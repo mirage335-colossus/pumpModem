@@ -26,7 +26,20 @@ rare-error probabilities or complete-receiver real-time capacity. The
 and [protocol](experiment-protocol.md) preserve those distinctions and the
 source limits in [`_ref`](../../_ref/highFidelity-triple_Robust_Modem).
 
-The current [independent HF ensemble](hf-ensemble.md) adds multiscale and
+The [physical and operating coverage expansion](hf-coverage-expansion.md)
+adds a frozen parameter design independent of the receiver bank, canonical GUI
+preparation with actual sample/RF clock errors, and a separately validated
+[static collisional full-wave reference](hf-fullwave.md). These are three
+distinct model layers; they do not jointly qualify a dynamic magnetized channel.
+
+Its [44 modem/planning observations](hf-coverage-expansion.md#same-observation-native-branch-counterfactual)
+and fourteen static full-wave profiles expose another failed energy/time
+boundary and wrong accepted GUI content. Same-IQ diagnostics then find correct-bit
+evidence in existing native processing that early affine admission skipped,
+including a fresh physical path. Complete-message recovery under a changed
+decision policy remains untested; ordinary receiver defaults are unchanged.
+
+The earlier [independent HF ensemble](hf-ensemble.md) adds multiscale and
 nonperiodic density trajectories, separate trajectory/noise seeds, independent
 channel placement, competing paths, and selected Helper/noise interactions.
 Its frozen screen, complete-message cohort and conditional SNR/time brackets
@@ -35,7 +48,7 @@ separate. The earlier [public phase search](hf-public-search.md) and
 [phase refinement](hf-phase-refinement.md) remain opt-in experiments with fixed
 public priors. Ordinary receiver defaults are unchanged.
 
-The new [31-trial results](hf-ensemble.md#executed-evidence-and-findings)
+Its [31-trial results](hf-ensemble.md#executed-evidence-and-findings)
 include a near-equal-energy long-message failure, premature completion across
 mode changes, and nonwhite-noise false DATA. Fresh trajectory/placement checks
 also pass, and a native bit rescue contradicts a standalone shadow miss.
@@ -51,11 +64,15 @@ From the repository root:
 ```
 
 This configures an ignored `.build/` and links the production C++ modem.
-The independent-trajectory check passed all **18 CTest groups in 74.95 s**
-([log](.build/hf-independent-checks.log)). The follow-up analyzer was then
-corrected for canonical manifest hashes and null-control truth; its five
-focused checks passed before rebuilding the final source identity. The runner
-has 52 checks. These are software checks, not communication successes.
+The physical/operating extension passed all **22 CTest groups in 81.52 s**
+([log](.build/hf-coverage-checks.log)). A small diagnostic-report addition then
+passed the affected integration/runner groups again in 52.13 s
+([log](.build/hf-coverage-final-checks.log)). This includes 233 physical-domain
+assertions and 36 full-wave assertions. The final same-IQ diagnostic passed
+all three affected groups in 64.70 s, including 63 runner cases; the frozen
+design has nine cases. These are software checks, not communication successes.
+Exact build identities, the repaired prior-accounting defect and replay parity
+are recorded in the [coverage expansion](hf-coverage-expansion.md).
 
 The earlier canonical `test triad` result remains 32/32 in 62.22 s
 ([log](.build/hf-native-triad-checks.log)); its native source hash is unchanged
@@ -70,6 +87,9 @@ Current group coverage is:
 | `scenarios` | Physical/source tuples, normalization, reference observables and adverse numerical controls |
 | `hf_scenarios` | NVIS, DRM6, extended HF profiles and an off-grid eikonal holdout |
 | `hf_ionosphere` | Eikonal phase/group-delay consistency, independent quadrature, and frequency/time derivatives |
+| `hf_design` | Fixed whole-domain phase/group bounds, strict physical coefficients, seed/placement isolation and mutation order |
+| `hf_gui_profile` | Canonical preset preparation, actual endpoint clock errors, margin semantics, Helper, noise-seed isolation and rejection |
+| `hf_fullwave` | Independent zero-index, Fresnel/slab, Joule-loss and smooth-barrier references; passive opaque layers and unresolved resonances |
 | `hf_history` | 175 matched public-aperture block-history, projection, nuisance-rank and conditional-oracle checks |
 | `hf_phase_bank` | Frozen phase dictionary, matched projection, uncertainty and boundary regression checks |
 | `hf_public_statistics` | Exact effective-template FFT/direct-sum agreement, shared phase/FFT preparation parity, full priors, phase bounds and resource guards |
@@ -80,8 +100,9 @@ Current group coverage is:
 | `impairment_observables` | Independent AR(1)/shot moments and covariance, resonator response, ADC and AGC recovery |
 | `lunar_spectral` | Joint delay–Doppler covariance through 360 s, independent refinement, long integration and waveform parity |
 | `integration` | Actual native source/receiver, physical completion, noise/EOF, recovery, HF history and numerical-admission boundaries |
-| `runner` | 52 checks for immutable identity, independent seeds, known-binary diagnostics, censoring and statistical reporting |
+| `runner` | Immutable identity, GUI and trajectory controls, known-binary/gain diagnostics, censoring and statistical reporting |
 | `ensemble` | Five checks for signed evidence, outer priors, null controls, canonical hashes, fixed brackets and censoring |
+| `coverage_design` | Frozen physical sampling, independent holdout, sparse pair coverage and complete status accounting |
 | `competitor_calibration` | Compiled calibration for the native channel bridge into upstream FLDigi/WSJT-X modes |
 | `competitor_runner` | Six external-comparison manifest and receipt parser cases |
 

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "name": "hf-domain-edge-receiver",
+  "purpose": "Declared after the frozen screen and before this receiver outcome: its only shadow miss is the max-rate edge. Test actual complete native reception before attributing an operational failure; preserve original screen and cohort. One bounded causal follow-up, not an independent population sample.",
+  "max_wall_seconds": 180,
+  "per_trial_wall_seconds": 180,
+  "max_trials": 1,
+  "max_samples": 8000000,
+  "episodes": [
+    {
+      "id": "domain-max-edge-message",
+      "scenario": "hf-ensemble-design",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 60101,
+      "noise_seed": 70101,
+      "hf_trajectory_seed": 80202,
+      "bit_seconds": 128,
+      "cn0_db_hz": 0,
+      "control": "wanted",
+      "hf_phase_refinement": true,
+      "hf_primary_amplitude_hz": 20000,
+      "hf_primary_period_seconds": 110,
+      "hf_primary_phase_radians": 0.0,
+      "hf_secondary_amplitude_hz": 20000,
+      "hf_secondary_period_seconds": 480,
+      "hf_secondary_phase_radians": 0.0,
+      "hf_knot_amplitude_hz": 20000,
+      "hf_knot_seconds": 70,
+      "hf_trajectory_offset_seconds": 0.0,
+      "hf_public_phase_receiver": true,
+      "capture_digest_slot": 1
+    }
+  ]
+}

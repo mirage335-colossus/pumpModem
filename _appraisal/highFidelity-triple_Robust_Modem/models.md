@@ -272,6 +272,39 @@ calibration. Its observed phase-statistic discrepancy and the complete-slot
 versus complete-message boundary are recorded in
 [the fixture provenance](fixtures/hf-ding-2021/README.md).
 
+### Separate cutoff/reflection component
+
+The [scalar full-wave probe](hf-fullwave.md) solves the static, normally
+incident, unmagnetized cold-plasma wave equation with vacuum input/output
+ports. The same electron-density and collision profiles determine phase,
+reflection, transmission and absorption; there is no additional independently
+prescribed fade multiplier. Collisionless cutoff is admitted by that boundary-
+value calculation, not by weakening the existing eikonal admission checks.
+Its spatial-grid and frequency-step checks concern numerical component
+accuracy. They do not qualify O/X coupling, oblique paths, three-dimensional
+scattering, caustics, a time-varying waveform or complete reception.
+
+### Canonical GUI settings are a separate channel stratum
+
+The native GUI-profile adapter calls the canonical profile preparation path
+and uses its native `StreamingChannel` directly. It does not stack the
+appraisal eikonal renderer around it. This preserves the application's
+waveform, public search geometry, endpoint clock draws and physical channel
+placement without silently applying clocks or tails twice. A result must
+report the requested settings and resolved profile, including any explicit
+fixture bit duration distinct from the target-C/N0 planner's duration.
+
+The source authority is [`robust_profile.cpp`](../../src/robust_profile.cpp):
+`each-65` sets slow and fast selective depths to 0.65 separately. The channel
+uses bounded Gaussian-erf coefficients; 65% is neither an occurrence
+probability nor a bound of ±65% on the composite received waveform. The
+physical fast coefficient width is one tenth of the declared modulation
+allowance, with a further factor of ten for slow evolution. Public margins,
+receiver oscillator bounds and actual endpoint oscillator draws are distinct
+quantities; use the resolved values rather than applying one multiplier to
+all of them. A canonical setting check establishes application semantics,
+not independent environmental calibration.
+
 ## Noise and equipment controls
 
 These two cases exercise the native renderer's stateful noise and equipment

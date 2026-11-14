@@ -235,6 +235,53 @@ metadata differ, so inspect a pinned repository license before reuse. A ray
 solution alone does not supply small-scale scintillation or validate an
 instantaneous complete channel.
 
+The separate [scalar full-wave component](hf-fullwave.md) addresses reflection,
+transmission and collisional loss through one declared density profile. It does
+not relax the eikonal's cutoff guard. [Wang et al. (2015)](https://link.springer.com/article/10.1186/s40623-015-0285-0)
+explain why WKB fails near reflection/conversion and use a uniform treatment
+with geomagnetic coupling. Their first author is Chen **Wang**. The present
+unmagnetized normal-incidence calculation uses the scalar Maxwell equation;
+it does not reproduce that paper's O/X results or its high-power heating physics.
+
+The collision convention matters even for this smaller problem. The new
+component's `nu` is an explicitly declared cold-fluid momentum-relaxation rate
+in s^-1, with `omega=2*pi*f`. It is not automatically an empirical
+monoenergetic, thermal-average or Sen–Wyller collision frequency. Zawdie et al.
+show that the conversion depends on the adopted electron-energy dependence;
+the often encountered factor 5/2 is not a universal conversion. Keep the
+profile law and collision convention alongside every reported result.
+
+[Gondarenko and Bernhardt (2009)](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2009GL038379)
+provide a counterexample to a single ordered severity scale: absorption depends
+nonmonotonically on incidence angle and magnetization, while near a critical
+angle their magnetized calculation becomes nearly insensitive to collision
+rate through mode conversion. This is not evidence that increasing collisions
+generally decreases absorption. Their electromagnetic/electrostatic mode
+coupling is absent from the scalar component; its successful power accounting
+cannot close this gap.
+
+Recent ray-model literature retains a complementary limit:
+[Hirvonen et al. (2025), AU-Ray §2](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2024RS008209)
+require the weighted collision frequency to remain well below wave frequency
+for their pseudo-real ray approximation and identify strong D-layer absorption
+as problematic. Agreement among ray programs is therefore not independent
+validation in that regime. Conversely, full-wave cost does not imply broad
+physical coverage: [Smith et al. (2020)](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2019JA027499)
+used a 3.6×3.6×250 km, 4.5 m grid on 4,400 processors for a 150 microsecond
+frozen-density F-region calculation, with collisions approximated as zero.
+That supports a separate scattering question, not long collisional channel
+replay. The inexpensive one-dimensional component deliberately leaves its
+three-dimensional irregularities and magnetic structure unrepresented.
+
+New observational evidence also needs the right observable.
+[Verhulst et al. (2026)](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2026RS008688)
+detect flare/particle-event signatures in passive ionosonde band-power records
+relative to frequency-specific 14-day medians. Their study is explicitly a
+qualitative proof of principle; the received mixture also changes with the
+area from which broadcasts can propagate. These records support absorption
+monitoring, not arbitrary-input complex channel replay or a quantitative map
+from flare class to this component's density/collision profiles.
+
 ## What a useful sensitivity comparison must measure
 
 The aspiration of much lower transmit power and more tolerated path loss is a
@@ -279,6 +326,72 @@ increase the noise penalty. No private channel truth may enter the actual
 receiver. A high-energy miss with a favorable oracle motivates investigation
 of model/search mismatch; an antenna null or complete outage can defeat every
 decoder with the same observation.
+
+The existing history diagnostic computes 0.25, 1, 4 and 16 second partitions
+and the full aperture, with a complex gain per block and its associated
+rank/shrinkage penalty. Reporting those already-computed alternatives helps
+separate coherence loss from coefficient-fitting cost. It does not turn their
+scores into operational false-alarm guarantees: a public winning template,
+timing or frequency selected from the same noisy observation is still
+data-selected. Calibration must include that selection and all searched
+hypotheses. Private clean-energy and known-channel comparisons remain
+diagnostics, even when they agree with a native score.
+
+Conservative noise-only (`H0`) scoring does not certify bit selection with a
+signal present (`H1`). With fixed public mixture weights and an unchanged
+noise denominator, dropping nonnegative likelihood terms without
+renormalizing can only lower the detection score relative to the full
+mixture. That preserves a pointwise ordering for its threshold test; it does
+not preserve the ordering between the two bit hypotheses when omitted
+channel histories support them differently. Quiet noise controls therefore
+leave a distinct wrong-content question under channel mismatch. In a
+different, explicitly scoped model,
+[Asyhari and Guillén i Fàbregas (2012)](https://guillen.eng.cam.ac.uk/files/journals/imperfect_csir_final.pdf)
+analyze nearest-neighbor MIMO block-fading decoding with imperfect receiver
+channel information through generalized mutual information and outage.
+Their result motivates checking the actual decoding metric under mismatch;
+it does not identify a cause in this receiver. The executed
+[same-I/Q native comparison](hf-coverage-expansion.md) now reproduces the
+original full-stream hashes and baseline scores at 40 and 20 dB-Hz. At
+40 dB-Hz, explicitly scoring the broader varying-channel branch changes the
+selected wrong affine bit 0 to correct bit 1; the first wrong slot on fresh
+physical seed 62002 likewise becomes correct bit 0. The diagnostic preserves
+unscored line/drift prior mass. These component counterfactuals identify useful
+evidence skipped by affine early admission in those slots. They do not repair
+the complete receiver or establish complete-message success or capacity; the
+fresh message's additional wrong slot 2 remains untested by this diagnostic.
+
+Unknown gain per block has an information cost even if clean projection
+recovers all signal energy. For a fixed unit-norm waveform `u`, independent
+proper complex Gaussian gain `g~CN(0,1)` and white noise `n~CN(0,I)`, write
+`y=sqrt(rho)*g*u+n`. After marginalizing `g`, signal-present and noise-only
+covariances are `I+rho*u*u^H` and `I`. Their exact divergence, in nats, is
+
+```
+D(P_signal || P_noise) = rho - log(1+rho) = rho^2/2 + O(rho^3).
+```
+
+For `N` independent equal-energy blocks with total mean energy/noise ratio
+`R`, this becomes `N*[R/N-log(1+R/N)]`, approximately `R^2/(2*N)` when
+`R/N << 1`. This is a fixed-waveform, fixed-prior presence-versus-noise
+calculation, not bit-error probability or a capacity result for the modem.
+It explains why increasingly short independent-gain partitions cannot receive
+free credit for their clean projection. Correlated or lower-dimensional
+physical histories can preserve more information, but a practical receiver
+must exploit that structure with calibrated public hypotheses.
+
+The primary results support the broader caution under their own assumptions:
+[Sethuraman et al. (2009)](https://doi.org/10.1109/TIT.2009.2012995)
+derive quadratic low-SNR capacity asymptotics for stationary noncoherent
+Rayleigh models with shrinking peak/average-power constraints;
+[Bergel and Benedetto (2011)](https://arxiv.org/html/1107.0639v1)
+study underspread Gaussian WSSUS OFDM and an SNR-dependent effective coherence
+time under stated power constraints. Neither establishes a universal HF
+penalty or licenses using a known-channel bound for unknown channel history.
+The existing [Fable 86](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/86-statistics-and-calculation-checks.md)
+and [Fable 90](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/90-cross-check-calculations.md)
+coherent-energy calculations likewise remain distinct from detection and
+complete-message probabilities.
 
 ## Research-to-test discriminators
 

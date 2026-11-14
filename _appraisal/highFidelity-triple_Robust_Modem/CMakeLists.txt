@@ -5,18 +5,25 @@ endif()
 
 set(_hf_root "${CMAKE_CURRENT_LIST_DIR}")
 add_library(high_fidelity_channel STATIC "${_hf_root}/src/channel.cpp" "${_hf_root}/src/scenarios.cpp"
-  "${_hf_root}/src/hf_scenarios.cpp" "${_hf_root}/src/hf_ionosphere.cpp"
+  "${_hf_root}/src/hf_scenarios.cpp" "${_hf_root}/src/hf_ionosphere.cpp" "${_hf_root}/src/hf_design.cpp"
   "${_hf_root}/src/hf_history.cpp" "${_hf_root}/src/hf_phase_bank.cpp" "${_hf_root}/src/hf_public_statistics.cpp"
   "${_hf_root}/src/hf_phase_refinement.cpp"
   "${_hf_root}/src/hf_replay.cpp" "${_hf_root}/src/lunar_spectral.cpp")
 target_include_directories(high_fidelity_channel PUBLIC "${_hf_root}/include" PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(high_fidelity_channel PUBLIC datapump_triad)
-add_library(high_fidelity_public_receiver STATIC "${_hf_root}/src/hf_public_diagnostic.cpp")
+add_library(high_fidelity_gui_profile STATIC "${_hf_root}/src/hf_gui_profile.cpp")
+target_include_directories(high_fidelity_gui_profile PUBLIC "${_hf_root}/include")
+target_link_libraries(high_fidelity_gui_profile PUBLIC datapump_robust_session)
+add_library(high_fidelity_fullwave STATIC "${_hf_root}/src/hf_fullwave.cpp")
+target_include_directories(high_fidelity_fullwave PUBLIC "${_hf_root}/include")
+target_compile_features(high_fidelity_fullwave PUBLIC cxx_std_20)
+add_library(high_fidelity_public_receiver STATIC "${_hf_root}/src/hf_public_diagnostic.cpp"
+  "${_hf_root}/src/hf_gui_diagnostic.cpp")
 target_include_directories(high_fidelity_public_receiver PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")
 target_link_libraries(high_fidelity_public_receiver PUBLIC high_fidelity_channel datapump_triad_receiver)
 add_executable(high_fidelity_appraisal "${_hf_root}/src/main.cpp" "${_hf_root}/src/vlf_diagnostic.cpp")
 target_include_directories(high_fidelity_appraisal PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")
-target_link_libraries(high_fidelity_appraisal PRIVATE high_fidelity_public_receiver)
+target_link_libraries(high_fidelity_appraisal PRIVATE high_fidelity_public_receiver high_fidelity_gui_profile)
 get_target_property(_hf_identity triad_receiver_probe COMPILE_DEFINITIONS)
 target_compile_definitions(high_fidelity_appraisal PRIVATE ${_hf_identity})
 
@@ -41,20 +48,34 @@ endforeach()
 string(SHA256 _hf_source_sha "${_hf_manifest}")
 target_compile_definitions(high_fidelity_appraisal PRIVATE APPRAISAL_SOURCE_SHA="${_hf_source_sha}")
 set_target_properties(high_fidelity_appraisal PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+add_executable(high_fidelity_fullwave_probe "${_hf_root}/src/hf_fullwave_probe.cpp")
+target_include_directories(high_fidelity_fullwave_probe PRIVATE "${PROJECT_SOURCE_DIR}/tools")
+target_link_libraries(high_fidelity_fullwave_probe PRIVATE high_fidelity_fullwave)
+target_compile_definitions(high_fidelity_fullwave_probe PRIVATE ${_hf_identity} APPRAISAL_SOURCE_SHA="${_hf_source_sha}")
+set_target_properties(high_fidelity_fullwave_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(high_fidelity_channel PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(high_fidelity_public_receiver PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(high_fidelity_appraisal PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_options(high_fidelity_gui_profile PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_options(high_fidelity_fullwave PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_options(high_fidelity_fullwave_probe PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 if(BUILD_TESTING)
-  foreach(_hf_test channel scenarios hf_scenarios hf_ionosphere hf_history hf_phase_bank hf_public_statistics hf_phase_refinement hf_replay impairment_observables lunar_spectral)
+  foreach(_hf_test channel scenarios hf_scenarios hf_ionosphere hf_design hf_history hf_phase_bank hf_public_statistics hf_phase_refinement hf_replay impairment_observables lunar_spectral)
     add_executable(high_fidelity_test_${_hf_test} "${_hf_root}/tests/test_${_hf_test}.cpp")
     target_include_directories(high_fidelity_test_${_hf_test} PRIVATE "${PROJECT_SOURCE_DIR}/src" "${_hf_root}/src")
     target_link_libraries(high_fidelity_test_${_hf_test} PRIVATE high_fidelity_channel)
     add_test(NAME high_fidelity_${_hf_test} COMMAND high_fidelity_test_${_hf_test})
     set_tests_properties(high_fidelity_${_hf_test} PROPERTIES LABELS "appraisal" TIMEOUT 45)
+  endforeach()
+  foreach(_hf_extra gui_profile fullwave)
+    add_executable(high_fidelity_test_hf_${_hf_extra} "${_hf_root}/tests/test_hf_${_hf_extra}.cpp")
+    target_link_libraries(high_fidelity_test_hf_${_hf_extra} PRIVATE high_fidelity_${_hf_extra})
+    add_test(NAME high_fidelity_hf_${_hf_extra} COMMAND high_fidelity_test_hf_${_hf_extra})
+    set_tests_properties(high_fidelity_hf_${_hf_extra} PROPERTIES LABELS "appraisal" TIMEOUT 45)
   endforeach()
   add_executable(high_fidelity_test_hf_native_supplement "${_hf_root}/tests/test_hf_native_supplement.cpp")
   target_include_directories(high_fidelity_test_hf_native_supplement PRIVATE "${PROJECT_SOURCE_DIR}/src")
@@ -76,9 +97,13 @@ if(BUILD_TESTING)
   add_test(NAME high_fidelity_ensemble COMMAND "${Python3_EXECUTABLE}"
     "${_hf_root}/tests/test_ensemble.py")
   set_tests_properties(high_fidelity_ensemble PROPERTIES LABELS "appraisal" TIMEOUT 45)
-  add_custom_target(high_fidelity_checks DEPENDS high_fidelity_appraisal
+  add_test(NAME high_fidelity_coverage_design COMMAND "${Python3_EXECUTABLE}"
+    "${_hf_root}/tests/test_coverage_design.py")
+  set_tests_properties(high_fidelity_coverage_design PROPERTIES LABELS "appraisal" TIMEOUT 45)
+  add_custom_target(high_fidelity_checks DEPENDS high_fidelity_appraisal high_fidelity_fullwave_probe
     high_fidelity_test_channel high_fidelity_test_scenarios
-    high_fidelity_test_hf_scenarios high_fidelity_test_hf_ionosphere high_fidelity_test_hf_history
+    high_fidelity_test_hf_scenarios high_fidelity_test_hf_ionosphere high_fidelity_test_hf_design high_fidelity_test_hf_history
+    high_fidelity_test_hf_gui_profile high_fidelity_test_hf_fullwave
     high_fidelity_test_hf_phase_bank high_fidelity_test_hf_public_statistics high_fidelity_test_hf_native_supplement
     high_fidelity_test_hf_phase_refinement
     high_fidelity_test_hf_public_receiver high_fidelity_test_hf_replay

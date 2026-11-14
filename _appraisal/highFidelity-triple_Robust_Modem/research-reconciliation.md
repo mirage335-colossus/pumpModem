@@ -25,6 +25,23 @@ cadence, cutoff and ray-approximation limits. The
 distinguishes useful public polar sounding summaries and received audio from a
 long, calibrated complex channel replay; no additional replay fixture is implied.
 
+The [cutoff/reflection component](hf-fullwave.md) adds a different evidence
+axis: a static scalar cold-plasma boundary-value calculation, with collisional
+loss and reflection derived together. This follows the existing
+[_ref separation of absorption, mode changes and outage](../../_ref/highFidelity-triple_Robust_Modem/Astra-6/30-skywave-1-to-30mhz.md),
+not an assumption that deeper Watterson fades reproduce a blackout. The
+[focused source review](hf-research.md#absorption-and-critical-frequency-boundaries)
+records collision-convention, magnetic mode-conversion and strong-absorption
+ray limits. The component neither replaces the guarded eikonal renderer nor
+constitutes a dynamic channel or a complete-message trial.
+
+The separate canonical GUI route tests the application's own profile
+construction. Its `Each 65%` is an implementation parameter: slow and fast
+selective depths are each 0.65 in
+[`selective_depths`](../../src/robust_profile.cpp), not a 65th-percentile
+ionosphere or an academic claim about disturbance incidence. Physical model
+coverage and coverage of public GUI settings must have separate denominators.
+
 The most useful correction to a too-simple “worse channel” scale is that the
 mechanisms are conditional and can oppose each other. More propagation delay,
 Doppler, noise or antenna loss does not universally mean a worse receiver

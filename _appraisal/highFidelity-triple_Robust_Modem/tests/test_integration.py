@@ -24,6 +24,64 @@ def main() -> None:
     listing = invoke("--list")
     assert len(listing["scenarios"]) >= 6
     scenarios = {scenario["id"]: scenario for scenario in listing["scenarios"]}
+    assert scenarios["hf-gui-native"]["channel"]["renderer"] == "canonical_gui_streaming_channel"
+    gui_args = ["--scenario", "hf-gui-native", "--seed", "41", "--noise-seed", "52",
+                "--gui-spread", "hf-worst", "--gui-selective", "each-65", "--gui-clock-edge",
+                "--bit-seconds", "2", "--cn0", "40", "--gui-target-cn0-db-hz", "32"]
+    gui = invoke("--mode", "plan", *gui_args)["plan"]
+    declared = gui["gui_profile"]
+    assert gui["channel_renderer"] == "canonical_gui_streaming_channel", gui
+    assert declared["profile_source"] == "canonical_prepare_profile" and not declared["realization_passed_to_receiver"], gui
+    assert declared["selective_slow_depth"] == declared["selective_fast_depth"] == .65, gui
+    assert declared["spread_doppler_hz"] == 90 and math.isclose(declared["spread_delay_seconds"], .021), gui
+    assert declared["endpoint_clock_bound_ppm"] == 150 and declared["realized"]["tx_audio_ppm"] == 50, gui
+    assert declared["realized"]["rx_audio_ppm"] == -50 and declared["realized"]["tx_rf_ppm"] == .5, gui
+    assert declared["actual_cn0_db_hz"] == 40 and declared["target_cn0_db_hz"] == 32, gui
+    assert declared["fixture_bit_seconds"] == gui["requested_bit_seconds"] == 2, gui
+    assert gui["capture_preroll_seconds"] == declared["capture_preroll_seconds"] == .2525, gui
+    assert gui["receiver_resources"]["workers"] == 2 * gui["receiver_resources"]["hardware_threads"], gui
+    gui_other_noise = invoke("--mode", "plan", *gui_args, "--noise-seed", "53")["plan"]
+    assert gui_other_noise["gui_profile"]["realized"] == declared["realized"], gui_other_noise
+    assert gui_other_noise["noise_seed"] == 53 and gui_other_noise["public_slots"] == gui["public_slots"], gui_other_noise
+    gui_too_short = invoke("--mode", "receive", *gui_args, "--max-samples", "1", code=3)
+    assert gui_too_short["status"] == "resource_limit" and gui_too_short["plan"]["channel_renderer"] == gui["channel_renderer"], gui_too_short
+    gui_varying_args = ["--mode", "gui-varying", *gui_args, "--message", "e"]
+    for extra in ([], ["--capture-digest-slot", "3"], ["--capture-digest-slot", "2", "--helper"]):
+        rejected = invoke(*gui_varying_args, *extra, code=2)
+        assert rejected["status"] == "error", rejected
+    bounded_shadow = invoke(*gui_varying_args, "--capture-digest-slot", "2", "--control", "noise",
+                            "--max-samples", "1", code=3)
+    assert bounded_shadow["status"] == "resource_limit", bounded_shadow
+    shadow_plan = bounded_shadow["plan"]
+    receive_plan = invoke("--mode", "receive", *gui_args, "--message", "e",
+                          "--capture-digest-slot", "2", "--control", "noise", "--max-samples", "1", code=3)["plan"]
+    for field in ("horizon_samples", "public_slots", "public_bounds", "capture_digest_first_sample",
+                  "capture_digest_stop_sample"):
+        assert shadow_plan[field] == receive_plan[field], (field, bounded_shadow, receive_plan)
+    assert shadow_plan["observation_scope"] == "shadow_canonical_varying_of_selected_complete_observation"
+    assert shadow_plan["planned_uncontaminated_quiet_slots"] == 0
+    unavailable = invoke("--mode", "slot", *gui_args, "--hf-public-phase-receiver", code=5)
+    assert "phase scorer is unavailable" in unavailable["reason"], unavailable
+    for args in (['--scenario', 'awgn', '--gui-margin', '3'],
+                 [*gui_args, '--capture-lead-seconds', '.25'],
+                 [*gui_args, '--gui-margin', '.9']):
+        rejected = invoke("--mode", "plan", *args, code=2)
+        assert rejected["status"] == "error", rejected
+    design_args = ["--mode", "plan", "--scenario", "hf-ensemble-design", "--seed", "17",
+                   "--hf-trajectory-seed", "27", "--hf-trajectory-offset-seconds", "19",
+                   "--hf-primary-amplitude-hz", "8000", "--hf-primary-period-seconds", "180",
+                   "--hf-primary-phase-radians", ".5", "--hf-secondary-amplitude-hz", "12000",
+                   "--hf-secondary-period-seconds", "820", "--hf-secondary-phase-radians", "-.7",
+                   "--hf-knot-amplitude-hz", "6000", "--hf-knot-seconds", "105"]
+    design = invoke(*design_args)
+    assert design["plan"]["hf_design"]["primary_amplitude_hz"] == 8000, design
+    assert design["plan"]["hf_design_domain"]["bounds_are_independent_of_realization"], design
+    different = invoke(*design_args, "--hf-primary-amplitude-hz", "18000")
+    assert different["plan"]["public_bounds"] == design["plan"]["public_bounds"], different
+    assert different["scenario"]["channel"]["path_parameters_sha256"] != design["scenario"]["channel"]["path_parameters_sha256"], different
+    for args in (design_args[:-2], [*design_args, "--hf-primary-amplitude-hz", "20001"]):
+        rejected = invoke(*args, code=2)
+        assert rejected["status"] == "error", rejected
     assert scenarios["awgn"]["channel"]["path_hash_version"] == 1, scenarios["awgn"]
     ox = scenarios["hf-ox-cancellation"]["channel"]
     assert ox["path_hash_version"] == 2, ox
@@ -152,6 +210,16 @@ def main() -> None:
     assert binary["fixed_known_context"] and not binary["truth_information_passed_to_search"], binary
     assert not binary["includes_acquisition_presence_or_completion"], binary
     winner = physical["winning_public_cell"]
+    partitions = physical["gain_partitions"]
+    assert not partitions["used_for_receiver_decisions"] and partitions["template_selected_from_noisy_public_search"], partitions
+    assert not partitions["fixed_template_null_law_applies_after_selection"], partitions
+    assert partitions["refined_public_cell"] is None, partitions
+    for name, full in (("physical_templates", known), ("winning_public_cell", winner["projection"])):
+        rows = partitions[name]
+        assert [row["requested_block_seconds"] for row in rows] == [.25, 1, 4, 16, None], partitions
+        for row, hypothesis in zip(rows[-1]["hypotheses"], full["hypotheses"], strict=True):
+            assert row["reference_energy"] == hypothesis["template_energy"], partitions
+            assert row["noisy_log_likelihood_ratio"] == hypothesis["noisy_log_likelihood_ratio"], partitions
     assert abs(winner["single_cell_log_lr_replay_difference"]) <= 2e-9 * max(1, abs(winner["search_maximum_single_cell_log_lr"])), physical_search
     refined_search = invoke("--mode", "hf-search", "--scenario", "awgn", "--waveform", "smoke",
                             "--search-slot", "1", "--cn0", "40", "--max-wall-seconds", "25",
@@ -163,6 +231,7 @@ def main() -> None:
     assert refined_physical["physical_templates"]["template_sha256"] == physical["physical_templates"]["template_sha256"], refined_search
     assert refined_physical["refinement_replay_available"], refined_search
     refined_cell = refined_physical["refined_public_cell"]
+    assert len(refined_physical["gain_partitions"]["refined_public_cell"]) == 5, refined_physical
     assert abs(refined_cell["single_cell_log_lr_replay_difference"]) <= 2e-9 * max(1, abs(refined_cell["search_maximum_single_cell_log_lr"])), refined_search
     assert refined_physical["public_refinement_proposals"]["not_admitted_evidence"], refined_search
     assert not refined_physical["public_refinement_proposals"]["uses_physical_truth"], refined_search

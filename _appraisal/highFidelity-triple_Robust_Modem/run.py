@@ -8,6 +8,8 @@ episodes report bounded VLF acquisition and abbreviated fine components without
 bit decisions or complete receiver service. Oracle episodes report a separate
 known-waveform bound, not a receiver communication outcome. HF-search episodes
 report a shadow detector with public acquisition priors and no receiver decisions.
+GUI-varying episodes compare canonical affine and short varying components on
+one complete observation from the original GUI capture, without receiver output.
 """
 from __future__ import annotations
 
@@ -38,12 +40,36 @@ MAX_OUTPUT_BYTES = 8 * 1024 * 1024
 MAX_CAMPAIGN_OUTPUT_BYTES = 256 * 1024 * 1024
 ROOT_KEYS = {"schema_version", "name", "purpose", "max_wall_seconds", "per_trial_wall_seconds",
              "max_trials", "max_samples", "episodes", "confirmatory_strata"}
+GUI_DEFAULTS = {
+    "gui_spread": "hf-worst", "gui_selective": "each-65", "gui_arrival": "tight",
+    "gui_margin": 3, "gui_audio_ppm": 100, "gui_rf_ppm": 1,
+    "gui_audio_phase_degrees_sqrt_s": .5, "gui_rf_phase_degrees_sqrt_s": .05,
+    "gui_target_cn0_db_hz": 32, "gui_clock_edge": False,
+}
+GUI_NUMERIC_BOUNDS = {
+    "gui_margin": (1, 1000), "gui_audio_ppm": (0, 100000), "gui_rf_ppm": (0, 100000),
+    "gui_audio_phase_degrees_sqrt_s": (0, 360), "gui_rf_phase_degrees_sqrt_s": (0, 360),
+    "gui_target_cn0_db_hz": (-200, 200),
+}
+GUI_SPREAD_DOPPLER = {"none": 0, "hf-best": .1, "hf-moderate": 10, "hf-worst": 30,
+                      "aurora-best": 10, "aurora-worst": 55}
+GUI_SELECTIVE_DEPTHS = {"off": (0., 0.), **{
+    f"{kind}-{percent}": (percent / 100 if kind != "fast" else 0., percent / 100 if kind != "slow" else 0.)
+    for kind in ("slow", "fast", "each") for percent in (1, 5, 10, 25, 65)}}
+HF_DESIGN_BOUNDS = {
+    "primary_amplitude_hz": (0, 20000), "primary_period_seconds": (110, 480),
+    "primary_phase_radians": (-math.pi, math.pi),
+    "secondary_amplitude_hz": (0, 20000), "secondary_period_seconds": (480, 1400),
+    "secondary_phase_radians": (-math.pi, math.pi),
+    "knot_amplitude_hz": (0, 20000), "knot_seconds": (70, 200),
+}
+HF_DESIGN_FIELDS = {"hf_" + field for field in HF_DESIGN_BOUNDS}
 EPISODE_KEYS = {"id", "scenario", "mode", "waveform", "seed", "cn0_db_hz", "control",
                 "helper", "backend", "bit_seconds", "duration_seconds", "pulse", "stratum",
                 "oracle_slot", "search_slot", "search_timing", "capture_digest_slot", "chunk", "message", "max_wall_seconds", "max_samples",
                 "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "fec", "fade_slots", "capture_lead_seconds",
-                "hf_trajectory_seed", "hf_trajectory_offset_seconds", "noise_seed"}
-MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose", "hf-search"}
+                "hf_trajectory_seed", "hf_trajectory_offset_seconds", "noise_seed"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS
+MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose", "hf-search", "gui-varying"}
 CONTROLS = {"wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap", "eof"}
 BACKENDS = {"cpu", "cuda", "vulkan", "gpu"}
 STATUSES = {"completed", "resource_limit", "time_limit", "unavailable", "error"}
@@ -111,7 +137,7 @@ def _read_campaign(path: Path) -> dict[str, Any]:
         invariant_fields = ("scenario", "mode", "waveform", "cn0_db_hz", "control", "helper",
                             "backend", "bit_seconds", "duration_seconds", "pulse", "oracle_slot", "search_slot", "search_timing", "capture_digest_slot", "chunk",
                             "message", "max_wall_seconds", "max_samples", "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "fec", "fade_slots", "capture_lead_seconds",
-                            "hf_trajectory_seed", "hf_trajectory_offset_seconds")
+                            "hf_trajectory_seed", "hf_trajectory_offset_seconds") + tuple(sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS))
         reference = matched[0]
         heterogeneous = [field for field in invariant_fields
                          if any(episode.get(field) != reference.get(field) for episode in matched[1:])]
@@ -149,6 +175,28 @@ def _validate_episode(item: Any, index: int, ids: set[str],
         raise CampaignError(f"duplicate episode id: {episode_id}")
     ids.add(episode_id)
     _nonempty_str(item["scenario"], f"episodes[{index}].scenario")
+    gui_fields = GUI_DEFAULTS.keys() & item.keys()
+    if gui_fields and item["scenario"] != "hf-gui-native":
+        raise CampaignError(f"episodes[{index}]: GUI controls require hf-gui-native")
+    for field, choices in (("gui_spread", GUI_SPREAD_DOPPLER.keys()),
+                           ("gui_selective", GUI_SELECTIVE_DEPTHS.keys()),
+                           ("gui_arrival", {"tight", "default"})):
+        if field in item and (not isinstance(item[field], str) or item[field] not in choices):
+            raise CampaignError(f"episodes[{index}].{field} must be one of {sorted(choices)}")
+    for field, (low, high) in GUI_NUMERIC_BOUNDS.items():
+        if field in item:
+            _bounded_number(item[field], f"episodes[{index}].{field}", low, high)
+    if "gui_clock_edge" in item and not isinstance(item["gui_clock_edge"], bool):
+        raise CampaignError(f"episodes[{index}].gui_clock_edge must be boolean")
+    design_fields = HF_DESIGN_FIELDS & item.keys()
+    if item["scenario"] == "hf-ensemble-design":
+        if design_fields != HF_DESIGN_FIELDS:
+            raise CampaignError(f"episodes[{index}]: hf-ensemble-design requires all eight physical parameters")
+    elif design_fields:
+        raise CampaignError(f"episodes[{index}]: physical design controls require hf-ensemble-design")
+    for field, (low, high) in HF_DESIGN_BOUNDS.items():
+        if "hf_" + field in item:
+            _bounded_number(item["hf_" + field], f"episodes[{index}].hf_{field}", low, high)
     if not isinstance(item["mode"], str) or item["mode"] not in MODES:
         raise CampaignError(f"episodes[{index}].mode must be one of {sorted(MODES)}")
     if not isinstance(item["waveform"], str) or item["waveform"] not in {"smoke", "reference"}:
@@ -221,11 +269,21 @@ def _validate_episode(item: Any, index: int, ids: set[str],
             raise CampaignError(f"episodes[{index}].{field} must be a simple identifier")
     mode = item["mode"]
     control = item.get("control", "wanted")
+    if item["scenario"] == "hf-gui-native":
+        if (mode not in {"plan", "slot", "receive", "gui-varying"} or item["waveform"] != "reference" or
+                item.get("pulse", "rrc") != "rrc" or
+                control not in {"wanted", "noise", "wrong-key", "wrong-ordinal"}):
+            raise CampaignError(f"episodes[{index}]: native GUI requires reference RRC plan/slot/receive/gui-varying and a supported control")
+        forbidden = {"hf_trajectory_seed", "hf_trajectory_offset_seconds", "capture_lead_seconds",
+                     "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver",
+                     "hf_physical_diagnostic", "hf_phase_refinement", "duration_seconds"} & item.keys()
+        if forbidden:
+            raise CampaignError(f"episodes[{index}]: native GUI does not accept custom channel or phase controls: {', '.join(sorted(forbidden))}")
     if "fade_slots" in item and control != "interior-fade":
         raise CampaignError(f"episodes[{index}]: fade_slots is valid only for interior-fade control")
-    if mode not in {"receive", "slot", "diagnose", "hf-search"} and "control" in item:
+    if mode not in {"receive", "slot", "diagnose", "hf-search", "gui-varying"} and "control" in item:
         raise CampaignError(f"episodes[{index}]: control is valid only for receiver or diagnostic mode")
-    if mode in {"receive", "slot", "diagnose", "hf-search"} and control not in CONTROLS:
+    if mode in {"receive", "slot", "diagnose", "hf-search", "gui-varying"} and control not in CONTROLS:
         raise CampaignError(f"episodes[{index}]: invalid receiver control")
     if mode == "slot" and control not in {"wanted", "noise"}:
         raise CampaignError(f"episodes[{index}]: slot mode requires wanted or noise control")
@@ -241,6 +299,11 @@ def _validate_episode(item: Any, index: int, ids: set[str],
             raise CampaignError(f"episodes[{index}]: hf-search requires wanted, noise, wrong-key or wrong-ordinal control")
         if item.get("helper", False) or item.get("backend", "cpu") != "cpu":
             raise CampaignError(f"episodes[{index}]: hf-search requires Helper-off CPU")
+    if mode == "gui-varying":
+        if (item["scenario"] != "hf-gui-native" or control not in {"wanted", "noise"} or
+                item.get("helper", False) or item.get("backend", "cpu") != "cpu" or
+                "capture_digest_slot" not in item):
+            raise CampaignError(f"episodes[{index}]: gui-varying requires native GUI, wanted/noise, Helper-off CPU and explicit capture_digest_slot")
     if item.get("hf_phase_refinement", False) and not (mode == "hf-search" or
             (mode in {"receive", "slot"} and item.get("hf_public_phase_receiver", False))):
         raise CampaignError(f"episodes[{index}]: phase refinement requires hf-search or the public phase receiver")
@@ -250,8 +313,8 @@ def _validate_episode(item: Any, index: int, ids: set[str],
         if mode not in {"receive", "slot"} or item.get("helper", False) or item.get("backend", "cpu") != "cpu":
             raise CampaignError(f"episodes[{index}]: HF public phase receiver requires receive/slot with Helper-off CPU")
     if "capture_digest_slot" in item:
-        if mode not in {"receive", "slot", "hf-search"}:
-            raise CampaignError(f"episodes[{index}]: capture_digest_slot requires receive, slot or hf-search mode")
+        if mode not in {"receive", "slot", "hf-search", "gui-varying"}:
+            raise CampaignError(f"episodes[{index}]: capture_digest_slot requires receive, slot, hf-search or gui-varying mode")
         if mode == "slot" and item["capture_digest_slot"] != 0:
             raise CampaignError(f"episodes[{index}]: slot mode can hash only public slot 0")
         if mode == "hf-search" and item["capture_digest_slot"] != item.get("search_slot", 0):
@@ -283,10 +346,11 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
                         ("hf_phase_bank", "--hf-phase-bank"),
                         ("hf_public_phase_receiver", "--hf-public-phase-receiver"),
                         ("hf_physical_diagnostic", "--hf-physical-diagnostic"),
-                        ("hf_phase_refinement", "--hf-phase-refinement")):
+                        ("hf_phase_refinement", "--hf-phase-refinement")) + tuple(
+                            (key, "--" + key.replace("_", "-")) for key in sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS)):
         if key in episode:
             value = episode[key]
-            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement"}:
+            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "gui_clock_edge"}:
                 if value:
                     command.append(option)
             else:
@@ -560,6 +624,339 @@ def _validate_decoded_success(receipt: dict[str, Any], episode: dict[str, Any], 
         raise CampaignError("decoded success FEC statistics conflict with raw slot counts")
 
 
+def _validate_profile_controls(plan: dict[str, Any], episode: dict[str, Any]) -> None:
+    """Bind constructed physical parameters and canonical GUI preparation separately."""
+    design = plan.get("hf_design")
+    if episode["scenario"] == "hf-ensemble-design":
+        if not isinstance(design, dict) or set(design) != set(HF_DESIGN_BOUNDS):
+            raise CampaignError("native physical design receipt requires all eight resolved parameters")
+        for field in HF_DESIGN_BOUNDS:
+            if not _is_finite_number(design[field]) or design[field] != episode["hf_" + field]:
+                raise CampaignError(f"native physical design {field} does not match the frozen episode")
+    elif design is not None:
+        raise CampaignError("unrequested native physical design receipt")
+    gui = plan.get("gui_profile")
+    if episode["scenario"] != "hf-gui-native":
+        if gui is not None or plan.get("channel_renderer") == "canonical_gui_streaming_channel":
+            raise CampaignError("unrequested canonical GUI profile receipt")
+        return
+    if (not isinstance(gui, dict) or plan.get("channel_renderer") != "canonical_gui_streaming_channel" or
+            gui.get("profile_source") != "canonical_prepare_profile" or
+            gui.get("realization_passed_to_receiver") is not False):
+        raise CampaignError("native GUI receipt must identify canonical preparation and private realization")
+    for field, default in GUI_DEFAULTS.items():
+        actual = gui.get(field.removeprefix("gui_"))
+        expected = episode.get(field, default)
+        if (actual != expected or
+                (field in GUI_NUMERIC_BOUNDS and not _is_finite_number(actual)) or
+                (field == "gui_clock_edge" and not isinstance(actual, bool))):
+            raise CampaignError(f"native GUI {field} does not match the frozen episode")
+    fixture = gui.get("fixture_bit_seconds")
+    if (fixture != episode.get("bit_seconds") or isinstance(fixture, bool) or
+            (fixture is not None and not _is_finite_number(fixture))):
+        raise CampaignError("native GUI fixture duration must remain separate from target planning")
+    actual_cn0 = gui.get("actual_cn0_db_hz")
+    if (not _is_finite_number(actual_cn0) or actual_cn0 != episode.get("cn0_db_hz", 32) or
+            actual_cn0 != plan.get("cn0_db_hz")):
+        raise CampaignError("native GUI actual noise must remain separate from target planning")
+    preroll = gui.get("capture_preroll_seconds")
+    if (not _is_finite_number(preroll) or preroll < .25 or
+            preroll != plan.get("capture_preroll_seconds")):
+        raise CampaignError("native GUI capture preroll must match canonical preparation")
+    for field, expected_depth in zip(("selective_slow_depth", "selective_fast_depth"), GUI_SELECTIVE_DEPTHS[gui["selective"]]):
+        if not _is_finite_number(gui.get(field)) or gui[field] != expected_depth:
+            raise CampaignError("native GUI selective modulation requires separate slow and fast amplitude depths")
+    endpoint = gui.get("endpoint_clock_bound_ppm")
+    if not _is_finite_number(endpoint) or not math.isclose(endpoint, gui["audio_ppm"] * gui["margin"] / 2,
+                                                          rel_tol=1e-12, abs_tol=1e-12):
+        raise CampaignError("native GUI endpoint clock bound must retain the declared margin")
+    spread = gui.get("spread_doppler_hz")
+    expected_spread = GUI_SPREAD_DOPPLER[gui["spread"]] * gui["margin"]
+    if not _is_finite_number(spread) or not math.isclose(spread, expected_spread, rel_tol=1e-12, abs_tol=1e-12):
+        raise CampaignError("native GUI Doppler support must retain the selected preset and margin")
+    realized = gui.get("realized")
+    realized_fields = ("tx_audio_ppm", "rx_audio_ppm", "tx_rf_ppm", "rx_rf_ppm",
+                       "timing_offset_seconds", "tx_phase_noise_rad_sqrt_s", "rx_phase_noise_rad_sqrt_s",
+                       "relative_audio_ppm")
+    if not isinstance(realized, dict) or any(not _is_finite_number(realized.get(field)) for field in realized_fields):
+        raise CampaignError("native GUI receipt requires finite actual endpoint impairments")
+    for band in ("audio", "rf"):
+        bound = gui[band + "_ppm"] / 2
+        for endpoint_name, sign in (("tx", 1), ("rx", -1)):
+            actual = realized[f"{endpoint_name}_{band}_ppm"]
+            if abs(actual) > bound + 1e-12 or (gui["clock_edge"] and actual != sign * bound):
+                raise CampaignError("native GUI realized endpoint error must obey the unexpanded physical accuracy")
+    relative = (realized["tx_audio_ppm"] - realized["rx_audio_ppm"]) / (1 + realized["rx_audio_ppm"] * 1e-6)
+    if not math.isclose(realized["relative_audio_ppm"], relative, rel_tol=1e-10, abs_tol=1e-8):
+        raise CampaignError("native GUI realized sample-clock ratio must use both physical endpoints")
+    phase = math.hypot(gui["audio_phase_degrees_sqrt_s"], gui["rf_phase_degrees_sqrt_s"]) * math.pi / 180 / math.sqrt(2)
+    if any(not math.isclose(realized[field], phase, rel_tol=1e-12, abs_tol=1e-12)
+           for field in ("tx_phase_noise_rad_sqrt_s", "rx_phase_noise_rad_sqrt_s")):
+        raise CampaignError("native GUI phase diffusion must retain both independent oscillator references")
+    bounds = plan.get("public_bounds")
+    if (not isinstance(bounds, dict) or any(not _is_finite_number(bounds.get(field)) for field in
+            ("arrival_low_seconds", "arrival_high_seconds")) or
+            not bounds["arrival_low_seconds"] <= realized["timing_offset_seconds"] <= bounds["arrival_high_seconds"] or
+            not math.isclose(preroll, max(.25, -bounds["arrival_low_seconds"] + .25), rel_tol=1e-12, abs_tol=1e-12)):
+        raise CampaignError("native GUI physical arrival and preroll must fit canonical public bounds")
+
+
+def _validate_gain_partitions(physical: dict[str, Any], sample_rate: Any, sample_count: int,
+                              wanted_bit: int, refined_available: bool) -> None:
+    """Validate diagnostic block-gain curves without treating selected scores as evidence."""
+    partitions = physical.get("gain_partitions")
+    if partitions is None:  # Historical receipts retain their full-aperture-only scope.
+        return
+    if (not isinstance(partitions, dict) or partitions.get("used_for_receiver_decisions") is not False or
+            partitions.get("template_selected_from_noisy_public_search") is not True or
+            partitions.get("fixed_template_null_law_applies_after_selection") is not False or
+            not _is_finite_number(sample_rate) or sample_rate <= 0):
+        raise CampaignError("gain partitions must preserve selected-template diagnostic scope")
+    pairs = [("physical_templates", physical["physical_templates"]),
+             ("winning_public_cell", physical["winning_public_cell"]["projection"])]
+    if refined_available:
+        pairs.append(("refined_public_cell", physical["refined_public_cell"]["projection"]))
+    elif partitions.get("refined_public_cell") is not None:
+        raise CampaignError("gain partitions cannot invent an unavailable refined public cell")
+    for name, projection in pairs:
+        rows = partitions.get(name)
+        if not isinstance(rows, list) or len(rows) != 5:
+            raise CampaignError("gain partitions require all five fixed block lengths")
+        for row, requested in zip(rows, (.25, 1, 4, 16, None)):
+            samples = max(1, math.floor(requested * sample_rate + .5)) if requested is not None else sample_count
+            blocks = (sample_count + samples - 1) // samples
+            if (not isinstance(row, dict) or row.get("requested_block_seconds") != requested or
+                    isinstance(row.get("requested_block_seconds"), bool) or
+                    not _is_nonnegative_int(row.get("block_samples")) or row["block_samples"] != samples or
+                    not _is_nonnegative_int(row.get("block_count")) or row["block_count"] != blocks or
+                    not _is_finite_number(row.get("actual_block_seconds")) or
+                    not math.isclose(row["actual_block_seconds"], samples / sample_rate, rel_tol=1e-12, abs_tol=1e-12)):
+                raise CampaignError("gain partitions must cover the same aperture with fixed sample-rounded blocks")
+            hypotheses = row.get("hypotheses")
+            if not isinstance(hypotheses, list) or len(hypotheses) != 2:
+                raise CampaignError("gain partitions require both bit hypotheses")
+            for bit, hypothesis in enumerate(hypotheses):
+                nonnegative = ("reference_energy", "projected_signal_energy", "residual_signal_energy", "noisy_projected_energy")
+                if (not isinstance(hypothesis, dict) or not _is_nonnegative_int(hypothesis.get("rank")) or
+                        hypothesis["rank"] > blocks or any(not _is_finite_number(hypothesis.get(field)) or hypothesis[field] < 0
+                                                         for field in nonnegative) or
+                        not _is_finite_number(hypothesis.get("noisy_log_likelihood_ratio")) or
+                        hypothesis.get("noise_only_projected_energy") is not None or
+                        hypothesis.get("noise_only_log_likelihood_ratio") is not None):
+                    raise CampaignError("gain partitions require finite energies, likelihood and bounded complex rank")
+                energy = projection["noise_free_energy"]
+                projected, residual = hypothesis["projected_signal_energy"], hypothesis["residual_signal_energy"]
+                fraction = hypothesis.get("retained_signal_fraction")
+                if (not math.isclose(projected + residual, energy, rel_tol=1e-9, abs_tol=1e-9) or
+                        (energy > 0 and (not _is_finite_number(fraction) or not 0 <= fraction <= 1 + 1e-10 or
+                                         not math.isclose(fraction, projected / energy, rel_tol=1e-9, abs_tol=1e-10))) or
+                        (energy == 0 and fraction is not None)):
+                    raise CampaignError("gain partitions must preserve clean energy and normalized retained fraction")
+                if requested is None:
+                    full = projection["hypotheses"][bit]
+                    for source, target in (("rank", "rank"), ("reference_energy", "template_energy"),
+                                           ("projected_signal_energy", "clean_projected_energy"),
+                                           ("residual_signal_energy", "clean_residual_energy"),
+                                           ("noisy_log_likelihood_ratio", "noisy_log_likelihood_ratio")):
+                        if not math.isclose(hypothesis[source], full[target], rel_tol=1e-9, abs_tol=1e-9):
+                            raise CampaignError("gain partitions must reproduce the existing full-aperture projection")
+            for field, hypothesis_field in (("correct_minus_wrong_projected_signal_energy", "projected_signal_energy"),
+                                            ("correct_minus_wrong_noisy_log_likelihood_ratio", "noisy_log_likelihood_ratio")):
+                expected = hypotheses[wanted_bit][hypothesis_field] - hypotheses[1 - wanted_bit][hypothesis_field]
+                if not _is_finite_number(row.get(field)) or not math.isclose(row[field], expected, rel_tol=1e-9, abs_tol=1e-9):
+                    raise CampaignError("gain partitions require a signed evaluator-only correct-bit difference")
+            if row.get("correct_minus_wrong_noise_only_log_likelihood_ratio") is not None:
+                raise CampaignError("gain partitions cannot report an unrendered noise-only twin")
+
+
+def _validate_gui_varying(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    """Validate a bounded same-observation component comparison, never reception."""
+    plan = receipt["plan"]
+    scope = "shadow_canonical_varying_of_selected_complete_observation"
+    outcomes, diagnostic = receipt.get("outcomes"), receipt.get("hf_gui_varying_diagnostic")
+    if (not isinstance(outcomes, dict) or plan.get("observation_scope") != scope or
+            outcomes.get("observation_scope") != scope or
+            not _is_nonnegative_int(plan.get("planned_uncontaminated_quiet_slots")) or
+            plan["planned_uncontaminated_quiet_slots"] != 0):
+        raise CampaignError("GUI varying diagnostic must preserve component observation scope")
+    for field, expected in (("receiver_executed", False), ("component_only", True),
+                            ("completion_evaluated", False), ("correct_complete", False),
+                            ("correct_decoded_complete", False), ("public_search_executed", False)):
+        if outcomes.get(field) is not expected:
+            raise CampaignError("GUI varying diagnostic must not claim receiver decisions or completion")
+    for field in ("actual_scored_slots", "physical_completions", "accepted_messages",
+                  "premature_completions", "wrong_bits", "false_data"):
+        if not _is_nonnegative_int(outcomes.get(field)) or outcomes[field] != 0:
+            raise CampaignError("GUI varying diagnostic must not count operational receiver output")
+    if receipt.get("slots") != [] or receipt.get("messages") != [] or "receiver" in receipt:
+        raise CampaignError("GUI varying diagnostic must not publish receiver or message receipts")
+    if (receipt["backend"].get("device") != "cpu" or
+            receipt["backend"].get("executed_gpu_work") is not False):
+        raise CampaignError("GUI varying diagnostic is CPU-only component work")
+    if (not isinstance(diagnostic, dict) or diagnostic.get("component_complete") is not True or
+            diagnostic.get("all_valid") is not True or
+            diagnostic.get("used_for_receiver_decisions") is not False):
+        raise CampaignError("GUI varying diagnostic must report complete, valid, evaluator-only work")
+    selected = episode["capture_digest_slot"]
+    if (not _is_nonnegative_int(plan.get("wire_bits")) or selected >= plan["wire_bits"] or
+            not _is_nonnegative_int(diagnostic.get("public_slot")) or diagnostic["public_slot"] != selected):
+        raise CampaignError("GUI varying diagnostic must select the requested active public slot")
+    first, stop = plan["capture_digest_first_sample"], plan["capture_digest_stop_sample"]
+    samples = stop - first
+    if (not 0 < samples <= 32768 or
+            any(not _is_nonnegative_int(diagnostic.get(field)) or diagnostic[field] != expected
+                for field, expected in (("observation_first_sample", first), ("observation_stop_sample", stop),
+                                        ("observation_samples", samples)))):
+        raise CampaignError("GUI varying observation must match the bounded complete capture digest")
+    channel = receipt["channel"]
+    if diagnostic.get("observation_sha256") != channel["selected_observation_sha256"]:
+        raise CampaignError("GUI varying component must use the hashed selected IQ observation")
+    public_slots = plan.get("public_slots")
+    if not isinstance(public_slots, list) or not all(isinstance(row, dict) for row in public_slots):
+        raise CampaignError("GUI varying diagnostic requires the public observation calendar")
+    matching = [row for row in public_slots if row.get("index") == selected]
+    if (len(matching) != 1 or not _is_nonnegative_int(matching[0].get("index")) or
+            matching[0].get("observation") != {"first": first, "stop": stop} or
+            matching[0].get("evaluator_transmitting") is not (episode.get("control", "wanted") == "wanted")):
+        raise CampaignError("GUI varying observation must match its public slot and control")
+    if (any(not _is_nonnegative_int(channel.get(field)) or channel[field] != plan["horizon_samples"]
+            for field in ("samples", "hashed_samples")) or
+            not isinstance(channel.get("input_sha256"), str) or
+            re.fullmatch(r"[0-9a-fA-F]{64}", channel["input_sha256"]) is None):
+        raise CampaignError("GUI varying diagnostic must render and hash the full original horizon")
+
+    prior = diagnostic.get("prior")
+    if (not isinstance(prior, dict) or not isinstance(prior.get("drift_reserved"), bool) or
+            not isinstance(prior.get("line_reserved"), bool) or
+            prior.get("drift_scored") is not False or prior.get("line_scored") is not False or
+            prior.get("coherent_gain_available") is not False or
+            not isinstance(prior.get("coherent_gain_status"), str) or not prior["coherent_gain_status"].strip()):
+        raise CampaignError("GUI varying diagnostic must retain unavailable coherent/drift/line qualification")
+    for field in ("branch_weight", "ordinary_weight", "noise_variance", "frequency_lower_hz", "frequency_upper_hz",
+                  "atmospheric_allowance_hz", "clock_bound_ppm", "arrival_lower_seconds", "arrival_upper_seconds",
+                  "operational_threshold", "minimum_bit_log_separation"):
+        if not _is_finite_number(prior.get(field)):
+            raise CampaignError("GUI varying diagnostic requires finite canonical public priors")
+    branch_weight = 1 / (2 + prior["drift_reserved"])
+    ordinary_weight = .5 if prior["line_reserved"] else 1.
+    if (not math.isclose(prior["branch_weight"], branch_weight, rel_tol=1e-12) or
+            prior["ordinary_weight"] != ordinary_weight or
+            prior["noise_variance"] <= 0 or prior["noise_variance"] != plan.get("noise_variance") or
+            prior["frequency_lower_hz"] > prior["frequency_upper_hz"] or
+            prior["arrival_lower_seconds"] > prior["arrival_upper_seconds"] or
+            prior["atmospheric_allowance_hz"] < 0 or prior["clock_bound_ppm"] < 0 or
+            prior["operational_threshold"] <= 0 or prior["minimum_bit_log_separation"] < 0):
+        raise CampaignError("GUI varying diagnostic has inconsistent public prior accounting")
+    bounds = plan["public_bounds"]
+    for field, public_field, sign in (("frequency_lower_hz", "frequency_bound_hz", -1),
+            ("frequency_upper_hz", "frequency_bound_hz", 1), ("atmospheric_allowance_hz", "atmospheric_hz", 1),
+            ("clock_bound_ppm", "clock_bound_ppm", 1), ("arrival_lower_seconds", "arrival_low_seconds", 1),
+            ("arrival_upper_seconds", "arrival_high_seconds", 1)):
+        expected = bounds.get(public_field)
+        if not _is_finite_number(expected) or not math.isclose(prior[field], sign * expected, rel_tol=1e-10, abs_tol=1e-9):
+            raise CampaignError("GUI varying priors must match canonical public bounds without truth narrowing")
+
+    coarse, resources = diagnostic.get("coarse"), diagnostic.get("resources")
+    if not isinstance(coarse, dict) or not isinstance(resources, dict):
+        raise CampaignError("GUI varying diagnostic requires coarse and resource receipts")
+    for field in ("frequency_points", "arrival_points", "workspaces", "total_tiles", "completed_tiles", "workspace_bytes"):
+        if not _is_nonnegative_int(coarse.get(field)) or coarse[field] == 0:
+            raise CampaignError("GUI varying diagnostic requires completed positive coarse geometry")
+    if (coarse["completed_tiles"] != coarse["total_tiles"] or coarse["total_tiles"] > 4096 or
+            coarse["workspaces"] * coarse["frequency_points"] > 2**20 or
+            not isinstance(coarse.get("fft_precision"), str) or not coarse["fft_precision"].strip()):
+        raise CampaignError("GUI varying coarse work exceeds its fixed cap or is incomplete")
+    for field in ("workers", "scratch_bound_bytes", "worker_stack_bound_bytes", "metadata_bound_bytes", "render_row_bound"):
+        if not _is_nonnegative_int(resources.get(field)):
+            raise CampaignError("GUI varying diagnostic requires explicit integer resource bounds")
+    if (resources["workers"] == 0 or not 0 < resources["scratch_bound_bytes"] <= 512 * 2**20 or
+            not 0 < resources["render_row_bound"] <= 32 * 2**20 or
+            coarse["workspace_bytes"] > resources["scratch_bound_bytes"]):
+        raise CampaignError("GUI varying diagnostic exceeds its bounded scratch or render work")
+
+    def coordinate(value: Any) -> None:
+        if not isinstance(value, dict) or any(not _is_finite_number(value.get(field)) for field in
+                ("epoch_offset_seconds", "arrival_seconds", "frequency_hz", "clock_ppm")):
+            raise CampaignError("GUI varying diagnostic requires finite public coordinates")
+
+    proposals = coarse.get("proposals")
+    if not isinstance(proposals, list) or not proposals:
+        raise CampaignError("GUI varying diagnostic requires public coarse proposals")
+    for proposal in proposals:
+        if (not isinstance(proposal, dict) or not _is_finite_number(proposal.get("score")) or
+                not _is_nonnegative_int(proposal.get("bit")) or proposal["bit"] not in (0, 1) or
+                not _is_nonnegative_int(proposal.get("rank"))):
+            raise CampaignError("GUI varying diagnostic has an invalid public coarse proposal")
+        coordinate(proposal.get("coordinate"))
+    for field in ("affine_coordinates", "varying_coordinates", "segmented_timing_coordinates", "epoch_timing_coordinates"):
+        coordinates = coarse.get(field)
+        if not isinstance(coordinates, list):
+            raise CampaignError("GUI varying diagnostic requires its public coordinate sets")
+        for value in coordinates:
+            coordinate(value)
+
+    def evidence(value: Any) -> list[float]:
+        if not isinstance(value, list) or len(value) != 2 or any(not _is_finite_number(x) for x in value):
+            raise CampaignError("GUI varying diagnostic requires finite paired bit evidence")
+        return value
+
+    def log_add(a: float, b: float) -> float:
+        peak = max(a, b)
+        return peak + math.log(math.exp(a - peak) + math.exp(b - peak))
+
+    stages = []
+    for name in ("affine", "varying"):
+        stage = diagnostic.get(name)
+        if not isinstance(stage, dict):
+            raise CampaignError("GUI varying diagnostic requires both native component stages")
+        for field in ("candidates", "basis_rows", "workspace_bytes"):
+            if not _is_nonnegative_int(stage.get(field)) or stage[field] == 0:
+                raise CampaignError("GUI varying stage requires positive executed work")
+        if (stage["workspace_bytes"] > resources["scratch_bound_bytes"] or
+                stage["candidates"] != len(coarse[name + "_coordinates"])):
+            raise CampaignError("GUI varying stage work must match admitted coordinates and workspace")
+        for field in ("selected_log_prior_mass", "public_grid_log_count", "seconds"):
+            if not _is_finite_number(stage.get(field)):
+                raise CampaignError("GUI varying stage requires finite work and prior accounting")
+        expected_mass = math.log(stage["candidates"]) - stage["public_grid_log_count"]
+        if (stage["seconds"] < 0 or stage["public_grid_log_count"] < 0 or
+                not math.isclose(stage["selected_log_prior_mass"], expected_mass, rel_tol=1e-10, abs_tol=1e-9)):
+            raise CampaignError("GUI varying stage must preserve canonical selected prior mass")
+        raw, corrected = evidence(stage.get("raw_bit_log_evidence")), evidence(stage.get("prior_corrected_bit_log_evidence"))
+        for before, after in zip(raw, corrected):
+            if not math.isclose(after, before + expected_mass + math.log(branch_weight * ordinary_weight), rel_tol=1e-10, abs_tol=1e-9):
+                raise CampaignError("GUI varying stage must retain its public-grid, inner-branch and outer-line prior penalties")
+        if (not _is_finite_number(stage.get("log_presence")) or
+                not math.isclose(stage["log_presence"], log_add(*corrected) - math.log(2), rel_tol=1e-10, abs_tol=1e-9)):
+            raise CampaignError("GUI component presence must match its prior-corrected evidence")
+        if name == "varying":
+            for field in ("blocks", "block_rows"):
+                if not _is_nonnegative_int(stage.get(field)) or stage[field] == 0:
+                    raise CampaignError("GUI varying stage requires positive short-block geometry")
+            if not _is_nonnegative_int(stage.get("frequency_states")):
+                raise CampaignError("GUI varying frequency-state count must report actual nonnegative work")
+            if (stage["basis_rows"] > resources["render_row_bound"] or
+                    not isinstance(stage.get("status"), str) or not stage["status"].strip()):
+                raise CampaignError("GUI varying stage must report its bounded executed model status")
+            admitted = stage.get("diagnostic_admits_data")
+            bit = stage.get("diagnostic_data_bit")
+            if (not isinstance(admitted, bool) or
+                    (admitted and (not _is_nonnegative_int(bit) or bit not in (0, 1))) or
+                    (not admitted and bit is not None)):
+                raise CampaignError("GUI varying local admission must be a typed component diagnostic")
+        stages.append(corrected)
+    combined = diagnostic.get("combined")
+    if not isinstance(combined, dict):
+        raise CampaignError("GUI varying diagnostic requires combined component evidence")
+    scores = evidence(combined.get("prior_corrected_bit_log_evidence"))
+    if any(not math.isclose(value, log_add(a, b), rel_tol=1e-10, abs_tol=1e-9)
+           for value, a, b in zip(scores, *stages)):
+        raise CampaignError("GUI varying combined evidence must preserve both weighted component branches")
+    if (not _is_finite_number(combined.get("log_presence")) or
+            not math.isclose(combined["log_presence"], log_add(*scores) - math.log(2), rel_tol=1e-10, abs_tol=1e-9)):
+        raise CampaignError("GUI varying combined presence must match its paired component evidence")
+
+
 def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
     identity_fields = ("requested_scenario", "mode", "waveform", "seed", "control")
     missing_identity = [field for field in identity_fields if field not in receipt]
@@ -585,6 +982,9 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     plan = receipt.get("plan")
     if not isinstance(plan, dict):
         raise CampaignError("completed receipt is missing plan")
+    _validate_profile_controls(plan, episode)
+    if episode["mode"] != "gui-varying" and "hf_gui_varying_diagnostic" in receipt:
+        raise CampaignError("unrequested GUI varying diagnostic in native receipt")
     expected_digest_slot = episode.get("capture_digest_slot", episode.get("search_slot", 0) if episode["mode"] == "hf-search" else None)
     if "capture_digest_slot" in plan or expected_digest_slot is not None:
         actual_digest_slot = plan.get("capture_digest_slot")
@@ -612,7 +1012,7 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
         raise CampaignError("completed receipt plan.requested_bit_seconds must be positive")
     if plan.get("pulse") != episode.get("pulse", "rrc"):
         raise CampaignError("native plan pulse does not match the frozen episode")
-    if "capture_lead_seconds" in episode or "capture_preroll_seconds" in plan:
+    if episode["scenario"] != "hf-gui-native" and ("capture_lead_seconds" in episode or "capture_preroll_seconds" in plan):
         lead = plan.get("capture_preroll_seconds")
         if not _is_finite_number(lead) or lead != episode.get("capture_lead_seconds", .25):
             raise CampaignError("native capture lead does not match the frozen episode")
@@ -723,7 +1123,7 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     device = backend.get("device")
     if not isinstance(backend.get("executed_gpu_work"), bool):
         raise CampaignError("completed receipt backend.executed_gpu_work must be boolean")
-    if episode["mode"] in {"receive", "slot", "channel", "diagnose", "hf-search"}:
+    if episode["mode"] in {"receive", "slot", "channel", "diagnose", "hf-search", "gui-varying"}:
         if not isinstance(device, str) or not device:
             raise CampaignError("completed processing receipt backend.device must identify the actual device")
         if requested_backend == "cpu" and device != "cpu":
@@ -832,6 +1232,8 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
             raise CampaignError("diagnose receipt must not evaluate message completion")
         if outcomes.get("correct_complete") is not False:
             raise CampaignError("diagnose receipt must never report complete-message success")
+    elif episode["mode"] == "gui-varying":
+        _validate_gui_varying(receipt, episode)
     elif episode["mode"] == "hf-search":
         selected = episode.get("search_slot", 0)
         if (not _is_nonnegative_int(plan.get("search_slot")) or plan["search_slot"] != selected or
@@ -998,6 +1400,8 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
             if not isinstance(hashes, list) or len(hashes) != 2 or any(
                     not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None for value in hashes):
                 raise CampaignError("physical diagnostic must bind both clean template hashes")
+            _validate_gain_partitions(physical, plan.get("sample_rate_hz"), observation["stop"] - observation["first"],
+                                      expected, refined_available)
             known = physical.get("known_binary")
             if known is None and "noise_seed" in plan:
                 raise CampaignError("current physical diagnostic requires the known binary reference")
@@ -1280,6 +1684,8 @@ def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
             outcome = "component complete; no slot decision"
         elif episode["mode"] == "hf-search":
             outcome = "public shadow search complete; no receiver decision"
+        elif episode["mode"] == "gui-varying":
+            outcome = "canonical varying component complete; no receiver decision or message completion"
         else:
             outcome = "plan only"
         rows.append(f"| {trial['episode']['id']} | {trial['episode']['scenario']} | {trial['episode']['mode']} | "

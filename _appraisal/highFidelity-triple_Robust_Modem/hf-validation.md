@@ -10,6 +10,51 @@ from a worldwide ionospheric population. See [models and scope](hf-experiments.m
 [primary research reconciliation](hf-research.md), and the
 [actual upstream codec comparison](competitor/README.md).
 
+## Physical-domain and canonical GUI coverage
+
+The [coverage expansion](hf-coverage-expansion.md#executed-physical-and-operating-cohort)
+adds systematic physical coefficients and placement, actual canonical GUI
+clock/preset preparation, and a separate collisional full-wave reference.
+Its initial 40 observations comprise 20 complete-receiver trials, twelve
+component diagnostics and eight plans, taking 487.979 s locally. One narrow-audio
+auroral plan is unavailable; the separately declared wider-audio plan admits.
+All executed communications/components finish within their caps. These are
+heterogeneous cases, not pooled reliability observations.
+
+The maximum-rate physical-domain edge is a new operational failure: two active
+quiet decisions cause premature completion and rejection. It remains failed
+with +3 dB at the same duration, and with a longer near-equal-energy transmission
+(266.8 versus 139.2 s per bit; received energy/noise only .18174 dB lower).
+The matched known-channel diagnostic has distance/noise 276.369 while the
+selected public template retains only 6.993% coherently. Independent short-block
+gains retain much more energy but incur substantial nuisance cost. The retained
+long-TID failure reproduces its old IQ and scores exactly; its shortest partition
+retains 81.597% yet has negative observed log likelihood. Neither reference is
+an implemented receiver repair or universal sensitivity bound.
+
+The canonical GUI tests find a separate integrity failure within HF Worst /
+Each 65% / Margin 3: 40 dB-Hz accepts a space instead of `e`, whereas the matched
+20 dB-Hz message is correct. The wrong bit uses affine admission and skips the
+varying-channel branch; the correct weaker observation uses that broader branch.
+The 30 dB-Hz midpoint, fresh noise and fresh physical realization also accept
+wrong content. These are present-signal wrong-bit failures, distinct from
+noise-only false DATA. All four new receiver null controls remain quiet.
+The FEC-off short prefix code has no checksum/authentication to reject another
+valid token. The contained same-IQ comparison then reproduces the original
+affine/combined evidence exactly and finds correct-bit evidence in the existing
+short-varying model on both original40 and fresh-path first wrong slots. Four
+added diagnostic/parity rows bring the total to 44 in 499.168 s. The native
+receiver replay still accepts the original wrong message; no operating policy
+was changed. The fresh path's other wrong bit remains outside the diagnostic.
+Final source identity, preserved line/drift prior mass, bounded work and the
+three affected correctness groups are recorded in the coverage expansion.
+
+All fourteen [static full-wave profiles](hf-fullwave.md#scope-and-result-record)
+pass their complex-response mesh check; thirteen phase-slope delays are resolved
+and one reflection-null delay is withheld. This is scalar, unmagnetized, static
+normal incidence. It does not replace the guarded time-varying channel or
+qualify caustics, magnetic modes, long measured disturbed days or modem superiority.
+
 ## Independent trajectory and boundary continuation
 
 The [independent ensemble](hf-ensemble.md#executed-evidence-and-findings)

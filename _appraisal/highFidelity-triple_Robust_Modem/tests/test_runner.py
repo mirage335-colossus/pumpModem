@@ -35,6 +35,14 @@ def valid_campaign() -> dict:
     }
 
 
+def physical_design_episode() -> dict:
+    return {"id": "design", "scenario": "hf-ensemble-design", "mode": "plan", "waveform": "reference", "seed": 1,
+            "hf_primary_amplitude_hz": 12000, "hf_primary_period_seconds": 271,
+            "hf_primary_phase_radians": .57, "hf_secondary_amplitude_hz": 13000,
+            "hf_secondary_period_seconds": 1013, "hf_secondary_phase_radians": -1.11,
+            "hf_knot_amplitude_hz": 8000, "hf_knot_seconds": 113}
+
+
 def fake_refinement_trace(*, full: bool) -> dict:
     work = {field: 0 for field in ("fft_row_stages", "spectrum_cells", "table_lookups", "direct_sweeps", "direct_rows",
                                    "phase_rotations", "trigonometric_evaluations", "likelihood_cells")}
@@ -64,6 +72,81 @@ def fake_unavailable_refinement_trace(*, full: bool) -> dict:
     for field in ("shape_count", "nu_count", "nu_step_hz"):
         del trace[field]
     return trace
+
+
+def fake_gain_partitions(physical: dict, sample_rate: float, samples: int) -> dict:
+    result = {"used_for_receiver_decisions": False, "template_selected_from_noisy_public_search": True,
+              "fixed_template_null_law_applies_after_selection": False, "refined_public_cell": None}
+    for name in ("physical_templates", "winning_public_cell", "refined_public_cell"):
+        if name not in physical:
+            continue
+        projection = physical[name] if name == "physical_templates" else physical[name]["projection"]
+        rows = []
+        for requested in (.25, 1, 4, 16, None):
+            block_samples = math.floor(requested * sample_rate + .5) if requested is not None else samples
+            hypotheses = [{"rank": h["rank"], "reference_energy": h["template_energy"],
+                           "projected_signal_energy": h["clean_projected_energy"],
+                           "residual_signal_energy": h["clean_residual_energy"],
+                           "retained_signal_fraction": h["clean_coherence_power"],
+                           "noisy_projected_energy": h["clean_projected_energy"] + 1,
+                           "noisy_log_likelihood_ratio": h["noisy_log_likelihood_ratio"],
+                           "noise_only_projected_energy": None, "noise_only_log_likelihood_ratio": None}
+                          for h in projection["hypotheses"]]
+            wanted = projection["wanted_bit"]
+            rows.append({"requested_block_seconds": requested, "block_samples": block_samples,
+                         "actual_block_seconds": block_samples / sample_rate,
+                         "block_count": (samples + block_samples - 1) // block_samples, "hypotheses": hypotheses,
+                         "correct_minus_wrong_projected_signal_energy": hypotheses[wanted]["projected_signal_energy"] - hypotheses[1 - wanted]["projected_signal_energy"],
+                         "correct_minus_wrong_noisy_log_likelihood_ratio": hypotheses[wanted]["noisy_log_likelihood_ratio"] - hypotheses[1 - wanted]["noisy_log_likelihood_ratio"],
+                         "correct_minus_wrong_noise_only_log_likelihood_ratio": None})
+        result[name] = rows
+    return result
+
+
+def gui_varying_episode(**overrides) -> dict:
+    return {"id": "varying", "scenario": "hf-gui-native", "mode": "gui-varying",
+            "waveform": "reference", "seed": 1, "capture_digest_slot": 2, **overrides}
+
+
+def fake_gui_varying_diagnostic(selected: int, bounds: dict, *, drift_reserved=True, line_reserved=True) -> dict:
+    """Receipt fixture only; all component DSP remains in the native probe."""
+    def presence(values):
+        peak = max(values)
+        return peak + math.log(sum(math.exp(value - peak) for value in values)) - math.log(2)
+
+    weight = 1 / (2 + drift_reserved)
+    ordinary_weight = .5 if line_reserved else 1.
+    coordinate = {"epoch_offset_seconds": 0., "arrival_seconds": 0., "frequency_hz": 0., "clock_ppm": 0.}
+    stages = []
+    for raw in ([1., 3.], [-1., 5.]):
+        corrected = [value - math.log(4) + math.log(weight * ordinary_weight) for value in raw]
+        stages.append({"raw_bit_log_evidence": raw, "prior_corrected_bit_log_evidence": corrected,
+            "selected_log_prior_mass": -math.log(4), "public_grid_log_count": math.log(4),
+            "candidates": 1, "basis_rows": 80, "workspace_bytes": 64, "seconds": .01,
+            "log_presence": presence(corrected)})
+    stages[1].update(blocks=2, block_rows=40, frequency_states=1, status="short_block_partial_bandwidth",
+                     diagnostic_admits_data=False, diagnostic_data_bit=None)
+    combined = [presence([a, b]) + math.log(2) for a, b in zip(
+        stages[0]["prior_corrected_bit_log_evidence"], stages[1]["prior_corrected_bit_log_evidence"])]
+    return {"component_complete": True, "public_slot": selected, "observation_sha256": "c" * 64,
+        "observation_first_sample": 20, "observation_stop_sample": 100, "observation_samples": 80,
+        "all_valid": True, "used_for_receiver_decisions": False,
+        "affine": stages[0], "varying": stages[1],
+        "combined": {"prior_corrected_bit_log_evidence": combined, "log_presence": presence(combined)},
+        "prior": {"branch_weight": weight, "drift_reserved": drift_reserved, "drift_scored": False,
+            "line_reserved": line_reserved, "ordinary_weight": ordinary_weight,
+            "coherent_gain_status": "plan_unavailable", "coherent_gain_available": False,
+            "line_scored": False, "noise_variance": 5., "operational_threshold": 4., "minimum_bit_log_separation": 1.,
+            "frequency_lower_hz": -bounds["frequency_bound_hz"], "frequency_upper_hz": bounds["frequency_bound_hz"],
+            "atmospheric_allowance_hz": bounds["atmospheric_hz"], "clock_bound_ppm": bounds["clock_bound_ppm"],
+            "arrival_lower_seconds": bounds["arrival_low_seconds"], "arrival_upper_seconds": bounds["arrival_high_seconds"]},
+        "coarse": {"frequency_points": 2, "arrival_points": 1, "workspaces": 1, "total_tiles": 2,
+            "completed_tiles": 2, "workspace_bytes": 64, "fft_precision": "fp32",
+            "proposals": [{"coordinate": dict(coordinate), "score": 2., "bit": 1, "rank": 0}],
+            "affine_coordinates": [dict(coordinate)], "varying_coordinates": [dict(coordinate)],
+            "segmented_timing_coordinates": [], "epoch_timing_coordinates": []},
+        "resources": {"workers": 2, "scratch_bound_bytes": 256, "worker_stack_bound_bytes": 64,
+            "metadata_bound_bytes": 32, "render_row_bound": 1024}}
 
 
 def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None) -> dict:
@@ -110,6 +193,31 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
         "backend": {"requested": backend, "device": backend if backend in {"cuda", "vulkan"} else "cpu",
                     "executed_gpu_work": backend in {"cuda", "vulkan"}},
     }
+    if receipt["requested_scenario"] == "hf-ensemble-design":
+        receipt["plan"]["hf_design"] = {field: float(argument("--hf-" + field.replace("_", "-")))
+                                        for field in runner.HF_DESIGN_BOUNDS}
+    if receipt["requested_scenario"] == "hf-gui-native":
+        gui = {field.removeprefix("gui_"): ("--gui-clock-edge" in command if field == "gui_clock_edge" else
+                float(argument("--" + field.replace("_", "-"), str(default))) if field in runner.GUI_NUMERIC_BOUNDS else
+                argument("--" + field.replace("_", "-"), default)) for field, default in runner.GUI_DEFAULTS.items()}
+        low, high = (-.0025, .0025) if gui["arrival"] == "tight" else (-7., 7.07)
+        lead = max(.25, -low + .25)
+        phase = math.hypot(gui["audio_phase_degrees_sqrt_s"], gui["rf_phase_degrees_sqrt_s"]) * math.pi / 180 / math.sqrt(2)
+        realized = {"tx_audio_ppm": gui["audio_ppm"] / 2, "rx_audio_ppm": -gui["audio_ppm"] / 2,
+                    "tx_rf_ppm": gui["rf_ppm"] / 2, "rx_rf_ppm": -gui["rf_ppm"] / 2,
+                    "timing_offset_seconds": 0., "tx_phase_noise_rad_sqrt_s": phase, "rx_phase_noise_rad_sqrt_s": phase}
+        realized["relative_audio_ppm"] = (realized["tx_audio_ppm"] - realized["rx_audio_ppm"]) / (1 + realized["rx_audio_ppm"] * 1e-6)
+        gui.update({"realization_passed_to_receiver": False, "profile_source": "canonical_prepare_profile",
+                    "fixture_bit_seconds": requested_bit_seconds if "--bit-seconds" in command else None,
+                    "actual_cn0_db_hz": cn0, "capture_preroll_seconds": lead,
+                    "selective_slow_depth": runner.GUI_SELECTIVE_DEPTHS[gui["selective"]][0],
+                    "selective_fast_depth": runner.GUI_SELECTIVE_DEPTHS[gui["selective"]][1],
+                    "endpoint_clock_bound_ppm": gui["audio_ppm"] * gui["margin"] / 2,
+                    "spread_doppler_hz": runner.GUI_SPREAD_DOPPLER[gui["spread"]] * gui["margin"],
+                    "realized": realized})
+        receipt["plan"].update({"gui_profile": gui, "channel_renderer": "canonical_gui_streaming_channel",
+                               "capture_preroll_seconds": lead,
+                               "public_bounds": {"arrival_low_seconds": low, "arrival_high_seconds": high}})
     if mode == "receive":
         receipt["outcomes"] = outcomes or {
             "receiver_executed": True, "component_only": False, "completion_evaluated": True,
@@ -149,6 +257,20 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
                                 "correct_complete": False}
         receipt["vlf_diagnostic"] = {"component_complete": True, "phase": "completed",
                                      "capacity_qualified": False, "complete_receiver_service": False}
+    elif mode == "gui-varying":
+        selected = int(argument("--capture-digest-slot"))
+        scope = "shadow_canonical_varying_of_selected_complete_observation"
+        receipt["plan"].update(observation_scope=scope, planned_uncontaminated_quiet_slots=0,
+            wire_bits=3, horizon_samples=1000, public_slots=[{"index": selected,
+                "observation": {"first": 20, "stop": 100}, "evaluator_transmitting": receipt["control"] == "wanted"}])
+        receipt["plan"]["public_bounds"].update(frequency_bound_hz=20., atmospheric_hz=10., clock_bound_ppm=300.)
+        receipt["hf_gui_varying_diagnostic"] = fake_gui_varying_diagnostic(selected, receipt["plan"]["public_bounds"])
+        receipt["outcomes"] = {"observation_scope": scope, "receiver_executed": False, "component_only": True,
+            "completion_evaluated": False, "correct_complete": False, "correct_decoded_complete": False,
+            "public_search_executed": False, "actual_scored_slots": 0, "physical_completions": 0,
+            "accepted_messages": 0, "premature_completions": 0, "wrong_bits": 0, "false_data": 0}
+        receipt["slots"], receipt["messages"] = [], []
+        receipt["channel"] = {"samples": 1000, "hashed_samples": 1000, "input_sha256": "f" * 64}
     if mode == "channel" or channel is not None:
         receipt["channel"] = channel or {"contains_signal_energy": True, "samples": 100}
     if mode == "oracle":
@@ -708,6 +830,286 @@ class CampaignValidationTests(unittest.TestCase):
         receipt["plan"]["capture_preroll_override"] = True
         with self.assertRaisesRegex(runner.CampaignError, "capture lead override"):
             runner._validate_completed_receipt(receipt, implicit)
+
+    def test_gain_partitions_are_complete_but_not_selected_receiver_evidence(self) -> None:
+        episode = {"id": "history", "scenario": "hf-ensemble-tid", "mode": "hf-search", "waveform": "reference",
+                   "seed": 1, "hf_physical_diagnostic": True}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 4000, 2))
+        observation = {"first": 20, "stop": 2020}
+        receipt["plan"].update(horizon_samples=2020, search_observation=observation, capture_digest_stop_sample=2020)
+        receipt["channel"]["selected_observation_hashed_samples"] = 2000
+        physical = receipt["hf_physical_diagnostic"]
+        physical.update(observation=observation, prefix_samples_rendered_per_twin=2020)
+        physical["physical_templates"]["samples"] = 2000
+        physical["winning_public_cell"]["projection"]["samples"] = 2000
+        physical["gain_partitions"] = fake_gain_partitions(physical, 1920, 2000)
+        runner._validate_completed_receipt(receipt, episode)
+        self.assertEqual(physical["gain_partitions"]["winning_public_cell"][0]["block_count"], 5)
+        for flag, invalid in (("used_for_receiver_decisions", True),
+                              ("template_selected_from_noisy_public_search", False),
+                              ("fixed_template_null_law_applies_after_selection", True)):
+            bad = json.loads(json.dumps(receipt)); bad["hf_physical_diagnostic"]["gain_partitions"][flag] = invalid
+            with self.assertRaisesRegex(runner.CampaignError, "gain partitions"):
+                runner._validate_completed_receipt(bad, episode)
+        for change in ("missing", "count", "rank", "energy", "sign", "full", "refined", "physical_missing", "physical_full"):
+            bad = json.loads(json.dumps(receipt)); partitions = bad["hf_physical_diagnostic"]["gain_partitions"]
+            rows = partitions["winning_public_cell"]
+            if change == "missing": rows.pop(0)
+            elif change == "count": rows[0]["block_count"] = 4
+            elif change == "rank": rows[0]["hypotheses"][0]["rank"] = 6
+            elif change == "energy": rows[0]["hypotheses"][1]["residual_signal_energy"] = 1
+            elif change == "sign": rows[0]["correct_minus_wrong_noisy_log_likelihood_ratio"] *= -1
+            elif change == "full": rows[-1]["hypotheses"][0]["reference_energy"] += 1
+            elif change == "refined": partitions["refined_public_cell"] = rows
+            elif change == "physical_missing": del partitions["physical_templates"]
+            else: partitions["physical_templates"][-1]["hypotheses"][1]["reference_energy"] += 1
+            with self.subTest(change=change), self.assertRaisesRegex(runner.CampaignError, "gain partitions"):
+                runner._validate_completed_receipt(bad, episode)
+
+    def test_physical_design_requires_one_complete_bounded_native_descriptor(self) -> None:
+        episode = physical_design_episode()
+        runner._validate_episode(episode, 0, set(), 10, 1000)
+        command = runner._command(Path("/native/probe"), episode, 1000, 2)
+        receipt = fake_completed_receipt(command)
+        runner._validate_completed_receipt(receipt, episode)
+        for field, (low, high) in runner.HF_DESIGN_BOUNDS.items():
+            option = "hf_" + field
+            self.assertEqual(command[command.index("--" + option.replace("_", "-")) + 1], str(episode[option]))
+            for value in (low, high):
+                runner._validate_episode(dict(episode, **{option: value}), 0, set(), 10, 1000)
+            for value in (low - .001, high + .001, True, float("nan"), "1"):
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_episode(dict(episode, **{option: value}), 0, set(), 10, 1000)
+            missing = dict(episode)
+            del missing[option]
+            with self.assertRaisesRegex(runner.CampaignError, "all eight"):
+                runner._validate_episode(missing, 0, set(), 10, 1000)
+            altered = json.loads(json.dumps(receipt))
+            altered["plan"]["hf_design"][field] += .01
+            with self.assertRaisesRegex(runner.CampaignError, "physical design"):
+                runner._validate_completed_receipt(altered, episode)
+        with self.assertRaisesRegex(runner.CampaignError, "require hf-ensemble-design"):
+            runner._validate_episode(dict(episode, scenario="hf-ensemble-tid"), 0, set(), 10, 1000)
+
+    def test_gui_settings_are_explicitly_scoped_and_passed_as_argv(self) -> None:
+        episode = {"id": "gui", "scenario": "hf-gui-native", "mode": "receive", "waveform": "reference", "seed": 1,
+                   **runner.GUI_DEFAULTS, "gui_clock_edge": True, "gui_arrival": "default",
+                   "gui_target_cn0_db_hz": 20, "cn0_db_hz": 12, "bit_seconds": 16}
+        runner._validate_episode(episode, 0, set(), 10, 1000)
+        command = runner._command(Path("/native/probe"), episode, 1000, 2)
+        for field in runner.GUI_DEFAULTS:
+            option = "--" + field.replace("_", "-")
+            self.assertIn(option, command)
+            if field != "gui_clock_edge":
+                self.assertEqual(command[command.index(option) + 1], str(episode[field]))
+        for override in ({"scenario": "hf-quiet"}, {"waveform": "smoke"}, {"mode": "channel"},
+                         {"control": "interior-fade"}, {"pulse": "tapered-rrc"}, {"capture_lead_seconds": 1},
+                         {"hf_trajectory_offset_seconds": 0}, {"hf_public_phase_receiver": True},
+                         {"gui_clock_edge": 1}, {"gui_selective": "65%"}, {"gui_spread": "worst"},
+                         {"gui_margin": 0}, {"gui_audio_ppm": -1}, {"gui_rf_phase_degrees_sqrt_s": 361}):
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(episode, **override), 0, set(), 10, 1000)
+
+    def test_gui_varying_inputs_require_explicit_cpu_component_scope(self) -> None:
+        episode = gui_varying_episode()
+        for control in ("wanted", "noise"):
+            for selected in (0, 2):
+                declared = dict(episode, control=control, capture_digest_slot=selected)
+                runner._validate_episode(declared, 0, set(), 10, 1000)
+                command = runner._command(Path("/native/probe"), declared, 1000, 2)
+                self.assertEqual(command[command.index("--mode") + 1], "gui-varying")
+                self.assertEqual(command[command.index("--capture-digest-slot") + 1], str(selected))
+                runner._validate_completed_receipt(fake_completed_receipt(command), declared)
+        missing = dict(episode)
+        del missing["capture_digest_slot"]
+        for invalid in [missing] + [dict(episode, **override) for override in (
+                {"scenario": "awgn"}, {"waveform": "smoke"}, {"helper": True}, {"backend": "cuda"},
+                {"control": "wrong-key"}, {"control": "wrong-ordinal"}, {"control": "eof"},
+                {"control": "interior-fade"}, {"capture_digest_slot": True}, {"capture_digest_slot": -1},
+                {"search_slot": 2}, {"search_timing": "full"}, {"oracle_slot": 2}, {"duration_seconds": 1},
+                {"hf_public_phase_receiver": False}, {"hf_phase_refinement": False}, {"pulse": "tapered-rrc"})]:
+            with self.subTest(invalid=invalid), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(invalid, 0, set(), 10, 1000)
+
+    def test_gui_varying_receipts_bind_capture_priors_work_and_component_scope(self) -> None:
+        episode = gui_varying_episode()
+        command = runner._command(Path("/native/probe"), episode, 1000, 2)
+        receipt = fake_completed_receipt(command)
+        runner._validate_completed_receipt(receipt, episode)
+        changes = (
+            (("plan", "observation_scope"), "physical_message_completion"),
+            (("plan", "planned_uncontaminated_quiet_slots"), 2), (("plan", "wire_bits"), 2),
+            (("plan", "public_slots", 0, "observation", "first"), 21),
+            (("plan", "public_slots", 0, "evaluator_transmitting"), False),
+            (("channel", "samples"), 100), (("channel", "hashed_samples"), 999),
+            (("channel", "input_sha256"), "missing"), (("backend", "executed_gpu_work"), True),
+            (("outcomes", "receiver_executed"), True), (("outcomes", "component_only"), False),
+            (("outcomes", "completion_evaluated"), True), (("outcomes", "correct_complete"), True),
+            (("outcomes", "correct_decoded_complete"), True), (("outcomes", "actual_scored_slots"), 1),
+            (("outcomes", "physical_completions"), 1), (("outcomes", "accepted_messages"), 1),
+            (("outcomes", "false_data"), 1), (("slots",), [{"index": 2}]), (("messages",), [{}]),
+        )
+        diagnostic_changes = (
+            (("component_complete",), False), (("public_slot",), 1), (("all_valid",), False),
+            (("used_for_receiver_decisions",), True), (("observation_first_sample",), 19),
+            (("observation_stop_sample",), 99), (("observation_samples",), True),
+            (("observation_sha256",), "d" * 64), (("prior", "branch_weight"), .5),
+            (("prior", "drift_reserved"), 1), (("prior", "drift_scored"), True),
+            (("prior", "line_reserved"), 1), (("prior", "ordinary_weight"), 1),
+            (("prior", "line_scored"), True), (("prior", "coherent_gain_available"), True),
+            (("prior", "coherent_gain_status"), ""), (("prior", "noise_variance"), 6),
+            (("prior", "frequency_lower_hz"), -1), (("prior", "frequency_upper_hz"), 1),
+            (("prior", "atmospheric_allowance_hz"), 1), (("prior", "clock_bound_ppm"), 1),
+            (("prior", "arrival_lower_seconds"), 0), (("prior", "arrival_upper_seconds"), 0),
+            (("prior", "operational_threshold"), 0), (("prior", "minimum_bit_log_separation"), -1),
+            (("coarse", "completed_tiles"), 1), (("coarse", "total_tiles"), 4097),
+            (("coarse", "workspaces"), 2**20), (("coarse", "fft_precision"), ""),
+            (("coarse", "proposals", 0, "bit"), True), (("coarse", "proposals", 0, "rank"), -1),
+            (("coarse", "proposals", 0, "coordinate", "clock_ppm"), math.nan),
+            (("coarse", "affine_coordinates"), []), (("coarse", "varying_coordinates"), []),
+            (("resources", "workers"), 0), (("resources", "scratch_bound_bytes"), 512 * 2**20 + 1),
+            (("resources", "render_row_bound"), 32 * 2**20 + 1), (("resources", "metadata_bound_bytes"), -1),
+            (("affine", "selected_log_prior_mass"), 0), (("affine", "public_grid_log_count"), math.nan),
+            (("affine", "raw_bit_log_evidence"), [1.]), (("affine", "prior_corrected_bit_log_evidence"), [1., 3.]),
+            (("affine", "log_presence"), 0), (("varying", "seconds"), -1),
+            (("varying", "basis_rows"), 1025), (("varying", "workspace_bytes"), 257),
+            (("varying", "frequency_states"), -1), (("varying", "blocks"), True),
+            (("varying", "block_rows"), 0), (("varying", "status"), ""),
+            (("varying", "diagnostic_admits_data"), 1), (("varying", "diagnostic_data_bit"), 0),
+            (("combined", "prior_corrected_bit_log_evidence"), [1., 3.]), (("combined", "log_presence"), 0),
+        )
+        for path, value in changes + tuple((("hf_gui_varying_diagnostic",) + path, value)
+                                           for path, value in diagnostic_changes):
+            with self.subTest(path=path):
+                bad = json.loads(json.dumps(receipt))
+                parent = bad
+                for key in path[:-1]:
+                    parent = parent[key]
+                parent[path[-1]] = value
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(bad, episode)
+        oversized = json.loads(json.dumps(receipt))
+        oversized["plan"].update(horizon_samples=40000, capture_digest_stop_sample=33000)
+        oversized["channel"].update(samples=40000, hashed_samples=40000, selected_observation_hashed_samples=32980)
+        oversized["plan"]["public_slots"][0]["observation"]["stop"] = 33000
+        oversized["hf_gui_varying_diagnostic"].update(observation_stop_sample=33000, observation_samples=32980)
+        with self.assertRaisesRegex(runner.CampaignError, "bounded complete"):
+            runner._validate_completed_receipt(oversized, episode)
+        unsolicited = fake_completed_receipt(runner._command(Path("/native/probe"),
+            dict(episode, mode="receive"), 1000, 2))
+        unsolicited["hf_gui_varying_diagnostic"] = receipt["hf_gui_varying_diagnostic"]
+        with self.assertRaisesRegex(runner.CampaignError, "unrequested GUI"):
+            runner._validate_completed_receipt(unsolicited, dict(episode, mode="receive"))
+
+    def test_gui_varying_preserves_reserved_outer_line_mass(self) -> None:
+        episode = gui_varying_episode()
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 1000, 2))
+        for drift_reserved in (False, True):
+            ordinary = fake_gui_varying_diagnostic(2, receipt["plan"]["public_bounds"],
+                drift_reserved=drift_reserved, line_reserved=False)
+            reserved = fake_gui_varying_diagnostic(2, receipt["plan"]["public_bounds"],
+                drift_reserved=drift_reserved, line_reserved=True)
+            for diagnostic in (ordinary, reserved):
+                receipt["hf_gui_varying_diagnostic"] = diagnostic
+                runner._validate_completed_receipt(receipt, episode)
+            for stage in ("affine", "varying"):
+                self.assertEqual(ordinary[stage]["raw_bit_log_evidence"], reserved[stage]["raw_bit_log_evidence"])
+            for stage in ("affine", "varying", "combined"):
+                for before, after in zip(ordinary[stage]["prior_corrected_bit_log_evidence"],
+                                          reserved[stage]["prior_corrected_bit_log_evidence"]):
+                    self.assertAlmostEqual(before - after, math.log(2))
+                self.assertAlmostEqual(ordinary[stage]["log_presence"] - reserved[stage]["log_presence"], math.log(2))
+            # Reproduce the original defect coherently: remove only the outer
+            # half-weight everywhere, leaving raw evidence and all inner priors
+            # intact. Cross-stage logaddexp identities alone would still pass.
+            inflated = json.loads(json.dumps(reserved))
+            for stage in ("affine", "varying", "combined"):
+                inflated[stage]["prior_corrected_bit_log_evidence"] = [
+                    value + math.log(2) for value in inflated[stage]["prior_corrected_bit_log_evidence"]]
+                inflated[stage]["log_presence"] += math.log(2)
+            receipt["hf_gui_varying_diagnostic"] = inflated
+            with self.assertRaisesRegex(runner.CampaignError, "outer-line prior"):
+                runner._validate_completed_receipt(receipt, episode)
+        for field in ("line_reserved", "ordinary_weight"):
+            receipt["hf_gui_varying_diagnostic"] = json.loads(json.dumps(reserved))
+            del receipt["hf_gui_varying_diagnostic"]["prior"][field]
+            with self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(receipt, episode)
+
+    def test_gui_varying_noise_admission_remains_a_component_observation(self) -> None:
+        episode = gui_varying_episode(control="noise")
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 1000, 2))
+        for drift_reserved in (False, True):
+            diagnostic = fake_gui_varying_diagnostic(2, receipt["plan"]["public_bounds"], drift_reserved=drift_reserved)
+            receipt["hf_gui_varying_diagnostic"] = diagnostic
+            diagnostic["varying"]["frequency_states"] = 0  # No tracking states when the native plan disables tracking.
+            for bit in (0, 1):
+                diagnostic["varying"].update(diagnostic_admits_data=True, diagnostic_data_bit=bit)
+                runner._validate_completed_receipt(receipt, episode)
+                self.assertFalse(receipt["outcomes"]["correct_complete"])
+                self.assertEqual(receipt["outcomes"]["actual_scored_slots"], 0)
+            for invalid_bit in (None, True, 2):
+                diagnostic["varying"]["diagnostic_data_bit"] = invalid_bit
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_completed_receipt(receipt, episode)
+
+    def test_gui_receipts_bind_actual_errors_without_narrowing_public_priors(self) -> None:
+        episode = {"id": "gui", "scenario": "hf-gui-native", "mode": "receive", "waveform": "reference", "seed": 1,
+                   "gui_clock_edge": True, "gui_arrival": "default", "gui_target_cn0_db_hz": 20,
+                   "cn0_db_hz": 12, "bit_seconds": 16}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 1000, 2))
+        runner._validate_completed_receipt(receipt, episode)
+        self.assertEqual(receipt["plan"]["capture_preroll_seconds"], 7.25)
+        self.assertEqual(receipt["plan"]["gui_profile"]["endpoint_clock_bound_ppm"], 150)
+        self.assertEqual(receipt["plan"]["gui_profile"]["realized"]["tx_audio_ppm"], 50)
+        for field, value in (("margin", 1), ("selective_slow_depth", 0), ("selective_fast_depth", 0),
+                             ("endpoint_clock_bound_ppm", 50), ("spread_doppler_hz", 30),
+                             ("realization_passed_to_receiver", True), ("fixture_bit_seconds", None),
+                             ("actual_cn0_db_hz", 20), ("capture_preroll_seconds", .25)):
+            bad = json.loads(json.dumps(receipt)); bad["plan"]["gui_profile"][field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(runner.CampaignError, "native GUI"):
+                runner._validate_completed_receipt(bad, episode)
+        for field, value in (("tx_audio_ppm", 150), ("rx_audio_ppm", 50), ("tx_rf_ppm", True),
+                             ("relative_audio_ppm", 100), ("timing_offset_seconds", 8),
+                             ("tx_phase_noise_rad_sqrt_s", 0)):
+            bad = json.loads(json.dumps(receipt)); bad["plan"]["gui_profile"]["realized"][field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(runner.CampaignError, "native GUI"):
+                runner._validate_completed_receipt(bad, episode)
+        bad = json.loads(json.dumps(receipt)); bad["plan"]["channel_renderer"] = "appraisal_channel"
+        with self.assertRaisesRegex(runner.CampaignError, "canonical preparation"):
+            runner._validate_completed_receipt(bad, episode)
+
+    def test_gui_off_and_target_planned_receipts_do_not_invent_fixture_duration(self) -> None:
+        episode = {"id": "off", "scenario": "hf-gui-native", "mode": "plan", "waveform": "reference", "seed": 1,
+                   "gui_audio_ppm": 0, "gui_rf_ppm": 0, "gui_audio_phase_degrees_sqrt_s": 0,
+                   "gui_rf_phase_degrees_sqrt_s": 0, "gui_selective": "off", "gui_spread": "none"}
+        runner._validate_episode(episode, 0, set(), 10, 1000)
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 1000, 2))
+        runner._validate_completed_receipt(receipt, episode)
+        self.assertIsNone(receipt["plan"]["gui_profile"]["fixture_bit_seconds"])
+        self.assertEqual(receipt["plan"]["gui_profile"]["realized"]["tx_phase_noise_rad_sqrt_s"], 0)
+        for spread in runner.GUI_SPREAD_DOPPLER:
+            for selective in ("slow-25", "fast-10", "each-1"):
+                changed = dict(episode, gui_spread=spread, gui_selective=selective)
+                runner._validate_episode(changed, 0, set(), 10, 1000)
+                native = fake_completed_receipt(runner._command(Path("/native/probe"), changed, 1000, 2))
+                runner._validate_completed_receipt(native, changed)
+
+    def test_new_physical_and_gui_axes_are_not_pooled_in_confirmatory_strata(self) -> None:
+        for setting, first, second in (("gui_audio_ppm", 50, 100), ("gui_selective", "off", "each-65"),
+                                       ("hf_primary_period_seconds", 200, 300)):
+            campaign = valid_campaign()
+            for row in campaign["episodes"]:
+                if setting.startswith("hf_"):
+                    row.update({k: v for k, v in physical_design_episode().items() if k not in {"id", "seed", "mode"}})
+                else:
+                    row.update(scenario="hf-gui-native", waveform="reference")
+            campaign["episodes"][0][setting] = first
+            campaign["episodes"][1][setting] = second
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "campaign.json"; path.write_text(json.dumps(campaign))
+                with self.assertRaisesRegex(runner.CampaignError, "mixes episode settings.*" + setting):
+                    runner._read_campaign(path)
 
     def test_trajectory_and_noise_controls_are_separate_and_receipt_bound(self) -> None:
         episode = {"id": "independent", "scenario": "hf-ensemble-knots", "mode": "receive",
@@ -1286,6 +1688,29 @@ class CampaignExecutionTests(unittest.TestCase):
         self.assertEqual(run["status"], "completed")
         self.assertEqual(run["valid_communication_failures"], 0)
         self.assertIn("component complete; no slot decision", report)
+        self.assertNotIn("physical message complete", report)
+
+    def test_gui_varying_report_does_not_count_component_admission_as_communication(self) -> None:
+        campaign = {"schema_version": 1, "name": "gui-varying-report", "max_wall_seconds": 4,
+                    "per_trial_wall_seconds": 2, "max_trials": 2, "max_samples": 1000,
+                    "episodes": [gui_varying_episode(id=control, control=control) for control in ("wanted", "noise")]}
+        self.campaign_file.write_text(json.dumps(campaign))
+        output = self.work / "gui-varying-output"
+
+        def admitted_component(command, **kwargs):
+            receipt = fake_completed_receipt(command)
+            receipt["hf_gui_varying_diagnostic"]["varying"].update(diagnostic_admits_data=True, diagnostic_data_bit=1)
+            kwargs["stdout"].write((json.dumps(receipt) + "\n").encode())
+            return subprocess.CompletedProcess(command, 0)
+
+        with patch.object(runner.subprocess, "run", side_effect=admitted_component):
+            run = runner.run_campaign(self.probe, self.campaign_file, output)
+        report = (output / "report.md").read_text()
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(run["execution_failures"], 0)
+        self.assertEqual(run["valid_communication_failures"], 0)
+        self.assertEqual(run["statistics"], {})
+        self.assertIn("canonical varying component complete; no receiver decision or message completion", report)
         self.assertNotIn("physical message complete", report)
 
     def test_channel_episode_requires_nonempty_received_signal(self) -> None:

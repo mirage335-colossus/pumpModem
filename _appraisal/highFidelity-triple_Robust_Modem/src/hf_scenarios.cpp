@@ -1,5 +1,6 @@
 #include "appraisal/hf_scenarios.hpp"
 #include "appraisal/hf_replay.hpp"
+#include "appraisal/hf_design.hpp"
 
 #include <algorithm>
 #include <array>
@@ -465,6 +466,30 @@ Scenario ensemble_ox_helper() {
     return s;
 }
 
+Scenario eikonal_design() {
+    auto s=eikonal_ensemble("hf-ensemble-changing-rate");
+    s.id="hf-ensemble-design";
+    s.bounds.delay_excursion_seconds=80e-6;
+    s.evidence="constructed bounded coefficient-domain density trajectory independent of receiver templates";
+    s.provenance="Existing native cold-plasma parabolic eikonal and immutable quintic-knot field; "
+        "Olugbon et al. 2021 doi:10.1029/2020SW002676 temporal context and hf-research.md cadence limits";
+    s.assumptions="An explicitly supplied eight-parameter density history combines two sinusoids and one "
+        "immutable C2 knot field. Each amplitude is in [0,20]kHz; primary periods110-480s, secondary480-1400s, "
+        "knot spacing70-200s and sine phases[-pi,pi] form one fixed declared domain. The layer has bottom245km, "
+        "semi-thickness52km and nominal critical frequency3.73MHz at3.4MHz RF. The full domain, including every "
+        "knot seed and physical placement, is admitted against fixed public1-3ms arrival, +/-1Hz atmospheric "
+        "frequency and80us group-delay excursion bounds, never narrowed from a realization. Phase, group delay "
+        "and local dispersion use the same eikonal. This is a constructed parameter-coverage stress, not a "
+        "measured ionospheric day or natural occurrence distribution. The coefficients are independent of the "
+        "receiver phase bank. It excludes magnetic splitting, collisions, cutoff crossings, caustics and full "
+        "oblique-ray geometry. Quintic-knot first and second derivatives vanish at every knot; this is not "
+        "a measured turbulence law. The source band for the declared domain check is384Hz, not a Helper band. "
+        "No signal or noise energy is normalized by realization. Listing the scenario uses a documented "
+        "midpoint descriptor; an executable design experiment must explicitly provide all eight parameters.";
+    apply_hf_trajectory_design(s,default_hf_trajectory_design());
+    return s;
+}
+
 Scenario ding_measured(const std::string& id) {
     auto s = base_hf(id);
     s.channel.rf_hz = 12.7e6;
@@ -513,6 +538,7 @@ std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
     if (id == "hf-ensemble-tid" || id == "hf-ensemble-changing-rate" ||
         id == "hf-ensemble-modes" || id == "hf-ensemble-modes-noisy") return eikonal_ensemble(id);
     if (id == "hf-ensemble-ox-helper") return ensemble_ox_helper();
+    if (id == "hf-ensemble-design") return eikonal_design();
     if (id == "hf-ding-measured" || id == "hf-ding-amplitude" || id == "hf-ding-phase" ||
         id == "hf-ding-measured-late" || id == "hf-ding-clock41") return ding_measured(id);
     return std::nullopt;

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "name": "hf-gui-varying-fresh",
+  "purpose": "Conditional fresh physical realization, predeclared before pair outcomes: execute only if original40 varying-only native classification supports correct DATA1 against original wrong affine DATA0 and original20 diagnostic is valid. Select first actual wrong active slot0 of earlier fresh physical seed62002 (received100 vs expected001). No extra noise replicas or production repair claim.",
+  "max_wall_seconds": 120,
+  "per_trial_wall_seconds": 120,
+  "max_trials": 1,
+  "max_samples": 8000000,
+  "episodes": [
+    {
+      "scenario": "hf-gui-native",
+      "mode": "gui-varying",
+      "waveform": "reference",
+      "seed": 62002,
+      "noise_seed": 72001,
+      "cn0_db_hz": 40,
+      "gui_target_cn0_db_hz": 32,
+      "gui_spread": "hf-worst",
+      "gui_selective": "each-65",
+      "gui_margin": 3,
+      "gui_audio_ppm": 100,
+      "gui_rf_ppm": 1,
+      "gui_audio_phase_degrees_sqrt_s": 0.5,
+      "gui_rf_phase_degrees_sqrt_s": 0.05,
+      "gui_clock_edge": true,
+      "gui_arrival": "tight",
+      "bit_seconds": 2,
+      "control": "wanted",
+      "id": "gui-varying-fresh-path40-slot0",
+      "capture_digest_slot": 0
+    }
+  ]
+}

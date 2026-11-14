@@ -198,7 +198,7 @@ std::vector<std::string> scenario_names() {
             "hf-watterson-i1", "hf-watterson-i3", "hf-ox-split", "hf-ox-cancellation", "hf-trough-static", "hf-trough-phase",
             "hf-mode-transition", "hf-vertical-eikonal-static", "hf-vertical-eikonal-motion", "hf-vertical-eikonal-holdout",
             "hf-eikonal-holdout-a", "hf-eikonal-holdout-b", "hf-eikonal-compound", "hf-eikonal-cfo-edge",
-            "hf-ensemble-tid", "hf-ensemble-changing-rate", "hf-ensemble-modes", "hf-ensemble-modes-noisy", "hf-ensemble-ox-helper",
+            "hf-ensemble-tid", "hf-ensemble-changing-rate", "hf-ensemble-modes", "hf-ensemble-modes-noisy", "hf-ensemble-ox-helper", "hf-ensemble-design",
             "hf-ding-measured", "hf-ding-amplitude",
             "hf-ding-phase", "hf-ding-measured-late", "hf-ding-clock41",
             "eme-disk-episode", "eme-patch-episode", "eme-severe-episode",

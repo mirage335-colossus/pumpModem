@@ -1,12 +1,13 @@
 # Native high-fidelity appraisal protocol
 
 Updated 14 November 2026. The contained appraisal has a native renderer,
-scenario catalog, executable, bounded campaign runner and 18 CTest groups.
-The latest full check passed in 74.95 seconds
-([log](.build/hf-independent-checks.log)); five focused follow-up-analyzer
-checks passed after its hash/null-control repair and before the final rebuild.
-The [independent HF ensemble](hf-ensemble.md) specifies the current frozen
-trajectory, interaction and boundary campaign.
+scenario catalog, executable, bounded campaign runner and 22 CTest groups.
+The physical/operating extension passed in 81.52 seconds
+([log](.build/hf-coverage-checks.log)); the affected reporting checks passed
+again in 52.13 seconds. The [coverage expansion](hf-coverage-expansion.md)
+records the current parameter design, GUI operating strata, static full-wave
+reference, bounded causal amendments and source-bound results. The earlier
+[independent HF ensemble](hf-ensemble.md) retains its original findings.
 The [model inventory](models.md) records implemented equations and
 limits; the [research reconciliation](research-reconciliation.md) maps them to
 the literature. The added [HF research synthesis](hf-research.md) reconciles
@@ -90,9 +91,10 @@ the appraisal subtree and reads any shared compiler cache in read-only mode:
 ./_appraisal/highFidelity-triple_Robust_Modem/build.sh test
 ```
 
-The current 18-group check includes the existing native receiver/phase-search
-checks, multiscale and knot-trajectory bounds, signed physical placement,
-noise/path seed isolation, strict known-binary receipts and bounded follow-up
+The 22-group check includes native receiver/phase-search checks, multiscale
+and knot-trajectory bounds, signed physical placement, fixed physical-domain
+coverage, canonical GUI preparation, independent full-wave references,
+noise/path seed isolation, gain-partition receipts and bounded follow-up
 selection. The earlier canonical `./build.sh test triad` passed 32/32 in
 62.22 seconds ([log](.build/hf-native-triad-checks.log)); its native source hash
 is unchanged here. The approved generic two-file native hook leaves ordinary

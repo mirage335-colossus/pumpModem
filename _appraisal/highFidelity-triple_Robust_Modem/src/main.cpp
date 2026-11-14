@@ -1,4 +1,7 @@
 #include "appraisal/channel.hpp"
+#include "appraisal/hf_design.hpp"
+#include "appraisal/hf_gui_diagnostic.hpp"
+#include "appraisal/hf_gui_profile.hpp"
 #include "appraisal/hf_history.hpp"
 #include "appraisal/hf_phase_bank.hpp"
 #include "appraisal/hf_public_diagnostic.hpp"
@@ -9,6 +12,7 @@
 #include "appraisal/vlf_diagnostic.hpp"
 #include "datapump/triad_acceleration.hpp"
 #include "datapump/triad_message_receiver.hpp"
+#include "datapump/triad_shaping.hpp"
 #include "datapump/triad_stream.hpp"
 #include "datapump/triad_stream_receiver.hpp"
 #include "datapump/execution_resources.hpp"
@@ -66,6 +70,9 @@ struct Options {
     double max_wall_seconds=60, duration_seconds=10;
     std::optional<double> cn0, bit_seconds, history_reference_delay_seconds, capture_lead_seconds;
     std::optional<double> hf_trajectory_offset_seconds;
+    appraisal::HfGuiProfileOptions gui;
+    appraisal::HfTrajectoryDesign design;
+    bool gui_options=false, design_options=false;
     std::optional<unsigned> workers, owners, fade_slots;
     std::optional<std::size_t> memory_bytes;
     std::size_t chunk=4096;
@@ -87,6 +94,7 @@ Options parse(int argc,char** argv) {
     for(int i=1;i<argc;++i) {
         const std::string key=argv[i];
         if(key=="--helper") {o.helper=true;continue;}
+        if(key=="--gui-clock-edge") {o.gui_options=true;o.gui.clock_edge=true;continue;}
         if(key=="--hf-phase-refinement") {o.hf_phase_refinement=true;continue;}
         if(key=="--hf-physical-diagnostic") {o.hf_physical_diagnostic=true;continue;}
         if(key=="--hf-public-phase-receiver") {o.hf_public_phase_receiver=true;continue;}
@@ -106,6 +114,34 @@ Options parse(int argc,char** argv) {
         else if(key=="--seed") o.seed=integer(value);
         else if(key=="--hf-trajectory-seed") o.hf_trajectory_seed=integer(value);
         else if(key=="--noise-seed") o.noise_seed=integer(value);
+        else if(key.starts_with("--gui-")) {
+            o.gui_options=true;
+            if(key=="--gui-spread")o.gui.spread=value;
+            else if(key=="--gui-selective")o.gui.selective=value;
+            else if(key=="--gui-arrival")o.gui.arrival=value;
+            else if(key=="--gui-margin")o.gui.margin=number(value);
+            else if(key=="--gui-audio-ppm")o.gui.audio_ppm=number(value);
+            else if(key=="--gui-rf-ppm")o.gui.rf_ppm=number(value);
+            else if(key=="--gui-audio-phase-degrees-sqrt-s")o.gui.audio_phase_degrees_sqrt_s=number(value);
+            else if(key=="--gui-rf-phase-degrees-sqrt-s")o.gui.rf_phase_degrees_sqrt_s=number(value);
+            else if(key=="--gui-target-cn0-db-hz")o.gui.target_cn0_db_hz=number(value);
+            else throw Error("unknown option: "+key);
+        }
+        else if(key=="--hf-primary-amplitude-hz"||key=="--hf-primary-period-seconds"||
+                key=="--hf-primary-phase-radians"||key=="--hf-secondary-amplitude-hz"||
+                key=="--hf-secondary-period-seconds"||key=="--hf-secondary-phase-radians"||
+                key=="--hf-knot-amplitude-hz"||key=="--hf-knot-seconds") {
+            o.design_options=true;
+            const auto parameter=number(value);
+            if(key=="--hf-primary-amplitude-hz")o.design.primary_amplitude_hz=parameter;
+            else if(key=="--hf-primary-period-seconds")o.design.primary_period_seconds=parameter;
+            else if(key=="--hf-primary-phase-radians")o.design.primary_phase_radians=parameter;
+            else if(key=="--hf-secondary-amplitude-hz")o.design.secondary_amplitude_hz=parameter;
+            else if(key=="--hf-secondary-period-seconds")o.design.secondary_period_seconds=parameter;
+            else if(key=="--hf-secondary-phase-radians")o.design.secondary_phase_radians=parameter;
+            else if(key=="--hf-knot-amplitude-hz")o.design.knot_amplitude_hz=parameter;
+            else o.design.knot_seconds=parameter;
+        }
         else if(key=="--hf-trajectory-offset-seconds") {
             o.hf_trajectory_offset_seconds=number(value);
             require(*o.hf_trajectory_offset_seconds>=-86400&&*o.hf_trajectory_offset_seconds<=86400,
@@ -133,16 +169,20 @@ Options parse(int argc,char** argv) {
         else if(key=="--duration-seconds") o.duration_seconds=number(value);
         else throw Error("unknown option: "+key);
     }
-    require(o.mode=="plan"||o.mode=="channel"||o.mode=="receive"||o.mode=="slot"||o.mode=="oracle"||o.mode=="diagnose"||o.mode=="hf-search","unknown mode");
+    require(o.mode=="plan"||o.mode=="channel"||o.mode=="receive"||o.mode=="slot"||o.mode=="oracle"||
+        o.mode=="diagnose"||o.mode=="hf-search"||o.mode=="gui-varying","unknown mode");
     require(o.search_timing=="selected"||o.search_timing=="full","search timing must be selected or full");
     require(!o.search_options||o.mode=="hf-search","search options require hf-search mode");
-    require(!o.capture_digest_slot||o.mode=="receive"||o.mode=="slot"||o.mode=="hf-search",
-        "capture digest requires receive, slot or hf-search mode");
+    require(!o.capture_digest_slot||o.mode=="receive"||o.mode=="slot"||o.mode=="hf-search"||o.mode=="gui-varying",
+        "capture digest requires receive, slot, hf-search or gui-varying mode");
     require(o.mode!="hf-search"||!o.capture_digest_slot||*o.capture_digest_slot==o.search_slot,
         "hf-search capture digest must select its search slot");
     require(o.mode!="hf-search"||(!o.helper&&o.backend=="cpu"&&
         (o.control=="wanted"||o.control=="noise"||o.control=="wrong-key"||o.control=="wrong-ordinal")),
         "hf-search requires Helper-off CPU wanted, noise, wrong-key or wrong-ordinal control");
+    require(o.mode!="gui-varying"||(o.scenario=="hf-gui-native"&&!o.helper&&o.backend=="cpu"&&
+        o.capture_digest_slot&&(o.control=="wanted"||o.control=="noise")),
+        "gui-varying requires hf-gui-native, Helper-off CPU, wanted or noise, and an explicit capture-digest-slot");
     require(!o.hf_phase_refinement||(o.mode=="hf-search"||((o.mode=="receive"||o.mode=="slot")&&o.hf_public_phase_receiver)),
         "HF phase refinement requires hf-search or the public phase receiver in receive/slot mode");
     require(!o.hf_physical_diagnostic||(o.mode=="hf-search"&&o.control=="wanted"),
@@ -168,6 +208,23 @@ Options parse(int argc,char** argv) {
     require(std::all_of(o.message.begin(),o.message.end(),[](unsigned char c){return c>=32&&c<127;}),
         "appraisal message must contain printable ASCII bytes");
     require(!o.cn0 || (*o.cn0>=-300 && *o.cn0<=300),"C/N0 must be -300..300 dB-Hz");
+    require(!o.gui_options||o.scenario=="hf-gui-native","GUI controls require hf-gui-native");
+    require(!o.design_options||o.scenario=="hf-ensemble-design","HF trajectory coefficients require hf-ensemble-design");
+    if(o.scenario=="hf-ensemble-design") {
+        require(o.design_options,"hf-ensemble-design requires all eight trajectory coefficients");
+        require(o.waveform=="reference","hf-ensemble-design requires the declared reference waveform");
+        appraisal::validate_hf_trajectory_design(o.design);
+    }
+    if(o.scenario=="hf-gui-native") {
+        require(o.waveform=="reference"&&o.pulse=="rrc","hf-gui-native requires the canonical reference RRC waveform");
+        require(o.control=="wanted"||o.control=="noise"||o.control=="wrong-key"||o.control=="wrong-ordinal",
+            "hf-gui-native requires wanted, noise, wrong-key or wrong-ordinal control");
+        require(!o.capture_lead_seconds&&!o.hf_trajectory_seed&&!o.hf_trajectory_offset_seconds,
+            "hf-gui-native derives its capture clock and path from the prepared native profile");
+        o.gui.helper=o.helper;o.gui.seed=o.seed;o.gui.noise_seed=o.noise_seed;
+        o.gui.actual_cn0_db_hz=o.cn0.value_or(32);o.gui.fixture_bit_seconds=o.bit_seconds;
+        o.gui.memory_bytes=o.memory_bytes;
+    }
     return o;
 }
 std::uint64_t checked_samples(long double seconds,double fs) {
@@ -187,7 +244,7 @@ Json fec_stats_json(const StreamFecStats& s) {
         {"scope","native accepted-codeword accounting by encoded region; missing bits are separate from observed bits; repaired bytes are the union of corrected and erased bytes, not their sum"}});
 }
 Json optional_number(const std::optional<double>& value) {return value?Json(*value):Json{};}
-Json history_json(const appraisal::HfHistoryReport& h,double reference_delay_seconds) {
+Json::Array history_blocks_json(const appraisal::HfHistoryReport& h) {
     Json::Array rows;
     for(const auto& block:h.blocks) {
         Json::Array hypotheses;
@@ -207,6 +264,9 @@ Json history_json(const appraisal::HfHistoryReport& h,double reference_delay_sec
             {"correct_minus_wrong_noisy_log_likelihood_ratio",optional_number(block.correct_minus_wrong_noisy_log_likelihood_ratio)},
             {"correct_minus_wrong_noise_only_log_likelihood_ratio",optional_number(block.correct_minus_wrong_noise_only_log_likelihood_ratio)}}));
     }
+    return rows;
+}
+Json history_json(const appraisal::HfHistoryReport& h,double reference_delay_seconds) {
     return object({{"scope",appraisal::HfHistoryReport::scope},
         {"projection_null_law",appraisal::HfHistoryReport::projection_null_law},
         {"likelihood_model",appraisal::HfHistoryReport::likelihood_model},
@@ -216,7 +276,7 @@ Json history_json(const appraisal::HfHistoryReport& h,double reference_delay_sec
         {"white_noise_variance",h.config.white_noise_variance},
         {"noise_free_energy",h.noise_free_energy},{"noise_free_energy_seconds",h.noise_free_energy_seconds},
         {"noisy_energy",optional_number(h.noisy_energy)},{"noise_only_energy",optional_number(h.noise_only_energy)},
-        {"evaluator_wall_seconds",h.evaluator_wall_seconds},{"blocks",std::move(rows)},
+        {"evaluator_wall_seconds",h.evaluator_wall_seconds},{"blocks",history_blocks_json(h)},
         {"reference_delay_seconds",reference_delay_seconds},
         {"template_timing","clean emitted waveform through one declared constant reference delay; default zero is the unshifted capture-origin baseline; no realized path-delay, phase or gain lookup"},
         {"reference_conditioning","private analytic conditioning on the declared reference arrival; no arrival search and no information passed to the receiver"},
@@ -456,11 +516,13 @@ Json channel_parameters(const appraisal::ChannelSpec& c) {
     return result;
 }
 Json scenario_json(const appraisal::Scenario& s) {
+    const bool native_gui=s.id=="hf-gui-native";
     auto result=object({{"id",s.id},{"family",s.family},{"evidence",s.evidence},{"provenance",s.provenance},{"assumptions",s.assumptions},
         {"reference_cn0_db_hz",s.reference_cn0_db_hz},{"physical_level_connected",s.physical_level_connected},
         {"reference_received_dbm",s.physical_level_connected?Json(s.reference_received_dbm):Json{}},
         {"reference_noise_dbm_hz",s.physical_level_connected?Json(s.reference_noise_dbm_hz):Json{}},
-        {"channel",channel_parameters(s.channel)}});
+        {"channel",native_gui?object({{"renderer","canonical_gui_streaming_channel"},{"parameters_location","plan.gui_profile"},
+            {"rf_shift_hz",s.channel.rf_hz}}):channel_parameters(s.channel)}});
     if(s.channel.lunar)
         result["numerical_adequacy"]=object({{"qualification_horizon_seconds",s.numerical_horizon_seconds},
             {"scope","joint Doppler-delay spectral approximation; independent whole-horizon covariance and projection checks required"},
@@ -500,13 +562,90 @@ struct Setup {
     std::string message;
     StreamReceiverOptions stream;
     StreamReceiverResources resources;
+    std::optional<StreamChannelConfig> native_channel;
     double cn0=0,tail=0;
     std::uint64_t source_stop=0,q0=0,horizon=0,slot_horizon=0,gap_first=0,gap_stop=0;
     Setup(appraisal::Scenario s,PublicProfile p,PublicProfile tx,ReceiverConfig r,NativeMessageProfile mp,
           PreparedTextMessage d,Crypto k,Crypto tk,std::string text):scenario(std::move(s)),profile(std::move(p)),transmit_profile(std::move(tx)),receiver(std::move(r)),message_profile(std::move(mp)),draft(std::move(d)),key(std::move(k)),tx_key(std::move(tk)),message(std::move(text)){}
 };
-Setup setup(const Options& o) {
+void set_resources(Setup& s,const Options& o) {
+    s.stream.workers=o.workers;s.stream.slot_owners=o.owners;s.stream.memory_limit_bytes=o.memory_bytes;
+    s.stream.maximum_input_chunk_samples=o.chunk;s.stream.maximum_gap_samples=o.chunk;
+    s.stream.record_commit_timing=true;s.stream.recent_slot_receipts=512;
+    s.resources=resolve_stream_receiver_resources(s.stream);
+}
+void evaluate_source_extent(Setup& s) {
+    const auto lookup=[&](std::uint64_t i){return message_address(s.transmit_profile,i);};
+    auto bits=s.draft.bit_source(0,lookup);
+    for(std::size_t i=0;i<s.draft.wire_bits();++i)s.truth.push_back(bits(i));
+    s.source_stop=s.transmit_profile.calendar().distance(s.transmit_profile.origin(),
+        s.transmit_profile.transmit_slot(s.truth.size()-1).helper_end);
+    s.q0=s.truth.size();
+}
+appraisal::Scenario native_gui_scenario() {
+    appraisal::Scenario scenario;
+    scenario.id="hf-gui-native";
+    scenario.family="skywave-1-30MHz";
+    scenario.evidence="canonical GUI synthetic propagation and oscillator controls";
+    scenario.provenance="datapump::live::detail::prepare_profile and datapump::triad::v3::StreamingChannel";
+    scenario.assumptions="The prepared canonical profile supplies the public receiver and separately seeded physical channel. "
+        "The appraisal observes a finite configured calendar using native DATA, Helper, and quiet-slot processing.";
+    scenario.channel.rf_hz=appraisal::hf_gui_rf_shift_hz;
+    scenario.channel.paths.clear();
+    return scenario;
+}
+Setup setup_native_gui(const Options& o,std::stop_token stop) {
+    if(o.mode!="plan"&&o.mode!="slot"&&o.mode!="receive"&&o.mode!="gui-varying")
+        throw Unavailable("canonical GUI appraisal supports plan, complete first-slot, complete-message, and varying-branch evaluation");
+    if(o.hf_public_phase_receiver||o.hf_phase_refinement||o.hf_physical_diagnostic||o.hf_phase_bank||o.history_reference_delay_seconds)
+        throw Unavailable("the experimental single-public-tap phase scorer is unavailable for the canonical GUI profile");
+    auto prepared=appraisal::prepare_hf_gui_profile(o.gui,stop);
+    const auto key=prepared.key;
+    const auto txkey=o.control=="wrong-key"?wrong_key():key;
+    auto tx_config=prepared.waveform.config();
+    if(o.control=="wrong-ordinal")++tx_config.format.symbol_ordinal;
+    PublicProfile tx_profile=o.control=="wrong-ordinal"?
+        PublicProfile(std::move(tx_config),key):prepared.waveform;
+    NativeMessageProfile mp;mp.content_limit=16;mp.compression=true;mp.fec=fec_mode(o);mp.key=key;
+    auto txmp=mp;txmp.key=txkey;
+    const Bytes bytes(o.message.begin(),o.message.end());
+    auto draft=prepare_text_message(bytes,txmp);
+    require(!draft.long_form()&&draft.wire_bits()>0&&draft.wire_bits()<=message_receiver_options(mp.fec).maximum_data_bits,
+        "message exceeds bounded appraisal short-frame bit count");
+    auto scenario=native_gui_scenario();
+    scenario.channel.noise_seed=o.noise_seed;
+    scenario.reference_cn0_db_hz=o.gui.actual_cn0_db_hz;
+    Setup s(std::move(scenario),std::move(prepared.waveform),std::move(tx_profile),std::move(prepared.receiver),
+        mp,std::move(draft),key,txkey,o.message);
+    s.native_channel.emplace(std::move(prepared.channel));
+    s.native_channel->maximum_chunk_samples=o.chunk;
+    s.cn0=o.gui.actual_cn0_db_hz;
+    evaluate_source_extent(s);
+    // Use the canonical public endpoint bound, including spread, clock,
+    // interpolation and selective-filter tails. Receiver settings remain
+    // independent of the actual seeded arrival or oscillator offsets.
+    const auto fs=s.receiver.sample_rate_hz;
+    const auto clean=s.profile.capture_stop(static_cast<long double>(s.source_stop)/fs);
+    s.tail=static_cast<double>(clean)/fs-static_cast<double>(s.source_stop)/fs-
+        s.profile.config().capture_lead_seconds;
+    while(make_receiver_slot_plan(s.profile,s.receiver,s.q0).first_sample<clean) {
+        require(s.q0<s.truth.size()+100,"canonical GUI tail exceeds the bounded quiet-horizon search");
+        ++s.q0;
+    }
+    s.slot_horizon=o.mode=="slot"?1:s.q0+2;
+    s.horizon=make_receiver_slot_plan(s.profile,s.receiver,s.slot_horizon-1).stop_sample;
+    if(o.capture_digest_slot)
+        require(*o.capture_digest_slot<s.slot_horizon,"capture-digest-slot must be within the evaluated public horizon");
+    if(o.mode=="gui-varying")
+        require(*o.capture_digest_slot<s.truth.size(),"gui-varying capture-digest-slot must select a prepared data slot");
+    s.native_channel->minimum_capture_samples=s.horizon;
+    set_resources(s,o);
+    return s;
+}
+Setup setup(const Options& o,std::stop_token stop) {
+    if(o.scenario=="hf-gui-native")return setup_native_gui(o,stop);
     auto scenario=appraisal::make_scenario(o.scenario);
+    if(o.design_options)appraisal::apply_hf_trajectory_design(scenario,o.design);
     if(o.hf_trajectory_seed) {
         bool applied=false;
         for(std::size_t index=0;index<scenario.channel.paths.size();++index) {
@@ -624,12 +763,8 @@ Setup setup(const Options& o) {
     scenario.channel.noise.white_variance=variance;
     Setup s(std::move(scenario),std::move(profile),std::move(transmit_profile),rc,mp,std::move(draft),key,txkey,message);
     s.cn0=cn0;
-    const auto lookup=[&](std::uint64_t i){return message_address(s.transmit_profile,i);};
-    auto bits=s.draft.bit_source(0,lookup);
-    for(std::size_t i=0;i<s.draft.wire_bits();++i)s.truth.push_back(bits(i));
-    s.source_stop=add(s.transmit_profile.calendar().distance(s.transmit_profile.origin(),s.transmit_profile.transmit_slot(s.truth.size()-1).helper_end),
-        checked_samples(pc.capture_lead_seconds,rc.sample_rate_hz));
-    s.q0=s.truth.size();
+    evaluate_source_extent(s);
+    s.source_stop=add(s.source_stop,checked_samples(pc.capture_lead_seconds,rc.sample_rate_hz));
     // Tail uses a conservative preliminary horizon, then is checked again at
     // the exact fixed point. No channel realization participates in these bounds.
     double guess=static_cast<double>(s.source_stop)/rc.sample_rate_hz+4*60+filter_tail;
@@ -686,12 +821,18 @@ Setup setup(const Options& o) {
         if(!appraisal::hf_public_search_supported(s.receiver,public_slot,o.hf_phase_refinement))
             throw Unavailable("HF public phase scorer does not support the configured public geometry; actual linear multipath remains a permitted model-mismatch test");
     }
-    s.stream.workers=o.workers;s.stream.slot_owners=o.owners;s.stream.memory_limit_bytes=o.memory_bytes;
-    s.stream.maximum_input_chunk_samples=o.chunk;s.stream.maximum_gap_samples=o.chunk;
-    s.stream.record_commit_timing=true;s.stream.recent_slot_receipts=512;
-    s.resources=resolve_stream_receiver_resources(s.stream);
+    set_resources(s,o);
     return s;
 }
+std::string_view observation_scope(const Options& o) {
+    if(o.mode=="gui-varying")return "shadow_canonical_varying_of_selected_complete_observation";
+    if(o.mode=="hf-search")return "shadow_public_search_of_selected_complete_observation";
+    if(o.mode=="diagnose")return "bounded_native_phases_from_complete_first_observation";
+    if(o.mode=="slot")return "first_complete_public_observation";
+    if(o.mode=="channel")return "bounded_channel_episode";
+    return "physical_message_completion";
+}
+
 Json plan_json(const Setup& s,const Options& o) {
     const auto& f=s.profile.config().format;const auto& g=s.profile.geometry();const auto& p=s.profile.config();
     const auto digest_index=o.mode=="hf-search"?std::optional<std::uint64_t>(o.search_slot):o.capture_digest_slot;
@@ -704,7 +845,8 @@ Json plan_json(const Setup& s,const Options& o) {
             {"data_support",range(slot.data_support)},{"observation",range({rx.first_sample,rx.stop_sample})},
             {"quiet_aperture",range({rx.quiet_first_sample,rx.quiet_stop_sample})},{"evaluator_transmitting",i<s.truth.size()&&o.control!="noise"}}));
     }
-    auto result=object({{"sample_rate_hz",s.receiver.sample_rate_hz},{"requested_bit_seconds",f.bit_seconds},{"actual_bit_seconds",g.bit_seconds},
+    auto result=object({{"sample_rate_hz",s.receiver.sample_rate_hz},
+        {"requested_bit_seconds",s.native_channel?o.bit_seconds.value_or(f.bit_seconds):f.bit_seconds},{"actual_bit_seconds",g.bit_seconds},
         {"inner_rate_hz",f.inner_rate_hz},{"added_symbols",f.added_symbols},{"fhss",f.fhss},{"pulse",o.pulse},{"epoch",f.epoch},{"initial_ordinal",f.symbol_ordinal},
         {"data_if_hz",p.data_if_hz},{"helper_enabled",p.helper_enabled},{"helper_high_hz",s.profile.helper_plan().frequency_hz},
         {"capture_preroll_seconds",p.capture_lead_seconds},{"physical_rf_retuning",false},
@@ -724,8 +866,9 @@ Json plan_json(const Setup& s,const Options& o) {
         {"fade_slots",o.control=="interior-fade"?Json(o.fade_slots.value_or(2)):Json{}},
         {"content_limit_bytes",s.message_profile.content_limit},{"long_form",s.draft.long_form()},
         {"message",s.message},{"requested_message",o.message},{"source_stop_sample",s.source_stop},{"first_uncontaminated_quiet_slot",s.q0},
-        {"planned_uncontaminated_quiet_slots",o.control=="eof"||o.mode=="slot"||o.mode=="diagnose"||o.mode=="hf-search"?0:2},
-        {"observation_scope",o.mode=="hf-search"?"shadow_public_search_of_selected_complete_observation":o.mode=="diagnose"?"bounded_native_phases_from_complete_first_observation":o.mode=="slot"?"first_complete_public_observation":o.mode=="channel"?"bounded_channel_episode":"physical_message_completion"},
+        {"planned_uncontaminated_quiet_slots",o.control=="eof"||o.mode=="slot"||o.mode=="diagnose"||
+            o.mode=="hf-search"||o.mode=="gui-varying"?0:2},
+        {"observation_scope",observation_scope(o)},
         {"first_data_support",range(s.transmit_profile.slot(0).data_support)},
         {"first_data_nominal_seconds",static_cast<double>(s.transmit_profile.calendar().relative_seconds(s.transmit_profile.origin(),s.transmit_profile.transmit_slot(0).pattern_begin))},
         {"first_data_nominal_capture_seconds",p.capture_lead_seconds+static_cast<double>(s.transmit_profile.calendar().relative_seconds(s.transmit_profile.origin(),s.transmit_profile.transmit_slot(0).pattern_begin))},
@@ -762,6 +905,66 @@ Json plan_json(const Setup& s,const Options& o) {
             {"workers_explicit",o.workers.has_value()},{"owners_explicit",o.owners.has_value()}})},
         {"capture_gap",range({s.gap_first,s.gap_stop})},{"public_slots",std::move(slots)},
         {"configured_calendar_only",true},{"capacity_qualified",false},{"empirically_validated",false}});
+    if(s.native_channel) {
+        const auto& channel=*s.native_channel;
+        const auto& effects=channel.effects;
+        result["channel_renderer"]="canonical_gui_streaming_channel";
+        result["capture_preroll_scope"]="canonical native StreamingChannel uses the configured public capture lead in the physical RX clock";
+        result["hf_trajectory_clock_scope"]="canonical native StreamingChannel physical time = output sample / (nominal sample rate * RX clock scale) - public capture lead; source sampling uses the separate TX clock and realized timing offset";
+        result["seed_scope"]="native seeded profile draws and physical channel realization use seed; noise_seed independently overrides additive noise";
+        result["source_stop_sample_scope"]="native emitted source coordinate before physical TX/RX clocks and capture lead";
+        result["channel_tail_seconds_scope"]="conservative public end allowance including arrival, oscillator bound, spread, filter and trail";
+        result["cn0_reference_plane"]="fixed normalized DATA reference in the native GUI synthetic link budget; receiver white input density";
+        result["gui_profile"]=object({{"profile_source","canonical_prepare_profile"},{"realization_passed_to_receiver",false},
+            {"spread",o.gui.spread},{"selective",o.gui.selective},{"arrival",o.gui.arrival},{"margin",o.gui.margin},
+            {"audio_ppm",o.gui.audio_ppm},{"rf_ppm",o.gui.rf_ppm},
+            {"audio_phase_degrees_sqrt_s",o.gui.audio_phase_degrees_sqrt_s},{"rf_phase_degrees_sqrt_s",o.gui.rf_phase_degrees_sqrt_s},
+            {"target_cn0_db_hz",o.gui.target_cn0_db_hz},{"actual_cn0_db_hz",s.cn0},{"clock_edge",o.gui.clock_edge},
+            {"fixture_bit_seconds",optional_number(o.bit_seconds)},{"capture_preroll_seconds",p.capture_lead_seconds},
+            {"prepared_pulse_shape",pulse_shape_name(f.pulse_shape)},{"prepared_ramp_seconds",f.ramp_seconds},
+            {"rf_shift_hz",effects.rf_hz},{"endpoint_clock_bound_ppm",s.receiver.endpoint_clock_bound_ppm},
+            {"spread_doppler_hz",s.receiver.spread_doppler_hz},{"spread_delay_seconds",s.receiver.spread_delay_seconds},
+            {"selective_slow_depth",s.receiver.selective_slow_depth},{"selective_fast_depth",s.receiver.selective_fast_depth},
+            {"selective_public_rate_hz",s.receiver.selective_modulation_rate_hz},
+            {"selective_physical_rate_hz",optional_number(channel.selective_model.modulation_rate_hz)},
+            {"common_doppler_wander_hz",channel.path_evolution.common_doppler_wander_hz},
+            {"common_doppler_knot_seconds",channel.path_evolution.common_doppler_knot_seconds},
+            {"bounded_spread_knot_seconds",channel.path_evolution.bounded_spread_knot_seconds},
+            {"relative_phase_diffusion_rad_sqrt_s",s.receiver.relative_phase_diffusion_rad_sqrt_s},
+            {"native_gui_nominal_message_slots",s.truth.size()+2},
+            {"realized",object({{"tx_audio_ppm",effects.tx.audio_ppm},{"rx_audio_ppm",effects.rx.audio_ppm},
+                {"tx_rf_ppm",effects.tx.rf_ppm},{"rx_rf_ppm",effects.rx.rf_ppm},
+                {"timing_offset_seconds",effects.timing_offset_seconds},
+                {"tx_phase_noise_rad_sqrt_s",effects.tx.phase_noise_rad_per_sqrt_second},
+                {"rx_phase_noise_rad_sqrt_s",effects.rx.phase_noise_rad_per_sqrt_second},
+                {"relative_audio_ppm",(effects.tx.audio_ppm-effects.rx.audio_ppm)/(1+effects.rx.audio_ppm*1e-6)}})}});
+        result["path_count"]=Json{};
+        result["path_sample_products"]=Json{};
+        if(o.mode=="plan"&&o.backend=="cpu") {
+            try {
+                const auto bytes=receiver_slot_workspace(s.receiver,make_receiver_slot_plan(s.profile,s.receiver,0),s.resources.workers);
+                result["native_cpu_first_slot_workspace_bytes"]=bytes;
+                result["native_cpu_first_slot_workspace_fits_total_budget"]=bytes<s.resources.memory_limit_bytes;
+            } catch(const Error& error) {
+                result["native_cpu_first_slot_workspace_bytes"]=Json{};
+                result["native_cpu_first_slot_workspace_reason"]=error.what();
+            }
+        }
+    }
+    if(o.design_options) {
+        const auto& d=o.design;
+        result["hf_design"]=object({{"primary_amplitude_hz",d.primary_amplitude_hz},{"primary_period_seconds",d.primary_period_seconds},
+            {"primary_phase_radians",d.primary_phase_radians},{"secondary_amplitude_hz",d.secondary_amplitude_hz},
+            {"secondary_period_seconds",d.secondary_period_seconds},{"secondary_phase_radians",d.secondary_phase_radians},
+            {"knot_amplitude_hz",d.knot_amplitude_hz},{"knot_seconds",d.knot_seconds}});
+        const auto domain=appraisal::hf_trajectory_design_domain();
+        result["hf_design_domain"]=object({{"source_band_hz",domain.source_band_hz},
+            {"minimum_critical_frequency_hz",domain.minimum_critical_frequency_hz},{"maximum_critical_frequency_hz",domain.maximum_critical_frequency_hz},
+            {"minimum_group_delay_seconds",domain.minimum_group_delay_seconds},{"maximum_group_delay_seconds",domain.maximum_group_delay_seconds},
+            {"maximum_delay_excursion_seconds",domain.maximum_delay_excursion_seconds},
+            {"maximum_spectral_margin_hz",domain.maximum_spectral_margin_hz},{"maximum_group_delay_rate",domain.maximum_group_delay_rate},
+            {"bounds_are_independent_of_realization",true}});
+    }
     if(s.scenario.channel.lunar && static_cast<double>(s.horizon)/s.receiver.sample_rate_hz<=s.scenario.numerical_horizon_seconds) {
         const auto lp=appraisal::lunar_spectral_plan(*s.scenario.channel.lunar,s.scenario.channel.rf_hz,
             s.receiver.sample_rate_hz,s.scenario.channel.interpolation_half_width,s.horizon);
@@ -837,6 +1040,44 @@ Json channel_json(const appraisal::ChannelReport& r,double fs) {
         {"transmitted_normalized_energy_seconds",static_cast<double>(r.input_energy)/fs},
         {"received_signal_normalized_energy_seconds",static_cast<double>(r.signal_energy)/fs},
         {"output_normalized_energy_seconds",static_cast<double>(r.output_energy)/fs}});
+}
+Json channel_json(const StreamChannelReport& r,double fs,const EmissionReport& emission) {
+    Json spread,common,selective;
+    if(r.bounded_spread) {
+        const auto& v=*r.bounded_spread;
+        spread=object({{"excess_delay_seconds",v.excess_delay_seconds},{"knot_seconds",v.knot_seconds},
+            {"doppler_bound_hz",v.doppler_bound_hz},{"minimum_echo_ratio",v.minimum_echo_ratio},
+            {"maximum_echo_ratio",v.maximum_echo_ratio},{"minimum_doppler_hz",v.minimum_doppler_hz},
+            {"maximum_doppler_hz",v.maximum_doppler_hz},{"seed",v.seed},{"processed_rows",v.processed_rows}});
+    }
+    if(r.common_doppler_wander) {
+        const auto& v=*r.common_doppler_wander;
+        common=object({{"bound_hz",v.bound_hz},{"knot_seconds",v.knot_seconds},{"minimum_hz",v.minimum_hz},
+            {"maximum_hz",v.maximum_hz},{"seed",v.seed},{"processed_rows",v.processed_rows}});
+    }
+    if(r.selective_perturbation) {
+        const auto& v=*r.selective_perturbation;
+        selective=object({{"coefficient_law",v.coefficient_law==SelectiveCoefficientLaw::GaussianErf?"gaussian_erf":"sinusoidal"},
+            {"sample_rate_hz",v.sample_rate_hz},{"correlation_spacing_hz",v.correlation_spacing_hz},
+            {"component_depths",Json::Array{v.component_depths[0],v.component_depths[1]}},
+            {"component_rates_hz",Json::Array{v.component_rates_hz[0],v.component_rates_hz[1]}},
+            {"decay_tail_samples",v.decay_tail_samples},{"memory_samples",v.memory_samples},{"seed",v.seed},
+            {"processed_rows",v.processed_rows},{"pre_selective_energy_sample_sum",v.pre_selective_energy_samples},
+            {"post_selective_energy_sample_sum",v.post_selective_energy_samples}});
+    }
+    return object({{"samples",r.samples},{"source_samples",r.source_samples},{"workspace_bytes",r.working_bytes},
+        {"workspace_scope","native source and streaming channel joint workspace bound"},
+        {"contains_signal_energy",r.signal_energy>0},{"contains_source_energy",emission.data_energy>0||emission.helper_energy>0},
+        {"impulse_events",r.impulse_events},{"erased_samples",r.erased_samples},{"out_of_passband_samples",r.out_of_passband_samples},
+        {"tail_samples",r.tail_samples},{"tail_seconds",static_cast<double>(r.tail_samples)/fs},
+        {"natural_complete_samples",r.natural_complete_samples},{"natural_end_observed",r.samples>=r.natural_complete_samples},
+        {"observation_padding_samples",r.observation_padding_samples},
+        {"input_energy_sample_sum",Json{}},{"signal_energy_sample_sum",r.signal_energy},
+        {"output_energy_sample_sum",r.observed_energy},{"additive_noise_energy_sample_sum",Json{}},
+        {"transmitted_normalized_energy_seconds",Json{}},{"received_signal_normalized_energy_seconds",r.signal_energy/fs},
+        {"output_normalized_energy_seconds",r.observed_energy/fs},{"complex_noise_variance",r.complex_noise_variance},
+        {"energy_scope","native report supplies propagated signal and observed energy. Source DATA and Helper energies are separate; composite input and realized additive-noise energies are not measured here. Energy seconds use the nominal receiver sample rate."},
+        {"bounded_spread",std::move(spread)},{"common_doppler_wander",std::move(common)},{"selective_perturbation",std::move(selective)}});
 }
 const char* state_name(StreamReceiverState s) {
     switch(s){case StreamReceiverState::receiving:return"receiving";case StreamReceiverState::input_ended:return"input_ended";
@@ -1255,10 +1496,19 @@ void physical_hf_diagnostic(Json& output,const Setup& s,const Options& o,
     const auto replay_lr=effective_report.blocks.back().hypotheses[winning_bit].noisy_log_likelihood_ratio;
     require(replay_lr.has_value(),"physical diagnostic is missing the public-cell replay likelihood");
     output["winning_public_cell"]["single_cell_log_lr_replay_difference"]=*replay_lr-winning_log_lr;
+    output["gain_partitions"]=object({
+        {"physical_templates",history_blocks_json(physical_report)},
+        {"winning_public_cell",history_blocks_json(effective_report)},
+        {"refined_public_cell",Json{}},
+        {"used_for_receiver_decisions",false},
+        {"template_selected_from_noisy_public_search",true},
+        {"fixed_template_null_law_applies_after_selection",false},
+        {"scope","Same-aperture diagnostic with fixed partitions and independent proper-complex CN(0,1) block gains. Physical templates use evaluator-only fixed known context. Public templates are selected using the same noisy samples. All partition scores remain descriptive."}});
     output["refinement_requested"]=o.hf_phase_refinement;
     output["refinement_replay_available"]=refined_available;
     if(refined_available) {
         const auto refined_report=refined_effective->finish();
+        output["gain_partitions"]["refined_public_cell"]=history_blocks_json(refined_report);
         const auto& timing=searched.timing[refined_timing];
         const auto& public_trace=searched.refinement_evidence[refined_trace_index].report;
         const auto refined_lr=refined_report.blocks.back().hypotheses[refined_bit].noisy_log_likelihood_ratio;
@@ -1306,29 +1556,48 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
         throw Unavailable("channel numerical qualification is limited to its declared horizon; use slot mode or a shorter channel component");
     if(execution::process_footprint_bytes()>=s.resources.memory_limit_bytes)
         throw Limit("application baseline exhausts the declared total memory limit");
+    // This is the canonical one-channel/source contract also used by the
+    // native receiver probe. It includes lazy source workspace, not receipts.
+    constexpr std::size_t native_channel_source_bound=65u*1024u*1024u;
+    if(s.native_channel) {
+        const auto baseline=execution::process_footprint_bytes();
+        if(baseline>=s.resources.memory_limit_bytes||native_channel_source_bound>=s.resources.memory_limit_bytes-baseline)
+            throw Limit("native GUI source/channel preflight exhausts the declared total memory limit");
+    }
     const auto begin=Clock::now();
     EmissionOptions eo;eo.mode=o.control=="noise"?EmissionMode::Quiet:EmissionMode::Message;
     eo.slot_count=s.truth.size();eo.stop=deadline.stop.get_token();
     if(eo.mode==EmissionMode::Message)eo.bit_at=s.draft.bit_source(0,[&](std::uint64_t i){return message_address(s.transmit_profile,i);});
     Emission emission(s.transmit_profile,s.tx_key,eo);
-    // The receiver's fixed calibration is derived only from its configured
-    // waveform/key. A wrong-key or wrong-ordinal transmitter is private truth
-    // and must not change this value through the emitted-source report.
-    const auto receiver_reference=data_power_reference(s.profile.config().format,s.key,deadline.stop.get_token());
-    s.receiver.data_basis_gain=1/std::sqrt(receiver_reference.mean_norm);
+    // The prepared GUI profile has already calibrated its public source.
+    // The analytic renderer's profile needs that same fixed calibration here.
+    if(!s.native_channel) {
+        const auto receiver_reference=data_power_reference(s.profile.config().format,s.key,deadline.stop.get_token());
+        s.receiver.data_basis_gain=1/std::sqrt(receiver_reference.mean_norm);
+    }
     auto source=emission.source();
-    const auto preroll=checked_samples(s.profile.config().capture_lead_seconds,s.receiver.sample_rate_hz);
+    // StreamingChannel applies the prepared preroll in its RX clock. The
+    // analytic renderer expects source preroll in its own sample coordinates.
+    const auto preroll=s.native_channel?0:checked_samples(s.profile.config().capture_lead_seconds,s.receiver.sample_rate_hz);
     require(add(source.geometry.source_samples,preroll)==s.source_stop,"planned and actual canonical emission extents differ");
-    const auto native_source=source.sample_at;
-    source.sample_at=[native_source,preroll](std::uint64_t i){return i<preroll?Complex{}:native_source(i-preroll);};
-    source.geometry.source_samples=add(source.geometry.source_samples,preroll);
+    if(!s.native_channel) {
+        const auto native_source=source.sample_at;
+        source.sample_at=[native_source,preroll](std::uint64_t i){return i<preroll?Complex{}:native_source(i-preroll);};
+        source.geometry.source_samples=add(source.geometry.source_samples,preroll);
+    }
     const auto prepared=Clock::now();
     // Materialized renderer storage is charged by the controller's live RSS.
     // Reserve future source cache and bounded evaluator output separately.
-    const auto diagnostic_slot=make_receiver_slot_plan(s.profile,s.receiver,o.mode=="hf-search"?o.search_slot:0);
-    const auto diagnostic_samples=(o.mode=="diagnose"||o.mode=="hf-search")?diagnostic_slot.stop_sample-diagnostic_slot.first_sample:0;
-    require(diagnostic_samples<=SIZE_MAX/sizeof(Complex),"diagnostic capture extent overflow");
-    const auto diagnostic_bytes=static_cast<std::size_t>(diagnostic_samples)*sizeof(Complex);
+    const bool gui_varying=o.mode=="gui-varying";
+    const auto diagnostic_index=gui_varying?*o.capture_digest_slot:o.mode=="hf-search"?o.search_slot:0;
+    const auto diagnostic_slot=make_receiver_slot_plan(s.profile,s.receiver,diagnostic_index);
+    const auto diagnostic_samples=(o.mode=="diagnose"||o.mode=="hf-search"||gui_varying)?
+        diagnostic_slot.stop_sample-diagnostic_slot.first_sample:0;
+    if(gui_varying&&diagnostic_samples>appraisal::hf_gui_varying_maximum_aperture_rows)
+        throw Limit("HF GUI diagnostic aperture exceeds its declared row bound");
+    const auto bytes_per_diagnostic_sample=sizeof(Complex)+(gui_varying?sizeof(std::uint8_t):0);
+    require(diagnostic_samples<=SIZE_MAX/bytes_per_diagnostic_sample,"diagnostic capture extent overflow");
+    const auto diagnostic_bytes=static_cast<std::size_t>(diagnostic_samples)*bytes_per_diagnostic_sample;
     const auto future=source.working_bytes+o.chunk*(sizeof(Complex)+1)+
         static_cast<std::size_t>(s.slot_horizon)*(o.hf_phase_refinement?65536:16384)+65536;
     const auto baseline=execution::process_footprint_bytes();
@@ -1338,15 +1607,30 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     s.scenario.channel.maximum_workspace_bytes=std::min(s.scenario.channel.maximum_workspace_bytes,
         s.resources.memory_limit_bytes-baseline-future-diagnostic_bytes);
     const auto channel_begin=Clock::now();
-    appraisal::Channel channel(source,s.scenario.channel,o.seed,s.horizon,deadline.stop.get_token());
+    std::optional<appraisal::Channel> channel;
+    std::optional<StreamingChannel> native_channel;
+    if(s.native_channel) {
+        if(native_channel_source_bound>=s.resources.memory_limit_bytes-baseline-future-diagnostic_bytes)
+            throw Limit("native GUI channel and evaluator preflight exhaust the declared total memory limit");
+        native_channel.emplace(source,*s.native_channel);
+        if((o.mode=="receive"||gui_varying)&&native_channel->total_samples()!=s.horizon)
+            throw Unavailable("native GUI channel tail does not fit the declared complete-message horizon");
+        if((o.mode=="receive"||gui_varying)&&native_channel->report().natural_complete_samples>
+                make_receiver_slot_plan(s.profile,s.receiver,s.q0).first_sample)
+            throw Unavailable("native GUI channel tail extends into the declared uncontaminated quiet slots");
+    } else channel.emplace(source,s.scenario.channel,o.seed,s.horizon,deadline.stop.get_token());
     const double channel_preparation_seconds=std::chrono::duration<double>(Clock::now()-channel_begin).count();
     std::vector<Complex> diagnostic_capture(static_cast<std::size_t>(diagnostic_samples));
+    std::vector<std::uint8_t> diagnostic_validity(gui_varying?diagnostic_capture.size():0);
     s.stream.memory_limit_bytes=s.resources.memory_limit_bytes-future;
     const bool receive=o.mode=="receive"||o.mode=="slot";
     if(receive||o.mode=="diagnose")s.receiver.bulk_backend=backend(o);
     result["plan"]["outside_receiver_future_reserved_bytes"]=future;
     result["plan"]["evaluator_reserved_bytes_per_public_slot"]=o.hf_phase_refinement?65536:16384;
-    result["plan"]["renderer_resident_accounting"]="materialized state included in canonical process-footprint admission";
+    result["plan"]["renderer_resident_accounting"]=native_channel?
+        "native joint source/channel bound checked before construction; materialized channel state charged by process footprint and future source workspace reserved separately":
+        "materialized state included in canonical process-footprint admission";
+    if(native_channel)result["plan"]["native_source_channel_preflight_bound_bytes"]=native_channel_source_bound;
     result["plan"]["receiver_memory_limit_bytes"]=*s.stream.memory_limit_bytes;
     result["plan"]["diagnostic_capture_bytes"]=diagnostic_bytes;
     std::shared_ptr<appraisal::HfPublicPhaseReceiver> phase_receiver;
@@ -1487,10 +1771,15 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     try {
         while(first<s.horizon) {
             deadline.check();const auto n=static_cast<std::size_t>(std::min<std::uint64_t>(o.chunk,s.horizon-first));
-            const auto start=Clock::now();require(channel.read(std::span(iq).first(n),deadline.stop.get_token())==n,"channel returned a short experiment chunk");
+            const auto start=Clock::now();
+            const auto rows=std::span(iq).first(n);
+            const auto mask=std::span(valid).first(n);
+            const auto count=native_channel?native_channel->read(rows,mask):channel->read(rows,deadline.stop.get_token());
+            require(count==n,"channel returned a short experiment chunk");
             render_seconds+=std::chrono::duration<double>(Clock::now()-start).count();
             deadline.check();
-            for(std::size_t i=0;i<n;++i)valid[i]=(o.control!="capture-gap"||first+i<s.gap_first||first+i>=s.gap_stop)?1:0;
+            if(!native_channel)
+                for(std::size_t i=0;i<n;++i)valid[i]=(o.control!="capture-gap"||first+i<s.gap_first||first+i>=s.gap_stop)?1:0;
             hash.samples(std::span(iq).first(n),std::span(valid).first(n));
             hashed_samples+=n;
             if(digest_plan) {
@@ -1503,11 +1792,17 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
                     if(b==digest_plan->stop_sample)selected_digest=selected_hash->finish();
                 }
             }
-            if(o.mode=="diagnose"||o.mode=="hf-search") {
+            if(!diagnostic_capture.empty()) {
                 const auto a=std::max(first,diagnostic_slot.first_sample);
                 const auto b=std::min(first+n,diagnostic_slot.stop_sample);
-                if(a<b)std::copy_n(iq.begin()+static_cast<std::size_t>(a-first),static_cast<std::size_t>(b-a),
-                    diagnostic_capture.begin()+static_cast<std::size_t>(a-diagnostic_slot.first_sample));
+                if(a<b) {
+                    const auto source_offset=static_cast<std::size_t>(a-first);
+                    const auto destination_offset=static_cast<std::size_t>(a-diagnostic_slot.first_sample);
+                    const auto count=static_cast<std::size_t>(b-a);
+                    std::copy_n(iq.begin()+source_offset,count,diagnostic_capture.begin()+destination_offset);
+                    if(gui_varying)
+                        std::copy_n(valid.begin()+source_offset,count,diagnostic_validity.begin()+destination_offset);
+                }
             }
             if(receiver) {
                 const auto ctl=Clock::now();
@@ -1534,6 +1829,16 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
             const auto ctl=Clock::now();
             appraisal::diagnose_vlf_slot(result["vlf_diagnostic"],s.receiver,diagnostic_slot,s.key,
                 diagnostic_capture,s.resources.workers,*s.stream.memory_limit_bytes,deadline.stop.get_token());
+            control_seconds+=std::chrono::duration<double>(Clock::now()-ctl).count();
+        }
+        if(gui_varying) {
+            require(hashed_samples==s.horizon&&selected_digest&&selected_hashed_samples==diagnostic_samples,
+                "GUI varying diagnostic requires the full episode and a complete selected observation");
+            const auto ctl=Clock::now();
+            auto diagnostic=appraisal::diagnose_hf_gui_varying(s.receiver,diagnostic_slot,s.key,
+                diagnostic_capture,diagnostic_validity,s.resources.workers,*s.stream.memory_limit_bytes,deadline.stop.get_token());
+            diagnostic["observation_sha256"]=*selected_digest;
+            result["hf_gui_varying_diagnostic"]=std::move(diagnostic);
             control_seconds+=std::chrono::duration<double>(Clock::now()-ctl).count();
         }
         if(o.mode=="hf-search") {
@@ -1578,6 +1883,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
         }
         deadline.check();
     }catch(const Timeout& e){run_status="time_limit";reason=e.what();}
+     catch(const appraisal::HfGuiDiagnosticUnavailable& e){run_status="unavailable";reason=e.what();}
      catch(const ReceiverWorkspaceError& e){run_status="resource_limit";reason=e.what();}
      catch(const appraisal::ChannelWorkspaceError& e){run_status="resource_limit";reason=e.what();}
      catch(const Limit& e){run_status="resource_limit";reason=e.what();}
@@ -1592,7 +1898,8 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     if(receiver&&!ended){receiver->request_cancel();final=receiver->cancel();drain();}
     const auto end=Clock::now();
     result["status"]=run_status;result["reason"]=reason;
-    result["channel"]=channel_json(channel.report(),s.receiver.sample_rate_hz);
+    result["channel"]=native_channel?channel_json(native_channel->report(),s.receiver.sample_rate_hz,emission.report()):
+        channel_json(channel->report(),s.receiver.sample_rate_hz);
     result["channel"]["input_sha256"]=hash.finish();
     result["channel"]["hashed_samples"]=hashed_samples;
     if(digest_plan) {
@@ -1602,10 +1909,11 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
         result["channel"]["selected_observation_hash_format"]="same little-endian IEEE754 real,imag plus actual validity byte as input_sha256; evaluator-only, no receiver geometry change";
     }
     result["channel"]["hash_format"]="little-endian IEEE754 real,imag plus validity byte per fully hashed sample; rendered samples may include an unhashed cancelled prefix of the next chunk; accepted_samples reported separately";
-    result["channel"]["effective_maximum_workspace_bytes"]=s.scenario.channel.maximum_workspace_bytes;
-    result["channel"]["parameters_location"]="scenario.channel";
+    result["channel"]["effective_maximum_workspace_bytes"]=native_channel?native_channel_source_bound:s.scenario.channel.maximum_workspace_bytes;
+    result["channel"]["parameters_location"]=native_channel?"plan.gui_profile":"scenario.channel";
     result["source"]=object({{"data_gain",emission.report().data_gain},{"transmitter_data_gain",emission.report().data_gain},
-        {"receiver_data_basis_gain",s.receiver.data_basis_gain},{"receiver_reference_mean_norm",receiver_reference.mean_norm},
+        {"receiver_data_basis_gain",s.receiver.data_basis_gain},
+        {"receiver_reference_mean_norm",1/(s.receiver.data_basis_gain*s.receiver.data_basis_gain)},
         {"receiver_calibration_source","public receiver waveform and key; independent of transmitter truth"},
         {"reference_data_mean_norm",emission.report().data_reference.mean_norm},
         {"reference_nodes",emission.report().data_reference.nodes},{"reference_tiles",emission.report().data_reference.sampled_tiles},
@@ -1630,11 +1938,12 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
         {"completion_evaluated",bool(receiver)&&o.mode=="receive"&&run_status=="completed"},
         {"missed_completion",run_status=="completed"&&bool(receiver)&&o.mode!="slot"&&target&&o.control!="eof"&&safe_completions==0},{"configured_outage",s.scenario.channel.fade.first_seconds>=0},
         {"configured_mode_voltage_transitions",configured_mode_voltage_transitions},
-        {"resumed_data_slots",resumed},{"actual_scored_slots",slots.size()},{"component_only",o.mode=="channel"||o.mode=="slot"||o.mode=="diagnose"||o.mode=="hf-search"},
+        {"resumed_data_slots",resumed},{"actual_scored_slots",slots.size()},{"component_only",o.mode=="channel"||
+            o.mode=="slot"||o.mode=="diagnose"||o.mode=="hf-search"||gui_varying},
         {"resumed_data_boundary_sample",resumed_data_boundary_source=="none"?Json{}:Json(resumed_data_boundary_sample)},
         {"resumed_data_boundary_source",resumed_data_boundary_source},
         {"resumed_data_scope","evaluator counts complete all-valid DATA decisions within the transmitted message whose whole public observation starts at or after the selected boundary; a mode-transition boundary is the last scheduled voltage-change stop and does not guarantee recovery or correct DATA"},
-        {"observation_scope",o.mode=="hf-search"?"shadow_public_search_of_selected_complete_observation":o.mode=="diagnose"?"bounded_native_phases_from_complete_first_observation":o.mode=="slot"?"first_complete_public_observation":o.mode=="channel"?"bounded_channel_episode":"physical_message_completion"},
+        {"observation_scope",observation_scope(o)},
         {"first_public_observation_complete",first_observation_complete},
         {"first_public_observation_correct_data",first_observation_correct_data},
         {"backpressure_count",backpressure},{"peak_uncommitted_slots",peak_backlog},{"accepted_samples",receiver?final.input_stop:0}});
@@ -1673,16 +1982,20 @@ int main(int argc,char** argv) {
         if(o.help) {
             result["status"]="completed";result["mode"]="help";
             result["usage"]="high_fidelity_appraisal --mode plan|channel|receive|slot|oracle|diagnose|hf-search --scenario NAME --waveform reference|smoke [--cn0 DBHZ] [--bit-seconds S] [--capture-lead-seconds S] [--pulse rrc|tapered-rrc] [--control wanted|noise|wrong-key|wrong-ordinal|interior-fade|capture-gap|eof] [--helper] [--seed N] [--noise-seed N] [--hf-trajectory-seed N] [--hf-trajectory-offset-seconds S] [--workers N] [--owners N] [--memory-mib N] [--backend cpu|cuda|vulkan|gpu] [--max-samples N] [--max-wall-seconds S] [--duration-seconds S] [--chunk N] [--message TEXT] [--fec off|rs20|rs60] [--fade-slots 1|2] [--oracle-slot N] [--search-slot N] [--search-timing selected|full] [--capture-digest-slot N] [--history-reference-delay-seconds S] [--hf-phase-bank] [--hf-public-phase-receiver] [--hf-physical-diagnostic] [--hf-phase-refinement]; noise-seed separates additive-noise realizations from stochastic path seed; hf-trajectory-seed selects immutable critical-frequency knots only in knot-bearing scenarios; hf-trajectory-offset-seconds accepts -86400..86400 and shifts analytic HF physical time without shifting source/calendar or noise; capture lead defaults to .25s and accepts .25..10s to retain more pre-signal noise history; interior-fade defaults to two consecutive complete observation apertures, with --fade-slots 1 selecting a single physical erasure opportunity; slot observes only the complete first public slot; diagnose measures canonical VLF acquisition and short persistent fine phases without bit/message decisions; capture-digest-slot incrementally hashes one complete public observation in receive/slot/hf-search without changing receiver geometry; hf-phase-refinement opts into bounded public phase refinement in hf-search or the experimental public phase receiver; refinement shadow omits affine comparison and uses the operational block geometry; hf-physical-diagnostic adds a post-search finite physical-template and winning-public-cell evaluator for wanted active hf-search slots; hf-public-phase-receiver enables the experimental fixed-prior supplement inside the canonical receive/slot stream with raw white-noise linear HF/AWGN with a single-public-tap model and Helper-off CPU; hf-search runs a shadow public search on complete selected slot N (default 0), without receiver decisions or completion, using raw white-noise linear HF/AWGN with a single-public-tap model and Helper-off CPU; oracle requires linear Helper-off wanted AWGN, HF or EME with white noise and uses public slot N (default 0) within the prepared message; HF oracle additionally reports private clean-template history diagnostics; optional reference delay is independently declared within public arrival bounds (zero keeps the unshifted baseline), and --hf-phase-bank enables the fixed coherent phase-family evaluator";
+            result["gui_profile_usage"]="hf-gui-native with plan, slot or receive on the reference RRC waveform accepts --gui-spread ID --gui-selective ID --gui-arrival tight|default --gui-margin N --gui-audio-ppm N --gui-rf-ppm N --gui-audio-phase-degrees-sqrt-s N --gui-rf-phase-degrees-sqrt-s N --gui-clock-edge --gui-target-cn0-db-hz N; --cn0 is actual link C/N0 and --bit-seconds is an explicit duration fixture override";
+            result["gui_varying_usage"]="--mode gui-varying --scenario hf-gui-native --capture-digest-slot N compares canonical affine and short varying evidence on one complete Helper-off CPU observation from the full native capture; accepts wanted and noise";
+            result["hf_design_usage"]="hf-ensemble-design on the reference waveform requires all eight coefficients: --hf-primary-amplitude-hz --hf-primary-period-seconds --hf-primary-phase-radians --hf-secondary-amplitude-hz --hf-secondary-period-seconds --hf-secondary-phase-radians --hf-knot-amplitude-hz --hf-knot-seconds";
         } else if(o.list) {
             result["mode"]="list";result["status"]="completed";Json::Array entries;
             for(const auto& name:appraisal::scenario_names())entries.push_back(scenario_json(appraisal::make_scenario(name)));
+            entries.push_back(scenario_json(native_gui_scenario()));
             result["scenarios"]=std::move(entries);
         } else {
             result["mode"]=o.mode;result["waveform"]=o.waveform;result["control"]=o.control;result["seed"]=o.seed;
             result["requested_scenario"]=o.scenario;
             active_deadline=std::make_unique<Deadline>(o.max_wall_seconds);
             auto& deadline=*active_deadline;
-            auto s=setup(o);deadline.check();
+            auto s=setup(o,deadline.stop.get_token());deadline.check();
             result["scenario"]=scenario_json(s.scenario);result["plan"]=plan_json(s,o);
             result["slots"]=Json::Array{};result["messages"]=Json::Array{};result["outcomes"]=object({});
             result["backend"]=object({{"requested",o.backend},{"executed_gpu_work",false}});
@@ -1693,6 +2006,7 @@ int main(int argc,char** argv) {
     }catch(const Timeout& e){result["status"]="time_limit";result["reason"]=e.what();code=4;}
      catch(const Limit& e){result["status"]="resource_limit";result["reason"]=e.what();code=3;}
      catch(const Unavailable& e){result["status"]="unavailable";result["reason"]=e.what();code=5;}
+     catch(const appraisal::HfGuiProfileUnavailable& e){result["status"]="unavailable";result["reason"]=e.what();code=5;}
      catch(const ReceiverWorkspaceError& e){result["status"]="resource_limit";result["reason"]=e.what();code=3;}
      catch(const appraisal::ChannelWorkspaceError& e){result["status"]="resource_limit";result["reason"]=e.what();code=3;}
      catch(const std::exception& e){
