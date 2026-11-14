@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "name": "hf-independent-long-receiver",
+  "purpose": "Post-screen causal amendment using one otherwise-unused complete-follow-up allowance: matched native long TID message, selected operational timing and same IQ. Shadow failure alone is not message failure.",
+  "max_wall_seconds": 180,
+  "per_trial_wall_seconds": 180,
+  "max_trials": 1,
+  "max_samples": 8000000,
+  "episodes": [
+    {
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 30101,
+      "noise_seed": 40101,
+      "bit_seconds": 512,
+      "cn0_db_hz": -6,
+      "control": "wanted",
+      "hf_phase_refinement": true,
+      "id": "tid-long-message",
+      "scenario": "hf-ensemble-tid",
+      "hf_trajectory_offset_seconds": 0,
+      "hf_public_phase_receiver": true,
+      "capture_digest_slot": 1
+    }
+  ]
+}

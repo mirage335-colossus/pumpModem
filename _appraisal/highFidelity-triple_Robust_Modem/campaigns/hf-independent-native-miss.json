@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "name": "hf-independent-native-miss",
+  "purpose": "Post-native causal amendment: first actual missed active slot (0) of the failed long TID message. Same declared native source/channel/noise context, full timing and private known-binary reference. Native slot1 was rescued and must not be presented as the operational miss.",
+  "max_wall_seconds": 100,
+  "per_trial_wall_seconds": 100,
+  "max_trials": 1,
+  "max_samples": 8000000,
+  "episodes": [
+    {
+      "mode": "hf-search",
+      "waveform": "reference",
+      "seed": 30101,
+      "noise_seed": 40101,
+      "bit_seconds": 512,
+      "cn0_db_hz": -6,
+      "control": "wanted",
+      "search_slot": 0,
+      "search_timing": "full",
+      "hf_phase_refinement": true,
+      "id": "tid-long-native-miss-slot0",
+      "scenario": "hf-ensemble-tid",
+      "hf_trajectory_offset_seconds": 0,
+      "hf_physical_diagnostic": true
+    }
+  ]
+}
