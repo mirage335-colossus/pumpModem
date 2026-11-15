@@ -50,7 +50,9 @@ struct HfPublicTimingSelection {
 HfPublicTimingSelection select_hf_public_timing(
     const datapump::triad::v3::ReceiverConfig&, const datapump::triad::v3::ReceiverSlotPlan&,
     const datapump::triad::v3::receiver_detail::FinePreparation&, bool full_timing,
-    bool close_small_arrival_grid);
+    bool close_small_arrival_grid, std::size_t maximum_timing_atoms = 512);
+std::size_t hf_public_timing_count(const datapump::triad::v3::ReceiverConfig&,
+    const datapump::triad::v3::ReceiverSlotPlan&, std::size_t maximum_timing_atoms);
 
 struct HfPublicRefinedTiming {
     std::size_t timing_index=0;

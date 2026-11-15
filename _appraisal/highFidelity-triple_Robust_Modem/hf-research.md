@@ -17,6 +17,14 @@ make this receiver look artificially good if it preserves phase longer than the
 physical path does. Conversely, arbitrarily increasing every impairment can
 produce a channel with no demonstrated physical counterpart.
 
+The [correlated-presence continuation](hf-correlated-presence.md) reconciles
+conditional Gaussian inference with measured scintillation's model-mismatch
+warnings and noncoherent low-SNR capacity results. It distinguishes a private
+known-mean energy reference, a fixed unknown-channel covariance likelihood,
+public search penalties and actual compute. The separate
+[fragment-integrity investigation](hf-fragment-integrity.md) tests information
+lost by physical framing even when every admitted DATA bit is correct.
+
 ## Magnetic propagation and long observed-voltage records
 
 The [magnetic/recorded-voltage continuation](hf-magnetoionic.md) reconciles the

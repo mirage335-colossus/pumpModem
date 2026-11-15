@@ -114,6 +114,22 @@ def main() -> None:
         assert target_preflight["plan"]["hf_target_presence_diagnostic_requested"] is True, target_preflight
         assert target_preflight["plan"]["capture_digest_slot"] == 2, target_preflight
         assert target_preflight["plan"][built_key] is False, target_preflight
+    protected_lens_args = ["--scenario", "hf-wave-lens-holdout", "--waveform", "reference",
+                           "--bit-seconds", "64", "--message", "B", "--fec", "rs20"]
+    protected_lens = invoke("--mode", "plan", *protected_lens_args,
+                            "--max-samples", "14000000")["plan"]
+    assert protected_lens["wire_bits"] == 72 and protected_lens["scored_slot_horizon"] == 74, protected_lens
+    assert protected_lens["represented_seconds"] > 6600 and protected_lens["fits_sample_budget"], protected_lens
+    assert protected_lens["wave_optics_table_built"] is False, protected_lens
+    for control in ("wanted", "noise", "wrong-key"):
+        limited = invoke("--mode", "receive", *protected_lens_args, "--control", control,
+                         "--max-samples", "1", code=3)
+        assert limited["status"] == "resource_limit" and "channel" not in limited, limited
+        assert limited["plan"]["wave_optics_table_built"] is False, limited
+    for scenario, fec in (("hf-wave-lens-holdout", "rs60"), ("hf-phase-screens-holdout", "rs20")):
+        rejected = invoke("--mode", "plan", "--scenario", scenario, "--waveform", "reference",
+                          "--bit-seconds", "64", "--message", "B", "--fec", fec, code=5)
+        assert rejected["status"] == "unavailable", rejected
     target_args = ["--mode", "receive", "--waveform", "reference", "--message", "A",
                    "--hf-target-presence-diagnostic", "--max-samples", "1"]
     for scenario in ("frontend-overload", "hf-wave-chain-off"):

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "name": "hf-lens-correlated-gain-shadow",
+  "purpose": "One frozen full-grid shadow of the retained 0 dB-Hz lens B slot 2 miss. Require the original selected IQ and validity SHA-256 c087a7e77465c07b674cd5cb97f8340645241dbc5af83912f554f29717fe03a8 and the original qualified physical table before interpretation. Compare the finite stationary one-tap Gaussian mixture at all public timing atoms and the closed ±5 Hz band. Require a correctly favored bit and unchanged presence and bit-gap thresholds using one-eighth standalone mass. Even a positive screen needs exact native mixed evidence and full-message controls. Stop after this one diagnostic regardless of outcome.",
+  "max_wall_seconds": 90,
+  "per_trial_wall_seconds": 90,
+  "max_trials": 1,
+  "max_samples": 3000000,
+  "episodes": [
+    {
+      "id": "lens-holdout-slot2-correlated-gain",
+      "scenario": "hf-wave-lens-holdout",
+      "mode": "hf-search",
+      "control": "wanted",
+      "waveform": "reference",
+      "seed": 69002,
+      "noise_seed": 79002,
+      "bit_seconds": 64,
+      "message": "B",
+      "cn0_db_hz": 0,
+      "search_slot": 2,
+      "search_timing": "full",
+      "hf_correlated_gain_shadow": true
+    }
+  ]
+}

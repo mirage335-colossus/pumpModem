@@ -2497,6 +2497,133 @@ class CampaignValidationTests(unittest.TestCase):
                 altered[section][field] = bad_value
                 runner._validate_gannon_native_comparison(altered, plan)
 
+    def test_lens_correlated_gain_shadow_binds_full_work_and_normalized_evidence(self) -> None:
+        app = RUNNER.parent
+        frozen = runner._read_campaign(app / "campaigns/hf-lens-correlated-gain-shadow.json")
+        episode, = frozen["episodes"]
+        baseline = runner._read_campaign(app / "campaigns/hf-wave-lens-followup.json")["episodes"][0]
+        for field in ("scenario", "waveform", "seed", "noise_seed", "bit_seconds", "cn0_db_hz", "message", "control"):
+            self.assertEqual(episode[field], baseline[field])
+        self.assertEqual(episode["search_slot"], baseline["capture_digest_slot"])
+        self.assertIn("--hf-correlated-gain-shadow", runner._command(Path("/native/probe"), episode, 3_000_000, 90))
+        for change in ({"search_timing": "selected"}, {"hf_physical_diagnostic": True}, {"fec": "rs20"},
+                       {"mode": "receive"}, {"control": "noise"}, {"scenario": "awgn"}):
+            with self.subTest(change=change), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(episode, **change), 0, set(), 90, 3_000_000)
+
+        digest = "a" * 64
+        quote = {"public_timing_atoms": 559, "observation_samples": 134921,
+                 "basis_products": 150841678, "full_fft_row_stage_charge": 3551268864, "scalar_innovations": 607221576}
+        plan = {"public_bounds": {"arrival_low_seconds": 4/1920, "arrival_high_seconds": 84/1920,
+                                 "clock_bound_ppm": 0, "spread_seconds": 0, "frequency_bound_hz": 0, "atmospheric_hz": 5},
+                "hf_correlated_gain_shadow_quote": quote, "receiver_memory_limit_bytes": 1000000000,
+                "receiver_resources": {"total_memory_limit_bytes": 1100000000, "workers": 24}, "noise_variance": 1920}
+        bits = [16., 25.]
+        presence = 25 + math.log1p(math.exp(-9)) - math.log(2)
+        coherence, powers = [.5, 2., 8.], [1/256, 1/32, 1/4, 2.]
+        report = dict(quote, model="stationary_single_tap_complex_ar1", all_valid=True, observation_sha256=digest,
+            component_complete=True, receiver_executed=False, completion_evaluated=False, capacity_qualified=False,
+            truth_information_passed_to_search=False,
+            all_public_timing_atoms_evaluated=True, sample_rate_hz=1920, phase_atom_rows=30, gain_block_rows=960,
+            gain_blocks=141, frequency_count=321, fft_rows=2048, coherence_seconds=coherence, gain_powers=powers,
+            closed_band_frequency_prior="uniform cell widths with half mass at both endpoints", frequency_step_hz=1/32,
+            frequency_bound_hz=5, noise_variance=1920, standalone_native_weight=.125,
+            maximum_nominal_phase_atom_error_radians=math.pi*5*30/1920, canonical_selected_timing_atoms=64,
+            bit_log_e=bits, canonical_selected_bit_log_contribution=[x+math.log(.2) for x in bits],
+            complement_bit_log_contribution=[x+math.log(.8) for x in bits], bitwise_maximum_unweighted_component_log_lr=[19., 31.],
+            per_law_evidence=[{"coherence_seconds": seconds, "gain_power": power, "weight": 1/12,
+                               "bit_log_e_before_law_weight": bits} for seconds in coherence for power in powers],
+            presence_log_e=presence, charged_presence_log_e=presence-math.log(8), bit_separation=9.,
+            presence_reference_threshold=21.493378688261398, bit_separation_reference=math.log(199), favored_bit=1,
+            passes_standalone_candidate_screen=True, memory_limit_bytes=1000000000, process_and_stacks_reserved_bytes=1000,
+            diagnostic_workspace_bytes=1000, coarse_workspace_reserved_bytes=1000, workers=24, active_timing_lanes=24,
+            canonical_preparation_seconds=2., scoring_seconds=12.,
+            summed_worker_wall_seconds={"basis_rendering": 1., "correlation_and_projection": 1., "gain_innovations": 1.},
+            actual_work={"basis_products": 150841678, "fft_prefix_calls": 157638, "scalar_innovations": 607221576,
+                "basis_bank_calls": 78819, "basis_bank_column_samples": 150841678, "basis_fallback_calls": 0,
+                "coordinate_guard_fallbacks": 0, "mapped_basis_calls": 0, "mapped_basis_direct_rows": 0,
+                "mapped_basis_interpolated_rows": 0, "basis_cache_peak_bytes": 0})
+        runner._validate_correlated_gain_shadow(report, plan, digest, 134921)
+        for field, value in (("observation_sha256", "b" * 64), ("public_timing_atoms", 512),
+                             ("standalone_native_weight", .25), ("passes_standalone_candidate_screen", False),
+                             ("complement_bit_log_contribution", bits), ("per_law_evidence", []),
+                             ("actual_work", dict(report["actual_work"], fft_prefix_calls=157637))):
+            with self.subTest(field=field), self.assertRaises(runner.CampaignError):
+                runner._validate_correlated_gain_shadow(dict(report, **{field: value}), plan, digest, 134921)
+
+        integrated = runner._read_campaign(app / "campaigns/hf-correlated-gain-receiver.json")
+        self.assertEqual(len(integrated["episodes"]), 9)
+        candidate = integrated["episodes"][0]
+        self.assertIn("--hf-correlated-gain-receiver", runner._command(Path("/native/probe"), candidate, 3_072_000, 300))
+        for change in ({"fec": "rs20"}, {"hf_compare_admitted_models": True}, {"hf_target_presence_diagnostic": True},
+                       {"helper": True}, {"scenario": "awgn"}, {"mode": "hf-search"}):
+            with self.subTest(change=change), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(candidate, **change), 0, set(), 300, 3_072_000)
+        model = dict(report, slot_index=2)
+        del model["canonical_preparation_seconds"]
+        native = {"index": 2, "complete": True, "all_valid": True, "first_sample": 345524, "stop_sample": 480445,
+                  "decision": "data", "fine_candidates": 4, "correlated_gain_executed": True,
+                  "workers": 24, "workspace_peak_bytes": 10000, "reason": "bounded_supplemental_data_evidence"}
+        telemetry = {"experimental": True, "fixed_weight": .25, "canonical_preparation_reused": True,
+                     "telemetry_overflow": 0, "telemetry_duplicates": 0, "scored_components": [model]}
+        plan["receiver_resources"].update(hardware_threads=12, workers_explicit=False)
+        plan.update(scored_slot_horizon=15, correlated_gain_evaluator_reserved_bytes=15*65536)
+        plan["public_slots"] = [{"index": i, "observation": {"first": i*172800, "stop": i*172800+134921}}
+                                for i in range(15)]
+        receiver = {"plan": plan, "slots": [native], "hf_correlated_gain_receiver": telemetry}
+        runner._validate_correlated_gain_receiver(receiver, candidate)
+        for changes in ({"fixed_weight": .5}, {"telemetry_overflow": 1}, {"scored_components": []},
+                        {"scored_components": [dict(model, workers=12)]},
+                        {"scored_components": [dict(model, canonical_preparation_seconds=2.)]}):
+            with self.subTest(changes=list(changes)), self.assertRaises(runner.CampaignError):
+                runner._validate_correlated_gain_receiver(dict(receiver, hf_correlated_gain_receiver=dict(telemetry, **changes)), candidate)
+        quiet = dict(native, decision="quiet", reason="scored_public_quiet_aperture")
+        failed = dict(model, passes_standalone_candidate_screen=False,
+                      presence_log_e=model["presence_log_e"]-5, charged_presence_log_e=model["charged_presence_log_e"]-5)
+        for field in ("bit_log_e", "canonical_selected_bit_log_contribution", "complement_bit_log_contribution"):
+            failed[field] = [x-5 for x in model[field]]
+        failed["per_law_evidence"] = [dict(law, bit_log_e_before_law_weight=[x-5 for x in law["bit_log_e_before_law_weight"]])
+                                      for law in model["per_law_evidence"]]
+        runner._validate_correlated_gain_receiver(dict(receiver, slots=[quiet],
+            hf_correlated_gain_receiver=dict(telemetry, scored_components=[failed])), candidate)
+        omitted = dict(telemetry, scored_components=[])
+        for slot in (quiet, dict(quiet, correlated_gain_executed=False),
+                     {key: value for key, value in quiet.items() if key != "correlated_gain_executed"}):
+            with self.subTest(quiet_marker=slot.get("correlated_gain_executed")), self.assertRaises(runner.CampaignError):
+                runner._validate_correlated_gain_receiver(dict(receiver, slots=[slot], hf_correlated_gain_receiver=omitted), candidate)
+        retained_line = dict(quiet, decision="ambiguous", reason="coherent_line_in_public_data_aperture", correlated_gain_executed=False)
+        runner._validate_correlated_gain_receiver(dict(receiver, slots=[retained_line], hf_correlated_gain_receiver=omitted), candidate)
+
+    def test_correlated_gain_duration_preflights_entire_calendar(self) -> None:
+        app = RUNNER.parent
+        original = runner._read_campaign(app / "campaigns/hf-wave-lens-followup.json")["episodes"][3]
+        manifest = runner._read_campaign(app / "campaigns/hf-correlated-gain-duration.json")
+        wanted, noise = manifest["episodes"]
+        self.assertEqual(wanted, dict(original, id=wanted["id"], hf_correlated_gain_receiver=True, capture_digest_slot=2))
+        self.assertEqual(noise, dict(original, id=noise["id"], hf_correlated_gain_receiver=True, control="noise", noise_seed=81006))
+        self.assertEqual((manifest["max_wall_seconds"], manifest["per_trial_wall_seconds"], manifest["max_samples"]),
+                         (1200, 600, 5_000_000))
+
+        quote = {"planned_public_slots": 2, "workers": 24, "maximum_aperture_samples": 268553,
+                 "maximum_public_timing_atoms": 559, "maximum_basis_products": 300242254,
+                 "maximum_full_fft_row_stage_charge": 7052165120, "maximum_scalar_innovations": 1205830080,
+                 "maximum_additional_workspace_bytes": 189000000}
+        public_slots = [{"index": 0, "observation": {"first": 0, "stop": 268477}},
+                        {"index": 1, "observation": {"first": 575924, "stop": 844477}}]
+        plan = {"public_bounds": {"arrival_low_seconds": 4/1920, "arrival_high_seconds": 84/1920,
+                                 "clock_bound_ppm": 0, "spread_seconds": 0, "frequency_bound_hz": 0, "atmospheric_hz": 5},
+                "public_slots": public_slots, "hf_correlated_gain_calendar_quote": quote}
+        self.assertEqual(runner._validate_correlated_gain_calendar_quote(plan, 24, 2), 189000000)
+        for field, value in (("planned_public_slots", 1), ("workers", 12), ("maximum_aperture_samples", 268477),
+                             ("maximum_full_fft_row_stage_charge", 7052165120-1), ("maximum_additional_workspace_bytes", 0)):
+            with self.subTest(field=field), self.assertRaisesRegex(runner.CampaignError, "full-calendar"):
+                runner._validate_correlated_gain_calendar_quote(dict(plan, hf_correlated_gain_calendar_quote=dict(quote, **{field: value})), 24, 2)
+        with self.assertRaisesRegex(runner.CampaignError, "full-calendar"):
+            runner._validate_correlated_gain_calendar_quote({k:v for k,v in plan.items() if k != "hf_correlated_gain_calendar_quote"}, 24, 2)
+        over_limit = [public_slots[0], {"index": 1, "observation": {"first": 575924, "stop": 575924+286226}}]
+        with self.assertRaisesRegex(runner.CampaignError, "work envelope"):
+            runner._validate_correlated_gain_calendar_quote(dict(plan, public_slots=over_limit), 24, 2)
+
     def test_gannon_gain_variance_witness_keeps_fixed_cells_and_likelihood_masses(self) -> None:
         campaign = runner._read_campaign(RUNNER.parent / "campaigns" / "hf-gannon-gain-variance.json")
         baseline = runner._read_campaign(RUNNER.parent / "campaigns" / "hf-gannon-native-comparison.json")

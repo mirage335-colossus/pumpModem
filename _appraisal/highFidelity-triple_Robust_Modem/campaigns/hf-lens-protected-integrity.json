@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "name": "hf-lens-protected-integrity",
+  "purpose": "Frozen before protected waveform outcomes. Existing analytic long-horizon lens holdout, original requested64s duration/physical field/payload B/seeds/CN0, existing native RS20 versus archived FEC-off miss. Same early physical clock but72 rather than13 DATA bits and greater total energy; no equal-energy coding-gain or MPS-repair claim. All74 physical slots must execute, including two scored quiet slots. Noise and bright wrong-key controls cover the longer public calendar. New inference supplement remains off. No outcome-dependent retries or censored-outcome imputation.",
+  "max_wall_seconds": 2400,
+  "per_trial_wall_seconds": 900,
+  "max_trials": 3,
+  "max_samples": 14000000,
+  "episodes": [
+    {"id": "lens-rs20-wanted", "scenario": "hf-wave-lens-holdout", "waveform": "reference", "seed": 69002, "noise_seed": 79002, "bit_seconds": 64, "message": "B", "fec": "rs20", "mode": "receive", "control": "wanted", "cn0_db_hz": 0, "max_wall_seconds": 600},
+    {"id": "lens-rs20-noise", "scenario": "hf-wave-lens-holdout", "waveform": "reference", "seed": 69002, "noise_seed": 79002, "bit_seconds": 64, "message": "B", "fec": "rs20", "mode": "receive", "control": "noise", "cn0_db_hz": 10},
+    {"id": "lens-rs20-wrong-key", "scenario": "hf-wave-lens-holdout", "waveform": "reference", "seed": 69002, "noise_seed": 79002, "bit_seconds": 64, "message": "B", "fec": "rs20", "mode": "receive", "control": "wrong-key", "cn0_db_hz": 10}
+  ]
+}

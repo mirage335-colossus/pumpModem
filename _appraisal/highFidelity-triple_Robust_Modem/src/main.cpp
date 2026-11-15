@@ -1,4 +1,5 @@
 #include "appraisal/channel.hpp"
+#include "appraisal/hf_correlated_gain.hpp"
 #include "appraisal/hf_design.hpp"
 #include "appraisal/hf_gui_diagnostic.hpp"
 #include "appraisal/hf_gui_profile.hpp"
@@ -92,6 +93,8 @@ struct Options {
     bool hf_gannon_native_diagnostic=false;
     bool hf_gannon_gain_variance_diagnostic=false;
     bool hf_target_presence_diagnostic=false;
+    bool hf_correlated_gain_shadow=false;
+    bool hf_correlated_gain_receiver=false;
     unsigned service_episodes=1;
     std::optional<std::uint64_t> service_backlog_begin,service_backlog_end,service_spool_limit;
     bool helper=false, list=false, help=false, hf_phase_bank=false, search_options=false, hf_public_phase_receiver=false, hf_physical_diagnostic=false, hf_phase_refinement=false;
@@ -122,6 +125,8 @@ Options parse(int argc,char** argv) {
         if(key=="--hf-gannon-native-diagnostic") {o.hf_gannon_native_diagnostic=true;continue;}
         if(key=="--hf-gannon-gain-variance-diagnostic") {o.hf_gannon_gain_variance_diagnostic=true;continue;}
         if(key=="--hf-target-presence-diagnostic") {o.hf_target_presence_diagnostic=true;continue;}
+        if(key=="--hf-correlated-gain-shadow") {o.hf_correlated_gain_shadow=true;continue;}
+        if(key=="--hf-correlated-gain-receiver") {o.hf_correlated_gain_receiver=true;continue;}
         if(key=="--helper") {o.helper=true;continue;}
         if(key=="--gui-clock-edge") {o.gui_options=true;o.gui.clock_edge=true;continue;}
         if(key=="--hf-phase-refinement") {o.hf_phase_refinement=true;continue;}
@@ -253,6 +258,13 @@ Options parse(int argc,char** argv) {
         "Gannon native diagnostic requires a reference Gannon physical shadow with full timing");
     require(!o.hf_gannon_gain_variance_diagnostic||(o.hf_gannon_native_diagnostic&&o.hf_phase_refinement),
         "Gannon gain variance diagnostic requires the full native comparison and refinement");
+    require(!o.hf_correlated_gain_shadow||(o.mode=="hf-search"&&o.search_timing=="full"&&o.control=="wanted"&&
+        o.waveform=="reference"&&o.fec=="off"&&!o.hf_physical_diagnostic&&!o.hf_phase_refinement),
+        "HF correlated gain requires an exclusive full-timing wanted reference shadow with FEC off");
+    require(!o.hf_correlated_gain_receiver||(o.mode=="receive"&&o.waveform=="reference"&&o.fec=="off"&&
+        !o.helper&&o.backend=="cpu"&&!o.service_replay&&!o.hf_public_phase_receiver&&!o.hf_compare_admitted_models&&
+        !o.hf_target_presence_diagnostic&&(o.control=="wanted"||o.control=="noise"||o.control=="wrong-key")),
+        "HF correlated gain receiver requires exclusive Helper-off CPU receive with FEC off and wanted, noise or wrong-key control");
     require(!o.hf_target_presence_diagnostic||(o.mode=="receive"&&o.capture_digest_slot&&o.control=="wanted"&&
         o.waveform=="reference"&&!o.helper&&o.backend=="cpu"&&!o.service_replay&&!o.hf_public_phase_receiver&&
         !o.hf_compare_admitted_models),
@@ -800,6 +812,10 @@ Crypto wrong_key() {
     return Crypto::from_independent_roots(a,b);
 }
 struct Setup {
+    struct CorrelatedGainCalendarQuote {
+        appraisal::HfCorrelatedGainPlan maximum;
+        std::size_t maximum_additional_workspace_bytes=0;
+    };
     appraisal::Scenario scenario;
     PublicProfile profile, transmit_profile;
     ReceiverConfig receiver;
@@ -814,6 +830,7 @@ struct Setup {
     StreamReceiverResources resources;
     std::optional<StreamChannelConfig> native_channel;
     std::optional<appraisal::HfNativeChainConfig> native_chain;
+    std::optional<CorrelatedGainCalendarQuote> correlated_gain_calendar_quote;
     double cn0=0,tail=0;
     std::uint64_t source_stop=0,q0=0,horizon=0,slot_horizon=0,gap_first=0,gap_stop=0;
     Setup(appraisal::Scenario s,PublicProfile p,PublicProfile tx,ReceiverConfig r,NativeMessageProfile mp,
@@ -964,13 +981,14 @@ Setup setup(const Options& o,std::stop_token stop) {
     }
     if(scenario.channel.wave_optics&&!native_chain_case) {
         if((o.mode!="plan"&&o.mode!="channel"&&o.mode!="receive"&&o.mode!="hf-search")||
-           o.backend!="cpu"||o.waveform!="reference"||o.pulse!="rrc"||o.helper||o.fec!="off"||
+           o.backend!="cpu"||o.waveform!="reference"||o.pulse!="rrc"||o.helper||
+           (o.fec!="off"&&(o.fec!="rs20"||o.mode=="hf-search"))||
            (o.control!="wanted"&&!(o.mode=="receive"&&(o.control=="wrong-key"||o.control=="noise")))||
            o.duration_override||o.capture_lead_seconds||o.design_options||o.service_replay||
            o.hf_public_phase_receiver||o.hf_compare_admitted_models||o.hf_trajectory_seed||
            o.hf_trajectory_offset_seconds||o.hf_phase_refinement||o.hf_phase_filter||
            o.hf_phase_filter_receiver||o.hf_phase_filter_paths||o.hf_phase_filter_sticky||o.hf_phase_bridge)
-            throw Unavailable("wave optics supports fixed-geometry reference CPU plan/channel/receive or wanted-only hf-search, with Helper/FEC and experimental receiver policies off");
+            throw Unavailable("wave optics supports fixed-geometry reference CPU plan/channel/receive with FEC off or rs20, or wanted hf-search with FEC off; Helper and receiver policies remain off");
     }
     if(scenario.channel.phase_screens) {
         if((o.mode!="plan"&&o.mode!="channel"&&o.mode!="receive"&&o.mode!="hf-search")||
@@ -1010,7 +1028,7 @@ Setup setup(const Options& o,std::stop_token stop) {
         scenario.channel.hf_trajectory_offset_seconds=*o.hf_trajectory_offset_seconds;
     }
     scenario.channel.noise_seed=o.noise_seed;
-    if(o.mode=="hf-search"||o.hf_public_phase_receiver||o.hf_target_presence_diagnostic) {
+    if(o.mode=="hf-search"||o.hf_public_phase_receiver||o.hf_correlated_gain_receiver||o.hf_target_presence_diagnostic) {
         const auto& channel=scenario.channel;
         const auto& noise=channel.noise;
         const auto& frontend=channel.frontend;
@@ -1244,12 +1262,38 @@ Setup setup(const Options& o,std::stop_token stop) {
     }
     if(o.mode=="hf-search"||o.hf_public_phase_receiver) {
         const auto public_slot=make_receiver_slot_plan(s.profile,s.receiver,o.mode=="hf-search"?o.search_slot:0);
-        if(!appraisal::hf_public_search_supported(s.receiver,public_slot,o.hf_phase_refinement))
+        if(o.hf_correlated_gain_shadow) {
+            if(!(s.scenario.channel.wave_optics||s.scenario.channel.phase_screens)||o.search_slot>=s.truth.size())
+                throw Unavailable("HF correlated gain shadow requires an active slot on direct lens or phase screens");
+            try { (void)appraisal::hf_correlated_gain_plan(s.receiver,public_slot); }
+            catch(const Error& e) { throw Unavailable(e.what()); }
+        } else if(!appraisal::hf_public_search_supported(s.receiver,public_slot,o.hf_phase_refinement))
             throw Unavailable("HF public phase scorer does not support the configured public geometry; actual linear multipath remains a permitted model-mismatch test");
         if((o.hf_phase_filter||o.hf_phase_filter_receiver)&&!appraisal::hf_public_phase_filter_supported(s.receiver,public_slot))
             throw Unavailable("HF phase filter does not support the configured public geometry or declared horizon");
     }
     set_resources(s,o);
+    if(o.hf_correlated_gain_receiver) {
+        if(native_chain_case||!(s.scenario.channel.wave_optics||s.scenario.channel.phase_screens))
+            throw Unavailable("HF correlated gain receiver requires direct lens or phase-screen propagation");
+        auto& quote=s.correlated_gain_calendar_quote.emplace();
+        auto& maximum=quote.maximum;
+        for(std::uint64_t index=0;index<s.slot_horizon;++index) {
+            const auto slot=make_receiver_slot_plan(s.profile,s.receiver,index);
+            try {
+                const auto work=appraisal::hf_correlated_gain_plan(s.receiver,slot);
+                const auto workspace=appraisal::hf_correlated_gain_workspace(s.receiver,slot,s.resources.workers);
+                maximum.samples=std::max(maximum.samples,work.samples);
+                maximum.timings=std::max(maximum.timings,work.timings);
+                maximum.basis_products=std::max(maximum.basis_products,work.basis_products);
+                maximum.fft_row_stages=std::max(maximum.fft_row_stages,work.fft_row_stages);
+                maximum.innovations=std::max(maximum.innovations,work.innovations);
+                quote.maximum_additional_workspace_bytes=std::max(quote.maximum_additional_workspace_bytes,workspace);
+            } catch(const Error& e) {
+                throw Unavailable("HF correlated gain calendar preflight at public slot "+std::to_string(index)+": "+e.what());
+            }
+        }
+    }
     return s;
 }
 std::string_view observation_scope(const Options& o) {
@@ -1361,6 +1405,24 @@ Json plan_json(const Setup& s,const Options& o) {
     }
     if(o.hf_phase_filter)result["hf_phase_filter_requested"]=true;
     if(o.hf_target_presence_diagnostic)result["hf_target_presence_diagnostic_requested"]=true;
+    if(o.hf_correlated_gain_shadow) {
+        result["hf_correlated_gain_shadow_requested"]=true;
+        const auto quote=appraisal::hf_correlated_gain_plan(s.receiver,make_receiver_slot_plan(s.profile,s.receiver,o.search_slot));
+        result["hf_correlated_gain_shadow_quote"]=object({{"public_timing_atoms",quote.timings},
+            {"observation_samples",quote.samples},{"basis_products",quote.basis_products},
+            {"full_fft_row_stage_charge",quote.fft_row_stages},{"scalar_innovations",quote.innovations}});
+    }
+    if(s.correlated_gain_calendar_quote) {
+        const auto& quote=*s.correlated_gain_calendar_quote;
+        const auto& maximum=quote.maximum;
+        result["hf_correlated_gain_receiver_requested"]=true;
+        result["hf_correlated_gain_calendar_quote"]=object({
+            {"planned_public_slots",s.slot_horizon},{"workers",s.resources.workers},
+            {"maximum_aperture_samples",maximum.samples},{"maximum_public_timing_atoms",maximum.timings},
+            {"maximum_basis_products",maximum.basis_products},{"maximum_full_fft_row_stage_charge",maximum.fft_row_stages},
+            {"maximum_scalar_innovations",maximum.innovations},
+            {"maximum_additional_workspace_bytes",quote.maximum_additional_workspace_bytes}});
+    }
     if(o.hf_gannon_gain_variance_diagnostic)result["hf_gannon_gain_variance_diagnostic_requested"]=true;
     if(o.hf_phase_filter_receiver)result["hf_phase_filter_receiver_requested"]=true;
     if(o.hf_phase_filter_paths)result["hf_phase_filter_paths_requested"]=true;
@@ -2955,8 +3017,10 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     const auto clean_capture_bytes=gui_clean?static_cast<std::size_t>(diagnostic_samples)*sizeof(Complex):0;
     const auto clean_chunk_bytes=gui_clean?o.chunk*(sizeof(Complex)+sizeof(std::uint8_t)):0;
     const auto total_diagnostic_bytes=add_bytes(diagnostic_bytes,clean_capture_bytes);
-    const std::size_t per_slot_bytes=o.hf_phase_refinement?65536:16384;
+    const std::size_t per_slot_bytes=(o.hf_phase_refinement||o.hf_correlated_gain_receiver)?65536:16384;
     require(s.slot_horizon<=SIZE_MAX/per_slot_bytes,"evaluator receipt reservation overflow");
+    if(o.hf_correlated_gain_receiver)result["plan"]["correlated_gain_evaluator_reserved_bytes"]=
+        static_cast<std::size_t>(s.slot_horizon)*per_slot_bytes;
     const auto evaluator_future=add_bytes(add_bytes(o.chunk*(sizeof(Complex)+1),clean_chunk_bytes),
         add_bytes(static_cast<std::size_t>(s.slot_horizon)*per_slot_bytes,65536));
     auto future=add_bytes(add_bytes(source.working_bytes,evaluator_future),spool?spool->working_bytes():0);
@@ -3088,11 +3152,18 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     result["plan"]["receiver_memory_limit_bytes"]=*s.stream.memory_limit_bytes;
     result["plan"]["diagnostic_capture_bytes"]=diagnostic_bytes;
     std::shared_ptr<appraisal::HfPublicPhaseReceiver> phase_receiver;
+    std::optional<appraisal::HfCorrelatedGainReceiver> correlated_gain_receiver;
     std::unique_ptr<CompleteStreamReceiver> receiver;
-    if(receive&&o.hf_public_phase_receiver) {
-        phase_receiver=std::make_shared<appraisal::HfPublicPhaseReceiver>(s.slot_horizon,o.hf_phase_refinement,
-            o.hf_phase_filter_receiver,o.hf_phase_filter_sticky,o.hf_phase_bridge);
-        const auto supplement=phase_receiver->supplement();
+    if(receive&&(o.hf_public_phase_receiver||o.hf_correlated_gain_receiver)) {
+        const auto supplement=[&] {
+            if(o.hf_correlated_gain_receiver) {
+                correlated_gain_receiver.emplace(s.slot_horizon);
+                return correlated_gain_receiver->supplement();
+            }
+            phase_receiver=std::make_shared<appraisal::HfPublicPhaseReceiver>(s.slot_horizon,o.hf_phase_refinement,
+                o.hf_phase_filter_receiver,o.hf_phase_filter_sticky,o.hf_phase_bridge);
+            return phase_receiver->supplement();
+        }();
         const datapump::triad::v3::detail::StreamWorkspace workspace=[supplement](const auto& config,const auto& slot,unsigned workers) {
             return receiver_detail::receiver_slot_workspace_with_supplement(config,slot,workers,supplement,false);
         };
@@ -3202,6 +3273,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
                 else {++ambiguous;++episode_ambiguous[*episode];}
             }
             auto row=score_json(receipt);
+            if(correlated_gain_receiver)row["correlated_gain_executed"]=correlated_gain_receiver->scored(r.index);
             if(spool) {
                 row["commit_input_stop"]=receipt.commit_timing?Json(receipt.commit_timing->input_stop):Json{};
                 row["commit_uncommitted_slots"]=receipt.commit_timing?Json(receipt.commit_timing->uncommitted_slots):Json{};
@@ -3332,9 +3404,9 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
                     const auto destination_offset=static_cast<std::size_t>(a-diagnostic_slot.first_sample);
                     const auto count=static_cast<std::size_t>(b-a);
                     std::copy_n(iq.begin()+source_offset,count,diagnostic_capture.begin()+destination_offset);
-                    if(known_target)
+                    if(known_target||o.hf_correlated_gain_shadow)
                         require(std::ranges::all_of(mask.subspan(source_offset,count),[](auto byte){return byte==1;}),
-                            "target-presence diagnostic requires an all-valid selected aperture");
+                            "HF diagnostic requires an all-valid selected aperture");
                     if(gui_varying)
                         std::copy_n(valid.begin()+source_offset,count,diagnostic_validity.begin()+destination_offset);
                     if(clean_channel) {
@@ -3429,10 +3501,18 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
             result["plan"]["search_observation_sha256"]=*selected_digest;
             const auto ctl=Clock::now();
             appraisal::HfPublicSearchResult public_result;
-            result["hf_public_search"]=appraisal::diagnose_hf_public_search(s.receiver,diagnostic_slot,s.key,
-                diagnostic_capture,s.resources.workers,*s.stream.memory_limit_bytes,o.search_timing=="full",deadline.stop.get_token(),
-                o.hf_physical_diagnostic?&public_result:nullptr,o.hf_phase_refinement,o.hf_phase_filter,
-                o.hf_phase_filter_sticky,o.hf_phase_bridge);
+            if(o.hf_correlated_gain_shadow) {
+                auto search=appraisal::diagnose_hf_correlated_gain(s.receiver,diagnostic_slot,s.key,
+                    diagnostic_capture,s.resources.workers,*s.stream.memory_limit_bytes,deadline.stop.get_token());
+                search["observation_sha256"]=*selected_digest;
+                search["all_valid"]=true;
+                result["hf_public_search"]=std::move(search);
+            } else {
+                result["hf_public_search"]=appraisal::diagnose_hf_public_search(s.receiver,diagnostic_slot,s.key,
+                    diagnostic_capture,s.resources.workers,*s.stream.memory_limit_bytes,o.search_timing=="full",deadline.stop.get_token(),
+                    o.hf_physical_diagnostic?&public_result:nullptr,o.hf_phase_refinement,o.hf_phase_filter,
+                    o.hf_phase_filter_sticky,o.hf_phase_bridge);
+            }
             public_search_seconds=std::chrono::duration<double>(Clock::now()-ctl).count();
             public_search_executed=true;
             if(o.hf_physical_diagnostic)
@@ -3559,6 +3639,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
         {"backpressure_count",backpressure},{"peak_uncommitted_slots",peak_backlog},{"accepted_samples",receiver_executed?final.input_stop:0}});
     result["slots"]=std::move(slots);result["messages"]=std::move(messages);
     if(phase_receiver)result["hf_public_phase_receiver"]=phase_receiver->report();
+    if(correlated_gain_receiver)result["hf_correlated_gain_receiver"]=correlated_gain_receiver->report();
     result["backend"]=backend_json(o,s.receiver.bulk_backend);
     if((receiver_executed||o.mode=="diagnose")&&o.backend!="cpu"&&run_status=="completed") {
         const auto receipt=s.receiver.bulk_backend->receipt();
@@ -3667,6 +3748,8 @@ int main(int argc,char** argv) {
             result["hf_gannon_native_diagnostic_usage"]="--hf-gannon-native-diagnostic adds a target-absent full-prefix reference and private clean/noisy native coherent-gain comparison to a Gannon reference physical shadow with full timing";
             result["hf_gannon_gain_variance_diagnostic_usage"]="--hf-gannon-gain-variance-diagnostic adds the fixed independent block-variance scores at retained public cells to the Gannon native comparison with refinement";
             result["hf_target_presence_diagnostic_usage"]="--hf-target-presence-diagnostic uses --capture-digest-slot N on an ordinary direct lens, phase-screen or Gannon receive to compare private known target-present, absent and alternate-bit means after native scoring";
+            result["hf_correlated_gain_shadow_usage"]="--hf-correlated-gain-shadow uses hf-search with full timing on a wanted lens or phase-screen aperture; evaluates a normalized stationary complex-gain mixture over the configured band";
+            result["hf_correlated_gain_receiver_usage"]="--hf-correlated-gain-receiver opts into the fixed complex-gain fallback inside canonical lens or phase-screen receive, with the public geometry and native thresholds intact";
             result["hf_design_usage"]="hf-ensemble-design on the reference waveform requires all eight coefficients: --hf-primary-amplitude-hz --hf-primary-period-seconds --hf-primary-phase-radians --hf-secondary-amplitude-hz --hf-secondary-period-seconds --hf-secondary-phase-radians --hf-knot-amplitude-hz --hf-knot-seconds";
         } else if(o.list) {
             result["mode"]="list";result["status"]="completed";Json::Array entries;

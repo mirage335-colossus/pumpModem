@@ -38,6 +38,14 @@ target-presence comparison distinguish known-mean information from evidence
 available to the implemented receiver. These additions keep the physical
 approximation, numerical, communications and resource gates separate.
 
+The [fragment-integrity protocol](hf-fragment-integrity.md) separates rejection
+of surviving fragments from successful protected waveform reception and
+charges the longer public calendar and total energy. The
+[correlated-presence protocol](hf-correlated-presence.md) freezes a full public
+timing/CFO mixture, channel-law prior and native work caps before the first
+shadow. Its known-channel reference is an optimistic diagnostic; a fitted
+best cell or a passing component check cannot count as a receiver repair.
+
 ## Questions and evidence layers
 
 Keep four claims separate:

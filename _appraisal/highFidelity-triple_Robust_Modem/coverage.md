@@ -7,6 +7,36 @@ different questions and are reported separately. No natural-condition
 probability, field calibration, or universal sensitivity floor follows from
 these deterministic cases or small fixed-seed holdouts.
 
+The [correlated-presence continuation](hf-correlated-presence.md) now repairs
+the exact lens `B` failure at unchanged energy/duration and the matched
+separated-screen `A` failure at +11 dB-Hz. It evaluates all public timing
+atoms and retains normalized channel-law and CFO priors. Fresh payload and
+ambient controls deliver, and both complete negative controls stay quiet.
+The original separated-screen `B` still accepts a wrong space after interior
+fades, so the candidate fails the general accepted-content gate. The +10
+shadow remains below threshold; the +11 success is a fixed new bracket,
+not a reclassification of that failure or a measured 9 dB sensitivity gain.
+
+The duration follow-up admits the existing 139.2-second case without changing
+laws, thresholds or public hypotheses. It preserves correct delivery at nearly
+equal incident energy and records all fifteen noise slots as quiet. Together,
+the current inference and integrity continuation adds fourteen complete
+receiver observations and two standalone shadows: seven of nine wanted rows
+deliver correctly, one accepts incorrect content, and one delivers nothing;
+all five negative controls have zero DATA and accepted messages. These are
+selected, sometimes matched observations, not a population success rate.
+The software checks pass 34/34 groups, followed by the affected checks for the
+larger duration envelope; no communication failure is reclassified as a pass.
+
+The [integrity continuation](hf-fragment-integrity.md) reproduces that
+fragment mechanism using the canonical codec and rejects all 7,282 proper
+contiguous fragments of the protected RS20/RS60 `B` frames. These are synthetic
+scored-slot component checks. Separately, the complete native RS20 lens trial
+repairs a missing bit and delivers `B`, with both long negative controls
+quiet. It uses 5.538 times the incident energy and 4.992 times the total
+capture duration of the unprotected lens case; it is not an equal-energy
+coding gain or a demonstrated repair of the separated-screen fragment case.
+
 The [transverse lens](hf-wave-optics.md) and
 [separated plasma regions](hf-phase-screens.md) now test focusing, diffraction
 and deep destructive interference from prescribed density fields. Independent
@@ -41,14 +71,14 @@ CPU-capacity qualification. The
 exact input identity and locates evidence losses on the archived Gannon miss;
 private known-channel information is not an implemented receiver repair.
 
-This extension completed **29 receiver observations and three standalone
+The preceding wave/scattering extension completed **29 receiver observations and three standalone
 Gannon diagnostics**. The receiver observations include matched replications:
 eleven wanted observations deliver correctly, twelve fail their complete
 endpoint, and six negative controls remain quiet. The one incorrect-space
 case is observed twice on exactly matched input, not on two independent
 fields. One original native noise deadline and one interrupted attempt remain
 separate. These heterogeneous, deliberately selected observations are not a
-failure-rate estimate. The current 32-group software check passes without
+failure-rate estimate. Its 32-group software check passed without
 reclassifying any communication failure.
 
 The fixed additional brackets recover the primary multiple-screen message at

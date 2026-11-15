@@ -29,7 +29,8 @@ target_compile_features(high_fidelity_phase_screens PUBLIC cxx_std_20)
 target_link_libraries(high_fidelity_phase_screens PRIVATE high_fidelity_fullwave datapump_fft datapump)
 target_link_libraries(high_fidelity_channel PRIVATE high_fidelity_fullwave high_fidelity_wave_optics high_fidelity_phase_screens)
 add_library(high_fidelity_public_receiver STATIC "${_hf_root}/src/hf_public_diagnostic.cpp"
-  "${_hf_root}/src/hf_gui_diagnostic.cpp" "${_hf_root}/src/hf_phase_filter.cpp")
+  "${_hf_root}/src/hf_gui_diagnostic.cpp" "${_hf_root}/src/hf_phase_filter.cpp"
+  "${_hf_root}/src/hf_correlated_gain.cpp")
 target_include_directories(high_fidelity_public_receiver PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")
 target_link_libraries(high_fidelity_public_receiver PUBLIC high_fidelity_channel datapump_triad_receiver)
 add_executable(high_fidelity_appraisal "${_hf_root}/src/main.cpp" "${_hf_root}/src/vlf_diagnostic.cpp")
@@ -98,6 +99,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 if(BUILD_TESTING)
+  add_executable(high_fidelity_test_hf_fragment_integrity "${_hf_root}/tests/test_hf_fragment_integrity.cpp")
+  target_link_libraries(high_fidelity_test_hf_fragment_integrity PRIVATE datapump_triad_receiver)
+  add_test(NAME high_fidelity_hf_fragment_integrity COMMAND high_fidelity_test_hf_fragment_integrity)
+  set_tests_properties(high_fidelity_hf_fragment_integrity PROPERTIES LABELS "appraisal" TIMEOUT 45)
   add_executable(high_fidelity_test_hf_phase_screens "${_hf_root}/tests/test_hf_phase_screens.cpp")
   target_link_libraries(high_fidelity_test_hf_phase_screens PRIVATE high_fidelity_phase_screens high_fidelity_wave_optics)
   add_test(NAME high_fidelity_hf_phase_screens COMMAND high_fidelity_test_hf_phase_screens)
@@ -124,7 +129,7 @@ if(BUILD_TESTING)
   target_link_libraries(high_fidelity_test_hf_native_supplement PRIVATE datapump_triad_receiver)
   add_test(NAME high_fidelity_hf_native_supplement COMMAND high_fidelity_test_hf_native_supplement)
   set_tests_properties(high_fidelity_hf_native_supplement PROPERTIES LABELS "appraisal" TIMEOUT 45)
-  foreach(_hf_extra admitted_evidence phase_filter)
+  foreach(_hf_extra admitted_evidence phase_filter correlated_gain)
     add_executable(high_fidelity_test_hf_${_hf_extra} "${_hf_root}/tests/test_hf_${_hf_extra}.cpp")
     target_include_directories(high_fidelity_test_hf_${_hf_extra} PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")
     if(_hf_extra STREQUAL "admitted_evidence")
@@ -157,6 +162,7 @@ if(BUILD_TESTING)
     "${_hf_root}/tests/test_coverage_design.py")
   set_tests_properties(high_fidelity_coverage_design PROPERTIES LABELS "appraisal" TIMEOUT 45)
   add_custom_target(high_fidelity_checks DEPENDS high_fidelity_appraisal high_fidelity_fullwave_probe high_fidelity_fullwave_kernel_probe high_fidelity_magnetoionic_probe high_fidelity_wave_optics_probe
+    high_fidelity_test_hf_fragment_integrity
     high_fidelity_phase_screens_probe high_fidelity_test_hf_phase_screens
     high_fidelity_test_channel high_fidelity_test_scenarios
     high_fidelity_test_hf_scenarios high_fidelity_test_hf_ionosphere high_fidelity_test_hf_design high_fidelity_test_hf_history
@@ -164,7 +170,7 @@ if(BUILD_TESTING)
     high_fidelity_test_hf_magnetoionic high_fidelity_test_hf_magnetoionic_kernel high_fidelity_test_hf_wave_optics
     high_fidelity_test_hf_phase_bank high_fidelity_test_hf_public_statistics high_fidelity_test_hf_native_supplement
     high_fidelity_test_hf_phase_refinement
-    high_fidelity_test_hf_admitted_evidence high_fidelity_test_hf_phase_filter
+    high_fidelity_test_hf_admitted_evidence high_fidelity_test_hf_phase_filter high_fidelity_test_hf_correlated_gain
     high_fidelity_test_hf_public_receiver high_fidelity_test_hf_replay high_fidelity_test_hf_gannon_replay high_fidelity_test_hf_native_chain
     high_fidelity_test_impairment_observables high_fidelity_test_lunar_spectral)
 endif()

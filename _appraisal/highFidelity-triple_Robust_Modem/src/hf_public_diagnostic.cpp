@@ -70,11 +70,11 @@ Json coordinate_json(const FineCoordinate& c) {
 AdmissionGrid timing_grid(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
     return {slot.arrival_lower_seconds,slot.arrival_upper_seconds,0,config.clock_bound_ppm,.01};
 }
-std::size_t timing_count(const AdmissionGrid& grid) {
-    geometry_require(grid.arrival_intervals<maximum_timing_atoms,"HF public timing lattice exceeds diagnostic cap");
+std::size_t timing_count(const AdmissionGrid& grid,std::size_t limit=maximum_timing_atoms) {
+    geometry_require(grid.arrival_intervals<limit,"HF public timing lattice exceeds diagnostic cap");
     const auto arrivals=static_cast<std::size_t>(grid.arrival_intervals)+1;
     const auto count=checked_multiply(checked_multiply(receiver_epoch_offsets.size(),arrivals),grid.clock_bound?9:1);
-    geometry_require(count<=maximum_timing_atoms,"HF public timing lattice exceeds diagnostic cap");
+    geometry_require(count<=limit,"HF public timing lattice exceeds diagnostic cap");
     return count;
 }
 bool public_geometry_supported(const ReceiverConfig& config,const ReceiverSlotPlan& slot) {
@@ -236,9 +236,10 @@ SearchPlan search_plan(const ReceiverConfig& config,const ReceiverSlotPlan& slot
     return result;
 }
 HfPublicTimingSelection timing_subset(const ReceiverConfig& config,const ReceiverSlotPlan& slot,
-                                        const FinePreparation& prepared,bool full_timing,bool close_small_arrival_grid) {
+        const FinePreparation& prepared,bool full_timing,bool close_small_arrival_grid,
+        std::size_t limit=maximum_timing_atoms) {
     const auto grid=timing_grid(config,slot);
-    const auto full_count=timing_count(grid);
+    const auto full_count=timing_count(grid,limit);
     require(prepared.grid.lower==grid.lower&&prepared.grid.upper==grid.upper&&prepared.grid.clock_bound==grid.clock_bound,
             "HF public preparation does not match configured timing geometry");
     HfPublicTimingSelection result;
@@ -623,8 +624,12 @@ HfPublicTimingFrontier select_hf_refinement_timing(std::span<const double> old_p
 }
 
 HfPublicTimingSelection select_hf_public_timing(const ReceiverConfig& config,const ReceiverSlotPlan& slot,
-        const FinePreparation& prepared,bool full_timing,bool close_small_arrival_grid) {
-    return timing_subset(config,slot,prepared,full_timing,close_small_arrival_grid);
+        const FinePreparation& prepared,bool full_timing,bool close_small_arrival_grid,std::size_t limit) {
+    return timing_subset(config,slot,prepared,full_timing,close_small_arrival_grid,limit);
+}
+
+std::size_t hf_public_timing_count(const ReceiverConfig& config,const ReceiverSlotPlan& slot,std::size_t limit) {
+    return timing_count(timing_grid(config,slot),limit);
 }
 
 bool hf_public_search_supported(const ReceiverConfig& config,const ReceiverSlotPlan& slot,bool phase_refinement) {

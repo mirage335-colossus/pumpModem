@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import itertools
 import json
 import math
 import os
@@ -146,7 +147,8 @@ EPISODE_KEYS = {"id", "scenario", "mode", "waveform", "seed", "cn0_db_hz", "cont
                 "oracle_slot", "search_slot", "search_timing", "capture_digest_slot", "chunk", "message", "max_wall_seconds", "max_samples",
                 "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "fec", "fade_slots", "capture_lead_seconds",
                 "hf_trajectory_seed", "hf_trajectory_offset_seconds", "noise_seed", "hf_gannon_native_diagnostic",
-                "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS
+                "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic",
+                "hf_correlated_gain_shadow", "hf_correlated_gain_receiver"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS
 MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose", "hf-search", "gui-varying"}
 CONTROLS = {"wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap", "eof"}
 BACKENDS = {"cpu", "cuda", "vulkan", "gpu"}
@@ -216,7 +218,8 @@ def _read_campaign(path: Path) -> dict[str, Any]:
                             "backend", "bit_seconds", "duration_seconds", "pulse", "oracle_slot", "search_slot", "search_timing", "capture_digest_slot", "chunk",
                             "message", "max_wall_seconds", "max_samples", "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "fec", "fade_slots", "capture_lead_seconds",
                             "hf_trajectory_seed", "hf_trajectory_offset_seconds", "hf_gannon_native_diagnostic",
-                            "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic") + tuple(sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS))
+                            "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic",
+                            "hf_correlated_gain_shadow", "hf_correlated_gain_receiver") + tuple(sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS))
         reference = matched[0]
         heterogeneous = [field for field in invariant_fields
                          if any(episode.get(field) != reference.get(field) for episode in matched[1:])]
@@ -405,17 +408,19 @@ def _validate_episode(item: Any, index: int, ids: set[str],
     if item["scenario"] in HF_WAVE_OPTICS_SCENARIOS:
         if (mode not in {"plan", "channel", "receive", "hf-search"} or item["waveform"] != "reference" or
                 item.get("backend", "cpu") != "cpu" or item.get("pulse", "rrc") != "rrc" or
-                item.get("helper", False) or item.get("fec", "off") != "off" or
+                item.get("helper", False) or item.get("fec", "off") not in {"off", "rs20"} or
+                (mode == "hf-search" and item.get("fec", "off") != "off") or
                 (mode in {"plan", "channel"} and control != "wanted") or
                 (mode == "receive" and control not in {"wanted", "noise", "wrong-key"}) or
-                (mode == "hf-search" and (control != "wanted" or item.get("hf_physical_diagnostic") is not True)) or
+                (mode == "hf-search" and (control != "wanted" or not (
+                    item.get("hf_physical_diagnostic") is True or item.get("hf_correlated_gain_shadow") is True))) or
                 (mode != "hf-search" and item.get("hf_physical_diagnostic", False)) or
                 any(item.get(field, False) for field in ("service_replay", "hf_phase_bank", "hf_public_phase_receiver",
                     "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths",
                     "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic")) or
                 {"duration_seconds", "capture_lead_seconds", "hf_trajectory_seed", "hf_trajectory_offset_seconds",
                  "history_reference_delay_seconds"} & item.keys()):
-            raise CampaignError(f"episodes[{index}]: wave-optics scenarios require reference RRC Helper-off CPU plan/channel/receive, or wanted hf-search with physical diagnostic, FEC off and fixed geometry")
+            raise CampaignError(f"episodes[{index}]: wave-optics scenarios require reference RRC Helper-off CPU plan/channel/receive with FEC off/rs20, or wanted FEC-off hf-search with a supported diagnostic, and fixed geometry")
     if item["scenario"] in HF_WAVE_CHAIN_SCENARIOS:
         if (mode not in {"plan", "receive"} or item["waveform"] != "reference" or
                 item.get("backend", "cpu") != "cpu" or item.get("pulse", "rrc") != "rrc" or
@@ -434,7 +439,7 @@ def _validate_episode(item: Any, index: int, ids: set[str],
     if item["scenario"] in HF_PHASE_SCREENS_SCENARIOS:
         cn0 = item.get("cn0_db_hz", 0)
         primary_high_bracket = (item["scenario"] == "hf-phase-screens" and mode == "receive" and control == "wanted" and
-                                item.get("bit_seconds", 64) == 64 and cn0 == 20)
+                                item.get("bit_seconds", 64) == 64 and cn0 in {11, 20})
         if (mode not in {"plan", "channel", "receive", "hf-search"} or item["waveform"] != "reference" or
                 item.get("backend", "cpu") != "cpu" or item.get("pulse", "rrc") != "rrc" or
                 item.get("helper", False) or item.get("fec", "off") != "off" or
@@ -530,6 +535,20 @@ def _validate_episode(item: Any, index: int, ids: set[str],
             not isinstance(item["hf_gannon_gain_variance_diagnostic"], bool) or
             not item.get("hf_gannon_native_diagnostic", False) or not item.get("hf_phase_refinement", False)):
         raise CampaignError(f"episodes[{index}]: Gannon gain variance diagnostic requires the full native comparison and refinement")
+    if "hf_correlated_gain_shadow" in item and (
+            not isinstance(item["hf_correlated_gain_shadow"], bool) or
+            item["scenario"] not in HF_WAVE_OPTICS_SCENARIOS.keys() | HF_PHASE_SCREENS_SCENARIOS.keys() or
+            mode != "hf-search" or item["waveform"] != "reference" or control != "wanted" or
+            item.get("search_timing") != "full" or item.get("fec", "off") != "off" or
+            item.get("hf_physical_diagnostic", False) or item.get("hf_phase_refinement", False)):
+        raise CampaignError(f"episodes[{index}]: correlated gain requires an exclusive full-timing wanted lens or phase-screen shadow with FEC off")
+    if "hf_correlated_gain_receiver" in item and (
+            not isinstance(item["hf_correlated_gain_receiver"], bool) or
+            item["scenario"] not in HF_WAVE_OPTICS_SCENARIOS.keys() | HF_PHASE_SCREENS_SCENARIOS.keys() or
+            mode != "receive" or item["waveform"] != "reference" or control not in {"wanted", "noise", "wrong-key"} or
+            item.get("backend", "cpu") != "cpu" or item.get("helper", False) or item.get("fec", "off") != "off" or
+            any(item.get(field, False) for field in ("hf_public_phase_receiver", "hf_compare_admitted_models", "hf_target_presence_diagnostic", "service_replay"))):
+        raise CampaignError(f"episodes[{index}]: correlated gain receiver requires exclusive Helper-off CPU lens or phase-screen receive with FEC off")
     if "hf_target_presence_diagnostic" in item and (
             not isinstance(item["hf_target_presence_diagnostic"], bool) or
             item["scenario"] not in HF_WAVE_OPTICS_SCENARIOS.keys() | HF_PHASE_SCREENS_SCENARIOS.keys() | GANNON_REPLAY.keys() or
@@ -549,6 +568,8 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
     for key, option in (("cn0_db_hz", "--cn0"), ("control", "--control"), ("helper", "--helper"),
                         ("hf_gannon_native_diagnostic", "--hf-gannon-native-diagnostic"),
                         ("hf_gannon_gain_variance_diagnostic", "--hf-gannon-gain-variance-diagnostic"),
+                        ("hf_correlated_gain_shadow", "--hf-correlated-gain-shadow"),
+                        ("hf_correlated_gain_receiver", "--hf-correlated-gain-receiver"),
                         ("hf_target_presence_diagnostic", "--hf-target-presence-diagnostic"),
                         ("backend", "--backend"), ("bit_seconds", "--bit-seconds"),
                         ("duration_seconds", "--duration-seconds"), ("oracle_slot", "--oracle-slot"),
@@ -575,7 +596,7 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
                             (key, "--" + key.replace("_", "-")) for key in sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS)):
         if key in episode:
             value = episode[key]
-            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "hf_gannon_native_diagnostic", "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic", "gui_clock_edge", "service_replay"}:
+            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "hf_gannon_native_diagnostic", "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic", "hf_correlated_gain_shadow", "hf_correlated_gain_receiver", "gui_clock_edge", "service_replay"}:
                 if value:
                     command.append(option)
             else:
@@ -2313,8 +2334,11 @@ def _validate_wave_optics(receipt: dict[str, Any], episode: dict[str, Any]) -> N
         if isinstance(channel, dict) and "wave_optics" in channel:
             raise CampaignError("wave-optics planning cannot claim an executed table or channel")
         return
+    # A causal shadow reads source samples only through its observation stop.
+    source_samples = min(horizon, source_stop) if episode["mode"] == "hf-search" else source_stop
     if (not isinstance(channel, dict) or channel.get("samples") != horizon or
-            channel.get("source_samples") != source_stop or channel.get("hashed_samples") != horizon or
+            not _is_nonnegative_int(channel.get("source_samples")) or channel["source_samples"] != source_samples or
+            channel.get("hashed_samples") != horizon or
             not isinstance(channel.get("input_sha256"), str) or
             re.fullmatch(r"[0-9a-fA-F]{64}", channel["input_sha256"]) is None or
             not _is_finite_number(channel.get("tail_seconds")) or
@@ -2323,7 +2347,7 @@ def _validate_wave_optics(receipt: dict[str, Any], episode: dict[str, Any]) -> N
             not _is_finite_number(channel.get("maximum_delay_seconds")) or
             not math.isclose(channel["maximum_delay_seconds"], 4 / fs, rel_tol=0,
                              abs_tol=4 * math.ulp(4 / fs))):
-        raise CampaignError("wave-optics execution must hash the full capture and report its complete source and causal extent")
+        raise CampaignError("wave-optics execution must hash the full capture and report its exact source prefix and causal extent")
     full = channel.get("wave_optics")
     _validate_wave_optics_report(full, scenario_id)
     _validate_wave_energy_planes(channel, full, episode.get("control", "wanted") == "noise")
@@ -2870,8 +2894,10 @@ def _validate_phase_screens(receipt: dict[str, Any], episode: dict[str, Any]) ->
         if isinstance(channel, dict) and "phase_screens" in channel:
             raise CampaignError("phase-screen planning cannot claim an executed numerical table")
         return
+    source_samples = min(horizon, source_stop) if episode["mode"] == "hf-search" else source_stop
     if (not isinstance(channel, dict) or channel.get("samples") != horizon or
-            channel.get("source_samples") != source_stop or channel.get("hashed_samples") != horizon or
+            not _is_nonnegative_int(channel.get("source_samples")) or channel["source_samples"] != source_samples or
+            channel.get("hashed_samples") != horizon or
             not isinstance(channel.get("input_sha256"), str) or
             re.fullmatch(r"[0-9a-fA-F]{64}", channel["input_sha256"]) is None or
             not _is_finite_number(channel.get("tail_seconds")) or
@@ -2880,7 +2906,7 @@ def _validate_phase_screens(receipt: dict[str, Any], episode: dict[str, Any]) ->
             not _is_finite_number(channel.get("maximum_delay_seconds")) or
             not math.isclose(channel["maximum_delay_seconds"], 4 / fs, rel_tol=0,
                              abs_tol=4 * math.ulp(4 / fs))):
-        raise CampaignError("phase-screen execution must hash the full capture and report complete physical/tail extent")
+        raise CampaignError("phase-screen execution must hash the full capture and report its exact source prefix and causal extent")
     full = channel.get("phase_screens")
     _validate_phase_screens_report(full, scenario_id)
     _validate_wave_energy_planes(channel, full, episode.get("control", "wanted") == "noise")
@@ -2894,6 +2920,231 @@ def _validate_phase_screens(receipt: dict[str, Any], episode: dict[str, Any]) ->
             isinstance(resources, dict) and _is_nonnegative_int(resources.get("total_memory_limit_bytes")) and
             channel["workspace_bytes"] > resources["total_memory_limit_bytes"]):
         raise CampaignError("phase-screen rendering workspace must remain within the declared application allocation")
+
+
+def _correlated_gain_geometry(plan: dict[str, Any], samples: int) -> tuple[int, int, dict[str, int]]:
+    bounds = plan.get("public_bounds", {})
+    if not isinstance(bounds, dict):
+        raise CampaignError("correlated gain shadow requires explicit public bounds")
+    lower, upper = bounds.get("arrival_low_seconds"), bounds.get("arrival_high_seconds")
+    if (not _is_finite_number(lower) or not _is_finite_number(upper) or not 0 <= upper - lower <= .512 or
+            bounds.get("clock_bound_ppm") != 0 or bounds.get("spread_seconds") != 0 or
+            bounds.get("frequency_bound_hz") != 0 or bounds.get("atmospheric_hz") != 5):
+        raise CampaignError("correlated gain shadow must use the complete declared zero-clock 5 Hz geometry")
+    timings = 13 * (math.ceil((upper - lower) / .001) + 1)
+    groups = (samples + 959) // 960
+    transforms = 2 * timings * groups
+    work = {"basis_products": 2 * timings * samples, "full_fft_row_stage_charge": transforms * 2048 * 11,
+            "scalar_innovations": transforms * 321 * 12}
+    return timings, groups, work
+
+
+def _correlated_gain_shape_admitted(timings: int, work: dict[str, int]) -> bool:
+    return (timings <= 600 and work["basis_products"] <= 320_000_000 and
+            work["full_fft_row_stage_charge"] <= 7_600_000_000 and work["scalar_innovations"] <= 1_300_000_000)
+
+
+def _validate_correlated_gain_evidence(search: dict[str, Any], plan: dict[str, Any], samples: int) -> dict[str, int]:
+    timings, groups, work = _correlated_gain_geometry(plan, samples)
+    transforms = 2 * timings * groups
+    quote = {"public_timing_atoms": timings, "observation_samples": samples, **work}
+    integer_fields = {"public_timing_atoms": timings, "observation_samples": samples, "sample_rate_hz": 1920,
+                      "phase_atom_rows": 30, "gain_block_rows": 960, "gain_blocks": groups,
+                      "frequency_count": 321, "fft_rows": 2048, **work}
+    if (search.get("model") != "stationary_single_tap_complex_ar1" or search.get("component_complete") is not True or
+            search.get("all_public_timing_atoms_evaluated") is not True or
+            any(search.get(flag) is not False for flag in ("receiver_executed", "completion_evaluated", "capacity_qualified",
+                                                           "truth_information_passed_to_search")) or
+            any(not _is_nonnegative_int(search.get(field)) or search[field] != value for field, value in integer_fields.items()) or
+            not _correlated_gain_shape_admitted(timings, work)):
+        raise CampaignError("correlated gain component must bind the complete unchanged aperture and declared work")
+    if (search.get("coherence_seconds") != [.5, 2., 8.] or search.get("gain_powers") != [1/256, 1/32, 1/4, 2.] or
+            search.get("closed_band_frequency_prior") != "uniform cell widths with half mass at both endpoints" or
+            search.get("frequency_step_hz") != 1/32 or search.get("frequency_bound_hz") != 5 or
+            search.get("noise_variance") != plan.get("noise_variance") or search.get("standalone_native_weight") != .125 or
+            not _is_finite_number(search.get("maximum_nominal_phase_atom_error_radians")) or
+            not math.isclose(search["maximum_nominal_phase_atom_error_radians"], math.pi * 5 * 30 / 1920, abs_tol=1e-14)):
+        raise CampaignError("correlated gain shadow must preserve its fixed noise, coherence, gain and coordinate priors")
+
+    selected = search.get("canonical_selected_timing_atoms")
+    if not _is_nonnegative_int(selected) or not 0 < selected <= min(130, timings):
+        raise CampaignError("correlated gain shadow must bind its canonical preparation timing subset")
+    pairs = [search.get(field) for field in ("bit_log_e", "canonical_selected_bit_log_contribution",
+                                             "complement_bit_log_contribution", "bitwise_maximum_unweighted_component_log_lr")]
+    if any(not isinstance(pair, list) or len(pair) != 2 for pair in pairs):
+        raise CampaignError("correlated gain shadow requires both bit evidence values in every partition")
+    full, inside, outside, maximum = pairs
+    if (any(not _is_finite_number(x) for x in full + inside + maximum) or
+            (any(not _is_finite_number(x) for x in outside) if selected < timings else outside != [None, None])):
+        raise CampaignError("correlated gain shadow requires finite normalized evidence for every evaluated timing subset")
+
+    def log_add(a: float, b: float) -> float:
+        return max(a, b) + math.log1p(math.exp(-abs(a - b)))
+
+    combined = inside if selected == timings else [log_add(a, b) for a, b in zip(inside, outside)]
+    if any(not math.isclose(score, reference, abs_tol=1e-10) or score > peak + 1e-10
+           for score, reference, peak in zip(full, combined, maximum)):
+        raise CampaignError("correlated gain shadow must keep the complete public prior across timing subsets")
+    laws = search.get("per_law_evidence")
+    if not isinstance(laws, list) or len(laws) != 12:
+        raise CampaignError("correlated gain shadow must report each fixed law's full timing/frequency evidence")
+    for law, (coherence, power) in zip(laws, itertools.product((.5, 2., 8.), (1/256, 1/32, 1/4, 2.))):
+        if (not isinstance(law, dict) or law.get("coherence_seconds") != coherence or law.get("gain_power") != power or
+                law.get("weight") != 1/12 or not isinstance(law.get("bit_log_e_before_law_weight"), list) or
+                len(law["bit_log_e_before_law_weight"]) != 2 or
+                any(not _is_finite_number(x) for x in law["bit_log_e_before_law_weight"])):
+            raise CampaignError("correlated gain shadow must retain the twelve declared laws and their equal weights")
+    for bit, score in enumerate(full):
+        scores = [law["bit_log_e_before_law_weight"][bit] for law in laws]
+        peak = max(scores)
+        if not math.isclose(score, peak + math.log(math.fsum(math.exp(value - peak) for value in scores) / len(scores)), abs_tol=1e-10):
+            raise CampaignError("correlated gain shadow must retain the full gain-law mixture")
+    presence = log_add(*full) - math.log(2)
+    gap = abs(full[1] - full[0])
+    charged = presence - math.log(8)
+    threshold, separation = 21.493378688261398, math.log(199)
+    evidence = {"presence_log_e": presence, "bit_separation": gap, "charged_presence_log_e": charged,
+                "presence_reference_threshold": threshold, "bit_separation_reference": separation}
+    if (any(not _is_finite_number(search.get(field)) or not math.isclose(search[field], value, abs_tol=1e-10)
+            for field, value in evidence.items()) or
+            not _is_nonnegative_int(search.get("favored_bit")) or search["favored_bit"] != int(full[1] > full[0]) or
+            search.get("passes_standalone_candidate_screen") is not (charged >= threshold and gap > 0 and gap >= separation)):
+        raise CampaignError("correlated gain shadow must charge native bit and one-eighth line-comparison mass")
+    actual = search.get("actual_work")
+    actual_expected = {"basis_products": work["basis_products"], "fft_prefix_calls": transforms,
+                       "scalar_innovations": work["scalar_innovations"]}
+    renderer_fields = ("basis_bank_calls", "basis_bank_column_samples", "basis_fallback_calls", "coordinate_guard_fallbacks",
+                       "mapped_basis_calls", "mapped_basis_direct_rows", "mapped_basis_interpolated_rows", "basis_cache_peak_bytes")
+    durations = search.get("summed_worker_wall_seconds")
+    if (not isinstance(actual, dict) or any(actual.get(field) != value for field, value in actual_expected.items()) or
+            any(not _is_nonnegative_int(actual.get(field)) for field in renderer_fields) or
+            actual["basis_bank_calls"] + actual["basis_fallback_calls"] != transforms // 2 or
+            actual["coordinate_guard_fallbacks"] > actual["basis_fallback_calls"] or
+            not isinstance(durations, dict) or any(not _is_finite_number(durations.get(field)) or durations[field] < 0
+                for field in ("basis_rendering", "correlation_and_projection", "gain_innovations"))):
+        raise CampaignError("correlated gain shadow must report actual full work and observed basis costs")
+    if (not _is_nonnegative_int(search.get("diagnostic_workspace_bytes")) or search["diagnostic_workspace_bytes"] == 0 or
+            not _is_nonnegative_int(search.get("workers")) or search["workers"] == 0 or
+            not _is_nonnegative_int(search.get("active_timing_lanes")) or search["active_timing_lanes"] != min(search["workers"], timings) or
+            not _is_finite_number(search.get("scoring_seconds")) or search["scoring_seconds"] < 0):
+        raise CampaignError("correlated gain component requires its measured score and bounded stage resources")
+    return quote
+
+
+def _validate_correlated_gain_shadow(search: dict[str, Any], plan: dict[str, Any], digest: str, samples: int) -> None:
+    quote = _validate_correlated_gain_evidence(search, plan, samples)
+    if (search.get("all_valid") is not True or search.get("observation_sha256") != digest or
+            plan.get("hf_correlated_gain_shadow_quote") != quote):
+        raise CampaignError("correlated gain shadow must bind the requested aperture digest and full upfront work")
+    resources = plan.get("receiver_resources", {})
+    memory_fields = ("process_and_stacks_reserved_bytes", "diagnostic_workspace_bytes", "coarse_workspace_reserved_bytes", "memory_limit_bytes")
+    if (not isinstance(resources, dict) or not _is_nonnegative_int(resources.get("total_memory_limit_bytes")) or
+            any(not _is_nonnegative_int(search.get(field)) or search[field] == 0 for field in memory_fields) or
+            search["memory_limit_bytes"] != plan.get("receiver_memory_limit_bytes") or
+            search["memory_limit_bytes"] > resources["total_memory_limit_bytes"] or
+            search["process_and_stacks_reserved_bytes"] + max(search["diagnostic_workspace_bytes"],
+                search["coarse_workspace_reserved_bytes"]) > search["memory_limit_bytes"] or
+            search["workers"] != resources.get("workers") or
+            not _is_finite_number(search.get("canonical_preparation_seconds")) or search["canonical_preparation_seconds"] < 0):
+        raise CampaignError("correlated gain shadow must retain the declared memory and worker ceilings")
+
+
+def _validate_correlated_gain_calendar_quote(plan: dict[str, Any], workers: int, horizon: int) -> int | None:
+    slots = plan.get("public_slots")
+    if not isinstance(slots, list) or not slots or len(slots) != horizon:
+        raise CampaignError("correlated gain preflight must cover every planned public slot")
+    expected = dict.fromkeys(("maximum_aperture_samples", "maximum_public_timing_atoms", "maximum_basis_products",
+                              "maximum_full_fft_row_stage_charge", "maximum_scalar_innovations"), 0)
+    for index, slot in enumerate(slots):
+        observation = slot.get("observation") if isinstance(slot, dict) else None
+        if (not isinstance(observation, dict) or slot.get("index") != index or
+                not _is_nonnegative_int(observation.get("first")) or not _is_nonnegative_int(observation.get("stop")) or
+                observation["stop"] <= observation["first"]):
+            raise CampaignError("correlated gain preflight requires each complete public aperture")
+        samples = observation["stop"] - observation["first"]
+        timings, _, work = _correlated_gain_geometry(plan, samples)
+        if not _correlated_gain_shape_admitted(timings, work):
+            raise CampaignError("correlated gain preflight exceeds the fixed work envelope")
+        values = (samples, timings, work["basis_products"], work["full_fft_row_stage_charge"], work["scalar_innovations"])
+        for key, value in zip(expected, values):
+            expected[key] = max(expected[key], value)
+
+    if "hf_correlated_gain_calendar_quote" not in plan and (
+            expected["maximum_basis_products"] <= 160_000_000 and
+            expected["maximum_full_fft_row_stage_charge"] <= 3_800_000_000 and
+            expected["maximum_scalar_innovations"] <= 650_000_000):
+        return None  # Archived short receipts predate the all-slot preflight.
+    quote = plan.get("hf_correlated_gain_calendar_quote")
+    expected.update(planned_public_slots=horizon, workers=workers)
+    if (not isinstance(quote, dict) or any(not _is_nonnegative_int(quote.get(key)) or quote[key] != expected[key]
+                                          for key in expected) or
+            not _is_nonnegative_int(quote.get("maximum_additional_workspace_bytes")) or
+            quote["maximum_additional_workspace_bytes"] == 0):
+        raise CampaignError("correlated gain requires the full-calendar work and workspace quote at the resolved workers")
+    return quote["maximum_additional_workspace_bytes"]
+
+
+def _validate_correlated_gain_receiver(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    plan = receipt["plan"]
+    report = receipt.get("hf_correlated_gain_receiver")
+    if not episode.get("hf_correlated_gain_receiver", False):
+        if "hf_correlated_gain_receiver" in receipt:
+            raise CampaignError("unrequested correlated gain receiver execution")
+        return
+    slots = receipt.get("slots")
+    resources = plan.get("receiver_resources", {})
+    if not isinstance(resources, dict):
+        raise CampaignError("correlated gain receiver requires the native resource allocation")
+    workers, hardware = resources.get("workers"), resources.get("hardware_threads")
+    horizon = plan.get("scored_slot_horizon")
+    if (not isinstance(report, dict) or report.get("experimental") is not True or report.get("fixed_weight") != .25 or
+            report.get("telemetry_overflow") != 0 or report.get("telemetry_duplicates") != 0 or
+            report.get("canonical_preparation_reused") is not True or not isinstance(slots, list) or not slots or
+            not isinstance(report.get("scored_components"), list) or len(report["scored_components"]) > len(slots) or
+            not _is_nonnegative_int(horizon) or not 0 < horizon <= 65536 or
+            plan.get("correlated_gain_evaluator_reserved_bytes") != 65536 * horizon or
+            not _is_nonnegative_int(workers) or not _is_nonnegative_int(hardware) or hardware == 0 or workers != 2 * hardware or
+            resources.get("workers_explicit") is not False):
+        raise CampaignError("correlated gain receiver must retain fixed native mixture and complete bounded fallback telemetry")
+    maximum_workspace = _validate_correlated_gain_calendar_quote(plan, workers, horizon)
+    by_index = {slot.get("index"): slot for slot in slots if isinstance(slot, dict) and _is_nonnegative_int(slot.get("index"))}
+    if len(by_index) != len(slots) or any(i >= horizon or not isinstance(slot.get("correlated_gain_executed"), bool)
+                                          for i, slot in by_index.items()):
+        raise CampaignError("correlated gain receiver requires an invocation marker on every native slot")
+    attempted = set()
+    last = -1
+    for model in report["scored_components"]:
+        index = model.get("slot_index") if isinstance(model, dict) else None
+        native = by_index.get(index) if _is_nonnegative_int(index) else None
+        if (native is None or index <= last or native.get("complete") is not True or native.get("all_valid") is not True or
+                not _is_nonnegative_int(native.get("first_sample")) or not _is_nonnegative_int(native.get("stop_sample")) or
+                native["stop_sample"] <= native["first_sample"] or not _is_nonnegative_int(native.get("workers")) or
+                not 0 < native["workers"] <= workers or model.get("workers") != native["workers"] or
+                "canonical_preparation_seconds" in model):
+            raise CampaignError("correlated gain fallback must reuse one ordered complete valid native slot and admitted lanes")
+        _validate_correlated_gain_evidence(model, plan, native["stop_sample"] - native["first_sample"])
+        quote = native.get("workspace_peak_bytes")
+        if (not _is_nonnegative_int(quote) or model["diagnostic_workspace_bytes"] > quote or
+                maximum_workspace is not None and model["diagnostic_workspace_bytes"] > maximum_workspace):
+            raise CampaignError("correlated gain fallback exceeds the native slot workspace quote")
+        attempted.add(index)
+        last = index
+    executed = {index for index, slot in by_index.items() if slot["correlated_gain_executed"]}
+    if attempted != executed or any(slot.get("reason") == "bounded_supplemental_data_evidence" and i not in attempted
+                                   for i, slot in by_index.items()):
+        raise CampaignError("each executed native correlated gain fallback requires its actual evidence receipt")
+    for index, native in by_index.items():
+        first, stop = native.get("first_sample"), native.get("stop_sample")
+        fine = native.get("fine_candidates")
+        if (not _is_nonnegative_int(first) or not _is_nonnegative_int(stop) or stop <= first or
+                not _is_nonnegative_int(fine) or native.get("decision") not in {"data", "quiet", "ambiguous"} or
+                not isinstance(native.get("complete"), bool) or not isinstance(native.get("all_valid"), bool)):
+            raise CampaignError("correlated gain receiver requires the eligible native slot geometry and outcome")
+        if (index not in attempted and native["complete"] and native["all_valid"] and fine > 0 and
+                native["decision"] != "data" and native.get("reason") != "coherent_line_in_public_data_aperture"):
+            timings, _, work = _correlated_gain_geometry(plan, stop - first)
+            if _correlated_gain_shape_admitted(timings, work):
+                raise CampaignError("eligible native quiet or ambiguous slot omitted the correlated gain fallback")
 
 
 def _validate_gannon_gain_variance(receipt: dict[str, Any], physical: dict[str, Any]) -> None:
@@ -3658,6 +3909,11 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     variance_requested = episode.get("hf_gannon_gain_variance_diagnostic", False)
     if plan.get("hf_gannon_gain_variance_diagnostic_requested", False) is not variance_requested:
         raise CampaignError("Gannon gain variance request does not match the frozen episode")
+    correlated_gain_requested = episode.get("hf_correlated_gain_shadow", False)
+    if plan.get("hf_correlated_gain_shadow_requested", False) is not correlated_gain_requested:
+        raise CampaignError("correlated gain request does not match the frozen episode")
+    if plan.get("hf_correlated_gain_receiver_requested", False) is not episode.get("hf_correlated_gain_receiver", False):
+        raise CampaignError("correlated gain receiver request does not match the frozen episode")
     filter_requested = episode.get("hf_phase_filter", False)
     if plan.get("hf_phase_filter_requested", False) is not filter_requested:
         raise CampaignError("native phase filter request does not match the frozen episode")
@@ -3805,6 +4061,7 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
                 raise CampaignError("FEC receive receipt requires the decoded-message endpoint")
         if outcomes.get("correct_decoded_complete") is True:
             _validate_decoded_success(receipt, episode, fec)
+        _validate_correlated_gain_receiver(receipt, episode)
     elif episode["mode"] == "channel":
         channel = receipt.get("channel")
         if not isinstance(channel, dict) or not isinstance(channel.get("contains_signal_energy"), bool):
@@ -3886,6 +4143,10 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
         if (not isinstance(diagnostic, dict) or diagnostic.get("component_complete") is not True or
                 not _is_nonnegative_int(diagnostic.get("slot_index")) or diagnostic["slot_index"] != selected):
             raise CampaignError("HF search requires a completed public-search diagnostic for the selected slot")
+        if correlated_gain_requested:
+            _validate_correlated_gain_shadow(diagnostic, plan, digest, observation["stop"] - observation["first"])
+        elif diagnostic.get("model") == "stationary_single_tap_complex_ar1":
+            raise CampaignError("unrequested correlated gain shadow")
         if diagnostic.get("refinement_enabled", False) is not refinement_requested:
             raise CampaignError("shadow phase refinement does not match the frozen request")
         if refinement_requested:
@@ -4531,7 +4792,8 @@ def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
         elif episode["mode"] == "diagnose":
             outcome = "component complete; no slot decision"
         elif episode["mode"] == "hf-search":
-            outcome = "public shadow search complete; no receiver decision"
+            outcome = ("correlated gain shadow complete; no receiver decision" if episode.get("hf_correlated_gain_shadow") else
+                       "public shadow search complete; no receiver decision")
         elif episode["mode"] == "gui-varying":
             outcome = "canonical varying component complete; no receiver decision or message completion"
         else:

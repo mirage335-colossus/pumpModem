@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "name": "hf-correlated-gain-receiver",
+  "purpose": "Frozen after the lens shadow cleared both standalone references and the unchanged +10 phase-screen shadow fell short of presence. Compare the fixed correlated gain supplement through canonical complete reception. Require the original lens B full IQ and validity SHA-256 80ff806e6e6dab7d3ef1311c725c4261435108af56a2d801959d5e3d7f5b2b42 and selected SHA-256 c087a7e77465c07b674cd5cb97f8340645241dbc5af83912f554f29717fe03a8 at chunk 257, identical correlated model bit mass on slot 2, correct delivered B and two scored quiet slots. Check the fresh, ambient and negative controls, and retain original phase-screen accepted-fragment regression. Test the one fixed +11 dB-Hz phase-screen pair; stop without further SNR points, parameter fitting or threshold changes. Any censor or wrong accepted message remains an observed gate outcome.",
+  "max_wall_seconds": 2700,
+  "per_trial_wall_seconds": 300,
+  "max_trials": 9,
+  "max_samples": 3072000,
+  "episodes": [
+    {"id": "lens-holdout-b0-candidate", "scenario": "hf-wave-lens-holdout", "mode": "receive", "control": "wanted", "waveform": "reference", "seed": 69002, "noise_seed": 79002, "bit_seconds": 64, "message": "B", "cn0_db_hz": 0, "chunk": 257, "capture_digest_slot": 2, "hf_correlated_gain_receiver": true},
+    {"id": "lens-fresh-c0-baseline", "scenario": "hf-wave-lens", "mode": "receive", "control": "wanted", "waveform": "reference", "seed": 71003, "noise_seed": 81003, "bit_seconds": 64, "message": "C", "cn0_db_hz": 0},
+    {"id": "lens-fresh-c0-candidate", "scenario": "hf-wave-lens", "mode": "receive", "control": "wanted", "waveform": "reference", "seed": 71003, "noise_seed": 81003, "bit_seconds": 64, "message": "C", "cn0_db_hz": 0, "hf_correlated_gain_receiver": true},
+    {"id": "lens-ambient-a0-candidate", "scenario": "hf-wave-lens-off", "mode": "receive", "control": "wanted", "waveform": "reference", "seed": 69001, "noise_seed": 79001, "bit_seconds": 64, "message": "A", "cn0_db_hz": 0, "hf_correlated_gain_receiver": true},
+    {"id": "lens-plus10-noise-candidate", "scenario": "hf-wave-lens", "mode": "receive", "control": "noise", "waveform": "reference", "seed": 71004, "noise_seed": 81004, "bit_seconds": 64, "message": "A", "cn0_db_hz": 10, "hf_correlated_gain_receiver": true},
+    {"id": "lens-plus10-wrong-key-candidate", "scenario": "hf-wave-lens", "mode": "receive", "control": "wrong-key", "waveform": "reference", "seed": 71005, "noise_seed": 81005, "bit_seconds": 64, "message": "A", "cn0_db_hz": 10, "hf_correlated_gain_receiver": true},
+    {"id": "screens-holdout-b0-candidate", "scenario": "hf-phase-screens-holdout", "mode": "receive", "control": "wanted", "waveform": "reference", "seed": 70002, "noise_seed": 80002, "bit_seconds": 64, "message": "B", "cn0_db_hz": 0, "capture_digest_slot": 11, "hf_correlated_gain_receiver": true},
+    {"id": "screens-primary-a11-baseline", "scenario": "hf-phase-screens", "mode": "receive", "control": "wanted", "waveform": "reference", "seed": 70001, "noise_seed": 80001, "bit_seconds": 64, "message": "A", "cn0_db_hz": 11, "capture_digest_slot": 10},
+    {"id": "screens-primary-a11-candidate", "scenario": "hf-phase-screens", "mode": "receive", "control": "wanted", "waveform": "reference", "seed": 70001, "noise_seed": 80001, "bit_seconds": 64, "message": "A", "cn0_db_hz": 11, "capture_digest_slot": 10, "hf_correlated_gain_receiver": true}
+  ]
+}

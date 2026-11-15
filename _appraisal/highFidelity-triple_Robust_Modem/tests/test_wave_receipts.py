@@ -90,6 +90,13 @@ class WaveReceiptTests(unittest.TestCase):
         self._episode("plan")
         self._episode("channel")
         self._episode("hf-search", hf_physical_diagnostic=True)
+        for mode in ("plan", "channel", "receive"):
+            self._episode(mode, fec="rs20")
+        for mode in ("plan", "channel", "receive", "hf-search"):
+            with self.assertRaises(run.CampaignError):
+                self._episode(mode, fec="rs60", hf_physical_diagnostic=mode == "hf-search")
+        with self.assertRaises(run.CampaignError):
+            self._episode("hf-search", fec="rs20", hf_physical_diagnostic=True)
         with self.assertRaises(run.CampaignError):
             self._episode("hf-search")
         with self.assertRaises(run.CampaignError):
@@ -286,6 +293,35 @@ class WaveReceiptTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(run.CampaignError):
                 run._validate_wave_public_calendar(dict(plan, **{field: value}), shadow,
                                                    selected["stop"], plan["source_stop_sample"] + 84)
+
+    def test_causal_wave_shadow_counts_the_source_prefix_from_native_layout(self):
+        lens, lens_episode = self._native_wave_receipt()
+        phase = json.loads((APP / "tests/fixtures/hf_phase_screens_off_native_receive.json").read_bytes())
+        phase_episode = run._read_campaign(APP / "campaigns/hf-phase-screens-receiver.json")["episodes"][0]
+        for receipt, baseline_episode, validate in ((lens, lens_episode, run._validate_wave_optics),
+                                                      (phase, phase_episode, run._validate_phase_screens)):
+            with self.subTest(scenario=baseline_episode["scenario"]):
+                validate(receipt, baseline_episode)
+                episode = dict(baseline_episode, mode="hf-search", search_slot=0)
+                plan, channel = receipt["plan"], receipt["channel"]
+                plan["public_slots"] = plan["public_slots"][:1]
+                aperture = plan["public_slots"][0]["observation"]
+                horizon = aperture["stop"]
+                source_stop = plan["source_stop_sample"]
+                self.assertLess(horizon, source_stop)
+                plan.update(horizon_samples=horizon, represented_seconds=horizon / 1920, search_observation=aperture,
+                            scored_slot_horizon=1, planned_uncontaminated_quiet_slots=0)
+                if validate is run._validate_wave_optics:
+                    plan.update(full_crossing_rendered=False, screen_exposure_scope="partial_rendered_observation")
+                else:
+                    plan["screen_horizon_seconds"] = horizon / 1920
+                channel.update(samples=horizon, hashed_samples=horizon, source_samples=horizon)
+                validate(receipt, episode)
+                for field, value in (("source_samples", source_stop), ("source_samples", horizon-1),
+                                     ("hashed_samples", horizon-1), ("samples", horizon+1)):
+                    with self.subTest(field=field, value=value), self.assertRaisesRegex(run.CampaignError, "source prefix"):
+                        altered = dict(receipt, channel=dict(channel, **{field: value}))
+                        validate(altered, episode)
 
     def test_actual_native_wave_receipt_malformed_controls(self):
         mutations = (

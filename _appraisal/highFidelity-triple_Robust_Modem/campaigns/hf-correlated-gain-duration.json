@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "name": "hf-correlated-gain-duration",
+  "purpose": "Test native correlated-gain fallback at the retained longer approximately equal-incident-energy lens point. The original uncoded receiver already delivered B at requested 128 seconds and -3 dB-Hz with full IQ and validity SHA-256 700d820cd07a04824647b294266472725d0252279647f7554f9eed6fb237029b. Require that same full digest, slot 2 geometry, physical table 93e1614361dd8f5ec053e6a5b7fd53cc2a46f5fe7e38998c565ef23ad7815542, and incident and received energies. Record the new selected digest. Preserve exact B and scored final quiet at the longer point. Same-calendar fresh noise checks the full unsuccessful-search cost and quiet decisions. Stop after two attempts with no new SNR points or inference parameter changes.",
+  "max_wall_seconds": 1200,
+  "per_trial_wall_seconds": 600,
+  "max_trials": 2,
+  "max_samples": 5000000,
+  "episodes": [
+    {"id": "lens-holdout-b-long-minus3-candidate", "scenario": "hf-wave-lens-holdout", "mode": "receive", "control": "wanted", "waveform": "reference", "seed": 69002, "noise_seed": 79002, "bit_seconds": 128, "message": "B", "cn0_db_hz": -3, "capture_digest_slot": 2, "hf_correlated_gain_receiver": true},
+    {"id": "lens-holdout-long-minus3-noise-candidate", "scenario": "hf-wave-lens-holdout", "mode": "receive", "control": "noise", "waveform": "reference", "seed": 69002, "noise_seed": 81006, "bit_seconds": 128, "message": "B", "cn0_db_hz": -3, "hf_correlated_gain_receiver": true}
+  ]
+}

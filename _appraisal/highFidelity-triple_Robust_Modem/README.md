@@ -7,6 +7,18 @@ groundwave, 1–30 MHz skywave, and Earth–Moon–Earth**. All appraisal code,
 fixtures, documentation and generated evidence remain in this directory.
 Python launches native executables and analyzes receipts; it implements no DSP.
 
+The [correlated-presence follow-up](hf-correlated-presence.md) demonstrates
+two complete-message repairs on matched captures using a normalized public
+gain-history search. It preserves a fresh payload, ambient reception and
+quiet negative controls, but the original separated-screen incorrect-space
+acceptance remains: general promotion fails. Its duration follow-up removes
+an artificial pilot admission limit, preserves the archived 139.2-second
+case at nearly equal energy, and keeps its complete noise control quiet. The
+[fragment-integrity follow-up](hf-fragment-integrity.md) separately verifies
+the existing protected codecs and delivers the failed lens payload using
+RS20, with its roughly fivefold duration and energy costs disclosed. Codec
+checks, shadow evidence and complete-message reception remain distinct.
+
 The [transverse wave-optics extension](hf-wave-optics.md) adds a plasma lens
 whose focusing, cancellation, phase and frequency response share one density
 model. The [separated-screen extension](hf-phase-screens.md) propagates the
@@ -129,9 +141,24 @@ From the repository root:
 ```
 
 This configures an ignored `.build/` and links the production C++ modem.
-The current wave/scattering and matched-diagnostic extension passed
+The current correlated-presence and fragment-integrity extension passed
+**34/34 CTest groups in 89.13 s**
+([log](local-evidence/hf-presence-integrity-tests.log)). The subsequent duration
+admission changes passed the geometry check and all three affected integration,
+runner and waveform-receipt groups in 60.19 s, including 119 runner and 13
+waveform-receipt checks
+([records](local-evidence/hf-duration-preflight/)). The final duration campaign
+binds to appraisal source
+`d6260db20cec9a95a4c2507e6d5619ba6cdd3b8378575bc0a03deaa0aca289f0`;
+earlier comparisons retain their own exact build identities in the
+[correlated-presence guide](hf-correlated-presence.md). Canonical production
+source is unchanged. All fourteen new complete-receiver observations validate
+their receipts; two retain valid communication failures. A valid receipt is
+not a successful message or promotion of the candidate.
+
+The preceding wave/scattering and matched-diagnostic extension passed
 **32/32 CTest groups in 83.06 s**, including 129 runner and wave-receipt
-checks ([final log](local-evidence/hf-wave-final-tests.log)). The final
+checks ([final log](local-evidence/hf-wave-final-tests.log)). Its
 appraisal source digest is
 `178d4ea3eee441faa9301086ac7337749394d3ee62c742bc76b118a8c17b0e5c`;
 canonical native source remains

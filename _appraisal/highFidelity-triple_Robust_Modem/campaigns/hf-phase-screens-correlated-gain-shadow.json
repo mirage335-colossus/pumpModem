@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "name": "hf-phase-screens-correlated-gain-shadow",
+  "purpose": "After the lens shadow met its standalone reference, test the identical frozen correlated gain model on the retained +10 dB-Hz primary A slot 10 miss. Require original selected IQ and validity SHA-256 029e8ffbfa31481e79849005a611c49f7af1618796c440948a508d804806cdae and qualified propagation table 41cdf388c29edd4e7b43d9e469668ea8e1ba4a5cfd9fca9670ae19937f965b37. Keep the full timing lattice, closed ±5 Hz band, fixed twelve gain laws, one-eighth standalone mass, and native presence and bit-gap references. Stop after one complete shadow attempt regardless of outcome. A positive component finding requires native mixed evidence and complete-message controls.",
+  "max_wall_seconds": 90,
+  "per_trial_wall_seconds": 90,
+  "max_trials": 1,
+  "max_samples": 3000000,
+  "episodes": [
+    {
+      "id": "screens-primary-plus10-slot10-correlated-gain",
+      "scenario": "hf-phase-screens",
+      "mode": "hf-search",
+      "control": "wanted",
+      "waveform": "reference",
+      "seed": 70001,
+      "noise_seed": 80001,
+      "bit_seconds": 64,
+      "message": "A",
+      "cn0_db_hz": 10,
+      "search_slot": 10,
+      "search_timing": "full",
+      "hf_correlated_gain_shadow": true
+    }
+  ]
+}
