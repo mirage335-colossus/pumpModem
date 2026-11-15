@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "name": "hf-vector-oblique-boundary",
+  "purpose": "Declared after primary0/10 and holdout0/10 failures, before these followup outcomes. Fixed +20 incident C/N0 for primary, flat same-antenna control and independent B field establish a stronger positive control or bracket. One matched +10 slot0 replay invokes existing private native target/absent/alternate twins only after blind completion; full input/table/calendar/decisions must match original +10. At most one additional primary+30 followup is admitted if primary+20 still fails. No threshold, law, field or model retuning; not a population sensitivity estimate. A fixed primary+20 wrong-key control also tests the stronger signal, instead of assuming the original weak-signal/clock controls cover it.",
+  "max_wall_seconds": 1080,
+  "per_trial_wall_seconds": 300,
+  "max_trials": 5,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "id": "primary-A-20",
+      "scenario": "hf-vector-oblique",
+      "waveform": "reference",
+      "seed": 70501,
+      "noise_seed": 80501,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 20,
+      "max_wall_seconds": 180
+    },
+    {
+      "id": "flat-layer-A-20",
+      "scenario": "hf-vector-oblique-off",
+      "waveform": "reference",
+      "seed": 70501,
+      "noise_seed": 80501,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 20,
+      "max_wall_seconds": 180
+    },
+    {
+      "id": "holdout-B-20",
+      "scenario": "hf-vector-oblique-holdout",
+      "waveform": "reference",
+      "seed": 70502,
+      "noise_seed": 80502,
+      "bit_seconds": 64,
+      "message": "B",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 20,
+      "max_wall_seconds": 180
+    },
+    {
+      "id": "primary-A-10-known-channel-slot0",
+      "scenario": "hf-vector-oblique",
+      "waveform": "reference",
+      "seed": 70501,
+      "noise_seed": 80501,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 10,
+      "max_wall_seconds": 240,
+      "capture_digest_slot": 0,
+      "hf_target_presence_diagnostic": true
+    },
+    {
+      "id": "primary-A-20-wrong-key",
+      "scenario": "hf-vector-oblique",
+      "waveform": "reference",
+      "seed": 70501,
+      "noise_seed": 80501,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wrong-key",
+      "cn0_db_hz": 20,
+      "max_wall_seconds": 300
+    }
+  ]
+}

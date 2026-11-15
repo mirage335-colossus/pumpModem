@@ -237,14 +237,15 @@ physics before use near a turning point or cutoff.
 
 The focused audit found no qualifying publicly downloadable, calibrated,
 multi-event broadband complex HF channel capture. This is an evidence gap, not
-a claim that no such files exist. Four useful leads, ordered by what they can
+a claim that no such files exist. Five useful leads, ordered by what they can
 actually validate, are:
 
 | Lead | Public observable and availability | Barrier to the target validation |
 | --- | --- | --- |
 | [ION-FAST Cyprus–Vasilsursk tests, Zenodo 10.5281/zenodo.7861107](https://zenodo.org/records/7861107); [instrument paper](https://doi.org/10.3390/atmos15020188) | Record page lists a 499.6 MB ZIP with three chirp-mode IQ captures on 15 April 2023 at 11:05:20, 11:20:20 and 11:35:20 UT, plus commercial-ionosonde WAVs and an ionogram notebook. This is the clearest public raw-IQ lead. | Same path/site/day, not independent storm events. Page has no license field. Public metadata/paper do not establish capture encoding, sample clock, volts/phase calibration, or an end-to-end calibrated channel; chirp sounding is not proof of broadband modem transfer recovery. No archive download was made. |
-| [McMurdo–South Pole oblique sounder, Zenodo 10.5281/zenodo.3478267](https://zenodo.org/records/3478267); [Chartier et al. (2020)](https://doi.org/10.5194/amt-13-3023-2020) | The public deposit lists `oblique_hf_data.zip` (30.2 MB). The paper documents the measured link and sounding: 12 frequency hops/min, 50 kHz baseband, 1,000-baud PRBS, GPS-timed transmissions. | Paper says raw IQ was stored on-site in DigitalRF for future retrieval; the deposit is used as figure/data products and raw complex IQ was not verified in it. License field blank. One pilot link/population, no calibrated broadband channel package established. |
+| [McMurdo–South Pole oblique sounder, Zenodo 10.5281/zenodo.3478267](https://zenodo.org/records/3478267); [Chartier et al. (2020)](https://doi.org/10.5194/amt-13-3023-2020) | The public deposit lists `oblique_hf_data.zip` (30.2 MB). The paper documents the measured link and sounding: 12 frequency hops/min, 50 kHz baseband, 1,000-baud PRBS, GPS-timed transmissions. | The complete ZIP directory and representative spectral, metadata and daily members were inspected. Nonhidden payloads are 18,330 pickle products and 82 PNGs; the sampled arrays contain real Doppler/power measurements and range axes, not complex IQ. The paper says raw DigitalRF IQ was stored on-site for later retrieval. No calibrated broadband channel package is established; the blank license field also remains unresolved. |
 | [Ponomarchuk et al. (2026) storm study](https://doi.org/10.1016/j.asr.2026.03.068) | Publisher abstract identifies observations on Magadan–Irkutsk (3,034 km) and Norilsk–Irkutsk (2,030 km) across ten 2023–25 storms. Oblique sounding supports event-level changes in observed modes/MOF, off-great-circle propagation, additional diffuse delayed returns and outages. | The abstract/full-page result exposes event/ionogram observables, not raw complex IQ, sample timing, channel calibration or a downloadable capture package. It validates path/mode phenomena, not the complex waveform response needed for broadband replay. |
+| [Cameron et al. (2026)](https://doi.org/10.1029/2025RS008395); [Harvard Dataverse](https://doi.org/10.7910/DVN/KZAO3G) | Public API metadata identifies 42.8 MB Ottawa–Alert and 219.5 MB Qaanaaq–Alert ZIPs of dated/frequency-indexed MATLAB signal-parameter files. A bounded Ottawa prefix and representative MATLAB headers were inspected; fields include time of flight, Doppler, spreads, SNR, power and arrival angles. | Sampled arrays are real parameter estimates, with no complex impulse-response or continuous calibrated I/Q sequence. The remaining archive payloads were not exhaustively inspected. The paper provides path/frequency observations, including both storm losses and occasionally stable enhanced Es; this does not define a universal adverse-day distribution. |
 | [DORS/DOTS oblique ionosonde, Ayliffe et al. (2019)](https://doi.org/10.1029/2018RS006681) | The instrument paper describes downconverted/decimated I/Q soundings, with 2–45 MHz sweeps; raw files contain sampled channel data, while processed ionograms are much smaller. It is the most direct identified route to request oblique raw sounder data. | Raw files are Commonwealth of Australia property and access is case-by-case; the paper does not provide an open raw-IQ archive or license. Instrument IQ is not itself evidence of end-to-end voltage/phase calibration, and a particular disturbed multi-event cohort was not verified as obtainable. |
 
 Use the storm study to check whether constructed cases can produce plausible
@@ -253,6 +254,55 @@ not validate the screen realization or waveform statistics. A useful next
 evidence step is an authorized raw-IQ request for a named event/path, including
 calibration and excitation metadata. Until that succeeds, keep MPS/scintillation
 cases labeled as physical constructions and retain measured-observable limits.
+
+The 14 November 2026 follow-up also distinguishes published measurements from
+accessible raw captures. [Nissen and Bello (2003)](https://doi.org/10.1029/2002RS002746)
+report nominal 1 MHz complex impulse responses on a 3,100 km auroral path
+during March–April 1992, including intervals associated with M-class flares.
+Their approximately 100 retained measurements exclude significant multimode
+profiles; equipment filtering also affects the measured delay correlation.
+These are valuable measured single-mode statistics, already examined in
+[_ref, Fable 32](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/32-skywave-dispersion-highlatitude-equatorial.md).
+No downloadable raw response series was located in the reviewed sources.
+The publication can constrain selected distribution summaries; it cannot
+supply a replay of the omitted multimode fades.
+
+[Robert T. Johnk's 2026 citizen-science sounder](https://usncursi.org/archive/nrsm/2026/papers/1011.pdf)
+offers a concrete acquisition method using repeated known sequences and
+GPS-referenced transmission/receiving equipment. Its worked example has a
+2.8 kHz USB passband, 6 kbaud sequence and 12 ksample/s audio recording;
+the latter two numbers do not establish 6 kHz channel bandwidth. It derives
+complex impulse responses but adjusts the delay origin and supplies no raw
+capture archive or per-capture calibration record. A usable acquisition needs
+the transmitted waveform, received audio/IQ, clock/gain/filter metadata,
+delay reference, antenna/path details, calibration and independent disturbed
+events. No outreach was performed. Bounded public archive reads, described
+below, cover the separate McMurdo and Cameron data products. These leads do
+not justify treating recorded receiver noise as a multiplicative channel.
+
+The new [archive inspection records](local-evidence/hf-vector-oblique-preflight/)
+replace an earlier metadata-only uncertainty for two leads. The McMurdo ZIP
+central directory has 18,530 entries, with 49 dated spectral folders from
+28 February through 3 June 2019. Its representative spectral pickle contains
+`dop_vel`, `max_pwr_db` and `int_pwr`; the inspected metadata adds range and
+Doppler axes, and a daily aggregate adds time. Static opcode inspection found
+real `f4`/`f8` arrays; no pickle was deserialized or executed. The directory
+contains no DigitalRF/HDF raw-recording files. This inspection does not certify
+every individual pickle payload, but it materially narrows what the deposit
+can supply.
+
+For the Cameron deposit, the public API was accessible even though the ordinary
+landing page required JavaScript verification. A 256 KiB HTTP-range read exposed
+20 complete early Ottawa MATLAB members. The inspected first member has 28 real
+variables, including `timeday`, `toflight`, `doppler`, `dopspread`, `delspread`,
+`snr`, `sigpow`, `azimuth`, `elevation`, mode/arrival summaries and `clock_oddity`.
+The known paper and metadata describe signal-parameter products. These data
+can constrain sampled path and spread statistics; treating them as a unique
+phase-bearing channel would require information that the inspected products
+do not provide. The full archives' published checksums were not verified from
+these partial reads. An initial bounded McMurdo full transfer hit its
+120-second limit; subsequent range reads supplied the directory and selected
+members without completing the large transfer.
 
 ## Trajectory diversity independent of receiver templates
 
@@ -625,3 +675,13 @@ public selection priors, investigate gain/phase assumptions with bounded
 discriminators, then require complete-message and negative-control evidence
 before promoting a receiver change. Neither raising energy nor increasing
 the historical search size alone establishes efficient use of that evidence.
+
+
+The [coupled oblique-vector implementation](hf-vector-oblique.md) now applies
+this distinction directly. Its finite Fourier-modal Maxwell operator retains
+upward/downward scattering, magnetic polarization and transverse diffraction
+from the same density field. The original order grid failed its numerical
+checks; increasing resolution without changing the physical fields qualified
+the primary and held-out constructions. This addresses a combined-physics gap
+within one explicit geometry. It does not turn the measured ranges above into
+a calibrated distribution or replace the missing raw wideband event data.

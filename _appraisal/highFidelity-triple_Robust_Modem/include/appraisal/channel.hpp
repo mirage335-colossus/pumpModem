@@ -3,6 +3,7 @@
 #include "appraisal/hf_fullwave_kernel.hpp"
 #include "appraisal/hf_magnetoionic_kernel.hpp"
 #include "appraisal/hf_phase_screens.hpp"
+#include "appraisal/hf_vector_oblique.hpp"
 #include "appraisal/hf_wave_optics.hpp"
 #include "appraisal/hf_ionosphere.hpp"
 #include "datapump/triad_modem_v3.hpp"
@@ -76,6 +77,7 @@ struct ChannelSpec {
     std::optional<HfMagnetoionicReflectionSpec> magnetoionic_reflection;
     std::optional<HfWaveOpticsSpec> wave_optics;
     std::optional<HfPhaseScreensSpec> phase_screens;
+    std::optional<HfVectorObliqueSpec> vector_oblique;
     Resonator transmitter;
     Noise noise;
     Frontend frontend;
@@ -94,6 +96,7 @@ struct FullwaveReflectionUnavailable : std::invalid_argument { using std::invali
 struct MagnetoionicReflectionUnavailable : std::invalid_argument { using std::invalid_argument::invalid_argument; };
 struct HfWaveOpticsUnavailable : std::invalid_argument { using std::invalid_argument::invalid_argument; };
 struct HfPhaseScreensUnavailable : std::invalid_argument { using std::invalid_argument::invalid_argument; };
+struct HfVectorObliqueUnavailable : std::invalid_argument { using std::invalid_argument::invalid_argument; };
 struct HfFullwaveReflectionReport {
     struct Region {
         std::uint64_t samples = 0;
@@ -139,6 +142,15 @@ struct HfPhaseScreensReport {
     double source_minimum_frequency_hz = 0., source_maximum_frequency_hz = 0.;
     long double incident_energy = 0., selected_energy = 0.;
 };
+struct HfVectorObliqueReport {
+    HfVectorObliqueChecks checks;
+    HfVectorObliqueSpec spec;
+    std::string table_sha256;
+    std::size_t table_workspace_bytes = 0, stream_workspace_bytes = 0;
+    double preparation_seconds = 0., retarded_peak_error_bound = 0.;
+    double source_minimum_frequency_hz = 0., source_maximum_frequency_hz = 0.;
+    long double incident_energy = 0., selected_energy = 0.;
+};
 struct ChannelReport {
     std::uint64_t samples = 0, source_samples = 0, impulse_events = 0, clipped_samples = 0;
     std::size_t workspace_bytes = 0;
@@ -148,6 +160,7 @@ struct ChannelReport {
     std::optional<HfMagnetoionicReflectionReport> magnetoionic_reflection;
     std::optional<HfWaveOpticsReport> wave_optics;
     std::optional<HfPhaseScreensReport> phase_screens;
+    std::optional<HfVectorObliqueReport> vector_oblique;
 };
 // A bounded, single-owner, forward renderer. It never rewinds or reseeds the
 // canonical Emission. Horizon is an evaluator/resource bound, never RX truth.

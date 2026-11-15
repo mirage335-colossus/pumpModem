@@ -876,6 +876,73 @@ def complete_service_messages(receipt: dict) -> None:
 
 
 class CampaignValidationTests(unittest.TestCase):
+    def test_vector_oblique_scope_keeps_band_and_receiver_controls_honest(self):
+        base = {"id": "vector", "scenario": "hf-vector-oblique", "mode": "receive",
+                "waveform": "reference", "seed": 1, "control": "wanted", "bit_seconds": 64,
+                "cn0_db_hz": 0, "message": "A"}
+        for scenario in runner.HF_VECTOR_OBLIQUE_SCENARIOS:
+            runner._validate_episode(dict(base, scenario=scenario), 0, set(), 600, 5_000_000)
+        runner._validate_episode(dict(base, bit_seconds=128, cn0_db_hz=-3), 0, set(), 600, 5_000_000)
+        for cn0 in (20, 30):
+            runner._validate_episode(dict(base, cn0_db_hz=cn0), 0, set(), 600, 5_000_000)
+        for scenario in runner.HF_VECTOR_CHAIN_SCENARIOS:
+            runner._validate_episode(dict(base, scenario=scenario, cn0_db_hz=30), 0, set(), 600, 5_000_000)
+        diagnostic = dict(base, hf_target_presence_diagnostic=True, capture_digest_slot=0, cn0_db_hz=10)
+        runner._validate_episode(diagnostic, 0, set(), 600, 5_000_000)
+        for change in ({"scenario": "hf-vector-oblique-chain-off"}, {"control": "noise"},
+                       {"scenario": "hf-vector-oblique-holdout"}, {"helper": True}):
+            with self.subTest(diagnostic_change=change), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(diagnostic, **change), 0, set(), 600, 5_000_000)
+        for change in ({"helper": True}, {"backend": "cuda"}, {"fec": "rs20"},
+                       {"hf_correlated_gain_receiver": True}, {"hf_phase_filter_receiver": True},
+                       {"duration_seconds": 30}, {"bit_seconds": 192}, {"cn0_db_hz": 40},
+                       {"mode": "hf-search"}, {"control": "wrong-ordinal"},
+                       {"scenario": "hf-vector-oblique-chain-clocks", "bit_seconds": 128},
+                       {"scenario": "hf-vector-oblique-chain-clocks-tone", "cn0_db_hz": 10}):
+            with self.subTest(change=change), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(base, **change), 0, set(), 600, 5_000_000)
+
+    def test_vector_report_rejects_unqualified_or_mislabeled_physics(self):
+        # Schema fixture only; these invented values are not physical evidence.
+        report = runner._vector_oblique_spec("hf-vector-oblique")
+        for key in ("maximum_flux_excess", "maximum_solve_residual", "mesh_voltage_error",
+                    "refined_order_voltage_error", "maximum_edge_flux", "frequency_voltage_error",
+                    "fir_voltage_error", "period_averaged_discarded_energy_fraction",
+                    "interpolation_peak_error_bound", "retarded_peak_error_bound",
+                    "relative_voltage_error_at_minimum", "order_voltage_error",
+                    "period_averaged_raw_precursor_energy_fraction", "minimum_carrier_position_m"):
+            report[key] = 0.
+        report.update(table_qualified=True, table_sha256="0" * 64,
+            table_digest_scope="all 257 translating-position knots, all 129 retained lags, binary64 complex coefficients and knot slopes in canonical little-endian order; source identity binds generation and interpolation",
+            qualification_scope="finite-order bidirectional 2D cold collisional Maxwell scattering with periodic transverse density, oblique incidence and fixed antenna projection; limited RF/position/order/FIR witnesses do not establish random 3D fields, field calibration or environmental probabilities",
+            rf_solves=29, output_half_orders=24, checked_frequencies=13, checked_positions=2048,
+            checked_table_assembly_positions=54, table_assembly_voltage_error=0.,
+            matrix_products=1, minimum_vacuum_cosine=.5, minimum_carrier_power=.01,
+            maximum_carrier_power=1., certified_minimum_power_lower_bound=.009,
+            minimum_checked_band_power_lower_bound=.008, minimum_checked_band_power_witness_offset_hz=120.,
+            carrier_reflected_flux=.7, carrier_transmitted_flux=.2, carrier_scattered_reflected_flux=.3,
+            carrier_crosspolar_reflected_flux=.8, carrier_crosspolar_scattered_flux=.6,
+            preparation_peak_workspace_bytes=12 * 1024**2, table_workspace_bytes=1024,
+            stream_workspace_bytes=256, preparation_seconds=1., source_minimum_frequency_hz=-112.5,
+            source_maximum_frequency_hz=112.5, incident_energy_sample_sum=100., selected_energy_sample_sum=50.)
+        # Pure-TE cross-polar flux may exceed mixed-launch flux: different inputs.
+        runner._validate_vector_oblique_report(report, "hf-vector-oblique")
+        for key, value in (("table_qualified", False), ("checked_frequencies", 5),
+                ("output_half_orders", 8), ("maximum_edge_flux", 6e-5),
+                ("checked_table_assembly_positions", 0), ("table_assembly_voltage_error", 1e-8),
+                ("period_averaged_discarded_energy_fraction", 2e-6),
+                ("minimum_checked_band_power_witness_offset_hz", 960.),
+                ("minimum_checked_band_power_lower_bound", .02),
+                ("relative_voltage_error_at_minimum", .01), ("magnetic", False),
+                ("source_maximum_frequency_hz", 385.),
+                ("preparation_peak_workspace_bytes", 17 * 1024**2)):
+            with self.subTest(field=key), self.assertRaises(runner.CampaignError):
+                runner._validate_vector_oblique_report(dict(report, **{key: value}), "hf-vector-oblique")
+        legacy = dict(report)
+        legacy["maximum_discarded_energy_fraction"] = legacy.pop("period_averaged_discarded_energy_fraction")
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_vector_oblique_report(legacy, "hf-vector-oblique")
+
     def test_campaigns_are_finite_and_well_formed(self) -> None:
         for path in sorted((RUNNER.parent / "campaigns").glob("*.json")):
             campaign = runner._read_campaign(path)

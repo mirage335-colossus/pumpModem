@@ -38,6 +38,12 @@ target-presence comparison distinguish known-mean information from evidence
 available to the implemented receiver. These additions keep the physical
 approximation, numerical, communications and resource gates separate.
 
+The [coupled vector-oblique protocol](hf-vector-oblique.md) adds one shared
+Maxwell operator for magnetic polarization, transverse scattering and oblique
+reflection. Numerical rejection precedes receiver admission; finite-order,
+mesh, broadband, deep-cancellation, table-assembly and causal-stream checks
+remain separate from complete-message and negative-control outcomes.
+
 The [fragment-integrity protocol](hf-fragment-integrity.md) separates rejection
 of surviving fragments from successful protected waveform reception and
 charges the longer public calendar and total energy. The
@@ -86,6 +92,7 @@ uses shorter integration geometry for fast wiring checks.
 | Long observed HF voltages | `hf-gannon-1700`, `hf-gannon-2000`, `hf-gannon-2000-late`; [provenance](fixtures/hf-gannon-2024/README.md) | Two exact hourly 10 Hz records and bounded nonwrapped full-message stress | Recorded receiver noise becomes signal-proportional; no calibrated broadband CIR, physical blackout availability or field sensitivity; stored UTC grid does not establish independent clock metrology |
 | Transverse plasma lens | `hf-wave-lens-*`; [protocol](hf-wave-optics.md) | Exact scalar uniform-column phase, analytic Gaussian Fresnel expansion, independently checked focusing/cancellation and causal finite-band stream | Prescribed ideal unfolded single hop; scalar thin screen, no magnetoionic reflection or full oblique geometry; finite thickness changes the checked fade more than numerical error |
 | Separated finite plasma regions | `hf-phase-screens-*`; [protocol](hf-phase-screens.md) | Two 2D transverse irregularity fields with finite slab slices and forward angular-spectrum propagation; full-band, fine-null and thickness witnesses | Frozen common advection, scalar forward-wave approximation, limited fixed fields; not general 3D, independent evolving layers, backward scattering or a calibrated disturbed-event population |
+| Coupled oblique vector reflection | `hf-vector-oblique*`; [protocol](hf-vector-oblique.md) | Bidirectional Fourier-modal Maxwell scattering from one cold magnetized density field, fixed-antenna projection, finite-band causal stream and native clock/tone interactions | Single periodic x-z layer, y-invariant plane-wave geometry and slow frozen translation; no random 3D field, multiple hops, calibrated link loss or natural-event probabilities |
 | Detailed HF plus endpoints | `hf-wave-chain-*`; [protocol](hf-wave-optics.md#complete-receiver-and-endpoint-interaction-protocol) | Continuous native TX/physical-channel/native RX composition with actual clocks, oscillators and a continuing RF-plane tone | Selected fixed combinations, Helper off, fixed 1,920 Hz physical band; no all-GUI, broad receiver-hardware or real-time capacity qualification |
 | EME at 5.76 GHz | `eme-disk-episode`, `eme-patch-episode`, `eme-severe-episode` | Joint spectral approximation of the frozen beam-weighted monostatic delay–Doppler kernel, numerically checked through 360 s | Helper-off 1,920 Hz source only; not full retarded bistatic DE440 geometry or measured whole-disk IQ; legacy finite-grid and first-slot cases retain their narrower limits |
 | Noise/equipment controls | `noise-bursts`, `frontend-overload` | Constructed colored/impulse and blocker/AGC/clipping/quantization paths | Not a site capture, lightning law or named radio's RF nonlinearity |

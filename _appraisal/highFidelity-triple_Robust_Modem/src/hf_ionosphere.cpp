@@ -286,6 +286,12 @@ double channel_interpolation_tail_seconds(const ChannelSpec& spec, double fs) {
         return static_cast<double>(HfPhaseScreensTable::last_lag_samples() -
             HfPhaseScreensTable::first_lag_samples()) / fs;
     }
+    if (spec.vector_oblique) {
+        require(fs == HfVectorObliqueTable::sample_rate_hz,
+                "vector oblique propagation requires its fixed sample rate");
+        return static_cast<double>(HfVectorObliqueTable::last_lag_samples() -
+            HfVectorObliqueTable::first_lag_samples()) / fs;
+    }
     return static_cast<double>(spec.interpolation_half_width + detail::hf_dispersion_halo_samples(spec)) / fs;
 }
 

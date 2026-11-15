@@ -132,6 +132,22 @@ HF_PHASE_SCREENS_SCENARIOS = {
     "hf-phase-screens": (True, 0, 0., 42., 600.),
     "hf-phase-screens-holdout": (True, 1, 750., 35., 490.),
 }
+HF_VECTOR_OBLIQUE_SCENARIOS = {
+    # perturbations, magnetic field, physical realization, receiving antenna
+    "hf-vector-oblique": (True, True, 0, 0),
+    "hf-vector-oblique-off": (False, True, 0, 0),
+    "hf-vector-oblique-no-b": (True, False, 0, 0),
+    "hf-vector-oblique-holdout": (True, True, 1, 0),
+    "hf-vector-oblique-cross": (True, True, 0, 1),
+    "hf-vector-oblique-chain-off": (True, True, 0, 0),
+    "hf-vector-oblique-chain-clocks": (True, True, 0, 0),
+    "hf-vector-oblique-chain-clocks-tone": (True, True, 0, 0),
+}
+HF_VECTOR_CHAIN_SCENARIOS = {
+    "hf-vector-oblique-chain-off": (0., 0., 0., 0., False),
+    "hf-vector-oblique-chain-clocks": (1., -1., .01, -.01, False),
+    "hf-vector-oblique-chain-clocks-tone": (1., -1., .01, -.01, True),
+}
 GANNON_REPLAY = {"hf-gannon-1700": (17, 0.), "hf-gannon-2000": (20, 0.),
                  "hf-gannon-2000-late": (20, 1800.)}
 GANNON_RECORDS = {
@@ -454,6 +470,23 @@ def _validate_episode(item: Any, index: int, ids: set[str],
                 {"duration_seconds", "capture_lead_seconds", "hf_trajectory_seed", "hf_trajectory_offset_seconds",
                  "history_reference_delay_seconds"} & item.keys()):
             raise CampaignError(f"episodes[{index}]: phase-screen cases require fixed-geometry reference RRC Helper-off CPU plan/channel/receive or wanted hf-search, with admitted bit/SNR settings")
+    if item["scenario"] in HF_VECTOR_OBLIQUE_SCENARIOS:
+        chain = item["scenario"] in HF_VECTOR_CHAIN_SCENARIOS
+        if (mode not in ({"plan", "receive"} if chain else {"plan", "channel", "receive"}) or
+                item["waveform"] != "reference" or item.get("backend", "cpu") != "cpu" or
+                item.get("pulse", "rrc") != "rrc" or item.get("helper", False) or
+                item.get("fec", "off") != "off" or
+                control not in ({"wanted", "noise", "wrong-key"} if mode == "receive" else {"wanted"}) or
+                item.get("bit_seconds", 64) not in ({64} if chain else {64, 128}) or
+                item.get("cn0_db_hz", 0) not in ({0, 30} if chain else {-3, 0, 10, 20, 30}) or
+                any(item.get(field, False) for field in ("service_replay", "hf_phase_bank", "hf_public_phase_receiver",
+                    "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver",
+                    "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models",
+                    "hf_gui_clean_diagnostic", "hf_correlated_gain_shadow", "hf_correlated_gain_receiver")) or
+                {"duration_seconds", "capture_lead_seconds", "hf_trajectory_seed", "hf_trajectory_offset_seconds",
+                 "history_reference_delay_seconds", "search_slot", "search_timing"} & item.keys()):
+            raise CampaignError(f"episodes[{index}]: vector oblique cases require the frozen CPU reference RRC "
+                                "Helper/FEC-off geometry and ordinary receiver; endpoint cases require 64 seconds and C/N0 0 or 30")
     if item["scenario"] in GANNON_REPLAY:
         if (mode not in {"plan", "channel", "receive", "oracle", "hf-search"} or
                 control != "wanted" and (mode not in {"channel", "receive"} or control not in {"noise", "wrong-key"}) or
@@ -551,7 +584,7 @@ def _validate_episode(item: Any, index: int, ids: set[str],
         raise CampaignError(f"episodes[{index}]: correlated gain receiver requires exclusive Helper-off CPU lens or phase-screen receive with FEC off")
     if "hf_target_presence_diagnostic" in item and (
             not isinstance(item["hf_target_presence_diagnostic"], bool) or
-            item["scenario"] not in HF_WAVE_OPTICS_SCENARIOS.keys() | HF_PHASE_SCREENS_SCENARIOS.keys() | GANNON_REPLAY.keys() or
+            item["scenario"] not in HF_WAVE_OPTICS_SCENARIOS.keys() | HF_PHASE_SCREENS_SCENARIOS.keys() | GANNON_REPLAY.keys() | {"hf-vector-oblique"} or
             mode != "receive" or item["waveform"] != "reference" or control != "wanted" or
             item.get("backend", "cpu") != "cpu" or item.get("helper", False) or
             "capture_digest_slot" not in item or
@@ -2359,8 +2392,8 @@ def _validate_wave_optics(receipt: dict[str, Any], episode: dict[str, Any]) -> N
 
 
 def _validate_wave_chain_energy(propagation: dict[str, Any], rx: dict[str, Any],
-                                tone_amplitude: float, noise: bool) -> None:
-    _validate_wave_energy_planes(propagation, propagation["wave_optics"], noise)
+                                tone_amplitude: float, noise: bool, physical_key: str = "wave_optics") -> None:
+    _validate_wave_energy_planes(propagation, propagation[physical_key], noise)
     tone_energy = propagation.get("additive_noise_energy_sample_sum")
     # The APP channel calls the RF-plane tone additive. Native RX signal
     # includes the retimed coherent sum of wanted DATA and that tone.
@@ -2377,7 +2410,8 @@ def _validate_wave_chain_energy(propagation: dict[str, Any], rx: dict[str, Any],
 def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
     """Bind named native TX/physical/RX cases without mixing stage energy planes."""
     scenario_id = episode["scenario"]
-    if scenario_id not in HF_WAVE_CHAIN_SCENARIOS:
+    vector = scenario_id in HF_VECTOR_CHAIN_SCENARIOS
+    if scenario_id not in HF_WAVE_CHAIN_SCENARIOS and not vector:
         plan, scenario, channel = receipt["plan"], receipt.get("scenario", {}), receipt.get("channel")
         configured = scenario.get("channel") if isinstance(scenario, dict) else None
         if (isinstance(plan, dict) and "native_chain" in plan or
@@ -2391,17 +2425,26 @@ def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> No
     scenario = receipt.get("scenario", {})
     configured = scenario.get("channel") if isinstance(scenario, dict) else None
     plan_chain = plan.get("native_chain")
+    physical_key = "vector_oblique" if vector else "wave_optics"
+    physical_renderer = "hf_vector_oblique" if vector else "hf_wave_optics_screen"
+    physical_scenario = scenario_id if vector else "hf-wave-lens"
+    validate_descriptor = _validate_vector_oblique_descriptor if vector else _validate_wave_optics_descriptor
+    first_lag, last_lag = (2, 130) if vector else (4, 84)
     if (plan.get("channel_renderer") != "native_tx_physical_hf_native_rx" or
-            not isinstance(configured, dict) or configured.get("renderer") != "hf_wave_optics_screen" or
+            not isinstance(configured, dict) or configured.get("renderer") != physical_renderer or
             not isinstance(plan_chain, dict)):
-        raise CampaignError("native wave chain must bind the named receiver renderer and physical lens in plan and scenario")
-    _validate_wave_optics_descriptor(configured.get("wave_optics"), "hf-wave-lens")
-    _validate_wave_optics_descriptor(plan.get("wave_optics"), "hf-wave-lens")
-    if plan.get("wave_optics") != configured.get("wave_optics"):
-        raise CampaignError("native chain planned lens descriptor differs from the frozen scenario")
+        raise CampaignError("native wave chain must bind the named receiver renderer and physical operator in plan and scenario")
+    validate_descriptor(configured.get(physical_key), physical_scenario)
+    validate_descriptor(plan.get(physical_key), physical_scenario)
+    if plan.get(physical_key) != configured.get(physical_key):
+        raise CampaignError("native chain planned physical descriptor differs from the frozen scenario")
 
-    tx_audio, rx_audio, tx_rf, rx_rf, tone = HF_WAVE_CHAIN_SCENARIOS[scenario_id]
+    tx_audio, rx_audio, tx_rf, rx_rf, tone = (HF_VECTOR_CHAIN_SCENARIOS if vector else HF_WAVE_CHAIN_SCENARIOS)[scenario_id]
     fs = HF_WAVE_OPTICS["sample_rate_hz"]
+    expected_cn0 = episode.get("cn0_db_hz", 0) if vector else 0
+    if expected_cn0 not in ({0, 30} if vector else {0}):
+        raise CampaignError("native chain C/N0 is outside the frozen endpoint controls")
+    expected_noise_variance = fs / 10 ** (expected_cn0 / 10)
     wanted_tone, wanted_tone_offset = ((.3, 100.) if tone else (0., 0.))
     expected_plan = {
         "stages": ["canonical_emission", "native_tx", "app_physical_channel", "native_rx", "canonical_receiver"],
@@ -2432,7 +2475,7 @@ def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> No
     if (not _is_finite_number(plan_chain.get("final_receiver_noise_variance")) or
             not _is_finite_number(plan.get("noise_variance")) or
             not math.isclose(plan_chain["final_receiver_noise_variance"], plan["noise_variance"], rel_tol=1e-12) or
-            not math.isclose(plan_chain["final_receiver_noise_variance"], fs, rel_tol=1e-12)):
+            not math.isclose(plan_chain["final_receiver_noise_variance"], expected_noise_variance, rel_tol=1e-12)):
         raise CampaignError("native chain final noise must preserve the fixed post-RX C/N0 plane")
     noise = configured.get("noise")
     if (not isinstance(noise, dict) or noise.get("white_variance") != 0 or
@@ -2443,17 +2486,17 @@ def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> No
     if (plan.get("sample_rate_hz") != fs or plan.get("requested_bit_seconds") != 64 or
             not _is_finite_number(plan.get("actual_bit_seconds")) or plan["actual_bit_seconds"] < 64 or
             plan.get("data_if_hz") != 240 or
-            plan.get("helper_enabled") is not False or plan.get("cn0_db_hz") != 0 or
-            plan.get("wave_optics_source_band_checked") is not (episode["mode"] != "plan") or
-            plan.get("wave_optics_table_built") is not (episode["mode"] != "plan")):
+            plan.get("helper_enabled") is not False or plan.get("cn0_db_hz") != expected_cn0 or
+            plan.get(physical_key + "_source_band_checked") is not (episode["mode"] != "plan") or
+            plan.get(physical_key + "_table_built") is not (episode["mode"] != "plan")):
         raise CampaignError("native chain must preserve the fixed 1920 Hz lens waveform and distinguish planning from execution")
     bounds = plan.get("public_bounds")
     if (not isinstance(bounds, dict) or
             not _is_finite_number(bounds.get("arrival_low_seconds")) or
-            not math.isclose(bounds["arrival_low_seconds"], 4 / fs, rel_tol=0, abs_tol=4 * math.ulp(4 / fs)) or
+            not math.isclose(bounds["arrival_low_seconds"], first_lag / fs, rel_tol=0, abs_tol=4 * math.ulp(first_lag / fs)) or
             not _is_finite_number(bounds.get("arrival_high_seconds")) or
-            not math.isclose(bounds["arrival_high_seconds"], 84 / fs, rel_tol=0, abs_tol=4 * math.ulp(84 / fs)) or
-            bounds.get("receiver_filter_halo_samples") != 105 or
+            not math.isclose(bounds["arrival_high_seconds"], last_lag / fs, rel_tol=0, abs_tol=4 * math.ulp(last_lag / fs)) or
+            bounds.get("receiver_filter_halo_samples") != (152 if vector else 105) or
             bounds.get("clock_bound_ppm") != 4 or bounds.get("frequency_bound_hz") != 1 or
             bounds.get("atmospheric_hz") != 5):
         raise CampaignError("native chain receiver priors must remain fixed across endpoint cases and cover the causal lens support")
@@ -2471,7 +2514,7 @@ def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> No
     capture_horizon = plan_chain["capture_horizon_samples"]
     signal_stop = plan_chain["propagation_signal_stop_samples"]
     expected_tx = math.ceil(source_stop / (1 - 2e-6)) + 12
-    expected_signal_stop = expected_tx + HF_WAVE_OPTICS["last_lag_samples"]
+    expected_signal_stop = expected_tx + last_lag
     expected_propagation = (math.ceil(horizon / (1 - 2e-6)) + 9 if tone else expected_signal_stop)
     if (tx_horizon != expected_tx or signal_stop != expected_signal_stop or
             propagation_horizon != expected_propagation or capture_horizon != horizon or
@@ -2549,9 +2592,9 @@ def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> No
             rx_stage.get("samples") != horizon or rx_stage.get("source_samples") != propagation_horizon or
             propagation.get("maximum_delay_seconds") is None or
             not _is_finite_number(propagation.get("tail_seconds")) or
-            not math.isclose(propagation["tail_seconds"], 84 / fs, rel_tol=0, abs_tol=4 * math.ulp(84 / fs)) or
-            not math.isclose(propagation["maximum_delay_seconds"], 4 / fs, rel_tol=0,
-                             abs_tol=4 * math.ulp(4 / fs))):
+            not math.isclose(propagation["tail_seconds"], last_lag / fs, rel_tol=0, abs_tol=4 * math.ulp(last_lag / fs)) or
+            not math.isclose(propagation["maximum_delay_seconds"], first_lag / fs, rel_tol=0,
+                             abs_tol=4 * math.ulp(first_lag / fs))):
         raise CampaignError("native chain stage receipts do not preserve TX, causal propagation and RX extents")
     if (not _is_finite_number(rx_stage.get("complex_noise_variance")) or
             not math.isclose(rx_stage["complex_noise_variance"], plan_chain["final_receiver_noise_variance"],
@@ -2559,15 +2602,18 @@ def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> No
             not _is_finite_number(rx_stage.get("output_energy_sample_sum")) or
             rx_stage["output_energy_sample_sum"] < 0):
         raise CampaignError("native chain RX must report the fixed post-interpolation noise plane and output energy")
-    _validate_wave_optics_report(propagation.get("wave_optics"), "hf-wave-lens")
-    _validate_wave_chain_energy(propagation, rx_stage, wanted_tone, episode.get("control", "wanted") == "noise")
+    if vector:
+        _validate_vector_oblique_report(propagation.get(physical_key), scenario_id)
+    else:
+        _validate_wave_optics_report(propagation.get(physical_key), physical_scenario)
+    _validate_wave_chain_energy(propagation, rx_stage, wanted_tone, episode.get("control", "wanted") == "noise", physical_key)
 
     for field in ("tx_preparation_seconds", "propagation_preparation_seconds", "rx_preparation_seconds",
                   "tx_render_seconds", "propagation_render_seconds", "rx_render_seconds"):
         if not _is_finite_number(chain.get(field)) or chain[field] < 0:
             raise CampaignError("native chain must report finite per-stage preparation and exclusive render costs")
-    if chain["propagation_preparation_seconds"] < propagation["wave_optics"]["preparation_seconds"]:
-        raise CampaignError("wave-optics table preparation must be included in propagation-stage preparation cost")
+    if chain["propagation_preparation_seconds"] < propagation[physical_key]["preparation_seconds"]:
+        raise CampaignError("physical table preparation must be included in propagation-stage preparation cost")
     timing = receipt.get("timing")
     stage_preparation = sum(chain[field] for field in
         ("tx_preparation_seconds", "propagation_preparation_seconds", "rx_preparation_seconds"))
@@ -2576,6 +2622,198 @@ def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> No
             timing["channel_preparation_seconds"] < stage_preparation or
             timing["channel_preparation_seconds"] > timing["wall_seconds"]):
         raise CampaignError("native chain per-stage preparation must be charged in total channel and wall cost")
+
+
+def _vector_oblique_spec(scenario_id: str) -> dict[str, Any]:
+    perturbations, magnetic, field, antenna = HF_VECTOR_OBLIQUE_SCENARIOS[scenario_id]
+    angle, height, period, thickness, peak, collisions, slice_m, field_b, launch = (
+        (53., 104000., 20500., 1200., 6.12e6, 2450., 100., [-11e-6, 25e-6, -46e-6], .23)
+        if field else (50., 112000., 24000., 960., 6.55e6, 1300., 80., [18e-6, 17e-6, -43e-6], .10))
+    return {"carrier_hz": 10_000_000., "sample_rate_hz": 1920., "occupied_half_band_hz": 384.,
+        "maximum_horizon_seconds": 2400., "perturbations": perturbations, "magnetic": magnetic,
+        "field": field, "antenna": antenna, "drift_mps": 7.5 if field else 8., "epoch_seconds": 520. if field else 600.,
+        "incidence_deg": angle, "height_m": height, "receiver_x_m": 2 * height * math.tan(math.radians(angle)),
+        "period_m": period, "thickness_m": thickness, "peak_plasma_hz": peak,
+        "collision_rate_per_second": collisions, "corrugated_slice_m": slice_m,
+        "corrugation_center_fraction": -.1,
+        "density_harmonic_x": ([.007, .0044] if field else [.008, .0038]) if perturbations else [0., 0.],
+        "density_harmonic_phase_rad": [-1.15, .8] if field else [.45, -1.2],
+        "density_profile": "critical-density-scaled cos^2 vertical profile plus a flat local corrugated slice; two positive-x Fourier harmonics with stated phases",
+        "field_solver_scope": "one incident plane wave at fixed angle/common vacuum phase across the declared frequency band; one y-invariant finite periodic x-z layer encounter",
+        "magnetic_field_tesla": field_b if magnetic else [0., 0., 0.],
+        "fixed_receive_antenna_axis": [0., 1., 0.] if antenna == 0 else [.6, 0., .8],
+        "launch_tm_fraction": launch, "first_lag_samples": 2, "last_lag_samples": 130,
+        "modelling_delay_samples": 32, "retained_late_samples": 96, "position_intervals": 256,
+        "preparation_workspace_bound_bytes": 16 * 1024 * 1024,
+        "interpolation": "fixed antenna complex-voltage coefficients and slopes over one translating plasma period"}
+
+
+def _validate_vector_oblique_descriptor(value: Any, scenario_id: str) -> None:
+    if not isinstance(value, dict):
+        raise CampaignError("vector oblique descriptor is missing")
+    for field, expected in _vector_oblique_spec(scenario_id).items():
+        actual = value.get(field)
+        if isinstance(expected, bool):
+            matches = actual is expected
+        elif isinstance(expected, (int, float)):
+            matches = _is_finite_number(actual) and math.isclose(actual, expected, rel_tol=1e-12, abs_tol=1e-12)
+        else:
+            matches = actual == expected
+        if not matches:
+            raise CampaignError(f"vector oblique descriptor differs from the frozen physical field: {field}")
+
+
+def _validate_vector_oblique_report(full: Any, scenario_id: str) -> None:
+    _validate_vector_oblique_descriptor(full, scenario_id)
+    if (full.get("table_qualified") is not True or
+            not isinstance(full.get("table_sha256"), str) or
+            re.fullmatch(r"[0-9a-fA-F]{64}", full["table_sha256"]) is None or
+            full.get("table_digest_scope") != "all 257 translating-position knots, all 129 retained lags, binary64 complex coefficients and knot slopes in canonical little-endian order; source identity binds generation and interpolation" or
+            full.get("qualification_scope") != "finite-order bidirectional 2D cold collisional Maxwell scattering with periodic transverse density, oblique incidence and fixed antenna projection; limited RF/position/order/FIR witnesses do not establish random 3D fields, field calibration or environmental probabilities"):
+        raise CampaignError("vector oblique execution requires its qualified source-bound coefficient table")
+    expected_counts = {"rf_solves": 29, "output_half_orders": 24, "checked_frequencies": 13,
+                       "checked_positions": 2048, "checked_table_assembly_positions": 54}
+    for field, expected in expected_counts.items():
+        if not _is_nonnegative_int(full.get(field)) or full[field] != expected:
+            raise CampaignError(f"vector oblique numerical witness coverage differs: {field}")
+    if not _is_nonnegative_int(full.get("matrix_products")) or full["matrix_products"] == 0:
+        raise CampaignError("vector oblique matrix work must be reported")
+    gates = {"maximum_flux_excess": 2e-9, "maximum_solve_residual": 2e-12,
+        "mesh_voltage_error": .004, "refined_order_voltage_error": .004,
+        "maximum_edge_flux": 5e-5, "frequency_voltage_error": .0006, "fir_voltage_error": .0006,
+        "period_averaged_discarded_energy_fraction": 1e-6, "interpolation_peak_error_bound": 2e-5,
+        "retarded_peak_error_bound": .004, "relative_voltage_error_at_minimum": .15}
+    for field, maximum in gates.items():
+        if not _is_finite_number(full.get(field)) or not 0 <= full[field] <= maximum:
+            raise CampaignError(f"vector oblique numerical admission gate failed: {field}")
+    for field in ("order_voltage_error", "minimum_carrier_power", "maximum_carrier_power",
+                  "certified_minimum_power_lower_bound", "minimum_checked_band_power_lower_bound"):
+        if not _is_finite_number(full.get(field)) or full[field] < 0:
+            raise CampaignError(f"vector oblique diagnostic is invalid: {field}")
+    if (not _is_finite_number(full.get("minimum_vacuum_cosine")) or
+            not .35 <= full["minimum_vacuum_cosine"] <= 1 or
+            not _is_finite_number(full.get("period_averaged_raw_precursor_energy_fraction")) or
+            not 0 <= full["period_averaged_raw_precursor_energy_fraction"] <= 1 or
+            not _is_finite_number(full.get("minimum_carrier_position_m")) or
+            not 0 <= full["minimum_carrier_position_m"] <= full["period_m"] or
+            not full["certified_minimum_power_lower_bound"] <= full["minimum_carrier_power"] <= full["maximum_carrier_power"]):
+        raise CampaignError("vector oblique port, precursor or finite-series minimum diagnostic is inconsistent")
+    if (full.get("minimum_checked_band_power_witness_offset_hz") not in {-384., -360., -120., -103.7, 0., 120., 196.5, 360., 384.} or
+            full["minimum_checked_band_power_lower_bound"] > full["certified_minimum_power_lower_bound"]):
+        raise CampaignError("vector oblique deep-null bound must include occupied-band witnesses")
+    relative = sum(full[field] for field in ("mesh_voltage_error", "refined_order_voltage_error",
+                                             "fir_voltage_error", "interpolation_peak_error_bound")) / max(
+                                                 1e-12, math.sqrt(full["minimum_checked_band_power_lower_bound"]))
+    if not math.isclose(full["relative_voltage_error_at_minimum"], relative, rel_tol=1e-10, abs_tol=1e-12):
+        raise CampaignError("vector oblique relative error must be charged against the worst checked-band minimum")
+    if (not _is_finite_number(full.get("table_assembly_voltage_error")) or
+            not 0 <= full["table_assembly_voltage_error"] <=
+                full["fir_voltage_error"] + full["interpolation_peak_error_bound"] + 2e-12):
+        raise CampaignError("vector oblique assembled table must agree with independent physical RF witnesses")
+    flux_fields = ("carrier_reflected_flux", "carrier_transmitted_flux", "carrier_scattered_reflected_flux",
+                   "carrier_crosspolar_reflected_flux", "carrier_crosspolar_scattered_flux")
+    for field in flux_fields:
+        if not _is_finite_number(full.get(field)) or not 0 <= full[field] <= 1 + 2e-9:
+            raise CampaignError(f"vector oblique coherent launch flux is invalid: {field}")
+    if (full["carrier_reflected_flux"] + full["carrier_transmitted_flux"] > 1 + 2e-9 or
+            full["carrier_scattered_reflected_flux"] > full["carrier_reflected_flux"] + 2e-9 or
+            full["carrier_crosspolar_scattered_flux"] > full["carrier_crosspolar_reflected_flux"] + 2e-9):
+        raise CampaignError("vector oblique flux subsets or passive total are inconsistent")
+    for field in ("preparation_peak_workspace_bytes", "table_workspace_bytes", "stream_workspace_bytes"):
+        if not _is_nonnegative_int(full.get(field)) or not 0 < full[field] <= 16 * 1024 * 1024:
+            raise CampaignError("vector oblique workspace is missing or exceeds the preflight bound")
+    if (full["table_workspace_bytes"] + full["stream_workspace_bytes"] > 16 * 1024 * 1024 or
+            not _is_finite_number(full.get("preparation_seconds")) or full["preparation_seconds"] < 0):
+        raise CampaignError("vector oblique preparation resource receipt is invalid")
+    low, high = full.get("source_minimum_frequency_hz"), full.get("source_maximum_frequency_hz")
+    if not _is_finite_number(low) or not _is_finite_number(high) or not -384 <= low <= high <= 384:
+        raise CampaignError("vector oblique executed source exceeds its qualified band")
+    for field in ("incident_energy_sample_sum", "selected_energy_sample_sum"):
+        if not _is_finite_number(full.get(field)) or full[field] < 0:
+            raise CampaignError("vector oblique incident and selected energies must be measured")
+
+
+def _validate_vector_oblique(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    scenario_id = episode["scenario"]
+    plan, channel = receipt["plan"], receipt.get("channel")
+    configured = receipt.get("scenario", {}).get("channel")
+    if scenario_id not in HF_VECTOR_OBLIQUE_SCENARIOS:
+        if ("vector_oblique" in plan or plan.get("channel_renderer") == "hf_vector_oblique" or
+                isinstance(configured, dict) and ("vector_oblique" in configured or configured.get("renderer") == "hf_vector_oblique") or
+                isinstance(channel, dict) and "vector_oblique" in channel):
+            raise CampaignError("unrequested vector oblique physical operator")
+        return
+    _validate_vector_oblique_descriptor(plan.get("vector_oblique"), scenario_id)
+    if not isinstance(configured, dict) or configured.get("vector_oblique") != plan["vector_oblique"]:
+        raise CampaignError("vector oblique plan and configured physical operator differ")
+    horizon = plan.get("horizon_samples")
+    period = plan["vector_oblique"]["period_m"]
+    drift = plan["vector_oblique"]["drift_mps"]
+    chain_case = scenario_id in HF_VECTOR_CHAIN_SCENARIOS
+    if (not _is_nonnegative_int(horizon) or not 0 < horizon <= 2400 * 1920 or
+            drift * ((horizon + 2 * 130) / 1920) >= period or
+            plan.get("sample_rate_hz") != 1920 or plan.get("helper_enabled") is not False or
+            plan.get("physical_kernel_supplied_to_receiver") is not False or
+            plan.get("vector_oblique_source_band_checked") is not (episode["mode"] != "plan") or
+            plan.get("vector_oblique_table_built") is not (episode["mode"] != "plan") or
+            plan.get("path_count") is not None or plan.get("path_sample_products") is not None):
+        raise CampaignError("vector oblique plan omits its nonrepeating horizon, source-band or execution scope")
+    source_stop = plan.get("source_stop_sample")
+    if (not _is_nonnegative_int(source_stop) or source_stop > horizon or
+            plan.get("requested_bit_seconds") != episode.get("bit_seconds", 64) or
+            plan.get("cn0_db_hz") != episode.get("cn0_db_hz", 0)):
+        raise CampaignError("vector oblique source support, duration or C/N0 differs from the fixed episode")
+    expected_tail = 130 / 1920
+    if chain_case:
+        expected_tx = math.ceil(source_stop / (1 - 2e-6)) + 12
+        expected_tail = (math.ceil((expected_tx + 130) * (1 + 2e-6)) + 12 - source_stop) / 1920
+    for field, expected in (("vector_oblique_period_traverse_seconds", period / drift),
+                            ("vector_oblique_source_seconds", source_stop / 1920),
+                            ("vector_oblique_rendered_horizon_seconds", horizon / 1920),
+                            ("channel_tail_seconds", expected_tail)):
+        if not _is_finite_number(plan.get(field)) or not math.isclose(plan[field], expected, rel_tol=1e-12, abs_tol=1e-12):
+            raise CampaignError(f"vector oblique exposure or causal support differs: {field}")
+    if (plan.get("vector_oblique_one_period_traverse_in_source") is not False or
+            plan.get("vector_oblique_one_period_traverse_in_rendered_horizon") is not False or
+            plan.get("channel_tail_seconds_scope") != (
+                "conservative complete native endpoint and vector FIR tail under the public clock bounds" if chain_case else
+                "complete causal fixed-antenna complex-voltage FIR support from first input through last retained lag")):
+        raise CampaignError("vector oblique exposure must remain a partial period with a complete causal tail")
+    if chain_case:
+        chain = plan.get("native_chain", {})
+        propagation_horizon = chain.get("propagation_horizon_samples")
+        if (not _is_nonnegative_int(propagation_horizon) or not 0 < propagation_horizon <= 2400 * 1920 or
+                drift * ((propagation_horizon + 260) / 1920) >= period):
+            raise CampaignError("vector oblique native chain must preflight its actual propagation extent")
+        return  # Shared native endpoint validation checks nested propagation and complete stage horizons.
+    if (plan.get("channel_renderer") != "hf_vector_oblique" or configured.get("renderer") != "hf_vector_oblique"):
+        raise CampaignError("vector oblique plan must bind the selected renderer")
+    bounds = plan.get("public_bounds", {})
+    if (bounds.get("clock_bound_ppm") != 0 or bounds.get("frequency_bound_hz") != 0 or
+            bounds.get("atmospheric_hz") != 5 or bounds.get("receiver_filter_halo_samples") != 128 or
+            any(not _is_finite_number(bounds.get(key)) or not math.isclose(bounds[key], expected, rel_tol=1e-12, abs_tol=1e-12)
+                for key, expected in (("arrival_low_seconds", 2 / 1920), ("arrival_high_seconds", 130 / 1920))) or
+            plan.get("cn0_reference_plane") != "normalized incident DATA before oblique vector-plasma propagation and fixed additive receiver noise"):
+        raise CampaignError("vector oblique public receiver priors or incident-energy reference changed")
+    _validate_wave_public_calendar(plan, episode, horizon, source_stop + 130)
+    if episode["mode"] == "plan":
+        if isinstance(channel, dict) and "vector_oblique" in channel:
+            raise CampaignError("vector oblique planning cannot claim executed table work")
+        return
+    if (not isinstance(channel, dict) or channel.get("samples") != horizon or channel.get("source_samples") != source_stop or
+            channel.get("hashed_samples") != horizon or not isinstance(channel.get("input_sha256"), str) or
+            re.fullmatch(r"[0-9a-fA-F]{64}", channel["input_sha256"]) is None or
+            any(not _is_finite_number(channel.get(key)) or not math.isclose(channel[key], expected, rel_tol=1e-12, abs_tol=1e-12)
+                for key, expected in (("tail_seconds", 130 / 1920), ("maximum_delay_seconds", 2 / 1920)))):
+        raise CampaignError("vector oblique execution must consume the complete canonical capture")
+    full = channel.get("vector_oblique")
+    _validate_vector_oblique_report(full, scenario_id)
+    _validate_wave_energy_planes(channel, full, episode.get("control", "wanted") == "noise")
+    timing = receipt.get("timing", {})
+    if (not _is_finite_number(timing.get("channel_preparation_seconds")) or
+            not _is_finite_number(timing.get("wall_seconds")) or
+            not full["preparation_seconds"] <= timing["channel_preparation_seconds"] <= timing["wall_seconds"]):
+        raise CampaignError("vector oblique preparation must be included in complete execution cost")
 
 
 def _phase_screens_spec(scenario_id: str) -> dict[str, Any]:
@@ -3743,7 +3981,7 @@ def _validate_known_target(receipt: dict[str, Any], episode: dict[str, Any]) -> 
     if (not isinstance(digests, list) or len(digests) != 3 or
             any(not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None for value in digests)):
         raise CampaignError("target-presence diagnostic requires three private template digests")
-    physical = channel.get("wave_optics") or channel.get("phase_screens")
+    physical = channel.get("wave_optics") or channel.get("phase_screens") or channel.get("vector_oblique")
     if not recorded and (not isinstance(physical, dict) or not isinstance(physical.get("table_sha256"), str)):
         raise CampaignError("target-presence diagnostic has no qualified observed-input physical table")
     table = None if recorded else physical["table_sha256"]
@@ -3815,6 +4053,7 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     _validate_fullwave_reflection(receipt, episode)
     _validate_magnetoionic_reflection(receipt, episode)
     _validate_wave_optics(receipt, episode)
+    _validate_vector_oblique(receipt, episode)
     _validate_wave_chain(receipt, episode)
     _validate_phase_screens(receipt, episode)
     _validate_gannon_replay(receipt, episode)

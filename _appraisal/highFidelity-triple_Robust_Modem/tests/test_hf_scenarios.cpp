@@ -431,6 +431,26 @@ void gannon_observed_voltage_profiles() {
     near(late.numerical_horizon_seconds, 1799.9, 1e-12, "late placement cannot wrap or extend the record");
 }
 
+void vector_oblique_native_chain_profiles() {
+    const auto off = make_scenario("hf-vector-oblique-chain-off");
+    const auto clocks = make_scenario("hf-vector-oblique-chain-clocks");
+    const auto tone = make_scenario("hf-vector-oblique-chain-clocks-tone");
+    for (const auto* scenario : {&off, &clocks, &tone}) {
+        check(scenario->channel.vector_oblique.has_value(),
+              "native vector-chain cases retain the coupled physical channel");
+        near(scenario->bounds.frequency_bound_hz, 1., 0.,
+             "native vector-chain receiver retains its public oscillator bound");
+        near(scenario->bounds.atmospheric_hz, 5., 0.,
+             "native vector-chain receiver retains its physical-frequency allowance");
+        check(scenario->assumptions.find("TX/RX audio +1/−1 ppm and RF +0.01/−0.01 ppm") != std::string::npos,
+              "native vector-chain clock cases retain the documented independent TX/RX clock errors");
+    }
+    near(off.channel.noise.tone_amplitude, 0., 0., "native vector-chain off control has no RF tone");
+    near(clocks.channel.noise.tone_amplitude, 0., 0., "clock-only vector-chain control has no RF tone");
+    near(tone.channel.noise.tone_amplitude, .3, 0., "clock-plus-tone vector-chain case preserves RF tone amplitude");
+    near(tone.channel.noise.tone_hz, 100., 0., "clock-plus-tone vector-chain case preserves RF tone offset");
+}
+
 } // namespace
 
 int main() {
@@ -445,6 +465,7 @@ int main() {
         independent_ensemble();
         magnetoionic_profiles();
         gannon_observed_voltage_profiles();
+        vector_oblique_native_chain_profiles();
         std::cout << "additional HF profile checks passed: " << checks << '\n';
         return 0;
     } catch (const std::exception& error) {

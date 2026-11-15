@@ -558,6 +558,29 @@ Json phase_screens_json(const appraisal::HfPhaseScreensSpec& spec) {
         {"first_lag_samples",Table::first_lag_samples()},{"last_lag_samples",Table::last_lag_samples()},
         {"taps",Table::taps},{"preparation_workspace_bound_bytes",Table::preparation_workspace_bound_bytes}});
 }
+Json vector_oblique_json(const appraisal::HfVectorObliqueSpec& spec) {
+    using Table=appraisal::HfVectorObliqueTable;
+    const auto g=appraisal::hf_vector_oblique_geometry(spec);
+    return object({{"carrier_hz",Table::carrier_hz},{"sample_rate_hz",Table::sample_rate_hz},
+        {"occupied_half_band_hz",Table::occupied_half_band_hz},{"maximum_horizon_seconds",Table::horizon_seconds},
+        {"perturbations",spec.perturbations},{"magnetic",spec.magnetic},{"field",spec.field},
+        {"antenna",spec.antenna},{"drift_mps",spec.drift_mps},{"epoch_seconds",spec.epoch_seconds},
+        {"incidence_deg",g.incidence_deg},{"height_m",g.height_m},{"receiver_x_m",g.receiver_x_m},
+        {"period_m",g.period_m},{"thickness_m",g.thickness_m},{"peak_plasma_hz",g.peak_plasma_hz},
+        {"collision_rate_per_second",g.collision_rate},{"corrugated_slice_m",g.corrugated_slice_m},
+        {"corrugation_center_fraction",g.corrugation_center_fraction},
+        {"density_harmonic_x",Json::Array{g.density_harmonic_x[0],g.density_harmonic_x[1]}},
+        {"density_harmonic_phase_rad",Json::Array{g.density_harmonic_phase_rad[0],g.density_harmonic_phase_rad[1]}},
+        {"density_profile","critical-density-scaled cos^2 vertical profile plus a flat local corrugated slice; two positive-x Fourier harmonics with stated phases"},
+        {"field_solver_scope","one incident plane wave at fixed angle/common vacuum phase across the declared frequency band; one y-invariant finite periodic x-z layer encounter"},
+        {"magnetic_field_tesla",Json::Array{g.field_tesla[0],g.field_tesla[1],g.field_tesla[2]}},
+        {"fixed_receive_antenna_axis",Json::Array{g.antenna_axis[0],g.antenna_axis[1],g.antenna_axis[2]}},
+        {"launch_tm_fraction",g.launch_tm_fraction},
+        {"first_lag_samples",Table::first_lag_samples()},{"last_lag_samples",Table::last_lag_samples()},
+        {"modelling_delay_samples",Table::modelling_delay_samples},{"retained_late_samples",Table::retained_late_samples},
+        {"position_intervals",Table::position_intervals},{"preparation_workspace_bound_bytes",Table::preparation_workspace_bound_bytes},
+        {"interpolation","fixed antenna complex-voltage coefficients and slopes over one translating plasma period"}});
+}
 Json channel_parameters(const appraisal::ChannelSpec& c,std::string_view scenario_id={}) {
     Json::Array paths;Hash path_hash;double power=0;
     const bool extended=std::any_of(c.paths.begin(),c.paths.end(),[](const auto& p){return p.hf.has_value();});
@@ -768,6 +791,10 @@ Json channel_parameters(const appraisal::ChannelSpec& c,std::string_view scenari
         result["renderer"]="hf_phase_screens";
         result["phase_screens"]=phase_screens_json(*c.phase_screens);
     }
+    if(c.vector_oblique) {
+        result["renderer"]="hf_vector_oblique";
+        result["vector_oblique"]=vector_oblique_json(*c.vector_oblique);
+    }
     return result;
 }
 Json scenario_json(const appraisal::Scenario& s) {
@@ -942,10 +969,12 @@ Setup setup(const Options& o,std::stop_token stop) {
         return setup_native_gui(o,stop);
     }
     auto scenario=appraisal::make_scenario(o.scenario);
-    const bool native_chain_case=scenario.id.starts_with("hf-wave-chain-");
+    const bool vector_native_chain_case=scenario.id.starts_with("hf-vector-oblique-chain-");
+    const bool native_chain_case=scenario.id.starts_with("hf-wave-chain-")||vector_native_chain_case;
     if(o.hf_target_presence_diagnostic&&(native_chain_case||
-        !(scenario.channel.wave_optics||scenario.channel.phase_screens||scenario.id.starts_with("hf-gannon-"))))
-        throw Unavailable("target-presence diagnostic requires direct lens, phase-screen or Gannon propagation");
+        !(scenario.channel.wave_optics||scenario.channel.phase_screens||scenario.channel.vector_oblique||
+          scenario.id.starts_with("hf-gannon-"))))
+        throw Unavailable("target-presence diagnostic requires direct lens, phase-screen, vector-oblique or Gannon propagation");
     if(native_chain_case) {
         if((o.mode!="plan"&&o.mode!="receive")||o.backend!="cpu"||o.waveform!="reference"||o.pulse!="rrc"||
            o.helper||o.fec!="off"||(o.control!="wanted"&&o.control!="noise"&&o.control!="wrong-key")||
@@ -999,6 +1028,26 @@ Setup setup(const Options& o,std::stop_token stop) {
            o.hf_trajectory_offset_seconds||o.hf_phase_refinement||o.hf_phase_filter||
            o.hf_phase_filter_receiver||o.hf_phase_filter_paths||o.hf_phase_filter_sticky||o.hf_phase_bridge)
             throw Unavailable("multiple phase screens support fixed-geometry reference CPU plan/channel/receive or wanted-only hf-search, with Helper/FEC and experimental receiver policies off");
+    }
+    if(scenario.channel.vector_oblique) {
+        if((vector_native_chain_case?(o.mode!="plan"&&o.mode!="receive"):
+                (o.mode!="plan"&&o.mode!="channel"&&o.mode!="receive"))||
+           o.backend!="cpu"||o.waveform!="reference"||o.pulse!="rrc"||o.helper||o.fec!="off"||
+           (o.control!="wanted"&&!(o.mode=="receive"&&(o.control=="wrong-key"||o.control=="noise")))||
+           o.duration_override||o.capture_lead_seconds||o.design_options||o.service_replay||
+           o.hf_phase_bank||o.hf_physical_diagnostic||o.hf_gui_clean_diagnostic||
+           o.hf_correlated_gain_shadow||o.hf_correlated_gain_receiver||
+           o.hf_gannon_native_diagnostic||o.hf_gannon_gain_variance_diagnostic||
+           o.hf_public_phase_receiver||o.hf_compare_admitted_models||o.hf_trajectory_seed||
+           o.hf_trajectory_offset_seconds||o.hf_phase_refinement||o.hf_phase_filter||
+           o.hf_phase_filter_receiver||o.hf_phase_filter_paths||o.hf_phase_filter_sticky||o.hf_phase_bridge)
+            throw Unavailable("vector oblique propagation supports fixed-geometry reference CPU plan/channel/receive with wanted or complete noise/wrong-key controls, Helper/FEC and experimental receiver policies off; native endpoint variants use plan/receive");
+        if((vector_native_chain_case&&o.bit_seconds&&*o.bit_seconds!=64.)||
+           (!vector_native_chain_case&&o.bit_seconds&&*o.bit_seconds!=64.&&*o.bit_seconds!=128.))
+            throw Unavailable("vector oblique supports 64 or 128 second direct bits and 64 second native-chain bits");
+        if(o.cn0&&((vector_native_chain_case&&*o.cn0!=0.&&*o.cn0!=30.)||
+                   (!vector_native_chain_case&&*o.cn0!=-3.&&*o.cn0!=0.&&*o.cn0!=10.&&*o.cn0!=20.&&*o.cn0!=30.)))
+            throw Unavailable("vector oblique chains allow 0 or 30 dB-Hz; direct cases allow -3, 0, 10, 20, or 30 dB-Hz");
     }
     if(o.design_options)appraisal::apply_hf_trajectory_design(scenario,o.design);
     if(o.hf_trajectory_seed) {
@@ -1192,7 +1241,7 @@ Setup setup(const Options& o,std::stop_token stop) {
         effects.rf_hz=s.scenario.channel.rf_hz;
         effects.nominal_conversion_if_hz=pc.data_if_hz;
         effects.seed=o.seed;
-        if(s.scenario.id!="hf-wave-chain-off") {
+        if(!s.scenario.id.ends_with("chain-off")) {
             effects.tx.audio_ppm=1.;effects.rx.audio_ppm=-1.;
             effects.tx.rf_ppm=.01;effects.rx.rf_ppm=-.01;
         }
@@ -1206,7 +1255,7 @@ Setup setup(const Options& o,std::stop_token stop) {
         chain.capture_horizon_samples=s.horizon;
         chain.public_endpoint_clock_bound_ppm=2.;
         chain.tx_band={-384.,384.};chain.propagation_band={-389.,389.};
-        if(s.scenario.id=="hf-wave-chain-clocks-tone") {
+        if(s.scenario.id.ends_with("clocks-tone")) {
             chain.continuing_rf_interference=true;
             chain.propagation_signal_stop_samples=chain_signal_stop;
             chain.propagation_horizon_samples=add(checked_samples(static_cast<long double>(s.horizon)/
@@ -1237,7 +1286,7 @@ Setup setup(const Options& o,std::stop_token stop) {
         s.horizon=make_receiver_slot_plan(s.profile,s.receiver,s.slot_horizon-1).stop_sample;
     }
     if(o.mode=="channel"&&!s.scenario.channel.fullwave_reflection&&!s.scenario.channel.magnetoionic_reflection&&
-       !s.scenario.channel.wave_optics&&!s.scenario.channel.phase_screens)
+       !s.scenario.channel.wave_optics&&!s.scenario.channel.phase_screens&&!s.scenario.channel.vector_oblique)
         s.horizon=checked_samples(o.duration_seconds,rc.sample_rate_hz);
     if(o.mode=="slot"||o.mode=="diagnose") {
         // Observe the entire first public aperture at its real duration. The
@@ -1258,6 +1307,10 @@ Setup setup(const Options& o,std::stop_token stop) {
         require(*o.capture_digest_slot<s.truth.size(),"target-presence digest must select an active DATA slot");
     if(s.scenario.channel.phase_screens) {
         try { appraisal::validate_hf_phase_screens_spec(*s.scenario.channel.phase_screens, s.horizon); }
+        catch (const std::exception& error) { throw Unavailable(error.what()); }
+    }
+    if(s.scenario.channel.vector_oblique) {
+        try { appraisal::validate_hf_vector_oblique_spec(*s.scenario.channel.vector_oblique, s.horizon); }
         catch (const std::exception& error) { throw Unavailable(error.what()); }
     }
     if(o.mode=="hf-search"||o.hf_public_phase_receiver) {
@@ -1503,6 +1556,33 @@ Json plan_json(const Setup& s,const Options& o) {
             horizon_seconds<event_end?"partial_rendered_observation":
             "contains_closest_approach_with_bounded_outbound_extent_not_full_1600s_dynamics";
     }
+    if(s.scenario.channel.vector_oblique) {
+        const auto& vector=*s.scenario.channel.vector_oblique;
+        const auto geometry=appraisal::hf_vector_oblique_geometry(vector);
+        const double source_seconds=static_cast<double>(s.source_stop)/s.receiver.sample_rate_hz;
+        const double horizon_seconds=static_cast<double>(s.horizon)/s.receiver.sample_rate_hz;
+        const double period_seconds=geometry.period_m/std::abs(vector.drift_mps);
+        const bool source_period=source_seconds>=period_seconds;
+        const bool rendered_period=horizon_seconds>=period_seconds;
+        result["channel_renderer"]="hf_vector_oblique";
+        result["vector_oblique"]=vector_oblique_json(vector);
+        result["vector_oblique_source_band_checked"]=false;
+        result["vector_oblique_table_built"]=false;
+        result["path_count"]=Json{};
+        result["path_sample_products"]=Json{};
+        result["channel_tail_seconds_scope"]="complete causal fixed-antenna complex-voltage FIR support from first input through last retained lag";
+        result["cn0_reference_plane"]="normalized incident DATA before oblique vector-plasma propagation and fixed additive receiver noise";
+        result["physical_kernel_supplied_to_receiver"]=false;
+        result["vector_oblique_period_traverse_seconds"]=period_seconds;
+        result["vector_oblique_source_seconds"]=source_seconds;
+        result["vector_oblique_rendered_horizon_seconds"]=horizon_seconds;
+        result["vector_oblique_one_period_traverse_in_source"]=source_period;
+        result["vector_oblique_one_period_traverse_in_rendered_horizon"]=rendered_period;
+        result["vector_oblique_exposure_scope"]=!vector.perturbations?"flat_laminar_control_no_transverse_translation":
+            rendered_period?"at_least_one_complete_period_of_the_declared_two_dimensional_translating_layer_with_causal_tail":
+            "partial_period_of_the_declared_two_dimensional_translating_layer_with_causal_tail";
+        result["vector_oblique_exposure_limit"]="The finite periodic x-z model represents one translating density period; y-invariant geometry, one layer encounter, and this sampled period do not establish coverage of random 3D structure, multiple hops, or real disturbed-day probabilities.";
+    }
     if(s.scenario.id.starts_with("hf-gannon-")) {
         result["channel_renderer"]="observed_voltage_multiplicative_replay";
         result["cn0_reference_plane"]="incident normalized modem waveform before jointly scaled observed-voltage multiplication; independent synthetic white receiver noise";
@@ -1512,6 +1592,8 @@ Json plan_json(const Setup& s,const Options& o) {
     if(s.native_chain) {
         const auto& c=*s.native_chain;
         const auto& e=c.endpoints.effects;
+        if(s.scenario.channel.vector_oblique)
+            result["channel_tail_seconds_scope"]="conservative complete native endpoint and vector FIR tail under the public clock bounds";
         result["channel_renderer"]="native_tx_physical_hf_native_rx";
         result["capture_preroll_scope"]="public nominal source preroll traverses TX clock once; native RX capture lead is zero";
         result["cn0_reference_plane"]="fixed normalized emitted DATA reference; independent fixed-variance noise added after native RX interpolation and oscillator mixing";
@@ -1921,6 +2003,58 @@ Json channel_json(const appraisal::ChannelReport& r,double fs) {
         receipt["incident_energy_sample_sum"]=static_cast<double>(screens.incident_energy);
         receipt["selected_energy_sample_sum"]=static_cast<double>(screens.selected_energy);
         result["phase_screens"]=std::move(receipt);
+    }
+    if(r.vector_oblique) {
+        const auto& vector=*r.vector_oblique;
+        const auto& checks=vector.checks;
+        auto receipt=vector_oblique_json(vector.spec);
+        receipt["table_sha256"]=vector.table_sha256;
+        receipt["table_digest_scope"]="all 257 translating-position knots, all 129 retained lags, binary64 complex coefficients and knot slopes in canonical little-endian order; source identity binds generation and interpolation";
+        receipt["qualification_scope"]="finite-order bidirectional 2D cold collisional Maxwell scattering with periodic transverse density, oblique incidence and fixed antenna projection; limited RF/position/order/FIR witnesses do not establish random 3D fields, field calibration or environmental probabilities";
+        receipt["table_qualified"]=checks.qualified;
+        receipt["rf_solves"]=checks.rf_solves;
+        receipt["matrix_products"]=checks.matrix_products;
+        receipt["preparation_peak_workspace_bytes"]=checks.preparation_peak_workspace_bytes;
+        receipt["output_half_orders"]=checks.output_half_orders;
+        receipt["checked_frequencies"]=checks.checked_frequencies;
+        receipt["checked_positions"]=checks.checked_positions;
+        receipt["minimum_vacuum_cosine"]=checks.minimum_vacuum_cosine;
+        receipt["maximum_flux_excess"]=checks.maximum_flux_excess;
+        receipt["maximum_solve_residual"]=checks.maximum_solve_residual;
+        receipt["mesh_voltage_error"]=checks.mesh_voltage_error;
+        receipt["order_voltage_error"]=checks.order_voltage_error;
+        receipt["refined_order_voltage_error"]=checks.refined_order_voltage_error;
+        receipt["maximum_edge_flux"]=checks.maximum_edge_flux;
+        receipt["frequency_voltage_error"]=checks.frequency_voltage_error;
+        receipt["fir_voltage_error"]=checks.fir_voltage_error;
+        receipt["table_assembly_voltage_error"]=checks.table_assembly_voltage_error;
+        receipt["checked_table_assembly_positions"]=checks.checked_table_assembly_positions;
+        receipt["carrier_reflected_flux"]=checks.carrier_reflected_flux;
+        receipt["carrier_transmitted_flux"]=checks.carrier_transmitted_flux;
+        receipt["carrier_scattered_reflected_flux"]=checks.carrier_scattered_reflected_flux;
+        receipt["carrier_crosspolar_reflected_flux"]=checks.carrier_crosspolar_reflected_flux;
+        receipt["carrier_crosspolar_scattered_flux"]=checks.carrier_crosspolar_scattered_flux;
+        receipt["carrier_flux_reference_plane"]="mixed TE/TM launch with the declared TM power fraction; reflected/transmitted and scattered flux are normalized to this launch";
+        receipt["carrier_crosspolar_reference_plane"]="independent pure-TE launch and TM output diagnostic; these cross-polar fluxes are not subsets of the mixed-launch scattered flux";
+        receipt["minimum_carrier_power"]=checks.minimum_carrier_power;
+        receipt["maximum_carrier_power"]=checks.maximum_carrier_power;
+        receipt["minimum_carrier_position_m"]=checks.minimum_carrier_position_m;
+        receipt["certified_minimum_power_lower_bound"]=checks.certified_minimum_power_lower_bound;
+        receipt["minimum_checked_band_power_lower_bound"]=checks.minimum_checked_band_power_lower_bound;
+        receipt["minimum_checked_band_power_witness_offset_hz"]=checks.minimum_checked_band_power_witness_offset_hz;
+        receipt["relative_voltage_error_at_minimum"]=checks.relative_voltage_error_at_minimum;
+        receipt["period_averaged_discarded_energy_fraction"]=checks.period_averaged_discarded_energy_fraction;
+        receipt["period_averaged_raw_precursor_energy_fraction"]=checks.period_averaged_raw_precursor_energy_fraction;
+        receipt["interpolation_peak_error_bound"]=checks.interpolation_peak_error_bound;
+        receipt["retarded_peak_error_bound"]=vector.retarded_peak_error_bound;
+        receipt["table_workspace_bytes"]=vector.table_workspace_bytes;
+        receipt["stream_workspace_bytes"]=vector.stream_workspace_bytes;
+        receipt["preparation_seconds"]=vector.preparation_seconds;
+        receipt["source_minimum_frequency_hz"]=vector.source_minimum_frequency_hz;
+        receipt["source_maximum_frequency_hz"]=vector.source_maximum_frequency_hz;
+        receipt["incident_energy_sample_sum"]=static_cast<double>(vector.incident_energy);
+        receipt["selected_energy_sample_sum"]=static_cast<double>(vector.selected_energy);
+        result["vector_oblique"]=std::move(receipt);
     }
     return result;
 }
@@ -2834,6 +2968,7 @@ Json diagnose_known_target(const Setup& s,const Options& o,const ReceiverSlotPla
     const auto table_hash=[](const appraisal::ChannelReport& report)->std::optional<std::string> {
         if(report.wave_optics)return report.wave_optics->table_sha256;
         if(report.phase_screens)return report.phase_screens->table_sha256;
+        if(report.vector_oblique)return report.vector_oblique->table_sha256;
         return std::nullopt;
     };
     const auto actual_table=table_hash(actual);
@@ -3049,6 +3184,10 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
             result["plan"]["wave_optics_source_band_checked"]=true;
             result["plan"]["wave_optics_table_built"]=true;
         }
+        if(receipt.propagation.vector_oblique) {
+            result["plan"]["vector_oblique_source_band_checked"]=true;
+            result["plan"]["vector_oblique_table_built"]=true;
+        }
     } else if(s.native_channel) {
         if(native_channel_bound>=available_limit-baseline-future-total_diagnostic_bytes)
             throw Limit("native GUI channel and evaluator preflight exhaust the declared total memory limit");
@@ -3091,6 +3230,10 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
         if(channel->report().phase_screens) {
             result["plan"]["phase_screens_source_band_checked"]=true;
             result["plan"]["phase_screens_table_built"]=true;
+        }
+        if(channel->report().vector_oblique) {
+            result["plan"]["vector_oblique_source_band_checked"]=true;
+            result["plan"]["vector_oblique_table_built"]=true;
         }
     }
     const double channel_preparation_seconds=std::chrono::duration<double>(Clock::now()-channel_begin).count();
@@ -3747,7 +3890,7 @@ int main(int argc,char** argv) {
             result["hf_gui_clean_diagnostic_usage"]="--hf-gui-clean-diagnostic adds a thermal-noise-off twin to gui-varying; alternate-key truth is used only by the wrong-key evaluator";
             result["hf_gannon_native_diagnostic_usage"]="--hf-gannon-native-diagnostic adds a target-absent full-prefix reference and private clean/noisy native coherent-gain comparison to a Gannon reference physical shadow with full timing";
             result["hf_gannon_gain_variance_diagnostic_usage"]="--hf-gannon-gain-variance-diagnostic adds the fixed independent block-variance scores at retained public cells to the Gannon native comparison with refinement";
-            result["hf_target_presence_diagnostic_usage"]="--hf-target-presence-diagnostic uses --capture-digest-slot N on an ordinary direct lens, phase-screen or Gannon receive to compare private known target-present, absent and alternate-bit means after native scoring";
+            result["hf_target_presence_diagnostic_usage"]="--hf-target-presence-diagnostic uses --capture-digest-slot N on an ordinary direct lens, phase-screen, vector-oblique or Gannon receive to compare private known target-present, absent and alternate-bit means after native scoring";
             result["hf_correlated_gain_shadow_usage"]="--hf-correlated-gain-shadow uses hf-search with full timing on a wanted lens or phase-screen aperture; evaluates a normalized stationary complex-gain mixture over the configured band";
             result["hf_correlated_gain_receiver_usage"]="--hf-correlated-gain-receiver opts into the fixed complex-gain fallback inside canonical lens or phase-screen receive, with the public geometry and native thresholds intact";
             result["hf_design_usage"]="hf-ensemble-design on the reference waveform requires all eight coefficients: --hf-primary-amplitude-hz --hf-primary-period-seconds --hf-primary-phase-radians --hf-secondary-amplitude-hz --hf-secondary-period-seconds --hf-secondary-phase-radians --hf-knot-amplitude-hz --hf-knot-seconds";
@@ -3775,6 +3918,7 @@ int main(int argc,char** argv) {
      catch(const appraisal::HfGuiProfileUnavailable& e){result["status"]="unavailable";result["reason"]=e.what();code=5;}
      catch(const appraisal::FullwaveReflectionUnavailable& e){result["status"]="unavailable";result["reason"]=e.what();code=5;}
      catch(const appraisal::MagnetoionicReflectionUnavailable& e){result["status"]="unavailable";result["reason"]=e.what();code=5;}
+     catch(const appraisal::HfVectorObliqueUnavailable& e){result["status"]="unavailable";result["reason"]=e.what();code=5;}
      catch(const ReceiverWorkspaceError& e){result["status"]="resource_limit";result["reason"]=e.what();code=3;}
      catch(const appraisal::ChannelWorkspaceError& e){result["status"]="resource_limit";result["reason"]=e.what();code=3;}
      catch(const std::exception& e){

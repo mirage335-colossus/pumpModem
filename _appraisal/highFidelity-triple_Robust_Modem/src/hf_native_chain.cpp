@@ -311,7 +311,8 @@ HfNativeChainReport HfNativeChain::report() const {
     result.propagation_band = c.propagation_band;
     result.propagation_band_declared_not_analytically_proved =
         c.propagation.fullwave_reflection.has_value() || c.propagation.magnetoionic_reflection.has_value() ||
-        c.propagation.wave_optics.has_value() || c.propagation.phase_screens.has_value();
+        c.propagation.wave_optics.has_value() || c.propagation.phase_screens.has_value() ||
+        c.propagation.vector_oblique.has_value();
     result.bridge_chunk_samples = c.bridge_chunk_samples;
     result.workspace_bytes = impl_->workspace_bytes;
     result.tx_preparation_seconds = impl_->tx_preparation_seconds;

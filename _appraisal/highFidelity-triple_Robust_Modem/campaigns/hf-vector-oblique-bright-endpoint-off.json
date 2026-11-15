@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "name": "hf-vector-oblique-bright-endpoint-off",
+  "purpose": "Predeclared conditional discriminator triggered by completed bright clocks-tone failure: all 13 transmitted bits are correctly DATA but both physical quiet slots are ambiguous, so no message completes. Match C/N0 +30, field, public priors, source/noise seeds, payload and geometry; use the named endpoint-off case (no actual clock errors or continuing tone). No threshold or receiver change.",
+  "max_wall_seconds": 300,
+  "per_trial_wall_seconds": 300,
+  "max_trials": 1,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "id": "chain-off-A-30",
+      "scenario": "hf-vector-oblique-chain-off",
+      "waveform": "reference",
+      "seed": 70501,
+      "noise_seed": 80501,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 30,
+      "max_wall_seconds": 300
+    }
+  ]
+}

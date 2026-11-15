@@ -1,0 +1,63 @@
+{
+  "episodes": [
+    {
+      "bit_seconds": 64,
+      "cn0_db_hz": 0,
+      "control": "wanted",
+      "id": "chain-clocks",
+      "max_wall_seconds": 600,
+      "message": "A",
+      "mode": "receive",
+      "noise_seed": 80501,
+      "scenario": "hf-vector-oblique-chain-clocks",
+      "seed": 70501,
+      "waveform": "reference"
+    },
+    {
+      "bit_seconds": 64,
+      "cn0_db_hz": 0,
+      "control": "wanted",
+      "id": "chain-clocks-tone",
+      "max_wall_seconds": 600,
+      "message": "A",
+      "mode": "receive",
+      "noise_seed": 80501,
+      "scenario": "hf-vector-oblique-chain-clocks-tone",
+      "seed": 70501,
+      "waveform": "reference"
+    },
+    {
+      "bit_seconds": 64,
+      "cn0_db_hz": 0,
+      "control": "noise",
+      "id": "chain-noise-tone",
+      "max_wall_seconds": 900,
+      "message": "A",
+      "mode": "receive",
+      "noise_seed": 80501,
+      "scenario": "hf-vector-oblique-chain-clocks-tone",
+      "seed": 70501,
+      "waveform": "reference"
+    },
+    {
+      "bit_seconds": 64,
+      "cn0_db_hz": 0,
+      "control": "wrong-key",
+      "id": "chain-wrong-key-tone",
+      "max_wall_seconds": 900,
+      "message": "A",
+      "mode": "receive",
+      "noise_seed": 80501,
+      "scenario": "hf-vector-oblique-chain-clocks-tone",
+      "seed": 70501,
+      "waveform": "reference"
+    }
+  ],
+  "max_samples": 12000000,
+  "max_trials": 4,
+  "max_wall_seconds": 3000,
+  "name": "hf-vector-oblique-endpoint-continuation",
+  "per_trial_wall_seconds": 900,
+  "purpose": "Execute only the four previously frozen rows that never ran after the original endpoint-off receipt failed a reporting-only band-scope flag check. Same cases, seeds, priors and per-row budgets. The original endpoint-off native observation is preserved and independently audited using an exact one-field metadata amendment; no original raw result is overwritten or counted as an original strict pass.",
+  "schema_version": 1
+}

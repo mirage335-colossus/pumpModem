@@ -27,7 +27,11 @@ add_library(high_fidelity_phase_screens STATIC "${_hf_root}/src/hf_phase_screens
 target_include_directories(high_fidelity_phase_screens PUBLIC "${_hf_root}/include" PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_compile_features(high_fidelity_phase_screens PUBLIC cxx_std_20)
 target_link_libraries(high_fidelity_phase_screens PRIVATE high_fidelity_fullwave datapump_fft datapump)
-target_link_libraries(high_fidelity_channel PRIVATE high_fidelity_fullwave high_fidelity_wave_optics high_fidelity_phase_screens)
+add_library(high_fidelity_vector_oblique STATIC "${_hf_root}/src/hf_vector_oblique.cpp")
+target_include_directories(high_fidelity_vector_oblique PUBLIC "${_hf_root}/include")
+target_compile_features(high_fidelity_vector_oblique PUBLIC cxx_std_20)
+target_link_libraries(high_fidelity_vector_oblique PUBLIC high_fidelity_fullwave)
+target_link_libraries(high_fidelity_channel PRIVATE high_fidelity_fullwave high_fidelity_wave_optics high_fidelity_phase_screens high_fidelity_vector_oblique)
 add_library(high_fidelity_public_receiver STATIC "${_hf_root}/src/hf_public_diagnostic.cpp"
   "${_hf_root}/src/hf_gui_diagnostic.cpp" "${_hf_root}/src/hf_phase_filter.cpp"
   "${_hf_root}/src/hf_correlated_gain.cpp")
@@ -75,6 +79,11 @@ target_include_directories(high_fidelity_phase_screens_probe PRIVATE "${PROJECT_
 target_link_libraries(high_fidelity_phase_screens_probe PRIVATE high_fidelity_phase_screens high_fidelity_wave_optics)
 target_compile_definitions(high_fidelity_phase_screens_probe PRIVATE ${_hf_identity} APPRAISAL_SOURCE_SHA="${_hf_source_sha}")
 set_target_properties(high_fidelity_phase_screens_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+add_executable(high_fidelity_vector_oblique_probe "${_hf_root}/src/hf_vector_oblique_probe.cpp")
+target_include_directories(high_fidelity_vector_oblique_probe PRIVATE "${PROJECT_SOURCE_DIR}/tools")
+target_link_libraries(high_fidelity_vector_oblique_probe PRIVATE high_fidelity_vector_oblique)
+target_compile_definitions(high_fidelity_vector_oblique_probe PRIVATE ${_hf_identity} APPRAISAL_SOURCE_SHA="${_hf_source_sha}")
+set_target_properties(high_fidelity_vector_oblique_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 add_executable(high_fidelity_magnetoionic_probe "${_hf_root}/src/hf_magnetoionic_probe.cpp")
 target_include_directories(high_fidelity_magnetoionic_probe PRIVATE "${PROJECT_SOURCE_DIR}/tools")
 target_link_libraries(high_fidelity_magnetoionic_probe PRIVATE high_fidelity_fullwave)
@@ -87,6 +96,7 @@ target_compile_definitions(high_fidelity_wave_optics_probe PRIVATE ${_hf_identit
 set_target_properties(high_fidelity_wave_optics_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(high_fidelity_vector_oblique PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(high_fidelity_phase_screens PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(high_fidelity_channel PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(high_fidelity_public_receiver PRIVATE -Wall -Wextra -Wpedantic)
@@ -99,6 +109,12 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 if(BUILD_TESTING)
+  add_executable(high_fidelity_test_hf_vector_oblique "${_hf_root}/tests/test_hf_vector_oblique.cpp")
+  target_link_libraries(high_fidelity_test_hf_vector_oblique PRIVATE high_fidelity_vector_oblique)
+  add_test(NAME high_fidelity_hf_vector_oblique COMMAND high_fidelity_test_hf_vector_oblique)
+  set_tests_properties(high_fidelity_hf_vector_oblique PROPERTIES LABELS "appraisal" TIMEOUT 90)
+  add_test(NAME high_fidelity_hf_vector_oblique_waveform COMMAND high_fidelity_vector_oblique_probe primary)
+  set_tests_properties(high_fidelity_hf_vector_oblique_waveform PROPERTIES LABELS "appraisal" TIMEOUT 90)
   add_executable(high_fidelity_test_hf_fragment_integrity "${_hf_root}/tests/test_hf_fragment_integrity.cpp")
   target_link_libraries(high_fidelity_test_hf_fragment_integrity PRIVATE datapump_triad_receiver)
   add_test(NAME high_fidelity_hf_fragment_integrity COMMAND high_fidelity_test_hf_fragment_integrity)
@@ -162,6 +178,7 @@ if(BUILD_TESTING)
     "${_hf_root}/tests/test_coverage_design.py")
   set_tests_properties(high_fidelity_coverage_design PROPERTIES LABELS "appraisal" TIMEOUT 45)
   add_custom_target(high_fidelity_checks DEPENDS high_fidelity_appraisal high_fidelity_fullwave_probe high_fidelity_fullwave_kernel_probe high_fidelity_magnetoionic_probe high_fidelity_wave_optics_probe
+    high_fidelity_vector_oblique_probe high_fidelity_test_hf_vector_oblique
     high_fidelity_test_hf_fragment_integrity
     high_fidelity_phase_screens_probe high_fidelity_test_hf_phase_screens
     high_fidelity_test_channel high_fidelity_test_scenarios

@@ -25,6 +25,7 @@ using Fullwave = HfFullwaveKernelTable;
 using Magnetic = HfMagnetoionicKernelTable;
 using WaveOptics = HfWaveOpticsTable;
 using PhaseScreens = HfPhaseScreensTable;
+using VectorOblique = HfVectorObliqueTable;
 constexpr auto reflection = HfFullwavePort::reflection;
 
 void require(bool condition, const char* message) {
@@ -108,6 +109,12 @@ double maximum_delay(const ChannelSpec& spec, double horizon) {
                 !spec.wave_optics && spec.paths.empty(),
                 "multiple phase-screen propagation excludes other propagation paths");
         maximum = PhaseScreens::first_lag_samples() / PhaseScreens::sample_rate_hz;
+    }
+    if (spec.vector_oblique) {
+        require(!spec.lunar && !spec.fullwave_reflection && !spec.magnetoionic_reflection &&
+                !spec.wave_optics && !spec.phase_screens && spec.paths.empty(),
+                "vector oblique propagation excludes other propagation paths");
+        maximum = static_cast<double>(VectorOblique::first_lag_samples()) / VectorOblique::sample_rate_hz;
     }
     if (spec.lunar) {
         const auto& lunar = *spec.lunar;
@@ -268,6 +275,37 @@ std::string phase_screens_table_sha256(const PhaseScreens& table) {
     return digest;
 }
 
+std::string vector_oblique_table_sha256(const VectorOblique& table) {
+    std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> context(EVP_MD_CTX_new(), EVP_MD_CTX_free);
+    require(context && EVP_DigestInit_ex(context.get(), EVP_sha256(), nullptr) == 1,
+            "vector oblique table digest initialization failed");
+    for (std::size_t k = 0; k <= VectorOblique::position_intervals; ++k) {
+        for (auto lag = VectorOblique::first_lag_samples(); lag <= VectorOblique::last_lag_samples(); ++lag) {
+            const auto value = table.coefficient_knot_value(lag, k);
+            const auto slope = table.coefficient_knot_slope(lag, k);
+            const std::array bits{std::bit_cast<std::uint64_t>(value.real()), std::bit_cast<std::uint64_t>(value.imag()),
+                                  std::bit_cast<std::uint64_t>(slope.real()), std::bit_cast<std::uint64_t>(slope.imag())};
+            std::array<unsigned char, 32> encoded{};
+            for (std::size_t i = 0; i < encoded.size(); ++i)
+                encoded[i] = static_cast<unsigned char>((bits[i / 8] >> (8 * (i % 8))) & 255);
+            require(EVP_DigestUpdate(context.get(), encoded.data(), encoded.size()) == 1,
+                    "vector oblique table digest update failed");
+        }
+    }
+    std::array<unsigned char, 32> value{};
+    unsigned length = 0;
+    require(EVP_DigestFinal_ex(context.get(), value.data(), &length) == 1 && length == value.size(),
+            "vector oblique table digest finalization failed");
+    constexpr char digits[] = "0123456789abcdef";
+    std::string digest;
+    digest.reserve(2 * value.size());
+    for (auto byte : value) {
+        digest.push_back(digits[byte >> 4]);
+        digest.push_back(digits[byte & 15]);
+    }
+    return digest;
+}
+
 std::vector<double> interpolation_weights(unsigned half, double fraction) {
     std::vector<double> result(2 * half);
     detail::fractional_weights(half, fraction, result);
@@ -392,6 +430,7 @@ struct Channel::Impl {
     std::uint64_t magnetoionic_transition_first = 0, magnetoionic_transition_stop = 0;
     std::optional<HfWaveOpticsStream> wave_optics;
     std::optional<HfPhaseScreensStream> phase_screens;
+    std::optional<HfVectorObliqueStream> vector_oblique;
     Random white, colored, events, marks;
     Complex tx_state{}, colored_state{}, impulse_state{}, lowpass_state{};
     double colored_decay = 0, colored_innovation = 0, impulse_decay = 0;
@@ -413,7 +452,7 @@ struct Channel::Impl {
         require(finite(spec.rf_hz) && spec.rf_hz > 0, "RF carrier must be positive and finite");
         require(spec.interpolation_half_width >= 4 && spec.interpolation_half_width <= 64,
                 "fractional-delay half width must be in [4,64]");
-        require(spec.lunar || spec.fullwave_reflection || spec.magnetoionic_reflection || spec.wave_optics || spec.phase_screens ? spec.paths.empty() :
+        require(spec.lunar || spec.fullwave_reflection || spec.magnetoionic_reflection || spec.wave_optics || spec.phase_screens || spec.vector_oblique ? spec.paths.empty() :
                 (!spec.paths.empty() && spec.paths.size() <= 65536),
                 "channel requires one spectral propagation model or 1..65536 explicit paths");
         require(finite(source.minimum_frequency_hz) && finite(source.maximum_frequency_hz) &&
@@ -460,6 +499,23 @@ struct Channel::Impl {
                 throw HfPhaseScreensUnavailable("phase-screens source exceeds the qualified carrier, sample rate, or occupied band");
             try { validate_hf_phase_screens_spec(*spec.phase_screens, horizon); }
             catch (const std::exception& error) { throw HfPhaseScreensUnavailable(error.what()); }
+        }
+        if (spec.vector_oblique) {
+            const auto& vector = *spec.vector_oblique;
+            require(!spec.lunar && !spec.fullwave_reflection && !spec.magnetoionic_reflection &&
+                    !spec.wave_optics && !spec.phase_screens && !spec.transmitter.enabled &&
+                    spec.hf_trajectory_offset_seconds == 0 && spec.noise.colored_variance == 0 &&
+                    spec.noise.impulse_rate_hz == 0 && spec.noise.impulse_rms == 0 &&
+                    spec.frontend.lowpass_hz == 0 &&
+                    spec.frontend.clip_magnitude == 0 && spec.frontend.agc_target == 0 &&
+                    spec.frontend.adc_bits == 0 && spec.fade.first_seconds == -1 &&
+                    spec.fade.stop_seconds == -1,
+                    "vector oblique propagation requires an isolated linear channel or native endpoint chain");
+            if (fs != VectorOblique::sample_rate_hz || spec.rf_hz != VectorOblique::carrier_hz ||
+                source_band > VectorOblique::occupied_half_band_hz)
+                throw HfVectorObliqueUnavailable("vector oblique source exceeds its qualified carrier, sample rate, or occupied band");
+            try { validate_hf_vector_oblique_spec(vector, horizon); }
+            catch (const std::exception& error) { throw HfVectorObliqueUnavailable(error.what()); }
         }
         if (spec.fullwave_reflection) {
             require(!spec.lunar && !spec.transmitter.enabled && spec.hf_trajectory_offset_seconds == 0 &&
@@ -600,7 +656,7 @@ struct Channel::Impl {
                  fade.ramp_seconds <= .5 * (fade.stop_seconds - fade.first_seconds)),
                 "fade must be disabled or have ordered bounds and nonoverlapping ramps");
 
-        const auto history_count = spec.fullwave_reflection || spec.magnetoionic_reflection || spec.wave_optics || spec.phase_screens ? 1 : count_from_long_double(
+        const auto history_count = spec.fullwave_reflection || spec.magnetoionic_reflection || spec.wave_optics || spec.phase_screens || spec.vector_oblique ? 1 : count_from_long_double(
             std::ceil(static_cast<long double>(report.maximum_delay_seconds) * fs) +
             2 * spec.interpolation_half_width + detail::hf_dispersion_halo_samples(spec) + 4);
         std::size_t bytes = checked_add(sizeof(Impl), source.working_bytes);
@@ -631,6 +687,7 @@ struct Channel::Impl {
         if (spec.magnetoionic_reflection) bytes = checked_add(bytes, Magnetic::preparation_workspace_bound_bytes);
         if (spec.wave_optics) bytes = checked_add(bytes, WaveOptics::preparation_workspace_bound_bytes);
         if (spec.phase_screens) bytes = checked_add(bytes, PhaseScreens::preparation_workspace_bound_bytes);
+        if (spec.vector_oblique) bytes = checked_add(bytes, VectorOblique::preparation_workspace_bound_bytes);
         if (bytes > spec.maximum_workspace_bytes) throw ChannelWorkspaceError("channel exceeds explicit workspace limit");
         std::vector<std::size_t> order(spec.paths.size()), membership(spec.paths.size(), std::numeric_limits<std::size_t>::max());
         for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
@@ -767,6 +824,30 @@ struct Channel::Impl {
             receipt.stream_workspace_bytes = phase_screens->workspace_bytes();
             require(built.checks.preparation_peak_workspace_bytes <= PhaseScreens::preparation_workspace_bound_bytes,
                     "phase-screens preparation exceeded its workspace admission");
+            receipt.preparation_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+            receipt.retarded_peak_error_bound = built.checks.retarded_peak_error_bound;
+            receipt.source_minimum_frequency_hz = source.minimum_frequency_hz;
+            receipt.source_maximum_frequency_hz = source.maximum_frequency_hz;
+        }
+        if (spec.vector_oblique) {
+            const auto start = std::chrono::steady_clock::now();
+            const auto& selected = *spec.vector_oblique;
+            const auto built = build_hf_vector_oblique_table(selected, stop);
+            if (!built.table || !built.checks.qualified)
+                throw HfVectorObliqueUnavailable("vector oblique table failed its Maxwell, Fourier-order, or causal-kernel qualification");
+            vector_oblique.emplace(built.table, selected);
+            require(vector_oblique->tail_samples() == VectorOblique::last_lag_samples(),
+                    "vector oblique tail differs from its declared complete causal support");
+            auto& receipt = report.vector_oblique.emplace();
+            receipt.checks = built.checks;
+            receipt.spec = selected;
+            receipt.table_sha256 = vector_oblique_table_sha256(*built.table);
+            receipt.table_workspace_bytes = built.table->workspace_bytes();
+            receipt.stream_workspace_bytes = vector_oblique->workspace_bytes();
+            require(built.checks.preparation_peak_workspace_bytes <= VectorOblique::preparation_workspace_bound_bytes &&
+                    checked_add(receipt.table_workspace_bytes, receipt.stream_workspace_bytes) <=
+                        VectorOblique::preparation_workspace_bound_bytes,
+                    "vector oblique table, stream and peak preparation exceed their workspace admission");
             receipt.preparation_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             receipt.retarded_peak_error_bound = built.checks.retarded_peak_error_bound;
             receipt.source_minimum_frequency_hz = source.minimum_frequency_hz;
@@ -968,7 +1049,7 @@ struct Channel::Impl {
     Complex render() {
         const auto n = report.samples;
         const long double time = static_cast<long double>(n) / fs;
-        ensure_source(fullwave || magnetoionic || wave_optics || phase_screens ? n : n + spec.interpolation_half_width);
+        ensure_source(fullwave || magnetoionic || wave_optics || phase_screens || vector_oblique ? n : n + spec.interpolation_half_width);
         Complex wanted = lunar ? lunar->wanted(n, history, source.geometry.source_samples, spec.transmitter.enabled) : Complex{};
         if (fullwave) {
             const auto input = saved(n);
@@ -1001,6 +1082,13 @@ struct Channel::Impl {
             const auto input = saved(n);
             wanted = phase_screens->step(input);
             auto& receipt = *report.phase_screens;
+            receipt.incident_energy += std::norm(input);
+            receipt.selected_energy += std::norm(wanted);
+        }
+        if (vector_oblique) {
+            const auto input = saved(n);
+            wanted = vector_oblique->step(input);
+            auto& receipt = *report.vector_oblique;
             receipt.incident_energy += std::norm(input);
             receipt.selected_energy += std::norm(wanted);
         }

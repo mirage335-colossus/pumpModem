@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "name": "hf-vector-oblique-bright-endpoint",
+  "purpose": "Completion-review control fixed before execution: direct primary delivers at +30 dB-Hz; test the same physical field, public priors, source/noise seeds and A payload through native TX/RX clock errors and the continuing tone at +30. Reduce post-RX noise variance only; source and tone amplitudes and their ratio remain unchanged. If this fails, permit one separate matched chain-off +30 discriminator; no sweep or threshold change.",
+  "max_wall_seconds": 300,
+  "per_trial_wall_seconds": 300,
+  "max_trials": 1,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "id": "chain-clocks-tone-A-30",
+      "scenario": "hf-vector-oblique-chain-clocks-tone",
+      "waveform": "reference",
+      "seed": 70501,
+      "noise_seed": 80501,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 30,
+      "max_wall_seconds": 300
+    }
+  ]
+}

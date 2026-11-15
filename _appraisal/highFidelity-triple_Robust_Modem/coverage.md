@@ -7,6 +7,47 @@ different questions and are reported separately. No natural-condition
 probability, field calibration, or universal sensitivity floor follows from
 these deterministic cases or small fixed-seed holdouts.
 
+The latest [coupled vector/oblique extension](hf-vector-oblique.md) materially
+changes the earlier environmental gap: magnetic polarization, transverse
+diffraction and oblique reflection now share one bidirectional Maxwell
+operator. Five physical variants pass independent reductions, flux checks,
+refinement, 54 assembled-table comparisons each, and actual stream tests.
+An under-resolved initial pilot is rejected and retained. The primary contains
+a sampled −25.22 dB antenna-power minimum within the frozen message.
+This is a slow translating, two-dimensional sporadic-E construction, not a
+general 3-D, multiple-hop or calibrated disturbed-day channel.
+
+Its **21 complete native observations** include twenty strict receipts and one
+explicitly metadata-audited receipt; the original campaign stop is preserved.
+Eighteen wanted observations yield four correct complete messages, one
+incorrect accepted `i`, and thirteen without delivery. Three negative controls
+accept no message; the strong direct wrong-key control produces three false
+DATA decisions. One wanted observation is an exact diagnostic replay, and
+several others are matched brackets or ablations, so these are not independent
+statistical success trials.
+
+The new field reproduces the fragment mechanism as `B`→`i`, despite every
+admitted DATA bit being correct. A distinct bright native clock/interference
+case recovers all thirteen active bits correctly but marks both ending quiet
+slots ambiguous, so **no message completes**. Its matched bright endpoint-off
+control succeeds. The result establishes a combined-interaction failure;
+it does not separately identify clocks or the continuing tone as the cause.
+Direct primary erasures decrease 11→9→4→0 at incident C/N0 0/+10/+20/+30.
+The equal-incident-energy doubled-duration case still fails, but sees less
+selected-antenna E/N0, so it is not an equal-received-information comparison.
+The matched private diagnostic distinguishes conditional bit information from
+presence evidence and does not establish a receiver-only miss in its sampled
+slot. These communications failures are unresolved.
+
+The [new public-data audit](hf-research.md#transverse-diffraction-and-usable-measurement-audit)
+inspects the McMurdo archive directory and representative pickle products,
+plus a bounded Ottawa prefix from the Cameron 2026 deposit. The sampled data
+are real sounding-parameter products, not established calibrated continuous
+complex channel recordings. The full payloads were not exhaustively inspected.
+Current software coverage is 36 groups, with the full original run, its
+catalog-test correction, affected follow-up checks and automatic waveform
+test separately recorded in the [build summary](README.md).
+
 The [correlated-presence continuation](hf-correlated-presence.md) now repairs
 the exact lens `B` failure at unchanged energy/duration and the matched
 separated-screen `A` failure at +11 dB-Hz. It evaluates all public timing

@@ -6,6 +6,15 @@ single-antenna cancellation, or a missing propagation mode prevent that gain.
 They run the canonical native Robust receiver. They do not require a favorable
 answer or turn a completed experiment into successful communication.
 
+The [coupled vector/oblique extension](hf-vector-oblique.md) adds one
+bidirectional Maxwell operator for polarization, transverse scattering and
+oblique reflection in a slowly translating, two-dimensional sporadic-E field.
+Frozen primary/holdout fields, ablations, numerical waveform gates and native
+clock/interference controls now test these effects together. The new complete
+message and strong wrong-key failures remain separate from simulator validity.
+This is a bounded physical extension, not qualification of arbitrary 3-D or
+multiple-hop disturbed propagation.
+
 The [research reconciliation](hf-research.md) connects the model choices to
 the existing `_ref` collection and newly inspected primary literature. Four
 evidence classes remain separate: deposited measured envelopes, historical

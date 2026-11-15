@@ -7,6 +7,20 @@ groundwave, 1–30 MHz skywave, and Earth–Moon–Earth**. All appraisal code,
 fixtures, documentation and generated evidence remain in this directory.
 Python launches native executables and analyzes receipts; it implements no DSP.
 
+The [coupled vector/oblique extension](hf-vector-oblique.md) now calculates
+magnetic polarization, transverse diffraction and oblique reflection in one
+bidirectional Maxwell operator. Independent analytic, flux, refinement and
+assembled-waveform checks precede complete native reception. Its frozen fields,
+physical ablations and endpoint interactions expose another `B`→`i` fragment
+acceptance and strong wrong-key false DATA, while focused higher-C/N0 controls
+establish complete reception. A bright clock/interference case also recovers
+every active bit yet misses completion because both ending slots are ambiguous;
+its matched endpoint-off control delivers. This materially extends the environmental model;
+it does not repair those receiver failures or qualify general disturbed-day
+availability. [Public archive/schema inspection](hf-research.md#transverse-diffraction-and-usable-measurement-audit)
+also distinguishes available sounding-parameter products from calibrated complex
+channel recordings.
+
 The [correlated-presence follow-up](hf-correlated-presence.md) demonstrates
 two complete-message repairs on matched captures using a normalized public
 gain-history search. It preserves a fresh payload, ambient reception and
@@ -141,7 +155,19 @@ From the repository root:
 ```
 
 This configures an ignored `.build/` and links the production C++ modem.
-The current correlated-presence and fragment-integrity extension passed
+The coupled-vector extension exercised 35 CTest groups: 34 passed in the
+initial full run (88.79 s); the scenario-catalog assertion omitted the new
+propagation family and its finite horizon. After that test was corrected,
+the affected group passed in 1.34 s. The four affected native-chain,
+integration, runner and waveform-receipt groups then passed in 58.28 s.
+The newly added automatic assembled-vector-waveform group passed in 8.96 s,
+bringing the current suite to 36 groups. The final endpoint-C/N0 admission
+change passed all 121 runner and 13 waveform-receipt checks. These are applicable full and affected
+checks, not a claim of a second single 36-group run.
+[Original and corrected logs](local-evidence/hf-vector-oblique-preflight/)
+preserve that failure separately from communications outcomes.
+
+The preceding correlated-presence and fragment-integrity extension passed
 **34/34 CTest groups in 89.13 s**
 ([log](local-evidence/hf-presence-integrity-tests.log)). The subsequent duration
 admission changes passed the geometry check and all three affected integration,
@@ -198,6 +224,8 @@ Current group coverage is:
 | `scenarios` | Physical/source tuples, normalization, reference observables and adverse numerical controls |
 | `hf_scenarios` | NVIS, DRM6, extended HF profiles and an off-grid eikonal holdout |
 | `hf_ionosphere` | Eikonal phase/group-delay consistency, independent quadrature, and frequency/time derivatives |
+| `hf_vector_oblique` | Coupled bidirectional vector scattering, vacuum/Fresnel/Born reductions, coherent passivity, translation and magnetic reversal |
+| `hf_vector_oblique_waveform` | Primary qualified RF/FIR table, 54 direct assembly witnesses, impulse/tail, moving tone and chunk invariance |
 | `hf_design` | Fixed whole-domain phase/group bounds, strict physical coefficients, seed/placement isolation and mutation order |
 | `hf_gui_profile` | Canonical preset preparation, actual endpoint clock errors, margin semantics, Helper, noise-seed isolation and rejection |
 | `hf_fullwave` | Independent zero-index, Fresnel/slab, Joule-loss and smooth-barrier references; passive opaque layers and unresolved resonances |

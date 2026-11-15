@@ -697,6 +697,78 @@ Scenario phase_screens(const std::string& id) {
     return scenario;
 }
 
+Scenario vector_oblique(const std::string& id) {
+    auto scenario = base_hf(id);
+    scenario.channel.rf_hz = HfVectorObliqueTable::carrier_hz;
+    auto& vector = scenario.channel.vector_oblique.emplace();
+    if (id == "hf-vector-oblique-off") {
+        vector.perturbations = false;
+    } else if (id == "hf-vector-oblique-no-b") {
+        vector.magnetic = false;
+    } else if (id == "hf-vector-oblique-holdout") {
+        vector.field = 1;
+        vector.drift_mps = 7.5;
+        vector.epoch_seconds = 520.;
+    } else if (id == "hf-vector-oblique-cross") {
+        vector.antenna = 1;
+    }
+    scenario.waveform.rate_hz = 36.;
+    scenario.waveform.added_symbols = 10;
+    scenario.waveform.fhss = false;
+    scenario.waveform.sample_rate_hz = HfVectorObliqueTable::sample_rate_hz;
+    scenario.waveform.requested_bit_seconds = 64.;
+    scenario.bounds.arrival_low_seconds = HfVectorObliqueTable::first_lag_samples() /
+        HfVectorObliqueTable::sample_rate_hz;
+    scenario.bounds.arrival_high_seconds = HfVectorObliqueTable::last_lag_samples() /
+        HfVectorObliqueTable::sample_rate_hz;
+    scenario.bounds.frequency_bound_hz = 0.;
+    scenario.bounds.atmospheric_hz = 5.;
+    scenario.bounds.varying = true;
+    scenario.reference_cn0_db_hz = 0.;
+    scenario.numerical_horizon_seconds = HfVectorObliqueTable::horizon_seconds;
+    scenario.evidence = id == "hf-vector-oblique-off"
+        ? "flat-laminar oblique magnetized Es control with the same finite layered reflector"
+        : id == "hf-vector-oblique-no-b"
+            ? "matched oblique scalar-permittivity control with transverse Fourier scattering retained"
+            : id == "hf-vector-oblique-holdout"
+                ? "independent structured-layer field and crossing placement selected before receiver outcomes"
+                : id == "hf-vector-oblique-cross"
+                    ? "cross-antenna projection on the same physical layer and public calendar"
+                    : "same density perturbations couple oblique vector magnetoionic reflection and transverse Fourier scattering";
+    scenario.provenance = "coupled APP finite-order Maxwell scattering solution; numerically qualified transfer table and causal FIR";
+    scenario.assumptions = "Constructed, two-dimensional x-z cold collisional plasma path, invariant along y, with a finite "
+        "oblique reflecting layer and one periodic transverse density corrugation. The permittivity tensor is formed from "
+        "the same tilted geomagnetic field and electron-density map across all retained diffraction orders, so diffraction, "
+        "mode coupling, reflection and fixed-antenna polarization projection interact within each solve. One complete layer "
+        "encounter and one nonwrapped horizontal density period are admitted; this is not a three-dimensional random field, "
+        "statistical channel ensemble, or measured event. A causal complex-voltage FIR covers the declared ±384 Hz input "
+        "band and processes the whole waveform through quiet completion without per-window power normalization. The native "
+        "receiver receives no Fourier coefficients, layer state or propagated orthogonal antenna component. Ordinary "
+        "receiver estimates use the public finite arrival/frequency bounds. The no-corrugation, zero-magnetic-field, "
+        "independent-field and cross-antenna variants are separate controlled physical hypotheses; no Helper is used.";
+    return scenario;
+}
+
+Scenario native_vector_oblique_chain(const std::string& id) {
+    auto scenario = vector_oblique("hf-vector-oblique");
+    scenario.id = id;
+    scenario.bounds.frequency_bound_hz = 1.;
+    scenario.reference_cn0_db_hz = 0.;
+    if (id == "hf-vector-oblique-chain-clocks-tone") {
+        scenario.channel.noise.tone_amplitude = .3;
+        scenario.channel.noise.tone_hz = 100.;
+    }
+    scenario.evidence = "coupled oblique vector-scattering channel between canonical native TX and RX clocks";
+    scenario.provenance += "; HfNativeChain reuses canonical StreamingChannel endpoint DSP";
+    scenario.assumptions += " The transmission is passed through native TX audio/RF clocks and oscillators before the "
+        "physical solver, and native RX clocks/oscillators afterward. Public endpoint clocks remain bounded at ±2 ppm "
+        "and the relative audio-clock bound at ±4 ppm; the receiver sees only these declared bounds. The clock rows use "
+        "TX/RX audio +1/−1 ppm and RF +0.01/−0.01 ppm at the 10 MHz carrier. The tone row adds a continuing "
+        "0.3-amplitude RF-plane interferer at +100 Hz before RX retiming/mixing. Final white noise is added only after "
+        "native RX. All captures require two scored quiet slots; no receiver message length selects physical completion.";
+    return scenario;
+}
+
 } // namespace
 
 std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
@@ -709,6 +781,12 @@ std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
         return native_wave_chain(id);
     if (id == "hf-phase-screens-off" || id == "hf-phase-screens" || id == "hf-phase-screens-holdout")
         return phase_screens(id);
+    if (id == "hf-vector-oblique-off" || id == "hf-vector-oblique" || id == "hf-vector-oblique-no-b" ||
+        id == "hf-vector-oblique-holdout" || id == "hf-vector-oblique-cross")
+        return vector_oblique(id);
+    if (id == "hf-vector-oblique-chain-off" || id == "hf-vector-oblique-chain-clocks" ||
+        id == "hf-vector-oblique-chain-clocks-tone")
+        return native_vector_oblique_chain(id);
     if (id == "hf-magnetoionic-x" || id == "hf-magnetoionic-y" || id == "hf-magnetoionic-x-holdout" ||
         id == "hf-magnetoionic-x-spread" || id == "hf-magnetoionic-parallel-x" ||
         id == "hf-magnetoionic-parallel-y" || id == "hf-magnetoionic-parallel-x-holdout")

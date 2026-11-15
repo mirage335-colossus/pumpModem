@@ -5,6 +5,15 @@ corrective history and the evidence limits for the contained appraisal. No
 scenario qualifies a real environment, universal receiver sensitivity floor,
 or complete-receiver CPU/GPU capacity.
 
+The latest [coupled vector/oblique record](hf-vector-oblique.md) joins magnetic
+polarization, transverse diffraction and oblique reflection in one native
+Maxwell calculation. It retains a rejected numerical pilot, qualified final
+waveforms, complete receiver brackets, endpoint interactions and exact private
+replay checks. Wrong fragment acceptance, strong wrong-key false DATA and
+missed completion despite all correct active bits remain communications
+failures. See the [current coverage](coverage.md) for the bounded observation
+counts; software checks do not reclassify those outcomes.
+
 The subsequent [adverse HF expansion and comparison record](hf-validation.md)
 contains the current HF models, executed campaigns, phase-history and coding
 findings, and updated software checks. It also records the later
