@@ -64,6 +64,14 @@ HfVectorScattering solve_hf_vector_oblique_3d(double frequency_hz, const HfVecto
     std::array<double, 3> field_tesla, std::span<const HfVectorPlasmaLayer3d> bottom_to_top,
     std::stop_token = {});
 
+// Shared solver limits for the selected two-hop appraisal only. The E
+// branch admits 169 modes, 2,048 layers and 12 billion dense terms. The
+// stratified F branch admits 81 modes, 9,600 layers and 1.2 billion terms.
+HfVectorScattering solve_hf_vector_two_hop_es(double frequency_hz, const HfVectorTransverseGrid&,
+    std::array<double, 3> field_tesla, std::span<const HfVectorPlasmaLayer3d> bottom_to_top, std::stop_token = {});
+HfVectorScattering solve_hf_vector_two_hop_f(double frequency_hz, const HfVectorTransverseGrid&,
+    std::array<double, 3> field_tesla, std::span<const HfVectorPlasmaLayer3d> bottom_to_top, std::stop_token = {});
+
 struct HfVectorObliqueSpec {
     bool perturbations = true, magnetic = true;
     unsigned field = 0, antenna = 0;

@@ -50,6 +50,17 @@ additional realistic temporal stress without a field-availability claim.
 
 ## Intrinsic evolution versus rigidly translated spatial fields
 
+The [selected multiple-hop continuation](hf-multihop.md) separates rapid
+received fading from rapid bulk plasma evolution. It composes vector
+reflection/transmission operators with a polarization-dependent ground bounce,
+and lets a competing F return interfere at the same receiving antenna. Old
+multihop fading observations and recent HF sounder results support testing this
+mechanism, but do not calibrate its occurrence probability. Fixed ground
+endpoints also require changing incidence and dispersive layer response as a
+reflector moves: an image-phase correction alone failed independent numerical
+checks. The continuation records that rejection, the full complex-stage repair,
+and measured-data eligibility audits separately from communications results.
+
 [Schinder et al. (5 August 2026)](https://doi.org/10.3389/fspas.2026.1858870)
 couple a two-dimensional sporadic-E fluid model to reconstructed realistic
 winds. They find irregular broad spatial spectra where idealized wind shears
@@ -79,7 +90,7 @@ preserving the distinction between a radar observable and a one-way channel:
 |---|---|---|
 | [Liu et al. (2023)](https://doi.org/10.1029/2022SW003195), [Zenodo 7376983](https://zenodo.org/records/7376983) | CC BY 4.0, 64.2 MB processed echo/image data for six figures; deposit explicitly omits raw ionosonde records and specifies a five-bin internal-delay correction | Vertical Es structure and short-term changes. Sequential frequency sounding and processed images do not give calibrated simultaneous oblique complex transfer. |
 | [Hysell et al. (2024)](https://doi.org/10.1029/2024JA033088), [Cornell dataset](https://doi.org/10.7298/8sxf-b977) | Partially reduced spectra and interferometric cross-spectra; repository states no license and requests author consultation before publication/presentation | E-region spatial structure, motion and radar interference. Neither one-way skip-channel gain nor absolute link-power calibration follows. No data imported. |
-| [NOAA VIPIR RIQ specification](https://data.ngdc.noaa.gov/instruments/remote-sensing/active/profilers-sounders/ionosonde/documentation/VIPIR/RIQ_Specification_v1.2.PDF), [pynasonde (2026)](https://doi.org/10.1016/j.softx.2026.102617) | Per-pulse complex samples with instrument/pulse metadata; software has an example record, while the paper's larger SDR data are request-only | Useful vertical-incidence sounding route. The reviewed material does not establish a calibrated multi-event one-way broadband fixture. Software licensing does not automatically establish dataset licensing. |
+| [NOAA VIPIR RIQ specification](https://data.ngdc.noaa.gov/instruments/remote-sensing/active/profilers-sounders/ionosonde/documentation/VIPIR/RIQ_Specification_v1.2.PDF), [pynasonde (2026)](https://doi.org/10.1016/j.softx.2026.102617) | Per-pulse complex samples with instrument/pulse metadata; documentation names an example RIQ, but the 15 November audit finds that member absent from the public repository and its raw URL returns 404. The paper's larger SDR data are request-only. | Useful vertical-incidence sounding route. The reviewed material does not establish a calibrated multi-event one-way broadband fixture. Software licensing does not automatically establish dataset licensing. See the [specific public-file audit](hf-multihop.md#measured-channel-lead-and-evidence-lifecycle). |
 | [Antarctica–Spain sounding study](https://www.mdpi.com/2072-4292/7/9/11712) | Published wideband response matrices and sounding method | Relevant long-link measurement evidence. No usable raw-capture package with license was located in this bounded search. |
 | [Niu et al. (2026)](https://doi.org/10.1109/LAWP.2026.3696384) | Previously identified multi-link HF measurement publication, rechecked as a data lead | No directly usable public capture/calibration package verified; publisher access was challenged. Do not turn an indexed measurement claim into a replay fixture. |
 
@@ -366,6 +377,12 @@ chirp receiver's swept local oscillator and fixed 1 MHz IF; it does not clearly
 assign that rate to these BIN files or explain the notebook's corrections.
 Consequently, the notebook rate is not declared wrong, but its calibration is
 not independently established by the reviewed documentation.
+The subsequent [multiple-hop audit](hf-multihop.md#measured-channel-lead-and-evidence-lifecycle)
+reconciles these retained archive facts with the paper's 8–30 MHz chirp at
+100 kHz/s: roughly 220 s is a sequential sweep, not a simultaneous broadband
+temporal channel. The paper's documented AGC artifact in the comparison receiver
+also prevents treating its output as calibrated truth. No additional large
+download or modem replay follows from the availability of licensed raw IQ.
 
 The public API's CC-BY-4.0 declaration resolves the earlier license uncertainty.
 The date discrepancy and unreported absolute transmitter/receiver phase, gain

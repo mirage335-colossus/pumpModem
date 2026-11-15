@@ -42,7 +42,8 @@ SCHEMA_VERSION = 1
 MAX_OUTPUT_BYTES = 8 * 1024 * 1024
 MAX_CAMPAIGN_OUTPUT_BYTES = 256 * 1024 * 1024
 ROOT_KEYS = {"schema_version", "name", "purpose", "max_wall_seconds", "per_trial_wall_seconds",
-             "max_trials", "max_samples", "episodes", "confirmatory_strata"}
+             "max_trials", "max_samples", "episodes", "confirmatory_strata",
+             "stop_on_execution_failure"}
 GUI_DEFAULTS = {
     "gui_spread": "hf-worst", "gui_selective": "each-65", "gui_arrival": "tight",
     "gui_margin": 3, "gui_audio_ppm": 100, "gui_rf_ppm": 1,
@@ -174,6 +175,25 @@ HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS = {
     "hf-vector-evolving-chain-off": (0., 0., 0., 0., False),
     "hf-vector-evolving-chain-clocks-tone": (1., -1., .01, -.01, True),
 }
+# Frozen from the bounded, independent channel-only 36-axis selection.  The held
+# axis is the predeclared +15-degree offset and was not chosen from receiver outcomes.
+HF_VECTOR_TWO_HOP_PRIMARY_AXIS_INDEX = 11
+HF_VECTOR_TWO_HOP_HELD_AXIS_INDEX = 14
+HF_VECTOR_TWO_HOP_SCENARIOS = {
+    "hf-vector-two-hop": ("primary", "both", HF_VECTOR_TWO_HOP_PRIMARY_AXIS_INDEX),
+    "hf-vector-two-hop-only": ("primary", "two_hop", HF_VECTOR_TWO_HOP_PRIMARY_AXIS_INDEX),
+    "hf-vector-one-hop-only": ("primary", "one_hop", HF_VECTOR_TWO_HOP_PRIMARY_AXIS_INDEX),
+    "hf-vector-two-hop-holdout": ("holdout", "both", HF_VECTOR_TWO_HOP_HELD_AXIS_INDEX),
+    "hf-vector-two-hop-chain-off": ("primary", "both", HF_VECTOR_TWO_HOP_PRIMARY_AXIS_INDEX),
+    "hf-vector-two-hop-chain-clocks-tone": ("primary", "both", HF_VECTOR_TWO_HOP_PRIMARY_AXIS_INDEX),
+}
+HF_VECTOR_TWO_HOP_CHAIN_SCENARIOS = {
+    "hf-vector-two-hop-chain-off": (0., 0., 0., 0., False),
+    "hf-vector-two-hop-chain-clocks-tone": (1., -1., .01, -.01, True),
+}
+
+# The 36-axis channel-only selection is frozen independently of communication
+# results; receiver rows must keep these selected physical axes unchanged.
 GANNON_REPLAY = {"hf-gannon-1700": (17, 0.), "hf-gannon-2000": (20, 0.),
                  "hf-gannon-2000-late": (20, 1800.)}
 GANNON_RECORDS = {
@@ -230,6 +250,9 @@ def _read_campaign(path: Path) -> dict[str, Any]:
     _nonempty_str(value["name"], "name")
     if "purpose" in value and not isinstance(value["purpose"], str):
         raise CampaignError("purpose must be a string")
+    if ("stop_on_execution_failure" in value and
+            not isinstance(value["stop_on_execution_failure"], bool)):
+        raise CampaignError("stop_on_execution_failure must be a boolean")
     for key, minimum, maximum in (("max_wall_seconds", 1, 86400),
                                   ("per_trial_wall_seconds", 1, 3600),
                                   ("max_trials", 1, 100), ("max_samples", 1, 100_000_000)):
@@ -556,6 +579,65 @@ def _validate_episode(item: Any, index: int, ids: set[str],
                  "history_reference_delay_seconds", "search_slot", "search_timing"} & item.keys()):
             raise CampaignError(f"episodes[{index}]: vector oblique cases require the frozen CPU reference RRC "
                                 "Helper/FEC-off geometry and ordinary receiver; endpoint cases require 64 seconds and C/N0 0 or 30")
+    if item["scenario"] in HF_VECTOR_TWO_HOP_SCENARIOS:
+        field, routes, _axis = HF_VECTOR_TWO_HOP_SCENARIOS[item["scenario"]]
+        chain = item["scenario"] in HF_VECTOR_TWO_HOP_CHAIN_SCENARIOS
+        control = item.get("control", "wanted")
+        cn0 = item.get("cn0_db_hz", 30)
+        seconds = item.get("bit_seconds", 64)
+        requirement = item.get("reception_requirement")
+        anchor_point = ((field == "primary" and routes in {"both", "two_hop", "one_hop"} or
+                         field == "holdout" and routes == "both") and cn0 == 30 and seconds == 64)
+        characterization_point = (not chain and item["scenario"] == "hf-vector-two-hop" and
+                                   field == "primary" and routes == "both" and
+                                   ((cn0 == 20 and seconds == 64) or (cn0 == 17 and seconds == 128)))
+        # The lower-energy follow-up has only two frozen wanted points. Plan mode
+        # is allowed to preflight those exact cases; receive mode may characterize
+        # them. Keep the channel-only mode and nearby points closed, and bind both
+        # plans to the same E payload and seeds as the frozen receive campaign.
+        lower_followup_point = (
+            not chain and item["scenario"] == "hf-vector-two-hop" and
+            field == "primary" and routes == "both" and
+            ((cn0 == 0 and seconds == 64) or (cn0 == -3 and seconds == 128)) and
+            item.get("message") == "E" and item.get("seed") == 73613 and
+            item.get("noise_seed") == 93613)
+        boundary_followup_point = (
+            not chain and item["scenario"] == "hf-vector-two-hop" and
+            field == "primary" and routes == "both" and
+            ((cn0 == 6 and seconds == 64) or (cn0 == 3 and seconds == 128)) and
+            item.get("message") == "E" and item.get("seed") == 73613 and
+            item.get("noise_seed") == 93613)
+        expected_wanted = ((anchor_point and requirement == "required_complete") or
+                           (characterization_point and requirement == "characterization") or
+                           ((lower_followup_point or boundary_followup_point) and
+                            requirement == "characterization"))
+        expected_negative = (not chain and item["scenario"] == "hf-vector-two-hop" and routes == "both" and
+                             ((control in {"noise", "wrong-key"} and cn0 == 30 and seconds == 64) or
+                              (control == "noise" and cn0 == 0 and seconds == 64) or
+                              (control == "wrong-key" and cn0 == -3 and seconds == 128)) and
+                             requirement == "negative_control")
+        allowed_modes = {"plan", "receive"} if chain else {"plan", "channel", "receive"}
+        if (item["mode"] not in allowed_modes or item["waveform"] != "reference" or
+                item.get("backend", "cpu") != "cpu" or item.get("pulse", "rrc") != "rrc" or
+                item.get("helper", False) or item.get("fec", "off") != "off" or
+                (item["mode"] != "receive" and (control != "wanted" or not (
+                    anchor_point or characterization_point or lower_followup_point or
+                    boundary_followup_point))) or
+                (item["mode"] == "channel" and
+                 (lower_followup_point or boundary_followup_point)) or
+                (item["mode"] == "receive" and
+                 not (expected_wanted and control == "wanted" or expected_negative)) or
+                (item["mode"] == "receive" and requirement is None) or
+                (chain and (seconds != 64 or cn0 != 30)) or
+                any(item.get(flag, False) for flag in (
+                    "service_replay", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic",
+                    "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths",
+                    "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models",
+                    "hf_gui_clean_diagnostic", "hf_correlated_gain_shadow", "hf_correlated_gain_receiver",
+                    "hf_target_presence_diagnostic")) or
+                {"duration_seconds", "capture_lead_seconds", "hf_trajectory_seed", "hf_trajectory_offset_seconds",
+                 "history_reference_delay_seconds", "search_slot", "search_timing"} & item.keys()):
+            raise CampaignError(f"episodes[{index}]: vector two-hop requires frozen CPU reference RRC, Helper/FEC-off cases; receive requirements must match the declared anchors, characterizations and negative controls")
     if item["scenario"] in GANNON_REPLAY:
         if (mode not in {"plan", "channel", "receive", "oracle", "hf-search"} or
                 control != "wanted" and (mode not in {"channel", "receive"} or control not in {"noise", "wrong-key"}) or
@@ -2476,11 +2558,58 @@ def _validate_wave_chain_energy(propagation: dict[str, Any], rx: dict[str, Any],
         raise CampaignError("native RX input must retain the continuing tone and keep an unlit noise control at zero")
 
 
+def _validate_two_hop_chain_workspace(channel: dict[str, Any], chain: dict[str, Any],
+                                      tx: dict[str, Any], propagation: dict[str, Any],
+                                      rx: dict[str, Any], physical: dict[str, Any]) -> None:
+    """Reconcile peak and resident memory for the two-hop native endpoint chain."""
+    accounting = chain.get("workspace_accounting")
+    keys = {"fixed_overhead_bytes", "tx_bridge_bytes", "propagation_bridge_bytes",
+            "preparation_peak_bytes", "resident_bytes"}
+    if not isinstance(accounting, dict) or set(accounting) != keys:
+        raise CampaignError("two-hop native chain requires the exact peak/resident workspace accounting")
+    if any(not _is_nonnegative_int(accounting[key]) or accounting[key] == 0 for key in keys):
+        raise CampaignError("two-hop native chain workspace charges must be positive size values")
+    tx_bridge = accounting["tx_bridge_bytes"]
+    propagation_bridge = accounting["propagation_bridge_bytes"]
+    if tx_bridge < 4096 or propagation_bridge < 4096:
+        raise CampaignError("two-hop endpoint bridge charges must include at least the frozen 256-complex-sample buffers")
+    prop_peak = propagation.get("workspace_bytes")
+    prop_resident = propagation.get("resident_workspace_bytes")
+    tx_workspace = tx.get("workspace_bytes")
+    rx_workspace = rx.get("workspace_bytes")
+    table_workspace, stream_workspace = (physical.get("table_workspace_bytes"),
+                                        physical.get("stream_workspace_bytes"))
+    if any(not _is_nonnegative_int(value) or value == 0 for value in
+           (prop_peak, prop_resident, tx_workspace, rx_workspace, table_workspace, stream_workspace)):
+        raise CampaignError("two-hop chain stages and physical table must report positive integer workspace")
+    if prop_peak < 100_663_296:
+        raise CampaignError("two-hop propagation peak is below the declared 96 MiB construction reservation")
+    expected_prop_resident = prop_peak - 100_663_296 + table_workspace + stream_workspace
+    if prop_resident != expected_prop_resident:
+        raise CampaignError("two-hop propagation resident bytes do not reconcile released preparation scratch and retained table")
+    if prop_resident <= tx_workspace + tx_bridge:
+        raise CampaignError("two-hop propagation resident source must include the TX stage and bridge")
+    if rx_workspace <= prop_resident + propagation_bridge or rx_workspace > 68_157_440:
+        raise CampaignError("two-hop RX workspace must include the resident propagation source and fit its 65 MiB stage limit")
+    expected_preparation_peak = prop_peak + accounting["fixed_overhead_bytes"] + propagation_bridge
+    expected_resident = rx_workspace + accounting["fixed_overhead_bytes"]
+    if (accounting["preparation_peak_bytes"] != expected_preparation_peak or
+            accounting["resident_bytes"] != expected_resident):
+        raise CampaignError("two-hop endpoint workspace peak/resident totals do not match their ownership charges")
+    aggregate = max(expected_preparation_peak, expected_resident)
+    effective_limit = channel.get("effective_maximum_workspace_bytes")
+    if (channel.get("workspace_bytes") != aggregate or chain.get("workspace_bytes") != aggregate or
+            not _is_nonnegative_int(effective_limit) or effective_limit < aggregate or
+            effective_limit > 201_326_592):
+        raise CampaignError("two-hop native chain aggregate must reconcile to the effective limit of at most 192 MiB")
+
+
 def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
     """Bind named native TX/physical/RX cases without mixing stage energy planes."""
     scenario_id = episode["scenario"]
     vector = scenario_id in HF_VECTOR_CHAIN_SCENARIOS
-    if scenario_id not in HF_WAVE_CHAIN_SCENARIOS and not vector:
+    two_hop = scenario_id in HF_VECTOR_TWO_HOP_CHAIN_SCENARIOS
+    if scenario_id not in HF_WAVE_CHAIN_SCENARIOS and not vector and not two_hop:
         plan, scenario, channel = receipt["plan"], receipt.get("scenario", {}), receipt.get("channel")
         configured = scenario.get("channel") if isinstance(scenario, dict) else None
         if (isinstance(plan, dict) and "native_chain" in plan or
@@ -2494,11 +2623,12 @@ def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> No
     scenario = receipt.get("scenario", {})
     configured = scenario.get("channel") if isinstance(scenario, dict) else None
     plan_chain = plan.get("native_chain")
-    physical_key = "vector_oblique" if vector else "wave_optics"
-    physical_renderer = "hf_vector_oblique" if vector else "hf_wave_optics_screen"
-    physical_scenario = scenario_id if vector else "hf-wave-lens"
-    validate_descriptor = _validate_vector_oblique_descriptor if vector else _validate_wave_optics_descriptor
-    first_lag, last_lag = (2, 130) if vector else (4, 84)
+    physical_key = "vector_oblique" if vector else "vector_two_hop" if two_hop else "wave_optics"
+    physical_renderer = "hf_vector_oblique" if vector else "hf_vector_two_hop" if two_hop else "hf_wave_optics_screen"
+    physical_scenario = scenario_id if vector or two_hop else "hf-wave-lens"
+    validate_descriptor = (_validate_vector_oblique_descriptor if vector else
+                           _validate_vector_two_hop_descriptor if two_hop else _validate_wave_optics_descriptor)
+    first_lag, last_lag = (2, 130) if vector else (3, 131) if two_hop else (4, 84)
     if (plan.get("channel_renderer") != "native_tx_physical_hf_native_rx" or
             not isinstance(configured, dict) or configured.get("renderer") != physical_renderer or
             not isinstance(plan_chain, dict)):
@@ -2508,10 +2638,11 @@ def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> No
     if plan.get(physical_key) != configured.get(physical_key):
         raise CampaignError("native chain planned physical descriptor differs from the frozen scenario")
 
-    tx_audio, rx_audio, tx_rf, rx_rf, tone = (HF_VECTOR_CHAIN_SCENARIOS if vector else HF_WAVE_CHAIN_SCENARIOS)[scenario_id]
+    tx_audio, rx_audio, tx_rf, rx_rf, tone = (HF_VECTOR_CHAIN_SCENARIOS if vector else
+        HF_VECTOR_TWO_HOP_CHAIN_SCENARIOS if two_hop else HF_WAVE_CHAIN_SCENARIOS)[scenario_id]
     fs = HF_WAVE_OPTICS["sample_rate_hz"]
-    expected_cn0 = episode.get("cn0_db_hz", 0) if vector else 0
-    if expected_cn0 not in ({0, 30} if vector else {0}):
+    expected_cn0 = episode.get("cn0_db_hz", 0) if vector or two_hop else 0
+    if expected_cn0 not in ({30} if two_hop else {0, 30} if vector else {0}):
         raise CampaignError("native chain C/N0 is outside the frozen endpoint controls")
     expected_noise_variance = fs / 10 ** (expected_cn0 / 10)
     wanted_tone, wanted_tone_offset = ((.3, 100.) if tone else (0., 0.))
@@ -2565,7 +2696,7 @@ def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> No
             not math.isclose(bounds["arrival_low_seconds"], first_lag / fs, rel_tol=0, abs_tol=4 * math.ulp(first_lag / fs)) or
             not _is_finite_number(bounds.get("arrival_high_seconds")) or
             not math.isclose(bounds["arrival_high_seconds"], last_lag / fs, rel_tol=0, abs_tol=4 * math.ulp(last_lag / fs)) or
-            bounds.get("receiver_filter_halo_samples") != (152 if vector else 105) or
+            bounds.get("receiver_filter_halo_samples") != (152 if vector or two_hop else 105) or
             bounds.get("clock_bound_ppm") != 4 or bounds.get("frequency_bound_hz") != 1 or
             bounds.get("atmospheric_hz") != 5):
         raise CampaignError("native chain receiver priors must remain fixed across endpoint cases and cover the causal lens support")
@@ -2671,7 +2802,15 @@ def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> No
             not _is_finite_number(rx_stage.get("output_energy_sample_sum")) or
             rx_stage["output_energy_sample_sum"] < 0):
         raise CampaignError("native chain RX must report the fixed post-interpolation noise plane and output energy")
-    if vector:
+    if two_hop:
+        physical = propagation.get(physical_key)
+        _validate_vector_two_hop_report(physical, scenario_id)
+        if (episode["mode"] == "receive" and
+                HF_VECTOR_TWO_HOP_SCENARIOS[scenario_id][0:2] == ("primary", "both") and
+                physical.get("specified_fade_observed") is not True):
+            raise CampaignError("primary two-hop chain reception is gated on a conservatively qualified moving-angle fade")
+        _validate_two_hop_chain_workspace(channel, chain, tx_stage, propagation, rx_stage, physical)
+    elif vector:
         _validate_vector_oblique_report(propagation.get(physical_key), scenario_id)
     else:
         _validate_wave_optics_report(propagation.get(physical_key), physical_scenario)
@@ -2802,6 +2941,391 @@ def _validate_vector_oblique_descriptor(value: Any, scenario_id: str) -> None:
             matches = actual == expected
         if not matches:
             raise CampaignError(f"vector oblique descriptor differs from the frozen physical field: {field}")
+
+
+def _vector_two_hop_spec(scenario_id: str) -> dict[str, Any]:
+    """Independent, literal description of the prescribed two-hop fixture."""
+    if scenario_id not in HF_VECTOR_TWO_HOP_SCENARIOS:
+        raise CampaignError("unknown vector two-hop scenario")
+    field, routes, axis = HF_VECTOR_TWO_HOP_SCENARIOS[scenario_id]
+    held = field == "holdout"
+    columns = (
+        [
+            {"lower_height_m": 111000., "thickness_m": 960., "peak_plasma_hz": 6.55e6,
+             "collisions_per_second": 1300., "field_tesla": [18e-6, 17e-6, -43e-6],
+             "slice_thickness_m": 80., "slice_center_fraction": -.1,
+             "density_modes": [{"m": 1, "n": 0, "amplitude_x": .00120, "phase_rad": .45},
+                               {"m": 0, "n": 1, "amplitude_x": .00100, "phase_rad": -.70},
+                               {"m": 1, "n": 1, "amplitude_x": .00080, "phase_rad": 1.10}]},
+            {"lower_height_m": 103000., "thickness_m": 1080., "peak_plasma_hz": 6.44e6,
+             "collisions_per_second": 1850., "field_tesla": [17e-6, 18e-6, -44e-6],
+             "slice_thickness_m": 90., "slice_center_fraction": -.1,
+             "density_modes": [{"m": 1, "n": 0, "amplitude_x": .00100, "phase_rad": -1.05},
+                               {"m": 0, "n": 1, "amplitude_x": .00125, "phase_rad": .60},
+                               {"m": 1, "n": -1, "amplitude_x": .00065, "phase_rad": -.20}]},
+        ] if not held else [
+            {"lower_height_m": 104000., "thickness_m": 960., "peak_plasma_hz": 6.38e6,
+             "collisions_per_second": 1950., "field_tesla": [-11e-6, 25e-6, -46e-6],
+             "slice_thickness_m": 80., "slice_center_fraction": -.1,
+             "density_modes": [{"m": 1, "n": 0, "amplitude_x": .00095, "phase_rad": .80},
+                               {"m": 0, "n": 1, "amplitude_x": .00110, "phase_rad": -.40},
+                               {"m": 1, "n": -1, "amplitude_x": .00060, "phase_rad": .33}]},
+            {"lower_height_m": 112000., "thickness_m": 1080., "peak_plasma_hz": 6.51e6,
+             "collisions_per_second": 2450., "field_tesla": [-13e-6, 24e-6, -45e-6],
+             "slice_thickness_m": 90., "slice_center_fraction": -.1,
+             "density_modes": [{"m": 1, "n": 0, "amplitude_x": .00110, "phase_rad": -.83},
+                               {"m": 0, "n": 1, "amplitude_x": .00090, "phase_rad": .95},
+                               {"m": 1, "n": 1, "amplitude_x": .00075, "phase_rad": -1.38}]},
+        ])
+    f_column = ({"lower_height_m": 284000., "thickness_m": 24000., "peak_plasma_hz": 8.35e6,
+                 "collisions_per_second": 90., "field_tesla": [17.5e-6, 17.5e-6, -43.5e-6],
+                 "slice_thickness_m": 0., "slice_center_fraction": 0.,
+                 "density_modes": [{"m": 0, "n": 0, "amplitude_x": 0., "phase_rad": 0.}] * 3}
+                if not held else
+                {"lower_height_m": 278000., "thickness_m": 24000., "peak_plasma_hz": 8.30e6,
+                 "collisions_per_second": 120., "field_tesla": [-12e-6, 24.5e-6, -45.5e-6],
+                 "slice_thickness_m": 0., "slice_center_fraction": 0.,
+                 "density_modes": [{"m": 0, "n": 0, "amplitude_x": 0., "phase_rad": 0.}] * 3})
+    theta_two = 48. if held else 50.
+    x = 2. * (columns[0]["lower_height_m"] + columns[1]["lower_height_m"]) * math.tan(math.radians(theta_two))
+    f_height = f_column["lower_height_m"]
+    return {
+        "carrier_hz": 10_000_000., "sample_rate_hz": 1920., "occupied_half_band_hz": 384.,
+        "maximum_horizon_seconds": 2400., "relative_spreading_reference_range_m": 1_000_000.,
+        "field": field, "routes": routes, "receive_axis_index": axis,
+        "receive_axis_grid_degrees_per_index": 5., "es_columns": columns, "f_column": f_column,
+        "transverse_period_m": [24000., 17000.], "two_hop_incidence_deg": theta_two,
+        "one_hop_incidence_deg": math.degrees(math.atan2(x, 2. * f_height)), "receiver_x_m": x,
+        "ground_relative_permittivity": 80. if held else 10.,
+        "ground_conductivity_s_m": 5. if held else .01,
+        "f_height_amplitude_m": 260. if held else 300.,
+        "f_height_period_seconds": 470. if held else 540.,
+        "f_height_epoch_seconds": 390. if held else 137.,
+        "transmit_axis": [0., math.sqrt(.86), math.sqrt(.14)],
+        "receive_axis": [0., math.cos(math.radians(5. * axis)), math.sin(math.radians(5. * axis))],
+        "two_hop_vacuum_range_m": math.hypot(2. * (columns[0]["lower_height_m"] + columns[1]["lower_height_m"]), x),
+        "one_hop_vacuum_range_m": math.hypot(2. * f_height, x),
+        "first_lag_samples": 3, "last_lag_samples": 131, "modelling_delay_samples": 32,
+        "retained_late_samples": 96, "taps": 129, "displacement_intervals": 16,
+        "moving_angle_fit_nodes": 9,
+        "moving_angle_fit_height_displacements_m": [
+            (260. if held else 300.) * (-1. + .25 * i) for i in range(9)],
+        "moving_angle_fit_rf_offsets_hz": [(i - 4) * 240. for i in range(9)],
+        "moving_angle_fit_layout": "nine uniform height nodes d/A=-1..1 in 0.25 steps; nine RF offsets -960..+960 Hz in 240 Hz steps; ascending spatial order and TE/TM ports; pre-F P then post-F Ey/Ez; dephased to nominal half-range with d-dependent chromatic correction",
+        "moving_angle_interpolation": "P/Q barycentric interpolation over nine fixed height nodes with weights (-1)^i*C(8,i); exact central-image carrier phase and implicit half-flight retarded-time corrections remain analytic",
+        "moving_angle_voltage_error_limit": .0006,
+        "fixed_angle_carrier_diagnostic_scope": "fixed-angle carrier comparison is reported separately as a diagnostic and is not the moving-angle production response",
+        "branch_error_accounting_scope": "route-specific mesh, refined-order and frequency errors preserve both direct and staged checks; coherent physical allowance uses the maximum of direct/staged error within each category, then sums categories and active routes plus the larger moving-angle direct/staged error",
+        "preparation_workspace_bound_bytes": 96 * 1024 * 1024,
+        "fade_statistic_scope": "uniform frequency-integrated power statistic over the declared symmetric band; this is not DATA-symbol-weighted",
+        "fade_statistic_half_width_hz": 112.5, "fade_statistic_bandwidth_hz": 225.,
+        "fade_time_witnesses": 4097, "fade_band_intervals": 64,
+        "interpolation": "route-specific complex-voltage FIR coefficients over the declared physical displacement law; physical output time is (output_sample-32)/1920; F retarded range uses two bounded substitutions with L(d)=hypot(X,2(hF+d)), central-image phase and Rref/L(d), then nine-node P/Q moving-angle interpolation with independently checked 0.0006 voltage error",
+        "point_source_scope": "conditional planar retarded return approximation; not an exact point-source Green function",
+        "numerical_scope": "selected local planar return corridors; full diffraction orders and TE/TM retained through route composition until fixed antenna projection; other arrivals, Earth curvature, finite-beam spreading, and global path coverage are outside this model",
+    }
+
+
+def _validate_vector_two_hop_descriptor(value: Any, scenario_id: str, *, report: bool = False) -> None:
+    if not isinstance(value, dict):
+        raise CampaignError("vector two-hop plan requires its fixed physical descriptor")
+    expected = _vector_two_hop_spec(scenario_id)
+    if not report and set(value) != set(expected):
+        raise CampaignError("vector two-hop descriptor has missing or unexpected physical fields")
+
+    def same(actual: Any, wanted: Any) -> bool:
+        if isinstance(wanted, bool):
+            return actual is wanted
+        if isinstance(wanted, (int, float)) and not isinstance(wanted, bool):
+            return _is_finite_number(actual) and math.isclose(actual, wanted, rel_tol=1e-12, abs_tol=1e-12)
+        if isinstance(wanted, list):
+            return isinstance(actual, list) and len(actual) == len(wanted) and all(same(a, w) for a, w in zip(actual, wanted))
+        if isinstance(wanted, dict):
+            return isinstance(actual, dict) and set(actual) == set(wanted) and all(same(actual[k], w) for k, w in wanted.items())
+        return actual == wanted
+
+    for key, expected_value in expected.items():
+        if not same(value.get(key), expected_value):
+            raise CampaignError(f"vector two-hop descriptor differs from its frozen physical geometry: {key}")
+
+
+def _validate_vector_two_hop_temporal_fade(value: Any, scenario_id: str,
+                                            expected_allowance: float) -> None:
+    """Validate sampled FIR fade diagnostics without treating them as duration guarantees."""
+    scope = "sampled compiled-FIR coefficient response over one output-time period; no between-sample duration guarantee"
+    if not isinstance(value, dict) or set(value) != {
+            "scope", "evaluated", "sample_count", "sample_step_seconds", "voltage_allowance",
+            "mean_incoherent_band_power", "carrier", "band", "joint"}:
+        raise CampaignError("vector two-hop report requires the exact sampled temporal-fade receipt")
+    if value.get("scope") != scope:
+        raise CampaignError("temporal-fade scope must remain sampled FIR evidence, without a continuous-duration claim")
+    _field, routes, _axis = HF_VECTOR_TWO_HOP_SCENARIOS[scenario_id]
+    active = routes == "both"
+    if value.get("evaluated") is not active:
+        raise CampaignError("temporal-fade evaluation must follow route availability")
+    sample_count = value.get("sample_count")
+    step = value.get("sample_step_seconds")
+    allowance = value.get("voltage_allowance")
+    mean_power = value.get("mean_incoherent_band_power")
+    groups = {name: value.get(name) for name in ("carrier", "band", "joint")}
+    group_keys = {"qualifying_samples", "longest_run_samples", "longest_sample_span_seconds"}
+    if any(not isinstance(row, dict) or set(row) != group_keys for row in groups.values()):
+        raise CampaignError("temporal-fade summaries must contain only qualifying counts and circular-run spans")
+    if (not _is_nonnegative_int(sample_count) or not _is_finite_number(step) or step < 0 or
+            not _is_finite_number(allowance) or allowance < 0 or
+            not _is_finite_number(mean_power) or mean_power < 0):
+        raise CampaignError("temporal-fade grid and power metrics must be finite and nonnegative")
+    for name, row in groups.items():
+        count, run, span = (row.get("qualifying_samples"), row.get("longest_run_samples"),
+                            row.get("longest_sample_span_seconds"))
+        if (not _is_nonnegative_int(count) or not _is_nonnegative_int(run) or
+                not _is_finite_number(span) or span < 0):
+            raise CampaignError(f"temporal-fade {name} counts and circular span must be finite and nonnegative")
+    if not active:
+        if (sample_count != 0 or step != 0 or allowance != 0 or mean_power != 0 or
+                any(row["qualifying_samples"] != 0 or row["longest_run_samples"] != 0 or
+                    row["longest_sample_span_seconds"] != 0 for row in groups.values())):
+            raise CampaignError("one-route temporal-fade controls must report zero evaluation and zero summaries")
+        return
+
+    period = _vector_two_hop_spec(scenario_id)["f_height_period_seconds"]
+    expected_step = period / 4096
+    if (sample_count != 4096 or
+            not math.isclose(step, expected_step, rel_tol=1e-12, abs_tol=1e-12) or
+            not math.isclose(allowance, expected_allowance, rel_tol=1e-14, abs_tol=1e-14) or
+            mean_power <= 0):
+        raise CampaignError("temporal-fade diagnostics must use the frozen 4096-point period grid and compiled full allowance")
+    for name, row in groups.items():
+        count, run, span = row["qualifying_samples"], row["longest_run_samples"], row["longest_sample_span_seconds"]
+        if (count > 4096 or run > count or (count == 0) != (run == 0) or
+                (count == 4096 and run != 4096) or
+                not math.isclose(span, max(0, run - 1) * expected_step, rel_tol=1e-12, abs_tol=1e-12)):
+            raise CampaignError(f"temporal-fade {name} count, circular run, and sample span are inconsistent")
+    mean_lower = max(0., math.sqrt(mean_power) - expected_allowance)
+    if (mean_lower * mean_lower < .003 and
+            any(row["qualifying_samples"] != 0 or row["longest_run_samples"] != 0 or
+                row["longest_sample_span_seconds"] != 0 for row in groups.values())):
+        raise CampaignError("temporal-fade runs must remain zero when the conservative period-mean floor is unresolved")
+    if (groups["joint"]["qualifying_samples"] > min(groups["carrier"]["qualifying_samples"],
+                                                       groups["band"]["qualifying_samples"]) or
+            groups["joint"]["longest_run_samples"] > min(groups["carrier"]["longest_run_samples"],
+                                                           groups["band"]["longest_run_samples"])):
+        raise CampaignError("joint temporal-fade samples and circular runs must be subsets of carrier and band masks")
+
+
+def _validate_vector_two_hop_report(full: Any, scenario_id: str) -> None:
+    """Strictly validate the physical table, independent witnesses and error budget."""
+    _validate_vector_two_hop_descriptor(full, scenario_id, report=True)
+    report_keys = {
+        "table_sha256", "table_digest_scope", "qualification_scope", "table_qualified", "carrier_qualified",
+        "specified_fade_observed", "rf_solves", "rf_points", "matrix_products",
+        "two_hop_rf_points", "one_hop_rf_points", "moving_angle_fit_points",
+        "checked_moving_angle_witnesses", "checked_moving_angle_refinement_points",
+        "checked_frequency_witnesses", "checked_displacement_witnesses", "scanned_displacements",
+        "checked_fade_witnesses", "checked_angular_witnesses", "checked_staged_modes",
+        "checked_linear_velocity_witnesses", "scanned_null_displacements", "checked_null_witnesses",
+        "null_witnesses", "preparation_peak_workspace_bytes", "maximum_rf_dense_terms",
+        "minimum_vacuum_cosine", "maximum_flux_excess", "maximum_solve_residual", "maximum_ground_power",
+        "maximum_outer_order_flux", "one_hop_carrier_power", "two_hop_carrier_power",
+        "two_hop_intermediate_nonspecular_flux", "two_hop_intermediate_cross_plane_flux",
+        "maximum_mesh_voltage_error", "maximum_refined_order_voltage_error", "maximum_frequency_voltage_error",
+        "maximum_fir_voltage_error", "maximum_displacement_tap_error", "maximum_discarded_energy_fraction",
+        "minimum_carrier_power", "minimum_incoherent_carrier_power", "minimum_band_power",
+        "minimum_band_incoherent_power", "average_incoherent_band_power", "carrier_fade_displacement_m",
+        "band_fade_displacement_m", "relative_voltage_error_at_witness_minimum", "retarded_peak_error_bound",
+        "maximum_staged_support_error", "maximum_linear_velocity_voltage_error",
+        "maximum_band_quadrature_power_error", "maximum_angular_freezing_voltage_error",
+        "maximum_moving_angle_voltage_error", "maximum_moving_angle_staged_voltage_error",
+        "two_hop_voltage_errors", "one_hop_voltage_errors", "physical_voltage_allowance",
+        "temporal_fade",
+        "maximum_carrier_shift_voltage_error",
+        "maximum_staged_frequency_voltage_error", "minimum_assembled_null_power", "minimum_direct_null_power",
+        "maximum_longitudinal_footprint_offset_m", "maximum_cross_plane_footprint_offset_m",
+        "table_workspace_bytes", "stream_workspace_bytes", "moving_angle_fit_coefficient_count", "preparation_seconds",
+        "source_minimum_frequency_hz", "source_maximum_frequency_hz", "incident_energy_sample_sum",
+        "selected_energy_sample_sum",
+    }
+    expected_fields = set(_vector_two_hop_spec(scenario_id)) | report_keys
+    if set(full) != expected_fields:
+        raise CampaignError("vector two-hop physical receipt has missing or unexpected report fields")
+    field, routes, _axis = HF_VECTOR_TWO_HOP_SCENARIOS[scenario_id]
+    del field
+    has_two = routes in {"two_hop", "both"}
+    has_one = routes in {"one_hop", "both"}
+    branch_keys = {
+        "mesh_voltage_error", "staged_mesh_voltage_error",
+        "refined_order_voltage_error", "staged_refined_order_voltage_error",
+        "frequency_voltage_error", "staged_frequency_voltage_error",
+    }
+    branch_errors: dict[str, dict[str, float]] = {}
+    for branch, enabled in (("two_hop_voltage_errors", has_two), ("one_hop_voltage_errors", has_one)):
+        values = full.get(branch)
+        if not isinstance(values, dict) or set(values) != branch_keys:
+            raise CampaignError(f"vector two-hop receipt requires the exact {branch} error breakdown")
+        if any(not _is_finite_number(values[key]) or values[key] < 0 for key in branch_keys):
+            raise CampaignError(f"vector two-hop {branch} values must be finite and nonnegative")
+        if not enabled and any(values[key] != 0 for key in branch_keys):
+            raise CampaignError(f"disabled vector route must report zero {branch} errors")
+        if (values["mesh_voltage_error"] > .004 or values["staged_mesh_voltage_error"] > .004 or
+                values["refined_order_voltage_error"] > .004 or
+                values["staged_refined_order_voltage_error"] > .004 or
+                values["frequency_voltage_error"] > .0006 or
+                values["staged_frequency_voltage_error"] > .0006):
+            raise CampaignError(f"vector two-hop {branch} exceeds its branch-specific numerical error gates")
+        branch_errors[branch] = values
+    for global_key, branch_key in (
+        ("maximum_mesh_voltage_error", "mesh_voltage_error"),
+        ("maximum_refined_order_voltage_error", "refined_order_voltage_error"),
+        ("maximum_frequency_voltage_error", "frequency_voltage_error"),
+        ("maximum_staged_frequency_voltage_error", "staged_frequency_voltage_error"),
+    ):
+        expected = max(values[branch_key] for values in branch_errors.values())
+        actual = full.get(global_key)
+        if (not _is_finite_number(actual) or
+                not math.isclose(actual, expected, rel_tol=1e-14, abs_tol=1e-14)):
+            raise CampaignError(f"vector two-hop global {global_key} disagrees with its route breakdown")
+    table_digest_scope = (
+        "versioned moving-angle route-composed operator; exact binary64 complex coefficients for each retained lag and displacement knot in both route tables, plus all 9 x 9 x 98 x 3 moving-angle P/Q fit coefficients when F route is active and full selected geometry, reference range, retarded-time law, route and receive-axis metadata in canonical little-endian order")
+    qualification_scope = (
+        "finite-order vector Maxwell composition for the declared local two-Es ground-bounce and one-F corridors; finite RF, displacement, mesh/order, staged support and causal FIR witnesses qualify this fixed operator only, not all possible HF paths")
+    digest = full.get("table_sha256")
+    if (full.get("table_qualified") is not True or full.get("carrier_qualified") is not True or
+            not isinstance(digest, str) or re.fullmatch(r"[0-9a-fA-F]{64}", digest) is None or
+            full.get("table_digest_scope") != table_digest_scope or
+            full.get("qualification_scope") != qualification_scope):
+        raise CampaignError("vector two-hop execution requires its qualified, source-bound route-composed table")
+    expected_rf_points = 177 if has_two and has_one else 148 if has_one else 29
+    expected_rf_solves = 502 if has_two and has_one else 444 if has_one else 58
+    expected_counts = {
+        "rf_points": expected_rf_points,
+        "rf_solves": expected_rf_solves,
+        "two_hop_rf_points": 29 if has_two else 0,
+        "one_hop_rf_points": 148 if has_one else 0,
+        "moving_angle_fit_points": 81 if has_one else 0,
+        "checked_moving_angle_witnesses": 32 if has_one else 0,
+        "checked_moving_angle_refinement_points": 5 if has_one else 0,
+        "checked_frequency_witnesses": 26 if has_two and has_one else 13,
+        "checked_displacement_witnesses": 16 if has_one else 0,
+        "scanned_displacements": 4097,
+        "checked_angular_witnesses": 0,
+        "checked_staged_modes": 98 if has_one else 0,
+        "checked_linear_velocity_witnesses": 18 if has_one else 0,
+        "scanned_null_displacements": 4097 if has_one else 1,
+        "checked_null_witnesses": 10,
+        "moving_angle_fit_coefficient_count": 23814 if has_one else 0,
+    }
+    for key, expected in expected_counts.items():
+        if not _is_nonnegative_int(full.get(key)) or full[key] != expected:
+            raise CampaignError(f"vector two-hop numerical witness coverage differs: {key}")
+    dense_term_limit = 12_000_000_000 if has_two else 1_200_000_000
+    if (not _is_nonnegative_int(full.get("matrix_products")) or full["matrix_products"] == 0 or
+            not _is_nonnegative_int(full.get("maximum_rf_dense_terms")) or
+            full["maximum_rf_dense_terms"] == 0 or full["maximum_rf_dense_terms"] > dense_term_limit):
+        raise CampaignError("vector two-hop must report nonzero bounded RF solve work")
+    if not _is_nonnegative_int(full.get("checked_fade_witnesses")) or full["checked_fade_witnesses"] == 0:
+        raise CampaignError("vector two-hop must independently compare assembled and physical FIR witnesses")
+    witnesses = full.get("null_witnesses")
+    expected_offsets = [-384., -360., -120., -112.5, -56.25, 0., 112.5, 120., 360., 384.]
+    if not isinstance(witnesses, list) or len(witnesses) != 10:
+        raise CampaignError("vector two-hop must retain all ten independent occupied-band null witnesses")
+    for witness, offset in zip(witnesses, expected_offsets):
+        if (not isinstance(witness, dict) or set(witness) != {
+                "offset_hz", "displacement_m", "assembled_power", "direct_power", "voltage_error"} or
+                witness.get("offset_hz") != offset or
+                any(not _is_finite_number(witness.get(key)) for key in
+                    ("displacement_m", "assembled_power", "direct_power", "voltage_error")) or
+                witness["assembled_power"] < 0 or witness["direct_power"] < 0 or witness["voltage_error"] < 0):
+            raise CampaignError("vector two-hop null witnesses must retain the fixed independent RF offsets and finite values")
+    numeric = (
+        "preparation_peak_workspace_bytes", "minimum_vacuum_cosine", "maximum_flux_excess",
+        "maximum_solve_residual", "maximum_ground_power", "maximum_outer_order_flux",
+        "one_hop_carrier_power", "two_hop_carrier_power", "two_hop_intermediate_nonspecular_flux",
+        "two_hop_intermediate_cross_plane_flux", "maximum_mesh_voltage_error",
+        "maximum_refined_order_voltage_error", "maximum_frequency_voltage_error",
+        "maximum_fir_voltage_error", "maximum_displacement_tap_error", "maximum_discarded_energy_fraction",
+        "minimum_carrier_power", "minimum_incoherent_carrier_power", "minimum_band_power",
+        "minimum_band_incoherent_power", "average_incoherent_band_power", "carrier_fade_displacement_m",
+        "band_fade_displacement_m", "relative_voltage_error_at_witness_minimum", "retarded_peak_error_bound",
+        "maximum_staged_support_error", "maximum_linear_velocity_voltage_error",
+        "maximum_band_quadrature_power_error", "maximum_angular_freezing_voltage_error",
+        "maximum_moving_angle_voltage_error", "maximum_moving_angle_staged_voltage_error",
+        "maximum_carrier_shift_voltage_error",
+        "maximum_staged_frequency_voltage_error", "minimum_assembled_null_power", "minimum_direct_null_power",
+        "maximum_longitudinal_footprint_offset_m", "maximum_cross_plane_footprint_offset_m",
+        "table_workspace_bytes", "stream_workspace_bytes", "preparation_seconds",
+        "physical_voltage_allowance",
+        "source_minimum_frequency_hz", "source_maximum_frequency_hz", "incident_energy_sample_sum",
+        "selected_energy_sample_sum")
+    if any(not _is_finite_number(full.get(key)) for key in numeric):
+        raise CampaignError("vector two-hop physical report must include finite numerical, source-band and resource metrics")
+    nonnegative = set(numeric) - {
+        "carrier_fade_displacement_m", "band_fade_displacement_m", "source_minimum_frequency_hz"}
+    if any(full[key] < 0 for key in nonnegative):
+        raise CampaignError("vector two-hop error, power, workspace and source-energy metrics must be nonnegative")
+    if (full["minimum_vacuum_cosine"] < .35 or full["minimum_vacuum_cosine"] > 1 or
+            full["maximum_flux_excess"] > 2e-9 or full["maximum_ground_power"] > 1 + 2e-9 or
+            full["maximum_outer_order_flux"] > 5e-5 or
+            full["maximum_mesh_voltage_error"] > .004 or
+            full["maximum_refined_order_voltage_error"] > .004 or
+            full["maximum_frequency_voltage_error"] > .0006 or
+            full["maximum_staged_frequency_voltage_error"] > .0006 or
+            full["maximum_moving_angle_voltage_error"] > .0006 or
+            full["maximum_moving_angle_staged_voltage_error"] > .0006 or
+            full["maximum_fir_voltage_error"] > .0006 or
+            full["maximum_displacement_tap_error"] > .0012 or
+            full["maximum_staged_support_error"] > .0012 or
+            full["maximum_discarded_energy_fraction"] > 1e-6 or
+            full["retarded_peak_error_bound"] > .004 or
+            full["maximum_linear_velocity_voltage_error"] > full["retarded_peak_error_bound"] + 2e-10 or
+            full["maximum_carrier_shift_voltage_error"] > full["retarded_peak_error_bound"] + 2e-10 or
+            full["relative_voltage_error_at_witness_minimum"] > .15 or
+            min(full["minimum_carrier_power"], full["minimum_band_power"],
+                full["minimum_assembled_null_power"], full["minimum_direct_null_power"]) <= 1e-24 or
+            not _is_nonnegative_int(full["preparation_peak_workspace_bytes"]) or
+            not _is_nonnegative_int(full["table_workspace_bytes"]) or
+            not _is_nonnegative_int(full["stream_workspace_bytes"]) or
+            full["table_workspace_bytes"] == 0 or full["stream_workspace_bytes"] == 0 or
+            full["table_workspace_bytes"] + full["stream_workspace_bytes"] > 96 * 1024 * 1024 or
+            full["preparation_peak_workspace_bytes"] > full["preparation_workspace_bound_bytes"] or
+            full["preparation_peak_workspace_bytes"] > 96 * 1024 * 1024 or
+            full["table_workspace_bytes"] > 160 * 1024 * 1024 or
+            full["stream_workspace_bytes"] > 160 * 1024 * 1024 or
+            full["source_minimum_frequency_hz"] < -384. or
+            full["source_maximum_frequency_hz"] > 384. or
+            full["source_minimum_frequency_hz"] > full["source_maximum_frequency_hz"]):
+        raise CampaignError("vector two-hop numerical errors, physical minima, frequency range or workspace exceed the frozen gates")
+    expected_source_edge = 384. if scenario_id in HF_VECTOR_TWO_HOP_CHAIN_SCENARIOS else 362.5
+    if (full["source_minimum_frequency_hz"] != -expected_source_edge or
+            full["source_maximum_frequency_hz"] != expected_source_edge):
+        raise CampaignError("vector two-hop measured baseband source band differs from the frozen direct or endpoint profile")
+    branch_allowance = sum(
+        max(errors["mesh_voltage_error"], errors["staged_mesh_voltage_error"]) +
+        max(errors["refined_order_voltage_error"], errors["staged_refined_order_voltage_error"]) +
+        max(errors["frequency_voltage_error"], errors["staged_frequency_voltage_error"])
+        for branch, errors in branch_errors.items()
+        if (branch == "two_hop_voltage_errors" and has_two) or
+           (branch == "one_hop_voltage_errors" and has_one))
+    physical_allowance = branch_allowance + max(
+        full["maximum_moving_angle_voltage_error"], full["maximum_moving_angle_staged_voltage_error"])
+    if not math.isclose(full["physical_voltage_allowance"], physical_allowance,
+                        rel_tol=1e-14, abs_tol=1e-14):
+        raise CampaignError("vector two-hop physical voltage allowance disagrees with its branch-composed errors")
+    fade_allowance = (physical_allowance +
+                      full["maximum_displacement_tap_error"] +
+                      full["maximum_fir_voltage_error"] + full["maximum_staged_support_error"] +
+                      full["retarded_peak_error_bound"])
+    _validate_vector_two_hop_temporal_fade(full["temporal_fade"], scenario_id, fade_allowance)
+    carrier_lower = max(0., math.sqrt(full["minimum_incoherent_carrier_power"]) - fade_allowance) ** 2
+    band_lower = max(0., math.sqrt(full["minimum_band_incoherent_power"]) - fade_allowance) ** 2
+    mean_band_lower = max(0., math.sqrt(full["average_incoherent_band_power"]) - fade_allowance) ** 2
+    carrier_upper = (math.sqrt(full["minimum_carrier_power"]) + fade_allowance) ** 2
+    band_upper = (math.sqrt(full["minimum_band_power"]) + fade_allowance) ** 2
+    conservatively_meets_fade = (has_two and has_one and carrier_lower >= .001 and band_lower >= .001 and
+        mean_band_lower >= .003 and carrier_upper / carrier_lower <= 10 ** -1.8 and
+        band_upper / band_lower <= 10 ** -.6)
+    if (not isinstance(full.get("specified_fade_observed"), bool) or
+            full["specified_fade_observed"] is not conservatively_meets_fade):
+        raise CampaignError("vector two-hop fade flag disagrees with independently recomputed conservative coherent/incoherent ratios and floors")
 
 
 def _validate_vector_oblique_report(full: Any, scenario_id: str) -> None:
@@ -3152,6 +3676,125 @@ def _validate_vector_oblique(receipt: dict[str, Any], episode: dict[str, Any]) -
             not _is_finite_number(timing.get("wall_seconds")) or
             not full["preparation_seconds"] <= timing["channel_preparation_seconds"] <= timing["wall_seconds"]):
         raise CampaignError("vector oblique preparation must be included in complete execution cost")
+
+
+def _validate_vector_two_hop_plan_scopes(plan: dict[str, Any]) -> None:
+    if (plan.get("vector_two_hop_exposure_scope") !=
+            "selected local planar two-Es ground-bounce and one-F return corridors; numerical support does not prove global path completeness, other arrivals, finite-beam coverage, Earth-curvature effects, or field occurrence probability" or
+            plan.get("vector_two_hop_physical_time_scope") !=
+            "physical output time is (output_sample - 32)/1920; F-region retarded range uses two bounded substitutions with L(d)=hypot(X,2(hF+d)) and flight time L(d)/(2c), from the common receiver output time" or
+            plan.get("vector_two_hop_angular_interpolation_scope") !=
+            "production F interaction uses nine-node uniform-height P/Q angular interpolation; fixed-angle carrier comparison remains a separate diagnostic, not the production response; moving-angle and staged errors are separately reported and gated at 0.0006 voltage"):
+        raise CampaignError("vector two-hop moving-angle interpolation scope differs from the frozen production construction")
+
+
+def _validate_vector_two_hop(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    scenario_id = episode["scenario"]
+    plan = receipt["plan"]
+    channel = receipt.get("channel")
+    configured = receipt.get("scenario", {}).get("channel")
+    chain_case = scenario_id in HF_VECTOR_TWO_HOP_CHAIN_SCENARIOS
+    expected_renderer = "native_tx_physical_hf_native_rx" if chain_case else "hf_vector_two_hop"
+    if scenario_id not in HF_VECTOR_TWO_HOP_SCENARIOS:
+        if ("vector_two_hop" in plan or plan.get("channel_renderer") == "hf_vector_two_hop" or
+                isinstance(configured, dict) and ("vector_two_hop" in configured or
+                    configured.get("renderer") == "hf_vector_two_hop") or
+                isinstance(channel, dict) and ("vector_two_hop" in channel or
+                    isinstance(channel.get("propagation"), dict) and "vector_two_hop" in channel["propagation"])):
+            raise CampaignError("unrequested coupled vector two-hop operator")
+        return
+    descriptor = plan.get("vector_two_hop")
+    _validate_vector_two_hop_descriptor(descriptor, scenario_id)
+    if not isinstance(configured, dict) or configured.get("vector_two_hop") != descriptor:
+        raise CampaignError("vector two-hop plan and configured physical operator differ")
+    if configured.get("renderer") != "hf_vector_two_hop":
+        raise CampaignError("vector two-hop scenario must bind its exclusive native channel renderer")
+    expected_source_checked = episode["mode"] != "plan"
+    horizon = plan.get("horizon_samples")
+    source_stop = plan.get("source_stop_sample")
+    fs = descriptor["sample_rate_hz"]
+    if (plan.get("channel_renderer") != expected_renderer or
+            not _is_nonnegative_int(horizon) or not 0 < horizon <= 2400 * fs or
+            not _is_nonnegative_int(source_stop) or source_stop > horizon or
+            plan.get("sample_rate_hz") != fs or plan.get("helper_enabled") is not False or
+            plan.get("physical_kernel_supplied_to_receiver") is not False or
+            plan.get("vector_two_hop_source_band_checked") is not expected_source_checked or
+            plan.get("vector_two_hop_table_built") is not expected_source_checked or
+            plan.get("path_count") is not None or plan.get("path_sample_products") is not None or
+            not _is_finite_number(plan.get("vector_two_hop_rendered_horizon_seconds")) or
+            not math.isclose(plan["vector_two_hop_rendered_horizon_seconds"], horizon / fs, rel_tol=1e-12, abs_tol=1e-12) or
+            plan.get("vector_two_hop_horizon_within_declared_model") is not (horizon <= 2400 * fs)):
+        raise CampaignError("vector two-hop plan must bind the finite horizon, exclusive renderer and source-band/table state")
+    _validate_vector_two_hop_plan_scopes(plan)
+    if chain_case:
+        expected_cn0 = 30.
+        expected_tail_scope = "conservative complete native endpoint and common two-hop FIR tail under public clock bounds"
+    else:
+        expected_cn0 = episode.get("cn0_db_hz", 30)
+        expected_tail_scope = "complete causal route-composed fixed-antenna complex-voltage FIR support, common first-to-last retained lag across selected routes"
+    if (not _is_finite_number(plan.get("cn0_db_hz")) or plan.get("cn0_db_hz") != expected_cn0 or
+            plan.get("requested_bit_seconds") != episode.get("bit_seconds", 64) or
+            plan.get("channel_tail_seconds_scope") != expected_tail_scope):
+        raise CampaignError("vector two-hop public source, noise reference or complete causal tail differs from its frozen scenario")
+    expected_reference = ("fixed normalized emitted DATA reference; independent fixed-variance noise added after native RX interpolation and oscillator mixing"
+                          if chain_case else
+                          "common normalized E reference at the declared 1000 km range before route, spreading, reflection, and fixed antenna projection; fixed additive receiver noise")
+    if plan.get("cn0_reference_plane") != expected_reference:
+        raise CampaignError("vector two-hop C/N0 must retain its declared pre-route or native-chain reference plane")
+    if chain_case:
+        # Shared endpoint validation is specialized for other physical models;
+        # check this family’s exact descriptor and causal support here.
+        chain = plan.get("native_chain")
+        if not isinstance(chain, dict) or not _is_nonnegative_int(chain.get("propagation_horizon_samples")):
+            raise CampaignError("vector two-hop native chain must preflight its propagation stage")
+        if episode["mode"] == "plan":
+            if isinstance(channel, dict) and ("native_chain" in channel or "propagation" in channel):
+                raise CampaignError("vector two-hop planning cannot claim executed native stages")
+            return
+        if (not isinstance(channel, dict) or channel.get("renderer") != expected_renderer or
+                channel.get("samples") != horizon or channel.get("hashed_samples") != horizon or
+                not _is_nonnegative_int(channel.get("workspace_bytes")) or
+                not 0 < channel["workspace_bytes"] <= 192 * 1024 * 1024 or
+                not isinstance(channel.get("native_chain"), dict) or
+                not isinstance(channel.get("propagation"), dict)):
+            raise CampaignError("vector two-hop native chain execution must report complete TX/channel/RX stages")
+        return
+    bounds = plan.get("public_bounds")
+    if (not isinstance(bounds, dict) or not _is_finite_number(plan.get("channel_tail_seconds")) or
+            not math.isclose(plan["channel_tail_seconds"], 131 / fs, rel_tol=0., abs_tol=1e-12) or
+            bounds.get("arrival_low_seconds") != 3 / fs or bounds.get("arrival_high_seconds") != 131 / fs):
+        raise CampaignError("vector two-hop source support and public receive bounds must cover the retained FIR")
+    _validate_wave_public_calendar(plan, episode, horizon, source_stop + 131)
+    if episode["mode"] == "plan":
+        if isinstance(channel, dict) and "vector_two_hop" in channel:
+            raise CampaignError("vector two-hop planning cannot claim built physical tables")
+        return
+    if (not isinstance(channel, dict) or channel.get("channel_renderer") not in (None, "hf_vector_two_hop") or
+            channel.get("samples") != horizon or channel.get("source_samples") != source_stop or
+            channel.get("hashed_samples") != horizon or
+            not _is_nonnegative_int(channel.get("workspace_bytes")) or
+            not 0 < channel["workspace_bytes"] <= 160 * 1024 * 1024 or
+            not isinstance(channel.get("input_sha256"), str) or
+            re.fullmatch(r"[0-9a-fA-F]{64}", channel["input_sha256"]) is None or
+            not _is_finite_number(channel.get("tail_seconds")) or
+            not math.isclose(channel["tail_seconds"], 131 / fs, rel_tol=0., abs_tol=1e-12) or
+            not _is_finite_number(channel.get("maximum_delay_seconds")) or
+            not math.isclose(channel["maximum_delay_seconds"], 3 / fs, rel_tol=0., abs_tol=1e-12)):
+        raise CampaignError("vector two-hop direct rendering must consume the complete canonical capture and FIR tail")
+    report = channel.get("vector_two_hop")
+    _validate_vector_two_hop_report(report, scenario_id)
+    if (episode["mode"] == "receive" and scenario_id in HF_VECTOR_TWO_HOP_SCENARIOS and
+            HF_VECTOR_TWO_HOP_SCENARIOS[scenario_id][0:2] == ("primary", "both") and
+            report.get("specified_fade_observed") is not True):
+        raise CampaignError("primary coupled-route reception is gated on a conservatively qualified moving-angle fade")
+    _validate_wave_energy_planes(channel, report, episode.get("control", "wanted") == "noise")
+    if episode["mode"] == "receive":
+        _validate_vector_private_signal_energy(channel, plan)
+    timing = receipt.get("timing", {})
+    if (not isinstance(timing, dict) or not _is_finite_number(timing.get("channel_preparation_seconds")) or
+            not _is_finite_number(timing.get("wall_seconds")) or
+            not report["preparation_seconds"] <= timing["channel_preparation_seconds"] <= timing["wall_seconds"]):
+        raise CampaignError("vector two-hop preparation must be included in complete execution cost")
 
 
 def _phase_screens_spec(scenario_id: str) -> dict[str, Any]:
@@ -4392,6 +5035,7 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     _validate_magnetoionic_reflection(receipt, episode)
     _validate_wave_optics(receipt, episode)
     _validate_vector_oblique(receipt, episode)
+    _validate_vector_two_hop(receipt, episode)
     _validate_wave_chain(receipt, episode)
     _validate_phase_screens(receipt, episode)
     _validate_gannon_replay(receipt, episode)
@@ -5476,6 +6120,11 @@ def run_campaign(probe: Path, campaign_path: Path, output_dir: Path) -> dict[str
             status = "incomplete_checks"
             stop_reason = "probe_changed"
             break
+        if campaign.get("stop_on_execution_failure", False) and result["status"] != "completed":
+            status = "incomplete_checks"
+            suffix = "timeout" if result["status"] == "timed_out" else result["status"]
+            stop_reason = f"trial_{suffix}"
+            break
         if result["status"] == "timed_out":
             status = "incomplete_checks"
             stop_reason = "trial_timeout"
@@ -5522,6 +6171,8 @@ def run_campaign(probe: Path, campaign_path: Path, output_dir: Path) -> dict[str
         if isinstance(receipt, dict):
             item["receipt_status"] = receipt.get("status")
             item["outcomes"] = receipt.get("outcomes")
+            if campaign.get("stop_on_execution_failure", False):
+                item["receipt_reason"] = receipt.get("reason")
         wanted_counts = _wanted_outcome_counts(trial)
         if wanted_counts is not None:
             item["wanted_outcomes"] = wanted_counts

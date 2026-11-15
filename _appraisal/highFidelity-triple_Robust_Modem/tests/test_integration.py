@@ -612,6 +612,60 @@ def main() -> None:
     runner = importlib.util.module_from_spec(runner_spec)
     sys.modules[runner_spec.name] = runner
     runner_spec.loader.exec_module(runner)
+    # Exercise actual native descriptors against the independent receipt reader
+    # before any expensive multiple-hop table or receiver can be constructed.
+    for scenario in runner.HF_VECTOR_TWO_HOP_SCENARIOS:
+        episode = {"id": "two-hop-plan", "scenario": scenario, "mode": "plan",
+                   "waveform": "reference", "seed": 73613, "noise_seed": 93613,
+                   "message": "E", "control": "wanted", "bit_seconds": 64,
+                   "cn0_db_hz": 30}
+        command = runner._command(Path(probe), episode, 12_000_000, 30)
+        actual = invoke(*command[1:])
+        runner._validate_completed_receipt(actual, episode)
+        assert actual["plan"]["vector_two_hop_table_built"] is False, actual
+        assert actual["plan"]["vector_two_hop_source_band_checked"] is False, actual
+        assert "channel" not in actual, actual
+    for control in ("noise", "wrong-key"):
+        bounded = invoke("--scenario", "hf-vector-two-hop", "--mode", "receive",
+                         "--waveform", "reference", "--message", "E",
+                         "--bit-seconds", "64", "--cn0", "30", "--control", control,
+                         "--max-samples", "1", code=3)
+        assert bounded["status"] == "resource_limit" and "channel" not in bounded, bounded
+        assert bounded["plan"]["vector_two_hop_table_built"] is False, bounded
+    for cn0, bit_seconds, negative, other_negative in ((0, 64, "noise", "wrong-key"),
+                                                        (-3, 128, "wrong-key", "noise")):
+        episode = {"id": "two-hop-sensitivity-plan", "scenario": "hf-vector-two-hop", "mode": "plan",
+                   "waveform": "reference", "seed": 73613, "noise_seed": 93613,
+                   "message": "E", "control": "wanted", "bit_seconds": bit_seconds, "cn0_db_hz": cn0}
+        actual = invoke(*runner._command(Path(probe), episode, 12_000_000, 30)[1:])
+        runner._validate_completed_receipt(actual, episode)
+        assert actual["plan"]["cn0_db_hz"] == cn0 and actual["plan"]["requested_bit_seconds"] == bit_seconds, actual
+        assert actual["plan"]["vector_two_hop_table_built"] is False and "channel" not in actual, actual
+        for control in ("wanted", negative):
+            receive = dict(episode, mode="receive", control=control)
+            bounded = invoke(*runner._command(Path(probe), receive, 1, 30)[1:], code=3)
+            assert bounded["status"] == "resource_limit" and "channel" not in bounded, bounded
+            assert bounded["plan"]["vector_two_hop_table_built"] is False, bounded
+        for request in (dict(episode, control=negative), dict(episode, mode="channel"), dict(episode, message="F"),
+                        dict(episode, mode="receive", control=other_negative)):
+            rejected = invoke(*runner._command(Path(probe), request, 1, 30)[1:], code=5)
+            assert rejected["status"] == "unavailable" and "channel" not in rejected, rejected
+    for cn0, bit_seconds in ((6, 64), (3, 128)):
+        episode = {"id": "two-hop-boundary-plan", "scenario": "hf-vector-two-hop", "mode": "plan",
+                   "waveform": "reference", "seed": 73613, "noise_seed": 93613,
+                   "message": "E", "control": "wanted", "bit_seconds": bit_seconds, "cn0_db_hz": cn0}
+        actual = invoke(*runner._command(Path(probe), episode, 12_000_000, 30)[1:])
+        runner._validate_completed_receipt(actual, episode)
+        assert actual["plan"]["vector_two_hop_table_built"] is False and "channel" not in actual, actual
+        receive = dict(episode, mode="receive")
+        bounded = invoke(*runner._command(Path(probe), receive, 1, 30)[1:], code=3)
+        assert bounded["status"] == "resource_limit" and "channel" not in bounded, bounded
+        assert bounded["plan"]["vector_two_hop_table_built"] is False, bounded
+        for request in (dict(episode, mode="channel"), dict(episode, message="F"),
+                        dict(episode, seed=73614), dict(episode, noise_seed=93614),
+                        dict(receive, control="noise"), dict(receive, control="wrong-key")):
+            rejected = invoke(*runner._command(Path(probe), request, 1, 30)[1:], code=5)
+            assert rejected["status"] == "unavailable" and "channel" not in rejected, rejected
     runner._validate_completed_receipt(refined_receive, {
         "id": "refinement-native-integration", "scenario": "awgn", "mode": "receive", "waveform": "smoke",
         "seed": 5489, "cn0_db_hz": 40, "capture_digest_slot": 1, "hf_public_phase_receiver": True,

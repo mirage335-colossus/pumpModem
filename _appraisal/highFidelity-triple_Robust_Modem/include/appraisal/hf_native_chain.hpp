@@ -64,6 +64,8 @@ struct HfNativeChainReport {
     // Their caller-declared band remains an engineering qualification input.
     bool propagation_band_declared_not_analytically_proved = false;
     std::size_t bridge_chunk_samples = 0, workspace_bytes = 0;
+    std::size_t fixed_overhead_bytes = 0, tx_bridge_bytes = 0, propagation_bridge_bytes = 0;
+    std::size_t preparation_peak_bytes = 0, resident_bytes = 0;
     double tx_preparation_seconds = 0, propagation_preparation_seconds = 0, rx_preparation_seconds = 0;
     // Exclusive wall time: nested upstream reads are subtracted from each
     // downstream stage. TX includes the original source callback. These are

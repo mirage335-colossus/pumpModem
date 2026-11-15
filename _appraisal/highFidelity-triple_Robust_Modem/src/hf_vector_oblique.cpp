@@ -18,7 +18,7 @@ using namespace hf_slab_detail;
 constexpr C imaginary{0., 1.};
 constexpr double flux_slack = 2e-9;
 constexpr std::size_t max_half_orders = 32, max_layers = 2048;
-struct SolveBounds { std::size_t spatial_modes; std::uint64_t dense_terms; };
+struct SolveBounds { std::size_t spatial_modes; std::uint64_t dense_terms; std::size_t layers = max_layers; };
 constexpr SolveBounds planar_bounds{65, 600'000'000}, volume_bounds{81, 1'200'000'000};
 constexpr SolveBounds wide_carrier_bounds{289, hf_vector_wide_carrier_dense_terms_bound};
 constexpr double minimum_port_cosine = .35;
@@ -359,7 +359,7 @@ HfVectorScattering solve_scattering(double frequency_hz, const HfVectorTransvers
     const auto [lx, ly] = grid.period_m;
     if (!finite_between(frequency_hz, 1e5, 1e8) || !finite_between(std::hypot(p0x, p0y), 0., .9) ||
         !finite_between(lx, 150., 1e6) || !finite_between(ly, 150., 1e6) ||
-        grid.half_x > max_half_orders || grid.half_y > max_half_orders || layers.size() > max_layers ||
+        grid.half_x > max_half_orders || grid.half_y > max_half_orders || layers.size() > bounds.layers ||
         !finite_between(std::hypot(field_tesla[0], field_tesla[1], field_tesla[2]), 0., 1e-3))
         throw std::invalid_argument("unsupported HF vector oblique solver geometry");
     const auto n = (2 * grid.half_x + 1) * (2 * grid.half_y + 1);
@@ -458,6 +458,22 @@ HfVectorScattering solve_hf_vector_oblique(double frequency_hz, double sine_inci
 HfVectorScattering solve_hf_vector_oblique_3d(double frequency_hz, const HfVectorTransverseGrid& grid,
     std::array<double, 3> field_tesla, std::span<const HfVectorPlasmaLayer3d> layers, std::stop_token stop) {
     return solve_scattering(frequency_hz, grid, field_tesla, layers, false, volume_bounds, stop);
+}
+
+HfVectorScattering solve_hf_vector_two_hop_es(double frequency_hz, const HfVectorTransverseGrid& grid,
+    std::array<double, 3> field_tesla, std::span<const HfVectorPlasmaLayer3d> layers, std::stop_token stop) {
+    if (grid.half_x > 6 || grid.half_y > 6) throw std::invalid_argument("two-hop E order allocation exceeds the bounded recovery");
+    return solve_scattering(frequency_hz, grid, field_tesla, layers, false, {169, 12'000'000'000ull}, stop);
+}
+
+HfVectorScattering solve_hf_vector_two_hop_f(double frequency_hz, const HfVectorTransverseGrid& grid,
+    std::array<double, 3> field_tesla, std::span<const HfVectorPlasmaLayer3d> layers, std::stop_token stop) {
+    constexpr std::size_t layer_limit = 9600;
+    if (layers.size() > layer_limit || std::any_of(layers.begin(), layers.end(), [](const auto& layer) {
+            return std::any_of(layer.density_harmonics.begin(), layer.density_harmonics.end(),
+                [](const auto& mode) { return mode.electrons_per_m3 != C{}; });
+        })) throw std::invalid_argument("two-hop F refinement requires a bounded stratified column");
+    return solve_scattering(frequency_hz, grid, field_tesla, layers, false, {81, 1'200'000'000ull, layer_limit}, stop);
 }
 
 namespace {

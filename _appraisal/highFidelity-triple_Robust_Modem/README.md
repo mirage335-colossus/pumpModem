@@ -7,7 +7,24 @@ groundwave, 1–30 MHz skywave, and Earth–Moon–Earth**. All appraisal code,
 fixtures, documentation and generated evidence remain in this directory.
 Python launches native executables and analyzes receipts; it implements no DSP.
 
-The [intrinsic-evolution extension](hf-vector-evolving.md) deforms the plasma
+The [coupled multiple-hop extension](hf-multihop.md) combines two Es reflections,
+a lossy ground bounce and a competing F-region return, retaining magnetic
+polarization and diffraction through the selected paths. Full numerical
+admission rejects an inaccurate fixed-angle approximation before receiver use.
+The primary constructed field contains qualified sampled subsecond deep
+carrier cancellation and longer band-energy fades. Sixteen unique complete
+observations include eight correct deliveries and four misses among twelve
+wanted cases. At the nearer boundary, +6 dB-Hz/69.6-second bits miss one bit,
+while +3 dB-Hz/139.2-second bits deliver at nearly equal incident E/N0. The
+clock/interference combination still fails physical completion, and the strong
+wrong-key control produces thirteen false DATA decisions but no accepted
+message. Three other negative controls stay quiet. Those failures remain
+requirements failures. These are selected local
+planar corridors, not a global ionosphere or a calibrated disturbed-event replay.
+The public-data audit records concrete raw-IQ leads and their calibration,
+event-selection and access limitations.
+
+The preceding [intrinsic-evolution extension](hf-vector-evolving.md) deforms the plasma
 density during a message in that same coupled 3D calculation. Two fixed fields
 pass independent temporal, spatial, frequency and minimum-voltage checks before
 receiver admission. Four complete-delivery requirements are declared before
@@ -183,6 +200,18 @@ From the repository root:
 ```
 
 This configures an ignored `.build/` and links the production C++ modem.
+The coupled multiple-hop continuation passes **41/41 CTest groups in 183.46 s**,
+including 140 runner checks, exact lower-signal plan admission, and native
+preparation-versus-resident memory accounting. Insufficient channel budgets
+are rejected before physical table preparation or source consumption.
+[Current full check log](local-evidence/hf-multihop-preflight/workspace-build-and-checks.log).
+The numerical physical trials and complete communications results are recorded
+separately in the [multiple-hop investigation](hf-multihop.md); a software-check
+pass does not override its failed false-DATA requirement or earlier failures.
+The subsequent admission-only extension for the frozen +6/+3 pair passes all
+three affected native integration, runner and qualification groups in 61.21 s.
+[Final affected check log](local-evidence/hf-multihop-preflight/boundary-build-and-checks.log).
+
 The intrinsic-evolution continuation passes **39/39 CTest groups in 105.37
 seconds**, including 127 runner and 23 qualification/analysis checks. Native
 checks cover the evolution law, energy-window accounting, identical rendered IQ

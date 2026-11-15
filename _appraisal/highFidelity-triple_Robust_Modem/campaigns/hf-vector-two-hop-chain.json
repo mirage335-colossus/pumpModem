@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "name": "hf-vector-two-hop-chain",
+  "purpose": "Conditional fixed complete-delivery requirement: run only after all four direct +30 anchors pass. Geometry and receive axis remain frozen; no new physical selection. Actual endpoint clock/RF/tone effects are reported separately from declared public bounds.",
+  "max_wall_seconds": 900,
+  "per_trial_wall_seconds": 900,
+  "stop_on_execution_failure": true,
+  "max_trials": 1,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "id": "both-E-30-chain",
+      "scenario": "hf-vector-two-hop-chain-clocks-tone",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 73613,
+      "noise_seed": 93613,
+      "bit_seconds": 64,
+      "message": "E",
+      "control": "wanted",
+      "cn0_db_hz": 30,
+      "max_wall_seconds": 900,
+      "reception_requirement": "required_complete"
+    }
+  ]
+}

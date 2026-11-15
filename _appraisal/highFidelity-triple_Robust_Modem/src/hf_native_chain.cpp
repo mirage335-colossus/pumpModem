@@ -160,7 +160,7 @@ struct HfNativeChain::Impl {
     std::size_t tx_position = 0, tx_count = 0, propagation_position = 0, propagation_count = 0;
     std::uint64_t tx_next = 0, propagation_next = 0, minimum_propagation_horizon = 0;
     std::uint64_t wanted_stop = 0, minimum_wanted_capture = 0;
-    std::size_t workspace_bytes = 0;
+    std::size_t fixed_overhead_bytes = 0, preparation_peak_bytes = 0;
     double tx_preparation_seconds = 0, propagation_preparation_seconds = 0, rx_preparation_seconds = 0;
     double tx_render_seconds = 0, propagation_render_seconds = 0, propagation_inclusive_seconds = 0, rx_render_seconds = 0;
     std::unique_ptr<StreamingChannel> tx;
@@ -173,14 +173,20 @@ struct HfNativeChain::Impl {
         const auto retained_configuration = bytes_add(
             config.endpoints.effects.hop_offsets_hz.capacity() * sizeof(double),
             config.endpoints.missed_receiver_dwell_indices.capacity() * sizeof(std::uint64_t));
-        const auto fixed = bytes_add(bytes_add(sizeof(Impl), retained_configuration),
-            2 * config.bridge_chunk_samples * sizeof(Complex));
-        if (fixed >= config.maximum_workspace_bytes)
+        fixed_overhead_bytes = bytes_add(sizeof(Impl), retained_configuration);
+        if (bytes_add(fixed_overhead_bytes, 2 * config.bridge_chunk_samples * sizeof(Complex)) >=
+                config.maximum_workspace_bytes)
             throw ChannelWorkspaceError("native HF chain fixed storage exhausts workspace");
         const double fs = config.endpoints.effects.sample_rate;
         const double physical_seconds = static_cast<double>(config.propagation_horizon_samples) / fs;
-        const double physical_tail = channel_tail_seconds(config.propagation, physical_seconds) +
+        double physical_tail = channel_tail_seconds(config.propagation, physical_seconds) +
             channel_interpolation_tail_seconds(config.propagation, fs);
+        if(config.propagation.vector_two_hop) {
+            const double complete_fir_tail=channel_tail_seconds(config.propagation,physical_seconds)-
+                static_cast<double>(HfVectorTwoHopTable::first_lag_samples())/fs+
+                static_cast<double>(HfVectorTwoHopTable::last_lag_samples())/fs;
+            physical_tail=std::max(physical_tail,complete_fir_tail);
+        }
         minimum_propagation_horizon = samples_ceil(static_cast<long double>(config.tx_horizon_samples) +
                                                    static_cast<long double>(physical_tail) * fs);
         require(config.propagation_horizon_samples >= minimum_propagation_horizon,
@@ -205,6 +211,11 @@ struct HfNativeChain::Impl {
         }
         tx_buffer.resize(config.bridge_chunk_samples);
         propagation_buffer.resize(config.bridge_chunk_samples);
+        const auto tx_bridge_bytes = tx_buffer.capacity() * sizeof(Complex);
+        const auto propagation_bridge_bytes = propagation_buffer.capacity() * sizeof(Complex);
+        const auto outside_propagation_bytes = bytes_add(fixed_overhead_bytes, propagation_bridge_bytes);
+        if (bytes_add(outside_propagation_bytes, tx_bridge_bytes) >= config.maximum_workspace_bytes)
+            throw ChannelWorkspaceError("native HF chain bridge capacities exhaust workspace");
         auto prepared = Clock::now();
         tx = std::make_unique<StreamingChannel>(source, tx_configuration(config));
         tx_preparation_seconds = seconds_since(prepared);
@@ -214,21 +225,22 @@ struct HfNativeChain::Impl {
         physical_source.geometry.source_samples = config.tx_horizon_samples;
         physical_source.minimum_frequency_hz = config.tx_band.minimum_hz;
         physical_source.maximum_frequency_hz = config.tx_band.maximum_hz;
-        physical_source.working_bytes = bytes_add(tx->report().working_bytes, tx_buffer.capacity() * sizeof(Complex));
+        physical_source.working_bytes = bytes_add(tx->report().working_bytes, tx_bridge_bytes);
         physical_source.sample_at = [this](std::uint64_t index) { return tx_sample(index); };
         auto physical_config = std::move(config.propagation);
         physical_config.maximum_workspace_bytes = std::min(physical_config.maximum_workspace_bytes,
-            config.maximum_workspace_bytes - fixed);
+            config.maximum_workspace_bytes - outside_propagation_bytes);
         prepared = Clock::now();
         propagation = std::make_unique<Channel>(std::move(physical_source), std::move(physical_config),
             config.propagation_seed, config.propagation_horizon_samples, stop);
         propagation_preparation_seconds = seconds_since(prepared);
+        preparation_peak_bytes = bytes_add(propagation->report().workspace_bytes, outside_propagation_bytes);
         auto receiver_source = source;
         receiver_source.geometry.source_samples = config.propagation_horizon_samples;
         receiver_source.minimum_frequency_hz = config.propagation_band.minimum_hz;
         receiver_source.maximum_frequency_hz = config.propagation_band.maximum_hz;
-        receiver_source.working_bytes = bytes_add(propagation->report().workspace_bytes,
-            propagation_buffer.capacity() * sizeof(Complex));
+        receiver_source.working_bytes = bytes_add(propagation->report().resident_workspace_bytes,
+            propagation_bridge_bytes);
         receiver_source.sample_at = [this](std::uint64_t index) { return propagation_sample(index); };
         prepared = Clock::now();
         rx = std::make_unique<StreamingChannel>(std::move(receiver_source), rx_configuration(config));
@@ -236,8 +248,8 @@ struct HfNativeChain::Impl {
         require(config.continuing_rf_interference || rx->total_samples() == config.capture_horizon_samples,
                 "native HF chain capture horizon truncates the native RX clock/frontend tail");
         if (!config.continuing_rf_interference) minimum_wanted_capture = rx->report().natural_complete_samples;
-        workspace_bytes = bytes_add(rx->report().working_bytes, bytes_add(sizeof(Impl), retained_configuration));
-        if (workspace_bytes > config.maximum_workspace_bytes)
+        const auto resident_bytes = bytes_add(rx->report().working_bytes, fixed_overhead_bytes);
+        if (std::max(preparation_peak_bytes, resident_bytes) > config.maximum_workspace_bytes)
             throw ChannelWorkspaceError("native HF chain exceeds the combined source/channel/bridge workspace limit");
         cancelled(stop);
     }
@@ -312,9 +324,12 @@ HfNativeChainReport HfNativeChain::report() const {
     result.propagation_band_declared_not_analytically_proved =
         c.propagation.fullwave_reflection.has_value() || c.propagation.magnetoionic_reflection.has_value() ||
         c.propagation.wave_optics.has_value() || c.propagation.phase_screens.has_value() ||
-        c.propagation.vector_oblique.has_value();
+        c.propagation.vector_oblique.has_value() || c.propagation.vector_two_hop.has_value();
     result.bridge_chunk_samples = c.bridge_chunk_samples;
-    result.workspace_bytes = impl_->workspace_bytes;
+    result.fixed_overhead_bytes = impl_->fixed_overhead_bytes;
+    result.tx_bridge_bytes = impl_->tx_buffer.capacity() * sizeof(Complex);
+    result.propagation_bridge_bytes = impl_->propagation_buffer.capacity() * sizeof(Complex);
+    result.preparation_peak_bytes = impl_->preparation_peak_bytes;
     result.tx_preparation_seconds = impl_->tx_preparation_seconds;
     result.propagation_preparation_seconds = impl_->propagation_preparation_seconds;
     result.rx_preparation_seconds = impl_->rx_preparation_seconds;
@@ -324,6 +339,8 @@ HfNativeChainReport HfNativeChain::report() const {
     result.tx = impl_->tx->report();
     result.propagation = impl_->propagation->report();
     result.rx = impl_->rx->report();
+    result.resident_bytes = bytes_add(result.rx.working_bytes, result.fixed_overhead_bytes);
+    result.workspace_bytes = std::max(result.preparation_peak_bytes, result.resident_bytes);
     return result;
 }
 

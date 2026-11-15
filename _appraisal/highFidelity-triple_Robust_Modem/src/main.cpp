@@ -626,6 +626,65 @@ Json vector_oblique_json(const appraisal::HfVectorObliqueSpec& spec, bool includ
     }
     return result;
 }
+Json vector_two_hop_json(const appraisal::HfVectorTwoHopSpec& spec) {
+    using Table = appraisal::HfVectorTwoHopTable;
+    const auto g = appraisal::hf_vector_two_hop_geometry(spec);
+    const auto column = [](const appraisal::HfVectorTwoHopColumn& c) {
+        Json::Array modes;
+        for (const auto& mode : c.density_modes)
+            modes.push_back(object({{"m",mode.m},{"n",mode.n},{"amplitude_x",mode.amplitude_x},
+                                   {"phase_rad",mode.phase_rad}}));
+        return object({{"lower_height_m",c.lower_height_m},{"thickness_m",c.thickness_m},
+            {"peak_plasma_hz",c.peak_plasma_hz},{"collisions_per_second",c.collisions_per_second},
+            {"field_tesla",Json::Array{c.field_tesla[0],c.field_tesla[1],c.field_tesla[2]}},
+            {"slice_thickness_m",c.slice_thickness_m},{"slice_center_fraction",c.slice_center_fraction},
+            {"density_modes",std::move(modes)}});
+    };
+    Json::Array height_nodes, rf_fit_offsets;
+    for(std::size_t i=0;i<Table::moving_angle_fit_nodes;++i) {
+        const double normalized=-1.+.25*static_cast<double>(i);
+        height_nodes.push_back(normalized*g.f_height_amplitude_m);
+        rf_fit_offsets.push_back((static_cast<double>(i)-4.)*240.);
+    }
+    return object({{"carrier_hz",Table::carrier_hz},{"sample_rate_hz",Table::sample_rate_hz},
+        {"occupied_half_band_hz",Table::occupied_half_band_hz},{"maximum_horizon_seconds",Table::horizon_seconds},
+        {"relative_spreading_reference_range_m",Table::relative_spreading_reference_range_m},
+        {"field",spec.field==appraisal::HfVectorTwoHopField::primary?"primary":"holdout"},
+        {"routes",spec.routes==appraisal::HfVectorTwoHopRoutes::both?"both":
+            spec.routes==appraisal::HfVectorTwoHopRoutes::two_hop?"two_hop":"one_hop"},
+        {"receive_axis_index",spec.receive_axis_index},{"receive_axis_grid_degrees_per_index",5.},
+        {"es_columns",Json::Array{column(g.es[0]),column(g.es[1])}},
+        {"f_column",column(g.f)},
+        {"transverse_period_m",Json::Array{g.transverse_period_m[0],g.transverse_period_m[1]}},
+        {"two_hop_incidence_deg",g.two_hop_incidence_deg},{"one_hop_incidence_deg",g.one_hop_incidence_deg},
+        {"receiver_x_m",g.receiver_x_m},{"ground_relative_permittivity",g.ground_relative_permittivity},
+        {"ground_conductivity_s_m",g.ground_conductivity_s_m},
+        {"f_height_amplitude_m",g.f_height_amplitude_m},{"f_height_period_seconds",g.f_height_period_seconds},
+        {"f_height_epoch_seconds",g.f_height_epoch_seconds},
+        {"transmit_axis",Json::Array{g.transmit_axis[0],g.transmit_axis[1],g.transmit_axis[2]}},
+        {"receive_axis",Json::Array{g.receive_axis[0],g.receive_axis[1],g.receive_axis[2]}},
+        {"two_hop_vacuum_range_m",g.two_hop_vacuum_range_m},{"one_hop_vacuum_range_m",g.one_hop_vacuum_range_m},
+        {"first_lag_samples",Table::first_lag_samples()},{"last_lag_samples",Table::last_lag_samples()},
+        {"modelling_delay_samples",Table::modelling_delay_samples},{"retained_late_samples",Table::retained_late_samples},
+        {"taps",Table::taps},{"displacement_intervals",Table::displacement_intervals},
+        {"moving_angle_fit_nodes",Table::moving_angle_fit_nodes},
+        {"moving_angle_fit_height_displacements_m",std::move(height_nodes)},
+        {"moving_angle_fit_rf_offsets_hz",std::move(rf_fit_offsets)},
+        {"moving_angle_fit_layout","nine uniform height nodes d/A=-1..1 in 0.25 steps; nine RF offsets -960..+960 Hz in 240 Hz steps; ascending spatial order and TE/TM ports; pre-F P then post-F Ey/Ez; dephased to nominal half-range with d-dependent chromatic correction"},
+        {"moving_angle_interpolation","P/Q barycentric interpolation over nine fixed height nodes with weights (-1)^i*C(8,i); exact central-image carrier phase and implicit half-flight retarded-time corrections remain analytic"},
+        {"moving_angle_voltage_error_limit",0.0006},
+        {"fixed_angle_carrier_diagnostic_scope","fixed-angle carrier comparison is reported separately as a diagnostic and is not the moving-angle production response"},
+        {"branch_error_accounting_scope","route-specific mesh, refined-order and frequency errors preserve both direct and staged checks; coherent physical allowance uses the maximum of direct/staged error within each category, then sums categories and active routes plus the larger moving-angle direct/staged error"},
+        {"preparation_workspace_bound_bytes",Table::preparation_workspace_bound_bytes},
+        {"fade_statistic_scope","uniform frequency-integrated power statistic over the declared symmetric band; this is not DATA-symbol-weighted"},
+        {"fade_statistic_half_width_hz",Table::fade_half_band_hz},
+        {"fade_statistic_bandwidth_hz",2.*Table::fade_half_band_hz},
+        {"fade_time_witnesses",Table::fade_time_witnesses},
+        {"fade_band_intervals",Table::fade_band_intervals},
+        {"interpolation","route-specific complex-voltage FIR coefficients over the declared physical displacement law; physical output time is (output_sample-32)/1920; F retarded range uses two bounded substitutions with L(d)=hypot(X,2(hF+d)), central-image phase and Rref/L(d), then nine-node P/Q moving-angle interpolation with independently checked 0.0006 voltage error"},
+        {"point_source_scope","conditional planar retarded return approximation; not an exact point-source Green function"},
+        {"numerical_scope","selected local planar return corridors; full diffraction orders and TE/TM retained through route composition until fixed antenna projection; other arrivals, Earth curvature, finite-beam spreading, and global path coverage are outside this model"}});
+}
 Json channel_parameters(const appraisal::ChannelSpec& c,std::string_view scenario_id={}) {
     Json::Array paths;Hash path_hash;double power=0;
     const bool extended=std::any_of(c.paths.begin(),c.paths.end(),[](const auto& p){return p.hf.has_value();});
@@ -840,6 +899,10 @@ Json channel_parameters(const appraisal::ChannelSpec& c,std::string_view scenari
         result["renderer"]="hf_vector_oblique";
         result["vector_oblique"]=vector_oblique_json(*c.vector_oblique,scenario_id.starts_with("hf-vector-evolving"));
     }
+    if(c.vector_two_hop) {
+        result["renderer"]="hf_vector_two_hop";
+        result["vector_two_hop"]=vector_two_hop_json(*c.vector_two_hop);
+    }
     return result;
 }
 Json scenario_json(const appraisal::Scenario& s) {
@@ -1016,7 +1079,10 @@ Setup setup(const Options& o,std::stop_token stop) {
     auto scenario=appraisal::make_scenario(o.scenario);
     const bool vector_native_chain_case=scenario.id.starts_with("hf-vector-oblique-chain-")||
         scenario.id.starts_with("hf-vector-3d-chain-")||
-        scenario.id.starts_with("hf-vector-evolving-chain-");
+        scenario.id.starts_with("hf-vector-evolving-chain-")||
+        scenario.id.starts_with("hf-vector-two-hop-chain-");
+    const bool vector_two_hop_case=scenario.channel.vector_two_hop.has_value();
+    const bool vector_two_hop_native_chain_case=scenario.id.starts_with("hf-vector-two-hop-chain-");
     const bool evolving_native_chain_case=scenario.id.starts_with("hf-vector-evolving-chain-");
     const bool evolving_vector_case=scenario.id.starts_with("hf-vector-evolving");
     const bool native_chain_case=scenario.id.starts_with("hf-wave-chain-")||vector_native_chain_case;
@@ -1034,6 +1100,39 @@ Setup setup(const Options& o,std::stop_token stop) {
            o.hf_trajectory_offset_seconds||o.hf_phase_refinement||o.hf_phase_filter||
            o.hf_phase_filter_receiver||o.hf_phase_filter_paths||o.hf_phase_filter_sticky||o.hf_phase_bridge)
             throw Unavailable("native wave chain supports fixed-geometry reference CPU plan/receive with wanted/noise/wrong-key controls, Helper/FEC and experimental receiver policies off");
+    }
+    if(vector_two_hop_case) {
+        const double cn0=o.cn0.value_or(30.), bit_seconds=o.bit_seconds.value_or(64.);
+        const bool primary=scenario.id=="hf-vector-two-hop";
+        const bool primary_receive=primary&&o.mode=="receive";
+        const bool low_short=primary&&o.message=="E"&&cn0==0.&&bit_seconds==64.;
+        const bool low_long=primary&&o.message=="E"&&cn0==-3.&&bit_seconds==128.;
+        const bool negative_sensitivity=primary_receive&&
+            ((low_short&&o.control=="noise")||(low_long&&o.control=="wrong-key"));
+        const bool boundary_pair=primary&&o.message=="E"&&o.seed==73613&&o.noise_seed==93613&&
+            ((cn0==6.&&bit_seconds==64.)||(cn0==3.&&bit_seconds==128.));
+        const bool wanted_sensitivity=(low_short||low_long||boundary_pair)&&o.control=="wanted"&&
+            (o.mode=="plan"||o.mode=="receive");
+        const bool sensitivity_point=wanted_sensitivity||negative_sensitivity;
+        const bool primary_negative_control=primary_receive&&(o.control=="wrong-key"||o.control=="noise")&&
+            ((cn0==30.&&bit_seconds==64.)||negative_sensitivity);
+        if((vector_two_hop_native_chain_case?(o.mode!="plan"&&o.mode!="receive"):
+                (o.mode!="plan"&&o.mode!="channel"&&o.mode!="receive"))||
+           o.backend!="cpu"||o.waveform!="reference"||o.pulse!="rrc"||o.helper||o.fec!="off"||
+           (o.control!="wanted"&&!primary_negative_control)||
+           o.duration_override||o.capture_lead_seconds||o.design_options||o.service_replay||
+           o.hf_phase_bank||o.hf_physical_diagnostic||o.hf_gui_clean_diagnostic||
+           o.hf_correlated_gain_shadow||o.hf_correlated_gain_receiver||
+           o.hf_gannon_native_diagnostic||o.hf_gannon_gain_variance_diagnostic||
+           o.hf_target_presence_diagnostic||o.hf_public_phase_receiver||o.hf_compare_admitted_models||
+           o.hf_trajectory_seed||o.hf_trajectory_offset_seconds||o.hf_phase_refinement||o.hf_phase_filter||
+           o.hf_phase_filter_receiver||o.hf_phase_filter_paths||o.hf_phase_filter_sticky||o.hf_phase_bridge)
+            throw Unavailable("coupled vector two-hop supports fixed-geometry reference CPU plan/channel/receive with wanted or complete noise/wrong-key controls, Helper/FEC and experimental receiver policies off; native endpoint variants use plan/receive");
+        const bool long_characterization=primary&&cn0==17.&&bit_seconds==128.;
+        if(bit_seconds!=64.&&!long_characterization&&!sensitivity_point)
+            throw Unavailable("coupled vector two-hop supports 64 second bits or a declared 128 second primary point");
+        if(cn0!=30.&&!(primary&&cn0==20.)&&!long_characterization&&!sensitivity_point)
+            throw Unavailable("coupled vector two-hop C/N0 must match an admitted scenario, duration and control");
     }
     if(scenario.id.starts_with("hf-gannon-")) {
         const bool allowed_mode=o.mode=="plan"||o.mode=="channel"||o.mode=="receive"||
@@ -1266,6 +1365,12 @@ Setup setup(const Options& o,std::stop_token stop) {
     for(unsigned iteration=0;iteration<8;++iteration) {
         s.tail=appraisal::channel_tail_seconds(s.scenario.channel,guess)+
             appraisal::channel_interpolation_tail_seconds(s.scenario.channel,rc.sample_rate_hz);
+        if(s.scenario.channel.vector_two_hop) {
+            const double geometry_tail=appraisal::channel_tail_seconds(s.scenario.channel,guess)-
+                static_cast<double>(appraisal::HfVectorTwoHopTable::first_lag_samples())/rc.sample_rate_hz+
+                static_cast<double>(appraisal::HfVectorTwoHopTable::last_lag_samples())/rc.sample_rate_hz;
+            s.tail=std::max(s.tail,geometry_tail);
+        }
         auto clean=add(s.source_stop,checked_samples(s.tail,rc.sample_rate_hz));
         if(native_chain_case) {
             chain_tx_horizon=add(checked_samples(static_cast<long double>(s.source_stop)/rc.sample_rate_hz/chain_slowest,
@@ -1302,7 +1407,8 @@ Setup setup(const Options& o,std::stop_token stop) {
         chain.endpoints.noise_seed=o.noise_seed;
         chain.endpoints.maximum_chunk_samples=o.chunk;
         chain.propagation=s.scenario.channel;
-        if(evolving_native_chain_case) chain.maximum_workspace_bytes=96u*1024u*1024u;
+        if(evolving_native_chain_case)chain.maximum_workspace_bytes=96u*1024u*1024u;
+        if(vector_two_hop_native_chain_case)chain.maximum_workspace_bytes=192u*1024u*1024u;
         chain.propagation_seed=o.seed;
         chain.final_receiver_noise_variance=variance;
         chain.tx_horizon_samples=chain_tx_horizon;
@@ -1341,7 +1447,8 @@ Setup setup(const Options& o,std::stop_token stop) {
         s.horizon=make_receiver_slot_plan(s.profile,s.receiver,s.slot_horizon-1).stop_sample;
     }
     if(o.mode=="channel"&&!s.scenario.channel.fullwave_reflection&&!s.scenario.channel.magnetoionic_reflection&&
-       !s.scenario.channel.wave_optics&&!s.scenario.channel.phase_screens&&!s.scenario.channel.vector_oblique)
+       !s.scenario.channel.wave_optics&&!s.scenario.channel.phase_screens&&!s.scenario.channel.vector_oblique&&
+       !s.scenario.channel.vector_two_hop)
         s.horizon=checked_samples(o.duration_seconds,rc.sample_rate_hz);
     if(o.mode=="slot"||o.mode=="diagnose") {
         // Observe the entire first public aperture at its real duration. The
@@ -1366,6 +1473,10 @@ Setup setup(const Options& o,std::stop_token stop) {
     }
     if(s.scenario.channel.vector_oblique) {
         try { appraisal::validate_hf_vector_oblique_spec(*s.scenario.channel.vector_oblique, s.horizon); }
+        catch (const std::exception& error) { throw Unavailable(error.what()); }
+    }
+    if(s.scenario.channel.vector_two_hop) {
+        try { appraisal::validate_hf_vector_two_hop_spec(*s.scenario.channel.vector_two_hop, s.horizon); }
         catch (const std::exception& error) { throw Unavailable(error.what()); }
     }
     if(o.mode=="hf-search"||o.hf_public_phase_receiver) {
@@ -1645,6 +1756,26 @@ Json plan_json(const Setup& s,const Options& o) {
             result["vector_oblique_exposure_limit"]="The coupled 3D periodic x-y field is sampled along one fixed commensurate receiver trajectory within the bounded horizon; it does not represent a random trajectory ensemble, multiple hops, or real disturbed-day probabilities.";
         }
     }
+    if(s.scenario.channel.vector_two_hop) {
+        const double source_seconds=static_cast<double>(s.source_stop)/s.receiver.sample_rate_hz;
+        const double horizon_seconds=static_cast<double>(s.horizon)/s.receiver.sample_rate_hz;
+        result["channel_renderer"]="hf_vector_two_hop";
+        result["vector_two_hop"]=vector_two_hop_json(*s.scenario.channel.vector_two_hop);
+        result["vector_two_hop_source_band_checked"]=false;
+        result["vector_two_hop_table_built"]=false;
+        result["path_count"]=Json{};
+        result["path_sample_products"]=Json{};
+        result["channel_tail_seconds_scope"]="complete causal route-composed fixed-antenna complex-voltage FIR support, common first-to-last retained lag across selected routes";
+        result["cn0_reference_plane"]="common normalized E reference at the declared 1000 km range before route, spreading, reflection, and fixed antenna projection; fixed additive receiver noise";
+        result["physical_kernel_supplied_to_receiver"]=false;
+        result["vector_two_hop_source_seconds"]=source_seconds;
+        result["vector_two_hop_rendered_horizon_seconds"]=horizon_seconds;
+        result["vector_two_hop_horizon_within_declared_model"]=
+            horizon_seconds<=appraisal::HfVectorTwoHopTable::horizon_seconds;
+        result["vector_two_hop_exposure_scope"]="selected local planar two-Es ground-bounce and one-F return corridors; numerical support does not prove global path completeness, other arrivals, finite-beam coverage, Earth-curvature effects, or field occurrence probability";
+        result["vector_two_hop_physical_time_scope"]="physical output time is (output_sample - 32)/1920; F-region retarded range uses two bounded substitutions with L(d)=hypot(X,2(hF+d)) and flight time L(d)/(2c), from the common receiver output time";
+        result["vector_two_hop_angular_interpolation_scope"]="production F interaction uses nine-node uniform-height P/Q angular interpolation; fixed-angle carrier comparison remains a separate diagnostic, not the production response; moving-angle and staged errors are separately reported and gated at 0.0006 voltage";
+    }
     if(s.scenario.id.starts_with("hf-gannon-")) {
         result["channel_renderer"]="observed_voltage_multiplicative_replay";
         result["cn0_reference_plane"]="incident normalized modem waveform before jointly scaled observed-voltage multiplication; independent synthetic white receiver noise";
@@ -1656,6 +1787,8 @@ Json plan_json(const Setup& s,const Options& o) {
         const auto& e=c.endpoints.effects;
         if(s.scenario.channel.vector_oblique)
             result["channel_tail_seconds_scope"]="conservative complete native endpoint and vector FIR tail under the public clock bounds";
+        if(s.scenario.channel.vector_two_hop)
+            result["channel_tail_seconds_scope"]="conservative complete native endpoint and common two-hop FIR tail under public clock bounds";
         result["channel_renderer"]="native_tx_physical_hf_native_rx";
         result["capture_preroll_scope"]="public nominal source preroll traverses TX clock once; native RX capture lead is zero";
         result["cn0_reference_plane"]="fixed normalized emitted DATA reference; independent fixed-variance noise added after native RX interpolation and oscillator mixing";
@@ -2198,6 +2331,119 @@ Json channel_json(const appraisal::ChannelReport& r,double fs,std::string_view s
         receipt["selected_energy_sample_sum"]=static_cast<double>(vector.selected_energy);
         result["vector_oblique"]=std::move(receipt);
     }
+    if(r.vector_two_hop) {
+        const auto& model=*r.vector_two_hop;
+        const auto& checks=model.checks;
+        auto receipt=vector_two_hop_json(model.spec);
+        receipt["table_sha256"]=model.table_sha256;
+        // The receipt writer escapes non-ASCII bytes individually.
+        receipt["table_digest_scope"]="versioned moving-angle route-composed operator; exact binary64 complex coefficients for each retained lag and displacement knot in both route tables, plus all 9 x 9 x 98 x 3 moving-angle P/Q fit coefficients when F route is active and full selected geometry, reference range, retarded-time law, route and receive-axis metadata in canonical little-endian order";
+        receipt["qualification_scope"]="finite-order vector Maxwell composition for the declared local two-Es ground-bounce and one-F corridors; finite RF, displacement, mesh/order, staged support and causal FIR witnesses qualify this fixed operator only, not all possible HF paths";
+        receipt["table_qualified"]=checks.qualified;
+        receipt["carrier_qualified"]=checks.carrier_qualified;
+        receipt["specified_fade_observed"]=checks.specified_fade_observed;
+        receipt["rf_solves"]=checks.rf_solves;
+        receipt["rf_points"]=checks.rf_points;
+        receipt["matrix_products"]=checks.matrix_products;
+        receipt["two_hop_rf_points"]=checks.two_hop_rf_points;
+        receipt["one_hop_rf_points"]=checks.one_hop_rf_points;
+        receipt["moving_angle_fit_points"]=checks.moving_angle_fit_points;
+        receipt["checked_moving_angle_witnesses"]=checks.checked_moving_angle_witnesses;
+        receipt["checked_moving_angle_refinement_points"]=checks.checked_moving_angle_refinement_points;
+        receipt["checked_frequency_witnesses"]=checks.checked_frequency_witnesses;
+        receipt["checked_displacement_witnesses"]=checks.checked_displacement_witnesses;
+        receipt["scanned_displacements"]=checks.scanned_displacements;
+        receipt["checked_fade_witnesses"]=checks.checked_fade_witnesses;
+        const auto& temporal_fade=checks.temporal_fade;
+        const auto temporal_fade_run=[](const appraisal::HfVectorTwoHopFadeRun& run) {
+            return object({{"qualifying_samples",run.qualifying_samples},
+                {"longest_run_samples",run.longest_run_samples},
+                {"longest_sample_span_seconds",run.longest_sample_span_seconds}});
+        };
+        receipt["temporal_fade"]=object({
+            {"scope",appraisal::HfVectorTwoHopTable::temporal_fade_scope},
+            {"evaluated",temporal_fade.evaluated},
+            {"sample_count",temporal_fade.sample_count},
+            {"sample_step_seconds",temporal_fade.sample_step_seconds},
+            {"voltage_allowance",temporal_fade.voltage_allowance},
+            {"mean_incoherent_band_power",temporal_fade.mean_incoherent_band_power},
+            {"carrier",temporal_fade_run(temporal_fade.carrier)},
+            {"band",temporal_fade_run(temporal_fade.band)},
+            {"joint",temporal_fade_run(temporal_fade.joint)}});
+        receipt["checked_angular_witnesses"]=checks.checked_angular_witnesses;
+        receipt["checked_staged_modes"]=checks.checked_staged_modes;
+        receipt["checked_linear_velocity_witnesses"]=checks.checked_linear_velocity_witnesses;
+        receipt["scanned_null_displacements"]=checks.scanned_null_displacements;
+        require(checks.checked_null_witnesses<=checks.null_witnesses.size(),
+                "two-hop null-witness count exceeds its fixed report bound");
+        Json::Array null_witnesses;
+        for(std::size_t i=0;i<checks.checked_null_witnesses;++i) {
+            const auto& witness=checks.null_witnesses[i];
+            null_witnesses.push_back(object({{"offset_hz",witness.offset_hz},
+                {"displacement_m",witness.displacement_m},{"assembled_power",witness.assembled_power},
+                {"direct_power",witness.direct_power},{"voltage_error",witness.voltage_error}}));
+        }
+        receipt["checked_null_witnesses"]=checks.checked_null_witnesses;
+        receipt["null_witnesses"]=std::move(null_witnesses);
+        receipt["preparation_peak_workspace_bytes"]=checks.preparation_peak_workspace_bytes;
+        receipt["maximum_rf_dense_terms"]=checks.maximum_rf_dense_terms;
+        receipt["minimum_vacuum_cosine"]=checks.minimum_vacuum_cosine;
+        receipt["maximum_flux_excess"]=checks.maximum_flux_excess;
+        receipt["maximum_solve_residual"]=checks.maximum_solve_residual;
+        receipt["maximum_ground_power"]=checks.maximum_ground_power;
+        receipt["maximum_outer_order_flux"]=checks.maximum_outer_order_flux;
+        receipt["one_hop_carrier_power"]=checks.one_hop_carrier_power;
+        receipt["two_hop_carrier_power"]=checks.two_hop_carrier_power;
+        receipt["two_hop_intermediate_nonspecular_flux"]=checks.two_hop_intermediate_nonspecular_flux;
+        receipt["two_hop_intermediate_cross_plane_flux"]=checks.two_hop_intermediate_cross_plane_flux;
+        receipt["maximum_mesh_voltage_error"]=checks.maximum_mesh_voltage_error;
+        receipt["maximum_refined_order_voltage_error"]=checks.maximum_refined_order_voltage_error;
+        receipt["maximum_frequency_voltage_error"]=checks.maximum_frequency_voltage_error;
+        receipt["maximum_fir_voltage_error"]=checks.maximum_fir_voltage_error;
+        receipt["maximum_displacement_tap_error"]=checks.maximum_displacement_tap_error;
+        receipt["maximum_discarded_energy_fraction"]=checks.maximum_discarded_energy_fraction;
+        receipt["minimum_carrier_power"]=checks.minimum_carrier_power;
+        receipt["minimum_incoherent_carrier_power"]=checks.minimum_incoherent_carrier_power;
+        receipt["minimum_band_power"]=checks.minimum_band_power;
+        receipt["minimum_band_incoherent_power"]=checks.minimum_band_incoherent_power;
+        receipt["average_incoherent_band_power"]=checks.average_incoherent_band_power;
+        receipt["carrier_fade_displacement_m"]=checks.carrier_fade_displacement_m;
+        receipt["band_fade_displacement_m"]=checks.band_fade_displacement_m;
+        receipt["relative_voltage_error_at_witness_minimum"]=checks.relative_voltage_error_at_witness_minimum;
+        receipt["retarded_peak_error_bound"]=checks.retarded_peak_error_bound;
+        receipt["maximum_staged_support_error"]=checks.maximum_staged_support_error;
+        receipt["maximum_linear_velocity_voltage_error"]=checks.maximum_linear_velocity_voltage_error;
+        receipt["maximum_band_quadrature_power_error"]=checks.maximum_band_quadrature_power_error;
+        receipt["maximum_angular_freezing_voltage_error"]=checks.maximum_angular_freezing_voltage_error;
+        receipt["maximum_moving_angle_voltage_error"]=checks.maximum_moving_angle_voltage_error;
+        receipt["maximum_moving_angle_staged_voltage_error"]=checks.maximum_moving_angle_staged_voltage_error;
+        receipt["maximum_carrier_shift_voltage_error"]=checks.maximum_carrier_shift_voltage_error;
+        receipt["maximum_staged_frequency_voltage_error"]=checks.maximum_staged_frequency_voltage_error;
+        receipt["minimum_assembled_null_power"]=checks.minimum_assembled_null_power;
+        receipt["minimum_direct_null_power"]=checks.minimum_direct_null_power;
+        receipt["maximum_longitudinal_footprint_offset_m"]=checks.maximum_longitudinal_footprint_offset_m;
+        receipt["maximum_cross_plane_footprint_offset_m"]=checks.maximum_cross_plane_footprint_offset_m;
+        const auto branch_errors=[](const appraisal::HfVectorTwoHopBranchErrors& branch) {
+            return object({{"mesh_voltage_error",branch.mesh_voltage_error},
+                {"refined_order_voltage_error",branch.refined_order_voltage_error},
+                {"frequency_voltage_error",branch.frequency_voltage_error},
+                {"staged_frequency_voltage_error",branch.staged_frequency_voltage_error},
+                {"staged_mesh_voltage_error",branch.staged_mesh_voltage_error},
+                {"staged_refined_order_voltage_error",branch.staged_refined_order_voltage_error}});
+        };
+        receipt["two_hop_voltage_errors"]=branch_errors(checks.two_hop_voltage_errors);
+        receipt["one_hop_voltage_errors"]=branch_errors(checks.one_hop_voltage_errors);
+        receipt["physical_voltage_allowance"]=appraisal::hf_vector_two_hop_physical_voltage_allowance(checks);
+        receipt["table_workspace_bytes"]=model.table_workspace_bytes;
+        receipt["stream_workspace_bytes"]=model.stream_workspace_bytes;
+        receipt["moving_angle_fit_coefficient_count"]=model.moving_angle_fit_coefficient_count;
+        receipt["preparation_seconds"]=model.preparation_seconds;
+        receipt["source_minimum_frequency_hz"]=model.source_minimum_frequency_hz;
+        receipt["source_maximum_frequency_hz"]=model.source_maximum_frequency_hz;
+        receipt["incident_energy_sample_sum"]=static_cast<double>(model.incident_energy);
+        receipt["selected_energy_sample_sum"]=static_cast<double>(model.selected_energy);
+        result["vector_two_hop"]=std::move(receipt);
+    }
     return result;
 }
 Json channel_json(const StreamChannelReport& r,double fs,const EmissionReport& emission) {
@@ -2268,6 +2514,15 @@ Json channel_json(const appraisal::HfNativeChainReport& r,double fs,const Emissi
         {"rx_render_seconds",r.rx_render_seconds},
         {"render_cost_scope","exclusive wall seconds for completed read calls; TX includes original source callbacks; nested upstream read time is subtracted; no complete-receiver capacity claim"},
         {"receiver_completion_inferred_from_render_end",false}});
+    if(r.propagation.vector_two_hop) {
+        result["propagation"]["resident_workspace_bytes"]=r.propagation.resident_workspace_bytes;
+        result["native_chain"]["workspace_accounting"]=object({
+            {"fixed_overhead_bytes",r.fixed_overhead_bytes},
+            {"tx_bridge_bytes",r.tx_bridge_bytes},
+            {"propagation_bridge_bytes",r.propagation_bridge_bytes},
+            {"preparation_peak_bytes",r.preparation_peak_bytes},
+            {"resident_bytes",r.resident_bytes}});
+    }
     return result;
 }
 const char* state_name(StreamReceiverState s) {
@@ -3332,6 +3587,10 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
             result["plan"]["vector_oblique_source_band_checked"]=true;
             result["plan"]["vector_oblique_table_built"]=true;
         }
+        if(receipt.propagation.vector_two_hop) {
+            result["plan"]["vector_two_hop_source_band_checked"]=true;
+            result["plan"]["vector_two_hop_table_built"]=true;
+        }
     } else if(s.native_channel) {
         if(native_channel_bound>=available_limit-baseline-future-total_diagnostic_bytes)
             throw Limit("native GUI channel and evaluator preflight exhaust the declared total memory limit");
@@ -3362,7 +3621,10 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
         const bool evolution_energy_case=o.mode=="receive"&&
             (s.scenario.id=="hf-vector-evolving"||s.scenario.id=="hf-vector-evolving-rigid"||
              s.scenario.id=="hf-vector-evolving-holdout"||s.scenario.id=="hf-vector-evolving-holdout-rigid");
-        if(evolution_energy_case) {
+        const bool two_hop_energy_case=o.mode=="receive"&&
+            (s.scenario.id=="hf-vector-two-hop"||s.scenario.id=="hf-vector-two-hop-only"||
+             s.scenario.id=="hf-vector-one-hop-only"||s.scenario.id=="hf-vector-two-hop-holdout");
+        if(evolution_energy_case||two_hop_energy_case) {
             signal_energy_intervals.reserve(static_cast<std::size_t>(s.slot_horizon));
             for(std::uint64_t slot=0;slot<s.slot_horizon;++slot) {
                 const auto aperture=make_receiver_slot_plan(s.profile,s.receiver,slot);
@@ -3392,6 +3654,10 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
         if(channel->report().vector_oblique) {
             result["plan"]["vector_oblique_source_band_checked"]=true;
             result["plan"]["vector_oblique_table_built"]=true;
+        }
+        if(channel->report().vector_two_hop) {
+            result["plan"]["vector_two_hop_source_band_checked"]=true;
+            result["plan"]["vector_two_hop_table_built"]=true;
         }
     }
     const double channel_preparation_seconds=std::chrono::duration<double>(Clock::now()-channel_begin).count();
@@ -4077,6 +4343,7 @@ int main(int argc,char** argv) {
      catch(const appraisal::FullwaveReflectionUnavailable& e){result["status"]="unavailable";result["reason"]=e.what();code=5;}
      catch(const appraisal::MagnetoionicReflectionUnavailable& e){result["status"]="unavailable";result["reason"]=e.what();code=5;}
      catch(const appraisal::HfVectorObliqueUnavailable& e){result["status"]="unavailable";result["reason"]=e.what();code=5;}
+     catch(const appraisal::HfVectorTwoHopUnavailable& e){result["status"]="unavailable";result["reason"]=e.what();code=5;}
      catch(const ReceiverWorkspaceError& e){result["status"]="resource_limit";result["reason"]=e.what();code=3;}
      catch(const appraisal::ChannelWorkspaceError& e){result["status"]="resource_limit";result["reason"]=e.what();code=3;}
      catch(const std::exception& e){

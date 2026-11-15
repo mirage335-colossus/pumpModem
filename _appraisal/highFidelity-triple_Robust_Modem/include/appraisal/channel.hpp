@@ -4,6 +4,7 @@
 #include "appraisal/hf_magnetoionic_kernel.hpp"
 #include "appraisal/hf_phase_screens.hpp"
 #include "appraisal/hf_vector_oblique.hpp"
+#include "appraisal/hf_vector_two_hop.hpp"
 #include "appraisal/hf_wave_optics.hpp"
 #include "appraisal/hf_ionosphere.hpp"
 #include "datapump/triad_modem_v3.hpp"
@@ -78,6 +79,7 @@ struct ChannelSpec {
     std::optional<HfWaveOpticsSpec> wave_optics;
     std::optional<HfPhaseScreensSpec> phase_screens;
     std::optional<HfVectorObliqueSpec> vector_oblique;
+    std::optional<HfVectorTwoHopSpec> vector_two_hop;
     Resonator transmitter;
     Noise noise;
     Frontend frontend;
@@ -97,6 +99,7 @@ struct MagnetoionicReflectionUnavailable : std::invalid_argument { using std::in
 struct HfWaveOpticsUnavailable : std::invalid_argument { using std::invalid_argument::invalid_argument; };
 struct HfPhaseScreensUnavailable : std::invalid_argument { using std::invalid_argument::invalid_argument; };
 struct HfVectorObliqueUnavailable : std::invalid_argument { using std::invalid_argument::invalid_argument; };
+struct HfVectorTwoHopUnavailable : std::invalid_argument { using std::invalid_argument::invalid_argument; };
 struct HfFullwaveReflectionReport {
     struct Region {
         std::uint64_t samples = 0;
@@ -152,6 +155,15 @@ struct HfVectorObliqueReport {
     double source_minimum_frequency_hz = 0., source_maximum_frequency_hz = 0.;
     long double incident_energy = 0., selected_energy = 0.;
 };
+struct HfVectorTwoHopReport {
+    HfVectorTwoHopChecks checks;
+    HfVectorTwoHopSpec spec;
+    std::string table_sha256;
+    std::size_t table_workspace_bytes = 0, stream_workspace_bytes = 0;
+    std::size_t moving_angle_fit_coefficient_count = 0;
+    double preparation_seconds = 0., source_minimum_frequency_hz = 0., source_maximum_frequency_hz = 0.;
+    long double incident_energy = 0., selected_energy = 0.;
+};
 // Evaluator-only clean-signal energy apertures. These are never propagated to
 // a receiver; samples use the channel's zero-based output clock and exclusive stop.
 struct SignalEnergyInterval {
@@ -164,7 +176,10 @@ struct SignalEnergyObservation {
 };
 struct ChannelReport {
     std::uint64_t samples = 0, source_samples = 0, impulse_events = 0, clipped_samples = 0;
+    // Both bounds include the upstream source. Its retained graph can be
+    // composed into a downstream stage after transient preparation has ended.
     std::size_t workspace_bytes = 0;
+    std::size_t resident_workspace_bytes = 0;
     long double input_energy = 0, signal_energy = 0, output_energy = 0, additive_noise_energy = 0;
     double maximum_delay_seconds = 0, tail_seconds = 0, minimum_agc_gain = 1;
     std::optional<HfFullwaveReflectionReport> fullwave_reflection;
@@ -172,6 +187,7 @@ struct ChannelReport {
     std::optional<HfWaveOpticsReport> wave_optics;
     std::optional<HfPhaseScreensReport> phase_screens;
     std::optional<HfVectorObliqueReport> vector_oblique;
+    std::optional<HfVectorTwoHopReport> vector_two_hop;
     std::vector<SignalEnergyObservation> signal_energy_observations;
     long double signal_energy_outside_observations = 0.;
 };

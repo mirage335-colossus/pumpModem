@@ -852,6 +852,60 @@ Scenario native_vector_oblique_evolving_chain(const std::string& id) {
     return scenario;
 }
 
+Scenario vector_two_hop(const std::string& id) {
+    auto scenario = base_hf(id);
+    scenario.channel.rf_hz = HfVectorTwoHopTable::carrier_hz;
+    auto& two_hop = scenario.channel.vector_two_hop.emplace();
+    const bool held = id == "hf-vector-two-hop-holdout";
+    two_hop.field = held ? HfVectorTwoHopField::holdout : HfVectorTwoHopField::primary;
+    // The channel-only selection froze these independent primary/held axes;
+    // receiver outcomes do not select or update them.
+    two_hop.receive_axis_index = held ? 14u : 11u;
+    if (id == "hf-vector-two-hop-only") two_hop.routes = HfVectorTwoHopRoutes::two_hop;
+    if (id == "hf-vector-one-hop-only") two_hop.routes = HfVectorTwoHopRoutes::one_hop;
+    scenario.waveform.rate_hz = 36.;
+    scenario.waveform.added_symbols = 10;
+    scenario.waveform.fhss = false;
+    scenario.waveform.sample_rate_hz = HfVectorTwoHopTable::sample_rate_hz;
+    scenario.waveform.requested_bit_seconds = 64.;
+    scenario.bounds.arrival_low_seconds = HfVectorTwoHopTable::first_lag_samples() /
+        HfVectorTwoHopTable::sample_rate_hz;
+    scenario.bounds.arrival_high_seconds = HfVectorTwoHopTable::last_lag_samples() /
+        HfVectorTwoHopTable::sample_rate_hz;
+    scenario.bounds.frequency_bound_hz = 0.;
+    scenario.bounds.atmospheric_hz = 5.;
+    scenario.bounds.varying = true;
+    scenario.reference_cn0_db_hz = 30.;
+    scenario.numerical_horizon_seconds = HfVectorTwoHopTable::horizon_seconds;
+    scenario.channel.maximum_workspace_bytes = 160u * 1024u * 1024u;
+    scenario.evidence = held
+        ? "independent held-out coupled local two-hop magnetoionic scattering geometry"
+        : id == "hf-vector-two-hop-only"
+            ? "two-hop route ablation of the coupled two-hop and one-hop return operator"
+            : id == "hf-vector-one-hop-only"
+                ? "one-hop route ablation of the coupled two-hop and one-hop return operator"
+                : "coupled local two-hop and one-hop magnetoionic returns through two Es layers and an F region";
+    scenario.provenance = "APP finite-order vector Maxwell scattering composition; selected antenna-projected causal transfer table with finite-band and route checks";
+    scenario.assumptions = "Constructed local planar return corridors for two Es ground-bounce and one F route through two Es transmissions; full diffraction orders and TE/TM are retained through composition until the selected receive antenna projection. Earth curvature, other arrivals, finite beam effects, natural occurrence distributions, and global coverage beyond these selected local corridors are outside this model. One predeclared receive-axis index from the finite 36-axis grid is used independently of receiver outcomes. A causal sampled complex-voltage FIR covers ±384 Hz at 1920 Hz and retains the full common lag support; no per-window normalization is applied. Physical output time is (output_sample-32)/1920; F retarded range uses two bounded substitutions with L(d)=hypot(X,2(hF+d)), central-image carrier phase restoration and relative amplitude Rref/L(d), plus nine-node P/Q moving-angle interpolation. Moving-angle and staged voltage errors are independently checked; the fixed-angle carrier witness is diagnostic only and does not define the production response. This conditional planar return is not an exact point-source Green function. The receiver receives neither intermediate fields nor route coefficients. This is a constructed high-fidelity hypothesis, not a measured multi-hop event or field-performance claim; no Helper is used.";
+    return scenario;
+}
+
+Scenario native_vector_two_hop_chain(const std::string& id) {
+    auto scenario = vector_two_hop("hf-vector-two-hop");
+    scenario.id = id;
+    scenario.channel.maximum_workspace_bytes = 192u * 1024u * 1024u;
+    scenario.bounds.frequency_bound_hz = 1.;
+    scenario.reference_cn0_db_hz = 30.;
+    if (id == "hf-vector-two-hop-chain-clocks-tone") {
+        scenario.channel.noise.tone_amplitude = .3;
+        scenario.channel.noise.tone_hz = 100.;
+    }
+    scenario.evidence = "coupled vector two-hop channel through canonical native TX and RX clock/oscillator stages";
+    scenario.provenance += "; HfNativeChain reuses canonical StreamingChannel endpoint DSP";
+    scenario.assumptions += " Native TX and RX clocks/oscillators are applied on their canonical sides of the physical propagation operator, with public endpoint clock limits ±2 ppm, relative audio clock ±4 ppm, and 1 Hz oscillator bound. The clock-tone row uses the established TX/RX audio ±1 ppm and RF ±0.01 ppm, plus a continuing 0.3-amplitude RF-plane tone at +100 Hz. The off row keeps actual clocks, oscillators and tone disabled. Final white noise is added only after native RX.";
+    return scenario;
+}
+
 } // namespace
 
 std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
@@ -880,6 +934,11 @@ std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
         return vector_oblique_evolving(id);
     if (id == "hf-vector-evolving-chain-off" || id == "hf-vector-evolving-chain-clocks-tone")
         return native_vector_oblique_evolving_chain(id);
+    if (id == "hf-vector-two-hop" || id == "hf-vector-two-hop-only" ||
+        id == "hf-vector-one-hop-only" || id == "hf-vector-two-hop-holdout")
+        return vector_two_hop(id);
+    if (id == "hf-vector-two-hop-chain-off" || id == "hf-vector-two-hop-chain-clocks-tone")
+        return native_vector_two_hop_chain(id);
     if (id == "hf-magnetoionic-x" || id == "hf-magnetoionic-y" || id == "hf-magnetoionic-x-holdout" ||
         id == "hf-magnetoionic-x-spread" || id == "hf-magnetoionic-parallel-x" ||
         id == "hf-magnetoionic-parallel-y" || id == "hf-magnetoionic-parallel-x-holdout")

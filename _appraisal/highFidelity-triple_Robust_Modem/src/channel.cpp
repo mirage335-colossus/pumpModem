@@ -113,9 +113,15 @@ double maximum_delay(const ChannelSpec& spec, double horizon) {
     }
     if (spec.vector_oblique) {
         require(!spec.lunar && !spec.fullwave_reflection && !spec.magnetoionic_reflection &&
-                !spec.wave_optics && !spec.phase_screens && spec.paths.empty(),
+                !spec.wave_optics && !spec.phase_screens && !spec.vector_two_hop && spec.paths.empty(),
                 "vector oblique propagation excludes other propagation paths");
         maximum = static_cast<double>(VectorOblique::first_lag_samples()) / VectorOblique::sample_rate_hz;
+    }
+    if (spec.vector_two_hop) {
+        require(!spec.lunar && !spec.fullwave_reflection && !spec.magnetoionic_reflection &&
+                !spec.wave_optics && !spec.phase_screens && !spec.vector_oblique && spec.paths.empty(),
+                "coupled vector two-hop propagation excludes other propagation paths");
+        maximum = static_cast<double>(HfVectorTwoHopTable::first_lag_samples()) / HfVectorTwoHopTable::sample_rate_hz;
     }
     if (spec.lunar) {
         const auto& lunar = *spec.lunar;
@@ -347,6 +353,116 @@ std::string vector_oblique_table_sha256(const VectorOblique& table, const HfVect
     return digest;
 }
 
+std::string vector_two_hop_table_sha256(const HfVectorTwoHopTable& table, const HfVectorTwoHopSpec& spec,
+                                        std::span<const std::complex<double>> moving_angle_fit_coefficients) {
+    std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> context(EVP_MD_CTX_new(), EVP_MD_CTX_free);
+    require(context && EVP_DigestInit_ex(context.get(), EVP_sha256(), nullptr) == 1,
+            "vector two-hop table digest initialization failed");
+    constexpr std::string_view version = "hf-vector-two-hop-moving-angle-v2; output-clock=(n-32)/Fs; two bounded F half-flight substitutions with L(d)=hypot(X,2(hF+d)); exact central-image phase and relative amplitude Rref/L(d); nine-node uniform-height barycentric P/Q angular interpolation; fixed-axis unit-flux projection";
+    require(EVP_DigestUpdate(context.get(), version.data(), version.size()) == 1,
+            "vector two-hop table digest version update failed");
+    for (const double value : {HfVectorTwoHopTable::carrier_hz,HfVectorTwoHopTable::sample_rate_hz,
+         HfVectorTwoHopTable::occupied_half_band_hz,HfVectorTwoHopTable::horizon_seconds,
+         HfVectorTwoHopTable::relative_spreading_reference_range_m,
+         static_cast<double>(HfVectorTwoHopTable::modelling_delay_samples),
+         static_cast<double>(HfVectorTwoHopTable::moving_angle_fit_nodes)}) {
+        const auto bits=std::bit_cast<std::uint64_t>(value);
+        std::array<unsigned char,8> encoded{};
+        for(std::size_t i=0;i<encoded.size();++i)
+            encoded[i]=static_cast<unsigned char>((bits>>(8*i))&255);
+        require(EVP_DigestUpdate(context.get(),encoded.data(),encoded.size())==1,
+                "vector two-hop table digest physical convention update failed");
+    }
+    const std::array<std::uint64_t, 3> descriptor{static_cast<std::uint64_t>(spec.field),
+        static_cast<std::uint64_t>(spec.routes), static_cast<std::uint64_t>(spec.receive_axis_index)};
+    std::array<unsigned char, 24> encoded_descriptor{};
+    for (std::size_t j = 0; j < descriptor.size(); ++j)
+        for (std::size_t i = 0; i < 8; ++i)
+            encoded_descriptor[j * 8 + i] = static_cast<unsigned char>((descriptor[j] >> (8 * i)) & 255);
+    require(EVP_DigestUpdate(context.get(), encoded_descriptor.data(), encoded_descriptor.size()) == 1,
+            "vector two-hop table digest descriptor update failed");
+    const auto geometry = hf_vector_two_hop_geometry(spec);
+    const auto hash_double = [&](double x) {
+        const auto bits = std::bit_cast<std::uint64_t>(x);
+        std::array<unsigned char, 8> encoded{};
+        for (std::size_t i = 0; i < encoded.size(); ++i)
+            encoded[i] = static_cast<unsigned char>((bits >> (8 * i)) & 255);
+        require(EVP_DigestUpdate(context.get(), encoded.data(), encoded.size()) == 1,
+                "vector two-hop table digest geometry update failed");
+    };
+    for (const auto& column : geometry.es) {
+        hash_double(column.lower_height_m); hash_double(column.thickness_m);
+        hash_double(column.peak_plasma_hz); hash_double(column.collisions_per_second);
+        for (const auto value : column.field_tesla) hash_double(value);
+        hash_double(column.slice_thickness_m); hash_double(column.slice_center_fraction);
+        for (const auto& mode : column.density_modes) {
+            const auto m = static_cast<std::int64_t>(mode.m), n = static_cast<std::int64_t>(mode.n);
+            hash_double(static_cast<double>(m)); hash_double(static_cast<double>(n));
+            hash_double(mode.amplitude_x); hash_double(mode.phase_rad);
+        }
+    }
+    const auto& f_column = geometry.f;
+    hash_double(f_column.lower_height_m); hash_double(f_column.thickness_m);
+    hash_double(f_column.peak_plasma_hz); hash_double(f_column.collisions_per_second);
+    for (const auto value : f_column.field_tesla) hash_double(value);
+    hash_double(f_column.slice_thickness_m); hash_double(f_column.slice_center_fraction);
+    for (const auto& mode : f_column.density_modes) {
+        hash_double(static_cast<double>(mode.m)); hash_double(static_cast<double>(mode.n));
+        hash_double(mode.amplitude_x); hash_double(mode.phase_rad);
+    }
+    for (const auto value : geometry.transverse_period_m) hash_double(value);
+    for (const auto value : {geometry.two_hop_incidence_deg, geometry.one_hop_incidence_deg,
+         geometry.receiver_x_m, geometry.ground_relative_permittivity, geometry.ground_conductivity_s_m,
+         geometry.f_height_amplitude_m, geometry.f_height_period_seconds, geometry.f_height_epoch_seconds,
+         geometry.two_hop_vacuum_range_m, geometry.one_hop_vacuum_range_m}) hash_double(value);
+    for (const auto value : geometry.transmit_axis) hash_double(value);
+    for (const auto value : geometry.receive_axis) hash_double(value);
+    constexpr std::string_view fit_layout = "d/A=-1,-.75,-.5,-.25,0,.25,.5,.75,1; barycentric weights=(-1)^i*C(8,i); RF=-960..960Hz step240; ascending(m,n,TE,TM); stages=preF-P,postF-Ey,postF-Ez; dephased to nominal half-range with d-dependent chromatic correction";
+    require(EVP_DigestUpdate(context.get(),fit_layout.data(),fit_layout.size())==1,
+            "vector two-hop digest moving-angle fit layout update failed");
+    const auto hash_complex = [&](std::complex<double> sample) {
+        const std::array bits{std::bit_cast<std::uint64_t>(sample.real()), std::bit_cast<std::uint64_t>(sample.imag())};
+        std::array<unsigned char, 16> encoded{};
+        for (std::size_t j = 0; j < bits.size(); ++j)
+            for (std::size_t i = 0; i < 8; ++i)
+                encoded[j * 8 + i] = static_cast<unsigned char>((bits[j] >> (8 * i)) & 255);
+        require(EVP_DigestUpdate(context.get(), encoded.data(), encoded.size()) == 1,
+                "vector two-hop table digest coefficient update failed");
+    };
+    for (const auto route : {HfVectorTwoHopRoutes::two_hop, HfVectorTwoHopRoutes::one_hop}) {
+        const auto knots = table.coefficient_knot_count(route);
+        const std::uint64_t count = knots;
+        std::array<unsigned char, 8> encoded_count{};
+        for (std::size_t i = 0; i < 8; ++i)
+            encoded_count[i] = static_cast<unsigned char>((count >> (8 * i)) & 255);
+        require(EVP_DigestUpdate(context.get(), encoded_count.data(), encoded_count.size()) == 1,
+                "vector two-hop table digest knot-count update failed");
+        for (std::size_t k = 0; k < knots; ++k)
+            for (auto lag = HfVectorTwoHopTable::first_lag_samples();
+                 lag <= HfVectorTwoHopTable::last_lag_samples(); ++lag)
+                hash_complex(table.coefficient_knot_value(route, lag, k));
+    }
+    const std::uint64_t fit_count=moving_angle_fit_coefficients.size();
+    std::array<unsigned char,8> encoded_fit_count{};
+    for(std::size_t i=0;i<encoded_fit_count.size();++i)
+        encoded_fit_count[i]=static_cast<unsigned char>((fit_count>>(8*i))&255);
+    require(EVP_DigestUpdate(context.get(),encoded_fit_count.data(),encoded_fit_count.size())==1,
+            "vector two-hop digest moving-angle coefficient count update failed");
+    for(const auto value:moving_angle_fit_coefficients)hash_complex(value);
+    std::array<unsigned char, 32> value{};
+    unsigned length = 0;
+    require(EVP_DigestFinal_ex(context.get(), value.data(), &length) == 1 && length == value.size(),
+            "vector two-hop table digest finalization failed");
+    constexpr char digits[] = "0123456789abcdef";
+    std::string digest;
+    digest.reserve(2 * value.size());
+    for (auto byte : value) {
+        digest.push_back(digits[byte >> 4]);
+        digest.push_back(digits[byte & 15]);
+    }
+    return digest;
+}
+
 std::vector<double> interpolation_weights(unsigned half, double fraction) {
     std::vector<double> result(2 * half);
     detail::fractional_weights(half, fraction, result);
@@ -473,6 +589,7 @@ struct Channel::Impl {
     std::optional<HfWaveOpticsStream> wave_optics;
     std::optional<HfPhaseScreensStream> phase_screens;
     std::optional<HfVectorObliqueStream> vector_oblique;
+    std::optional<HfVectorTwoHopStream> vector_two_hop;
     std::size_t signal_energy_cursor = 0;
     Random white, colored, events, marks;
     Complex tx_state{}, colored_state{}, impulse_state{}, lowpass_state{};
@@ -510,7 +627,7 @@ struct Channel::Impl {
         require(finite(spec.rf_hz) && spec.rf_hz > 0, "RF carrier must be positive and finite");
         require(spec.interpolation_half_width >= 4 && spec.interpolation_half_width <= 64,
                 "fractional-delay half width must be in [4,64]");
-        require(spec.lunar || spec.fullwave_reflection || spec.magnetoionic_reflection || spec.wave_optics || spec.phase_screens || spec.vector_oblique ? spec.paths.empty() :
+        require(spec.lunar || spec.fullwave_reflection || spec.magnetoionic_reflection || spec.wave_optics || spec.phase_screens || spec.vector_oblique || spec.vector_two_hop ? spec.paths.empty() :
                 (!spec.paths.empty() && spec.paths.size() <= 65536),
                 "channel requires one spectral propagation model or 1..65536 explicit paths");
         require(finite(source.minimum_frequency_hz) && finite(source.maximum_frequency_hz) &&
@@ -518,6 +635,10 @@ struct Channel::Impl {
         const double seconds = static_cast<double>(horizon) / fs;
         report.maximum_delay_seconds = maximum_delay(spec, seconds);
         report.tail_seconds = report.maximum_delay_seconds + channel_filter_tail_seconds(spec, fs);
+        if (spec.vector_two_hop)
+            report.tail_seconds = std::max(report.tail_seconds,
+                report.maximum_delay_seconds + static_cast<double>(HfVectorTwoHopTable::last_lag_samples() -
+                    HfVectorTwoHopTable::first_lag_samples()) / fs);
         if (spec.transmitter.enabled) {
             require(std::max(std::abs(spec.transmitter.detuning_hz), std::abs(spec.transmitter.detuning_hz +
                     spec.transmitter.detuning_rate_hz_s * seconds)) < fs / 2,
@@ -574,6 +695,22 @@ struct Channel::Impl {
                 throw HfVectorObliqueUnavailable("vector oblique source exceeds its qualified carrier, sample rate, or occupied band");
             try { validate_hf_vector_oblique_spec(vector, horizon); }
             catch (const std::exception& error) { throw HfVectorObliqueUnavailable(error.what()); }
+        }
+        if (spec.vector_two_hop) {
+            require(!spec.lunar && !spec.fullwave_reflection && !spec.magnetoionic_reflection &&
+                    !spec.wave_optics && !spec.phase_screens && !spec.vector_oblique &&
+                    !spec.transmitter.enabled && spec.hf_trajectory_offset_seconds == 0 &&
+                    spec.noise.colored_variance == 0 && spec.noise.impulse_rate_hz == 0 &&
+                    spec.noise.impulse_rms == 0 && spec.frontend.lowpass_hz == 0 &&
+                    spec.frontend.clip_magnitude == 0 && spec.frontend.agc_target == 0 &&
+                    spec.frontend.adc_bits == 0 && spec.fade.first_seconds == -1 &&
+                    spec.fade.stop_seconds == -1,
+                    "coupled vector two-hop propagation requires an isolated linear channel or native endpoint chain");
+            if (fs != HfVectorTwoHopTable::sample_rate_hz || spec.rf_hz != HfVectorTwoHopTable::carrier_hz ||
+                source_band > HfVectorTwoHopTable::occupied_half_band_hz)
+                throw HfVectorTwoHopUnavailable("coupled vector two-hop source exceeds its qualified carrier, sample rate, or occupied band");
+            try { validate_hf_vector_two_hop_spec(*spec.vector_two_hop, horizon); }
+            catch (const std::exception& error) { throw HfVectorTwoHopUnavailable(error.what()); }
         }
         if (spec.fullwave_reflection) {
             require(!spec.lunar && !spec.transmitter.enabled && spec.hf_trajectory_offset_seconds == 0 &&
@@ -714,7 +851,7 @@ struct Channel::Impl {
                  fade.ramp_seconds <= .5 * (fade.stop_seconds - fade.first_seconds)),
                 "fade must be disabled or have ordered bounds and nonoverlapping ramps");
 
-        const auto history_count = spec.fullwave_reflection || spec.magnetoionic_reflection || spec.wave_optics || spec.phase_screens || spec.vector_oblique ? 1 : count_from_long_double(
+        const auto history_count = spec.fullwave_reflection || spec.magnetoionic_reflection || spec.wave_optics || spec.phase_screens || spec.vector_oblique || spec.vector_two_hop ? 1 : count_from_long_double(
             std::ceil(static_cast<long double>(report.maximum_delay_seconds) * fs) +
             2 * spec.interpolation_half_width + detail::hf_dispersion_halo_samples(spec) + 4);
         std::size_t bytes = checked_add(sizeof(Impl), source.working_bytes);
@@ -747,6 +884,7 @@ struct Channel::Impl {
         if (spec.phase_screens) bytes = checked_add(bytes, PhaseScreens::preparation_workspace_bound_bytes);
         if (spec.vector_oblique) bytes = checked_add(bytes,
             hf_vector_oblique_preparation_workspace_bound_bytes(*spec.vector_oblique));
+        if (spec.vector_two_hop) bytes = checked_add(bytes, HfVectorTwoHopTable::preparation_workspace_bound_bytes);
         bytes = checked_add(bytes, checked_multiply(signal_energy_intervals.size(), sizeof(SignalEnergyObservation)));
         if (bytes > spec.maximum_workspace_bytes) throw ChannelWorkspaceError("channel exceeds explicit workspace limit");
         report.signal_energy_observations.reserve(signal_energy_intervals.size());
@@ -784,7 +922,7 @@ struct Channel::Impl {
             }
             first = stop;
         }
-        report.workspace_bytes = bytes;
+        report.workspace_bytes = report.resident_workspace_bytes = bytes;
         delay_groups.resize(groups);
         for (auto& group : delay_groups) group.endpoints.resize(fractional_intervals + 1);
         history.resize(history_count);
@@ -818,6 +956,38 @@ struct Channel::Impl {
             receipt.preparation_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             receipt.retarded_peak_error_bound = rate;
             receipt.carrier_flight_phase_bound = built.table->carrier_flight_phase_bound(reflection, Spec::transition_seconds);
+            receipt.source_minimum_frequency_hz = source.minimum_frequency_hz;
+            receipt.source_maximum_frequency_hz = source.maximum_frequency_hz;
+        }
+        if (spec.vector_two_hop) {
+            const auto start = std::chrono::steady_clock::now();
+            const auto& selected = *spec.vector_two_hop;
+            auto built = build_hf_vector_two_hop_table(selected, stop);
+            if (!built.table || !built.checks.qualified)
+                throw HfVectorTwoHopUnavailable("coupled vector two-hop table failed its Maxwell, route-composition, finite-band, or causal-kernel qualification");
+            const auto fit_coefficient_count=built.moving_angle_fit_coefficients.size();
+            const auto table_digest=vector_two_hop_table_sha256(*built.table, selected,
+                built.moving_angle_fit_coefficients);
+            std::vector<std::complex<double>>().swap(built.moving_angle_fit_coefficients);
+            vector_two_hop.emplace(built.table, selected);
+            require(vector_two_hop->tail_samples() == HfVectorTwoHopTable::last_lag_samples(),
+                    "coupled vector two-hop tail differs from its declared complete causal support");
+            auto& receipt = report.vector_two_hop.emplace();
+            receipt.checks = built.checks;
+            receipt.spec = selected;
+            receipt.table_sha256 = table_digest;
+            receipt.table_workspace_bytes = built.table->workspace_bytes();
+            receipt.stream_workspace_bytes = vector_two_hop->workspace_bytes();
+            receipt.moving_angle_fit_coefficient_count=fit_coefficient_count;
+            const auto preparation_bytes = HfVectorTwoHopTable::preparation_workspace_bound_bytes;
+            const auto retained_bytes = checked_add(receipt.table_workspace_bytes, receipt.stream_workspace_bytes);
+            require(built.checks.preparation_peak_workspace_bytes <= preparation_bytes &&
+                    retained_bytes <= preparation_bytes,
+                    "coupled vector two-hop table, stream and peak preparation exceed their workspace admission");
+            // The Maxwell solve and coefficient digest scratch are released.
+            // Keep the complete construction charge in workspace_bytes.
+            report.resident_workspace_bytes = checked_add(bytes - preparation_bytes, retained_bytes);
+            receipt.preparation_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             receipt.source_minimum_frequency_hz = source.minimum_frequency_hz;
             receipt.source_maximum_frequency_hz = source.maximum_frequency_hz;
         }
@@ -1123,7 +1293,7 @@ struct Channel::Impl {
     Complex render() {
         const auto n = report.samples;
         const long double time = static_cast<long double>(n) / fs;
-        ensure_source(fullwave || magnetoionic || wave_optics || phase_screens || vector_oblique ? n : n + spec.interpolation_half_width);
+        ensure_source(fullwave || magnetoionic || wave_optics || phase_screens || vector_oblique || vector_two_hop ? n : n + spec.interpolation_half_width);
         Complex wanted = lunar ? lunar->wanted(n, history, source.geometry.source_samples, spec.transmitter.enabled) : Complex{};
         if (fullwave) {
             const auto input = saved(n);
@@ -1163,6 +1333,13 @@ struct Channel::Impl {
             const auto input = saved(n);
             wanted = vector_oblique->step(input);
             auto& receipt = *report.vector_oblique;
+            receipt.incident_energy += std::norm(input);
+            receipt.selected_energy += std::norm(wanted);
+        }
+        if (vector_two_hop) {
+            const auto input = saved(n);
+            wanted = vector_two_hop->step(input);
+            auto& receipt = *report.vector_two_hop;
             receipt.incident_energy += std::norm(input);
             receipt.selected_energy += std::norm(wanted);
         }

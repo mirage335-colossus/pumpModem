@@ -279,6 +279,82 @@ void rejection_before_source_consumption() {
     rejects([&] { HfNativeChain chain(tone(count, 20), config(count), stop.get_token()); },
             "cancelled chain construction was accepted");
 }
+
+void workspace_ownership() {
+    constexpr std::uint64_t count = 1024;
+    auto c = config(count);
+    c.bridge_chunk_samples = 73;
+    auto input = tone(count, 20);
+    input.working_bytes = 32768;
+    const HfNativeChain chain(input, c);
+    const auto receipt = chain.report();
+    const auto& physical = receipt.propagation;
+    check(receipt.tx.working_bytes > input.working_bytes &&
+          receipt.tx_bridge_bytes >= c.bridge_chunk_samples * sizeof(Complex) &&
+          receipt.propagation_bridge_bytes >= c.bridge_chunk_samples * sizeof(Complex) &&
+          physical.resident_workspace_bytes > receipt.tx.working_bytes + receipt.tx_bridge_bytes &&
+          receipt.rx.working_bytes > physical.resident_workspace_bytes + receipt.propagation_bridge_bytes,
+          "each resident native chain stage must charge its upstream source, bridge and local workspace");
+    check(physical.workspace_bytes == physical.resident_workspace_bytes &&
+          receipt.preparation_peak_bytes == physical.workspace_bytes + receipt.propagation_bridge_bytes +
+              receipt.fixed_overhead_bytes &&
+          receipt.resident_bytes == receipt.rx.working_bytes + receipt.fixed_overhead_bytes &&
+          receipt.workspace_bytes == std::max(receipt.preparation_peak_bytes, receipt.resident_bytes),
+          "native chain aggregate separates time-disjoint workspace while retaining its peak bound");
+
+    // Vary the declared resident source charge without allocating an equally
+    // large test buffer. RX owns the cumulative live chain and must still cap it.
+    constexpr std::size_t native_endpoint_limit = 65u * 1024u * 1024u;
+    c.maximum_workspace_bytes = c.propagation.maximum_workspace_bytes = 2 * native_endpoint_limit;
+    input.working_bytes += native_endpoint_limit - receipt.rx.working_bytes;
+    const HfNativeChain at_limit(input, c);
+    check(at_limit.report().rx.working_bytes == native_endpoint_limit,
+          "native chain must preserve the exact endpoint workspace boundary");
+    ++input.working_bytes;
+    bool endpoint_rejected = false;
+    try { HfNativeChain above_limit(input, c); }
+    catch (const datapump::Error& e) {
+        endpoint_rejected = std::string(e.what()) == "emitted source and channel workspace exceed the fixed bound";
+    }
+    check(endpoint_rejected, "native endpoint must still reject a one-byte excess in resident chain workspace");
+}
+
+void coupled_two_hop_chain_preflight() {
+    constexpr std::uint64_t count=64;
+    auto cursor=std::make_shared<std::uint64_t>();
+    Source input;
+    input.format.sample_rate=1920;
+    input.geometry.source_samples=count;
+    input.geometry.carrier_spacing_hz=40.;
+    input.geometry.occupied_bandwidth_hz=100.;
+    input.minimum_frequency_hz=-100.;input.maximum_frequency_hz=100.;
+    input.sample_at=[cursor](std::uint64_t index){
+        if(index!=*cursor)throw std::logic_error("two-hop preflight source was not read forward");
+        ++*cursor;return Complex{.1,0};
+    };
+    auto c=config(count);
+    c.endpoints.effects.sample_rate=1920;
+    c.endpoints.effects.occupied_bandwidth_hz=100;
+    c.endpoints.effects.rf_hz=c.propagation.rf_hz=10e6;
+    c.tx_band={-384,384};
+    c.propagation_band={-389,389};
+    c.propagation.paths.clear();
+    c.propagation.vector_two_hop.emplace();
+    const auto preparation_bytes=HfVectorTwoHopTable::preparation_workspace_bound_bytes;
+    const auto rejects_before_render=[&](std::size_t chain_limit,std::size_t propagation_limit) {
+        c.maximum_workspace_bytes=chain_limit;
+        c.propagation.maximum_workspace_bytes=propagation_limit;
+        bool rejected=false;
+        try { HfNativeChain chain(input,c); }
+        catch(const ChannelWorkspaceError& e) {
+            rejected=std::string(e.what())=="channel exceeds explicit workspace limit";
+        }
+        check(rejected,"insufficient local or aggregate budget must fail at the channel workspace preflight before table construction");
+        check(*cursor==0,"two-hop chain workspace rejection does not consume the canonical source");
+    };
+    rejects_before_render(2*preparation_bytes,preparation_bytes-1);
+    rejects_before_render(preparation_bytes,2*preparation_bytes);
+}
 } // namespace
 
 int main() {
@@ -290,6 +366,8 @@ int main() {
         canonical_emission_source();
         continuing_interference_without_wanted_tail_truncation();
         rejection_before_source_consumption();
+        workspace_ownership();
+        coupled_two_hop_chain_preflight();
         std::cout << "Native HF chain checks passed: " << checks << '\n';
         return 0;
     } catch (const std::exception& e) {

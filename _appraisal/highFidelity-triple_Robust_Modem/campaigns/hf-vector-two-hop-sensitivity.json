@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "name": "hf-vector-two-hop-sensitivity",
+  "purpose": "Prospectively frozen before the original +20/+17 outcomes and before any lower-point execution. Execute only after all four original +30 direct anchors and both original +20/64 and +17/128 wanted points pass. Same primary field, axis11, E payload, source/channel seed73613 and noise seed93613. Wanted0/64 and -3/128 characterize the per-decision energy boundary; they are not natural reliability or promised operational-floor qualifications. Noise0/64 and wrong-key-3/128 each require zero DATA and zero accepted messages. These are two explicitly named negative cells, not a complete2x2 control matrix. No further SNR bisection or field retuning. Stop on invalid evidence, numerical refusal or execution limits, retain valid communications failures. Review/source admission expansion occurs only after the original frozen campaign finishes.",
+  "max_wall_seconds": 3600,
+  "per_trial_wall_seconds": 900,
+  "max_trials": 4,
+  "max_samples": 12000000,
+  "stop_on_execution_failure": true,
+  "episodes": [
+    {
+      "id": "both-E-0",
+      "scenario": "hf-vector-two-hop",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 73613,
+      "noise_seed": 93613,
+      "bit_seconds": 64,
+      "message": "E",
+      "control": "wanted",
+      "cn0_db_hz": 0,
+      "max_wall_seconds": 900,
+      "reception_requirement": "characterization"
+    },
+    {
+      "id": "both-E-long-minus3",
+      "scenario": "hf-vector-two-hop",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 73613,
+      "noise_seed": 93613,
+      "bit_seconds": 128,
+      "message": "E",
+      "control": "wanted",
+      "cn0_db_hz": -3,
+      "max_wall_seconds": 900,
+      "reception_requirement": "characterization"
+    },
+    {
+      "id": "both-noise-0",
+      "scenario": "hf-vector-two-hop",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 73613,
+      "noise_seed": 93613,
+      "bit_seconds": 64,
+      "message": "E",
+      "control": "noise",
+      "cn0_db_hz": 0,
+      "max_wall_seconds": 900,
+      "reception_requirement": "negative_control"
+    },
+    {
+      "id": "both-wrong-key-long-minus3",
+      "scenario": "hf-vector-two-hop",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 73613,
+      "noise_seed": 93613,
+      "bit_seconds": 128,
+      "message": "E",
+      "control": "wrong-key",
+      "cn0_db_hz": -3,
+      "max_wall_seconds": 900,
+      "reception_requirement": "negative_control"
+    }
+  ]
+}

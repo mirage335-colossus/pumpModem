@@ -5,6 +5,14 @@ Protocol frozen before candidate outcomes on 14 November 2026, against Git
 failures in [the coverage expansion](hf-coverage-expansion.md), rather than
 counting additional software checks as communications qualification.
 
+The later [selected multiple-hop appraisal](hf-multihop.md#eight-trial-findings-and-finite-qualification)
+reproduces the structured-signal rejection weakness with thirteen wrong-key
+DATA decisions and codec rejection. Three decisions use affine evidence, so
+disabling only varying-channel evidence cannot repair that capture. Its
+source-bound ledger and statistical reconciliation preserve the distinction
+between a noise-null presence test, correct-key discrimination and accepted
+message integrity. It does not promote or repair the comparator described here.
+
 ## Competing native evidence before commitment
 
 The demonstrated GUI failure is wrong accepted content at higher C/N0, with

@@ -279,7 +279,8 @@ int main() {
                     !s.provenance.empty() && !s.assumptions.empty(), "scenario provenance missing");
             const auto spectral_models = s.channel.lunar.has_value() + s.channel.fullwave_reflection.has_value() +
                 s.channel.magnetoionic_reflection.has_value() + s.channel.wave_optics.has_value() +
-                s.channel.phase_screens.has_value() + s.channel.vector_oblique.has_value();
+                s.channel.phase_screens.has_value() + s.channel.vector_oblique.has_value() +
+                s.channel.vector_two_hop.has_value();
             require(std::isfinite(s.reference_cn0_db_hz) && spectral_models <= 1 &&
                     (spectral_models == 1) == s.channel.paths.empty(),
                     "invalid scenario level or propagation mode");
@@ -291,6 +292,9 @@ int main() {
             else if (s.channel.vector_oblique)
                 near(s.numerical_horizon_seconds, appraisal::HfVectorObliqueTable::horizon_seconds, 0.,
                      "vector oblique finite nonrepeating horizon changed");
+            else if (s.channel.vector_two_hop)
+                near(s.numerical_horizon_seconds, appraisal::HfVectorTwoHopTable::horizon_seconds, 0.,
+                     "vector two-hop finite propagation horizon changed");
             else if (id.starts_with("hf-ding-")) {
                 const double expected = id == "hf-ding-measured-late" ? 20.94 :
                     id == "hf-ding-clock41" ? 2047 * 41. / 2048 : 40.94;

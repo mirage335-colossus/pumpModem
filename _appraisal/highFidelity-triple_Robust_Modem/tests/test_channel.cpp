@@ -187,6 +187,33 @@ void private_signal_energy_intervals() {
             "private signal-energy aperture count exceeded its fixed bound");
 }
 
+void vector_two_hop_preflight() {
+    using Table=HfVectorTwoHopTable;
+    ChannelSpec spec;
+    spec.rf_hz=Table::carrier_hz;
+    spec.paths.clear();
+    spec.vector_two_hop.emplace();
+    near(channel_interpolation_tail_seconds(spec,Table::sample_rate_hz),
+         static_cast<double>(Table::last_lag_samples()-Table::first_lag_samples())/Table::sample_rate_hz,
+         0.,"two-hop interpolation tail uses the complete retained FIR memory");
+    near(channel_tail_seconds(spec,1.)+channel_interpolation_tail_seconds(spec,Table::sample_rate_hz),
+         static_cast<double>(Table::last_lag_samples())/Table::sample_rate_hz,
+         0.,"two-hop complete causal support reaches its declared final lag");
+    bool band_rejected=false;
+    try { Channel channel(tone(static_cast<unsigned>(Table::sample_rate_hz),1,400.),spec,1,1); }
+    catch(const HfVectorTwoHopUnavailable&) { band_rejected=true; }
+    check(band_rejected,"two-hop channel rejects an out-of-band source before table construction");
+    spec.maximum_workspace_bytes=1;
+    bool workspace_rejected=false;
+    try { Channel channel(tone(static_cast<unsigned>(Table::sample_rate_hz),1,100.),spec,1,1); }
+    catch(const ChannelWorkspaceError&) { workspace_rejected=true; }
+    check(workspace_rejected,"two-hop preparation is refused by the explicit channel workspace preflight");
+    spec.maximum_workspace_bytes=64u*1024u*1024u;
+    spec.paths.push_back({});
+    rejects([&] { Channel channel(tone(static_cast<unsigned>(Table::sample_rate_hz),1,100.),spec,1,1); },
+            "two-hop physical operator can’t be combined with an unrelated scalar path");
+}
+
 void moving_delay_and_chunks() {
     ChannelSpec spec;
     spec.rf_hz = 1e6;
@@ -689,6 +716,7 @@ int main() {
     try {
         identity_and_delays();
         private_signal_energy_intervals();
+        vector_two_hop_preflight();
         moving_delay_and_chunks();
         independent_noise_seed_and_hf_clock();
         finite_extent_fast_paths();

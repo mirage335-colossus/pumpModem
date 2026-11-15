@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "name": "hf-vector-two-hop-boundary",
+  "purpose": "Prospective additional fixed characterization pair, declared after both original lower wanted points (0/64 and -3/128) missed every active slot and before either new point executes. The original +20/64 and +17/128 successes leave a 20 dB (100x E/N0) gap. +6/64 and +3/128 use the same primary field, axis11, E payload, source/channel seed73613 and noise seed93613, raising the lower-pair E/N0 by 6 dB. Both points are frozen together; no retuning between them and no automatic subsequent sweep. This explicitly extends the earlier investigator-chosen no-further-bisection stopping choice, not the original frozen campaign. Existing strong and lower negative-control failures remain requirements failures; this unchanged-receiver pair is characterization, not new false-alarm calibration or a receiver repair. Stop on invalid evidence, numerical refusal or execution limits; retain valid communications failures.",
+  "max_wall_seconds": 1800,
+  "per_trial_wall_seconds": 900,
+  "max_trials": 2,
+  "max_samples": 12000000,
+  "stop_on_execution_failure": true,
+  "episodes": [
+    {
+      "id": "both-E-6",
+      "scenario": "hf-vector-two-hop",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 73613,
+      "noise_seed": 93613,
+      "bit_seconds": 64,
+      "message": "E",
+      "control": "wanted",
+      "cn0_db_hz": 6,
+      "max_wall_seconds": 900,
+      "reception_requirement": "characterization"
+    },
+    {
+      "id": "both-E-long-3",
+      "scenario": "hf-vector-two-hop",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 73613,
+      "noise_seed": 93613,
+      "bit_seconds": 128,
+      "message": "E",
+      "control": "wanted",
+      "cn0_db_hz": 3,
+      "max_wall_seconds": 900,
+      "reception_requirement": "characterization"
+    }
+  ]
+}

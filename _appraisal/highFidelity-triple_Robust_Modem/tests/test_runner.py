@@ -1120,6 +1120,411 @@ class CampaignValidationTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(runner.CampaignError):
                 runner._validate_episode(invalid, 0, set(), 900, 12_000_000)
 
+    def test_vector_two_hop_descriptors_bind_selected_field_routes_and_frozen_axes(self):
+        expected = {
+            "hf-vector-two-hop": ("primary", "both", 11),
+            "hf-vector-two-hop-only": ("primary", "two_hop", 11),
+            "hf-vector-one-hop-only": ("primary", "one_hop", 11),
+            "hf-vector-two-hop-holdout": ("holdout", "both", 14),
+            "hf-vector-two-hop-chain-off": ("primary", "both", 11),
+            "hf-vector-two-hop-chain-clocks-tone": ("primary", "both", 11),
+        }
+        self.assertEqual(runner.HF_VECTOR_TWO_HOP_SCENARIOS, expected)
+        for scenario, (field, routes, axis) in expected.items():
+            descriptor = runner._vector_two_hop_spec(scenario)
+            self.assertEqual((descriptor["field"], descriptor["routes"], descriptor["receive_axis_index"]),
+                             (field, routes, axis))
+            self.assertEqual(descriptor["receive_axis_grid_degrees_per_index"], 5.)
+            self.assertEqual(descriptor["receive_axis"],
+                             [0., math.cos(math.radians(axis * 5)), math.sin(math.radians(axis * 5))])
+            runner._validate_vector_two_hop_descriptor(descriptor, scenario)
+        primary = runner._vector_two_hop_spec("hf-vector-two-hop")
+        held = runner._vector_two_hop_spec("hf-vector-two-hop-holdout")
+        self.assertEqual(held["receive_axis_index"], (primary["receive_axis_index"] + 3) % 36)
+        self.assertEqual([c["lower_height_m"] for c in primary["es_columns"]], [111000., 103000.])
+        self.assertEqual([c["lower_height_m"] for c in held["es_columns"]], [104000., 112000.])
+        self.assertEqual([m["m"] for m in primary["es_columns"][0]["density_modes"]], [1, 0, 1])
+        self.assertEqual([m["n"] for m in primary["es_columns"][0]["density_modes"]], [0, 1, 1])
+        self.assertEqual(len(primary["f_column"]["density_modes"]), 3)
+        self.assertTrue(all(mode == {"m": 0, "n": 0, "amplitude_x": 0., "phase_rad": 0.}
+                            for mode in primary["f_column"]["density_modes"]))
+        self.assertEqual(primary["preparation_workspace_bound_bytes"], 96 * 1024 * 1024)
+        for bad in (
+            {**primary, "receive_axis_index": 1},
+            {**primary, "field": "holdout"},
+            {**primary, "routes": "one_hop"},
+            {**primary, "ground_conductivity_s_m": .02},
+            {**primary, "two_hop_incidence_deg": 48.},
+            {**primary, "receive_axis": [0., math.cos(math.radians(5)), math.sin(math.radians(5))]},
+        ):
+            with self.subTest(bad=bad), self.assertRaises(runner.CampaignError):
+                runner._validate_vector_two_hop_descriptor(bad, "hf-vector-two-hop")
+
+    def test_vector_two_hop_plan_requires_current_moving_angle_scope(self):
+        scope = {
+            "vector_two_hop_exposure_scope": "selected local planar two-Es ground-bounce and one-F return corridors; numerical support does not prove global path completeness, other arrivals, finite-beam coverage, Earth-curvature effects, or field occurrence probability",
+            "vector_two_hop_physical_time_scope": "physical output time is (output_sample - 32)/1920; F-region retarded range uses two bounded substitutions with L(d)=hypot(X,2(hF+d)) and flight time L(d)/(2c), from the common receiver output time",
+            "vector_two_hop_angular_interpolation_scope": "production F interaction uses nine-node uniform-height P/Q angular interpolation; fixed-angle carrier comparison remains a separate diagnostic, not the production response; moving-angle and staged errors are separately reported and gated at 0.0006 voltage",
+        }
+        runner._validate_vector_two_hop_plan_scopes(scope)
+        stale = dict(scope)
+        stale["vector_two_hop_angular_approximation_scope"] = stale.pop("vector_two_hop_angular_interpolation_scope")
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_vector_two_hop_plan_scopes(stale)
+        changed = dict(scope, vector_two_hop_angular_interpolation_scope="fixed-angle tensor approximation")
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_vector_two_hop_plan_scopes(changed)
+
+    def test_two_hop_chain_workspace_accounting_reconciles_peak_and_residency(self):
+        prop_peak = 100_663_296
+        table, stream = 8 * 1024 * 1024, 2 * 1024 * 1024
+        prop_resident = prop_peak - 100_663_296 + table + stream
+        fixed, bridge = 12 * 1024 * 1024, 4096
+        tx_workspace, rx_workspace = 2 * 1024 * 1024, 20 * 1024 * 1024
+        preparation_peak = prop_peak + fixed + bridge
+        resident = rx_workspace + fixed
+        aggregate = max(preparation_peak, resident)
+        channel = {"workspace_bytes": aggregate, "effective_maximum_workspace_bytes": 192 * 1024 * 1024}
+        chain = {"workspace_bytes": aggregate, "workspace_accounting": {
+            "fixed_overhead_bytes": fixed, "tx_bridge_bytes": bridge,
+            "propagation_bridge_bytes": bridge, "preparation_peak_bytes": preparation_peak,
+            "resident_bytes": resident}}
+        tx = {"workspace_bytes": tx_workspace}
+        propagation = {"workspace_bytes": prop_peak, "resident_workspace_bytes": prop_resident}
+        rx = {"workspace_bytes": rx_workspace}
+        physical = {"table_workspace_bytes": table, "stream_workspace_bytes": stream}
+        runner._validate_two_hop_chain_workspace(channel, chain, tx, propagation, rx, physical)
+
+        def bad(**changes):
+            mutated_channel = dict(channel)
+            mutated_chain = {**chain, "workspace_accounting": dict(chain["workspace_accounting"])}
+            mutated_tx, mutated_propagation, mutated_rx, mutated_physical = (
+                dict(tx), dict(propagation), dict(rx), dict(physical))
+            for key, value in changes.items():
+                section, field = key.split(".", 1)
+                target = {"channel": mutated_channel, "chain": mutated_chain,
+                          "accounting": mutated_chain["workspace_accounting"],
+                          "tx": mutated_tx, "propagation": mutated_propagation,
+                          "rx": mutated_rx, "physical": mutated_physical}[section]
+                target[field] = value
+            return (mutated_channel, mutated_chain, mutated_tx, mutated_propagation,
+                    mutated_rx, mutated_physical)
+
+        corruptions = (
+            {"propagation.resident_workspace_bytes": prop_resident + 1},
+            {"accounting.tx_bridge_bytes": 4095},
+            {"accounting.propagation_bridge_bytes": 4095},
+            {"tx.workspace_bytes": prop_resident - bridge},
+            {"rx.workspace_bytes": prop_resident + bridge},
+            {"rx.workspace_bytes": 68_157_441},
+            {"accounting.preparation_peak_bytes": preparation_peak + 1},
+            {"accounting.resident_bytes": resident + 1},
+            {"channel.workspace_bytes": aggregate + 1},
+            {"chain.workspace_bytes": aggregate + 1},
+            {"channel.effective_maximum_workspace_bytes": aggregate - 1},
+            {"channel.effective_maximum_workspace_bytes": 201_326_593},
+            {"accounting.fixed_overhead_bytes": True},
+            {"physical.table_workspace_bytes": 0},
+        )
+        for mutation in corruptions:
+            with self.subTest(mutation=mutation), self.assertRaises(runner.CampaignError):
+                runner._validate_two_hop_chain_workspace(*bad(**mutation))
+
+    def test_vector_two_hop_episode_gate_is_explicit_and_confined(self):
+        def row(scenario, *, mode="receive", control="wanted", cn0=30, seconds=64, requirement="required_complete"):
+            result = {"id": scenario, "scenario": scenario, "mode": mode, "waveform": "reference",
+                      "seed": 7, "message": "C", "cn0_db_hz": cn0,
+                      "bit_seconds": seconds}
+            if mode == "receive":
+                result["control"] = control
+                result["reception_requirement"] = requirement
+            return result
+        for scenario in runner.HF_VECTOR_TWO_HOP_SCENARIOS:
+            runner._validate_episode(row(scenario), 0, set(), 900, 12_000_000)
+        for scenario in ("hf-vector-two-hop", "hf-vector-two-hop-only", "hf-vector-one-hop-only",
+                         "hf-vector-two-hop-holdout"):
+            runner._validate_episode(row(scenario, mode="plan", requirement=None), 0, set(), 900, 12_000_000)
+        runner._validate_episode(row("hf-vector-two-hop", cn0=20, requirement="characterization"),
+                                 0, set(), 900, 12_000_000)
+        runner._validate_episode(row("hf-vector-two-hop", cn0=17, seconds=128, requirement="characterization"),
+                                 0, set(), 900, 12_000_000)
+        for cn0, seconds in ((0, 64), (-3, 128)):
+            receive = row("hf-vector-two-hop", cn0=cn0, seconds=seconds,
+                          requirement="characterization")
+            receive.update(message="E", seed=73613, noise_seed=93613)
+            runner._validate_episode(receive, 0, set(), 900, 12_000_000)
+        for cn0, seconds in ((0, 64), (-3, 128)):
+            plan = row("hf-vector-two-hop", mode="plan", cn0=cn0, seconds=seconds,
+                       requirement=None)
+            plan.update(message="E", seed=73613, noise_seed=93613)
+            runner._validate_episode(plan, 0, set(), 900, 12_000_000)
+        boundary_receives = {}
+        for cn0, seconds in ((6, 64), (3, 128)):
+            receive = row("hf-vector-two-hop", cn0=cn0, seconds=seconds,
+                          requirement="characterization")
+            receive.update(message="E", seed=73613, noise_seed=93613)
+            runner._validate_episode(receive, 0, set(), 900, 12_000_000)
+            boundary_receives[cn0] = receive
+            plan = row("hf-vector-two-hop", mode="plan", cn0=cn0, seconds=seconds,
+                       requirement=None)
+            plan.update(message="E", seed=73613, noise_seed=93613)
+            runner._validate_episode(plan, 0, set(), 900, 12_000_000)
+        for control in ("noise", "wrong-key"):
+            runner._validate_episode(row("hf-vector-two-hop", control=control, requirement="negative_control"),
+                                     0, set(), 900, 12_000_000)
+        runner._validate_episode(row("hf-vector-two-hop", control="noise", cn0=0,
+                                     requirement="negative_control"), 0, set(), 900, 12_000_000)
+        runner._validate_episode(row("hf-vector-two-hop", control="wrong-key", cn0=-3, seconds=128,
+                                     requirement="negative_control"), 0, set(), 900, 12_000_000)
+        invalid = (
+            row("hf-vector-two-hop", cn0=20, requirement="required_complete"),
+            row("hf-vector-two-hop", cn0=17, seconds=128, requirement="required_complete"),
+            dict(row("hf-vector-two-hop", mode="channel", cn0=6, requirement=None), message="E", seed=73613,
+                 noise_seed=93613),
+            dict(row("hf-vector-two-hop", mode="channel", cn0=3, seconds=128, requirement=None), message="E",
+                 seed=73613, noise_seed=93613),
+            dict(row("hf-vector-two-hop", mode="channel", cn0=0, requirement=None), message="E", seed=73613,
+                 noise_seed=93613),
+            dict(row("hf-vector-two-hop", mode="channel", cn0=-3, seconds=128, requirement=None), message="E",
+                 seed=73613, noise_seed=93613),
+            dict(row("hf-vector-two-hop", mode="plan", cn0=0, requirement=None), message="B", seed=73613,
+                 noise_seed=93613),
+            dict(row("hf-vector-two-hop", mode="plan", cn0=-3, seconds=128, requirement=None), message="E",
+                 seed=73613, noise_seed=93612),
+            dict(row("hf-vector-two-hop", mode="plan", cn0=0, requirement=None), message="E", seed=7,
+                 noise_seed=93613),
+            dict(row("hf-vector-two-hop", mode="receive", cn0=0, requirement="characterization"),
+                 message="B", seed=73613, noise_seed=93613),
+            dict(row("hf-vector-two-hop", mode="plan", cn0=6, requirement=None), message="A", seed=73613,
+                 noise_seed=93613),
+            dict(row("hf-vector-two-hop", mode="plan", cn0=3, seconds=128, requirement=None), message="E",
+                 seed=73612, noise_seed=93613),
+            dict(row("hf-vector-two-hop", mode="plan", cn0=6, requirement=None), message="E", seed=73613,
+                 noise_seed=93612),
+            dict(boundary_receives[6], control="noise", reception_requirement="negative_control"),
+            dict(boundary_receives[6], control="wrong-key", reception_requirement="negative_control"),
+            dict(boundary_receives[3], control="noise", reception_requirement="negative_control"),
+            dict(boundary_receives[3], control="wrong-key", reception_requirement="negative_control"),
+            dict(boundary_receives[6], reception_requirement="required_complete"),
+            row("hf-vector-two-hop", control="noise", cn0=0, requirement="characterization"),
+            row("hf-vector-two-hop", control="noise", cn0=0, requirement="negative_control", seconds=128),
+            row("hf-vector-two-hop", control="wrong-key", cn0=-3, seconds=64, requirement="negative_control"),
+            row("hf-vector-two-hop", control="wrong-ordinal", cn0=0, requirement="negative_control"),
+            row("hf-vector-two-hop-holdout", cn0=20, requirement="characterization"),
+            row("hf-vector-two-hop-only", control="noise", requirement="negative_control"),
+            row("hf-vector-two-hop", control="wrong-ordinal", requirement="negative_control"),
+            row("hf-vector-two-hop-chain-off", cn0=20),
+            row("hf-vector-two-hop", mode="hf-search"),
+            dict(row("hf-vector-two-hop", mode="channel", requirement=None), control="noise"),
+            row("hf-vector-two-hop", cn0=30, requirement="characterization"),
+            row("hf-vector-two-hop", mode="plan", cn0=40, requirement=None),
+        )
+        for episode in invalid:
+            with self.subTest(episode=episode), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(episode, 0, set(), 900, 12_000_000)
+
+    def test_vector_two_hop_report_requires_hash_witnesses_and_numerical_error_budget(self):
+        scenario = "hf-vector-two-hop"
+        report = runner._vector_two_hop_spec(scenario)
+        report.update({
+            "table_sha256": "a" * 64,
+            "table_digest_scope": "versioned moving-angle route-composed operator; exact binary64 complex coefficients for each retained lag and displacement knot in both route tables, plus all 9 x 9 x 98 x 3 moving-angle P/Q fit coefficients when F route is active and full selected geometry, reference range, retarded-time law, route and receive-axis metadata in canonical little-endian order",
+            "qualification_scope": "finite-order vector Maxwell composition for the declared local two-Es ground-bounce and one-F corridors; finite RF, displacement, mesh/order, staged support and causal FIR witnesses qualify this fixed operator only, not all possible HF paths",
+            "table_qualified": True, "carrier_qualified": True, "specified_fade_observed": False,
+            "rf_solves": 502, "rf_points": 177, "matrix_products": 1,
+            "two_hop_rf_points": 29, "one_hop_rf_points": 148,
+            "moving_angle_fit_points": 81, "checked_moving_angle_witnesses": 32,
+            "checked_moving_angle_refinement_points": 5,
+            "checked_frequency_witnesses": 26, "checked_displacement_witnesses": 16,
+            "scanned_displacements": 4097, "checked_fade_witnesses": 20,
+            "checked_angular_witnesses": 0, "checked_staged_modes": 98,
+            "checked_linear_velocity_witnesses": 18, "scanned_null_displacements": 4097,
+            "checked_null_witnesses": 10,
+            "null_witnesses": [{"offset_hz": f, "displacement_m": 0., "assembled_power": .02,
+                                "direct_power": .02, "voltage_error": .0001}
+                               for f in [-384., -360., -120., -112.5, -56.25, 0., 112.5, 120., 360., 384.]],
+            "preparation_peak_workspace_bytes": 90 * 1024 * 1024, "maximum_rf_dense_terms": 1,
+            "minimum_vacuum_cosine": .7, "maximum_flux_excess": 1e-10, "maximum_solve_residual": 1e-9,
+            "maximum_ground_power": .8, "maximum_outer_order_flux": 1e-5,
+            "one_hop_carrier_power": .2, "two_hop_carrier_power": .2,
+            "two_hop_intermediate_nonspecular_flux": .01, "two_hop_intermediate_cross_plane_flux": .01,
+            "maximum_mesh_voltage_error": .001, "maximum_refined_order_voltage_error": .001,
+            "maximum_frequency_voltage_error": .0001, "maximum_fir_voltage_error": .0001,
+            "two_hop_voltage_errors": {
+                "mesh_voltage_error": .001, "staged_mesh_voltage_error": .001,
+                "refined_order_voltage_error": .001, "staged_refined_order_voltage_error": .001,
+                "frequency_voltage_error": .0001, "staged_frequency_voltage_error": 0.,
+            },
+            "one_hop_voltage_errors": {
+                "mesh_voltage_error": .001, "staged_mesh_voltage_error": .001,
+                "refined_order_voltage_error": .001, "staged_refined_order_voltage_error": .001,
+                "frequency_voltage_error": .0001, "staged_frequency_voltage_error": .0001,
+            },
+            "physical_voltage_allowance": .0043,
+            "temporal_fade": {
+                "scope": "sampled compiled-FIR coefficient response over one output-time period; no between-sample duration guarantee",
+                "evaluated": True, "sample_count": 4096, "sample_step_seconds": 540. / 4096,
+                "voltage_allowance": .0056, "mean_incoherent_band_power": .1,
+                "carrier": {"qualifying_samples": 100, "longest_run_samples": 10,
+                            "longest_sample_span_seconds": 9 * 540. / 4096},
+                "band": {"qualifying_samples": 50, "longest_run_samples": 5,
+                         "longest_sample_span_seconds": 4 * 540. / 4096},
+                "joint": {"qualifying_samples": 20, "longest_run_samples": 3,
+                          "longest_sample_span_seconds": 2 * 540. / 4096},
+            },
+            "maximum_displacement_tap_error": .0001, "maximum_discarded_energy_fraction": 1e-8,
+            "minimum_carrier_power": .02, "minimum_incoherent_carrier_power": .1,
+            "minimum_band_power": .02, "minimum_band_incoherent_power": .1,
+            "average_incoherent_band_power": .1, "carrier_fade_displacement_m": -100.,
+            "band_fade_displacement_m": 100., "relative_voltage_error_at_witness_minimum": .01,
+            "retarded_peak_error_bound": .001, "maximum_staged_support_error": .0001,
+            "maximum_linear_velocity_voltage_error": .0005, "maximum_band_quadrature_power_error": .0001,
+            "maximum_angular_freezing_voltage_error": .9,
+            "maximum_moving_angle_voltage_error": .0001,
+            "maximum_moving_angle_staged_voltage_error": .0001,
+            "maximum_carrier_shift_voltage_error": .0005,
+            "maximum_staged_frequency_voltage_error": .0001,
+            "minimum_assembled_null_power": .02, "minimum_direct_null_power": .02,
+            "maximum_longitudinal_footprint_offset_m": 1000., "maximum_cross_plane_footprint_offset_m": 1000.,
+            "table_workspace_bytes": 1024, "stream_workspace_bytes": 1024,
+            "moving_angle_fit_coefficient_count": 23814, "preparation_seconds": .5,
+            "source_minimum_frequency_hz": -362.5, "source_maximum_frequency_hz": 362.5,
+            "incident_energy_sample_sum": 100., "selected_energy_sample_sum": 1.,
+        })
+        runner._validate_vector_two_hop_report(report, scenario)
+        held_temporal = dict(report["temporal_fade"], sample_step_seconds=470. / 4096)
+        held_temporal["carrier"] = dict(report["temporal_fade"]["carrier"],
+                                        longest_sample_span_seconds=9 * 470. / 4096)
+        held_temporal["band"] = dict(report["temporal_fade"]["band"],
+                                     longest_sample_span_seconds=4 * 470. / 4096)
+        held_temporal["joint"] = dict(report["temporal_fade"]["joint"],
+                                      longest_sample_span_seconds=2 * 470. / 4096)
+        runner._validate_vector_two_hop_temporal_fade(
+            held_temporal, "hf-vector-two-hop-holdout", .0056)
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_vector_two_hop_temporal_fade(
+                report["temporal_fade"], "hf-vector-two-hop-holdout", .0056)
+        one_hop_scenario = "hf-vector-one-hop-only"
+        one_hop_report = dict(report)
+        one_hop_report.update(runner._vector_two_hop_spec(one_hop_scenario))
+        one_hop_report.update(
+            rf_points=148, rf_solves=444, two_hop_rf_points=0, one_hop_rf_points=148,
+            checked_frequency_witnesses=13, maximum_rf_dense_terms=1_200_000_000,
+            two_hop_voltage_errors={key: 0. for key in report["two_hop_voltage_errors"]},
+            two_hop_carrier_power=0., two_hop_intermediate_nonspecular_flux=0.,
+            two_hop_intermediate_cross_plane_flux=0., physical_voltage_allowance=.0022,
+            temporal_fade={
+                "scope": "sampled compiled-FIR coefficient response over one output-time period; no between-sample duration guarantee",
+                "evaluated": False, "sample_count": 0, "sample_step_seconds": 0.,
+                "voltage_allowance": 0., "mean_incoherent_band_power": 0.,
+                "carrier": {"qualifying_samples": 0, "longest_run_samples": 0,
+                            "longest_sample_span_seconds": 0.},
+                "band": {"qualifying_samples": 0, "longest_run_samples": 0,
+                         "longest_sample_span_seconds": 0.},
+                "joint": {"qualifying_samples": 0, "longest_run_samples": 0,
+                          "longest_sample_span_seconds": 0.},
+            },
+        )
+        runner._validate_vector_two_hop_report(one_hop_report, one_hop_scenario)
+        conservative_fade = dict(report, minimum_carrier_power=1e-5,
+                                 minimum_incoherent_carrier_power=.2,
+                                 minimum_band_power=.001,
+                                 minimum_band_incoherent_power=.2,
+                                 average_incoherent_band_power=.2,
+                                 specified_fade_observed=True)
+        runner._validate_vector_two_hop_report(conservative_fade, scenario)
+        # The physical budget sums both enabled route errors. Charging each
+        # category only once from global maxima would understate this case:
+        # it would accept the carrier fade while the correct route sum rejects it.
+        route_sum_case = dict(
+            report,
+            two_hop_voltage_errors={
+                "mesh_voltage_error": .004, "staged_mesh_voltage_error": .004,
+                "refined_order_voltage_error": .004, "staged_refined_order_voltage_error": .004,
+                "frequency_voltage_error": .0006, "staged_frequency_voltage_error": 0.,
+            },
+            one_hop_voltage_errors={
+                "mesh_voltage_error": .004, "staged_mesh_voltage_error": .004,
+                "refined_order_voltage_error": .004, "staged_refined_order_voltage_error": .004,
+                "frequency_voltage_error": .0006, "staged_frequency_voltage_error": .0006,
+            },
+            maximum_mesh_voltage_error=.004,
+            maximum_refined_order_voltage_error=.004,
+            maximum_frequency_voltage_error=.0006,
+            maximum_staged_frequency_voltage_error=.0006,
+            maximum_moving_angle_voltage_error=.0006,
+            maximum_moving_angle_staged_voltage_error=.0006,
+            maximum_displacement_tap_error=.0012,
+            maximum_fir_voltage_error=.0006,
+            maximum_staged_support_error=.0012,
+            retarded_peak_error_bound=.004,
+            maximum_linear_velocity_voltage_error=.004,
+            maximum_carrier_shift_voltage_error=.004,
+            minimum_carrier_power=.01,
+            minimum_incoherent_carrier_power=1.,
+            minimum_band_power=.01,
+            minimum_band_incoherent_power=1.,
+            average_incoherent_band_power=1.,
+            physical_voltage_allowance=.0178,
+            temporal_fade={
+                **report["temporal_fade"],
+                "voltage_allowance": .0248,
+            },
+            specified_fade_observed=False,
+        )
+        runner._validate_vector_two_hop_report(route_sum_case, scenario)
+        # The first native trial emitted the UTF-8 multiplication sign as
+        # a pair of byte escapes. Require the exact current ASCII scope.
+        byte_escaped_scope = report["table_digest_scope"].replace(" x ", "\xc3\x97")
+        with self.assertRaisesRegex(runner.CampaignError, "qualified, source-bound route-composed table"):
+            runner._validate_vector_two_hop_report({**report, "table_digest_scope": byte_escaped_scope}, scenario)
+        bad_reports = (
+            {**report, "table_sha256": "not-a-digest"},
+            {**report, "rf_solves": 180},
+            {**report, "maximum_rf_dense_terms": 12_000_000_001},
+            {**report, "maximum_frequency_voltage_error": .0007},
+            {**report, "maximum_staged_frequency_voltage_error": .0007},
+            {**report, "maximum_displacement_tap_error": .0013},
+            {**report, "maximum_moving_angle_voltage_error": .0007},
+            {**report, "maximum_moving_angle_staged_voltage_error": .0007},
+            {**report, "physical_voltage_allowance": .0022},
+            {**report, "two_hop_voltage_errors": {
+                **report["two_hop_voltage_errors"], "frequency_voltage_error": .0002}},
+            {**report, "one_hop_voltage_errors": {
+                **report["one_hop_voltage_errors"], "staged_mesh_voltage_error": .0041}},
+            {**report, "temporal_fade": {**report["temporal_fade"], "sample_count": 4095}},
+            {**report, "temporal_fade": {**report["temporal_fade"], "sample_step_seconds": 540. / 4095}},
+            {**report, "temporal_fade": {**report["temporal_fade"], "voltage_allowance": .0043}},
+            {**report, "temporal_fade": {**report["temporal_fade"], "joint": {
+                **report["temporal_fade"]["joint"], "longest_sample_span_seconds": .01}}},
+            {**report, "temporal_fade": {**report["temporal_fade"], "mean_incoherent_band_power": 1e-8}},
+            {**report, "temporal_fade": {**report["temporal_fade"], "joint": {
+                **report["temporal_fade"]["joint"], "qualifying_samples": 101}}},
+            {**one_hop_report, "temporal_fade": {**one_hop_report["temporal_fade"], "evaluated": True}},
+            {**route_sum_case, "specified_fade_observed": True},
+            {**one_hop_report, "maximum_rf_dense_terms": 1_200_000_001},
+            {**report, "checked_moving_angle_witnesses": 31},
+            {**report, "moving_angle_fit_coefficient_count": 0},
+            {**report, "preparation_peak_workspace_bytes": 97 * 1024 * 1024},
+            {**report, "source_maximum_frequency_hz": 384.},
+            {**report, "null_witnesses": report["null_witnesses"][:-1]},
+            {**report, "unknown_field": 1},
+            {**report, "specified_fade_observed": True},
+        )
+        for bad in bad_reports:
+            with self.subTest(bad=bad), self.assertRaises(runner.CampaignError):
+                runner._validate_vector_two_hop_report(bad, scenario)
+
+    def test_vector_two_hop_renderer_is_rejected_when_unrequested(self):
+        receipt = {"plan": {"channel_renderer": "hf_vector_two_hop", "vector_two_hop": {}},
+                   "scenario": {"channel": {"renderer": "hf_vector_two_hop", "vector_two_hop": {}}},
+                   "channel": {"vector_two_hop": {}}}
+        with self.assertRaisesRegex(runner.CampaignError, "unrequested coupled vector two-hop"):
+            runner._validate_vector_two_hop(receipt, {"scenario": "awgn"})
+        requested = {"plan": {"vector_two_hop": {}}, "scenario": {"channel": {}}}
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_vector_two_hop(requested, {"scenario": "hf-vector-two-hop"})
+
     def test_evolving_vector_private_energy_is_complete_aligned_disjoint_and_conservative(self):
         plan = {"public_slots": [{"observation": {"first": 0, "stop": 4}},
                                  {"observation": {"first": 4, "stop": 9}},
@@ -1220,6 +1625,39 @@ class CampaignValidationTests(unittest.TestCase):
             campaign = runner._read_campaign(path)
             self.assertLessEqual(len(campaign["episodes"]), campaign["max_trials"])
             self.assertGreaterEqual(campaign["max_wall_seconds"], 1)
+
+    def test_vector_two_hop_campaigns_stop_on_precompletion_execution_failure(self) -> None:
+        for name in ("hf-vector-two-hop-receiver.json", "hf-vector-two-hop-chain.json",
+                     "hf-vector-two-hop-chain-off.json"):
+            with self.subTest(name=name):
+                campaign = runner._read_campaign(RUNNER.parent / "campaigns" / name)
+                self.assertIs(campaign.get("stop_on_execution_failure"), True)
+
+    def test_vector_two_hop_sensitivity_campaign_contains_only_frozen_new_cells(self) -> None:
+        campaign = runner._read_campaign(RUNNER.parent / "campaigns" / "hf-vector-two-hop-sensitivity.json")
+        cells = [(episode["control"], episode["cn0_db_hz"], episode["bit_seconds"],
+                  episode.get("reception_requirement")) for episode in campaign["episodes"]]
+        self.assertEqual(cells, [
+            ("wanted", 0, 64, "characterization"),
+            ("wanted", -3, 128, "characterization"),
+            ("noise", 0, 64, "negative_control"),
+            ("wrong-key", -3, 128, "negative_control"),
+        ])
+
+    def test_stop_on_execution_failure_is_optional_and_strict_boolean(self) -> None:
+        campaign = valid_campaign()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.json"
+            path.write_text(json.dumps(campaign))
+            self.assertNotIn("stop_on_execution_failure", runner._read_campaign(path))
+            campaign["stop_on_execution_failure"] = False
+            path.write_text(json.dumps(campaign))
+            self.assertIs(runner._read_campaign(path)["stop_on_execution_failure"], False)
+            for invalid in (None, 0, 1, "true", []):
+                campaign["stop_on_execution_failure"] = invalid
+                path.write_text(json.dumps(campaign))
+                with self.subTest(value=invalid), self.assertRaisesRegex(runner.CampaignError, "must be a boolean"):
+                    runner._read_campaign(path)
 
     def test_service_replay_inputs_and_argv_are_explicitly_bounded(self) -> None:
         episode = {"id": "service", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1,
@@ -4353,6 +4791,72 @@ class CampaignExecutionTests(unittest.TestCase):
         self.assertEqual(run["executed_trials"], 2)
         self.assertEqual(run["trials"][1]["status"], "completed")
         self.assertEqual(run["valid_communication_failures"], 1)
+
+    def test_opt_in_stop_on_execution_failure_keeps_timeout_evidence_and_stops(self) -> None:
+        campaign = valid_campaign()
+        campaign["confirmatory_strata"] = {}
+        campaign["stop_on_execution_failure"] = True
+        self.campaign_file.write_text(json.dumps(campaign))
+        calls = 0
+
+        def timeout_then_complete(command, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+            return self._fake_completed(command, **kwargs)
+
+        output = self.work / "stop-timeout-output"
+        with patch.object(runner.subprocess, "run", side_effect=timeout_then_complete):
+            run = runner.run_campaign(self.probe, self.campaign_file, output)
+        self.assertEqual(run["status"], "incomplete_checks")
+        self.assertEqual(run["stop_reason"], "trial_timeout")
+        self.assertEqual(run["executed_trials"], 1)
+        self.assertEqual(run["trials"][0]["status"], "timed_out")
+        for field in ("raw_stdout", "raw_stderr"):
+            self.assertTrue((output / run["trials"][0][field]).exists())
+
+    def test_opt_in_stop_on_native_refusal_preserves_native_reason(self) -> None:
+        campaign = valid_campaign()
+        campaign["confirmatory_strata"] = {}
+        campaign["stop_on_execution_failure"] = True
+        self.campaign_file.write_text(json.dumps(campaign))
+
+        def refuse_then_complete(command, **kwargs):
+            receipt = fake_completed_receipt(command)
+            receipt["status"] = "unavailable"
+            receipt["reason"] = "frozen numerical qualification refused this case"
+            kwargs["stdout"].write((json.dumps(receipt) + "\n").encode())
+            kwargs["stderr"].write(b"")
+            return subprocess.CompletedProcess(command, 5)
+
+        output = self.work / "stop-refusal-output"
+        with patch.object(runner.subprocess, "run", side_effect=refuse_then_complete) as launch:
+            run = runner.run_campaign(self.probe, self.campaign_file, output)
+        self.assertEqual(run["status"], "incomplete_checks")
+        self.assertEqual(run["stop_reason"], "trial_unavailable")
+        self.assertEqual(run["executed_trials"], 1)
+        self.assertEqual(launch.call_count, 1)
+        trial = run["trials"][0]
+        self.assertEqual(trial["status"], "unavailable")
+        self.assertEqual(trial["receipt"]["reason"], "frozen numerical qualification refused this case")
+        raw = json.loads((output / trial["raw_stdout"]).read_text())
+        self.assertEqual(raw["reason"], trial["receipt"]["reason"])
+        persisted = json.loads((output / "run.json").read_text())
+        self.assertEqual(persisted["trials"][0]["receipt_reason"], raw["reason"])
+
+    def test_opt_in_stop_does_not_treat_valid_communication_miss_as_execution_failure(self) -> None:
+        campaign = valid_campaign()
+        campaign["confirmatory_strata"] = {}
+        campaign["stop_on_execution_failure"] = True
+        self.campaign_file.write_text(json.dumps(campaign))
+        with patch.object(runner.subprocess, "run", side_effect=self._fake_completed) as launch:
+            run = runner.run_campaign(self.probe, self.campaign_file, self.work / "valid-miss-output")
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(run["executed_trials"], 2)
+        self.assertEqual(launch.call_count, 2)
+        self.assertEqual(run["execution_failures"], 0)
+        self.assertEqual(run["valid_communication_failures"], 2)
 
     def test_probe_hash_change_invalidates_current_episode_and_stops(self) -> None:
         campaign = valid_campaign()

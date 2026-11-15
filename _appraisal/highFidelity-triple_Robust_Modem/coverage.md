@@ -7,7 +7,37 @@ different questions and are reported separately. No natural-condition
 probability, field calibration, or universal sensitivity floor follows from
 these deterministic cases or small fixed-seed holdouts.
 
-The latest [intrinsic-evolution extension](hf-vector-evolving.md) changes density
+The latest [coupled multiple-hop extension](hf-multihop.md) carries all retained
+polarization/diffraction orders through two Es reflections and a lossy ground
+bounce, alongside a competing transmitted-through-Es F return. Both frozen
+physical fields pass mesh, order, frequency, moving-angle and actual FIR checks.
+The primary includes sampled subsecond deep carrier cancellation and longer
+band-energy fades; the independently fixed holdout does not reproduce that
+deep-fade criterion and is not retuned. The initial under-resolved and
+fixed-angle approximations remain explicitly rejected.
+
+The extension has **sixteen unique strict complete observations**: eight correct
+deliveries and four misses among twelve wanted cases, plus four negative controls.
+The initial +20/69.6-second and +17/139.2-second pair delivers at nearly equal
+incident E/N0; the weaker 0/−3 pair misses every active bit. A fixed prospective
+follow-up finds twelve correct bits and one erasure at +6/69.6 seconds, but
+complete delivery at +3/139.2 seconds with nearly equal incident E/N0 and about
+1.3% less propagated E/N0. This positive duration comparison does not establish
+a general sensitivity floor or natural-condition probability.
+
+The impaired native endpoint case recovers all thirteen bits but fails to
+finish; its matched Off case delivers. The strong wrong-key control produces
+thirteen false DATA decisions, one rejected codec completion and no accepted
+message. The other three negative controls stay quiet. Existing failures remain
+failed requirements. A corrected endpoint setup refusal and an original metadata
+recovery are retained separately; the repeated input is not an independent case.
+The final finite qualification and exact-window diagnostics are detailed in the
+[experiment record](hf-multihop.md).
+This selected local planar two-hop/one-hop construction and public-data audit
+materially extend the earlier gap; general curved-Earth hop populations and
+calibrated broadband disturbed-event measurements remain unqualified.
+
+The preceding [intrinsic-evolution extension](hf-vector-evolving.md) changes density
 mode magnitudes and relative phases during each message in the coupled 3D
 Maxwell calculation. Both fixed fields pass 270-solve numerical admission,
 including direct checks at scanned temporal minima. Four prospectively declared
@@ -26,8 +56,9 @@ are ambiguous. The matched endpoint-Off case completes. This extends the
 combined-effects regression to an evolving field without claiming a new
 deformation-specific failure or a receiver repair. The original receipt-reader
 stop, its correction and the repeated validation observations are retained.
-Prescribed minute-scale Es evolution does not close rapid/deep F-region,
-coupled multiple-hop or calibrated disturbed-event measurement coverage.
+That preceding minute-scale Es extension alone did not cover rapid/deep
+F-region or coupled multiple-hop behavior; the subsequent extension above
+addresses selected cases. Neither provides calibrated disturbed-event measurements.
 
 This increment has eleven unique complete observations: five delivered messages
 and four delivery misses among nine wanted observations, plus two quiet negative

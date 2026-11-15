@@ -31,7 +31,11 @@ add_library(high_fidelity_vector_oblique STATIC "${_hf_root}/src/hf_vector_obliq
 target_include_directories(high_fidelity_vector_oblique PUBLIC "${_hf_root}/include")
 target_compile_features(high_fidelity_vector_oblique PUBLIC cxx_std_20)
 target_link_libraries(high_fidelity_vector_oblique PUBLIC high_fidelity_fullwave)
-target_link_libraries(high_fidelity_channel PRIVATE high_fidelity_fullwave high_fidelity_wave_optics high_fidelity_phase_screens high_fidelity_vector_oblique)
+add_library(high_fidelity_vector_two_hop STATIC "${_hf_root}/src/hf_vector_two_hop.cpp")
+target_include_directories(high_fidelity_vector_two_hop PUBLIC "${_hf_root}/include")
+target_compile_features(high_fidelity_vector_two_hop PUBLIC cxx_std_20)
+target_link_libraries(high_fidelity_vector_two_hop PUBLIC high_fidelity_vector_oblique)
+target_link_libraries(high_fidelity_channel PRIVATE high_fidelity_fullwave high_fidelity_wave_optics high_fidelity_phase_screens high_fidelity_vector_oblique high_fidelity_vector_two_hop)
 add_library(high_fidelity_public_receiver STATIC "${_hf_root}/src/hf_public_diagnostic.cpp"
   "${_hf_root}/src/hf_gui_diagnostic.cpp" "${_hf_root}/src/hf_phase_filter.cpp"
   "${_hf_root}/src/hf_correlated_gain.cpp")
@@ -84,6 +88,11 @@ target_include_directories(high_fidelity_vector_oblique_probe PRIVATE "${PROJECT
 target_link_libraries(high_fidelity_vector_oblique_probe PRIVATE high_fidelity_vector_oblique)
 target_compile_definitions(high_fidelity_vector_oblique_probe PRIVATE ${_hf_identity} APPRAISAL_SOURCE_SHA="${_hf_source_sha}")
 set_target_properties(high_fidelity_vector_oblique_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+add_executable(high_fidelity_vector_two_hop_probe "${_hf_root}/src/hf_vector_two_hop_probe.cpp")
+target_include_directories(high_fidelity_vector_two_hop_probe PRIVATE "${PROJECT_SOURCE_DIR}/tools")
+target_link_libraries(high_fidelity_vector_two_hop_probe PRIVATE high_fidelity_vector_two_hop)
+target_compile_definitions(high_fidelity_vector_two_hop_probe PRIVATE ${_hf_identity} APPRAISAL_SOURCE_SHA="${_hf_source_sha}")
+set_target_properties(high_fidelity_vector_two_hop_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 add_executable(high_fidelity_completion_ambiguity_probe "${_hf_root}/src/hf_completion_ambiguity_probe.cpp")
 target_include_directories(high_fidelity_completion_ambiguity_probe PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")
 target_link_libraries(high_fidelity_completion_ambiguity_probe PRIVATE high_fidelity_channel datapump_triad_receiver)
@@ -101,6 +110,7 @@ target_compile_definitions(high_fidelity_wave_optics_probe PRIVATE ${_hf_identit
 set_target_properties(high_fidelity_wave_optics_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(high_fidelity_vector_two_hop PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(high_fidelity_vector_oblique PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(high_fidelity_phase_screens PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(high_fidelity_channel PRIVATE -Wall -Wextra -Wpedantic)
@@ -114,6 +124,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 if(BUILD_TESTING)
+  add_executable(high_fidelity_test_hf_vector_two_hop "${_hf_root}/tests/test_hf_vector_two_hop.cpp")
+  target_link_libraries(high_fidelity_test_hf_vector_two_hop PRIVATE high_fidelity_vector_two_hop)
+  add_test(NAME high_fidelity_hf_vector_two_hop COMMAND high_fidelity_test_hf_vector_two_hop)
+  set_tests_properties(high_fidelity_hf_vector_two_hop PROPERTIES LABELS "appraisal" TIMEOUT 120)
   add_test(NAME high_fidelity_hf_completion_ambiguity COMMAND high_fidelity_completion_ambiguity_probe)
   set_tests_properties(high_fidelity_hf_completion_ambiguity PROPERTIES LABELS "appraisal" TIMEOUT 120)
   add_executable(high_fidelity_test_hf_vector_oblique "${_hf_root}/tests/test_hf_vector_oblique.cpp")
@@ -194,6 +208,7 @@ if(BUILD_TESTING)
   add_custom_target(high_fidelity_checks DEPENDS high_fidelity_appraisal high_fidelity_fullwave_probe high_fidelity_fullwave_kernel_probe high_fidelity_magnetoionic_probe high_fidelity_wave_optics_probe
     high_fidelity_completion_ambiguity_probe
     high_fidelity_vector_oblique_probe high_fidelity_test_hf_vector_oblique
+    high_fidelity_vector_two_hop_probe high_fidelity_test_hf_vector_two_hop
     high_fidelity_test_hf_fragment_integrity
     high_fidelity_phase_screens_probe high_fidelity_test_hf_phase_screens
     high_fidelity_test_channel high_fidelity_test_scenarios

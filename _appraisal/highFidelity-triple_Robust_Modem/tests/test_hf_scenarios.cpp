@@ -573,6 +573,60 @@ void vector_oblique_evolving_profiles() {
         check(std::ranges::find(names, id) != names.end(), "evolution scenario is in the public scenario catalogue");
 }
 
+void vector_two_hop_profiles() {
+    const auto primary=make_scenario("hf-vector-two-hop");
+    const auto two_only=make_scenario("hf-vector-two-hop-only");
+    const auto one_only=make_scenario("hf-vector-one-hop-only");
+    const auto holdout=make_scenario("hf-vector-two-hop-holdout");
+    const auto chain_off=make_scenario("hf-vector-two-hop-chain-off");
+    const auto chain_tone=make_scenario("hf-vector-two-hop-chain-clocks-tone");
+    for(const auto* scenario:{&primary,&two_only,&one_only,&holdout,&chain_off,&chain_tone}) {
+        check(scenario->channel.vector_two_hop.has_value(),"two-hop scenario retains its typed composed physical operator");
+        near(scenario->waveform.sample_rate_hz,1920.,0.,"two-hop channel uses its fixed 1920-Hz waveform");
+        near(scenario->waveform.requested_bit_seconds,64.,0.,"two-hop receiver uses the fixed 64-second anchor");
+        near(scenario->reference_cn0_db_hz,30.,0.,"two-hop channel preserves the predeclared 30 dB-Hz default");
+        near(scenario->bounds.frequency_bound_hz,scenario->id.find("chain-")!=std::string::npos?1.:0.,0.,
+             "two-hop receiver exposes only its family-declared oscillator bound");
+        near(scenario->bounds.atmospheric_hz,5.,0.,"two-hop channel preserves its blind atmospheric allowance");
+        check(scenario->channel.paths.empty(),"two-hop physical operator is not combined with unrelated scalar paths");
+        check(scenario->assumptions.find("nine-node P/Q moving-angle interpolation")!=std::string::npos,
+              "two-hop scenarios describe the moving-angle production operator");
+        const auto expected_workspace=scenario->id.find("chain-")!=std::string::npos?
+            192u*1024u*1024u:160u*1024u*1024u;
+        check(scenario->channel.maximum_workspace_bytes==expected_workspace,
+              "two-hop scenario reserves its explicit direct or endpoint-chain physical workspace");
+        check(scenario->channel.maximum_workspace_bytes>=
+              HfVectorTwoHopTable::preparation_workspace_bound_bytes+
+                  (scenario->id.find("chain-")!=std::string::npos?96u:64u)*1024u*1024u,
+              "two-hop scenario workspace includes the recovered preparation quote plus channel/runtime allowance");
+    }
+    check(HfVectorTwoHopTable::preparation_workspace_bound_bytes==96u*1024u*1024u,
+          "two-hop core recovery remains within its frozen 96 MiB preparation quote");
+    check(HfVectorTwoHopTable::moving_angle_fit_nodes==9,
+          "two-hop production descriptor uses the independently qualified nine-node moving-angle fit");
+    check(primary.channel.vector_two_hop->field==HfVectorTwoHopField::primary&&
+          primary.channel.vector_two_hop->routes==HfVectorTwoHopRoutes::both&&
+          primary.channel.vector_two_hop->receive_axis_index==11,
+          "primary two-hop both-route scenario freezes channel-selected receive axis 11");
+    check(two_only.channel.vector_two_hop->routes==HfVectorTwoHopRoutes::two_hop&&
+          one_only.channel.vector_two_hop->routes==HfVectorTwoHopRoutes::one_hop,
+          "route controls isolate each route using the shared coupled solver");
+    check(holdout.channel.vector_two_hop->field==HfVectorTwoHopField::holdout&&
+          holdout.channel.vector_two_hop->receive_axis_index==14,
+          "held-out two-hop field freezes separate channel-selected axis 14");
+    near(chain_off.channel.noise.tone_amplitude,0.,0.,"two-hop chain off control has no RF tone");
+    near(chain_tone.channel.noise.tone_amplitude,.3,0.,"two-hop chain tone has its frozen amplitude");
+    near(chain_tone.channel.noise.tone_hz,100.,0.,"two-hop chain tone has its frozen offset");
+    check(chain_off.assumptions.find("±2 ppm")!=std::string::npos&&
+          chain_tone.assumptions.find("±4 ppm")!=std::string::npos,
+          "two-hop chain documents its public clock bounds");
+    const auto names=scenario_names();
+    for(const auto* id:{"hf-vector-two-hop","hf-vector-two-hop-only","hf-vector-one-hop-only",
+                         "hf-vector-two-hop-holdout","hf-vector-two-hop-chain-off",
+                         "hf-vector-two-hop-chain-clocks-tone"})
+        check(std::ranges::find(names,id)!=names.end(),"two-hop scenario appears in the public catalogue");
+}
+
 } // namespace
 
 int main() {
@@ -590,6 +644,7 @@ int main() {
         vector_oblique_native_chain_profiles();
         vector_oblique_3d_profiles();
         vector_oblique_evolving_profiles();
+        vector_two_hop_profiles();
         std::cout << "additional HF profile checks passed: " << checks << '\n';
         return 0;
     } catch (const std::exception& error) {
