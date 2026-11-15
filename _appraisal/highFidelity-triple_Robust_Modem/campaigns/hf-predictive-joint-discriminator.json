@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "per_trial_wall_seconds": 600,
+  "max_samples": 12000000,
+  "stop_on_execution_failure": true,
+  "stop_on_predictive_regression": true,
+  "name": "hf-predictive-joint-discriminator",
+  "purpose": "Fixed before three-witness receiver execution. Combine confidence interval unions from fixed old/middle/recent public gaps, same total1e-6 budget, no data-dependent fallback or threshold relaxation. Wrong-key first then exact matched formerly-fresh B; require no added false acceptance and exact B completion. Conditional preservation/field follow-ups only if both requirements pass. Earlier separated-pair alias failures remain retained; these repeats are algorithm comparisons, not independent environmental samples.",
+  "max_wall_seconds": 1250,
+  "max_trials": 2,
+  "episodes": [
+    {
+      "id": "oblique-wrong-key-30-paired",
+      "scenario": "hf-vector-oblique-chain-clocks-tone",
+      "waveform": "reference",
+      "seed": 70501,
+      "noise_seed": 80529,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wrong-key",
+      "cn0_db_hz": 30,
+      "hf_predictive_quiet": true
+    },
+    {
+      "id": "oblique-fresh-B-30-paired",
+      "scenario": "hf-vector-oblique-chain-clocks-tone",
+      "waveform": "reference",
+      "seed": 70501,
+      "noise_seed": 80519,
+      "bit_seconds": 64,
+      "message": "B",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 30,
+      "hf_predictive_quiet": true
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "per_trial_wall_seconds": 600,
+  "max_samples": 12000000,
+  "stop_on_execution_failure": true,
+  "stop_on_predictive_regression": true,
+  "name": "hf-predictive-separated-discriminator",
+  "purpose": "Frozen after adjacent-pair controls and before separated-baseline execution. Run wrong-key first, then matched fresh B. Selected frequency pair depends only on public confirmation centroids; no threshold relaxation or data-driven fallback. Require unchanged DATA, exact B completion, and no added accepted false content/premature completion. Stop on execution or paired safety regression. Only if both pass these requirements run the separate preservation campaign. Repeats of the same captures compare algorithms, not independent environmental samples.",
+  "max_wall_seconds": 1250,
+  "max_trials": 2,
+  "episodes": [
+    {
+      "id": "oblique-wrong-key-30-paired",
+      "scenario": "hf-vector-oblique-chain-clocks-tone",
+      "waveform": "reference",
+      "seed": 70501,
+      "noise_seed": 80529,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wrong-key",
+      "cn0_db_hz": 30,
+      "hf_predictive_quiet": true
+    },
+    {
+      "id": "oblique-fresh-B-30-paired",
+      "scenario": "hf-vector-oblique-chain-clocks-tone",
+      "waveform": "reference",
+      "seed": 70501,
+      "noise_seed": 80519,
+      "bit_seconds": 64,
+      "message": "B",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 30,
+      "hf_predictive_quiet": true
+    }
+  ]
+}

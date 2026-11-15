@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "name": "hf-predictive-quiet-controls",
+  "purpose": "Conditional controls fixed before the first physical candidate result. Run only if the paired oblique discriminator restores exact A delivery with unchanged DATA. Order prioritizes wrong-key integrity: enabling completion must not turn existing false DATA into accepted false content. Then run noise, matched endpoint-Off, and fresh B payload/noise holdout. Stop expansion on a new accepted incorrect message, new premature completion, changed DATA, or lost previously correct delivery; preserve failure receipts. These are four channel realizations with two policies each, not eight independent trials. No general operational promotion follows.",
+  "max_wall_seconds": 2500,
+  "per_trial_wall_seconds": 600,
+  "max_trials": 4,
+  "max_samples": 12000000,
+  "stop_on_execution_failure": true,
+  "stop_on_predictive_regression": true,
+  "episodes": [
+    {"id":"oblique-wrong-key-30-paired","scenario":"hf-vector-oblique-chain-clocks-tone","waveform":"reference","seed":70501,"noise_seed":80529,"bit_seconds":64,"message":"A","mode":"receive","control":"wrong-key","cn0_db_hz":30,"hf_predictive_quiet":true},
+    {"id":"oblique-noise-30-paired","scenario":"hf-vector-oblique-chain-clocks-tone","waveform":"reference","seed":70501,"noise_seed":80523,"bit_seconds":64,"message":"A","mode":"receive","control":"noise","cn0_db_hz":30,"hf_predictive_quiet":true},
+    {"id":"oblique-off-A-30-paired","scenario":"hf-vector-oblique-chain-off","waveform":"reference","seed":70501,"noise_seed":80501,"bit_seconds":64,"message":"A","mode":"receive","control":"wanted","cn0_db_hz":30,"hf_predictive_quiet":true},
+    {"id":"oblique-fresh-B-30-paired","scenario":"hf-vector-oblique-chain-clocks-tone","waveform":"reference","seed":70501,"noise_seed":80519,"bit_seconds":64,"message":"B","mode":"receive","control":"wanted","cn0_db_hz":30,"hf_predictive_quiet":true}
+  ]
+}

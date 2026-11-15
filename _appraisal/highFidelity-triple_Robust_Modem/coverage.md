@@ -7,7 +7,85 @@ different questions and are reported separately. No natural-condition
 probability, field calibration, or universal sensitivity floor follows from
 these deterministic cases or small fixed-seed holdouts.
 
-The latest [coupled multiple-hop extension](hf-multihop.md) carries all retained
+The current [receiver-repair investigation](hf-predictive-completion.md) records
+ten paired complete observations and a separate active-fade discriminator.
+**The candidate fails the broader integrity criterion and cannot be promoted
+as a general repair.** The active-fade test sends `Ae`, whose first thirteen
+bits form the complete shorter `A`, removes wanted signal in slots 13–14 and
+resumes correct DATA in slot 15. Both receivers still have open input. On the
+same IQ, the baseline reports two ambiguous slots and no message; the candidate
+reports two quiet slots and accepts one wrong, premature `A`. The new branch is
+actually exercised, every admitted DATA bit remains correct, and the acceptance
+assertion intentionally fails.
+
+Within the ten paired observations, the revision estimating frequency from
+three prior gaps repairs oblique `A`, `B` and prospectively selected fresh `D`,
+evolving-field `C` and two-hop `E`. Each preserves thirteen correct DATA
+decisions unchanged and replaces both ending ambiguous decisions with scored
+quiet; all five matched baselines miss completion. Both policies deliver the
+endpoint-Off `A`, and the complete noise control has no DATA or accepted
+content. The duration checks preserve the +6 dB-Hz/69.6-second miss and
++3 dB-Hz/139.2-second delivery in both policies. The wrong-key replay retains
+three false DATA decisions in both policies; the candidate's physical
+completion is rejected for an unqualified leading message prefix, with no
+accepted content.
+
+Earlier revisions restored the original bright clock/interference `A` and
+preserved two successful references but missed `B`; those failures remain
+recorded. A separate strong in-band tone produces false DATA in physically
+quiet wanted slots, preventing the predictor from running. A variance guard
+and a directional guard are rejected for demonstrated/theoretical high-SNR
+rejection floors. The five scoped completion repairs do not remove the newly
+exposed integrity regression or establish general HF qualification.
+
+The [protected-fragment extension](hf-protected-reassembly.md) adds seven standalone complete
+native signal-chain observations. It recovers exact RS20 `B` and fresh `e` after
+two-slot interior fades, preserving the original premature native completion
+and two rejected fragments in each case. The bounded consumer inserts located
+erasures and calls the existing codec once, without repeating acquisition.
+Clean, full-noise and separate-message controls pass. The first wrong-key case
+produces **72 false DATA decisions**, a rejected native frame and no recovered
+content. The added wrong-key joining case exercises one combined decode, which
+rejects the joined span; **136 false DATA decisions persist**, and neither
+native nor consumer content is accepted. Both wrong-key requirements remain
+failed. No production promotion, general false-join bound, equal-energy gain or
+real-time capacity qualification follows.
+
+The separate [combined predictive/protected observation](hf-protected-reassembly.md#completed-wanted-observation)
+preserves 62 correct DATA decisions on matched IQ. All four baseline ambiguous
+slots—interior 13/14 and ending 64/65—become candidate quiet through actual
+accepted causal predictions. Two actual native codec rejections feed one
+64-position, two-erasure decode, recovering exact `e` at slot 66 without
+incorrect accepted content. One premature physical completion remains. The
+849.620-second execution costs 21.333 times the nominal uncoded active airtime
+and incident energy at equal power; it does not repair the unprotected
+counterexample or establish equal-energy sensitivity. A raw-receipt audit
+checks the stronger ending-activation requirement that the archived native
+summary did not enforce. The original baseline timeout and first wrong-key
+setup failure remain ungraded.
+
+The corrected complete wrong-key observation actually exercises all four
+causal quiet conversions, two native codec rejections and one 64-position
+combined decode, which rejects without accepted content. **Both policies still
+produce 61 false DATA decisions.** Native slot 43 remains ambiguous in both,
+so the combined attempt has three bit erasures instead of the frozen two.
+The exact two-erasure requirement and wrong-key discrimination both fail;
+`branch_covered` and `consumer_acceptance_check` remain false. The observed
+three-erasure rejection is retained separately from those failed criteria,
+not reclassified as a pass or an unexecuted decoder. Combined-route
+qualification remains failed. The cheap completion and new key-preflight
+CTest checks pass; they do not qualify these communications requirements.
+
+The [normalized-covariance diagnostic](hf-normalized-null.md) adds two
+aperture diagnostics using an analytic channel. The wanted observation is correct
+native DATA, while the wrong-key observation is already **AMBIGUOUS** in the ordinary
+receiver. Their directional evidence comparison is not a false-DATA repair.
+A separate matched static native-slot pair reproduces actual wrong-key false
+DATA: the normalized scores separate it from its wanted control. This supplies
+a concrete discriminator, but neither a qualified wrong-key null model nor an
+operational veto. These component results do not establish complete-message behavior.
+
+The preceding [coupled multiple-hop extension](hf-multihop.md) carries all retained
 polarization/diffraction orders through two Es reflections and a lossy ground
 bounce, alongside a competing transmitted-through-Es F return. Both frozen
 physical fields pass mesh, order, frequency, moving-angle and actual FIR checks.

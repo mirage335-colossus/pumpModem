@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "name": "hf-null-guard-preflight",
+  "purpose": "Current-native baseline discriminator before any new rejection policy is implemented. Reuse the archived hf-disturbed reference episode unchanged to test whether a proposed fixed-variance diffuse-null veto would destroy a correctly received wanted message. Candidate arithmetic is a separate source-bound diagnostic; no receiver decision is altered. One frozen episode, no tuning or automatic sweep. Preserve the archived result and actual current binary identity.",
+  "max_wall_seconds": 120,
+  "per_trial_wall_seconds": 120,
+  "max_trials": 1,
+  "max_samples": 8000000,
+  "stop_on_execution_failure": true,
+  "episodes": [
+    {
+      "cn0_db_hz": 20,
+      "id": "hf-disturbed-reference",
+      "mode": "receive",
+      "scenario": "hf-disturbed",
+      "seed": 9201,
+      "waveform": "reference"
+    }
+  ]
+}

@@ -1,5 +1,9 @@
+
 Further improvements to pumpModem
 ================================
+
+This is a carefully curated list of possible future improvements - this should
+not be edited by agents unless edits to this file are explicitly requested.
 
 Keep actionable improvements that justify their complexity, maintenance and
 qualification cost. Entries are future-work prompts, not authorization to launch
@@ -11,6 +15,65 @@ Update or remove an entry when it is resolved, superseded or no longer worth
 its maintenance cost. Keep concise useful conclusions in maintained guidance;
 do not accumulate session histories, obsolete experiment instructions or raw
 outputs here. Follow the material lifecycle in docs/development.md.
+
+Mitigation for Frequency Division Multiple Access (FDMA) for Encrypted Users
+==============================================================================
+
+Please add to the triple Robust Modem keystrems derivation, the calculated
+absolute configured (but not hop) carrier frequency from baseband and shift
+frequency, to the nearest 1/10th of rate Hz .
+
+This should result in triple Robust Modem using entirely different keys for
+significantly different frequencies.
+
+Hopefully, this should prevent the possibly wide search of the historical
+receiver used by triple Robust Modem from mistaking transmissions intended to use
+adjacent frequencies instead as if these were intended to use the same frequency.
+
+
+Wrong-Key Statistical Confidence Dropdown
+=======================================
+
+Please add a dropdown for wrong-key statistical confidence.
+
+Under deleterious conditions, a triple Robust Modem receiver can be required to
+accept mere fragments of evidence, which could accumulate not from fragments
+of the cryptographically random pattern of the intended triple Robust Modem
+transmission, but from a mere combination of fragments of another user with a
+different encryption key.
+
+The best case of wrong-key admission rates, admitting interfering
+triple Robust Modem transmissions as valid bits at rates as low as admitting
+random thermal noise, may not be achievable.
+
+Fortunately, interferring triple Robust Modem transmissions on the same
+frequency at the same time with the wrong key, are a rare occurrence.
+
+It is important that receiver algorithm improvements to score wrong-key bits
+do not worsen the computational ceiling, so this should be a generic algorithm
+improvement with minimal additional computation required. Merely changing the
+threshold of received evidence fragments, and other approaches, etc, should be
+contemplated.
+
+Exact statistical confidence is not necessary as thi mitigation for what is mostly
+a rare edge case.
+
+Data from known failures, and theoretical estimates, and maybe quick computational
+experiments, extrapolated probabilities with loose confidence intervals based on
+conjectures from quicker simulations, etc, may be sufficient to determine the minimal
+general evidence increase needed for general 'rules of thumb', etc, which may be
+sufficient for the amount of additional evidence needed to meet thresholds chosen
+by the dropdown.
+
+The dropdown may support multiples of thermal noise admission rates, as something
+like  10^0 (best 10^-4/day), 10^1, 10^2, 10^3, 10^4 (mediocre 10^0/day), 10^5,
+10^6 (worst 10^2/day) , as appropriate . Not all of these need be well supported,
+and the lower transmit energy tradeoff friendly point that is already in effect may
+be used as the default.
+
+This dropdown may be labeled 'Wrong Key Admission', to the left of the
+Encryption key entry' dropdown on that GUI row.
+
 
 Complete the Bookworm offline build path
 =======================================

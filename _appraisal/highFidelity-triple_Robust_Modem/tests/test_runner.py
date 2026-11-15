@@ -44,6 +44,22 @@ def physical_design_episode() -> dict:
             "hf_knot_amplitude_hz": 8000, "hf_knot_seconds": 113}
 
 
+def fake_predictive_diagnostic(row: dict) -> dict:
+    result = {"attempted": False, "accepted": False, "training_status": "insufficient_prior_public_gaps",
+              "status": "canonical_decision_retained", "legacy_modes": 0, "expanded_modes": 0,
+              "frequency_coherent_nodes": 0, "frequency_band_nodes": 0}
+    result.update({field: {"first": 0, "stop": 0} for field in
+                   ("frequency_first", "frequency_second", "amplitude", "validation", "frequency_first_proposal",
+                    "frequency_first_confirmation", "frequency_second_proposal", "frequency_second_confirmation")})
+    result.update({field: 0. for field in ("frequency_hz", "frequency_lower_hz", "frequency_upper_hz",
+        "frequency_confidence_exclusion_probability", "coherent_interpolation_norm", "band_interpolation_norm",
+        "amplitude_magnitude", "validation_line_residual",
+        "validation_energy", "validation_threshold", "line_direction_gain_squared", "coherent_residual", "coherent_threshold",
+        "legacy_energy", "legacy_threshold", "expanded_energy", "expanded_threshold", "extra_seconds")})
+    result.update(raw_quiet_energy=row["quiet_energy"], raw_quiet_threshold=row["quiet_threshold"])
+    return result
+
+
 def fake_refinement_trace(*, full: bool) -> dict:
     work = {field: 0 for field in ("fft_row_stages", "spectrum_cells", "table_lookups", "direct_sweeps", "direct_rows",
                                    "phase_rotations", "trigonometric_evaluations", "likelihood_cells")}
@@ -714,7 +730,7 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
         receipt["plan"].update({"wire_bits": 64 if fec == "rs20" else 80,
                                 "short_wire_bit_limit": 304 if fec == "rs20" else 400,
                                 "content_limit_bytes": 16, "long_form": False})
-    if "--hf-compare-admitted-models" in command or "--service-replay" in command:
+    if any(flag in command for flag in ("--hf-compare-admitted-models", "--service-replay", "--hf-predictive-quiet")):
         policy = "compare_admitted" if "--hf-compare-admitted-models" in command else "fallback_only"
         receipt["plan"].update(hf_compare_admitted_models_requested="--hf-compare-admitted-models" in command,
                                receiver_evidence_policy=policy)
@@ -768,7 +784,7 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
         callback["phase_filter"] = fake_phase_filter(callback, 4001, sticky="--hf-phase-filter-sticky" in command,
                                                      bridge="--hf-phase-bridge" in command)
         callback["bit_log_e"] = list(callback["phase_filter"]["combined"]["bit_log_e"])
-    if "--service-replay" in command:
+    if "--service-replay" in command or "--hf-predictive-quiet" in command:
         plan = receipt["plan"]
         episodes = int(argument("--service-episodes", "1"))
         wire = plan.setdefault("wire_bits", 3)
@@ -834,6 +850,27 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
         add_fake_magnetoionic_receipt(receipt)
     if receipt["requested_scenario"] in runner.GANNON_REPLAY:
         add_fake_gannon_receipt(receipt)
+    if "--hf-predictive-quiet" in command:
+        receipt["plan"].update(hf_predictive_quiet_requested=True, hf_predictive_quiet_active=False)
+        if mode == "receive":
+            for row in receipt["slots"]:
+                row.update(operational_log_e=30. if row["decision"] == "data" else -2., operational_threshold=21.,
+                    bit_evidence=[-3., 31.] if row["decision"] == "data" else [-3., -1.], bit_separation=34.,
+                    quiet_energy=9., quiet_threshold=10.)
+            receipt["plan"]["predictive_training_reserved_bytes"] = 0
+            receipt.setdefault("timing", {}).update(wall_seconds=3., wall_includes_shared_render_per_policy=True)
+            receipt["receiver"].update(quiet_policy="canonical", predictive_training_seconds=0., predictive_training_reserved_bytes=0,
+                predictive_training_scanned_samples=0, predictive_training_scheduling="sequential_before_receiver_executor")
+            candidate = json.loads(json.dumps(receipt))
+            candidate["plan"].update(hf_predictive_quiet_active=True, predictive_training_reserved_bytes=1024)
+            candidate["receiver"].update(quiet_policy="independent_public_gap_line_prediction",
+                predictive_training_seconds=.1, predictive_training_reserved_bytes=1024,
+                predictive_training_scanned_samples=receipt["plan"]["horizon_samples"])
+            for row in candidate["slots"]:
+                row["predictive_quiet"] = fake_predictive_diagnostic(row)
+            receipt["hf_predictive_quiet_comparison"] = {"experimental": True,
+                "truth_information_passed_to_receiver": False, "rendered_once": True, "status": "completed",
+                "common_render_wall_seconds": 1., "candidate": candidate}
     return receipt
 
 
@@ -1659,6 +1696,20 @@ class CampaignValidationTests(unittest.TestCase):
                 with self.subTest(value=invalid), self.assertRaisesRegex(runner.CampaignError, "must be a boolean"):
                     runner._read_campaign(path)
 
+    def test_stop_on_predictive_regression_is_optional_and_strict_boolean(self) -> None:
+        campaign = valid_campaign()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.json"
+            for value in (False, True):
+                campaign["stop_on_predictive_regression"] = value
+                path.write_text(json.dumps(campaign))
+                self.assertIs(runner._read_campaign(path)["stop_on_predictive_regression"], value)
+            for invalid in (None, 0, 1, "true", []):
+                campaign["stop_on_predictive_regression"] = invalid
+                path.write_text(json.dumps(campaign))
+                with self.subTest(value=invalid), self.assertRaisesRegex(runner.CampaignError, "must be a boolean"):
+                    runner._read_campaign(path)
+
     def test_service_replay_inputs_and_argv_are_explicitly_bounded(self) -> None:
         episode = {"id": "service", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1,
                    "service_replay": True, "service_episodes": 2, "service_spool_byte_limit": 170000,
@@ -1685,6 +1736,220 @@ class CampaignValidationTests(unittest.TestCase):
         ordinary["service_episodes"] = 1
         with self.assertRaises(runner.CampaignError):
             runner._validate_episode(ordinary, 0, set(), 10, 10000)
+
+    def test_predictive_quiet_input_scope_preserves_physical_bounds(self) -> None:
+        episode = {"id": "predictive", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1,
+                   "hf_predictive_quiet": True, "service_spool_byte_limit": 170000, "owners": 2}
+        for mode in ("receive", "plan"):
+            declared = dict(episode, mode=mode)
+            runner._validate_episode(declared, 0, set(), 10, 10000)
+            command = runner._command(Path("/native/probe"), declared, 10000, 2)
+            self.assertIn("--hf-predictive-quiet", command)
+            self.assertNotIn("--service-replay", command)
+            runner._validate_completed_receipt(fake_completed_receipt(command), declared)
+        for override in ({"hf_predictive_quiet": 1}, {"helper": True}, {"backend": "cuda"},
+                         {"mode": "slot"}, {"waveform": "smoke"}, {"fec": "rs20"}, {"service_episodes": 2},
+                         {"service_replay": True}, {"hf_compare_admitted_models": True},
+                         {"hf_correlated_gain_receiver": True}, {"chunk": 4097}):
+            with self.subTest(override=override), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(episode, **override), 0, set(), 10, 10000)
+        physical = dict(episode, scenario="hf-vector-oblique-chain-clocks-tone", cn0_db_hz=30, bit_seconds=64)
+        runner._validate_episode(physical, 0, set(), 10, 10000)
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_episode(dict(physical, bit_seconds=128), 0, set(), 10, 10000)
+
+    def test_predictive_quiet_pair_rejects_nonmatched_or_changed_data(self) -> None:
+        episode = {"id": "predictive", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1,
+                   "hf_predictive_quiet": True}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 10000, 2))
+        runner._validate_completed_receipt(receipt, episode)
+        mutations = (((), "rendered_once", False), ((), "truth_information_passed_to_receiver", True),
+                     ((), "status", "error"), ((), "common_render_wall_seconds", 2.), (("candidate",), "source_identity", {}),
+                     (("candidate", "timing"), "wall_includes_shared_render_per_policy", False),
+                     (("candidate", "receiver"), "predictive_training_scanned_samples", 0),
+                     (("candidate", "receiver"), "predictive_training_scheduling", "concurrent_with_receiver"),
+                     (("candidate", "channel"), "input_sha256", "e" * 64),
+                     (("candidate", "plan"), "hf_predictive_quiet_active", False),
+                     (("candidate", "plan"), "public_bounds", {"different": True}),
+                     (("candidate", "slots", 0), "bit_evidence", [-3., 32.]),
+                     (("candidate", "slots", 0), "decision", "quiet"),
+                     (("candidate", "slots", 0), "predictive_quiet", None))
+        for path, key, value in mutations:
+            changed = json.loads(json.dumps(receipt))
+            target = changed["hf_predictive_quiet_comparison"]
+            for segment in path:
+                target = target[segment]
+            target[key] = value
+            with self.subTest(path=path, key=key), self.assertRaises(runner.CampaignError):
+                runner._validate_completed_receipt(changed, episode)
+        missing = json.loads(json.dumps(receipt))
+        del missing["hf_predictive_quiet_comparison"]
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_completed_receipt(missing, episode)
+        nested = json.loads(json.dumps(receipt))
+        nested["hf_predictive_quiet_comparison"]["candidate"]["hf_predictive_quiet_comparison"] = {}
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_completed_receipt(nested, episode)
+        ordinary = dict(episode, hf_predictive_quiet=False)
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_completed_receipt(receipt, ordinary)
+
+    def test_predictive_quiet_acceptance_requires_causal_disjoint_guards(self) -> None:
+        plan = {"public_slots": [{"observation": {"first": 200 * i, "stop": 200 * i + 100}} for i in range(4)]}
+        baseline = {"index": 3, "first_sample": 600, "stop_sample": 700, "quiet_first_sample": 600,
+                    "quiet_stop_sample": 700, "decision": "ambiguous", "complete": True, "all_valid": True,
+                    "operational_log_e": 1., "operational_threshold": 21., "quiet_energy": 100., "quiet_threshold": 10.}
+        proposed = dict(baseline, decision="quiet", quiet_energy=9.,
+                        reason="scored_public_quiet_with_independent_line_prediction")
+        diagnostic = fake_predictive_diagnostic(baseline)
+        diagnostic.update(attempted=True, accepted=True, training_status="validated_prior_stationary_line",
+            status="predictive_quiet_passed_both_bands", frequency_first={"first": 110, "stop": 190},
+            frequency_second={"first": 310, "stop": 390}, amplitude={"first": 510, "stop": 564},
+            validation={"first": 564, "stop": 590}, amplitude_magnitude=.3,
+            frequency_first_proposal={"first": 110, "stop": 130}, frequency_first_confirmation={"first": 130, "stop": 190},
+            frequency_second_proposal={"first": 310, "stop": 330}, frequency_second_confirmation={"first": 330, "stop": 390},
+            frequency_lower_hz=-.0001, frequency_upper_hz=.0001, frequency_confidence_exclusion_probability=1e-6,
+            frequency_coherent_nodes=9, frequency_band_nodes=9, coherent_interpolation_norm=.01, band_interpolation_norm=.01,
+            validation_line_residual=1., validation_energy=9., validation_threshold=10.,
+            line_direction_gain_squared=54 / 154, coherent_residual=1., coherent_threshold=21.,
+            legacy_energy=9., legacy_threshold=10., legacy_modes=10,
+            expanded_energy=9., expanded_threshold=11., expanded_modes=11)
+        runner._validate_predictive_slot(diagnostic, baseline, proposed, plan, True)
+        for key, value in (("accepted", False), ("attempted", False), ("training_status", "invalid_public_training_gap"),
+                           ("amplitude", {"first": 380, "stop": 550}), ("validation", {"first": 550, "stop": 601}),
+                           ("frequency_first", {"first": 50, "stop": 190}), ("line_direction_gain_squared", 0.),
+                           ("coherent_residual", 22.), ("coherent_threshold", 22.),
+                           ("legacy_threshold", 11.), ("expanded_energy", 12.), ("raw_quiet_energy", 90.),
+                           ("validation_line_residual", 22.), ("legacy_modes", 0),
+                           ("frequency_confidence_exclusion_probability", 1e-5), ("frequency_upper_hz", .003),
+                           ("frequency_band_nodes", 8), ("frequency_coherent_nodes", 10), ("band_interpolation_norm", 4.),
+                           ("frequency_first_proposal", {"first": 110, "stop": 131}),
+                           ("frequency_second_confirmation", {"first": 329, "stop": 390})):
+            with self.subTest(field=key), self.assertRaises(runner.CampaignError):
+                runner._validate_predictive_slot(dict(diagnostic, **{key: value}), baseline, proposed, plan, True)
+
+    def test_predictive_frequency_selection_is_fixed_by_public_confirmation_geometry(self) -> None:
+        def geometry(period=200, width=100, fs=10):
+            return {"sample_rate_hz": fs, "public_slots": [
+                {"observation": {"first": period*i, "stop": period*i+width},
+                 "public_profile_observation": {"first": period*i, "stop": period*i+width},
+                 "previous_signal_stop": period*(i-1)+width if i else 0,
+                 "next_signal_first": period*(i+1)} for i in range(6)]}
+        plan = geometry()
+        self.assertEqual(runner._predictive_frequency_selection(plan, 4), (2, "adjacent_gaps"))
+        self.assertEqual(runner._predictive_frequency_selection(plan, 5), (1, "separated_gaps"))
+        self.assertEqual(runner._predictive_frequency_selection(geometry(period=2000, width=1000), 5), (3, "adjacent_gaps"))
+        missing_long_gap = json.loads(json.dumps(plan))
+        missing_long_gap["public_slots"][1]["previous_signal_stop"] = 200
+        self.assertEqual(runner._predictive_frequency_selection(missing_long_gap, 5), (3, "adjacent_gaps"))
+        limited = geometry(period=200000, width=100000, fs=1920)
+        self.assertEqual(runner._predictive_public_gap(limited, 1), {"first": 200000-65536, "stop": 200000})
+        # Scored observations cannot replace the original PublicProfile bounds.
+        distinct = json.loads(json.dumps(plan))
+        distinct["public_slots"][0]["observation"] = {"first": 0, "stop": 150}
+        self.assertEqual(runner._predictive_public_gap(distinct, 1), {"first": 100, "stop": 200})
+        del distinct["public_slots"][0]["public_profile_observation"]
+        with self.assertRaises(runner.CampaignError):
+            runner._predictive_frequency_selection(distinct, 5)
+
+    def test_predictive_separated_baseline_cannot_fall_back_after_failed_calibration(self) -> None:
+        plan = {"sample_rate_hz": 10, "public_slots": [
+            {"observation": {"first": i*200, "stop": i*200+100},
+             "public_profile_observation": {"first": i*200, "stop": i*200+100},
+             "previous_signal_stop": (i-1)*200+100 if i else 0, "next_signal_first": (i+1)*200}
+            for i in range(6)]}
+        baseline = {"index": 5, "first_sample": 1000, "stop_sample": 1100, "quiet_first_sample": 1000,
+                    "quiet_stop_sample": 1100, "decision": "ambiguous", "complete": True, "all_valid": True,
+                    "operational_log_e": 1., "operational_threshold": 21., "quiet_energy": 100., "quiet_threshold": 10.}
+        proposed = dict(baseline, decision="quiet", quiet_energy=9.,
+                        reason="scored_public_quiet_with_independent_line_prediction")
+        diagnostic = fake_predictive_diagnostic(baseline)
+        diagnostic.update(attempted=True, accepted=True, training_status="validated_prior_stationary_line",
+            status="predictive_quiet_passed_both_bands", frequency_first={"first": 100, "stop": 200},
+            frequency_second={"first": 700, "stop": 800}, amplitude={"first": 900, "stop": 967},
+            validation={"first": 967, "stop": 1000}, amplitude_magnitude=.3,
+            frequency_first_proposal={"first": 100, "stop": 125}, frequency_first_confirmation={"first": 125, "stop": 200},
+            frequency_second_proposal={"first": 700, "stop": 725}, frequency_second_confirmation={"first": 725, "stop": 800},
+            frequency_lower_hz=-.0001, frequency_upper_hz=.0001, frequency_confidence_exclusion_probability=1e-6,
+            frequency_coherent_nodes=9, frequency_band_nodes=9, coherent_interpolation_norm=.01, band_interpolation_norm=.01,
+            validation_line_residual=1., validation_energy=9., validation_threshold=10.,
+            line_direction_gain_squared=67 / 167, coherent_residual=1., coherent_threshold=21.,
+            legacy_energy=9., legacy_threshold=10., legacy_modes=10, expanded_energy=9., expanded_threshold=11., expanded_modes=11,
+            frequency_first_gap_slot=1, frequency_second_gap_slot=4, frequency_baseline="separated_gaps",
+            frequency_consistency="compatible_short_tube")
+        rule = "public_confirmation_centroid_360s_v1"
+        runner._validate_predictive_slot(diagnostic, baseline, proposed, plan, True, frequency_rule=rule)
+        allowed_ambiguity = dict(diagnostic, frequency_consistency="no_unique_short_tube")
+        runner._validate_predictive_slot(allowed_ambiguity, baseline, proposed, plan, True, frequency_rule=rule)
+        for key, value in (("frequency_first_gap_slot", 3), ("frequency_baseline", "adjacent_gaps"),
+                           ("frequency_consistency", "disjoint_short_tube"), ("frequency_consistency", "not_applicable")):
+            with self.subTest(field=key, value=value), self.assertRaises(runner.CampaignError):
+                runner._validate_predictive_slot(dict(diagnostic, **{key: value}), baseline, proposed, plan, True, frequency_rule=rule)
+        fallback = dict(diagnostic, attempted=False, accepted=False, frequency_first_gap_slot=3,
+                        frequency_baseline="adjacent_gaps", training_status="no_clean_coherent_frequency_gaps",
+                        status="canonical_decision_retained", frequency_consistency="not_applicable")
+        with self.assertRaisesRegex(runner.CampaignError, "score-dependent fallback"):
+            runner._validate_predictive_slot(fallback, baseline, baseline, plan, False, frequency_rule=rule)
+        with self.assertRaisesRegex(runner.CampaignError, "historical adjacent-only"):
+            runner._validate_predictive_slot(diagnostic, baseline, proposed, plan, True)
+        with self.assertRaisesRegex(runner.CampaignError, "unknown predictive"):
+            runner._validate_predictive_slot(diagnostic, baseline, proposed, plan, True, frequency_rule="unknown")
+        three = dict(diagnostic)
+        del three["frequency_consistency"]
+        three.update(frequency_interval_rule="fixed_three_witness_intersection_v1", frequency_middle_gap_slot=3,
+            frequency_middle={"first": 500, "stop": 600}, frequency_middle_proposal={"first": 500, "stop": 525},
+            frequency_middle_confirmation={"first": 525, "stop": 600}, frequency_witness_count=3,
+            frequency_older_pair_intervals=2, frequency_adjacent_pair_intervals=2, frequency_joint_intervals=1)
+        three_rule = "public_confirmation_centroid_360s_three_witness_v2"
+        # Each pair may be ambiguous before their merged intersection becomes
+        # unique. Requiring pair uniqueness would wrongly reject this case.
+        runner._validate_predictive_slot(three, baseline, proposed, plan, True, frequency_rule=three_rule)
+        for key, value in (("frequency_middle_gap_slot", 2), ("frequency_middle", {"first": 0, "stop": 0}),
+                           ("frequency_middle_confirmation", {"first": 524, "stop": 600}), ("frequency_witness_count", 2),
+                           ("frequency_older_pair_intervals", 0), ("frequency_adjacent_pair_intervals", 0),
+                           ("frequency_joint_intervals", 2), ("frequency_older_pair_intervals", 129),
+                           ("frequency_joint_intervals", 256), ("frequency_interval_rule", "unknown"),
+                           ("frequency_consistency", "compatible_short_tube")):
+            with self.subTest(three_witness_field=key), self.assertRaises(runner.CampaignError):
+                runner._validate_predictive_slot(dict(three, **{key: value}), baseline, proposed, plan, True, frequency_rule=three_rule)
+        incomplete = dict(three)
+        del incomplete["frequency_middle_confirmation"]
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_predictive_slot(incomplete, baseline, proposed, plan, True, frequency_rule=three_rule)
+        with self.assertRaisesRegex(runner.CampaignError, "historical two-witness"):
+            runner._validate_predictive_slot(three, baseline, proposed, plan, True, frequency_rule=rule)
+        missing_middle_plan = json.loads(json.dumps(plan))
+        missing_middle_plan["public_slots"][3]["previous_signal_stop"] = 600
+        absent = dict(three, frequency_middle={"first": 0, "stop": 0},
+                      frequency_middle_proposal={"first": 0, "stop": 0}, frequency_middle_confirmation={"first": 0, "stop": 0})
+        with self.assertRaisesRegex(runner.CampaignError, "unique merged intersection"):
+            runner._validate_predictive_slot(absent, baseline, proposed, missing_middle_plan, True, frequency_rule=three_rule)
+
+    def test_predictive_three_witness_adjacent_and_unavailable_states_remain_explicit(self) -> None:
+        diagnostic = {"frequency_interval_rule": "fixed_three_witness_intersection_v1", "frequency_middle_gap_slot": 0,
+            "frequency_middle": {"first": 0, "stop": 0}, "frequency_middle_proposal": {"first": 0, "stop": 0},
+            "frequency_middle_confirmation": {"first": 0, "stop": 0}, "frequency_witness_count": 2,
+            "frequency_older_pair_intervals": 0, "frequency_adjacent_pair_intervals": 1, "frequency_joint_intervals": 1}
+        runner._validate_predictive_three_witness(diagnostic, {}, 3, "adjacent_gaps", True)
+        for key, value in (("frequency_witness_count", 3), ("frequency_older_pair_intervals", 1),
+                           ("frequency_adjacent_pair_intervals", 2), ("frequency_middle_gap_slot", 1)):
+            with self.subTest(field=key), self.assertRaises(runner.CampaignError):
+                runner._validate_predictive_three_witness(dict(diagnostic, **{key: value}), {}, 3, "adjacent_gaps", True)
+        unavailable = dict(diagnostic, frequency_witness_count=0, frequency_adjacent_pair_intervals=0, frequency_joint_intervals=0)
+        runner._validate_predictive_three_witness(unavailable, {}, 0, "unavailable", False)
+        episode = {"id": "predictive", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1,
+                   "hf_predictive_quiet": True}
+        receipt = fake_completed_receipt(runner._command(Path("/native/probe"), episode, 10000, 2))
+        candidate = receipt["hf_predictive_quiet_comparison"]["candidate"]
+        receipt["receiver"]["predictive_frequency_baseline_rule"] = "none"
+        candidate["receiver"]["predictive_frequency_baseline_rule"] = "public_confirmation_centroid_360s_three_witness_v2"
+        for slot in candidate["slots"]:
+            slot["predictive_quiet"].update(unavailable, frequency_first_gap_slot=0,
+                frequency_second_gap_slot=0, frequency_baseline="unavailable")
+        runner._validate_completed_receipt(receipt, episode)
+        candidate["receiver"]["predictive_frequency_baseline_rule"] = "public_confirmation_centroid_360s_v1"
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_completed_receipt(receipt, episode)
 
     def test_service_receipt_binds_full_work_timing_hashes_and_reservations(self) -> None:
         episode = {"id": "service", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1,
@@ -4340,6 +4605,86 @@ class CampaignExecutionTests(unittest.TestCase):
         kwargs["stdout"].write((json.dumps(fake_completed_receipt(command)) + "\n").encode())
         kwargs["stderr"].write(b"")
         return subprocess.CompletedProcess(command, 0)
+
+    def test_predictive_regression_gate_stops_only_opted_in_valid_pairs(self) -> None:
+        campaign = valid_campaign()
+        campaign.pop("confirmatory_strata")
+        campaign["max_wall_seconds"] = 10
+        for episode in campaign["episodes"]:
+            episode.pop("stratum")
+            episode.update(waveform="reference", hf_predictive_quiet=True, control="wrong-key")
+        def validated_trial(probe, episode, samples, timeout, directory, index):
+            # A supplied validated-trial boundary isolates the batch rule; this
+            # fixture is not a second implementation of the native receiver.
+            receipt = fake_completed_receipt(runner._command(probe, episode, 10000, timeout))
+            candidate = receipt["hf_predictive_quiet_comparison"]["candidate"]
+            candidate["outcomes"].update(accepted_messages=1, premature_completions=0)
+            candidate["messages"] = [{"decoded": True, "matches_transmitted_message": True}]
+            return {"episode": episode, "receipt": receipt, "status": "completed", "elapsed_seconds": .01}
+        for flag, expected_count in ((None, 2), (False, 2), (True, 1)):
+            if flag is None:
+                campaign.pop("stop_on_predictive_regression", None)
+            else:
+                campaign["stop_on_predictive_regression"] = flag
+            self.campaign_file.write_text(json.dumps(campaign))
+            with patch.object(runner, "_trial", side_effect=validated_trial) as trial:
+                run = runner.run_campaign(self.probe, self.campaign_file, self.work / f"predictive-stop-{flag}")
+            self.assertEqual(trial.call_count, expected_count)
+            self.assertEqual(run["executed_trials"], expected_count)
+            self.assertEqual(run["execution_failures"], 0)
+            self.assertEqual(run["trials"][0]["status"], "completed")
+            self.assertEqual(run["trials"][0]["predictive_regressions"], ["increased_accepted_incorrect_messages"])
+            self.assertEqual(run["stop_reason"], "predictive_receiver_regression" if flag else None)
+            self.assertEqual(run["status"], "incomplete_checks" if flag else "completed")
+        trial = validated_trial(self.probe, campaign["episodes"][0], 10000, 2, self.work, 0)
+        self.assertEqual(runner._predictive_regressions(dict(trial, status="invalid_receipt")), [])
+        trial["receipt"]["hf_predictive_quiet_comparison"]["status"] = "time_limit"
+        self.assertEqual(runner._predictive_regressions(trial), [])
+
+    def test_predictive_regression_gate_covers_delivery_loss_and_premature_completion(self) -> None:
+        episode = {"id": "predictive", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1,
+                   "hf_predictive_quiet": True}
+        receipt = fake_completed_receipt(runner._command(self.probe, episode, 10000, 2))
+        trial = {"episode": episode, "receipt": receipt, "status": "completed"}
+        self.assertEqual(runner._predictive_regressions(trial), [])
+        receipt["outcomes"]["correct_complete"] = True
+        candidate = receipt["hf_predictive_quiet_comparison"]["candidate"]
+        candidate["outcomes"]["premature_completions"] = 1
+        self.assertEqual(runner._predictive_regressions(trial),
+                         ["increased_premature_completions", "lost_required_complete_delivery"])
+        candidate["outcomes"]["accepted_messages"] = 1
+        candidate["messages"] = [{"decoded": True, "matches_transmitted_message": False}]
+        self.assertEqual(runner._predictive_regressions(trial), ["increased_accepted_incorrect_messages",
+                         "increased_premature_completions", "lost_required_complete_delivery"])
+
+    def test_predictive_quiet_candidate_failure_is_not_a_completed_trial(self) -> None:
+        episode = {"id": "predictive", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1,
+                   "hf_predictive_quiet": True}
+        def failed_candidate(command, out, err, timeout, options):
+            receipt = fake_completed_receipt(command)
+            comparison = receipt["hf_predictive_quiet_comparison"]
+            comparison["status"] = "time_limit"
+            comparison["candidate"]["status"] = "time_limit"
+            comparison["candidate"]["reason"] = "bounded candidate failure fixture"
+            comparison["candidate"]["service_replay"].update(work_complete=False, communication_complete=False)
+            out.write(json.dumps(receipt).encode())
+            return 4, None
+        with patch.object(runner, "_run_service_child", side_effect=failed_candidate):
+            trial = runner._trial(self.probe, episode, 10000, 2, self.work, 0)
+        self.assertEqual(trial["status"], "time_limit", trial.get("error"))
+        self.assertEqual(trial["receipt"]["status"], "completed")
+        summary = runner._predictive_comparison_summary([trial])
+        self.assertEqual(len(summary["pairs"]), 1)
+        self.assertEqual(summary["pairs"][0]["baseline"]["status"], "completed")
+        self.assertEqual(summary["pairs"][0]["candidate"]["status"], "time_limit")
+        self.assertEqual(runner._wanted_outcome_summary([trial])["completed_trials"], 0)
+        self.assertEqual(trial["child_file_limit_bytes"], runner.MAX_OUTPUT_BYTES)
+        for malformed in (None, [], {"candidate": None}, {"candidate": {"outcomes": None, "service_replay": None}}):
+            invalid = {"episode": episode, "status": "invalid_receipt",
+                       "receipt": {"hf_predictive_quiet_comparison": malformed}}
+            summary = runner._predictive_comparison_summary([invalid])
+            self.assertEqual(summary["pairs"][0]["trial_status"], "invalid_receipt")
+            self.assertIsNone(summary["pairs"][0]["candidate"]["correct_complete"])
 
     @unittest.skipUnless(os.name == "posix" and runner.resource is not None, "POSIX file-size limit discriminator")
     def test_service_spool_larger_than_output_limit_has_its_own_bounded_file_cap(self) -> None:

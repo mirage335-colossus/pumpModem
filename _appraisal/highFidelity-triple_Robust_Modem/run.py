@@ -43,7 +43,7 @@ MAX_OUTPUT_BYTES = 8 * 1024 * 1024
 MAX_CAMPAIGN_OUTPUT_BYTES = 256 * 1024 * 1024
 ROOT_KEYS = {"schema_version", "name", "purpose", "max_wall_seconds", "per_trial_wall_seconds",
              "max_trials", "max_samples", "episodes", "confirmatory_strata",
-             "stop_on_execution_failure"}
+             "stop_on_execution_failure", "stop_on_predictive_regression"}
 GUI_DEFAULTS = {
     "gui_spread": "hf-worst", "gui_selective": "each-65", "gui_arrival": "tight",
     "gui_margin": 3, "gui_audio_ppm": 100, "gui_rf_ppm": 1,
@@ -210,7 +210,7 @@ EPISODE_KEYS = {"id", "scenario", "mode", "waveform", "seed", "cn0_db_hz", "cont
                 "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "fec", "fade_slots", "capture_lead_seconds",
                 "hf_trajectory_seed", "hf_trajectory_offset_seconds", "noise_seed", "hf_gannon_native_diagnostic",
                 "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic",
-                "hf_correlated_gain_shadow", "hf_correlated_gain_receiver", "reception_requirement"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS
+                "hf_correlated_gain_shadow", "hf_correlated_gain_receiver", "hf_predictive_quiet", "reception_requirement"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS
 MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose", "hf-search", "gui-varying"}
 CONTROLS = {"wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap", "eof"}
 BACKENDS = {"cpu", "cuda", "vulkan", "gpu"}
@@ -219,6 +219,10 @@ STATUSES = {"completed", "resource_limit", "time_limit", "unavailable", "error"}
 
 class CampaignError(ValueError):
     pass
+
+
+def _uses_spool(episode: dict[str, Any]) -> bool:
+    return episode.get("service_replay", False) or episode.get("hf_predictive_quiet", False)
 
 
 def _sha256(path: Path) -> str:
@@ -250,9 +254,9 @@ def _read_campaign(path: Path) -> dict[str, Any]:
     _nonempty_str(value["name"], "name")
     if "purpose" in value and not isinstance(value["purpose"], str):
         raise CampaignError("purpose must be a string")
-    if ("stop_on_execution_failure" in value and
-            not isinstance(value["stop_on_execution_failure"], bool)):
-        raise CampaignError("stop_on_execution_failure must be a boolean")
+    for field in ("stop_on_execution_failure", "stop_on_predictive_regression"):
+        if field in value and not isinstance(value[field], bool):
+            raise CampaignError(f"{field} must be a boolean")
     for key, minimum, maximum in (("max_wall_seconds", 1, 86400),
                                   ("per_trial_wall_seconds", 1, 3600),
                                   ("max_trials", 1, 100), ("max_samples", 1, 100_000_000)):
@@ -284,7 +288,7 @@ def _read_campaign(path: Path) -> dict[str, Any]:
                             "message", "max_wall_seconds", "max_samples", "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "fec", "fade_slots", "capture_lead_seconds",
                             "hf_trajectory_seed", "hf_trajectory_offset_seconds", "hf_gannon_native_diagnostic",
                             "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic",
-                            "hf_correlated_gain_shadow", "hf_correlated_gain_receiver") + tuple(sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS))
+                            "hf_correlated_gain_shadow", "hf_correlated_gain_receiver", "hf_predictive_quiet") + tuple(sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS))
         reference = matched[0]
         heterogeneous = [field for field in invariant_fields
                          if any(episode.get(field) != reference.get(field) for episode in matched[1:])]
@@ -418,7 +422,7 @@ def _validate_episode(item: Any, index: int, ids: set[str],
     if "history_reference_delay_seconds" in item:
         _bounded_number(item["history_reference_delay_seconds"],
                         f"episodes[{index}].history_reference_delay_seconds", 0, sys.float_info.max)
-    for field in ("hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic"):
+    for field in ("hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "hf_predictive_quiet"):
         if field in item and not isinstance(item[field], bool):
             raise CampaignError(f"episodes[{index}].{field} must be boolean")
     if "chunk" in item:
@@ -447,9 +451,9 @@ def _validate_episode(item: Any, index: int, ids: set[str],
         raise CampaignError(f"episodes[{index}].helper must be boolean")
     if "service_replay" in item and not isinstance(item["service_replay"], bool):
         raise CampaignError(f"episodes[{index}].service_replay must be boolean")
-    service_requested = item.get("service_replay", False)
+    service_requested = _uses_spool(item)
     if (SERVICE_FIELDS - {"service_replay"}) & item.keys() and not service_requested:
-        raise CampaignError(f"episodes[{index}]: service options require service_replay")
+        raise CampaignError(f"episodes[{index}]: service options require service_replay or hf_predictive_quiet")
     if "service_episodes" in item:
         _bounded_number(item["service_episodes"], f"episodes[{index}].service_episodes", 1, 2, integer=True)
     if "owners" in item:
@@ -475,6 +479,17 @@ def _validate_episode(item: Any, index: int, ids: set[str],
             raise CampaignError(f"episodes[{index}]: service replay requires receive/plan and chunks no larger than 4096")
         if item.get("service_episodes", 1) == 2 and control not in {"wanted", "noise", "wrong-key", "wrong-ordinal"}:
             raise CampaignError(f"episodes[{index}]: two service episodes require wanted/noise/wrong-key/wrong-ordinal")
+    if item.get("hf_predictive_quiet", False):
+        incompatible = ("service_replay", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic",
+                        "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths",
+                        "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models",
+                        "hf_gui_clean_diagnostic", "hf_gannon_native_diagnostic", "hf_gannon_gain_variance_diagnostic",
+                        "hf_target_presence_diagnostic", "hf_correlated_gain_shadow", "hf_correlated_gain_receiver")
+        if (mode not in {"plan", "receive"} or item.get("helper", False) or
+                item.get("backend", "cpu") != "cpu" or item["waveform"] != "reference" or
+                item.get("fec", "off") != "off" or item.get("service_episodes", 1) != 1 or
+                any(item.get(field, False) for field in incompatible)):
+            raise CampaignError(f"episodes[{index}]: predictive quiet requires exclusive Helper-off reference CPU plan/receive, FEC off and one episode")
     if item["scenario"] == "hf-gui-native":
         if (mode not in {"plan", "slot", "receive", "gui-varying"} or item["waveform"] != "reference" or
                 item.get("pulse", "rrc") != "rrc" or
@@ -754,6 +769,7 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
                         ("hf_gannon_gain_variance_diagnostic", "--hf-gannon-gain-variance-diagnostic"),
                         ("hf_correlated_gain_shadow", "--hf-correlated-gain-shadow"),
                         ("hf_correlated_gain_receiver", "--hf-correlated-gain-receiver"),
+                        ("hf_predictive_quiet", "--hf-predictive-quiet"),
                         ("hf_target_presence_diagnostic", "--hf-target-presence-diagnostic"),
                         ("backend", "--backend"), ("bit_seconds", "--bit-seconds"),
                         ("duration_seconds", "--duration-seconds"), ("oracle_slot", "--oracle-slot"),
@@ -780,7 +796,7 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
                             (key, "--" + key.replace("_", "-")) for key in sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS)):
         if key in episode:
             value = episode[key]
-            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "hf_gannon_native_diagnostic", "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic", "hf_correlated_gain_shadow", "hf_correlated_gain_receiver", "gui_clock_edge", "service_replay"}:
+            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "hf_gannon_native_diagnostic", "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic", "hf_correlated_gain_shadow", "hf_correlated_gain_receiver", "hf_predictive_quiet", "gui_clock_edge", "service_replay"}:
                 if value:
                     command.append(option)
             else:
@@ -960,7 +976,7 @@ def _validate_refinement_trace(trace: Any, *, full: bool, timing_count: int,
 
 
 def _communication_endpoint(episode: dict[str, Any]) -> str:
-    if episode.get("service_replay", False) and episode.get("service_episodes", 1) == 2:
+    if _uses_spool(episode) and episode.get("service_episodes", 1) == 2:
         return "service_replay.communication_complete"
     return "correct_decoded_complete" if episode.get("fec", "off") != "off" else "correct_complete"
 
@@ -1570,7 +1586,7 @@ def _validate_gain_partitions(physical: dict[str, Any], sample_rate: Any, sample
 def _validate_service_plan(receipt: dict[str, Any], episode: dict[str, Any]) -> dict[str, Any] | None:
     plan = receipt.get("plan")
     service = plan.get("service_replay") if isinstance(plan, dict) else None
-    if not episode.get("service_replay", False):
+    if not _uses_spool(episode):
         if service is not None or receipt.get("service_replay") is not None:
             raise CampaignError("unrequested native service replay receipt")
         return None
@@ -1638,7 +1654,7 @@ def _validate_service_replay(receipt: dict[str, Any], episode: dict[str, Any]) -
     service_plan = _validate_service_plan(receipt, episode)
     replay = receipt.get("service_replay")
     if replay is None:
-        if episode.get("service_replay", False) and episode["mode"] == "receive" and receipt.get("status") == "completed":
+        if _uses_spool(episode) and episode["mode"] == "receive" and receipt.get("status") == "completed":
             raise CampaignError("completed service receive requires its full replay measurement")
         return
     if episode["mode"] != "receive" or not isinstance(replay, dict) or service_plan is None:
@@ -2245,7 +2261,7 @@ def _validate_fullwave_reflection(receipt: dict[str, Any], episode: dict[str, An
     if (not isinstance(timing, dict) or any(not _is_finite_number(timing.get(field)) for field in
             ("channel_preparation_seconds", "wall_seconds")) or
             not full["preparation_seconds"] <= timing["channel_preparation_seconds"] <= timing["wall_seconds"] or
-            timing.get("isolated_receiver_service_measured") is not False or timing.get("capacity_qualified") is not False):
+            timing.get("isolated_receiver_service_measured") is not _uses_spool(episode) or timing.get("capacity_qualified") is not False):
         raise CampaignError("full-wave table construction must remain charged to preparation and total wall time, without a receiver service claim")
     low, high = full.get("source_minimum_frequency_hz"), full.get("source_maximum_frequency_hz")
     if not _is_finite_number(low) or not _is_finite_number(high) or not -768 <= low <= high <= 768:
@@ -4828,7 +4844,7 @@ def _validate_magnetoionic_reflection(receipt: dict[str, Any], episode: dict[str
                 raise CampaignError("magnetoionic oracle table construction must remain within its recorded wall time")
         elif (not isinstance(timing, dict) or any(not _is_finite_number(timing.get(k)) for k in ("channel_preparation_seconds", "wall_seconds")) or
                 not full["preparation_seconds"] <= timing["channel_preparation_seconds"] <= timing["wall_seconds"] or
-                timing.get("isolated_receiver_service_measured") is not False or timing.get("capacity_qualified") is not False):
+                timing.get("isolated_receiver_service_measured") is not _uses_spool(episode) or timing.get("capacity_qualified") is not False):
             raise CampaignError("magnetoionic table construction remains charged to preparation and wall time")
         regions = full.get("regions")
         if not isinstance(regions, list) or len(regions) != 3:
@@ -5005,7 +5021,379 @@ def _validate_known_target(receipt: dict[str, Any], episode: dict[str, Any]) -> 
         raise CampaignError("target-presence preparation and rendering must be included in total wall time")
 
 
-def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+def _predictive_incorrect_messages(receipt: dict[str, Any], episode: dict[str, Any]) -> int:
+    messages, outcomes = receipt.get("messages"), receipt.get("outcomes", {})
+    if (not isinstance(messages, list) or not _is_nonnegative_int(outcomes.get("accepted_messages")) or
+            any(not isinstance(message, dict) or not isinstance(message.get("decoded"), bool) for message in messages)):
+        raise CampaignError("predictive comparison requires complete decoded-message counts")
+    accepted = [message for message in messages if message["decoded"]]
+    if (len(accepted) != outcomes["accepted_messages"] or
+            any(not isinstance(message.get("matches_transmitted_message"), bool) for message in accepted)):
+        raise CampaignError("predictive comparison accepted messages must match its native aggregate and payload comparison")
+    if episode.get("control", "wanted") in {"noise", "wrong-key", "wrong-ordinal"}:
+        return len(accepted)
+    return sum(not message["matches_transmitted_message"] for message in accepted)
+
+
+def _predictive_regressions(trial: dict[str, Any]) -> list[str]:
+    episode, baseline = trial.get("episode", {}), trial.get("receipt", {})
+    if (trial.get("status") != "completed" or not episode.get("hf_predictive_quiet", False) or
+            episode.get("mode") != "receive" or baseline.get("status") != "completed"):
+        return []
+    comparison = baseline.get("hf_predictive_quiet_comparison", {})
+    candidate = comparison.get("candidate", {})
+    if comparison.get("status") != "completed" or candidate.get("status") != "completed":
+        return []
+    old, new = baseline["outcomes"], candidate["outcomes"]
+    reasons = []
+    if _predictive_incorrect_messages(candidate, episode) > _predictive_incorrect_messages(baseline, episode):
+        reasons.append("increased_accepted_incorrect_messages")
+    if new["premature_completions"] > old["premature_completions"]:
+        reasons.append("increased_premature_completions")
+    if old["correct_complete"] is True and new["correct_complete"] is False:
+        reasons.append("lost_required_complete_delivery")
+    return reasons
+
+
+def _validate_predictive_comparison(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    comparison = receipt.get("hf_predictive_quiet_comparison")
+    requested = episode.get("hf_predictive_quiet", False)
+    if not requested:
+        if (comparison is not None or receipt.get("receiver", {}).get("quiet_policy") == "independent_public_gap_line_prediction" or
+                any(isinstance(slot, dict) and "predictive_quiet" in slot for slot in receipt.get("slots", []))):
+            raise CampaignError("unrequested predictive quiet comparison or slot policy")
+        return
+    if episode["mode"] == "plan":
+        if comparison is not None:
+            raise CampaignError("predictive quiet plan must not claim executed receiver comparison")
+        return
+    if comparison is None and receipt.get("status") != "completed":
+        return  # Rendering can fail before either receiver is constructed.
+    if (not isinstance(comparison, dict) or comparison.get("experimental") is not True or
+            comparison.get("truth_information_passed_to_receiver") is not False or
+            comparison.get("rendered_once") is not True):
+        raise CampaignError("predictive quiet requires one rendered input and explicit experimental public-input scope")
+    candidate = comparison.get("candidate")
+    if (not isinstance(candidate, dict) or candidate.get("schema_version") != 1 or
+            isinstance(candidate.get("schema_version"), bool) or candidate.get("status") not in STATUSES or
+            "hf_predictive_quiet_comparison" in candidate):
+        raise CampaignError("predictive quiet requires one nonrecursive complete native candidate receipt")
+    expected_status = receipt.get("status") if receipt.get("status") != "completed" else candidate["status"]
+    if comparison.get("status") != expected_status:
+        raise CampaignError("predictive quiet comparison status must preserve either receiver execution failure")
+    if candidate.get("status") == "completed":
+        _validate_completed_receipt(candidate, episode, _predictive_candidate=True)
+    else:
+        _validate_service_replay(candidate, episode)
+    if candidate.get("source_identity") != receipt.get("source_identity"):
+        raise CampaignError("predictive quiet replays must use identical source and binary provenance")
+    for field in ("requested_scenario", "mode", "waveform", "seed", "control", "scenario", "source", "channel"):
+        if candidate.get("status") != "completed" and field not in candidate:
+            continue  # A construction failure may precede source/channel finalization.
+        if candidate.get(field) != receipt.get(field):
+            raise CampaignError(f"predictive quiet replays must preserve the identical rendered {field}")
+    baseline_plan, candidate_plan = receipt.get("plan"), candidate.get("plan")
+    if not isinstance(baseline_plan, dict) or not isinstance(candidate_plan, dict):
+        raise CampaignError("predictive quiet comparison requires both native public plans")
+    if (baseline_plan.get("hf_predictive_quiet_requested") is not True or
+            baseline_plan.get("hf_predictive_quiet_active") is not False or
+            candidate_plan.get("hf_predictive_quiet_requested") is not True or
+            candidate_plan.get("hf_predictive_quiet_active") is not True):
+        raise CampaignError("predictive quiet comparison must identify canonical and candidate roles")
+    for field in ("public_slots", "public_bounds", "receiver_resources", "service_replay", "sample_rate_hz",
+                  "horizon_samples", "scored_slot_horizon", "wire_bits", "requested_bit_seconds",
+                  "message", "requested_message", "fec", "helper_enabled", "cn0_db_hz", "max_samples", "max_wall_seconds"):
+        if candidate_plan.get(field) != baseline_plan.get(field):
+            raise CampaignError(f"predictive quiet replays changed public geometry or resource contract: {field}")
+    if receipt.get("status") != "completed" or candidate["status"] != "completed":
+        return  # Partial work remains an execution failure, never a repair pass.
+    for member, policy in ((receipt, "canonical"), (candidate, "independent_public_gap_line_prediction")):
+        replay, receiver, plan = member.get("service_replay", {}), member.get("receiver", {}), member["plan"]
+        if replay.get("work_complete") is not True or replay.get("digest_match") is not True:
+            raise CampaignError("completed predictive quiet comparison requires two complete verified spool replays")
+        _predictive_incorrect_messages(member, episode)
+        if not _is_nonnegative_int(member.get("outcomes", {}).get("premature_completions")):
+            raise CampaignError("predictive comparison requires explicit native premature completion counts")
+        reserve, seconds = receiver.get("predictive_training_reserved_bytes"), receiver.get("predictive_training_seconds")
+        if (receiver.get("quiet_policy") != policy or not _is_nonnegative_int(reserve) or
+                not _is_finite_number(seconds) or seconds < 0 or seconds > replay["wall_seconds"] or
+                plan.get("predictive_training_reserved_bytes") != reserve or
+                reserve > replay["outside_receiver_future_reserved_bytes"] or
+                receiver.get("predictive_training_scheduling") != "sequential_before_receiver_executor" or
+                not _is_nonnegative_int(receiver.get("predictive_training_scanned_samples")) or
+                receiver["predictive_training_scanned_samples"] != (0 if policy == "canonical" else plan["horizon_samples"]) or
+                (policy == "canonical" and (reserve != 0 or seconds != 0)) or
+                (policy != "canonical" and reserve == 0)):
+            raise CampaignError("predictive quiet must identify policy and charge its bounded causal training storage and work")
+    common_render = comparison.get("common_render_wall_seconds")
+    if not _is_finite_number(common_render) or common_render < 0 or common_render != receipt["service_replay"]["render_wall_seconds"]:
+        raise CampaignError("predictive quiet must report its single shared render cost explicitly")
+    for member in (receipt, candidate):
+        timing, replay = member.get("timing", {}), member["service_replay"]
+        if (timing.get("wall_includes_shared_render_per_policy") is not True or
+                not _is_finite_number(timing.get("wall_seconds")) or
+                timing["wall_seconds"] + 1e-6 < common_render + replay["wall_seconds"]):
+            raise CampaignError("paired policy wall cost must include shared rendering and its own complete receiver service")
+    for field in ("captured_input_sha256", "verified_input_sha256", "replayed_samples", "render_wall_seconds",
+                  "render_process_cpu_seconds", "spool_write_seconds", "spool_write_process_cpu_seconds"):
+        if candidate["service_replay"].get(field) != receipt["service_replay"].get(field):
+            raise CampaignError("predictive quiet comparison must share the exact IQ/validity capture and single render work")
+    rule_field = "predictive_frequency_baseline_rule"
+    frequency_rule = candidate["receiver"].get(rule_field)
+    if rule_field in candidate["receiver"] or rule_field in receipt["receiver"]:
+        if (frequency_rule not in {"public_confirmation_centroid_360s_v1", "public_confirmation_centroid_360s_three_witness_v2"} or
+                receipt["receiver"].get(rule_field) != "none"):
+            raise CampaignError("predictive quiet requires a recognized geometry-only frequency baseline rule")
+    baseline_slots, candidate_slots = receipt.get("slots"), candidate.get("slots")
+    if not isinstance(baseline_slots, list) or not isinstance(candidate_slots, list) or len(baseline_slots) != len(candidate_slots):
+        raise CampaignError("predictive quiet comparison must preserve every public slot")
+    required = ("index", "decision", "bit", "complete", "all_valid", "first_sample", "stop_sample",
+                "operational_log_e", "operational_threshold", "bit_evidence", "bit_separation", "quiet_energy", "quiet_threshold")
+    # Native scheduling can alter timings, selected worker counts and workspace
+    # peaks. Every actual DATA statistic and search-count field stays identical.
+    variable = {"decision", "quiet_energy", "quiet_threshold", "reason", "workers", "workspace_peak_bytes", "predictive_quiet",
+                "helper_overlapped", "commit_input_stop", "commit_uncommitted_slots", "commit_active_owners", "commit_next_ready"}
+    for baseline, proposed in zip(baseline_slots, candidate_slots):
+        if not isinstance(baseline, dict) or not isinstance(proposed, dict) or any(field not in baseline or field not in proposed for field in required):
+            raise CampaignError("predictive quiet comparison needs complete native slot decisions and evidence")
+        invariant = set(baseline) | set(proposed)
+        invariant -= variable
+        invariant = {field for field in invariant if not field.endswith("_seconds")}
+        if any(baseline.get(field) != proposed.get(field) for field in invariant):
+            raise CampaignError("predictive quiet must leave native DATA evidence and public scoring geometry unchanged")
+        if "predictive_quiet" in baseline:
+            raise CampaignError("canonical baseline cannot contain candidate quiet decisions")
+        changed = baseline["decision"] != proposed["decision"]
+        if changed and (baseline["decision"], proposed["decision"]) != ("ambiguous", "quiet"):
+            raise CampaignError("predictive quiet may only change an ambiguous slot to quiet")
+        if not changed and any(proposed[field] != baseline[field] for field in ("quiet_energy", "quiet_threshold", "reason") if field in baseline):
+            raise CampaignError("unaccepted predictive quiet attempt must preserve the canonical quiet receipt")
+        diagnostic = proposed.get("predictive_quiet")
+        if not isinstance(diagnostic, dict):
+            raise CampaignError("predictive quiet candidate requires per-slot public diagnostics")
+        _validate_predictive_slot(diagnostic, baseline, proposed, baseline_plan, changed, frequency_rule=frequency_rule)
+
+
+def _predictive_public_gap(plan: dict[str, Any], index: int) -> dict[str, int]:
+    slots, sample_rate = plan.get("public_slots"), plan.get("sample_rate_hz")
+    if (not isinstance(slots, list) or not _is_nonnegative_int(index) or not 0 < index < len(slots) or
+            not _is_finite_number(sample_rate) or sample_rate <= 0):
+        raise CampaignError("predictive frequency selection requires bounded public gap geometry")
+    previous, current = slots[index - 1], slots[index]
+    for slot in (previous, current):
+        observation = slot.get("public_profile_observation")
+        if (not isinstance(observation, dict) or set(observation) != {"first", "stop"} or
+                any(not _is_nonnegative_int(observation.get(key)) for key in ("first", "stop")) or
+                observation["stop"] <= observation["first"] or
+                any(not _is_nonnegative_int(slot.get(key)) for key in ("previous_signal_stop", "next_signal_first"))):
+            raise CampaignError("predictive frequency selection needs raw public observations and adjacent-signal exclusions")
+    first = max(previous["public_profile_observation"]["stop"], current["previous_signal_stop"])
+    stop = min(current["public_profile_observation"]["first"], previous["next_signal_first"])
+    if stop <= first or stop - first < sample_rate * 4:
+        return {"first": 0, "stop": 0}
+    return {"first": max(first, stop - 65536), "stop": stop}
+
+
+def _predictive_frequency_selection(plan: dict[str, Any], index: int) -> tuple[int, str]:
+    first_slot, baseline = index - 2, "adjacent_gaps"
+    if index >= 5:
+        older, recent = _predictive_public_gap(plan, index - 4), _predictive_public_gap(plan, index - 1)
+        if older["stop"] > older["first"] and recent["stop"] > recent["first"]:
+            def twice_confirmation_centre(gap: dict[str, int]) -> int:
+                return gap["first"] + (gap["stop"] - gap["first"]) // 4 + gap["stop"] - 1
+            distance = twice_confirmation_centre(recent) - twice_confirmation_centre(older)
+            if 0 < distance <= 720 * plan["sample_rate_hz"]:
+                first_slot, baseline = index - 4, "separated_gaps"
+    return first_slot, baseline
+
+
+PREDICTIVE_THREE_WITNESS_FIELDS = {
+    "frequency_interval_rule", "frequency_middle_gap_slot", "frequency_middle", "frequency_middle_proposal",
+    "frequency_middle_confirmation", "frequency_witness_count", "frequency_older_pair_intervals",
+    "frequency_adjacent_pair_intervals", "frequency_joint_intervals",
+}
+
+
+def _validate_predictive_three_witness(diagnostic: dict[str, Any], plan: dict[str, Any], index: int,
+                                     mode: str, trained: bool) -> None:
+    if (not PREDICTIVE_THREE_WITNESS_FIELDS <= diagnostic.keys() or
+            diagnostic["frequency_interval_rule"] != "fixed_three_witness_intersection_v1" or
+            "frequency_consistency" in diagnostic):
+        raise CampaignError("three-witness frequency inference requires its exact intersection rule and complete diagnostics")
+    for field, maximum in (("frequency_middle_gap_slot", max(0, index)), ("frequency_witness_count", 3),
+                           ("frequency_older_pair_intervals", 128), ("frequency_adjacent_pair_intervals", 128),
+                           ("frequency_joint_intervals", 255)):
+        if not _is_nonnegative_int(diagnostic[field]) or diagnostic[field] > maximum:
+            raise CampaignError("three-witness frequency interval counts must stay within their fixed native work bounds")
+    expected_witnesses = {"unavailable": 0, "adjacent_gaps": 2, "separated_gaps": 3}[mode]
+    if diagnostic["frequency_witness_count"] != expected_witnesses:
+        raise CampaignError("frequency witness count must follow the fixed public selection")
+    older, adjacent, joint = (diagnostic[field] for field in
+                              ("frequency_older_pair_intervals", "frequency_adjacent_pair_intervals", "frequency_joint_intervals"))
+    middle = diagnostic["frequency_middle"]
+    proposal, confirmation = diagnostic["frequency_middle_proposal"], diagnostic["frequency_middle_confirmation"]
+    if mode == "separated_gaps":
+        if diagnostic["frequency_middle_gap_slot"] != index - 2 or middle != _predictive_public_gap(plan, index - 2):
+            raise CampaignError("separated frequency inference must use the fixed i-minus-two middle public gap")
+        split = middle["first"] + (middle["stop"] - middle["first"]) // 4
+        if proposal != {"first": middle["first"], "stop": split} or confirmation != {"first": split, "stop": middle["stop"]}:
+            raise CampaignError("middle frequency proposal and confirmation must be disjoint fixed quarter/three-quarter intervals")
+        if (joint and (not older or not adjacent or joint > older + adjacent) or
+                (trained and (middle["stop"] <= middle["first"] or older < 1 or adjacent < 1 or joint != 1))):
+            raise CampaignError("validated separated inference requires the unique merged intersection of both nonempty pair unions")
+        if trained and (diagnostic["frequency_first"]["stop"] > middle["first"] or
+                        middle["stop"] > diagnostic["frequency_second"]["first"]):
+            raise CampaignError("all three frequency witnesses must be disjoint and ordered before the independent amplitude interval")
+    else:
+        if (diagnostic["frequency_middle_gap_slot"] != 0 or
+                any(value != {"first": 0, "stop": 0} for value in (middle, proposal, confirmation)) or older != 0 or
+                (mode == "unavailable" and (adjacent != 0 or joint != 0)) or
+                (mode == "adjacent_gaps" and adjacent != joint) or (trained and joint != 1)):
+            raise CampaignError("adjacent or unavailable frequency inference must not claim a middle witness or older-pair intersection")
+
+
+def _validate_predictive_slot(diagnostic: dict[str, Any], baseline: dict[str, Any], proposed: dict[str, Any],
+                              plan: dict[str, Any], changed: bool, *, frequency_rule: str | None = None) -> None:
+    if (not isinstance(diagnostic.get("attempted"), bool) or diagnostic.get("accepted") is not changed or
+            not isinstance(diagnostic.get("training_status"), str) or not isinstance(diagnostic.get("status"), str)):
+        raise CampaignError("predictive quiet acceptance must agree with the actual native decision change")
+    for field in ("frequency_hz", "frequency_lower_hz", "frequency_upper_hz", "frequency_confidence_exclusion_probability",
+                  "coherent_interpolation_norm", "band_interpolation_norm", "amplitude_magnitude",
+                  "validation_line_residual", "validation_energy", "validation_threshold",
+                  "line_direction_gain_squared", "coherent_residual", "coherent_threshold", "raw_quiet_energy",
+                  "raw_quiet_threshold", "legacy_energy", "legacy_threshold", "expanded_energy", "expanded_threshold", "extra_seconds"):
+        value = diagnostic.get(field)
+        if not _is_finite_number(value) or (field not in {"frequency_hz", "frequency_lower_hz", "frequency_upper_hz"} and value < 0):
+            raise CampaignError("predictive quiet diagnostics must retain finite measured guard statistics")
+    for field in ("legacy_modes", "expanded_modes", "frequency_coherent_nodes", "frequency_band_nodes"):
+        if not _is_nonnegative_int(diagnostic.get(field)):
+            raise CampaignError("predictive quiet must retain integer native quiet mode and frequency node counts")
+    if any(diagnostic[field] > 9 for field in ("frequency_coherent_nodes", "frequency_band_nodes")):
+        raise CampaignError("predictive quiet frequency envelope cannot exceed its fixed nine-node work budget")
+    if (diagnostic["raw_quiet_energy"] != baseline["quiet_energy"] or
+            diagnostic["raw_quiet_threshold"] != baseline["quiet_threshold"]):
+        raise CampaignError("predictive quiet diagnostic must preserve the untouched canonical quiet measurement")
+    three_witness = frequency_rule == "public_confirmation_centroid_360s_three_witness_v2"
+    interval_fields = ("frequency_first", "frequency_second", "amplitude", "validation", "frequency_first_proposal",
+                       "frequency_first_confirmation", "frequency_second_proposal", "frequency_second_confirmation")
+    if three_witness:
+        interval_fields += ("frequency_middle", "frequency_middle_proposal", "frequency_middle_confirmation")
+    for field in interval_fields:
+        interval = diagnostic.get(field)
+        if (not isinstance(interval, dict) or set(interval) != {"first", "stop"} or
+                any(not _is_nonnegative_int(interval.get(k)) for k in ("first", "stop")) or
+                interval["stop"] < interval["first"]):
+            raise CampaignError("predictive quiet must retain bounded public training sample intervals")
+    trained = diagnostic["training_status"] == "validated_prior_stationary_line"
+    attempted = diagnostic["attempted"]
+    selected_first = baseline["index"] - 2
+    selection_fields = {"frequency_first_gap_slot", "frequency_second_gap_slot", "frequency_baseline"}
+    if frequency_rule is None:
+        if (selection_fields | {"frequency_consistency"} | PREDICTIVE_THREE_WITNESS_FIELDS) & diagnostic.keys():
+            raise CampaignError("historical adjacent-only predictive receipts cannot claim a new frequency baseline")
+    elif frequency_rule in {"public_confirmation_centroid_360s_v1", "public_confirmation_centroid_360s_three_witness_v2"}:
+        if not selection_fields <= diagnostic.keys():
+            raise CampaignError("predictive frequency baseline rule requires every selected-geometry diagnostic")
+        mode = diagnostic["frequency_baseline"]
+        if (mode not in {"adjacent_gaps", "separated_gaps", "unavailable"} or
+                any(not _is_nonnegative_int(diagnostic[field]) for field in ("frequency_first_gap_slot", "frequency_second_gap_slot"))):
+            raise CampaignError("predictive frequency baseline diagnostics require recognized geometry states")
+        if not three_witness:
+            if (PREDICTIVE_THREE_WITNESS_FIELDS & diagnostic.keys() or
+                    diagnostic.get("frequency_consistency") not in {"not_applicable", "no_unique_short_tube", "compatible_short_tube", "disjoint_short_tube"}):
+                raise CampaignError("historical two-witness inference must retain its original consistency rule")
+            consistency = diagnostic["frequency_consistency"]
+        if mode != "unavailable":
+            if baseline["index"] < 3:
+                raise CampaignError("predictive frequency selection needs three strictly prior public gaps")
+            selected_first, expected_mode = _predictive_frequency_selection(plan, baseline["index"])
+            if (diagnostic["frequency_first_gap_slot"] != selected_first or
+                    diagnostic["frequency_second_gap_slot"] != baseline["index"] - 1 or mode != expected_mode):
+                raise CampaignError("predictive frequency baseline must be fixed by public geometry, without score-dependent fallback")
+            for name, gap_index in (("frequency_first", selected_first), ("frequency_second", baseline["index"] - 1)):
+                if diagnostic[name] != _predictive_public_gap(plan, gap_index):
+                    raise CampaignError("predictive frequency baseline must preserve the exact truncated public gaps")
+            if not three_witness and mode == "adjacent_gaps" and consistency != "not_applicable":
+                raise CampaignError("adjacent frequency baseline cannot claim a separated-baseline consistency test")
+        elif trained or attempted or changed:
+            raise CampaignError("unavailable frequency baseline cannot supply predictive quiet evidence")
+        if three_witness:
+            _validate_predictive_three_witness(diagnostic, plan, baseline["index"], mode, trained)
+        elif trained and (mode == "unavailable" or consistency == "disjoint_short_tube" or
+                        (mode == "separated_gaps" and consistency not in {"no_unique_short_tube", "compatible_short_tube"})):
+            raise CampaignError("validated predictive training must preserve the noncontradicting short-baseline check")
+    else:
+        raise CampaignError("unknown predictive frequency baseline rule")
+    if attempted and (not trained or baseline["decision"] != "ambiguous" or baseline["complete"] is not True or
+                      baseline["all_valid"] is not True or baseline["operational_log_e"] >= baseline["operational_threshold"]):
+        raise CampaignError("predictive quiet attempts require validated prior training and a complete low-DATA ambiguous slot")
+    if trained:
+        index, slots = baseline["index"], plan.get("public_slots", [])
+        ranges = [diagnostic[name] for name in ("frequency_first", "frequency_second", "amplitude", "validation")]
+        if (not _is_nonnegative_int(index) or index < 3 or index >= len(slots) or
+                any(interval["stop"] <= interval["first"] for interval in ranges) or
+                any(left["stop"] > right["first"] for left, right in zip(ranges, ranges[1:])) or
+                ranges[2]["stop"] != ranges[3]["first"] or ranges[-1]["stop"] > baseline["first_sample"]):
+            raise CampaignError("predictive quiet frequency, amplitude and validation intervals must be disjoint and strictly prior")
+        for interval, gap_index in ((ranges[0], selected_first), (ranges[1], index - 1),
+                                    ({"first": ranges[2]["first"], "stop": ranges[3]["stop"]}, index)):
+            if frequency_rule is not None:
+                if interval != _predictive_public_gap(plan, gap_index):
+                    raise CampaignError("predictive quiet training must use the fixed earlier truncated public gaps")
+            else:
+                lower = slots[gap_index - 1].get("observation", {}).get("stop")
+                upper = slots[gap_index].get("observation", {}).get("first")
+                if not _is_nonnegative_int(lower) or not _is_nonnegative_int(upper) or not lower <= interval["first"] < interval["stop"] <= upper:
+                    raise CampaignError("predictive quiet training must stay inside the fixed earlier public observation gaps")
+        for prefix in ("frequency_first", "frequency_second"):
+            whole, proposal, confirmation = (diagnostic[prefix], diagnostic[prefix + "_proposal"], diagnostic[prefix + "_confirmation"])
+            split = whole["first"] + (whole["stop"] - whole["first"]) // 4
+            if (proposal != {"first": whole["first"], "stop": split} or
+                    confirmation != {"first": split, "stop": whole["stop"]}):
+                raise CampaignError("predictive quiet needs independent quarter-gap proposals and disjoint confirmation samples")
+        training_rows = ranges[3]["stop"] - ranges[2]["first"]
+        if ranges[3]["stop"] - ranges[3]["first"] != training_rows // 3:
+            raise CampaignError("predictive quiet amplitude and held-out validation must preserve the declared two-thirds/one-third split")
+        lower, upper = diagnostic["frequency_lower_hz"], diagnostic["frequency_upper_hz"]
+        if (not lower <= diagnostic["frequency_hz"] <= upper or upper - lower > .002 or
+                diagnostic["frequency_confidence_exclusion_probability"] != 1e-6):
+            raise CampaignError("predictive quiet must retain its bounded frequency confidence tube and fixed exclusion budget")
+        if (diagnostic["amplitude_magnitude"] <= 0 or diagnostic["validation_threshold"] <= 0 or
+                diagnostic["validation_energy"] > diagnostic["validation_threshold"] or
+                diagnostic["validation_line_residual"] > baseline["operational_threshold"]):
+            raise CampaignError("predictive quiet validated training must pass its held-out line and band checks")
+    if attempted:
+        quiet_first, quiet_stop = baseline.get("quiet_first_sample"), baseline.get("quiet_stop_sample")
+        if (not _is_nonnegative_int(quiet_first) or not _is_nonnegative_int(quiet_stop) or
+                not baseline["first_sample"] <= quiet_first < quiet_stop <= baseline["stop_sample"]):
+            raise CampaignError("predictive quiet needs the complete unchanged physical quiet aperture")
+        trained_rows = diagnostic["amplitude"]["stop"] - diagnostic["amplitude"]["first"]
+        expected_gain = trained_rows / (trained_rows + quiet_stop - quiet_first)
+        if (not math.isclose(diagnostic["line_direction_gain_squared"], expected_gain, rel_tol=1e-12, abs_tol=1e-15) or
+                diagnostic["coherent_threshold"] != baseline["operational_threshold"]):
+            raise CampaignError("predictive quiet must preserve nonzero aligned information and the fixed coherent guard")
+    if changed:
+        if (not attempted or diagnostic["status"] != "predictive_quiet_passed_both_bands" or
+                diagnostic["frequency_coherent_nodes"] != 9 or diagnostic["frequency_band_nodes"] != 9 or
+                diagnostic["coherent_residual"] < diagnostic["coherent_interpolation_norm"] ** 2 or
+                diagnostic["legacy_energy"] < diagnostic["band_interpolation_norm"] ** 2 or
+                diagnostic["expanded_energy"] < diagnostic["band_interpolation_norm"] ** 2 or
+                diagnostic["coherent_residual"] > diagnostic["coherent_threshold"] or
+                diagnostic["legacy_modes"] <= 0 or diagnostic["expanded_modes"] <= 0 or
+                diagnostic["legacy_threshold"] <= 0 or diagnostic["expanded_threshold"] <= 0 or
+                diagnostic["legacy_energy"] > diagnostic["legacy_threshold"] or
+                diagnostic["expanded_energy"] > diagnostic["expanded_threshold"] or
+                diagnostic["legacy_threshold"] != baseline["quiet_threshold"] or
+                proposed["quiet_energy"] != diagnostic["legacy_energy"] or
+                proposed["quiet_threshold"] != diagnostic["legacy_threshold"] or
+                proposed.get("reason") != "scored_public_quiet_with_independent_line_prediction"):
+            raise CampaignError("predictive quiet decision requires every fixed training, coherent and native band guard")
+    elif diagnostic["status"] == "predictive_quiet_passed_both_bands":
+        raise CampaignError("unaccepted predictive quiet attempt cannot report a passed decision")
+
+
+def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any], *,
+                                _predictive_candidate: bool = False) -> None:
     identity_fields = ("requested_scenario", "mode", "waveform", "seed", "control")
     missing_identity = [field for field in identity_fields if field not in receipt]
     if missing_identity:
@@ -5030,6 +5418,12 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     plan = receipt.get("plan")
     if not isinstance(plan, dict):
         raise CampaignError("completed receipt is missing plan")
+    predictive = episode.get("hf_predictive_quiet", False)
+    if (plan.get("hf_predictive_quiet_requested", False) is not predictive or
+            plan.get("hf_predictive_quiet_active", False) is not _predictive_candidate):
+        raise CampaignError("predictive quiet request/active policy does not match its declared paired role")
+    if _predictive_candidate and not predictive:
+        raise CampaignError("unrequested predictive quiet candidate")
     _validate_profile_controls(plan, episode)
     _validate_fullwave_reflection(receipt, episode)
     _validate_magnetoionic_reflection(receipt, episode)
@@ -5153,7 +5547,7 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
         raise CampaignError("native clean GUI diagnostic request does not match the frozen episode")
     comparison_requested = episode.get("hf_compare_admitted_models", False)
     policy = "compare_admitted" if comparison_requested else "fallback_only"
-    if comparison_requested or episode.get("service_replay", False) or "receiver_evidence_policy" in plan:
+    if comparison_requested or _uses_spool(episode) or "receiver_evidence_policy" in plan:
         if (plan.get("hf_compare_admitted_models_requested") is not comparison_requested or
                 plan.get("receiver_evidence_policy") != policy):
             raise CampaignError("native receiver evidence policy does not match the frozen episode")
@@ -5602,6 +5996,10 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
 
 
     _validate_service_replay(receipt, episode)
+    if not _predictive_candidate:
+        _validate_predictive_comparison(receipt, episode)
+    elif "hf_predictive_quiet_comparison" in receipt:
+        raise CampaignError("predictive quiet candidate cannot recursively contain another comparison")
 
 
 def _run_service_child(command: list[str], out: Any, err: Any, timeout: float,
@@ -5666,7 +6064,7 @@ def _trial(probe: Path, episode: dict[str, Any], max_samples: int, timeout: floa
     # The native spool cannot contain more than the declared sample budget,
     # even if its separately declared byte limit is larger.
     child_file_limit = max(MAX_OUTPUT_BYTES, min(episode.get("service_spool_byte_limit", max_samples * 17),
-        max_samples * 17)) if episode.get("service_replay", False) else MAX_OUTPUT_BYTES
+        max_samples * 17)) if _uses_spool(episode) else MAX_OUTPUT_BYTES
     def limit_output() -> None:
         if resource is not None:
             resource.setrlimit(resource.RLIMIT_FSIZE, (child_file_limit, child_file_limit))
@@ -5677,7 +6075,7 @@ def _trial(probe: Path, episode: dict[str, Any], max_samples: int, timeout: floa
                 options: dict[str, Any] = {}
                 if os.name == "posix" and resource is not None:
                     options["preexec_fn"] = limit_output
-                if episode.get("service_replay", False):
+                if _uses_spool(episode):
                     return_code, output_overflow = _run_service_child(command, out, err, timeout, options)
                 else:
                     result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
@@ -5718,7 +6116,8 @@ def _trial(probe: Path, episode: dict[str, Any], max_samples: int, timeout: floa
             _validate_completed_receipt(receipt, episode)
         else:
             _validate_service_replay(receipt, episode)
-        if episode.get("service_replay", False) and isinstance(receipt.get("plan"), dict) and receipt["plan"].get("service_replay") is not None:
+            _validate_predictive_comparison(receipt, episode)
+        if _uses_spool(episode) and isinstance(receipt.get("plan"), dict) and receipt["plan"].get("service_replay") is not None:
             if (receipt["plan"].get("max_samples") != max_samples or
                     not _is_finite_number(receipt["plan"].get("max_wall_seconds")) or
                     not math.isclose(receipt["plan"]["max_wall_seconds"], native_budget, rel_tol=1e-12, abs_tol=1e-12)):
@@ -5733,9 +6132,10 @@ def _trial(probe: Path, episode: dict[str, Any], max_samples: int, timeout: floa
                 result["status"] = "channel_empty"
                 result["error"] = "channel episode reported no transmitted signal energy"
                 return result
+        effective_status = receipt.get("hf_predictive_quiet_comparison", {}).get("status", receipt["status"])
         expected_exit = {"completed": 0, "error": 2, "resource_limit": 3,
-                         "time_limit": 4, "unavailable": 5}[receipt["status"]]
-        result["status"] = receipt["status"] if return_code == expected_exit else "receipt_exit_mismatch"
+                         "time_limit": 4, "unavailable": 5}[effective_status]
+        result["status"] = effective_status if return_code == expected_exit else "receipt_exit_mismatch"
     except (OSError, CampaignError) as exc:
         result["status"] = "invalid_receipt"
         result["error"] = str(exc)
@@ -5831,7 +6231,7 @@ def _wanted_outcome_counts(trial: dict[str, Any]) -> dict[str, int | None] | Non
     if (trial.get("status") != "completed" or receipt.get("status") != "completed" or
             episode.get("mode") != "receive" or episode.get("control", "wanted") != "wanted"):
         return None
-    if episode.get("service_replay", False):
+    if _uses_spool(episode):
         service = receipt.get("service_replay", {})
         if (not isinstance(service, dict) or service.get("work_complete") is not True or
                 not _is_nonnegative_int(service.get("expected_message_count")) or service["expected_message_count"] == 0):
@@ -5914,7 +6314,7 @@ def _negative_control_summary(trials: list[dict[str, Any]]) -> dict[str, Any]:
                 trial.get("status") != "completed" or receipt.get("status") != "completed" or
                 episode.get("mode") != "receive" or episode.get("control") not in groups):
             continue
-        if episode.get("service_replay", False):
+        if _uses_spool(episode):
             service = receipt.get("service_replay")
             if not isinstance(service, dict) or service.get("work_complete") is not True:
                 continue
@@ -5941,9 +6341,41 @@ def _negative_control_label(receipt: dict[str, Any], episode: dict[str, Any]) ->
         return "negative control counts incomplete; " + counts
     if false_data or accepted:
         return "negative control did not pass; " + counts
-    if episode.get("service_replay", False) and receipt.get("service_replay", {}).get("communication_complete") is not True:
+    if _uses_spool(episode) and receipt.get("service_replay", {}).get("communication_complete") is not True:
         return "negative control service endpoint did not pass; " + counts
     return "negative control passed; no accepted messages or false DATA; " + counts
+
+
+def _predictive_comparison_summary(trials: list[dict[str, Any]]) -> dict[str, Any]:
+    rows = []
+    for trial in trials:
+        episode, baseline = trial.get("episode", {}), trial.get("receipt", {})
+        if not episode.get("hf_predictive_quiet", False) or episode.get("mode") != "receive":
+            continue
+        comparison = baseline.get("hf_predictive_quiet_comparison")
+        comparison = comparison if isinstance(comparison, dict) else {}
+        candidate = comparison.get("candidate")
+        candidate = candidate if isinstance(candidate, dict) else {}
+        def policy(receipt: dict[str, Any]) -> dict[str, Any]:
+            outcomes, service = receipt.get("outcomes"), receipt.get("service_replay")
+            outcomes = outcomes if isinstance(outcomes, dict) else {}
+            service = service if isinstance(service, dict) else {}
+            return {"status": receipt.get("status"), "correct_complete": outcomes.get("correct_complete"),
+                    "accepted_messages": outcomes.get("accepted_messages"), "false_data": outcomes.get("false_data"),
+                    "premature_completions": outcomes.get("premature_completions"),
+                    "ambiguous_active_slots": outcomes.get("ambiguous_active_slots"),
+                    "quiet_active_slots": outcomes.get("quiet_active_slots"),
+                    "service_wall_seconds": service.get("wall_seconds"),
+                    "service_process_cpu_seconds": service.get("process_cpu_seconds"),
+                    "peak_reserved_bytes": service.get("peak_reserved_bytes")}
+        rows.append({"episode_id": episode.get("id"), "trial_status": trial.get("status"),
+                     "comparison_status": comparison.get("status"), "regressions": trial.get("predictive_regressions", []),
+                     "baseline": policy(baseline),
+                     "candidate": policy(candidate),
+                     "input_sha256": baseline.get("channel", {}).get("input_sha256")})
+    return {"scope": "Paired receiver policies on one identical rendered IQ/validity observation. "
+                     "Candidates are not additional independent channel trials; ordinary campaign counts remain canonical baseline outcomes.",
+            "pairs": rows}
 
 
 def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
@@ -6023,6 +6455,16 @@ def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
                     f"{episode.get('control', '—')} | {trial.get('status')} | {native_status} | {outcome} | "
                     f"{slot_decision} | {correct_data} | {receive_counts} | "
                     f"{trial.get('elapsed_seconds', 0):.3f} |")
+    paired = _predictive_comparison_summary(run["trials"])
+    if paired["pairs"]:
+        rows.extend(["", "## Predictive quiet paired comparison", "", paired["scope"], "",
+                     "| Episode | Paired execution | Baseline complete | Candidate complete | Candidate false DATA | Candidate premature completions | Baseline / candidate service seconds |",
+                     "|---|---|---|---|---:|---:|---|"])
+        for pair in paired["pairs"]:
+            baseline, candidate = pair["baseline"], pair["candidate"]
+            rows.append(f"| {pair['episode_id']} | {pair['trial_status']} | {baseline['correct_complete']} | "
+                        f"{candidate['correct_complete']} | {candidate['false_data']} | {candidate['premature_completions']} | "
+                        f"{baseline['service_wall_seconds']} / {candidate['service_wall_seconds']} |")
     wanted = _wanted_outcome_summary(run["trials"])
     rows.extend(["", "## Completed wanted reception", "", wanted["scope"],
                  f"Completed wanted trials {wanted['completed_trials']}. Trials without an accepted message "
@@ -6120,6 +6562,13 @@ def run_campaign(probe: Path, campaign_path: Path, output_dir: Path) -> dict[str
             status = "incomplete_checks"
             stop_reason = "probe_changed"
             break
+        regressions = _predictive_regressions(result)
+        if regressions:
+            result["predictive_regressions"] = regressions
+        if campaign.get("stop_on_predictive_regression", False) and regressions:
+            status = "incomplete_checks"
+            stop_reason = "predictive_receiver_regression"
+            break
         if campaign.get("stop_on_execution_failure", False) and result["status"] != "completed":
             status = "incomplete_checks"
             suffix = "timeout" if result["status"] == "timed_out" else result["status"]
@@ -6159,7 +6608,8 @@ def run_campaign(probe: Path, campaign_path: Path, output_dir: Path) -> dict[str
            "retained_output_bytes": sum(path.stat().st_size for path in output_dir.iterdir() if path.is_file()),
            "retained_output_limit_bytes": MAX_CAMPAIGN_OUTPUT_BYTES,
            "statistics": stats, "wanted_outcomes": _wanted_outcome_summary(trials),
-           "negative_controls": _negative_control_summary(trials), "trials": trials}
+           "negative_controls": _negative_control_summary(trials),
+           "predictive_quiet_comparisons": _predictive_comparison_summary(trials), "trials": trials}
     # The full native receipt remains in its raw stdout file. Keep run.json
     # compact so campaign metadata does not duplicate large native receipts.
     persisted = dict(run)

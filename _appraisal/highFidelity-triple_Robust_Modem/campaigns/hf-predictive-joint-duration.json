@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "name": "hf-predictive-joint-duration",
+  "purpose": "Preserve the already frozen +6/64 and +3/128 two-hop near-equal-energy comparison through identical-input baseline/candidate complete native replays. Same source/field/seed/payload/geometry as hf-vector-two-hop-boundary. No new success requirement on the known shorter miss, no physical parameter search or threshold adjustment. Stop on execution or paired DATA/content regression. Per-trial allowance includes two complete receiver services and one shared physical render.",
+  "max_wall_seconds": 3100,
+  "per_trial_wall_seconds": 1500,
+  "max_trials": 2,
+  "max_samples": 12000000,
+  "stop_on_execution_failure": true,
+  "episodes": [
+    {
+      "id": "both-E-6-paired",
+      "scenario": "hf-vector-two-hop",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 73613,
+      "noise_seed": 93613,
+      "bit_seconds": 64,
+      "message": "E",
+      "control": "wanted",
+      "cn0_db_hz": 6,
+      "max_wall_seconds": 1500,
+      "reception_requirement": "characterization",
+      "hf_predictive_quiet": true
+    },
+    {
+      "id": "both-E-long-3-paired",
+      "scenario": "hf-vector-two-hop",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 73613,
+      "noise_seed": 93613,
+      "bit_seconds": 128,
+      "message": "E",
+      "control": "wanted",
+      "cn0_db_hz": 3,
+      "max_wall_seconds": 1500,
+      "reception_requirement": "characterization",
+      "hf_predictive_quiet": true
+    }
+  ],
+  "stop_on_predictive_regression": true
+}

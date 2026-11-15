@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "per_trial_wall_seconds": 1200,
+  "max_samples": 12000000,
+  "stop_on_execution_failure": true,
+  "stop_on_predictive_regression": true,
+  "name": "hf-predictive-joint-fields",
+  "purpose": "Conditional on joint frequency discrimination and preservation. Paired full receiver tests of the already frozen evolving and two-hop clock/continuing-tone completion failures. Preserve their physical/source/noise geometry; require exact C/E candidate delivery, unchanged DATA and no wrong acceptance. This tests extension to independent channel families, not new physical parameter sampling. Stop on execution or paired regression; no further sweep.",
+  "max_wall_seconds": 2500,
+  "max_trials": 2,
+  "episodes": [
+    {
+      "id": "evolving-chain-clocks-tone-C-30-paired",
+      "scenario": "hf-vector-evolving-chain-clocks-tone",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 72511,
+      "noise_seed": 92511,
+      "bit_seconds": 64,
+      "message": "C",
+      "control": "wanted",
+      "cn0_db_hz": 30,
+      "max_wall_seconds": 1200,
+      "reception_requirement": "required_complete",
+      "hf_predictive_quiet": true
+    },
+    {
+      "id": "both-E-30-chain-paired",
+      "scenario": "hf-vector-two-hop-chain-clocks-tone",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 73613,
+      "noise_seed": 93613,
+      "bit_seconds": 64,
+      "message": "E",
+      "control": "wanted",
+      "cn0_db_hz": 30,
+      "max_wall_seconds": 1200,
+      "reception_requirement": "required_complete",
+      "hf_predictive_quiet": true
+    }
+  ]
+}

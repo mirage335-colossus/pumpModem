@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "name": "hf-predictive-quiet-preservation",
+  "purpose": "Small native replay/receipt contract check after component admission and before the bright physical discriminator. Preserve the successful hf-disturbed reference that rejected the variance veto: same source, noise and IQ, three correct DATA and two scored quiet slots, both policies deliver e. The comparison must execute one physical render and two complete native controllers; includes all predictor preparation in candidate service. No independent-trial count inflation or capacity claim.",
+  "max_wall_seconds": 120,
+  "per_trial_wall_seconds": 120,
+  "max_trials": 1,
+  "max_samples": 8000000,
+  "stop_on_execution_failure": true,
+  "stop_on_predictive_regression": true,
+  "episodes": [
+    {"cn0_db_hz":20,"id":"hf-disturbed-reference-paired","mode":"receive","scenario":"hf-disturbed","seed":9201,"waveform":"reference","hf_predictive_quiet":true}
+  ]
+}

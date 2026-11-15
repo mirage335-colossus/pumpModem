@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "per_trial_wall_seconds": 600,
+  "max_samples": 12000000,
+  "stop_on_execution_failure": true,
+  "stop_on_predictive_regression": true,
+  "name": "hf-predictive-joint-preservation",
+  "purpose": "Conditional on joint three-witness discriminator delivering exact B without a wrong-key acceptance regression. Preserve original A, noise and matched-Off, then prospectively fresh D/noise80541. No changed DATA, false acceptance, premature completion or lost prior delivery. Fixed before new policy execution; existing cases are repeats, only new payload/noise is a fresh holdout.",
+  "max_wall_seconds": 2500,
+  "max_trials": 4,
+  "episodes": [
+    {
+      "id": "oblique-A-30-paired",
+      "scenario": "hf-vector-oblique-chain-clocks-tone",
+      "waveform": "reference",
+      "seed": 70501,
+      "noise_seed": 80501,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 30,
+      "hf_predictive_quiet": true,
+      "max_wall_seconds": 600
+    },
+    {
+      "id": "oblique-noise-30-paired",
+      "scenario": "hf-vector-oblique-chain-clocks-tone",
+      "waveform": "reference",
+      "seed": 70501,
+      "noise_seed": 80523,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "noise",
+      "cn0_db_hz": 30,
+      "hf_predictive_quiet": true
+    },
+    {
+      "id": "oblique-off-A-30-paired",
+      "scenario": "hf-vector-oblique-chain-off",
+      "waveform": "reference",
+      "seed": 70501,
+      "noise_seed": 80501,
+      "bit_seconds": 64,
+      "message": "A",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 30,
+      "hf_predictive_quiet": true
+    },
+    {
+      "id": "oblique-new-D-30-paired",
+      "scenario": "hf-vector-oblique-chain-clocks-tone",
+      "waveform": "reference",
+      "seed": 70501,
+      "noise_seed": 80541,
+      "bit_seconds": 64,
+      "message": "D",
+      "mode": "receive",
+      "control": "wanted",
+      "cn0_db_hz": 30,
+      "hf_predictive_quiet": true
+    }
+  ]
+}

@@ -38,7 +38,8 @@ target_link_libraries(high_fidelity_vector_two_hop PUBLIC high_fidelity_vector_o
 target_link_libraries(high_fidelity_channel PRIVATE high_fidelity_fullwave high_fidelity_wave_optics high_fidelity_phase_screens high_fidelity_vector_oblique high_fidelity_vector_two_hop)
 add_library(high_fidelity_public_receiver STATIC "${_hf_root}/src/hf_public_diagnostic.cpp"
   "${_hf_root}/src/hf_gui_diagnostic.cpp" "${_hf_root}/src/hf_phase_filter.cpp"
-  "${_hf_root}/src/hf_correlated_gain.cpp")
+  "${_hf_root}/src/hf_correlated_gain.cpp" "${_hf_root}/src/hf_predictive_quiet.cpp"
+  "${_hf_root}/src/hf_protected_reassembly.cpp" "${_hf_root}/src/hf_normalized_null.cpp")
 target_include_directories(high_fidelity_public_receiver PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")
 target_link_libraries(high_fidelity_public_receiver PUBLIC high_fidelity_channel datapump_triad_receiver)
 add_executable(high_fidelity_appraisal "${_hf_root}/src/main.cpp" "${_hf_root}/src/vlf_diagnostic.cpp")
@@ -95,9 +96,14 @@ target_compile_definitions(high_fidelity_vector_two_hop_probe PRIVATE ${_hf_iden
 set_target_properties(high_fidelity_vector_two_hop_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 add_executable(high_fidelity_completion_ambiguity_probe "${_hf_root}/src/hf_completion_ambiguity_probe.cpp")
 target_include_directories(high_fidelity_completion_ambiguity_probe PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")
-target_link_libraries(high_fidelity_completion_ambiguity_probe PRIVATE high_fidelity_channel datapump_triad_receiver)
+target_link_libraries(high_fidelity_completion_ambiguity_probe PRIVATE high_fidelity_public_receiver)
 target_compile_definitions(high_fidelity_completion_ambiguity_probe PRIVATE ${_hf_identity} APPRAISAL_SOURCE_SHA="${_hf_source_sha}")
 set_target_properties(high_fidelity_completion_ambiguity_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+add_executable(high_fidelity_protected_reassembly_probe "${_hf_root}/src/hf_protected_reassembly_probe.cpp")
+target_include_directories(high_fidelity_protected_reassembly_probe PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")
+target_link_libraries(high_fidelity_protected_reassembly_probe PRIVATE high_fidelity_public_receiver)
+target_compile_definitions(high_fidelity_protected_reassembly_probe PRIVATE ${_hf_identity} APPRAISAL_SOURCE_SHA="${_hf_source_sha}")
+set_target_properties(high_fidelity_protected_reassembly_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 add_executable(high_fidelity_magnetoionic_probe "${_hf_root}/src/hf_magnetoionic_probe.cpp")
 target_include_directories(high_fidelity_magnetoionic_probe PRIVATE "${PROJECT_SOURCE_DIR}/tools")
 target_link_libraries(high_fidelity_magnetoionic_probe PRIVATE high_fidelity_fullwave)
@@ -130,6 +136,9 @@ if(BUILD_TESTING)
   set_tests_properties(high_fidelity_hf_vector_two_hop PROPERTIES LABELS "appraisal" TIMEOUT 120)
   add_test(NAME high_fidelity_hf_completion_ambiguity COMMAND high_fidelity_completion_ambiguity_probe)
   set_tests_properties(high_fidelity_hf_completion_ambiguity PROPERTIES LABELS "appraisal" TIMEOUT 120)
+  add_test(NAME high_fidelity_hf_protected_key_preflight
+    COMMAND high_fidelity_completion_ambiguity_probe --predictive-protected-key-preflight)
+  set_tests_properties(high_fidelity_hf_protected_key_preflight PROPERTIES LABELS "appraisal" TIMEOUT 45)
   add_executable(high_fidelity_test_hf_vector_oblique "${_hf_root}/tests/test_hf_vector_oblique.cpp")
   target_link_libraries(high_fidelity_test_hf_vector_oblique PRIVATE high_fidelity_vector_oblique)
   add_test(NAME high_fidelity_hf_vector_oblique COMMAND high_fidelity_test_hf_vector_oblique)
@@ -170,7 +179,7 @@ if(BUILD_TESTING)
   target_link_libraries(high_fidelity_test_hf_native_supplement PRIVATE datapump_triad_receiver)
   add_test(NAME high_fidelity_hf_native_supplement COMMAND high_fidelity_test_hf_native_supplement)
   set_tests_properties(high_fidelity_hf_native_supplement PROPERTIES LABELS "appraisal" TIMEOUT 45)
-  foreach(_hf_extra admitted_evidence phase_filter correlated_gain)
+  foreach(_hf_extra admitted_evidence phase_filter correlated_gain predictive_quiet protected_reassembly normalized_null)
     add_executable(high_fidelity_test_hf_${_hf_extra} "${_hf_root}/tests/test_hf_${_hf_extra}.cpp")
     target_include_directories(high_fidelity_test_hf_${_hf_extra} PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")
     if(_hf_extra STREQUAL "admitted_evidence")
@@ -207,6 +216,7 @@ if(BUILD_TESTING)
   set_tests_properties(high_fidelity_coverage_design PROPERTIES LABELS "appraisal" TIMEOUT 45)
   add_custom_target(high_fidelity_checks DEPENDS high_fidelity_appraisal high_fidelity_fullwave_probe high_fidelity_fullwave_kernel_probe high_fidelity_magnetoionic_probe high_fidelity_wave_optics_probe
     high_fidelity_completion_ambiguity_probe
+    high_fidelity_protected_reassembly_probe
     high_fidelity_vector_oblique_probe high_fidelity_test_hf_vector_oblique
     high_fidelity_vector_two_hop_probe high_fidelity_test_hf_vector_two_hop
     high_fidelity_test_hf_fragment_integrity
@@ -218,6 +228,9 @@ if(BUILD_TESTING)
     high_fidelity_test_hf_phase_bank high_fidelity_test_hf_public_statistics high_fidelity_test_hf_native_supplement
     high_fidelity_test_hf_phase_refinement
     high_fidelity_test_hf_admitted_evidence high_fidelity_test_hf_phase_filter high_fidelity_test_hf_correlated_gain
+    high_fidelity_test_hf_predictive_quiet
+    high_fidelity_test_hf_protected_reassembly
+    high_fidelity_test_hf_normalized_null
     high_fidelity_test_hf_public_receiver high_fidelity_test_hf_replay high_fidelity_test_hf_gannon_replay high_fidelity_test_hf_native_chain
     high_fidelity_test_impairment_observables high_fidelity_test_lunar_spectral)
 endif()

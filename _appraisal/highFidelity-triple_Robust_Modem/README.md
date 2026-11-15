@@ -7,7 +7,58 @@ groundwave, 1–30 MHz skywave, and Earth–Moon–Earth**. All appraisal code,
 fixtures, documentation and generated evidence remain in this directory.
 Python launches native executables and analyzes receipts; it implements no DSP.
 
-The [coupled multiple-hop extension](hf-multihop.md) combines two Es reflections,
+The current [receiver-repair investigation](hf-predictive-completion.md) repairs
+five selected completion failures, but **the candidate fails the broader
+integrity criterion**. Across ten paired complete observations, it completes
+oblique `A`, `B` and prospectively selected fresh `D`, evolving-field `C` and
+two-hop `E`. Each preserves thirteen correct DATA decisions and scores two
+ending quiet slots on the identical capture that the baseline cannot finish.
+Both policies preserve endpoint-Off `A` delivery, no DATA or accepted content in
+the complete noise control, and the +6 dB-Hz/69.6-second miss versus
++3 dB-Hz/139.2-second delivery. Wrong-key reception still produces three false
+DATA decisions in both policies without accepted content.
+
+The decisive active-fade follow-up transmits `Ae`, suppresses its wanted signal
+in public slots 13–14, then resumes correct DATA in slot 15 with input still
+open. The baseline leaves both faded slots ambiguous and accepts no message.
+The candidate calls them quiet and prematurely accepts the shorter `A`:
+**one new wrong-content acceptance, so general promotion fails**. The test
+reaches the new decision branch and intentionally fails its acceptance check;
+it is not an execution failure. Earlier candidate failures remain recorded.
+Two proposed DATA guards are also rejected because they can create high-SNR
+rejection floors.
+
+The [protected-fragment consumer](hf-protected-reassembly.md)
+has seven standalone complete native signal-chain observations. It recovers complete
+RS20 `B` and fresh `e` after native interior-outage splitting, using one bounded
+span and the existing decoder, without another DSP search. Clean, noise and
+separate-message controls pass. The first wrong-key case produces 72 false DATA
+decisions. The added wrong-key joining case actually attempts one combined
+decode and rejects it, while **136 false DATA decisions persist**. Neither
+wrong-key control accepts native or consumer content. These are contained
+candidate results; operational qualification and calibrated disturbed-event
+replay remain failed or unqualified.
+
+A separate [combined predictive/protected trial](hf-protected-reassembly.md#completed-wanted-observation)
+now recovers exact RS20 `e` after the candidate changes four ambiguous slots
+to quiet while preserving 62 correct DATA decisions. Two actual rejected
+fragments become one 64-position native decode with two erasures, completing
+at slot 66 without incorrect content. The premature physical completion
+remains recorded, and coding costs 21.333 times the uncoded nominal airtime
+and energy. After a preserved setup failure, the corrected wrong-key trial
+actually attempts and rejects a combined decode without accepted content.
+However, both policies produce 61 false DATA decisions, and an additional
+ambiguous slot gives three erasures instead of the frozen two. **Both declared
+requirements fail; the combined route remains unqualified.**
+
+The [normalized-covariance diagnostic](hf-normalized-null.md) adds two analytic
+aperture diagnostics and a separate matched static native-slot pair. The latter
+reproduces actual wrong-key false DATA and separates it from the wanted control
+in the normalized scores. The analytic wrong-key case already abstains natively.
+Neither pair establishes a qualified structured-interference null or an
+operational DATA veto; native decisions remain unchanged.
+
+The preceding [coupled multiple-hop extension](hf-multihop.md) combines two Es reflections,
 a lossy ground bounce and a competing F-region return, retaining magnetic
 polarization and diffraction through the selected paths. Full numerical
 admission rejects an inaccurate fixed-angle approximation before receiver use.
