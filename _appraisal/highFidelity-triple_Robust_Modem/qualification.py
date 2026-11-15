@@ -328,6 +328,9 @@ def _validate_spec(spec: Any) -> None:
             raise QualificationError(f"cell {cell['id']} must bind one native receive episode")
         role = cell.get("control_role")
         expected = episode.get("control", "wanted")
+        requirement = episode.get("reception_requirement")
+        if requirement is not None and (not isinstance(requirement, str) or requirement not in {"required_complete", "characterization", "negative_control"}):
+            raise QualificationError(f"cell {cell['id']} has invalid frozen reception_requirement")
         if (role not in {"wanted", "negative"} or
                 (role == "wanted") != (expected == "wanted") or
                 (role == "negative" and expected not in run.NEGATIVE_RECEIVE_CONTROLS)):
@@ -343,6 +346,19 @@ def _validate_spec(spec: Any) -> None:
         if role == "wanted" and gates.get("delivery_requirement_basis") != (
                 "declared_operational_anchor" if gates["delivery"] else "characterization"):
             raise QualificationError("wanted delivery needs an explicit anchor or characterization basis")
+        if role == "wanted" and gates["delivery"] and requirement != "required_complete":
+            raise QualificationError("operational delivery anchors must be predeclared as required_complete in the frozen campaign")
+        if requirement is not None:
+            if ((requirement == "required_complete" and
+                    (role != "wanted" or not gates["delivery"] or
+                     gates.get("delivery_requirement_basis") != "declared_operational_anchor")) or
+                    (requirement == "characterization" and
+                     (role != "wanted" or gates["delivery"] or
+                      gates.get("delivery_requirement_basis") != "characterization")) or
+                    (requirement == "negative_control" and
+                     (role != "negative" or gates["delivery"] or not gates["integrity"] or
+                      gates.get("false_data_max") != 0))):
+                raise QualificationError(f"cell {cell['id']} qualification gates contradict its frozen reception_requirement")
         if role == "negative" and (gates["delivery"] or not gates["integrity"]):
             raise QualificationError("negative cells require integrity and cannot require wanted delivery")
         if not gates["bounded_execution"]:

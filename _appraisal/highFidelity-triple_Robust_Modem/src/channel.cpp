@@ -13,6 +13,7 @@
 #include <numbers>
 #include <random>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 
 namespace appraisal {
@@ -275,10 +276,37 @@ std::string phase_screens_table_sha256(const PhaseScreens& table) {
     return digest;
 }
 
-std::string vector_oblique_table_sha256(const VectorOblique& table) {
+std::string vector_oblique_table_sha256(const VectorOblique& table, const HfVectorObliqueSpec& spec) {
     std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)> context(EVP_MD_CTX_new(), EVP_MD_CTX_free);
     require(context && EVP_DigestInit_ex(context.get(), EVP_sha256(), nullptr) == 1,
             "vector oblique table digest initialization failed");
+    if (spec.intrinsic_evolution) {
+        constexpr std::string_view version = "hf-vector-oblique-intrinsic-evolution-v1";
+        constexpr std::string_view law = "T=(output_sample-32)/1920; B=64u^3(1-u)^3; Q=2(2u-1)B; outside[0,1] identity; mode order is spec geometry order";
+        require(EVP_DigestUpdate(context.get(), version.data(), version.size()) == 1 &&
+                EVP_DigestUpdate(context.get(), law.data(), law.size()) == 1,
+                "vector oblique evolution digest law update failed");
+        const auto evolution = hf_vector_oblique_evolution(spec);
+        require(evolution.has_value(), "vector oblique evolution digest law is unavailable");
+        const auto hash_double = [&](double x) {
+            const auto bits = std::bit_cast<std::uint64_t>(x);
+            std::array<unsigned char, 8> encoded{};
+            for (std::size_t i = 0; i < encoded.size(); ++i)
+                encoded[i] = static_cast<unsigned char>((bits >> (8 * i)) & 255);
+            require(EVP_DigestUpdate(context.get(), encoded.data(), encoded.size()) == 1,
+                    "vector oblique evolution digest metadata update failed");
+        };
+        const auto intervals = static_cast<std::uint64_t>(VectorOblique::evolution_intervals);
+        std::array<unsigned char, 8> interval_bytes{};
+        for (std::size_t i = 0; i < interval_bytes.size(); ++i)
+            interval_bytes[i] = static_cast<unsigned char>((intervals >> (8 * i)) & 255);
+        require(EVP_DigestUpdate(context.get(), interval_bytes.data(), interval_bytes.size()) == 1,
+                "vector oblique evolution digest interval update failed");
+        hash_double(evolution->start_seconds);
+        hash_double(evolution->duration_seconds);
+        for (const auto& factors : evolution->mode_factors)
+            for (const auto factor : factors) hash_double(factor);
+    }
     for (std::size_t k = 0; k <= VectorOblique::position_intervals; ++k) {
         for (auto lag = VectorOblique::first_lag_samples(); lag <= VectorOblique::last_lag_samples(); ++lag) {
             const auto value = table.coefficient_knot_value(lag, k);
@@ -290,6 +318,19 @@ std::string vector_oblique_table_sha256(const VectorOblique& table) {
                 encoded[i] = static_cast<unsigned char>((bits[i / 8] >> (8 * (i % 8))) & 255);
             require(EVP_DigestUpdate(context.get(), encoded.data(), encoded.size()) == 1,
                     "vector oblique table digest update failed");
+        }
+    }
+    for (std::size_t k = 0; k < table.evolution_knot_count(); ++k) {
+        for (auto lag = VectorOblique::first_lag_samples(); lag <= VectorOblique::last_lag_samples(); ++lag) {
+            const auto value = table.evolution_knot_value(lag, k);
+            const auto slope = table.evolution_knot_slope(lag, k);
+            const std::array bits{std::bit_cast<std::uint64_t>(value.real()), std::bit_cast<std::uint64_t>(value.imag()),
+                                  std::bit_cast<std::uint64_t>(slope.real()), std::bit_cast<std::uint64_t>(slope.imag())};
+            std::array<unsigned char, 32> encoded{};
+            for (std::size_t i = 0; i < encoded.size(); ++i)
+                encoded[i] = static_cast<unsigned char>((bits[i / 8] >> (8 * (i % 8))) & 255);
+            require(EVP_DigestUpdate(context.get(), encoded.data(), encoded.size()) == 1,
+                    "vector oblique evolution digest update failed");
         }
     }
     std::array<unsigned char, 32> value{};
@@ -396,6 +437,7 @@ double channel_tail_seconds(const ChannelSpec& spec, double horizon_seconds) {
 }
 
 struct Channel::Impl {
+    static constexpr std::size_t maximum_signal_energy_intervals = 256;
     struct RuntimePath {
         const Path* spec = nullptr;
         Complex fixed{1, 0}, phase{1, 0}, phase_step{1, 0}, step_change{1, 0};
@@ -431,6 +473,7 @@ struct Channel::Impl {
     std::optional<HfWaveOpticsStream> wave_optics;
     std::optional<HfPhaseScreensStream> phase_screens;
     std::optional<HfVectorObliqueStream> vector_oblique;
+    std::size_t signal_energy_cursor = 0;
     Random white, colored, events, marks;
     Complex tx_state{}, colored_state{}, impulse_state{}, lowpass_state{};
     double colored_decay = 0, colored_innovation = 0, impulse_decay = 0;
@@ -438,7 +481,8 @@ struct Channel::Impl {
     double lowpass_decay = 0, gain = 1, attack_decay = 0, release_decay = 0;
     Complex stationary_tx_decay{1, 0}, stationary_tx_drive{};
 
-    Impl(Source input, ChannelSpec config, std::uint64_t seed, std::uint64_t count, std::stop_token stop)
+    Impl(Source input, ChannelSpec config, std::uint64_t seed, std::uint64_t count, std::stop_token stop,
+         std::span<const SignalEnergyInterval> signal_energy_intervals)
         : source(std::move(input)), spec(std::move(config)), horizon(count),
           white(spec.noise_seed.value_or(seed), 2), colored(spec.noise_seed.value_or(seed), 6),
           events(spec.noise_seed.value_or(seed), 3), marks(spec.noise_seed.value_or(seed), 4) {
@@ -448,6 +492,20 @@ struct Channel::Impl {
         dt = 1 / fs;
         require(finite(fs) && fs > 0, "channel sample rate overflow");
         require(horizon <= static_cast<std::uint64_t>(INT64_MAX / 4), "channel horizon exceeds signed coordinate range");
+        require(signal_energy_intervals.size() <= maximum_signal_energy_intervals,
+                "too many private signal-energy intervals");
+        std::uint64_t previous_slot = 0, previous_stop = 0;
+        bool first_interval = true;
+        for (const auto& interval : signal_energy_intervals) {
+            require(interval.first_sample < interval.stop_sample && interval.stop_sample <= horizon,
+                    "private signal-energy interval is empty or exceeds the channel horizon");
+            require(first_interval || (interval.public_slot > previous_slot &&
+                    interval.first_sample >= previous_stop),
+                    "private signal-energy intervals must be sorted by slot and nonoverlapping");
+            first_interval = false;
+            previous_slot = interval.public_slot;
+            previous_stop = interval.stop_sample;
+        }
         require(source.geometry.source_samples == 0 || static_cast<bool>(source.sample_at), "channel source callback is missing");
         require(finite(spec.rf_hz) && spec.rf_hz > 0, "RF carrier must be positive and finite");
         require(spec.interpolation_half_width >= 4 && spec.interpolation_half_width <= 64,
@@ -689,7 +747,18 @@ struct Channel::Impl {
         if (spec.phase_screens) bytes = checked_add(bytes, PhaseScreens::preparation_workspace_bound_bytes);
         if (spec.vector_oblique) bytes = checked_add(bytes,
             hf_vector_oblique_preparation_workspace_bound_bytes(*spec.vector_oblique));
+        bytes = checked_add(bytes, checked_multiply(signal_energy_intervals.size(), sizeof(SignalEnergyObservation)));
         if (bytes > spec.maximum_workspace_bytes) throw ChannelWorkspaceError("channel exceeds explicit workspace limit");
+        report.signal_energy_observations.reserve(signal_energy_intervals.size());
+        const auto quoted_observation_bytes = checked_multiply(signal_energy_intervals.size(), sizeof(SignalEnergyObservation));
+        const auto actual_observation_bytes = checked_multiply(report.signal_energy_observations.capacity(), sizeof(SignalEnergyObservation));
+        if (actual_observation_bytes > quoted_observation_bytes) {
+            bytes = checked_add(bytes, actual_observation_bytes - quoted_observation_bytes);
+            if (bytes > spec.maximum_workspace_bytes)
+                throw ChannelWorkspaceError("private signal-energy observation capacity exceeds channel workspace limit");
+        }
+        for (const auto& interval : signal_energy_intervals)
+            report.signal_energy_observations.push_back({interval, 0, 0.});
         std::vector<std::size_t> order(spec.paths.size()), membership(spec.paths.size(), std::numeric_limits<std::size_t>::max());
         for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
         std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
@@ -837,15 +906,18 @@ struct Channel::Impl {
             const auto built = build_hf_vector_oblique_table(selected, stop);
             if (!built.table || !built.checks.qualified)
                 throw HfVectorObliqueUnavailable("vector oblique table failed its Maxwell, Fourier-order, or causal-kernel qualification");
+            if (selected.intrinsic_evolution && (!built.checks.evolution || !built.checks.evolution->qualified))
+                throw HfVectorObliqueUnavailable("intrinsic vector evolution failed its temporal numerical qualification");
             vector_oblique.emplace(built.table, selected);
             require(vector_oblique->tail_samples() == VectorOblique::last_lag_samples(),
                     "vector oblique tail differs from its declared complete causal support");
             auto& receipt = report.vector_oblique.emplace();
             receipt.checks = built.checks;
             receipt.spec = selected;
-            receipt.table_sha256 = vector_oblique_table_sha256(*built.table);
+            receipt.table_sha256 = vector_oblique_table_sha256(*built.table, selected);
             receipt.table_workspace_bytes = built.table->workspace_bytes();
             receipt.stream_workspace_bytes = vector_oblique->workspace_bytes();
+            receipt.evolution_knot_count = built.table->evolution_knot_count();
             require(built.checks.preparation_peak_workspace_bytes <= preparation_bound &&
                     checked_add(receipt.table_workspace_bytes, receipt.stream_workspace_bytes) <=
                         preparation_bound,
@@ -1146,7 +1218,22 @@ struct Channel::Impl {
             path.phase_step *= path.step_change;
         }
         wanted *= fade_gain(spec.fade, static_cast<double>(time));
-        report.signal_energy += static_cast<long double>(std::norm(wanted));
+        const auto clean_energy = static_cast<long double>(std::norm(wanted));
+        report.signal_energy += clean_energy;
+        bool energy_observed = false;
+        while (signal_energy_cursor < report.signal_energy_observations.size() &&
+               n >= report.signal_energy_observations[signal_energy_cursor].interval.stop_sample)
+            ++signal_energy_cursor;
+        if (signal_energy_cursor < report.signal_energy_observations.size()) {
+            auto& observation = report.signal_energy_observations[signal_energy_cursor];
+            if (n >= observation.interval.first_sample && n < observation.interval.stop_sample) {
+                observation.energy += clean_energy;
+                ++observation.samples;
+                energy_observed = true;
+            }
+        }
+        if (!energy_observed && !report.signal_energy_observations.empty())
+            report.signal_energy_outside_observations += clean_energy;
         const auto& noise = spec.noise;
         Complex additive{};
         if (noise.white_variance > 0) additive += std::sqrt(noise.white_variance) * white.proper();
@@ -1204,8 +1291,10 @@ struct Channel::Impl {
     }
 };
 
-Channel::Channel(Source source, ChannelSpec spec, std::uint64_t seed, std::uint64_t horizon_samples, std::stop_token stop)
-    : impl_(std::make_unique<Impl>(std::move(source), std::move(spec), seed, horizon_samples, stop)) {}
+Channel::Channel(Source source, ChannelSpec spec, std::uint64_t seed, std::uint64_t horizon_samples,
+                 std::stop_token stop, std::span<const SignalEnergyInterval> signal_energy_intervals)
+    : impl_(std::make_unique<Impl>(std::move(source), std::move(spec), seed, horizon_samples, stop,
+                                  signal_energy_intervals)) {}
 Channel::~Channel() = default;
 Channel::Channel(Channel&&) noexcept = default;
 Channel& Channel::operator=(Channel&&) noexcept = default;

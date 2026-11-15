@@ -147,9 +147,20 @@ struct HfVectorObliqueReport {
     HfVectorObliqueSpec spec;
     std::string table_sha256;
     std::size_t table_workspace_bytes = 0, stream_workspace_bytes = 0;
+    std::size_t evolution_knot_count = 0;
     double preparation_seconds = 0., retarded_peak_error_bound = 0.;
     double source_minimum_frequency_hz = 0., source_maximum_frequency_hz = 0.;
     long double incident_energy = 0., selected_energy = 0.;
+};
+// Evaluator-only clean-signal energy apertures. These are never propagated to
+// a receiver; samples use the channel's zero-based output clock and exclusive stop.
+struct SignalEnergyInterval {
+    std::uint64_t public_slot = 0, first_sample = 0, stop_sample = 0;
+};
+struct SignalEnergyObservation {
+    SignalEnergyInterval interval;
+    std::uint64_t samples = 0;
+    long double energy = 0.;
 };
 struct ChannelReport {
     std::uint64_t samples = 0, source_samples = 0, impulse_events = 0, clipped_samples = 0;
@@ -161,12 +172,15 @@ struct ChannelReport {
     std::optional<HfWaveOpticsReport> wave_optics;
     std::optional<HfPhaseScreensReport> phase_screens;
     std::optional<HfVectorObliqueReport> vector_oblique;
+    std::vector<SignalEnergyObservation> signal_energy_observations;
+    long double signal_energy_outside_observations = 0.;
 };
 // A bounded, single-owner, forward renderer. It never rewinds or reseeds the
 // canonical Emission. Horizon is an evaluator/resource bound, never RX truth.
 class Channel {
 public:
-    Channel(Source, ChannelSpec, std::uint64_t seed, std::uint64_t horizon_samples, std::stop_token = {});
+    Channel(Source, ChannelSpec, std::uint64_t seed, std::uint64_t horizon_samples, std::stop_token = {},
+            std::span<const SignalEnergyInterval> signal_energy_intervals = {});
     ~Channel();
     Channel(Channel&&) noexcept;
     Channel& operator=(Channel&&) noexcept;

@@ -148,6 +148,12 @@ HF_VECTOR_OBLIQUE_SCENARIOS = {
     "hf-vector-3d-in-plane": (True, True, 2, 0),
     "hf-vector-3d-chain-off": (True, True, 2, 0),
     "hf-vector-3d-chain-clocks-tone": (True, True, 2, 0),
+    "hf-vector-evolving": (True, True, 2, 0),
+    "hf-vector-evolving-rigid": (True, True, 2, 0),
+    "hf-vector-evolving-holdout": (True, True, 4, 0),
+    "hf-vector-evolving-holdout-rigid": (True, True, 4, 0),
+    "hf-vector-evolving-chain-off": (True, True, 2, 0),
+    "hf-vector-evolving-chain-clocks-tone": (True, True, 2, 0),
 }
 HF_VECTOR_CHAIN_SCENARIOS = {
     "hf-vector-oblique-chain-off": (0., 0., 0., 0., False),
@@ -155,6 +161,18 @@ HF_VECTOR_CHAIN_SCENARIOS = {
     "hf-vector-oblique-chain-clocks-tone": (1., -1., .01, -.01, True),
     "hf-vector-3d-chain-off": (0., 0., 0., 0., False),
     "hf-vector-3d-chain-clocks-tone": (1., -1., .01, -.01, True),
+    "hf-vector-evolving-chain-off": (0., 0., 0., 0., False),
+    "hf-vector-evolving-chain-clocks-tone": (1., -1., .01, -.01, True),
+}
+HF_VECTOR_EVOLUTION_SCENARIOS = {
+    "hf-vector-evolving": (2, True),
+    "hf-vector-evolving-rigid": (2, False),
+    "hf-vector-evolving-holdout": (4, True),
+    "hf-vector-evolving-holdout-rigid": (4, False),
+}
+HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS = {
+    "hf-vector-evolving-chain-off": (0., 0., 0., 0., False),
+    "hf-vector-evolving-chain-clocks-tone": (1., -1., .01, -.01, True),
 }
 GANNON_REPLAY = {"hf-gannon-1700": (17, 0.), "hf-gannon-2000": (20, 0.),
                  "hf-gannon-2000-late": (20, 1800.)}
@@ -172,7 +190,7 @@ EPISODE_KEYS = {"id", "scenario", "mode", "waveform", "seed", "cn0_db_hz", "cont
                 "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "fec", "fade_slots", "capture_lead_seconds",
                 "hf_trajectory_seed", "hf_trajectory_offset_seconds", "noise_seed", "hf_gannon_native_diagnostic",
                 "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic",
-                "hf_correlated_gain_shadow", "hf_correlated_gain_receiver"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS
+                "hf_correlated_gain_shadow", "hf_correlated_gain_receiver", "reception_requirement"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS
 MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose", "hf-search", "gui-varying"}
 CONTROLS = {"wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap", "eof"}
 BACKENDS = {"cpu", "cuda", "vulkan", "gpu"}
@@ -322,6 +340,42 @@ def _validate_episode(item: Any, index: int, ids: set[str],
                         f"episodes[{index}].hf_trajectory_offset_seconds", -86400, 86400)
     if "control" in item and (not isinstance(item["control"], str) or item["control"] not in CONTROLS):
         raise CampaignError(f"episodes[{index}].control must be one of {sorted(CONTROLS)}")
+    requirement = item.get("reception_requirement")
+    if requirement is not None:
+        control = item.get("control", "wanted")
+        if not isinstance(requirement, str) or requirement not in {"required_complete", "characterization", "negative_control"}:
+            raise CampaignError(f"episodes[{index}].reception_requirement must be required_complete, characterization or negative_control")
+        if item["mode"] != "receive":
+            raise CampaignError(f"episodes[{index}].reception_requirement is valid only for receive episodes")
+        if ((requirement in {"required_complete", "characterization"} and control != "wanted") or
+                (requirement == "negative_control" and control not in NEGATIVE_RECEIVE_CONTROLS)):
+            raise CampaignError(f"episodes[{index}].reception_requirement does not match its wanted/negative receive control")
+    if item["scenario"] in HF_VECTOR_EVOLUTION_SCENARIOS:
+        control = item.get("control", "wanted")
+        expected_point = ((item.get("cn0_db_hz") == 20 and item.get("bit_seconds", 64) == 64 and
+                           requirement == "required_complete") or
+                          (item.get("cn0_db_hz") == 15 and item.get("bit_seconds", 64) == 64 and
+                           item["scenario"] == "hf-vector-evolving" and requirement == "characterization") or
+                          (item.get("cn0_db_hz") == 17.5 and item.get("bit_seconds", 64) == 64 and
+                           item["scenario"] == "hf-vector-evolving" and requirement == "characterization" and
+                           item.get("seed") == 72511 and item.get("noise_seed") == 92511) or
+                          (item.get("cn0_db_hz") == 12 and item.get("bit_seconds") == 128 and
+                           item["scenario"] == "hf-vector-evolving" and requirement == "characterization"))
+        expected_negative = (control in {"noise", "wrong-key"} and item.get("cn0_db_hz") == 20 and
+                             item.get("bit_seconds", 64) == 64 and requirement == "negative_control" and
+                             item["scenario"] == "hf-vector-evolving")
+        if (item["mode"] != "receive" or item["waveform"] != "reference" or
+                item.get("helper", False) or item.get("backend", "cpu") != "cpu" or
+                item.get("fec", "off") != "off" or
+                not (expected_point and control == "wanted" or expected_negative)):
+            raise CampaignError(f"episodes[{index}]: evolving-vector native reception requires the frozen CPU, Helper-off, FEC-off 64/128 second direct anchor or characterization cases")
+    if item["scenario"] in HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS:
+        if (item["mode"] != "receive" or item["waveform"] != "reference" or
+                item.get("control", "wanted") != "wanted" or item.get("bit_seconds", 64) != 64 or
+                item.get("cn0_db_hz") != 30 or requirement != "required_complete" or
+                item.get("helper", False) or item.get("backend", "cpu") != "cpu" or
+                item.get("fec", "off") != "off"):
+            raise CampaignError(f"episodes[{index}]: evolving-vector endpoint discriminator requires required_complete 64-second 30 dB-Hz native reception")
     if "backend" in item and (not isinstance(item["backend"], str) or item["backend"] not in BACKENDS):
         raise CampaignError(f"episodes[{index}].backend must be one of {sorted(BACKENDS)}")
     for key in ("cn0_db_hz",):
@@ -480,13 +534,20 @@ def _validate_episode(item: Any, index: int, ids: set[str],
             raise CampaignError(f"episodes[{index}]: phase-screen cases require fixed-geometry reference RRC Helper-off CPU plan/channel/receive or wanted hf-search, with admitted bit/SNR settings")
     if item["scenario"] in HF_VECTOR_OBLIQUE_SCENARIOS:
         chain = item["scenario"] in HF_VECTOR_CHAIN_SCENARIOS
-        if (mode not in ({"plan", "receive"} if chain else {"plan", "channel", "receive"}) or
+        evolving_direct = item["scenario"] in HF_VECTOR_EVOLUTION_SCENARIOS
+        evolving_chain = item["scenario"] in HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS
+        allowed_modes = ({"receive"} if evolving_direct or evolving_chain else
+                         {"plan", "receive"} if chain else {"plan", "channel", "receive"})
+        allowed_durations = ({64, 128} if not chain else {64})
+        allowed_cn0 = ({12, 15, 17.5, 20} if evolving_direct else {30} if evolving_chain else
+                       {0, 30} if chain else {-3, 0, 10, 20, 30})
+        if (mode not in allowed_modes or
                 item["waveform"] != "reference" or item.get("backend", "cpu") != "cpu" or
                 item.get("pulse", "rrc") != "rrc" or item.get("helper", False) or
                 item.get("fec", "off") != "off" or
                 control not in ({"wanted", "noise", "wrong-key"} if mode == "receive" else {"wanted"}) or
-                item.get("bit_seconds", 64) not in ({64} if chain else {64, 128}) or
-                item.get("cn0_db_hz", 0) not in ({0, 30} if chain else {-3, 0, 10, 20, 30}) or
+                item.get("bit_seconds", 64) not in allowed_durations or
+                item.get("cn0_db_hz", 0) not in allowed_cn0 or
                 any(item.get(field, False) for field in ("service_replay", "hf_phase_bank", "hf_public_phase_receiver",
                     "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver",
                     "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models",
@@ -2634,13 +2695,26 @@ def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> No
 
 def _vector_oblique_spec(scenario_id: str) -> dict[str, Any]:
     perturbations, magnetic, field, antenna = HF_VECTOR_OBLIQUE_SCENARIOS[scenario_id]
-    holdout, three_d = bool(field % 2), field >= 2
+    evolving_case = scenario_id in HF_VECTOR_EVOLUTION_SCENARIOS or scenario_id in HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS
+    evolving_holdout = scenario_id in {"hf-vector-evolving-holdout", "hf-vector-evolving-holdout-rigid"}
+    legacy_holdout = scenario_id in {"hf-vector-oblique-holdout", "hf-vector-3d-holdout"}
+    holdout = evolving_holdout or legacy_holdout
+    three_d = field >= 2
     angle, height, period, thickness, peak, collisions, slice_m, field_b, launch = (
-        (53., 104000., 20500., 1200., 6.12e6, 2450., 100., [-11e-6, 25e-6, -46e-6], .23)
+        ((51., 108000., 21500., 1000., 6.47e6, 1720., 90., [20e-6, 11e-6, -45e-6], .16)
+         if evolving_case and holdout else
+         (53., 104000., 20500., 1200., 6.12e6, 2450., 100., [-11e-6, 25e-6, -46e-6], .23))
         if holdout else (50., 112000., 24000., 960., 6.55e6, 1300., 80., [18e-6, 17e-6, -43e-6], .10))
+    if evolving_case:
+        # Keep the held-out scenario physically matched to the native fixture.
+        drift = 7. if holdout else 8.
+        epoch = 470. if holdout else 600.
+    else:
+        drift = 7.5 if holdout else 8.
+        epoch = 520. if holdout else 600.
     result = {"carrier_hz": 10_000_000., "sample_rate_hz": 1920., "occupied_half_band_hz": 384.,
         "maximum_horizon_seconds": 2400., "perturbations": perturbations, "magnetic": magnetic,
-        "field": field, "antenna": antenna, "drift_mps": 7.5 if holdout else 8., "epoch_seconds": 520. if holdout else 600.,
+        "field": field, "antenna": antenna, "drift_mps": drift, "epoch_seconds": epoch,
         "incidence_deg": angle, "height_m": height, "receiver_x_m": 2 * height * math.tan(math.radians(angle)),
         "period_m": period, "thickness_m": thickness, "peak_plasma_hz": peak,
         "collision_rate_per_second": collisions, "corrugated_slice_m": slice_m,
@@ -2653,20 +2727,25 @@ def _vector_oblique_spec(scenario_id: str) -> dict[str, Any]:
         "fixed_receive_antenna_axis": [0., 1., 0.] if antenna == 0 else [.6, 0., .8],
         "launch_tm_fraction": launch, "first_lag_samples": 2, "last_lag_samples": 130,
         "modelling_delay_samples": 32, "retained_late_samples": 96, "position_intervals": 256,
-        "preparation_workspace_bound_bytes": 16 * 1024 * 1024,
+        "preparation_workspace_bound_bytes": (48 if scenario_id in {"hf-vector-evolving", "hf-vector-evolving-holdout"}
+                                                else 32 if evolving_case else 16) * 1024 * 1024,
         "interpolation": "fixed antenna complex-voltage coefficients and slopes over one translating plasma period"}
 
     if three_d:
         cross_plane = scenario_id != "hf-vector-3d-in-plane"
-        wider_held = holdout and perturbations and cross_plane
-        period_y = 18500. if holdout else 17000.
+        wider_held = holdout and perturbations and cross_plane and not evolving_case
+        period_y = (18000. if evolving_case else 18500.) if holdout else 17000.
         winding = -1 if holdout else 1
-        modes = [(1, 0, .0016, -1.05), (0, 1, .0019, .6), (1, -1, .0011, -.2)] if holdout else [
-            (1, 0, .0018, .45), (0, 1, .0015, -.7), (1, 1, .0012, 1.1)]
+        receiver_y_fraction = (-.093 if evolving_case else -.112) if holdout else .073
+        modes = ([(1, 0, .0013, -.65), (0, 1, .0011, .90), (1, -1, .00085, -1.40)]
+                 if evolving_case and holdout else
+                 [(1, 0, .0016, -1.05), (0, 1, .0019, .6), (1, -1, .0011, -.2)]
+                 if holdout else [
+            (1, 0, .0018, .45), (0, 1, .0015, -.7), (1, 1, .0012, 1.1)])
         result.pop("density_harmonic_x")
         result.pop("density_harmonic_phase_rad")
         result.update(cross_plane=cross_plane, spatial_geometry_dimension=3, transverse_periodic_dimensions=2,
-            period_y_m=period_y, receiver_y_m=(-.112 if holdout else .073) * period_y,
+            period_y_m=period_y, receiver_y_m=receiver_y_fraction * period_y,
             drift_y_mps=winding * result["drift_mps"] * period_y / period,
             trajectory_winding_y=winding,
             transverse_density_modes=[{"m": m, "n": n,
@@ -2684,6 +2763,24 @@ def _vector_oblique_spec(scenario_id: str) -> dict[str, Any]:
                 "planar-background control with all transverse perturbations disabled" if not perturbations else
                 "in-plane control retains only the n=0 Fourier terms and removes cross-plane density variation"),
             trajectory_accuracy_scope="3D spatial L1 refinement and carrier witnesses are checked before complex-field folding along the fixed commensurate receiver trajectory; the scalar time-varying FIR is specific to this trajectory, not an arbitrary 3D path ensemble")
+    if evolving_case:
+        evolving = scenario_id in {"hf-vector-evolving", "hf-vector-evolving-holdout",
+                                  "hf-vector-evolving-chain-off", "hf-vector-evolving-chain-clocks-tone"}
+        result["intrinsic_evolution"] = evolving
+        if evolving:
+            result["preparation_workspace_bound_bytes"] = 48 * 1024 * 1024
+            start, duration, factors = ((838., 144., [[0., -.38, .18, 0.], [-.42, 0., 0., .30],
+                                                      [-.24, 0., 0., -.45]]) if holdout else
+                                        (490., 192., [[-.35, 0., 0., .20], [0., -.55, .25, 0.],
+                                                      [-.40, 0., 0., .30]]))
+            result["evolution"] = {
+                "start_seconds": start,
+                "duration_seconds": duration,
+                "intervals": 16,
+                "mode_factors": factors,
+                "law": "Each mode multiplier is 1+(a+ib)B(u)+(c+id)Q(u), B=64u^3(1-u)^3, Q=2(2u-1)B; identity outside u in [0,1].",
+                "time_scope": "T=(output_sample-32)/1920 seconds, on the physical output clock before the added FIR delay; independent of the receiver message calendar.",
+            }
     return result
 
 
@@ -2710,17 +2807,23 @@ def _validate_vector_oblique_descriptor(value: Any, scenario_id: str) -> None:
 def _validate_vector_oblique_report(full: Any, scenario_id: str) -> None:
     _validate_vector_oblique_descriptor(full, scenario_id)
     three_d = HF_VECTOR_OBLIQUE_SCENARIOS[scenario_id][2] >= 2
+    evolving = scenario_id in {"hf-vector-evolving", "hf-vector-evolving-holdout",
+                               "hf-vector-evolving-chain-off", "hf-vector-evolving-chain-clocks-tone"}
     qualification_scope = (
+        "finite-order bidirectional 3D cold collisional Maxwell scattering with doubly periodic transverse density, a bounded intrinsic density-mode event and fixed antenna projection; temporal checks cover 16 intervals, 16 midpoints, 4 direct FIR epochs, 3 refined epochs, 61 temporal RF pairs, and a 4097-point event-time minimum scan with five checked RF minima, but do not establish random 3D fields, field calibration or environmental probabilities" if evolving else
         "finite-order bidirectional 3D cold collisional Maxwell scattering with doubly periodic transverse density, oblique incidence and fixed antenna projection; finite RF/position/order/FIR witnesses and one commensurate trajectory do not establish random field ensembles, field calibration or environmental probabilities" if three_d else
         "finite-order bidirectional 2D cold collisional Maxwell scattering with periodic transverse density, oblique incidence and fixed antenna projection; limited RF/position/order/FIR witnesses do not establish random 3D fields, field calibration or environmental probabilities")
+    digest_scope = ("all 257 spatial-position knots and 17 evolution-time residual knots across all 129 retained lags, binary64 complex coefficients/slopes, plus a versioned T/B/Q time-law tag, interval count, event start/duration and all mode factors in canonical little-endian metadata order"
+                    if evolving else
+                    "all 257 translating-position knots, all 129 retained lags, binary64 complex coefficients and knot slopes in canonical little-endian order; source identity binds generation and interpolation")
     if (full.get("table_qualified") is not True or
             not isinstance(full.get("table_sha256"), str) or
             re.fullmatch(r"[0-9a-fA-F]{64}", full["table_sha256"]) is None or
-            full.get("table_digest_scope") != "all 257 translating-position knots, all 129 retained lags, binary64 complex coefficients and knot slopes in canonical little-endian order; source identity binds generation and interpolation" or
+            full.get("table_digest_scope") != digest_scope or
             full.get("qualification_scope") != qualification_scope):
         raise CampaignError("vector oblique execution requires its qualified source-bound coefficient table")
     half_orders = full.get("production_half_orders_each_axis", 24)
-    expected_counts = {"rf_solves": 29, "output_half_orders": half_orders, "checked_frequencies": 13,
+    expected_counts = {"rf_solves": 270 if evolving else 29, "output_half_orders": half_orders, "checked_frequencies": 13,
                        "checked_positions": 2048, "checked_table_assembly_positions": 54}
     if three_d:
         expected_counts.update(output_half_orders_y=half_orders, output_trajectory_half_orders=2*half_orders)
@@ -2761,6 +2864,106 @@ def _validate_vector_oblique_report(full: Any, scenario_id: str) -> None:
         if (not full["perturbations"] or not full["cross_plane"]) and (
                 full["carrier_out_of_plane_reflected_flux"] > 2e-9 or full["carrier_out_of_plane_transmitted_flux"] > 2e-9):
             raise CampaignError("planar/in-plane control cannot report cross-plane density scattering")
+    if evolving:
+        evolution = full.get("evolution_checks")
+        required_evolution = {
+            "qualified", "intervals", "scanned_time_points", "checked_midpoints", "checked_direct_fir_epochs",
+            "checked_refined_epochs", "checked_rf_pairs", "checked_minimum_rf_pairs",
+            "minimum_scanned_assembled_power", "minimum_witnesses", "minimum_slice_density_fraction",
+            "maximum_mode_magnitude_change", "maximum_phase_closure_change_rad",
+            "maximum_rigid_departure_voltage", "maximum_temporal_voltage_error",
+            "maximum_direct_fir_tap_error", "maximum_frequency_voltage_error",
+            "maximum_fir_voltage_error", "maximum_discarded_energy_fraction",
+            "maximum_mesh_voltage_error", "maximum_refined_order_voltage_error",
+            "maximum_refined_edge_flux", "minimum_checked_trajectory_power",
+            "relative_voltage_error_at_minimum", "retarded_peak_error_bound",
+        }
+        if (full.get("intrinsic_evolution") is not True or not isinstance(evolution, dict) or
+                set(evolution) != required_evolution or evolution.get("qualified") is not True or
+                full.get("evolution_knot_count") != 17):
+            raise CampaignError("evolving vector report must bind its 17-knot intrinsic-density coefficient table")
+        exact_counts = {"intervals": 16, "scanned_time_points": 4097, "checked_midpoints": 16,
+                        "checked_direct_fir_epochs": 4, "checked_refined_epochs": 3,
+                        "checked_rf_pairs": 61, "checked_minimum_rf_pairs": 5}
+        for field, expected in exact_counts.items():
+            if not _is_nonnegative_int(evolution.get(field)) or evolution[field] != expected:
+                raise CampaignError(f"evolving vector witness count differs: {field}")
+        for field in required_evolution - {"qualified", "intervals", "scanned_time_points", "checked_midpoints",
+                                           "checked_direct_fir_epochs", "checked_refined_epochs", "checked_rf_pairs",
+                                           "checked_minimum_rf_pairs", "minimum_witnesses"}:
+            if not _is_finite_number(evolution.get(field)) or evolution[field] < 0:
+                raise CampaignError(f"evolving vector witness is missing or invalid: {field}")
+        evolution_gates = {
+            "minimum_slice_density_fraction": (0., 1.),
+            "maximum_mode_magnitude_change": (1e-4, math.inf),
+            "maximum_phase_closure_change_rad": (.1, math.inf),
+            "maximum_rigid_departure_voltage": (.001, math.inf),
+            "maximum_temporal_voltage_error": (0., .0012),
+            "maximum_direct_fir_tap_error": (0., .0012),
+            "maximum_frequency_voltage_error": (0., .0006),
+            "maximum_fir_voltage_error": (0., .0006),
+            "maximum_discarded_energy_fraction": (0., 1e-6),
+            "maximum_mesh_voltage_error": (0., .004),
+            "maximum_refined_order_voltage_error": (0., .004),
+            "maximum_refined_edge_flux": (0., 5e-5),
+            "relative_voltage_error_at_minimum": (0., .15),
+            "retarded_peak_error_bound": (0., .004),
+        }
+        for field, (minimum, maximum) in evolution_gates.items():
+            if not minimum <= evolution[field] <= maximum:
+                raise CampaignError(f"evolving vector temporal admission failed: {field}")
+        if evolution["minimum_checked_trajectory_power"] <= 0:
+            raise CampaignError("evolving vector temporal relative witness requires a positive checked-path field")
+        minimum_witnesses = evolution["minimum_witnesses"]
+        expected_offsets = (-384., -196.5, 0., 196.5, 384.)
+        if not isinstance(minimum_witnesses, list) or len(minimum_witnesses) != len(expected_offsets):
+            raise CampaignError("evolving vector report must retain all five independently checked frequency minima")
+        assembled_powers: list[float] = []
+        direct_powers: list[float] = []
+        witness_errors: list[float] = []
+        start = full["evolution"]["start_seconds"]
+        duration = full["evolution"]["duration_seconds"]
+        for row, expected_offset in zip(minimum_witnesses, expected_offsets):
+            if not isinstance(row, dict) or set(row) != {
+                    "offset_hz", "physical_seconds", "assembled_power", "direct_power", "voltage_error"}:
+                raise CampaignError("evolving vector RF-minimum witnesses have an unexpected schema")
+            if (not _is_finite_number(row.get("offset_hz")) or
+                    not math.isclose(row["offset_hz"], expected_offset, rel_tol=0., abs_tol=1e-12)):
+                raise CampaignError("evolving vector RF minima must use the frozen ascending occupied-band witness offsets")
+            physical_seconds = row.get("physical_seconds")
+            assembled = row.get("assembled_power")
+            direct = row.get("direct_power")
+            voltage_error = row.get("voltage_error")
+            if (not _is_finite_number(physical_seconds) or not start <= physical_seconds <= start + duration or
+                    not _is_finite_number(assembled) or assembled <= 0 or
+                    not _is_finite_number(direct) or direct <= 0 or
+                    not _is_finite_number(voltage_error) or not 0 <= voltage_error <= .0012):
+                raise CampaignError("evolving vector minimum witness is outside its event or has invalid power/error")
+            grid_coordinate = (physical_seconds - start) * 4096. / duration
+            if not math.isclose(grid_coordinate, round(grid_coordinate), rel_tol=0., abs_tol=1e-8):
+                raise CampaignError("evolving vector minimum time must be one of the 4097 declared uniform scan points")
+            if math.sqrt(assembled) - math.sqrt(direct) > voltage_error + 2e-12 or math.sqrt(direct) - math.sqrt(assembled) > voltage_error + 2e-12:
+                raise CampaignError("evolving vector direct and assembled powers contradict their voltage-error witness")
+            assembled_powers.append(assembled)
+            direct_powers.append(direct)
+            witness_errors.append(voltage_error)
+        if (not _is_finite_number(evolution["minimum_scanned_assembled_power"]) or
+                evolution["minimum_scanned_assembled_power"] <= 0 or
+                not math.isclose(evolution["minimum_scanned_assembled_power"], min(assembled_powers),
+                                 rel_tol=2e-10, abs_tol=2e-12) or
+                evolution["minimum_checked_trajectory_power"] > min(direct_powers) +
+                    max(2e-12, min(direct_powers) * 2e-10) or
+                evolution["maximum_temporal_voltage_error"] + 2e-12 < max(witness_errors)):
+            raise CampaignError("evolving vector raw/assembled minima are inconsistent with the five checked RF witnesses")
+        relative = (evolution["maximum_mesh_voltage_error"] + evolution["maximum_refined_order_voltage_error"] +
+                    max(evolution["maximum_temporal_voltage_error"],
+                        evolution["maximum_direct_fir_tap_error"] + evolution["maximum_fir_voltage_error"])) / max(
+                            1e-12, math.sqrt(min(evolution["minimum_checked_trajectory_power"],
+                                                 evolution["minimum_scanned_assembled_power"])))
+        if not math.isclose(evolution["relative_voltage_error_at_minimum"], relative, rel_tol=2e-10, abs_tol=2e-12):
+            raise CampaignError("evolving vector relative error must be charged against both raw and assembled minima")
+    elif "evolution_checks" in full or "evolution_knot_count" in full:
+        raise CampaignError("rigid vector control cannot claim intrinsic evolution checks")
     gates = {"maximum_flux_excess": 2e-9, "maximum_solve_residual": 2e-12,
         "mesh_voltage_error": .004, "refined_order_voltage_error": .004,
         "maximum_edge_flux": 5e-5, "frequency_voltage_error": .0006, "fir_voltage_error": .0006,
@@ -2815,6 +3018,45 @@ def _validate_vector_oblique_report(full: Any, scenario_id: str) -> None:
     for field in ("incident_energy_sample_sum", "selected_energy_sample_sum"):
         if not _is_finite_number(full.get(field)) or full[field] < 0:
             raise CampaignError("vector oblique incident and selected energies must be measured")
+
+
+def _validate_vector_private_signal_energy(channel: Any, plan: Any) -> None:
+    """Check evaluator-only clean energy receipts against the public receive apertures."""
+    scope = ("Evaluator-only per-public-slot sum of the propagated wanted complex voltage after physical fading "
+             "and before additive noise or frontend processing; intervals are not supplied to the receiver or decoder.")
+    observations = channel.get("private_signal_energy_observations") if isinstance(channel, dict) else None
+    public_slots = plan.get("public_slots") if isinstance(plan, dict) else None
+    if (not isinstance(channel, dict) or channel.get("private_signal_energy_scope") != scope or
+            not isinstance(observations, list) or not isinstance(public_slots, list) or
+            len(observations) != len(public_slots) or not observations):
+        raise CampaignError("evolving-vector receive must report clean signal energy for every public slot aperture")
+    intervals: list[tuple[int, int]] = []
+    energies: list[float] = []
+    for index, (row, public) in enumerate(zip(observations, public_slots)):
+        if not isinstance(row, dict) or set(row) != {
+                "public_slot", "first_sample", "stop_sample", "samples", "energy_sample_sum"}:
+            raise CampaignError("private per-slot energy rows must contain only their aperture and scalar energy")
+        aperture = public.get("observation") if isinstance(public, dict) else None
+        first, stop = row.get("first_sample"), row.get("stop_sample")
+        energy = row.get("energy_sample_sum")
+        if (row.get("public_slot") != index or not isinstance(aperture, dict) or
+                first != aperture.get("first") or stop != aperture.get("stop") or
+                not _is_nonnegative_int(first) or not _is_nonnegative_int(stop) or not first < stop or
+                row.get("samples") != stop - first or not _is_finite_number(energy) or energy < 0):
+            raise CampaignError("private per-slot clean energy must align exactly with a complete planned public aperture")
+        intervals.append((first, stop))
+        energies.append(energy)
+    intervals.sort()
+    if any(left[1] > right[0] for left, right in zip(intervals, intervals[1:])):
+        raise CampaignError("private public-slot energy apertures overlap")
+    aggregate = channel.get("signal_energy_sample_sum")
+    outside = channel.get("private_signal_energy_outside_observations_sample_sum")
+    observed = math.fsum(energies)
+    if (not _is_finite_number(aggregate) or aggregate < 0 or
+            not _is_finite_number(outside) or outside < 0 or
+            observed > aggregate + max(1e-8, aggregate * 1e-10) or
+            not math.isclose(observed + outside, aggregate, rel_tol=1e-10, abs_tol=1e-8)):
+        raise CampaignError("private per-slot and outside-aperture energies must account for the aggregate pre-noise signal plane")
 
 
 def _validate_vector_oblique(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
@@ -2903,6 +3145,8 @@ def _validate_vector_oblique(receipt: dict[str, Any], episode: dict[str, Any]) -
     full = channel.get("vector_oblique")
     _validate_vector_oblique_report(full, scenario_id)
     _validate_wave_energy_planes(channel, full, episode.get("control", "wanted") == "noise")
+    if scenario_id in HF_VECTOR_EVOLUTION_SCENARIOS:
+        _validate_vector_private_signal_energy(channel, plan)
     timing = receipt.get("timing", {})
     if (not _is_finite_number(timing.get("channel_preparation_seconds")) or
             not _is_finite_number(timing.get("wall_seconds")) or

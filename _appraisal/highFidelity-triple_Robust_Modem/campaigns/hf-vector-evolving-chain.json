@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "name": "hf-vector-evolving-chain",
+  "purpose": "Conditionally admitted after all four frozen direct +20 dB-Hz required anchors pass. This +30 native clocks/continuing-tone C delivery requirement and matched Off discriminator on a miss were declared before initial numerical/receiver outcomes in hf-vector-evolving-receiver. Same physical event, actual endpoint sample-clock/RF errors, continuing interferer and canonical complete receiver. Single bounded complete trial; no sweep.",
+  "max_wall_seconds": 650,
+  "per_trial_wall_seconds": 600,
+  "max_trials": 1,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "id": "evolving-chain-clocks-tone-C-30",
+      "scenario": "hf-vector-evolving-chain-clocks-tone",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 72511,
+      "noise_seed": 92511,
+      "bit_seconds": 64,
+      "message": "C",
+      "control": "wanted",
+      "cn0_db_hz": 30,
+      "max_wall_seconds": 600,
+      "reception_requirement": "required_complete"
+    }
+  ]
+}

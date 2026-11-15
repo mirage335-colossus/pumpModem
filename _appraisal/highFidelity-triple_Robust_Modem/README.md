@@ -7,7 +7,23 @@ groundwave, 1–30 MHz skywave, and Earth–Moon–Earth**. All appraisal code,
 fixtures, documentation and generated evidence remain in this directory.
 Python launches native executables and analyzes receipts; it implements no DSP.
 
-The [two-transverse-coordinate extension](hf-vector-3d.md) adds coupled 3D
+The [intrinsic-evolution extension](hf-vector-evolving.md) deforms the plasma
+density during a message in that same coupled 3D calculation. Two fixed fields
+pass independent temporal, spatial, frequency and minimum-voltage checks before
+receiver admission. Four complete-delivery requirements are declared before
+execution, alongside weaker duration/energy comparisons and negative controls.
+Private energy measurements use each actual public decision window, keeping
+whole-message energy separate from per-decision information.
+The four direct delivery requirements pass and both negative controls stay
+quiet. The strong native clock/interference case still fails message completion
+despite thirteen correct DATA bits; its matched endpoint-Off case completes.
+This is a retained failed requirement, not a receiver repair.
+The eleven unique complete observations also narrow one fixed weak-signal
+delivery bracket to +17.5 failure / +20 success. At the midpoint, eleven correct
+bits still do not make a delivered message: two consecutive quiet decisions
+split it into codec-rejected fragments.
+
+The preceding [two-transverse-coordinate extension](hf-vector-3d.md) adds coupled 3D
 spatial diffraction to the same native magnetic/reflection calculation, with
 explicit numerical rejection and support recovery. Its
 [executable qualification reader](hf-vector-3d.md#executable-qualification-requirements)
@@ -167,7 +183,28 @@ From the repository root:
 ```
 
 This configures an ignored `.build/` and links the production C++ modem.
-The 3D spatial/qualification continuation passes **39/39 CTest groups in
+The intrinsic-evolution continuation passes **39/39 CTest groups in 105.37
+seconds**, including 127 runner and 23 qualification/analysis checks. Native
+checks cover the evolution law, energy-window accounting, identical rendered IQ
+with instrumentation enabled, partial captures and energy outside observations.
+[Full pre-reader-correction check log](local-evidence/hf-vector-evolving-preflight/ctest-current.log).
+After the receipt-scope correction, both affected Python groups again pass
+(127 runner and 23 qualification/analysis checks); the native calculations are
+unchanged. The original validation stop remains in the experiment record.
+These software checks are separate from complete receiver outcomes in the
+[evolving-field record](hf-vector-evolving.md).
+The newly registered evolving-waveform group passes in 75.04 s, and the final
+four affected groups pass in 140.78 s, including native integration. Coverage
+now spans forty registered groups through the full and affected runs;
+[final affected log](local-evidence/hf-vector-evolving-preflight/ctest-final-affected.log).
+The subsequent Python-only historical-held descriptor correction passes
+128 runner and 23 qualification checks. All 43 qualification receipts validate
+with the original 32 outcomes preserved; the overall qualification remains
+failed. [Final reader checks](local-evidence/hf-vector-evolving-preflight/reader-final-tests.log)
+and [qualification record](hf-vector-evolving.md#finite-qualification-and-preservation-of-earlier-failures)
+retain the original failed audit and exact compiled/external-reader identities.
+
+The preceding 3D spatial/qualification continuation passes **39/39 CTest groups in
 108.77 seconds**, including the added 3D assembled waveform, exact-input
 completion ambiguity and finite qualification-reader groups.
 [Current complete check log](local-evidence/hf-3d-preflight/ctest-final.log).

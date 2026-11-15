@@ -876,6 +876,32 @@ def complete_service_messages(receipt: dict) -> None:
 
 
 class CampaignValidationTests(unittest.TestCase):
+    def test_frozen_reception_requirement_is_receive_only_and_not_native_cli(self):
+        base = {"id": "required", "scenario": "awgn", "mode": "receive",
+                "waveform": "reference", "seed": 4, "control": "wanted",
+                "reception_requirement": "required_complete"}
+        runner._validate_episode(base, 0, set(), 30, 100_000)
+        command = runner._command(Path("/native/probe"), base, 100_000, 30)
+        self.assertNotIn("--reception-requirement", command)
+        self.assertNotIn("required_complete", command)
+        characterization = dict(base, reception_requirement="characterization")
+        runner._validate_episode(characterization, 0, set(), 30, 100_000)
+        negative = dict(base, id="negative", control="noise", reception_requirement="negative_control")
+        runner._validate_episode(negative, 0, set(), 30, 100_000)
+        for invalid in (
+            dict(base, reception_requirement="invented"),
+            dict(base, reception_requirement=[]),
+            dict(base, mode="plan"),
+            dict(base, control="wrong-key"),
+            dict(base, control="noise", reception_requirement="characterization"),
+            dict(base, control="wanted", reception_requirement="negative_control"),
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(invalid, 0, set(), 30, 100_000)
+        # Historical episode dictionaries without the optional annotation remain valid.
+        runner._validate_episode({k: v for k, v in base.items() if k != "reception_requirement"},
+                                 0, set(), 30, 100_000)
+
     def test_vector_3d_descriptor_preserves_spatial_and_trajectory_scope(self):
         for scenario in (name for name in runner.HF_VECTOR_OBLIQUE_SCENARIOS if name.startswith("hf-vector-3d")):
             descriptor = runner._vector_oblique_spec(scenario)
@@ -895,16 +921,243 @@ class CampaignValidationTests(unittest.TestCase):
         self.assertTrue(all(mode["amplitude_x"] == 0 for mode in in_plane["transverse_density_modes"] if mode["n"] != 0))
         self.assertGreater(in_plane["transverse_density_modes"][0]["amplitude_x"], 0.)
 
+    def test_legacy_vector_descriptors_keep_independent_frozen_field_expectations(self):
+        # These literals intentionally stand apart from _vector_oblique_spec and its scenario map.
+        expected = {
+            "hf-vector-oblique": (True, True, 0, 0, False),
+            "hf-vector-oblique-off": (False, True, 0, 0, False),
+            "hf-vector-oblique-no-b": (True, False, 0, 0, False),
+            "hf-vector-oblique-holdout": (True, True, 1, 0, True),
+            "hf-vector-oblique-cross": (True, True, 0, 1, False),
+            "hf-vector-oblique-chain-off": (True, True, 0, 0, False),
+            "hf-vector-oblique-chain-clocks": (True, True, 0, 0, False),
+            "hf-vector-oblique-chain-clocks-tone": (True, True, 0, 0, False),
+            "hf-vector-3d": (True, True, 2, 0, False),
+            "hf-vector-3d-holdout": (True, True, 3, 0, True),
+            "hf-vector-3d-planar": (False, True, 2, 0, False),
+            "hf-vector-3d-in-plane": (True, True, 2, 0, False),
+            "hf-vector-3d-chain-off": (True, True, 2, 0, False),
+            "hf-vector-3d-chain-clocks-tone": (True, True, 2, 0, False),
+        }
+        legacy_ids = set(runner.HF_VECTOR_OBLIQUE_SCENARIOS) - set(runner.HF_VECTOR_EVOLUTION_SCENARIOS) - set(runner.HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS)
+        self.assertEqual(set(expected), legacy_ids)
+        primary = (50., 112000., 24000., 960., 6.55e6, 1300., 80., [18e-6, 17e-6, -43e-6], .10, 8., 600.)
+        held = (53., 104000., 20500., 1200., 6.12e6, 2450., 100., [-11e-6, 25e-6, -46e-6], .23, 7.5, 520.)
+        for name, (perturbations, magnetic, field, antenna, is_held) in expected.items():
+            with self.subTest(scenario=name):
+                descriptor = runner._vector_oblique_spec(name)
+                runner._validate_vector_oblique_descriptor(descriptor, name)
+                geometry = held if is_held else primary
+                self.assertEqual((descriptor["perturbations"], descriptor["magnetic"], descriptor["field"], descriptor["antenna"]),
+                                 (perturbations, magnetic, field, antenna))
+                for key, value in zip(("incidence_deg", "height_m", "period_m", "thickness_m", "peak_plasma_hz",
+                                       "collision_rate_per_second", "corrugated_slice_m", "magnetic_field_tesla",
+                                       "launch_tm_fraction", "drift_mps", "epoch_seconds"), geometry):
+                    if key == "magnetic_field_tesla" and not magnetic:
+                        value = [0., 0., 0.]
+                    self.assertEqual(descriptor[key], value)
+                if field < 2:
+                    self.assertEqual(descriptor["preparation_workspace_bound_bytes"], 16 * 1024**2)
+                    self.assertNotIn("cross_plane", descriptor)
+                    self.assertEqual(descriptor["density_harmonic_x"],
+                                     ([.007, .0044] if is_held else [.008, .0038]) if perturbations else [0., 0.])
+                    continue
+                self.assertEqual(descriptor["spatial_geometry_dimension"], 3)
+                self.assertEqual(descriptor["cross_plane"], name != "hf-vector-3d-in-plane")
+                wide = name == "hf-vector-3d-holdout"
+                self.assertEqual(descriptor["preparation_workspace_bound_bytes"], (256 if wide else 32) * 1024**2)
+                self.assertEqual((descriptor["production_half_orders_each_axis"], descriptor["coarse_half_orders_each_axis"],
+                                  descriptor["refined_half_orders_each_axis"], descriptor["maximum_admitted_spatial_modes"]),
+                                 (7, 6, 8, 289) if wide else (3, 2, 4, 81))
+                modes = descriptor["transverse_density_modes"]
+                expected_modes = ([(1, 0, .0016, -1.05), (0, 1, .0019, .6), (1, -1, .0011, -.2)] if is_held else
+                                  [(1, 0, .0018, .45), (0, 1, .0015, -.7), (1, 1, .0012, 1.1)])
+                for actual, (m, n, amplitude, phase) in zip(modes, expected_modes):
+                    self.assertEqual((actual["m"], actual["n"], actual["phase_rad"]), (m, n, phase))
+                    expected_amplitude = amplitude if perturbations and (descriptor["cross_plane"] or n == 0) else 0.
+                    self.assertEqual(actual["amplitude_x"], expected_amplitude)
+
+    def test_evolving_vector_descriptors_bind_intrinsic_field_and_matched_rigid_controls(self):
+        evolving = ("hf-vector-evolving", "hf-vector-evolving-holdout")
+        rigid = ("hf-vector-evolving-rigid", "hf-vector-evolving-holdout-rigid")
+        for name in (*evolving, *rigid, *runner.HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS):
+            descriptor = runner._vector_oblique_spec(name)
+            runner._validate_vector_oblique_descriptor(descriptor, name)
+            self.assertEqual(descriptor["spatial_geometry_dimension"], 3)
+            self.assertEqual(descriptor["field"], 4 if "holdout" in name else 2)
+            self.assertEqual(descriptor.get("intrinsic_evolution", False),
+                             name in evolving or name in runner.HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS)
+            self.assertEqual(descriptor["preparation_workspace_bound_bytes"],
+                             (48 if name in evolving or name in runner.HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS else 32) * 1024**2)
+            if name in rigid:
+                self.assertNotIn("evolution", descriptor)
+        primary, held = (runner._vector_oblique_spec(name) for name in evolving)
+        self.assertEqual((primary["evolution"]["start_seconds"], primary["evolution"]["duration_seconds"]), (490., 192.))
+        self.assertEqual((held["evolution"]["start_seconds"], held["evolution"]["duration_seconds"]), (838., 144.))
+        self.assertEqual(held["drift_mps"], 7.)
+        self.assertEqual(primary["evolution"]["intervals"], 16)
+        self.assertEqual(primary["evolution"]["law"],
+            "Each mode multiplier is 1+(a+ib)B(u)+(c+id)Q(u), B=64u^3(1-u)^3, Q=2(2u-1)B; identity outside u in [0,1].")
+        self.assertEqual(primary["evolution"]["time_scope"],
+            "T=(output_sample-32)/1920 seconds, on the physical output clock before the added FIR delay; independent of the receiver message calendar.")
+        self.assertEqual(held["transverse_density_modes"], [
+            {"m": 1, "n": 0, "amplitude_x": .0013, "phase_rad": -.65},
+            {"m": 0, "n": 1, "amplitude_x": .0011, "phase_rad": .90},
+            {"m": 1, "n": -1, "amplitude_x": .00085, "phase_rad": -1.40}])
+        changed = dict(held, evolution=dict(held["evolution"], start_seconds=839.))
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_vector_oblique_descriptor(changed, "hf-vector-evolving-holdout")
+
+    def test_evolving_vector_report_requires_nested_temporal_witnesses_and_preserves_rigid_receipts(self):
+        report = runner._vector_oblique_spec("hf-vector-evolving")
+        report.update(
+            table_qualified=True, table_sha256="0" * 64,
+            table_digest_scope="all 257 spatial-position knots and 17 evolution-time residual knots across all 129 retained lags, binary64 complex coefficients/slopes, plus a versioned T/B/Q time-law tag, interval count, event start/duration and all mode factors in canonical little-endian metadata order",
+            qualification_scope="finite-order bidirectional 3D cold collisional Maxwell scattering with doubly periodic transverse density, a bounded intrinsic density-mode event and fixed antenna projection; temporal checks cover 16 intervals, 16 midpoints, 4 direct FIR epochs, 3 refined epochs, 61 temporal RF pairs, and a 4097-point event-time minimum scan with five checked RF minima, but do not establish random 3D fields, field calibration or environmental probabilities",
+            evolution_knot_count=17, rf_solves=270, output_half_orders=3, output_half_orders_y=3,
+            output_trajectory_half_orders=6, checked_frequencies=13, checked_positions=2048,
+            checked_table_assembly_positions=54, matrix_products=1, maximum_rf_dense_terms=100,
+            rf_dense_terms_limit=1_200_000_000, maximum_admitted_spatial_modes=81,
+            carrier_witnesses_qualified=True, unfolded_order_scope="two-dimensional transverse diffraction orders in x and y are retained through Maxwell solves; the trajectory-folded response combines those orders only at the declared receiver coordinates",
+            spatial_l1_error_scope="mesh/order/refined-order errors are L1 sums of absolute fixed-antenna-projected complex-voltage differences across retained unfolded (m,n) orders, before trajectory folding; they are not polarization-resolved norms and do not bound orders omitted by finite truncation",
+            carrier_power_minimum_scope="minimum and maximum carrier power are sampled over one declared commensurate receiver-trajectory period; the finite trajectory-series lower bound is not a global x-y minimum or a three-dimensional path-ensemble bound",
+            out_of_plane_flux_scope="out-of-plane reflected and transmitted flux is independently reported from the mixed TE/TM launch for the retained nonzero-y diffraction orders",
+            period_averaged_energy_scope="coherent average along the declared commensurate receiver trajectory after combining equal temporal indices; not an incoherent average over the full x-y spatial torus",
+            maximum_edge_x_flux=1e-5, maximum_edge_y_flux=2e-5, maximum_edge_flux=3e-5,
+            carrier_refined_edge_flux=3e-5, carrier_refined_edge_x_flux=1e-5, carrier_refined_edge_y_flux=2e-5,
+            carrier_out_of_plane_reflected_flux=1e-3, carrier_out_of_plane_transmitted_flux=1e-3,
+            carrier_reflected_flux=.7, carrier_transmitted_flux=.2, carrier_scattered_reflected_flux=.3,
+            carrier_crosspolar_reflected_flux=.8, carrier_crosspolar_scattered_flux=.6,
+            table_assembly_voltage_error=0., minimum_vacuum_cosine=.5, maximum_flux_excess=0., maximum_solve_residual=0.,
+            mesh_voltage_error=0., order_voltage_error=0., refined_order_voltage_error=0., frequency_voltage_error=0.,
+            fir_voltage_error=0., period_averaged_discarded_energy_fraction=0., interpolation_peak_error_bound=0.,
+            retarded_peak_error_bound=0., relative_voltage_error_at_minimum=0.,
+            minimum_carrier_power=.01, maximum_carrier_power=1., certified_minimum_power_lower_bound=.009,
+            minimum_checked_band_power_lower_bound=.008, minimum_checked_band_power_witness_offset_hz=120.,
+            period_averaged_raw_precursor_energy_fraction=0., minimum_carrier_position_m=1.,
+            preparation_peak_workspace_bytes=20 * 1024**2, table_workspace_bytes=1024, stream_workspace_bytes=256,
+            preparation_seconds=1., source_minimum_frequency_hz=-112.5, source_maximum_frequency_hz=112.5,
+            incident_energy_sample_sum=100., selected_energy_sample_sum=50.)
+        minimum_witnesses = [
+            {"offset_hz": offset, "physical_seconds": 682., "assembled_power": assembled,
+             "direct_power": direct, "voltage_error": error}
+            for offset, assembled, direct, error in (
+                (-384., .012, .011999, 1e-5), (-196.5, .0118, .011799, 1e-5),
+                (0., .0116, .011599, 1e-5), (196.5, .0114, .011399, 1e-5),
+                (384., .0112, .011199, 1e-5))]
+        evolution = {
+            "qualified": True, "intervals": 16, "scanned_time_points": 4097, "checked_midpoints": 16,
+            "checked_direct_fir_epochs": 4, "checked_refined_epochs": 3, "checked_rf_pairs": 61,
+            "checked_minimum_rf_pairs": 5, "minimum_scanned_assembled_power": .0112,
+            "minimum_witnesses": minimum_witnesses,
+            "minimum_slice_density_fraction": .8, "maximum_mode_magnitude_change": .01,
+            "maximum_phase_closure_change_rad": .2, "maximum_rigid_departure_voltage": .01,
+            "maximum_temporal_voltage_error": .001, "maximum_direct_fir_tap_error": .001,
+            "maximum_frequency_voltage_error": .0005, "maximum_fir_voltage_error": .0005,
+            "maximum_discarded_energy_fraction": 1e-7, "maximum_mesh_voltage_error": .003,
+            "maximum_refined_order_voltage_error": .003, "maximum_refined_edge_flux": 4e-5,
+            "minimum_checked_trajectory_power": .011199, "relative_voltage_error_at_minimum": 0.,
+            "retarded_peak_error_bound": .003,
+        }
+        evolution["relative_voltage_error_at_minimum"] = (
+            evolution["maximum_mesh_voltage_error"] + evolution["maximum_refined_order_voltage_error"] +
+            max(evolution["maximum_temporal_voltage_error"],
+                evolution["maximum_direct_fir_tap_error"] + evolution["maximum_fir_voltage_error"])) / math.sqrt(
+                    min(evolution["minimum_checked_trajectory_power"], evolution["minimum_scanned_assembled_power"]))
+        report["evolution_checks"] = evolution
+        runner._validate_vector_oblique_report(report, "hf-vector-evolving")
+        for bad in (
+            dict(report, rf_solves=265),
+            dict(report, evolution_checks={**evolution, "checked_rf_pairs": 60}),
+            dict(report, evolution_checks={**evolution, "maximum_temporal_voltage_error": .002}),
+            dict(report, evolution_checks={**evolution, "unexpected": 1}),
+            dict(report, table_digest_scope="all 257 spatial-position knots and 17 evolution-time residual knots, across all 129 retained lags, as binary64 complex coefficients and slopes in canonical little-endian order; source identity binds generation and interpolation"),
+            dict(report, evolution_checks={**evolution, "minimum_witnesses": minimum_witnesses[:-1]}),
+            dict(report, evolution_checks={**evolution, "minimum_witnesses": [dict(minimum_witnesses[0], physical_seconds=681.99), *minimum_witnesses[1:]]}),
+            dict(report, evolution_checks={**evolution, "minimum_witnesses": [dict(minimum_witnesses[0], offset_hz=-360.), *minimum_witnesses[1:]]}),
+            dict(report, evolution_checks={**evolution, "minimum_scanned_assembled_power": .0113}),
+            dict(report, evolution_checks={**evolution, "relative_voltage_error_at_minimum": .1}),
+            {key: value for key, value in report.items() if key != "evolution_checks"},
+        ):
+            with self.subTest(bad=bad.get("evolution_checks")), self.assertRaises(runner.CampaignError):
+                runner._validate_vector_oblique_report(bad, "hf-vector-evolving")
+        rigid = runner._vector_oblique_spec("hf-vector-evolving-rigid")
+        self.assertIs(rigid["intrinsic_evolution"], False)
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_vector_oblique_report({**report, **rigid, "evolution_checks": evolution},
+                                                   "hf-vector-evolving-rigid")
+
+    def test_evolving_vector_receive_requirements_predeclare_anchors_and_characterization(self):
+        def row(scenario, cn0, seconds=64, requirement="required_complete", control="wanted"):
+            return {"id": scenario, "scenario": scenario, "mode": "receive", "waveform": "reference",
+                    "seed": 1, "noise_seed": 2, "cn0_db_hz": cn0, "bit_seconds": seconds,
+                    "message": "C", "control": control, "reception_requirement": requirement}
+        valid = [
+            row("hf-vector-evolving", 20), row("hf-vector-evolving-rigid", 20),
+            row("hf-vector-evolving-holdout", 20), row("hf-vector-evolving-holdout-rigid", 20),
+            row("hf-vector-evolving", 15, requirement="characterization"),
+            dict(row("hf-vector-evolving", 17.5, requirement="characterization"), seed=72511, noise_seed=92511),
+            row("hf-vector-evolving", 12, 128, "characterization"),
+            row("hf-vector-evolving", 20, control="noise", requirement="negative_control"),
+            row("hf-vector-evolving", 20, control="wrong-key", requirement="negative_control"),
+            row("hf-vector-evolving-chain-off", 30), row("hf-vector-evolving-chain-clocks-tone", 30),
+        ]
+        for episode in valid:
+            runner._validate_episode(episode, 0, set(), 900, 12_000_000)
+        for invalid in (
+            row("hf-vector-evolving", 20, requirement="characterization"),
+            row("hf-vector-evolving", 15),
+            row("hf-vector-evolving", 17.5, requirement="required_complete"),
+            row("hf-vector-evolving-holdout", 17.5, requirement="characterization"),
+            row("hf-vector-evolving", 17.5, 128, "characterization"),
+            dict(row("hf-vector-evolving", 17.5, requirement="characterization"), seed=72511, noise_seed=92512),
+            row("hf-vector-evolving", 12, 128, "required_complete"),
+            row("hf-vector-evolving-rigid", 12, 128, "characterization"),
+            row("hf-vector-evolving-chain-off", 30, requirement="characterization"),
+            row("hf-vector-evolving-chain-clocks-tone", 20),
+            row("hf-vector-evolving", 20, control="wrong-ordinal", requirement="negative_control"),
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(invalid, 0, set(), 900, 12_000_000)
+
+    def test_evolving_vector_private_energy_is_complete_aligned_disjoint_and_conservative(self):
+        plan = {"public_slots": [{"observation": {"first": 0, "stop": 4}},
+                                 {"observation": {"first": 4, "stop": 9}},
+                                 {"observation": {"first": 9, "stop": 13}}]}
+        scope = ("Evaluator-only per-public-slot sum of the propagated wanted complex voltage after physical fading "
+                 "and before additive noise or frontend processing; intervals are not supplied to the receiver or decoder.")
+        channel = {"private_signal_energy_scope": scope, "signal_energy_sample_sum": 16.,
+                   "private_signal_energy_outside_observations_sample_sum": 2.,
+                   "private_signal_energy_observations": [
+                       {"public_slot": 0, "first_sample": 0, "stop_sample": 4, "samples": 4, "energy_sample_sum": 3.},
+                       {"public_slot": 1, "first_sample": 4, "stop_sample": 9, "samples": 5, "energy_sample_sum": 8.},
+                       {"public_slot": 2, "first_sample": 9, "stop_sample": 13, "samples": 4, "energy_sample_sum": 3.}]}
+        runner._validate_vector_private_signal_energy(channel, plan)
+        bad_cases = []
+        bad = json.loads(json.dumps(channel)); bad["private_signal_energy_observations"].pop(); bad_cases.append(bad)
+        bad = json.loads(json.dumps(channel)); bad["private_signal_energy_observations"][1]["first_sample"] = 3; bad_cases.append(bad)
+        bad = json.loads(json.dumps(channel)); bad["private_signal_energy_observations"][1]["energy_sample_sum"] = float("nan"); bad_cases.append(bad)
+        bad = json.loads(json.dumps(channel)); bad["private_signal_energy_observations"][2]["first_sample"] = 8; bad_cases.append(bad)
+        bad = json.loads(json.dumps(channel)); bad["signal_energy_sample_sum"] = 15.; bad_cases.append(bad)
+        bad = json.loads(json.dumps(channel)); bad["private_signal_energy_outside_observations_sample_sum"] = -1.; bad_cases.append(bad)
+        bad = json.loads(json.dumps(channel)); bad["private_signal_energy_outside_observations_sample_sum"] = 1.; bad_cases.append(bad)
+        for malformed in bad_cases:
+            with self.subTest(malformed=malformed), self.assertRaises(runner.CampaignError):
+                runner._validate_vector_private_signal_energy(malformed, plan)
+
     def test_vector_oblique_scope_keeps_band_and_receiver_controls_honest(self):
         base = {"id": "vector", "scenario": "hf-vector-oblique", "mode": "receive",
                 "waveform": "reference", "seed": 1, "control": "wanted", "bit_seconds": 64,
                 "cn0_db_hz": 0, "message": "A"}
-        for scenario in runner.HF_VECTOR_OBLIQUE_SCENARIOS:
+        for scenario in (name for name in runner.HF_VECTOR_OBLIQUE_SCENARIOS
+                         if name not in runner.HF_VECTOR_EVOLUTION_SCENARIOS and
+                         name not in runner.HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS):
             runner._validate_episode(dict(base, scenario=scenario), 0, set(), 600, 5_000_000)
         runner._validate_episode(dict(base, bit_seconds=128, cn0_db_hz=-3), 0, set(), 600, 5_000_000)
         for cn0 in (20, 30):
             runner._validate_episode(dict(base, cn0_db_hz=cn0), 0, set(), 600, 5_000_000)
-        for scenario in runner.HF_VECTOR_CHAIN_SCENARIOS:
+        for scenario in (name for name in runner.HF_VECTOR_CHAIN_SCENARIOS
+                         if name not in runner.HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS):
             runner._validate_episode(dict(base, scenario=scenario, cn0_db_hz=30), 0, set(), 600, 5_000_000)
         diagnostic = dict(base, hf_target_presence_diagnostic=True, capture_digest_slot=0, cn0_db_hz=10)
         runner._validate_episode(diagnostic, 0, set(), 600, 5_000_000)

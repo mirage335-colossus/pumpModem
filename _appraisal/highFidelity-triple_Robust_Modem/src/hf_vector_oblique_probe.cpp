@@ -17,11 +17,11 @@ using datapump::triad::probe::write_json;
 using Table = HfVectorObliqueTable;
 using C = std::complex<double>;
 
-double impulse_check(const std::shared_ptr<const Table>& table, const HfVectorObliqueSpec& spec) {
+double impulse_check(const std::shared_ptr<const Table>& table, const HfVectorObliqueSpec& spec,
+                     std::uint64_t start = 672133) {
     // Independently compute the expected sample clock of a delayed impulse
     // with a nonzero starting index; verify arbitrary chunks and full tail.
     constexpr std::size_t prefix = 13, chunk = 4;
-    constexpr std::size_t start = 672133;
     constexpr C impulse{.75, -.25};
     HfVectorObliqueStream stream(table, spec, start);
     std::array<C, prefix> input{};
@@ -38,7 +38,7 @@ double impulse_check(const std::shared_ptr<const Table>& table, const HfVectorOb
     for (std::size_t i = 0; i < result.size(); ++i) {
         const double seconds = (start + i - Table::modelling_delay_samples) / Table::sample_rate_hz;
         const auto want = i >= Table::first_lag_samples() && i <= Table::last_lag_samples() ?
-            impulse * table->coefficient_at_position(i, -spec.drift_mps * (seconds - spec.epoch_seconds)) : C{};
+            impulse * table->coefficient_at_time(i, seconds) : C{};
         maximum = std::max(maximum, std::abs(result[i] - want));
     }
     return maximum;
@@ -46,9 +46,9 @@ double impulse_check(const std::shared_ptr<const Table>& table, const HfVectorOb
 
 struct ToneCheck { double reference_error = 0., chunk_error = 0.; };
 
-ToneCheck moving_tone_check(const std::shared_ptr<const Table>& table, const HfVectorObliqueSpec& spec) {
+ToneCheck moving_tone_check(const std::shared_ptr<const Table>& table, const HfVectorObliqueSpec& spec,
+                            std::uint64_t start = 872137) {
     constexpr std::size_t count = 2 * Table::last_lag_samples() + 31;
-    constexpr std::uint64_t start = 872137;
     constexpr double angle = 2 * std::numbers::pi * 196.5 / Table::sample_rate_hz;
     using Output = std::array<C, count + Table::last_lag_samples()>;
     std::array<C, count> input;
@@ -72,11 +72,10 @@ ToneCheck moving_tone_check(const std::shared_ptr<const Table>& table, const HfV
     ToneCheck check;
     for (std::size_t i = 0; i < bulk.size(); ++i) {
         const double time = (start + i - Table::modelling_delay_samples) / Table::sample_rate_hz;
-        const double position = -spec.drift_mps * (time - spec.epoch_seconds);
         C frequency_response{};
         for (std::size_t l = Table::first_lag_samples(); l <= Table::last_lag_samples(); ++l)
             if (i >= l && i - l < count)
-                frequency_response += table->coefficient_at_position(l, position) * std::polar(1., -angle * l);
+                frequency_response += table->coefficient_at_time(l, time) * std::polar(1., -angle * l);
         const auto expected = std::polar(.8, angle * i + .431) * frequency_response;
         check.reference_error = std::max(check.reference_error, std::abs(bulk[i] - expected));
         check.chunk_error = std::max(check.chunk_error, std::abs(bulk[i] - chunked[i]));
@@ -99,7 +98,7 @@ int main(int argc, char** argv) {
         const std::string_view mode = argc == 3 ? argv[2] : "";
         const std::size_t wide = mode == "carrier-wide5" ? 5 : mode == "carrier-wide7" ? 7 : 0;
         if (argc < 2 || argc > 3 || (argc == 3 && mode != "carrier" && wide == 0))
-            throw std::invalid_argument("usage: high_fidelity_vector_oblique_probe primary|holdout|off|no-b|cross|primary-3d|holdout-3d|3d-planar|3d-in-plane [carrier], or holdout-3d carrier-wide5|carrier-wide7");
+            throw std::invalid_argument("usage: high_fidelity_vector_oblique_probe primary|holdout|off|no-b|cross|primary-3d|holdout-3d|3d-planar|3d-in-plane [carrier], holdout-3d carrier-wide5|carrier-wide7, or evolving-3d|evolving-3d-holdout|evolving-3d-holdout-rigid");
         HfVectorObliqueSpec spec;
         const auto name = std::string_view(argv[1]);
         if (name == "holdout") { spec.field = 1; spec.drift_mps = 7.5; spec.epoch_seconds = 520.; }
@@ -110,8 +109,18 @@ int main(int argc, char** argv) {
         else if (name == "holdout-3d") { spec.field = 3; spec.drift_mps = 7.5; spec.epoch_seconds = 520.; }
         else if (name == "3d-planar") { spec.field = 2; spec.perturbations = false; }
         else if (name == "3d-in-plane") { spec.field = 2; spec.cross_plane = false; }
+        else if (name == "evolving-3d") { spec.field = 2; spec.intrinsic_evolution = true; }
+        else if (name == "evolving-3d-holdout" || name == "evolving-3d-holdout-rigid") {
+            spec.field = 4;
+            spec.drift_mps = 7.;
+            spec.epoch_seconds = 470.;
+            spec.intrinsic_evolution = name == "evolving-3d-holdout";
+        }
         else if (name != "primary") throw std::invalid_argument("unknown vector oblique field");
         const bool carrier_only = argc == 3;
+        const auto evolution = hf_vector_oblique_evolution(spec);
+        if (carrier_only && evolution)
+            throw std::invalid_argument("intrinsic evolution probe requires the full temporal witnesses");
         const auto start = std::chrono::steady_clock::now();
         HfVectorObliqueTableBuild result;
         if (wide) result.checks = assess_hf_vector_oblique_carrier_resolution(spec, wide);
@@ -119,8 +128,21 @@ int main(int argc, char** argv) {
         else result = build_hf_vector_oblique_table(spec);
         const auto& checks = result.checks;
         const auto g = hf_vector_oblique_geometry(spec);
-        const double impulse_error = result.table ? impulse_check(result.table, spec) : 0.;
-        const auto tone = result.table ? moving_tone_check(result.table, spec) : ToneCheck{};
+        double impulse_error = result.table ? impulse_check(result.table, spec) : 0.;
+        auto tone = result.table ? moving_tone_check(result.table, spec) : ToneCheck{};
+        std::size_t evolution_stream_checks = 0;
+        if (result.table && evolution) {
+            for (double fraction : std::array{0., .537, 1.}) {
+                const auto t = evolution->start_seconds + fraction * evolution->duration_seconds;
+                const auto sample = static_cast<std::uint64_t>(std::llround(t * Table::sample_rate_hz)) +
+                    Table::modelling_delay_samples;
+                impulse_error = std::max(impulse_error, impulse_check(result.table, spec, sample - 40));
+                const auto checked = moving_tone_check(result.table, spec, sample - 129);
+                tone.reference_error = std::max(tone.reference_error, checked.reference_error);
+                tone.chunk_error = std::max(tone.chunk_error, checked.chunk_error);
+                ++evolution_stream_checks;
+            }
+        }
         const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         auto out = object({{"kind", "appraisal_hf_vector_oblique_numerics"},
             {"appraisal_source_sha256", APPRAISAL_SOURCE_SHA}, {"native_source_sha256", DATAPUMP_TRIAD_PROBE_SOURCE_SHA},
@@ -202,6 +224,43 @@ int main(int argc, char** argv) {
             out["largest_spatial_mode_count"] = refined_width * refined_width;
             out["carrier_dense_terms_limit"] = hf_vector_wide_carrier_dense_terms_bound;
             out["edge_flux_scope"] = "mixed-launch reflected and transmitted flux on either outer axis of the full unfolded spatial grid, with corners counted once in the union";
+        }
+        if (evolution) {
+            Json::Array factors;
+            for (const auto& factor : evolution->mode_factors) factors.push_back(values(factor));
+            out["intrinsic_evolution"] = object({{"start_seconds", evolution->start_seconds},
+                {"duration_seconds", evolution->duration_seconds}, {"mode_factors", std::move(factors)},
+                {"stream_checks", evolution_stream_checks}, {"table_knots", result.table ? result.table->evolution_knot_count() : 0u}});
+            out["carrier_crosspolar_flux_scope"] = "unit TE incidence, reflected TM power; separate from mixed-launch carrier reflection";
+        }
+        if (checks.evolution) {
+            const auto& e = *checks.evolution;
+            Json::Array minima;
+            for (std::size_t i = 0; i < e.checked_minimum_rf_pairs; ++i) {
+                const auto& m = e.minimum_witnesses[i];
+                minima.push_back(object({{"offset_hz", m.offset_hz}, {"physical_seconds", m.physical_seconds},
+                    {"assembled_power", m.assembled_power}, {"direct_power", m.direct_power}, {"voltage_error", m.voltage_error}}));
+            }
+            out["evolution_checks"] = object({{"qualified", e.qualified}, {"intervals", e.intervals},
+                {"checked_midpoints", e.checked_midpoints}, {"checked_direct_fir_epochs", e.checked_direct_fir_epochs},
+                {"checked_refined_epochs", e.checked_refined_epochs}, {"checked_rf_pairs", e.checked_rf_pairs},
+                {"scanned_time_points", e.scanned_time_points}, {"checked_minimum_rf_pairs", e.checked_minimum_rf_pairs},
+                {"minimum_scanned_assembled_power", e.minimum_scanned_assembled_power}, {"minimum_witnesses", std::move(minima)},
+                {"minimum_slice_density_fraction", e.minimum_slice_density_fraction},
+                {"maximum_mode_magnitude_change", e.maximum_mode_magnitude_change},
+                {"maximum_phase_closure_change_rad", e.maximum_phase_closure_change_rad},
+                {"maximum_rigid_departure_voltage", e.maximum_rigid_departure_voltage},
+                {"maximum_temporal_voltage_error", e.maximum_temporal_voltage_error},
+                {"maximum_direct_fir_tap_error", e.maximum_direct_fir_tap_error},
+                {"maximum_frequency_voltage_error", e.maximum_frequency_voltage_error},
+                {"maximum_fir_voltage_error", e.maximum_fir_voltage_error},
+                {"maximum_discarded_energy_fraction", e.maximum_discarded_energy_fraction},
+                {"maximum_mesh_voltage_error", e.maximum_mesh_voltage_error},
+                {"maximum_refined_order_voltage_error", e.maximum_refined_order_voltage_error},
+                {"maximum_refined_edge_flux", e.maximum_refined_edge_flux},
+                {"minimum_checked_trajectory_power", e.minimum_checked_trajectory_power},
+                {"relative_voltage_error_at_minimum", e.relative_voltage_error_at_minimum},
+                {"retarded_peak_error_bound", e.retarded_peak_error_bound}});
         }
         write_json(std::cout, out);
         std::cout << '\n';

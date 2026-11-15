@@ -545,6 +545,37 @@ constexpr std::array transverse_fields{
     TransverseField{18500., -.112, -1, {{{1, 0, .0016, -1.05}, {0, 1, .0019, .60}, {1, -1, .0011, -.20}}}}
 };
 
+constexpr unsigned evolution_holdout_field = 4;
+constexpr Field evolution_holdout{51., 108000., 21500., 1000., 6.47e6, 1720., 90., -.10,
+    {20e-6, 11e-6, -45e-6}, {}, {}, .16};
+constexpr TransverseField evolution_holdout_transverse{18000., -.093, -1,
+    {{{1, 0, .0013, -.65}, {0, 1, .0011, .90}, {1, -1, .00085, -1.40}}}};
+constexpr HfVectorObliqueEvolution primary_evolution{490., 192.,
+    {{{-.35, 0., 0., .20}, {0., -.55, .25, 0.}, {-.40, 0., 0., .30}}}};
+constexpr HfVectorObliqueEvolution held_evolution{838., 144.,
+    {{{0., -.38, .18, 0.}, {-.42, 0., 0., .30}, {-.24, 0., 0., -.45}}}};
+
+const Field& base_field(const HfVectorObliqueSpec& spec) {
+    return spec.field == evolution_holdout_field ? evolution_holdout : fields[spec.field % fields.size()];
+}
+
+HfVectorObliqueGeometry evolved_geometry(HfVectorObliqueGeometry geometry,
+    const HfVectorObliqueEvolution& evolution, double physical_seconds) {
+    const auto u = (physical_seconds - evolution.start_seconds) / evolution.duration_seconds;
+    if (!(0. < u && u < 1.)) return geometry;
+    const auto bump_root = 4. * u * (1. - u);
+    const auto bump = bump_root * bump_root * bump_root;
+    const auto skew = 2. * (2. * u - 1.) * bump;
+    for (std::size_t i = 0; i < evolution.mode_factors.size(); ++i) {
+        const auto [real_bump, imag_bump, real_skew, imag_skew] = evolution.mode_factors[i];
+        const C multiplier = 1. + C(real_bump, imag_bump) * bump + C(real_skew, imag_skew) * skew;
+        auto& mode = geometry.transverse_density_modes[i];
+        mode.amplitude_x *= std::abs(multiplier);
+        mode.phase_rad += std::arg(multiplier);
+    }
+    return geometry;
+}
+
 bool is_three_dimensional(const HfVectorObliqueSpec& spec) { return spec.field >= fields.size(); }
 
 bool is_active_held_field(const HfVectorObliqueSpec& spec) {
@@ -561,14 +592,14 @@ double angle_radians(double degrees) { return degrees * std::numbers::pi / 180.;
 bool same_spec(const HfVectorObliqueSpec& a, const HfVectorObliqueSpec& b) {
     return a.field == b.field && a.antenna == b.antenna && a.magnetic == b.magnetic &&
         a.perturbations == b.perturbations && a.drift_mps == b.drift_mps && a.epoch_seconds == b.epoch_seconds &&
-        a.cross_plane == b.cross_plane;
+        a.cross_plane == b.cross_plane && a.intrinsic_evolution == b.intrinsic_evolution;
 }
 
 C phase(double radians) { return std::polar(1., radians); }
 
 std::vector<HfVectorPlasmaLayer3d> field_layers(const HfVectorObliqueSpec& spec, const HfVectorObliqueGeometry& geometry,
                                               double dz_max) {
-    const auto& field = fields[spec.field % fields.size()];
+    const auto& field = base_field(spec);
     const double omega_plasma = two_pi * field.peak_plasma_hz;
     const double critical_carrier_density = electron_mass * vacuum_permittivity *
         std::pow(two_pi * Table::carrier_hz / elementary_charge, 2);
@@ -821,16 +852,59 @@ C intrinsic_interpolation(const std::array<RfReturn, rf_knots>& knots, double of
     return value;
 }
 
+std::vector<HfFullwaveKernel> frozen_kernels(const std::array<RfReturn, rf_knots>& knots,
+    const HfVectorObliqueGeometry& g, double& discarded_fraction, double& precursor_fraction, std::stop_token stop) {
+    const HfFullwaveKernelDesign design{Table::sample_rate_hz, Table::occupied_half_band_hz,
+        2. * (g.height_m - .5 * g.thickness_m) / c * Table::sample_rate_hz,
+        Table::modelling_delay_samples, Table::retained_late_samples};
+    const double range = common_range_m(g);
+    std::vector<HfFullwaveKernel> kernels(knots[rf_knots / 2].harmonic.size());
+    std::array<C, frequency_bins> grid{};
+    double power = 0., discarded = 0., precursor = 0.;
+    for (std::size_t m = 0; m < kernels.size(); ++m) {
+        if (stop.stop_requested()) throw std::runtime_error("HF vector oblique preparation cancelled");
+        for (std::size_t j = 0; j < grid.size(); ++j) {
+            const double offset = Table::sample_rate_hz * (static_cast<double>(j) / grid.size() - .5);
+            const auto vacuum = phase(two_pi * (Table::carrier_hz + offset) / c * range);
+            grid[j] = intrinsic_interpolation(knots, offset, m, &RfReturn::harmonic) * vacuum;
+        }
+        kernels[m] = design_hf_fullwave_kernel(grid, design);
+        const auto& k = kernels[m];
+        if (k.fir.first_tap_sample != Table::first_lag_samples() || k.fir.taps.size() != Table::taps)
+            throw std::runtime_error("HF vector oblique FIR differs from public sample plan");
+        power += k.tapered_grid_mean_power;
+        discarded += k.tapered_grid_mean_power * (k.discarded_pre_energy_fraction + k.discarded_tail_energy_fraction);
+        precursor += k.tapered_grid_mean_power * k.prearrival_energy_fraction;
+    }
+    if (power > 0.) {
+        discarded_fraction = discarded / power;
+        precursor_fraction = precursor / power;
+    }
+    return kernels;
+}
+
 struct Bracket { std::size_t lo; std::array<double, 4> weights; };
+
+Bracket cubic_bracket(double p, std::size_t intervals) {
+    const auto lo = std::min(static_cast<std::size_t>(p), intervals - 1);
+    const double u = p - lo, v = 1. - u;
+    return {lo, {(1. + 2. * u) * v * v, u * v * v, (3. - 2. * u) * u * u, -u * u * v}};
+}
 
 Bracket table_bracket(double x_m, double period_m) {
     if (!std::isfinite(x_m)) throw std::invalid_argument("nonfinite HF vector oblique position");
     double position = std::fmod(x_m, period_m);
     if (position < 0.) position += period_m;
     const double p = position / period_m * Table::position_intervals;
-    const auto lo = std::min(static_cast<std::size_t>(p), Table::position_intervals - 1);
-    const double u = p - lo, v = 1. - u;
-    return {lo, {(1. + 2. * u) * v * v, u * v * v, (3. - 2. * u) * u * u, -u * u * v}};
+    return cubic_bracket(p, Table::position_intervals);
+}
+
+std::optional<Bracket> evolution_bracket(const std::optional<HfVectorObliqueEvolution>& evolution,
+                                        std::size_t intervals, double physical_seconds) {
+    if (!evolution) return std::nullopt;
+    const auto u = (physical_seconds - evolution->start_seconds) / evolution->duration_seconds;
+    if (!(0. < u && u < 1.)) return std::nullopt;
+    return cubic_bracket(u * intervals, intervals);
 }
 
 C blend(const Bracket& b, C lo, C dl, C hi, C dh) {
@@ -889,17 +963,18 @@ RfReturn screen_carrier(const HfVectorObliqueSpec& spec, const HfVectorObliqueGe
 } // namespace
 
 HfVectorObliqueGeometry hf_vector_oblique_geometry(const HfVectorObliqueSpec& spec) {
-    if (spec.field >= fields.size() + transverse_fields.size() || spec.antenna > 1 ||
+    if (spec.field > evolution_holdout_field || spec.antenna > 1 ||
         (!is_three_dimensional(spec) && !spec.cross_plane))
         throw std::invalid_argument("unknown HF vector oblique field/antenna or unsupported cross-plane control");
-    const auto& g = fields[spec.field % fields.size()];
+    const auto& g = base_field(spec);
     HfVectorObliqueGeometry out{g.theta_deg, g.height_m, 2. * g.height_m * std::tan(angle_radians(g.theta_deg)), g.period_m,
         g.thickness_m, g.peak_plasma_hz, g.collisions, g.corrugated_slice_m,
         spec.magnetic ? g.field_tesla : std::array<double, 3>{},
         spec.antenna == 0 ? std::array{0., 1., 0.} : std::array{.6, 0., .8}, g.launch_tm_fraction,
         g.corrugation_center_fraction, spec.perturbations ? g.amplitude_x : std::array<double, 2>{}, g.phase_rad};
     if (is_three_dimensional(spec)) {
-        const auto& transverse = transverse_fields[spec.field - fields.size()];
+        const auto& transverse = spec.field == evolution_holdout_field ? evolution_holdout_transverse :
+            transverse_fields[spec.field - fields.size()];
         out.period_y_m = transverse.period_y_m;
         out.receiver_y_m = out.period_y_m * transverse.receiver_y_fraction;
         out.trajectory_winding_y = transverse.trajectory_winding_y;
@@ -913,7 +988,24 @@ HfVectorObliqueGeometry hf_vector_oblique_geometry(const HfVectorObliqueSpec& sp
     return out;
 }
 
+std::optional<HfVectorObliqueEvolution> hf_vector_oblique_evolution(const HfVectorObliqueSpec& spec) {
+    if (!spec.intrinsic_evolution) return std::nullopt;
+    if (!active_cross_plane(spec))
+        throw std::invalid_argument("intrinsic HF evolution requires the full cross-plane density field");
+    if (spec.field == 2) return primary_evolution;
+    if (spec.field == evolution_holdout_field) return held_evolution;
+    throw std::invalid_argument("intrinsic HF evolution is admitted for the prescribed primary and held fields");
+}
+
+HfVectorObliqueGeometry hf_vector_oblique_geometry_at_time(const HfVectorObliqueSpec& spec, double physical_seconds) {
+    if (!std::isfinite(physical_seconds)) throw std::invalid_argument("nonfinite HF evolution time");
+    const auto geometry = hf_vector_oblique_geometry(spec);
+    const auto evolution = hf_vector_oblique_evolution(spec);
+    return evolution ? evolved_geometry(geometry, *evolution, physical_seconds) : geometry;
+}
+
 std::size_t hf_vector_oblique_preparation_workspace_bound_bytes(const HfVectorObliqueSpec& spec) {
+    if (spec.intrinsic_evolution) return Table::evolution_preparation_workspace_bound_bytes;
     if (is_active_held_field(spec)) return hf_vector_wide_carrier_workspace_bound_bytes;
     return is_three_dimensional(spec) ? Table::three_d_preparation_workspace_bound_bytes :
         Table::preparation_workspace_bound_bytes;
@@ -921,6 +1013,7 @@ std::size_t hf_vector_oblique_preparation_workspace_bound_bytes(const HfVectorOb
 
 void validate_hf_vector_oblique_spec(const HfVectorObliqueSpec& spec, std::uint64_t horizon_samples) {
     const auto g = hf_vector_oblique_geometry(spec);
+    hf_vector_oblique_evolution(spec);
     if (!(horizon_samples > 0 && horizon_samples <= Table::horizon_seconds * Table::sample_rate_hz) ||
         !finite_between(spec.drift_mps, 0., 60.) || !finite_between(spec.epoch_seconds, 0., Table::horizon_seconds) ||
         spec.drift_mps * ((horizon_samples + 2 * Table::last_lag_samples()) / Table::sample_rate_hz) >= g.period_m)
@@ -928,7 +1021,7 @@ void validate_hf_vector_oblique_spec(const HfVectorObliqueSpec& spec, std::uint6
 }
 
 std::size_t HfVectorObliqueTable::workspace_bytes() const noexcept {
-    return sizeof(*this) + knots_.capacity() * sizeof(Knot);
+    return sizeof(*this) + (knots_.capacity() + evolution_knots_.capacity()) * sizeof(Knot);
 }
 
 C HfVectorObliqueTable::coefficient_at_position(std::size_t lag, double x_m) const {
@@ -952,7 +1045,32 @@ C HfVectorObliqueTable::coefficient_knot_value(std::size_t lag, std::size_t knot
     return knots_[knot].value[lag - first_lag_samples()];
 }
 
+C HfVectorObliqueTable::coefficient_at_time(std::size_t lag, double physical_seconds) const {
+    auto value = coefficient_at_position(lag, -spec_.drift_mps * (physical_seconds - spec_.epoch_seconds));
+    if (const auto b = evolution_bracket(evolution_, evolution_intervals, physical_seconds)) {
+        const auto& lo = evolution_knots_[b->lo];
+        const auto& hi = evolution_knots_[b->lo + 1];
+        lag -= first_lag_samples();
+        value += blend(*b, lo.value[lag], lo.slope[lag], hi.value[lag], hi.slope[lag]);
+    }
+    return value;
+}
+
+C HfVectorObliqueTable::evolution_knot_value(std::size_t lag, std::size_t knot) const {
+    if (lag < first_lag_samples() || lag > last_lag_samples() || knot >= evolution_knots_.size())
+        throw std::invalid_argument("invalid HF evolution lag or knot");
+    return evolution_knots_[knot].value[lag - first_lag_samples()];
+}
+
+C HfVectorObliqueTable::evolution_knot_slope(std::size_t lag, std::size_t knot) const {
+    if (lag < first_lag_samples() || lag > last_lag_samples() || knot >= evolution_knots_.size())
+        throw std::invalid_argument("invalid HF evolution lag or knot");
+    return evolution_knots_[knot].slope[lag - first_lag_samples()];
+}
+
 HfVectorObliqueChecks assess_hf_vector_oblique_carrier(const HfVectorObliqueSpec& spec, std::stop_token stop) {
+    if (spec.intrinsic_evolution)
+        throw std::invalid_argument("intrinsic HF evolution requires chronological broadband witnesses");
     validate_hf_vector_oblique_spec(spec, 1);
     const auto g = hf_vector_oblique_geometry(spec);
     HfVectorObliqueChecks checks;
@@ -987,6 +1105,235 @@ HfVectorObliqueChecks assess_hf_vector_oblique_carrier_resolution(const HfVector
     HfVectorObliqueChecks checks;
     screen_carrier(spec, hf_vector_oblique_geometry(spec), support, checks, stop);
     return checks;
+}
+
+bool HfVectorObliqueTable::prepare_evolution(HfVectorObliqueChecks& checks, std::stop_token stop) {
+    evolution_ = hf_vector_oblique_evolution(spec_);
+    const auto& evolution = *evolution_;
+    auto& temporal = checks.evolution.emplace();
+    temporal.intervals = evolution_intervals;
+    checks.preparation_peak_workspace_bytes = evolution_preparation_workspace_bound_bytes;
+    const auto& g = geometry_;
+    const auto peak_x = std::pow(g.peak_plasma_hz / carrier_hz, 2);
+    temporal.minimum_slice_density_fraction = peak_x * std::pow(std::cos(std::numbers::pi * g.corrugation_center_fraction), 2);
+    // |B| and |Q| are bounded by 1 on their full support, so the triangle
+    // inequality proves positivity at every t, x and y in the slice.
+    for (std::size_t i = 0; i < evolution.mode_factors.size(); ++i) {
+        const auto [a, b, c, d] = evolution.mode_factors[i];
+        temporal.minimum_slice_density_fraction -= 2. * g.transverse_density_modes[i].amplitude_x *
+            (1. + std::hypot(a, b) + std::hypot(c, d));
+    }
+    if (!(temporal.minimum_slice_density_fraction > 0.)) return false;
+
+    const auto time_at = [&](double u) { return evolution.start_seconds + u * evolution.duration_seconds; };
+    const auto x_at = [&](double t) { return -spec_.drift_mps * (t - spec_.epoch_seconds); };
+    const auto frozen = [&](const HfVectorObliqueGeometry& snapshot, double f, OrderSpan orders = output_3d,
+                           double dz = main_vertical_step) {
+        return frozen_return(f, orders, dz, spec_, snapshot, checks, volume_bounds, stop);
+    };
+    const auto range = common_range_m(g);
+    const auto native_phase = [&](double f) {
+        return std::conj(phase(two_pi * (carrier_hz + f) / c * range)) *
+            phase(-two_pi * f / sample_rate_hz * modelling_delay_samples);
+    };
+    const auto physical_response = [&](const RfReturn& exact, double t, double f) {
+        return std::conj(translated_spatial(exact, x_at(t) / g.period_m, g.trajectory_winding_y)) * native_phase(f);
+    };
+    auto minimum_power = std::numeric_limits<double>::infinity();
+    const auto observe_power = [&](C voltage) {
+        if (!std::isfinite(std::abs(voltage))) throw std::runtime_error("nonfinite HF evolution voltage witness");
+        minimum_power = std::min(minimum_power, std::norm(voltage));
+        temporal.minimum_checked_trajectory_power = minimum_power;
+    };
+    const auto witness = [&](const RfReturn& exact, double t, double f) {
+        const auto angle = -two_pi * f / sample_rate_hz;
+        C assembled{}, rigid{};
+        for (std::size_t lag = first_lag_samples(); lag <= last_lag_samples(); ++lag) {
+            const auto clock = phase(angle * lag);
+            assembled += coefficient_at_time(lag, t) * clock;
+            if (f == 0.) rigid += coefficient_at_position(lag, x_at(t)) * clock;
+        }
+        const auto voltage = physical_response(exact, t, f);
+        observe_power(voltage);
+        const auto error = std::abs(assembled - voltage);
+        temporal.maximum_temporal_voltage_error = std::max(temporal.maximum_temporal_voltage_error, error);
+        if (f == 0.) temporal.maximum_rigid_departure_voltage = std::max(temporal.maximum_rigid_departure_voltage,
+            std::abs(voltage - rigid));
+        ++temporal.checked_rf_pairs;
+        return HfVectorObliqueTemporalMinimum{f, t, std::norm(assembled), std::norm(voltage), error};
+    };
+
+    const auto closure = [&](const HfVectorObliqueGeometry& snapshot) {
+        const auto& m = snapshot.transverse_density_modes;
+        return m[2].phase_rad - m[0].phase_rad - m[2].n * m[1].phase_rad;
+    };
+    const auto observe_density = [&](const HfVectorObliqueGeometry& snapshot) {
+        for (std::size_t i = 0; i < g.transverse_density_modes.size(); ++i)
+            temporal.maximum_mode_magnitude_change = std::max(temporal.maximum_mode_magnitude_change,
+                std::abs(snapshot.transverse_density_modes[i].amplitude_x - g.transverse_density_modes[i].amplitude_x));
+        temporal.maximum_phase_closure_change_rad = std::max(temporal.maximum_phase_closure_change_rad,
+            std::abs(std::remainder(closure(snapshot) - closure(g), two_pi)));
+    };
+
+    using RfKnots = std::array<RfReturn, rf_knots>;
+    const auto rf_knots_for = [&](const HfVectorObliqueGeometry& snapshot) {
+        RfKnots rf;
+        for (std::size_t i = 0; i < rf.size(); ++i)
+            rf[i] = frozen(snapshot, (static_cast<double>(i) - (rf_knots - 1) * .5) * rf_spacing);
+        return rf;
+    };
+    const auto design = [&](const RfKnots& rf, const HfVectorObliqueGeometry& snapshot) {
+        double discarded = 0., precursor = 0.;
+        auto kernels = frozen_kernels(rf, snapshot, discarded, precursor, stop);
+        temporal.maximum_discarded_energy_fraction = std::max(temporal.maximum_discarded_energy_fraction, discarded);
+        return kernels;
+    };
+    const auto taps_for = [&](std::span<const HfFullwaveKernel> kernels, double t) {
+        Taps values{};
+        for (std::size_t m = 0; m < kernels.size(); ++m) {
+            const double order = static_cast<double>(m) - kernels.size() / 2;
+            const auto p = phase(-two_pi * order * x_at(t) / g.period_m);
+            for (std::size_t i = 0; i < taps; ++i) values[i] += kernels[m].fir.taps[i] * p;
+        }
+        return values;
+    };
+
+    evolution_knots_.resize(evolution_intervals + 1);
+    for (std::size_t i = 1; i < evolution_intervals; ++i) {
+        const auto t = time_at(static_cast<double>(i) / evolution_intervals);
+        const auto snapshot = evolved_geometry(g, evolution, t);
+        observe_density(snapshot);
+        const auto rf = rf_knots_for(snapshot);
+        const auto& carrier = rf[rf_knots / 2];
+        observe_power(physical_response(carrier, t, 0.));
+        if (i % (evolution_intervals / 4) == 0) {
+            const auto fine_z = frozen(snapshot, 0., output_3d, .5 * main_vertical_step);
+            const auto coarse = frozen(snapshot, 0., coarse_3d);
+            const auto refined = frozen(snapshot, 0., fine_3d, .5 * main_vertical_step);
+            temporal.maximum_mesh_voltage_error = std::max(temporal.maximum_mesh_voltage_error,
+                spatial_difference(carrier, fine_z));
+            temporal.maximum_refined_order_voltage_error = std::max(temporal.maximum_refined_order_voltage_error,
+                spatial_difference(fine_z, refined));
+            temporal.maximum_refined_edge_flux = std::max(temporal.maximum_refined_edge_flux, refined.edge);
+            ++temporal.checked_refined_epochs;
+            // Observe the coarse difference as a finite independent witness;
+            // the admission criterion uses the production-to-refined result.
+            if (!std::isfinite(spatial_difference(coarse, carrier)) || temporal.maximum_mesh_voltage_error > .004 ||
+                temporal.maximum_refined_order_voltage_error > .004 || checks.maximum_edge_flux > maximum_outer_order_flux ||
+                !refined_edge_qualified(true, refined.edge, refined.edge_x, refined.edge_y)) return false;
+        }
+        const auto fitted = taps_for(design(rf, snapshot), t);
+        for (std::size_t j = 0; j < taps; ++j)
+            evolution_knots_[i].value[j] = fitted[j] - coefficient_at_position(j + first_lag_samples(), x_at(t));
+    }
+    // The plasma law and its first derivatives vanish at both event ends.
+    // Internal slopes are centered differences; the end slopes stay zero.
+    for (std::size_t i = 1; i < evolution_intervals; ++i)
+        for (std::size_t l = 0; l < taps; ++l)
+            evolution_knots_[i].slope[l] = .5 * (evolution_knots_[i + 1].value[l] - evolution_knots_[i - 1].value[l]);
+
+    for (std::size_t i = 0; i < evolution_intervals; ++i) {
+        const auto t = time_at((i + .5) / evolution_intervals);
+        const auto snapshot = evolved_geometry(g, evolution, t);
+        for (double f : mesh_witnesses) witness(frozen(snapshot, f), t, f);
+        ++temporal.checked_midpoints;
+    }
+    for (double u : std::array{3. / 64., 17. / 64., 43. / 64., 59. / 64.}) {
+        const auto t = time_at(u);
+        const auto snapshot = evolved_geometry(g, evolution, t);
+        const auto rf = rf_knots_for(snapshot);
+        const auto kernels = design(rf, snapshot);
+        const auto exact_taps = taps_for(kernels, t);
+        double tap_error = 0.;
+        for (std::size_t j = 0; j < taps; ++j)
+            tap_error += std::abs(coefficient_at_time(j + first_lag_samples(), t) - exact_taps[j]);
+        temporal.maximum_direct_fir_tap_error = std::max(temporal.maximum_direct_fir_tap_error, tap_error);
+        ++temporal.checked_direct_fir_epochs;
+        for (double f : std::array{-196.5, 196.5}) {
+            const auto exact = frozen(snapshot, f);
+            double frequency_error = 0., fir_error = 0.;
+            for (std::size_t j = 0; j < exact.spatial.size(); ++j)
+                frequency_error += std::abs(intrinsic_interpolation(rf, f, j, &RfReturn::spatial) - exact.spatial[j]);
+            for (std::size_t j = 0; j < kernels.size(); ++j)
+                fir_error += std::abs(hf_fullwave_fir_response(kernels[j].fir, f / sample_rate_hz) -
+                    std::conj(exact.harmonic[j]) * native_phase(f));
+            temporal.maximum_frequency_voltage_error = std::max(temporal.maximum_frequency_voltage_error, frequency_error);
+            temporal.maximum_fir_voltage_error = std::max(temporal.maximum_fir_voltage_error, fir_error);
+            witness(exact, t, f);
+        }
+    }
+
+    // A dense search of the actual assembled FIR can expose a narrow
+    // cancellation between the fixed qualification epochs. Its selected
+    // times are checked with new frozen Maxwell solves, one per frequency.
+    constexpr std::array scan_offsets{-384., -196.5, 0., 196.5, 384.};
+    constexpr std::size_t scan_intervals = 4096;
+    std::array<Taps, scan_offsets.size()> lag_phasors;
+    std::array<double, scan_offsets.size()> minimum_at{};
+    std::array<double, scan_offsets.size()> assembled_minimum;
+    assembled_minimum.fill(std::numeric_limits<double>::infinity());
+    for (std::size_t f = 0; f < scan_offsets.size(); ++f) {
+        const auto angle = -two_pi * scan_offsets[f] / sample_rate_hz;
+        for (std::size_t lag = 0; lag < taps; ++lag)
+            lag_phasors[f][lag] = phase(angle * (lag + first_lag_samples()));
+    }
+    for (std::size_t i = 0; i <= scan_intervals; ++i) {
+        if (stop.stop_requested()) throw std::runtime_error("HF evolution minimum scan cancelled");
+        const auto t = time_at(static_cast<double>(i) / scan_intervals);
+        std::array<C, scan_offsets.size()> responses{};
+        for (std::size_t lag = 0; lag < taps; ++lag) {
+            const auto coefficient = coefficient_at_time(lag + first_lag_samples(), t);
+            for (std::size_t f = 0; f < responses.size(); ++f)
+                responses[f] += coefficient * lag_phasors[f][lag];
+        }
+        for (std::size_t f = 0; f < responses.size(); ++f) {
+            const auto power = std::norm(responses[f]);
+            if (!std::isfinite(power)) throw std::runtime_error("nonfinite HF evolution minimum scan");
+            if (power < assembled_minimum[f]) {
+                assembled_minimum[f] = power;
+                minimum_at[f] = t;
+            }
+        }
+        ++temporal.scanned_time_points;
+    }
+    temporal.minimum_scanned_assembled_power = *std::min_element(assembled_minimum.begin(), assembled_minimum.end());
+    for (std::size_t f = 0; f < scan_offsets.size(); ++f) {
+        const auto t = minimum_at[f];
+        const auto snapshot = evolved_geometry(g, evolution, t);
+        temporal.minimum_witnesses[f] = witness(frozen(snapshot, scan_offsets[f]), t, scan_offsets[f]);
+        ++temporal.checked_minimum_rf_pairs;
+    }
+
+    for (std::size_t j = 0; j < taps; ++j) {
+        double derivative_bound = 0.;
+        for (std::size_t i = 0; i < evolution_intervals; ++i) {
+            const auto& lo = evolution_knots_[i];
+            const auto& hi = evolution_knots_[i + 1];
+            // Three quadratic Bezier control values of the cubic derivative.
+            derivative_bound = std::max({derivative_bound, std::abs(lo.slope[j]), std::abs(hi.slope[j]),
+                std::abs(3. * (hi.value[j] - lo.value[j]) - lo.slope[j] - hi.slope[j])});
+        }
+        const auto clock_separation = (j + first_lag_samples()) / sample_rate_hz + range / c;
+        temporal.retarded_peak_error_bound += derivative_bound * evolution_intervals / evolution.duration_seconds * clock_separation;
+    }
+    checks.retarded_peak_error_bound += temporal.retarded_peak_error_bound;
+    temporal.relative_voltage_error_at_minimum = (temporal.maximum_mesh_voltage_error + temporal.maximum_refined_order_voltage_error +
+        std::max(temporal.maximum_temporal_voltage_error,
+            temporal.maximum_direct_fir_tap_error + temporal.maximum_fir_voltage_error)) /
+        std::max(1e-12, std::sqrt(std::min(temporal.minimum_checked_trajectory_power, temporal.minimum_scanned_assembled_power)));
+
+    if (checks.rf_solves != 270 || temporal.checked_midpoints != 16 || temporal.checked_direct_fir_epochs != 4 ||
+        temporal.checked_rf_pairs != 61 || temporal.checked_refined_epochs != 3 ||
+        temporal.scanned_time_points != 4097 || temporal.checked_minimum_rf_pairs != 5)
+        throw std::logic_error("HF evolution preparation missed a planned temporal witness");
+    temporal.qualified = temporal.maximum_mode_magnitude_change >= 1e-4 && temporal.maximum_phase_closure_change_rad >= .1 &&
+        temporal.maximum_rigid_departure_voltage >= .001 && temporal.maximum_temporal_voltage_error <= .0012 &&
+        temporal.maximum_direct_fir_tap_error <= .0012 && temporal.maximum_frequency_voltage_error <= .0006 &&
+        temporal.maximum_fir_voltage_error <= .0006 && temporal.maximum_discarded_energy_fraction <= 1e-6 &&
+        checks.maximum_edge_flux <= maximum_outer_order_flux && checks.retarded_peak_error_bound <= .004 &&
+        temporal.minimum_checked_trajectory_power > 1e-24 && temporal.minimum_scanned_assembled_power > 1e-24 &&
+        temporal.relative_voltage_error_at_minimum <= .15;
+    return temporal.qualified;
 }
 
 HfVectorObliqueTableBuild build_hf_vector_oblique_table(const HfVectorObliqueSpec& spec, std::stop_token stop) {
@@ -1033,32 +1380,10 @@ HfVectorObliqueTableBuild build_hf_vector_oblique_table(const HfVectorObliqueSpe
     // Each retained harmonic has its own broadband FIR. Combining those FIRs
     // by the exact translated Fourier phase gives the time-varying filter.
     // Runtime tables sample that smooth finite sum, not a fitted fading trace.
-    const HfFullwaveKernelDesign design{Table::sample_rate_hz, Table::occupied_half_band_hz,
-        2. * (g.height_m - .5 * g.thickness_m) / c * Table::sample_rate_hz,
-        Table::modelling_delay_samples, Table::retained_late_samples};
     const double range = common_range_m(g);
     const auto common_phase = [&](double offset) { return phase(two_pi * (Table::carrier_hz + offset) / c * range); };
-    std::vector<HfFullwaveKernel> kernels(carrier.harmonic.size());
-    std::array<C, frequency_bins> grid{};
-    double power = 0., discarded = 0., precursor = 0.;
-    for (std::size_t m = 0; m < kernels.size(); ++m) {
-        if (stop.stop_requested()) throw std::runtime_error("HF vector oblique preparation cancelled");
-        for (std::size_t j = 0; j < grid.size(); ++j) {
-            const double offset = Table::sample_rate_hz * (static_cast<double>(j) / grid.size() - .5);
-            grid[j] = intrinsic_interpolation(knots, offset, m, &RfReturn::harmonic) * common_phase(offset);
-        }
-        kernels[m] = design_hf_fullwave_kernel(grid, design);
-        const auto& k = kernels[m];
-        if (k.fir.first_tap_sample != Table::first_lag_samples() || k.fir.taps.size() != Table::taps)
-            throw std::runtime_error("HF vector oblique FIR differs from public sample plan");
-        power += k.tapered_grid_mean_power;
-        discarded += k.tapered_grid_mean_power * (k.discarded_pre_energy_fraction + k.discarded_tail_energy_fraction);
-        precursor += k.tapered_grid_mean_power * k.prearrival_energy_fraction;
-    }
-    if (power > 0.) {
-        checks.period_averaged_discarded_energy_fraction = discarded / power;
-        checks.period_averaged_raw_precursor_energy_fraction = precursor / power;
-    }
+    const auto kernels = frozen_kernels(knots, g, checks.period_averaged_discarded_energy_fraction,
+        checks.period_averaged_raw_precursor_energy_fraction, stop);
     auto table = std::make_shared<Table>();
     table->spec_ = spec;
     table->geometry_ = g;
@@ -1137,6 +1462,7 @@ HfVectorObliqueTableBuild build_hf_vector_oblique_table(const HfVectorObliqueSpe
         checks.period_averaged_discarded_energy_fraction <= 1e-6 && checks.interpolation_peak_error_bound <= 2e-5 &&
         checks.table_assembly_voltage_error <= checks.fir_voltage_error + checks.interpolation_peak_error_bound + 2e-12 &&
         checks.retarded_peak_error_bound <= .004 && checks.relative_voltage_error_at_minimum <= .15;
+    if (checks.qualified && spec.intrinsic_evolution) checks.qualified = table->prepare_evolution(checks, stop);
     return {checks.qualified ? std::move(table) : nullptr, checks};
 }
 
@@ -1158,10 +1484,17 @@ C HfVectorObliqueStream::render(C input) {
     const auto b = table_bracket(-spec.drift_mps * (physical_time - spec.epoch_seconds), table_->geometry_.period_m);
     const auto& lo = table_->knots_[b.lo];
     const auto& hi = table_->knots_[b.lo + 1];
+    const auto temporal = evolution_bracket(table_->evolution_, Table::evolution_intervals, physical_time);
     C value{};
     auto at = (cursor_ + history_.size() - Table::first_lag_samples()) % history_.size();
     for (std::size_t i = 0; i < Table::taps; ++i) {
-        value += blend(b, lo.value[i], lo.slope[i], hi.value[i], hi.slope[i]) * history_[at];
+        auto coefficient = blend(b, lo.value[i], lo.slope[i], hi.value[i], hi.slope[i]);
+        if (temporal) {
+            const auto& first = table_->evolution_knots_[temporal->lo];
+            const auto& last = table_->evolution_knots_[temporal->lo + 1];
+            coefficient += blend(*temporal, first.value[i], first.slope[i], last.value[i], last.slope[i]);
+        }
+        value += coefficient * history_[at];
         at = at == 0 ? history_.size() - 1 : at - 1;
     }
     cursor_ = (cursor_ + 1) % history_.size();

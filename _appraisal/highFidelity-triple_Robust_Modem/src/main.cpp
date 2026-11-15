@@ -558,7 +558,7 @@ Json phase_screens_json(const appraisal::HfPhaseScreensSpec& spec) {
         {"first_lag_samples",Table::first_lag_samples()},{"last_lag_samples",Table::last_lag_samples()},
         {"taps",Table::taps},{"preparation_workspace_bound_bytes",Table::preparation_workspace_bound_bytes}});
 }
-Json vector_oblique_json(const appraisal::HfVectorObliqueSpec& spec) {
+Json vector_oblique_json(const appraisal::HfVectorObliqueSpec& spec, bool include_evolution_marker=false) {
     using Table=appraisal::HfVectorObliqueTable;
     const auto g=appraisal::hf_vector_oblique_geometry(spec);
     auto result=object({{"carrier_hz",Table::carrier_hz},{"sample_rate_hz",Table::sample_rate_hz},
@@ -608,6 +608,21 @@ Json vector_oblique_json(const appraisal::HfVectorObliqueSpec& spec) {
         result["refined_half_orders_each_axis"]=wide_holdout?8:4;
         result["maximum_admitted_spatial_modes"]=wide_holdout?289:81;
         result["rf_dense_terms_limit"]=wide_holdout?60'000'000'000ull:1'200'000'000ull;
+    }
+    if (include_evolution_marker) result["intrinsic_evolution"]=spec.intrinsic_evolution;
+    if (spec.intrinsic_evolution) {
+        const auto evolution=appraisal::hf_vector_oblique_evolution(spec);
+        require(evolution.has_value(),"intrinsic vector evolution descriptor is unavailable");
+        Json::Array factors;
+        for (const auto& factor : evolution->mode_factors)
+            factors.push_back(Json::Array{factor[0],factor[1],factor[2],factor[3]});
+        result["evolution"]=object({
+            {"start_seconds",evolution->start_seconds},
+            {"duration_seconds",evolution->duration_seconds},
+            {"intervals",Table::evolution_intervals},
+            {"mode_factors",std::move(factors)},
+            {"law","Each mode multiplier is 1+(a+ib)B(u)+(c+id)Q(u), B=64u^3(1-u)^3, Q=2(2u-1)B; identity outside u in [0,1]."},
+            {"time_scope","T=(output_sample-32)/1920 seconds, on the physical output clock before the added FIR delay; independent of the receiver message calendar."}});
     }
     return result;
 }
@@ -823,7 +838,7 @@ Json channel_parameters(const appraisal::ChannelSpec& c,std::string_view scenari
     }
     if(c.vector_oblique) {
         result["renderer"]="hf_vector_oblique";
-        result["vector_oblique"]=vector_oblique_json(*c.vector_oblique);
+        result["vector_oblique"]=vector_oblique_json(*c.vector_oblique,scenario_id.starts_with("hf-vector-evolving"));
     }
     return result;
 }
@@ -1000,7 +1015,10 @@ Setup setup(const Options& o,std::stop_token stop) {
     }
     auto scenario=appraisal::make_scenario(o.scenario);
     const bool vector_native_chain_case=scenario.id.starts_with("hf-vector-oblique-chain-")||
-        scenario.id.starts_with("hf-vector-3d-chain-");
+        scenario.id.starts_with("hf-vector-3d-chain-")||
+        scenario.id.starts_with("hf-vector-evolving-chain-");
+    const bool evolving_native_chain_case=scenario.id.starts_with("hf-vector-evolving-chain-");
+    const bool evolving_vector_case=scenario.id.starts_with("hf-vector-evolving");
     const bool native_chain_case=scenario.id.starts_with("hf-wave-chain-")||vector_native_chain_case;
     if(o.hf_target_presence_diagnostic&&scenario.channel.vector_oblique&&scenario.id!="hf-vector-oblique")
         throw Unavailable("target-presence diagnostic is qualified only for the original direct hf-vector-oblique primary");
@@ -1078,9 +1096,12 @@ Setup setup(const Options& o,std::stop_token stop) {
         if((vector_native_chain_case&&o.bit_seconds&&*o.bit_seconds!=64.)||
            (!vector_native_chain_case&&o.bit_seconds&&*o.bit_seconds!=64.&&*o.bit_seconds!=128.))
             throw Unavailable("vector oblique supports 64 or 128 second direct bits and 64 second native-chain bits");
-        if(o.cn0&&((vector_native_chain_case&&*o.cn0!=0.&&*o.cn0!=30.)||
-                   (!vector_native_chain_case&&*o.cn0!=-3.&&*o.cn0!=0.&&*o.cn0!=10.&&*o.cn0!=20.&&*o.cn0!=30.)))
-            throw Unavailable("vector oblique chains allow 0 or 30 dB-Hz; direct cases allow -3, 0, 10, 20, or 30 dB-Hz");
+        if(o.cn0&&((evolving_native_chain_case&&*o.cn0!=30.)||
+                   (vector_native_chain_case&&!evolving_native_chain_case&&*o.cn0!=0.&&*o.cn0!=30.)||
+                   (evolving_vector_case&&!evolving_native_chain_case&&*o.cn0!=12.&&*o.cn0!=15.&&*o.cn0!=20.&&
+                    !(scenario.id=="hf-vector-evolving"&&*o.cn0==17.5&&o.bit_seconds.value_or(64.)==64.))||
+                   (!vector_native_chain_case&&!evolving_vector_case&&*o.cn0!=-3.&&*o.cn0!=0.&&*o.cn0!=10.&&*o.cn0!=20.&&*o.cn0!=30.)))
+            throw Unavailable("vector oblique C/N0 must match the selected fixed direct or native-chain experiment");
     }
     if(o.design_options)appraisal::apply_hf_trajectory_design(scenario,o.design);
     if(o.hf_trajectory_seed) {
@@ -1281,6 +1302,7 @@ Setup setup(const Options& o,std::stop_token stop) {
         chain.endpoints.noise_seed=o.noise_seed;
         chain.endpoints.maximum_chunk_samples=o.chunk;
         chain.propagation=s.scenario.channel;
+        if(evolving_native_chain_case) chain.maximum_workspace_bytes=96u*1024u*1024u;
         chain.propagation_seed=o.seed;
         chain.final_receiver_noise_variance=variance;
         chain.tx_horizon_samples=chain_tx_horizon;
@@ -1598,7 +1620,7 @@ Json plan_json(const Setup& s,const Options& o) {
         const bool source_period=source_seconds>=period_seconds;
         const bool rendered_period=horizon_seconds>=period_seconds;
         result["channel_renderer"]="hf_vector_oblique";
-        result["vector_oblique"]=vector_oblique_json(vector);
+        result["vector_oblique"]=vector_oblique_json(vector,s.scenario.id.starts_with("hf-vector-evolving"));
         result["vector_oblique_source_band_checked"]=false;
         result["vector_oblique_table_built"]=false;
         result["path_count"]=Json{};
@@ -1786,7 +1808,7 @@ Json score_json(const StreamSlotReceipt& receipt) {
         {"commit_wall_seconds",receipt.commit_timing?Json(receipt.commit_timing->wall_seconds):Json{}},
         {"commit_process_cpu_seconds",receipt.commit_timing&&receipt.commit_timing->process_cpu_seconds?Json(*receipt.commit_timing->process_cpu_seconds):Json{}}});
 }
-Json channel_json(const appraisal::ChannelReport& r,double fs) {
+Json channel_json(const appraisal::ChannelReport& r,double fs,std::string_view scenario_id={}) {
     auto result=object({{"samples",r.samples},{"source_samples",r.source_samples},{"workspace_bytes",r.workspace_bytes},
         {"contains_signal_energy",r.signal_energy>0},{"contains_source_energy",r.input_energy>0},
         {"impulse_events",r.impulse_events},{"clipped_samples",r.clipped_samples},{"minimum_agc_gain",r.minimum_agc_gain},
@@ -1796,6 +1818,18 @@ Json channel_json(const appraisal::ChannelReport& r,double fs) {
         {"transmitted_normalized_energy_seconds",static_cast<double>(r.input_energy)/fs},
         {"received_signal_normalized_energy_seconds",static_cast<double>(r.signal_energy)/fs},
         {"output_normalized_energy_seconds",static_cast<double>(r.output_energy)/fs}});
+    if(!r.signal_energy_observations.empty()) {
+        Json::Array observations;
+        for(const auto& observation:r.signal_energy_observations) {
+            observations.push_back(object({{"public_slot",observation.interval.public_slot},
+                {"first_sample",observation.interval.first_sample},{"stop_sample",observation.interval.stop_sample},
+                {"samples",observation.samples},{"energy_sample_sum",static_cast<double>(observation.energy)}}));
+        }
+        result["private_signal_energy_observations"]=std::move(observations);
+        result["private_signal_energy_outside_observations_sample_sum"]=
+            static_cast<double>(r.signal_energy_outside_observations);
+        result["private_signal_energy_scope"]="Evaluator-only per-public-slot sum of the propagated wanted complex voltage after physical fading and before additive noise or frontend processing; intervals are not supplied to the receiver or decoder.";
+    }
     if(r.fullwave_reflection) {
         const auto& full=*r.fullwave_reflection;
         const auto& checks=full.checks;
@@ -2047,9 +2081,16 @@ Json channel_json(const appraisal::ChannelReport& r,double fs) {
     if(r.vector_oblique) {
         const auto& vector=*r.vector_oblique;
         const auto& checks=vector.checks;
-        auto receipt=vector_oblique_json(vector.spec);
+        auto receipt=vector_oblique_json(vector.spec,scenario_id.starts_with("hf-vector-evolving"));
+        if (vector.spec.intrinsic_evolution)
+            require(checks.evolution && checks.evolution->qualified,
+                    "intrinsic evolution report is missing its qualified temporal checks");
         receipt["table_sha256"]=vector.table_sha256;
         receipt["table_digest_scope"]="all 257 translating-position knots, all 129 retained lags, binary64 complex coefficients and knot slopes in canonical little-endian order; source identity binds generation and interpolation";
+        if (vector.spec.intrinsic_evolution)
+            receipt["table_digest_scope"]="all 257 spatial-position knots and 17 evolution-time residual knots across all 129 retained lags, binary64 complex coefficients/slopes, plus a versioned T/B/Q time-law tag, interval count, event start/duration and all mode factors in canonical little-endian metadata order";
+        if (vector.spec.intrinsic_evolution)
+            receipt["evolution_knot_count"]=vector.evolution_knot_count;
         receipt["qualification_scope"]="finite-order bidirectional 2D cold collisional Maxwell scattering with periodic transverse density, oblique incidence and fixed antenna projection; limited RF/position/order/FIR witnesses do not establish random 3D fields, field calibration or environmental probabilities";
         receipt["table_qualified"]=checks.qualified;
         receipt["rf_solves"]=checks.rf_solves;
@@ -2097,6 +2138,46 @@ Json channel_json(const appraisal::ChannelReport& r,double fs) {
             receipt["maximum_admitted_spatial_modes"]=checks.maximum_admitted_spatial_modes;
             receipt["period_averaged_energy_scope"]="coherent average along the declared commensurate receiver trajectory after combining equal temporal indices; not an incoherent average over the full x-y spatial torus";
         }
+        if (vector.spec.intrinsic_evolution)
+            receipt["qualification_scope"]="finite-order bidirectional 3D cold collisional Maxwell scattering with doubly periodic transverse density, a bounded intrinsic density-mode event and fixed antenna projection; temporal checks cover 16 intervals, 16 midpoints, 4 direct FIR epochs, 3 refined epochs, 61 temporal RF pairs, and a 4097-point event-time minimum scan with five checked RF minima, but do not establish random 3D fields, field calibration or environmental probabilities";
+        if (vector.spec.intrinsic_evolution && checks.evolution) {
+            const auto& evolution=*checks.evolution;
+            require(evolution.checked_minimum_rf_pairs<=evolution.minimum_witnesses.size(),
+                    "intrinsic evolution minimum-witness count exceeds its fixed report bound");
+            Json::Array minimum_witnesses;
+            for(std::size_t i=0;i<evolution.checked_minimum_rf_pairs;++i) {
+                const auto& witness=evolution.minimum_witnesses[i];
+                minimum_witnesses.push_back(object({{"offset_hz",witness.offset_hz},
+                    {"physical_seconds",witness.physical_seconds},{"assembled_power",witness.assembled_power},
+                    {"direct_power",witness.direct_power},{"voltage_error",witness.voltage_error}}));
+            }
+            receipt["evolution_checks"]=object({
+                {"qualified",evolution.qualified},
+                {"intervals",evolution.intervals},
+                {"scanned_time_points",evolution.scanned_time_points},
+                {"checked_midpoints",evolution.checked_midpoints},
+                {"checked_direct_fir_epochs",evolution.checked_direct_fir_epochs},
+                {"checked_refined_epochs",evolution.checked_refined_epochs},
+                {"checked_rf_pairs",evolution.checked_rf_pairs},
+                {"checked_minimum_rf_pairs",evolution.checked_minimum_rf_pairs},
+                {"minimum_scanned_assembled_power",evolution.minimum_scanned_assembled_power},
+                {"minimum_witnesses",std::move(minimum_witnesses)},
+                {"minimum_slice_density_fraction",evolution.minimum_slice_density_fraction},
+                {"maximum_mode_magnitude_change",evolution.maximum_mode_magnitude_change},
+                {"maximum_phase_closure_change_rad",evolution.maximum_phase_closure_change_rad},
+                {"maximum_rigid_departure_voltage",evolution.maximum_rigid_departure_voltage},
+                {"maximum_temporal_voltage_error",evolution.maximum_temporal_voltage_error},
+                {"maximum_direct_fir_tap_error",evolution.maximum_direct_fir_tap_error},
+                {"maximum_frequency_voltage_error",evolution.maximum_frequency_voltage_error},
+                {"maximum_fir_voltage_error",evolution.maximum_fir_voltage_error},
+                {"maximum_discarded_energy_fraction",evolution.maximum_discarded_energy_fraction},
+                {"maximum_mesh_voltage_error",evolution.maximum_mesh_voltage_error},
+                {"maximum_refined_order_voltage_error",evolution.maximum_refined_order_voltage_error},
+                {"maximum_refined_edge_flux",evolution.maximum_refined_edge_flux},
+                {"minimum_checked_trajectory_power",evolution.minimum_checked_trajectory_power},
+                {"relative_voltage_error_at_minimum",evolution.relative_voltage_error_at_minimum},
+                {"retarded_peak_error_bound",evolution.retarded_peak_error_bound}});
+        }
         receipt["minimum_carrier_power"]=checks.minimum_carrier_power;
         receipt["maximum_carrier_power"]=checks.maximum_carrier_power;
         receipt["minimum_carrier_position_m"]=checks.minimum_carrier_position_m;
@@ -2143,7 +2224,7 @@ Json channel_json(const StreamChannelReport& r,double fs,const EmissionReport& e
             {"processed_rows",v.processed_rows},{"pre_selective_energy_sample_sum",v.pre_selective_energy_samples},
             {"post_selective_energy_sample_sum",v.post_selective_energy_samples}});
     }
-    return object({{"samples",r.samples},{"source_samples",r.source_samples},{"workspace_bytes",r.working_bytes},
+    auto result=object({{"samples",r.samples},{"source_samples",r.source_samples},{"workspace_bytes",r.working_bytes},
         {"workspace_scope","native source and streaming channel joint workspace bound"},
         {"contains_signal_energy",r.signal_energy>0},{"contains_source_energy",emission.data_energy>0||emission.helper_energy>0},
         {"impulse_events",r.impulse_events},{"erased_samples",r.erased_samples},{"out_of_passband_samples",r.out_of_passband_samples},
@@ -2156,14 +2237,16 @@ Json channel_json(const StreamChannelReport& r,double fs,const EmissionReport& e
         {"output_normalized_energy_seconds",r.observed_energy/fs},{"complex_noise_variance",r.complex_noise_variance},
         {"energy_scope","native report supplies propagated signal and observed energy. Source DATA and Helper energies are separate; composite input and realized additive-noise energies are not measured here. Energy seconds use the nominal receiver sample rate."},
         {"bounded_spread",std::move(spread)},{"common_doppler_wander",std::move(common)},{"selective_perturbation",std::move(selective)}});
+    return result;
 }
-Json channel_json(const appraisal::HfNativeChainReport& r,double fs,const EmissionReport& emission) {
+Json channel_json(const appraisal::HfNativeChainReport& r,double fs,const EmissionReport& emission,
+                  std::string_view scenario_id={}) {
     auto result=channel_json(r.rx,fs,emission);
     result["renderer"]="native_tx_physical_hf_native_rx";
     result["workspace_bytes"]=r.workspace_bytes;
     result["workspace_scope"]="aggregate original source, both native endpoints, physical channel and bridges; nested stage workspace counts are cumulative and must not be summed";
     result["tx"]=channel_json(r.tx,fs,emission);
-    result["propagation"]=channel_json(r.propagation,fs);
+    result["propagation"]=channel_json(r.propagation,fs,scenario_id);
     result["rx"]=channel_json(r.rx,fs,emission);
     result["native_chain"]=object({{"tx_horizon_samples",r.tx_horizon_samples},
         {"propagation_horizon_samples",r.propagation_horizon_samples},{"capture_horizon_samples",r.capture_horizon_samples},
@@ -3275,7 +3358,21 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
                 "clean channel differs from the original geometry or exceeds its admitted bound");
         }
     } else {
-        channel.emplace(source,s.scenario.channel,o.seed,s.horizon,deadline.stop.get_token());
+        std::vector<appraisal::SignalEnergyInterval> signal_energy_intervals;
+        const bool evolution_energy_case=o.mode=="receive"&&
+            (s.scenario.id=="hf-vector-evolving"||s.scenario.id=="hf-vector-evolving-rigid"||
+             s.scenario.id=="hf-vector-evolving-holdout"||s.scenario.id=="hf-vector-evolving-holdout-rigid");
+        if(evolution_energy_case) {
+            signal_energy_intervals.reserve(static_cast<std::size_t>(s.slot_horizon));
+            for(std::uint64_t slot=0;slot<s.slot_horizon;++slot) {
+                const auto aperture=make_receiver_slot_plan(s.profile,s.receiver,slot);
+                signal_energy_intervals.push_back({slot,aperture.first_sample,aperture.stop_sample});
+            }
+            require(signal_energy_intervals.size()==s.slot_horizon,
+                "evolving-vector evaluator failed to build every public-slot energy aperture");
+        }
+        channel.emplace(source,s.scenario.channel,o.seed,s.horizon,deadline.stop.get_token(),
+                        signal_energy_intervals);
         if(channel->report().fullwave_reflection) {
             result["plan"]["fullwave_reflection_source_band_checked"]=true;
             result["plan"]["fullwave_reflection_table_built"]=true;
@@ -3325,9 +3422,9 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
         {const ServiceTimer io;spool->seal();spool_write_time.add(io.elapsed());}
         captured_digest=capture_hash.finish();
         frozen_emission=emission_report();
-        frozen_channel=native_chain?channel_json(native_chain->report(),s.receiver.sample_rate_hz,*frozen_emission):
+        frozen_channel=native_chain?channel_json(native_chain->report(),s.receiver.sample_rate_hz,*frozen_emission,s.scenario.id):
             native_channel?channel_json(native_channel->report(),s.receiver.sample_rate_hz,*frozen_emission):
-            channel_json(channel->report(),s.receiver.sample_rate_hz);
+            channel_json(channel->report(),s.receiver.sample_rate_hz,s.scenario.id);
         // The retained observation owns replay input. Rendering caches and
         // source callbacks end here, before receiver construction and timing.
         native_chain.reset();native_channel.reset();channel.reset();source.sample_at={};episode_sources.clear();emissions.clear();
@@ -3785,9 +3882,9 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     const auto end=Clock::now();
     result["status"]=run_status;result["reason"]=reason;
     const auto source_report=emission_report();
-    result["channel"]=frozen_channel?*frozen_channel:native_chain?channel_json(native_chain->report(),s.receiver.sample_rate_hz,source_report):
+    result["channel"]=frozen_channel?*frozen_channel:native_chain?channel_json(native_chain->report(),s.receiver.sample_rate_hz,source_report,s.scenario.id):
         native_channel?channel_json(native_channel->report(),s.receiver.sample_rate_hz,source_report):
-        channel_json(channel->report(),s.receiver.sample_rate_hz);
+        channel_json(channel->report(),s.receiver.sample_rate_hz,s.scenario.id);
     // A sealed spool is the full immutable capture even when receiver replay
     // ends early. Its verification prefix belongs only in service_replay.
     result["channel"]["input_sha256"]=spool?captured_digest:replay_digest;

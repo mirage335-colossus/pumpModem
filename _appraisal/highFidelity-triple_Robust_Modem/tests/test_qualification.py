@@ -14,6 +14,7 @@ APP = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(APP))
 import qualification as q
 import analyze_vector_presence as presence
+import analyze_evolving as evolving
 import run
 
 
@@ -116,7 +117,7 @@ class QualificationReaderTests(unittest.TestCase):
 
     def _cell(self, cell_id="cell-a", receipt_sha="4" * 64, episode_id="ep-a"):
         ep = {"id": episode_id, "scenario": "hf-wave-lens-off", "mode": "receive",
-              "waveform": "reference", "seed": 11}
+              "waveform": "reference", "seed": 11, "reception_requirement": "required_complete"}
         return {"id": cell_id, "campaign_path": "campaign.json", "campaign_file_sha256": "5" * 64,
                 "campaign_sha256": "6" * 64, "episode_id": episode_id, "episode": ep,
                 "run_directory": "run-a", "receipt_sha256": receipt_sha, "probe_sha256": "7" * 64,
@@ -150,6 +151,39 @@ class QualificationReaderTests(unittest.TestCase):
         spec["qualification_domain"]["required_missing_strata"] = [None]
         with self.assertRaises(q.QualificationError):
             q._validate_spec(spec)
+
+    def test_delivery_anchor_must_be_predeclared_and_cannot_be_downgraded(self):
+        cell = self._cell()
+        q._validate_spec(self._spec([cell]))
+        downgraded = copy.deepcopy(cell)
+        downgraded["gates"].update(delivery=False, delivery_requirement_basis="characterization")
+        with self.assertRaisesRegex(q.QualificationError, "contradict"):
+            q._validate_spec(self._spec([downgraded]))
+        retrospective = copy.deepcopy(cell)
+        retrospective["episode"].pop("reception_requirement")
+        with self.assertRaisesRegex(q.QualificationError, "predeclared"):
+            q._validate_spec(self._spec([retrospective]))
+        promoted = copy.deepcopy(cell)
+        promoted["episode"]["reception_requirement"] = "characterization"
+        promoted["gates"].update(delivery=False, delivery_requirement_basis="characterization")
+        q._validate_spec(self._spec([promoted]))
+        promoted["gates"].update(delivery=True, delivery_requirement_basis="declared_operational_anchor")
+        with self.assertRaisesRegex(q.QualificationError, "predeclared"):
+            q._validate_spec(self._spec([promoted]))
+
+    def test_negative_control_requirement_matches_frozen_noise_and_zero_false_data_gate(self):
+        cell = self._cell()
+        cell["episode"].update(control="noise", reception_requirement="negative_control")
+        cell.update(control_role="negative")
+        cell["gates"] = gates("negative")
+        q._validate_spec(self._spec([cell]))
+        cell["gates"]["false_data_max"] = 1
+        with self.assertRaisesRegex(q.QualificationError, "contradict"):
+            q._validate_spec(self._spec([cell]))
+        cell["gates"]["false_data_max"] = 0
+        cell["episode"]["control"] = "wanted"
+        with self.assertRaises(q.QualificationError):
+            q._validate_spec(self._spec([cell]))
 
     def test_required_unqualified_strata_prevent_domain_pass_even_when_finite_cells_pass(self):
         cell = self._cell()
@@ -202,6 +236,7 @@ class QualificationReaderTests(unittest.TestCase):
 
     def test_characterization_miss_remains_visible_and_missing_anchors_prevent_pass(self):
         cell = self._cell()
+        cell["episode"]["reception_requirement"] = "characterization"
         cell["gates"].update(delivery=False, delivery_requirement_basis="characterization")
         spec = self._spec([cell])
         dimensions = {name: {"status": "passed"} for name in
@@ -219,9 +254,6 @@ class QualificationReaderTests(unittest.TestCase):
         self.assertEqual(report["delivery_qualification_status"], "incomplete")
         self.assertEqual(report["all_wanted_delivery"]["failed_delivery_observations"], 1)
         dimensions["integrity"] = {"status": "failed"}
-        self.assertEqual(evaluate()["status"], "failed")
-        dimensions["integrity"] = {"status": "passed"}
-        cell["gates"].update(delivery=True, delivery_requirement_basis="declared_operational_anchor")
         self.assertEqual(evaluate()["status"], "failed")
 
     def test_optional_source_commit_is_preserved_and_compared_when_present(self):
@@ -380,6 +412,60 @@ class PresenceReferenceTests(unittest.TestCase):
         for energy in (-1., float("nan"), float("inf")):
             with self.assertRaises(ValueError):
                 presence.known_mean_miss(energy)
+
+
+class DecisionWindowReferenceTests(unittest.TestCase):
+    @staticmethod
+    def receipt():
+        return {"plan": {"channel_renderer": "hf_vector_oblique", "helper_enabled": False,
+            "noise_variance": 2., "horizon_samples": 25,
+            "public_slots": [{"index": i, "evaluator_transmitting": True,
+                "observation": {"first": 10*i, "stop": 10*i+8}} for i in range(2)]},
+            "channel": {"signal_energy_sample_sum": 65., "private_signal_energy_observations": [
+                {"public_slot": i, "first_sample": 10*i, "stop_sample": 10*i+8,
+                 "samples": 8, "energy_sample_sum": 20.*(i+1)} for i in range(2)]},
+            "scenario": {"channel": {"noise": {"white_variance": 2., "colored_variance": 0,
+                "impulse_rate_hz": 0, "impulse_rms": 0, "tone_amplitude": 0},
+                "frontend": {"adc_bits": 0, "agc_target": 0, "clip_magnitude": 0, "lowpass_hz": 0},
+                "transmitter": {"enabled": False}}},
+            "slots": [{"index": i, "first_sample": 10*i, "stop_sample": 10*i+8,
+                "complete": True, "all_valid": True, "decision": "quiet", "bit": None}
+                for i in range(2)]}
+
+    def test_uses_exact_observation_energy_with_unobserved_gaps(self):
+        rows = evolving.decision_references(self.receipt())
+        self.assertEqual([r["energy_over_noise_variance"] for r in rows], [10., 20.])
+        self.assertLess(rows[1]["conditional_known_mean_presence_miss"],
+                        rows[0]["conditional_known_mean_presence_miss"])
+
+    def test_rejects_incomplete_or_excess_energy(self):
+        receipt = self.receipt()
+        receipt["channel"]["private_signal_energy_observations"][0]["samples"] = 7
+        with self.assertRaises(ValueError):
+            evolving.decision_references(receipt)
+        receipt = self.receipt()
+        receipt["channel"]["signal_energy_sample_sum"] = 59.
+        with self.assertRaises(ValueError):
+            evolving.decision_references(receipt)
+
+    def test_event_exposure_uses_propagation_clock_and_model_delay(self):
+        receipt = self.receipt()
+        receipt["plan"]["sample_rate_hz"] = 2.
+        receipt["channel"]["vector_oblique"] = {"modelling_delay_samples": 2,
+            "evolution": {"start_seconds": 1., "duration_seconds": 3.}}
+        rows = evolving.decision_references(receipt)
+        self.assertEqual([r["intrinsic_event_overlap_samples"] for r in rows], [4, 0])
+        self.assertEqual(rows[0]["intrinsic_event_overlap_fraction"], .5)
+
+    def test_rejects_other_noise_planes_and_window_mismatch(self):
+        receipt = self.receipt()
+        receipt["scenario"]["channel"]["noise"]["tone_amplitude"] = .01
+        with self.assertRaises(ValueError):
+            evolving.decision_references(receipt)
+        receipt = self.receipt()
+        receipt["slots"][0]["stop_sample"] = 9
+        with self.assertRaises(ValueError):
+            evolving.decision_references(receipt)
 
 
 if __name__ == "__main__":

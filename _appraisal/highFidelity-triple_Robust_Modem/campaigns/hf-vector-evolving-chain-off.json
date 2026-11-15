@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "name": "hf-vector-evolving-chain-off",
+  "purpose": "Predeclared matched endpoint-Off discriminator triggered by the +30 evolving native clocks/continuing-tone C case recovering all13 DATA bits but leaving both ending quiet slots ambiguous. Preserve field/event/key/noise/calendar/incident C/N0 and required_complete requirement. Switch actual TX/RX audio clocks, RF offsets and continuing tone Off together, retaining public search bounds. One trial; no causal attribution to an individual switched effect.",
+  "max_wall_seconds": 650,
+  "per_trial_wall_seconds": 600,
+  "max_trials": 1,
+  "max_samples": 12000000,
+  "episodes": [
+    {
+      "id": "evolving-chain-off-C-30",
+      "scenario": "hf-vector-evolving-chain-off",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 72511,
+      "noise_seed": 92511,
+      "bit_seconds": 64,
+      "message": "C",
+      "control": "wanted",
+      "cn0_db_hz": 30,
+      "max_wall_seconds": 600,
+      "reception_requirement": "required_complete"
+    }
+  ]
+}

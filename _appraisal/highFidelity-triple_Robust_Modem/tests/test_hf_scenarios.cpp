@@ -507,6 +507,72 @@ void vector_oblique_3d_profiles() {
           "3D clock/tone chain is listed in the scenario catalogue");
 }
 
+void vector_oblique_evolving_profiles() {
+    const auto primary = make_scenario("hf-vector-evolving");
+    const auto primary_rigid = make_scenario("hf-vector-evolving-rigid");
+    const auto holdout = make_scenario("hf-vector-evolving-holdout");
+    const auto holdout_rigid = make_scenario("hf-vector-evolving-holdout-rigid");
+    const auto chain_off = make_scenario("hf-vector-evolving-chain-off");
+    const auto chain_tone = make_scenario("hf-vector-evolving-chain-clocks-tone");
+    for (const auto* scenario : {&primary, &primary_rigid, &holdout, &holdout_rigid, &chain_off, &chain_tone}) {
+        check(scenario->channel.vector_oblique.has_value(), "evolving cases retain the common vector channel");
+        near(scenario->waveform.sample_rate_hz, 1920., 0., "evolving comparison keeps the qualified sample rate");
+        near(scenario->waveform.requested_bit_seconds, 64., 0., "evolving comparison keeps the fixed long-bit geometry");
+        check(scenario->channel.maximum_workspace_bytes == 80u * 1024u * 1024u,
+              "evolving comparison declares enough workspace for temporal table preparation and fixed charges");
+        check(scenario->assumptions.find("receiver receives no physical coefficients") != std::string::npos,
+              "evolution remains hidden from the receiver");
+    }
+    for (const auto* scenario : {&primary, &primary_rigid, &holdout, &holdout_rigid})
+        near(scenario->reference_cn0_db_hz, 20., 0., "direct evolving comparison uses its frozen default C/N0");
+    check(primary.channel.vector_oblique->field == 2 && primary.channel.vector_oblique->intrinsic_evolution &&
+          !primary_rigid.channel.vector_oblique->intrinsic_evolution,
+          "primary evolutionary and rigid pair differs only in the physical time-evolution switch");
+    check(holdout.channel.vector_oblique->field == 4 && holdout.channel.vector_oblique->intrinsic_evolution &&
+          holdout_rigid.channel.vector_oblique->field == 4 && !holdout_rigid.channel.vector_oblique->intrinsic_evolution,
+          "independent held-out evolutionary field has a matched rigid control");
+    near(holdout.channel.vector_oblique->drift_mps, 7., 0., "evolution holdout keeps its frozen seven-metre-per-second drift");
+    near(holdout_rigid.channel.vector_oblique->drift_mps, 7., 0., "rigid holdout matches the held drift");
+    near(holdout.channel.vector_oblique->epoch_seconds, 470., 0., "evolution holdout keeps its independent epoch");
+    near(holdout_rigid.channel.vector_oblique->epoch_seconds, 470., 0., "rigid holdout matches the held epoch");
+    check(hf_vector_oblique_evolution(*primary.channel.vector_oblique).has_value() &&
+          !hf_vector_oblique_evolution(*primary_rigid.channel.vector_oblique).has_value() &&
+          hf_vector_oblique_evolution(*holdout.channel.vector_oblique).has_value() &&
+          !hf_vector_oblique_evolution(*holdout_rigid.channel.vector_oblique).has_value(),
+          "only the two designated physical scenarios receive an intrinsic evolution law");
+    check(hf_vector_oblique_preparation_workspace_bound_bytes(*primary.channel.vector_oblique)==48u*1024u*1024u &&
+          hf_vector_oblique_preparation_workspace_bound_bytes(*holdout.channel.vector_oblique)==48u*1024u*1024u &&
+          hf_vector_oblique_preparation_workspace_bound_bytes(*primary_rigid.channel.vector_oblique)==32u*1024u*1024u &&
+          hf_vector_oblique_preparation_workspace_bound_bytes(*holdout_rigid.channel.vector_oblique)==32u*1024u*1024u,
+          "evolutionary and rigid fields use their distinct preparation workspace admissions");
+    check(primary.bounds.arrival_low_seconds == primary_rigid.bounds.arrival_low_seconds &&
+          primary.bounds.arrival_high_seconds == primary_rigid.bounds.arrival_high_seconds &&
+          primary.bounds.frequency_bound_hz == primary_rigid.bounds.frequency_bound_hz &&
+          primary.bounds.atmospheric_hz == primary_rigid.bounds.atmospheric_hz &&
+          holdout.bounds.arrival_low_seconds == holdout_rigid.bounds.arrival_low_seconds &&
+          holdout.bounds.arrival_high_seconds == holdout_rigid.bounds.arrival_high_seconds &&
+          holdout.bounds.frequency_bound_hz == holdout_rigid.bounds.frequency_bound_hz &&
+          holdout.bounds.atmospheric_hz == holdout_rigid.bounds.atmospheric_hz,
+          "evolution and rigid comparisons expose identical blind public receiver bounds");
+    for (const auto* scenario : {&chain_off, &chain_tone}) {
+        check(scenario->channel.vector_oblique->field == 2 && scenario->channel.vector_oblique->intrinsic_evolution,
+              "native evolving-chain scenarios use the primary intrinsic physical event");
+        near(scenario->reference_cn0_db_hz, 30., 0., "native evolving-chain comparison uses its frozen C/N0");
+        near(scenario->bounds.frequency_bound_hz, 1., 0., "native evolving-chain receiver retains its clock bound");
+        check(scenario->assumptions.find("TX/RX audio +1/−1 ppm") != std::string::npos &&
+              scenario->assumptions.find("RF +0.01/−0.01 ppm") != std::string::npos,
+              "native evolving-chain documents its actual endpoint clock offsets");
+    }
+    near(chain_off.channel.noise.tone_amplitude, 0., 0., "evolving chain off control has no tone");
+    near(chain_tone.channel.noise.tone_amplitude, .3, 0., "evolving chain tone control preserves blocker amplitude");
+    near(chain_tone.channel.noise.tone_hz, 100., 0., "evolving chain tone control preserves blocker offset");
+    const auto names = scenario_names();
+    for (const auto* id : {"hf-vector-evolving", "hf-vector-evolving-rigid", "hf-vector-evolving-holdout",
+                           "hf-vector-evolving-holdout-rigid", "hf-vector-evolving-chain-off",
+                           "hf-vector-evolving-chain-clocks-tone"})
+        check(std::ranges::find(names, id) != names.end(), "evolution scenario is in the public scenario catalogue");
+}
+
 } // namespace
 
 int main() {
@@ -523,6 +589,7 @@ int main() {
         gannon_observed_voltage_profiles();
         vector_oblique_native_chain_profiles();
         vector_oblique_3d_profiles();
+        vector_oblique_evolving_profiles();
         std::cout << "additional HF profile checks passed: " << checks << '\n';
         return 0;
     } catch (const std::exception& error) {

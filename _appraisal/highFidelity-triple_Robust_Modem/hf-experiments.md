@@ -6,7 +6,15 @@ single-antenna cancellation, or a missing propagation mode prevent that gain.
 They run the canonical native Robust receiver. They do not require a favorable
 answer or turn a completed experiment into successful communication.
 
-The [3D spatial continuation](hf-vector-3d.md) extends that coupled model
+The [intrinsic-evolution continuation](hf-vector-evolving.md) changes spatial
+density-mode magnitudes and relative phases during the message, with a fresh
+field and matched rigid controls. The two prescribed events add medium evolution
+to coupled magnetic/scattering/oblique propagation. They remain quasi-static
+Maxwell constructions, not solved plasma-fluid histories or arbitrary rapid
+material dynamics. Their frozen campaign adds named complete-delivery anchors
+and measures received energy in the exact public decision windows.
+
+The preceding [3D spatial continuation](hf-vector-3d.md) extends that coupled model
 to a second transverse coordinate. It keeps spatial convergence separate from
 trajectory interpolation, admits larger support for the unchanged difficult
 field, and audits reception requirements with exact evidence/binary bindings.

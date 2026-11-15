@@ -327,6 +327,12 @@ void validation_guards() {
     check(reject([&] { assess_hf_vector_oblique_carrier_resolution(held, 5); }), "wide carrier cannot change the frozen holdout");
     check(hf_vector_oblique_preparation_workspace_bound_bytes(held) == Table::three_d_preparation_workspace_bound_bytes,
         "3D holdout control keeps standard workspace bound");
+    held.intrinsic_evolution = true;
+    check(reject([&] { validate_hf_vector_oblique_spec(held, 1); }), "unplanned intrinsic evolution geometry is rejected");
+    HfVectorObliqueSpec evolving;
+    evolving.field = 2;
+    evolving.intrinsic_evolution = true;
+    check(reject([&] { assess_hf_vector_oblique_carrier(evolving); }), "rigid carrier-only API cannot screen intrinsic evolution");
     check(reject([] {
         HfVectorPlasmaLayer bad{7., 1e7, 90., {1e7, {}}};
         solve_hf_vector_oblique(f, p, period, 4, B, {&bad, 1});
@@ -354,6 +360,50 @@ void validation_guards() {
     }
 }
 
+void intrinsic_density_law() {
+    for (unsigned field : {2u, 4u}) {
+        HfVectorObliqueSpec evolving;
+        evolving.field = field;
+        evolving.intrinsic_evolution = true;
+        const auto event = *hf_vector_oblique_evolution(evolving);
+        auto rigid = evolving;
+        rigid.intrinsic_evolution = false;
+        const auto baseline = hf_vector_oblique_geometry(rigid).transverse_density_modes;
+        const auto density = [&](double t) { return hf_vector_oblique_geometry_at_time(evolving, t).transverse_density_modes; };
+        const auto coefficient = [](const HfVectorGeometryMode& mode) {
+            return std::polar(mode.amplitude_x, mode.phase_rad);
+        };
+        check(hf_vector_oblique_preparation_workspace_bound_bytes(evolving) ==
+            HfVectorObliqueTable::evolution_preparation_workspace_bound_bytes, "intrinsic workspace preflight");
+        for (double t : {event.start_seconds - 100., event.start_seconds,
+                         event.start_seconds + event.duration_seconds, event.start_seconds + event.duration_seconds + 100.}) {
+            const auto still = density(t);
+            for (std::size_t i = 0; i < baseline.size(); ++i)
+                equal(coefficient(still[i]), coefficient(baseline[i]), 0., "compact event exactly restores rigid density");
+        }
+        // At the center Q=0 and B=1. Both magnitude and closure change,
+        // which cannot be produced by translation even at variable speed.
+        const auto peak = density(event.start_seconds + .5 * event.duration_seconds);
+        const auto closure = [](const auto& modes) {
+            return modes[2].phase_rad - modes[0].phase_rad - modes[2].n * modes[1].phase_rad;
+        };
+        for (std::size_t i = 0; i < baseline.size(); ++i) {
+            const auto [a, b, c, d] = event.mode_factors[i];
+            equal(coefficient(peak[i]), coefficient(baseline[i]) * C(1. + a, b), 1e-17, "analytic peak complex density");
+            check(std::abs(peak[i].amplitude_x - baseline[i].amplitude_x) > 1e-6,
+                "all three density magnitudes depart from the rigid field at peak");
+        }
+        check(std::abs(closure(peak) - closure(baseline)) > .1, "density phase closure cannot be translated from rigid field");
+        const auto early = density(event.start_seconds + .25 * event.duration_seconds);
+        const auto late = density(event.start_seconds + .75 * event.duration_seconds);
+        for (std::size_t i = 0; i < baseline.size(); ++i) {
+            const auto [a, b, c, d] = event.mode_factors[i];
+            equal(coefficient(late[i]) - coefficient(early[i]), coefficient(baseline[i]) * C(c, d) * (.84375),
+                1e-17, "signed skew evolves independently of the symmetric bump");
+        }
+    }
+}
+
 } // namespace
 
 int main() {
@@ -364,6 +414,7 @@ int main() {
         three_dimensional_born();
         transverse_covariance();
         validation_guards();
+        intrinsic_density_law();
         std::cout << "HF vector oblique: " << assertions << " independent assertions\n";
         return 0;
     } catch (const std::exception& e) {

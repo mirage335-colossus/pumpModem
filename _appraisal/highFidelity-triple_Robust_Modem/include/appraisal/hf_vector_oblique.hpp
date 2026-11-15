@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stop_token>
 #include <vector>
@@ -57,7 +58,8 @@ HfVectorScattering solve_hf_vector_oblique(double frequency_hz, double sine_inci
     std::span<const HfVectorPlasmaLayer> bottom_to_top, std::stop_token = {});
 
 // Same shared scattering solver with both transverse wave numbers retained.
-// The finite lattice has at most 81 spatial modes before allocating matrices.
+// This entry point admits at most 81 spatial modes. The explicit, frozen
+// wide holdout preparation has a separate 289-mode bound.
 HfVectorScattering solve_hf_vector_oblique_3d(double frequency_hz, const HfVectorTransverseGrid&,
     std::array<double, 3> field_tesla, std::span<const HfVectorPlasmaLayer3d> bottom_to_top,
     std::stop_token = {});
@@ -67,6 +69,7 @@ struct HfVectorObliqueSpec {
     unsigned field = 0, antenna = 0;
     double drift_mps = 8., epoch_seconds = 600.;
     bool cross_plane = true;
+    bool intrinsic_evolution = false;
 };
 
 struct HfVectorGeometryMode {
@@ -87,8 +90,42 @@ struct HfVectorObliqueGeometry {
 };
 
 HfVectorObliqueGeometry hf_vector_oblique_geometry(const HfVectorObliqueSpec&);
+
+struct HfVectorObliqueEvolution {
+    // Physical output seconds, before the added filter delay. Independent of
+    // the drift epoch and the transmitter/receiver message calendars.
+    double start_seconds, duration_seconds;
+    // Each complex multiplier is 1 + (a+ib)B(u) + (c+id)Q(u).
+    // B=64u³(1-u)³, Q=2(2u-1)B, zero outside the event, u=(T-start)/duration.
+    std::array<std::array<double, 4>, 3> mode_factors;
+};
+
+std::optional<HfVectorObliqueEvolution> hf_vector_oblique_evolution(const HfVectorObliqueSpec&);
+HfVectorObliqueGeometry hf_vector_oblique_geometry_at_time(const HfVectorObliqueSpec&, double physical_seconds);
 void validate_hf_vector_oblique_spec(const HfVectorObliqueSpec&, std::uint64_t horizon_samples);
 std::size_t hf_vector_oblique_preparation_workspace_bound_bytes(const HfVectorObliqueSpec&);
+
+struct HfVectorObliqueTemporalMinimum {
+    double offset_hz = 0., physical_seconds = 0.;
+    double assembled_power = 0., direct_power = 0., voltage_error = 0.;
+};
+
+struct HfVectorObliqueEvolutionChecks {
+    bool qualified = false;
+    std::size_t intervals = 0, checked_midpoints = 0, checked_direct_fir_epochs = 0;
+    std::size_t checked_refined_epochs = 0, checked_rf_pairs = 0;
+    std::size_t scanned_time_points = 0, checked_minimum_rf_pairs = 0;
+    std::array<HfVectorObliqueTemporalMinimum, 5> minimum_witnesses{};
+    double minimum_slice_density_fraction = 0., maximum_mode_magnitude_change = 0.;
+    double maximum_phase_closure_change_rad = 0., maximum_rigid_departure_voltage = 0.;
+    double maximum_temporal_voltage_error = 0., maximum_direct_fir_tap_error = 0.;
+    double maximum_frequency_voltage_error = 0., maximum_fir_voltage_error = 0.;
+    double maximum_discarded_energy_fraction = 0., maximum_mesh_voltage_error = 0.;
+    double maximum_refined_order_voltage_error = 0., maximum_refined_edge_flux = 0.;
+    double minimum_checked_trajectory_power = 0., relative_voltage_error_at_minimum = 0.;
+    double minimum_scanned_assembled_power = 0.;
+    double retarded_peak_error_bound = 0.; // additional analytic bound for the temporal residual only
+};
 
 struct HfVectorObliqueChecks {
     bool qualified = false;
@@ -117,11 +154,12 @@ struct HfVectorObliqueChecks {
     double relative_voltage_error_at_minimum = 0.;
     double period_averaged_discarded_energy_fraction = 0., period_averaged_raw_precursor_energy_fraction = 0.;
     double interpolation_peak_error_bound = 0., retarded_peak_error_bound = 0.;
+    std::optional<HfVectorObliqueEvolutionChecks> evolution;
 };
 
-// Four carrier-only solves for early mesh/order screening. Active 3D adds a
-// fifth, matched y-ablation solve. Qualified stays false without broadband
-// checks and waveform construction.
+// Four carrier-only solves for early mesh/order screening of rigid fields.
+// Active 3D adds a fifth matched y-ablation solve. Intrinsically evolving
+// fields require the chronological broadband preparation.
 HfVectorObliqueChecks assess_hf_vector_oblique_carrier(const HfVectorObliqueSpec&, std::stop_token = {});
 
 // Explicit carrier-only follow-up for the same active field-3 holdout at
@@ -147,6 +185,8 @@ public:
     static constexpr std::size_t position_intervals = 256;
     static constexpr std::size_t preparation_workspace_bound_bytes = 16u * 1024u * 1024u;
     static constexpr std::size_t three_d_preparation_workspace_bound_bytes = 32u * 1024u * 1024u;
+    static constexpr std::size_t evolution_preparation_workspace_bound_bytes = 48u * 1024u * 1024u;
+    static constexpr std::size_t evolution_intervals = 16;
     static constexpr std::size_t first_lag_samples() noexcept { return 2; }
     static constexpr std::size_t last_lag_samples() noexcept { return first_lag_samples() + taps - 1; }
     std::size_t workspace_bytes() const noexcept;
@@ -158,15 +198,25 @@ public:
     // endpoint. Slopes are in units of one position interval.
     std::complex<double> coefficient_knot_value(std::size_t lag, std::size_t knot) const;
     std::complex<double> coefficient_knot_slope(std::size_t lag, std::size_t knot) const;
+    // Runtime coefficient along this field's declared chronological path.
+    std::complex<double> coefficient_at_time(std::size_t lag, double physical_seconds) const;
+    // Exact stored values of the additive temporal residual; slopes are in
+    // units of one time interval. Rigid tables have no evolution knots.
+    std::size_t evolution_knot_count() const noexcept { return evolution_knots_.size(); }
+    std::complex<double> evolution_knot_value(std::size_t lag, std::size_t knot) const;
+    std::complex<double> evolution_knot_slope(std::size_t lag, std::size_t knot) const;
 
 private:
     using Taps = std::array<std::complex<double>, taps>;
     struct Knot { Taps value{}, slope{}; };
     friend HfVectorObliqueTableBuild build_hf_vector_oblique_table(const HfVectorObliqueSpec&, std::stop_token);
     friend class HfVectorObliqueStream;
+    bool prepare_evolution(HfVectorObliqueChecks&, std::stop_token);
     HfVectorObliqueSpec spec_;
     HfVectorObliqueGeometry geometry_;
     std::vector<Knot> knots_;
+    std::optional<HfVectorObliqueEvolution> evolution_;
+    std::vector<Knot> evolution_knots_;
 };
 
 HfVectorObliqueTableBuild build_hf_vector_oblique_table(const HfVectorObliqueSpec&, std::stop_token = {});

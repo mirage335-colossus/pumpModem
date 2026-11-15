@@ -813,6 +813,45 @@ Scenario native_vector_oblique_3d_chain(const std::string& id) {
     return scenario;
 }
 
+Scenario vector_oblique_evolving(const std::string& id) {
+    const bool held = id == "hf-vector-evolving-holdout" || id == "hf-vector-evolving-holdout-rigid";
+    const bool evolving = id == "hf-vector-evolving" || id == "hf-vector-evolving-holdout";
+    auto scenario = vector_oblique("hf-vector-oblique");
+    scenario.id = id;
+    auto& vector = *scenario.channel.vector_oblique;
+    vector.field = held ? 4u : 2u;
+    vector.drift_mps = held ? 7. : 8.;
+    vector.epoch_seconds = held ? 470. : 600.;
+    vector.intrinsic_evolution = evolving;
+    scenario.channel.maximum_workspace_bytes = 80u * 1024u * 1024u;
+    scenario.reference_cn0_db_hz = 20.;
+    scenario.evidence = held
+        ? evolving ? "independent held-out field with a bounded intrinsic plasma-density evolution and matched rigid control"
+                   : "independent held-out rigid plasma field paired with its bounded intrinsic-evolution candidate"
+        : evolving ? "frozen primary field with a bounded intrinsic plasma-density evolution and matched rigid control"
+                   : "rigid primary plasma field paired with its bounded intrinsic-evolution candidate";
+    scenario.provenance = "coupled APP finite-order 3D transverse Maxwell scattering; temporal field evolution is a declared density-mode perturbation, not receiver side information";
+    scenario.assumptions = "The transmitter and receiver use the same canonical public calendar, waveform and blind arrival/frequency bounds as the rigid 3D vector model. The evolving case changes the physical transverse density-mode coefficients only over the declared finite event; its time coordinate follows channel output time before the fixed FIR delay and is independent of the receiver's message calendar. The rigid control retains the same geometric field and propagation model with no temporal density evolution. One finite periodic field encounter and the declared horizon are tested; no random 3D trajectory ensemble, measured event or natural-occurrence distribution is implied. The receiver receives no physical coefficients or field state; no Helper is used.";
+    return scenario;
+}
+
+Scenario native_vector_oblique_evolving_chain(const std::string& id) {
+    auto scenario = vector_oblique_evolving("hf-vector-evolving");
+    scenario.id = id;
+    scenario.bounds.frequency_bound_hz = 1.;
+    scenario.reference_cn0_db_hz = 30.;
+    if (id == "hf-vector-evolving-chain-clocks-tone") {
+        scenario.channel.noise.tone_amplitude = .3;
+        scenario.channel.noise.tone_hz = 100.;
+    }
+    scenario.evidence = id == "hf-vector-evolving-chain-off"
+        ? "intrinsically evolving 3D vector channel through canonical native TX/RX with endpoint clocks disabled"
+        : "intrinsically evolving 3D vector channel through canonical native TX/RX clocks with a continuing RF tone";
+    scenario.provenance += "; HfNativeChain reuses canonical StreamingChannel endpoint DSP";
+    scenario.assumptions += " Native TX and RX clocks/oscillators are applied on their canonical sides of the physical channel. Public endpoint clocks remain bounded at ±2 ppm and relative audio-clock error at ±4 ppm; actual endpoint errors are TX/RX audio +1/−1 ppm and RF +0.01/−0.01 ppm at 10 MHz. The tone case adds a continuing 0.3-amplitude RF-plane interferer at +100 Hz before RX retiming/mixing; final white noise is added after native RX. The off case preserves the evolving physical field while disabling endpoint errors and the tone. The receiver is not given the physical time law or coefficients; no Helper is used.";
+    return scenario;
+}
+
 } // namespace
 
 std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
@@ -836,6 +875,11 @@ std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
         return vector_oblique_3d(id);
     if (id == "hf-vector-3d-chain-off" || id == "hf-vector-3d-chain-clocks-tone")
         return native_vector_oblique_3d_chain(id);
+    if (id == "hf-vector-evolving" || id == "hf-vector-evolving-rigid" ||
+        id == "hf-vector-evolving-holdout" || id == "hf-vector-evolving-holdout-rigid")
+        return vector_oblique_evolving(id);
+    if (id == "hf-vector-evolving-chain-off" || id == "hf-vector-evolving-chain-clocks-tone")
+        return native_vector_oblique_evolving_chain(id);
     if (id == "hf-magnetoionic-x" || id == "hf-magnetoionic-y" || id == "hf-magnetoionic-x-holdout" ||
         id == "hf-magnetoionic-x-spread" || id == "hf-magnetoionic-parallel-x" ||
         id == "hf-magnetoionic-parallel-y" || id == "hf-magnetoionic-parallel-x-holdout")

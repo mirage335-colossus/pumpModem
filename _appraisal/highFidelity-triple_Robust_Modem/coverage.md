@@ -7,7 +7,40 @@ different questions and are reported separately. No natural-condition
 probability, field calibration, or universal sensitivity floor follows from
 these deterministic cases or small fixed-seed holdouts.
 
-The latest [3D spatial extension](hf-vector-3d.md) retains both transverse
+The latest [intrinsic-evolution extension](hf-vector-evolving.md) changes density
+mode magnitudes and relative phases during each message in the coupled 3D
+Maxwell calculation. Both fixed fields pass 270-solve numerical admission,
+including direct checks at scanned temporal minima. Four prospectively declared
++20 dB-Hz complete-delivery requirements pass, and both complete negative
+controls stay quiet. The +15 short and nearly equal-incident-energy +12 long
+cases each miss twelve of thirteen bits; the longer case receives about 9% more
+total signal energy without delivering. Exact decision-window energy references
+keep those observations separate from an idealized known-channel benchmark.
+One frozen +17.5 midpoint recovers eleven bits but misses two consecutive slots,
+splitting the message into codec-rejected fragments. It narrows this fixed
+realization's complete-message bracket to +17.5 failure / +20 success.
+
+The native clock/interference combination at +30 dB-Hz fails its declared
+delivery requirement: all thirteen DATA bits are correct, but both ending slots
+are ambiguous. The matched endpoint-Off case completes. This extends the
+combined-effects regression to an evolving field without claiming a new
+deformation-specific failure or a receiver repair. The original receipt-reader
+stop, its correction and the repeated validation observations are retained.
+Prescribed minute-scale Es evolution does not close rapid/deep F-region,
+coupled multiple-hop or calibrated disturbed-event measurement coverage.
+
+This increment has eleven unique complete observations: five delivered messages
+and four delivery misses among nine wanted observations, plus two quiet negative
+controls. Two additional original executions are retained as validation recovery;
+they are repeats, not extra independent cases.
+The expanded [43-cell qualification](hf-vector-evolving.md#finite-qualification-and-preservation-of-earlier-failures)
+validates every receipt and preserves all original 32 gate outcomes. Five of
+six declared delivery anchors succeed; the combined endpoint case fails. Older
+binary identities remain historical, and the previous integrity and false-DATA
+failures are retained. A legacy-held descriptor regression discovered by this
+audit is repaired and recorded separately from communications outcomes.
+
+The preceding [3D spatial extension](hf-vector-3d.md) retains both transverse
 coordinates in the coupled Maxwell solve. The stronger fixed field requires
 wider numerical support; its initially rejected approximations remain evidence.
 A [machine-checked finite qualification](hf-vector-3d.md#executable-qualification-requirements)
@@ -64,7 +97,7 @@ inspects the McMurdo archive directory and representative pickle products,
 plus a bounded Ottawa prefix from the Cameron 2026 deposit. The sampled data
 are real sounding-parameter products, not established calibrated continuous
 complex channel recordings. The full payloads were not exhaustively inspected.
-Current software coverage is 36 groups, with the full original run, its
+That preceding software coverage is 36 groups, with the full original run, its
 catalog-test correction, affected follow-up checks and automatic waveform
 test separately recorded in the [build summary](README.md).
 

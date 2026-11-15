@@ -1,5 +1,6 @@
 #include "appraisal/channel.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -103,6 +104,87 @@ void identity_and_delays() {
     Channel notch(tone(2000, 1000, 100), spec, 7, 1000);
     const auto notch_result = run(notch, 1000, 128);
     check(power(notch_result) < 1e-28, "two-path coherent cancellation failed");
+}
+
+void private_signal_energy_intervals() {
+    const auto intervals = std::array{
+        SignalEnergyInterval{3, 4, 10}, SignalEnergyInterval{7, 13, 18}};
+    ChannelSpec spec;
+    const auto make = [&] {
+        return Channel(source(2000, 24, [](std::uint64_t i) {
+            return Complex{1. + static_cast<double>(i % 3), .5};
+        }), spec, 741, 24, {}, intervals);
+    };
+    Channel whole = make();
+    const auto whole_samples = run(whole, 24, 24);
+    Channel chunked = make();
+    const auto chunked_samples = run(chunked, 24, 3);
+    check(whole_samples == chunked_samples, "private signal-energy observation changed rendered samples");
+    const auto& a = whole.report().signal_energy_observations;
+    const auto& b = chunked.report().signal_energy_observations;
+    check(a.size() == intervals.size() && b.size() == intervals.size(),
+          "private signal-energy interval count was not retained");
+    for (std::size_t i = 0; i < intervals.size(); ++i) {
+        check(a[i].interval.public_slot == intervals[i].public_slot &&
+              a[i].interval.first_sample == intervals[i].first_sample &&
+              a[i].interval.stop_sample == intervals[i].stop_sample,
+              "private signal-energy interval identity changed");
+        check(a[i].samples == intervals[i].stop_sample - intervals[i].first_sample &&
+              b[i].samples == a[i].samples && a[i].energy == b[i].energy,
+              "private signal-energy counts or sums depend on read chunking");
+        long double expected = 0;
+        for (auto n = intervals[i].first_sample; n < intervals[i].stop_sample; ++n)
+            expected += std::norm(Complex{1. + static_cast<double>(n % 3), .5});
+        check(a[i].energy == expected, "private signal-energy sum is not post-channel clean signal energy");
+    }
+    check(a[0].energy + a[1].energy + whole.report().signal_energy_outside_observations ==
+              whole.report().signal_energy && whole.report().signal_energy_outside_observations > 0.,
+          "clean energy in gaps outside private apertures is not explicitly accounted");
+    check(whole.report().signal_energy_outside_observations ==
+              chunked.report().signal_energy_outside_observations,
+          "outside-aperture clean energy depends on chunking");
+    Channel no_observations(source(2000, 24, [](auto) { return Complex{1., 0.}; }), spec, 741, 24);
+    check(no_observations.report().signal_energy_observations.empty(),
+          "default channel unexpectedly allocates private signal-energy observations");
+    check(whole.report().workspace_bytes > no_observations.report().workspace_bytes,
+          "private signal-energy report storage was omitted from the workspace charge");
+
+    ChannelSpec faded_spec;
+    faded_spec.fade = {0., 8., 0., .5};
+    faded_spec.noise.white_variance = 10.;
+    const std::array faded_interval{SignalEnergyInterval{0, 0, 4}};
+    Channel faded(source(2000, 8, [](auto) { return Complex{2., 0.}; }), faded_spec, 9, 8, {}, faded_interval);
+    const auto instrumented = run(faded, 8, 2);
+    Channel uninstrumented(source(2000, 8, [](auto) { return Complex{2., 0.}; }), faded_spec, 9, 8);
+    check(instrumented == run(uninstrumented, 8, 7),
+          "private energy instrumentation changes matched noisy samples");
+    check(faded.report().signal_energy_observations.front().energy == 4.,
+          "private energy must measure post-fade wanted signal before additive noise");
+
+    const std::array partial_intervals{SignalEnergyInterval{0, 2, 10}, SignalEnergyInterval{1, 12, 15}};
+    Channel partial(source(2000, 16, [](auto) { return Complex{1., 0.}; }), spec, 11, 16, {}, partial_intervals);
+    std::array<Complex, 6> prefix{};
+    check(partial.read(prefix) == prefix.size(), "partial interval fixture failed to render its requested prefix");
+    const auto& partial_observations=partial.report().signal_energy_observations;
+    check(partial_observations.size()==2 && partial_observations[0].samples==4 &&
+          partial_observations[0].energy==4. && partial_observations[1].samples==0 &&
+          partial_observations[1].energy==0. && partial.report().signal_energy_outside_observations==2.,
+          "partial channel report must retain actual per-interval counts and energy without claiming completion");
+
+    const std::array overlap{SignalEnergyInterval{0, 2, 8}, SignalEnergyInterval{1, 7, 9}};
+    rejects([&] { Channel invalid(source(2000, 24, [](auto) { return Complex{}; }), spec, 1, 24, {}, overlap); },
+            "overlapping private signal-energy apertures were accepted");
+    const std::array unordered{SignalEnergyInterval{2, 12, 14}, SignalEnergyInterval{1, 2, 4}};
+    rejects([&] { Channel invalid(source(2000, 24, [](auto) { return Complex{}; }), spec, 1, 24, {}, unordered); },
+            "unordered public-slot energy apertures were accepted");
+    const std::array outside{SignalEnergyInterval{0, 20, 25}};
+    rejects([&] { Channel invalid(source(2000, 24, [](auto) { return Complex{}; }), spec, 1, 24, {}, outside); },
+            "private signal-energy aperture beyond horizon was accepted");
+    std::vector<SignalEnergyInterval> too_many(257);
+    for (std::size_t i = 0; i < too_many.size(); ++i)
+        too_many[i] = {i, 2 * i, 2 * i + 1};
+    rejects([&] { Channel invalid(source(2000, 514, [](auto) { return Complex{}; }), spec, 1, 514, {}, too_many); },
+            "private signal-energy aperture count exceeded its fixed bound");
 }
 
 void moving_delay_and_chunks() {
@@ -606,6 +688,7 @@ void magnetoionic_reflection_admission() {
 int main() {
     try {
         identity_and_delays();
+        private_signal_energy_intervals();
         moving_delay_and_chunks();
         independent_noise_seed_and_hf_clock();
         finite_extent_fast_paths();

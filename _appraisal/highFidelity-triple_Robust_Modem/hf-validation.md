@@ -12,6 +12,22 @@ from a worldwide ionospheric population. See [models and scope](hf-experiments.m
 
 ## Current receiver and physical-approximation investigation
 
+The [intrinsic evolving-vector investigation](hf-vector-evolving.md) adds two
+numerically checked density deformations to the coupled 3D field, matched rigid
+controls and predeclared delivery requirements. All four direct +20 dB-Hz
+requirements pass; both negative controls produce no DATA or messages. The
+near-equal-incident-energy short/long pair still misses twelve bits each,
+despite about 9% more selected energy in the longer capture. Private references
+now use the exact public decision windows, not pooled complete-message energy.
+A single +17.5 midpoint recovers eleven bits but misses two consecutive windows;
+the native evidence favors the correct bits while presence falls below its
+threshold. Codec rejection preserves content integrity but no message delivers.
+The +30 clock/interferer case fails its required completion despite perfect
+DATA reception, while its matched endpoint-Off control completes. The experiment
+preserves the initial reader-metadata stop and its independently checked repair.
+This changes the former absence of intrinsic evolution and operational anchors;
+it does not establish general rapid-plasma, multiple-hop or disturbed-day coverage.
+
 The [magnetic propagation and long-record investigation](hf-magnetoionic.md)
 adds coupled two-polarization physical propagation and two exact hour-long
 recorded-voltage fixtures. It preserves an absolute-error pass that failed

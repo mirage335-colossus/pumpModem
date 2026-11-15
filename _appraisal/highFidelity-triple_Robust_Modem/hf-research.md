@@ -1,6 +1,6 @@
 # HF skywave: adverse mechanisms and comparison requirements
 
-Reviewed 14 November 2026. This continuation reconciles the existing
+Reviewed 15 November 2026. This continuation reconciles the existing
 [`_ref` HF model review](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/33-hf-channel-models-and-simulators.md),
 [measured midlatitude/NVIS evidence](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/31-skywave-dispersion-midlatitude-nvis-longhaul.md),
 [high-latitude/equatorial evidence](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/32-skywave-dispersion-highlatitude-equatorial.md)
@@ -61,6 +61,42 @@ intrinsic evolution and broad spectra as consequential gaps in the
 [rigidly drifting 3D propagation experiment](hf-vector-3d.md), not as effects
 already covered by its extra coordinate. It supplies neither a ready calibrated
 complex channel nor a natural occurrence distribution for our selected fields.
+
+The [intrinsic-evolution experiment](hf-vector-evolving.md) now freezes an
+explicit non-rigid density history, matched rigid controls and required
+reception anchors. Its 144–192 s events are prescribed physical constructions.
+Earlier interpolation failures require independent intermediate Maxwell
+solutions; density smoothness alone does not certify interpolated waveforms.
+The numerical coefficient-clock bound must remain separate from a claim about
+the error of an evolving Maxwell medium.
+
+## Measured evolution data and the channel observable
+
+The new data search supplies useful measured structure constraints, while
+preserving the distinction between a radar observable and a one-way channel:
+
+| Source inspected | Accessible observable and terms | Appropriate use and missing information |
+|---|---|---|
+| [Liu et al. (2023)](https://doi.org/10.1029/2022SW003195), [Zenodo 7376983](https://zenodo.org/records/7376983) | CC BY 4.0, 64.2 MB processed echo/image data for six figures; deposit explicitly omits raw ionosonde records and specifies a five-bin internal-delay correction | Vertical Es structure and short-term changes. Sequential frequency sounding and processed images do not give calibrated simultaneous oblique complex transfer. |
+| [Hysell et al. (2024)](https://doi.org/10.1029/2024JA033088), [Cornell dataset](https://doi.org/10.7298/8sxf-b977) | Partially reduced spectra and interferometric cross-spectra; repository states no license and requests author consultation before publication/presentation | E-region spatial structure, motion and radar interference. Neither one-way skip-channel gain nor absolute link-power calibration follows. No data imported. |
+| [NOAA VIPIR RIQ specification](https://data.ngdc.noaa.gov/instruments/remote-sensing/active/profilers-sounders/ionosonde/documentation/VIPIR/RIQ_Specification_v1.2.PDF), [pynasonde (2026)](https://doi.org/10.1016/j.softx.2026.102617) | Per-pulse complex samples with instrument/pulse metadata; software has an example record, while the paper's larger SDR data are request-only | Useful vertical-incidence sounding route. The reviewed material does not establish a calibrated multi-event one-way broadband fixture. Software licensing does not automatically establish dataset licensing. |
+| [Antarctica–Spain sounding study](https://www.mdpi.com/2072-4292/7/9/11712) | Published wideband response matrices and sounding method | Relevant long-link measurement evidence. No usable raw-capture package with license was located in this bounded search. |
+| [Niu et al. (2026)](https://doi.org/10.1109/LAWP.2026.3696384) | Previously identified multi-link HF measurement publication, rechecked as a data lead | No directly usable public capture/calibration package verified; publisher access was challenged. Do not turn an indexed measurement claim into a replay fixture. |
+
+Liu's WISS experiment used 39.0625 kHz sounding bandwidth, 4.194 s dwell per
+frequency and approximately fifteen minutes for a sweep. Its fine images
+therefore do not make all sweep frequencies simultaneous. Hysell's radar
+observations include roughly 5–10 km secondary structure, three-second cadence
+and interference-related cutouts. Those are valuable constraints on plausible
+structure, not the evolution law or complex voltage received along our modem
+path. Together with the 2026 realistic-wind work they strengthen the reason to
+test intrinsic deformation; they do not measure the chosen joint coefficients.
+
+No raw archive was downloaded or notebook executed for this incremental audit.
+The search did not find a new fixture satisfying the declared complex
+observable, bandwidth, timing/phase, gain/noise calibration, independent
+disturbed-event and license requirements. This is a result about inspected
+sources, not a claim that such measurements do not exist.
 
 ## Evidence levels and the reference baseline
 
