@@ -769,6 +769,50 @@ Scenario native_vector_oblique_chain(const std::string& id) {
     return scenario;
 }
 
+Scenario vector_oblique_3d(const std::string& id) {
+    auto scenario = vector_oblique("hf-vector-oblique");
+    scenario.id = id;
+    auto& vector = *scenario.channel.vector_oblique;
+    vector.field = id == "hf-vector-3d-holdout" ? 3u : 2u;
+    if (id == "hf-vector-3d-holdout") {
+        vector.drift_mps = 7.5;
+        vector.epoch_seconds = 520.;
+        // The wide held field has a 256 MiB solver-preparation quote. Reserve
+        // an additional 64 MiB for the channel's fixed source and runtime
+        // allocations so ordinary channel preflight can admit this scenario.
+        scenario.channel.maximum_workspace_bytes = 320u * 1024u * 1024u;
+    } else if (id == "hf-vector-3d-planar") {
+        vector.perturbations = false;
+    } else if (id == "hf-vector-3d-in-plane") {
+        vector.cross_plane = false;
+    }
+    scenario.evidence = id == "hf-vector-3d-holdout"
+        ? "independent frozen 3D transverse magnetoionic field and commensurate receiver trajectory"
+        : id == "hf-vector-3d-planar"
+            ? "matched flat-profile 3D layer control with transverse density perturbations disabled"
+            : id == "hf-vector-3d-in-plane"
+                ? "matched 3D field control with cross-plane Fourier terms removed"
+                : "coupled oblique magnetoionic scattering through a finite 3D transverse density field";
+    scenario.provenance = "coupled APP finite-order 3D transverse Maxwell scattering with a fixed commensurate observation trajectory; numerically qualified transfer table and causal FIR";
+    scenario.assumptions = "Constructed cold collisional plasma with a finite reflecting layer and three frozen transverse Fourier modes in x and y. The full transverse Fourier coupling enters the same magnetized permittivity tensor solve, so reflection, diffraction, polarization and fixed-antenna projection are coupled before trajectory folding. The receiver observes one predeclared commensurate path through this 3D periodic field, with no path repeat in the admitted horizon; this is not a random 3D field ensemble, multiple-hop propagation, a measured event or a natural-occurrence distribution. A causal fixed-antenna complex-voltage FIR covers the declared ±384 Hz input band and is processed through the complete capture and physical quiet completion without per-window normalization. The receiver receives no physical coefficients, field state or discarded polarization. The planar-background and in-plane variants are explicit ablations of the same field family; no Helper is used.";
+    return scenario;
+}
+
+Scenario native_vector_oblique_3d_chain(const std::string& id) {
+    auto scenario = vector_oblique_3d("hf-vector-3d");
+    scenario.id = id;
+    scenario.bounds.frequency_bound_hz = 1.;
+    scenario.reference_cn0_db_hz = 0.;
+    if (id == "hf-vector-3d-chain-clocks-tone") {
+        scenario.channel.noise.tone_amplitude = .3;
+        scenario.channel.noise.tone_hz = 100.;
+    }
+    scenario.evidence = "coupled oblique 3D vector-scattering channel between canonical native TX and RX clocks";
+    scenario.provenance += "; HfNativeChain reuses canonical StreamingChannel endpoint DSP";
+    scenario.assumptions += " Native TX and RX clocks and RF oscillators are applied on their canonical sides of the physical channel. Public endpoint clocks remain bounded at ±2 ppm and relative audio-clock error at ±4 ppm; actual clock cases use TX/RX audio +1/−1 ppm and RF +0.01/−0.01 ppm at 10 MHz. The tone case adds a continuing 0.3-amplitude RF-plane interferer at +100 Hz before RX retiming/mixing; final white noise is added only after native RX. The off case preserves the 3D physical field while disabling endpoint errors and the tone. All captures retain complete physical tail and scored quiet completion; no receiver message length selects the channel endpoint.";
+    return scenario;
+}
+
 } // namespace
 
 std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
@@ -787,6 +831,11 @@ std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
     if (id == "hf-vector-oblique-chain-off" || id == "hf-vector-oblique-chain-clocks" ||
         id == "hf-vector-oblique-chain-clocks-tone")
         return native_vector_oblique_chain(id);
+    if (id == "hf-vector-3d" || id == "hf-vector-3d-holdout" || id == "hf-vector-3d-planar" ||
+        id == "hf-vector-3d-in-plane")
+        return vector_oblique_3d(id);
+    if (id == "hf-vector-3d-chain-off" || id == "hf-vector-3d-chain-clocks-tone")
+        return native_vector_oblique_3d_chain(id);
     if (id == "hf-magnetoionic-x" || id == "hf-magnetoionic-y" || id == "hf-magnetoionic-x-holdout" ||
         id == "hf-magnetoionic-x-spread" || id == "hf-magnetoionic-parallel-x" ||
         id == "hf-magnetoionic-parallel-y" || id == "hf-magnetoionic-parallel-x-holdout")

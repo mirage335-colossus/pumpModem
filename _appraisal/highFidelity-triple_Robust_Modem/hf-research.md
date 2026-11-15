@@ -48,6 +48,20 @@ preserves the limits of UTC metadata, joint normalization, Cartesian
 interpolation, transmitter identity and clock calibration. The source supports
 additional realistic temporal stress without a field-availability claim.
 
+## Intrinsic evolution versus rigidly translated spatial fields
+
+[Schinder et al. (5 August 2026)](https://doi.org/10.3389/fspas.2026.1858870)
+couple a two-dimensional sporadic-E fluid model to reconstructed realistic
+winds. They find irregular broad spatial spectra where idealized wind shears
+produce periodic structures; their displayed evolution includes 125–1,500 s
+timescales. Only two observed days are examined, the simulated density peaks
+and ionosonde virtual heights differ, and the data statement offers raw data
+from the authors without a direct public download. This supports treating
+intrinsic evolution and broad spectra as consequential gaps in the
+[rigidly drifting 3D propagation experiment](hf-vector-3d.md), not as effects
+already covered by its extra coordinate. It supplies neither a ready calibrated
+complex channel nor a natural occurrence distribution for our selected fields.
+
 ## Evidence levels and the reference baseline
 
 Keep these labels attached to individual inputs and outcomes:
@@ -242,7 +256,7 @@ actually validate, are:
 
 | Lead | Public observable and availability | Barrier to the target validation |
 | --- | --- | --- |
-| [ION-FAST Cyprus–Vasilsursk tests, Zenodo 10.5281/zenodo.7861107](https://zenodo.org/records/7861107); [instrument paper](https://doi.org/10.3390/atmos15020188) | Record page lists a 499.6 MB ZIP with three chirp-mode IQ captures on 15 April 2023 at 11:05:20, 11:20:20 and 11:35:20 UT, plus commercial-ionosonde WAVs and an ionogram notebook. This is the clearest public raw-IQ lead. | Same path/site/day, not independent storm events. Page has no license field. Public metadata/paper do not establish capture encoding, sample clock, volts/phase calibration, or an end-to-end calibrated channel; chirp sounding is not proof of broadband modem transfer recovery. No archive download was made. |
+| [ION-FAST Cyprus–Vasilsursk tests, Zenodo 10.5281/zenodo.7861107](https://zenodo.org/records/7861107); [instrument paper](https://doi.org/10.3390/atmos15020188) | The 499.6 MB ZIP directory identifies three raw binary captures, matching commercial-receiver WAVs and an analysis notebook. Bounded archive reads now verify the notebook's intended `complex64` format and its dechirped-sounder processing. The public API declares **CC-BY-4.0**, correcting the earlier landing-page uncertainty. | Same path/day, not independent disturbed events. Metadata says 15 April 2023; filenames and paper say 14 April. The notebook uses unexplained sample-rate, frequency-axis and per-capture delay-origin adjustments. These are valuable raw complex observations, but not an established calibrated simultaneous modem-band transfer function. Only the directory and notebook were fetched; binary signal captures were not downloaded. |
 | [McMurdo–South Pole oblique sounder, Zenodo 10.5281/zenodo.3478267](https://zenodo.org/records/3478267); [Chartier et al. (2020)](https://doi.org/10.5194/amt-13-3023-2020) | The public deposit lists `oblique_hf_data.zip` (30.2 MB). The paper documents the measured link and sounding: 12 frequency hops/min, 50 kHz baseband, 1,000-baud PRBS, GPS-timed transmissions. | The complete ZIP directory and representative spectral, metadata and daily members were inspected. Nonhidden payloads are 18,330 pickle products and 82 PNGs; the sampled arrays contain real Doppler/power measurements and range axes, not complex IQ. The paper says raw DigitalRF IQ was stored on-site for later retrieval. No calibrated broadband channel package is established; the blank license field also remains unresolved. |
 | [Ponomarchuk et al. (2026) storm study](https://doi.org/10.1016/j.asr.2026.03.068) | Publisher abstract identifies observations on Magadan–Irkutsk (3,034 km) and Norilsk–Irkutsk (2,030 km) across ten 2023–25 storms. Oblique sounding supports event-level changes in observed modes/MOF, off-great-circle propagation, additional diffuse delayed returns and outages. | The abstract/full-page result exposes event/ionogram observables, not raw complex IQ, sample timing, channel calibration or a downloadable capture package. It validates path/mode phenomena, not the complex waveform response needed for broadband replay. |
 | [Cameron et al. (2026)](https://doi.org/10.1029/2025RS008395); [Harvard Dataverse](https://doi.org/10.7910/DVN/KZAO3G) | Public API metadata identifies 42.8 MB Ottawa–Alert and 219.5 MB Qaanaaq–Alert ZIPs of dated/frequency-indexed MATLAB signal-parameter files. A bounded Ottawa prefix and representative MATLAB headers were inspected; fields include time of flight, Doppler, spreads, SNR, power and arrival angles. | Sampled arrays are real parameter estimates, with no complex impulse-response or continuous calibrated I/Q sequence. The remaining archive payloads were not exhaustively inspected. The paper provides path/frequency observations, including both storm losses and occasionally stable enhanced Es; this does not define a universal adverse-day distribution. |
@@ -303,6 +317,29 @@ do not provide. The full archives' published checksums were not verified from
 these partial reads. An initial bounded McMurdo full transfer hit its
 120-second limit; subsequent range reads supplied the directory and selected
 members without completing the large transfer.
+
+The later [ION-FAST archive audit](local-evidence/hf-3d-preflight/ionfast-archive-audit.json)
+reads 64 KiB of ZIP directory and the 976,154-byte first member, verifies its
+CRC and inspects notebook source without executing it. The author reads the
+three BIN files with `numpy.fromfile(dtype=complex64)`, with no explicit byte
+order. It uses a spectrogram rate of **193,745.925 Hz**, RF axes multiplied by
+**1.045**, and capture-specific delay-origin corrections of **1.1122, 0.79597
+and 0.47353 seconds**. NaNs in either component are replaced with zero.
+The reviewed paper describes the vertical sounder at 192 ksamples/s and the
+chirp receiver's swept local oscillator and fixed 1 MHz IF; it does not clearly
+assign that rate to these BIN files or explain the notebook's corrections.
+Consequently, the notebook rate is not declared wrong, but its calibration is
+not independently established by the reviewed documentation.
+
+The public API's CC-BY-4.0 declaration resolves the earlier license uncertainty.
+The date discrepancy and unreported absolute transmitter/receiver phase, gain
+and system response remain. Sweeping RF frequency over time also confounds
+frequency selectivity with temporal evolution when reconstructing an arbitrary
+modem channel. These samples are a useful lead for measured oblique-sounder
+observables; they must not be multiplied onto modem transmission as if they were
+a noiseless channel response. No signal capture, plot output or notebook code
+was executed or turned into a modem fixture. Metadata, directory and compact
+source/audit records are retained; redundant binary ZIP fragments were removed.
 
 ## Trajectory diversity independent of receiver templates
 

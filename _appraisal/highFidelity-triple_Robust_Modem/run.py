@@ -142,11 +142,19 @@ HF_VECTOR_OBLIQUE_SCENARIOS = {
     "hf-vector-oblique-chain-off": (True, True, 0, 0),
     "hf-vector-oblique-chain-clocks": (True, True, 0, 0),
     "hf-vector-oblique-chain-clocks-tone": (True, True, 0, 0),
+    "hf-vector-3d": (True, True, 2, 0),
+    "hf-vector-3d-holdout": (True, True, 3, 0),
+    "hf-vector-3d-planar": (False, True, 2, 0),
+    "hf-vector-3d-in-plane": (True, True, 2, 0),
+    "hf-vector-3d-chain-off": (True, True, 2, 0),
+    "hf-vector-3d-chain-clocks-tone": (True, True, 2, 0),
 }
 HF_VECTOR_CHAIN_SCENARIOS = {
     "hf-vector-oblique-chain-off": (0., 0., 0., 0., False),
     "hf-vector-oblique-chain-clocks": (1., -1., .01, -.01, False),
     "hf-vector-oblique-chain-clocks-tone": (1., -1., .01, -.01, True),
+    "hf-vector-3d-chain-off": (0., 0., 0., 0., False),
+    "hf-vector-3d-chain-clocks-tone": (1., -1., .01, -.01, True),
 }
 GANNON_REPLAY = {"hf-gannon-1700": (17, 0.), "hf-gannon-2000": (20, 0.),
                  "hf-gannon-2000-late": (20, 1800.)}
@@ -2626,18 +2634,19 @@ def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> No
 
 def _vector_oblique_spec(scenario_id: str) -> dict[str, Any]:
     perturbations, magnetic, field, antenna = HF_VECTOR_OBLIQUE_SCENARIOS[scenario_id]
+    holdout, three_d = bool(field % 2), field >= 2
     angle, height, period, thickness, peak, collisions, slice_m, field_b, launch = (
         (53., 104000., 20500., 1200., 6.12e6, 2450., 100., [-11e-6, 25e-6, -46e-6], .23)
-        if field else (50., 112000., 24000., 960., 6.55e6, 1300., 80., [18e-6, 17e-6, -43e-6], .10))
-    return {"carrier_hz": 10_000_000., "sample_rate_hz": 1920., "occupied_half_band_hz": 384.,
+        if holdout else (50., 112000., 24000., 960., 6.55e6, 1300., 80., [18e-6, 17e-6, -43e-6], .10))
+    result = {"carrier_hz": 10_000_000., "sample_rate_hz": 1920., "occupied_half_band_hz": 384.,
         "maximum_horizon_seconds": 2400., "perturbations": perturbations, "magnetic": magnetic,
-        "field": field, "antenna": antenna, "drift_mps": 7.5 if field else 8., "epoch_seconds": 520. if field else 600.,
+        "field": field, "antenna": antenna, "drift_mps": 7.5 if holdout else 8., "epoch_seconds": 520. if holdout else 600.,
         "incidence_deg": angle, "height_m": height, "receiver_x_m": 2 * height * math.tan(math.radians(angle)),
         "period_m": period, "thickness_m": thickness, "peak_plasma_hz": peak,
         "collision_rate_per_second": collisions, "corrugated_slice_m": slice_m,
         "corrugation_center_fraction": -.1,
-        "density_harmonic_x": ([.007, .0044] if field else [.008, .0038]) if perturbations else [0., 0.],
-        "density_harmonic_phase_rad": [-1.15, .8] if field else [.45, -1.2],
+        "density_harmonic_x": ([.007, .0044] if holdout else [.008, .0038]) if perturbations else [0., 0.],
+        "density_harmonic_phase_rad": [-1.15, .8] if holdout else [.45, -1.2],
         "density_profile": "critical-density-scaled cos^2 vertical profile plus a flat local corrugated slice; two positive-x Fourier harmonics with stated phases",
         "field_solver_scope": "one incident plane wave at fixed angle/common vacuum phase across the declared frequency band; one y-invariant finite periodic x-z layer encounter",
         "magnetic_field_tesla": field_b if magnetic else [0., 0., 0.],
@@ -2647,10 +2656,45 @@ def _vector_oblique_spec(scenario_id: str) -> dict[str, Any]:
         "preparation_workspace_bound_bytes": 16 * 1024 * 1024,
         "interpolation": "fixed antenna complex-voltage coefficients and slopes over one translating plasma period"}
 
+    if three_d:
+        cross_plane = scenario_id != "hf-vector-3d-in-plane"
+        wider_held = holdout and perturbations and cross_plane
+        period_y = 18500. if holdout else 17000.
+        winding = -1 if holdout else 1
+        modes = [(1, 0, .0016, -1.05), (0, 1, .0019, .6), (1, -1, .0011, -.2)] if holdout else [
+            (1, 0, .0018, .45), (0, 1, .0015, -.7), (1, 1, .0012, 1.1)]
+        result.pop("density_harmonic_x")
+        result.pop("density_harmonic_phase_rad")
+        result.update(cross_plane=cross_plane, spatial_geometry_dimension=3, transverse_periodic_dimensions=2,
+            period_y_m=period_y, receiver_y_m=(-.112 if holdout else .073) * period_y,
+            drift_y_mps=winding * result["drift_mps"] * period_y / period,
+            trajectory_winding_y=winding,
+            transverse_density_modes=[{"m": m, "n": n,
+                "amplitude_x": amp if perturbations and (cross_plane or n == 0) else 0.,
+                "phase_rad": phase} for m, n, amp, phase in modes],
+            preparation_workspace_bound_bytes=(256 if wider_held else 32) * 1024 * 1024,
+            production_half_orders_each_axis=7 if wider_held else 3,
+            coarse_half_orders_each_axis=6 if wider_held else 2,
+            refined_half_orders_each_axis=8 if wider_held else 4,
+            maximum_admitted_spatial_modes=289 if wider_held else 81,
+            rf_dense_terms_limit=60_000_000_000 if wider_held else 1_200_000_000,
+            density_profile="critical-density-scaled cos^2 vertical profile plus a flat local corrugated slab; three fixed transverse Fourier modes with explicit (m,n), normalized-density amplitudes and phases",
+            field_solver_scope="fully coupled finite Fourier Maxwell scattering in both transverse coordinates for one incident plane wave with fixed x/y incidence and common vacuum phase across the declared frequency band; one finite x-y periodic layer encounter",
+            trajectory_scope=("fixed antenna projection samples the coupled x-y Fourier field along the declared commensurate trajectory without repeating within the admitted horizon" if perturbations and cross_plane else
+                "planar-background control with all transverse perturbations disabled" if not perturbations else
+                "in-plane control retains only the n=0 Fourier terms and removes cross-plane density variation"),
+            trajectory_accuracy_scope="3D spatial L1 refinement and carrier witnesses are checked before complex-field folding along the fixed commensurate receiver trajectory; the scalar time-varying FIR is specific to this trajectory, not an arbitrary 3D path ensemble")
+    return result
+
 
 def _validate_vector_oblique_descriptor(value: Any, scenario_id: str) -> None:
     if not isinstance(value, dict):
         raise CampaignError("vector oblique descriptor is missing")
+    three_d = HF_VECTOR_OBLIQUE_SCENARIOS[scenario_id][2] >= 2
+    if three_d and ("density_harmonic_x" in value or "density_harmonic_phase_rad" in value):
+        raise CampaignError("3D fields must identify transverse modes rather than x-only harmonic metadata")
+    if not three_d and any(key in value for key in ("cross_plane", "transverse_density_modes", "spatial_geometry_dimension")):
+        raise CampaignError("2D fields cannot claim a second transverse density coordinate")
     for field, expected in _vector_oblique_spec(scenario_id).items():
         actual = value.get(field)
         if isinstance(expected, bool):
@@ -2665,19 +2709,58 @@ def _validate_vector_oblique_descriptor(value: Any, scenario_id: str) -> None:
 
 def _validate_vector_oblique_report(full: Any, scenario_id: str) -> None:
     _validate_vector_oblique_descriptor(full, scenario_id)
+    three_d = HF_VECTOR_OBLIQUE_SCENARIOS[scenario_id][2] >= 2
+    qualification_scope = (
+        "finite-order bidirectional 3D cold collisional Maxwell scattering with doubly periodic transverse density, oblique incidence and fixed antenna projection; finite RF/position/order/FIR witnesses and one commensurate trajectory do not establish random field ensembles, field calibration or environmental probabilities" if three_d else
+        "finite-order bidirectional 2D cold collisional Maxwell scattering with periodic transverse density, oblique incidence and fixed antenna projection; limited RF/position/order/FIR witnesses do not establish random 3D fields, field calibration or environmental probabilities")
     if (full.get("table_qualified") is not True or
             not isinstance(full.get("table_sha256"), str) or
             re.fullmatch(r"[0-9a-fA-F]{64}", full["table_sha256"]) is None or
             full.get("table_digest_scope") != "all 257 translating-position knots, all 129 retained lags, binary64 complex coefficients and knot slopes in canonical little-endian order; source identity binds generation and interpolation" or
-            full.get("qualification_scope") != "finite-order bidirectional 2D cold collisional Maxwell scattering with periodic transverse density, oblique incidence and fixed antenna projection; limited RF/position/order/FIR witnesses do not establish random 3D fields, field calibration or environmental probabilities"):
+            full.get("qualification_scope") != qualification_scope):
         raise CampaignError("vector oblique execution requires its qualified source-bound coefficient table")
-    expected_counts = {"rf_solves": 29, "output_half_orders": 24, "checked_frequencies": 13,
+    half_orders = full.get("production_half_orders_each_axis", 24)
+    expected_counts = {"rf_solves": 29, "output_half_orders": half_orders, "checked_frequencies": 13,
                        "checked_positions": 2048, "checked_table_assembly_positions": 54}
+    if three_d:
+        expected_counts.update(output_half_orders_y=half_orders, output_trajectory_half_orders=2*half_orders)
     for field, expected in expected_counts.items():
         if not _is_nonnegative_int(full.get(field)) or full[field] != expected:
             raise CampaignError(f"vector oblique numerical witness coverage differs: {field}")
     if not _is_nonnegative_int(full.get("matrix_products")) or full["matrix_products"] == 0:
         raise CampaignError("vector oblique matrix work must be reported")
+    if three_d:
+        scopes = {
+            "unfolded_order_scope": "two-dimensional transverse diffraction orders in x and y are retained through Maxwell solves; the trajectory-folded response combines those orders only at the declared receiver coordinates",
+            "spatial_l1_error_scope": "mesh/order/refined-order errors are L1 sums of absolute fixed-antenna-projected complex-voltage differences across retained unfolded (m,n) orders, before trajectory folding; they are not polarization-resolved norms and do not bound orders omitted by finite truncation",
+            "carrier_power_minimum_scope": "minimum and maximum carrier power are sampled over one declared commensurate receiver-trajectory period; the finite trajectory-series lower bound is not a global x-y minimum or a three-dimensional path-ensemble bound",
+            "out_of_plane_flux_scope": "out-of-plane reflected and transmitted flux is independently reported from the mixed TE/TM launch for the retained nonzero-y diffraction orders",
+            "period_averaged_energy_scope": "coherent average along the declared commensurate receiver trajectory after combining equal temporal indices; not an incoherent average over the full x-y spatial torus",
+        }
+        if any(full.get(key) != value for key, value in scopes.items()):
+            raise CampaignError("3D spatial evidence and trajectory-only claims must remain separate")
+        if (full.get("carrier_witnesses_qualified") is not True or
+                not _is_nonnegative_int(full.get("maximum_rf_dense_terms")) or
+                not 0 < full["maximum_rf_dense_terms"] <= full["rf_dense_terms_limit"]):
+            raise CampaignError("3D carrier checks or finite RF work budget are not qualified")
+        for field in ("maximum_edge_x_flux", "maximum_edge_y_flux", "carrier_refined_edge_flux",
+                      "carrier_refined_edge_x_flux", "carrier_refined_edge_y_flux"):
+            if not _is_finite_number(full.get(field)) or not 0 <= full[field] <= 5e-5:
+                raise CampaignError(f"3D directional edge witness is unresolved: {field}")
+        for prefix in ("maximum_", "carrier_refined_"):
+            union, x, y = (full[prefix + suffix] for suffix in ("edge_flux", "edge_x_flux", "edge_y_flux"))
+            if max(x, y) > union + 2e-12 or union > x + y + 2e-12:
+                raise CampaignError("3D outer-order union must count corner power once")
+        for key, total in (("carrier_out_of_plane_reflected_flux", "carrier_reflected_flux"),
+                           ("carrier_out_of_plane_transmitted_flux", "carrier_transmitted_flux")):
+            if (not _is_finite_number(full.get(key)) or not _is_finite_number(full.get(total)) or
+                    not 0 <= full[key] <= full[total] + 2e-9):
+                raise CampaignError("3D out-of-plane flux is not a valid subset of the same launch")
+        if full["perturbations"] and full["cross_plane"] and full["carrier_out_of_plane_reflected_flux"] < 1e-4:
+            raise CampaignError("3D field has not demonstrated the declared out-of-plane reflection witness")
+        if (not full["perturbations"] or not full["cross_plane"]) and (
+                full["carrier_out_of_plane_reflected_flux"] > 2e-9 or full["carrier_out_of_plane_transmitted_flux"] > 2e-9):
+            raise CampaignError("planar/in-plane control cannot report cross-plane density scattering")
     gates = {"maximum_flux_excess": 2e-9, "maximum_solve_residual": 2e-12,
         "mesh_voltage_error": .004, "refined_order_voltage_error": .004,
         "maximum_edge_flux": 5e-5, "frequency_voltage_error": .0006, "fir_voltage_error": .0006,
@@ -2719,10 +2802,11 @@ def _validate_vector_oblique_report(full: Any, scenario_id: str) -> None:
             full["carrier_scattered_reflected_flux"] > full["carrier_reflected_flux"] + 2e-9 or
             full["carrier_crosspolar_scattered_flux"] > full["carrier_crosspolar_reflected_flux"] + 2e-9):
         raise CampaignError("vector oblique flux subsets or passive total are inconsistent")
+    workspace_bound = full["preparation_workspace_bound_bytes"]
     for field in ("preparation_peak_workspace_bytes", "table_workspace_bytes", "stream_workspace_bytes"):
-        if not _is_nonnegative_int(full.get(field)) or not 0 < full[field] <= 16 * 1024 * 1024:
+        if not _is_nonnegative_int(full.get(field)) or not 0 < full[field] <= workspace_bound:
             raise CampaignError("vector oblique workspace is missing or exceeds the preflight bound")
-    if (full["table_workspace_bytes"] + full["stream_workspace_bytes"] > 16 * 1024 * 1024 or
+    if (full["table_workspace_bytes"] + full["stream_workspace_bytes"] > workspace_bound or
             not _is_finite_number(full.get("preparation_seconds")) or full["preparation_seconds"] < 0):
         raise CampaignError("vector oblique preparation resource receipt is invalid")
     low, high = full.get("source_minimum_frequency_hz"), full.get("source_maximum_frequency_hz")
@@ -2746,6 +2830,16 @@ def _validate_vector_oblique(receipt: dict[str, Any], episode: dict[str, Any]) -
     _validate_vector_oblique_descriptor(plan.get("vector_oblique"), scenario_id)
     if not isinstance(configured, dict) or configured.get("vector_oblique") != plan["vector_oblique"]:
         raise CampaignError("vector oblique plan and configured physical operator differ")
+    if plan["vector_oblique"]["field"] >= 2:
+        descriptor = plan["vector_oblique"]
+        exposure = ("bounded_nonrepeating_commensurate_3d_transverse_trajectory_with_complete_fir_tail"
+                    if descriptor["perturbations"] and descriptor["cross_plane"] else
+                    "flat_background_3d_control_no_transverse_perturbations" if not descriptor["perturbations"] else
+                    "bounded_in_plane_control_with_cross_plane_modes_removed")
+        if (plan.get("vector_oblique_exposure_scope") != exposure or
+                plan.get("vector_oblique_exposure_limit") !=
+                "The coupled 3D periodic x-y field is sampled along one fixed commensurate receiver trajectory within the bounded horizon; it does not represent a random trajectory ensemble, multiple hops, or real disturbed-day probabilities."):
+            raise CampaignError("3D exposure must preserve the fixed trajectory and environmental limits")
     horizon = plan.get("horizon_samples")
     period = plan["vector_oblique"]["period_m"]
     drift = plan["vector_oblique"]["drift_mps"]

@@ -18,7 +18,9 @@ using namespace hf_slab_detail;
 constexpr C imaginary{0., 1.};
 constexpr double flux_slack = 2e-9;
 constexpr std::size_t max_half_orders = 32, max_layers = 2048;
-constexpr std::size_t max_multiply_terms = 600'000'000;
+struct SolveBounds { std::size_t spatial_modes; std::uint64_t dense_terms; };
+constexpr SolveBounds planar_bounds{65, 600'000'000}, volume_bounds{81, 1'200'000'000};
+constexpr SolveBounds wide_carrier_bounds{289, hf_vector_wide_carrier_dense_terms_bound};
 constexpr double minimum_port_cosine = .35;
 
 struct Matrix {
@@ -53,15 +55,17 @@ double inf_norm(const Matrix& a) {
 
 struct Work {
     std::stop_token stop;
-    std::size_t products = 0, multiply_terms = 0;
+    std::uint64_t limit;
+    std::size_t products = 0;
+    std::uint64_t multiply_terms = 0;
     double solve_residual = 0.;
     void checkpoint() const {
         if (stop.stop_requested()) throw std::runtime_error("HF vector oblique preparation cancelled");
     }
     void charge(std::size_t n) {
         checkpoint();
-        const auto terms = n * n * n;
-        if (terms > max_multiply_terms - multiply_terms)
+        const auto terms = static_cast<std::uint64_t>(n) * n * n;
+        if (terms > limit - multiply_terms)
             throw std::runtime_error("HF vector oblique RF solve exceeds dense work budget");
         multiply_terms += terms;
     }
@@ -170,7 +174,19 @@ Scatter bounded_layer(Matrix generator, Work& work) {
     return scatter;
 }
 
-struct Port { double p, q, root_q; };
+struct Port {
+    int m, n;
+    double px, py, q, root_q, ux, uy;
+};
+
+Port make_port(int m, int n, double px, double py, bool fixed_lab_basis) {
+    const double p = py == 0. ? std::abs(px) : std::hypot(px, py);
+    const double q = std::sqrt((1. - p) * (1. + p));
+    if (!(q >= minimum_port_cosine))
+        throw std::invalid_argument("HF vector oblique includes closed or grazing vacuum orders");
+    if (fixed_lab_basis || p == 0.) return {m, n, px, py, q, std::sqrt(q), 1., 0.};
+    return {m, n, px, py, q, std::sqrt(q), px / p, py / p};
+}
 
 std::array<C, 9> electron_susceptibility(double omega, double collisions, std::array<double, 3> field) {
     const C a{1., collisions / omega};
@@ -195,8 +211,18 @@ std::array<C, 9> electron_susceptibility(double omega, double collisions, std::a
     return result;
 }
 
-Scatter plasma_layer(const HfVectorPlasmaLayer& layer, std::span<const Port> ports,
-                     double omega, std::array<double, 3> field, Work& work) {
+C density_coefficient(const HfVectorPlasmaLayer3d& layer, const Port& out, const Port& in) {
+    const int m = out.m - in.m, n = out.n - in.n;
+    if (!m && !n) return layer.mean_electrons_per_m3;
+    for (const auto& h : layer.density_harmonics) {
+        if (m == h.m && n == h.n) return h.electrons_per_m3;
+        if (m == -h.m && n == -h.n) return std::conj(h.electrons_per_m3);
+    }
+    return {};
+}
+
+Scatter plasma_layer(const HfVectorPlasmaLayer3d& layer, std::span<const Port> ports,
+                     double omega, std::array<double, 3> field, bool fixed_lab_basis, Work& work) {
     const auto n = ports.size();
     const auto optical_thickness = omega * layer.thickness_m / c;
     if (layer.mean_electrons_per_m3 == 0.) {
@@ -211,9 +237,7 @@ Scatter plasma_layer(const HfVectorPlasmaLayer& layer, std::span<const Port> por
     Matrix density(n), zz(n);
     for (std::size_t i = 0; i < n; ++i)
         for (std::size_t j = 0; j < n; ++j) {
-            if (i == j) density(i, j) = layer.mean_electrons_per_m3;
-            else if (i > j && i - j <= 2) density(i, j) = layer.density_harmonics[i - j - 1];
-            else if (j > i && j - i <= 2) density(i, j) = std::conj(layer.density_harmonics[j - i - 1]);
+            density(i, j) = density_coefficient(layer, ports[i], ports[j]);
             zz(i, j) = (i == j ? 1. : 0.) + tensor[8] * density(i, j);
         }
     if (inf_norm(zz) < 1e-8)
@@ -223,7 +247,8 @@ Scatter plasma_layer(const HfVectorPlasmaLayer& layer, std::span<const Port> por
         throw std::runtime_error("unresolved vector oblique longitudinal permittivity");
 
     // Apply the tangential Maxwell generator column by column in vacuum
-    // wave coordinates. D_z = -P h_y, H_z = P E_y, h = Z0 H. All products
+    // wave coordinates. D_z = P_y h_x - P_x h_y, h_z = P_x E_y - P_y E_x,
+    // h = Z0 H. All products
     // by plasma density share the same finite Fourier convolution.
     Matrix generator(4 * n);
     std::vector<C> ez_rhs(n), ez(n);
@@ -232,12 +257,16 @@ Scatter plasma_layer(const HfVectorPlasmaLayer& layer, std::span<const Port> por
         const auto& p = ports[j];
         const double dir = column < 2 * n ? 1. : -1.;
         const bool tm = column % 2 != 0;
-        const double ex = tm ? p.root_q : 0.;
-        const double ey = tm ? 0. : 1. / p.root_q;
-        const double hx = tm ? 0. : -dir * p.root_q;
-        const double hy = tm ? dir / p.root_q : 0.;
-        for (std::size_t i = 0; i < n; ++i) ez_rhs[i] =
-            -density(i, j) * (tensor[6] * ex + tensor[7] * ey) - (i == j ? p.p * hy : 0.);
+        const double ex = tm ? p.root_q * p.ux : (fixed_lab_basis ? 0. : -p.uy / p.root_q);
+        const double ey = tm ? (fixed_lab_basis ? 0. : p.root_q * p.uy) : p.ux / p.root_q;
+        const double hx = tm ? (fixed_lab_basis ? 0. : -dir * p.uy / p.root_q) : -dir * p.root_q * p.ux;
+        const double hy = tm ? dir * p.ux / p.root_q : (fixed_lab_basis ? 0. : -dir * p.root_q * p.uy);
+        const double dz = p.py * hx - p.px * hy;
+        const double hz = p.px * ey - p.py * ex;
+        for (std::size_t i = 0; i < n; ++i) {
+            const auto coupling = -density(i, j) * (tensor[6] * ex + tensor[7] * ey);
+            ez_rhs[i] = fixed_lab_basis ? coupling - (i == j ? p.px * hy : 0.) : coupling + (i == j ? dz : 0.);
+        }
         for (std::size_t i = 0; i < n; ++i) {
             ez[i] = 0.;
             for (std::size_t k = 0; k < n; ++k) ez[i] += zz_inv(i, k) * ez_rhs[k];
@@ -250,15 +279,29 @@ Scatter plasma_layer(const HfVectorPlasmaLayer& layer, std::span<const Port> por
                 (tensor[0] * ex + tensor[1] * ey) + tensor[2] * density_ez;
             const auto dy = (i == j ? ey : 0.) + density(i, j) *
                 (tensor[3] * ex + tensor[4] * ey) + tensor[5] * density_ez;
-            const auto gex = (i == j ? hy : 0.) + q.p * ez[i];
-            const auto gey = i == j ? -hx : 0.;
-            const auto ghx = (i == j ? q.p * q.p * ey : 0.) - dy;
-            const auto ghy = dx;
+            const auto gex = (i == j ? hy : 0.) + q.px * ez[i];
             const auto z = .5 * imaginary * optical_thickness;
-            generator(2 * i, column) = z * (q.root_q * gey - ghx / q.root_q);
-            generator(2 * i + 1, column) = z * (gex / q.root_q + q.root_q * ghy);
-            generator(2 * (n + i), column) = z * (q.root_q * gey + ghx / q.root_q);
-            generator(2 * (n + i) + 1, column) = z * (gex / q.root_q - q.root_q * ghy);
+            if (fixed_lab_basis) {
+                // Keep the existing y-invariant port gauge and products.
+                const auto gey = i == j ? -hx : 0.;
+                const auto ghx = (i == j ? q.px * q.px * ey : 0.) - dy;
+                generator(2 * i, column) = z * (q.root_q * gey - ghx / q.root_q);
+                generator(2 * i + 1, column) = z * (gex / q.root_q + q.root_q * dx);
+                generator(2 * (n + i), column) = z * (q.root_q * gey + ghx / q.root_q);
+                generator(2 * (n + i) + 1, column) = z * (gex / q.root_q - q.root_q * dx);
+            } else {
+                const auto gey = (i == j ? -hx : 0.) + q.py * ez[i];
+                const auto ghx = (i == j ? q.px * hz : 0.) - dy;
+                const auto ghy = dx + (i == j ? q.py * hz : 0.);
+                const auto e_te = q.root_q * (-q.uy * gex + q.ux * gey);
+                const auto h_te = (q.ux * ghx + q.uy * ghy) / q.root_q;
+                const auto e_tm = (q.ux * gex + q.uy * gey) / q.root_q;
+                const auto h_tm = q.root_q * (-q.uy * ghx + q.ux * ghy);
+                generator(2 * i, column) = z * (e_te - h_te);
+                generator(2 * i + 1, column) = z * (e_tm + h_tm);
+                generator(2 * (n + i), column) = z * (e_te + h_te);
+                generator(2 * (n + i) + 1, column) = z * (e_tm - h_tm);
+            }
         }
     }
     return bounded_layer(std::move(generator), work);
@@ -309,29 +352,32 @@ bool finite_between(double value, double lo, double hi) {
     return std::isfinite(value) && value >= lo && value <= hi;
 }
 
-} // namespace
-
-HfVectorScattering solve_hf_vector_oblique(double frequency_hz, double sine_incidence,
-    double period_m, std::size_t half_orders, std::array<double, 3> field_tesla,
-    std::span<const HfVectorPlasmaLayer> layers, std::stop_token stop) {
-    if (!finite_between(frequency_hz, 1e5, 1e8) || !finite_between(sine_incidence, -.9, .9) ||
-        !finite_between(period_m, 150., 1e6) || half_orders > max_half_orders || layers.size() > max_layers ||
+HfVectorScattering solve_scattering(double frequency_hz, const HfVectorTransverseGrid& grid,
+    std::array<double, 3> field_tesla, std::span<const HfVectorPlasmaLayer3d> layers,
+    bool fixed_lab_basis, SolveBounds bounds, std::stop_token stop) {
+    const auto [p0x, p0y] = grid.incidence_sine;
+    const auto [lx, ly] = grid.period_m;
+    if (!finite_between(frequency_hz, 1e5, 1e8) || !finite_between(std::hypot(p0x, p0y), 0., .9) ||
+        !finite_between(lx, 150., 1e6) || !finite_between(ly, 150., 1e6) ||
+        grid.half_x > max_half_orders || grid.half_y > max_half_orders || layers.size() > max_layers ||
         !finite_between(std::hypot(field_tesla[0], field_tesla[1], field_tesla[2]), 0., 1e-3))
         throw std::invalid_argument("unsupported HF vector oblique solver geometry");
-    Work work{stop};
+    const auto n = (2 * grid.half_x + 1) * (2 * grid.half_y + 1);
+    if (n > bounds.spatial_modes) throw std::invalid_argument("HF vector oblique spatial mode budget exceeded");
+    Work work{stop, bounds.dense_terms};
     work.checkpoint();
-    const auto n = 2 * half_orders + 1;
     const auto omega = two_pi * frequency_hz;
     std::vector<Port> ports;
+    ports.reserve(n);
     double min_q = 1.;
-    for (int m = -static_cast<int>(half_orders); m <= static_cast<int>(half_orders); ++m) {
-        const double p = sine_incidence + m * (c / (period_m * frequency_hz));
-        const double q = std::sqrt((1. - p) * (1. + p));
-        if (!(q >= minimum_port_cosine))
-            throw std::invalid_argument("HF vector oblique includes closed or grazing vacuum orders");
-        ports.push_back({p, q, std::sqrt(q)});
-        min_q = std::min(min_q, q);
-    }
+    const int hx = static_cast<int>(grid.half_x), hy = static_cast<int>(grid.half_y);
+    for (int m = -hx; m <= hx; ++m)
+        for (int j = -hy; j <= hy; ++j) {
+            const auto port = make_port(m, j, p0x + m * (c / (lx * frequency_hz)),
+                p0y + j * (c / (ly * frequency_hz)), fixed_lab_basis);
+            min_q = std::min(min_q, port.q);
+            ports.push_back(port);
+        }
     auto total = transparent(2 * n);
     bool has_total = false, has_planar = false;
     std::vector<Scatter> planar(n, transparent(2));
@@ -355,18 +401,32 @@ HfVectorScattering solve_hf_vector_oblique(double frequency_hz, double sine_inci
     for (const auto& layer : layers) {
         work.checkpoint();
         extent += layer.thickness_m;
-        const auto amplitude_bound = 2 * (std::abs(layer.density_harmonics[0]) + std::abs(layer.density_harmonics[1]));
+        double amplitude_sum = 0.;
+        for (std::size_t i = 0; i < layer.density_harmonics.size(); ++i) {
+            const auto& h = layer.density_harmonics[i];
+            if (h.m < 0 || h.m > static_cast<int>(max_half_orders) ||
+                h.n < -static_cast<int>(max_half_orders) || h.n > static_cast<int>(max_half_orders))
+                throw std::invalid_argument("invalid HF vector oblique density harmonic index");
+            const auto amplitude = std::abs(h.electrons_per_m3);
+            amplitude_sum += amplitude;
+            if (amplitude == 0.) continue;
+            if ((!h.m && h.n <= 0) || h.m > hx || h.n < -hy || h.n > hy || (fixed_lab_basis && hx < 2))
+                throw std::invalid_argument("corrugated slab requires positive harmonics with sideband support");
+            for (std::size_t previous = 0; previous < i; ++previous)
+                if (layer.density_harmonics[previous].m == h.m && layer.density_harmonics[previous].n == h.n)
+                    throw std::invalid_argument("duplicate HF vector oblique density harmonic");
+        }
+        const double amplitude_bound = 2. * amplitude_sum;
         if (!finite_between(layer.thickness_m, 1e-4, 4e5) || !finite_between(extent, 0., 1e6) ||
             !finite_between(layer.mean_electrons_per_m3, amplitude_bound, 1e13 - amplitude_bound) ||
             !finite_between(layer.collisions_per_second, 0., 1e9))
             throw std::invalid_argument("invalid HF vector oblique plasma slab");
         if (amplitude_bound != 0.) {
-            if (half_orders < 2) throw std::invalid_argument("corrugated slab requires sideband support");
             flush();
-            append(plasma_layer(layer, ports, omega, field_tesla, work));
+            append(plasma_layer(layer, ports, omega, field_tesla, fixed_lab_basis, work));
         } else {
             for (std::size_t i = 0; i < n; ++i) {
-                auto block = plasma_layer(layer, std::span{ports}.subspan(i, 1), omega, field_tesla, work);
+                auto block = plasma_layer(layer, std::span{ports}.subspan(i, 1), omega, field_tesla, fixed_lab_basis, work);
                 planar[i] = has_planar ? cascade(planar[i], block, work) : std::move(block);
             }
             has_planar = true;
@@ -374,24 +434,88 @@ HfVectorScattering solve_hf_vector_oblique(double frequency_hz, double sine_inci
     }
     flush();
     const auto flux_excess = certify_passivity(total, work);
-    return {half_orders, std::move(total.rb.values), std::move(total.ra.values),
+    return {grid.half_x, std::move(total.rb.values), std::move(total.ra.values),
         std::move(total.tu.values), std::move(total.td.values), min_q, flux_excess,
-        work.solve_residual, work.products};
+        work.solve_residual, work.products, grid.half_y, work.multiply_terms};
+}
+
+} // namespace
+
+HfVectorScattering solve_hf_vector_oblique(double frequency_hz, double sine_incidence,
+    double period_m, std::size_t half_orders, std::array<double, 3> field_tesla,
+    std::span<const HfVectorPlasmaLayer> layers, std::stop_token stop) {
+    if (layers.size() > max_layers) throw std::invalid_argument("unsupported HF vector oblique solver geometry");
+    std::vector<HfVectorPlasmaLayer3d> expanded;
+    expanded.reserve(layers.size());
+    for (const auto& layer : layers) {
+        expanded.push_back({layer.thickness_m, layer.mean_electrons_per_m3, layer.collisions_per_second,
+            {{{1, 0, layer.density_harmonics[0]}, {2, 0, layer.density_harmonics[1]}}}});
+    }
+    return solve_scattering(frequency_hz, {{sine_incidence, 0.}, {period_m, period_m}, half_orders, 0},
+        field_tesla, expanded, true, planar_bounds, stop);
+}
+
+HfVectorScattering solve_hf_vector_oblique_3d(double frequency_hz, const HfVectorTransverseGrid& grid,
+    std::array<double, 3> field_tesla, std::span<const HfVectorPlasmaLayer3d> layers, std::stop_token stop) {
+    return solve_scattering(frequency_hz, grid, field_tesla, layers, false, volume_bounds, stop);
 }
 
 namespace {
 
-constexpr std::size_t half_output_orders = 24, coarse_half_orders = 16, finer_half_orders = 32;
+struct OrderSpan { std::size_t x, y; };
+constexpr OrderSpan output_2d{24, 0}, coarse_2d{16, 0}, fine_2d{32, 0};
+constexpr OrderSpan output_3d{3, 3}, coarse_3d{2, 2}, fine_3d{4, 4};
 constexpr std::size_t frequency_bins = 256, rf_knots = 9, period_witnesses = 2048;
 // Eight interval midpoints (including the taper's outer intervals) and
 // the original five off-mesh witnesses. Only the nine RF knots are fitted.
 constexpr std::array frequency_witnesses{-840., -631.3, -600., -384., -360., -120., -103.7,
     120., 196.5, 360., 384., 600., 840.};
 constexpr std::array mesh_witnesses{-384., 0., 384.};
+constexpr std::size_t carrier_solves = 4, assembly_positions_per_frequency = 6;
+constexpr std::size_t broadband_rf_solves = carrier_solves + (rf_knots - 1) + frequency_witnesses.size() +
+    2 * (mesh_witnesses.size() - 1);
+constexpr auto occupied_witnesses = 1 + std::count_if(frequency_witnesses.begin(), frequency_witnesses.end(),
+    [](double offset) { return -Table::occupied_half_band_hz <= offset && offset <= Table::occupied_half_band_hz; });
+constexpr auto broadband_assembly_pairs = assembly_positions_per_frequency * occupied_witnesses;
+static_assert(broadband_rf_solves == 29 && broadband_assembly_pairs == 54);
 constexpr double rf_spacing = Table::sample_rate_hz / (rf_knots - 1);
 constexpr double main_vertical_step = 3.;
+constexpr double maximum_outer_order_flux = 5e-5;
 constexpr std::size_t preparation_quote = 12u * 1024u * 1024u;
+constexpr std::size_t preparation_quote_3d = 24u * 1024u * 1024u;
 static_assert(preparation_quote <= Table::preparation_workspace_bound_bytes);
+static_assert(preparation_quote_3d <= Table::three_d_preparation_workspace_bound_bytes);
+
+struct CarrierSupport {
+    OrderSpan production, coarse, refined;
+    SolveBounds solve;
+    std::size_t workspace_bytes;
+};
+
+constexpr CarrierSupport planar_support{output_2d, coarse_2d, fine_2d, planar_bounds, preparation_quote};
+constexpr CarrierSupport volume_support{output_3d, coarse_3d, fine_3d, volume_bounds, preparation_quote_3d};
+
+// Charge eight full tangential matrices. The peak includes the outer
+// accumulated S, transfer generator/term/sum, in-layer S, its two extracted
+// port blocks, cascade temporaries and the three smaller material matrices.
+// Four MiB also covers layer/port arrays and linear scratch at either grade.
+constexpr std::size_t wide_workspace(std::size_t refined_half_order) {
+    const auto orders_per_axis = 2 * refined_half_order + 1;
+    const auto tangential_rows = 4 * orders_per_axis * orders_per_axis;
+    return 8 * tangential_rows * tangential_rows * sizeof(C) + 4u * 1024u * 1024u;
+}
+static_assert(wide_workspace(8) <= hf_vector_wide_carrier_workspace_bound_bytes);
+
+constexpr CarrierSupport wide_carrier_support(std::size_t production_half_order) {
+    const auto coarse = production_half_order - 1;
+    const auto refined = production_half_order + 1;
+    const auto width = 2 * refined + 1;
+    return {{production_half_order, production_half_order}, {coarse, coarse}, {refined, refined},
+        {width * width, wide_carrier_bounds.dense_terms}, wide_workspace(refined)};
+}
+
+constexpr auto held_table_support = wide_carrier_support(7);
+static_assert(held_table_support.solve.spatial_modes == wide_carrier_bounds.spatial_modes);
 
 struct Field {
     double theta_deg, height_m, period_m, thickness_m, peak_plasma_hz, collisions;
@@ -410,17 +534,41 @@ constexpr std::array fields{
           {-11e-6, 25e-6, -46e-6}, {.007, .0044}, {-1.15, .8}, .23}
 };
 
+struct TransverseField {
+    double period_y_m, receiver_y_fraction;
+    int trajectory_winding_y;
+    std::array<HfVectorGeometryMode, 3> density;
+};
+
+constexpr std::array transverse_fields{
+    TransverseField{17000., .073, 1, {{{1, 0, .0018, .45}, {0, 1, .0015, -.70}, {1, 1, .0012, 1.10}}}},
+    TransverseField{18500., -.112, -1, {{{1, 0, .0016, -1.05}, {0, 1, .0019, .60}, {1, -1, .0011, -.20}}}}
+};
+
+bool is_three_dimensional(const HfVectorObliqueSpec& spec) { return spec.field >= fields.size(); }
+
+bool is_active_held_field(const HfVectorObliqueSpec& spec) {
+    return spec.field == 3 && spec.perturbations && spec.cross_plane && spec.magnetic && spec.antenna == 0 &&
+        spec.drift_mps == 7.5 && spec.epoch_seconds == 520.;
+}
+
+const CarrierSupport& ordinary_support(const HfVectorObliqueSpec& spec) {
+    return is_three_dimensional(spec) ? volume_support : planar_support;
+}
+
 double angle_radians(double degrees) { return degrees * std::numbers::pi / 180.; }
 
 bool same_spec(const HfVectorObliqueSpec& a, const HfVectorObliqueSpec& b) {
     return a.field == b.field && a.antenna == b.antenna && a.magnetic == b.magnetic &&
-        a.perturbations == b.perturbations && a.drift_mps == b.drift_mps && a.epoch_seconds == b.epoch_seconds;
+        a.perturbations == b.perturbations && a.drift_mps == b.drift_mps && a.epoch_seconds == b.epoch_seconds &&
+        a.cross_plane == b.cross_plane;
 }
 
 C phase(double radians) { return std::polar(1., radians); }
 
-std::vector<HfVectorPlasmaLayer> field_layers(const HfVectorObliqueSpec& spec, double dz_max) {
-    const auto& field = fields[spec.field];
+std::vector<HfVectorPlasmaLayer3d> field_layers(const HfVectorObliqueSpec& spec, const HfVectorObliqueGeometry& geometry,
+                                              double dz_max) {
+    const auto& field = fields[spec.field % fields.size()];
     const double omega_plasma = two_pi * field.peak_plasma_hz;
     const double critical_carrier_density = electron_mass * vacuum_permittivity *
         std::pow(two_pi * Table::carrier_hz / elementary_charge, 2);
@@ -432,7 +580,7 @@ std::vector<HfVectorPlasmaLayer> field_layers(const HfVectorObliqueSpec& spec, d
     const double slice_center = field.corrugation_center_fraction * field.thickness_m;
     const double slice_start = slice_center - .5 * field.corrugated_slice_m;
     const double slice_end = slice_center + .5 * field.corrugated_slice_m;
-    std::vector<HfVectorPlasmaLayer> layers;
+    std::vector<HfVectorPlasmaLayer3d> layers;
     const auto part = [&](double a, double b) {
         const auto n = static_cast<std::size_t>(std::ceil((b - a) / dz_max));
         const double dz = (b - a) / n;
@@ -442,18 +590,29 @@ std::vector<HfVectorPlasmaLayer> field_layers(const HfVectorObliqueSpec& spec, d
     part(-.5 * field.thickness_m, slice_start);
     // Retain the same mean and vertical slab boundaries under the off control.
     // The sharp finite vertical edges are part of this constructed Es field.
-    HfVectorPlasmaLayer slice{field.corrugated_slice_m, density(slice_center), field.collisions};
-    if (spec.perturbations)
+    HfVectorPlasmaLayer3d slice{field.corrugated_slice_m, density(slice_center), field.collisions};
+    if (is_three_dimensional(spec)) {
+        for (std::size_t j = 0; j < geometry.transverse_density_modes.size(); ++j) {
+            const auto& mode = geometry.transverse_density_modes[j];
+            slice.density_harmonics[j] = {mode.m, mode.n,
+                std::polar(critical_carrier_density * mode.amplitude_x, mode.phase_rad)};
+        }
+    } else if (spec.perturbations) {
         for (std::size_t j = 0; j < 2; ++j)
-            slice.density_harmonics[j] = std::polar(critical_carrier_density * field.amplitude_x[j], field.phase_rad[j]);
+            slice.density_harmonics[j] = {static_cast<int>(j + 1), 0,
+                std::polar(critical_carrier_density * field.amplitude_x[j], field.phase_rad[j])};
+    }
     layers.push_back(slice);
     part(slice_end, .5 * field.thickness_m);
     return layers;
 }
 
 struct RfReturn {
-    std::vector<C> harmonic;
+    OrderSpan orders{};
+    std::vector<C> spatial, harmonic; // harmonic is the exact one-dimensional path through the spatial series
     double reflected = 0., transmitted = 0., scattered = 0., crosspolar = 0., crosspolar_scattered = 0., edge = 0.;
+    double edge_x = 0., edge_y = 0.;
+    double out_of_plane_reflected = 0., out_of_plane_transmitted = 0.;
 };
 
 double common_range_m(const HfVectorObliqueGeometry& g) {
@@ -461,33 +620,43 @@ double common_range_m(const HfVectorObliqueGeometry& g) {
     return 2. * (g.height_m - .5 * g.thickness_m) * std::cos(theta) + g.receiver_x_m * std::sin(theta);
 }
 
-RfReturn frozen_return(double offset, std::size_t orders, double dz_max, const HfVectorObliqueSpec& spec,
-                       const HfVectorObliqueGeometry& g, HfVectorObliqueChecks& checks, std::stop_token stop) {
+RfReturn frozen_return(double offset, OrderSpan orders, double dz_max, const HfVectorObliqueSpec& spec,
+                       const HfVectorObliqueGeometry& g, HfVectorObliqueChecks& checks, SolveBounds bounds,
+                       std::stop_token stop) {
     const double frequency = Table::carrier_hz + offset;
     const double theta = angle_radians(g.incidence_deg);
     const double p0 = std::sin(theta), q0 = std::cos(theta);
     const double k0 = two_pi * frequency / c;
     const double altitude = g.height_m - .5 * g.thickness_m;
     const double G = two_pi / g.period_m;
-    const auto layers = field_layers(spec, dz_max);
-    const auto solution = solve_hf_vector_oblique(frequency, p0, g.period_m, orders, g.field_tesla, layers, stop);
+    const bool three_d = is_three_dimensional(spec);
+    const double Gy = three_d ? two_pi / g.period_y_m : 0.;
+    const auto layers = field_layers(spec, g, dz_max);
+    const auto solution = solve_scattering(frequency,
+        {{p0, 0.}, {g.period_m, three_d ? g.period_y_m : g.period_m}, orders.x, orders.y},
+        g.field_tesla, layers, !three_d, bounds, stop);
     ++checks.rf_solves;
     checks.matrix_products += solution.matrix_products;
     checks.minimum_vacuum_cosine = std::min(checks.minimum_vacuum_cosine, solution.minimum_vacuum_cosine);
     checks.maximum_flux_excess = std::max(checks.maximum_flux_excess, solution.maximum_flux_excess);
     checks.maximum_solve_residual = std::max(checks.maximum_solve_residual, solution.maximum_solve_residual);
+    checks.maximum_rf_dense_terms = std::max(checks.maximum_rf_dense_terms, solution.dense_terms);
 
     const auto n = solution.port_modes();
-    const auto in_te = 2 * orders;
+    const auto ny = 2 * orders.y + 1;
+    const auto in_te = 2 * (orders.x * ny + orders.y);
     const auto wte = std::sqrt(1. - g.launch_tm_fraction);
     const auto wtm = std::sqrt(g.launch_tm_fraction);
     RfReturn result;
-    result.harmonic.resize(2 * orders + 1);
-    for (std::size_t i = 0; i < result.harmonic.size(); ++i) {
-        const auto m = static_cast<double>(i) - orders;
-        const double p = p0 + m * G / k0;
-        const double q = std::sqrt((1. - p) * (1. + p));
-        const double root_q = std::sqrt(q);
+    result.orders = orders;
+    result.spatial.resize(n / 2);
+    const auto trajectory_half_orders = orders.x + orders.y;
+    result.harmonic.resize(2 * trajectory_half_orders + 1);
+    const auto hx = static_cast<int>(orders.x), hy = static_cast<int>(orders.y);
+    for (std::size_t i = 0; i < result.spatial.size(); ++i) {
+        const int m = static_cast<int>(i / ny) - hx, j = static_cast<int>(i % ny) - hy;
+        const auto port = make_port(m, j, p0 + m * G / k0, j * Gy / k0, !three_d);
+        const double q = port.q, root_q = port.root_q;
         const auto Rte = solution.reflect_below[(2 * i) * n + in_te] * wte +
             solution.reflect_below[(2 * i) * n + in_te + 1] * wtm;
         const auto Rtm = solution.reflect_below[(2 * i + 1) * n + in_te] * wte +
@@ -502,35 +671,62 @@ RfReturn frozen_return(double offset, std::size_t orders, double dz_max, const H
         result.reflected += reflected;
         result.transmitted += transmitted;
         result.crosspolar += cross;
-        if (i != orders) {
+        if (m || j) {
             result.scattered += reflected;
             result.crosspolar_scattered += cross;
         }
-        if (orders > 0 && (i == 0 || i + 1 == result.harmonic.size())) result.edge += reflected + transmitted;
+        if (j) {
+            result.out_of_plane_reflected += reflected;
+            result.out_of_plane_transmitted += transmitted;
+        }
+        const bool x_edge = hx && std::abs(m) == hx, y_edge = hy && std::abs(j) == hy;
+        if (x_edge) result.edge_x += reflected + transmitted;
+        if (y_edge) result.edge_y += reflected + transmitted;
+        if (x_edge || y_edge) result.edge += reflected + transmitted;
 
         // Convert vertical-flux amplitudes to fixed lab E for antenna
         // projection. Downward TM has E_z=+p/sqrt(q). Unit launch total E
         // magnitude sets the reference, without normalization by return.
         const auto [ax, ay, az] = g.antenna_axis;
-        const auto voltage = std::sqrt(q0) * ((ax * root_q + az * p / root_q) * Rtm + ay / root_q * Rte);
         // Remove only the common 0th-order vacuum phase: incoming and
         // outgoing leg phases plus kx*x_RX. Keep every differential phase.
-        const double q_difference = -(p - p0) * (p + p0) / (q + q0);
-        result.harmonic[i] = voltage * phase(k0 * altitude * q_difference + m * G * g.receiver_x_m);
+        if (!three_d) {
+            const auto voltage = std::sqrt(q0) * ((ax * root_q + az * port.px / root_q) * Rtm + ay / root_q * Rte);
+            const double q_difference = -(port.px - p0) * (port.px + p0) / (q + q0);
+            result.spatial[i] = result.harmonic[i] = voltage * phase(k0 * altitude * q_difference + m * G * g.receiver_x_m);
+        } else {
+            const auto te = (-ax * port.uy + ay * port.ux) / root_q;
+            const auto tm = root_q * (ax * port.ux + ay * port.uy) + az * std::hypot(port.px, port.py) / root_q;
+            const auto voltage = std::sqrt(q0) * (tm * Rtm + te * Rte);
+            const double q_difference = (-(port.px - p0) * (port.px + p0) - port.py * port.py) / (q + q0);
+            result.spatial[i] = voltage * phase(k0 * altitude * q_difference + m * G * g.receiver_x_m + j * Gy * g.receiver_y_m);
+            const auto order = static_cast<int>(trajectory_half_orders) + m + g.trajectory_winding_y * j;
+            result.harmonic[static_cast<std::size_t>(order)] += result.spatial[i];
+        }
     }
-    if (orders == half_output_orders) checks.maximum_edge_flux = std::max(checks.maximum_edge_flux, result.edge);
+    if (orders.x == checks.output_half_orders && orders.y == checks.output_half_orders_y) {
+        checks.maximum_edge_flux = std::max(checks.maximum_edge_flux, result.edge);
+        checks.maximum_edge_x_flux = std::max(checks.maximum_edge_x_flux, result.edge_x);
+        checks.maximum_edge_y_flux = std::max(checks.maximum_edge_y_flux, result.edge_y);
+    }
     return result;
 }
 
-double harmonic_difference(std::span<const C> a, std::span<const C> b) {
-    // L1 difference (zero-extension of the shorter band) bounds received
-    // complex-voltage difference at every translation within the period.
-    const auto n = std::max(a.size(), b.size());
-    const auto first_a = (n - a.size()) / 2, first_b = (n - b.size()) / 2;
+C spatial_at(const RfReturn& field, int m, int n) {
+    const auto hx = static_cast<int>(field.orders.x), hy = static_cast<int>(field.orders.y);
+    if (std::abs(m) > hx || std::abs(n) > hy) return {};
+    return field.spatial[static_cast<std::size_t>(m + hx) * (2 * field.orders.y + 1) +
+                         static_cast<std::size_t>(n + hy)];
+}
+
+double spatial_difference(const RfReturn& a, const RfReturn& b) {
+    // The unfolded L1 difference bounds projected voltage at every x,y.
+    // Folding onto one trajectory first could hide compensating order errors.
+    const auto hx = static_cast<int>(std::max(a.orders.x, b.orders.x));
+    const auto hy = static_cast<int>(std::max(a.orders.y, b.orders.y));
     double error = 0.;
-    for (std::size_t i = 0; i < n; ++i)
-        error += std::abs((i >= first_a && i - first_a < a.size() ? a[i - first_a] : C{}) -
-                          (i >= first_b && i - first_b < b.size() ? b[i - first_b] : C{}));
+    for (int m = -hx; m <= hx; ++m)
+        for (int n = -hy; n <= hy; ++n) error += std::abs(spatial_at(a, m, n) - spatial_at(b, m, n));
     return error;
 }
 
@@ -539,6 +735,15 @@ C translated(std::span<const C> values, double phase_per_order) {
     C result{};
     for (std::size_t i = 0; i < values.size(); ++i)
         result += values[i] * phase((i - center) * phase_per_order);
+    return result;
+}
+
+C translated_spatial(const RfReturn& field, double fraction, int winding_y) {
+    C result{};
+    const int hx = static_cast<int>(field.orders.x), hy = static_cast<int>(field.orders.y);
+    for (int m = -hx; m <= hx; ++m)
+        for (int n = -hy; n <= hy; ++n)
+            result += spatial_at(field, m, n) * phase(two_pi * m * fraction + (two_pi * n * winding_y) * fraction);
     return result;
 }
 
@@ -554,7 +759,7 @@ PeriodExtrema period_extrema(std::span<const C> harmonic) {
     // handles cancellation in between samples, not just values on a mesh.
     double second_derivative = 0.;
     for (std::size_t i = 0; i < harmonic.size(); ++i) {
-        const double order = static_cast<double>(i) - half_output_orders;
+        const double order = static_cast<double>(i) - harmonic.size() / 2;
         second_derivative += order * order * std::abs(harmonic[i]);
     }
     const double position_phase_step = two_pi / period_witnesses;
@@ -589,6 +794,8 @@ void assess_carrier(const RfReturn& carrier, const HfVectorObliqueGeometry& g, H
     checks.carrier_scattered_reflected_flux = carrier.scattered;
     checks.carrier_crosspolar_reflected_flux = carrier.crosspolar;
     checks.carrier_crosspolar_scattered_flux = carrier.crosspolar_scattered;
+    checks.carrier_out_of_plane_reflected_flux = carrier.out_of_plane_reflected;
+    checks.carrier_out_of_plane_transmitted_flux = carrier.out_of_plane_transmitted;
     const auto ex = period_extrema(carrier.harmonic);
     checks.minimum_carrier_power = ex.sampled_min;
     checks.maximum_carrier_power = ex.sampled_max;
@@ -598,7 +805,8 @@ void assess_carrier(const RfReturn& carrier, const HfVectorObliqueGeometry& g, H
     checks.minimum_checked_band_power_lower_bound = ex.lower_bound;
 }
 
-C intrinsic_interpolation(const std::array<RfReturn, rf_knots>& knots, double offset, std::size_t order) {
+C intrinsic_interpolation(const std::array<RfReturn, rf_knots>& knots, double offset, std::size_t order,
+                          std::vector<C> RfReturn::*coefficients) {
     const double coord = offset / rf_spacing + (rf_knots - 1) * .5;
     const auto i = static_cast<unsigned>(std::floor(std::clamp(coord, 0., static_cast<double>(rf_knots - 1))));
     const auto first = std::min(i == 0 ? 0u : i - 1u, static_cast<unsigned>(rf_knots - 4));
@@ -608,7 +816,7 @@ C intrinsic_interpolation(const std::array<RfReturn, rf_knots>& knots, double of
         for (unsigned k = 0; k < 4; ++k)
             if (k != j) weight *= (coord - static_cast<double>(first + k)) /
                 (static_cast<double>(j) - static_cast<double>(k));
-        value += weight * knots[first + j].harmonic[order];
+        value += weight * (knots[first + j].*coefficients)[order];
     }
     return value;
 }
@@ -629,16 +837,86 @@ C blend(const Bracket& b, C lo, C dl, C hi, C dh) {
     return b.weights[0] * lo + b.weights[1] * dl + b.weights[2] * hi + b.weights[3] * dh;
 }
 
+bool active_cross_plane(const HfVectorObliqueSpec& spec) {
+    return is_three_dimensional(spec) && spec.perturbations && spec.cross_plane;
+}
+
+constexpr bool refined_edge_qualified(bool three_d, double edge, double edge_x, double edge_y) {
+    const auto bounded = [](double flux) { return 0. <= flux && flux <= maximum_outer_order_flux; };
+    return !three_d || (bounded(edge) && bounded(edge_x) && bounded(edge_y));
+}
+
+static_assert(refined_edge_qualified(true, 5e-5, 2.5e-5, 2.5e-5));
+static_assert(!refined_edge_qualified(true, 5.1e-5, 3e-5, 3e-5));
+static_assert(!refined_edge_qualified(true, 5e-5, 5.1e-5, 0.));
+static_assert(!refined_edge_qualified(true, 5e-5, 0., 5.1e-5));
+static_assert(refined_edge_qualified(false, 5.1e-5, 5.1e-5, 0.));
+
+RfReturn screen_carrier(const HfVectorObliqueSpec& spec, const HfVectorObliqueGeometry& geometry,
+                       const CarrierSupport& support, HfVectorObliqueChecks& checks, std::stop_token stop) {
+    const auto production = support.production;
+    checks.output_half_orders = production.x;
+    checks.output_half_orders_y = production.y;
+    checks.output_trajectory_half_orders = production.x + production.y;
+    checks.coarse_half_orders = {support.coarse.x, support.coarse.y};
+    checks.refined_half_orders = {support.refined.x, support.refined.y};
+    checks.maximum_admitted_spatial_modes = support.solve.spatial_modes;
+    checks.rf_dense_terms_limit = support.solve.dense_terms;
+    checks.preparation_peak_workspace_bytes = support.workspace_bytes;
+    const auto rf = [&](OrderSpan orders, double dz) {
+        return frozen_return(0., orders, dz, spec, geometry, checks, support.solve, stop);
+    };
+    auto carrier = rf(production, main_vertical_step);
+    const auto refined_z = rf(production, .5 * main_vertical_step);
+    const auto coarse = rf(support.coarse, main_vertical_step);
+    const auto refined_xz = rf(support.refined, .5 * main_vertical_step);
+    checks.carrier_refined_edge_flux = refined_xz.edge;
+    checks.carrier_refined_edge_x_flux = refined_xz.edge_x;
+    checks.carrier_refined_edge_y_flux = refined_xz.edge_y;
+    checks.order_voltage_error = spatial_difference(coarse, carrier);
+    checks.mesh_voltage_error = spatial_difference(carrier, refined_z);
+    checks.refined_order_voltage_error = spatial_difference(refined_z, refined_xz);
+    assess_carrier(carrier, geometry, checks);
+    checks.relative_voltage_error_at_minimum = (checks.mesh_voltage_error + checks.refined_order_voltage_error) /
+        std::max(1e-12, std::sqrt(checks.certified_minimum_power_lower_bound));
+    checks.carrier_witnesses_qualified = checks.mesh_voltage_error <= .004 && checks.refined_order_voltage_error <= .004 &&
+        checks.maximum_edge_flux <= maximum_outer_order_flux && checks.relative_voltage_error_at_minimum <= .15 &&
+        refined_edge_qualified(is_three_dimensional(spec), refined_xz.edge, refined_xz.edge_x, refined_xz.edge_y) &&
+        (!active_cross_plane(spec) || checks.carrier_out_of_plane_reflected_flux >= 1e-4);
+    return carrier;
+}
+
 } // namespace
 
 HfVectorObliqueGeometry hf_vector_oblique_geometry(const HfVectorObliqueSpec& spec) {
-    if (spec.field >= fields.size() || spec.antenna > 1) throw std::invalid_argument("unknown HF vector oblique field/antenna");
-    const auto& g = fields[spec.field];
-    return {g.theta_deg, g.height_m, 2. * g.height_m * std::tan(angle_radians(g.theta_deg)), g.period_m,
+    if (spec.field >= fields.size() + transverse_fields.size() || spec.antenna > 1 ||
+        (!is_three_dimensional(spec) && !spec.cross_plane))
+        throw std::invalid_argument("unknown HF vector oblique field/antenna or unsupported cross-plane control");
+    const auto& g = fields[spec.field % fields.size()];
+    HfVectorObliqueGeometry out{g.theta_deg, g.height_m, 2. * g.height_m * std::tan(angle_radians(g.theta_deg)), g.period_m,
         g.thickness_m, g.peak_plasma_hz, g.collisions, g.corrugated_slice_m,
         spec.magnetic ? g.field_tesla : std::array<double, 3>{},
         spec.antenna == 0 ? std::array{0., 1., 0.} : std::array{.6, 0., .8}, g.launch_tm_fraction,
         g.corrugation_center_fraction, spec.perturbations ? g.amplitude_x : std::array<double, 2>{}, g.phase_rad};
+    if (is_three_dimensional(spec)) {
+        const auto& transverse = transverse_fields[spec.field - fields.size()];
+        out.period_y_m = transverse.period_y_m;
+        out.receiver_y_m = out.period_y_m * transverse.receiver_y_fraction;
+        out.trajectory_winding_y = transverse.trajectory_winding_y;
+        out.drift_y_mps = (out.period_y_m / out.period_m) * spec.drift_mps * out.trajectory_winding_y;
+        out.density_harmonic_x = {};
+        out.density_harmonic_phase_rad = {};
+        out.transverse_density_modes = transverse.density;
+        for (auto& mode : out.transverse_density_modes)
+            if (!spec.perturbations || (!spec.cross_plane && mode.n)) mode.amplitude_x = 0.;
+    }
+    return out;
+}
+
+std::size_t hf_vector_oblique_preparation_workspace_bound_bytes(const HfVectorObliqueSpec& spec) {
+    if (is_active_held_field(spec)) return hf_vector_wide_carrier_workspace_bound_bytes;
+    return is_three_dimensional(spec) ? Table::three_d_preparation_workspace_bound_bytes :
+        Table::preparation_workspace_bound_bytes;
 }
 
 void validate_hf_vector_oblique_spec(const HfVectorObliqueSpec& spec, std::uint64_t horizon_samples) {
@@ -678,17 +956,36 @@ HfVectorObliqueChecks assess_hf_vector_oblique_carrier(const HfVectorObliqueSpec
     validate_hf_vector_oblique_spec(spec, 1);
     const auto g = hf_vector_oblique_geometry(spec);
     HfVectorObliqueChecks checks;
-    checks.output_half_orders = half_output_orders;
-    checks.preparation_peak_workspace_bytes = preparation_quote;
-    const auto rf = [&](std::size_t n, double dz_max) { return frozen_return(0., n, dz_max, spec, g, checks, stop); };
-    const auto main = rf(half_output_orders, main_vertical_step);
-    const auto fine = rf(half_output_orders, .5 * main_vertical_step);
-    checks.order_voltage_error = harmonic_difference(rf(coarse_half_orders, main_vertical_step).harmonic, main.harmonic);
-    checks.mesh_voltage_error = harmonic_difference(main.harmonic, fine.harmonic);
-    checks.refined_order_voltage_error = harmonic_difference(fine.harmonic, rf(finer_half_orders, .5 * main_vertical_step).harmonic);
-    assess_carrier(main, g, checks);
-    checks.relative_voltage_error_at_minimum = (checks.mesh_voltage_error + checks.refined_order_voltage_error) /
-        std::max(1e-12, std::sqrt(checks.certified_minimum_power_lower_bound));
+    const auto carrier = screen_carrier(spec, g, ordinary_support(spec), checks, stop);
+    if (active_cross_plane(spec)) {
+        auto reduced_spec = spec;
+        reduced_spec.cross_plane = false;
+        const auto reduced_geometry = hf_vector_oblique_geometry(reduced_spec);
+        HfVectorObliqueChecks comparison;
+        const auto reduced = frozen_return(0., output_3d, main_vertical_step, reduced_spec, reduced_geometry, comparison,
+            volume_bounds, stop);
+        checks.rf_solves += comparison.rf_solves;
+        checks.matrix_products += comparison.matrix_products;
+        checks.maximum_rf_dense_terms = std::max(checks.maximum_rf_dense_terms, comparison.maximum_rf_dense_terms);
+        for (std::size_t i = 0; i < period_witnesses; ++i) {
+            const auto fraction = static_cast<double>(i) / period_witnesses;
+            const auto error = std::abs(translated_spatial(carrier, fraction, g.trajectory_winding_y) -
+                                        translated_spatial(reduced, fraction, g.trajectory_winding_y));
+            checks.carrier_cross_plane_ablation_voltage_error = std::max(checks.carrier_cross_plane_ablation_voltage_error, error);
+        }
+        checks.carrier_cross_plane_ablation_compared = true;
+    }
+    return checks;
+}
+
+HfVectorObliqueChecks assess_hf_vector_oblique_carrier_resolution(const HfVectorObliqueSpec& spec,
+    std::size_t production_half_order, std::stop_token stop) {
+    if (!is_active_held_field(spec) || (production_half_order != 5 && production_half_order != 7))
+        throw std::invalid_argument("wide carrier witness requires the unchanged active 3D holdout and grade 5 or 7");
+    validate_hf_vector_oblique_spec(spec, 1);
+    const auto support = wide_carrier_support(production_half_order);
+    HfVectorObliqueChecks checks;
+    screen_carrier(spec, hf_vector_oblique_geometry(spec), support, checks, stop);
     return checks;
 }
 
@@ -696,37 +993,41 @@ HfVectorObliqueTableBuild build_hf_vector_oblique_table(const HfVectorObliqueSpe
     validate_hf_vector_oblique_spec(spec, 1);
     const auto g = hf_vector_oblique_geometry(spec);
     HfVectorObliqueChecks checks;
-    checks.output_half_orders = half_output_orders;
-    checks.preparation_peak_workspace_bytes = preparation_quote; // conservative analytical charge, not RSS
-    const auto rf = [&](double offset, std::size_t orders = half_output_orders, double dz = main_vertical_step) {
-        return frozen_return(offset, orders, dz, spec, g, checks, stop);
+    const bool three_d = is_three_dimensional(spec);
+    const auto& support = is_active_held_field(spec) ? held_table_support : ordinary_support(spec);
+    const auto production = support.production;
+    const auto refinement = support.refined;
+    const auto rf = [&](double offset, OrderSpan orders, double dz = main_vertical_step) {
+        return frozen_return(offset, orders, dz, spec, g, checks, support.solve, stop);
     };
     std::array<RfReturn, rf_knots> knots;
+    knots[rf_knots / 2] = screen_carrier(spec, g, support, checks, stop);
+    if (three_d && !checks.carrier_witnesses_qualified) return {nullptr, checks};
     for (std::size_t i = 0; i < rf_knots; ++i)
-        knots[i] = rf((static_cast<double>(i) - (rf_knots - 1) * .5) * rf_spacing);
+        if (i != rf_knots / 2)
+            knots[i] = rf((static_cast<double>(i) - (rf_knots - 1) * .5) * rf_spacing, production);
     const auto& carrier = knots[rf_knots / 2];
-    assess_carrier(carrier, g, checks);
-    checks.order_voltage_error = harmonic_difference(rf(0., coarse_half_orders).harmonic, carrier.harmonic);
     std::array<RfReturn, frequency_witnesses.size()> witness;
     for (std::size_t f = 0; f < witness.size(); ++f) {
-        witness[f] = rf(frequency_witnesses[f]);
-        auto predicted = witness[f].harmonic;
-        for (std::size_t i = 0; i < predicted.size(); ++i)
-            predicted[i] = intrinsic_interpolation(knots, frequency_witnesses[f], i);
-        checks.frequency_voltage_error = std::max(checks.frequency_voltage_error,
-            harmonic_difference(predicted, witness[f].harmonic));
+        auto& actual = witness[f];
+        actual = rf(frequency_witnesses[f], production);
+        double error = 0.;
+        for (std::size_t i = 0; i < actual.spatial.size(); ++i)
+            error += std::abs(intrinsic_interpolation(knots, frequency_witnesses[f], i, &RfReturn::spatial) - actual.spatial[i]);
+        checks.frequency_voltage_error = std::max(checks.frequency_voltage_error, error);
     }
     checks.checked_frequencies = witness.size();
     for (double offset : mesh_witnesses) {
+        if (!offset) continue; // covered by the carrier screen
         const auto at = std::find(frequency_witnesses.begin(), frequency_witnesses.end(), offset);
-        if (offset != 0. && at == frequency_witnesses.end()) throw std::logic_error("missing HF vector mesh witness");
-        const auto& standard = offset == 0. ? carrier : witness[at - frequency_witnesses.begin()];
-        auto fine_z = rf(offset, half_output_orders, main_vertical_step * .5);
-        auto fine_xz = rf(offset, finer_half_orders, main_vertical_step * .5);
+        if (at == frequency_witnesses.end()) throw std::logic_error("missing HF vector mesh witness");
+        const auto& standard = witness[at - frequency_witnesses.begin()];
+        auto fine_z = rf(offset, production, main_vertical_step * .5);
+        auto fine_xz = rf(offset, refinement, main_vertical_step * .5);
         checks.mesh_voltage_error = std::max(checks.mesh_voltage_error,
-            harmonic_difference(standard.harmonic, fine_z.harmonic));
+            spatial_difference(standard, fine_z));
         checks.refined_order_voltage_error = std::max(checks.refined_order_voltage_error,
-            harmonic_difference(fine_z.harmonic, fine_xz.harmonic));
+            spatial_difference(fine_z, fine_xz));
     }
 
     // Each retained harmonic has its own broadband FIR. Combining those FIRs
@@ -737,14 +1038,14 @@ HfVectorObliqueTableBuild build_hf_vector_oblique_table(const HfVectorObliqueSpe
         Table::modelling_delay_samples, Table::retained_late_samples};
     const double range = common_range_m(g);
     const auto common_phase = [&](double offset) { return phase(two_pi * (Table::carrier_hz + offset) / c * range); };
-    std::array<HfFullwaveKernel, 2 * half_output_orders + 1> kernels;
+    std::vector<HfFullwaveKernel> kernels(carrier.harmonic.size());
     std::array<C, frequency_bins> grid{};
     double power = 0., discarded = 0., precursor = 0.;
     for (std::size_t m = 0; m < kernels.size(); ++m) {
         if (stop.stop_requested()) throw std::runtime_error("HF vector oblique preparation cancelled");
         for (std::size_t j = 0; j < grid.size(); ++j) {
             const double offset = Table::sample_rate_hz * (static_cast<double>(j) / grid.size() - .5);
-            grid[j] = intrinsic_interpolation(knots, offset, m) * common_phase(offset);
+            grid[j] = intrinsic_interpolation(knots, offset, m, &RfReturn::harmonic) * common_phase(offset);
         }
         kernels[m] = design_hf_fullwave_kernel(grid, design);
         const auto& k = kernels[m];
@@ -763,7 +1064,7 @@ HfVectorObliqueTableBuild build_hf_vector_oblique_table(const HfVectorObliqueSpe
     table->geometry_ = g;
     table->knots_.resize(Table::position_intervals + 1);
     for (std::size_t m = 0; m < kernels.size(); ++m) {
-        const double order = static_cast<double>(m) - half_output_orders;
+        const double order = static_cast<double>(m) - checks.output_trajectory_half_orders;
         const double rad_per_knot = -two_pi * order / Table::position_intervals;
         const double rad_per_sec = two_pi * std::abs(order) * spec.drift_mps / g.period_m;
         for (std::size_t k = 0; k < Table::position_intervals; ++k) {
@@ -805,12 +1106,15 @@ HfVectorObliqueTableBuild build_hf_vector_oblique_table(const HfVectorObliqueSpe
         // Witness the assembled table against the physical RF sum directly.
         // Include off-knot translations on both sides of the period boundary
         // and the finest chord's minimum in the cancellation search.
-        const std::array translations{-.00121, .10137, .27716, .61903, 1.00191, extrema.minimum_chord_fraction};
+        const std::array<double, assembly_positions_per_frequency> translations{
+            -.00121, .10137, .27716, .61903, 1.00191, extrema.minimum_chord_fraction};
         for (double fraction : translations) {
             C assembled{};
             for (std::size_t lag = Table::first_lag_samples(); lag <= Table::last_lag_samples(); ++lag)
                 assembled += table->coefficient_at_position(lag, fraction * g.period_m) * phase(angle_per_lag * lag);
-            const auto physical = std::conj(vacuum * translated(exact.harmonic, two_pi * fraction)) * model_delay;
+            const auto physical_series = three_d ? translated_spatial(exact, fraction, g.trajectory_winding_y) :
+                translated(exact.harmonic, two_pi * fraction);
+            const auto physical = std::conj(vacuum * physical_series) * model_delay;
             const double error = std::abs(assembled - physical);
             if (!std::isfinite(error)) throw std::runtime_error("nonfinite assembled HF vector oblique witness");
             checks.table_assembly_voltage_error = std::max(checks.table_assembly_voltage_error, error);
@@ -821,13 +1125,15 @@ HfVectorObliqueTableBuild build_hf_vector_oblique_table(const HfVectorObliqueSpe
     for (std::size_t f = 0; f < witness.size(); ++f)
         if (std::abs(frequency_witnesses[f]) <= Table::occupied_half_band_hz)
             assess_witness(frequency_witnesses[f], witness[f]);
+    if (checks.rf_solves != broadband_rf_solves || checks.checked_table_assembly_positions != broadband_assembly_pairs)
+        throw std::logic_error("HF vector oblique preparation missed a planned RF or table assembly witness");
 
     checks.relative_voltage_error_at_minimum = (checks.mesh_voltage_error + checks.refined_order_voltage_error +
         checks.fir_voltage_error + checks.interpolation_peak_error_bound) /
         std::max(1e-12, std::sqrt(checks.minimum_checked_band_power_lower_bound));
 
     checks.qualified = checks.mesh_voltage_error <= .004 && checks.refined_order_voltage_error <= .004 &&
-        checks.maximum_edge_flux <= 5e-5 && checks.frequency_voltage_error <= .0006 && checks.fir_voltage_error <= .0006 &&
+        checks.maximum_edge_flux <= maximum_outer_order_flux && checks.frequency_voltage_error <= .0006 && checks.fir_voltage_error <= .0006 &&
         checks.period_averaged_discarded_energy_fraction <= 1e-6 && checks.interpolation_peak_error_bound <= 2e-5 &&
         checks.table_assembly_voltage_error <= checks.fir_voltage_error + checks.interpolation_peak_error_bound + 2e-12 &&
         checks.retarded_peak_error_bound <= .004 && checks.relative_voltage_error_at_minimum <= .15;

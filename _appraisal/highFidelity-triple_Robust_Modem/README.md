@@ -7,7 +7,19 @@ groundwave, 1–30 MHz skywave, and Earth–Moon–Earth**. All appraisal code,
 fixtures, documentation and generated evidence remain in this directory.
 Python launches native executables and analyzes receipts; it implements no DSP.
 
-The [coupled vector/oblique extension](hf-vector-oblique.md) now calculates
+The [two-transverse-coordinate extension](hf-vector-3d.md) adds coupled 3D
+spatial diffraction to the same native magnetic/reflection calculation, with
+explicit numerical rejection and support recovery. Its
+[executable qualification reader](hf-vector-3d.md#executable-qualification-requirements)
+separates completed tests from satisfied reception requirements and checks the
+actual target binary. The [exact-input outage witness](hf-fragment-integrity.md#exact-native-input-ambiguity-under-an-outage)
+shows a framing ambiguity that additional receiver compute alone cannot remove.
+Eleven new complete receiver observations include successful controls and a
+reproduced completion failure despite thirteen correct DATA bits. The
+32-cell audit remains failed on documented integrity and false-DATA requirements;
+the separate delivery observations and missing qualification strata remain visible.
+
+The preceding [coupled vector/oblique extension](hf-vector-oblique.md) calculates
 magnetic polarization, transverse diffraction and oblique reflection in one
 bidirectional Maxwell operator. Independent analytic, flux, refinement and
 assembled-waveform checks precede complete native reception. Its frozen fields,
@@ -155,13 +167,23 @@ From the repository root:
 ```
 
 This configures an ignored `.build/` and links the production C++ modem.
-The coupled-vector extension exercised 35 CTest groups: 34 passed in the
+The 3D spatial/qualification continuation passes **39/39 CTest groups in
+108.77 seconds**, including the added 3D assembled waveform, exact-input
+completion ambiguity and finite qualification-reader groups.
+[Current complete check log](local-evidence/hf-3d-preflight/ctest-final.log).
+After the final Python-only qualification/reference edits, the affected reader
+group passes all **17 checks**; this includes the disjoint-observation energy
+bound and rejection of overlapping or incomplete apertures. The compiled native
+binary and communication receipts retain their original source identity.
+These checks do not change the failed communications requirements.
+
+The preceding coupled-vector extension exercised 35 CTest groups: 34 passed in the
 initial full run (88.79 s); the scenario-catalog assertion omitted the new
 propagation family and its finite horizon. After that test was corrected,
 the affected group passed in 1.34 s. The four affected native-chain,
 integration, runner and waveform-receipt groups then passed in 58.28 s.
 The newly added automatic assembled-vector-waveform group passed in 8.96 s,
-bringing the current suite to 36 groups. The final endpoint-C/N0 admission
+bringing that preceding suite to 36 groups. The final endpoint-C/N0 admission
 change passed all 121 runner and 13 waveform-receipt checks. These are applicable full and affected
 checks, not a claim of a second single 36-group run.
 [Original and corrected logs](local-evidence/hf-vector-oblique-preflight/)
@@ -226,6 +248,9 @@ Current group coverage is:
 | `hf_ionosphere` | Eikonal phase/group-delay consistency, independent quadrature, and frequency/time derivatives |
 | `hf_vector_oblique` | Coupled bidirectional vector scattering, vacuum/Fresnel/Born reductions, coherent passivity, translation and magnetic reversal |
 | `hf_vector_oblique_waveform` | Primary qualified RF/FIR table, 54 direct assembly witnesses, impulse/tail, moving tone and chunk invariance |
+| `hf_vector_3d_waveform` | Coupled two-transverse-coordinate primary, spatial checks before trajectory folding, broadband/FIR and streaming checks |
+| `hf_completion_ambiguity` | Exact native IQ-prefix identity, three DATA/two QUIET decisions and premature acceptance before EOF under a constructed outage |
+| `qualification` | Hash-bound finite evidence, current target-binary observation, separate requirements and characterization, stale/missing/censored evidence |
 | `hf_design` | Fixed whole-domain phase/group bounds, strict physical coefficients, seed/placement isolation and mutation order |
 | `hf_gui_profile` | Canonical preset preparation, actual endpoint clock errors, margin semantics, Helper, noise-seed isolation and rejection |
 | `hf_fullwave` | Independent zero-index, Fresnel/slab, Joule-loss and smooth-barrier references; passive opaque layers and unresolved resonances |

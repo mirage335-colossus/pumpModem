@@ -6,7 +6,15 @@ single-antenna cancellation, or a missing propagation mode prevent that gain.
 They run the canonical native Robust receiver. They do not require a favorable
 answer or turn a completed experiment into successful communication.
 
-The [coupled vector/oblique extension](hf-vector-oblique.md) adds one
+The [3D spatial continuation](hf-vector-3d.md) extends that coupled model
+to a second transverse coordinate. It keeps spatial convergence separate from
+trajectory interpolation, admits larger support for the unchanged difficult
+field, and audits reception requirements with exact evidence/binary bindings.
+The [identical-IQ outage pair](hf-fragment-integrity.md#exact-native-input-ambiguity-under-an-outage)
+separates an unidentifiable message ending from avoidable weak-signal inference
+loss; it does not estimate the incidence of such outages.
+
+The preceding [coupled vector/oblique extension](hf-vector-oblique.md) adds one
 bidirectional Maxwell operator for polarization, transverse scattering and
 oblique reflection in a slowly translating, two-dimensional sporadic-E field.
 Frozen primary/holdout fields, ablations, numerical waveform gates and native

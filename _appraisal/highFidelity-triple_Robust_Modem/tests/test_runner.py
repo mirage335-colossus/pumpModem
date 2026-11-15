@@ -876,6 +876,25 @@ def complete_service_messages(receipt: dict) -> None:
 
 
 class CampaignValidationTests(unittest.TestCase):
+    def test_vector_3d_descriptor_preserves_spatial_and_trajectory_scope(self):
+        for scenario in (name for name in runner.HF_VECTOR_OBLIQUE_SCENARIOS if name.startswith("hf-vector-3d")):
+            descriptor = runner._vector_oblique_spec(scenario)
+            runner._validate_vector_oblique_descriptor(descriptor, scenario)
+            self.assertEqual(descriptor["spatial_geometry_dimension"], 3)
+            self.assertEqual(descriptor["transverse_periodic_dimensions"], 2)
+            self.assertAlmostEqual(descriptor["drift_y_mps"] / descriptor["period_y_m"],
+                descriptor["trajectory_winding_y"] * descriptor["drift_mps"] / descriptor["period_m"])
+            self.assertNotIn("density_harmonic_x", descriptor)
+            for mutation in ({"spatial_geometry_dimension": 2}, {"drift_y_mps": 0.},
+                             {"density_harmonic_x": [0., 0.]}, {"transverse_density_modes": []}):
+                with self.subTest(scenario=scenario, mutation=mutation), self.assertRaises(runner.CampaignError):
+                    runner._validate_vector_oblique_descriptor(dict(descriptor, **mutation), scenario)
+        planar = runner._vector_oblique_spec("hf-vector-3d-planar")
+        in_plane = runner._vector_oblique_spec("hf-vector-3d-in-plane")
+        self.assertTrue(all(mode["amplitude_x"] == 0 for mode in planar["transverse_density_modes"]))
+        self.assertTrue(all(mode["amplitude_x"] == 0 for mode in in_plane["transverse_density_modes"] if mode["n"] != 0))
+        self.assertGreater(in_plane["transverse_density_modes"][0]["amplitude_x"], 0.)
+
     def test_vector_oblique_scope_keeps_band_and_receiver_controls_honest(self):
         base = {"id": "vector", "scenario": "hf-vector-oblique", "mode": "receive",
                 "waveform": "reference", "seed": 1, "control": "wanted", "bit_seconds": 64,

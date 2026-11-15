@@ -7,7 +7,27 @@ different questions and are reported separately. No natural-condition
 probability, field calibration, or universal sensitivity floor follows from
 these deterministic cases or small fixed-seed holdouts.
 
-The latest [coupled vector/oblique extension](hf-vector-oblique.md) materially
+The latest [3D spatial extension](hf-vector-3d.md) retains both transverse
+coordinates in the coupled Maxwell solve. The stronger fixed field requires
+wider numerical support; its initially rejected approximations remain evidence.
+A [machine-checked finite qualification](hf-vector-3d.md#executable-qualification-requirements)
+now binds individual receipts and refuses to turn execution completion, stale
+binaries or missing coverage into qualification. The
+[native outage witness](hf-fragment-integrity.md#exact-native-input-ambiguity-under-an-outage)
+additionally establishes identical-IQ premature completion before EOF.
+
+The extension runs **eleven complete native observations**: five correct
+deliveries and four misses among nine wanted observations, plus two negative
+controls with no DATA or accepted message. The strong combined clock/interferer
+case again recovers every active DATA bit but cannot finish; its matched Off
+control delivers. The [32-cell audit](hf-vector-3d.md#executable-qualification-requirements)
+keeps the older integrity and false-DATA failures as failed requirements and
+does not invent operational delivery promises for sensitivity probes.
+Its [energy-scale reference](hf-vector-3d.md#information-reference-at-the-correct-observation-scale)
+also prevents pooling an entire known message from being misreported as a
+demonstrated practical per-slot receiver gain. No receiver repair is claimed.
+
+The preceding [coupled vector/oblique extension](hf-vector-oblique.md) materially
 changes the earlier environmental gap: magnetic polarization, transverse
 diffraction and oblique reflection now share one bidirectional Maxwell
 operator. Five physical variants pass independent reductions, flux checks,

@@ -16,6 +16,66 @@ radio samples contain no further usable information. Delaying completion
 by an arbitrary fixed number of slots would change the physical-completion
 contract and would not eliminate arbitrarily long interior fades.
 
+## Exact native-input ambiguity under an outage
+
+The [native completion probe](src/hf_completion_ambiguity_probe.cpp) now tests
+the stronger claim at the actual receiver input. Canonical FEC-off messages
+`" "` and `" B"` share the space code `000`, public epoch/ordinal sequence,
+waveform key and seeded noise. Both pass through the native TX/RX chain. A
+constructed zero-voltage outage suppresses the longer transmission after its
+third bit through the two scored quiet apertures. This is an identifiability
+witness, not a measured fade probability or a typical ionosphere model.
+
+The two **540,003-sample complex prefixes are bit-for-bit identical**, with
+SHA-256 `bc8058066ebf53a301bea032673a65d20a5af246033ba166ec091246188d08b8`.
+Both complete native receivers score `DATA 0, DATA 0, DATA 0, QUIET, QUIET`,
+accept a space, and remain open: `finish_input` is never called. All five
+slots are complete and valid. The longer source subsequently resumes; its
+later received differential signal energy is 19,769.808 sample-sum units
+against the identically seeded short-message/noise control. Both receivers
+use 24 software workers on 12 logical hardware threads. The probe passes
+all 17 assertions in 2.965 seconds. [Exact receipt](local-evidence/hf-3d-preflight/completion-ambiguity-recovery.stdout.json)
+
+This separates a structural limitation from a search weakness. Any receiver
+given that same prefix, calendar and key must make the same inference about
+both histories. Additional compute cannot distinguish them at that point.
+Requiring zero premature acceptance under arbitrary complete outages while
+also accepting this legitimate short message at the same finite deadline is
+therefore impossible for this unprotected framing. That is narrower than a
+claim that every realistic fade is information-destroying: partial fades can
+retain information that improved presence inference should exploit.
+
+The limiting interpretation extends conditionally to a deep but nonzero fade.
+For fixed, fully known received means `mu0` and `mu1` over the **whole prefix**,
+let `E = ||mu1 - mu0||^2` and let proper complex white Gaussian noise have
+`nu = E[|n[k]|^2]` per complex sample (each real quadrature has variance
+`nu/2`). With equal priors, the optimum binary average error is
+`Q(sqrt(E/(2*nu)))`, equivalently `0.5*erfc(sqrt(E/(4*nu)))`.
+The log-likelihood ratio has means `+/- E/nu` and variance `2*E/nu`.
+Thus even the known-mean benchmark tends continuously to chance as the
+received difference energy vanishes; at zero energy the distributions coincide.
+This is the same Gaussian likelihood calculation already used by the
+[known-channel diagnostics](hf-phase-screens.md), not a new numerical receiver.
+Include every sample on which the hypotheses differ; a selected fade window
+cannot stand in for the whole prefix. The benchmark assumes known channel,
+timing, noise law and context, and supplies neither a natural fade probability
+nor attainable blind performance. Colored noise and unknown channel states
+require their own likelihood; additional integrity coding changes the allowed
+message hypotheses rather than making this unprotected pair distinguishable.
+
+The existing protected-codec fragment checks below remain relevant, but they
+do not establish a universal false-acceptance guarantee or equal-energy
+sensitivity. Integrity checks must remain independent of physical completion;
+received lengths must not select DSP geometry or replace scored quiet slots.
+No production framing or defaults were changed by this experiment.
+
+The first probe attempt lacked the leading samples required by native coarse
+preparation and failed before reception. A common emitted pre-roll and public
+filter halo corrected the setup; full-worker workspace quotes now fail early
+with the actual geometry error. This harness failure and its correction are
+retained separately from the successful ambiguity witness. The executable is
+included in the regular `high_fidelity_hf_completion_ambiguity` CTest group.
+
 ## Native component regression
 
 [`test_hf_fragment_integrity.cpp`](tests/test_hf_fragment_integrity.cpp) uses

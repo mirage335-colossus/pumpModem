@@ -561,7 +561,7 @@ Json phase_screens_json(const appraisal::HfPhaseScreensSpec& spec) {
 Json vector_oblique_json(const appraisal::HfVectorObliqueSpec& spec) {
     using Table=appraisal::HfVectorObliqueTable;
     const auto g=appraisal::hf_vector_oblique_geometry(spec);
-    return object({{"carrier_hz",Table::carrier_hz},{"sample_rate_hz",Table::sample_rate_hz},
+    auto result=object({{"carrier_hz",Table::carrier_hz},{"sample_rate_hz",Table::sample_rate_hz},
         {"occupied_half_band_hz",Table::occupied_half_band_hz},{"maximum_horizon_seconds",Table::horizon_seconds},
         {"perturbations",spec.perturbations},{"magnetic",spec.magnetic},{"field",spec.field},
         {"antenna",spec.antenna},{"drift_mps",spec.drift_mps},{"epoch_seconds",spec.epoch_seconds},
@@ -569,17 +569,47 @@ Json vector_oblique_json(const appraisal::HfVectorObliqueSpec& spec) {
         {"period_m",g.period_m},{"thickness_m",g.thickness_m},{"peak_plasma_hz",g.peak_plasma_hz},
         {"collision_rate_per_second",g.collision_rate},{"corrugated_slice_m",g.corrugated_slice_m},
         {"corrugation_center_fraction",g.corrugation_center_fraction},
-        {"density_harmonic_x",Json::Array{g.density_harmonic_x[0],g.density_harmonic_x[1]}},
-        {"density_harmonic_phase_rad",Json::Array{g.density_harmonic_phase_rad[0],g.density_harmonic_phase_rad[1]}},
-        {"density_profile","critical-density-scaled cos^2 vertical profile plus a flat local corrugated slice; two positive-x Fourier harmonics with stated phases"},
-        {"field_solver_scope","one incident plane wave at fixed angle/common vacuum phase across the declared frequency band; one y-invariant finite periodic x-z layer encounter"},
         {"magnetic_field_tesla",Json::Array{g.field_tesla[0],g.field_tesla[1],g.field_tesla[2]}},
         {"fixed_receive_antenna_axis",Json::Array{g.antenna_axis[0],g.antenna_axis[1],g.antenna_axis[2]}},
         {"launch_tm_fraction",g.launch_tm_fraction},
         {"first_lag_samples",Table::first_lag_samples()},{"last_lag_samples",Table::last_lag_samples()},
         {"modelling_delay_samples",Table::modelling_delay_samples},{"retained_late_samples",Table::retained_late_samples},
-        {"position_intervals",Table::position_intervals},{"preparation_workspace_bound_bytes",Table::preparation_workspace_bound_bytes},
+        {"position_intervals",Table::position_intervals},
+        {"preparation_workspace_bound_bytes",appraisal::hf_vector_oblique_preparation_workspace_bound_bytes(spec)},
         {"interpolation","fixed antenna complex-voltage coefficients and slopes over one translating plasma period"}});
+    if (spec.field < 2) {
+        result["density_harmonic_x"]=Json::Array{g.density_harmonic_x[0],g.density_harmonic_x[1]};
+        result["density_harmonic_phase_rad"]=Json::Array{g.density_harmonic_phase_rad[0],g.density_harmonic_phase_rad[1]};
+        result["density_profile"]="critical-density-scaled cos^2 vertical profile plus a flat local corrugated slice; two positive-x Fourier harmonics with stated phases";
+        result["field_solver_scope"]="one incident plane wave at fixed angle/common vacuum phase across the declared frequency band; one y-invariant finite periodic x-z layer encounter";
+    } else {
+        Json::Array modes;
+        for (const auto& mode : g.transverse_density_modes)
+            modes.push_back(object({{"m",mode.m},{"n",mode.n},{"amplitude_x",mode.amplitude_x},
+                                    {"phase_rad",mode.phase_rad}}));
+        result["cross_plane"]=spec.cross_plane;
+        result["spatial_geometry_dimension"]=3;
+        result["transverse_periodic_dimensions"]=2;
+        result["period_y_m"]=g.period_y_m;
+        result["receiver_y_m"]=g.receiver_y_m;
+        result["drift_y_mps"]=g.drift_y_mps;
+        result["trajectory_winding_y"]=g.trajectory_winding_y;
+        result["transverse_density_modes"]=std::move(modes);
+        result["density_profile"]="critical-density-scaled cos^2 vertical profile plus a flat local corrugated slab; three fixed transverse Fourier modes with explicit (m,n), normalized-density amplitudes and phases";
+        result["field_solver_scope"]="fully coupled finite Fourier Maxwell scattering in both transverse coordinates for one incident plane wave with fixed x/y incidence and common vacuum phase across the declared frequency band; one finite x-y periodic layer encounter";
+        result["trajectory_scope"]=spec.perturbations&&spec.cross_plane?
+            "fixed antenna projection samples the coupled x-y Fourier field along the declared commensurate trajectory without repeating within the admitted horizon":
+            !spec.perturbations?"planar-background control with all transverse perturbations disabled":
+            "in-plane control retains only the n=0 Fourier terms and removes cross-plane density variation";
+        result["trajectory_accuracy_scope"]="3D spatial L1 refinement and carrier witnesses are checked before complex-field folding along the fixed commensurate receiver trajectory; the scalar time-varying FIR is specific to this trajectory, not an arbitrary 3D path ensemble";
+        const bool wide_holdout = spec.field == 3 && spec.perturbations && spec.cross_plane;
+        result["production_half_orders_each_axis"]=wide_holdout?7:3;
+        result["coarse_half_orders_each_axis"]=wide_holdout?6:2;
+        result["refined_half_orders_each_axis"]=wide_holdout?8:4;
+        result["maximum_admitted_spatial_modes"]=wide_holdout?289:81;
+        result["rf_dense_terms_limit"]=wide_holdout?60'000'000'000ull:1'200'000'000ull;
+    }
+    return result;
 }
 Json channel_parameters(const appraisal::ChannelSpec& c,std::string_view scenario_id={}) {
     Json::Array paths;Hash path_hash;double power=0;
@@ -969,8 +999,11 @@ Setup setup(const Options& o,std::stop_token stop) {
         return setup_native_gui(o,stop);
     }
     auto scenario=appraisal::make_scenario(o.scenario);
-    const bool vector_native_chain_case=scenario.id.starts_with("hf-vector-oblique-chain-");
+    const bool vector_native_chain_case=scenario.id.starts_with("hf-vector-oblique-chain-")||
+        scenario.id.starts_with("hf-vector-3d-chain-");
     const bool native_chain_case=scenario.id.starts_with("hf-wave-chain-")||vector_native_chain_case;
+    if(o.hf_target_presence_diagnostic&&scenario.channel.vector_oblique&&scenario.id!="hf-vector-oblique")
+        throw Unavailable("target-presence diagnostic is qualified only for the original direct hf-vector-oblique primary");
     if(o.hf_target_presence_diagnostic&&(native_chain_case||
         !(scenario.channel.wave_optics||scenario.channel.phase_screens||scenario.channel.vector_oblique||
           scenario.id.starts_with("hf-gannon-"))))
@@ -1582,6 +1615,13 @@ Json plan_json(const Setup& s,const Options& o) {
             rendered_period?"at_least_one_complete_period_of_the_declared_two_dimensional_translating_layer_with_causal_tail":
             "partial_period_of_the_declared_two_dimensional_translating_layer_with_causal_tail";
         result["vector_oblique_exposure_limit"]="The finite periodic x-z model represents one translating density period; y-invariant geometry, one layer encounter, and this sampled period do not establish coverage of random 3D structure, multiple hops, or real disturbed-day probabilities.";
+        if (vector.field >= 2) {
+            result["vector_oblique_exposure_scope"]=vector.perturbations&&vector.cross_plane?
+                "bounded_nonrepeating_commensurate_3d_transverse_trajectory_with_complete_fir_tail":
+                !vector.perturbations?"flat_background_3d_control_no_transverse_perturbations":
+                "bounded_in_plane_control_with_cross_plane_modes_removed";
+            result["vector_oblique_exposure_limit"]="The coupled 3D periodic x-y field is sampled along one fixed commensurate receiver trajectory within the bounded horizon; it does not represent a random trajectory ensemble, multiple hops, or real disturbed-day probabilities.";
+        }
     }
     if(s.scenario.id.starts_with("hf-gannon-")) {
         result["channel_renderer"]="observed_voltage_multiplicative_replay";
@@ -2036,6 +2076,27 @@ Json channel_json(const appraisal::ChannelReport& r,double fs) {
         receipt["carrier_crosspolar_scattered_flux"]=checks.carrier_crosspolar_scattered_flux;
         receipt["carrier_flux_reference_plane"]="mixed TE/TM launch with the declared TM power fraction; reflected/transmitted and scattered flux are normalized to this launch";
         receipt["carrier_crosspolar_reference_plane"]="independent pure-TE launch and TM output diagnostic; these cross-polar fluxes are not subsets of the mixed-launch scattered flux";
+        if (vector.spec.field >= 2) {
+            receipt["qualification_scope"]="finite-order bidirectional 3D cold collisional Maxwell scattering with doubly periodic transverse density, oblique incidence and fixed antenna projection; finite RF/position/order/FIR witnesses and one commensurate trajectory do not establish random field ensembles, field calibration or environmental probabilities";
+            receipt["output_half_orders_y"]=checks.output_half_orders_y;
+            receipt["output_trajectory_half_orders"]=checks.output_trajectory_half_orders;
+            receipt["maximum_rf_dense_terms"]=checks.maximum_rf_dense_terms;
+            receipt["carrier_witnesses_qualified"]=checks.carrier_witnesses_qualified;
+            receipt["carrier_out_of_plane_reflected_flux"]=checks.carrier_out_of_plane_reflected_flux;
+            receipt["carrier_out_of_plane_transmitted_flux"]=checks.carrier_out_of_plane_transmitted_flux;
+            receipt["unfolded_order_scope"]="two-dimensional transverse diffraction orders in x and y are retained through Maxwell solves; the trajectory-folded response combines those orders only at the declared receiver coordinates";
+            receipt["spatial_l1_error_scope"]="mesh/order/refined-order errors are L1 sums of absolute fixed-antenna-projected complex-voltage differences across retained unfolded (m,n) orders, before trajectory folding; they are not polarization-resolved norms and do not bound orders omitted by finite truncation";
+            receipt["carrier_power_minimum_scope"]="minimum and maximum carrier power are sampled over one declared commensurate receiver-trajectory period; the finite trajectory-series lower bound is not a global x-y minimum or a three-dimensional path-ensemble bound";
+            receipt["out_of_plane_flux_scope"]="out-of-plane reflected and transmitted flux is independently reported from the mixed TE/TM launch for the retained nonzero-y diffraction orders";
+            receipt["maximum_edge_x_flux"]=checks.maximum_edge_x_flux;
+            receipt["maximum_edge_y_flux"]=checks.maximum_edge_y_flux;
+            receipt["carrier_refined_edge_flux"]=checks.carrier_refined_edge_flux;
+            receipt["carrier_refined_edge_x_flux"]=checks.carrier_refined_edge_x_flux;
+            receipt["carrier_refined_edge_y_flux"]=checks.carrier_refined_edge_y_flux;
+            receipt["rf_dense_terms_limit"]=checks.rf_dense_terms_limit;
+            receipt["maximum_admitted_spatial_modes"]=checks.maximum_admitted_spatial_modes;
+            receipt["period_averaged_energy_scope"]="coherent average along the declared commensurate receiver trajectory after combining equal temporal indices; not an incoherent average over the full x-y spatial torus";
+        }
         receipt["minimum_carrier_power"]=checks.minimum_carrier_power;
         receipt["maximum_carrier_power"]=checks.maximum_carrier_power;
         receipt["minimum_carrier_position_m"]=checks.minimum_carrier_position_m;

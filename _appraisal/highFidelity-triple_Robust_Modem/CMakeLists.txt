@@ -84,6 +84,11 @@ target_include_directories(high_fidelity_vector_oblique_probe PRIVATE "${PROJECT
 target_link_libraries(high_fidelity_vector_oblique_probe PRIVATE high_fidelity_vector_oblique)
 target_compile_definitions(high_fidelity_vector_oblique_probe PRIVATE ${_hf_identity} APPRAISAL_SOURCE_SHA="${_hf_source_sha}")
 set_target_properties(high_fidelity_vector_oblique_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+add_executable(high_fidelity_completion_ambiguity_probe "${_hf_root}/src/hf_completion_ambiguity_probe.cpp")
+target_include_directories(high_fidelity_completion_ambiguity_probe PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")
+target_link_libraries(high_fidelity_completion_ambiguity_probe PRIVATE high_fidelity_channel datapump_triad_receiver)
+target_compile_definitions(high_fidelity_completion_ambiguity_probe PRIVATE ${_hf_identity} APPRAISAL_SOURCE_SHA="${_hf_source_sha}")
+set_target_properties(high_fidelity_completion_ambiguity_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 add_executable(high_fidelity_magnetoionic_probe "${_hf_root}/src/hf_magnetoionic_probe.cpp")
 target_include_directories(high_fidelity_magnetoionic_probe PRIVATE "${PROJECT_SOURCE_DIR}/tools")
 target_link_libraries(high_fidelity_magnetoionic_probe PRIVATE high_fidelity_fullwave)
@@ -109,12 +114,16 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 if(BUILD_TESTING)
+  add_test(NAME high_fidelity_hf_completion_ambiguity COMMAND high_fidelity_completion_ambiguity_probe)
+  set_tests_properties(high_fidelity_hf_completion_ambiguity PROPERTIES LABELS "appraisal" TIMEOUT 120)
   add_executable(high_fidelity_test_hf_vector_oblique "${_hf_root}/tests/test_hf_vector_oblique.cpp")
   target_link_libraries(high_fidelity_test_hf_vector_oblique PRIVATE high_fidelity_vector_oblique)
   add_test(NAME high_fidelity_hf_vector_oblique COMMAND high_fidelity_test_hf_vector_oblique)
   set_tests_properties(high_fidelity_hf_vector_oblique PROPERTIES LABELS "appraisal" TIMEOUT 90)
   add_test(NAME high_fidelity_hf_vector_oblique_waveform COMMAND high_fidelity_vector_oblique_probe primary)
   set_tests_properties(high_fidelity_hf_vector_oblique_waveform PROPERTIES LABELS "appraisal" TIMEOUT 90)
+  add_test(NAME high_fidelity_hf_vector_3d_waveform COMMAND high_fidelity_vector_oblique_probe primary-3d)
+  set_tests_properties(high_fidelity_hf_vector_3d_waveform PROPERTIES LABELS "appraisal" TIMEOUT 120)
   add_executable(high_fidelity_test_hf_fragment_integrity "${_hf_root}/tests/test_hf_fragment_integrity.cpp")
   target_link_libraries(high_fidelity_test_hf_fragment_integrity PRIVATE datapump_triad_receiver)
   add_test(NAME high_fidelity_hf_fragment_integrity COMMAND high_fidelity_test_hf_fragment_integrity)
@@ -171,6 +180,9 @@ if(BUILD_TESTING)
   add_test(NAME high_fidelity_wave_receipts COMMAND "${Python3_EXECUTABLE}"
     "${_hf_root}/tests/test_wave_receipts.py")
   set_tests_properties(high_fidelity_wave_receipts PROPERTIES LABELS "appraisal" TIMEOUT 45)
+  add_test(NAME high_fidelity_qualification COMMAND "${Python3_EXECUTABLE}"
+    "${_hf_root}/tests/test_qualification.py")
+  set_tests_properties(high_fidelity_qualification PROPERTIES LABELS "appraisal" TIMEOUT 45)
   add_test(NAME high_fidelity_ensemble COMMAND "${Python3_EXECUTABLE}"
     "${_hf_root}/tests/test_ensemble.py")
   set_tests_properties(high_fidelity_ensemble PROPERTIES LABELS "appraisal" TIMEOUT 45)
@@ -178,6 +190,7 @@ if(BUILD_TESTING)
     "${_hf_root}/tests/test_coverage_design.py")
   set_tests_properties(high_fidelity_coverage_design PROPERTIES LABELS "appraisal" TIMEOUT 45)
   add_custom_target(high_fidelity_checks DEPENDS high_fidelity_appraisal high_fidelity_fullwave_probe high_fidelity_fullwave_kernel_probe high_fidelity_magnetoionic_probe high_fidelity_wave_optics_probe
+    high_fidelity_completion_ambiguity_probe
     high_fidelity_vector_oblique_probe high_fidelity_test_hf_vector_oblique
     high_fidelity_test_hf_fragment_integrity
     high_fidelity_phase_screens_probe high_fidelity_test_hf_phase_screens

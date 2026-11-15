@@ -451,6 +451,62 @@ void vector_oblique_native_chain_profiles() {
     near(tone.channel.noise.tone_hz, 100., 0., "clock-plus-tone vector-chain case preserves RF tone offset");
 }
 
+void vector_oblique_3d_profiles() {
+    const auto primary = make_scenario("hf-vector-3d");
+    const auto holdout = make_scenario("hf-vector-3d-holdout");
+    const auto planar = make_scenario("hf-vector-3d-planar");
+    const auto in_plane = make_scenario("hf-vector-3d-in-plane");
+    const auto chain_off = make_scenario("hf-vector-3d-chain-off");
+    const auto chain_tone = make_scenario("hf-vector-3d-chain-clocks-tone");
+    for (const auto* scenario : {&primary, &holdout, &planar, &in_plane, &chain_off, &chain_tone}) {
+        check(scenario->channel.vector_oblique.has_value(), "3D scenarios retain the shared vector propagation operator");
+        near(scenario->waveform.sample_rate_hz, 1920., 0., "3D scenario keeps the qualified native sample rate");
+        near(scenario->waveform.requested_bit_seconds, 64., 0., "3D scenario keeps the fixed long-bit geometry");
+        near(scenario->numerical_horizon_seconds, 2400., 0., "3D scenario keeps the qualified finite horizon");
+        near(scenario->reference_cn0_db_hz, 0., 0., "3D scenario keeps the fixed reference C/N0");
+    }
+    check(primary.channel.vector_oblique->field == 2 && primary.channel.vector_oblique->cross_plane,
+          "3D primary uses the frozen cross-plane physical field");
+    check(holdout.channel.vector_oblique->field == 3 && holdout.channel.vector_oblique->cross_plane,
+          "3D holdout uses the independent cross-plane physical field");
+    near(holdout.channel.vector_oblique->drift_mps, 7.5, 0., "3D holdout keeps its frozen independent drift");
+    near(holdout.channel.vector_oblique->epoch_seconds, 520., 0., "3D holdout keeps its frozen independent epoch");
+    const auto holdout_preparation_bound = hf_vector_oblique_preparation_workspace_bound_bytes(
+        *holdout.channel.vector_oblique);
+    check(holdout_preparation_bound == 256u * 1024u * 1024u,
+          "3D held field uses its explicit wide solver-preparation workspace quote");
+    check(holdout.channel.maximum_workspace_bytes == 320u * 1024u * 1024u &&
+          holdout.channel.maximum_workspace_bytes >= holdout_preparation_bound + 64u * 1024u * 1024u,
+          "3D held channel admission includes fixed-allocation headroom beyond solver preparation");
+    check(primary.channel.maximum_workspace_bytes >= hf_vector_oblique_preparation_workspace_bound_bytes(
+              *primary.channel.vector_oblique),
+          "ordinary 3D channel admission still covers its smaller solver-preparation quote");
+    const auto primary_geometry = hf_vector_oblique_geometry(*primary.channel.vector_oblique);
+    const auto holdout_geometry = hf_vector_oblique_geometry(*holdout.channel.vector_oblique);
+    const auto planar_geometry = hf_vector_oblique_geometry(*planar.channel.vector_oblique);
+    const auto in_plane_geometry = hf_vector_oblique_geometry(*in_plane.channel.vector_oblique);
+    near(primary_geometry.period_y_m, 17000., 0., "3D primary exposes its independent y-period");
+    near(holdout_geometry.period_y_m, 18500., 0., "3D holdout changes its y-period");
+    check(primary_geometry.trajectory_winding_y == 1 && holdout_geometry.trajectory_winding_y == -1,
+          "3D holdout reverses the independent transverse trajectory winding");
+    check(primary_geometry.transverse_density_modes[1].n != 0 && holdout_geometry.transverse_density_modes[1].n != 0,
+          "3D primary and holdout retain cross-plane Fourier harmonics");
+    check(!planar.channel.vector_oblique->perturbations,
+          "3D planar control disables transverse perturbations");
+    check(in_plane.channel.vector_oblique->perturbations && !in_plane.channel.vector_oblique->cross_plane,
+          "3D in-plane control retains perturbations while removing cross-plane modes");
+    check(planar_geometry.transverse_density_modes[0].amplitude_x == 0. &&
+          in_plane_geometry.transverse_density_modes[1].amplitude_x == 0. &&
+          in_plane_geometry.transverse_density_modes[0].amplitude_x > 0.,
+          "3D ablations keep mode identities while selectively zeroing transverse amplitudes");
+    near(chain_off.channel.noise.tone_amplitude, 0., 0., "3D chain off control has no tone");
+    near(chain_tone.channel.noise.tone_amplitude, .3, 0., "3D chain clock/tone control preserves tone amplitude");
+    near(chain_tone.channel.noise.tone_hz, 100., 0., "3D chain clock/tone control preserves tone offset");
+    const auto names = scenario_names();
+    check(std::ranges::find(names, "hf-vector-3d-chain-clocks-tone") != names.end(),
+          "3D clock/tone chain is listed in the scenario catalogue");
+}
+
 } // namespace
 
 int main() {
@@ -466,6 +522,7 @@ int main() {
         magnetoionic_profiles();
         gannon_observed_voltage_profiles();
         vector_oblique_native_chain_profiles();
+        vector_oblique_3d_profiles();
         std::cout << "additional HF profile checks passed: " << checks << '\n';
         return 0;
     } catch (const std::exception& error) {

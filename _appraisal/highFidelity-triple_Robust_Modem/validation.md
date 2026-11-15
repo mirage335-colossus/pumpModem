@@ -5,7 +5,18 @@ corrective history and the evidence limits for the contained appraisal. No
 scenario qualifies a real environment, universal receiver sensitivity floor,
 or complete-receiver CPU/GPU capacity.
 
-The latest [coupled vector/oblique record](hf-vector-oblique.md) joins magnetic
+The latest [3D spatial and qualification record](hf-vector-3d.md) contains the
+fixed fields, numerical support recovery, complete-receiver protocol and exact
+source-bound requirements. The separate [completion ambiguity probe](hf-fragment-integrity.md#exact-native-input-ambiguity-under-an-outage)
+verifies an identical-input failure using the complete native receiver.
+Eleven new complete observations yield five correct wanted deliveries, four
+wanted misses and two quiet negative controls. The matched endpoint pair
+reproduces missed completion despite all correct DATA, and the source-bound
+32-cell audit retains historical integrity/false-DATA failures. See the linked
+record for the 39-group software check, subsequent 17 analysis checks and
+decision-scale information-reference limits.
+
+The preceding [coupled vector/oblique record](hf-vector-oblique.md) joins magnetic
 polarization, transverse diffraction and oblique reflection in one native
 Maxwell calculation. It retains a rejected numerical pilot, qualified final
 waveforms, complete receiver brackets, endpoint interactions and exact private

@@ -96,26 +96,33 @@ int main(int argc, char** argv) {
     using namespace appraisal;
     try {
         std::cout << std::setprecision(17);
-        if (argc < 2 || argc > 3 || (argc == 3 && std::string_view(argv[2]) != "carrier"))
-            throw std::invalid_argument("usage: high_fidelity_vector_oblique_probe primary|holdout|off|no-b|cross [carrier]");
+        const std::string_view mode = argc == 3 ? argv[2] : "";
+        const std::size_t wide = mode == "carrier-wide5" ? 5 : mode == "carrier-wide7" ? 7 : 0;
+        if (argc < 2 || argc > 3 || (argc == 3 && mode != "carrier" && wide == 0))
+            throw std::invalid_argument("usage: high_fidelity_vector_oblique_probe primary|holdout|off|no-b|cross|primary-3d|holdout-3d|3d-planar|3d-in-plane [carrier], or holdout-3d carrier-wide5|carrier-wide7");
         HfVectorObliqueSpec spec;
         const auto name = std::string_view(argv[1]);
         if (name == "holdout") { spec.field = 1; spec.drift_mps = 7.5; spec.epoch_seconds = 520.; }
         else if (name == "off") spec.perturbations = false;
         else if (name == "no-b") spec.magnetic = false;
         else if (name == "cross") spec.antenna = 1;
+        else if (name == "primary-3d") spec.field = 2;
+        else if (name == "holdout-3d") { spec.field = 3; spec.drift_mps = 7.5; spec.epoch_seconds = 520.; }
+        else if (name == "3d-planar") { spec.field = 2; spec.perturbations = false; }
+        else if (name == "3d-in-plane") { spec.field = 2; spec.cross_plane = false; }
         else if (name != "primary") throw std::invalid_argument("unknown vector oblique field");
         const bool carrier_only = argc == 3;
         const auto start = std::chrono::steady_clock::now();
         HfVectorObliqueTableBuild result;
-        if (carrier_only) result.checks = assess_hf_vector_oblique_carrier(spec);
+        if (wide) result.checks = assess_hf_vector_oblique_carrier_resolution(spec, wide);
+        else if (carrier_only) result.checks = assess_hf_vector_oblique_carrier(spec);
         else result = build_hf_vector_oblique_table(spec);
         const auto& checks = result.checks;
         const auto g = hf_vector_oblique_geometry(spec);
         const double impulse_error = result.table ? impulse_check(result.table, spec) : 0.;
         const auto tone = result.table ? moving_tone_check(result.table, spec) : ToneCheck{};
         const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-        const auto out = object({{"kind", "appraisal_hf_vector_oblique_numerics"},
+        auto out = object({{"kind", "appraisal_hf_vector_oblique_numerics"},
             {"appraisal_source_sha256", APPRAISAL_SOURCE_SHA}, {"native_source_sha256", DATAPUMP_TRIAD_PROBE_SOURCE_SHA},
             {"field", static_cast<std::uint64_t>(spec.field)}, {"antenna", static_cast<std::uint64_t>(spec.antenna)},
             {"perturbations", spec.perturbations}, {"magnetic", spec.magnetic},
@@ -153,8 +160,52 @@ int main(int argc, char** argv) {
             {"interpolation_peak_error_bound", checks.interpolation_peak_error_bound},
             {"retarded_peak_error_bound", checks.retarded_peak_error_bound}, {"impulse_chunk_tail_error", impulse_error},
             {"moving_tone_reference_error", tone.reference_error}, {"moving_tone_chunk_error", tone.chunk_error}});
+        if (spec.field >= 2) {
+            Json::Array density_modes;
+            for (const auto& mode : g.transverse_density_modes)
+                density_modes.push_back(object({{"m", mode.m}, {"n", mode.n},
+                    {"amplitude_x", mode.amplitude_x}, {"phase_rad", mode.phase_rad}}));
+            out["cross_plane"] = spec.cross_plane;
+            out["period_y_m"] = g.period_y_m;
+            out["receiver_y_m"] = g.receiver_y_m;
+            out["drift_y_mps"] = g.drift_y_mps;
+            out["trajectory_winding_y"] = g.trajectory_winding_y;
+            out["transverse_density_modes"] = std::move(density_modes);
+            out["output_half_orders_y"] = checks.output_half_orders_y;
+            out["output_trajectory_half_orders"] = checks.output_trajectory_half_orders;
+            out["coarse_half_orders"] = Json::Array{checks.coarse_half_orders[0], checks.coarse_half_orders[1]};
+            out["refined_half_orders"] = Json::Array{checks.refined_half_orders[0], checks.refined_half_orders[1]};
+            out["maximum_rf_dense_terms"] = checks.maximum_rf_dense_terms;
+            out["rf_dense_terms_limit"] = checks.rf_dense_terms_limit;
+            out["maximum_admitted_spatial_modes"] = checks.maximum_admitted_spatial_modes;
+            const auto workspace_bound = carrier_only ?
+                (wide ? hf_vector_wide_carrier_workspace_bound_bytes : Table::three_d_preparation_workspace_bound_bytes) :
+                hf_vector_oblique_preparation_workspace_bound_bytes(spec);
+            out["preparation_workspace_bound_bytes"] = workspace_bound;
+            out["carrier_witnesses_qualified"] = checks.carrier_witnesses_qualified;
+            out["carrier_out_of_plane_reflected_flux"] = checks.carrier_out_of_plane_reflected_flux;
+            out["carrier_out_of_plane_transmitted_flux"] = checks.carrier_out_of_plane_transmitted_flux;
+            out["carrier_cross_plane_ablation_compared"] = checks.carrier_cross_plane_ablation_compared;
+            out["carrier_cross_plane_ablation_voltage_error"] = checks.carrier_cross_plane_ablation_voltage_error;
+            out["maximum_edge_x_flux"] = checks.maximum_edge_x_flux;
+            out["maximum_edge_y_flux"] = checks.maximum_edge_y_flux;
+            out["carrier_refined_edge_flux"] = checks.carrier_refined_edge_flux;
+            out["carrier_refined_edge_x_flux"] = checks.carrier_refined_edge_x_flux;
+            out["carrier_refined_edge_y_flux"] = checks.carrier_refined_edge_y_flux;
+        }
+        if (wide) {
+            out["wide_carrier_probe"] = true;
+            out["requested_coarse_half_order_each_axis"] = wide - 1;
+            out["requested_production_half_order_each_axis"] = wide;
+            out["requested_refined_half_order_each_axis"] = wide + 1;
+            const auto refined_width = 2 * (wide + 1) + 1;
+            out["largest_spatial_mode_count"] = refined_width * refined_width;
+            out["carrier_dense_terms_limit"] = hf_vector_wide_carrier_dense_terms_bound;
+            out["edge_flux_scope"] = "mixed-launch reflected and transmitted flux on either outer axis of the full unfolded spatial grid, with corners counted once in the union";
+        }
         write_json(std::cout, out);
         std::cout << '\n';
+        if (wide) return checks.carrier_witnesses_qualified ? 0 : 3;
         return carrier_only || (checks.qualified && result.table && impulse_error <= 2e-15 &&
             tone.reference_error <= 2e-13 && tone.chunk_error == 0.) ? 0 : 3;
     } catch (const std::exception& error) {

@@ -687,7 +687,8 @@ struct Channel::Impl {
         if (spec.magnetoionic_reflection) bytes = checked_add(bytes, Magnetic::preparation_workspace_bound_bytes);
         if (spec.wave_optics) bytes = checked_add(bytes, WaveOptics::preparation_workspace_bound_bytes);
         if (spec.phase_screens) bytes = checked_add(bytes, PhaseScreens::preparation_workspace_bound_bytes);
-        if (spec.vector_oblique) bytes = checked_add(bytes, VectorOblique::preparation_workspace_bound_bytes);
+        if (spec.vector_oblique) bytes = checked_add(bytes,
+            hf_vector_oblique_preparation_workspace_bound_bytes(*spec.vector_oblique));
         if (bytes > spec.maximum_workspace_bytes) throw ChannelWorkspaceError("channel exceeds explicit workspace limit");
         std::vector<std::size_t> order(spec.paths.size()), membership(spec.paths.size(), std::numeric_limits<std::size_t>::max());
         for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
@@ -832,6 +833,7 @@ struct Channel::Impl {
         if (spec.vector_oblique) {
             const auto start = std::chrono::steady_clock::now();
             const auto& selected = *spec.vector_oblique;
+            const auto preparation_bound = hf_vector_oblique_preparation_workspace_bound_bytes(selected);
             const auto built = build_hf_vector_oblique_table(selected, stop);
             if (!built.table || !built.checks.qualified)
                 throw HfVectorObliqueUnavailable("vector oblique table failed its Maxwell, Fourier-order, or causal-kernel qualification");
@@ -844,9 +846,9 @@ struct Channel::Impl {
             receipt.table_sha256 = vector_oblique_table_sha256(*built.table);
             receipt.table_workspace_bytes = built.table->workspace_bytes();
             receipt.stream_workspace_bytes = vector_oblique->workspace_bytes();
-            require(built.checks.preparation_peak_workspace_bytes <= VectorOblique::preparation_workspace_bound_bytes &&
+            require(built.checks.preparation_peak_workspace_bytes <= preparation_bound &&
                     checked_add(receipt.table_workspace_bytes, receipt.stream_workspace_bytes) <=
-                        VectorOblique::preparation_workspace_bound_bytes,
+                        preparation_bound,
                     "vector oblique table, stream and peak preparation exceed their workspace admission");
             receipt.preparation_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             receipt.retarded_peak_error_bound = built.checks.retarded_peak_error_bound;
