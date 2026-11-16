@@ -7,6 +7,62 @@ different questions and are reported separately. No natural-condition
 probability, field calibration, or universal sensitivity floor follows from
 these deterministic cases or small fixed-seed holdouts.
 
+## Five-link adequacy and receiver generality
+
+Assessment audited 16 November 2026 at repository
+`0d3369366798190e900d9d61000fced53a5a2931`. This is a source, retained-receipt
+and literature audit; it runs no new communications campaign. **The suite is
+not yet adequate to qualify the full five-link weak-signal objective.** It has
+demonstrated substantial failure-finding ability, especially for HF skywave,
+but the depth and applicability of the five families are uneven. A description
+such as “reasonably comprehensive” must not be extended from engineering
+failure discovery to whole-link reliability or practical sensitivity limits.
+
+| Requested link | Executed evidence | Main adequacy limit |
+| --- | --- | --- |
+| Sub-9 kHz / 200 ft antenna | Calculated resonant/detuned antenna, one bright complete message, and equal-energy weak static/phase-wander **single-slot** comparisons. Phase wander loses the wanted bit while wall time rises from 20.27 to 64.58 s. | No native waveguide solution or calibrated installation/noise replay; no weak complete-message duration/energy bracket or full-duration VLF negative cohort. Supplemental fine models report a resource/geometry rejection in the failed weak case. [VLF findings](validation.md#frozen-full-duration-vlf-campaign). |
+| 1 MHz groundwave | Homogeneous land/sea references, a constructed night competitor and a weak full-message failure; earlier interior-outage testing. | Fixed attenuation references and synthetic phase/ray dynamics, not mixed-terrain/coastal complex-channel validation. Sparse strength points, no dedicated energy/duration progression or per-family negative cohort. [Executed groundwave cases](validation.md#expanded-propagation-and-receiver-controls). |
+| 30 MHz groundwave | Sea/land complete-message references and one weak full-message failure. | A few magnitude snapshots at the model's frequency endpoint; no adequate ensemble of direct/reflected/surface/terrain/sea/duct contributions or calibrated local phase/noise. [Model scope](models.md#groundwave-snapshots-and-competing-path). |
+| 1–30 MHz skywave | The deepest coverage: statistical and independent trajectories, coupled magnetic/diffraction/oblique/3D/evolving/two-hop constructions, selected measured-voltage records, complete messages, controls, energy brackets and repair regressions. Selected current-waveform protected repairs now pass finite conditional checks. | Physical combinations and occurrence distributions remain sparse; calibrated broadband disturbed-event replay and full operational sensitivity/capacity qualification are missing. Current unprotected truncation and other phase/history failures remain. [Current repair](hf-current-admission.md), [coupled two-hop scope](hf-multihop.md). |
+| Earth–Moon–Earth | Numerically checked joint spectral delay–Doppler synthesis, disk/patch/severe complete messages, one noise control and a high-energy discriminator. Historical disk/severe cases accept the wrong space; disk still does so at 60 rather than 30 dB-Hz. | Frozen monostatic 5.76 GHz geometry with perfect bulk-Doppler compensation, not general bistatic/evolving/frequency/polarization/hardware coverage. No matched duration-energy campaign or full-message wrong-key cohort. [EME findings](validation.md#full-calendar-lunar-outcomes-and-final-discriminators). |
+
+The inspected VLF, groundwave and EME communications receipts above bind the
+older `independent-apsk-v2` waveform and native source
+`be47453d07fb27afe4cf4c168f76390de193cf57a403009a1078dccca6f01aa2`.
+They are meaningful historical observations, not current carrier-v1 passes or
+proof that each old failure persists unchanged. Current synthetic Sub-9
+admission studies elsewhere do not replace the antenna/waveguide tests. The
+more detailed `_ref` plans likewise are not executed modem coverage.
+
+The receiver work is **partly generic, partly additional model search**:
+
+- Protected-fragment recovery, scalar admission and reuse of already computed
+  scores/codecs add no new historical DSP search. Shared preparation, paired
+  rendering and block correlations reduce repeated work. These are generic
+  mechanisms, with explicitly limited full-message qualification.
+- Predictive quiet is a generic interference/completion mechanism, but adds
+  bounded earlier-gap estimation and validation. Its current unprotected `Ae`
+  regression rules out general promotion. Comparing already-admitted models
+  also evaluates existing branches that were formerly skipped; it is not free.
+- The 97-model phase bank and Cartesian refinement explicitly add hypotheses.
+  Phase/frequency forward sums are a more generic state-space method, but the
+  fixed walk/sticky/bridge laws and twelve correlated-gain laws still add priors,
+  support limits and work. They are not one hard-coded detector per named
+  weather condition, nor an established general solution without extra search.
+  See [phase-search scope](hf-experiments.md#separating-available-energy-from-receiver-use),
+  [retained inference failures](hf-receiver-repair.md), and
+  [correlated-gain costs](hf-correlated-presence.md).
+
+Detailed plasma, ground, antenna and lunar models belong to the **simulator**;
+they do not automatically add receiver candidates or give the receiver channel
+truth. Generic mathematical form alone does not establish generic performance.
+No common five-family suite of complete-message sensitivity boundaries, matched
+unknown-channel references, negative controls and complete-service costs yet
+demonstrates the desired practical floor. The latest approximately 2.047×
+energy / 1.74–1.75× service improvement is a finite HF operating-point result.
+The [reference assumptions](research-reconciliation.md#noise-references-and-decision-statistics)
+also distinguish physical outage/estimation cost from avoidable receiver loss.
+
 ## Applicability after the admission and carrier-key changes
 
 Documentation/source audit: **16 November 2026**, repository

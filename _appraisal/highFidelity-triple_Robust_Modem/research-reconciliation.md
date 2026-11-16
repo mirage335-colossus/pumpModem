@@ -87,6 +87,15 @@ sharp waterfall or outage can be physically real. The useful question is
 whether receiver loss is materially worse than the matched reference, not
 whether every real-world curve is smooth.
 
+For a concrete contrary theoretical result, [Yang, Durisi, Koch and Polyanskiy,
+*Diversity versus Channel Knowledge at Finite Block-Length*](https://arxiv.org/abs/1204.2927)
+find a nonmonotonic coherence-time tradeoff under noncoherent Rayleigh block
+fading at fixed block length/error probability: diversity and channel-estimation
+cost compete. This is not an HF/VLF/EME performance bound, but it rules out using
+known-channel AWGN smoothness as a universal acceptance criterion. It does not
+excuse implementation cliffs; compare matched observations, available known-
+channel information, declared inference assumptions and executed receiver work.
+
 Keep sensitivity sweeps paired by complete episode and fixed waveform/channel
 history. Never renormalize each received window or select favorable parts of a
 long episode. Report correct complete messages, wrong bits, erasures, missed or
