@@ -2,6 +2,7 @@
 #include "datapump/triad_stream.hpp"
 #include "../src/search_fft.hpp"
 #include "../src/triad_receiver_coarse.hpp"
+#include "../src/triad_receiver_driver.hpp"
 #include "../src/triad_receiver_executor.hpp"
 #include "../src/triad_receiver_fine.hpp"
 
@@ -129,6 +130,14 @@ ReceiverSlotScore score(const Fixture& f, unsigned workers = 1) {
     return score_receiver_slot(f.config, f.slot, f.key, f.iq, f.valid, workers, workspace_limit);
 }
 
+void strict_preserves_wanted(const ReceiverSlotScore& wanted) {
+    auto filtered = wanted;
+    receiver_detail::apply_wrong_key_admission(filtered, WrongKeyAdmission::strict);
+    check(wanted.decision == SlotDecision::data && filtered.decision == SlotDecision::data &&
+          filtered.bit == wanted.bit && !filtered.wrong_key_rejected,
+          "strict wrong-key policy lost a frozen weak/disturbed wanted control");
+}
+
 void complete_data() {
     const auto plain = fixture(0, false, false);
     const auto one = score(plain);
@@ -190,6 +199,86 @@ void configured_carrier_reception() {
           "lower-gain matching carrier did not admit the transmitted bit");
     check(weak_mismatched.complete && weak_mismatched.decision != SlotDecision::data,
           "lower-gain foreign carrier was admitted by the broad frequency search");
+
+    // Preserve the original false DATA as a regression control: key binding
+    // alone does not reject this strong, unrelated keyed waveform.
+    check(mismatched.decision == SlotDecision::data,
+          "the frozen strong foreign-carrier control no longer exercises false DATA");
+    adjacent_frequency.config.wrong_key_admission = WrongKeyAdmission::strict;
+    const auto rejected = score(adjacent_frequency);
+    check(rejected.decision == SlotDecision::ambiguous && !rejected.bit && rejected.wrong_key_rejected &&
+          rejected.operational_passes_conditional_bound,
+          "strict wrong-key policy must erase strong competing foreign DATA without inventing quiet");
+    check(rejected.operational_bit_evidence == mismatched.operational_bit_evidence &&
+          rejected.operational_log_e == mismatched.operational_log_e &&
+          rejected.quiet_energy == mismatched.quiet_energy &&
+          rejected.coarse_workspaces == mismatched.coarse_workspaces &&
+          rejected.coarse_frequency_points == mismatched.coarse_frequency_points &&
+          rejected.coarse_arrival_points == mismatched.coarse_arrival_points &&
+          rejected.basis_rows == mismatched.basis_rows &&
+          rejected.adaptive_transition_edges == mismatched.adaptive_transition_edges &&
+          rejected.workspace_peak_bytes == mismatched.workspace_peak_bytes,
+          "wrong-key admission must reuse exactly the ordinary DSP scores, work and workspace");
+    for (const auto* wanted : {&result, &weak_matching}) {
+        auto filtered = *wanted;
+        receiver_detail::apply_wrong_key_admission(filtered, WrongKeyAdmission::strict);
+        check(filtered.decision == SlotDecision::data && filtered.bit == 1 && !filtered.wrong_key_rejected,
+              "strict policy lost the frozen matched strong or lower-gain control");
+    }
+}
+
+void wrong_key_policy_boundaries() {
+    using receiver_detail::apply_wrong_key_admission;
+    const auto threshold = receiver_operational_threshold();
+    ReceiverSlotScore candidate;
+    candidate.decision = SlotDecision::data;
+    candidate.bit = 0;
+    candidate.operational_threshold = threshold;
+    candidate.operational_bit_evidence = {threshold + 25., threshold + 20.};
+    candidate.operational_bit_log_separation = 5.;
+    candidate.operational_log_e = threshold + 24.;
+    candidate.operational_passes_conditional_bound = true;
+    auto current = candidate, guarded = candidate, strict = candidate;
+    apply_wrong_key_admission(current, WrongKeyAdmission::current);
+    apply_wrong_key_admission(guarded, WrongKeyAdmission::guarded);
+    apply_wrong_key_admission(strict, WrongKeyAdmission::strict);
+    check(current.decision == candidate.decision && current.bit == candidate.bit &&
+          current.operational_bit_evidence == candidate.operational_bit_evidence &&
+          current.wrong_key_required_log_separation == 0., "current policy must preserve admission exactly");
+    check(guarded.decision == SlotDecision::data && strict.decision == SlotDecision::ambiguous &&
+          strict.wrong_key_required_log_separation > guarded.wrong_key_required_log_separation &&
+          strict.operational_passes_conditional_bound && !strict.bit,
+          "wrong-key strength must monotonically tighten admission without changing the noise-bound receipt");
+
+    // The extra penalty joins continuously at the competing bit's threshold;
+    // no minimum fragment count or stronger penalty merely for more samples.
+    for (double offset : {-1e-6, 0., 1e-6}) {
+        auto boundary = candidate;
+        boundary.operational_bit_evidence[1] = threshold + offset;
+        apply_wrong_key_admission(boundary, WrongKeyAdmission::strict);
+        check(std::abs(boundary.wrong_key_required_log_separation - 2 * std::numbers::ln10) < 1e-6,
+              "competing-evidence penalty must be continuous at the ordinary threshold");
+    }
+    // A modeled weak wanted signal with only one supported bit remains usable.
+    auto weak = candidate;
+    weak.operational_bit_evidence = {threshold + .01, -10};
+    weak.operational_bit_log_separation = threshold + 10.01;
+    apply_wrong_key_admission(weak, WrongKeyAdmission::strict);
+    check(weak.decision == SlotDecision::data, "strict policy must not impose an arbitrary higher noise threshold");
+    for (const auto decision : {SlotDecision::quiet, SlotDecision::ambiguous}) {
+        auto nondata = candidate;
+        nondata.decision = decision;
+        nondata.bit.reset();
+        apply_wrong_key_admission(nondata, WrongKeyAdmission::strict);
+        check(nondata.decision == decision && !nondata.wrong_key_rejected && !nondata.bit,
+              "wrong-key policy must preserve quiet and erasures");
+    }
+    for (auto mode : {WrongKeyAdmission::current, WrongKeyAdmission::guarded, WrongKeyAdmission::strict})
+        check(parse_wrong_key_admission(wrong_key_admission_name(mode)) == mode,
+              "wrong-key policy tokens must round trip");
+    rejects<Error>([] { (void)parse_wrong_key_admission("10^-4/day"); }, "uncalibrated rate is not a policy token");
+    rejects<Error>([&] { apply_wrong_key_admission(candidate, static_cast<WrongKeyAdmission>(99)); },
+                   "invalid wrong-key policy must not silently select a mode");
 }
 
 // One short DATA window per case, same observation and declared static
@@ -238,6 +327,7 @@ void bounded_drift_recovery() {
               changed.drift_frequency_bins > 1 && changed.drift_bit_evidence[expected] >
                   changed.drift_bit_evidence[1 - expected],
               "bounded coherent drift search did not recover the DATA alternative");
+        strict_preserves_wanted(changed);
         check(changed.coarse_workspaces == original.coarse_workspaces &&
               changed.coarse_frequency_points == original.coarse_frequency_points &&
               changed.coarse_arrival_points == original.coarse_arrival_points &&
@@ -332,6 +422,7 @@ void long_drift_recovery(bool broad) {
           result.drift_observation_rows > 131'072 && result.drift_proposal_stride > 1 &&
           result.drift_timing_atoms > 0 && result.drift_bit_evidence[bit] > result.drift_bit_evidence[1 - bit],
           "broad timing search missed the weak long drift after exceeding the old raw FFT limit");
+    strict_preserves_wanted(result);
     if (broad)
         check(result.varying_timing_status == "segmented_smooth_frequency_timing" && result.coarse_arrival_points > 512,
               "the wide public prior did not execute the smooth timing proposal");
@@ -402,6 +493,7 @@ void weak_diffuse_fading_recovery() {
           data.coherent_gain_candidates && data.coherent_gain_blocks > 100 &&
           data.coherent_gain_frequency_states > 1 && data.coherent_gain_bit_evidence[0] > data.coherent_gain_bit_evidence[1],
           "the receiver lost weak DATA under independent diffuse Gaussian ray gains");
+    strict_preserves_wanted(data);
     const auto noise = run(0);
     check(noise.complete && !noise.bit && noise.decision != SlotDecision::data &&
           !noise.operational_passes_conditional_bound && noise.coherent_gain_blocks == data.coherent_gain_blocks,
@@ -1060,6 +1152,7 @@ void native_precision_near_decision_sides() {
               direct.coarse_frequency_points == full.coarse_frequency_points &&
               direct.coarse_arrival_points == full.coarse_arrival_points,
               "automatic singleton dot changed a near-threshold decision or public search geometry");
+        if (expected_pass) strict_preserves_wanted(direct);
         if (cpu_fft_fp32_qualified) {
             auto packed_config = base;
             packed_config.native_coarse_precision = NativeCoarsePrecision::q15;
@@ -1094,6 +1187,7 @@ int main(int argc, char** argv) {
         }
         check(argc == 1, "unexpected native receiver test arguments");
         complete_data();
+        wrong_key_policy_boundaries();
         large_aperture_supplemental_plans();
         broad_frequency_timing_plan();
         varying_quiet_band(.5, false);

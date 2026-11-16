@@ -111,6 +111,13 @@ def main(executable):
     assert automatic["workers"] == 2 * automatic["hardware_threads"]
 
     plan = run("plan")
+    assert plan["configuration"]["wrong_key_admission"] == "current"
+    strict_plan = run("plan", "--wrong-key-admission", "strict")
+    assert strict_plan["configuration"]["wrong_key_admission"] == "strict"
+    for name in ("bit_seconds", "slot_plan", "receiver_slot_workspace_bytes", "coarse_full_prior"):
+        assert strict_plan["configuration"][name] == plan["configuration"][name]
+    run("plan", "--wrong-key-admission", "invalid", code=1,
+        parse_error="Wrong Key Admission expects current, guarded or strict")
     assert plan["result"]["planned"] and plan["observation"] is None
     assert plan["configuration"]["recurring_horizon"]["slots"] == 24
     assert plan["configuration"]["bit_seconds"] > 0
@@ -219,7 +226,7 @@ def main(executable):
 
     stream = run("message", "--max-samples", "600000", "--slots", "5", "--seconds", ".1",
                  "--rate", "120", "--shift-oscillator", "crystal", "--rf-hz", "200000",
-                 "--seed", "74207", "--cn0", "9")
+                 "--seed", "74207", "--cn0", "9", "--wrong-key-admission", "strict")
     result = stream["result"]
     assert result["message_and_physical_quiet_verified"] and result["eof_control_verified"]
     observation = stream["observation"]
@@ -241,6 +248,9 @@ def main(executable):
     assert reserved <= generation["work"]["generation_preflight_reserved_bytes"] <= stream["allocation"]["memory_limit_bytes"]
     rows = result["stream"]["slots"]
     assert [row["decision"] for row in rows] == ["data"] * 3 + ["quiet"] * 2
+    assert all(row["wrong_key_admission"] == "strict" and not row["wrong_key_rejected"] for row in rows)
+    assert all(row["wrong_key_required_log_separation"] > 0 for row in rows[:3])
+    assert all(row["wrong_key_required_log_separation"] == 0 for row in rows[3:])
     assert all(row["coarse_precision_reason"] == "exact-one-arrival-chirp-z" and
                row["coarse_frequency_points"] == 1794 and row["coarse_workspaces"] == 26 and
                row["coarse_arrival_points"] == 1 for row in rows)

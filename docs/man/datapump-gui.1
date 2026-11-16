@@ -204,6 +204,13 @@ words include a 32-byte interval tag. Decoding still requires two fully scored
 quiet slots. CRC is not sender authentication; public AMATEUR keys do not supply
 sender authentication. Exact raw-bit transmission bypasses text coding and FEC.
 .TP
+.BI \-\-wrong\-key\-admission " current|guarded|strict"
+Robust receiver-only admission policy. Current (the default) preserves existing
+sensitivity. Guarded and Strict require stronger separation of competing bit
+evidence and may erase wanted weak or distorted bits. These are heuristics, not
+calibrated wrong-key daily rates or sender authentication. The transmitted
+waveform, duration and physical quiet completion rule are unchanged.
+.TP
 .BI \-\-helper\-power " POWER"
 Requested Helper transmit power, separate from DATA power. Zero disables Helper.
 Accepts power units such as W or mW; it does not set physical radio power.

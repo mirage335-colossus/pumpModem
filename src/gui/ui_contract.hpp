@@ -27,7 +27,7 @@ enum class Field {
     fast_sim_spread, fast_sim_selective, fast_sim_margin, fast_sim_shift_hz, fast_sim_status,
     legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_status, legacy_device, legacy_volume, legacy_exclusive, legacy_mono,
     search_arithmetic, doppler, fhss_list, fhss_list_status, receiver_strategy, receiver_cpu_budget,
-    symbol_burst, symbol_burst_random, calendar_epoch, calendar_ordinal, live_noise_dbfs_hz, count
+    symbol_burst, symbol_burst_random, calendar_epoch, calendar_ordinal, live_noise_dbfs_hz, wrong_key_admission, count
 };
 enum class Command {
     none, transmit, force_transmit, transmit_noise, transmit_helper, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,

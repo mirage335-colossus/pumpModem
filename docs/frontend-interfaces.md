@@ -151,9 +151,11 @@ MFD convention. The backend offers two banks of Console operating functions:
 | ACTIONS | 2/3 choose an action; 5 (EXEC) executes it. Button 4 is inactive. Browsing never executes an action. |
 
 TUNE contains the modem selector, the selected modem's rate/profile, carrier,
-SNR targets or squelch where available, and actual TX audio volume. Robust Rate
-starts at 3.6 kHz. ACTIONS contains Transmit, Transmit noise where supported,
-Cancel TX and Clear received where available. Abbreviations include TX, RX,
+SNR targets or squelch where available, and actual TX audio volume. Fast also
+includes its baseband/shift oscillator assumptions, spread, selective
+perturbation, search margin and shift frequency. Robust Rate starts at 3.6 kHz.
+ACTIONS contains Transmit, Transmit noise where supported, Cancel TX and Clear
+received where available. Abbreviations include TX, RX,
 Exp SNR, Chan profile and Mdm. The header identifies the selected function and
 its accepted value. Numeric presets are ordered numerically; other options keep
 their declared order. Endpoints stop; the backend never invents a setting value.
@@ -161,8 +163,9 @@ their declared order. Endpoints stop; the backend never invents a setting value.
 The bezel does not offer application-tab navigation or inspection views. It also
 omits previous-message paste, attachments, Use text, clipboard/file operations,
 waterfall clearing and zoom, simulation, link-budget power/loss/noise assumptions,
-oscillator models, audio routing, QR brightness and key-management setup. These
-remain available through the ordinary GUI or preconfiguration. Noise-floor
+Robust oscillator models, audio routing, QR brightness, Wrong Key Admission and
+key-management setup. These remain available through the ordinary GUI or
+preconfiguration. Noise-floor
 planning is separate from the retained Transmit noise operation. Changing banks
 only changes bezel functions; it does not switch the application's tab.
 

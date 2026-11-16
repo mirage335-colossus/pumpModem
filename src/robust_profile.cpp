@@ -131,6 +131,7 @@ bool gpu_receiver_available() noexcept {
 }
 
 void validate_settings(const Settings& s) {
+    (void)triad::v3::parse_wrong_key_admission(s.wrong_key_admission);
     check(!s.gpu || gpu_receiver_available(), "GPU reception is unavailable in this build (CUDA or Vulkan support required)");
     modem::validate(s.transfer.modem);
     check(!s.gpu || s.transfer.modem.search_arithmetic != modem::SearchArithmetic::fp64,
@@ -231,6 +232,7 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     const auto shift_diffusion = osc.rf.phase_noise_degrees_per_sqrt_second * std::numbers::pi / 180;
 
     ReceiverConfig rx;
+    rx.wrong_key_admission = parse_wrong_key_admission(s.wrong_key_admission);
     if (modem.search_arithmetic == modem::SearchArithmetic::fp64)
         rx.native_coarse_precision = NativeCoarsePrecision::fp64;
     else if (modem.search_arithmetic == modem::SearchArithmetic::fp32)

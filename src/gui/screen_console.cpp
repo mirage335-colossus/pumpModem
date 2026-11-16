@@ -17,7 +17,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.purpose=ControlPurpose::planning;break;
     case Slot::device:case Slot::mono:case Slot::live_duplex:case Slot::exclusive:case Slot::key:case Slot::key_actions:
     case Slot::dsss_factor:case Slot::dsss_version:case Slot::fhss:
-    case Slot::symbol_burst:case Slot::symbol_burst_random:
+    case Slot::symbol_burst:case Slot::symbol_burst_random:case Slot::wrong_key_admission:
     case Slot::helper_power:case Slot::helper_ratio_limit:case Slot::helper_callsign:
     case Slot::fec:case Slot::dsp_workspace:
     case Slot::gpu:case Slot::developer_mode:case Slot::shellcode_mode:case Slot::send_key:
@@ -34,7 +34,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     control.developer_only=slot==Slot::dsp_workspace||slot==Slot::callsign||
         slot==Slot::grid||slot==Slot::repeatable;
     control.open_upward=slot>=Slot::device;
-    if(slot==Slot::symbol_burst||slot==Slot::symbol_burst_random||slot==Slot::helper_power||slot==Slot::helper_ratio_limit||slot==Slot::helper_callsign)control.open_upward=false;
+    if(slot==Slot::symbol_burst||slot==Slot::symbol_burst_random||slot==Slot::wrong_key_admission||slot==Slot::helper_power||slot==Slot::helper_ratio_limit||slot==Slot::helper_callsign)control.open_upward=false;
     control.font_size=control.multiline?16:13;
     if(control.kind==Kind::bitmap)control.font_size=11;
     if(menu==Menu::keyfile)control.menu_label="Keyfile";
@@ -83,6 +83,8 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::fhss)control.help="Canonical FHSS envelope and synthetic sequential hopping profile. This does not retune physical hardware or enable simultaneous reception.";
     if(slot==Slot::symbol_burst)control.help="Minimum whole-bit waiting periods between scheduled DATA slots. Scheduled waiting is not a scored quiet slot and cannot finish a message.";
     if(slot==Slot::symbol_burst_random)control.help="Additional shared-calendar waiting periods from zero through this limit. Both peers need the same calendar and key/profile; waits never count as missing DATA or quiet completion.";
+    if(slot==Slot::wrong_key_admission)control.help="Receiver-only stronger evidence against unrelated keyed signals; may reject wanted weak/distorted signals. No calibrated wrong-key/day rate or authentication. Does not change the transmitted waveform or duration.";
+    if(slot==Slot::symbol_burst_random||slot==Slot::wrong_key_admission)control.font_size=11;
 
     if(slot==Slot::mode)control.help="Native three-carrier Robust session state. Live reception needs the shared public calendar and a declared local input-noise model; set these in Robust setup.";
     if(slot==Slot::paste_previous) {control.font_size=11;control.help="Paste the previous transmitted message back into Message for editing or retransmission.";}
@@ -262,6 +264,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::choice,Field::fhss,Command::none,Bitmap::none,Page::console,3,"FHSS"}, Slot::fhss),
         placed({Kind::choice,Field::symbol_burst,Command::none,Bitmap::none,Page::console,3,"Symbol_Burst"}, Slot::symbol_burst),
         placed({Kind::choice,Field::symbol_burst_random,Command::none,Bitmap::none,Page::console,3,"Random extra"}, Slot::symbol_burst_random),
+        placed({Kind::choice,Field::wrong_key_admission,Command::none,Bitmap::none,Page::console,3,"Wrong Key Admission"}, Slot::wrong_key_admission),
         placed({Kind::choice,Field::key,Command::none,Bitmap::none,Page::console,3,"Encryption key entry"}, Slot::key),
         placed({Kind::text,Field::device,Command::none,Bitmap::none,Page::console,4,"Audio device"}, Slot::device),
         placed({Kind::text,Field::bandwidth,Command::none,Bitmap::none,Page::console,4,"Rate"}, Slot::bandwidth),

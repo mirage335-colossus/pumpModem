@@ -12,7 +12,7 @@ Earlier Ryzen CPU and RTX 4090 CUDA results retain their original source and
 hardware scope. No complete receiver-capacity or Tensor Core utilization claim
 follows.
 
-Updated 13 November 2026. The prior native history, matrix/preparation and
+Updated 15 November 2026. The prior native history, matrix/preparation and
 wide-search follow-through remains complete with its scoped checks below,
 including the fine-tail repair. Current overlap follow-up has focused functional
 and paired service evidence below; complete-receiver capacity and refreshed CPU
@@ -43,6 +43,152 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Wrong Key Admission — 15 November 2026
+
+Working change over `f674f9aeac3136917996a08b07f57496dfbe195d` adds the
+shared GUI choice immediately left of Encryption key entry and the saved
+`--wrong-key-admission current|guarded|strict` setting. Current preserves prior
+decisions. Guarded and Strict apply the final competing-bit margin in the
+[operating/research guide](triad-stochastic.md#wrong-key-admission), after
+normal fallback and quiet scoring. Their nested DATA acceptance sets can only
+remove bits; they cannot turn an erasure into quiet, change waveform duration,
+reduce the public search, restart fallback or change `W=2*H`.
+
+The finite diagnostic budget was fixed before each stage: the existing
+strong/weak neighboring-carrier pair first; 15 native slot calls covering
+noise, matched/foreign gains and four fixed receiver roots; then 18 calls on
+two fresh carrier/bit/noise strata with weak wanted, wrong-key-only, noise and
+mixed signals. No seed or timing-driven extension sought a favorable result.
+These are mechanism/sensitivity checks, not a rare-event rate experiment.
+Stop at this bounded evidence rather than attempt a multi-day tail simulation.
+Tests use the canonical C++ scorer on the Ryzen 5 PRO 5650U, 12 effective
+logical CPUs, 24 workers and native automatic arithmetic. They are not GPU,
+field, unknown-address acquisition or complete capacity qualification.
+
+The current fixture in `test_triad_native_receiver.cpp` uses seed 37,
+Rate 120, a 1737 Hz configured carrier and an actual +12 Hz offset within a
+±24 Hz search. Its strong foreign 1725 Hz receiver produces bit scores
+1793.376/1742.063 and false DATA under Current. Both added margins erase it.
+The matching strong score pair is 3552.108/14747.792; the one-fifth-amplitude
+wanted control also remains DATA. Four deterministic foreign receiver roots
+on the same capture have gap/excess ratios 0.0249, 0.1934, 0.0605 and 0.1234:
+The roots set AES first bytes 1–4 and Serpent first bytes 14–17, with all
+remaining bytes zero. The 15-call batch scores noise once, matched/foreign
+pairs at amplitudes 1.0/0.2/0.08/0.05/0.035, then these four roots at 1.0.
+Guarded erases two and Strict all four. This is dependent same-IQ evidence,
+not four independent propagation episodes or a wrong-key probability estimate.
+
+Fresh strata use `(noise seed, wanted bit, configured carrier Hz)` of
+`(74,0,1743)` and `(113,1,1719)` with the same +12/±24 Hz geometry.
+Foreign receiver roots set their AES/Serpent first bytes to 89/102 and 172/185,
+respectively, with other bytes zero (synthetic test keys). Both baseline
+wrong-key-only results are false DATA; both stronger policies erase them.
+Actual Strict rescoring has exactly equal raw bit scores, coarse-workspace
+counts, basis work and the 161,025,406-byte DSP lease. Matched amplitude 0.065
+retains DATA at log evidence 23.845/26.786 versus threshold 21.493; amplitudes
+0.057/0.061 already fail Current. Noise remains physically scored quiet.
+
+The mixed controls add an opposite-bit waveform with configured carrier
+31 Hz higher but the same received center/offset and noise seed, amplitude
+0.38, as `noise + gain*(wanted-noise) + .38*(foreign-noise)`; wanted
+amplitudes are 0.07/0.16. Current and Guarded receive all four wanted bits.
+**Strict erases one wanted bit**, seed 113 at amplitude 0.07: bit scores
+61.3182/68.0045 give gap 6.6862, versus required Guarded 6.2851 and Strict
+14.5614. Preserve this cost. A dominant accidental single-bit fit can still
+pass either policy. No daily-rate multiplier is assigned to these presets.
+
+The archived protected first-aperture counterexample was also rerendered with
+its original native libraries/headers and waveform context: matching I/Q
+digests and wrong-key scores 15,934,599.373/15,487,375.909 reproduce the
+[original false DATA](../_appraisal/highFidelity-triple_Robust_Modem/hf-normalized-null.md).
+Applying the new scalar rule offline rejects it and preserves the wanted pair
+194,740,790.599/31,591,513.615. That is an archived-score discriminator, not a
+current carrier-bound waveform run. An initial scratch include/ABI setup
+failure executed no valid assertions; matching the archived headers repaired
+the reproduction. Temporary scratch implementations were removed after these
+findings were distilled.
+The output-only scratch executables' hashes were not recorded; these
+diagnostics are source/recipe-bound findings, not hash-bound certification.
+
+Current native correctness checks pass **38/38** (`CCACHE_DISABLE=1
+./build.sh test triad`), including strict wanted-control checks for near-noise
+threshold, rising/falling drift, long/broad drift and weak diffuse fading.
+The probe's Strict five-slot `DDDQQ` stream decodes `e`, preserves both scored
+quiet slots and the incomplete-EOF control. The initial default-cache build
+failed before assertions because its configured sandbox-external ccache was
+unwritable; rerunning with `CCACHE_DISABLE=1` passed without changing the
+build profile or global cache. GUI tests pass **30/30** (`CCACHE_DISABLE=1
+./build.sh test gui`). The initial frontend smoke run passed 7/8: its framebuffer
+fixture expected eight Fast controls, while the current Fast screen has ten.
+The discriminator compiled HEAD's baseline `src/gui/screen_console.cpp`
+(without the new dropdown) into the current framebuffer test binary, retaining
+the original eight-control cap; it reproduced `TUNE 10/10 > 8`
+(exit 1). The Fast purpose fields entered in `7b31fde98` (12 November) while
+the eight-control cap and exclusion note date to `0dcdfecf3` (29 September).
+Updating Fast/Robust/Legacy inventories for both developer modes and asserting
+Wrong Key Admission metadata setup/downward propagation fixed the fixture.
+Final `CCACHE_DISABLE=1 ./build.sh test frontends` passed
+**8/8** in 21.51 s; focused `gui_fast`, `gui_layout`, `gui_contract` and
+`gui_launch_command` passed **4/4** in 3.91 s.
+
+The final bounded service comparison made 24 native calls in 26.7279 seconds:
+one untimed fixed preflight per binary and stratum, followed by three rotating
+paired looks for each of two strata. All arms used 24 workers on the Ryzen 5
+PRO 5650U (12 effective logical CPUs), Release/GNU 14.2, CPU AVX2 and native
+automatic routing with FP64 guards. The stream uses FP64 exact-one-arrival
+chirp-Z; the Helper/noise case uses Q15 products and an FP32 FFT. Baseline and
+current are the isolated pre-change executable and
+`build/dev/triad_receiver_probe`. OS-visible memory is 15,677,412 KiB;
+automatic application memory limits varied from 9,054,653,645 to
+9,284,935,680 bytes across the timed calls without changing DSP shapes.
+The stream reached five simultaneous owners and all 24 executor workers.
+They share build-options
+SHA-256 `63a1a31d84dfb81f992610f16c646d5f49b6f69bf7f0a0efa97ccd9180f14d41`
+and configured commit `f674f9aeac3136917996a08b07f57496dfbe195d`; source
+manifest SHA-256 is `ae0ac43a3497547c83e682394dc16c80d44c4622850e7ace83b44aca0ad43551`
+for baseline and `fb50b74454701c5a1c4fb0dcccda80a7dcfde3ccbe53a1bdbac508124f765e02`
+for current. Executable SHA-256 is `405fd9ef3ebd3453774e989e57922dd9bb6589684f2470ea6b07313a0dd637c4`
+and `3189130c31f86be456227281dc268f972c2945107f276d7c168ec2fe9f06313d`,
+respectively. Both calls use `--max-samples 600000 --deadline-ms 20000`.
+The baseline stream command is `message --slots 5 --seconds .1 --rate 120
+--shift-oscillator crystal --rf-hz 200000 --seed 74207 --cn0 9`; the
+baseline Helper/noise command is `regression --stratum noise --units 1 --helper on
+--helper-power-w .1 --sample-rate 6000 --data-if 1725 --seconds .1
+--shift-oscillator crystal --rf-hz 200000 --seed 74207 --cn0 9`. Current and
+strict calls additionally pass `--wrong-key-admission current` and
+`--wrong-key-admission strict`; baseline passes neither. Per stratum,
+baseline/current/strict were preflighted once, then timed in rotating orders
+baseline/current/strict; strict/baseline/current; current/strict/baseline.
+For paired log ratios `l_i=ln(candidate_time_i/baseline_time_i)`, the
+descriptive interval is `exp(mean(l) ± 4.30265273 * sd(l)/sqrt(3))` (Student
+`t`, 2 degrees of freedom), not a coverage claim for future runs.
+
+| Stratum and identical input hash | Native slot scores and decisions (baseline / current / strict) | DSP work and peak workspace |
+| --- | --- | --- |
+| Five-slot `DDDQQ` stream, seed 74207, Rate 120, 9 dB-Hz; `89e3f100543c718c92334adcd1f38919bddc4f42f2836d4f71c5deab668757e1` | Slots 0–2 raw operational bit scores: `[72.98051924867104,-7.532447698163896]`, `[70.83041923270437,-5.810479836539603]`, `[-6.574686470242291,68.03587648452418]`; log-evidence 72.287372, 70.137272, 67.342729; decisions DATA 0, DATA 0, DATA 1 in every arm. Quiet-slot raw scores are `[-8.030673921296703,-10.199198588912878]` and `[-8.369328870885738,-7.737190299566725]`; both decisions are quiet in every arm. Stream decodes `e`, verifies physical completion and the separate EOF control. | Identical work: one arrival, 1794 coarse frequencies, 26 workspaces, four fine candidates, 47 affine/adaptive blocks, 12 adaptive peak states, 276 transitions, 846,576–846,768 basis rows; slot workspace 162,488,669–162,505,217 bytes. Coarse arithmetic is FP64 exact-one-arrival chirp-Z; Helper disabled. |
+| Helper-enabled quiet/noise slot, seed 74207, Rate 120, DATA IF 1725 Hz, 9 dB-Hz; `ee5248625a9f3a35a6ef697ba0f1c8f02193e76383a2aa6e415eb14002a7a9f0` | Raw scores `[-8.086749025634216,-7.857600726371052]`, log-evidence −7.965626; baseline, current and strict all score quiet. | Identical work: one arrival, 1794 coarse frequencies, 26 workspaces, four fine candidates, 198 affine/adaptive blocks, 12 adaptive peak states, 1176 transitions, 14,325,360 basis rows; workspace 181,201,677 bytes. Q15 products with FP32 FFT; Helper reports `no_coarse_pilot`. |
+
+Across both strata the three modes retain identical input hashes, raw scores,
+decisions, DSP counters and workspace; this timing pair did not trigger a
+wrong-key rejection. Paired receiver-service wall-time candidate/baseline
+geometric ratios and descriptive small-sample Student log-ratio 95% intervals
+were: stream current **1.0034** `[0.7861, 1.2807]`, strict **1.0203**
+`[0.8380, 1.2423]`; Helper/noise current **0.9641** `[0.7599, 1.2231]`,
+strict **0.9829** `[0.7479, 1.2917]`. Each interval spans 1 and is wide; these
+three paired looks per stratum neither establish a timing penalty nor a speedup.
+The comparison is scoped to those two native shapes and their receiver-service
+phase; it is not a real-time or complete-receiver capacity certification.
+An earlier Helper plan preflight was refused before receiver execution because
+the fixed 550/950 Hz Helper tones overlapped the data-separation guard at the
+requested Robust carrier; the measured Helper-enabled stratum instead uses
+the explicit 1725 Hz DATA IF above. The initial ccache failure likewise ran no
+receiver assertions.
+
+After review and distillation here, the task's paired receipts, baseline
+executable, orchestration script and framebuffer diagnostic artifacts under
+`local-evidence/wrong-key-admission/` were removed. This summary is the durable
+validation finding. No RunPod instance was needed for these short CPU checks.
+
 ## Configured-carrier waveform keys — 15 November 2026
 
 The `independent-apsk-v2-carrier-v1` derivation adds the configured physical
@@ -70,8 +216,10 @@ is 569.222 and the bit is admitted; foreign evidence is -6.26214 and no DATA is
 admitted. Both scores complete. This demonstrates separation for one bounded
 fixture, not an admission probability or daily false-admission rate. No seed
 search, threshold change or receiver algorithm change was used. The requested
-future **Wrong Key Admission** control and statistical mitigation are deferred;
-this change adds only the configured-frequency key context.
+**Wrong Key Admission** control was deferred at that checkpoint, which added
+only the configured-frequency key context. The subsequent
+[heuristic control](#wrong-key-admission--15-november-2026) above retains this
+original false admission as its default-policy regression control.
 
 Existing drift regressions retain their original zero-centered synthetic
 source coordinate. An intermediate test edit applied 1725 Hz to those sources

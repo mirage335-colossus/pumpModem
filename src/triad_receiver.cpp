@@ -23,6 +23,7 @@ void require(bool valid, const char* reason) {
 }
 
 std::size_t validate(const ReceiverConfig& c, const ReceiverSlotPlan& s, unsigned workers) {
+    (void)wrong_key_admission_name(c.wrong_key_admission);
     require(workers > 0, "Robust slot requires an explicit positive worker share");
     require(std::isfinite(c.sample_rate_hz) && c.sample_rate_hz >= 1 && c.sample_rate_hz <= 120e6 &&
         std::floor(c.sample_rate_hz) == c.sample_rate_hz, "invalid Robust receiver sample rate");
@@ -323,6 +324,34 @@ void receiver_detail::classify_fine_slot(ReceiverSlotScore& score, const Admissi
     classify_varying_slot(score, grid, nullptr, nullptr, 0.);
 }
 
+void receiver_detail::apply_wrong_key_admission(ReceiverSlotScore& score, WrongKeyAdmission policy) {
+    (void)wrong_key_admission_name(policy);
+    score.wrong_key_admission = policy;
+    score.wrong_key_required_log_separation = 0;
+    score.wrong_key_rejected = false;
+    if (policy == WrongKeyAdmission::current || score.decision != SlotDecision::data) return;
+
+    // An unrelated strong keyed waveform can fit fragments of BOTH bit
+    // alternatives far better than white noise. A fixed additive threshold
+    // cannot address that near-far case. Increase the required gap smoothly
+    // with the competing bit's positive excess above the ordinary threshold.
+    // This is a bounded empirical rule, NOT a likelihood against a wrong-key
+    // null. A dominant accidental single-bit fit can still pass.
+    const bool strict = policy == WrongKeyAdmission::strict;
+    const auto floor = (strict ? 2. : 1.) * std::numbers::ln10;
+    const auto fraction = strict ? .25 : .10;
+    const auto competing = std::min(score.operational_bit_evidence[0], score.operational_bit_evidence[1]);
+    score.wrong_key_required_log_separation =
+        std::max(score.operational_minimum_bit_log_separation, floor) +
+        fraction * std::max(0., competing - score.operational_threshold);
+    if (!(score.operational_bit_log_separation >= score.wrong_key_required_log_separation)) {
+        score.decision = SlotDecision::ambiguous;
+        score.bit.reset();
+        score.wrong_key_rejected = true;
+        score.reason = "wrong_key_competing_evidence";
+    }
+}
+
 namespace {
 double elapsed(Clock::time_point began) {
     return std::chrono::duration<double>(Clock::now() - began).count();
@@ -362,6 +391,7 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         throw ReceiverWorkspaceError("Robust receiver slot exceeds its admitted memory lease");
 
     ReceiverSlotScore score;
+    score.wrong_key_admission = config.wrong_key_admission;
     score.index = slot.index;
     score.first_sample = slot.first_sample;
     score.stop_sample = slot.stop_sample;
@@ -583,6 +613,7 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
             score.reason = score.varying_quiet_status;
         }
     }
+    apply_wrong_key_admission(score, config.wrong_key_admission);
     score.fine_seconds = elapsed(began);
     check_cancelled(stop);
     return score;

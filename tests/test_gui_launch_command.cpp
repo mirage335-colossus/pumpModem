@@ -17,6 +17,16 @@ template<class Function> void rejects(Function function,const std::string& messa
     throw std::runtime_error(message);
 }
 void parsing_and_formatting() {
+    check(!launch_command::parse("--rate 1200").wrong_key_admission,
+          "Older partial commands must leave Wrong Key Admission unchanged");
+    for(const auto* value:{"current","guarded","strict"}) {
+        const auto policy=launch_command::parse(std::string("--wrong-key-admission ")+value);
+        check(policy.wrong_key_admission==value&&launch_command::parse(launch_command::format(policy))==policy,
+              "Wrong Key Admission policy did not round trip");
+    }
+    for(const auto* value:{"heuristic","CURRENT","fp64",""})
+        rejects([&]{launch_command::parse(std::string("--wrong-key-admission ")+value);},
+                "invalid Wrong Key Admission token accepted");
     check(!launch_command::parse("--rate 1200").gpu,
           "Older partial commands must leave GPU selection unspecified");
     const auto gpu_on=launch_command::parse("--gpu yes");

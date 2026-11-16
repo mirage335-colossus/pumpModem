@@ -36,7 +36,7 @@ enum class Slot {
     fast_waveform, fast_waterfall, fast_constellation_plot, fast_airtime, fast_diagnostics, fast_snr, fast_files, fast_use_text, fast_copy_signal, fast_paste_signal, fast_qr, fast_qr_brightness,
     fast_baseband_oscillator, fast_shift_oscillator, fast_spread, fast_selective, fast_margin, fast_shift_hz,
     legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_transmit, legacy_waterfall, legacy_status, legacy_device, legacy_volume, legacy_exclusive, legacy_mono,
-    symbol_burst, symbol_burst_random, count
+    symbol_burst, symbol_burst_random, wrong_key_admission, count
 };
 inline constexpr bool persistent_slot(Slot slot) {
     switch (slot) {
@@ -47,7 +47,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::helper_power: case Slot::helper_ratio_limit: case Slot::helper_callsign: case Slot::transmit_helper:
     case Slot::search_margin: case Slot::clock_accuracy: case Slot::clock_region: case Slot::clock_offset: case Slot::audio_error:
     case Slot::dsss_factor: case Slot::dsss_version: case Slot::fhss:
-    case Slot::symbol_burst: case Slot::symbol_burst_random:
+    case Slot::symbol_burst: case Slot::symbol_burst_random: case Slot::wrong_key_admission:
     case Slot::key_actions: case Slot::key:
     case Slot::device: case Slot::mono: case Slot::live_duplex: case Slot::volume: case Slot::exclusive: case Slot::bandwidth: case Slot::carrier: case Slot::rf_shift: case Slot::doppler: case Slot::snr:
     case Slot::fec: case Slot::dsp_workspace: case Slot::diagnostics: case Slot::status: return true;
@@ -179,12 +179,13 @@ struct DesktopLayout {
         out[Slot::grid] = {131, 62, 77, field_height};
         out[Slot::repeatable] = {352, 12, 119, 28};
         out[Slot::key_actions] = {216, 62, 92, field_height};
-        out[Slot::dsss_version] = {316, 62, 150, field_height};
-        out[Slot::dsss_factor] = {474, 62, 70, field_height};
-        out[Slot::fhss] = {552, 62, width - 1000, field_height};
-        out[Slot::symbol_burst] = {width - 440, 62, 112, field_height};
-        out[Slot::symbol_burst_random] = {width - 320, 62, 96, field_height};
-        out[Slot::key] = {width - 216, 62, 200, field_height};
+        out[Slot::dsss_version] = {316, 62, 130, field_height};
+        out[Slot::dsss_factor] = {454, 62, 60, field_height};
+        out[Slot::fhss] = {522, 62, width - 1079, field_height};
+        out[Slot::symbol_burst] = {width - 549, 62, 90, field_height};
+        out[Slot::symbol_burst_random] = {width - 451, 62, 76, field_height};
+        out[Slot::wrong_key_admission] = {width - 367, 62, 184, field_height};
+        out[Slot::key] = {width - 175, 62, 159, field_height};
         // Link assumptions share the row with the Simulation selector.
         constexpr int assumption_x = margin + 100, group_gap = 10;
         const int assumption_width = width - margin - assumption_x;

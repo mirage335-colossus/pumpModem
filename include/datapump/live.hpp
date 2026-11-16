@@ -20,6 +20,8 @@ struct Settings {
     bool mono=true,simulation=false,full_duplex=false,exclusive=false;
     // Local processing choice; it does not change the on-air profile.
     bool gpu=false;
+    // Local receive evidence policy; waveform and transmit duration are unchanged.
+    std::string wrong_key_admission="current";
     audio::ChannelMode channel_mode=audio::ChannelMode::left_mono;
     double transmit_gain=1;
     helper::Options helper;
@@ -71,6 +73,9 @@ struct PatternStep {
     std::array<double,2> operational_bit_evidence{};
     double quiet_energy=0, quiet_threshold=0, operational_log_e=0, operational_threshold=0;
     double operational_bit_log_separation=0, operational_minimum_bit_log_separation=0;
+    std::string wrong_key_admission="current";
+    double wrong_key_required_log_separation=0;
+    bool wrong_key_rejected=false;
     double helper_seconds=0, coarse_seconds=0, fine_seconds=0;
     // Helper acquisition ran beside coarse preparation, inside coarse_seconds.
     bool helper_overlapped=false;

@@ -451,19 +451,35 @@ void mfd_three_buttons() {
 void mfd_operating_subset() {
     Launch launch;launch.smoke=true;Application app(launch);framebuffer::Session session(app);
     session.resize({1480,1220,{8,18}});
-    for(bool developer:{false,true})for(const auto* modem:{"fast","robust","legacy"}) {
+    struct Inventory {const char* modem;std::vector<std::string_view> tune,actions;};
+    const Inventory inventories[]{
+        {"fast",{"Fast Mdm","Chan profile","Exp SNR","TX vol","Baseband oscillator","Shift oscillator",
+            "Doppler / delay","Selective AM","Search margin (x)","Shift frequency"},{"Clear RX","TX text","Cancel"}},
+        {"robust",{"Robust Mdm","Rate","Shift","Doppler","Target SNR","TX vol"},
+            {"Clear RX","Helper","TX","TX noise","Cancel TX"}},
+        {"legacy",{"Legacy Mdm","Modulation","Squelch","TX vol"},{"TX"}}
+    };
+    for(bool developer:{false,true})for(const auto& inventory:inventories) {
+        const auto* modem=inventory.modem;
         app.select(ui::Field::fast_mode,modem);app.toggle(ui::Field::developer_mode,developer);session.tick();
         for(const auto* bank:{"TUNE","ACTIONS"}) {
             for(int n=0;n<2&&!mfd_status(session).starts_with(bank);++n)bezel(session,1);
-            const auto initial=mfd_status(session);int count=0;
+            const auto& expected=std::string_view(bank)=="TUNE"?inventory.tune:inventory.actions;
+            const auto initial=mfd_status(session);std::vector<std::string> seen;
             do {
                 const auto value=mfd_status(session);
                 for(const auto* removed:{"Previous","Attach","Use text","Copy","Paste","Save","waterfall","Zoom","zoom","VIEWS",
-                    "Simulation","TX power","Path loss","Noise","Oscillator","Audio device","Dark","keyfile","Encryption"})
+                    "Simulation","TX power","Path loss","Noise","Oscillator","Audio device","Dark","keyfile","Encryption","Wrong Key"})
                     require(value.find(removed)==std::string::npos,"desktop/setup control escaped into MFD");
                 require(app.page()==ui::Page::console,"MFD operating subset navigated away from Console");
-                bezel(session,3);require(++count<=8,"MFD operating subset grew beyond its small control set");
+                const auto start=value.find(" | ");require(start!=std::string::npos,"missing MFD function label");
+                const auto label=value.substr(start+3,value.find(" | ",start+3)-(start+3));
+                require(std::find(expected.begin(),expected.end(),label)!=expected.end(),("unexpected MFD function: "+value).c_str());
+                require(std::find(seen.begin(),seen.end(),label)==seen.end(),"MFD cycle repeated a function before returning");
+                seen.push_back(label);bezel(session,3);
+                require(seen.size()<=expected.size(),"MFD cycle exceeded its declared inventory");
             }while(mfd_status(session)!=initial);
+            require(seen.size()==expected.size(),"MFD cycle omitted an operating function");
         }
     }
     // External changes between presentation and key input cannot retarget it.

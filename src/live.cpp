@@ -232,6 +232,9 @@ PatternStep pattern_step(const StreamSlotReceipt& receipt) {
     row.operational_threshold = s.operational_threshold;
     row.operational_bit_log_separation = s.operational_bit_log_separation;
     row.operational_minimum_bit_log_separation = s.operational_minimum_bit_log_separation;
+    row.wrong_key_admission = wrong_key_admission_name(s.wrong_key_admission);
+    row.wrong_key_required_log_separation = s.wrong_key_required_log_separation;
+    row.wrong_key_rejected = s.wrong_key_rejected;
     row.helper_seconds = s.helper_seconds;
     row.helper_overlapped = s.helper_overlapped;
     row.coarse_seconds = s.coarse_seconds;

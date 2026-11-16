@@ -37,6 +37,19 @@ checks and remaining gates, and the [GUI contract](gui-contract.md) for control
 mapping. No all-configuration sensitivity, real-time capacity or physical-device
 qualification follows from these connections.
 
+The receiver exposes `current` (default), `guarded` and `strict` Wrong Key
+Admission policies. The default retains the exact prior DATA decision. The
+stronger policies run only as a final bit-ambiguity filter after normal model
+fallback and quiet checks; they can turn DATA into an erasure but cannot create
+quiet or shorten the two-scored-quiet completion rule. The check uses only the
+already computed operational bit scores, adding constant-time scalar work and
+no search, DSP workspace or worker. It does not change the waveform, calendar,
+duration or public geometry. This is a heuristic against near-balanced bit
+scores, not a calibrated wrong-key rate or sender authentication; one dominant
+wrong-key bit may pass, and wanted weak/distorted bits may be erased. See the
+[research limits and evidence](triad-stochastic.md#wrong-key-admission) and
+[GUI settings](gui-contract.md#modems-and-current-availability).
+
 ## Native interfaces and ownership
 
 | Interface | Responsibility |

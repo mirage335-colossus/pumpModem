@@ -7,6 +7,7 @@
 #include <optional>
 #include <stop_token>
 #include <string>
+#include <string_view>
 
 namespace datapump::triad::v3 {
 
@@ -15,6 +16,12 @@ namespace receiver_detail { class ReceiverBulkBackend; }
 // Automatic may choose Q15 products on a supported native AVX2 geometry.
 // FP32 permits higher precision fallback. Explicit Q15 requires support.
 enum class NativeCoarsePrecision { automatic, fp64, q15, fp32 };
+
+// Receiver-local heuristic, not a calibrated wrong-key probability or a
+// waveform/key change. Current preserves the existing sensitivity policy.
+enum class WrongKeyAdmission { current, guarded, strict };
+const char* wrong_key_admission_name(WrongKeyAdmission);
+WrongKeyAdmission parse_wrong_key_admission(std::string_view);
 
 inline constexpr std::array<std::int64_t, 13> receiver_epoch_offsets{
     -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6};
@@ -55,6 +62,7 @@ struct ReceiverConfig {
     // from a decoded bit, a private sample realization, or the episode length.
     double noise_variance = 0, data_basis_gain = 1;
     NativeCoarsePrecision native_coarse_precision = NativeCoarsePrecision::automatic;
+    WrongKeyAdmission wrong_key_admission = WrongKeyAdmission::current;
     helper::Plan helper;
     bool helper_enabled = false, physical_rf_retuning = false;
     // Optional compiled bulk arithmetic. The shared receiver still owns all
@@ -95,6 +103,9 @@ struct ReceiverSlotScore {
     // Prior-corrected evidence actually used for operational bit selection.
     std::array<double, 2> operational_bit_evidence{};
     double operational_bit_log_separation = 0, operational_minimum_bit_log_separation = 0;
+    WrongKeyAdmission wrong_key_admission = WrongKeyAdmission::current;
+    double wrong_key_required_log_separation = 0;
+    bool wrong_key_rejected = false;
     double quiet_energy = 0, quiet_threshold = 0;
     double quiet_noise_upper_tail_probability = .001;
     double operational_log_e = 0, operational_threshold = 0;

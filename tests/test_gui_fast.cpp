@@ -542,6 +542,27 @@ void presentation_and_retention() {
           "Simulation launch must retain the Robust Modem facilities");
     check(app.field(F::fast_mode).options.size()==3&&app.field(F::fast_mode).options[0].label=="Fast Modem"&&
         app.field(F::fast_mode).options[1].label=="Robust Modem","Modem selector labels changed");
+    const auto& wrong_key=control(F::wrong_key_admission);
+    check(wrong_key.kind==ui::Kind::choice&&wrong_key.label==std::string("Wrong Key Admission")&&wrong_key.persistent&&
+          wrong_key.font_size==11&&control(F::symbol_burst_random).font_size==11&&
+          wrong_key.purpose==ui::ControlPurpose::setup&&!wrong_key.open_upward&&
+          std::string(wrong_key.help).find("No calibrated wrong-key/day rate or authentication")!=std::string::npos&&
+          app.control(wrong_key).visible&&app.control(wrong_key).enabled&&
+          app.field(F::wrong_key_admission).selected=="current"&&app.field(F::wrong_key_admission).options.size()==3&&
+          app.field(F::wrong_key_admission).options[0].label=="Current (best sensitivity)"&&
+          app.field(F::wrong_key_admission).options[1].label=="Guarded (heuristic)"&&
+          app.field(F::wrong_key_admission).options[2].label=="Strict (heuristic)",
+          "Wrong Key Admission must expose the three Robust-only policies and their limits");
+    app.select(wrong_key,"guarded");
+    check(app.field(F::wrong_key_admission).selected=="guarded","Wrong Key Admission choice was not accepted");
+    app.select(mode,"fast");
+    check(!app.control(wrong_key).visible&&!app.control(wrong_key).enabled&&
+          app.field(F::wrong_key_admission).selected=="guarded",
+          "Wrong Key Admission leaked into Fast mode or lost its retained Robust choice");
+    app.select(mode,"robust");
+    check(app.control(wrong_key).visible&&app.control(wrong_key).enabled&&
+          app.field(F::wrong_key_admission).selected=="guarded",
+          "Returning to Robust did not restore Wrong Key Admission selection");
     app.toggle(F::developer_mode,true);app.select_page(ui::Page::compression);
     app.edit(F::binary,"001");const auto bits=app.field(F::binary).text;
     app.select(F::fec,"off");const auto fec=app.field(F::fec).selected;
@@ -1023,6 +1044,7 @@ void robust_native_settings() {
     controller.edit(F::link_noise,"-164 dBm/Hz");controller.edit(F::snr,"20");
     controller.select(F::dsss_factor,"10");controller.edit(F::bandwidth,"36 Hz");
     controller.select(F::symbol_burst,"2");controller.select(F::symbol_burst_random,"3");
+    controller.select(F::wrong_key_admission,"strict");
     controller.select(F::fhss,"fake-fcc");controller.select(F::fec,"rs20");
     controller.edit(F::helper_power,"100 mW");controller.select(F::helper_ratio_limit,"20");
     controller.edit(F::helper_callsign,"K1ABC");
@@ -1036,11 +1058,12 @@ void robust_native_settings() {
           "Robust waveform controls remained saved-only preferences");
     check(s.helper.power_w==.1&&s.helper.ratio_limit_db==20&&s.helper.callsign=="K1ABC"&&
           s.transfer.fec==FecMode::rs20&&s.calendar&&s.calendar->epoch==1793850000&&
-          s.calendar->initial_ordinal==12&&s.live_noise_dbfs_hz==-92.25,
+          s.calendar->initial_ordinal==12&&s.live_noise_dbfs_hz==-92.25&&s.wrong_key_admission=="strict",
           "Robust Helper/codec/calendar settings did not reach the session");
     const auto exported=launch_command::parse(controller.field(F::planner_command).text);
     check(exported.calendar_epoch==1793850000ULL&&exported.calendar_ordinal==12&&
-          exported.live_noise_dbfs_hz==-92.25&&exported.fec=="rs20"&&exported.workspace_percent==0,
+          exported.live_noise_dbfs_hz==-92.25&&exported.fec=="rs20"&&exported.workspace_percent==0&&
+          exported.wrong_key_admission=="strict",
           "Native receiver settings were lost from saved launch parameters");
     controller.edit(F::short_bits,"001");
     check(controller.field(F::fec).selected=="rs20"&&controller.field(F::fec).display_text=="Off (exact raw bits)",

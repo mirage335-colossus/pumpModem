@@ -134,6 +134,7 @@ Display timing never controls receiver decisions or completion.
 | Rate, Shift | Rate is native inner rate; audio IF is Carrier minus Shift. Shift also contributes to the oscillator error model. |
 | Additional Symbols, Spreading | Off uses one lane; Interleave with `N×` selects `N` native added-symbol lanes. Nominal occupied DATA bandwidth is `0.625 × Rate × N`. |
 | Symbol burst, Random extra | Shared whole-bit calendar waits; see [burst scheduling](symbol-burst.md). |
+| Wrong Key Admission | Robust-only receiver policy: Current (best sensitivity), Guarded (heuristic), or Strict (heuristic). It applies stronger evidence against unrelated keyed signals and can reject wanted weak or distorted signals. No wrong-key-per-day rate is calibrated, and this is not authentication. It does not change the transmitted waveform or duration. Current preserves existing behavior. |
 | FHSS | Canonical envelope and illustrative frequency schedule; no external radio retuning. |
 | Target SNR dB/1Hz | One shared C/N0 target, default 32 dB-Hz, for provisional duration planning; separate from actual simulated C/N0. |
 | Error correction | Configured Off, RS20 or RS60 native short/long text profiles. Raw bits bypass text coding and FEC exactly. |
@@ -200,6 +201,15 @@ Robust keeps one Target SNR shared by Console, Link Planner and saved
 placement uses the fixed high/low pilots and separate auxiliary tone; an invalid
 selected IF/rate fails configuration explicitly. Pattern/tone and Helper
 frequency controls and their launch overrides remain removed.
+
+The Robust **Wrong Key Admission** choice is immediately left of Encryption key
+entry and persists in launch settings as
+`--wrong-key-admission current|guarded|strict`. It defaults to `current`, which
+preserves existing reception behavior. Guarded and Strict use a local heuristic to require stronger
+evidence against unrelated keyed signals; either may reject wanted weak or
+distorted signals. No calibrated wrong-key/day rate or authentication guarantee
+is provided. This receive-only setting does not alter the transmitted waveform
+or duration and remains retained while Fast or Legacy is selected.
 
 Robust text accepts up to 1 MiB of decoded bytes, with up to 4 MiB of escaped
 editor representation. Local edit frames allow up to 4 MiB for this declared

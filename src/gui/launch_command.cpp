@@ -168,7 +168,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             flag=="--keyfile"||flag=="--keyset"||flag=="--key-name"||flag=="--tx-key"||
             flag=="--symbol-burst"||flag=="--symbol-burst-random"||
             flag=="--helper-power"||flag=="--helper-ratio-limit"||flag=="--helper-callsign"||
-            flag=="--calendar-epoch"||flag=="--calendar-ordinal"||flag=="--live-noise-dbfs-hz"||flag=="--fec";
+            flag=="--calendar-epoch"||flag=="--calendar-ordinal"||flag=="--live-noise-dbfs-hz"||flag=="--fec"||flag=="--wrong-key-admission";
         if(!known)invalid("Unknown launch option: "+std::string(flag));
         std::string_view value;
         if(equal!=std::string_view::npos)value=argument.substr(equal+1);
@@ -202,6 +202,10 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         else if(flag=="--fec") {
             if(value!="off"&&value!="rs20"&&value!="rs60")invalid("--fec must be off, rs20 or rs60.");
             result.fec=value;
+        }
+        else if(flag=="--wrong-key-admission") {
+            if(value!="current"&&value!="guarded"&&value!="strict")invalid("--wrong-key-admission must be current, guarded or strict.");
+            result.wrong_key_admission=value;
         }
         else if(flag=="--clock-sync")result.clock_sync=clock_sync::format(clock_sync::parse(value));
         else if(flag=="--keyfile")result.keyfile=value;
@@ -355,6 +359,7 @@ std::string format(const Patch& settings) {
     if(settings.clear_live_noise)add("--live-noise-dbfs-hz","unspecified");
     else if(settings.live_noise_dbfs_hz)add("--live-noise-dbfs-hz",numeric(*settings.live_noise_dbfs_hz));
     if(settings.fec)add("--fec",*settings.fec);
+    if(settings.wrong_key_admission)add("--wrong-key-admission",*settings.wrong_key_admission);
     if(settings.clock_sync)add("--clock-sync",clock_sync::format(clock_sync::parse(*settings.clock_sync)));
     if(settings.audio_timing_error_seconds)add("--audio-error",clock_sync::duration_text(*settings.audio_timing_error_seconds));
     if(settings.dsss_mode)add("--dsss-mode",*settings.dsss_mode);

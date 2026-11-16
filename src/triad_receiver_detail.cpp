@@ -6,6 +6,22 @@
 
 namespace datapump::triad::v3 {
 
+const char* wrong_key_admission_name(WrongKeyAdmission policy) {
+    switch (policy) {
+    case WrongKeyAdmission::current: return "current";
+    case WrongKeyAdmission::guarded: return "guarded";
+    case WrongKeyAdmission::strict: return "strict";
+    }
+    throw Error("invalid Robust wrong-key admission policy");
+}
+
+WrongKeyAdmission parse_wrong_key_admission(std::string_view name) {
+    if (name == "current") return WrongKeyAdmission::current;
+    if (name == "guarded") return WrongKeyAdmission::guarded;
+    if (name == "strict") return WrongKeyAdmission::strict;
+    throw Error("Wrong Key Admission expects current, guarded or strict");
+}
+
 double receiver_operational_threshold() {
     constexpr double attempt_spacing = .4, probability_per_day = 1e-4;
     return std::log((std::ceil(86'400 / attempt_spacing) + 1) / probability_per_day);

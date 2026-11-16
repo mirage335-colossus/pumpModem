@@ -316,6 +316,9 @@ struct Controller::Impl {
         f(UiField::search_arithmetic).options={{"default","Default — automatic"},
             {"fp32-min","FP32 minimum"},{"fp64-force","FP64 force"}};
         f(UiField::search_arithmetic).selected="default";
+        f(UiField::wrong_key_admission).options={{"current","Current (best sensitivity)"},
+            {"guarded","Guarded (heuristic)"},{"strict","Strict (heuristic)"}};
+        f(UiField::wrong_key_admission).selected="current";
         f(UiField::receiver_strategy).options={{"auto","Automatic"},{"existing","Existing only"},
             {"complex","Complex only"},{"amplitude","Amplitude only"}};
         f(UiField::receiver_strategy).selected="auto";
@@ -559,6 +562,7 @@ struct Controller::Impl {
             choice(UiField::rf_oscillator,load->rf_oscillator);choice(UiField::spread_preset,load->spread_preset);
             choice(UiField::selective_perturbation,load->selective_perturbation);
             choice(UiField::fhss,load->fhss);choice(UiField::search_arithmetic,load->search_arithmetic);
+            choice(UiField::wrong_key_admission,load->wrong_key_admission);
             choice(UiField::receiver_strategy,load->receiver_strategy);
             if(load->reference) {
                 if(*load->reference=="shared-radio")f(UiField::rf_oscillator).selected="baseband-clock";
@@ -634,6 +638,7 @@ struct Controller::Impl {
         settings.transfer.modem.receiver_cpu_budget=number(f(UiField::receiver_cpu_budget).text,"Receiver budget");
         settings.transfer.modem.receiver_strategy=tuning::parse_receiver_strategy(f(UiField::receiver_strategy).selected);
         settings.transfer.modem.search_arithmetic=tuning::parse_search_arithmetic(f(UiField::search_arithmetic).selected);
+        settings.wrong_key_admission=f(UiField::wrong_key_admission).selected;
         settings.transfer.key=selected_key()?std::optional<Crypto>(selected_key()->key):std::nullopt;
         settings.transfer.clock_sync=clock_policy();
         settings.transfer.audio_timing_error_seconds=clock_sync::is_default(f(UiField::audio_error).text)?
@@ -710,6 +715,7 @@ struct Controller::Impl {
         if(f(UiField::dsss_version).selected!="legacy")values.dsss_mode=f(UiField::dsss_version).selected;
         values.dsss_version=f(UiField::dsss_version).selected=="legacy"?"legacy":"interleave";
         values.search_arithmetic=f(UiField::search_arithmetic).selected;
+        values.wrong_key_admission=settings.wrong_key_admission;
         values.receiver_strategy=tuning::receiver_strategy_id(settings.transfer.modem.receiver_strategy);
         values.receiver_cpu_budget=settings.transfer.modem.receiver_cpu_budget;
         values.full_duplex=settings.full_duplex;
@@ -1023,6 +1029,7 @@ struct Controller::Impl {
             UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::carrier,
             UiField::bandwidth,UiField::doppler,UiField::spread_preset,UiField::selective_perturbation,
             UiField::search_margin,UiField::dsss_factor,UiField::dsss_version,UiField::fhss,
+            UiField::wrong_key_admission,
             UiField::symbol_burst,UiField::symbol_burst_random,UiField::helper_power,
             UiField::fec,UiField::dsp_workspace,UiField::snr,UiField::planner_target,
             UiField::search_arithmetic,UiField::receiver_strategy,UiField::receiver_cpu_budget})
@@ -1234,6 +1241,10 @@ struct Controller::Impl {
             text<<"Slot "<<step.index<<" · epoch "<<step.epoch<<" / ordinal "<<step.ordinal<<" · "
                 <<(step.decision==live::PatternDecision::data?"DATA":step.decision==live::PatternDecision::quiet?"QUIET":"AMBIGUOUS");
             if(step.bit)text<<" "<<unsigned(*step.bit);
+            text<<" · Wrong Key Admission selected "<<f(UiField::wrong_key_admission).selected
+                <<" / actual "<<step.wrong_key_admission
+                <<" · required log gap "<<step.wrong_key_required_log_separation;
+            if(step.wrong_key_rejected)text<<" · admission withheld (evidence below selected margin)";
             if(!step.evidence_complete) {
                 text<<" · incomplete evidence";
                 if(!step.reason.empty())text<<" · "<<step.reason;
@@ -1691,7 +1702,8 @@ void Controller::select(UiField field,std::string id) {
         else if(field==UiField::helper_power||field==UiField::helper_ratio_limit||field==UiField::simulation||field==UiField::simulation_oscillator||field==UiField::rf_oscillator||
             field==UiField::fec||field==UiField::dsp_workspace||field==UiField::fhss||
             field==UiField::symbol_burst||field==UiField::symbol_burst_random||
-            field==UiField::dsss_version||field==UiField::search_arithmetic||field==UiField::receiver_strategy) p.configure();
+            field==UiField::dsss_version||field==UiField::search_arithmetic||field==UiField::receiver_strategy||
+            field==UiField::wrong_key_admission) p.configure();
         else if(field==UiField::dsss_factor) {
             p.f(UiField::dsss_version).selected="interleave";
             const auto factor=static_cast<unsigned>(number(state.selected,"DSSS factor"));

@@ -232,15 +232,18 @@ void supported_sizes() {
         }
         const auto key_action=layout[Slot::key_actions],key=layout[Slot::key];
         const auto burst=layout[Slot::symbol_burst],random=layout[Slot::symbol_burst_random];
+        const auto wrong_key=layout[Slot::wrong_key_admission];
         check(layout[Slot::grid].x+layout[Slot::grid].w<key_action.x&&
               key_action.x+key_action.w<layout[Slot::dsss_version].x&&
               layout[Slot::dsss_version].x+layout[Slot::dsss_version].w<layout[Slot::dsss_factor].x&&
               layout[Slot::dsss_factor].x+layout[Slot::dsss_factor].w<layout[Slot::fhss].x&&
               layout[Slot::fhss].x+layout[Slot::fhss].w+8==burst.x&&
-              burst.x+burst.w+8==random.x&&random.x+random.w+8==key.x&&
-              burst.y==key.y&&random.y==key.y&&burst.w>=112&&random.w>=96&&key.w>=200&&
-              layout[Slot::fhss].w>=130&&layout[Slot::dsss_version].w>=150&&
+              burst.x+burst.w+8==random.x&&random.x+random.w+8==wrong_key.x&&
+              wrong_key.x+wrong_key.w+8==key.x&&key.x+key.w==size.w-margin&&
+              burst.y==key.y&&random.y==key.y&&wrong_key.y==key.y&&burst.w>=90&&random.w>=76&&
+              wrong_key.w>=184&&key.w>=159&&layout[Slot::fhss].w==size.w-1079&&layout[Slot::dsss_version].w>=130&&
               persistent_slot(Slot::symbol_burst)&&persistent_slot(Slot::symbol_burst_random)&&
+              persistent_slot(Slot::wrong_key_admission)&&
               key_action.y==key.y&&key.y+key.h<=simulation.y-label_height,
               "Persistent Burst dropdowns must follow FHSS and fit before the key without obscuring the link row");
         const auto repeatable=layout[Slot::repeatable],mode=layout[Slot::mode],gpu=layout[Slot::gpu];

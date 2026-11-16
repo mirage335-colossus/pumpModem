@@ -132,3 +132,78 @@ of such alternatives and losses from poorly matched line rejection. Their
 detector geometries do not qualify this modem. Retain pure-line, off-grid-line,
 DATA-only and DATA-plus-line controls; score physical quiet on the original
 unnotched observation.
+
+## Wrong Key Admission
+
+The native receiver now has a final, receiver-local **Wrong Key Admission**
+heuristic. `current` is the default and preserves the previous DATA/erasure
+decision exactly. `guarded` and `strict` apply only after ordinary model
+fallback and scored-quiet checks have finished: a baseline DATA result becomes
+an ambiguous erasure when its two operational bit log scores are too close.
+Let `g` be their absolute gap, `m` their minimum, `T` the ordinary DATA
+threshold, and `rho` and `delta` the selected policy constants. The boundary is
+
+`g < max(existing_min_gap, delta) + rho * max(0, m - T)`.
+
+`guarded` uses `delta=ln(10), rho=0.10`; `strict` uses
+`delta=2*ln(10), rho=0.25`. This is scalar arithmetic after the normal score
+has been produced: it adds no search, projection, DSP workspace or worker,
+restarts no fallback, and changes no public geometry. It does not alter the
+transmitted waveform or its duration. An erasure cannot count as physical
+quiet; the usual two scored quiet slots remain required for completion.
+
+Treat this as a relative-competition filter. It asks whether the winning DATA
+bit is sufficiently separated from its competing bit relative to excess score
+above the existing threshold. It is not a likelihood against a wrong-key
+population, calibrated error probability, daily false-admission rate, sender
+authentication or a guarantee that every unrelated keyed signal is rejected.
+One accidentally dominant bit can still pass. A receiver-side threshold can
+also erase wanted weak or distorted bits; there is no universal sensitivity
+guarantee. The default preserves prior decisions for compatibility, while
+stronger modes trade some wanted-signal admission for extra rejection of
+near-balanced competing scores.
+
+The motivation is bounded native evidence, not broad calibration. An early
+strong foreign-key native fixture had relative-gap ratio 0.0298, where the
+ratio is the bit-score gap divided by `max(1, min(bit scores) - T)`. In a
+second diagnostic, four receiver roots scored on the same IQ all rejected
+under `strict`, with ratios 0.0249, 0.1934, 0.0605 and 0.1234. The repeated
+roots are not independent channel episodes, so they do not estimate natural
+wrong-key frequency or a daily rate.
+
+Fresh native holdouts sharpen the tradeoff. In two separate configured
+carrier/bit/noise strata (seed 74, bit 0, carrier 1743; seed 113, bit 1,
+carrier 1719), wrong-key-only inputs that baseline falsely admitted as DATA
+were rejected by both stronger modes. Wanted near-threshold DATA in the same
+strata, with operational scores 23.845 and 26.786 against `T=21.493`, passed
+both modes. In matched cochannel mixes using wanted amplitudes 0.07 or 0.16
+and a wrong-context same-frequency interferer at 0.38, all four baseline and
+`guarded` decisions were correct; `strict` erased one, seed 113 at wanted
+amplitude 0.07 (gap 6.6862 versus required separation 14.5614). This is direct
+evidence of a receiver-side wanted-signal cost, not a general sensitivity or
+wrong-key rate. See the source-bound [native validation record](validation.md)
+for matched inputs and outcomes.
+
+Earlier normalized-shadow work found that fixed-shape directional scores
+saturate at high SNR and can lose wanted signals outside their admitted
+subspace; a fixed 9/8 variance penalty also lost weak wanted DATA. These
+contrary findings rule out treating a universal directional or variance veto
+as a safe replacement. See the retained
+[normalized-null analysis](../_appraisal/highFidelity-triple_Robust_Modem/hf-normalized-null.md)
+and [predictive-completion analysis](../_appraisal/highFidelity-triple_Robust_Modem/hf-predictive-completion.md).
+
+Formal robust tests illustrate the gap between a useful heuristic and a
+calibrated test: safe/e-value and robust likelihood-ratio methods state their
+null and sampling assumptions, while fixed-ratio GNSS literature warns that a
+fixed critical ratio does not itself set a fixed failure rate. These are
+methodological analogies, not derivations for this bit-score rule
+([Grünwald, de Heide and Koolen, 2024](https://academic.oup.com/jrsssb/article/86/5/1091/7623686),
+[Saha and Ramdas, 2025 version](https://arxiv.org/abs/2408.14015),
+[Teunissen and Verhagen, §§2.6 and 3.3](https://gnss.curtin.edu.au/wp-content/uploads/sites/21/2016/04/Teunissen2007GNSS.pdf)).
+The related Saha and Ramdas paper submitted on 1 November 2026 is a preprint
+about instance-optimal sequential testing under its own formal setup, not
+validation of this receiver heuristic ([preprint](https://arxiv.org/abs/2611.02130)).
+Any future probability claim needs predeclared complete receiver episodes;
+bits, fragments, timing variants and roots sharing an IQ capture are dependent
+and do not count as independent samples. See the
+[episode-level statistical protocol](../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/86-statistics-and-calculation-checks.md).

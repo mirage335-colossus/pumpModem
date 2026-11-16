@@ -82,6 +82,7 @@ struct Options {
     std::string vulkan_precision = "automatic";
     bool gpu_fp32_minimum = false;
     std::string native_coarse_precision = "automatic";
+    std::string wrong_key_admission = "current";
     std::string base = "exact-fixture", shift = "exact-fixture";
     std::string spread = "none", selective = "off", timing = "fixture";
     std::optional<unsigned> workers, owners;
@@ -176,6 +177,8 @@ Options parse(int argc, char** argv) {
     const bool gpu_fp32_minimum_supplied = values.contains("--gpu-fp32-minimum");
     assign("--gpu-fp32-minimum", o.gpu_fp32_minimum);
     assign("--native-coarse-precision", o.native_coarse_precision);
+    assign("--wrong-key-admission", o.wrong_key_admission);
+    (void)parse_wrong_key_admission(o.wrong_key_admission);
     assign("--require-accelerator", o.require_accelerator);
     const bool device_index_supplied = values.contains("--device-index");
     const bool device_memory_limit_supplied = values.contains("--device-memory-limit-bytes");
@@ -306,6 +309,7 @@ const char* fec_name(FecMode mode) {
 
 live::Settings settings_for(const Options& o, std::size_t memory_limit) {
     live::Settings s;
+    s.wrong_key_admission = o.wrong_key_admission;
     s.simulation = true;
     s.receiver_memory_limit = memory_limit;
     if (o.native_coarse_precision == "fp64") s.transfer.modem.search_arithmetic = modem::SearchArithmetic::fp64;
@@ -548,6 +552,7 @@ Json profile_json(const Options& o, const Profile& profile, const ReceiverSlotPl
         {"time_varying_common_doppler_hz", config.time_varying_common_doppler_hz},
         {"time_varying_atmospheric_hz", config.time_varying_atmospheric_hz},
         {"time_varying_minimum_bit_log_separation", config.time_varying_minimum_bit_log_separation},
+        {"wrong_key_admission", wrong_key_admission_name(config.wrong_key_admission)},
         {"channel_bounded_spread_knot_seconds", channel.path_evolution.bounded_spread_knot_seconds},
         {"channel_common_doppler_wander_hz", channel.path_evolution.common_doppler_wander_hz},
         {"channel_common_doppler_knot_seconds", channel.path_evolution.common_doppler_knot_seconds},
@@ -1014,6 +1019,9 @@ Json score_json(const ReceiverSlotScore& score) {
         {"operational_bit_evidence", scores(score.operational_bit_evidence)},
         {"operational_bit_log_separation", score.operational_bit_log_separation},
         {"operational_minimum_bit_log_separation", score.operational_minimum_bit_log_separation},
+        {"wrong_key_admission", wrong_key_admission_name(score.wrong_key_admission)},
+        {"wrong_key_required_log_separation", score.wrong_key_required_log_separation},
+        {"wrong_key_rejected", score.wrong_key_rejected},
         {"varying_quiet_modes", score.varying_quiet_modes},
         {"varying_quiet_energy", score.varying_quiet_energy},
         {"varying_quiet_threshold", score.varying_quiet_threshold},
@@ -1336,6 +1344,7 @@ void fine_run(Json& report, const Options& o, const Profile& profile, const Rece
     ReceiverSlotScore score;
     fine->finish(score);
     classify_fine_slot(score, prepared.grid);
+    apply_wrong_key_admission(score, profile.receiver.wrong_key_admission);
     // Snapshot construction is diagnostics; exclude it from teardown service.
     const auto finish_elapsed = finish_time.elapsed();
     const auto final_progress = fine->progress();
