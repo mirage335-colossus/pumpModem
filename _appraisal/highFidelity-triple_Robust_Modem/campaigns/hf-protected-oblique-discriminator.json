@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "name": "hf-protected-oblique-discriminator",
+  "purpose": "Frozen current-waveform RS20 e and matched foreign-key control. One common IQ capture per case, canonical and predictive quiet receivers, and the same bounded native completion-event consumer on both. Charge two receiver passes; compare all six scalar admission tiers downstream without repeating DSP. The slower 5.5 m/s rigid trajectory fits a complete calendar without repeating its 24 km spatial period; it is not the original 8 m/s capture. Require exact wanted content/integrity and separately record false DATA, premature physical completion, attempts, and rejection on the foreign-key control.",
+  "max_trials": 2,
+  "max_wall_seconds": 1900,
+  "per_trial_wall_seconds": 900,
+  "max_samples": 12000000,
+  "stop_on_execution_failure": true,
+  "episodes": [
+    {
+      "id": "oblique-protected-e",
+      "scenario": "hf-vector-oblique-chain-protected-clocks-tone",
+      "mode": "receive",
+      "waveform": "reference",
+      "message": "e",
+      "fec": "rs20",
+      "control": "wanted",
+      "seed": 70501,
+      "noise_seed": 80501,
+      "bit_seconds": 8,
+      "cn0_db_hz": 30,
+      "hf_predictive_quiet": true,
+      "reception_requirement": "characterization"
+    },
+    {
+      "id": "oblique-protected-foreign-key",
+      "scenario": "hf-vector-oblique-chain-protected-clocks-tone",
+      "mode": "receive",
+      "waveform": "reference",
+      "message": "e",
+      "fec": "rs20",
+      "control": "wrong-key",
+      "seed": 70501,
+      "noise_seed": 80501,
+      "bit_seconds": 8,
+      "cn0_db_hz": 30,
+      "hf_predictive_quiet": true,
+      "reception_requirement": "negative_control"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 #include "appraisal/hf_native_chain.hpp"
 #include "datapump/triad_stream_receiver.hpp"
 #include "hf_normalized_null.hpp"
+#include "hf_admission_replay.hpp"
 #include "hf_protected_reassembly.hpp"
 #include "triad_probe_json.hpp"
 
@@ -47,7 +48,7 @@ using datapump::triad::probe::write_json;
 using Clock = std::chrono::steady_clock;
 constexpr std::size_t chunk_rows = 4096, consumer_reserve = 65536;
 constexpr std::size_t normalized_capture_reserve = hf_normalized_null_maximum_rows * sizeof(Complex);
-constexpr double noise_variance = .0001, maximum_wall_seconds = 120.;
+constexpr double default_noise_variance = .0001, maximum_wall_seconds = 120.;
 constexpr std::uint64_t ordinary_sample_limit = 10'000'000, separate_sample_limit = 16'000'000;
 constexpr std::uint64_t wrong_key_join_sample_limit = 18'000'000;
 constexpr std::uint64_t noise_seed = 0x5253323070726f62ULL, path_seed = 0x525332306368616eULL;
@@ -113,17 +114,20 @@ struct Case {
     bool noise = false, wrong_key = false;
     std::uint64_t seed = noise_seed;
     bool wrong_key_join = false;
+    std::uint8_t wrong_root_first = 0xa5;
 };
 
 Case select_case(std::string_view name) {
     if (name == "clean") return {name, {{'B'}}, {}, false, false};
     if (name == "fade-byte") return {name, {{'B'}}, 10, false, false};
     if (name == "fade-boundary") return {name, {{'e'}}, 15, false, false, noise_seed + 1};
+    if (name == "fade-holdout") return {name, {{'K'}}, 23, false, false, noise_seed + 2};
+    if (name == "wrong-key-holdout") return {name, {{'K'}}, {}, false, true, noise_seed + 2, false, 0x31};
     if (name == "noise") return {name, {{'B'}}, {}, true, false};
     if (name == "wrong-key") return {name, {{'B'}}, {}, false, true};
     if (name == "separate") return {name, {{' '}, {'e'}}, {}, false, false};
     if (name == "wrong-key-join") return {name, {{'B'}, {'e'}}, {}, false, true, noise_seed, true};
-    throw std::invalid_argument("--case must be clean, fade-byte, fade-boundary, noise, wrong-key, separate, or wrong-key-join");
+    throw std::invalid_argument("--case must be clean, fade-byte, fade-boundary, fade-holdout, noise, wrong-key, wrong-key-holdout, separate, or wrong-key-join");
 }
 
 Json identity() {
@@ -142,6 +146,45 @@ Json consumer_report(const ProtectedReassemblyReport& report) {
         {"last_action", report.last_action}, {"decode_seconds", report.decode_seconds},
         {"service_seconds", report.service_seconds}});
 }
+
+template<class Range> Json indices_json(const Range& values) {
+    Json::Array rows;
+    for (const auto value : values) rows.emplace_back(value);
+    return rows;
+}
+
+Json message_details(const CompletedMessage& event) {
+    const auto& m = event.message;
+    Json::Array bits, erased_bytes;
+    std::optional<std::size_t> previous_byte;
+    for (std::size_t i = 0; i < m.bit_slots.size(); ++i) {
+        bits.emplace_back(m.bit_slots[i] ? Json(*m.bit_slots[i]) : Json{});
+        if (!m.bit_slots[i] && previous_byte != i / 8) {
+            previous_byte = i / 8;
+            erased_bytes.emplace_back(*previous_byte);
+        }
+    }
+    return object({{"first_public_slot", event.first_public_slot}, {"stop_public_slot", event.stop_public_slot},
+        {"state", static_cast<unsigned>(m.state)}, {"reason", m.reason}, {"physical_complete", m.physical_complete},
+        {"decoded_content", m.decoded_content.has_value()},
+        {"decoded_bytes", m.decoded_content ? bytes_json(m.decoded_content->message.data) : Json{}},
+        {"observed_bits", m.observed_bits}, {"missing_slots", m.missing_slots},
+        {"slots_consumed", m.slots_consumed}, {"bit_slots", std::move(bits)},
+        {"erasure_slot_indices", indices_json(m.erasure_slot_indices)},
+        {"trailing_quiet_slots", indices_json(m.trailing_quiet_slots)},
+        {"fragment_relative_erased_byte_positions", std::move(erased_bytes)},
+        {"erased_byte_scope", "bit_slots offset divided by eight; decoder-frame diagnostic, not source-frame alignment"},
+        {"baseline_rating", object({{"available", m.wrong_key_evidence.available},
+            {"data_bits", m.wrong_key_evidence.data_bits},
+            {"passing_bits_current_guarded_strict_very_strict_extreme_maximum", indices_json(m.wrong_key_evidence.passing_bits)}})},
+        {"message_service_seconds", m.message_service_seconds}});
+}
+
+Json candidate_details(const ProtectedReassemblyCandidate& candidate) {
+    return object({{"first_public_slot", candidate.first_public_slot}, {"stop_public_slot", candidate.stop_public_slot},
+        {"bit_positions", candidate.bit_positions}, {"erased_positions", candidate.erased_positions},
+        {"fragments", candidate.fragments}, {"decoded_bytes", bytes_json(candidate.content.message.data)}});
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -155,20 +198,50 @@ int main(int argc, char** argv) {
     std::vector<ProtectedReassemblyCandidate> recovered;
     std::vector<StreamSlotReceipt> slots;
     bool observed_recovery = false;
-    bool normalized_first_slot = false;
+    bool normalized_first_slot = false, admission_replay = false;
+    WrongKeyAdmission admission = WrongKeyAdmission::current;
+    double noise_variance = default_noise_variance, bit_seconds = 8.;
     const auto check = [&](bool passed, std::string_view label) {
         assertions.emplace_back(object({{"name", label}, {"passed", passed}}));
         return passed;
     };
     try {
-        if ((argc != 3 && argc != 4) || std::string_view(argv[1]) != "--case" ||
-            (argc == 4 && std::string_view(argv[3]) != "--normalized-first-slot"))
-            throw std::invalid_argument("usage: high_fidelity_protected_reassembly_probe --case CASE [--normalized-first-slot]");
-        name = argv[2];
+        bool saw_case = false, saw_admission = false, saw_noise = false, saw_duration = false;
+        for (int i = 1; i < argc; ++i) {
+            const std::string_view argument(argv[i]);
+            const auto value = [&]() -> std::string_view {
+                if (++i == argc) throw std::invalid_argument("missing value for " + std::string(argument));
+                return argv[i];
+            };
+            const auto number = [&]() {
+                const std::string text(value());
+                std::size_t used = 0;
+                const auto parsed = std::stod(text, &used);
+                if (used != text.size() || !std::isfinite(parsed)) throw std::invalid_argument("invalid finite numeric option");
+                return parsed;
+            };
+            if (argument == "--case" && !saw_case) { name = value(); saw_case = true; }
+            else if (argument == "--normalized-first-slot" && !normalized_first_slot) normalized_first_slot = true;
+            else if (argument == "--admission-replay" && !admission_replay) admission_replay = true;
+            else if (argument == "--wrong-key-admission" && !saw_admission) {
+                admission = parse_wrong_key_admission(value()); saw_admission = true;
+            } else if (argument == "--noise-variance" && !saw_noise) { noise_variance = number(); saw_noise = true; }
+            else if (argument == "--bit-seconds" && !saw_duration) { bit_seconds = number(); saw_duration = true; }
+            else throw std::invalid_argument("unknown or duplicate option: " + std::string(argument));
+        }
+        if (!saw_case) throw std::invalid_argument("usage: high_fidelity_protected_reassembly_probe --case CASE "
+            "[--normalized-first-slot | --admission-replay] [--wrong-key-admission POLICY] "
+            "[--noise-variance .0001..1000000] [--bit-seconds 8|16]");
         const auto selected = select_case(name);
-        normalized_first_slot = argc == 4;
-        if (normalized_first_slot && name != "clean" && name != "wrong-key")
+        if (noise_variance < default_noise_variance || noise_variance > 1e6 || (bit_seconds != 8. && bit_seconds != 16.))
+            throw std::invalid_argument("noise variance must be .0001..1000000 and bit-seconds must be 8 or 16");
+        if (normalized_first_slot && (name != "clean" && name != "wrong-key"))
             throw std::invalid_argument("--normalized-first-slot is confined to --case clean or wrong-key");
+        if (normalized_first_slot && (admission_replay || admission != WrongKeyAdmission::current ||
+            noise_variance != default_noise_variance || bit_seconds != 8.))
+            throw std::invalid_argument("normalized first-slot diagnostic retains its original admission/noise/duration");
+        if (admission_replay && admission != WrongKeyAdmission::current)
+            throw std::invalid_argument("admission replay requires an unfiltered current-policy native baseline");
         Deadline deadline;
         const auto cancellation = deadline.source.get_token();
         PublicProfileConfig pc;
@@ -176,7 +249,7 @@ int main(int argc, char** argv) {
         pc.format.inner_rate_hz = 120;
         pc.format.added_symbols = 1;
         pc.format.added_interleave = false;
-        pc.format.bit_seconds = 8.;
+        pc.format.bit_seconds = bit_seconds;
         pc.format.epoch = 1793850000;
         pc.format.symbol_ordinal = 741;
         pc.format.encrypt = false;
@@ -187,9 +260,9 @@ int main(int argc, char** argv) {
         pc.receiver_filter_halo_samples = 8;
         const PublicProfile profile(pc);
         const auto receiver_key = Crypto::amateur();
-        const std::array<std::uint8_t, 32> wrong_root = [] {
+        const std::array<std::uint8_t, 32> wrong_root = [&] {
             std::array<std::uint8_t, 32> value{};
-            for (std::size_t i = 0; i < value.size(); ++i) value[i] = static_cast<std::uint8_t>(0xa5 + i);
+            for (std::size_t i = 0; i < value.size(); ++i) value[i] = static_cast<std::uint8_t>(selected.wrong_root_first + i);
             return value;
         }();
         const auto transmitter_key = selected.wrong_key ? Crypto(wrong_root) : receiver_key;
@@ -212,6 +285,7 @@ int main(int argc, char** argv) {
         config.sample_rate_hz = pc.format.sample_rate;
         config.data_if_hz = pc.data_if_hz;
         config.noise_variance = noise_variance;
+        config.wrong_key_admission = admission;
         config.data_basis_gain = 1. / std::sqrt(data_power_reference(pc.format, receiver_key, cancellation).mean_norm);
         const auto receive_slot_stop = normalized_first_slot ? std::uint64_t{1} : slot_stop;
         const auto first_observation = make_receiver_slot_plan(profile, config, 0);
@@ -220,7 +294,8 @@ int main(int argc, char** argv) {
         const auto captured_rows = normalized_first_slot ? first_observation.stop_sample - first_observation.first_sample : 0;
         if (normalized_first_slot && (!captured_rows || captured_rows > hf_normalized_null_maximum_rows))
             throw std::runtime_error("unchanged first observation exceeds normalized shadow row cap");
-        const auto outside_reserve = consumer_reserve + (normalized_first_slot ? normalized_capture_reserve : 0);
+        const auto outside_reserve = consumer_reserve + (normalized_first_slot ? normalized_capture_reserve : 0) +
+            (admission_replay ? hf_admission_replay_reserve_bytes : 0);
         const auto sample_limit = selected.wrong_key_join ? wrong_key_join_sample_limit :
             selected.payloads.size() == 2 ? separate_sample_limit : ordinary_sample_limit;
         if (input_stop > sample_limit) throw std::runtime_error("public RS20 capture exceeds declared per-case sample limit");
@@ -311,6 +386,8 @@ int main(int argc, char** argv) {
         options.memory_limit_bytes = resources.memory_limit_bytes - outside_reserve;
         const NativeMessageProfile message{FecMode::rs20, true, 16, receiver_key};
         HfProtectedReassembly consumer(FecMode::rs20);
+        if (admission_replay && receive_slot_stop > hf_admission_replay_maximum_slots)
+            throw std::runtime_error("admission replay public slot cap exceeded before rendering");
         const auto receiver_began = Clock::now();
         auto receiver = std::make_unique<CompleteStreamReceiver>(profile, config, receiver_key, options, message);
         std::optional<std::stop_callback<std::function<void()>>> cancel_receiver;
@@ -447,7 +524,14 @@ int main(int argc, char** argv) {
                 {"symbol_ordinal", receipt.symbol_ordinal}, {"complete", row.complete}, {"all_valid", row.all_valid},
                 {"decision", row.decision == SlotDecision::data ? "data" : row.decision == SlotDecision::quiet ? "quiet" : "ambiguous"},
                 {"bit", row.bit ? Json(*row.bit) : Json{}}, {"reason", row.reason},
-                {"operational_log_e", row.operational_log_e}, {"operational_threshold", row.operational_threshold},
+                { "operational_log_e", row.operational_log_e}, {"operational_threshold", row.operational_threshold},
+                {"operational_bit_evidence", Json::Array{row.operational_bit_evidence[0], row.operational_bit_evidence[1]}},
+                {"operational_bit_log_separation", row.operational_bit_log_separation},
+                {"operational_minimum_bit_log_separation", row.operational_minimum_bit_log_separation},
+                {"operational_passes_conditional_bound", row.operational_passes_conditional_bound},
+                {"wrong_key_admission", wrong_key_admission_name(row.wrong_key_admission)},
+                {"wrong_key_rejected", row.wrong_key_rejected},
+                {"wrong_key_required_log_separation", row.wrong_key_required_log_separation},
                 {"quiet_energy", row.quiet_energy}, {"quiet_threshold", row.quiet_threshold},
                 {"helper_seconds", row.helper_seconds}, {"coarse_seconds", row.coarse_seconds}, {"fine_seconds", row.fine_seconds},
                 {"workspace_peak_bytes", row.workspace_peak_bytes}, {"workers", receipt.workers}}));
@@ -467,15 +551,10 @@ int main(int argc, char** argv) {
             canonical_correct += correct;
             canonical_wrong += m.decoded_content.has_value() && !correct;
             canonical_premature += premature;
-            Json::Array quiet;
-            for (auto slot : m.trailing_quiet_slots) quiet.emplace_back(slot);
-            native_rows.emplace_back(object({{"first_public_slot", event.first_public_slot},
-                {"stop_public_slot", event.stop_public_slot}, {"state", static_cast<unsigned>(m.state)}, {"reason", m.reason},
-                {"physical_complete", m.physical_complete}, {"decoded_content", m.decoded_content.has_value()},
-                {"decoded_bytes", m.decoded_content ? bytes_json(m.decoded_content->message.data) : Json{}},
-                {"observed_bits", m.observed_bits}, {"missing_slots", m.missing_slots},
-                {"trailing_quiet_slots", std::move(quiet)}, {"premature_against_source", premature},
-                {"message_service_seconds", m.message_service_seconds}}));
+            auto row = message_details(event);
+            row["premature_against_source"] = premature;
+            row["correct_against_source"] = correct;
+            native_rows.emplace_back(std::move(row));
         }
         std::size_t consumer_correct = 0, consumer_wrong = 0;
         for (const auto& candidate : recovered) {
@@ -483,10 +562,9 @@ int main(int argc, char** argv) {
                 candidate.first_public_slot == 0 && candidate.stop_public_slot == slot_stop &&
                 candidate.bit_positions == wire.front().size() && candidate.content.message.data == selected.payloads.front();
             consumer_correct += correct; consumer_wrong += !correct;
-            recovered_rows.emplace_back(object({{"first_public_slot", candidate.first_public_slot},
-                {"stop_public_slot", candidate.stop_public_slot}, {"bit_positions", candidate.bit_positions},
-                {"erased_positions", candidate.erased_positions}, {"fragments", candidate.fragments},
-                {"decoded_bytes", bytes_json(candidate.content.message.data)}, {"correct_against_source", correct}}));
+            auto row = candidate_details(candidate);
+            row["correct_against_source"] = correct;
+            recovered_rows.emplace_back(std::move(row));
         }
         bool passed = true;
         bool consumer_acceptance_pass = false;
@@ -549,6 +627,121 @@ int main(int argc, char** argv) {
                 "clean_native_messages_complete_and_are_not_reassembled");
             passed &= check(consumer.report().pending_positions == 0, "canonical_success_clears_consumer_state");
         }
+        Json replay_report;
+        if (admission_replay) {
+            if (observed_recovery || report.input_closed || report.next_public_slot != slot_stop ||
+                slots.size() != slot_stop || report.uncommitted_slots)
+                throw std::runtime_error("admission replay requires the complete baseline with no recovery or EOF");
+            Json::Array policies;
+            bool baseline_parity = false;
+            double replay_seconds = 0.;
+            for (const auto policy : wrong_key_admission_policies) {
+                deadline.check();
+                const auto replay = replay_hf_admission_policy(profile, message, slots, policy, cancellation);
+                replay_seconds += replay.seconds;
+                if (policy == WrongKeyAdmission::current) {
+                    baseline_parity = hf_admission_matches_baseline(replay, completed, recovered, consumer.report()) &&
+                        replay.next_public_slot == report.next_public_slot &&
+                        replay.pending_message.observed_bits == report.observed_bits &&
+                        replay.pending_message.missing_slots == report.erasures &&
+                        replay.pending_message.wrong_key_evidence.available == report.wrong_key_evidence.available &&
+                        replay.pending_message.wrong_key_evidence.data_bits == report.wrong_key_evidence.data_bits &&
+                        replay.pending_message.wrong_key_evidence.passing_bits == report.wrong_key_evidence.passing_bits;
+                    for (std::size_t i = 0; i < slots.size(); ++i)
+                        baseline_parity &= replay.slots[i].decision == slots[i].score.decision &&
+                            replay.slots[i].bit == slots[i].score.bit && !replay.slots[i].rejected;
+                    passed &= check(baseline_parity, "current_native_downstream_replay_matches_complete_receiver_semantics");
+                }
+                std::array<std::size_t, 3> decisions{};
+                std::size_t tier_wrong = 0, tier_false = 0, tier_lost = 0, tier_quiet = 0;
+                std::size_t tier_native_correct = 0, tier_native_wrong = 0, tier_premature = 0;
+                std::size_t tier_consumer_correct = 0, tier_consumer_wrong = 0;
+                Json::Array tier_slots, rejected, tier_messages, tier_candidates;
+                std::vector<std::vector<std::size_t>> erased_bytes(wire.size());
+                for (const auto& row : replay.slots) {
+                    ++decisions[static_cast<std::size_t>(row.decision)];
+                    const auto wanted = expected_at(row.index);
+                    const bool target = wanted.has_value() && !selected.wrong_key;
+                    if (row.decision == SlotDecision::data) {
+                        tier_false += !target;
+                        tier_wrong += target && (!row.bit || *row.bit != wire[wanted->first][wanted->second]);
+                    } else if (target) {
+                        ++tier_lost;
+                        tier_quiet += row.decision == SlotDecision::quiet;
+                        auto& bytes = erased_bytes[wanted->first];
+                        const auto byte = wanted->second / 8;
+                        if (bytes.empty() || bytes.back() != byte) bytes.push_back(byte);
+                    }
+                    if (row.rejected) rejected.emplace_back(row.index);
+                    tier_slots.emplace_back(object({{"index", row.index},
+                        {"decision", row.decision == SlotDecision::data ? "data" :
+                            row.decision == SlotDecision::quiet ? "quiet" : "ambiguous"},
+                        {"bit", row.bit ? Json(*row.bit) : Json{}}, {"wrong_key_rejected", row.rejected},
+                        {"required_log_separation", row.required_log_separation}}));
+                }
+                for (const auto& event : replay.messages) {
+                    bool correct = false, premature = false;
+                    for (std::size_t i = 0; i < wire.size(); ++i) {
+                        correct |= !selected.noise && !selected.wrong_key && event.first_public_slot == starts[i] &&
+                            event.stop_public_slot == starts[i] + wire[i].size() + 2 && event.message.decoded_content &&
+                            event.message.decoded_content->message.data == selected.payloads[i];
+                        premature |= !selected.noise && event.first_public_slot >= starts[i] &&
+                            event.first_public_slot < starts[i] + wire[i].size() &&
+                            event.stop_public_slot < starts[i] + wire[i].size() + 2;
+                    }
+                    tier_native_correct += correct;
+                    tier_native_wrong += event.message.decoded_content.has_value() && !correct;
+                    tier_premature += premature;
+                    auto row = message_details(event);
+                    row["correct_against_source"] = correct;
+                    row["premature_against_source"] = premature;
+                    tier_messages.emplace_back(std::move(row));
+                }
+                for (const auto& candidate : replay.recovered) {
+                    const bool correct = !selected.noise && !selected.wrong_key && selected.payloads.size() == 1 &&
+                        candidate.first_public_slot == 0 && candidate.stop_public_slot == slot_stop &&
+                        candidate.bit_positions == wire.front().size() && candidate.content.message.data == selected.payloads.front();
+                    tier_consumer_correct += correct;
+                    tier_consumer_wrong += !correct;
+                    auto row = candidate_details(candidate);
+                    row["correct_against_source"] = correct;
+                    tier_candidates.emplace_back(std::move(row));
+                }
+                Json::Array source_bytes;
+                for (std::size_t i = 0; i < erased_bytes.size(); ++i)
+                    source_bytes.emplace_back(object({{"source_first_public_slot", starts[i]},
+                        {"erased_byte_positions", indices_json(erased_bytes[i])}}));
+                const bool negative = selected.noise || selected.wrong_key;
+                const bool content_requirement = !tier_native_wrong && !tier_consumer_wrong &&
+                    (negative ? (tier_native_correct == 0 && tier_consumer_correct == 0) :
+                        (tier_native_correct + tier_consumer_correct == selected.payloads.size()));
+                policies.emplace_back(object({{"policy", wrong_key_admission_name(policy)},
+                    {"claim_scope", "native_admission_and_message_state_replay_of_one_complete_scored_capture_no_second_DSP"},
+                    {"classification_counts_ambiguous_data_quiet", indices_json(decisions)},
+                    {"false_data_slots", tier_false}, {"wrong_data_bits", tier_wrong},
+                    {"lost_active_slots", tier_lost}, {"quiet_active_slots", tier_quiet},
+                    {"canonical_correct_messages", tier_native_correct}, {"canonical_incorrect_messages", tier_native_wrong},
+                    {"canonical_premature_completions", tier_premature}, {"consumer_correct_messages", tier_consumer_correct},
+                    {"consumer_incorrect_messages", tier_consumer_wrong},
+                    {"correct_content_or_negative_rejection_requirement_passed", content_requirement},
+                    {"no_false_data_requirement_passed", tier_false == 0},
+                    {"no_incorrect_content_requirement_passed", !tier_native_wrong && !tier_consumer_wrong},
+                    {"operational_qualification", false}, {"rejected_public_slots", std::move(rejected)},
+                    {"slots", std::move(tier_slots)}, {"native_messages", std::move(tier_messages)},
+                    {"consumer_candidates", std::move(tier_candidates)}, {"consumer", consumer_report(replay.consumer)},
+                    {"source_frame_erased_bytes_evaluator_only", std::move(source_bytes)},
+                    {"next_public_slot", replay.next_public_slot}, {"state_and_codec_seconds", replay.seconds}}));
+            }
+            replay_report = object({{"executed", true}, {"baseline_policy", "current"},
+                {"baseline_semantic_parity", baseline_parity}, {"independent_capture_count", 1},
+                {"DSP_passes", 1}, {"policies", std::move(policies)}, {"state_and_codec_seconds", replay_seconds},
+                {"maximum_public_slots", hf_admission_replay_maximum_slots},
+                {"fixed_reserved_bytes", hf_admission_replay_reserve_bytes},
+                {"new_quiet_from_admission_allowed", false}, {"finish_input_called", false},
+                {"gui_visibility_evaluated", false},
+                {"gui_scope", "baseline native rating counts are reported; direct admission redecodes and is not GUI filtering"}});
+            deadline.check();
+        }
         const double wall = std::chrono::duration<double>(Clock::now() - began).count();
         passed &= check(wall <= maximum_wall_seconds && rendered <= sample_limit, "declared_wall_and_sample_budgets_hold");
         Json::Array episodes;
@@ -556,6 +749,8 @@ int main(int argc, char** argv) {
             episodes.emplace_back(object({{"first_public_slot", starts[i]}, {"wire_bits", wire[i].size()},
                 {"payload_bytes", bytes_json(selected.payloads[i])}}));
         const auto channel_report = channel.report();
+        long double emitted_data_energy = 0;
+        for (const auto& emission : emissions) emitted_data_energy += emission.report().data_energy;
         std::cout << std::setprecision(17);
         auto output = object({{"probe", "hf_protected_reassembly"}, {"case", selected.name},
             {"status", passed ? "passed" : "failed"}, {"source_identity", identity()},
@@ -565,7 +760,11 @@ int main(int argc, char** argv) {
             {"operational_qualification", false}, {"fec", "rs20"}, {"helper_enabled", false},
             {"consumer_acceptance_check", selected.wrong_key_join ?
                 (consumer_acceptance_pass ? "passed" : "failed") : "not_requested"},
-            {"wrong_key_direction", selected.wrong_key ? "transmitter_fixed_distinct_a5_through_c4_receiver_amateur" : "none"},
+            {"wrong_key_direction", selected.wrong_key ? (selected.wrong_root_first == 0xa5 ?
+                "transmitter_fixed_distinct_a5_through_c4_receiver_amateur" : "transmitter_fixed_distinct_31_through_50_receiver_amateur") : "none"},
+            {"wrong_key_admission", wrong_key_admission_name(admission)},
+            {"pattern_revision", pattern_revision_name()},
+            {"configured_carrier_hz", pc.format.configured_carrier_hz},
             {"actual_wrong_key_join_not_synthetic_receipts", selected.wrong_key_join},
             {"inter_episode_quiet_slots", selected.payloads.size() > 1 ? (selected.wrong_key_join ? 8 : 2) : 0},
             {"public_slot_stop", receive_slot_stop}, {"episodes_evaluator_only", std::move(episodes)},
@@ -573,6 +772,9 @@ int main(int argc, char** argv) {
             {"public_minimum_recurrence_seconds", 60}, {"sample_rate_hz", pc.format.sample_rate}, {"data_if_hz", pc.data_if_hz},
             {"source_minimum_frequency_hz", source.minimum_frequency_hz}, {"source_maximum_frequency_hz", source.maximum_frequency_hz},
             {"noise_variance", noise_variance}, {"noise_seed", selected.seed}, {"path_seed", path_seed},
+            {"emitted_data_energy_sample_sum", static_cast<double>(emitted_data_energy)},
+            {"incident_data_energy_over_receiver_noise_density", static_cast<double>(emitted_data_energy / noise_variance)},
+            {"energy_scope", "canonical emitted DATA sample energy divided by configured receiver sample-noise variance; excludes propagation loss and is not measured received E/N0"},
             {"outage_first_public_slot", selected.fade_first ? Json(*selected.fade_first) : Json{}},
             {"outage_slot_count", selected.fade_first ? 2 : 0}, {"outage_first_sample", fade_first_sample},
             {"outage_stop_sample", fade_stop_sample}, {"input_iq_sha256", iq_hash},
@@ -595,7 +797,8 @@ int main(int argc, char** argv) {
                 {"iq_digest_seconds", digest_seconds}, {"workers", report.resources.workers},
                 {"hardware_threads", report.resources.hardware_threads}, {"peak_executor_workers", report.peak_executor_workers},
                 {"native_peak_reserved_bytes", report.peak_reserved_bytes}, {"receiver_memory_limit_bytes", report.resources.memory_limit_bytes},
-                {"consumer_reserved_bytes", consumer_reserve}, {"maximum_slot_workspace_bytes", largest_slot},
+                {"consumer_reserved_bytes", consumer_reserve},
+                {"admission_replay_reserved_bytes", admission_replay ? hf_admission_replay_reserve_bytes : 0}, {"maximum_slot_workspace_bytes", largest_slot},
                 {"native_channel_workspace_bytes", channel_report.workspace_bytes},
                 {"streaming_chunk_rows", chunk_rows}, {"capacity_qualification", false}})},
             {"assertions", std::move(assertions)}});
@@ -627,6 +830,7 @@ int main(int argc, char** argv) {
             output["shadow_threshold_or_rejection_asserted"] = false;
             output["canonical_false_data_failure_reproduced"] = selected.wrong_key && false_data == 1;
         }
+        if (admission_replay) output["admission_replay"] = std::move(replay_report);
         write_json(std::cout, output);
         std::cout << '\n';
         return passed ? 0 : 1;
@@ -643,7 +847,9 @@ int main(int argc, char** argv) {
             {"physical_complete", event.message.physical_complete}, {"reason", event.message.reason},
             {"decoded_bytes", event.message.decoded_content ? bytes_json(event.message.decoded_content->message.data) : Json{}}}));
         write_json(std::cout, object({{"probe", "hf_protected_reassembly"}, {"case", name}, {"status", "failed"},
-            {"error", error.what()}, {"source_identity", identity()}, {"rendered_samples", rendered}, {"accepted_samples", accepted},
+            {"error", error.what()}, {"source_identity", identity()},
+            {"wrong_key_admission", wrong_key_admission_name(admission)}, {"admission_replay_requested", admission_replay},
+            {"noise_variance", noise_variance}, {"requested_bit_seconds", bit_seconds}, {"rendered_samples", rendered}, {"accepted_samples", accepted},
             {"wall_seconds", std::chrono::duration<double>(Clock::now() - began).count()},
             {"next_public_slot", report.next_public_slot}, {"observed_native_recovery", observed_recovery},
             {"partial_native_slots", std::move(partial_slots)}, {"partial_native_messages", std::move(partial_messages)},

@@ -350,6 +350,23 @@ void validation_guards() {
     auto invalid = good;
     invalid.drift_mps = 14.;
     check(reject([&] { validate_hf_vector_oblique_spec(invalid, 4400000); }), "whole capture does not repeat periodic hypothesis");
+    constexpr std::uint64_t protected_horizon = 4200 * 1920;
+    check(reject([&] { validate_hf_vector_oblique_spec(good, protected_horizon); }),
+        "ordinary trajectories do not inherit protected-calendar support");
+    auto slow = good;
+    slow.protected_long_calendar = true;
+    check(reject([&] { validate_hf_vector_oblique_spec(slow, protected_horizon); }),
+        "ordinary 8 m/s field cannot fit a protected calendar within one period");
+    slow.drift_mps = hf_vector_oblique_protected_drift_mps;
+    validate_hf_vector_oblique_spec(slow, protected_horizon);
+    check(hf_vector_oblique_geometry(slow).period_m == 24000. &&
+        slow.drift_mps * (4200 + 260/1920.) < hf_vector_oblique_geometry(slow).period_m,
+        "only the frozen slower rigid path retains a nonrepeating band and complete tail");
+    check(reject([&] { validate_hf_vector_oblique_spec(slow, protected_horizon + 1); }),
+        "extended capture rejects the first sample outside the declared horizon");
+    slow.field = 2;
+    check(reject([&] { validate_hf_vector_oblique_spec(slow, protected_horizon); }),
+        "changing spatial dimensions does not inherit the rigid primary envelope");
     std::stop_source stop;
     stop.request_stop();
     try {

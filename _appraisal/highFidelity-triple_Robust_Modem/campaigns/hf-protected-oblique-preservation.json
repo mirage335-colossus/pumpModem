@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "name": "hf-protected-oblique-preservation",
+  "purpose": "Frozen prospective 64-position RS20 a payload and new thermal-noise seed, with a complete matched-horizon interferer-plus-thermal-noise control lacking any DATA transmission. Replay both quiet policies on each identical IQ capture and retain all native and reassembly outcomes. This is a holdout in payload and thermal noise, not an independently drawn ionospheric trajectory or a rate study.",
+  "max_trials": 2,
+  "max_wall_seconds": 1900,
+  "per_trial_wall_seconds": 900,
+  "max_samples": 12000000,
+  "stop_on_execution_failure": true,
+  "episodes": [
+    {
+      "id": "oblique-protected-fresh-a",
+      "scenario": "hf-vector-oblique-chain-protected-clocks-tone",
+      "mode": "receive",
+      "waveform": "reference",
+      "message": "a",
+      "fec": "rs20",
+      "control": "wanted",
+      "seed": 70501,
+      "noise_seed": 80547,
+      "bit_seconds": 8,
+      "cn0_db_hz": 30,
+      "hf_predictive_quiet": true,
+      "reception_requirement": "characterization"
+    },
+    {
+      "id": "oblique-protected-tone-noise",
+      "scenario": "hf-vector-oblique-chain-protected-clocks-tone",
+      "mode": "receive",
+      "waveform": "reference",
+      "message": "e",
+      "fec": "rs20",
+      "control": "noise",
+      "seed": 70501,
+      "noise_seed": 80501,
+      "bit_seconds": 8,
+      "cn0_db_hz": 30,
+      "hf_predictive_quiet": true,
+      "reception_requirement": "negative_control"
+    }
+  ]
+}

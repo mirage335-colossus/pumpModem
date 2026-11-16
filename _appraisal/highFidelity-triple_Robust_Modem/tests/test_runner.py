@@ -976,7 +976,8 @@ class CampaignValidationTests(unittest.TestCase):
             "hf-vector-3d-chain-off": (True, True, 2, 0, False),
             "hf-vector-3d-chain-clocks-tone": (True, True, 2, 0, False),
         }
-        legacy_ids = set(runner.HF_VECTOR_OBLIQUE_SCENARIOS) - set(runner.HF_VECTOR_EVOLUTION_SCENARIOS) - set(runner.HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS)
+        legacy_ids = (set(runner.HF_VECTOR_OBLIQUE_SCENARIOS) - set(runner.HF_VECTOR_EVOLUTION_SCENARIOS)
+                      - set(runner.HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS) - {runner.HF_PROTECTED_OBLIQUE})
         self.assertEqual(set(expected), legacy_ids)
         primary = (50., 112000., 24000., 960., 6.55e6, 1300., 80., [18e-6, 17e-6, -43e-6], .10, 8., 600.)
         held = (53., 104000., 20500., 1200., 6.12e6, 2450., 100., [-11e-6, 25e-6, -46e-6], .23, 7.5, 520.)
@@ -1593,13 +1594,13 @@ class CampaignValidationTests(unittest.TestCase):
                 "cn0_db_hz": 0, "message": "A"}
         for scenario in (name for name in runner.HF_VECTOR_OBLIQUE_SCENARIOS
                          if name not in runner.HF_VECTOR_EVOLUTION_SCENARIOS and
-                         name not in runner.HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS):
+                         name not in runner.HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS and name != runner.HF_PROTECTED_OBLIQUE):
             runner._validate_episode(dict(base, scenario=scenario), 0, set(), 600, 5_000_000)
         runner._validate_episode(dict(base, bit_seconds=128, cn0_db_hz=-3), 0, set(), 600, 5_000_000)
         for cn0 in (20, 30):
             runner._validate_episode(dict(base, cn0_db_hz=cn0), 0, set(), 600, 5_000_000)
         for scenario in (name for name in runner.HF_VECTOR_CHAIN_SCENARIOS
-                         if name not in runner.HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS):
+                         if name not in runner.HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS and name != runner.HF_PROTECTED_OBLIQUE):
             runner._validate_episode(dict(base, scenario=scenario, cn0_db_hz=30), 0, set(), 600, 5_000_000)
         diagnostic = dict(base, hf_target_presence_diagnostic=True, capture_digest_slot=0, cn0_db_hz=10)
         runner._validate_episode(diagnostic, 0, set(), 600, 5_000_000)
@@ -1615,6 +1616,21 @@ class CampaignValidationTests(unittest.TestCase):
                        {"scenario": "hf-vector-oblique-chain-clocks-tone", "cn0_db_hz": 10}):
             with self.subTest(change=change), self.assertRaises(runner.CampaignError):
                 runner._validate_episode(dict(base, **change), 0, set(), 600, 5_000_000)
+
+    def test_protected_oblique_only_admits_the_frozen_paired_short_profile(self):
+        app = Path(__file__).resolve().parents[1]
+        cases = []
+        for name in ("discriminator", "preservation"):
+            campaign = runner._read_campaign(app / f"campaigns/hf-protected-oblique-{name}.json")
+            cases.extend(campaign["episodes"])
+        self.assertEqual([(case["message"], case["control"], case["noise_seed"]) for case in cases],
+                         [("e", "wanted", 80501), ("e", "wrong-key", 80501),
+                          ("a", "wanted", 80547), ("e", "noise", 80501)])
+        for change in ({"scenario": "hf-vector-oblique-chain-clocks-tone"}, {"hf_predictive_quiet": False},
+                       {"fec": "off"}, {"fec": "rs60"}, {"message": "K"}, {"noise_seed": 80547},
+                       {"bit_seconds": 64}, {"cn0_db_hz": 0}, {"helper": True}, {"seed": 70502}):
+            with self.subTest(change=change), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(cases[0], **change), 0, set(), 900, 12_000_000)
 
     def test_vector_report_rejects_unqualified_or_mislabeled_physics(self):
         # Schema fixture only; these invented values are not physical evidence.

@@ -608,7 +608,8 @@ double angle_radians(double degrees) { return degrees * std::numbers::pi / 180.;
 bool same_spec(const HfVectorObliqueSpec& a, const HfVectorObliqueSpec& b) {
     return a.field == b.field && a.antenna == b.antenna && a.magnetic == b.magnetic &&
         a.perturbations == b.perturbations && a.drift_mps == b.drift_mps && a.epoch_seconds == b.epoch_seconds &&
-        a.cross_plane == b.cross_plane && a.intrinsic_evolution == b.intrinsic_evolution;
+        a.cross_plane == b.cross_plane && a.intrinsic_evolution == b.intrinsic_evolution &&
+        a.protected_long_calendar == b.protected_long_calendar;
 }
 
 C phase(double radians) { return std::polar(1., radians); }
@@ -1030,7 +1031,16 @@ std::size_t hf_vector_oblique_preparation_workspace_bound_bytes(const HfVectorOb
 void validate_hf_vector_oblique_spec(const HfVectorObliqueSpec& spec, std::uint64_t horizon_samples) {
     const auto g = hf_vector_oblique_geometry(spec);
     hf_vector_oblique_evolution(spec);
-    if (!(horizon_samples > 0 && horizon_samples <= Table::horizon_seconds * Table::sample_rate_hz) ||
+    // A protected short frame occupies at least 64 public DATA slots. The
+    // ordinary 8 m/s traversal repeats the 24 km density period before that
+    // calendar ends. Only the explicitly slower rigid primary trajectory gets
+    // a longer bound. The spatial-period and complete-tail checks still apply.
+    if (spec.protected_long_calendar &&
+        (spec.field != 0 || spec.antenna != 0 || !spec.perturbations || !spec.magnetic ||
+         !spec.cross_plane || spec.intrinsic_evolution || spec.drift_mps != hf_vector_oblique_protected_drift_mps ||
+         spec.epoch_seconds != 600.))
+        throw std::invalid_argument("extended HF vector calendar requires the frozen slow rigid primary");
+    if (!(horizon_samples > 0 && horizon_samples <= Table::horizon_seconds_for(spec) * Table::sample_rate_hz) ||
         !finite_between(spec.drift_mps, 0., 60.) || !finite_between(spec.epoch_seconds, 0., Table::horizon_seconds) ||
         spec.drift_mps * ((horizon_samples + 2 * Table::last_lag_samples()) / Table::sample_rate_hz) >= g.period_m)
         throw std::invalid_argument("HF vector oblique horizon must traverse less than one physical density period");
@@ -1484,14 +1494,15 @@ HfVectorObliqueTableBuild build_hf_vector_oblique_table(const HfVectorObliqueSpe
 
 HfVectorObliqueStream::HfVectorObliqueStream(std::shared_ptr<const Table> table, const HfVectorObliqueSpec& spec,
     std::uint64_t initial_output_sample) : table_(std::move(table)), output_sample_(initial_output_sample) {
-    if (!table_ || !same_spec(table_->spec_, spec) || initial_output_sample >= Table::horizon_seconds * Table::sample_rate_hz)
+    if (!table_ || !same_spec(table_->spec_, spec) ||
+        initial_output_sample >= Table::horizon_seconds_for(spec) * Table::sample_rate_hz)
         throw std::invalid_argument("invalid or mismatched HF vector oblique stream");
     validate_hf_vector_oblique_spec(spec, initial_output_sample + 1);
 }
 
 C HfVectorObliqueStream::render(C input) {
     const auto& spec = table_->spec_;
-    if (output_sample_ >= Table::horizon_seconds * Table::sample_rate_hz ||
+    if (output_sample_ >= Table::horizon_seconds_for(spec) * Table::sample_rate_hz ||
         spec.drift_mps * ((output_sample_ + 1 + 2 * Table::last_lag_samples()) / Table::sample_rate_hz) >=
             table_->geometry_.period_m)
         throw std::runtime_error("HF vector oblique stream exceeded its admitted horizon");

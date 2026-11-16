@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "name": "hf-protected-oblique-duration-preservation",
+  "purpose": "Execute the prospective preservation controls already specified in the frozen duration-followup purpose after sixteen-second e removes all DATA erasures and premature completion. Preserve the same field, clocks/tone, +30 dB-Hz, keys, payload/noise holdout and resource limits; change only requested active integration from eight to sixteen seconds. These are dependent duration comparisons and no field occurrence-rate sample. Require exact combined native-or-consumer wanted delivery, no accepted incorrect content, and separately report false DATA and premature completion. Baseline reception remains characterization.",
+  "max_trials": 3,
+  "max_wall_seconds": 2800,
+  "per_trial_wall_seconds": 900,
+  "max_samples": 12000000,
+  "stop_on_execution_failure": true,
+  "episodes": [
+    {
+      "id": "oblique-protected-fresh-a-longer",
+      "scenario": "hf-vector-oblique-chain-protected-clocks-tone",
+      "mode": "receive",
+      "waveform": "reference",
+      "message": "a",
+      "fec": "rs20",
+      "control": "wanted",
+      "seed": 70501,
+      "noise_seed": 80547,
+      "bit_seconds": 16,
+      "cn0_db_hz": 30,
+      "hf_predictive_quiet": true,
+      "reception_requirement": "characterization"
+    },
+    {
+      "id": "oblique-protected-foreign-key-longer",
+      "scenario": "hf-vector-oblique-chain-protected-clocks-tone",
+      "mode": "receive",
+      "waveform": "reference",
+      "message": "e",
+      "fec": "rs20",
+      "control": "wrong-key",
+      "seed": 70501,
+      "noise_seed": 80501,
+      "bit_seconds": 16,
+      "cn0_db_hz": 30,
+      "hf_predictive_quiet": true,
+      "reception_requirement": "negative_control"
+    },
+    {
+      "id": "oblique-protected-tone-noise-longer",
+      "scenario": "hf-vector-oblique-chain-protected-clocks-tone",
+      "mode": "receive",
+      "waveform": "reference",
+      "message": "e",
+      "fec": "rs20",
+      "control": "noise",
+      "seed": 70501,
+      "noise_seed": 80501,
+      "bit_seconds": 16,
+      "cn0_db_hz": 30,
+      "hf_predictive_quiet": true,
+      "reception_requirement": "negative_control"
+    }
+  ]
+}

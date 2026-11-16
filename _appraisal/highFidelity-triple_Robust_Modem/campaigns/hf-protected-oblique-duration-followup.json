@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "name": "hf-protected-oblique-duration-followup",
+  "purpose": "Frozen conditional follow-up only if the eight-second wanted e has a DATA or delivery miss. Keep C/N0, payload, physical trajectory, public 60-second minimum recurrence, clock/tone and noise seed fixed; raise requested active integration to sixteen seconds. Account for the actual additional time, incident energy and service cost. This is not an equal-energy comparison, and the earlier failure remains. If useful, the same sixteen-second duration is frozen for the fresh a and the original e foreign-key and tone/noise controls.",
+  "max_trials": 1,
+  "max_wall_seconds": 950,
+  "per_trial_wall_seconds": 900,
+  "max_samples": 12000000,
+  "stop_on_execution_failure": true,
+  "episodes": [
+    {
+      "id": "oblique-protected-e-longer",
+      "scenario": "hf-vector-oblique-chain-protected-clocks-tone",
+      "mode": "receive",
+      "waveform": "reference",
+      "message": "e",
+      "fec": "rs20",
+      "control": "wanted",
+      "seed": 70501,
+      "noise_seed": 80501,
+      "bit_seconds": 16,
+      "cn0_db_hz": 30,
+      "hf_predictive_quiet": true,
+      "reception_requirement": "characterization"
+    }
+  ]
+}

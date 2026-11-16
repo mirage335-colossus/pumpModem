@@ -612,6 +612,31 @@ def main() -> None:
     runner = importlib.util.module_from_spec(runner_spec)
     sys.modules[runner_spec.name] = runner
     runner_spec.loader.exec_module(runner)
+    # Actual long calendar preflight and independent descriptor/receipt gate.
+    # Do not run the expensive physical table or score passes in ordinary tests.
+    protected = {"id": "protected-oblique-plan", "scenario": runner.HF_PROTECTED_OBLIQUE,
+                 "mode": "plan", "waveform": "reference", "seed": 70501, "noise_seed": 80501,
+                 "message": "e", "bit_seconds": 8, "cn0_db_hz": 30, "fec": "rs20",
+                 "hf_predictive_quiet": True}
+    for bit_seconds in (8, 16):
+        case = dict(protected, bit_seconds=bit_seconds)
+        actual = invoke(*runner._command(Path(probe), case, 12_000_000, 30)[1:])
+        runner._validate_completed_receipt(actual, case)
+        plan = actual["plan"]
+        assert 2400 * 1920 < plan["horizon_samples"] <= 4200 * 1920, actual
+        assert plan["scored_slot_horizon"] == 66 and plan["wire_bits"] == 64, actual
+        assert plan["vector_oblique_table_built"] is False and "channel" not in actual, actual
+        assert "hf_protected_reassembly" not in actual and "hf_protected_admission_replay" not in actual, actual
+        for change in ({"requested_bit_seconds": 64}, {"actual_bit_seconds": bit_seconds - .01}):
+            try:
+                runner._validate_wave_chain(dict(actual, plan=dict(plan, **change)), case)
+            except runner.CampaignError as exc:
+                assert "waveform duration" in str(exc), exc
+            else:
+                raise AssertionError(f"protected native chain accepted altered duration: {change}")
+    wrong = dict(protected, message="K")
+    rejected = invoke(*runner._command(Path(probe), wrong, 12_000_000, 30)[1:], code=5)
+    assert rejected["status"] == "unavailable" and "channel" not in rejected, rejected
     # Exercise actual native descriptors against the independent receipt reader
     # before any expensive multiple-hop table or receiver can be constructed.
     for scenario in runner.HF_VECTOR_TWO_HOP_SCENARIOS:

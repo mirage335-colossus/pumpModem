@@ -754,7 +754,8 @@ Scenario native_vector_oblique_chain(const std::string& id) {
     scenario.id = id;
     scenario.bounds.frequency_bound_hz = 1.;
     scenario.reference_cn0_db_hz = 0.;
-    if (id == "hf-vector-oblique-chain-clocks-tone") {
+    const bool protected_case = id == hf_vector_oblique_protected_scenario;
+    if (id == "hf-vector-oblique-chain-clocks-tone" || protected_case) {
         scenario.channel.noise.tone_amplitude = .3;
         scenario.channel.noise.tone_hz = 100.;
     }
@@ -766,6 +767,17 @@ Scenario native_vector_oblique_chain(const std::string& id) {
         "TX/RX audio +1/−1 ppm and RF +0.01/−0.01 ppm at the 10 MHz carrier. The tone row adds a continuing "
         "0.3-amplitude RF-plane interferer at +100 Hz before RX retiming/mixing. Final white noise is added only after "
         "native RX. All captures require two scored quiet slots; no receiver message length selects physical completion.";
+    if (protected_case) {
+        auto& vector = *scenario.channel.vector_oblique;
+        vector.drift_mps = hf_vector_oblique_protected_drift_mps;
+        vector.protected_long_calendar = true;
+        scenario.waveform.requested_bit_seconds = 8.;
+        scenario.reference_cn0_db_hz = 30.;
+        scenario.numerical_horizon_seconds = HfVectorObliqueTable::horizon_seconds_for(vector);
+        scenario.assumptions += " The protected short frame uses a separate slower 5.5 m/s trajectory through the "
+            "same spatial slab, so its complete public calendar and causal tail fit inside one 24 km density period. "
+            "This is not a replay of the original 8 m/s unprotected realization.";
+    }
     return scenario;
 }
 
@@ -922,7 +934,7 @@ std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
         id == "hf-vector-oblique-holdout" || id == "hf-vector-oblique-cross")
         return vector_oblique(id);
     if (id == "hf-vector-oblique-chain-off" || id == "hf-vector-oblique-chain-clocks" ||
-        id == "hf-vector-oblique-chain-clocks-tone")
+        id == "hf-vector-oblique-chain-clocks-tone" || id == hf_vector_oblique_protected_scenario)
         return native_vector_oblique_chain(id);
     if (id == "hf-vector-3d" || id == "hf-vector-3d-holdout" || id == "hf-vector-3d-planar" ||
         id == "hf-vector-3d-in-plane")

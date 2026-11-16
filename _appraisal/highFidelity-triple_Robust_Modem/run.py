@@ -133,6 +133,7 @@ HF_PHASE_SCREENS_SCENARIOS = {
     "hf-phase-screens": (True, 0, 0., 42., 600.),
     "hf-phase-screens-holdout": (True, 1, 750., 35., 490.),
 }
+HF_PROTECTED_OBLIQUE = "hf-vector-oblique-chain-protected-clocks-tone"
 HF_VECTOR_OBLIQUE_SCENARIOS = {
     # perturbations, magnetic field, physical realization, receiving antenna
     "hf-vector-oblique": (True, True, 0, 0),
@@ -143,6 +144,7 @@ HF_VECTOR_OBLIQUE_SCENARIOS = {
     "hf-vector-oblique-chain-off": (True, True, 0, 0),
     "hf-vector-oblique-chain-clocks": (True, True, 0, 0),
     "hf-vector-oblique-chain-clocks-tone": (True, True, 0, 0),
+    HF_PROTECTED_OBLIQUE: (True, True, 0, 0),
     "hf-vector-3d": (True, True, 2, 0),
     "hf-vector-3d-holdout": (True, True, 3, 0),
     "hf-vector-3d-planar": (False, True, 2, 0),
@@ -160,6 +162,7 @@ HF_VECTOR_CHAIN_SCENARIOS = {
     "hf-vector-oblique-chain-off": (0., 0., 0., 0., False),
     "hf-vector-oblique-chain-clocks": (1., -1., .01, -.01, False),
     "hf-vector-oblique-chain-clocks-tone": (1., -1., .01, -.01, True),
+    HF_PROTECTED_OBLIQUE: (1., -1., .01, -.01, True),
     "hf-vector-3d-chain-off": (0., 0., 0., 0., False),
     "hf-vector-3d-chain-clocks-tone": (1., -1., .01, -.01, True),
     "hf-vector-evolving-chain-off": (0., 0., 0., 0., False),
@@ -474,6 +477,14 @@ def _validate_episode(item: Any, index: int, ids: set[str],
             raise CampaignError(f"episodes[{index}].{field} must be a simple identifier")
     mode = item["mode"]
     control = item.get("control", "wanted")
+    protected_oblique = item["scenario"] == HF_PROTECTED_OBLIQUE
+    if protected_oblique and (
+            item.get("hf_predictive_quiet") is not True or item.get("fec") != "rs20" or
+            item.get("bit_seconds", 8) not in {8, 16} or item.get("cn0_db_hz", 30) != 30 or
+            item["seed"] != 70501 or {"workers", "owners"} & item.keys() or
+            not ((item.get("message", "e"), item.get("noise_seed")) == ("e", 80501) or
+                 (item.get("message"), item.get("noise_seed"), control) == ("a", 80547, "wanted"))):
+        raise CampaignError(f"episodes[{index}]: protected oblique requires the frozen 8- or 16-second RS20 paired profile, payload, seeds and automatic receiver allocation")
     if service_requested:
         if mode not in {"receive", "plan"} or item.get("chunk", 4096) > 4096:
             raise CampaignError(f"episodes[{index}]: service replay requires receive/plan and chunks no larger than 4096")
@@ -487,9 +498,9 @@ def _validate_episode(item: Any, index: int, ids: set[str],
                         "hf_target_presence_diagnostic", "hf_correlated_gain_shadow", "hf_correlated_gain_receiver")
         if (mode not in {"plan", "receive"} or item.get("helper", False) or
                 item.get("backend", "cpu") != "cpu" or item["waveform"] != "reference" or
-                item.get("fec", "off") != "off" or item.get("service_episodes", 1) != 1 or
+                (item.get("fec", "off") != "off" and not protected_oblique) or item.get("service_episodes", 1) != 1 or
                 any(item.get(field, False) for field in incompatible)):
-            raise CampaignError(f"episodes[{index}]: predictive quiet requires exclusive Helper-off reference CPU plan/receive, FEC off and one episode")
+            raise CampaignError(f"episodes[{index}]: predictive quiet requires exclusive Helper-off reference CPU plan/receive, one episode and FEC off or the frozen protected oblique case")
     if item["scenario"] == "hf-gui-native":
         if (mode not in {"plan", "slot", "receive", "gui-varying"} or item["waveform"] != "reference" or
                 item.get("pulse", "rrc") != "rrc" or
@@ -576,16 +587,16 @@ def _validate_episode(item: Any, index: int, ids: set[str],
         evolving_chain = item["scenario"] in HF_VECTOR_EVOLUTION_CHAIN_SCENARIOS
         allowed_modes = ({"receive"} if evolving_direct or evolving_chain else
                          {"plan", "receive"} if chain else {"plan", "channel", "receive"})
-        allowed_durations = ({64, 128} if not chain else {64})
+        allowed_durations = ({8, 16} if protected_oblique else {64, 128} if not chain else {64})
         allowed_cn0 = ({12, 15, 17.5, 20} if evolving_direct else {30} if evolving_chain else
-                       {0, 30} if chain else {-3, 0, 10, 20, 30})
+                       {30} if protected_oblique else {0, 30} if chain else {-3, 0, 10, 20, 30})
         if (mode not in allowed_modes or
                 item["waveform"] != "reference" or item.get("backend", "cpu") != "cpu" or
                 item.get("pulse", "rrc") != "rrc" or item.get("helper", False) or
-                item.get("fec", "off") != "off" or
-                control not in ({"wanted", "noise", "wrong-key"} if mode == "receive" else {"wanted"}) or
-                item.get("bit_seconds", 64) not in allowed_durations or
-                item.get("cn0_db_hz", 0) not in allowed_cn0 or
+                (item.get("fec", "off") != "off" and not protected_oblique) or
+                control not in ({"wanted", "noise", "wrong-key"} if mode == "receive" or protected_oblique else {"wanted"}) or
+                item.get("bit_seconds", 8 if protected_oblique else 64) not in allowed_durations or
+                item.get("cn0_db_hz", 30 if protected_oblique else 0) not in allowed_cn0 or
                 any(item.get(field, False) for field in ("service_replay", "hf_phase_bank", "hf_public_phase_receiver",
                     "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver",
                     "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models",
@@ -593,7 +604,7 @@ def _validate_episode(item: Any, index: int, ids: set[str],
                 {"duration_seconds", "capture_lead_seconds", "hf_trajectory_seed", "hf_trajectory_offset_seconds",
                  "history_reference_delay_seconds", "search_slot", "search_timing"} & item.keys()):
             raise CampaignError(f"episodes[{index}]: vector oblique cases require the frozen CPU reference RRC "
-                                "Helper/FEC-off geometry and ordinary receiver; endpoint cases require 64 seconds and C/N0 0 or 30")
+                                "Helper-off geometry; endpoint cases require 64 seconds and C/N0 0 or 30, except the frozen protected oblique case")
     if item["scenario"] in HF_VECTOR_TWO_HOP_SCENARIOS:
         field, routes, _axis = HF_VECTOR_TWO_HOP_SCENARIOS[item["scenario"]]
         chain = item["scenario"] in HF_VECTOR_TWO_HOP_CHAIN_SCENARIOS
@@ -2657,7 +2668,7 @@ def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> No
     tx_audio, rx_audio, tx_rf, rx_rf, tone = (HF_VECTOR_CHAIN_SCENARIOS if vector else
         HF_VECTOR_TWO_HOP_CHAIN_SCENARIOS if two_hop else HF_WAVE_CHAIN_SCENARIOS)[scenario_id]
     fs = HF_WAVE_OPTICS["sample_rate_hz"]
-    expected_cn0 = episode.get("cn0_db_hz", 0) if vector or two_hop else 0
+    expected_cn0 = episode.get("cn0_db_hz", 30 if scenario_id == HF_PROTECTED_OBLIQUE else 0) if vector or two_hop else 0
     if expected_cn0 not in ({30} if two_hop else {0, 30} if vector else {0}):
         raise CampaignError("native chain C/N0 is outside the frozen endpoint controls")
     expected_noise_variance = fs / 10 ** (expected_cn0 / 10)
@@ -2699,13 +2710,16 @@ def _validate_wave_chain(receipt: dict[str, Any], episode: dict[str, Any]) -> No
             noise.get("impulse_rms") != 0 or noise.get("tone_amplitude") != wanted_tone or
             noise.get("tone_hz") != wanted_tone_offset or noise.get("tone_sweep_hz_s") != 0):
         raise CampaignError("native chain APP channel must preserve its named tone and keep random noise for the final RX plane")
-    if (plan.get("sample_rate_hz") != fs or plan.get("requested_bit_seconds") != 64 or
-            not _is_finite_number(plan.get("actual_bit_seconds")) or plan["actual_bit_seconds"] < 64 or
+    protected_oblique = scenario_id == HF_PROTECTED_OBLIQUE
+    requested_seconds = episode.get("bit_seconds", 8) if protected_oblique else 64
+    if ((protected_oblique and requested_seconds not in {8, 16}) or
+            plan.get("sample_rate_hz") != fs or plan.get("requested_bit_seconds") != requested_seconds or
+            not _is_finite_number(plan.get("actual_bit_seconds")) or plan["actual_bit_seconds"] < requested_seconds or
             plan.get("data_if_hz") != 240 or
             plan.get("helper_enabled") is not False or plan.get("cn0_db_hz") != expected_cn0 or
             plan.get(physical_key + "_source_band_checked") is not (episode["mode"] != "plan") or
             plan.get(physical_key + "_table_built") is not (episode["mode"] != "plan")):
-        raise CampaignError("native chain must preserve the fixed 1920 Hz lens waveform and distinguish planning from execution")
+        raise CampaignError("native chain must preserve the frozen 1920 Hz waveform duration and distinguish planning from execution")
     bounds = plan.get("public_bounds")
     if (not isinstance(bounds, dict) or
             not _is_finite_number(bounds.get("arrival_low_seconds")) or
@@ -2865,10 +2879,11 @@ def _vector_oblique_spec(scenario_id: str) -> dict[str, Any]:
         drift = 7. if holdout else 8.
         epoch = 470. if holdout else 600.
     else:
-        drift = 7.5 if holdout else 8.
+        drift = 5.5 if scenario_id == HF_PROTECTED_OBLIQUE else 7.5 if holdout else 8.
         epoch = 520. if holdout else 600.
     result = {"carrier_hz": 10_000_000., "sample_rate_hz": 1920., "occupied_half_band_hz": 384.,
-        "maximum_horizon_seconds": 2400., "perturbations": perturbations, "magnetic": magnetic,
+        "maximum_horizon_seconds": 4200. if scenario_id == HF_PROTECTED_OBLIQUE else 2400.,
+        "perturbations": perturbations, "magnetic": magnetic,
         "field": field, "antenna": antenna, "drift_mps": drift, "epoch_seconds": epoch,
         "incidence_deg": angle, "height_m": height, "receiver_x_m": 2 * height * math.tan(math.radians(angle)),
         "period_m": period, "thickness_m": thickness, "peak_plasma_hz": peak,
@@ -3624,9 +3639,10 @@ def _validate_vector_oblique(receipt: dict[str, Any], episode: dict[str, Any]) -
             raise CampaignError("3D exposure must preserve the fixed trajectory and environmental limits")
     horizon = plan.get("horizon_samples")
     period = plan["vector_oblique"]["period_m"]
+    horizon_limit = plan["vector_oblique"]["maximum_horizon_seconds"] * 1920
     drift = plan["vector_oblique"]["drift_mps"]
     chain_case = scenario_id in HF_VECTOR_CHAIN_SCENARIOS
-    if (not _is_nonnegative_int(horizon) or not 0 < horizon <= 2400 * 1920 or
+    if (not _is_nonnegative_int(horizon) or not 0 < horizon <= horizon_limit or
             drift * ((horizon + 2 * 130) / 1920) >= period or
             plan.get("sample_rate_hz") != 1920 or plan.get("helper_enabled") is not False or
             plan.get("physical_kernel_supplied_to_receiver") is not False or
@@ -3635,9 +3651,10 @@ def _validate_vector_oblique(receipt: dict[str, Any], episode: dict[str, Any]) -
             plan.get("path_count") is not None or plan.get("path_sample_products") is not None):
         raise CampaignError("vector oblique plan omits its nonrepeating horizon, source-band or execution scope")
     source_stop = plan.get("source_stop_sample")
+    protected = scenario_id == HF_PROTECTED_OBLIQUE
     if (not _is_nonnegative_int(source_stop) or source_stop > horizon or
-            plan.get("requested_bit_seconds") != episode.get("bit_seconds", 64) or
-            plan.get("cn0_db_hz") != episode.get("cn0_db_hz", 0)):
+            plan.get("requested_bit_seconds") != episode.get("bit_seconds", 8 if protected else 64) or
+            plan.get("cn0_db_hz") != episode.get("cn0_db_hz", 30 if protected else 0)):
         raise CampaignError("vector oblique source support, duration or C/N0 differs from the fixed episode")
     expected_tail = 130 / 1920
     if chain_case:
@@ -3658,7 +3675,7 @@ def _validate_vector_oblique(receipt: dict[str, Any], episode: dict[str, Any]) -
     if chain_case:
         chain = plan.get("native_chain", {})
         propagation_horizon = chain.get("propagation_horizon_samples")
-        if (not _is_nonnegative_int(propagation_horizon) or not 0 < propagation_horizon <= 2400 * 1920 or
+        if (not _is_nonnegative_int(propagation_horizon) or not 0 < propagation_horizon <= horizon_limit or
                 drift * ((propagation_horizon + 260) / 1920) >= period):
             raise CampaignError("vector oblique native chain must preflight its actual propagation extent")
         return  # Shared native endpoint validation checks nested propagation and complete stage horizons.
@@ -5052,7 +5069,123 @@ def _predictive_regressions(trial: dict[str, Any]) -> list[str]:
         reasons.append("increased_premature_completions")
     if old["correct_complete"] is True and new["correct_complete"] is False:
         reasons.append("lost_required_complete_delivery")
+    if episode["scenario"] == HF_PROTECTED_OBLIQUE:
+        old_consumer = baseline["hf_protected_reassembly"]
+        new_consumer = candidate["hf_protected_reassembly"]
+        if new_consumer["incorrect_messages"] > old_consumer["incorrect_messages"]:
+            reasons.append("increased_incorrect_protected_reassembly")
+        if (old["correct_decoded_complete"] is True and new["correct_decoded_complete"] is False):
+            reasons.append("lost_native_protected_delivery")
     return reasons
+
+
+def _validate_protected_oblique_reassembly(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
+    report = receipt.get("hf_protected_reassembly")
+    admission = receipt.get("hf_protected_admission_replay")
+    if episode["scenario"] != HF_PROTECTED_OBLIQUE:
+        if report is not None or admission is not None:
+            raise CampaignError("unrequested protected oblique reassembly")
+        return
+    plan = receipt["plan"]
+    resources = plan.get("receiver_resources", {})
+    hardware = resources.get("hardware_threads")
+    if (plan.get("pattern_revision") != "independent-apsk-v2-carrier-v1" or
+            plan.get("configured_carrier_hz") != 10_000_240. or plan.get("wrong_key_admission") != "current" or
+            plan.get("wire_bits") != 64 or plan.get("scored_slot_horizon") != 66 or
+            plan.get("protected_reassembly_maximum_positions") != 304 or
+            not _is_nonnegative_int(hardware) or not hardware or resources.get("workers") != 2 * hardware or
+            resources.get("workers_explicit") is not False or resources.get("owners_explicit") is not False):
+        raise CampaignError("protected oblique receipt changed its carrier, canonical RS20 geometry or full worker budget")
+    if episode["mode"] == "plan":
+        if report is not None or admission is not None:
+            raise CampaignError("protected oblique planning cannot claim executed reassembly")
+        return
+    replay = receipt.get("service_replay", {})
+    replay_reserve = 16 * 1024 * 1024
+    reserve = 65536 + replay_reserve
+    if (not isinstance(report, dict) or report.get("maximum_positions") != 304 or
+            report.get("truth_passed_to_consumer") is not False or report.get("extra_dsp_search") is not False or
+            plan.get("protected_reassembly_reserved_bytes") != reserve or
+            not _is_nonnegative_int(replay.get("outside_receiver_future_reserved_bytes")) or
+            replay["outside_receiver_future_reserved_bytes"] < reserve or
+            replay.get("work_complete") is not True or
+            not isinstance(report.get("native_recovery_barrier"), bool) or
+            report.get("complete_native_input") is not (not report["native_recovery_barrier"])):
+        raise CampaignError("protected oblique consumer must observe bounded actual native events")
+    fields = ("native_events", "decode_attempts", "fragments_joined", "rejected_decode_attempts",
+              "malformed_events", "last_attempt_positions", "last_attempt_erasures", "last_gap_positions",
+              "correct_complete_messages", "incorrect_messages")
+    if any(not _is_nonnegative_int(report.get(field)) for field in fields):
+        raise CampaignError("protected oblique consumer must report all work and result counters")
+    messages, candidates = receipt.get("messages"), report.get("candidates")
+    if (not isinstance(messages, list) or not isinstance(candidates, list) or
+            report["native_events"] > len(messages) or
+            (report["complete_native_input"] and report["native_events"] != len(messages)) or
+            report["malformed_events"] > report["native_events"] or
+            report["fragments_joined"] != report["decode_attempts"] or
+            report["decode_attempts"] > report["native_events"] or
+            report["rejected_decode_attempts"] + len(candidates) != report["decode_attempts"] or
+            not 0 <= report["last_gap_positions"] <= report["last_attempt_erasures"] <= report["last_attempt_positions"] <= 304):
+        raise CampaignError("protected oblique actual attempts, rejections and accepted candidates do not reconcile")
+    if (not all(_is_finite_number(report.get(field)) for field in ("decode_seconds", "service_seconds")) or
+            not 0 <= report["decode_seconds"] <= report["service_seconds"] <= replay["wall_seconds"]):
+        raise CampaignError("protected oblique consumer cost is missing or outside the measured replay")
+    expected_payload = list(episode.get("message", "e").encode("ascii"))
+    correct = 0
+    for candidate in candidates:
+        indices = ("first_public_slot", "stop_public_slot", "bit_positions", "erased_positions", "fragments")
+        if not isinstance(candidate, dict) or any(not _is_nonnegative_int(candidate.get(field)) for field in indices):
+            raise CampaignError("protected oblique candidate is missing its public frame positions")
+        first, stop, positions, erasures, fragments = (candidate[field] for field in indices)
+        payload = candidate.get("decoded_payload_bytes")
+        if (not 0 <= first < stop <= plan["scored_slot_horizon"] or stop - first != positions + 2 or
+                not 0 < positions <= 304 or positions % 8 or not 2 <= erasures <= positions or
+                not 2 <= fragments <= report["native_events"] or
+                not isinstance(payload, list) or not 1 <= len(payload) <= 16 or
+                any(not _is_nonnegative_int(byte) or byte > 255 for byte in payload)):
+            raise CampaignError("protected oblique candidate has invalid native short-frame extent or content")
+        exact = (episode.get("control", "wanted") == "wanted" and first == 0 and stop == 66 and
+                 positions == 64 and payload == expected_payload)
+        if candidate.get("matches_transmitted_complete_message") is not exact:
+            raise CampaignError("protected oblique candidate cannot claim an unmatched frame as correct")
+        correct += exact
+    if (correct != report["correct_complete_messages"] or len(candidates) - correct != report["incorrect_messages"]):
+        raise CampaignError("protected oblique candidate counts differ from complete message evaluation")
+    if not report["complete_native_input"]:
+        if admission is not None:
+            raise CampaignError("protected oblique cannot replay across a native recovery barrier")
+        return
+    if (not isinstance(admission, dict) or admission.get("current_semantic_parity") is not True or
+            admission.get("extra_dsp_search") is not False or admission.get("independent_captures") != 0 or
+            admission.get("finish_input_called") is not False or admission.get("reserved_bytes") != replay_reserve):
+        raise CampaignError("protected admission replay must preserve actual current-policy semantics without new DSP or EOF")
+    tiers = admission.get("tiers")
+    policies = ("current", "guarded", "strict", "very-strict", "extreme", "maximum")
+    counts = ("false_data", "wrong_data", "wanted_lost_slots", "wanted_erased_bytes", "quiet_slots",
+              "admission_rejected_slots", "canonical_correct_messages", "canonical_incorrect_messages",
+              "canonical_premature_completions", "consumer_correct_messages", "consumer_incorrect_messages",
+              "consumer_decode_attempts")
+    if (not isinstance(tiers, list) or len(tiers) != len(policies) or
+            any(not isinstance(tier, dict) or tier.get("policy") != policy or
+                any(not _is_nonnegative_int(tier.get(field)) or tier[field] > 66 for field in counts) or
+                tier["wanted_erased_bytes"] > min(8, tier["wanted_lost_slots"]) or
+                not _is_finite_number(tier.get("state_and_codec_seconds")) or tier["state_and_codec_seconds"] < 0
+                for tier, policy in zip(tiers, policies))):
+        raise CampaignError("protected admission replay must report all six fixed tiers and bounded work")
+    outcomes = receipt["outcomes"]
+    if (tiers[0]["admission_rejected_slots"] != 0 or tiers[0]["false_data"] != outcomes["false_data"] or
+            tiers[0]["wrong_data"] != outcomes["wrong_bits"] or
+            tiers[0]["canonical_premature_completions"] != outcomes["premature_completions"] or
+            tiers[0]["consumer_correct_messages"] != correct or
+            tiers[0]["consumer_incorrect_messages"] != report["incorrect_messages"] or
+            tiers[0]["consumer_decode_attempts"] != report["decode_attempts"] or
+            any(b["false_data"] > a["false_data"] or b["admission_rejected_slots"] < a["admission_rejected_slots"] or
+                b["quiet_slots"] != a["quiet_slots"] for a, b in zip(tiers, tiers[1:]))):
+        raise CampaignError("protected admission replay changed baseline counts, physical quiet or the nested DATA rule")
+    if (not _is_finite_number(admission.get("state_and_codec_seconds")) or
+            not math.isclose(admission["state_and_codec_seconds"],
+                             sum(tier["state_and_codec_seconds"] for tier in tiers), rel_tol=1e-12)):
+        raise CampaignError("protected admission replay cost must reconcile across all six tiers")
 
 
 def _validate_predictive_comparison(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
@@ -5996,6 +6129,7 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
 
 
     _validate_service_replay(receipt, episode)
+    _validate_protected_oblique_reassembly(receipt, episode)
     if not _predictive_candidate:
         _validate_predictive_comparison(receipt, episode)
     elif "hf_predictive_quiet_comparison" in receipt:

@@ -72,12 +72,17 @@ HfVectorScattering solve_hf_vector_two_hop_es(double frequency_hz, const HfVecto
 HfVectorScattering solve_hf_vector_two_hop_f(double frequency_hz, const HfVectorTransverseGrid&,
     std::array<double, 3> field_tesla, std::span<const HfVectorPlasmaLayer3d> bottom_to_top, std::stop_token = {});
 
+inline constexpr char hf_vector_oblique_protected_scenario[] =
+    "hf-vector-oblique-chain-protected-clocks-tone";
+inline constexpr double hf_vector_oblique_protected_drift_mps = 5.5;
+
 struct HfVectorObliqueSpec {
     bool perturbations = true, magnetic = true;
     unsigned field = 0, antenna = 0;
     double drift_mps = 8., epoch_seconds = 600.;
     bool cross_plane = true;
     bool intrinsic_evolution = false;
+    bool protected_long_calendar = false;
 };
 
 struct HfVectorGeometryMode {
@@ -188,6 +193,9 @@ class HfVectorObliqueTable {
 public:
     static constexpr double carrier_hz = 1e7, sample_rate_hz = 1920., occupied_half_band_hz = 384.;
     static constexpr double horizon_seconds = 2400.;
+    static constexpr double horizon_seconds_for(const HfVectorObliqueSpec& spec) noexcept {
+        return spec.protected_long_calendar ? 4200. : horizon_seconds;
+    }
     static constexpr std::size_t modelling_delay_samples = 32, retained_late_samples = 96;
     static constexpr std::size_t taps = 1 + modelling_delay_samples + retained_late_samples;
     static constexpr std::size_t position_intervals = 256;

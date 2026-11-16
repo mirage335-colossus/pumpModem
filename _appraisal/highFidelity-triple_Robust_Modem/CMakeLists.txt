@@ -39,7 +39,8 @@ target_link_libraries(high_fidelity_channel PRIVATE high_fidelity_fullwave high_
 add_library(high_fidelity_public_receiver STATIC "${_hf_root}/src/hf_public_diagnostic.cpp"
   "${_hf_root}/src/hf_gui_diagnostic.cpp" "${_hf_root}/src/hf_phase_filter.cpp"
   "${_hf_root}/src/hf_correlated_gain.cpp" "${_hf_root}/src/hf_predictive_quiet.cpp"
-  "${_hf_root}/src/hf_protected_reassembly.cpp" "${_hf_root}/src/hf_normalized_null.cpp")
+  "${_hf_root}/src/hf_protected_reassembly.cpp" "${_hf_root}/src/hf_normalized_null.cpp"
+  "${_hf_root}/src/hf_admission_replay.cpp")
 target_include_directories(high_fidelity_public_receiver PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")
 target_link_libraries(high_fidelity_public_receiver PUBLIC high_fidelity_channel datapump_triad_receiver)
 add_executable(high_fidelity_appraisal "${_hf_root}/src/main.cpp" "${_hf_root}/src/vlf_diagnostic.cpp")
@@ -179,7 +180,7 @@ if(BUILD_TESTING)
   target_link_libraries(high_fidelity_test_hf_native_supplement PRIVATE datapump_triad_receiver)
   add_test(NAME high_fidelity_hf_native_supplement COMMAND high_fidelity_test_hf_native_supplement)
   set_tests_properties(high_fidelity_hf_native_supplement PROPERTIES LABELS "appraisal" TIMEOUT 45)
-  foreach(_hf_extra admitted_evidence phase_filter correlated_gain predictive_quiet protected_reassembly normalized_null)
+  foreach(_hf_extra admitted_evidence phase_filter correlated_gain predictive_quiet protected_reassembly normalized_null admission_replay)
     add_executable(high_fidelity_test_hf_${_hf_extra} "${_hf_root}/tests/test_hf_${_hf_extra}.cpp")
     target_include_directories(high_fidelity_test_hf_${_hf_extra} PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/tools")
     if(_hf_extra STREQUAL "admitted_evidence")
@@ -202,6 +203,12 @@ if(BUILD_TESTING)
   add_test(NAME high_fidelity_runner COMMAND "${Python3_EXECUTABLE}"
     "${_hf_root}/tests/test_runner.py")
   set_tests_properties(high_fidelity_runner PROPERTIES LABELS "appraisal" TIMEOUT 45)
+  add_test(NAME high_fidelity_current_admission COMMAND "${Python3_EXECUTABLE}"
+    "${_hf_root}/tests/test_current_admission.py")
+  set_tests_properties(high_fidelity_current_admission PROPERTIES LABELS "appraisal" TIMEOUT 45)
+  add_test(NAME high_fidelity_protected_oblique_audit COMMAND "${Python3_EXECUTABLE}"
+    "${_hf_root}/tests/test_protected_oblique_audit.py")
+  set_tests_properties(high_fidelity_protected_oblique_audit PROPERTIES LABELS "appraisal" TIMEOUT 45)
   add_test(NAME high_fidelity_wave_receipts COMMAND "${Python3_EXECUTABLE}"
     "${_hf_root}/tests/test_wave_receipts.py")
   set_tests_properties(high_fidelity_wave_receipts PROPERTIES LABELS "appraisal" TIMEOUT 45)
@@ -216,7 +223,7 @@ if(BUILD_TESTING)
   set_tests_properties(high_fidelity_coverage_design PROPERTIES LABELS "appraisal" TIMEOUT 45)
   add_custom_target(high_fidelity_checks DEPENDS high_fidelity_appraisal high_fidelity_fullwave_probe high_fidelity_fullwave_kernel_probe high_fidelity_magnetoionic_probe high_fidelity_wave_optics_probe
     high_fidelity_completion_ambiguity_probe
-    high_fidelity_protected_reassembly_probe
+    high_fidelity_protected_reassembly_probe high_fidelity_test_hf_admission_replay
     high_fidelity_vector_oblique_probe high_fidelity_test_hf_vector_oblique
     high_fidelity_vector_two_hop_probe high_fidelity_test_hf_vector_two_hop
     high_fidelity_test_hf_fragment_integrity

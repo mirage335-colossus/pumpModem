@@ -12,12 +12,35 @@ Python launches native executables and analyzes receipts; it implements no DSP.
 distinguishes GUI history filtering from native DATA admission, explains the
 configured-frequency keystream revision, and connects known failures and
 tested/rejected/contemplated implementations to the evidence needed for reuse.
-The source-bound results below are preserved historical observations; the
-changed appraisal callers have not had their campaigns rerun merely because
-the canonical waveform and dropdown changed.
+The source-bound results below are preserved historical observations. The
+[current-waveform continuation](hf-current-admission.md) explicitly regenerates
+selected failures and controls; it does not refresh every old campaign.
 Failure guides, source and campaign definitions are versioned; links into
 ignored `local-evidence/` refer to retained local receipts, which a fresh
 checkout does not include.
+
+The current continuation demonstrates **protected complete-message recovery**
+through coupled magnetic polarization, oblique reflection and diffraction with
+actual clock errors and a continuing interferer: the baseline cannot complete
+`e` or fresh `a`, while the predictive candidate's rejected fragments recover
+the exact payload through the bounded native-codec consumer. All six native
+admission tiers preserve these two recoveries. Their premature physical
+completions remain recorded. The shorter physical foreign-key control leaves
+9/6/5/3/3/1 false DATA decisions across the six tiers, so even Maximum fails
+the zero-false-DATA gate; no incorrect content is accepted. The current-waveform
+unprotected `Ae` witness still accepts truncated `A`, rejecting general
+predictive-quiet promotion. See the linked continuation for frozen inputs,
+independent controls, timing, energy comparisons and applicability limits.
+
+The declared longer-duration follow-up then removes all DATA losses and
+premature completions for both protected payloads: the experimental quiet
+policy delivers them directly. It costs approximately 2.047× incident DATA
+energy and 1.74–1.75× candidate receiver service. Maximum native admission
+passes the four longer-case repair checks, including complete foreign-key and
+tone/no-DATA controls; primary Strict still leaves one false DATA decision.
+The canonical baseline still cannot complete either wanted message. These are
+finite conditional appraisal results, with separate per-policy audits; neither
+the GUI/default receiver nor general disturbed-day qualification is promoted.
 
 The archived [receiver-repair investigation](hf-predictive-completion.md) repairs
 five selected completion failures, but **the candidate fails the broader
@@ -380,6 +403,9 @@ Current group coverage is:
 | `hf_vector_3d_waveform` | Coupled two-transverse-coordinate primary, spatial checks before trajectory folding, broadband/FIR and streaming checks |
 | `hf_completion_ambiguity` | Exact native IQ-prefix identity, three DATA/two QUIET decisions and premature acceptance before EOF under a constructed outage |
 | `qualification` | Hash-bound finite evidence, current target-binary observation, separate requirements and characterization, stale/missing/censored evidence |
+| `hf_admission_replay` | Canonical admission/controller replay parity, preserved presence, bounded ordered slots, quiet/erasure and codec behavior |
+| `current_admission` | Changed-binary rejection, timeout stream retention, valid execution separated from failed communications requirements |
+| `protected_oblique_audit` | Retrospective physical repair checks separating combined delivery, integrity, false DATA, premature completion and provenance |
 | `hf_design` | Fixed whole-domain phase/group bounds, strict physical coefficients, seed/placement isolation and mutation order |
 | `hf_gui_profile` | Canonical preset preparation, actual endpoint clock errors, margin semantics, Helper, noise-seed isolation and rejection |
 | `hf_fullwave` | Independent zero-index, Fresnel/slab, Joule-loss and smooth-barrier references; passive opaque layers and unresolved resonances |

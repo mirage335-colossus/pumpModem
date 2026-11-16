@@ -205,6 +205,7 @@ std::vector<std::string> scenario_names() {
             "hf-vector-oblique-off", "hf-vector-oblique", "hf-vector-oblique-no-b",
             "hf-vector-oblique-holdout", "hf-vector-oblique-cross",
             "hf-vector-oblique-chain-off", "hf-vector-oblique-chain-clocks", "hf-vector-oblique-chain-clocks-tone",
+            hf_vector_oblique_protected_scenario,
             "hf-vector-3d", "hf-vector-3d-holdout", "hf-vector-3d-planar", "hf-vector-3d-in-plane",
             "hf-vector-3d-chain-off", "hf-vector-3d-chain-clocks-tone",
             "hf-vector-evolving", "hf-vector-evolving-rigid", "hf-vector-evolving-holdout",

@@ -17,9 +17,28 @@ included in a fresh checkout. The guides preserve the substantive outcomes,
 recipes, source identities and limits; consult a retained receipt when locally
 available, and regenerate missing evidence under an explicitly identified
 source when needed. Neither kind of record automatically describes this newer binary.
-In particular, the latest predictive/protected results bind native source
+In particular, the preceding predictive/protected results bind native source
 `dd2c9e267ae030db4393f815275ec615e8d6425732545bbdaf5d0705243e8e26`.
-This audit changes documentation only; it reruns no communications campaign.
+That audit changed documentation only. The subsequent
+[current-waveform repair investigation](hf-current-admission.md) regenerates
+selected protected-message, unwanted-key, duration and coupled physical cases
+with native source
+`fc5b4c596aff3866e03a9f2b4c506bec2da3b4eff0d164adcdfcaf61ffade1e6`.
+Those explicitly identified results supersede the old waveform's applicability
+for those cases only; they do not refresh the whole historical matrix.
+
+That continuation demonstrates a concrete protected-message repair through
+the coupled oblique/magnetic/diffraction channel with real endpoint clock
+errors and a continuing tone. At the shorter duration, the candidate's actual
+rejected fragments recover exact `e` and fresh `a`. At the declared longer
+duration, the experimental quiet policy completes both directly with no DATA
+losses or premature completion, at about 2.047× incident energy and 1.74–1.75×
+candidate service. The canonical baseline still cannot finish. Maximum native
+admission passes all checks in the four longer cases; primary Strict leaves one
+foreign-key DATA decision. The shorter failures and current unprotected `Ae`
+integrity failure remain. The [separate repair audits](hf-current-admission.md#executable-repair-acceptance-and-software-validation)
+preserve conditional per-policy results without claiming operational or field
+qualification.
 
 ### Wrong Key Admission: distinguish decoding from visibility
 
@@ -67,11 +86,18 @@ records the original-library/header recipe and its missing scratch-binary
 hashes. This is a historical-score discriminator, not a current-waveform or
 complete-message repair, and not hash-bound certification.
 
-The appraisal `run.py`/`src/main.cpp` currently has **no
+The appraisal `run.py`/`src/main.cpp` has **no general
 `--wrong-key-admission` option**; its receiver configurations use the native
-default `current`. Do not pass the GUI option to an old campaign and assume
-the requested tier ran. A future direct-policy appraisal needs an explicit
-configuration/receipt extension. Its baseline must remain Unfiltered. The
+default `current`. The standalone protected-reassembly probe now exposes an
+explicit direct-policy option and a six-policy downstream replay. The new
+protected-oblique scenario also reports all six downstream comparisons after
+each completed native receiver. These use the existing admission rule and
+message controller without repeating DSP; their Unfiltered baseline must match
+actual native messages. Direct native Strict runs check replay parity on one
+wanted and one foreign-key capture. See the
+[implementation, results and scope](hf-current-admission.md). Do not pass a GUI
+option to an old campaign and assume that tier ran or infer GUI visibility
+from these headless results. The
 predictive-quiet candidate also requires ambiguity *below* the ordinary
 presence bound: native admission-rejected DATA retains positive presence
 evidence and is not automatically eligible for that quiet correction.

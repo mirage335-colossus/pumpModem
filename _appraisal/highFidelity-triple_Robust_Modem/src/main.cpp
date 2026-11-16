@@ -29,6 +29,8 @@
 #include "triad_probe_json.hpp"
 #include "triad_probe_spool.hpp"
 #include "hf_predictive_quiet.hpp"
+#include "hf_protected_reassembly.hpp"
+#include "hf_admission_replay.hpp"
 #include "hf_normalized_null.hpp"
 #include <openssl/evp.h>
 #include <openssl/crypto.h>
@@ -224,14 +226,16 @@ Options parse(int argc,char** argv) {
     require(!o.service_options||o.service_replay||o.hf_predictive_quiet,"service options require a bounded replay");
     require(!o.service_replay||o.mode=="receive"||o.mode=="plan","service replay requires receive or plan mode");
     require(!(o.service_replay||o.hf_predictive_quiet)||o.chunk<=ObservationSpool::maximum_chunk_rows,"service replay chunk must be 1..4096");
+    const bool protected_oblique=o.scenario==appraisal::hf_vector_oblique_protected_scenario;
     require(!o.hf_predictive_quiet||((o.mode=="receive"||o.mode=="plan")&&o.backend=="cpu"&&
-        o.waveform=="reference"&&!o.helper&&o.fec=="off"&&o.service_episodes==1&&!o.service_replay&&
+        o.waveform=="reference"&&!o.helper&&(o.fec=="off"||(protected_oblique&&o.fec=="rs20"))&&
+        o.service_episodes==1&&!o.service_replay&&
         !o.hf_public_phase_receiver&&!o.hf_compare_admitted_models&&!o.hf_correlated_gain_receiver&&
         !o.hf_target_presence_diagnostic&&!o.hf_gui_clean_diagnostic&&!o.hf_correlated_gain_shadow&&
         !o.hf_phase_filter&&!o.hf_phase_filter_receiver&&!o.hf_phase_filter_paths&&!o.hf_phase_filter_sticky&&
         !o.hf_phase_bridge&&!o.hf_phase_bank&&!o.hf_phase_refinement&&!o.hf_physical_diagnostic&&
         !o.hf_gannon_native_diagnostic&&!o.hf_gannon_gain_variance_diagnostic),
-        "predictive quiet comparison requires exclusive Helper-off reference CPU plan/receive, FEC off and one episode");
+        "predictive quiet comparison requires exclusive Helper-off reference CPU plan/receive, one episode and FEC off or the frozen protected oblique case");
     require(o.service_backlog_begin.has_value()==o.service_backlog_end.has_value(),"service backlog requires both commit boundaries");
     require(!o.service_backlog_begin||*o.service_backlog_begin<*o.service_backlog_end,"service backlog begin must precede end");
     require(o.service_episodes==1||o.control=="wanted"||o.control=="noise"||o.control=="wrong-key"||o.control=="wrong-ordinal",
@@ -588,7 +592,7 @@ Json vector_oblique_json(const appraisal::HfVectorObliqueSpec& spec, bool includ
     using Table=appraisal::HfVectorObliqueTable;
     const auto g=appraisal::hf_vector_oblique_geometry(spec);
     auto result=object({{"carrier_hz",Table::carrier_hz},{"sample_rate_hz",Table::sample_rate_hz},
-        {"occupied_half_band_hz",Table::occupied_half_band_hz},{"maximum_horizon_seconds",Table::horizon_seconds},
+        {"occupied_half_band_hz",Table::occupied_half_band_hz},{"maximum_horizon_seconds",Table::horizon_seconds_for(spec)},
         {"perturbations",spec.perturbations},{"magnetic",spec.magnetic},{"field",spec.field},
         {"antenna",spec.antenna},{"drift_mps",spec.drift_mps},{"epoch_seconds",spec.epoch_seconds},
         {"incidence_deg",g.incidence_deg},{"height_m",g.height_m},{"receiver_x_m",g.receiver_x_m},
@@ -1103,6 +1107,13 @@ Setup setup(const Options& o,std::stop_token stop) {
         return setup_native_gui(o,stop);
     }
     auto scenario=appraisal::make_scenario(o.scenario);
+    const bool protected_oblique=scenario.id==appraisal::hf_vector_oblique_protected_scenario;
+    if(protected_oblique&&(!o.hf_predictive_quiet||o.fec!="rs20"||
+        (o.bit_seconds.value_or(8.)!=8.&&o.bit_seconds.value_or(8.)!=16.)||
+        o.cn0.value_or(30.)!=30.||o.seed!=70501||o.workers||o.owners||
+        !((o.message=="e"&&o.noise_seed==80501)||
+          (o.message=="a"&&o.control=="wanted"&&o.noise_seed==80547))))
+        throw Unavailable("protected oblique requires the frozen 8- or 16-second RS20 paired profile, payload, seeds and automatic receiver allocation");
     const bool vector_native_chain_case=scenario.id.starts_with("hf-vector-oblique-chain-")||
         scenario.id.starts_with("hf-vector-3d-chain-")||
         scenario.id.starts_with("hf-vector-evolving-chain-")||
@@ -1120,7 +1131,7 @@ Setup setup(const Options& o,std::stop_token stop) {
         throw Unavailable("target-presence diagnostic requires direct lens, phase-screen, vector-oblique or Gannon propagation");
     if(native_chain_case) {
         if((o.mode!="plan"&&o.mode!="receive")||o.backend!="cpu"||o.waveform!="reference"||o.pulse!="rrc"||
-           o.helper||o.fec!="off"||(o.control!="wanted"&&o.control!="noise"&&o.control!="wrong-key")||
+           o.helper||(!protected_oblique&&o.fec!="off")||(o.control!="wanted"&&o.control!="noise"&&o.control!="wrong-key")||
            o.duration_override||o.capture_lead_seconds||o.design_options||o.service_replay||
            o.hf_public_phase_receiver||o.hf_compare_admitted_models||o.hf_trajectory_seed||
            o.hf_trajectory_offset_seconds||o.hf_phase_refinement||o.hf_phase_filter||
@@ -1208,8 +1219,8 @@ Setup setup(const Options& o,std::stop_token stop) {
     if(scenario.channel.vector_oblique) {
         if((vector_native_chain_case?(o.mode!="plan"&&o.mode!="receive"):
                 (o.mode!="plan"&&o.mode!="channel"&&o.mode!="receive"))||
-           o.backend!="cpu"||o.waveform!="reference"||o.pulse!="rrc"||o.helper||o.fec!="off"||
-           (o.control!="wanted"&&!(o.mode=="receive"&&(o.control=="wrong-key"||o.control=="noise")))||
+           o.backend!="cpu"||o.waveform!="reference"||o.pulse!="rrc"||o.helper||(!protected_oblique&&o.fec!="off")||
+           (o.control!="wanted"&&!((o.mode=="receive"||protected_oblique)&&(o.control=="wrong-key"||o.control=="noise")))||
            o.duration_override||o.capture_lead_seconds||o.design_options||o.service_replay||
            o.hf_phase_bank||o.hf_physical_diagnostic||o.hf_gui_clean_diagnostic||
            o.hf_correlated_gain_shadow||o.hf_correlated_gain_receiver||
@@ -1218,7 +1229,7 @@ Setup setup(const Options& o,std::stop_token stop) {
            o.hf_trajectory_offset_seconds||o.hf_phase_refinement||o.hf_phase_filter||
            o.hf_phase_filter_receiver||o.hf_phase_filter_paths||o.hf_phase_filter_sticky||o.hf_phase_bridge)
             throw Unavailable("vector oblique propagation supports fixed-geometry reference CPU plan/channel/receive with wanted or complete noise/wrong-key controls, Helper/FEC and experimental receiver policies off; native endpoint variants use plan/receive");
-        if((vector_native_chain_case&&o.bit_seconds&&*o.bit_seconds!=64.)||
+        if((vector_native_chain_case&&!protected_oblique&&o.bit_seconds&&*o.bit_seconds!=64.)||
            (!vector_native_chain_case&&o.bit_seconds&&*o.bit_seconds!=64.&&*o.bit_seconds!=128.))
             throw Unavailable("vector oblique supports 64 or 128 second direct bits and 64 second native-chain bits");
         if(o.cn0&&((evolving_native_chain_case&&*o.cn0!=30.)||
@@ -1336,6 +1347,8 @@ Setup setup(const Options& o,std::stop_token stop) {
     auto draft=prepare_text_message(bytes,txmp);
     require(!draft.long_form()&&draft.wire_bits()>0&&draft.wire_bits()<=message_receiver_options(mp.fec).maximum_data_bits,
         "message exceeds bounded appraisal short-frame bit count");
+    if(protected_oblique&&draft.wire_bits()!=64)
+        throw Unavailable("protected oblique requires the 64-position native short RS20 wire profile");
     ReceiverConfig rc;
     rc.sample_rate_hz=f.sample_rate;rc.data_if_hz=pc.data_if_hz;
     rc.frequency_bound_hz=scenario.bounds.frequency_bound_hz;
@@ -1501,7 +1514,12 @@ Setup setup(const Options& o,std::stop_token stop) {
         catch (const std::exception& error) { throw Unavailable(error.what()); }
     }
     if(s.scenario.channel.vector_oblique) {
-        try { appraisal::validate_hf_vector_oblique_spec(*s.scenario.channel.vector_oblique, s.horizon); }
+        try {
+            const auto& spec=*s.scenario.channel.vector_oblique;
+            appraisal::validate_hf_vector_oblique_spec(spec,s.horizon);
+            if(protected_oblique)
+                appraisal::validate_hf_vector_oblique_spec(spec,s.native_chain->propagation_horizon_samples);
+        }
         catch (const std::exception& error) { throw Unavailable(error.what()); }
     }
     if(s.scenario.channel.vector_two_hop) {
@@ -1652,6 +1670,12 @@ Json plan_json(const Setup& s,const Options& o) {
     if(o.hf_predictive_quiet) {
         result["hf_predictive_quiet_requested"]=true;
         result["hf_predictive_quiet_active"]=false;
+    }
+    if(o.scenario==appraisal::hf_vector_oblique_protected_scenario) {
+        result["pattern_revision"]=pattern_revision_name();
+        result["configured_carrier_hz"]=f.configured_carrier_hz;
+        result["wrong_key_admission"]=wrong_key_admission_name(s.receiver.wrong_key_admission);
+        result["protected_reassembly_maximum_positions"]=appraisal::HfProtectedReassembly::maximum_positions;
     }
     if(o.hf_compare_admitted_models||o.service_replay||o.hf_predictive_quiet) {
         result["hf_compare_admitted_models_requested"]=o.hf_compare_admitted_models;
@@ -3589,12 +3613,16 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     const auto clean_capture_bytes=gui_clean?static_cast<std::size_t>(diagnostic_samples)*sizeof(Complex):0;
     const auto clean_chunk_bytes=gui_clean?o.chunk*(sizeof(Complex)+sizeof(std::uint8_t)):0;
     const auto total_diagnostic_bytes=add_bytes(diagnostic_bytes,clean_capture_bytes);
+    const bool protected_oblique=o.scenario==appraisal::hf_vector_oblique_protected_scenario;
     const std::size_t per_slot_bytes=(o.hf_phase_refinement||o.hf_correlated_gain_receiver)?65536:16384;
-    require(s.slot_horizon<=SIZE_MAX/per_slot_bytes,"evaluator receipt reservation overflow");
+    // The protected pair keeps both receipt sets until comparison output.
+    const auto pair_slot_bytes=protected_oblique?2*per_slot_bytes:per_slot_bytes;
+    const std::size_t reassembly_reserve=protected_oblique?65536+appraisal::hf_admission_replay_reserve_bytes:0;
+    require(s.slot_horizon<=SIZE_MAX/pair_slot_bytes,"evaluator receipt reservation overflow");
     if(o.hf_correlated_gain_receiver)result["plan"]["correlated_gain_evaluator_reserved_bytes"]=
         static_cast<std::size_t>(s.slot_horizon)*per_slot_bytes;
     const auto evaluator_future=add_bytes(add_bytes(o.chunk*(sizeof(Complex)+1),clean_chunk_bytes),
-        add_bytes(static_cast<std::size_t>(s.slot_horizon)*per_slot_bytes,65536));
+        add_bytes(static_cast<std::size_t>(s.slot_horizon)*pair_slot_bytes,65536+reassembly_reserve));
     auto future=add_bytes(add_bytes(source.working_bytes,evaluator_future),spool?spool->working_bytes():0);
     if(gui_clean)future=add_bytes(future,source.working_bytes);
     const auto baseline=execution::process_footprint_bytes();
@@ -3779,6 +3807,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     if(receive||o.mode=="diagnose")s.receiver.bulk_backend=backend(o);
     result["plan"]["outside_receiver_future_reserved_bytes"]=add_bytes(policy_future,retained_capture_reserve);
     if(o.hf_predictive_quiet)result["plan"]["predictive_training_reserved_bytes"]=training_reserve;
+    if(protected_oblique)result["plan"]["protected_reassembly_reserved_bytes"]=reassembly_reserve;
     result["plan"]["evaluator_reserved_bytes_per_public_slot"]=o.hf_phase_refinement?65536:16384;
     result["plan"]["renderer_resident_accounting"]=spool?
         "rendering source/channel destroyed before replay; spool buffers and possible resident backing reserved outside receiver":s.native_chain?
@@ -3853,7 +3882,18 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     const auto cancel_receiver=[&]{if(receiver)receiver->request_cancel();};
     std::optional<std::stop_callback<decltype(cancel_receiver)>> interrupt;
     interrupt.emplace(deadline.stop.get_token(),cancel_receiver);
-    Json::Array slots,messages;
+    Json::Array slots,messages,reassembled;
+    std::optional<appraisal::HfProtectedReassembly> reassembly;
+    std::vector<StreamSlotReceipt> protected_scores;
+    std::vector<CompletedMessage> protected_messages;
+    std::vector<appraisal::ProtectedReassemblyCandidate> protected_candidates;
+    if(protected_oblique) {
+        require(s.slot_horizon<=appraisal::hf_admission_replay_maximum_slots,"protected admission replay exceeds its slot bound");
+        reassembly.emplace(s.message_profile.fec);
+        protected_scores.reserve(static_cast<std::size_t>(s.slot_horizon));
+    }
+    bool reassembly_recovery_barrier=false;
+    std::size_t reassembled_correct=0,reassembled_incorrect=0;
     std::size_t wrong_bits=0,false_data=0,ambiguous=0,quiet_active=0,premature=0,physical=0,rejections=0,resumed=0;
     std::size_t backpressure=0,peak_backlog=0,peak_active_owners=0,safe_completions=0,accepted_messages=0;
     std::vector<std::size_t> episode_wrong(s.episode_starts.size()),episode_ambiguous(s.episode_starts.size()),episode_quiet(s.episode_starts.size());
@@ -3866,6 +3906,10 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     bool first_observation_complete=false,first_observation_correct_data=false,public_search_executed=false;
     const auto first_observation=make_receiver_slot_plan(s.profile,s.receiver,0);
     const bool target=o.control!="noise"&&o.control!="wrong-key"&&o.control!="wrong-ordinal";
+    const auto recovered_exact=[&](const appraisal::ProtectedReassemblyCandidate& candidate) {
+        return target&&candidate.first_public_slot==0&&candidate.stop_public_slot==s.truth.size()+2&&
+            candidate.bit_positions==s.truth.size()&&std::ranges::equal(candidate.content.message.data,s.message);
+    };
     const bool configured_mode_voltage_transitions=std::any_of(s.scenario.channel.paths.begin(),s.scenario.channel.paths.end(),
         [](const auto& path){return path.hf&&!path.hf->voltage_transitions.empty();});
     std::uint64_t resumed_data_boundary_sample=0;
@@ -3892,12 +3936,19 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
     StreamReceiverReport final;
     const auto drain=[&]{
         if(!receiver)return;
+        const auto barrier=[&](std::uint64_t cursor) {
+            if(reassembly&&!reassembly_recovery_barrier) {
+                reassembly->reset(cursor,appraisal::ProtectedReassemblyBoundary::native_recovery);
+                reassembly_recovery_barrier=true;
+            }
+        };
         if(spool) {
             const auto snapshot=receiver->report();
             peak_active_owners=std::max(peak_active_owners,snapshot.active_owners);
             peak_backlog=std::max(peak_backlog,snapshot.uncommitted_slots);
+            if(snapshot.recovering)barrier(snapshot.next_public_slot);
         }
-        for(const auto& receipt:receiver->drain_recent_slots()) {
+        for(auto& receipt:receiver->drain_recent_slots()) {
             const auto& r=receipt.score;const auto episode=source_episode(s,r.index);
             const bool active=episode.has_value()&&o.control!="noise";
             if(spool) {
@@ -3905,6 +3956,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
                 const auto address=message_address(s.profile,r.index);
                 service_receipts_complete&=r.index==service_commits.size()&&r.complete&&r.all_valid&&
                     receipt.pattern_epoch==address.epoch&&receipt.symbol_ordinal==address.ordinal;
+                if(!service_receipts_complete)barrier(r.index);
                 service_commits.push_back({r.index,r.stop_sample,receipt.commit_timing});
                 if(receipt.commit_timing) {
                     peak_active_owners=std::max(peak_active_owners,static_cast<std::size_t>(receipt.commit_timing->active_owners));
@@ -3969,9 +4021,28 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
                 row["commit_next_ready"]=receipt.commit_timing?Json(receipt.commit_timing->next_ready):Json{};
             }
             slots.push_back(std::move(row));
+            if(reassembly)protected_scores.push_back(std::move(receipt));
         }
-        for(const auto& event:receiver->drain_messages()) {
+        for(auto& event:receiver->drain_messages()) {
             const auto& m=event.message;
+            // A downstream observer sees only native immutable completion
+            // events. The source payload and expected boundaries below are
+            // used solely to evaluate the returned candidate.
+            if(reassembly&&!reassembly_recovery_barrier) {
+                if(auto recovered=reassembly->consume(event)) {
+                    const auto& data=recovered->content.message.data;
+                    const bool exact=recovered_exact(*recovered);
+                    reassembled_correct+=exact;
+                    reassembled_incorrect+=!exact;
+                    reassembled.push_back(object({{"first_public_slot",recovered->first_public_slot},
+                        {"stop_public_slot",recovered->stop_public_slot},{"bit_positions",recovered->bit_positions},
+                        {"erased_positions",recovered->erased_positions},{"fragments",recovered->fragments},
+                        {"decoded_payload_bytes",Json::Array(data.begin(),data.end())},
+                        {"fec_stats",fec_stats_json(recovered->content.fec_stats)},
+                        {"matches_transmitted_complete_message",exact}}));
+                    protected_candidates.push_back(std::move(*recovered));
+                }
+            }
             const bool matches=m.decoded_content&&std::ranges::equal(m.decoded_content->message.data,s.message);
             const bool active_quiet=std::any_of(m.trailing_quiet_slots.begin(),m.trailing_quiet_slots.end(),
                 [&](auto local){return source_episode(s,add(event.first_public_slot,local)).has_value();});
@@ -4020,8 +4091,10 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
                 row["ambiguous_active_slots"]=expected_start?Json(episode_ambiguous[*episode]):Json{};
                 row["quiet_active_slots"]=expected_start?Json(episode_quiet[*episode]):Json{};
             }
+            if(reassembly)protected_messages.push_back(std::move(event));
         }
         const auto r=receiver->report();peak_backlog=std::max(peak_backlog,r.uncommitted_slots);
+        if(reassembly&&!reassembly_recovery_barrier) reassembly->advance(r.next_public_slot);
     };
     std::vector<Complex> clean_iq(gui_clean?o.chunk:0);
     std::vector<std::uint8_t> clean_valid(gui_clean?o.chunk:0);
@@ -4377,6 +4450,73 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
         const bool work_complete=run_status=="completed"&&digest_match&&service_receipts_complete&&
             service_commits.size()==s.slot_horizon&&final.state==StreamReceiverState::input_ended&&
             final.next_public_slot==s.slot_horizon&&final.input_stop==s.horizon;
+        if(reassembly) {
+            const auto& r=reassembly->report();
+            result["hf_protected_reassembly"]=object({
+                {"complete_native_input",work_complete&&!reassembly_recovery_barrier},
+                {"native_recovery_barrier",reassembly_recovery_barrier},{"truth_passed_to_consumer",false},
+                {"extra_dsp_search",false},{"maximum_positions",appraisal::HfProtectedReassembly::maximum_positions},
+                {"native_events",r.events},{"decode_attempts",r.decode_attempts},{"fragments_joined",r.appends},
+                {"rejected_decode_attempts",r.decode_attempts-r.candidates},{"malformed_events",r.malformed_events},
+                {"last_attempt_positions",r.last_attempt_positions},{"last_attempt_erasures",r.last_attempt_erasures},
+                {"last_gap_positions",r.last_gap_positions},{"decode_seconds",r.decode_seconds},{"service_seconds",r.service_seconds},
+                {"correct_complete_messages",reassembled_correct},{"incorrect_messages",reassembled_incorrect},
+                {"candidates",std::move(reassembled)}});
+            if(work_complete&&!reassembly_recovery_barrier) {
+                Json::Array policies;
+                double replay_seconds=0;
+                bool parity=false;
+                for(const auto policy:wrong_key_admission_policies) {
+                    deadline.check();
+                    const auto replay=appraisal::replay_hf_admission_policy(s.profile,s.message_profile,
+                        protected_scores,policy,deadline.stop.get_token());
+                    replay_seconds+=replay.seconds;
+                    if(policy==WrongKeyAdmission::current) {
+                        parity=appraisal::hf_admission_matches_baseline(replay,protected_messages,protected_candidates,r)&&
+                            replay.next_public_slot==final.next_public_slot&&replay.slots.size()==protected_scores.size();
+                        for(std::size_t i=0;i<replay.slots.size();++i) {
+                            const auto& score=protected_scores[i].score;
+                            parity&=replay.slots[i].decision==score.decision&&replay.slots[i].bit==score.bit&&!replay.slots[i].rejected;
+                        }
+                    }
+                    std::size_t false_bits=0,wrong=0,erased=0,quiet=0,removed=0;
+                    std::array<bool,8> byte_erased{};
+                    for(const auto& slot:replay.slots) {
+                        const bool active=target&&slot.index<s.truth.size();
+                        removed+=slot.rejected;
+                        quiet+=slot.decision==SlotDecision::quiet;
+                        if(slot.decision==SlotDecision::data) {
+                            false_bits+=!active;
+                            wrong+=active&&slot.bit!=s.truth[slot.index];
+                        } else if(active) {
+                            ++erased;byte_erased[slot.index/8]=true;
+                        }
+                    }
+                    std::size_t correct_native=0,wrong_native=0,early=0,recovered=0;
+                    for(const auto& event:replay.messages) {
+                        const auto& m=event.message;
+                        const bool exact=target&&m.physical_complete&&m.decoded_content&&event.first_public_slot==0&&
+                            event.stop_public_slot==s.truth.size()+2&&std::ranges::equal(m.decoded_content->message.data,s.message);
+                        correct_native+=exact;
+                        wrong_native+=m.decoded_content.has_value()&&!exact;
+                        early+=m.physical_complete&&o.control!="noise"&&std::ranges::any_of(m.trailing_quiet_slots,
+                            [&](auto index) {return event.first_public_slot+index<s.truth.size();});
+                    }
+                    for(const auto& candidate:replay.recovered) recovered+=recovered_exact(candidate);
+                    policies.push_back(object({{"policy",wrong_key_admission_name(policy)},{"false_data",false_bits},
+                        {"wrong_data",wrong},{"wanted_lost_slots",erased},{"wanted_erased_bytes",std::ranges::count(byte_erased,true)},
+                        {"quiet_slots",quiet},{"admission_rejected_slots",removed},{"canonical_correct_messages",correct_native},
+                        {"canonical_incorrect_messages",wrong_native},{"canonical_premature_completions",early},
+                        {"consumer_correct_messages",recovered},{"consumer_incorrect_messages",replay.recovered.size()-recovered},
+                        {"consumer_decode_attempts",replay.consumer.decode_attempts},
+                        {"state_and_codec_seconds",replay.seconds}}));
+                }
+                result["hf_protected_admission_replay"]=object({{"current_semantic_parity",parity},{"extra_dsp_search",false},
+                    {"independent_captures",0},{"finish_input_called",false},
+                    {"reserved_bytes",appraisal::hf_admission_replay_reserve_bytes},
+                    {"state_and_codec_seconds",replay_seconds},{"tiers",std::move(policies)}});
+            }
+        }
         const auto expected=target&&o.control!="eof"?s.episode_starts.size():0;
         const bool communication_complete=work_complete&&accepted_messages==expected&&false_data==0&&premature==0&&
             (expected?physical==expected&&std::all_of(episode_decoded.begin(),episode_decoded.end(),[](bool value){return value;}):true);
@@ -4480,7 +4620,7 @@ int main(int argc,char** argv) {
             result["hf_correlated_gain_shadow_usage"]="--hf-correlated-gain-shadow uses hf-search with full timing on a wanted lens or phase-screen aperture; evaluates a normalized stationary complex-gain mixture over the configured band";
             result["hf_normalized_null_usage"]="--hf-normalized-null diagnoses gain-normalized directional evidence after the ordinary first slot in reference CPU hf-disturbed wanted/wrong-key runs, Helper/FEC off, automatic workers; no decisions are changed";
             result["hf_correlated_gain_receiver_usage"]="--hf-correlated-gain-receiver opts into the fixed complex-gain fallback inside canonical lens or phase-screen receive, with the public geometry and native thresholds intact";
-            result["hf_predictive_quiet_usage"]="--hf-predictive-quiet renders once into the bounded native spool, then compares the canonical receiver with an experimental earlier-public-gap interference predictor. CPU reference plan/receive, Helper/FEC off, one episode. DATA search, ordered commits, codec and two physical quiet slots remain canonical. Both full receipts and identical input digests are retained; no operational qualification.";
+            result["hf_predictive_quiet_usage"]="--hf-predictive-quiet renders once into the bounded native spool, then compares the canonical receiver with an experimental earlier-public-gap interference predictor. CPU reference plan/receive, Helper off, one episode. FEC off except the frozen hf-vector-oblique-chain-protected-clocks-tone RS20 profile with downstream protected reassembly. DATA search, ordered commits, codec and two physical quiet slots remain canonical. Both full receipts and identical input digests are retained; no operational qualification.";
             result["hf_design_usage"]="hf-ensemble-design on the reference waveform requires all eight coefficients: --hf-primary-amplitude-hz --hf-primary-period-seconds --hf-primary-phase-radians --hf-secondary-amplitude-hz --hf-secondary-period-seconds --hf-secondary-phase-radians --hf-knot-amplitude-hz --hf-knot-seconds";
         } else if(o.list) {
             result["mode"]="list";result["status"]="completed";Json::Array entries;
