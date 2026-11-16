@@ -43,6 +43,402 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Wrong Key Admission rate and sensitivity study — 15 November 2026
+
+This follow-up quantifies the existing policies; it does not retune them.
+The reference population is independently drawn synthetic wrong keys, noise,
+source bit and relative phase under declared native channel/overlap laws.
+It is not a distribution-free claim about all HF or sub-9 kHz traffic.
+The receiving pattern uses the fixed public Amateur roots and configured
+slot 1 / ordinal 7000038; simulation seeds randomize the native channel and
+noise, not the receiver's key or waveform ordinal. Daily equivalents assume
+that this conditional risk represents other scored slots. They are projections,
+not measured full-day or full-message outcomes. Wanted and foreign sources
+share one native channel realization; independent propagation paths are not
+qualified. A fixed foreign key can have a different risk than the ensemble
+of freshly drawn keys.
+The user's 10% interference-time stress assumption is an exposure model,
+separate from admission conditional on an overlap; see the
+[exposure accounting](triad-stochastic.md#wrong-key-admission).
+
+Before confirmation, the local fixed budget was 1,080 complete native slot
+calls: 300 each for long and short interfering bursts, plus 32 independent
+paired wanted episodes at seven clean and eight mixed C/N0 levels. The six
+primary wrong-key policy/stratum upper bounds use Bonferroni `alpha=.05/6`;
+individual one-sided 95% bounds and counts remain separately labeled.
+Wanted confidence intervals are pointwise, with paired comparisons across
+levels and policies; correlated levels do not multiply the episode count.
+The same completed native score supplies all three policies through the
+production scalar gate. Incomplete runs stop the batch, are retained, and
+cannot silently enter a success denominator. The fixed total deadline is
+3,600 seconds, with 60 seconds of native work per call. No outcome-driven
+sample extension is allowed.
+
+This initial HF reference uses 30 MHz, the IC-7100 oscillator declaration,
+Rate 36, a 180.4-second bit, 1,500 Hz I/Q sampling, 500 Hz DATA IF,
+fixed arrival and a static channel. It scores the full 43,938-position
+oscillator frequency search. Interferers use an independently keyed carrier
+6 Hz higher. The long and short pure-interference strata request 180 seconds
+at +18 dB-Hz and 30 seconds at +30 dB-Hz respectively, with onsets uniform
+over intersections of the declared nominal source and scored-window envelopes.
+Nominal support includes padding and tails, not just active DATA. C/N0 is
+the native pre-channel reference, not measured post-fade aperture power.
+Clean wanted levels are −13/−10/−7/−4/0/4/10 dB-Hz. Mixed wanted levels are
+−13/−10/−7/−4/−1/2/5/10 dB-Hz, with a +26 dB-Hz, requested 30-second foreign
+source at a fixed +60-second pattern offset. These are scoped references,
+not the full-stress manual HF case.
+
+The local experiment partitions the 12 logical CPUs of the Ryzen 5 PRO 5650U
+into four disjoint three-CPU affinities, each using automatic `W=6` and an
+exact 1,610,612,736-byte resource limit. The aggregate software budget stays
+24. One matched `W=24`/`W=6` check preserved input hashes, scores, decisions
+and DSP work; only timing and workspace leases differed. Independent trials
+measure statistical outcomes, not complete-receiver capacity or same-stream
+throughput. The fixed manifest hash is
+`963c90aa6ba43cb70e2408cc44ba0b5bb96840feb3a9c256f9941afdec2f616a`.
+Baseline source is `4b42411b0de5cb14732145cdf05da5f614dca4aa`; the measured
+probe's source manifest is
+`0b9877c3ba2ee4360cad4e71203951eb9b97bed78b450604ca31dabbedfe864b`.
+
+After deterministic GPU checks, a separate fixed 576-call changing-HF cohort
+was declared: 128 each for the same long/short wrong-key strata and 32 paired
+wanted episodes at −13/−7/−1/5/11 dB-Hz, clean and mixed. It uses the full
+43,938-frequency by 1,759-arrival search and the HF Best changing channel.
+The six wrong-key comparisons have their own simultaneous 95% family; they
+do not combine with the static cohort into a single six-comparison claim.
+The manifest hash is
+`e7c59c80b45ad077880d9bc048cf716c78c2d6384f2721574c5cffd9ba2c3614`.
+The fixed overall deadline is 5,800 seconds, with 60 native seconds and
+75 subprocess seconds per call; errors/incomplete calls stop the cohort.
+The native probe is built from the same source manifest on a full NVIDIA
+RTX PRO 6000 Blackwell Server Edition (97,887 MiB, MIG disabled), CUDA 12.8,
+cuFFT 11.3.3, ATen/Torch 2.9.1+cu128 and GNU 13.3. The EPYC 9355 host's
+13.6-vCPU quota resolves to `H=13`, `W=26`, with 16 GiB host and device caps.
+Native binary SHA256 is
+`dac5b1873ed607ab06c529681183342b26cb159c2bd1e7a032e60131c5cd38fe`.
+The 1.9 MB allowlisted source upload took seconds. Initial CUDA compiler
+discovery, absent Ninja and unrelated portable-packaging setup failures
+were repaired without changing modem source. One completed broad-HF pilot
+matched I/Q, final scores and decisions between native half-cuFFT and FP32;
+native slot work was 4.89 and 5.94 seconds, respectively. Both actually ran
+on CUDA and all three admission policies accepted this wrong-key example.
+This pairing supports this study's route, not universal precision parity or
+receiver capacity on another device.
+
+The static cohort completed all **1,080/1,080** calls in 1,378.64 seconds,
+without incomplete episodes. Wrong-key false-DATA counts were:
+
+| Static HF foreign source | Current | Guarded | Strict |
+| --- | ---: | ---: | ---: |
+| Long, +18 dB-Hz, 300 trials | 207/300 (69.0%) | 98/300 (32.7%) | 35/300 (11.7%) |
+| Short, +30 dB-Hz, 300 trials | 281/300 (93.7%) | 181/300 (60.3%) | 80/300 (26.7%) |
+
+The six-comparison simultaneous 95% upper probabilities are respectively
+75.25/39.53/16.81% and 96.57/67.08/33.25%; ordinary marginal one-sided 95%
+upper bounds are 73.40/37.40/15.17% and 95.81/65.05/31.19%. Policies share
+each observation; no independence between their outcomes is assumed.
+The direct foreign center is within the fixed ±30 Hz search in 297/300 long
+and 299/300 short draws. All draws remain in the declared denominators.
+
+For an explicit periodic traffic reference, define **10% occupancy of nominal
+source support**, with one burst of support `L` every `10L` and uniform phase.
+Actual support is 183.118 seconds for long bursts and **35.518 seconds** for
+the requested 30-second bursts (actual bit 32.8 seconds). The earlier scalar
+illustration using 33.118 seconds did not use this quantized source and is not
+the measurement conversion. With `W=183.689333`, `C=210`, the fractions of
+windows intersected are 20.0312% and 61.7173%, giving 82.4141 and 253.9224
+exposed windows per long-run day. `W+L<10L` ensures at most one foreign burst
+per window, matching the native single-burst law. The daily equivalents below
+are false DATA bits/windows, not false decoded messages or a probability of
+at least one event. Parentheses give simultaneous 95% upper bounds within
+the six-comparison static family; the negligible conditional thermal term
+is omitted at this displayed precision.
+
+| Static HF periodic 10% reference | Current / day | Guarded / day | Strict / day |
+| --- | ---: | ---: | ---: |
+| Long burst | 56.87 (62.02) | 26.92 (32.58) | 9.61 (13.86) |
+| Short burst | 237.84 (245.21) | 153.20 (170.32) | 67.71 (84.42) |
+
+These high-power foreign cases show improvement, not a thermal-noise-level
+guarantee. Air occupancy alone, unspecified key/power/channel populations,
+and unknown multiple-burst effects cannot establish generic daily rates.
+
+The changing-HF CUDA cohort completed **576/576** calls in 4,164.18 seconds.
+Every call executed native half-cuFFT; median/max native slot work was
+4.421/6.794 seconds (whole calls 7.072/9.450), with peak reserved device
+memory 176,160,768 bytes. This cohort changes arrival search, backend and
+channel together relative to the static reference; their outcome differences
+cannot be attributed solely to propagation.
+
+| Changing HF foreign source | Current | Guarded | Strict |
+| --- | ---: | ---: | ---: |
+| Long, +18 dB-Hz, 128 trials | 57/128 | 41/128 | 23/128 |
+| Short, +30 dB-Hz, 128 trials | 101/128 | 54/128 | 18/128 |
+| Long: simultaneous 95% probability upper bound | 55.47% | 42.77% | 27.49% |
+| Short: simultaneous 95% probability upper bound | 86.86% | 53.14% | 22.98% |
+
+With changing-channel padding, `W=204.752667`, `C=210`, and long/short
+`L=197.183333/49.583333` seconds. The same periodic 10% law gives
+83.86494/211.04032 exposed windows/day. The six-comparison family is separate
+from the static family; parentheses again give its simultaneous 95% upper
+bounds. Four long and one short direct-center-plus-common-wander envelopes
+extend beyond the frequency search; all remain in the declared denominator.
+
+| Changing HF periodic 10% reference | Current / day | Guarded / day | Strict / day |
+| --- | ---: | ---: | ---: |
+| Long burst | 37.35 (46.52) | 26.86 (35.87) | 15.07 (23.05) |
+| Short burst | 166.52 (183.30) | 89.03 (112.15) | 29.68 (48.50) |
+
+Clean wanted correct counts at −13/−7/−1/+5/+11 dB-Hz were
+0/0/27/32/32 out of 32 for every policy, with no wrong bits. Zero additional
+losses across 32 paired panels gives the same marginal 8.94% upper bound
+on any extra loss across that fixed grid. In the mixed case, Current correct
+counts were 14/18/18/14/32, Guarded 8/14/9/7/32 and Strict 6/6/2/3/32;
+wrong-bit counts were respectively 9/12/12/17/0, 5/7/8/11/0 and 4/5/2/4/0.
+Remainders are erasures. All policies received 32/32 correctly at +11.
+The coarse 6 dB grid does not resolve a sensitivity difference; its lower
+levels are nonmonotonic and contaminated by chance-correct foreign bits.
+
+For clean wanted reception, all three policies produced identical outcomes
+at every tested level: 0/32 correct at −13 and −10 dB-Hz, 4/32 at −7,
+and 32/32 at −4, 0, 4 and 10. No wrong bits occurred. There were no extra
+Guarded/Strict losses in any of the 32 independent paired panels; the
+ordinary one-sided 95% upper bound on a panel having any extra loss across
+this fixed grid is 8.94%, not a bound obtained from 224 independent trials.
+The observed clean sensitivity transition has no policy shift at the tested
+resolution; this is not a universal zero-dB guarantee.
+
+With the +26 dB-Hz short interferer, wanted C/N0 +5 yielded correct/wrong/
+erasure counts of 16/16/0 (Current), 10/8/14 (Guarded), and 5/4/23 (Strict).
+At +10 all three received 32/32 correctly. At still lower wanted power many
+baseline admissions happen to match the wanted bit by chance, so a 50%
+correct-bit crossing would not identify useful sensitivity. A separate
+refinement was therefore declared after the completed coarse grid: 64 fresh
+independent panels at each of +5/+6/+7/+8/+9/+10 dB-Hz, all policies paired,
+384 calls, 1,500-second fixed total budget. It is a new sensitivity study,
+not an extension of either primary wrong-key sample. Manifest SHA256:
+`81b67188c9ae9a7ace38b09b66e54e5153bd051756a633a8fada92eedf61f423`.
+All 384 calls completed. Each table entry is correct/wrong/erasure out of
+64 independent panels, paired across policies and levels:
+
+| Wanted C/N0, dB-Hz | Current | Guarded | Strict |
+| --- | ---: | ---: | ---: |
+| +5 | 41/23/0 | 22/12/30 | 13/2/49 |
+| +6 | 49/15/0 | 36/3/25 | 17/0/47 |
+| +7 | 60/4/0 | 51/1/12 | 30/0/34 |
+| +8 | 63/1/0 | 61/0/3 | 47/0/17 |
+| +9 | 64/0/0 | 63/0/1 | 61/0/3 |
+| +10 | 64/0/0 | 64/0/0 | 63/0/1 |
+
+Using 90% correct reception as an analyst-selected descriptive endpoint,
+the first tested crossings are +7/+8/+9 dB-Hz. Thus this case has observed
+Guarded/Strict shifts of approximately **+1/+2 dB** at 1 dB grid resolution,
+equivalent to 1.26/1.58 times received energy at unchanged geometry. They
+are not confidence-qualified exact dB shifts, general penalties, or equal
+time multipliers under changing coherence. The paired panel counts with
+any baseline-correct bit withheld somewhere on the grid are 40/64 and 50/64.
+Report both incorrect bits and erasures: reduced total correct count alone
+does not distinguish discarding a chance-correct interference bit from
+losing a reliably received wanted bit.
+
+The long Sub-9 reference uses physical carrier 8 kHz (200 Hz synthetic IF
+plus 7,800 Hz Shift), Rate 0.1, GPSDO-OCXO/shared-clock declaration,
+Sub9 Best channel and the full 78 coarse workspaces / 141 arrivals / two
+frequencies. A requested 3,600 seconds quantizes to a **5,760.4-second bit**.
+The foreign source is +6 dB-Hz at +0.0005 Hz. Its center lies outside the
+tiny fixed oscillator grid (±0.0000008 Hz), but the observed pilot center
+and common-wander range lie inside the admitted changing-channel range
+±0.0010008 Hz. This is a synthetic declared channel, not field qualification
+of propagation at these spreads. See the existing Sub-9 limitations in
+[_ref's method/context](../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/00-method-and-modem-context.md).
+
+The first 100 Hz capture failed native Nyquist admission. A valid 600 Hz
+capture exceeded a 24-second CPU pilot cap. Its CUDA pilot later exceeded
+87 seconds during fine work after real GPU execution; neither incomplete
+score is a rejection or a probability sample. An exact native CPU replay
+completed in 27.54 seconds on the 5650U (`W=24`), including 14.42 seconds
+of scoring. At `W=6` it completed in 36.01 seconds, scoring in 22.65 seconds.
+Both inputs and final scores are identical: I/Q SHA256
+`63cb73a5043cb4167c3200763fbe33c7ed9e0398f60ea89105018ff562c7ba94`,
+operational scores 1244.099774/1205.945195. Current falsely admits this
+fixed-aligned pilot; both added policies erase it. Tight-clock CUDA used
+FP64 fine work and many small submissions. The cost difference identifies
+a suitable measured CPU route; submission overhead is a source-based
+explanation, not a completed causal GPU profile or a hardware ceiling.
+The planned 900-second GPU retry was superseded by this cheaper completed
+native route. These slot timings are not complete-receiver capacity tests.
+
+A separate 32-draw Sub-9 cohort was frozen before its outcomes, with fresh
+foreign keys, source bits, phases and channel/noise seeds, uniform nominal
+overlap and slot 1. Actual scored window `W=6774.041667`, recurrence `C=6750`,
+and foreign nominal support `L=6734.591667` are used for exposure. The sample
+cap is ten million, admitting 8,110,224 generated samples and 4,064,425 scored
+samples. The three policy upper bounds form a separate simultaneous 95%
+family (`alpha=.05/3`). One strong wanted control is separate from its `n`.
+Original manifest SHA256:
+`43abb71b311f71a96e37006263b2dcc1594aeb09ad796ee3b6c7784be2bc6d7f`.
+The original four-lane `H=3/W=6`, 120-second-per-call execution **failed**:
+episode 027 hit its deadline, leaving eight completed calls (including the
+wanted control), one incomplete and 24 unstarted. No fixed-N interval was
+claimed for that incomplete execution.
+
+The resource amendment keeps exactly the original 32 foreign draws, with
+no replacement, exclusion or added sample. Two `H=6/W=12` lanes retain the
+aggregate `W=24` budget, 2 GiB per-call allowance, a 300-second native /
+315-second subprocess limit and a 5,400-second total cap. Replay manifest:
+`9ec7f73b8eb712fb76659ce35a40fd1db3976d4acb40d0b6f9f032378db61681`.
+Its first wave deliberately contains failed 027 and previously completed
+slow 008; they complete in 72.39/71.13 seconds with identical input hashes,
+and 008 also has exactly identical raw scores and decisions. Duplicate
+executions are not independent observations. The endpoint remains the
+completed-slot admission decision, not passing the original 120-second
+service bound. The amended **32/32** cohort completed in 940.97 seconds.
+All seven previously completed foreign inputs reproduce exactly the prior
+I/Q hashes, raw operational scores and policy decisions; the originally
+incomplete case also retains its input hash and now completes.
+
+| 96-minute Sub-9, 32 independent foreign draws | Current | Guarded | Strict |
+| --- | ---: | ---: | ---: |
+| False DATA | 19/32 | 1/32 | 0/32 |
+| Marginal one-sided 95% probability upper bound | 74.03% | 13.98% | 8.94% |
+| Simultaneous 95% probability upper bound, three policies | 77.47% | 17.47% | 12.01% |
+| Periodic 10% reference, estimated false windows/day | 1.524 | 0.0802 | 0 observed |
+| Corresponding simultaneous 95% upper bound/day | 1.989 | 0.449 | 0.308 |
+
+The exposure fraction is 20.0586%, or 2.56750 exposed windows/day. Zero
+observed Strict admissions therefore does **not** establish a zero rate,
+a thermal-level rate, or useful wanted reception. The separate wanted
+controls below are essential to interpreting this apparent rejection gain.
+
+All 32 direct foreign centers lie inside the expanded ±0.0010008 Hz search,
+but only one full-capture center-plus-common-wander envelope is wholly
+contained. These envelopes include pre-roll when the foreign source may be
+absent; excursions do not prove that 31 actual foreign bursts were outside
+the search. To distinguish this issue, a separate predeclared **16-draw
+cochannel** cohort set foreign offset to zero, with fresh independent seeds
+and otherwise identical geometry, power and overlap law. Both `H=6/W=12`
+lanes retained aggregate `W=24`, 300/315-second native/subprocess caps and a
+2,700-second total cap. Manifest SHA256:
+`72224b8966d3fdc7dd40c7435e2964ca941ced2ceb02424fcf8683cc59d3b3d2`.
+All 16 completed in 497.79 seconds, and all full-capture frequency envelopes
+were contained. These draws are not pooled with the adjacent-frequency 32.
+
+| 96-minute Sub-9 cochannel, 16 independent draws | Current | Guarded | Strict |
+| --- | ---: | ---: | ---: |
+| False DATA | 8/16 | 1/16 | 0/16 |
+| Periodic 10% reference, estimated false windows/day | 1.284 | 0.160 | 0 observed |
+| Marginal one-sided 95% upper bound/day | 1.852 | 0.678 | 0.438 |
+| Simultaneous 95% upper bound/day, three policies | 1.976 | 0.830 | 0.580 |
+
+The wider bounds reflect the smaller independent sample. Under the same
+periodic traffic model at 1% occupancy, all reported daily point estimates
+and confidence bounds scale by one tenth. This scaling does not cover a
+different burst law or multiple interfering bursts in a scored window.
+
+The wanted Sub-9 control exposed a separate, material sensitivity failure.
+With no interferer, wanted bit 1, seed 40029721 and C/N0 +6 dB-Hz, Current
+correctly receives the bit while **both Guarded and Strict erase it**.
+Scores 19907.940448/21869.129450 give gap 1961.189002, below required
+Guarded 1993.938012 and Strict 4976.905072. The bit/key/calendar and full
+window are valid; this is caused by the final gate, not a source mismatch.
+
+A fixed ten-call diagnostic then reused that seed/bit at −24/−18/−12/−6/0/+12
+dB-Hz and added two fresh channel/noise seeds (bits 0 and 1) at +6/+12.
+All ten completed, with a 300-second per-call / 1,800-second total cap and
+the same aggregate CPU budget. Manifest:
+`9e22392adb80db258bff3a9c13d1d73583dbcd9c6abb85522241b8ff860eecd4`.
+These fixed diagnostic controls are not a probability population.
+The probe varies C/N0 through its declared noise density at fixed normalized
+waveform and receiver profile; this does not cover every physical signal-gain
+change or noise-calibration error.
+
+| Same-seed clean Sub-9 C/N0 | Current | Guarded | Strict | Gap / competing excess |
+| --- | --- | --- | --- | ---: |
+| −24 dB-Hz | Scored quiet | Scored quiet | Scored quiet | Competing score below threshold |
+| −18 dB-Hz | Correct | Correct | Correct | Competing score below threshold |
+| −12 dB-Hz | Correct | Correct | Correct | 2.0697 |
+| −6 dB-Hz | Correct | Correct | Correct | 0.4197 |
+| 0 dB-Hz | Correct | Correct | Erasure | 0.2121 |
+| +6 dB-Hz | Correct | Erasure | Erasure | 0.0986 |
+| +12 dB-Hz | Correct | Erasure | Erasure | 0.0428 |
+
+The two fresh seeds remain correct under Current at both high levels.
+Guarded passes one at +6, then erases it at +12; it erases the other at both
+levels. Strict erases both at both levels. Thus raising modeled C/N0 can make
+these presets **lose** a previously received wanted signal. There is no
+single added-dB interpretation for this profile. Current remains the
+appropriate unchanged default when preserving this tested long-window
+sensitivity matters. This is not an asymptotic theorem for all keys/channels.
+The receiver's short observation blocks and persistent gain models can fit
+both slow keyed hypotheses; the noise-relative scores can grow faster than
+their separation. This explains the measured trend without attributing it
+to an arbitrary free gain in every block. No threshold retune or additional
+DSP fallback was introduced to rescue the diagnostic.
+
+The decisive clean wanted control remains cheaply reproducible with the
+canonical native probe (automatic workers respect the caller's allocation):
+
+```sh
+build/dev/triad_receiver_probe admission --encrypt on --stratum active \
+  --max-samples 10000000 --memory-limit-bytes 2147483648 --deadline-ms 300000 \
+  --sample-rate 600 --data-if 200 --rf-hz 7800 --rate .1 --seconds 3600 \
+  --base-oscillator gpsdo-ocxo --shift-oscillator baseband-clock \
+  --spread-preset sub9-best --timing-policy broad --slot-index 1 \
+  --cn0 6 --seed 40029721 --bit 1
+```
+
+Changing only `--cn0` to −6 or +12 reproduces the paired contrast. This is
+a bounded diagnostic, not a new independent trial or a capacity pass.
+
+Coverage remains bounded. Literal full-stress manual HF geometry hit native
+public-template preparation limits before GPU scoring; the completed HF
+cohorts do not qualify that case. A near-day Sub-9 CPU plan at 300 Hz sampling,
+100 Hz IF / 7,900 Hz Shift, Rate .10001 and requested 86,390 seconds admits
+an actual 86,394-second bit with all 78 workspaces / 141 arrivals / two
+frequencies. Its 600 Hz counterpart hit the mapped-template work limit.
+The valid lower-sample-rate near-day plan was not scored, so it supplies
+neither a sensitivity estimate nor a wrong-key probability. Geometry alone
+explains why a long window can encounter many short foreign bursts despite
+10% occupancy; the one-burst cohorts do not qualify such repeated-burst
+mixtures. For an illustrative `W≈C≈L≈24 hours` periodic reference, even
+`p=1` gives about 0.2 false windows/day; with much shorter bursts every window
+can instead be exposed and the geometry-only bound approaches one/day.
+These are traffic/decision-count bounds, not measured preset performance.
+
+Exploratory reapplication to the completed static score bank reproduced the
+production presets, then checked stronger scalar alternatives without extra
+DSP. With the Strict absolute floor, `rho=.5/1/2/4` leaves long wrong-key
+counts 18/13/10/10 and short counts 26/4/0/0 (each out of 300). However,
+mixed wanted +10 dB-Hz correct counts fall from 32 to 25/4/0/0 (out of 32);
+at +5 all are erased by those alternatives. Eight long-case false admissions
+already have the competing score below `T`, so increasing `rho` alone cannot
+reject them. An absolute DATA log-threshold increase of `ln(10)`, `2 ln(10)`
+or `6 ln(10)` leaves all 281 short-case false admissions; +100 nats leaves
+272 while erasing every clean −4 dB-Hz bit. These same-bank counterfactuals
+are not independently validated presets or rate calibrations. They explain
+why no threshold retune follows these measurements.
+
+The new `admission` probe and adjacent-frequency extension passed their
+focused checks. The full native group passed 38/38 before the offset-only
+extension. A first synthetic-key setup used roots of the wrong length and
+ran no signal assertions; the repaired implementation derives two distinct
+64-byte roots. Independent source review checked composition, normalization,
+one-score policy evaluation, uniform placement and the frequency translation.
+The final GUI help now warns that strong long-window wanted signals can be
+erased and higher SNR may not restore reception. `./build.sh test gui` passed
+30/30 in 154.46 seconds after that text change. No production thresholds,
+DSP search, allocations or worker defaults changed in this follow-up.
+
+The RunPod allocation was terminated and deleted after fetching the complete
+GPU results. Provider billing then showed zero GPUs, vCPUs and storage, and
+$0/hour ongoing spend. The observed account-balance decrease was about $3.83
+(about 1.4 hours of allocation), not an invoice-certified job charge. No
+persistent volume was created. Temporary local manifests, receipts and
+analysis under `local-evidence/wrong-key-rates/` were removed after their
+results were reviewed and distilled here; the reusable native probe, scoped
+findings, original failures, reproduction command and provenance remain
+maintained. Useful existing build caches were retained.
+
 ## Wrong Key Admission — 15 November 2026
 
 Working change over `f674f9aeac3136917996a08b07f57496dfbe195d` adds the

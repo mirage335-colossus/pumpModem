@@ -118,6 +118,37 @@ def main(executable):
         assert strict_plan["configuration"][name] == plan["configuration"][name]
     run("plan", "--wrong-key-admission", "invalid", code=1,
         parse_error="Wrong Key Admission expects current, guarded or strict")
+    run("admission", "--wrong-key-admission", "strict", code=1,
+        parse_error="Admission diagnostics score Current once")
+    run("admission", "--interferer-cn0", "20", code=1,
+        parse_error="The admission interferer requires --encrypt on")
+    interferer_args = ("--slot-index", "1", "--encrypt", "on", "--stratum", "noise",
+        "--interferer-cn0", "20", "--interferer-seconds", ".1", "--interferer-seed", "1234",
+        "--interferer-bit", "1", "--interferer-uniform-window", "on", "--interferer-frequency-offset-hz", "3")
+    run("admission", *interferer_args, "--interferer-offset-seconds", "0", code=1,
+        parse_error="Choose either uniform-window placement or a fixed interferer offset")
+    interference = run("admission", *interferer_args)
+    itx = interference["configuration"]["interferer"]
+    iq = interference["observation"]
+    assert re.fullmatch("[0-9a-f]{64}", itx["key_fingerprint_sha256"])
+    assert itx["placement"] == "uniform_window_intersection" and not itx["helper_enabled"]
+    assert itx["frequency_offset_hz"] == 3 and itx["configured_carrier_hz"] == 503
+    assert itx["direct_center_hz_excluding_phase_noise_fhss_and_echo"] == 3
+    assert itx["uniform_origin_count"] == (iq["samples"] + itx["nominal_support_stop_sample"] -
+                                            itx["nominal_support_first_sample"] - 1)
+    overlap = min(iq["stop_sample"], itx["nominal_support_stop_sample"]) - max(iq["first_sample"], itx["nominal_support_first_sample"])
+    assert overlap > 0 and itx["nominal_window_overlap_seconds"] == overlap / 1500
+    assert [p["name"] for p in interference["phases"]].count("native_slot") == 1
+    result = interference["result"]
+    assert result["one_native_score_for_all_policies"] and result["complete_public_slot"]
+    assert not result["complete_receiver_service"] and result["interferer_present"] and not result["wanted_present"]
+    policies = result["policies"]
+    assert set(policies) == {"current", "guarded", "strict"}
+    assert (policies["strict"]["decision"] == "data") <= (policies["guarded"]["decision"] == "data") <= (policies["current"]["decision"] == "data")
+    assert all((p["decision"] == "quiet") == (policies["current"]["decision"] == "quiet") for p in policies.values())
+    for policy in ("guarded", "strict"):
+        if policies[policy]["policy_rejected"]:
+            assert policies[policy]["bit"] is None and policies[policy]["decision"] == "ambiguous"
     assert plan["result"]["planned"] and plan["observation"] is None
     assert plan["configuration"]["recurring_horizon"]["slots"] == 24
     assert plan["configuration"]["bit_seconds"] > 0

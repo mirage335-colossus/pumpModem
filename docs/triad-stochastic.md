@@ -152,14 +152,66 @@ restarts no fallback, and changes no public geometry. It does not alter the
 transmitted waveform or its duration. An erasure cannot count as physical
 quiet; the usual two scored quiet slots remain required for completion.
 
+The shared operational threshold is `T=ln((ceil(86400/0.4)+1)/10^-4)`
+`=ln(216001/10^-4)=21.4933786883`, giving `exp(-T)=4.6296082e-10` for
+one opportunity. Under the receiver's conditional noise-null argument, the
+union bound across 216,001 nominal 0.4-second opportunities is
+`216001*exp(-T)=10^-4/day`. `current`, `guarded` and `strict` retain this same
+bound because the extra rule only removes baseline DATA decisions. These are
+design constants and a conditional bound, not measured radio noise, wrong-key
+traffic, a physical false-admission guarantee or a rate estimated from trials;
+the bound does not cover a structured interferer. Margin nats are not universal
+dB equivalents or tenfold changes in a false-admission rate.
+
+The extra threshold is dormant when the competing score is at or below `T`
+and the pre-existing minimum gap `g0` already meets the selected `delta`:
+then the added score-dependent term is zero and the baseline already enforced
+`g0`. In the changing-channel default, `g0=ln(199)=5.2933`, above the strict
+floor `2*ln(10)=4.6052`; for `m<=T` neither stronger policy changes that
+gap rule. For `m>T`, the `rho*(m-T)` term can still make the filter active.
+
+### Interference-time exposure is not window exposure
+
+A 10% interferer duty cycle describes active airtime; it does not mean 10% of
+candidate receive windows overlap interference. Let `L` be burst duration and
+`W` a candidate window. For periodic bursts of length `L` every `10L` with
+random phase, the fraction of windows touched is
+`min(1,(W+L)/(10L)) = min(1,0.1*(1+W/L))`: this holds directly when
+`W+L<=10L`, and it saturates at 1 when `W>=9L`.
+Thus every 24-hour candidate window can overlap a burst even when burst
+airtime is only 10%.
+
+For Poisson burst starts with fixed duration `L`, 10% stationary time
+occupancy requires `lambda*L=-ln(0.9)`. The number of bursts overlapping one
+window is Poisson with mean `mu=lambda*(W+L)=-ln(0.9)*(1+W/L)`, so the
+probability of at least one overlap is `1-exp(-mu)`. This includes multiple
+possible bursts during the window; applying a one-burst overlap probability
+once would undercount long windows. If candidate windows recur every `C`
+seconds and `p` is the conditional false-DATA probability given an exposed
+window, expected false-DATA windows per day are `(86400/C)*f_window*p`, where
+`f_window` is the periodic fraction above or the Poisson `1-exp(-mu)`. This is
+an expected count, not the probability of any daily event; windows can be
+dependent. The conditional probability `p` here includes every burst count;
+it is not the one-burst admission probability `p1` measured by the native
+single-interferer probe. Without repeated-burst qualification, a conservative
+Poisson per-window bound is
+`exp(-mu)*p0 + mu*exp(-mu)*U1 + 1-exp(-mu)*(1+mu)`, where `p0` is the
+conditional noise-only bound and `U1` an upper confidence bound for one burst.
+The last term treats every window with at least two bursts as potentially
+admitted. This is an uncertainty bound, not a prediction of multiburst errors.
+A 10% time-stress result alone supplies neither `p` nor that rate.
+Sub-9/HF scenarios with bit windows up to 24 hours need their actual `W`, burst
+duration `L` and cadence; airtime alone does not define window exposure.
+
 Treat this as a relative-competition filter. It asks whether the winning DATA
 bit is sufficiently separated from its competing bit relative to excess score
 above the existing threshold. It is not a likelihood against a wrong-key
 population, calibrated error probability, daily false-admission rate, sender
 authentication or a guarantee that every unrelated keyed signal is rejected.
 One accidentally dominant bit can still pass. A receiver-side threshold can
-also erase wanted weak or distorted bits; there is no universal sensitivity
-guarantee. The default preserves prior decisions for compatibility, while
+also erase wanted weak, distorted or strong long-window bits; there is no
+universal sensitivity guarantee or assurance that more power restores admission.
+The default preserves prior decisions for compatibility, while
 stronger modes trade some wanted-signal admission for extra rejection of
 near-balanced competing scores.
 
@@ -203,7 +255,52 @@ methodological analogies, not derivations for this bit-score rule
 The related Saha and Ramdas paper submitted on 1 November 2026 is a preprint
 about instance-optimal sequential testing under its own formal setup, not
 validation of this receiver heuristic ([preprint](https://arxiv.org/abs/2611.02130)).
-Any future probability claim needs predeclared complete receiver episodes;
-bits, fragments, timing variants and roots sharing an IQ capture are dependent
-and do not count as independent samples. See the
+Recent theory also cautions against declaring calibrated low-cost rejection
+fundamentally impossible. [Grünwald et al., v2](https://arxiv.org/abs/2404.19465v2)
+identify covariance conditions under which a simple likelihood ratio is valid
+for an entire exponential-family null. [He and Cheng, 2026 preprint,
+Theorem 2.2](https://arxiv.org/html/2609.27923v1) establish asymptotically
+lossless exact/pivotal evidence growth for a finite composite null with iid
+observations and joint atomlessness. Neither result supplies a finite-sample
+threshold or processor-cost guarantee for this receiver's adaptively fitted,
+correlated fragments and unknown interfering waveform. Reconsider a cheap
+calibrated statistic if a suitable null law for already-computed sufficient
+statistics can be established; do not infer it from the current score ratio.
+Probability claims require predeclared independent draws matching their
+endpoint. A complete public-slot score with a fresh key/noise/channel draw
+supports a conditional false-DATA-window estimate; message-completion or
+whole-receiver success requires complete receiver episodes. Fragments,
+timing variants, paired policies/levels and roots sharing an IQ capture
+remain dependent and do not multiply the independent sample count. See the
 [episode-level statistical protocol](../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/86-statistics-and-calculation-checks.md).
+The completed 1,080-case static-HF study and separate 384-case sensitivity
+refinement are recorded in [validation](validation.md#wrong-key-admission-rate-and-sensitivity-study--15-november-2026).
+Clean static-HF wanted decisions were identical across the three policies. Under one
+strong short-interferer case, the empirical 90%-correct reception point moved
+by approximately +1 dB for Guarded and +2 dB for Strict on a 1 dB grid.
+Wrong-key admissions remained far more frequent than the conditional thermal
+bound. Larger relative or absolute thresholds lost wanted signals and did
+not provide a calibrated generic low-rate option. These scenario-specific
+findings are not universal dB penalties or thermal-rate multipliers.
+The separate 96-minute Sub-9 wanted diagnostic is contrary evidence: a
+same-key clean signal passed all policies at −18/−12/−6 dB-Hz, but Strict
+erased it at 0 and both stronger policies erased it at +6/+12. Two fresh
+channel/noise seeds also showed strong-signal erasures. The relative penalty
+can grow faster than the discriminating bit-score gap. Consequently, neither
+the HF +1/+2 dB figures nor a monotone benefit from raising modeled C/N0 applies
+generically; retain Current when this tested long-window sensitivity matters.
+The separate 576-call changing-HF GPU confirmation also showed no extra
+clean-signal losses on its tested grid, but Strict still admitted 23/128 long
+and 18/128 short foreign sources. Under the declared periodic 10% traffic
+model these correspond to 15.07 and 29.68 false windows/day, far above the
+conditional thermal target. The 96-minute Sub-9 adjacent/cochannel cohorts
+observed respectively 19/1/0 out of 32 and 8/1/0 out of 16 for
+Current/Guarded/Strict. Strict's zero observations give simultaneous 95%
+upper bounds of 0.308 and 0.580 false windows/day in their separate
+three-policy families, not zero risk. All cochannel frequency envelopes were
+contained; the adjacent cohort includes common-wander excursions.
+The measured families condition one interferer on nominal-envelope overlap
+and do not represent natural traffic, 24-hour windows or complete-message rates.
+The native `admission` probe scores once and applies all three policies to the
+same observation, a reusable mechanism comparison rather than a daily-rate
+estimator.

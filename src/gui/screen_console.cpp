@@ -83,7 +83,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::fhss)control.help="Canonical FHSS envelope and synthetic sequential hopping profile. This does not retune physical hardware or enable simultaneous reception.";
     if(slot==Slot::symbol_burst)control.help="Minimum whole-bit waiting periods between scheduled DATA slots. Scheduled waiting is not a scored quiet slot and cannot finish a message.";
     if(slot==Slot::symbol_burst_random)control.help="Additional shared-calendar waiting periods from zero through this limit. Both peers need the same calendar and key/profile; waits never count as missing DATA or quiet completion.";
-    if(slot==Slot::wrong_key_admission)control.help="Receiver-only stronger evidence against unrelated keyed signals; may reject wanted weak/distorted signals. No calibrated wrong-key/day rate or authentication. Does not change the transmitted waveform or duration.";
+    if(slot==Slot::wrong_key_admission)control.help="Receiver-only heuristic against unrelated keyed signals. Guarded and Strict can erase wanted signals, including strong signals in long fading windows; higher SNR may not restore reception. No calibrated wrong-key/day rate or authentication. Does not change the transmitted waveform or duration.";
     if(slot==Slot::symbol_burst_random||slot==Slot::wrong_key_admission)control.font_size=11;
 
     if(slot==Slot::mode)control.help="Native three-carrier Robust session state. Live reception needs the shared public calendar and a declared local input-noise model; set these in Robust setup.";

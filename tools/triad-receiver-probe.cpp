@@ -34,7 +34,9 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <numbers>
 #include <optional>
+#include <random>
 #include <ranges>
 #include <span>
 #include <stop_token>
@@ -97,6 +99,11 @@ struct Options {
     double data_if_hz = 500, rate_hz = 120, rf_hz = 0, margin = 1, doppler_hz = 0;
     double data_w = .1, helper_w = 0, loss_db = 114, noise_dbm_hz = -174;
     std::optional<double> target_cn0, active_seconds, observed_cn0;
+    std::optional<double> interferer_cn0, interferer_seconds, interferer_rate;
+    std::optional<double> interferer_offset_seconds, interferer_frequency_offset_hz;
+    std::optional<std::uint64_t> interferer_seed;
+    std::optional<unsigned> interferer_bit;
+    std::optional<bool> interferer_uniform_window;
     bool encrypt = false, interleave = false, fhss = false, require_accelerator = false;
     bool helper = false, compression = true;
     bool work_only = false;
@@ -129,7 +136,7 @@ Options parse(int argc, char** argv) {
     require(argc >= 2, "Specify a native probe command; see --help");
     Options o;
     o.command = argv[1];
-    require(one_of(o.command, {"describe", "plan", "slot", "continuation", "message", "backlog", "regression", "codec"}),
+    require(one_of(o.command, {"describe", "plan", "slot", "continuation", "message", "backlog", "regression", "admission", "codec"}),
             "Unknown native probe command");
     std::map<std::string_view, std::string_view> values;
     for (int i = 2; i < argc; ++i) {
@@ -236,6 +243,15 @@ Options parse(int argc, char** argv) {
     assign("--target-cn0", o.target_cn0);
     if (o.target_cn0 && !duration_supplied) o.active_seconds.reset();
     assign("--cn0", o.observed_cn0);
+    assign("--interferer-cn0", o.interferer_cn0);
+    assign("--interferer-seconds", o.interferer_seconds);
+    assign("--interferer-rate", o.interferer_rate);
+    assign("--interferer-offset-seconds", o.interferer_offset_seconds);
+    assign("--interferer-frequency-offset-hz", o.interferer_frequency_offset_hz);
+    assign("--interferer-seed", o.interferer_seed);
+    assign("--interferer-bit", o.interferer_bit);
+    if (const auto uniform = take("--interferer-uniform-window"))
+        o.interferer_uniform_window = toggle(*uniform, "--interferer-uniform-window");
     assign("--added-symbols", o.added_symbols);
     assign("--added-interleave", o.interleave);
     assign("--burst-wait-tiles", o.waits);
@@ -274,8 +290,18 @@ Options parse(int argc, char** argv) {
     require(o.command == "regression" || o.units == 1, "--units applies only to regression");
     require(o.bit <= 1 && o.slots >= 3 && o.slots <= 4096, "Invalid native probe bit or slot count");
     require(o.helper_w >= 0 && o.helper == (o.helper_w > 0) && o.data_w > 0, "Invalid native probe TX powers");
-    if (o.command == "regression" || o.command == "slot")
+    if (o.command == "regression" || o.command == "slot" || o.command == "admission")
         require(o.stratum == "active" || o.stratum == "noise", "Use continuation for diagnostic fine strata");
+    if (o.interferer_cn0 || o.interferer_seconds || o.interferer_rate || o.interferer_offset_seconds ||
+        o.interferer_frequency_offset_hz || o.interferer_seed || o.interferer_bit || o.interferer_uniform_window) {
+        require(o.command == "admission" && o.encrypt && o.interferer_cn0 && o.interferer_seconds &&
+                o.interferer_seed && o.interferer_bit && *o.interferer_seconds > 0 && *o.interferer_bit <= 1,
+                "The admission interferer requires --encrypt on and explicit C/N0, duration, seed and bit");
+    }
+    require(!o.interferer_uniform_window.value_or(false) || !o.interferer_offset_seconds,
+            "Choose either uniform-window placement or a fixed interferer offset");
+    require(o.command != "admission" || o.wrong_key_admission == "current",
+            "Admission diagnostics score Current once and apply all policies to the resulting slot");
     require(!o.work_only || (o.command == "continuation" && o.stratum != "active"),
             "Work-only diagnostics require continuation and a nonnominal stratum");
     require(o.helper_overlap || o.command == "regression", "The Helper overlap lease applies only to regression");
@@ -797,10 +823,19 @@ void check_stop(std::stop_token stop) {
     if (stop.stop_requested()) throw Incomplete("Native probe deadline reached");
 }
 
+struct SecondaryEmission {
+    const PublicProfile& waveform;
+    const Crypto& key;
+    EmissionOptions options;
+    std::uint64_t origin;
+    Complex gain;
+    double frequency_offset_hz;
+};
+
 Capture simulate(const Profile& profile, std::span<const EmissionOptions> episodes,
                  std::uint64_t first, std::uint64_t end, std::uint64_t& samples_left,
                  const StreamReceiverResources& resources, std::stop_token stop,
-                 std::unique_ptr<ObservationSpool> spool = {}) {
+                 std::unique_ptr<ObservationSpool> spool = {}, const SecondaryEmission* secondary = nullptr) {
     // The canonical channel and one emitted source have a fixed 65 MiB bound.
     // Reserve this before creating either; account extra independently owned
     // source objects when exercising a second episode in the same channel.
@@ -811,7 +846,7 @@ Capture simulate(const Profile& profile, std::span<const EmissionOptions> episod
     constexpr auto chunk_bytes = input_chunk * (sizeof(Complex) + sizeof(std::uint8_t));
     const auto capture_bytes = spool ? spool->working_bytes() + chunk_bytes + 4096 :
         static_cast<std::size_t>(rows) * (sizeof(Complex) + sizeof(std::uint8_t));
-    const auto simultaneous_sources = std::max(std::size_t{1}, episodes.size());
+    const auto simultaneous_sources = std::max(std::size_t{1}, episodes.size() + (secondary != nullptr));
     const auto reserve = simultaneous_sources * channel_source_bound;
     const auto remaining = memory_remaining(resources);
     if (reserve > remaining || capture_bytes > remaining - reserve)
@@ -825,6 +860,15 @@ Capture simulate(const Profile& profile, std::span<const EmissionOptions> episod
         emitters.emplace_back(profile.waveform, profile.key, episode);
         inputs.push_back(emitters.back().source());
         origins.push_back(episode.source_first_sample);
+    }
+    if (secondary) {
+        emitters.emplace_back(secondary->waveform, secondary->key, secondary->options);
+        inputs.push_back(emitters.back().source());
+        // Emission's bounds are relative to its own configured IF. Move them
+        // into the composite frame before the native channel checks Nyquist.
+        inputs.back().minimum_frequency_hz += secondary->frequency_offset_hz;
+        inputs.back().maximum_frequency_hz += secondary->frequency_offset_hz;
+        origins.push_back(secondary->origin);
     }
     require(!inputs.empty(), "Native probe has no emission profile");
     // Each component is forward-only. The evaluator places whole locally
@@ -845,9 +889,20 @@ Capture simulate(const Profile& profile, std::span<const EmissionOptions> episod
     }
     composite.sample_at = [&](std::uint64_t i) {
         Complex result{};
-        for (std::size_t n = 0; n < inputs.size(); ++n)
-            if (i >= origins[n] && i - origins[n] < inputs[n].geometry.source_samples)
-                result += inputs[n].sample_at(i - origins[n]);
+        for (std::size_t n = 0; n < inputs.size(); ++n) {
+            if (i < origins[n] || i - origins[n] >= inputs[n].geometry.source_samples) continue;
+            const auto local = i - origins[n];
+            auto sample = inputs[n].sample_at(local);
+            if (n == episodes.size()) {
+                sample = secondary->gain * sample;
+                if (secondary->frequency_offset_hz != 0) {
+                    const long double cycles = static_cast<long double>(local) * secondary->frequency_offset_hz /
+                        secondary->waveform.effective_sample_rate();
+                    sample *= std::polar(1., 2 * std::numbers::pi * static_cast<double>(std::remainder(cycles, 1.L)));
+                }
+            }
+            result += sample;
+        }
         return result;
     };
     auto configuration = profile.channel;
@@ -1398,6 +1453,190 @@ void generation_phase(Json& report, const Profile& profile, const Capture& captu
         "subset_of_excluded_simulator_wall");
 }
 
+std::pair<ReceiverSlotScore, Timing> complete_probe_slot(const Options& o, const Profile& profile,
+        const ReceiverSlotPlan& slot, const Capture& capture, const StreamReceiverResources& resources,
+        std::stop_token stop) {
+    // The public workspace includes the IQ lease already held by the probe.
+    // The remaining process allowance covers DSP and stacks. Spare memory
+    // grants the lease that lets Helper run beside coarse preparation.
+    const auto workspace = receiver_slot_workspace(profile.receiver, slot, resources.workers);
+    const auto lease_bytes = capture.iq.size() * (sizeof(Complex) + 1);
+    const auto scratch = standalone_scratch(resources);
+    if (workspace < lease_bytes || workspace - lease_bytes > scratch)
+        throw Incomplete("Native full-slot probe exceeds its local memory lease");
+    const auto wider = receiver_slot_overlap_workspace(profile.receiver, slot, resources.workers);
+    const auto lease = o.helper_overlap && wider - lease_bytes <= scratch ? wider : workspace;
+    const Timer began;
+    auto score = o.helper_overlap ?
+        score_receiver_slot(profile.receiver, slot, profile.key, capture.iq, capture.valid,
+                            resources.workers, lease, stop) :
+        score_slot_in_sequence(profile.receiver, slot, profile.key, capture.iq, capture.valid,
+                               resources.workers, lease, stop, nullptr);
+    return {std::move(score), began.elapsed()};
+}
+
+std::array<std::uint8_t, 64> admission_digest(std::uint64_t seed, std::uint8_t purpose) {
+    std::array<std::uint8_t, 64> result{};
+    constexpr std::string_view tag = "datapump.triad.admission.v1";
+    std::array<std::uint8_t, tag.size() + 9> input{};
+    std::ranges::copy(tag, input.begin());
+    input[tag.size()] = purpose;
+    for (unsigned i = 0; i < 8; ++i) input[tag.size() + 1 + i] = static_cast<std::uint8_t>(seed >> (8 * i));
+    unsigned bytes = 0;
+    require(EVP_Digest(input.data(), input.size(), result.data(), &bytes, EVP_sha512(), nullptr) == 1 &&
+            bytes == result.size(), "Cannot derive synthetic admission interferer");
+    return result;
+}
+
+std::uint64_t admission_word(std::uint64_t seed, std::uint8_t purpose) {
+    const auto bytes = admission_digest(seed, purpose);
+    std::uint64_t word = 0;
+    for (unsigned i = 0; i < 8; ++i) word |= std::uint64_t{bytes[i]} << (8 * i);
+    return word;
+}
+
+void admission_run(Json& report, const Options& o, const Profile& profile, const ReceiverSlotPlan& slot,
+                   const StreamReceiverResources& resources, std::uint64_t& samples_left, std::stop_token stop) {
+    if (slot.stop_sample > samples_left)
+        throw Incomplete("Admission capture exceeds the declared probe sample budget");
+    const bool wanted = o.stratum == "active";
+    const std::array wanted_bit{static_cast<std::uint8_t>(o.bit)};
+    const std::array emissions{EmissionOptions{.mode = wanted ? EmissionMode::Message : EmissionMode::Quiet,
+        .first_slot = slot.index, .bits = wanted ? std::span<const std::uint8_t>(wanted_bit) :
+            std::span<const std::uint8_t>{}, .stop = stop}};
+    const auto render = [&] {
+        if (!o.interferer_cn0)
+            return simulate(profile, emissions, slot.first_sample, slot.stop_sample, samples_left, resources, stop);
+
+        const Timer began;
+        const auto serpent = admission_digest(*o.interferer_seed, 0);
+        const auto aes = admission_digest(*o.interferer_seed, 1);
+        const auto key = Crypto::from_independent_roots(serpent, aes);
+        Digest fingerprint;
+        fingerprint.add(std::as_bytes(std::span(serpent)));
+        fingerprint.add(std::as_bytes(std::span(aes)));
+        const auto phase_word = admission_word(*o.interferer_seed, 2);
+        const double phase_rad = std::numbers::pi * 2 * static_cast<double>(phase_word >> 11) * 0x1p-53;
+
+        auto foreign = o;
+        foreign.active_seconds = o.interferer_seconds;
+        foreign.rate_hz = o.interferer_rate.value_or(o.rate_hz);
+        const auto frequency_offset = o.interferer_frequency_offset_hz.value_or(0);
+        foreign.data_if_hz += frequency_offset;
+        foreign.helper = false;
+        foreign.helper_w = 0;
+        auto settings = settings_for(foreign, resources.memory_limit_bytes);
+        settings.transfer.key = key;
+        const auto tx = live::detail::prepare_profile(settings, *settings.calendar, stop,
+            {.simulation_seed = o.seed, .fixture_active_seconds = o.interferer_seconds});
+
+        const auto coordinate = [](const PublicProfile& w, std::uint64_t index) {
+            return w.calendar().distance(w.origin(), w.transmit_slot(index).pattern_begin);
+        };
+        const auto rate = profile.receiver.sample_rate_hz;
+        const auto aligned_origin = static_cast<long double>(coordinate(profile.waveform, slot.index)) -
+            coordinate(tx.waveform, 0);
+        const auto wanted_support = profile.waveform.slot(slot.index).data_support;
+        const auto foreign_support = tx.waveform.slot(0).data_support;
+        const bool uniform = o.interferer_uniform_window.value_or(false);
+        std::uint64_t first = 0, onset_choices = 0;
+        if (uniform) {
+            // Uniform on the discrete origins with nonempty intersection of the
+            // foreign nominal support and the complete configured scored window.
+            require(slot.first_sample >= foreign_support.stop - 1 && slot.stop_sample > foreign_support.first,
+                    "Uniform overlap needs a later public slot to include the complete early-origin range");
+            const auto low = slot.first_sample - (foreign_support.stop - 1);
+            const auto high = slot.stop_sample - foreign_support.first - 1;
+            require(high >= low, "Empty admission overlap-onset range");
+            onset_choices = high - low + 1;
+            std::mt19937_64 random(admission_word(*o.interferer_seed, 3));
+            const auto threshold = (std::uint64_t{0} - onset_choices) % onset_choices;
+            auto draw = random();
+            while (draw < threshold) draw = random();
+            first = low + draw % onset_choices;
+        } else {
+            const auto offset_rows = std::round(static_cast<long double>(o.interferer_offset_seconds.value_or(0)) * rate);
+            const auto origin = aligned_origin + offset_rows;
+            require(origin >= 0 && origin < slot.stop_sample,
+                    "Interferer placement is outside the native source timeline; use a later public slot for early arrivals");
+            first = static_cast<std::uint64_t>(origin);
+        }
+        const double actual_cn0 = 10 * std::log10(rate / profile.receiver.noise_variance);
+        const double gain = std::pow(10., (*o.interferer_cn0 - actual_cn0) / 20);
+        require(std::isfinite(gain) && gain > 0 && gain <= 1e8, "Admission interferer gain is outside probe bounds");
+
+        require(first <= UINT64_MAX - foreign_support.stop, "Interferer support exceeds native timeline");
+        const auto overlap = [&](std::uint64_t begin, std::uint64_t end) {
+            const auto overlap_first = std::max(begin, first + foreign_support.first);
+            const auto overlap_stop = std::min(end, first + foreign_support.stop);
+            return overlap_stop > overlap_first ? overlap_stop - overlap_first : 0;
+        };
+        const auto window_overlap = overlap(slot.first_sample, slot.stop_sample);
+        require(window_overlap > 0, "Interferer has no overlap with the public scored window");
+        report["configuration"]["interferer"] = object({{"model", "common_native_channel_separate_key_and_phase"},
+            {"key_fingerprint_sha256", fingerprint.finish()}, {"seed", *o.interferer_seed},
+            {"bit", *o.interferer_bit}, {"cn0_db_hz", *o.interferer_cn0}, {"relative_amplitude", gain},
+            {"pattern_offset_seconds", static_cast<double>((first - aligned_origin) / rate)}, {"initial_phase_rad", phase_rad},
+            {"placement", uniform ? "uniform_window_intersection" : "fixed_pattern_offset"},
+            {"uniform_origin_count", onset_choices},
+            {"inner_rate_hz", foreign.rate_hz}, {"requested_active_seconds", *o.interferer_seconds},
+            {"bit_seconds", tx.waveform.config().format.bit_seconds}, {"first_source_sample", first},
+            {"nominal_support_first_sample", first + foreign_support.first},
+            {"nominal_support_stop_sample", first + foreign_support.stop},
+            {"nominal_support_seconds", foreign_support.size() / rate},
+            {"nominal_window_overlap_seconds", window_overlap / rate},
+            {"nominal_data_overlap_seconds", overlap(wanted_support.first, wanted_support.stop) / rate},
+            {"frequency_offset_hz", frequency_offset},
+            {"configured_carrier_hz", tx.waveform.config().format.configured_carrier_hz}, {"helper_enabled", false}});
+        phase(report, "interferer_preparation", began.elapsed(), 0,
+              object({{"profile_ready", true}}), 0, "simulator_excluded");
+        const std::array foreign_bit{static_cast<std::uint8_t>(*o.interferer_bit)};
+        const SecondaryEmission secondary{tx.waveform, tx.key,
+            {.bits = foreign_bit, .stop = stop}, first, std::polar(gain, phase_rad), frequency_offset};
+        auto capture = simulate(profile, emissions, slot.first_sample, slot.stop_sample, samples_left,
+                                resources, stop, {}, &secondary);
+        // The slope in nominal RX sample seconds on the direct path. Exclude
+        // stochastic phase noise, FHSS and moving echo delay from this center.
+        const auto& effects = profile.channel.effects;
+        const auto tx_audio = effects.tx.audio_ppm * 1e-6;
+        const auto rx_audio = effects.rx.audio_ppm * 1e-6;
+        const auto center = (effects.rf_hz * (effects.tx.rf_ppm - effects.rx.rf_ppm) * 1e-6 +
+            effects.nominal_conversion_if_hz * (tx_audio - rx_audio) +
+            frequency_offset * (1 + tx_audio) + effects.static_doppler_hz) / (1 + rx_audio);
+        const auto& wander = capture.channel.common_doppler_wander;
+        auto& receipt = report["configuration"]["interferer"];
+        receipt["direct_center_hz_excluding_phase_noise_fhss_and_echo"] = center;
+        receipt["direct_center_low_hz_with_common_wander"] = center + (wander ? wander->minimum_hz : 0) / (1 + rx_audio);
+        receipt["direct_center_high_hz_with_common_wander"] = center + (wander ? wander->maximum_hz : 0) / (1 + rx_audio);
+        return capture;
+    };
+    const auto capture = render();
+    report["observation"] = observation(capture, slot.stop_sample, slot, o);
+    generation_phase(report, profile, capture);
+    const auto [score, elapsed] = complete_probe_slot(o, profile, slot, capture, resources, stop);
+    phase(report, "native_slot", elapsed, capture.iq.size() / profile.receiver.sample_rate_hz, score_json(score));
+    if (!score.complete || !score.all_valid)
+        throw Incomplete("Admission diagnostic did not score the complete valid public slot");
+
+    auto policies = object({});
+    for (const auto policy : {WrongKeyAdmission::current, WrongKeyAdmission::guarded, WrongKeyAdmission::strict}) {
+        auto decision = score;
+        apply_wrong_key_admission(decision, policy);
+        const auto data = decision.decision == SlotDecision::data;
+        const bool correct = wanted && data && decision.bit == o.bit;
+        policies[wrong_key_admission_name(policy)] = object({{"decision", decision_name(decision.decision)},
+            {"bit", decision.bit ? Json(*decision.bit) : Json{}}, {"reason", decision.reason},
+            {"required_log_gap", decision.wrong_key_required_log_separation},
+            {"policy_rejected", decision.wrong_key_rejected},
+            {"endpoint", data ? (wanted ? (correct ? "correct_bit" : "wrong_bit") : "false_data") :
+                (wanted ? "erasure" : decision_name(decision.decision))}});
+    }
+    report["result"] = object({{"one_native_score_for_all_policies", true},
+        {"complete_public_slot", true}, {"complete_receiver_service", false},
+        {"interferer_present", o.interferer_cn0.has_value()}, {"wanted_present", wanted},
+        {"policies", std::move(policies)}});
+}
+
 void slot_run(Json& report, const Options& o, const Profile& profile, const ReceiverSlotPlan& slot,
               const StreamReceiverResources& resources, std::uint64_t& samples_left, std::stop_token stop) {
     const std::array bit{static_cast<std::uint8_t>(o.bit)};
@@ -1412,24 +1651,7 @@ void slot_run(Json& report, const Options& o, const Profile& profile, const Rece
         const auto represented = capture.iq.size() / profile.receiver.sample_rate_hz;
         for (unsigned unit = 0; unit < o.units; ++unit) {
             check_stop(stop);
-            // The public workspace includes the IQ lease already held by the
-            // probe. The remaining process allowance covers DSP and stacks.
-            const auto workspace = receiver_slot_workspace(profile.receiver, slot, resources.workers);
-            const auto lease_bytes = capture.iq.size() * (sizeof(Complex) + 1);
-            if (workspace < lease_bytes || workspace - lease_bytes > standalone_scratch(resources))
-                throw Incomplete("Native regression unit exceeds its local memory lease");
-            // As in stream admission, spare local memory grants the lease that
-            // lets Helper acquisition run beside coarse preparation. The
-            // sequential control never overlaps, even where both leases agree.
-            const auto wider = receiver_slot_overlap_workspace(profile.receiver, slot, resources.workers);
-            const auto lease = o.helper_overlap && wider - lease_bytes <= standalone_scratch(resources) ? wider : workspace;
-            const Timer began;
-            const auto score = o.helper_overlap ?
-                score_receiver_slot(profile.receiver, slot, profile.key, capture.iq, capture.valid,
-                                    resources.workers, lease, stop) :
-                score_slot_in_sequence(profile.receiver, slot, profile.key, capture.iq, capture.valid,
-                                       resources.workers, lease, stop, nullptr);
-            const auto elapsed = began.elapsed();
+            const auto [score, elapsed] = complete_probe_slot(o, profile, slot, capture, resources, stop);
             auto work = score_json(score);
             Digest digest;
             const std::array<std::uint64_t, 14> fixed{score.index, score.consumed_samples, score.coarse_workspaces,
@@ -1933,7 +2155,7 @@ void codec_run(Json& report, const Options& o, const Profile& profile, std::stop
 }
 
 void help() {
-    std::cout << "triad_receiver_probe describe|plan|slot|continuation|message|backlog|regression|codec [--flag value ...]\n"
+    std::cout << "triad_receiver_probe describe|plan|slot|continuation|message|backlog|regression|admission|codec [--flag value ...]\n"
         "  --backend cpu|tensor-cpu|cuda|vulkan|gpu --require-accelerator on|off --tensor-precision automatic|fp64\n"
         "  --native-coarse-precision automatic|fp32|fp64|q15 (Q15 spectral products require native AVX2)\n"
         "  --tensor-coarse-math fft|fp16|int8|fp16-fft (fp16/int8 matrices; fp16-fft is explicit CUDA FFT)\n"
@@ -1946,6 +2168,10 @@ void help() {
         "  --coarse-tiles N --seed N --slot-index N --stratum active|noise|cold-maximum|terminal|erasure\n"
         "  --work-only on uses a non-admitting local noise crop for nonnominal continuation strata\n"
         "  --helper-overlap off keeps regression in sequence: Helper, then coarse preparation\n"
+        "  admission scores one complete slot for all policies; --stratum noise omits wanted DATA\n"
+        "  optional encrypted admission interferer: --interferer-cn0 DB_HZ --interferer-seconds SECONDS\n"
+        "    --interferer-seed N --interferer-bit 0|1 [--interferer-rate HZ --interferer-frequency-offset-hz HZ]\n"
+        "    [--interferer-offset-seconds SECONDS | --interferer-uniform-window on]\n"
         "  --slots N --units 1|2|4 --bit 0|1 --sample-rate HZ --data-if HZ\n"
         "  --doppler-hz HZ (bounded common wander; selected spread adds atmospheric support)\n"
         "  --target-cn0 DB_HZ --cn0 DB_HZ --seconds FIXED_ACTIVE_SECONDS --fec off|rs20|rs60\n"
@@ -2068,6 +2294,7 @@ void run(Json& report, const Options& o, std::stop_token stop) {
         std::uint64_t samples_left = o.sample_limit;
         if (o.command == "message" || o.command == "backlog")
             stream_run(report, o, profile, resources, samples_left, stop);
+        else if (o.command == "admission") admission_run(report, o, profile, slot, resources, samples_left, stop);
         else if (o.command == "codec") codec_run(report, o, profile, stop);
         else if (o.work_only) diagnostic_fine(report, o, profile, slot, resources, samples_left, stop);
         else slot_run(report, o, profile, slot, resources, samples_left, stop);
