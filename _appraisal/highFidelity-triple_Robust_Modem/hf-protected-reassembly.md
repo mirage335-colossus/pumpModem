@@ -1,5 +1,11 @@
 # Bounded protected-fragment recovery
 
+The [admission/carrier-key applicability map](coverage.md#applicability-after-the-admission-and-carrier-key-changes)
+explains how to reuse these source-bound results with the newer modem. GUI
+filtering does not change native fragments; direct DATA admission can add
+erasures, and the new waveform domain requires fresh complete-message inputs.
+Neither change retroactively repairs or invalidates the recorded observations.
+
 This appraisal-only experiment reuses the native RS20 redundancy to recover a
 short message after an interior fade has already split its physical reception.
 The canonical receiver, its scored two-quiet-slot completion rule, DATA search
@@ -62,7 +68,7 @@ single-case runs before execution:
 | `fade-byte` | `B`, wanted signal absent in public slots 10–11; retain two rejected native fragments and recover exact `B` afterward. |
 | `fade-boundary` | Fresh `e` and noise seed, outage at slots 15–16 crossing a byte boundary; recover exact `e`. |
 | `noise` | Entire wanted emission absent; no false DATA or accepted native/consumer content. |
-| `wrong-key` | Distinct receiver key; no false DATA or accepted native/consumer content. |
+| `wrong-key` | Mismatched transmitter/receiver keys; no false DATA or accepted native/consumer content. |
 | `separate` | Independent legitimate space and `e`, with two physical quiet slots between; both complete natively without joining. |
 
 Run clean first; an execution, wrong-content or delivery failure stops dependent

@@ -1,5 +1,10 @@
 # Normalized covariance and wrong-key evidence
 
+See the [admission/carrier-key applicability map](coverage.md#applicability-after-the-admission-and-carrier-key-changes)
+before transferring these results to the newer modem. The GUI's reversible
+competing-bit filter is a different rule; carrier-separated keys require new
+waveform-dependent measurements and do not validate this diagnostic's null.
+
 This is a bounded diagnostic, not a receiver decision rule. It investigates an
 alternative left open by the [fixed-physical-prior counterexample](hf-predictive-completion.md#rejected-directional-data-veto).
 That counterexample does not invalidate every angular statistic: making the

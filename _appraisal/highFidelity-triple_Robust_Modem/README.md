@@ -7,7 +7,19 @@ groundwave, 1–30 MHz skywave, and Earth–Moon–Earth**. All appraisal code,
 fixtures, documentation and generated evidence remain in this directory.
 Python launches native executables and analyzes receipts; it implements no DSP.
 
-The current [receiver-repair investigation](hf-predictive-completion.md) repairs
+**Using the findings with the newer modem:** the
+[admission/carrier-key applicability map](coverage.md#applicability-after-the-admission-and-carrier-key-changes)
+distinguishes GUI history filtering from native DATA admission, explains the
+configured-frequency keystream revision, and connects known failures and
+tested/rejected/contemplated implementations to the evidence needed for reuse.
+The source-bound results below are preserved historical observations; the
+changed appraisal callers have not had their campaigns rerun merely because
+the canonical waveform and dropdown changed.
+Failure guides, source and campaign definitions are versioned; links into
+ignored `local-evidence/` refer to retained local receipts, which a fresh
+checkout does not include.
+
+The archived [receiver-repair investigation](hf-predictive-completion.md) repairs
 five selected completion failures, but **the candidate fails the broader
 integrity criterion**. Across ten paired complete observations, it completes
 oblique `A`, `B` and prospectively selected fresh `D`, evolving-field `C` and

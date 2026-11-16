@@ -7,7 +7,164 @@ different questions and are reported separately. No natural-condition
 probability, field calibration, or universal sensitivity floor follows from
 these deterministic cases or small fixed-seed holdouts.
 
-The current [receiver-repair investigation](hf-predictive-completion.md) records
+## Applicability after the admission and carrier-key changes
+
+Documentation/source audit: **16 November 2026**, repository
+`f048f9fbf75b46a7a7754fb88e95ba305117e101`. The failure guides, candidate
+source and frozen campaign definitions are versioned repository records.
+Raw receipts linked under `local-evidence/` are ignored local artifacts, not
+included in a fresh checkout. The guides preserve the substantive outcomes,
+recipes, source identities and limits; consult a retained receipt when locally
+available, and regenerate missing evidence under an explicitly identified
+source when needed. Neither kind of record automatically describes this newer binary.
+In particular, the latest predictive/protected results bind native source
+`dd2c9e267ae030db4393f815275ec615e8d6425732545bbdaf5d0705243e8e26`.
+This audit changes documentation only; it reruns no communications campaign.
+
+### Wrong Key Admission: distinguish decoding from visibility
+
+The authoritative [admission equations and evidence](../../docs/triad-stochastic.md#wrong-key-admission)
+and [GUI contract](../../docs/gui-contract.md#modems-and-current-availability)
+describe two different uses of the same scalar competing-bit rule:
+
+- **GUI:** acquisition and decoding always use `current` (Unfiltered).
+  The dropdown retrospectively filters retained Signals/Files records; a
+  completed rated record remains visible when at least half its baseline DATA
+  bits pass, with ties visible. Pending, Helper, non-Robust and unrated records
+  remain visible. Changing the choice does not rerun DSP/FEC or change original
+  decoded content; Unfiltered restores records still retained in memory.
+- **Direct native/headless admission:** stronger policies run after ordinary
+  scoring/fallback/quiet checks. Rejected DATA becomes AMBIGUOUS, not physical
+  QUIET, without a new search or worker. This can change later message assembly
+  and FEC outcomes, unlike the GUI visibility choice.
+
+The tokens are `current`, `guarded`, `strict`, `very-strict`, `extreme` and
+`maximum`. Their GUI reference fractions are respectively unfiltered, 2/3,
+1/3, 1/10, 1/100 and 1/1000 **remaining wrong-key DATA relative to Unfiltered**;
+the compact word “reduction” does not mean the fraction removed. The last two
+are extrapolated model targets. The displayed approximately 1/2/3/6/6 dB costs
+are scoped HF visibility estimates, not universal penalties, probabilities or
+authentication. The rule uses the gap between the two operational bit scores
+and the competing score's excess above the ordinary threshold. It is not the
+old fixed variance penalty or the normalized-covariance diagnostic below.
+
+Existing native admission studies and the later reversible-history study are
+recorded separately in [maintained validation](../../docs/validation.md#reversible-wrong-key-admission-history--15-november-2026).
+Their empirical successes and contrary cases must both inform a choice:
+the recorded clean 96-minute Sub-9 case loses wanted admissions as C/N0 rises
+under stronger policies; in the GUI this hides content reversibly. The deep
+holdout tiers have zero observed foreign survivors but simultaneous upper
+retention bounds of 12.12%/8.19%, not verified 1%/0.1% rates. These studies do
+not establish the majority-bit browser rule's whole-message error rate or
+reproduce this appraisal's detailed disturbed-HF failures.
+
+The rate/sensitivity and 256-call holdout studies follow the carrier-key
+revision. One explicitly archived exception is also useful: the new scalar
+rule was applied offline to reproduced **old-waveform** protected-aperture
+scores and rejected the wrong-key observation while preserving its wanted
+pair. The [admission validation](../../docs/validation.md#wrong-key-admission--15-november-2026)
+records the original-library/header recipe and its missing scratch-binary
+hashes. This is a historical-score discriminator, not a current-waveform or
+complete-message repair, and not hash-bound certification.
+
+The appraisal `run.py`/`src/main.cpp` currently has **no
+`--wrong-key-admission` option**; its receiver configurations use the native
+default `current`. Do not pass the GUI option to an old campaign and assume
+the requested tier ran. A future direct-policy appraisal needs an explicit
+configuration/receipt extension. Its baseline must remain Unfiltered. The
+predictive-quiet candidate also requires ambiguity *below* the ordinary
+presence bound: native admission-rejected DATA retains positive presence
+evidence and is not automatically eligible for that quiet correction.
+
+### Configured carrier keys: regenerate waveform-dependent evidence
+
+Commit `f674f9aeac3136917996a08b07f57496dfbe195d` introduced
+`independent-apsk-v2-carrier-v1`. The [wire contract](../../docs/crypto.md#canonical-robust-waveform-purposes)
+binds **one configured nominal physical carrier**, baseband plus Shift, rounded
+with `Q = max(10 Hz, inner_rate_hz * added_symbols / 10)`. It appends the
+binary64 value `Q * round(configured_hz / Q)` in the specified order; nonnegative
+halfway values round upward. Same rounded value deliberately shares a context;
+very close settings across a boundary can differ. Both peers need the new
+derivation and matching rounded carrier; there is no old-key fallback.
+
+This is not a new key for each lane index, hop, Doppler shift or CFO search
+candidate. All three DATA lanes and their child derivations share the nominal
+context. The receiver still generates templates from the fixed public format
+and applies its ordinary CFO/clock transformations. A new cross-profile or
+persistent cache must include the waveform revision and relevant full format,
+including carrier context; existing source-owned caches already have that
+immutable scope. Do not add a crypto search over every CFO bin or reuse an
+old-domain template by frequency rotation.
+
+The domain change alters **all old DATA realizations**, including plain,
+Amateur and synthetic zero-origin fixtures. The three appraisal source callers
+already supply physical carrier: direct scenarios use the declared RF center;
+native endpoint-chain scenarios and the two standalone message probes include
+RF Shift plus DATA IF. Their migration received syntax checks, **not appraisal
+campaign reruns**, as recorded in [carrier-key validation](../../docs/validation.md#configured-carrier-waveform-keys--15-november-2026).
+Helper metadata and scheduling are unchanged, but composite/Helper amplitudes
+can depend on recalibrated finite DATA power; unchanged Helper metadata does
+not establish identical complete IQ or energy.
+
+That same validation preserves a relevant new-domain counterexample: the
+strong 1737-Hz source scored with neighboring 1725-Hz configuration still
+admits DATA under the baseline (log evidence 1792.68 against 21.4934). The
+prespecified one-fifth-amplitude control separates matching and foreign
+reception. Thus frequency separation can help without supplying reliable
+strong-foreign rejection. Later admission-control studies are additional
+source-bound evidence, not reruns of the older appraisal matrix.
+
+### Reuse map for failures and contemplated implementations
+
+| Preserved finding / implementation status | What to carry into the changed modem |
+| --- | --- |
+| **Wrong DATA/content and skipped evidence:** the native admitted-model comparison repairs selected GUI cases but accepts a wrong-key message and misses a fresh longer payload. [Repair investigation](hf-receiver-repair.md), [coverage expansion](hf-coverage-expansion.md). | A hidden GUI row does not repair its baseline DATA or decoded content. Preserve raw decisions, accepted wrong content, physical completion and browser visibility separately. Recreate the complete-message and wrong-key cases with current keys before recommending the comparison hook. |
+| **Phase/history and time-energy cliffs:** independent trajectories, mode changes and nonwhite noise expose new misses; additional phase/gain/bridge candidates improve selected bits or messages without a general sensitivity result. [Ensemble](hf-ensemble.md), [inference/propagation](hf-inference-and-propagation.md), [correlated presence](hf-correlated-presence.md). | Rebuild native templates and waveform energy references, retain public prior weights and all search work, and compare complete messages at declared energy/duration points. Higher admission margins are an additional possible loss, not evidence that phase mismatch is resolved. Preserve private known-channel diagnostics as optimistic references, not deployable receivers. |
+| **Predictive quiet: tested conditional candidate, rejected for general promotion.** Five ending failures improve; an active fade makes uncoded `Ae` become accepted `A`. [Methods and regressions](hf-predictive-completion.md). | Preserve separate causal frequency proposal/confirmation, amplitude training, validation, both quiet bands and coherent veto. Finite training gives aligned-signal information `MN/(M+N)`, saturating at fixed `M`. Recheck new-domain complete IQ, clocks/tone interactions and the active-fade negative together; neither GUI hiding nor stronger DATA admission makes this a generally safe completion rule. |
+| **Protected reassembly: demonstrated bounded recovery, not qualified operation.** Actual rejected fragments recover `B`/`e`; the combined negative invokes decoding and rejects, but retains 61 false DATA and fails its exact two-erasure pattern. [Contract and receipts](hf-protected-reassembly.md). | Keep actual native events, public located erasures, recovery/session barriers, the 304-position bound and one existing codec call. Direct admission can add erasures and alter fragments: rerun whole messages, not just codec inputs. GUI-only filtering leaves native events intact; integrating reconstructed records would also need explicit compatible baseline rating metadata. Retain the reported nominal coding cost (21.333× short-`e` airtime/energy at equal power), not an equal-energy gain claim. |
+| **Complete-outage ambiguity and fragment acceptance:** identical received histories can represent a genuine end or a continuing hidden transmission. [Framing witness and protected-codec checks](hf-fragment-integrity.md). | The identifiability argument survives when its same-context/shared-prefix assumptions hold. Regenerate the numerical witness under the new domain. A dropdown, extra search or frequency binding cannot distinguish identical observations. Protected coding can constrain later reconstruction, with its cost and residual false-acceptance limits explicit. |
+| **Fixed variance inflation and physical-prior directional guards: rejected proposals.** A wanted signal can lose acceptance as SNR rises. [Variance counterexample](hf-predictive-completion.md#rejected-wrong-key-filter), [directional counterexample](hf-predictive-completion.md#rejected-directional-data-veto). | Keep the high-SNR coefficient/mismatch arguments and the original observed counterexamples. They are not the formula implemented by Wrong Key Admission, so do not transfer their exact scores or proof to that rule. The current relative-gap rule has its own measured long-window counterexamples in maintained validation. |
+| **Normalized covariance and held-out prediction: diagnostic / conditional research.** A real wrong-key aperture separates from its wanted control, but no operational veto is qualified. [Normalized evidence](hf-normalized-null.md). | Preserve fixed covariance shapes, native projection/rank, full-lattice prior mass and same-model known-white positives. A structured wrong-key waveform need not satisfy the spherical null, and directional evidence can saturate. Reconsider held-out keyed prediction only with disjoint fit/score data and a defensible nuisance model; the new keystream does not provide one automatically. |
+| **Simulator validity and measured-data limits:** failed interpolation/refinement checks, coupled physical models, and public recordings with incomplete calibration remain documented. [Validity findings](hf-validation.md), [multiple-hop and data audit](hf-multihop.md). | Key-independent solver checks can remain applicable when their source, geometry and tolerances are unchanged. Waveform-coupled FIR/support, antenna cancellation, received energy and communications checks need current inputs. New keys/admission controls supply none of the missing transmitted-waveform, timing, gain/noise or disturbed-event calibration. |
+
+The implementation alternatives and observability limits in
+[_ref native implementation options](../../_ref/highFidelity-triple_Robust_Modem/Astra-6/60-native-implementation-options.md)
+and [noise/equipment guidance](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/85-scenarios-noise-and-equipment.md)
+remain part of this interpretation. They separate partial-fade inference from
+impossible arbitrary-outage discrimination, and noise power from covariance
+and frontend calibration. Existing research references in each investigation
+retain their stated model assumptions; a new control label does not extend them.
+
+### Evidence needed before updating an implementation recommendation
+
+1. Record source/binary hashes, pattern revision, configured and rounded carrier,
+   Rate/Added Symbols, key mode/direction, epoch/ordinal, policy and receiver
+   path. Regenerate TX and receiver references together; preserve old receipts
+   under their old identities. Do not relabel an old IQ digest or rescore old
+   scalar logs as a new-waveform experiment.
+2. Separate raw DATA/AMBIGUOUS/QUIET and completion/content from direct admission
+   and GUI visibility. Retain both bit scores, ordinary threshold and minimum
+   gap, required admission margin, baseline DATA count and per-tier passing
+   counts/availability. Quiet and erasure counts are not the GUI denominator;
+   missing evidence is not an inferred rejection or confidence value.
+3. Follow the staged [experiment protocol](experiment-protocol.md): cheap
+   generator/context and scalar-policy checks first, including same-bucket and
+   cross-boundary settings and a foreign carrier inside the declared CFO
+   search. Then use matched complete
+   wanted/foreign/noise cases, the relevant active-fade/integrity regression,
+   fresh trajectory/payload holdouts and the scoped duration/energy comparison.
+   Freeze budgets and criteria before execution; do not search until a known
+   failure disappears. A GUI-only history change needs its retention/tie/live
+   update checks, not a fictitious new receiver campaign.
+4. Preserve all public hypotheses, `W=2H`, memory bounds, recurring preparation,
+   unsuccessful work and physical quiet completion. Source inspection of an
+   unchanged geometry is not refreshed service or sensitivity calibration.
+   Only new applicable evidence can mark a failure repaired or recommend a
+   candidate for broader use; software checks alone do not do so.
+
+## Source-bound investigation record
+
+The pre-carrier-v1 [receiver-repair investigation](hf-predictive-completion.md) records
 ten paired complete observations and a separate active-fade discriminator.
 **The candidate fails the broader integrity criterion and cannot be promoted
 as a general repair.** The active-fade test sends `Ae`, whose first thirteen

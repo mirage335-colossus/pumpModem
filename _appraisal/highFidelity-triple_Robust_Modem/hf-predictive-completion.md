@@ -1,5 +1,11 @@
 # Predictive interference and physical completion
 
+For the newer Wrong Key Admission control and configured-carrier keystreams,
+read the [current applicability/reuse map](coverage.md#applicability-after-the-admission-and-carrier-key-changes).
+The numerical observations here retain their original source and waveform;
+GUI visibility, direct native admission and raw completion are distinct.
+The new competing-bit rule is not either rejected guard described below.
+
 This investigation targets the retained clock/interference completion failures.
 The canonical receiver admits all thirteen wanted DATA bits in the bright
 oblique, evolving and coupled two-hop examples, but continuing interference
@@ -11,7 +17,7 @@ evaluator's message length cannot supply completion evidence.
 
 Before implementing a new DATA rejection rule, the fixed variance-inflation
 proposal was checked against a successful disturbed-HF observation. The
-current native receiver delivers `e`, with DATA `001` and two scored quiet
+then-current native receiver delivers `e`, with DATA `001` and two scored quiet
 slots. Its full 506,441-sample IQ/validity digest and score statistics match
 the archived input exactly despite the source identity change.
 
