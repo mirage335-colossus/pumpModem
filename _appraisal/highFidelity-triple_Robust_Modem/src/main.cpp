@@ -15,6 +15,7 @@
 #include "appraisal/vlf_diagnostic.hpp"
 #include "datapump/triad_acceleration.hpp"
 #include "datapump/triad_message_receiver.hpp"
+#include "datapump/wrong_key_admission.hpp"
 #include "datapump/triad_shaping.hpp"
 #include "datapump/triad_stream.hpp"
 #include "datapump/triad_stream_receiver.hpp"
@@ -1684,9 +1685,9 @@ Json plan_json(const Setup& s,const Options& o) {
         result["wrong_key_admission"]=wrong_key_admission_name(s.receiver.wrong_key_admission);
         result["protected_reassembly_maximum_positions"]=appraisal::HfProtectedReassembly::maximum_positions;
     }
-    if(o.hf_compare_admitted_models||o.service_replay||o.hf_predictive_quiet) {
+    if(o.mode=="receive"||o.mode=="slot"||o.mode=="plan") {
         result["hf_compare_admitted_models_requested"]=o.hf_compare_admitted_models;
-        result["receiver_evidence_policy"]=o.hf_compare_admitted_models?"compare_admitted":"fallback_only";
+        result["receiver_evidence_policy"]=o.hf_compare_admitted_models?"compare_admitted":"bounded_competition";
     }
     if(o.hf_phase_filter)result["hf_phase_filter_requested"]=true;
     if(o.hf_target_presence_diagnostic)result["hf_target_presence_diagnostic_requested"]=true;
@@ -2010,6 +2011,36 @@ Json score_json(const StreamSlotReceipt& receipt) {
         {"drift_frequency_bins",r.drift_frequency_bins},{"workspace_peak_bytes",r.workspace_peak_bytes},{"reason",r.reason},
         {"commit_wall_seconds",receipt.commit_timing?Json(receipt.commit_timing->wall_seconds):Json{}},
         {"commit_process_cpu_seconds",receipt.commit_timing&&receipt.commit_timing->process_cpu_seconds?Json(*receipt.commit_timing->process_cpu_seconds):Json{}}});
+}
+Json wrong_key_evidence_json(const WrongKeyAdmissionEvidence& evidence) {
+    bool rated = evidence.available && evidence.data_bits > 0 &&
+        evidence.passing_bits.front() == evidence.data_bits;
+    for (std::size_t i = 1; rated && i < evidence.passing_bits.size(); ++i)
+        rated = evidence.passing_bits[i] <= evidence.passing_bits[i - 1];
+
+    Json::Array tiers;
+    for (const auto policy : wrong_key_admission_policies) {
+        const auto index = static_cast<std::size_t>(policy);
+        const auto passing = evidence.passing_bits[index];
+        // Mirror the GUI contract: unavailable evidence stays visible, current
+        // is unfiltered, and rated filters hide only a strict minority pass.
+        const bool visible = policy == WrongKeyAdmission::current || !rated ||
+            passing >= evidence.data_bits - passing;
+        tiers.push_back(object({
+            {"policy", wrong_key_admission_name(policy)},
+            {"passing_data_bits", passing},
+            {"data_bits", evidence.data_bits},
+            {"rated", rated},
+            {"passes_half_data_bit_rule", rated ? Json(passing >= evidence.data_bits - passing) : Json{}},
+            {"visible_under_filter", visible}
+        }));
+    }
+    return object({
+        {"summary_available", evidence.available},
+        {"data_bits", evidence.data_bits},
+        {"tiers", std::move(tiers)},
+        {"scope", "Native baseline DATA-bit evidence; browser visibility mirrors the available-score half-count rule. This filter does not correct bits or authenticate a sender."}
+    });
 }
 Json channel_json(const appraisal::ChannelReport& r,double fs,std::string_view scenario_id={}) {
     auto result=object({{"samples",r.samples},{"source_samples",r.source_samples},{"workspace_bytes",r.workspace_bytes},
@@ -4093,6 +4124,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
                 {"corrected_bytes",m.decoded_content?Json(m.decoded_content->corrected_bytes):Json{}},
                 {"authenticated",m.decoded_content?Json(m.decoded_content->authenticated):Json{}},
                 {"fec_stats",m.decoded_content?fec_stats_json(m.decoded_content->fec_stats):Json{}},
+                {"wrong_key_evidence",wrong_key_evidence_json(m.wrong_key_evidence)},
                 {"decoded",m.decoded_content.has_value()},{"text",m.filtered_text},{"reason",m.reason},
                 {"reacquisition_count",m.reacquisition_count},{"message_service_seconds",m.message_service_seconds}}));
             if(spool) {
@@ -4448,8 +4480,8 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
         {"peak_reserved_bytes",final.peak_reserved_bytes},{"peak_running_owners",final.peak_running_owners},
         {"peak_executor_workers",final.peak_executor_workers},{"input_closed",final.input_closed},
         {"controller_wait_seconds",final.controller_wait_seconds?Json(*final.controller_wait_seconds):Json{}}});
-    if(receiver_executed&&(o.hf_compare_admitted_models||o.service_replay||o.hf_predictive_quiet))
-        result["receiver"]["evidence_policy"]=o.hf_compare_admitted_models?"compare_admitted":"fallback_only";
+    if(receiver_executed)
+        result["receiver"]["evidence_policy"]=o.hf_compare_admitted_models?"compare_admitted":"bounded_competition";
     if(receiver_executed&&o.hf_predictive_quiet) {
         result["receiver"]["quiet_policy"]=predictive?"independent_public_gap_line_prediction":"canonical";
         result["receiver"]["predictive_frequency_baseline_rule"]=predictive?"public_confirmation_centroid_360s_three_witness_v2":"none";
@@ -4619,7 +4651,7 @@ int main(int argc,char** argv) {
             result["gui_profile_usage"]="hf-gui-native with plan, slot or receive on the reference RRC waveform accepts --gui-spread ID --gui-selective ID --gui-arrival tight|default --gui-margin N --gui-audio-ppm N --gui-rf-ppm N --gui-audio-phase-degrees-sqrt-s N --gui-rf-phase-degrees-sqrt-s N --gui-clock-edge --gui-target-cn0-db-hz N; --cn0 is actual link C/N0 and --bit-seconds is an explicit duration fixture override";
             result["gui_varying_usage"]="--mode gui-varying --scenario hf-gui-native --capture-digest-slot N compares canonical affine and short varying evidence on one complete Helper-off CPU observation from the full native capture; accepts wanted, noise and wrong-key";
             result["service_replay_usage"]="--service-replay in receive/plan pre-renders native I/Q into the canonical bounded ObservationSpool; accepts --service-episodes 1|2, --service-spool-byte-limit N, paired --service-backlog-begin-slot N --service-backlog-end-slot N, and chunks <=4096. Full service includes receiver construction, unchanged-chunk replay, drain/destruction and separately reported replay reads/hash; rendering is excluded. Two episodes retain the global ordinal and fixed two-quiet gap, with a final extra quiet slot. Backlog eligibility and communication completion are separate; no capacity qualification.";
-            result["hf_compare_admitted_models_usage"]="--hf-compare-admitted-models opts CPU receive/plan into the canonical admitted-model comparison with unchanged ordinary/overlap workspace quotes; excludes --hf-public-phase-receiver and never changes the default fallback policy";
+            result["hf_compare_admitted_models_usage"]="--hf-compare-admitted-models opts CPU receive/plan into comparison of all supported models with unchanged ordinary/overlap workspace quotes; excludes --hf-public-phase-receiver";
             result["hf_phase_filter_usage"]="--hf-phase-filter requires hf-search, --hf-phase-refinement and --search-timing full; reports a bounded public phase-filter diagnostic without changing receiver decisions";
             result["hf_phase_filter_receiver_usage"]="--hf-phase-filter-receiver requires receive, --hf-public-phase-receiver and --hf-phase-refinement; adds the fixed equal correlated phase mixture through the existing native fallback hook, restricted to the qualified full 39-atom geometry";
             result["hf_phase_filter_paths_usage"]="--hf-phase-filter-paths requires both --hf-phase-filter and --hf-physical-diagnostic; adds evaluator-only clean and noisy path diagnostics, never receiver evidence";

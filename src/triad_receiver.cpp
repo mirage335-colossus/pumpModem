@@ -441,14 +441,14 @@ std::size_t receiver_detail::receiver_slot_workspace_with_supplement(
 }
 
 namespace {
-enum class EvidenceEvaluation { fallback_only, compare_admitted };
+enum class EvidenceEvaluation { bounded_competition, compare_admitted };
 
 ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                                const Crypto& key, std::span<const Complex> iq,
                                std::span<const std::uint8_t> valid, unsigned workers,
                                std::size_t memory_limit_bytes, std::stop_token stop, ReceiverExecutor* shared,
                                bool may_overlap, const SlotEvidenceSupplement* supplement = nullptr,
-                               EvidenceEvaluation evaluation = EvidenceEvaluation::fallback_only) {
+                               EvidenceEvaluation evaluation = EvidenceEvaluation::bounded_competition) {
     check_cancelled(stop);
     const auto workspace = plan_workspace(config, slot, workers, may_overlap, supplement);
     require(iq.size() == slot.stop_sample - slot.first_sample &&
@@ -608,19 +608,25 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     const bool coherent_admission = score.decision == SlotDecision::data;
     // A comparison is meaningful only where at least one alternative has
     // a native public plan. Otherwise keep the inherited affine/line path.
-    const bool compare = evaluation == EvidenceEvaluation::compare_admitted &&
+    const bool compare_all = evaluation == EvidenceEvaluation::compare_admitted &&
         (varying_prior || coherent_gain_prior || drift);
-    if (varying && (compare || score.decision != SlotDecision::data)) {
+    // A short-block plan can compete with strong affine evidence from the
+    // same observation. Longer models still run as needed for admission.
+    if (varying) {
+        const auto quarter_clock_timing = workspace.varying.track_frequency && !config.helper_enabled ?
+            prepare_quarter_clock_timing(config, slot, coarse, fine.grid) : std::vector<FineCoordinate>{};
+        const auto timing = quarter_clock_timing.empty() ? std::span(fine.segmented_timing_coordinates) :
+                                                           std::span(quarter_clock_timing);
         score_varying_fine(config, slot, key, workspace.varying, iq, selected,
-                           fine.segmented_timing_coordinates,
+                           timing,
                            coarse.projected_sample_rate_hz, coarse.clock_gap_ppm, workers, score, stop, *executor);
         classify_supplement();
-    } else if (varying) score.varying_status = "coherent_evidence_sufficient";
-    if (coherent_gain_prior && (compare || score.decision != SlotDecision::data)) {
+    }
+    if (coherent_gain_prior && (compare_all || score.decision != SlotDecision::data)) {
         score_coherent_gain(workspace.coherent_gain, score, nullptr);
         classify_supplement();
     } else if (coherent_gain_prior) score.coherent_gain_status = "earlier_evidence_sufficient";
-    if (drift && (compare || score.decision != SlotDecision::data)) {
+    if (drift && (compare_all || score.decision != SlotDecision::data)) {
         score_drift_fine(config, slot, key, *drift, iq, selected, fine.epoch_timing_coordinates,
                          workers, score, stop, *executor);
         classify_supplement();
@@ -637,12 +643,14 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         if (score.decision == SlotDecision::data)
             score.reason = "bounded_supplemental_data_evidence";
     }
-    // A threshold crossing in the comparison or a fallback takes the
-    // ordinary line gate.
+    // The early comparison also checks the line-conditioned short model
+    // when planned. Keep longer line models on the same fallback policy.
     // If a line is retained, discard the new likelihood permanently: its
     // raw-IQ null model is not a line-conditioned model. Both canonical
     // branches retain (1-weight), with no observation-dependent renormalizing.
-    if (workspace.line && (compare || !coherent_admission) && score.operational_passes_conditional_bound) {
+    const bool compare_line_short = varying && workspace.line_varying.block_rows;
+    if (workspace.line && (compare_all || compare_line_short || !coherent_admission) &&
+            score.operational_passes_conditional_bound) {
         if (const auto line = find_varying_line(config, slot, iq, stop)) {
             if (has_supplement)
                 supplement_evidence.fill(-std::numeric_limits<double>::infinity());
@@ -653,11 +661,11 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
                     fine.segmented_timing_coordinates,
                     coarse.projected_sample_rate_hz, coarse.clock_gap_ppm, workers, residual, stop, *executor, &*line);
             add_line_branch(score, residual, line->log_weighted_evidence);
-            if (workspace.line_coherent_gain.block_rows && (compare || score.decision != SlotDecision::data)) {
+            if (workspace.line_coherent_gain.block_rows && (compare_all || score.decision != SlotDecision::data)) {
                 score_coherent_gain(workspace.line_coherent_gain, residual, &*line);
                 add_line_branch(score, residual, line->log_weighted_evidence);
             }
-            if (workspace.line_drift.workspace_bytes && (compare || score.decision != SlotDecision::data)) {
+            if (workspace.line_drift.workspace_bytes && (compare_all || score.decision != SlotDecision::data)) {
                 score_drift_fine(config, slot, key, workspace.line_drift, iq, selected, fine.epoch_timing_coordinates,
                     workers, residual, stop, *executor, &*line);
                 add_line_branch(score, residual, line->log_weighted_evidence);

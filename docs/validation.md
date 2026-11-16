@@ -43,6 +43,164 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Bounded short-model competition — 16 November 2026
+
+Starting from `b00f9371105220a87f742922928866e97a9ba276`, the normal native
+receiver compares every admitted short-block alternative even after strong
+fixed-affine DATA evidence. Strong signal-versus-noise evidence does not prove
+that the first model selects the correct bit under a changing channel. The
+evaluation prioritizes useful reception across natural deterioration and
+complete service cost, allowing measured modest sensitivity, compute or error
+tradeoffs. The earlier experiments' pointwise no-new-error criterion is not a
+general acceptance requirement. Raw bits, decoded content, physical completion
+and operator-visible records remain separately reported.
+
+The raw short frequency tracker also uses up to eight public quarter-clock
+nominations when Helper is Off and segmented timing is unavailable. These
+points already belong to the public prior; every original coordinate remains,
+and the total fits the existing 32-coordinate workspace bound. Admitted
+line-conditioned short evidence participates too. Medium and whole-slot drift
+models still run when the resulting decision needs them; the explicit
+compare-all diagnostic can force them. A profile without a short plan follows
+the previous path exactly, including the slow VLF gain repair. This avoids
+forcing costly long-duration searches after an already successful slow-model
+decision. Public coverage, fixed model weights, full `W=2*H`, memory admission
+and physical quiet completion are unchanged.
+
+### Matched current-source discriminator
+
+The maintained [four-row discriminator](../_appraisal/highFidelity-triple_Robust_Modem/campaigns/bounded-short-competition.json), SHA256
+`f2cac73b90991756ca271d55ad78613936350bb52bec203c65dcc03201006070`
+was frozen before execution, with 120 s per row/480 s aggregate limits. All
+four complete in 39.848 s with exact baseline full-IQ hashes. Three deliver
+the correct complete message; the fresh-`A` case remains a communication
+failure despite fewer wrong bits.
+
+| Frozen wanted episode | Affine-first baseline | Bounded competition | Wall, baseline→candidate (s) | Candidate Guarded visibility |
+|---|---|---|---:|---|
+| EME disk, 30 dB-Hz, seed 9501 | One wrong bit, wrong content accepted | Exact `e`; repaired third bit | 12.847→16.417 | 3/3 DATA bits pass; visible |
+| HF Worst/Each 65%, 40 dB-Hz, seed 62001/72001 | One wrong bit, wrong content accepted | Exact `e`; repaired third bit | 3.800→4.492 | 3/3; visible |
+| Same HF episode, 20 dB-Hz | Exact `e` | Exact `e` retained | 3.813→4.339 | 3/3; visible |
+| Fresh HF `A`, 40 dB-Hz, seed 62003/72003 | Six wrong bits; codec rejects | Four wrong bits; incorrect `_` accepted | 11.378→14.048 | 6/13; hidden |
+
+The added work costs approximately 14–28% in these single complete replay
+observations. These are not speed confidence bounds or receiver capacity.
+All active DATA slots report drift as `earlier_evidence_sufficient`: the
+bounded short comparison supplies the HF/EME benefit without forcing their
+longer searches. Full slot workspace is unchanged: 200,933,388 bytes for EME,
+164,794,413 for the two HF `e` cases, and 165,394,356 for `A`. The measured
+Ryzen 5 PRO 5650U uses H=12/W=24; aggregate reservations vary with live owners.
+
+The appraiser now serializes existing native message-level admission counts
+for all six browser tiers. No extra DSP, filtering, decoding or message change
+is performed to obtain them. Guarded hides the incorrect `A` record above;
+that does not recover its bits. Conversely, Strict hides this correctly decoded
+EME record (0/3 pass), while Guarded retains it. Displayed approximate HF dB
+costs remain scoped estimates, not universal costs in every changing channel.
+Unfiltered content remains available and the GUI default is unchanged.
+
+### Fresh histories, energy contrasts and preservation
+
+A separate maintained [six-row holdout manifest](../_appraisal/highFidelity-triple_Robust_Modem/campaigns/bounded-short-competition-holdouts.json), SHA256
+`69604e19584b4bb5190beafebfb47acf592d21763d730a27b3ea18a48c8a863e`
+uses three new constructed channel histories, each at two levels separated by
+3 dB: HF `e` seed 62011/noise 72011 at 20/23 dB-Hz, HF `A` seed
+62013/72013 at 40/43, and EME `e` seed 9511 at 30/33. Each binary has a
+120 s per-row/720 s aggregate cap. Corresponding baseline/candidate full-IQ
+hashes match exactly. Energy pairs share a history and are not independent
+communication trials; this is three histories, not a population estimate.
+
+Both versions correctly complete **four of six** rows: both HF `e` and both
+EME rows. No previously correct message is lost in this cohort. The fresh HF
+`A` remains failed and its bit errors worsen: seven→eight at 40 dB-Hz and
+seven→nine at 43. At 40 the candidate accepts incorrect `wan` rather than
+rejecting; at 43 both reject. Guarded has 3/13 passing DATA bits and hides both
+candidate records. The extra 3 dB does not recover this history. This is an
+unresolved bright-channel error pattern, **not** evidence of a small,
+energy-recoverable sensitivity penalty. The improvement on the earlier `A`
+history must not be generalized to every payload placement or channel history.
+
+The six-row elapsed totals are 59.683→70.552 s. Complete wall and CPU work
+are different: the final committed-slot cumulative process CPU snapshots show
+4.1%/11.1% increases for HF `e`, 31.9%/32.0% for HF `A`, and 67.1%/68.9%
+for EME at the paired levels. These snapshots include common source/channel
+generation and startup, and exclude later finalization; they are neither
+isolated DSP costs nor capacity results. They must not be summed across slots.
+The 18.2% aggregate elapsed increase is therefore not a universal compute-cost
+estimate. Slot workspace and fine candidate counts remain unchanged; aggregate
+reservations/owner overlap vary. The additional short comparisons are paid
+work, retained for the demonstrated reception benefits rather than advertised
+as a throughput optimization.
+
+The separately frozen preservation manifest
+`e8a40f6ee17d803a69b7c74eb2cf0070d58f9ad9cdd8e81c0568d1af48994581`
+completes all three rows in 166.082 s, within 120/120/240 s row caps and
+480 s total. The existing HF `A` noise control scores all 15 slots QUIET with
+zero false DATA. The bright wrong-key case still produces three false DATA
+and an accepted space; Guarded and stronger tiers have 0/3 passing bits and
+hide it. This is useful operator mitigation in the tested case, not a change
+to reception or a universal interference-rate claim.
+
+The weak VLF phase-wander message retains its exact
+`9140d5488776287c0a6e5ed063f72425d05189832905a89a050f9fd4836358ee`
+input hash and all five earlier slot decisions, bit evidence, basis work,
+fine candidate counts and gain scales. Its 64,806,069 samples still deliver
+three correct DATA bits and two physical QUIET slots at approximately
+−18.43 dB-Hz. Every slot reports no available short plan, zero varying work
+and 364.756/1459.025 s slow coherence. It finishes in 146.748 s with the
+unchanged 952,574,517-byte full slot quote; no added short search is imposed
+on this long, weak profile. Its Guarded and all deeper-tier counts are 3/3.
+
+One final fixed diagnostic reruns only fresh `A` at the already declared
+43 dB-Hz with full admitted-model comparison. Its complete input
+`e43e8e23427a0db3c0df370a4c09980f09054c0d50a3b3373e40f0f77ee9943d`
+and all 15 decisions and bit-evidence pairs match the bounded policy exactly:
+nine wrong DATA bits, codec rejection, and two scored quiet slots. Full comparison
+executes drift on all 15 slots (6,853 frequency bins and 250–256 slopes), rather
+than only the ending quiet slots; coherent gain remains unavailable under its
+center-grid work guard. It takes 17.672 rather than 13.992 s. Aggregate peak
+reservation rises from 813,613,112 to 1,260,245,972 bytes with three→five live
+owners, while per-slot quotes and W24 remain unchanged. This observed overlap
+is not a universal memory penalty. No score change or reception benefit supports
+forcing these additional searches in this case; the residual failure persists
+across the implemented alternatives. The one-row diagnostic respects its
+120 s/12-million-sample caps and adds no new SNR or seed.
+
+These results bind native source
+`13e3fca3592d4a3ec89d083e7745c60914a00dd25f5c9452f6f0a7f51941e809`,
+appraiser source
+`a3408a2c3fbf6735906b3642f56348f07c182468ff6eb097121df46d02cd7595`
+and binary
+`f919e5b6b39328f76129d429d3a686d8f95a33701372d01502c369b9264e13d3`.
+The matched discriminator and subsequent bounded qualification receipts are
+temporarily retained in
+`_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-production-repair/`
+for this default-policy comparison and its unresolved wanted-data failures.
+Remove the temporary baseline executable after paired comparisons; remove
+redundant raw receipts when their reproduction/validation purpose ends.
+
+Software validation: `./build.sh test triad` passes **38/38** (79.48 s),
+including the shared Robust GUI integration. The expanded focused native check
+also passes (5.86 s): both actually undisturbed DATA bits and thermal-only quiet
+retain their complete physical observations when only the receiver allowance
+is widened to 8 Hz, with real short-model work and deferred drift on DATA.
+The six affected appraisal checks pass. Their first run was **5/6** because an
+old assertion required the former affine early exit. Its replacement preserves
+the original grid, bit, quiet, cancellation and workspace checks and verifies
+the new short/long scheduling distinction; all 24 assertions pass in 1.64 s.
+The other five checks, including integration, had already passed and were not
+repeated without a source change.
+
+That final test-only edit leaves native source `13e3fca3…` unchanged. The
+appraiser's test-inventory fingerprint becomes
+`ca05788ff0fbfd3ca6971e04dd79d4d228db9043f40d500fbdae13cc36e0d223`
+and rebuilt binary
+`02fcffac259c9ab90e3407d0aaf77cfb43cfa0aecea522e72aee1d2c18c9c783`.
+No numerical receiver change follows the frozen comparisons. Documentation
+links and `git diff --check` pass. These finite cases support the bounded
+default improvement, not universal bit correctness, field outage probability,
+or complete-receiver capacity. No RunPod resource was used.
+
 ## Slow gain coherence and current appraisal reconciliation — 16 November 2026
 
 The baseline is `f739158ec591f748b18dead768061cbd23f09163`, native source

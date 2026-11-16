@@ -65,6 +65,29 @@ also distinguish physical outage/estimation cost from avoidable receiver loss.
 
 ## Applicability after the admission and carrier-key changes
 
+The latest [bounded short-model competition](../../docs/validation.md#bounded-short-model-competition--16-november-2026)
+reopens timing coverage together with the policy that invokes it. The default
+now compares admitted short models despite strong affine DATA, while preserving
+long-model fallback and the slow VLF path. Matched current-source replays repair
+the bright HF and EME 30 dB-Hz messages, preserve the weaker HF success, and
+reduce fresh-`A` errors from six to four. The latter still accepts incorrect
+content; Guarded hides its 6/13-passing record without correcting its bits.
+Complete replay costs rise approximately 14–28% in these four observations,
+with unchanged slot workspace. These net reception/cost tradeoffs are assessed
+under the resilience priority; an isolated raw admission regression is not a
+blanket veto. The earlier source-bound findings below remain historical evidence,
+including the experiments that used a stricter pointwise criterion.
+Three fresh physical histories, each with a paired +3 dB point, retain all four
+previously correct complete messages. The fresh longer HF history remains
+failed: errors worsen seven→eight/nine, and +3 dB does not recover it. Guarded
+hides the incorrect accepted record (3/13 pass), but does not repair its bits.
+Forcing all admitted longer models on that same 43 dB-Hz input gives identical
+scores and decisions at 26% more elapsed time. The existing noise control stays
+quiet, Guarded hides the bright wrong-key control (0/3 pass), and weak VLF keeps
+its exact earlier scores and zero short-model work. Complete wall increases and
+per-family cumulative CPU increases (up to 69% in the fresh EME pair) remain
+separate cost evidence in the linked validation record; no capacity pass follows.
+
 The subsequent 16 November current-production replay binds native source
 `fc5b4c596aff3866e03a9f2b4c506bec2da3b4eff0d164adcdfcaf61ffade1e6`
 and `independent-apsk-v2-carrier-v1`. Both archived weak VLF first-slot inputs
@@ -90,7 +113,8 @@ The subsequent HF timing diagnosis finds a raw frequency-tracker support gap:
 public quarter-clock nominations correct one selected bit in noisy and clean
 twins. Full-message default-mode checks preserve all 60 decisions without a
 repair, and the predeclared 15 dB-Hz pair recovers no bits while adding 10.7%
-varying-stage work. Production activation is removed; its opt-in diagnostic
+varying-stage work. Production activation was removed under that affine-first
+policy; its opt-in diagnostic
 and theoretical support finding remain. Additional affine centers also fail
 their wanted/control discriminator and are removed. These negative findings
 prevent selected-slot improvements from becoming unsupported default search.
@@ -109,10 +133,10 @@ binds the final binary, inputs, limits and remaining physical coverage gaps.
 One matched EME 30 dB-Hz compare-admitted diagnostic repairs the wrong third bit
 and completes the message, at 20.222 rather than 12.847 s. Its evidence is useful,
 but the HF incorrect-content counterexamples still prevent general promotion;
-a retained coherent line occurs in those failures too. Current EME default
-behavior therefore remains failed on the 30 dB-Hz episode.
+a retained coherent line occurs in those failures too. That affine-first EME
+default therefore remained failed on the 30 dB-Hz episode.
 
-Current HF GUI replays also retain the strong-signal failure: the 40 dB-Hz
+The affine-first HF GUI replays also retain the strong-signal failure: the 40 dB-Hz
 wanted message accepts a wrong bit, while the matched 20 dB-Hz message completes
 correctly. Comparing all admitted models repairs that bright message, but a
 fresh `A` changes from rejection to accepted wrong content. The wrong-key

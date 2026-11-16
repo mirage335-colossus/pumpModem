@@ -154,30 +154,47 @@ void narrow_alternatives() {
 
     ReceiverExecutor executor(workers);
     const auto noise = observation.compare(bytes, {}, &executor);
+    const auto bounded_noise = observation.baseline();
     check(noise.complete && noise.decision == SlotDecision::quiet && !noise.bit &&
           !noise.operational_passes_conditional_bound && noise.noise_statistics_valid,
           "comparing every admitted likelihood mistook seeded noise for DATA");
+    check(bounded_noise.complete && bounded_noise.all_valid && bounded_noise.zero_h0_verified &&
+          bounded_noise.noise_statistics_valid && bounded_noise.consumed_samples == observation.iq.size() &&
+          bounded_noise.decision == SlotDecision::quiet && !bounded_noise.bit &&
+          bounded_noise.varying_quiet_modes && bounded_noise.varying_quiet_energy <= bounded_noise.varying_quiet_threshold &&
+          bounded_noise.varying_candidates && bounded_noise.coherent_gain_candidates && bounded_noise.drift_timing_atoms &&
+          bounded_noise.operational_bit_evidence == noise.operational_bit_evidence,
+          "unadmitted noise must run the fallback models and preserve physical quiet");
 
     observation.add_data(1, .72);
-    const auto original = observation.baseline();
+    const auto bounded = observation.baseline();
     const auto data = observation.compare(bytes, {}, &executor);
-    check(original.decision == SlotDecision::data && original.bit == 1 &&
-          original.reason == "fixed_affine_data_evidence" && !original.varying_candidates &&
-          !original.coherent_gain_candidates && !original.drift_timing_atoms,
-          "ordinary native entry point no longer exits on the strong affine control");
+    check(bounded.complete && bounded.all_valid && bounded.zero_h0_verified &&
+          bounded.consumed_samples == observation.iq.size() && bounded.decision == SlotDecision::data &&
+          bounded.bit == 1 && bounded.operational_passes_conditional_bound &&
+          bounded.varying_candidates && bounded.varying_blocks && bounded.varying_basis_rows &&
+          bounded.coherent_gain_status == "earlier_evidence_sufficient" && !bounded.coherent_gain_candidates &&
+          bounded.drift_status == "earlier_evidence_sufficient" && !bounded.drift_timing_atoms,
+          "the default must compare the short model on strong DATA and leave longer models on fallback");
     check(data.complete && data.all_valid && data.index == observation.slot.index &&
           data.decision == SlotDecision::data && data.bit == 1 && data.operational_passes_conditional_bound &&
-          data.operational_threshold == original.operational_threshold,
+          data.operational_threshold == bounded.operational_threshold,
           "complete comparison must keep the strong bit and native presence threshold");
-    check(data.coarse_frequency_points == original.coarse_frequency_points &&
-          data.coarse_workspaces == original.coarse_workspaces && data.basis_rows == original.basis_rows &&
-          data.bit_evidence == original.bit_evidence && data.workspace_peak_bytes == bytes,
-          "comparison changed the inherited acquisition, affine scorer, or sequential workspace quote");
-    check(data.varying_candidates && data.varying_basis_rows &&
-          data.coherent_gain_candidates && data.coherent_gain_blocks > 1 &&
+    check(data.coarse_frequency_points == bounded.coarse_frequency_points &&
+          data.coarse_arrival_points == bounded.coarse_arrival_points &&
+          data.coarse_workspaces == bounded.coarse_workspaces && data.fine_candidates == bounded.fine_candidates &&
+          data.basis_rows == bounded.basis_rows && data.bit_evidence == bounded.bit_evidence &&
+          data.selected_prior_mass > 0 && data.selected_prior_mass == bounded.selected_prior_mass &&
+          data.workspace_peak_bytes == bytes && bounded.workspace_peak_bytes == bytes,
+          "comparison changed the inherited acquisition, affine score, public prior, or workspace quote");
+    check(data.varying_candidates == bounded.varying_candidates && data.varying_blocks == bounded.varying_blocks &&
+          data.varying_basis_rows == bounded.varying_basis_rows &&
+          data.varying_bit_evidence == bounded.varying_bit_evidence,
+          "full and bounded comparison must share the same short score and rendered work");
+    check(data.coherent_gain_candidates && data.coherent_gain_blocks > 1 &&
           data.coherent_gain_frequency_states && data.drift_timing_atoms && data.drift_slopes,
-          "strong affine evidence still bypassed a publicly admitted model");
-    check(data.operational_bit_evidence[1] >= original.operational_bit_evidence[1],
+          "full comparison must execute planned medium gain and drift on strong DATA");
+    check(data.operational_bit_evidence[1] >= bounded.operational_bit_evidence[1],
           "ordinary model evidence addition lost retained likelihood mass");
 
     rejects<ReceiverWorkspaceError>([&] { (void)observation.compare(bytes - 1, {}, &executor); },

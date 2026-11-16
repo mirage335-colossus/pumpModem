@@ -115,6 +115,18 @@ These bounded findings do not establish all-channel sensitivity. Historical
 evolving-ray and phase-particle likelihoods remain alternatives to revisit when
 a measured failure identifies missing dynamics and the native implementation
 preserves full search, false-admission accounting and end-of-message tests.
+The current default also compares an admitted short-coherence likelihood when
+the fixed-affine lane already says DATA. With Helper Off and no segmented
+coarse timing result, frequency tracking can score up to eight quarter-clock
+nominees derived from the strongest ordinary coarse proposal for each bit.
+The existing clock prior and 32-coordinate fine-search cap remain in force;
+longer coherent-gain and drift models keep their fallback policy. This accepts
+bounded added work for natural changing-channel resilience while preserving the
+public search and full worker budget. The GUI Wrong Key Admission option
+remains a retrospective filter on retained baseline results; it is neither
+receiver authentication nor a replacement for the native bit decision. See
+the [current short-model and clock findings](../validation.md#bounded-short-model-competition--16-november-2026)
+for outcomes and remaining limits.
 See [receiver details](../robust-current.md#configured-calendar-reception) and
 [historical likelihood research](../triad-v3.md#likelihood-techniques-worth-retaining).
 

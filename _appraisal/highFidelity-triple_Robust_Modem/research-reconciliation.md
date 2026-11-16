@@ -118,6 +118,44 @@ aggregate distribution score as fidelity proof.
 
 ## Corrections and unresolved evidence
 
+The later [bounded short-model competition](../../docs/validation.md#bounded-short-model-competition--16-november-2026)
+revises the tradeoff assessment, not the recorded earlier outcomes. Short-model
+competition and public quarter-clock coverage now work together: matched
+default-mode replays recover the bright HF and EME 30 dB-Hz messages, preserve
+the weaker HF message, and reduce fresh-`A` errors from six to four. The latter
+still accepts incorrect content; its existing Guarded browser rating hides the
+record. Visibility is an operator mitigation, not recovered data. These measured
+costs and benefits are weighed against general resilience rather than a
+pointwise no-new-admission requirement. Longer drift/gain models remain
+fallbacks to avoid forcing disproportionate work in slow geometries.
+
+Fresh paired histories retain four previous complete-message successes, but the
+new HF `A` history worsens from seven to eight/nine wrong bits and does not
+recover after +3 dB. Full admitted-model comparison on the same 43 dB-Hz
+capture produces exactly the same scores and decisions while executing drift
+on all 15 slots instead of two. This rules out the deferred implemented drift
+search as a demonstrated repair for that capture; it does not prove which
+unmodeled physical mechanism causes the error. Keep this counterexample beside
+the earlier gains, and distinguish its persistent model/support question from
+a modest, recoverable sensitivity tradeoff. Measured per-family process CPU
+increases also reach 67–69% for the fresh EME pair, despite smaller wall changes.
+Do not describe the new default as a free comparison or a capacity qualification.
+
+The mechanism has relevant theoretical support and limits. In a different
+noncoherent receiver, [Tarasak, Minn and Bhargava (2004)](https://personal.utdallas.edu/~hxm025000/TVTMar04ML_DiffSTBC.pdf)
+show that within-block channel variation defeats the assumed constant gain and
+creates a high-SNR floor; their multistage differential space-time method reduces
+but does not remove it. This is a mechanism analogue, not a transferable HF
+performance result. [Vilà-Insa and Riba (2025)](https://doi.org/10.1109/LWC.2025.3536921)
+relate high-SNR noncoherent discrimination to codeword-conditioned spans under
+their full-rank block-Rayleigh assumptions. It reinforces checking timing/model
+support; it does not qualify this modem's changing-channel bank.
+Fixed weighted e-value averaging can preserve null guarantees without assuming
+independent scores ([Vovk and Wang, 2021](https://doi.org/10.1214/20-AOS2020)).
+That property does not guarantee correct-bit selection or rejection of a
+structured foreign signal. Proper model competition is therefore useful
+without being a proof of robustness to every unmodeled trajectory.
+
 The [16 November native follow-through](../../docs/validation.md#slow-gain-coherence-and-current-appraisal-reconciliation--16-november-2026)
 distinguishes a source revision from a receiver repair. The current carrier-v1
 waveform no longer misses the archived first VLF wander slot, but a complete
@@ -188,10 +226,10 @@ improvement alone.
 
 Current-waveform EME adds a complementary result. At 30 dB-Hz, comparing the
 already-admitted alternatives repairs the wrong third bit on identical complete
-IQ, while default affine-first admission still fails. This does not rescue the
-generic policy: the HF fresh-`A` comparison accepts wrong content, including
+IQ, while the earlier affine-first default still fails. Unconditional full
+comparison has a tradeoff: the HF fresh-`A` comparison accepts wrong content, including
 when strong coherent-line evidence is present. Thus neither unconditional
-comparison nor line presence establishes a safe selection rule. The final
+comparison nor line presence establishes a universally safe selection rule. The final
 line-conditioned reason string does not isolate the responsible mixture
 component. Keep acquisition support, model adequacy and decision policy as
 separate unresolved mechanisms; changing a threshold or forcing all work is

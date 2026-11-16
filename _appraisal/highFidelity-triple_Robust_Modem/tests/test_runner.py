@@ -730,11 +730,11 @@ def fake_completed_receipt(command, *, channel=None, outcomes=None, control=None
         receipt["plan"].update({"wire_bits": 64 if fec == "rs20" else 80,
                                 "short_wire_bit_limit": 304 if fec == "rs20" else 400,
                                 "content_limit_bytes": 16, "long_form": False})
-    if any(flag in command for flag in ("--hf-compare-admitted-models", "--service-replay", "--hf-predictive-quiet")):
-        policy = "compare_admitted" if "--hf-compare-admitted-models" in command else "fallback_only"
+    if mode in {"receive", "slot", "plan"}:
+        policy = "compare_admitted" if "--hf-compare-admitted-models" in command else "bounded_competition"
         receipt["plan"].update(hf_compare_admitted_models_requested="--hf-compare-admitted-models" in command,
                                receiver_evidence_policy=policy)
-        if mode == "receive":
+        if mode in {"receive", "slot"}:
             receipt.setdefault("receiver", {})["evidence_policy"] = policy
     if "--hf-phase-filter-sticky" in command:
         receipt["plan"]["hf_phase_filter_sticky_requested"] = True

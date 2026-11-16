@@ -371,6 +371,51 @@ void wrong_key_policy_boundaries() {
                    "scalar query must reject an invalid policy even for non-DATA");
 }
 
+void bounded_short_competition() {
+    const auto declare_variation = [](Fixture& input) {
+        input.config.time_varying_channel = true;
+        input.config.time_varying_common_doppler_hz = 8;
+        input.config.time_varying_atmospheric_hz = 8;
+    };
+    using namespace receiver_detail;
+    const auto check_data = [&](Fixture input, std::uint8_t bit) {
+        const auto affine = score(input, 2);
+        declare_variation(input);
+        check(affine.decision == SlotDecision::data && affine.bit == bit &&
+              affine.operational_log_e > affine.operational_threshold + std::log(8.) &&
+              affine.operational_bit_log_separation > input.config.time_varying_minimum_bit_log_separation &&
+              varying_fine_plan(input.config, input.slot, 2).block_rows &&
+              drift_plan(input.config, input.slot, 2).workspace_bytes,
+              "short-model competition fixture must admit strong affine DATA and plan both alternatives");
+        const auto competed = score(input, 2);
+        check(competed.complete && competed.all_valid && competed.zero_h0_verified &&
+              competed.consumed_samples == input.iq.size() && competed.decision == SlotDecision::data &&
+              competed.bit == bit && competed.varying_candidates && competed.varying_blocks &&
+              competed.varying_basis_rows && !competed.drift_timing_atoms &&
+              competed.drift_status == "earlier_evidence_sufficient",
+              "default admitted DATA must compare the short model without forcing the longer drift search");
+    };
+    check_data(fixture(1, true, false), 1);
+    // Apply the same receiver allowance after rendering each undisturbed
+    // bit. Neither the original IQ nor the public calendar changes.
+    check_data(fixture(0, false, false), 0);
+    check_data(fixture(1, false, false), 1);
+
+    auto quiet = fixture(std::nullopt, false, false);
+    const auto affine_quiet = score(quiet, 2);
+    declare_variation(quiet);
+    const auto competed_quiet = score(quiet, 2);
+    check(affine_quiet.complete && affine_quiet.decision == SlotDecision::quiet &&
+          competed_quiet.complete && competed_quiet.all_valid && competed_quiet.zero_h0_verified &&
+          competed_quiet.noise_statistics_valid && competed_quiet.consumed_samples == quiet.iq.size() &&
+          competed_quiet.decision == SlotDecision::quiet && !competed_quiet.bit &&
+          competed_quiet.quiet_first_sample == affine_quiet.quiet_first_sample &&
+          competed_quiet.quiet_stop_sample == affine_quiet.quiet_stop_sample &&
+          competed_quiet.varying_candidates && competed_quiet.varying_quiet_modes &&
+          competed_quiet.varying_quiet_energy <= competed_quiet.varying_quiet_threshold,
+          "a broad receiver allowance must preserve the complete physical quiet observation");
+}
+
 // One short DATA window per case, same observation and declared static
 // search with and without the added model. Exact channel slope, offset and
 // timing go only to the independent waveform generator.
@@ -1268,7 +1313,10 @@ int main(int argc, char** argv) {
         if (argc == 2) {
             const std::string_view part = argv[1];
             if (part == "carrier") configured_carrier_reception();
-            else if (part == "short-drift") bounded_drift_recovery();
+            else if (part == "short-drift") {
+                bounded_short_competition();
+                bounded_drift_recovery();
+            }
             else if (part == "long-drift") long_drift_recovery(false);
             else if (part == "broad-drift") long_drift_recovery(true);
             else if (part == "fading") weak_diffuse_fading_recovery();

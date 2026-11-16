@@ -239,6 +239,21 @@ and does not enumerate frequency histories. The public score receipt reports
 the admitted coherence times; zero values mean the slow family was not
 supported. See the [channel-model limits](triad-stochastic.md#nonstationary-channel-research-reconciliation)
 before interpreting these scales physically.
+The default receiver also evaluates an admitted short-coherence likelihood
+when the fixed-affine score already says DATA, then makes the bit decision from
+the weighted combined evidence. This spends bounded additional work to retain
+changing-channel coverage under a strong coherent observation. When Helper is
+Off and coarse search has no segmented timing result, frequency tracking may
+also score up to eight quarter-clock nominees based on each bit's strongest
+ordinary coarse proposal. These nominees stay within the existing clock prior;
+the total fine-coordinate cap remains 32. The line-conditioned short model is
+compared when its workspace is admitted. Longer coherent-gain and drift models
+remain fallback work unless a full comparison is requested. The existing
+search, public hypotheses, priors, and `W=2*H` worker budget are preserved.
+This is a bounded receiver policy, not authentication or a claim that all
+wrong-bit cases are resolved. See the dated
+[short-model and clock-support findings](validation.md#bounded-short-model-competition--16-november-2026)
+for measured benefits and remaining failures.
 Differential and segmented spectral statistics propose candidates; they are
 not admission statistics. Retained candidates keep their original public
 prior mass, and a skipped model does not transfer its weight to another model.

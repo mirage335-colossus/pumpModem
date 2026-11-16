@@ -5858,13 +5858,14 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     if plan.get("hf_gui_quarter_clock_shadow_requested", False) is not episode.get("hf_gui_quarter_clock_shadow", False):
         raise CampaignError("native quarter-clock shadow request does not match the frozen episode")
     comparison_requested = episode.get("hf_compare_admitted_models", False)
-    policy = "compare_admitted" if comparison_requested else "fallback_only"
+    policy = "compare_admitted" if comparison_requested else "bounded_competition"
     if comparison_requested or _uses_spool(episode) or "receiver_evidence_policy" in plan:
         if (plan.get("hf_compare_admitted_models_requested") is not comparison_requested or
                 plan.get("receiver_evidence_policy") != policy):
             raise CampaignError("native receiver evidence policy does not match the frozen episode")
         receiver_policy = receipt.get("receiver")
-        if episode["mode"] == "receive" and (not isinstance(receiver_policy, dict) or receiver_policy.get("evidence_policy") != policy):
+        if episode["mode"] in {"receive", "slot"} and (
+                not isinstance(receiver_policy, dict) or receiver_policy.get("evidence_policy") != policy):
             raise CampaignError("executed receiver must report the requested native evidence policy")
     physical_requested = episode.get("hf_physical_diagnostic", False)
     if plan.get("hf_physical_diagnostic_requested", False) is not physical_requested:
