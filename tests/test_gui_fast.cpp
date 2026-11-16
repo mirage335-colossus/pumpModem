@@ -556,9 +556,9 @@ void presentation_and_retention() {
           app.field(F::wrong_key_admission).options[0].label=="Unfiltered"&&
           app.field(F::wrong_key_admission).options[1].label=="2/3 reduction ~1dB"&&
           app.field(F::wrong_key_admission).options[2].label=="1/3 reduction ~2dB"&&
-          app.field(F::wrong_key_admission).options[3].label=="1/10 reduction ~0-3dB"&&
-          app.field(F::wrong_key_admission).options[4].label=="1/100 reduction ~0-6dB*"&&
-          app.field(F::wrong_key_admission).options.back().label=="1/1000 reduction ~0-6dB*",
+          app.field(F::wrong_key_admission).options[3].label=="1/10 reduction ~3dB"&&
+          app.field(F::wrong_key_admission).options[4].label=="1/100 reduction ~6dB*"&&
+          app.field(F::wrong_key_admission).options.back().label=="1/1000 reduction ~6dB*",
           "Wrong Key Admission must expose reversible Robust browser filters and their limits");
     app.select(wrong_key,"guarded");
     check(app.field(F::wrong_key_admission).selected=="guarded","Wrong Key Admission choice was not accepted");

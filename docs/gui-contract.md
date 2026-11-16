@@ -218,15 +218,15 @@ Choices show approximate HF reference visibility losses:
 | Unfiltered | No added filter loss |
 | 2/3 reduction | ~1 dB |
 | 1/3 reduction | ~2 dB |
-| 1/10 reduction | ~0–3 dB |
-| 1/100 reduction | ~0–6 dB* |
-| 1/1000 reduction | ~0–6 dB* |
+| 1/10 reduction | ~3 dB |
+| 1/100 reduction | ~6 dB* |
+| 1/1000 reduction | ~6 dB* |
 
 The compact labels omit the space before `dB`; `*` identifies an extrapolated
 model target, as explained in the control's help.
-The ranges reflect coarse tested grids, not confidence bounds or universal
-sensitivity limits. The deeper choices share a range because the measurements
-do not resolve distinct dB costs. These estimates concern visibility; the
+The rounded estimates summarize coarse tested grids, not confidence bounds or
+universal sensitivity limits. The deeper choices share an estimate because the
+measurements do not resolve distinct dB costs. These estimates concern visibility; the
 original unfiltered reception is preserved.
 Here a fraction means wrong-key DATA bits **remaining relative to Unfiltered**
 in the static-HF reference: 1/10 means 90% filtered. The two deepest choices

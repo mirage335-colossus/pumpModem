@@ -170,13 +170,14 @@ multi-bit browser rule's message-level error rate. See
 [reversible history validation](validation.md#reversible-wrong-key-admission-history--15-november-2026).
 
 The dropdown uses `Unfiltered`, `2/3 reduction ~1dB`,
-`1/3 reduction ~2dB`, `1/10 reduction ~0-3dB`,
-`1/100 reduction ~0-6dB*` and `1/1000 reduction ~0-6dB*`.
+`1/3 reduction ~2dB`, `1/10 reduction ~3dB`,
+`1/100 reduction ~6dB*` and `1/1000 reduction ~6dB*`.
 The asterisk identifies an extrapolated model target in the control's help.
 The dB values are approximate HF reference visibility-loss estimates. The
 1/10 pilot crossing shares the baseline's `(7,10]` interval; both deeper
 crossings occupy `(10,13]`. Those grids motivate coarse 0–3 and 0–6 dB
-ranges, not confidence bounds or distinct exact penalties for the deep tiers.
+ranges, summarized by the compact ~3/~6 dB labels. These are not confidence
+bounds or distinct exact penalties for the deep tiers.
 The earlier finer-grid Guarded/Strict shifts motivate ~1/~2 dB. Clean HF showed
 no extra losses, and long Sub-9 counterexamples still prevent a universal
 added-dB interpretation. Original reception remains retained at every choice.
