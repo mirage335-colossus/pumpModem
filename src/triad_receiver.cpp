@@ -164,6 +164,12 @@ FineCoordinate snap(FineCoordinate coordinate, const AdmissionGrid& grid) {
     return coordinate;
 }
 
+FineCoordinate snap_timing(FineCoordinate coordinate, const AdmissionGrid& grid) {
+    coordinate = snap(coordinate, grid);
+    coordinate.frequency_hz = 0;
+    return coordinate;
+}
+
 } // namespace
 
 std::span<const FrequencyInterval> receiver_detail::public_frequency_intervals(
@@ -217,8 +223,7 @@ FinePreparation receiver_detail::prepare_fine_coordinates(const ReceiverConfig& 
             coarse.segmented_timing_coordinates.size() <= 8,
             "Robust epoch timing proposals exceed the public cap");
     const auto append_timing = [&](const auto& proposed, auto& destination) {
-        auto coordinate = snap(proposed, result.grid);
-        coordinate.frequency_hz = 0;
+        const auto coordinate = snap_timing(proposed, result.grid);
         if (std::ranges::find(destination, coordinate) == destination.end()) destination.push_back(coordinate);
     };
     for (const auto& proposed : coarse.segmented_timing_coordinates)
@@ -227,6 +232,18 @@ FinePreparation receiver_detail::prepare_fine_coordinates(const ReceiverConfig& 
     for (const auto& proposed : coarse.epoch_timing_coordinates)
         append_timing(proposed, result.epoch_timing_coordinates);
     return result;
+}
+
+std::vector<FineCoordinate> receiver_detail::prepare_quarter_clock_timing(const ReceiverConfig& config,
+        const ReceiverSlotPlan& slot, const CoarseResult& coarse, const AdmissionGrid& grid) {
+    auto timing = nominate_quarter_clock_timing(config, slot, coarse);
+    auto next = timing.begin();
+    for (const auto proposed : timing) {
+        const auto coordinate = snap_timing(proposed, grid);
+        if (std::find(timing.begin(), next, coordinate) == next) *next++ = coordinate;
+    }
+    timing.erase(next, timing.end());
+    return timing;
 }
 
 namespace {

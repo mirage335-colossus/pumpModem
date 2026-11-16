@@ -224,6 +224,21 @@ properly weighted likelihood alternatives: shorter gain-coherence models, a
 chronological common-frequency mixture, medium-duration coherent Gaussian-gain
 models (independent and causal AR), and coherent linear-drift matching.
 The original coherent search and its public hypotheses remain available.
+For public variable-channel settings where two fine cells span at least one
+second, the fixed-affine lane also includes two slow complex-Gaussian gain
+alternatives when a positive excursion/diffusion scale is declared. The
+existing 0.5 s, 2 s and infinite-coherence models retain 0.75 total prior mass;
+the two slow scales share the remaining 0.25. Their coherence times are
+`tau` and `4*tau`, where `tau=max(two_fine_cells, 1/lambda)` and `lambda` is
+`2*pi` times the largest declared frequency scale plus half the squared
+phase-diffusion coefficient. A large upper variation allowance does not remove
+the slower models: actual conditions may be calmer inside that bound. This is a bounded model family,
+not a channel estimate: it uses the existing public coordinates and projected
+correlations, adds two constant-size posteriors per fixed-affine coordinate,
+and does not enumerate frequency histories. The public score receipt reports
+the admitted coherence times; zero values mean the slow family was not
+supported. See the [channel-model limits](triad-stochastic.md#nonstationary-channel-research-reconciliation)
+before interpreting these scales physically.
 Differential and segmented spectral statistics propose candidates; they are
 not admission statistics. Retained candidates keep their original public
 prior mass, and a skipped model does not transfer its weight to another model.

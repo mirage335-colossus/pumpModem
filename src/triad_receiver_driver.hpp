@@ -24,6 +24,11 @@ struct FinePreparation {
 // supply candidates to an operational fine session.
 FinePreparation prepare_fine_coordinates(const ReceiverConfig&, const ReceiverSlotPlan&, const CoarseResult&);
 
+// Extra raw short-track timing cells on the prepared public grid, available
+// only when the coarse plan did not reserve segmented timing.
+std::vector<FineCoordinate> prepare_quarter_clock_timing(const ReceiverConfig&, const ReceiverSlotPlan&,
+                                                         const CoarseResult&, const AdmissionGrid&);
+
 // Apply once after ordinary model selection and quiet scoring. Never feeds
 // back into fallback scheduling, and can only turn DATA into an erasure.
 void apply_wrong_key_admission(ReceiverSlotScore&, WrongKeyAdmission);

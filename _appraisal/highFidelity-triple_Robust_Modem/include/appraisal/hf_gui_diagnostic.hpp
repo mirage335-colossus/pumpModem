@@ -17,6 +17,8 @@ struct HfGuiCleanInput {
     // Present only in the wrong-key evaluator. It selects an independent
     // noisy public preparation, never the receiver's original preparation.
     const datapump::Crypto* transmitter_key = nullptr;
+    bool tracked_frequency_span = false;
+    bool quarter_clock_shadow = false;
 };
 
 // Score two existing branches on one immutable complete public aperture.

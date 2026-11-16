@@ -94,7 +94,8 @@ struct Options {
     bool hf_predictive_quiet=false;
     bool hf_compare_admitted_models=false, hf_phase_filter=false, hf_phase_filter_receiver=false, hf_phase_filter_paths=false;
     bool hf_phase_filter_sticky=false, hf_phase_bridge=false;
-    bool hf_gui_clean_diagnostic=false;
+    bool hf_gui_clean_diagnostic=false, hf_gui_tracked_frequency_span=false;
+    bool hf_gui_quarter_clock_shadow=false;
     bool hf_gannon_native_diagnostic=false;
     bool hf_gannon_gain_variance_diagnostic=false;
     bool hf_target_presence_diagnostic=false;
@@ -129,6 +130,8 @@ Options parse(int argc,char** argv) {
         if(key=="--hf-phase-filter-sticky") {o.hf_phase_filter_sticky=true;continue;}
         if(key=="--hf-phase-bridge") {o.hf_phase_bridge=true;continue;}
         if(key=="--hf-gui-clean-diagnostic") {o.hf_gui_clean_diagnostic=true;continue;}
+        if(key=="--hf-gui-tracked-frequency-span") {o.hf_gui_tracked_frequency_span=true;continue;}
+        if(key=="--hf-gui-quarter-clock-shadow") {o.hf_gui_quarter_clock_shadow=true;continue;}
         if(key=="--hf-gannon-native-diagnostic") {o.hf_gannon_native_diagnostic=true;continue;}
         if(key=="--hf-gannon-gain-variance-diagnostic") {o.hf_gannon_gain_variance_diagnostic=true;continue;}
         if(key=="--hf-target-presence-diagnostic") {o.hf_target_presence_diagnostic=true;continue;}
@@ -267,6 +270,10 @@ Options parse(int argc,char** argv) {
         "gui-varying requires hf-gui-native, Helper-off CPU, wanted/noise/wrong-key, and an explicit capture-digest-slot");
     require(!o.hf_gui_clean_diagnostic||o.mode=="gui-varying",
         "HF GUI clean comparison requires gui-varying");
+    require(!o.hf_gui_tracked_frequency_span||o.hf_gui_clean_diagnostic,
+        "HF GUI tracked frequency span requires the clean GUI comparison");
+    require(!o.hf_gui_quarter_clock_shadow||o.hf_gui_clean_diagnostic,
+        "HF GUI quarter-clock shadow requires the clean GUI comparison");
     require(!o.hf_phase_refinement||(o.mode=="hf-search"||((o.mode=="receive"||o.mode=="slot")&&o.hf_public_phase_receiver)),
         "HF phase refinement requires hf-search or the public phase receiver in receive/slot mode");
     require(!o.hf_physical_diagnostic||(o.mode=="hf-search"&&o.control=="wanted"),
@@ -1707,6 +1714,8 @@ Json plan_json(const Setup& s,const Options& o) {
     if(o.hf_phase_filter_sticky)result["hf_phase_filter_sticky_requested"]=true;
     if(o.hf_phase_bridge)result["hf_phase_bridge_requested"]=true;
     if(o.hf_gui_clean_diagnostic)result["hf_gui_clean_diagnostic_requested"]=true;
+    if(o.hf_gui_tracked_frequency_span)result["hf_gui_tracked_frequency_span_requested"]=true;
+    if(o.hf_gui_quarter_clock_shadow)result["hf_gui_quarter_clock_shadow_requested"]=true;
     if(s.scenario.channel.fullwave_reflection) {
         result["channel_renderer"]="hf_fullwave_reflection";
         result["fullwave_reflection"]=fullwave_reflection_json();
@@ -1996,6 +2005,7 @@ Json score_json(const StreamSlotReceipt& receipt) {
         {"varying_basis_rows",r.varying_basis_rows},{"varying_coarse_seconds",r.varying_coarse_seconds},{"varying_fine_seconds",r.varying_fine_seconds},
         {"varying_line_frequency_hz",r.varying_line_frequency_hz},{"varying_line_log_evidence",r.varying_line_log_evidence},
         {"coherent_gain_status",r.coherent_gain_status},{"coherent_gain_seconds",r.coherent_gain_seconds},
+        {"slow_gain_coherence_seconds",Json::Array{r.slow_gain_coherence_seconds[0],r.slow_gain_coherence_seconds[1]}},
         {"drift_status",r.drift_status},{"drift_seconds",r.drift_seconds},{"drift_slopes",r.drift_slopes},
         {"drift_frequency_bins",r.drift_frequency_bins},{"workspace_peak_bytes",r.workspace_peak_bytes},{"reason",r.reason},
         {"commit_wall_seconds",receipt.commit_timing?Json(receipt.commit_timing->wall_seconds):Json{}},
@@ -4226,7 +4236,9 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline) {
                 require(std::isfinite(static_cast<double>(clean_selected_energy))&&
                     std::isfinite(static_cast<double>(difference_selected_energy)),
                     "clean comparison sample energy exceeds its finite numeric bound");
-                clean_input=appraisal::HfGuiCleanInput{clean_capture,o.control=="wrong-key"?&s.tx_key:nullptr};
+                clean_input=appraisal::HfGuiCleanInput{clean_capture,
+                    o.control=="wrong-key"?&s.tx_key:nullptr,o.hf_gui_tracked_frequency_span,
+                    o.hf_gui_quarter_clock_shadow};
             }
             auto diagnostic=appraisal::diagnose_hf_gui_varying(s.receiver,diagnostic_slot,s.key,
                 diagnostic_capture,diagnostic_validity,s.resources.workers,*s.stream.memory_limit_bytes,
@@ -4614,6 +4626,8 @@ int main(int argc,char** argv) {
             result["hf_phase_filter_sticky_usage"]="--hf-phase-filter-sticky splits the existing correlated branch equally between its original walk and a slower fixed transition prior; requires the shadow or receive phase filter and excludes private phase path diagnostics";
             result["hf_phase_bridge_usage"]="--hf-phase-bridge splits the correlated branch equally between its existing family and a phase- and frequency-continuous four-second edge model; requires the shadow or receive phase filter and excludes private phase path diagnostics";
             result["hf_gui_clean_diagnostic_usage"]="--hf-gui-clean-diagnostic adds a thermal-noise-off twin to gui-varying; alternate-key truth is used only by the wrong-key evaluator";
+            result["hf_gui_tracked_frequency_span_usage"]="--hf-gui-tracked-frequency-span measures unprojected tracked-template energy on the clean receiver-key comparison; requires --hf-gui-clean-diagnostic";
+            result["hf_gui_quarter_clock_shadow_usage"]="--hf-gui-quarter-clock-shadow compares the short tracker with up to eight public quarter-clock timing nominations; requires --hf-gui-clean-diagnostic";
             result["hf_gannon_native_diagnostic_usage"]="--hf-gannon-native-diagnostic adds a target-absent full-prefix reference and private clean/noisy native coherent-gain comparison to a Gannon reference physical shadow with full timing";
             result["hf_gannon_gain_variance_diagnostic_usage"]="--hf-gannon-gain-variance-diagnostic adds the fixed independent block-variance scores at retained public cells to the Gannon native comparison with refinement";
             result["hf_target_presence_diagnostic_usage"]="--hf-target-presence-diagnostic uses --capture-digest-slot N on an ordinary direct lens, phase-screen, vector-oblique or Gannon receive to compare private known target-present, absent and alternate-bit means after native scoring";

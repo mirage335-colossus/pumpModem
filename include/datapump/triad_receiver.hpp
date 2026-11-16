@@ -95,6 +95,8 @@ struct ReceiverSlotScore {
     bool complete = false, all_valid = false, zero_h0_verified = false;
     bool noise_statistics_valid = false, operational_passes_conditional_bound = false;
     std::array<double, 2> bit_evidence{}, adaptive_bit_evidence{}, combined_bit_evidence{};
+    // Added fixed-affine gain priors, or zeros outside their public support.
+    std::array<double, 2> slow_gain_coherence_seconds{};
     // Prior-corrected evidence actually used for operational bit selection.
     std::array<double, 2> operational_bit_evidence{};
     double operational_bit_log_separation = 0, operational_minimum_bit_log_separation = 0;
@@ -118,7 +120,10 @@ struct ReceiverSlotScore {
     std::array<double, 2> varying_bit_evidence{};
     std::string varying_status;
     std::size_t varying_frequency_states = 0;
+    // Component receipts before the fixed short-gain / frequency mixture.
+    std::array<double, 2> fixed_varying_bit_evidence{};
     std::array<double, 2> tracked_frequency_bit_evidence{};
+    double tracked_frequency_log_prior_adjustment = 0;
     std::size_t coherent_gain_candidates = 0, coherent_gain_blocks = 0, coherent_gain_frequency_states = 0;
     std::array<double, 2> coherent_gain_bit_evidence{};
     double coherent_gain_seconds = 0;

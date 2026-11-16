@@ -95,6 +95,38 @@ induced Doppler. Keep these distinctions when extending the native channel and
 receiver, and reconsider temporal bases or bounded causal state inference when
 fixed-block model mismatch remains material.
 
+The native receiver now reserves a small slow complex-gain mixture for public
+variable-channel configurations whose fine-cell cadence is itself slow. It
+keeps the original 0.5 s, 2 s and infinite-coherence family at 75% prior mass,
+and gives 12.5% each to two additional first-order complex-Gaussian gain laws.
+Their correlation is exponential, `R(dt)=exp(-|dt|/tau)`, with coherence
+scales derived from a declared rate, floored at two fine cells, and four times
+that scale. The receiver
+reuses its existing projections and channel sufficient statistics; this adds
+two constant-size posteriors per fixed-affine coordinate, not a bank of path
+histories. It is enabled for positive declared variation when two fine cells
+span at least one second. A larger declared bound does not exclude slower
+actual evolution, so it must not disable these slow alternatives. The cadence
+gate and scale floor are resource/model-support choices, not evidence that the
+physical channel is OU or that the receiver follows the maximum declared rate.
+
+An excursion bound does not determine the stochastic spectrum or whether the
+complex gain has constant magnitude. Exponential complex-gain covariance gives
+a Lorentzian spectrum; ITU-R F.1487's Gaussian Doppler tap is a distinct law,
+and a smooth bounded frequency wander or pure phase diffusion is distinct
+again. Ghandour-Haidar, Ros and Brossier compare correlation-matched and
+estimation-error-based AR(1) parameters for Jakes fading and show that the
+preferred approximation depends on the estimation objective; that channel
+estimation result does not validate this modem's gain model
+([Signal Processing, 2012](https://doi.org/10.1016/j.sigpro.2011.08.014)).
+Noncoherent low-SNR capacity also depends on the temporal fading covariance and
+the peak/average power constraints, so an AWGN trend or a single spectral width
+cannot establish the receiver's weak-signal floor
+([Sethuraman et al.](https://doi.org/10.1109/TIT.2009.2012995)). Keep the slow
+models as fixed-prior alternatives and assess matched OU, deterministic-wander,
+phase-only, negative-control and quiet-completion cases separately. Their
+presence does not guarantee reception outside the supported laws or bounds.
+
 The native weak-sweep discriminator also separates structured motion from an
 information limit: a weak static signal passed, a bounded linear sweep missed,
 and a labelled oracle dechirp restored admission. Exact timing alone did not.

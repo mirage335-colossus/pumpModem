@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "name": "vlf-native-slow-gain-preservation",
+  "purpose": "Fixed preservation cohort after the complete weak-wander repair: fresh noise on the same path, complete noise-only and strong wrong-key controls, strong wanted, clean actual propagation within unchanged varying receiver bounds, and a different one-hour phase trajectory with the same maximum frequency excursion. Each is one deterministic observation; no population, reliability, outage-duration or capacity claim. No selection of replacement seeds after outcomes.",
+  "max_wall_seconds": 1400,
+  "per_trial_wall_seconds": 240,
+  "max_trials": 6,
+  "max_samples": 100000000,
+  "episodes": [
+    {
+      "id": "vlf-weak-wander-fresh-noise",
+      "scenario": "vlf-phase-wander",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "tapered-rrc",
+      "seed": 9489,
+      "noise_seed": 94891,
+      "message": "e",
+      "max_samples": 70000000,
+      "max_wall_seconds": 240
+    },
+    {
+      "id": "vlf-weak-wander-noise-control",
+      "scenario": "vlf-phase-wander",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "tapered-rrc",
+      "seed": 9489,
+      "noise_seed": 94892,
+      "control": "noise",
+      "max_samples": 70000000,
+      "max_wall_seconds": 240
+    },
+    {
+      "id": "vlf-weak-wander-wrong-key-control",
+      "scenario": "vlf-phase-wander",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "tapered-rrc",
+      "seed": 9489,
+      "noise_seed": 94893,
+      "control": "wrong-key",
+      "max_samples": 70000000,
+      "max_wall_seconds": 240,
+      "cn0_db_hz": 20
+    },
+    {
+      "id": "vlf-bright-wander-wanted",
+      "scenario": "vlf-phase-wander",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "tapered-rrc",
+      "seed": 5489,
+      "noise_seed": 5489,
+      "message": "e",
+      "cn0_db_hz": 20,
+      "max_samples": 70000000,
+      "max_wall_seconds": 240
+    },
+    {
+      "id": "vlf-declared-bound-clean",
+      "scenario": "vlf-varying-clean",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "tapered-rrc",
+      "seed": 9489,
+      "noise_seed": 94894,
+      "max_samples": 70000000,
+      "max_wall_seconds": 240
+    },
+    {
+      "id": "vlf-independent-hour-wander",
+      "scenario": "vlf-phase-wander-hour",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "tapered-rrc",
+      "seed": 9489,
+      "noise_seed": 94895,
+      "max_samples": 70000000,
+      "max_wall_seconds": 240
+    }
+  ]
+}

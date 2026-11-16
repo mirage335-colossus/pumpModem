@@ -98,6 +98,12 @@ struct CoarseResult {
     CoarseProgress work;
 };
 
+// Optional shortlist for the short frequency tracker when its segmented
+// timing geometry is unavailable. The fine preparation still snaps these
+// points to the original public grid. No search or receiver decision here.
+std::vector<FineCoordinate> nominate_quarter_clock_timing(
+    const ReceiverConfig&, const ReceiverSlotPlan&, const CoarseResult&);
+
 // What frequency acquisition adds while it overlaps preparation: its live
 // scratch, and the most jobs any one of its waves runs at once.
 struct AssistanceBound {

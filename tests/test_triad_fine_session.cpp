@@ -1,6 +1,8 @@
 #include "triad_receiver_fine.hpp"
+#include "triad_receiver_executor.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -8,8 +10,15 @@
 #include <limits>
 #include <mutex>
 #include <numbers>
+#include <numeric>
 #include <stdexcept>
 #include <thread>
+
+extern "C" int triad_gaussian_update_v1(
+    std::size_t taps, std::size_t candidates, std::size_t models, std::size_t blocks,
+    std::size_t first, std::size_t stop, const double* correlations, const double* grams,
+    const double* power, const double* transitions, double* mean, double* covariance,
+    double* scores, double* diagnostics) noexcept;
 
 namespace {
 using namespace datapump;
@@ -49,7 +58,7 @@ struct Fixture {
     std::array<FineCoordinate, 1> coordinates{{{0, 0, 0, 0}}};
     unsigned fs;
 
-    explicit Fixture(unsigned sample_rate = 2400, double inner_rate = 120)
+    explicit Fixture(unsigned sample_rate = 2400, double inner_rate = 120, bool extend_for_source = false)
         : fs(sample_rate) {
         config.sample_rate_hz = fs;
         config.data_if_hz = 1725;
@@ -69,8 +78,13 @@ struct Fixture {
         slot.format.symbol_ordinal = 3117;
         slot.window_capture_lead_seconds = -17;
         slot.source_start_seconds = 18;
-        iq.resize(slot.stop_sample - slot.first_sample);
         PatternSource source(slot.format, key, 1);
+        if (extend_for_source) {
+            slot.stop_sample = slot.first_sample + std::max<std::uint64_t>(
+                19 * fs + 17, source.geometry().source_samples + 2 * fs);
+            slot.quiet_stop_sample = slot.stop_sample - 2 * fs;
+        }
+        iq.resize(slot.stop_sample - slot.first_sample);
         check(source.geometry().source_samples < iq.size() - fs, "public fine fixture does not contain DATA support");
         source.render(0, std::span(iq).subspan(fs, source.geometry().source_samples));
     }
@@ -615,6 +629,338 @@ void cold_maximum_states() {
           "cold ceiling must execute actual capped emission and posterior transitions without admission");
 }
 
+double test_log_add(double left, double right) {
+    const auto minus_infinity = -std::numeric_limits<double>::infinity();
+    if (left == minus_infinity) return right;
+    if (right == minus_infinity) return left;
+    return std::max(left, right) + std::log1p(std::exp(-std::abs(left - right)));
+}
+
+void slow_gain_coherence_is_bounded_and_normalized() {
+    // This public geometry has one-second fine cells. Its declared .04 Hz
+    // phase/frequency scale admits the slow gain alternatives. The phase
+    // trajectory is deterministic and independent of the receiver model bank.
+    const Fixture f(240, 6, true);
+    auto samples = f.iq;
+    for (std::size_t i = 0; i < samples.size(); ++i) {
+        const auto elapsed = static_cast<double>(i) / f.fs;
+        samples[i] *= std::polar(1., 2.2 * std::sin(2 * std::numbers::pi * elapsed / 400.));
+    }
+    const FineObservation extent{f.slot.first_sample, samples.size(), FineRunKind::probe, true};
+
+    struct Result { FineProgress progress; ReceiverSlotScore score; };
+    const auto run = [&](ReceiverConfig config, unsigned workers, bool prefix) {
+        const auto memory = fine_workspace(config, f.slot, extent, workers);
+        FineSession session(config, f.slot, f.key, extent, samples, {}, f.coordinates,
+                            100, 12, workers, memory);
+        if (prefix) session.advance_to(f.fs * 11);
+        session.advance_to(extent.rows);
+        Result result;
+        session.finish(result.score);
+        result.progress = session.progress();
+        return result;
+    };
+
+    auto static_config = f.config;
+    const auto static_result = run(static_config, 1, false);
+    auto slow_config = f.config;
+    slow_config.time_varying_channel = true;
+    slow_config.time_varying_common_doppler_hz = .04;
+    slow_config.time_varying_atmospheric_hz = .04;
+    const auto slow_serial = run(slow_config, 1, false);
+    const auto slow_parallel = run(slow_config, 2, true);
+    const auto old_workspace = fine_workspace(static_config, f.slot, extent, 1);
+    const auto slow_workspace = fine_workspace(slow_config, f.slot, extent, 1);
+
+    const auto expected_tau = 1 / (2 * std::numbers::pi * .04);
+    check(slow_serial.progress.slow_gain_coherence_seconds[0] == expected_tau &&
+          slow_serial.progress.slow_gain_coherence_seconds[1] == 4 * expected_tau &&
+          std::isfinite(slow_serial.progress.slow_gain_bit_evidence[0]) &&
+          std::isfinite(slow_serial.progress.slow_gain_bit_evidence[1]),
+          "eligible slow geometry must report both fixed slow-coherence alternatives and their evidence");
+    check(static_result.progress.slow_gain_coherence_seconds == std::array<double, 2>{} &&
+          static_result.progress.slow_gain_bit_evidence == std::array<double, 2>{} &&
+          !static_config.time_varying_channel,
+          "the explicit Off path must not acquire slow gain alternatives");
+    check(slow_workspace > old_workspace,
+          "admission must reserve the additional slow channel posterior state");
+    rejects<ReceiverWorkspaceError>([&] {
+        FineSession underquoted(slow_config, f.slot, f.key, extent, samples, {}, f.coordinates,
+                                100, 12, 1, slow_workspace - 1);
+    }, "slow channel state must be included in the admitted fine workspace");
+
+    // The old affine likelihood keeps .75 prior mass and the two new
+    // normalized OU likelihoods share .25. This checks the applied mixture
+    // itself, not merely the geometry's scale-selection formula.
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        const auto expected = test_log_add(std::log(.75) + static_result.progress.initial_affine.bit_scores[bit],
+            std::log(.25) + slow_serial.progress.slow_gain_bit_evidence[bit]);
+        check(std::abs(expected - slow_serial.score.bit_evidence[bit]) < 1e-10,
+              "slow gain evidence must enter the existing affine likelihood with its fixed prior mass");
+    }
+
+    const auto& old_lane = static_result.progress.initial_affine;
+    const auto& new_lane = slow_serial.progress.initial_affine;
+    check(new_lane.basis_rows == old_lane.basis_rows && new_lane.basis_calls == old_lane.basis_calls &&
+          new_lane.positive_basis_blocks == old_lane.positive_basis_blocks &&
+          new_lane.gaussian_updates == old_lane.gaussian_updates +
+              slow_serial.progress.blocks * old_lane.initial_states * 3 * 2 &&
+          slow_serial.progress.adaptive.transition_edges == static_result.progress.adaptive.transition_edges &&
+          slow_serial.progress.adaptive.basis_rows == static_result.progress.adaptive.basis_rows,
+          "slow gain work must reuse affine basis statistics without expanding adaptive search");
+    check(slow_parallel.progress.slow_gain_coherence_seconds == slow_serial.progress.slow_gain_coherence_seconds &&
+          slow_parallel.progress.slow_gain_bit_evidence == slow_serial.progress.slow_gain_bit_evidence &&
+          slow_parallel.score.bit_evidence == slow_serial.score.bit_evidence &&
+          slow_parallel.progress.initial_affine.basis_rows == new_lane.basis_rows &&
+          slow_parallel.progress.adaptive.transition_edges == slow_serial.progress.adaptive.transition_edges,
+          "slow gain likelihood must be invariant to prefix checkpoints and worker count");
+
+    // A larger declared allowance must retain the slower actual trajectory
+    // above. Two fine cells, rather than the upper bound, set the scale floor.
+    auto wide_config = slow_config;
+    wide_config.time_varying_common_doppler_hz = .1;
+    wide_config.time_varying_atmospheric_hz = .1;
+    auto wide_off = wide_config;
+    wide_off.time_varying_channel = false;
+    const auto wide_reference = run(wide_off, 1, false);
+    const auto wide_serial = run(wide_config, 1, false);
+    const auto wide_parallel = run(wide_config, 2, true);
+    check(wide_serial.progress.slow_gain_coherence_seconds == std::array<double, 2>{2., 8.} &&
+          fine_workspace(wide_config, f.slot, extent, 1) == slow_workspace,
+          "wide variation bounds must retain the two-cell slow models and the same state reservation");
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        const auto expected = test_log_add(std::log(.75) + wide_reference.progress.initial_affine.bit_scores[bit],
+            std::log(.25) + wide_serial.progress.slow_gain_bit_evidence[bit]);
+        check(std::abs(expected - wide_serial.score.bit_evidence[bit]) < 1e-10,
+              "clamped slow scales must retain the fixed normalized family weights");
+    }
+    check(wide_serial.progress.initial_affine.basis_rows == wide_reference.progress.initial_affine.basis_rows &&
+          wide_serial.progress.initial_affine.gaussian_updates == new_lane.gaussian_updates &&
+          wide_serial.progress.adaptive.transition_edges == wide_reference.progress.adaptive.transition_edges &&
+          wide_serial.progress.adaptive.basis_rows == wide_reference.progress.adaptive.basis_rows &&
+          wide_parallel.score.bit_evidence == wide_serial.score.bit_evidence &&
+          wide_parallel.progress.slow_gain_bit_evidence == wide_serial.progress.slow_gain_bit_evidence,
+          "wide bounds must preserve basis/adaptive work, two-model cost and prefix/worker invariance");
+}
+
+void slow_gain_coherence_gate_preserves_fast_and_off_paths() {
+    const Fixture f(240, 60); // 0.1 s per fine cell
+    const FineObservation extent{f.slot.first_sample, f.iq.size(), FineRunKind::probe, true};
+    const auto run = [&](ReceiverConfig config) {
+        const auto memory = fine_workspace(config, f.slot, extent, 1);
+        FineSession session(config, f.slot, f.key, extent, f.iq, {}, f.coordinates,
+                            100, 12, 1, memory);
+        session.advance_to(extent.rows);
+        ReceiverSlotScore score;
+        session.finish(score);
+        return std::pair{session.progress(), score};
+    };
+    auto fast = f.config;
+    fast.time_varying_channel = true;
+    fast.time_varying_common_doppler_hz = 12; // coherence is shorter than two cells
+    const auto fast_result = run(fast);
+    auto off = f.config;
+    off.time_varying_common_doppler_hz = .04;
+    const auto off_result = run(off);
+    check(fast_result.first.slow_gain_coherence_seconds == std::array<double, 2>{} &&
+          fast_result.first.slow_gain_bit_evidence == std::array<double, 2>{} &&
+          off_result.first.slow_gain_coherence_seconds == std::array<double, 2>{} &&
+          off_result.first.slow_gain_bit_evidence == std::array<double, 2>{},
+          "fast variation and explicit Off must retain the existing fine model set");
+    check(fast_result.first.initial_affine.gaussian_updates == off_result.first.initial_affine.gaussian_updates &&
+          fast_result.first.initial_affine.basis_rows == off_result.first.initial_affine.basis_rows &&
+          fast_result.second.bit_evidence == off_result.second.bit_evidence,
+          "an ineligible slow model must not alter fast or Off likelihood work");
+}
+
+void gaussian_update_matches_dense_complex_covariance() {
+    using C = std::complex<double>;
+    constexpr std::size_t count = 4;
+    constexpr double variance = .7;
+    constexpr double gain_power = .7;
+    constexpr double coherence = 3.7;
+    const std::array<double, count> times{0., .25, .5, .9};
+    const std::array<C, count> basis{{{1., 0.}, {}, {.8, .25}, {-.6, .4}}};
+    const std::array<C, count> observation{{{.8, -.2}, {}, {-.3, .7}, {.2, .1}}};
+
+    // Dense H1 output covariance over observed blocks {0,2,3}. Block 1 is
+    // erased. Its time remains in the AR recurrence: the gap from observed
+    // block 0 to block 2 is .5 s, followed by the merged .4 s terminal step.
+    constexpr std::array<std::size_t, 3> observed{0, 2, 3};
+    std::array<std::array<C, 3>, 3> lower{};
+    const auto covariance_at = [&](std::size_t row, std::size_t col) {
+        const auto i = observed[row], j = observed[col];
+        const auto separation = std::abs(times[i] - times[j]);
+        const auto channel = gain_power * std::exp(-separation / coherence) * basis[i] * std::conj(basis[j]);
+        return channel + (row == col ? C{variance, 0.} : C{});
+    };
+    double log_determinant = 0;
+    for (std::size_t row = 0; row < observed.size(); ++row) {
+        for (std::size_t col = 0; col <= row; ++col) {
+            auto value = covariance_at(row, col);
+            for (std::size_t k = 0; k < col; ++k)
+                value -= lower[row][k] * std::conj(lower[col][k]);
+            if (row == col) {
+                check(std::abs(value.imag()) < 1e-13 && value.real() > 0,
+                      "dense reference covariance must be Hermitian positive definite");
+                lower[row][col] = std::sqrt(value.real());
+                log_determinant += 2 * std::log(lower[row][col].real());
+            } else {
+                lower[row][col] = value / lower[col][col].real();
+            }
+        }
+    }
+    std::array<C, 3> whitened{};
+    for (std::size_t row = 0; row < observed.size(); ++row) {
+        auto value = observation[observed[row]];
+        for (std::size_t col = 0; col < row; ++col)
+            value -= lower[row][col] * whitened[col];
+        whitened[row] = value / lower[row][row].real();
+    }
+    double observed_energy = 0, whitened_energy = 0;
+    for (const auto index : observed) observed_energy += std::norm(observation[index]) / variance;
+    // Solving with the full H1 covariance already whitens the thermal noise.
+    for (const auto value : whitened) whitened_energy += std::norm(value);
+    const auto dense_log_likelihood_ratio = observed_energy - whitened_energy - log_determinant +
+        observed.size() * std::log(variance);
+
+    std::array<double, 1> power{gain_power};
+    std::array<C, 3> means{};
+    std::array<C, 3> posterior{{C{}, C{gain_power, 0.}, C{gain_power, 0.}}};
+    std::array<double, 3> scores{};
+    std::array<double, 2> diagnostics{std::numeric_limits<double>::infinity(), 0.};
+    double last_center = times[0];
+    for (std::size_t first = 0; first < count; first += 2) {
+        const auto blocks = std::min<std::size_t>(2, count - first);
+        std::array<C, 3 * 2> block_correlations{};
+        std::array<C, 3 * 2> block_grams{};
+        std::array<double, 4 * 2> transitions{};
+        for (std::size_t local = 0; local < blocks; ++local) {
+            const auto index = first + local;
+            const auto elapsed = index ? times[index] - last_center : 0.;
+            last_center = times[index];
+            const auto coefficient = std::exp(-elapsed / coherence);
+            const auto transition = 4 * local;
+            transitions[transition] = coefficient * coefficient;
+            transitions[transition + 1] = 1 - coefficient * coefficient;
+            transitions[transition + 2] = coefficient;
+            const auto h0 = (local * 3) * 1;
+            const auto h1 = (local * 3 + 1) * 1;
+            const auto h2 = (local * 3 + 2) * 1;
+            // An erased block has zero projected Gram/correlation. Its
+            // transition still advances the latent channel state.
+            block_correlations[h0] = 0;
+            block_correlations[h1] = std::conj(basis[index]) * observation[index] / variance;
+            block_correlations[h2] = block_correlations[h1];
+            block_grams[h0] = 0;
+            block_grams[h1] = std::norm(basis[index]) / variance;
+            block_grams[h2] = block_grams[h1];
+        }
+        const auto status = triad_gaussian_update_v1(1, 1, 1, blocks, 0, 1,
+            reinterpret_cast<const double*>(block_correlations.data()),
+            reinterpret_cast<const double*>(block_grams.data()), power.data(), transitions.data(),
+            reinterpret_cast<double*>(means.data()), reinterpret_cast<double*>(posterior.data()),
+            scores.data(), diagnostics.data());
+        check(status == 0, "Gaussian update kernel must accept the fixed finite slow-gain likelihood");
+    }
+    check(std::abs(scores[1] - dense_log_likelihood_ratio) < 2e-12,
+          "block Gaussian updates must equal the dense complex covariance likelihood across an erased block and merged tail");
+}
+
+void tracked_span_matches_signed_correlation_without_changing_evidence() {
+    const Fixture f(480);
+    auto config = f.config;
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = config.time_varying_atmospheric_hz = 12;
+    config.spread_delay_seconds = .004;
+    const auto plan = varying_fine_plan(config, f.slot, 2);
+    const auto work = tracked_frequency_span_workspace(f.slot, plan);
+    check(work > 0 && work < 512 * 1024, "tracked span must quote its bounded private workspace");
+    const auto final_rows = plan.block_rows + f.iq.size() % plan.block_rows;
+    check(final_rows > plan.block_rows, "tracked span fixture must merge a nonempty terminal remainder");
+    const auto fft_rows = std::bit_ceil(2 * final_rows);
+    const auto frequency = 2. * f.fs / fft_rows;
+    const std::array<Tap, 2> paths{{{0, 0}, {config.spread_delay_seconds * .5, 0}}};
+    MappedBasis source(config, f.slot, f.key, final_rows, 1);
+    const MappedBasisRow row{0, 1, 0, 0};
+    std::vector<double> offsets(final_rows);
+    std::iota(offsets.begin(), offsets.end(), 0.);
+    std::vector<Complex> rendered(4 * final_rows), observation(f.iq.size());
+    Complex phase{1};
+    for (std::size_t first = 0; first < observation.size();) {
+        const auto rows = observation.size() - first < 2 * plan.block_rows ? final_rows : plan.block_rows;
+        const auto sign = first / plan.block_rows % 2 ? -1. : 1.;
+        const auto increment = std::polar(1., 2 * std::numbers::pi * sign * frequency / f.fs);
+        source.render_pair(row, paths, first, std::span(offsets).first(rows),
+            std::span(rendered).first(4 * rows), {});
+        for (std::size_t i = 0; i < rows; ++i) {
+            observation[first + i] = phase *
+                (Complex{.75, .2} * rendered[2 * rows + i] + Complex{-.3, .6} * rendered[3 * rows + i]);
+            phase *= increment;
+        }
+        first += rows;
+    }
+
+    ReceiverExecutor executor(2);
+    ReceiverSlotScore ordinary, diagnostic;
+    const auto score = [&](const ReceiverConfig& c, ReceiverSlotScore& result, TrackedFrequencySpan* span) {
+        score_varying_fine(c, f.slot, f.key, plan, observation, f.coordinates, {},
+            100, 12, 2, result, {}, executor, nullptr, span);
+    };
+    TrackedFrequencySpan span;
+    score(config, ordinary, nullptr);
+    score(config, diagnostic, &span);
+    check(diagnostic.varying_bit_evidence == ordinary.varying_bit_evidence &&
+          diagnostic.fixed_varying_bit_evidence == ordinary.fixed_varying_bit_evidence &&
+          diagnostic.tracked_frequency_bit_evidence == ordinary.tracked_frequency_bit_evidence &&
+          diagnostic.varying_frequency_states == ordinary.varying_frequency_states &&
+          diagnostic.varying_basis_rows == ordinary.varying_basis_rows,
+          "appraisal span must not alter ordinary tracking evidence or basis work");
+    check(span.coordinates.size() == 1 && span.observation_energy.size() == f.iq.size() / plan.block_rows,
+          "tracked span must retain one timing coordinate across the full public block calendar");
+    double captured = 0, total = 0;
+    bool found_negative = false, found_positive = false;
+    for (std::size_t i = 0; i < span.observation_energy.size(); ++i) {
+        const auto& result = span.coordinates[0].blocks[i][1];
+        captured += result.captured_energy;
+        total += span.observation_energy[i];
+        if (result.verified && span.observation_energy[i] > 1e-6) {
+            found_negative |= (i % 2 == 1 && result.frequency_hz == -frequency);
+            found_positive |= (i % 2 == 0 && result.frequency_hz == frequency);
+        }
+    }
+    check(total > 0 && std::abs(captured - total) < 1e-8 * total && found_negative && found_positive,
+          "the tracked span must capture a known two-column signal at both signed FFT frequencies");
+
+    const std::array<FineCoordinate, 2> nominations{{{0, 0, 0, -10}, {0, 0, 0, 10}}};
+    TrackedFrequencyClockShadow shadow{nominations};
+    ReceiverSlotScore original, expanded;
+    score_varying_fine(config, f.slot, f.key, plan, observation, f.coordinates, {},
+        100, 12, 2, original, {}, executor, nullptr, &span, &shadow);
+    score_varying_fine(config, f.slot, f.key, plan, observation, f.coordinates, nominations,
+        100, 12, 2, expanded, {}, executor);
+    check(original.varying_bit_evidence == ordinary.varying_bit_evidence &&
+          original.tracked_frequency_bit_evidence == ordinary.tracked_frequency_bit_evidence &&
+          original.varying_basis_rows == ordinary.varying_basis_rows &&
+          shadow.ordinary_coordinates == 1 && shadow.added_coordinates == 2 &&
+          shadow.added_basis_rows == 8 * observation.size() && span.coordinates.size() == 3 &&
+          expanded.varying_basis_rows == original.varying_basis_rows + shadow.added_basis_rows,
+          "clock shadow must keep ordinary bit evidence exact and charge every added basis row");
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        check(std::abs(shadow.tracked_bit_evidence[bit] - expanded.tracked_frequency_bit_evidence[bit]) < 1e-10 &&
+              std::abs(shadow.varying_bit_evidence[bit] - expanded.varying_bit_evidence[bit]) < 1e-10 &&
+              std::abs(shadow.tracked_log_prior_adjustment - expanded.tracked_frequency_log_prior_adjustment) < 1e-12,
+              "clock shadow and canonical supplemental timing path must charge the same public prior");
+    }
+    auto coincident = config;
+    coincident.spread_delay_seconds = 1e-16;
+    ReceiverSlotScore coincident_score;
+    score(coincident, coincident_score, &span);
+    check(std::ranges::any_of(span.coordinates[0].blocks,
+          [](const auto& block) { return block[1].rank_ambiguous; }),
+          "a nearly coincident second column must carry a rank uncertainty bound");
+}
+
 enum class IncompleteBulk { mapping_only, missing_counts, missing_statistics, nonzero_null };
 
 class IncompleteFineBulk final : public FineBulk {
@@ -702,6 +1048,10 @@ int main() {
         uninterrupted_interior_probe();
         erasure_and_failure();
         cold_maximum_states();
+        slow_gain_coherence_is_bounded_and_normalized();
+        slow_gain_coherence_gate_preserves_fast_and_off_paths();
+        gaussian_update_matches_dense_complex_covariance();
+        tracked_span_matches_signed_correlation_without_changing_evidence();
         incomplete_bulk_cannot_publish_quiet();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

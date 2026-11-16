@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "name": "vlf-slow-gain-wide-bound-preservation",
+  "purpose": "Fixed complete-message preservation cohort for slow gain models when the declared receiver allowance exceeds the actual variation. Physical pi*sin(2*pi*t/7200) phase, weak wanted/noise controls and strong wrong-key control retain the original inputs; only the atmospheric receiver allowance is widened to 0.002 Hz. Three deterministic episodes, with no population, outage-duration or CPU-capacity claim; communication and negative-control failures remain separate from execution completion.",
+  "max_trials": 3,
+  "max_samples": 100000000,
+  "max_wall_seconds": 1080,
+  "per_trial_wall_seconds": 360,
+  "episodes": [
+    {
+      "id": "vlf-wide-bound-wanted-seed9489",
+      "scenario": "vlf-phase-wander-wide-bound",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "tapered-rrc",
+      "seed": 9489,
+      "noise_seed": 9489,
+      "message": "e",
+      "max_samples": 70000000,
+      "max_wall_seconds": 360
+    },
+    {
+      "id": "vlf-wide-bound-noise-seed94892",
+      "scenario": "vlf-phase-wander-wide-bound",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "tapered-rrc",
+      "seed": 9489,
+      "noise_seed": 94892,
+      "control": "noise",
+      "max_samples": 70000000,
+      "max_wall_seconds": 360
+    },
+    {
+      "id": "vlf-wide-bound-wrong-key-20db-seed94893",
+      "scenario": "vlf-phase-wander-wide-bound",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "tapered-rrc",
+      "seed": 9489,
+      "noise_seed": 94893,
+      "cn0_db_hz": 20,
+      "control": "wrong-key",
+      "max_samples": 70000000,
+      "max_wall_seconds": 360
+    }
+  ]
+}

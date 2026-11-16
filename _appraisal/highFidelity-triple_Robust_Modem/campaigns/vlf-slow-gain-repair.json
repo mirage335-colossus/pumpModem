@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "name": "vlf-native-slow-gain-repair",
+  "purpose": "Current carrier-v1 regression for slow within-bit phase: identical predeclared static and two-hour-wander weak full messages, native configured calendar and scored quiet completion. Preserve the original baseline wander third-bit miss. Same energy, waveform and noise seed; no threshold tuning, time compression, field-sensitivity probability or CPU-capacity claim. Run this two-row discriminator before the separately bounded preservation cohort.",
+  "max_wall_seconds": 480,
+  "per_trial_wall_seconds": 240,
+  "max_trials": 2,
+  "max_samples": 100000000,
+  "episodes": [
+    {
+      "id": "vlf-current-weak-static-complete",
+      "scenario": "vlf-resonant",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "tapered-rrc",
+      "seed": 9489,
+      "max_samples": 70000000,
+      "max_wall_seconds": 240
+    },
+    {
+      "id": "vlf-current-weak-wander-complete",
+      "scenario": "vlf-phase-wander",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "tapered-rrc",
+      "seed": 9489,
+      "max_samples": 70000000,
+      "max_wall_seconds": 240
+    }
+  ]
+}

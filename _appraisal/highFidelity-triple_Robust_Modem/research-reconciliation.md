@@ -1,6 +1,6 @@
 # Research reconciliation for the native appraisal
 
-Updated 14 November 2026. This is an implementation map that reconciles the
+Updated 16 November 2026. This is an implementation map that reconciles the
 existing [`_ref` evidence](../../_ref/highFidelity-triple_Robust_Modem/Astra-6/README.md)
 with focused primary-source checks. It selects bounded model families and
 records evidence limits; it is not a channel calibration or modem result. The
@@ -118,6 +118,114 @@ aggregate distribution score as fidelity proof.
 
 ## Corrections and unresolved evidence
 
+The [16 November native follow-through](../../docs/validation.md#slow-gain-coherence-and-current-appraisal-reconciliation--16-november-2026)
+distinguishes a source revision from a receiver repair. The current carrier-v1
+waveform no longer misses the archived first VLF wander slot, but a complete
+message at the same weak level loses a later bit. Two additional slow Gaussian
+gain laws in the existing native fixed-coordinate scorer recover that message
+without adding timing/frequency histories or lowering thresholds. Old short and
+fully coherent models retain fixed prior mass. Their scales are chosen from
+public geometry, not learned from this failed capture or supplied channel truth.
+
+These laws are receiver alternatives, not a physical VLF or HF spectrum. An
+exponential complex covariance has a Lorentzian spectrum and random magnitude;
+a bounded phase-only excursion establishes neither property. The
+[AR(1)/Jakes comparison by Ghandour-Haidar et al. (2012)](https://doi.org/10.1016/j.sigpro.2011.08.014)
+shows that an approximation suitable for correlation matching need not minimize
+slow-channel estimation error. That result concerns channel estimation, not a
+modem detection bound. The [maintained synthesis](../../docs/triad-stochastic.md#nonstationary-channel-research-reconciliation)
+retains this counterevidence and the conditional low-SNR covariance assumptions.
+Current HF full-model comparison still has a wrong-content counterexample;
+normalized white-noise evidence alone does not establish correct bit selection.
+Neither improvement nor simulation coverage establishes a days-long outage
+guarantee across the five physical path families.
+
+The fresh-`A` HF follow-through gives a more specific counterexample. Its fixed
+short-gain branch prefers the correct bit, while the frequency tracker dominates
+the normalized mixture with the wrong bit; the reversal persists in the paired
+thermal-off capture. A native diagnostic reuses the same per-block correlations
+and Gram matrices to compute, for each bit,
+`max_timing sum_blocks max_frequency(r* G^dagger r)`. Timing stays fixed across
+the whole aperture. The reset transition gives every frequency path positive
+prior; no uncharged path restriction is removed. On this frozen noisy-selected
+bank, correct/wrong clean capture is 10361.928/10428.850 squared-sample units,
+with resolved numerical ranks and direct residual checks.
+
+This supports a conditional mathematical warning, not a global impossibility
+claim. For the same block templates and finite positive Gaussian gain
+innovations, the high-SNR leading log-likelihood term is captured energy divided
+by noise variance. Correlation changes finite history penalties and determinant
+terms but not that span. Thus a finite-coherence Gaussian transport model alone
+cannot reverse this bank's leading wrong-bit ordering; it may still improve a
+finite-SNR result. A changed timing bank, within-block template, singular gain
+constraint or acquisition rule changes the premise. In particular, the ordinary
+coarse clocks and their half-step refinement omit quarter-clock atoms already
+included in the nine-clock public prior. This connects the present diagnosis
+to the earlier [timing-complement result](hf-correlated-presence.md), and makes
+bounded public timing nomination a concrete discriminator before a larger
+channel-model rewrite. Private maxima, known-timing witnesses and added public
+nominations remain distinct from qualified receiver decisions.
+
+The public quarter-clock shadow changes this selected raw-tracker ordering to
+the correct bit in both noisy and thermal-off twins, with unchanged wrong-key
+shadow evidence. However, six complete default-mode trials preserve all 60
+decisions without repairing a message: the earlier affine scorer already
+admits DATA before the tracker in the bright failures. Experimental comparison
+of all models repairs one fresh-`A` bit but still accepts incorrect content.
+Additional affine centers also fail the declared two-episode discriminator:
+wanted scores remain exactly wrong and wrong-key evidence rises. That evaluator
+is removed. Affine already includes residual quarter-clock offsets, so its
+negative result concerns new epoch/arrival anchoring. These findings favor
+improving acquisition support and model validity together; they do not justify
+blindly expanding history search or trusting the largest misspecified evidence.
+One final fixed 15 dB-Hz baseline/candidate full-message pair executes the default
+tracker but recovers no bits: both retain 13 ambiguous active slots. Varying
+basis work rises by 10.7% with unchanged workspace. The production timing
+expansion is therefore removed under its predeclared no-benefit rule; the
+opt-in diagnostic remains. Reconsider promotion only with an executed default
+benefit and matched negative-control preservation, not this selected-aperture
+improvement alone.
+
+Current-waveform EME adds a complementary result. At 30 dB-Hz, comparing the
+already-admitted alternatives repairs the wrong third bit on identical complete
+IQ, while default affine-first admission still fails. This does not rescue the
+generic policy: the HF fresh-`A` comparison accepts wrong content, including
+when strong coherent-line evidence is present. Thus neither unconditional
+comparison nor line presence establishes a safe selection rule. The final
+line-conditioned reason string does not isolate the responsible mixture
+component. Keep acquisition support, model adequacy and decision policy as
+separate unresolved mechanisms; changing a threshold or forcing all work is
+not a demonstrated five-path solution.
+
+Recent work reinforces the distinction between carrier-frequency tracking and
+waveform timing, without qualifying this modem. Sciacca et al.'s LuGRE snapshot
+analysis explicitly scales the local code as well as compensating the carrier
+([11 February 2026 preprint revision, §III-A](https://arxiv.org/html/2601.06081v2)).
+Its known GNSS codes, 0.2–2 s snapshots and coupled Doppler scaling are different
+from independent endpoint clocks and minute-scale unknown data bits. Lin et al.
+report misleading coarse correlation peaks under acoustic multipath and fading,
+and use multiple resampling branches
+([JMSE, 2024](https://www.mdpi.com/2077-1312/12/8/1271)). Their model assumes
+a common Doppler factor across paths; the lake captures were initially high
+SNR, and the weakest/noisier cases retain failures. Neither paper transfers a
+sensitivity or compute ceiling to HF, VLF, groundwave or EME. The implementation
+case for bounded quarter-clock nomination comes from the native omission and
+matched modem evidence, not from importing their reported gains.
+
+Two additional low-cost estimation approaches also have material transfer
+limits. [Schmid et al., Asilomar 2024](https://arxiv.org/html/2408.02312v1)
+combine expectation maximization and belief propagation for blind equalization,
+but the evaluated channel stays constant across 100 BPSK symbols, initialization
+uses a variational autoencoder, and the belief-propagation curves retain
+high-SNR error floors. This is not a qualified replacement for changing gains
+within one long unknown bit. [Li et al., February 2026 revision](https://arxiv.org/html/2507.09268v2)
+reduce fractional delay/Doppler search using separability and Fibonacci
+refinement, but their AFDM estimator relies on chirps, guarded pilots and a
+pilot 30 dB above data. Neither result authorizes narrowing this modem's public
+search or transfers its measured complexity/sensitivity gain. Reconsider these
+methods only with an appropriate observation model and explicit waveform or
+initialization costs, while preserving the current negative controls.
+
 - The mixed-route MF paper at DOI [`10.1587/comex.3.182`](https://doi.org/10.1587/comex.3.182)
   is Nishioka, Inasawa and Miyashita (2014), as corrected in [Fable 70](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/70-implementation-options.md).
   Do not attribute it to Kawano. The paper compares measured and predicted
@@ -136,7 +244,7 @@ aggregate distribution score as fidelity proof.
   unknown-ordinal or address acquisition. Physical transmission-level feasibility
   also needs measured antenna, system/noise, station and environmental inputs.
 
-External sources were checked 13–14 November 2026. This file is a concise decision
+External sources were checked 13–16 November 2026. This file is a concise decision
 map, not an exhaustive literature review; detailed source passages, search
 limits, arithmetic and alternatives remain in the linked research chapters.
 

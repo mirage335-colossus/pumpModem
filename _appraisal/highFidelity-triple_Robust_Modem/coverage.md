@@ -65,6 +65,65 @@ also distinguish physical outage/estimation cost from avoidable receiver loss.
 
 ## Applicability after the admission and carrier-key changes
 
+The subsequent 16 November current-production replay binds native source
+`fc5b4c596aff3866e03a9f2b4c506bec2da3b4eff0d164adcdfcaf61ffade1e6`
+and `independent-apsk-v2-carrier-v1`. Both archived weak VLF first-slot inputs
+now receive the correct bit; the historical single-slot wander miss does not
+reproduce. Extending the same seed, level and uncompressed waveform to complete
+messages reveals a different current miss: static `e` completes, while the
+phase-wander message loses its third DATA bit to QUIET and is rejected after
+premature completion. That slot favors the correct bit by 24.408 nats, but its
+presence score is 16.729 against 21.493. Both short-block alternatives remain
+unavailable at the 60-second fine-cell cadence. This is a current complete-message
+failure, distinct from the obsolete first-slot result and from field qualification.
+
+The subsequent [native slow-gain repair and matched preservation checks](../../docs/validation.md#slow-gain-coherence-and-current-appraisal-reconciliation--16-november-2026)
+recover that complete weak message without changing the waveform, threshold or
+public search. Static, fresh-noise, bright, clean-within-varying-bound and a
+different one-hour phase-history wanted case also complete. Noise-only remains
+quiet; strong wrong-key false DATA remains on both original and repaired source,
+with no accepted content in that VLF control. Unsuccessful-search replays cost
+about 10–11% more in single observations. These scoped gains do not qualify
+field sensitivity, multi-day outages, other link families or current CPU capacity.
+
+The subsequent HF timing diagnosis finds a raw frequency-tracker support gap:
+public quarter-clock nominations correct one selected bit in noisy and clean
+twins. Full-message default-mode checks preserve all 60 decisions without a
+repair, and the predeclared 15 dB-Hz pair recovers no bits while adding 10.7%
+varying-stage work. Production activation is removed; its opt-in diagnostic
+and theoretical support finding remain. Additional affine centers also fail
+their wanted/control discriminator and are removed. These negative findings
+prevent selected-slot improvements from becoming unsupported default search.
+
+A final six-episode current-waveform reconciliation also rerenders the original
+EME disk 30/60 dB-Hz pair and the 1 MHz/30 MHz land reference/weak cases. EME at
+30 still accepts one wrong bit; its same-seed 60 dB-Hz message now completes
+correctly. The older waveform's failure at both levels is therefore not current
+evidence of a persistent high-energy floor. Both land reference messages complete;
+the −16 dB-Hz 1 MHz and 0 dB-Hz 30 MHz cases each miss all three active slots.
+The groundwave reference/weak cases use different original seeds, so they are
+not paired sensitivity curves. All six execute, with three communication
+failures, in 79.778 s. No slow gain models activate in these profiles, so their
+outcomes cannot be attributed to that repair. The [current-source record](../../docs/validation.md#current-waveform-cross-path-reconciliation)
+binds the final binary, inputs, limits and remaining physical coverage gaps.
+One matched EME 30 dB-Hz compare-admitted diagnostic repairs the wrong third bit
+and completes the message, at 20.222 rather than 12.847 s. Its evidence is useful,
+but the HF incorrect-content counterexamples still prevent general promotion;
+a retained coherent line occurs in those failures too. Current EME default
+behavior therefore remains failed on the 30 dB-Hz episode.
+
+Current HF GUI replays also retain the strong-signal failure: the 40 dB-Hz
+wanted message accepts a wrong bit, while the matched 20 dB-Hz message completes
+correctly. Comparing all admitted models repairs that bright message, but a
+fresh `A` changes from rejection to accepted wrong content. The wrong-key
+control accepts false content under both policies. General comparator promotion
+therefore remains unsupported by current evidence, even though the old
+wrong-key regression is no longer the distinguishing counterexample. The
+source-bound receipts and frozen inputs are retained temporarily under
+`local-evidence/current-production-repair/` for this production-repair comparison;
+remove redundant raw outputs after its findings and reproduction inputs are
+reconciled into maintained validation.
+
 Documentation/source audit: **16 November 2026**, repository
 `f048f9fbf75b46a7a7754fb88e95ba305117e101`. The failure guides, candidate
 source and frozen campaign definitions are versioned repository records.

@@ -192,7 +192,9 @@ std::vector<Path> lunar_paths(unsigned rings, unsigned azimuths, double limb_wid
 }
 
 std::vector<std::string> scenario_names() {
-    return {"awgn", "vlf-resonant", "vlf-detuned", "vlf-phase-wander", "groundwave-1mhz",
+    return {"awgn", "vlf-resonant", "vlf-detuned", "vlf-phase-wander",
+            "vlf-phase-wander-wide-bound",
+            "vlf-varying-clean", "vlf-phase-wander-hour", "groundwave-1mhz",
             "groundwave-1mhz-sea", "groundwave-1mhz-night", "groundwave-30mhz",
             "groundwave-30mhz-land", "hf-quiet", "hf-disturbed", "hf-transition", "hf-nvis-disturbed", "hf-drm6",
             "hf-watterson-i1", "hf-watterson-i3", "hf-ox-split", "hf-ox-cancellation", "hf-trough-static", "hf-trough-phase",
@@ -305,7 +307,9 @@ Scenario make_scenario(const std::string& id) {
         }
         return s;
     }
-    if (id == "vlf-resonant" || id == "vlf-detuned" || id == "vlf-phase-wander") {
+    if (id == "vlf-resonant" || id == "vlf-detuned" || id == "vlf-phase-wander" ||
+        id == "vlf-phase-wander-wide-bound" ||
+        id == "vlf-varying-clean" || id == "vlf-phase-wander-hour") {
         auto s = base(id, "sub-9kHz-200ft");
         s.channel.rf_hz = 8270;
         s.channel.paths[0].delay_seconds = 1e6 / c;
@@ -342,17 +346,41 @@ Scenario make_scenario(const std::string& id) {
         if (id == "vlf-detuned")
             s.assumptions += " Added +4.135-Hz detuning and +1e-5-Hz/s drift are deterministic "
                              "sensitivity choices, not a weather population or time-varying C model.";
-        if (id == "vlf-phase-wander") {
-            s.channel.paths[0].phase_wander_amplitude_radians=pi;
-            s.channel.paths[0].phase_wander_period_seconds=7200;
+        if (id == "vlf-phase-wander" || id == "vlf-phase-wander-wide-bound" ||
+            id == "vlf-varying-clean" || id == "vlf-phase-wander-hour") {
             s.bounds.varying=true;
             s.bounds.atmospheric_hz=pi/7200;
-            s.provenance += "; Fable-5.2/81 section2 A1 smooth carrier-phase sensitivity";
-            s.assumptions += " Signal phase gains pi*sin(2*pi*t/7200), maximum residual frequency "
-                "pi/7200Hz, continuous through all public slots. This is a constructed two-hour "
-                "ionospheric phase sensitivity, not a measured waveguide law. No duplicate Doppler "
-                "or geometric group delay is added. The receiver retains its oscillator prior "
-                "and additionally declares time-varying atmospheric support pi/7200Hz.";
+            if (id == "vlf-phase-wander" || id == "vlf-phase-wander-wide-bound") {
+                s.channel.paths[0].phase_wander_amplitude_radians=pi;
+                s.channel.paths[0].phase_wander_period_seconds=7200;
+                s.provenance += "; Fable-5.2/81 section2 A1 smooth carrier-phase sensitivity";
+                s.assumptions += " Signal phase gains pi*sin(2*pi*t/7200), maximum residual frequency "
+                    "pi/7200Hz, continuous through all public slots. This is a constructed two-hour "
+                    "ionospheric phase sensitivity, not a measured waveguide law. No duplicate Doppler "
+                    "or geometric group delay is added. The receiver retains its oscillator prior "
+                    "and additionally declares time-varying atmospheric support pi/7200Hz.";
+                if (id == "vlf-phase-wander-wide-bound") {
+                    s.bounds.atmospheric_hz=.002;
+                    s.provenance += "; independent wider receiver-bound control";
+                    s.assumptions += " The physical phase history is identical to vlf-phase-wander; only "
+                        "the receiver's declared time-varying atmospheric allowance is widened to 0.002Hz. "
+                        "This is a receiver-bound control, not a changed physical propagation law.";
+                }
+            } else if (id == "vlf-varying-clean") {
+                s.provenance += "; declared-bound clean control for Fable-5.2/81 section2 A1 sensitivity";
+                s.assumptions += " Actual propagation phase is constant while the receiver retains the "
+                    "same pi/7200Hz time-varying atmospheric allowance as the paired phase-wander case. "
+                    "This is a constructed clean-within-bound control, not a field channel.";
+            } else {
+                s.channel.paths[0].phase_wander_amplitude_radians=pi/2;
+                s.channel.paths[0].phase_wander_period_seconds=3600;
+                s.provenance += "; constructed independent one-hour phase-history holdout";
+                s.assumptions += " Signal phase gains (pi/2)*sin(2*pi*t/3600), continuous through "
+                    "all public slots. It has the same pi/7200Hz maximum residual frequency as the "
+                    "two-hour phase-wander reference, but a different history. This is a constructed "
+                    "holdout, not a measured waveguide law. No duplicate Doppler or geometric group "
+                    "delay is added; the receiver retains the same oscillator and atmospheric bounds.";
+            }
         }
         return s;
     }

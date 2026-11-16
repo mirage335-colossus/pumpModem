@@ -213,7 +213,8 @@ EPISODE_KEYS = {"id", "scenario", "mode", "waveform", "seed", "cn0_db_hz", "cont
                 "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "fec", "fade_slots", "capture_lead_seconds",
                 "hf_trajectory_seed", "hf_trajectory_offset_seconds", "noise_seed", "hf_gannon_native_diagnostic",
                 "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic",
-                "hf_correlated_gain_shadow", "hf_correlated_gain_receiver", "hf_predictive_quiet", "reception_requirement"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS
+                "hf_correlated_gain_shadow", "hf_correlated_gain_receiver", "hf_predictive_quiet", "reception_requirement",
+                "hf_gui_tracked_frequency_span", "hf_gui_quarter_clock_shadow"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS
 MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose", "hf-search", "gui-varying"}
 CONTROLS = {"wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap", "eof"}
 BACKENDS = {"cpu", "cuda", "vulkan", "gpu"}
@@ -698,6 +699,14 @@ def _validate_episode(item: Any, index: int, ids: set[str],
             raise CampaignError(f"episodes[{index}]: gui-varying requires native GUI, wanted/noise/wrong-key, Helper-off CPU and explicit capture_digest_slot")
     if "hf_gui_clean_diagnostic" in item and mode != "gui-varying":
         raise CampaignError(f"episodes[{index}]: clean GUI diagnostic requires gui-varying component mode")
+    if "hf_gui_tracked_frequency_span" in item and (
+            not isinstance(item["hf_gui_tracked_frequency_span"], bool) or mode != "gui-varying" or
+            not item.get("hf_gui_clean_diagnostic", False)):
+        raise CampaignError(f"episodes[{index}]: tracked frequency span requires the clean GUI diagnostic")
+    if "hf_gui_quarter_clock_shadow" in item and (
+            not isinstance(item["hf_gui_quarter_clock_shadow"], bool) or mode != "gui-varying" or
+            not item.get("hf_gui_clean_diagnostic", False)):
+        raise CampaignError(f"episodes[{index}]: quarter-clock shadow requires the clean GUI diagnostic")
     if item.get("hf_phase_refinement", False) and not (mode == "hf-search" or
             (mode in {"receive", "slot"} and item.get("hf_public_phase_receiver", False))):
         raise CampaignError(f"episodes[{index}]: phase refinement requires hf-search or the public phase receiver")
@@ -812,6 +821,10 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
                     command.append(option)
             else:
                 command.extend((option, str(value)))
+    if episode.get("hf_gui_tracked_frequency_span", False):
+        command.append("--hf-gui-tracked-frequency-span")
+    if episode.get("hf_gui_quarter_clock_shadow", False):
+        command.append("--hf-gui-quarter-clock-shadow")
     return command
 
 
@@ -2047,6 +2060,164 @@ def _validate_gui_score_pair(diagnostic: dict[str, Any], prior: dict[str, Any],
         raise CampaignError("GUI varying combined presence must match its paired component evidence")
 
 
+def _validate_gui_tracked_span(pair: dict[str, Any], coarse: dict[str, Any], samples: int,
+                               clean_energy: float, scratch: int, requested: bool,
+                               nominations: tuple[dict[str, Any], ...] = ()) -> None:
+    if not requested:
+        if "tracked_frequency_span" in pair:
+            raise CampaignError("unrequested GUI tracked frequency span")
+        return
+    span = pair.get("tracked_frequency_span")
+    if (not isinstance(span, dict) or span.get("used_for_receiver_decisions") is not False or
+            span.get("key_role") != "receiver" or span.get("energy_units") != "sum_of_squared_complex_samples"):
+        raise CampaignError("GUI tracked frequency span must be a private receiver-key energy diagnostic")
+    states = pair["varying"]["frequency_states"]
+    block_rows = pair["varying"]["block_rows"]
+    blocks = pair["varying"]["blocks"]
+    timing = {(c["epoch_offset_seconds"], c["arrival_seconds"], c["clock_ppm"])
+              for name in ("varying_coordinates", "segmented_timing_coordinates") for c in coarse[name]}
+    timing.update((c["epoch_offset_seconds"], c["arrival_seconds"], c["clock_ppm"]) for c in nominations)
+    projections = 2 * len(timing) * blocks * states
+    if (not 0 < len(timing) <= (32 if nominations else 24) or not 0 < states <= 65 or
+            not 0 < block_rows <= samples <= 32768 or not 0 < blocks == samples // block_rows <= 256 or
+            not all(_is_nonnegative_int(span.get(field)) for field in (
+                "timing_coordinates", "frequency_states", "scratch_bound_bytes",
+                "state_projection_bound", "state_projections", "verified_maxima")) or
+            span["timing_coordinates"] != len(timing) or span["frequency_states"] != states or
+            not 0 < span["scratch_bound_bytes"] <= scratch - pair["varying"]["workspace_bytes"] or
+            span["state_projection_bound"] != projections or
+            span["state_projections"] != states * span["verified_maxima"] or
+            span["state_projections"] > projections or
+            not _is_finite_number(span.get("observation_energy")) or
+            not math.isclose(span["observation_energy"], clean_energy, rel_tol=1e-9, abs_tol=1e-12)):
+        raise CampaignError("GUI tracked frequency span differs from its clean observation and public work quote")
+    bits = span.get("bits")
+    if not isinstance(bits, list) or len(bits) != 2:
+        raise CampaignError("GUI tracked frequency span requires both bit energies")
+    for bit, result in enumerate(bits):
+        coordinate = result.get("coordinate") if isinstance(result, dict) else None
+        if (not isinstance(coordinate, dict) or coordinate.get("frequency_hz") != 0 or
+                tuple(coordinate.get(field) for field in ("epoch_offset_seconds", "arrival_seconds", "clock_ppm")) not in timing or
+                not _is_nonnegative_int(result.get("bit")) or result["bit"] != bit or
+                not isinstance(result.get("blocks"), list) or len(result["blocks"]) != blocks or
+                any(not _is_finite_number(result.get(field)) or result[field] < 0 for field in
+                    ("captured_energy", "rank_upper_energy", "residual_energy")) or
+                not result["captured_energy"] <= result["rank_upper_energy"] <= span["observation_energy"]):
+            raise CampaignError("GUI tracked frequency span has invalid bit aperture or energy bounds")
+        captured = energy = 0.
+        for i, row in enumerate(result["blocks"]):
+            first = i * block_rows
+            expected_rows = samples - first if i + 1 == blocks else block_rows
+            if (not isinstance(row, dict) or not all(_is_nonnegative_int(row.get(field)) for field in ("first_row", "rows")) or
+                    row["first_row"] != first or row["rows"] != expected_rows or
+                    not isinstance(row.get("rank_ambiguous"), bool) or not _is_finite_number(row.get("frequency_hz")) or
+                    not all(_is_finite_number(row.get(field)) for field in ("observation_energy", "captured_energy")) or
+                    not 0 <= row["captured_energy"] <= row["observation_energy"]):
+                raise CampaignError("GUI tracked frequency span must preserve each full public block")
+            captured += row["captured_energy"]
+            energy += row["observation_energy"]
+        if any(not math.isclose(left, right, rel_tol=1e-9, abs_tol=1e-12) for left, right in (
+                (captured, result["captured_energy"]), (energy, span["observation_energy"]),
+                (captured + result["residual_energy"], energy))):
+            raise CampaignError("GUI tracked frequency span block totals disagree with captured and residual energy")
+
+
+def _validate_gui_quarter_clock_shadow(diagnostic: dict[str, Any], clean: dict[str, Any],
+                                       episode: dict[str, Any]) -> None:
+    if not episode.get("hf_gui_quarter_clock_shadow", False):
+        if "quarter_clock_shadow" in diagnostic:
+            raise CampaignError("unrequested GUI quarter-clock shadow")
+        return
+    shadow = diagnostic.get("quarter_clock_shadow")
+    if (not isinstance(shadow, dict) or shadow.get("used_for_receiver_decisions") is not False or
+            not isinstance(shadow.get("nominations"), list) or
+            not _is_nonnegative_int(shadow.get("ordinary_segmented_timing_blocks")) or
+            not _is_finite_number(shadow.get("source_midpoint_seconds")) or
+            not _is_nonnegative_int(shadow.get("added_render_row_bound"))):
+        raise CampaignError("GUI quarter-clock shadow must be a private bounded comparison")
+    coarse, prior = diagnostic["coarse"], diagnostic["prior"]
+    lower, upper, bound = (prior[k] for k in ("arrival_lower_seconds", "arrival_upper_seconds", "clock_bound_ppm"))
+    samples = diagnostic["observation_samples"]
+    nominations = tuple(shadow["nominations"])
+    nominal = []
+    if bound and not shadow["ordinary_segmented_timing_blocks"] and diagnostic["varying"]["frequency_states"]:
+        intervals = math.ceil((upper - lower) / .001)
+        for bit in (0, 1):
+            candidates = [p for p in coarse["proposals"] if p["bit"] == bit]
+            if not candidates:
+                continue
+            anchor = max(candidates, key=lambda p: p["score"])["coordinate"]
+            old = anchor["clock_ppm"]
+            for clock in (-.75 * bound, -.25 * bound, .25 * bound, .75 * bound):
+                correction = shadow["source_midpoint_seconds"] * ((clock - old) * 1e-6) / (
+                    (1 + old * 1e-6) * (1 + clock * 1e-6))
+                arrival = min(upper, max(lower, anchor["arrival_seconds"] + correction))
+                if intervals:
+                    step = (upper - lower) / intervals
+                    arrival = lower + round((arrival - lower) / step) * step
+                coordinate = (anchor["epoch_offset_seconds"], arrival, clock)
+                if coordinate not in nominal:
+                    nominal.append(coordinate)
+    if (len(nominations) != len(nominal) or len(nominations) > 8 or
+            shadow["added_render_row_bound"] != 8 * len(nominations) * samples or
+            clean["resources"]["varying_render_row_bound"] + shadow["added_render_row_bound"] > 32 * 2**20):
+        raise CampaignError("GUI quarter-clock shadow differs from the bounded public nomination rule")
+    timing = set()
+    for actual, expected in zip(nominations, nominal):
+        if (not isinstance(actual, dict) or actual.get("frequency_hz") != 0 or
+                any(not _is_finite_number(actual.get(field)) or
+                    not math.isclose(actual[field], value, rel_tol=1e-10, abs_tol=1e-12)
+                    for field, value in zip(("epoch_offset_seconds", "arrival_seconds", "clock_ppm"), expected))):
+            raise CampaignError("GUI quarter-clock shadow must use midpoint-preserving public grid nominations")
+        timing.add((actual["epoch_offset_seconds"], actual["arrival_seconds"], actual["clock_ppm"]))
+    if not nominations:
+        if (shadow.get("status") != "no_public_quarter_clock_nominations" or
+                "noisy" in shadow or "clean" in shadow):
+            raise CampaignError("GUI quarter-clock shadow must report its unavailable scope")
+        return
+    if shadow.get("status") != "scored":
+        raise CampaignError("GUI quarter-clock shadow omitted available nominations")
+    ordinary = {(c["epoch_offset_seconds"], c["arrival_seconds"], c["clock_ppm"])
+                for field in ("varying_coordinates", "segmented_timing_coordinates") for c in coarse[field]}
+    added = len(timing - ordinary)
+    log_average = math.log((len(ordinary) + added) / len(ordinary))
+    weight = math.log(prior["branch_weight"] * prior["ordinary_weight"])
+    def log_add(a: float, b: float) -> float:
+        return max(a, b) + math.log1p(math.exp(-abs(a - b)))
+    for role, original in (("noisy", diagnostic), ("clean", clean["keys"][0]["clean"])):
+        row = shadow.get(role)
+        if (not isinstance(row, dict) or not all(_is_nonnegative_int(row.get(field)) for field in
+                ("ordinary_timing_coordinates", "added_timing_coordinates", "added_basis_rows")) or
+                row["ordinary_timing_coordinates"] != len(ordinary) or row["added_timing_coordinates"] != added or
+                row["added_basis_rows"] not in {2 * added * samples, 4 * added * samples}):
+            raise CampaignError("GUI quarter-clock shadow must score all new cells alongside the original timing bank")
+        for key in ("raw_varying_bit_log_evidence", "tracked_frequency_bit_log_evidence", "prior_corrected_bit_log_evidence"):
+            if not isinstance(row.get(key), list) or len(row[key]) != 2 or not all(map(_is_finite_number, row[key])):
+                raise CampaignError("GUI quarter-clock shadow requires finite paired evidence")
+        varying = original["varying"]
+        adjustment = row.get("tracked_frequency_log_prior_adjustment")
+        old_adjustment = varying["tracked_frequency_log_prior_adjustment"]
+        if not _is_finite_number(adjustment) or not math.isclose(adjustment, old_adjustment + log_average, abs_tol=1e-12):
+            raise CampaignError("GUI quarter-clock shadow changed original public timing prior mass")
+        for bit in range(2):
+            optimal = row["tracked_frequency_bit_log_evidence"][bit] + adjustment
+            expected_varying = log_add(varying["fixed_gain_bit_log_evidence"][bit], optimal) - math.log(2)
+            expected_combined = log_add(original["affine"]["prior_corrected_bit_log_evidence"][bit],
+                expected_varying + varying["selected_log_prior_mass"] + weight)
+            if (optimal + 1e-9 < varying["tracked_frequency_bit_log_evidence"][bit] + old_adjustment or
+                    not math.isclose(row["raw_varying_bit_log_evidence"][bit], expected_varying, abs_tol=1e-9) or
+                    not math.isclose(row["prior_corrected_bit_log_evidence"][bit], expected_combined, abs_tol=1e-9)):
+                raise CampaignError("GUI quarter-clock shadow did not preserve the ordinary evidence mixture")
+        if (not _is_finite_number(row.get("log_presence")) or not math.isclose(row["log_presence"],
+                log_add(*row["prior_corrected_bit_log_evidence"]) - math.log(2), abs_tol=1e-9)):
+            raise CampaignError("GUI quarter-clock shadow presence disagrees with its private scores")
+        span_requested = role == "clean" and episode.get("hf_gui_tracked_frequency_span", False)
+        _validate_gui_tracked_span(dict(row, varying=varying), coarse, samples, clean["clean_energy_sample_sum"],
+            diagnostic["resources"]["scratch_bound_bytes"], span_requested, nominations)
+    if shadow["noisy"]["added_basis_rows"] != shadow["clean"]["added_basis_rows"]:
+        raise CampaignError("GUI quarter-clock shadow work differs between its matched observations")
+
+
 def _validate_gui_clean_comparison(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
     diagnostic, plan = receipt["hf_gui_varying_diagnostic"], receipt["plan"]
     if not episode.get("hf_gui_clean_diagnostic", False):
@@ -2151,6 +2322,9 @@ def _validate_gui_clean_comparison(receipt: dict[str, Any], episode: dict[str, A
             if not isinstance(pair, dict):
                 raise CampaignError("clean GUI comparison requires every declared fine score pair")
             _validate_gui_score_pair(pair, diagnostic["prior"], dict(diagnostic["resources"], render_row_bound=bounds[index]), coarse)
+            _validate_gui_tracked_span(pair, coarse, diagnostic["observation_samples"],
+                clean["clean_energy_sample_sum"], diagnostic["resources"]["scratch_bound_bytes"],
+                index == 0 and episode.get("hf_gui_tracked_frequency_span", False))
             for name in ("affine", "varying"):
                 for field in ("workspace_bytes", "public_grid_log_count", "public_frequency_cells") + (
                         ("blocks", "block_rows", "frequency_states", "status") if name == "varying" else ()):
@@ -2166,6 +2340,7 @@ def _validate_gui_clean_comparison(receipt: dict[str, Any], episode: dict[str, A
             rendered += pair["varying"]["basis_rows"]
     if resources["varying_render_rows"] != rendered or rendered > resources["varying_render_row_bound"]:
         raise CampaignError("clean GUI comparison must count all executed fine pairs within its aggregate render bound")
+    _validate_gui_quarter_clock_shadow(diagnostic, clean, episode)
 
 
 def _validate_fullwave_reflection(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
@@ -5678,6 +5853,10 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
         raise CampaignError("native phase bridge request does not match the frozen episode")
     if plan.get("hf_gui_clean_diagnostic_requested", False) is not episode.get("hf_gui_clean_diagnostic", False):
         raise CampaignError("native clean GUI diagnostic request does not match the frozen episode")
+    if plan.get("hf_gui_tracked_frequency_span_requested", False) is not episode.get("hf_gui_tracked_frequency_span", False):
+        raise CampaignError("native tracked frequency span request does not match the frozen episode")
+    if plan.get("hf_gui_quarter_clock_shadow_requested", False) is not episode.get("hf_gui_quarter_clock_shadow", False):
+        raise CampaignError("native quarter-clock shadow request does not match the frozen episode")
     comparison_requested = episode.get("hf_compare_admitted_models", False)
     policy = "compare_admitted" if comparison_requested else "fallback_only"
     if comparison_requested or _uses_spool(episode) or "receiver_evidence_policy" in plan:

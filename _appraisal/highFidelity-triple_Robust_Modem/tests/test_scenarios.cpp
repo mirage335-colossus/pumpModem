@@ -290,7 +290,8 @@ int main() {
             if (s.channel.lunar)
                 near(s.numerical_horizon_seconds, 360., 0., "spectral lunar horizon changed");
             else if (s.channel.vector_oblique)
-                near(s.numerical_horizon_seconds, appraisal::HfVectorObliqueTable::horizon_seconds, 0.,
+                near(s.numerical_horizon_seconds,
+                     s.channel.vector_oblique->protected_long_calendar ? 4200. : 2400., 0.,
                      "vector oblique finite nonrepeating horizon changed");
             else if (s.channel.vector_two_hop)
                 near(s.numerical_horizon_seconds, appraisal::HfVectorTwoHopTable::horizon_seconds, 0.,
@@ -379,6 +380,117 @@ int main() {
         require(!vlf.physical_level_connected, "VLF circuit falsely connected to absolute field");
         const auto detuned = appraisal::make_scenario("vlf-detuned");
         near(detuned.channel.transmitter.detuning_hz, 4.135, 1e-12, "VLF detuning fixture");
+
+        const auto vlf_wander = appraisal::make_scenario("vlf-phase-wander");
+        const auto vlf_clean_bound = appraisal::make_scenario("vlf-varying-clean");
+        const auto vlf_hour = appraisal::make_scenario("vlf-phase-wander-hour");
+        for (const auto* control : {&vlf_clean_bound, &vlf_hour}) {
+            near(control->waveform.rate_hz, vlf_wander.waveform.rate_hz, 0., "VLF control waveform rate changed");
+            near(control->waveform.requested_bit_seconds, vlf_wander.waveform.requested_bit_seconds, 0.,
+                 "VLF control bit duration changed");
+            near(control->waveform.sample_rate_hz, vlf_wander.waveform.sample_rate_hz, 0.,
+                 "VLF control sample rate changed");
+            require(control->waveform.added_symbols == vlf_wander.waveform.added_symbols &&
+                    control->waveform.fhss == vlf_wander.waveform.fhss,
+                    "VLF control waveform profile changed");
+            near(control->reference_cn0_db_hz, vlf_wander.reference_cn0_db_hz, 0.,
+                 "VLF control reference level changed");
+            near(control->channel.rf_hz, vlf_wander.channel.rf_hz, 0., "VLF control RF changed");
+            near(control->channel.transmitter.inductance_h, vlf_wander.channel.transmitter.inductance_h, 0.,
+                 "VLF control antenna inductance changed");
+            near(control->channel.transmitter.capacitance_f, vlf_wander.channel.transmitter.capacitance_f, 0.,
+                 "VLF control antenna capacitance changed");
+            near(control->channel.transmitter.resistance_ohm, vlf_wander.channel.transmitter.resistance_ohm, 0.,
+                 "VLF control antenna resistance changed");
+            near(control->channel.paths[0].delay_seconds, vlf_wander.channel.paths[0].delay_seconds, 0.,
+                 "VLF control path delay changed");
+            near(control->bounds.frequency_bound_hz, vlf_wander.bounds.frequency_bound_hz, 0.,
+                 "VLF control static-frequency allowance changed");
+            near(control->bounds.atmospheric_hz, pi / 7200, 0.,
+                 "VLF control atmospheric allowance changed");
+            near(control->bounds.arrival_high_seconds, vlf_wander.bounds.arrival_high_seconds, 0.,
+                 "VLF control arrival support changed");
+            near(control->bounds.spread_seconds, vlf_wander.bounds.spread_seconds, 0.,
+                 "VLF control delay-spread support changed");
+            require(control->bounds.varying, "VLF control lost the public changing-channel declaration");
+        }
+        near(vlf_wander.channel.paths[0].phase_wander_amplitude_radians, pi, 0.,
+             "existing VLF phase-wander reference changed");
+        near(vlf_wander.channel.paths[0].phase_wander_period_seconds, 7200, 0.,
+             "existing VLF phase-wander period changed");
+        require(vlf_clean_bound.channel.paths[0].phase_wander_amplitude_radians == 0.,
+                "declared-bound clean VLF control still varies the channel phase");
+        near(vlf_hour.channel.paths[0].phase_wander_amplitude_radians, pi / 2, 0.,
+             "independent VLF trajectory amplitude changed");
+        near(vlf_hour.channel.paths[0].phase_wander_period_seconds, 3600, 0.,
+             "independent VLF trajectory period changed");
+        for (const auto* trajectory : {&vlf_wander, &vlf_hour})
+            near(trajectory->channel.paths[0].phase_wander_amplitude_radians /
+                     trajectory->channel.paths[0].phase_wander_period_seconds,
+                 trajectory->bounds.atmospheric_hz, 1e-15,
+                 "VLF trajectory exceeds or under-declares its maximum residual-frequency allowance");
+
+        const auto vlf_wide = appraisal::make_scenario("vlf-phase-wander-wide-bound");
+        require(vlf_wide.bounds.varying, "wide-bound VLF control lost changing-channel declaration");
+        near(vlf_wide.bounds.atmospheric_hz, .002, 0., "wide-bound VLF receiver allowance changed");
+        require(vlf_wide.bounds.atmospheric_hz > vlf_wander.bounds.atmospheric_hz,
+                "wide-bound VLF control did not widen receiver support");
+        require(vlf_wide.waveform.rate_hz == vlf_wander.waveform.rate_hz &&
+                vlf_wide.waveform.requested_bit_seconds == vlf_wander.waveform.requested_bit_seconds &&
+                vlf_wide.waveform.sample_rate_hz == vlf_wander.waveform.sample_rate_hz &&
+                vlf_wide.waveform.added_symbols == vlf_wander.waveform.added_symbols &&
+                vlf_wide.waveform.fhss == vlf_wander.waveform.fhss,
+                "wide-bound VLF control changed the physical waveform");
+        near(vlf_wide.reference_cn0_db_hz, vlf_wander.reference_cn0_db_hz, 0.,
+             "wide-bound VLF control changed reference noise level");
+        require(vlf_wide.channel.paths.size() == vlf_wander.channel.paths.size() &&
+                vlf_wide.channel.paths.size() == 1,
+                "wide-bound VLF control changed physical path count");
+        const auto& wide_path = vlf_wide.channel.paths[0];
+        const auto& wander_path = vlf_wander.channel.paths[0];
+        require(wide_path.power == wander_path.power && wide_path.phase_radians == wander_path.phase_radians &&
+                wide_path.delay_seconds == wander_path.delay_seconds && wide_path.delay_rate == wander_path.delay_rate &&
+                wide_path.residual_doppler_hz == wander_path.residual_doppler_hz &&
+                wide_path.residual_drift_hz_s == wander_path.residual_drift_hz_s &&
+                wide_path.gaussian_width_2sigma_hz == wander_path.gaussian_width_2sigma_hz &&
+                wide_path.frozen_gaussian == wander_path.frozen_gaussian &&
+                wide_path.phase_wander_amplitude_radians == wander_path.phase_wander_amplitude_radians &&
+                wide_path.phase_wander_period_seconds == wander_path.phase_wander_period_seconds &&
+                wide_path.hf.has_value() == wander_path.hf.has_value(),
+                "wide-bound VLF control changed physical path history");
+        const auto& wide_tx = vlf_wide.channel.transmitter;
+        const auto& wander_tx = vlf_wander.channel.transmitter;
+        require(vlf_wide.channel.rf_hz == vlf_wander.channel.rf_hz &&
+                wide_tx.enabled == wander_tx.enabled && wide_tx.inductance_h == wander_tx.inductance_h &&
+                wide_tx.capacitance_f == wander_tx.capacitance_f &&
+                wide_tx.resistance_ohm == wander_tx.resistance_ohm &&
+                wide_tx.detuning_hz == wander_tx.detuning_hz &&
+                wide_tx.detuning_rate_hz_s == wander_tx.detuning_rate_hz_s,
+                "wide-bound VLF control changed RF or antenna model");
+        const auto& wide_noise = vlf_wide.channel.noise;
+        const auto& wander_noise = vlf_wander.channel.noise;
+        require(wide_noise.white_variance == wander_noise.white_variance &&
+                wide_noise.colored_variance == wander_noise.colored_variance &&
+                wide_noise.colored_corner_hz == wander_noise.colored_corner_hz &&
+                wide_noise.impulse_rate_hz == wander_noise.impulse_rate_hz &&
+                wide_noise.impulse_rms == wander_noise.impulse_rms &&
+                wide_noise.impulse_decay_seconds == wander_noise.impulse_decay_seconds &&
+                wide_noise.tone_amplitude == wander_noise.tone_amplitude &&
+                wide_noise.tone_hz == wander_noise.tone_hz &&
+                wide_noise.tone_sweep_hz_s == wander_noise.tone_sweep_hz_s,
+                "wide-bound VLF control changed physical noise");
+        near(vlf_wide.bounds.frequency_bound_hz, vlf_wander.bounds.frequency_bound_hz, 0.,
+             "wide-bound VLF control changed static frequency support");
+        near(vlf_wide.bounds.arrival_low_seconds, vlf_wander.bounds.arrival_low_seconds, 0.,
+             "wide-bound VLF control changed arrival lower bound");
+        near(vlf_wide.bounds.arrival_high_seconds, vlf_wander.bounds.arrival_high_seconds, 0.,
+             "wide-bound VLF control changed arrival upper bound");
+        near(vlf_wide.bounds.spread_seconds, vlf_wander.bounds.spread_seconds, 0.,
+             "wide-bound VLF control changed delay-spread bound");
+        require(vlf_wide.provenance.find("wider receiver-bound control") != std::string::npos &&
+                vlf_wide.assumptions.find("only the receiver's declared time-varying atmospheric allowance") !=
+                    std::string::npos,
+                "wide-bound VLF metadata does not identify receiver-only change");
 
         for (const auto& id : {"groundwave-1mhz", "groundwave-1mhz-sea", "groundwave-30mhz", "groundwave-30mhz-land"}) {
             const auto s = appraisal::make_scenario(id);

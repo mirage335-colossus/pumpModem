@@ -2536,6 +2536,19 @@ void retain_proposals(CoarseResult& result, const Plan& plan, const ReceiverSlot
     }
 }
 
+FineCoordinate retarget_clock(FineCoordinate coordinate, double clock, long double center,
+                             const ReceiverSlotPlan& slot) {
+    const auto old_clock = coordinate.clock_ppm;
+    const auto old_scale = 1 + old_clock * 1e-6;
+    // Keep the same DATA midpoint after the clock changes. Avoid
+    // subtracting two large public times.
+    const auto correction = center * ((clock - old_clock) * 1e-6) / (old_scale * (1 + clock * 1e-6));
+    coordinate.arrival_seconds = std::clamp(static_cast<double>(coordinate.arrival_seconds + correction),
+        slot.arrival_lower_seconds, slot.arrival_upper_seconds);
+    coordinate.clock_ppm = clock;
+    return coordinate;
+}
+
 void refine(std::vector<FineCoordinate>& result, std::span<const CoarseProposal> proposals,
             const Plan& plan, const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
     const auto half_step = config.clock_bound_ppm / 2;
@@ -2544,27 +2557,56 @@ void refine(std::vector<FineCoordinate>& result, std::span<const CoarseProposal>
     std::array<Token, 3 * 2 * retained_per_bit> tokens{};
     result.reserve(tokens.size());
     for (const auto& proposal : proposals) {
-        const auto& coordinate = proposal.coordinate;
-        const auto old_clock = coordinate.clock_ppm;
-        const auto old_scale = 1 + old_clock * 1e-6;
         for (const auto delta : {-half_step, 0., half_step}) {
-            const auto clock = std::clamp(old_clock + delta, -config.clock_bound_ppm, config.clock_bound_ppm);
-            // Adjust the arrival to keep the same DATA midpoint after the
-            // candidate's clock changes. Avoid subtracting large UTC times.
-            const auto correction = center * ((clock - old_clock) * 1e-6) / (old_scale * (1 + clock * 1e-6));
-            const auto arrival = std::clamp(static_cast<double>(coordinate.arrival_seconds + correction),
-                                           slot.arrival_lower_seconds, slot.arrival_upper_seconds);
-            const Token token{coordinate.epoch_offset_seconds, std::round(arrival * 1e12),
+            const auto clock = std::clamp(proposal.coordinate.clock_ppm + delta,
+                -config.clock_bound_ppm, config.clock_bound_ppm);
+            const auto coordinate = retarget_clock(proposal.coordinate, clock, center, slot);
+            const Token token{coordinate.epoch_offset_seconds, std::round(coordinate.arrival_seconds * 1e12),
                               std::round(coordinate.frequency_hz * 1e12), std::round(clock * 1e9)};
             const auto end = tokens.begin() + result.size();
             if (std::find(tokens.begin(), end, token) != end) continue;
             *end = token;
-            result.push_back({coordinate.epoch_offset_seconds, arrival, coordinate.frequency_hz, clock});
+            result.push_back(coordinate);
         }
     }
 }
 
 } // namespace
+
+std::vector<FineCoordinate> nominate_quarter_clock_timing(const ReceiverConfig& config,
+        const ReceiverSlotPlan& slot, const CoarseResult& coarse) {
+    if (!config.time_varying_channel || config.clock_bound_ppm == 0 ||
+        coarse.work.plan.segmented_timing_blocks || !coarse.segmented_timing_coordinates.empty())
+        return {};
+    const auto& work = coarse.work;
+    const auto& plan = work.plan;
+    require_coarse(work.state == CoarseState::finished && plan.total_tiles &&
+        work.completed_tiles == plan.total_tiles && plan.public_slot == slot.index &&
+        plan.pattern_epoch == slot.format.epoch && plan.symbol_ordinal == slot.format.symbol_ordinal &&
+        plan.first_sample == slot.first_sample && plan.stop_sample == slot.stop_sample &&
+        plan.input_sample_rate_hz == config.sample_rate_hz && plan.source_rows &&
+        plan.clock_gap_ppm == config.clock_bound_ppm && coarse.proposal_count <= coarse.proposals.size(),
+        "Robust quarter-clock nominations require finished matching public coarse work");
+    std::array<const CoarseProposal*, 2> best{};
+    for (const auto& proposal : std::span(coarse.proposals).first(coarse.proposal_count)) {
+        require_coarse(proposal.bit <= 1 && std::isfinite(proposal.score),
+            "Robust quarter-clock nominations require finite ordinary proposals");
+        auto& winner = best[proposal.bit];
+        if (!winner || proposal.score > winner->score) winner = &proposal;
+    }
+    const auto center = slot.source_start_seconds + .5L * plan.source_rows / plan.input_sample_rate_hz;
+    std::vector<FineCoordinate> result;
+    result.reserve(8);
+    for (const auto* proposal : best) {
+        if (!proposal) continue;
+        for (const auto fraction : {-.75, -.25, .25, .75}) {
+            auto coordinate = retarget_clock(proposal->coordinate, config.clock_bound_ppm * fraction, center, slot);
+            coordinate.frequency_hz = 0;
+            if (std::ranges::find(result, coordinate) == result.end()) result.push_back(coordinate);
+        }
+    }
+    return result;
+}
 
 CoarseArrivalPeaks select_coarse_arrivals(std::span<const double> scores, std::size_t separation) {
     std::vector<std::uint32_t> interiors;

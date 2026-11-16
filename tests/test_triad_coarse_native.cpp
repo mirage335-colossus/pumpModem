@@ -1,4 +1,5 @@
 #include "../src/triad_receiver_coarse.hpp"
+#include "../src/triad_receiver_driver.hpp"
 #include "../src/triad_receiver_executor.hpp"
 #include "../src/search_fft.hpp"
 #include "triad_crypto_fixture.hpp"
@@ -1009,6 +1010,85 @@ void tied_arrival_frontier() {
     const auto plateau = r::select_coarse_arrivals(std::array{0., 4., 4., 0.}, 1);
     check(plateau.count == 1 && plateau.indices[0] == 1, "coarse flat peak lost its floor midpoint");
 }
+
+void quarter_clocks_nominate_only_missing_public_cells() {
+    v::ReceiverConfig config;
+    config.sample_rate_hz = 800;
+    config.clock_bound_ppm = 400;
+    config.frequency_bound_hz = 1;
+    config.time_varying_channel = true;
+    v::ReceiverSlotPlan slot;
+    slot.index = 4;
+    slot.first_sample = 100;
+    slot.stop_sample = 10'000;
+    slot.source_start_seconds = 30;
+    slot.arrival_lower_seconds = -.1;
+    slot.arrival_upper_seconds = .1;
+    r::CoarseResult coarse;
+    coarse.work.state = r::CoarseState::finished;
+    coarse.work.completed_tiles = 1;
+    auto& plan = coarse.work.plan;
+    plan.total_tiles = 1;
+    plan.public_slot = slot.index;
+    plan.pattern_epoch = slot.format.epoch;
+    plan.symbol_ordinal = slot.format.symbol_ordinal;
+    plan.first_sample = slot.first_sample;
+    plan.stop_sample = slot.stop_sample;
+    plan.input_sample_rate_hz = config.sample_rate_hz;
+    plan.source_rows = 4'000;
+    plan.clock_gap_ppm = config.clock_bound_ppm;
+    // The highest-scoring parents are deliberately not first in either
+    // bit's array segment. Only these two parents may supply the eight rows.
+    coarse.proposal_count = 4;
+    coarse.proposals = {{{{1, .03, 1, 0}, 2., 0, 1}, {{2, 0, 1, 0}, 3., 0, 1},
+                         {{-2, -.02, -1, 0}, 2., 1, 1}, {{-1, .099, -1, -400}, 4., 1, 1}}};
+    coarse.coordinates = {coarse.proposals[0].coordinate};
+    coarse.work.refined_coordinates = coarse.coordinates.size();
+    coarse.maximum_frequency_step_hz = .01;
+    const auto raw = r::nominate_quarter_clock_timing(config, slot, coarse);
+    check(raw.size() == 8, "quarter clock nomination lost one of its two ordinary parents or four interior cells");
+    constexpr std::array clock_cells{-300., -100., 100., 300.};
+    for (std::size_t i = 0; i < raw.size(); ++i) {
+        const auto& coordinate = raw[i];
+        const auto& parent = coarse.proposals[i < 4 ? 1 : 3].coordinate;
+        check(coordinate.clock_ppm == clock_cells[i % 4] && coordinate.frequency_hz == 0 &&
+              coordinate.epoch_offset_seconds == parent.epoch_offset_seconds,
+              "quarter clock nomination must keep the winner's epoch and all omitted clock cells");
+        const auto original_midpoint = parent.arrival_seconds + 32.5L / (1 + parent.clock_ppm * 1e-6);
+        const auto shifted_midpoint = coordinate.arrival_seconds + 32.5L / (1 + coordinate.clock_ppm * 1e-6);
+        if (i < 4)
+            check(std::abs(shifted_midpoint - original_midpoint) < 1e-12,
+                  "quarter clock nomination did not preserve an interior DATA midpoint");
+        else
+            check(coordinate.arrival_seconds == slot.arrival_upper_seconds,
+                  "quarter clock nomination exceeded its public arrival bound");
+    }
+    auto shadow = coarse;
+    shadow.segmented_timing_coordinates = raw;
+    const auto ordinary = r::prepare_fine_coordinates(config, slot, coarse);
+    const auto expanded = r::prepare_fine_coordinates(config, slot, shadow);
+    const auto tracking = r::prepare_quarter_clock_timing(config, slot, coarse, ordinary.grid);
+    check(expanded.coordinates == ordinary.coordinates &&
+          expanded.varying_coordinates == ordinary.varying_coordinates &&
+          expanded.segmented_timing_coordinates.size() == 8 &&
+          tracking == expanded.segmented_timing_coordinates &&
+          ordinary.segmented_timing_coordinates.empty() && ordinary.epoch_timing_coordinates.empty() &&
+          expanded.grid.log_count() == ordinary.grid.log_count(),
+          "clock nominations must snap without modifying original fine cells or prior size");
+    auto shared_timing = coarse;
+    shared_timing.proposals[3].coordinate = coarse.proposals[1].coordinate;
+    shared_timing.proposals[3].coordinate.frequency_hz = -1;
+    check(r::nominate_quarter_clock_timing(config, slot, shared_timing).size() == 4,
+          "matching bit winners must nominate each distinct timing cell only once");
+    auto off = config;
+    off.time_varying_channel = false;
+    check(r::nominate_quarter_clock_timing(off, slot, coarse).empty() &&
+          r::nominate_quarter_clock_timing(config, slot, shadow).empty(),
+          "Off and existing segmented timing nominations must not activate the quarter-clock rule");
+    coarse.work.plan.segmented_timing_blocks = 8;
+    check(r::nominate_quarter_clock_timing(config, slot, coarse).empty(),
+          "planned segmented work must suppress the rule even when no segmented coordinates survive");
+}
 } // namespace
 
 // Run test_triad_coarse_native --overlap-failures to check fixed-route
@@ -1016,10 +1096,13 @@ void tied_arrival_frontier() {
 // The default CTest invocation still runs the full coarse suite.
 int main(int argc, char** argv) try {
     const bool overlap_failures = argc == 2 && std::string_view(argv[1]) == "--overlap-failures";
-    if (argc != 1 && !overlap_failures) {
-        std::cerr << "Usage: test_triad_coarse_native [--overlap-failures]\n";
+    const bool quarter_clock = argc == 2 && std::string_view(argv[1]) == "--quarter-clock";
+    if (argc != 1 && !overlap_failures && !quarter_clock) {
+        std::cerr << "Usage: test_triad_coarse_native [--overlap-failures | --quarter-clock]\n";
         return 2;
     }
+    quarter_clocks_nominate_only_missing_public_cells();
+    if (quarter_clock) return 0;
     const auto crypto = key();
     tied_arrival_frontier();
     if (overlap_failures) {

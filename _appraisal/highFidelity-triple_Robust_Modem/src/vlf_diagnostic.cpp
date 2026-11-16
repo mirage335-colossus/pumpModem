@@ -84,6 +84,7 @@ Json checkpoint(const FineProgress& p, Json timing, double elapsed_seconds, doub
                           {"observed_projection_modes", p.observed_projection_modes},
                           {"representative_work", p.representative_work},
                           {"initial_affine", lane(p.initial_affine)}, {"adaptive", lane(p.adaptive)},
+                          {"slow_gain_coherence_seconds", Json::Array{p.slow_gain_coherence_seconds[0], p.slow_gain_coherence_seconds[1]}},
                           {"native_basis_fills", p.cache.native_preparation_calls},
                           {"native_basis_fill_rows", p.cache.native_preparation_samples},
                           {"direct_basis_columns", p.cache.direct_rows},

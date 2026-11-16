@@ -77,6 +77,9 @@ struct FineProgress {
     unsigned workers = 0, stage_workers = 0, tap_count = 0;
     int rate_radius = 0;
     bool observation_complete = false, representative_work = false, finished = false;
+    std::array<double, 2> slow_gain_coherence_seconds{};
+    // The normalized slow-family contribution before the outer mixture.
+    std::array<double, 2> slow_gain_bit_evidence{};
     FineLaneWork initial_affine, adaptive;
     MappedBasisReport cache;
     std::optional<BulkReceipt> bulk;
@@ -140,11 +143,38 @@ std::optional<LineAtom> find_varying_line(const ReceiverConfig&, const ReceiverS
                                         std::span<const Complex>, std::stop_token);
 VaryingFinePlan varying_fine_plan(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers,
                                  bool project_line = false, bool coherent_gain_blocks = false);
+// Evaluator only: projections onto the exact unprojected short tracker's
+// template spans. No likelihood, candidate feedback or admission decision.
+struct TrackedFrequencySpanBlock {
+    double captured_energy = 0, frequency_hz = 0;
+    bool rank_ambiguous = false, verified = false;
+};
+struct TrackedFrequencySpanCoordinate {
+    FineCoordinate coordinate;
+    std::vector<std::array<TrackedFrequencySpanBlock, 2>> blocks;
+};
+struct TrackedFrequencySpan {
+    std::vector<double> observation_energy;
+    std::vector<TrackedFrequencySpanCoordinate> coordinates;
+};
+// Optional appraisal comparison in the existing supplemental timing budget.
+// It appends snapped timing cells and only scores their frequency tracks.
+// All ordinary results remain in ReceiverSlotScore, unchanged.
+struct TrackedFrequencyClockShadow {
+    std::span<const FineCoordinate> nominations;
+    std::size_t ordinary_coordinates = 0, added_coordinates = 0;
+    std::uint64_t added_basis_rows = 0;
+    std::array<double, 2> tracked_bit_evidence{}, varying_bit_evidence{};
+    double tracked_log_prior_adjustment = 0;
+};
+std::size_t tracked_frequency_span_workspace(const ReceiverSlotPlan&, const VaryingFinePlan&,
+                                              bool clock_shadow = false);
 void score_varying_fine(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                         const VaryingFinePlan&, std::span<const Complex>, std::span<const FineCoordinate>,
                         std::span<const FineCoordinate> segmented_timing,
                         double projected_sample_rate_hz, double coarse_clock_gap_ppm, unsigned workers,
-                        ReceiverSlotScore&, std::stop_token, ReceiverExecutor&, const LineAtom* = nullptr);
+                        ReceiverSlotScore&, std::stop_token, ReceiverExecutor&, const LineAtom* = nullptr,
+                        TrackedFrequencySpan* = nullptr, TrackedFrequencyClockShadow* = nullptr);
 std::size_t varying_quiet_workspace(const ReceiverConfig&, const ReceiverSlotPlan&);
 void score_varying_quiet(const ReceiverConfig&, const ReceiverSlotPlan&, std::span<const Complex>,
                          ReceiverSlotScore&, std::stop_token);
