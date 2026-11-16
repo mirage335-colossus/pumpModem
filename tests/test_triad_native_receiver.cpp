@@ -49,14 +49,17 @@ struct Fixture {
     Crypto key = Crypto::amateur();
 };
 
-Fixture fixture(std::optional<std::uint8_t> bit, bool spread, bool encrypt, std::uint64_t seed = 37) {
+Fixture fixture(std::optional<std::uint8_t> bit, bool spread, bool encrypt, std::uint64_t seed = 37,
+                double test_frequency_offset_hz = .05,
+                double broad_frequency_bound_hz = .12,
+                double nominal_carrier_hz = 0) {
     Fixture f;
     auto& c = f.config;
     c.sample_rate_hz = sample_rate;
     c.data_if_hz = 1725;
     c.noise_variance = .25;
     c.clock_bound_ppm = spread ? 12 : 0;
-    c.frequency_bound_hz = spread ? .12 : 0;
+    c.frequency_bound_hz = spread ? broad_frequency_bound_hz : 0;
     c.spread_delay_seconds = spread ? .003 : 0;
     c.spread_doppler_hz = spread ? .2 : 0;
     auto& s = f.slot;
@@ -69,6 +72,7 @@ Fixture fixture(std::optional<std::uint8_t> bit, bool spread, bool encrypt, std:
     s.format.sample_rate = sample_rate;
     s.format.inner_rate_hz = 120;
     s.format.added_symbols = 1;
+    s.format.configured_carrier_hz = nominal_carrier_hz;
     s.format.bit_seconds = .001;
     s.format.pulse_shape = PulseShape::TaperedRrc;
     s.format.epoch = 1793850000;
@@ -107,7 +111,7 @@ Fixture fixture(std::optional<std::uint8_t> bit, bool spread, bool encrypt, std:
         const auto arrival = spread ? .004 : 0;
         candidate.arrival_seconds = static_cast<double>(s.window_capture_lead_seconds + arrival +
             s.source_start_seconds / scale);
-        candidate.frequency_hz = (spread ? .05 : 0) - c.data_if_hz * (scale - 1);
+        candidate.frequency_hz = (spread ? test_frequency_offset_hz : 0) - c.data_if_hz * (scale - 1);
         if (spread) candidate.channel.taps.push_back({c.spread_delay_seconds, c.spread_doppler_hz});
         std::vector<double> offsets(count);
         for (std::size_t i = 0; i < count; ++i) offsets[i] = i;
@@ -148,6 +152,44 @@ void complete_data() {
           serial.adaptive_bit_evidence == result.adaptive_bit_evidence &&
           serial.quiet_energy == result.quiet_energy && serial.bit == result.bit,
           "same-window evidence must match under independent worker shares");
+}
+
+void configured_carrier_reception() {
+    const auto encrypted = fixture(1, true, true, 37, 12, 24, 1737);
+    const auto result = score(encrypted);
+    check(result.complete && result.decision == SlotDecision::data && result.bit == 1,
+          "matching configured carrier did not admit the offset DATA waveform");
+    // This signal is configured at 1737 Hz while a neighboring 1725-Hz
+    // receiver has a +/-24-Hz search that covers its actual +12-Hz offset.
+    // Carrier binding must change the receiver's evidence on the same IQ.
+    // A strong foreign waveform can still beat the existing white-noise H0;
+    // see the configured-carrier validation record rather than treating key
+    // separation as an unconditional source-identity test.
+    auto adjacent_frequency = encrypted;
+    adjacent_frequency.slot.format.configured_carrier_hz = 1725;
+    const auto mismatched = score(adjacent_frequency);
+    check(mismatched.complete && result.operational_log_e > mismatched.operational_log_e,
+          "configured carrier separation did not lower evidence for the foreign waveform");
+
+    // One prespecified lower-gain control, retaining noise seed, geometry,
+    // search bounds and the exact frequency difference (no seed search).
+    const auto noise = fixture(std::nullopt, true, true, 37, 12, 24, 1737);
+    auto weaker = encrypted;
+    for (std::size_t i = 0; i < weaker.iq.size(); ++i)
+        weaker.iq[i] = noise.iq[i] + .2 * (encrypted.iq[i] - noise.iq[i]);
+    const auto weak_matching = score(weaker);
+    weaker.slot.format.configured_carrier_hz = 1725;
+    const auto weak_mismatched = score(weaker);
+    std::cout << "carrier context: strong matched=" << result.operational_log_e
+              << " foreign=" << mismatched.operational_log_e
+              << " foreign_decision=" << static_cast<int>(mismatched.decision)
+              << "; gain0.2 matched=" << weak_matching.operational_log_e
+              << " foreign=" << weak_mismatched.operational_log_e
+              << " threshold=" << weak_mismatched.operational_threshold << '\n';
+    check(weak_matching.complete && weak_matching.decision == SlotDecision::data && weak_matching.bit == 1,
+          "lower-gain matching carrier did not admit the transmitted bit");
+    check(weak_mismatched.complete && weak_mismatched.decision != SlotDecision::data,
+          "lower-gain foreign carrier was admitted by the broad frequency search");
 }
 
 // One short DATA window per case, same observation and declared static
@@ -1036,13 +1078,22 @@ void native_precision_near_decision_sides() {
 }
 }
 
-int main() {
+int main(int argc, char** argv) {
     try {
+        // Keep each deterministic channel stratum within its own bounded
+        // CTest invocation; key changes can alter which fallback model runs.
+        if (argc == 2) {
+            const std::string_view part = argv[1];
+            if (part == "carrier") configured_carrier_reception();
+            else if (part == "short-drift") bounded_drift_recovery();
+            else if (part == "long-drift") long_drift_recovery(false);
+            else if (part == "broad-drift") long_drift_recovery(true);
+            else if (part == "fading") weak_diffuse_fading_recovery();
+            else throw std::runtime_error("unknown native receiver test stratum");
+            return 0;
+        }
+        check(argc == 1, "unexpected native receiver test arguments");
         complete_data();
-        bounded_drift_recovery();
-        long_drift_recovery(false);
-        long_drift_recovery(true);
-        weak_diffuse_fading_recovery();
         large_aperture_supplemental_plans();
         broad_frequency_timing_plan();
         varying_quiet_band(.5, false);

@@ -127,6 +127,10 @@ PublicProfile::PublicProfile(PublicProfileConfig config, std::optional<Crypto> c
         "Robust calendar epoch must support the thirteen public epoch alternatives");
     require(std::isfinite(config_.data_if_hz) && config_.data_if_hz > 0 && config_.data_if_hz < effective_sample_rate() / 2,
         "Robust DATA IF must be positive and below Nyquist");
+    // A public stream without an explicit RF coordinate uses its configured
+    // audio carrier. Freeze this once; slot addresses and hops never retune it.
+    if (config_.format.configured_carrier_hz == 0)
+        config_.format.configured_carrier_hz = config_.data_if_hz;
     for (const auto value : {config_.capture_lead_seconds, config_.capture_trail_seconds, config_.audio_pair_ppm,
             config_.clock_bound_ppm, config_.cfo_bound_hz, config_.spread_delay_ms, config_.spread_doppler_hz,
             config_.signal_delay_ms.value_or(0), config_.delay_excursion_seconds, config_.gate_bandwidth_hz})

@@ -317,6 +317,14 @@ in Git tags and separately versioned binaries.
 
 ## Transmit key policy
 
+All three DATA carrier lanes bind the configured nominal physical frequency
+(baseband plus Shift) through the `independent-apsk-v2-carrier-v1` derivation.
+Its rounding step is `max(10 Hz, Rate × Spreading / 10)`; hops and receiver
+corrections never change the key context. Peers need matching rounded frequencies
+and the updated derivation. Same-bucket settings deliberately remain equivalent;
+this is waveform separation, not sender authentication. See the
+[canonical key context](crypto.md#canonical-robust-waveform-purposes).
+
 Selecting the public Amateur profile changes key material, not the Robust
 waveform or encryption protocol. Ordinary Robust DATA keeps its configured key
 and encryption setting; any enabled Helper uses the configured effective key.

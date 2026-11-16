@@ -211,6 +211,9 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     Format format;
     format.inner_rate_hz = modem.bandwidth_hz;
     format.added_symbols = s.added_symbols;
+    check(osc.sideband == modem::OscillatorSideband::upper,
+          "Robust supports only upper-sideband carrier translation");
+    format.configured_carrier_hz = modem.carrier_hz + osc.rf_shift_hz;
     format.added_interleave = s.added_interleave;
     format.sample_rate = fs;
     format.bit_seconds = .001; // native minimum protected tile

@@ -43,6 +43,63 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Configured-carrier waveform keys — 15 November 2026
+
+The `independent-apsk-v2-carrier-v1` derivation adds the configured physical
+carrier, rounded to `max(10 Hz, Rate × Spreading / 10)`, to every waveform child
+context and the payload mask. Baseband plus Shift determines the frequency;
+hops, Doppler and searched offsets do not. The GUI, native probe/exporter and
+current appraisal source callers supply that coordinate. This replaces the
+old derivation without compatibility fallback. See the
+[wire context](crypto.md#canonical-robust-waveform-purposes).
+
+The bounded native receiver check uses seed 37, Rate 120, Spreading 1, a
+1737 Hz configured transmitter, an actual +12 Hz offset and a ±24 Hz receiver
+search. The same I/Q is scored with matching 1737 Hz and neighboring 1725 Hz
+settings (rounded to 1740 and 1728 Hz). At the original fixture gain the
+operational log-evidence is 14747.1 versus 1792.68: **both are admitted** against
+the 21.4934 threshold. The initial strict foreign-key rejection check failed;
+frequency binding must not be described as reliable rejection of strong foreign
+signals. The existing fixed-affine statistic compares against white noise,
+not against an interfering keyed waveform, consistent with the earlier
+[wrong-key findings](../_appraisal/highFidelity-triple_Robust_Modem/hf-normalized-null.md).
+
+One prespecified follow-up scales both signal paths to one-fifth amplitude,
+retaining the exact noise samples, key, geometry and search. Matching evidence
+is 569.222 and the bit is admitted; foreign evidence is -6.26214 and no DATA is
+admitted. Both scores complete. This demonstrates separation for one bounded
+fixture, not an admission probability or daily false-admission rate. No seed
+search, threshold change or receiver algorithm change was used. The requested
+future **Wrong Key Admission** control and statistical mitigation are deferred;
+this change adds only the configured-frequency key context.
+
+Existing drift regressions retain their original zero-centered synthetic
+source coordinate. An intermediate test edit applied 1725 Hz to those sources
+and the weak rising-drift example missed admission; restoring the original
+fixture coordinate passes both rising and falling drift under the new key
+domain. This is not sensitivity qualification for every keyed waveform.
+Historical source-bound sensitivity and capacity receipts remain historical.
+
+Validation on the working change over `cf2eb489`: `./build.sh test triad`
+passes **38/38**, and `./build.sh test gui` passes **30/30**. The source tests
+cover same/different buckets, the 10 Hz floor, fractional rounding and ties,
+all three lanes, payload masking, invalid coordinates, equivalent baseband/Shift
+settings and hop/Doppler independence. Three changed appraisal callers pass
+syntax checks; no appraisal campaign was rerun. Local documentation links and
+`git diff --check` pass. Builds used `CCACHE_DISABLE=1` after the default compiler
+cache was read-only; that initial setup failure ran no assertions.
+
+The old Python FFTScreen scalar receipt failed because it described the previous
+keyed waveform. That obsolete value was removed; current coarse winner, rank,
+public coverage, exact worker consistency and arithmetic comparisons remain.
+A proposed singleton reference could not select the native scalar route for
+this two-ray geometry, so it is not claimed as replacement oracle coverage.
+The expanded monolithic receiver check exceeded its 60-second CTest deadline;
+the same deterministic cases now run as separate channel strata, each retaining
+that deadline (carrier 20.67 s, short/long/broad drift 5.50/6.74/7.13 s, fading
+7.53 s, remaining native checks 31.10 s in this run). These are functional test
+outcomes, not receiver-throughput measurements or release certification.
+
 ## Robust changing-channel receiver follow-up — 13 November 2026
 
 The bounded changing-channel work extends the native GUI and receiver using a

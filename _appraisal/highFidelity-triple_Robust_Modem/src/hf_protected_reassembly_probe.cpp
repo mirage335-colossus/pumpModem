@@ -182,6 +182,7 @@ int main(int argc, char** argv) {
         pc.format.encrypt = false;
         pc.helper_enabled = false;
         pc.data_if_hz = 500.;
+        pc.format.configured_carrier_hz = 10e6 + pc.data_if_hz;
         pc.lead_samples = 480;
         pc.receiver_filter_halo_samples = 8;
         const PublicProfile profile(pc);

@@ -14,6 +14,14 @@ share a public calendar, initial keyed ordinal, waveform profile, FEC mode and
 compression setting.
 Unknown waveform-address acquisition remains outside the current scope.
 
+The `independent-apsk-v2-carrier-v1` waveform key derivation also binds the
+configured physical carrier (baseband plus Shift), rounded to the nearest
+`max(10 Hz, Rate × Spreading / 10)` multiple, with halfway values rounded up.
+It excludes hop frequencies and receiver frequency corrections. Both peers
+must use this updated derivation and the same rounded carrier; previous Robust
+waveform keys are incompatible. Same-bucket settings remain equivalent. See the
+[exact context and limits](crypto.md#canonical-robust-waveform-purposes).
+
 `CompleteStreamReceiver` processes public slot plans, complete proposals and
 persistent fine tracking. Two fully scored quiet slots following DATA establish
 physical completion. Quiet evidence uses complete orthogonal likelihood blocks

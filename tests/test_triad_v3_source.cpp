@@ -1,9 +1,11 @@
 #include "triad_crypto_fixture.hpp"
 #include "datapump/triad_modem_v3.hpp"
 #include "datapump/triad_pulse.hpp"
+#include "datapump/triad_stream.hpp"
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -11,6 +13,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -31,7 +34,7 @@ Crypto fixture_key() {
 // Reconstruct the documented public coordinates rather than asking the
 // transmitter which child it selected. This checks the current independently keyed layout.
 datapump::Bytes payload_context(const Format& f) {
-    constexpr std::string_view prefix="datapump/experimental-triad/v3/independent-apsk-2/";
+    constexpr std::string_view prefix="datapump/experimental-triad/v3/independent-apsk-2/carrier-v1/";
     datapump::Bytes id(prefix.begin(),prefix.end());
     const auto append64=[&](std::uint64_t value){
         for(int shift=56;shift>=0;shift-=8)id.push_back(static_cast<std::uint8_t>(value>>shift));
@@ -40,7 +43,100 @@ datapump::Bytes payload_context(const Format& f) {
     append64(purpose.size());id.insert(id.end(),purpose.begin(),purpose.end());
     append64(f.epoch);append64(f.symbol_ordinal);append64(0);
     append64(2);append64(f.fhss_center_aligned?1:0);
+    const auto quantum=std::max(10.,f.inner_rate_hz*f.added_symbols/10.);
+    auto configured=quantum*std::round(f.configured_carrier_hz/quantum);
+    if(configured==0)configured=0; // Canonicalize negative zero before its binary encoding.
+    append64(std::bit_cast<std::uint64_t>(configured));
     return id;
+}
+
+void configured_carrier_key_checks() {
+    const auto key=fixture_key();
+    const auto same_bucket=[](double rate,unsigned spread,double first,double second) {
+        Format a; a.inner_rate_hz=rate; a.added_symbols=spread; a.configured_carrier_hz=first;
+        Format b=a; b.configured_carrier_hz=second;
+        return std::pair{a,b};
+    };
+    for (const auto& [a,b] : {same_bucket(36,10,1000,1025),
+                              same_bucket(3.6,1,1000,1004),
+                              same_bucket(125,1,1000,1006),
+                              same_bucket(36,10,0.,-0.)}) {
+        check(payload_context(a)==payload_context(b),
+              "configured carriers in the same rounded bucket changed the payload context");
+        PatternSource first(a,key,0), second(b,key,0);
+        for (std::uint64_t cell=0;cell<300;++cell)
+            check(first.pattern_coefficient_at(cell)==second.pattern_coefficient_at(cell),
+                  "same rounded configured carrier changed triple-lane coefficients");
+    }
+
+    // Q=max(10, rate*spreading/10): exercise the floor, a fractional 12.5-Hz
+    // quantum, rate/spreading scaling, and std::round's higher-frequency tie.
+    const auto verify_distinct=[](double rate,unsigned spread,double lower,double upper) {
+        auto key=fixture_key();
+        Format a; a.inner_rate_hz=rate; a.added_symbols=spread;
+        a.configured_carrier_hz=lower;
+        Format b=a; b.configured_carrier_hz=upper;
+        check(payload_context(a)!=payload_context(b),
+              "distinct configured carrier buckets shared a payload key context");
+        PatternSource first(a,key,0), second(b,key,0);
+        std::array<unsigned,3> lane_changes{};
+        for(std::uint64_t cell=0;cell<500;++cell) {
+            const auto x=first.pattern_coefficient_at(cell),y=second.pattern_coefficient_at(cell);
+            for(unsigned lane=0;lane<3;++lane) if(x[lane]!=y[lane]) ++lane_changes[lane];
+        }
+        check(std::all_of(lane_changes.begin(),lane_changes.end(),[](unsigned count){return count>=24;}),
+              "carrier bucket did not change each of the three independently keyed carrier lanes");
+    };
+    verify_distinct(3.6,1,1000,1006); // 10-Hz floor
+    verify_distinct(125,1,std::nextafter(1006.25,0.),1006.25); // fractional tie
+    verify_distinct(36,10,1000,1027); // Q=36 Hz from rate times spreading
+
+    Format boundary; boundary.inner_rate_hz=125; boundary.added_symbols=1;
+    constexpr double half_bin=1006.25;
+    auto below=boundary, tie=boundary, above=boundary;
+    below.configured_carrier_hz=std::nextafter(half_bin,0.);
+    tie.configured_carrier_hz=half_bin;
+    above.configured_carrier_hz=std::nextafter(half_bin,std::numeric_limits<double>::infinity());
+    check(payload_context(below)!=payload_context(tie) && payload_context(tie)==payload_context(above),
+          "fractional-quantum half boundary did not round toward the higher carrier");
+
+    Format base;
+    base.configured_carrier_hz=0;
+    auto negative_zero=base; negative_zero.configured_carrier_hz=-0.0;
+    check(payload_context(base)==payload_context(negative_zero),
+          "zero carrier context did not normalize negative zero");
+    for(double invalid_value:{-1.,std::numeric_limits<double>::infinity(),
+                              std::numeric_limits<double>::quiet_NaN()}) {
+        auto invalid=base; invalid.configured_carrier_hz=invalid_value;
+        bool rejected=false;
+        try { PatternSource source(invalid,key,0); (void)source; }
+        catch(const std::exception&) { rejected=true; }
+        check(rejected,"invalid configured carrier was accepted into the waveform key context");
+    }
+
+    // Public-profile callers that omit the optional nominal context use the
+    // profile's configured baseband IF as the physical carrier origin.
+    PublicProfileConfig implicit_config;
+    implicit_config.format.inner_rate_hz=36;
+    implicit_config.format.added_symbols=10;
+    implicit_config.format.sample_rate=6000;
+    implicit_config.format.bit_seconds=1;
+    implicit_config.data_if_hz=1000;
+    implicit_config.format.configured_carrier_hz=0;
+    PublicProfile implicit(std::move(implicit_config));
+    auto explicit_config=implicit.config();
+    explicit_config.format.configured_carrier_hz=1000;
+    PublicProfile explicit_carrier(std::move(explicit_config));
+    check(implicit.config().format.configured_carrier_hz==1000 &&
+          explicit_carrier.config().format.configured_carrier_hz==1000,
+          "PublicProfile did not resolve an omitted carrier to its nominal DATA IF");
+    auto normalized_a=implicit.config().format;
+    auto normalized_b=explicit_carrier.config().format;
+    normalized_a.encrypt=normalized_b.encrypt=false;
+    PatternSource normalized_source_a(normalized_a,key,0),normalized_source_b(normalized_b,key,0);
+    for(std::uint64_t cell=0;cell<100;++cell)
+        check(normalized_source_a.pattern_coefficient_at(cell)==normalized_source_b.pattern_coefficient_at(cell),
+              "implicit and explicit PublicProfile carrier contexts diverged");
 }
 
 void confidentiality_payload_checks() {
@@ -595,6 +691,7 @@ void month_and_low_sample_rate_checks() {
 int main() {
     try {
         confidentiality_payload_checks();
+        configured_carrier_key_checks();
         independent_patterns_and_apsk();
         revision_random_access_checks();
         shared_geometry_bank_checks();

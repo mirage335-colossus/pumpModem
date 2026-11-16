@@ -15,13 +15,18 @@
 namespace datapump::triad::v3 {
 using Complex = std::complex<double>;
 enum class PulseShape { Rrc, TaperedRrc };
-inline constexpr const char* pattern_revision_name(){return "independent-apsk-v2";}
+inline constexpr const char* pattern_revision_name(){return "independent-apsk-v2-carrier-v1";}
 
 // Canonical three-carrier waveform. Addresses and sample counts are 64-bit;
 // no whole-symbol map or capture is held.
 struct Format {
     double inner_rate_hz = 36;
     unsigned added_symbols = 10;
+    // Nominal physical carrier = configured baseband + Shift, before hopping,
+    // Doppler or receiver corrections. Zero is a baseband-only test origin.
+    // Every waveform child binds its nearest multiple of
+    // max(10 Hz, inner_rate_hz * added_symbols / 10), with ties rounded up.
+    double configured_carrier_hz = 0;
     bool added_interleave = true;
     // Independent keyed bit alternatives, with two-phase/two-radius Added
     // Symbols. Historical wire implementations belong in Git tags.

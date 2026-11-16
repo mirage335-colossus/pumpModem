@@ -2,6 +2,7 @@
 #include "datapump/triad_shaping.hpp"
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -23,21 +24,31 @@ std::uint64_t coordinate(long double x,const char* msg){
     return static_cast<std::uint64_t>(std::ceil(x));
 }
 void append64(Bytes& b,std::uint64_t v){for(int s=56;s>=0;s-=8)b.push_back(static_cast<std::uint8_t>(v>>s));}
-Bytes child_id(std::string_view purpose,const Format& f,std::uint64_t tile,
+std::uint64_t carrier_context(const Format& f){
+    static_assert(sizeof(double)==8&&std::numeric_limits<double>::is_iec559);
+    // Binary64 operations in this order are part of the wire context. Geometry
+    // has already validated the rate, spreading and configured carrier.
+    const double quantum=std::max(10.,(f.inner_rate_hz*f.added_symbols)/10.);
+    const double rounded=quantum*std::round(f.configured_carrier_hz/quantum);
+    require(std::isfinite(rounded),"triad v3 rounded configured carrier overflow");
+    return std::bit_cast<std::uint64_t>(rounded==0?0.:rounded);
+}
+Bytes child_id(std::string_view purpose,const Format& f,std::uint64_t carrier,std::uint64_t tile,
                unsigned alternative=2){
-    const std::string_view prefix="datapump/experimental-triad/v3/independent-apsk-2/";
+    const std::string_view prefix="datapump/experimental-triad/v3/independent-apsk-2/carrier-v1/";
     Bytes id(prefix.begin(),prefix.end());
     append64(id,purpose.size());id.insert(id.end(),purpose.begin(),purpose.end());
     append64(id,f.epoch);append64(id,f.symbol_ordinal);append64(id,tile);
     // 0/1 are independently keyed encrypted alternatives; 2 is common cover,
     // payload masking or permutation. All variable fields are fixed-width.
     append64(id,alternative);append64(id,f.fhss_center_aligned?1:0);
+    append64(id,carrier);
     return id;
 }
 
-Crypto child(const Crypto& key,std::string_view purpose,const Format& f,std::uint64_t tile,
+Crypto child(const Crypto& key,std::string_view purpose,const Format& f,std::uint64_t carrier,std::uint64_t tile,
              unsigned alternative=2){
-    return Crypto(key.mac(child_id(purpose,f,tile,alternative)));
+    return Crypto(key.mac(child_id(purpose,f,carrier,tile,alternative)));
 }
 std::uint64_t aligned_dwell_cells(const Format& f,double fine){
     require(f.fhss,"triad v3 center-aligned cells require FHSS");
@@ -130,6 +141,8 @@ Geometry geometry(const Format& f){
     require(std::isfinite(f.inner_rate_hz)&&f.inner_rate_hz>0&&f.inner_rate_hz<=30e6,"triad v3 invalid Rate");
     require(f.added_symbols>=1&&f.added_symbols<=1000&&f.minimum_inner_coefficients>=64,
             "triad v3 invalid Added Symbols or minimum complexity");
+    require(std::isfinite(f.configured_carrier_hz)&&f.configured_carrier_hz>=0,
+            "triad v3 configured carrier must be finite and nonnegative");
     require(std::isfinite(f.bit_seconds)&&f.bit_seconds>0,"triad v3 invalid duration/sample rate");
     require(sample_rate>=64||!f.fhss,"triad v3 sub-64-Hz source requires FHSS off");
     require(std::isfinite(f.dwell_seconds)&&std::abs(f.dwell_seconds-.4)<1e-12,"triad v3 dwell must be400ms");
@@ -223,10 +236,12 @@ Geometry geometry(const Format& f){
 struct PatternSource::Impl {
     struct Tile {std::uint64_t id=0,first=0;std::vector<Chip> chips;};
     Format format;Geometry geom;Crypto master;unsigned bit=0;std::uint64_t halo=0;double sample_rate=0;
+    std::uint64_t carrier=0;
     std::uint64_t dwell_cells=0,tile_cells=0,protected_first=0,protected_last=0;
     std::array<std::optional<Tile>,2> tiles;
     Impl(const Format& f,const Crypto& key,std::uint8_t source_bit):format(f),geom(v3::geometry(f)),master(key){
         require(source_bit<=1,"triad v3 source must be one binary bit");
+        carrier=carrier_context(f);
         halo=geom.calendar_origin_sample;sample_rate=effective_sample_rate(f);
         if(f.fhss_center_aligned){
             dwell_cells=aligned_dwell_cells(f,geom.fine_chip_rate_hz);
@@ -236,7 +251,7 @@ struct PatternSource::Impl {
         }
         bit=source_bit;
         if(f.encrypt){
-            const auto payload=master.confidentiality_child(child_id("payload",f,0));
+            const auto payload=master.confidentiality_child(child_id("payload",f,carrier,0));
             const auto mask=payload.confidentiality_stream(f.epoch,0,1);
             bit^=mask[0]&1U;
         }
@@ -273,9 +288,9 @@ struct PatternSource::Impl {
         tile.chips.resize(count);
         if(!active_tile(id))return tile;
         const auto ordinal=id/(format.burst_wait_tiles+1);
-        const auto cover=child(master,"cover-phase",format,ordinal)
+        const auto cover=child(master,"cover-phase",format,carrier,ordinal)
             .stream(StreamPurpose::Scrambler,format.epoch,0,count*3);
-        const auto cover_orders=amplitude_orders(count,child(master,"cover-amplitude",format,ordinal),format.epoch);
+        const auto cover_orders=amplitude_orders(count,child(master,"cover-amplitude",format,carrier,ordinal),format.epoch);
         std::vector<std::size_t> payload;payload.reserve(count);
         for(std::size_t i=0;i<count;++i){
             tile.chips[i]=independent_pattern(cover_orders[i],cover.data()+i*3,nullptr,nullptr,0);
@@ -284,15 +299,15 @@ struct PatternSource::Impl {
         const auto n=(payload.size()/format.added_symbols)*format.added_symbols;
         require(n>=geom.payload_fine_cells_per_tile,"triad v3 tile violated protected allocation bound");
         std::vector<std::size_t> order;
-        if(format.added_interleave)order=permutation(n,child(master,"permutation",format,ordinal),format.epoch);
+        if(format.added_interleave)order=permutation(n,child(master,"permutation",format,carrier,ordinal),format.epoch);
         const auto inner_count=n/format.added_symbols;
         const auto inner_orders=amplitude_orders(inner_count,
-            child(master,"inner-amplitude",format,ordinal,bit),format.epoch);
-        const auto inner_phase=child(master,"inner-phase",format,ordinal,bit)
+            child(master,"inner-amplitude",format,carrier,ordinal,bit),format.epoch);
+        const auto inner_phase=child(master,"inner-phase",format,carrier,ordinal,bit)
             .stream(StreamPurpose::Scrambler,format.epoch,0,inner_count*3);
-        const auto outer_radii=format.added_symbols>1?child(master,"added-amplitude",format,ordinal,bit)
+        const auto outer_radii=format.added_symbols>1?child(master,"added-amplitude",format,carrier,ordinal,bit)
             .stream(StreamPurpose::Dsss,format.epoch,0,n*3):Bytes{};
-        const auto outer_phase=format.added_symbols>1?child(master,"added-phase",format,ordinal,bit)
+        const auto outer_phase=format.added_symbols>1?child(master,"added-phase",format,carrier,ordinal,bit)
             .stream(StreamPurpose::Dsss,format.epoch,0,n*3):Bytes{};
         // Three consecutive byte addresses are the three carrier lanes;
         // logical/Added selects the inner symbol without splitting it.

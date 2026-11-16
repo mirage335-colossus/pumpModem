@@ -32,6 +32,8 @@ struct PublicProfileConfig {
     // Use the selected format from plan_shaping(). Geometry and calendar are
     // recomputed from this format, never accepted from received metadata.
     Format format;
+    // When format.configured_carrier_hz is zero, PublicProfile resolves it to
+    // data_if_hz (no Shift). Shifted callers must supply the nominal sum.
     double data_if_hz = 1725, gate_bandwidth_hz = 0;
     helper::Options helper;
     bool helper_enabled = false;

@@ -37,7 +37,40 @@ For file-backed keys, the AES root's first 32 bytes seed those waveform
 purpose keys. The independent Serpent root does not feed that AES derivation.
 
 The waveform's keyed child sources use `Crypto::mac` on their canonical
-context to derive a child waveform seed. The dual-lane message APIs are kept
+context to derive a child waveform seed. The current child domain is
+`datapump/experimental-triad/v3/independent-apsk-2/carrier-v1/`. After the
+existing purpose, epoch, ordinal, tile, alternative and alignment coordinates,
+it appends the configured carrier context as eight big-endian bytes. This is
+the IEEE 754 binary64 encoding of the rounded nominal physical frequency:
+
+```
+configured_hz = baseband_hz + shift_hz
+quantum_hz = max(10, (inner_rate_hz * added_symbols) / 10)
+rounded_hz = quantum_hz * round(configured_hz / quantum_hz)
+```
+
+The operations above use binary64 in the stated order. Frequencies are finite
+and nonnegative; halfway cases round toward the higher frequency, and zero is
+encoded as positive zero. Spreading is the configured Added Symbols count
+(one when disabled). The quantum may be fractional. Only the rounded frequency
+is appended, not the bucket index, so different grids cannot accidentally share
+keys merely because their bin numbers match. The context is calculated once
+per source and applies to every child: all three DATA lanes, cover, interleave
+permutation, Added Symbols and the dual-lane payload mask. Standalone baseband
+fixtures may use zero; public streams default to their DATA IF, and shifted
+GUI/exporter/probe profiles supply the nominal IF plus Shift.
+
+Hops, measured frequency, Doppler, oscillator error and receiver search candidates
+do not alter this context. Frequencies rounding to the same value deliberately
+share it; settings on opposite sides of a rounding boundary can differ even
+when very close. The diagnostic revision is `independent-apsk-v2-carrier-v1`.
+This changes all previous Robust waveform keys, including unencrypted and public
+Amateur waveforms; peers need the updated derivation and matching rounded
+frequency. There is no old-key fallback. It separates configured waveforms,
+not sender identities, and does not guarantee rejection of every nearby signal.
+Helper metadata, calendar/hop scheduling and shared keyfile formats are unchanged.
+
+The dual-lane message APIs are kept
 separate from this AES-only waveform path. The native C++ complete receiver
 and GUI session share these canonical components. Python tools test and compare
 the implementation; they are not an operating receiver. GUI connection does

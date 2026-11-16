@@ -1311,6 +1311,9 @@ Setup setup(const Options& o,std::stop_token stop) {
         pc.helper.data_power_w=1;pc.helper.power_w=2;pc.helper.ratio_limit_db=90;
         pc.helper.callsign="TEST";pc.helper.timecode=true;
     }
+    // Direct propagation declares the physical RF center. Only the native
+    // endpoint chain treats that coordinate as Shift plus a separate DATA IF.
+    f.configured_carrier_hz=scenario.channel.rf_hz+(native_chain_case?pc.data_if_hz:0.);
     // Twelve samples per native endpoint conservatively cover the eight-tap
     // half-support at the declared +/-2 ppm clock extrema, rounding and drain.
     constexpr std::uint64_t chain_endpoint_tail=12;

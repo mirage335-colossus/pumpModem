@@ -193,6 +193,57 @@ void native_precision_profile_policy() {
     check(rejected, "GPU plus FP64 force did not report the applicable explicit validation error");
 }
 
+void configured_physical_carrier_context() {
+    auto first_settings=settings(true);
+    first_settings.transfer.modem.carrier_hz=1720;
+    first_settings.transfer.modem.oscillator_search->rf_shift_hz=5;
+    first_settings.added_symbols=10;
+    first_settings.added_interleave=true;
+    first_settings.fhss_profile="fake-list";
+    first_settings.fhss_frequencies_hz={0,12};
+    const auto first=live::detail::prepare_profile(first_settings,*first_settings.calendar,{});
+    check(first.waveform.config().format.configured_carrier_hz==1725,
+          "Robust profile omitted the configured baseband plus Shift carrier");
+
+    // Equivalent baseband/Shift pairs denote the same configured carrier.
+    auto equivalent_settings=first_settings;
+    equivalent_settings.transfer.modem.carrier_hz=1723;
+    equivalent_settings.transfer.modem.oscillator_search->rf_shift_hz=2;
+    const auto equivalent=live::detail::prepare_profile(equivalent_settings,*equivalent_settings.calendar,{});
+    auto format_a=first.waveform.config().format;
+    auto format_b=equivalent.waveform.config().format;
+    check(format_a.configured_carrier_hz==format_b.configured_carrier_hz,
+          "equivalent configured carrier decompositions did not produce the same key context");
+    format_a.encrypt=format_b.encrypt=false;
+    triad::v3::PatternSource source_a(format_a,first.key,0), source_b(format_b,equivalent.key,0);
+    for(std::uint64_t cell=0;cell<100;++cell)
+        check(source_a.pattern_coefficient_at(cell)==source_b.pattern_coefficient_at(cell),
+              "equivalent baseband/Shift settings changed the triple Robust keystream");
+
+    // Hopping and Doppler alter operating shifts/searches but keep the base
+    // configured carrier context fixed.
+    auto moved_settings=first_settings;
+    moved_settings.fhss_profile="fake-list";
+    moved_settings.fhss_frequencies_hz={0,24};
+    moved_settings.doppler_shift_hz=3;
+    const auto moved=live::detail::prepare_profile(moved_settings,*moved_settings.calendar,{});
+    auto format_c=moved.waveform.config().format;
+    check(format_c.configured_carrier_hz==format_a.configured_carrier_hz &&
+          moved.hop_shifts_hz!=first.hop_shifts_hz,
+          "hop or Doppler settings replaced the configured carrier key coordinate");
+    format_c.encrypt=false;
+    triad::v3::PatternSource source_c(format_c,moved.key,0);
+    std::uint64_t first_payload_cell=0;
+    while(first_payload_cell<source_a.geometry().fine_cells &&
+          source_a.pattern_coefficient_at(first_payload_cell)==std::array<triad::v3::Complex,3>{})
+        ++first_payload_cell;
+    check(first_payload_cell<source_a.geometry().fine_cells,
+          "FHSS profile produced no active carrier-key fixture cell");
+    for(std::uint64_t cell=first_payload_cell;cell<first_payload_cell+100;++cell)
+        check(source_a.pattern_coefficient_at(cell)==source_c.pattern_coefficient_at(cell),
+              "hop or Doppler position changed the configured-carrier keystream");
+}
+
 live::Snapshot ready(live::Session& session) {
     return wait(session, [](const auto& s) {
         check(s.error.empty(), "Native Robust preparation failed: " + s.error);
@@ -933,6 +984,7 @@ int main(int argc, char** argv) {
         }
         check(argc == 1, "Unexpected Robust session test argument");
         native_precision_profile_policy();
+        configured_physical_carrier_context();
         if (!live::gpu_receiver_available()) unavailable_gpu();
         inactive_and_audio_ownership();
         live_transmit_and_cancel(false);

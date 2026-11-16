@@ -892,6 +892,7 @@ int run(const Options& o) {
         throw std::invalid_argument("diagnostic arrival override must stay inside the public arrival prior");
     const auto data_if_hz = data_if_for(o);
     auto initial_format = format_for(o);
+    initial_format.configured_carrier_hz = data_if_hz + physical.rf_hz;
     triad::v3::ShapingPlan selected_shaping;
     try {
         selected_shaping = shaped_format(o, initial_format);

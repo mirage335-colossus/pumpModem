@@ -19,9 +19,9 @@ outputs here. Follow the material lifecycle in docs/development.md.
 Mitigation for Frequency Division Multiple Access (FDMA) for Encrypted Users
 ==============================================================================
 
-Please add to the triple Robust Modem keystrems derivation, the calculated
+Please add to the triple Robust Modem keystreams derivation, the calculated
 absolute configured (but not hop) carrier frequency from baseband and shift
-frequency, to the nearest 1/10th of rate Hz .
+frequency, rounded to the greater of the nearest 1/10th of rate Hz multiplied by spreading, or 10Hz .
 
 This should result in triple Robust Modem using entirely different keys for
 significantly different frequencies.

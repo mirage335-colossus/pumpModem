@@ -641,6 +641,7 @@ int predictive_active_fade(Clock::time_point began, FadeCase selected, bool key_
     format.symbol_ordinal = 0;
     format.encrypt = true;
     public_config.data_if_hz = 240.;
+    format.configured_carrier_hz = rf_hz + public_config.data_if_hz;
     public_config.capture_lead_seconds = .25;
     public_config.arrival_low_seconds = 2. / format.sample_rate;
     public_config.arrival_high_seconds = 130. / format.sample_rate;
@@ -1049,6 +1050,7 @@ int main(int argc, char** argv) {
         public_config.format.encrypt = false;
         public_config.helper_enabled = false;
         public_config.data_if_hz = 500.;
+        public_config.format.configured_carrier_hz = rf_hz + public_config.data_if_hz;
         if (predictive_tone) public_config.cfo_bound_hz = 3.25;
         // Coarse template preparation inspects two rows before the source.
         // Render a common native pre-roll so slot zero really has those rows;
