@@ -233,6 +233,7 @@ void wrong_key_policy_boundaries() {
     ReceiverSlotScore candidate;
     candidate.decision = SlotDecision::data;
     candidate.bit = 0;
+    candidate.complete = candidate.all_valid = true;
     candidate.operational_threshold = threshold;
     candidate.operational_bit_evidence = {threshold + 25., threshold + 20.};
     candidate.operational_bit_log_separation = 5.;
@@ -273,12 +274,101 @@ void wrong_key_policy_boundaries() {
         check(nondata.decision == decision && !nondata.wrong_key_rejected && !nondata.bit,
               "wrong-key policy must preserve quiet and erasures");
     }
-    for (auto mode : {WrongKeyAdmission::current, WrongKeyAdmission::guarded, WrongKeyAdmission::strict})
+    // The extended filters share the same score and remain nested. Each
+    // coefficient receives an exact boundary and both adjacent outcomes.
+    double previous_required = 0;
+    for (const auto mode : wrong_key_admission_policies) {
         check(parse_wrong_key_admission(wrong_key_admission_name(mode)) == mode,
               "wrong-key policy tokens must round trip");
+        auto filtered = candidate;
+        apply_wrong_key_admission(filtered, mode);
+        check(filtered.wrong_key_required_log_separation >= previous_required &&
+              wrong_key_admission_passes(candidate, mode) == (filtered.decision == SlotDecision::data),
+              "scalar admission and mutating gate must agree for every nested tier");
+        previous_required = filtered.wrong_key_required_log_separation;
+        if (mode == WrongKeyAdmission::current) continue;
+        for (const auto offset : {-1e-9, 0., 1e-9}) {
+            auto boundary = candidate;
+            boundary.operational_bit_log_separation = previous_required + offset;
+            check(wrong_key_admission_passes(boundary, mode) == (offset >= 0),
+                  "every stronger tier must preserve its inclusive scalar boundary");
+        }
+    }
+    // Use an exactly represented excess for the coefficient check: at the
+    // operational threshold, (T + 20) - T can differ from 20 by one ULP.
+    auto integer_excess = candidate;
+    integer_excess.operational_threshold = 20.;
+    integer_excess.operational_bit_evidence = {60., 40.};
+    integer_excess.operational_bit_log_separation = 20.;
+    integer_excess.operational_minimum_bit_log_separation = 10.;
+    constexpr std::array expected_margins{0., 12., 15., 22.5, 41.25, 60.};
+    for (std::size_t i = 0; i < wrong_key_admission_count; ++i) {
+        auto filtered = integer_excess;
+        apply_wrong_key_admission(filtered, wrong_key_admission_policies[i]);
+        check(filtered.wrong_key_required_log_separation == expected_margins[i],
+              "stronger levels must scale the whole Strict margin by the frozen reference multiplier");
+    }
+    // A below-threshold competitor used to leave every larger rho dormant.
+    // Whole-margin scaling now acts on this finite-gap dominant-bit case.
+    auto below_threshold = integer_excess;
+    below_threshold.operational_bit_evidence = {26., 19.};
+    below_threshold.operational_bit_log_separation = 7.;
+    below_threshold.operational_minimum_bit_log_separation = 6.;
+    check(wrong_key_admission_passes(below_threshold, WrongKeyAdmission::strict) &&
+          !wrong_key_admission_passes(below_threshold, WrongKeyAdmission::very_strict) &&
+          !wrong_key_admission_passes(below_threshold, WrongKeyAdmission::extreme) &&
+          !wrong_key_admission_passes(below_threshold, WrongKeyAdmission::maximum),
+          "stronger full-margin levels must remain active below the competing-score threshold");
+
+    auto one_supported_bit = candidate;
+    one_supported_bit.operational_bit_evidence[1] = -std::numeric_limits<double>::infinity();
+    one_supported_bit.operational_bit_log_separation = std::numeric_limits<double>::infinity();
+    WrongKeyAdmissionEvidence evidence;
+    accumulate_wrong_key_admission(evidence, one_supported_bit);
+    check(evidence.available && evidence.data_bits == 1 &&
+          std::all_of(evidence.passing_bits.begin(), evidence.passing_bits.end(), [](auto count) { return count == 1; }),
+          "legal absent alternative and infinite gap must remain rated under every tier");
+    accumulate_wrong_key_admission(evidence, candidate);
+    check(evidence.available && evidence.data_bits == 2 && evidence.passing_bits[0] == 2 &&
+          evidence.passing_bits[1] == 2 && evidence.passing_bits[2] == 1 && evidence.passing_bits.back() == 1,
+          "episode evidence must retain exact per-tier baseline DATA counts");
+    auto quiet = candidate;
+    quiet.decision = SlotDecision::quiet;
+    quiet.bit.reset();
+    accumulate_wrong_key_admission(evidence, quiet);
+    check(evidence.available && evidence.data_bits == 2 && !wrong_key_admission_passes(quiet, WrongKeyAdmission::current),
+          "quiet is never a rated DATA bit");
+    auto unrated = candidate;
+    unrated.operational_bit_evidence = {};
+    unrated.operational_bit_log_separation = 0;
+    accumulate_wrong_key_admission(evidence, unrated);
+    accumulate_wrong_key_admission(evidence, one_supported_bit);
+    check(!evidence.available && evidence.data_bits == 4 && evidence.passing_bits[0] == 3,
+          "missing scalar evidence must stay unavailable after later rated bits");
+    WrongKeyAdmissionEvidence already_filtered;
+    auto filtered_baseline = candidate;
+    apply_wrong_key_admission(filtered_baseline, WrongKeyAdmission::guarded);
+    accumulate_wrong_key_admission(already_filtered, filtered_baseline);
+    check(!already_filtered.available && already_filtered.data_bits == 1 && already_filtered.passing_bits[0] == 0,
+          "already-filtered reception must not pretend to be unfiltered history");
+    auto contradictory = candidate;
+    contradictory.operational_minimum_bit_log_separation = candidate.operational_bit_log_separation + .25;
+    WrongKeyAdmissionEvidence contradictory_evidence;
+    accumulate_wrong_key_admission(contradictory_evidence, contradictory);
+    check(!contradictory_evidence.available && contradictory_evidence.data_bits == 1 &&
+          contradictory_evidence.passing_bits[0] == 0,
+          "DATA contradicting its baseline minimum gap must remain unrated");
+    contradictory.operational_minimum_bit_log_separation = candidate.operational_bit_log_separation;
+    WrongKeyAdmissionEvidence inclusive_baseline;
+    accumulate_wrong_key_admission(inclusive_baseline, contradictory);
+    check(inclusive_baseline.available && inclusive_baseline.data_bits == 1 &&
+          inclusive_baseline.passing_bits[0] == 1,
+          "DATA at the exact baseline minimum gap remains rated");
     rejects<Error>([] { (void)parse_wrong_key_admission("10^-4/day"); }, "uncalibrated rate is not a policy token");
     rejects<Error>([&] { apply_wrong_key_admission(candidate, static_cast<WrongKeyAdmission>(99)); },
                    "invalid wrong-key policy must not silently select a mode");
+    rejects<Error>([&] { (void)wrong_key_admission_passes(quiet, static_cast<WrongKeyAdmission>(99)); },
+                   "scalar query must reject an invalid policy even for non-DATA");
 }
 
 // One short DATA window per case, same observation and declared static

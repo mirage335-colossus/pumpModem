@@ -315,6 +315,7 @@ struct ReceiveDisplay {
     std::optional<std::uint64_t> pending_slot;
     std::uint64_t pending_id = 0, revision = 0;
     std::size_t observed_bits = 0, missing = 0;
+    WrongKeyAdmissionEvidence wrong_key_evidence;
 };
 
 } // namespace
@@ -475,6 +476,8 @@ struct Session::Impl {
                 signal.revision = matched ? display.revision + 1 : 1;
                 signal.frequency_hz = s.transfer.modem.carrier_hz;
                 signal.complete = true;
+                signal.robust_reception = true;
+                signal.wrong_key_evidence = message.wrong_key_evidence;
                 signal.received_bits = message.observed_bits;
                 signal.missing_symbols = message.missing_slots;
                 // Raw presentation requires an exact physical bit sequence.
@@ -514,12 +517,15 @@ struct Session::Impl {
             }
             display.observed_bits = report.observed_bits;
             display.missing = report.erasures;
+            display.wrong_key_evidence = report.wrong_key_evidence;
             SignalUpdate signal;
             signal.id = display.pending_id;
             signal.revision = ++display.revision;
             signal.frequency_hz = s.transfer.modem.carrier_hz;
             signal.received_bits = display.observed_bits;
             signal.missing_symbols = display.missing;
+            signal.robust_reception = true;
+            signal.wrong_key_evidence = display.wrong_key_evidence;
             signal.text = report.recovering ? "Robust episode rejected; listening for two quiet slots" : "Receiving Robust content";
             append_signal(std::move(signal));
         });
@@ -579,6 +585,8 @@ struct Session::Impl {
             signal.frequency_hz = s.transfer.modem.carrier_hz;
             signal.received_bits = display.observed_bits;
             signal.missing_symbols = display.missing;
+            signal.robust_reception = true;
+            signal.wrong_key_evidence = display.wrong_key_evidence;
             signal.text = "Robust input ended before physical completion";
             append_signal(std::move(signal));
         });
@@ -1157,6 +1165,10 @@ struct Session::Impl {
                 const auto prepare = [&] {
                     const auto anchor = s.simulation ? simulation_calendar(s) : *s.calendar;
                     auto prepared = detail::prepare_profile(s, anchor, stop);
+                    // Optional wrong-key filtering is a reversible browser
+                    // view. Retain the canonical baseline for every reception;
+                    // headless receiver/probe configurations remain independent.
+                    prepared.receiver.wrong_key_admission = WrongKeyAdmission::current;
                     prepared.receiver.bulk_backend = gpu_backend;
                     active = std::make_shared<const Profile>(std::move(prepared));
                     const auto& calendar = active->waveform;

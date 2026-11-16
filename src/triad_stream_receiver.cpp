@@ -675,6 +675,7 @@ struct CompleteStreamReceiver::Impl {
         const auto& current = codec.result();
         result.observed_bits = current.observed_bits;
         result.erasures = current.missing_slots;
+        result.wrong_key_evidence = current.wrong_key_evidence;
         if (current.slots_consumed && !codec.recovering())
             result.episode_first_public_slot = codec.next_slot_index()-current.slots_consumed;
         result.input_closed = closed;

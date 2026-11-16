@@ -2,6 +2,7 @@
 
 #include "datapump/stream_codec.hpp"
 #include "datapump/recovery.hpp"
+#include "datapump/wrong_key_admission.hpp"
 #include "utf8_policy.hpp"
 #include <chrono>
 #include <deque>
@@ -22,7 +23,11 @@ Bytes parse_binary_bits(std::string_view text);
 // are displayed separately and are never retained for every received message.
 class Inbox {
 public:
-    struct ReceptionIdentity { std::uint64_t signal_id=0, revision=0; };
+    struct ReceptionIdentity {
+        std::uint64_t signal_id=0, revision=0;
+        triad::v3::WrongKeyAdmissionEvidence wrong_key_evidence;
+        bool robust_reception=false;
+    };
     explicit Inbox(std::size_t capacity = default_memory_limit);
     void put(StreamContent stream, std::optional<ReceptionIdentity> identity = {});
     void erase(std::string_view reception_id);
@@ -32,6 +37,13 @@ public:
     const std::deque<StreamContent>& items() const noexcept { return items_; }
     std::vector<const StreamContent*> file_items() const;
     std::size_t size_bytes() const noexcept { return used_; }
+    std::size_t capacity() const noexcept { return capacity_; }
+    // Conservative retained-content charge, including capacity and metadata.
+    // apply_receptions shares this budget with Signals; standalone put keeps
+    // its historical payload-capacity contract.
+    std::size_t retained_bytes() const noexcept;
+    bool discard_oldest() noexcept;
+    const ReceptionIdentity* identity(const Message&) const noexcept;
 private:
     std::size_t capacity_;
     std::size_t used_ = 0;
@@ -110,7 +122,15 @@ struct SignalLine {
     std::uint64_t revision = 0;
     transfer::RecoveryProgress recovery_progress;
     bool helper_carrier = false;
+    triad::v3::WrongKeyAdmissionEvidence wrong_key_evidence;
+    bool robust_reception = false;
 };
+using WrongKeyAdmission = triad::v3::WrongKeyAdmission;
+std::string admission_filter_label(WrongKeyAdmission);
+bool admission_visible(const triad::v3::WrongKeyAdmissionEvidence&, WrongKeyAdmission);
+std::string admission_label(const triad::v3::WrongKeyAdmissionEvidence&, WrongKeyAdmission);
+bool signal_visible(const SignalLine&, WrongKeyAdmission);
+bool file_visible(const Inbox&, const Message&, WrongKeyAdmission);
 bool signal_byte_aligned(const SignalLine& line);
 std::string signal_display_text(const SignalLine& line, bool shellcode = false);
 std::string signal_status_label(const SignalLine& line);
@@ -126,12 +146,15 @@ std::string signal_data_label(const SignalLine& line);
 // diagnostics may be copied as displayed text, even while pending.
 class Signals {
 public:
+    static constexpr std::size_t maximum_records = 4096;
     bool update(SignalLine line);
     // Merged row identities stay retired within the bounded display history.
     void erase(std::uint64_t id);
     bool retired(std::uint64_t id) const noexcept;
     void clear() noexcept { lines_.clear(); retired_ids_.clear(); }
     const std::deque<SignalLine>& lines() const noexcept { return lines_; }
+    std::size_t retained_bytes() const noexcept;
+    bool discard_oldest() noexcept;
     std::optional<std::string> copy_id(std::size_t index) const;
     std::optional<std::string> copy_bits(std::size_t index) const;
     std::optional<std::string> copy_raw_bits(std::size_t index) const;
@@ -142,8 +165,9 @@ private:
     std::deque<std::uint64_t> retired_ids_;
 };
 
-// Apply a receiver poll atomically: retract superseded content before adding
-// newly completed sources and publishing their final row interpretations.
+// Apply one receiver poll on the UI thread: retract superseded content before
+// adding completed sources. Update touched rows in place; a pending bit does
+// not copy the full retained reception history.
 void apply_receptions(Inbox& inbox, Signals& signals, live::Snapshot& snapshot);
 
 std::string id_label(const Message& message);

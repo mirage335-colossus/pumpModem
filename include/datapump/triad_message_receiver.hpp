@@ -97,6 +97,10 @@ struct MessageResult {
     // Long episodes retain only a bounded diagnostic prefix. These counts
     // describe every committed data/erasure slot, independent of that prefix.
     std::size_t observed_bits = 0, missing_slots = 0;
+    // Whole-episode baseline DATA evidence for reversible browser filtering.
+    // It is independent of the bounded diagnostic bit prefix and does not
+    // change source decoding, physical completion or the original content.
+    WrongKeyAdmissionEvidence wrong_key_evidence;
     std::size_t recognized_markers = 0, damaged_markers = 0;
     bool long_form = false;
     Bytes received_bits;

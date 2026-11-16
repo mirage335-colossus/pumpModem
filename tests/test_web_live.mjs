@@ -87,12 +87,17 @@ function nativeTransport(fds,onBytes,onFailure,metrics) {
     // Model a modest peripheral relay with bounded pipe backpressure. This
     // adds no networking: serialized bytes traverse the same anonymous pipe.
     metrics.relayMbps=10;
+    let releaseAt=performance.now();
     output.on('data',async data=>{
         output.pause();
         try {
             for(let at=0;at<data.length&&!closing;at+=4096) {
                 const chunk=data.subarray(at,at+4096);
-                await pause(Math.ceil(chunk.length*8/(metrics.relayMbps*1000)));
+                // Keep the fractional byte deadline across chunks. Carry at
+                // most 1 ms of timer phase past an idle gap or late callback.
+                releaseAt=Math.max(releaseAt,performance.now()-1)+chunk.length*8/(metrics.relayMbps*1000);
+                for(let waitMs=releaseAt-performance.now();waitMs>0&&!closing;waitMs=releaseAt-performance.now())
+                    await pause(Math.ceil(waitMs));
                 if(!closing)onBytes(chunk);
             }
         }catch(error){onFailure(error);}
@@ -381,6 +386,11 @@ async function scenario(options,rate) {
         // Use this same capture stream: a new local TX would cancel RX and
         // discard accumulated backlog, concealing sustained throughput failure.
         const replay=incoming=physical.replay();let pendingId=null,received=null;
+        // Longer presets need their actual waveform and quiet tail before
+        // the receiver can finish. Preserve a bounded allowance for processing
+        // and presentation after the final required device frame.
+        const replayEnd=Math.max(replay.end,replay.absenceEnd);
+        const replayTimeoutMs=Math.ceil((replayEnd-physical.frame())*1000/rate)+20000;
         await wait(()=>{
             const rows=control('Signals')?.records||[];
             for(const row of rows){
@@ -392,7 +402,7 @@ async function scenario(options,rate) {
                 if(text.startsWith('RECEIVED')&&text.endsWith(' · 2 bytes · hi'))received=row;
             }
             return received;
-        },'complete incoming live message after physical absence',30000);
+        },'complete incoming live message after physical absence',replayTimeoutMs);
         assert(pendingId!==null,'incoming message was never exposed as pending');
         assert.equal(received.id,pendingId,'completed reception replaced the pending row');
         assert(physical.frame()>=replay.absenceEnd,'received content escaped the six-second physical absence boundary');

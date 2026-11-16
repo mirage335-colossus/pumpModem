@@ -37,16 +37,28 @@ checks and remaining gates, and the [GUI contract](gui-contract.md) for control
 mapping. No all-configuration sensitivity, real-time capacity or physical-device
 qualification follows from these connections.
 
-The receiver exposes `current` (default), `guarded` and `strict` Wrong Key
-Admission policies. The default retains the exact prior DATA decision. The
-stronger policies run only as a final bit-ambiguity filter after normal model
-fallback and quiet checks; they can turn DATA into an erasure but cannot create
-quiet or shorten the two-scored-quiet completion rule. The check uses only the
-already computed operational bit scores, adding constant-time scalar work and
-no search, DSP workspace or worker. It does not change the waveform, calendar,
-duration or public geometry. This is a heuristic against near-balanced bit
-scores, not a calibrated wrong-key rate or sender authentication; one dominant
-wrong-key bit may pass, and wanted weak/distorted bits may be erased. See the
+The GUI's **Wrong Key Admission** dropdown is a reversible browser filter.
+Reception and decoding always retain the `current` baseline. Compact counters
+record how many baseline DATA bits pass each nested scalar filter, including
+bits beyond the bounded diagnostic prefix. No raw audio, extra search, codec
+replay or per-message key copy is needed. Filter changes do not restart the
+receiver, alter original content, or change physical completion.
+
+For a completed rated record, the browser requires at least half its admitted
+DATA bits to pass the chosen filter; ties remain visible. The pass count is
+shown separately from physical erasures. Pending, non-Robust and unrated
+records remain visible. This is an explicit visibility rule, not a whole-message
+confidence decision. Current restores filtered records while they remain in
+the bounded RAM history. The standalone native receiver/probe still supports
+applying the same scalar policy directly as DATA-to-erasure admission; that
+headless option is distinct from the GUI's preservation policy.
+
+The score check uses only already computed operational bit scores, adding
+constant-time scalar work and no search, DSP workspace or worker. It does not
+change the waveform, calendar, duration or public geometry. This is a heuristic
+against near-balanced bit scores, not a calibrated wrong-key rate or sender
+authentication; one dominant wrong-key bit may pass, and wanted signals,
+including strong long-window signals, may be hidden. See the
 [research limits and evidence](triad-stochastic.md#wrong-key-admission) and
 [GUI settings](gui-contract.md#modems-and-current-availability).
 

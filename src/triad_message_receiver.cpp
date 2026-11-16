@@ -374,7 +374,8 @@ MessageReceiverStorage message_receiver_storage(const MessageReceiverOptions& op
         const auto slots = checked_multiply(64, options.maximum_slots);
         const auto bits = checked_multiply(8, options.maximum_data_bits);
         const auto content = checked_multiply(8, options.maximum_decoded_bytes);
-        return {0, checked_add(4096, checked_add(content, checked_add(slots, bits)))};
+        return {0, checked_add(4096+sizeof(WrongKeyAdmissionEvidence),
+            checked_add(content, checked_add(slots, bits)))};
     }
     const auto& profile = *options.native_profile;
     const auto layout = interval_layout(profile);
@@ -382,7 +383,7 @@ MessageReceiverStorage message_receiver_storage(const MessageReceiverOptions& op
     const auto short_bits = 2*short_wire_limit(profile.fec)*sizeof(MessageBit);
     // The result can contain a decoded source and its restricted view. The
     // source decoder can grow one result vector before it moves into that result.
-    const auto receipt = checked_add(4096+diagnostics+short_bits,
+    const auto receipt = checked_add(4096+sizeof(WrongKeyAdmissionEvidence)+diagnostics+short_bits,
         checked_multiply(4, profile.content_limit));
     if (!layout.maximum_intervals) return {0, receipt};
     auto episode = checked_add(128U*1024U, checked_multiply(2, layout.source_limit()));
@@ -744,7 +745,10 @@ const MessageResult& QuietSlotMessageReceiver::consume_slot(std::uint64_t local_
             fail(MessageState::resource_limit, "local_data_bit_limit_exceeded");
             return result_;
         }
+        const auto previous_bits = result_.observed_bits;
         commit_bit(*row.bit, local_index);
+        if (result_.observed_bits != previous_bits)
+            accumulate_wrong_key_admission(result_.wrong_key_evidence, row);
         if (terminal()) return result_;
         result_.state = MessageState::receiving;
         result_.reason.clear();

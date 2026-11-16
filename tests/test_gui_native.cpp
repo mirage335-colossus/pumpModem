@@ -365,6 +365,114 @@ void received_text_boundary() {
     check(inbox.items()[0].message.filename==file.message.filename);
     check(inbox.items()[0].message.data==file.message.data);
 }
+void reversible_admission_history() {
+    using P=gui::WrongKeyAdmission;
+    triad::v3::WrongKeyAdmissionEvidence evidence;
+    evidence.available=true;evidence.data_bits=3;evidence.passing_bits={3,2,1,0,0,0};
+    gui::SignalLine line;
+    line.id=41;line.frequency_hz=1500;line.text="101";line.raw_bits="101";
+    line.binary=true;line.complete=true;line.received_bits=3;
+    line.robust_reception=true;line.wrong_key_evidence=evidence;
+    gui::Signals signals;signals.update(line);
+    check(gui::signal_records(signals,false,P::guarded).size()==1);
+    check(gui::signal_records(signals,false,P::strict).empty());
+    check(gui::signal_records(signals).size()==1&&signals.copy_bits(0)=="101");
+    check(gui::admission_label(evidence,P::guarded)=="2/3 reduction (est.): 2/3 DATA bits pass");
+    check(signals.lines()[0].text=="101"&&signals.lines()[0].raw_bits=="101");
+    auto tie=evidence;tie.data_bits=4;tie.passing_bits={4,3,2,1,0,0};
+    check(gui::admission_visible(tie,P::strict)&&!gui::admission_visible(tie,P::very_strict));
+    auto single=evidence;single.data_bits=1;single.passing_bits={1,0,0,0,0,0};
+    check(!gui::admission_visible(single,P::guarded));
+    line.complete=false;check(gui::signal_visible(line,P::maximum));
+    line.complete=true;line.robust_reception=false;check(gui::signal_visible(line,P::maximum));
+    line.robust_reception=true;line.wrong_key_evidence.available=false;
+    check(gui::signal_visible(line,P::maximum)&&
+          gui::admission_label(line.wrong_key_evidence,P::maximum).find("unavailable")!=std::string::npos);
+    auto invalid=evidence;invalid.passing_bits[2]=4;
+    check(gui::admission_visible(invalid,P::strict)&&gui::admission_label(invalid,P::strict).find("unavailable")!=std::string::npos);
+
+    auto file=content(6,5);file.message.kind=MessageKind::file;file.message.filename="original.bin";
+    gui::Inbox inbox;
+    inbox.put(file,gui::Inbox::ReceptionIdentity{41,1,evidence,true});
+    signals.clear(); // File identity/evidence has the lifetime of its cached source.
+    check(gui::file_records(inbox,P::guarded).size()==1&&gui::file_records(inbox,P::strict).empty());
+    check(inbox.items()[0].message.data==file.message.data&&gui::file_records(inbox).size()==1);
+    check(inbox.identity(file.message)&&inbox.identity(file.message)->wrong_key_evidence.data_bits==3);
+
+    for(std::uint64_t id=0;id<gui::Signals::maximum_records+3;++id) {
+        gui::SignalLine row;row.id=id;row.text="1";signals.update(std::move(row));
+    }
+    check(signals.lines().size()==gui::Signals::maximum_records&&signals.lines().front().id==3);
+    const auto* retained_text=signals.lines().front().text.data();
+    live::Snapshot pending;
+    live::SignalUpdate changed;changed.id=gui::Signals::maximum_records+2;changed.text="pending update";
+    pending.signals.push_back(changed);
+    gui::apply_receptions(inbox,signals,pending);
+    check(signals.lines().front().text.data()==retained_text&&signals.lines().back().text=="pending update");
+    gui::Inbox small(8192);small.put(content(7,6000));
+    gui::Signals recent;live::Snapshot update;
+    live::SignalUpdate incoming;incoming.id=50;incoming.text=std::string(4096,'a');
+    update.signals.push_back(incoming);
+    gui::apply_receptions(small,recent,update);
+    check(recent.lines().size()==1&&small.items().empty());
+    check(recent.retained_bytes()+small.retained_bytes()<=small.capacity());
+}
+void admission_browser_controller() {
+    using F=gui::ui::Field;using C=gui::ui::Command;
+    gui::Controller controller({.simulation=true});
+    // Populate the real controller's owned history without starting audio.
+    // The accessors expose const views; the underlying controller is mutable.
+    auto& signals=const_cast<gui::Signals&>(controller.signals());
+    auto& inbox=const_cast<gui::Inbox&>(controller.inbox());
+    auto& snapshot=const_cast<live::Snapshot&>(controller.snapshot());
+    triad::v3::WrongKeyAdmissionEvidence evidence;
+    evidence.available=true;evidence.data_bits=1;evidence.passing_bits={1,0,0,0,0,0};
+    gui::SignalLine raw;raw.id=42;raw.frequency_hz=1500;raw.text="1";raw.raw_bits="1";
+    raw.binary=true;raw.complete=true;raw.received_bits=1;raw.robust_reception=true;raw.wrong_key_evidence=evidence;
+    signals.update(raw);
+    auto file=content(9,4);file.message.kind=MessageKind::file;file.message.filename="keep.bin";
+    inbox.put(file,gui::Inbox::ReceptionIdentity{43,1,evidence,true});
+    snapshot.bit_seconds=123;snapshot.slot_stride_seconds=125;snapshot.transmitting=true;
+    controller.select(F::wrong_key_admission,"strict");
+    check(controller.snapshot().bit_seconds==123&&controller.snapshot().slot_stride_seconds==125&&controller.snapshot().transmitting);
+    check(controller.field(F::wrong_key_admission).enabled&&controller.settings().wrong_key_admission=="strict");
+    check(controller.field(F::signals).records.empty()&&controller.field(F::files).records.empty());
+    check(controller.field(F::status).text.find("1 signals / 1 files hidden")!=std::string::npos);
+    check(controller.field(F::planner_command).text.find("--wrong-key-admission strict")!=std::string::npos);
+    // Even a stale adapter selection cannot act on a now-hidden record.
+    const_cast<gui::ui::FieldState&>(controller.field(F::signals)).selected="42";
+    const_cast<gui::ui::FieldState&>(controller.field(F::files)).selected=gui::id_label(file.message);
+    check(!controller.enabled(C::copy_signal)&&!controller.enabled(C::paste_signal)&&
+          !controller.enabled(C::copy_raw_signal)&&!controller.enabled(C::save_file));
+    controller.select(F::wrong_key_admission,"current");
+    check(controller.field(F::signals).records.size()==1&&controller.field(F::files).records.size()==1);
+    controller.select(F::signals,"42");
+    check(controller.enabled(C::copy_signal)&&controller.enabled(C::copy_raw_signal)&&controller.enabled(C::save_file));
+    check(signals.copy_bits(0)=="1"&&inbox.items()[0].message.data==file.message.data);
+    check(controller.snapshot().bit_seconds==123);
+    for(std::uint64_t id=100;id<240;++id) {
+        auto row=raw;row.id=id;row.wrong_key_evidence.passing_bits.fill(1);signals.update(row);
+        auto item=content(static_cast<std::uint8_t>(id),1);item.message.kind=MessageKind::file;
+        inbox.put(std::move(item));
+    }
+    // Lose the selected weak record under the filter, then browse older pages
+    // without deleting history, treating navigation IDs as payloads or DSP work.
+    controller.select(F::wrong_key_admission,"strict");
+    check(controller.field(F::signals).records.size()<=gui::reception_page_size+2);
+    check(controller.field(F::signals).records.front().id==gui::signals_older_id&&
+          !controller.field(F::signals).records.front().activatable);
+    controller.select(F::signals,std::string(gui::signals_older_id));
+    check(!controller.enabled(C::copy_signal)&&controller.field(F::signals).records.back().id==gui::signals_newer_id);
+    controller.select(F::signals,std::string(gui::signals_older_id));
+    check(controller.field(F::signals).records.front().id=="100");
+    controller.select(F::signals,"100");
+    controller.select(F::wrong_key_admission,"current");
+    check(controller.field(F::signals).selected=="100"&&controller.enabled(C::copy_signal));
+    controller.select(F::files,std::string(gui::files_older_id));
+    check(controller.field(F::files).records.size()<=gui::reception_page_size+2&&
+          controller.field(F::files).records.back().id==gui::files_newer_id);
+    check(signals.lines().size()==141&&inbox.items().size()==141&&controller.snapshot().bit_seconds==123);
+}
 int main() {
     try {
         planner_quick_references();
@@ -375,6 +483,8 @@ int main() {
         pending_transmit_trace();
         retained_raw_bits();
         received_text_boundary();
+        reversible_admission_history();
+        admission_browser_controller();
         check(gui::parse_binary_bits("0")==Bytes({0}));
         check(gui::parse_binary_bits("000101")==Bytes({0,0,0,1,0,1}));
         check(gui::parse_binary_bits("\t00 01\r\n0\f1\v")==Bytes({0,0,0,1,0,1}));
@@ -463,7 +573,7 @@ int main() {
             check(gui::signal_preamble_label(quality)=="Preamble --");
         }
         for (std::uint64_t id=8;id<80;++id) signals.update({id,1500,std::string(5000,'a'),false,{}});
-        check(signals.lines().size()==64 && signals.lines().back().text.size()==4096);
+        check(signals.lines().size()==73 && signals.lines().back().text.size()==4096);
         signals.clear(); check(signals.lines().empty());
         signals.update({90,1500,"readme.txt",true,"file-id",false});
         check(!signals.copy_id(0)); // Even UTF-8 files require explicit Save.

@@ -135,9 +135,9 @@ unnotched observation.
 
 ## Wrong Key Admission
 
-The native receiver now has a final, receiver-local **Wrong Key Admission**
+The native receiver has a final, receiver-local **Wrong Key Admission**
 heuristic. `current` is the default and preserves the previous DATA/erasure
-decision exactly. `guarded` and `strict` apply only after ordinary model
+decision exactly. Stronger policies apply only after ordinary model
 fallback and scored-quiet checks have finished: a baseline DATA result becomes
 an ambiguous erasure when its two operational bit log scores are too close.
 Let `g` be their absolute gap, `m` their minimum, `T` the ordinary DATA
@@ -146,11 +146,62 @@ threshold, and `rho` and `delta` the selected policy constants. The boundary is
 `g < max(existing_min_gap, delta) + rho * max(0, m - T)`.
 
 `guarded` uses `delta=ln(10), rho=0.10`; `strict` uses
-`delta=2*ln(10), rho=0.25`. This is scalar arithmetic after the normal score
+`delta=2*ln(10), rho=0.25`. The stronger GUI reference targets scale the
+**entire Strict required margin** by 1.5, 2.75 and 4.0. Thus they also increase
+the absolute gap floor when the competing score is below `T`; increasing only
+`rho` left a residual class unaffected. Current, Guarded and Strict retain
+their original equations. This is scalar arithmetic after the normal score
 has been produced: it adds no search, projection, DSP workspace or worker,
 restarts no fallback, and changes no public geometry. It does not alter the
 transmitted waveform or its duration. An erasure cannot count as physical
 quiet; the usual two scored quiet slots remain required for completion.
+
+In the GUI this is now a reversible **browser** choice: the native session
+always receives/decodes Current and retains per-message DATA-bit pass counts.
+Completed rated records remain visible when at least half their admitted bits
+pass the selected tier, with ties visible. This avoids a single-bit veto on a
+long message, but it is still a chosen presentation rule, not a calibrated
+message probability. Original decoded content and explicit saved files do not
+change, and no second DSP or codec pass is performed. Current restores hidden
+records within the bounded RAM history; pending/unrated records remain visible.
+The single-bit studies below measure per-bit admission/retention, not the
+multi-bit browser rule's message-level error rate. See
+[reversible history validation](validation.md#reversible-wrong-key-admission-history--15-november-2026).
+
+The dropdown uses the requested reduction fractions: Current, **2/3 reduction
+(est.)**, **1/3 reduction (est.)**, **1/10 reduction (est.)**, **1/100 reduction
+(model)** and **1/1000 reduction (model)**. Fractions mean the target proportion
+of wrong-key DATA bits **remaining relative to Current** in the static-HF
+reference, not the fraction removed. The corresponding saved tokens remain
+`current`, `guarded`, `strict`, `very-strict`, `extreme`, `maximum`.
+These names do not set universal admission rates or the fraction of multi-bit
+message rows hidden by the browser. The earlier changing-HF long-burst results
+already retained 41/57 for Guarded and 23/57 for Strict, above the nominal
+2/3 and 1/3 fractions. Preserve this contrary evidence.
+
+For deeper reference targets, the pilot ranks baseline false DATA by
+`R = g / [max(g0,2*ln(10)) + .25*max(0,m-T)]`. The 1/10 cutoff uses empirical
+conditional order statistics separately in each foreign-burst stratum. The
+1/100 and 1/1000 cutoffs use a predeclared exponential mean-excess tail fitted
+at the upper third and upper fifth of each stratum, taking the largest fitted
+cutoff and rounding upward to a quarter unit. Pareto fits and largest-observation
+influence are reported separately, not presented as confidence intervals.
+The two deepest choices are extrapolated model targets, not probabilities
+verified by zero survivors in a small holdout.
+
+This method follows the need to examine threshold choice and tail stability
+in [Davison and Smith](https://doi.org/10.1111/j.2517-6161.1990.tb01796.x),
+[Northrop et al.](https://arxiv.org/abs/1504.06653) and
+[Murphy et al.](https://arxiv.org/abs/2310.17999). Bounds for fixed positive
+quadratic forms of subgaussian vectors motivate comparing light tails
+([Hsu, Kakade and Zhang](https://www.cs.columbia.edu/~djhsu/papers/quadratic-ecp.pdf));
+they do not identify the tail onset or slope of this adaptive competing-score
+ratio. Finite held-out risk calibration requires representative independent
+draws, as in [Tong, Feng and Li](https://pmc.ncbi.nlm.nih.gov/articles/PMC5804623/)
+and [Angelopoulos et al.](https://doi.org/10.1214/24-AOAS1998). Neither these
+methods nor a display threshold justify transferring the reference probabilities
+to an unspecified channel, key, foreign power, repeated-burst mixture or field
+population.
 
 The shared operational threshold is `T=ln((ceil(86400/0.4)+1)/10^-4)`
 `=ln(216001/10^-4)=21.4933786883`, giving `exp(-T)=4.6296082e-10` for

@@ -19,7 +19,7 @@ template<class Function> void rejects(Function function,const std::string& messa
 void parsing_and_formatting() {
     check(!launch_command::parse("--rate 1200").wrong_key_admission,
           "Older partial commands must leave Wrong Key Admission unchanged");
-    for(const auto* value:{"current","guarded","strict"}) {
+    for(const auto* value:{"current","guarded","strict","very-strict","extreme","maximum"}) {
         const auto policy=launch_command::parse(std::string("--wrong-key-admission ")+value);
         check(policy.wrong_key_admission==value&&launch_command::parse(launch_command::format(policy))==policy,
               "Wrong Key Admission policy did not round trip");

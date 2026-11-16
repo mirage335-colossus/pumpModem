@@ -2,6 +2,7 @@
 
 #include "datapump/helper_carrier.hpp"
 #include "datapump/triad_modem_v3.hpp"
+#include "datapump/wrong_key_admission.hpp"
 
 #include <array>
 #include <optional>
@@ -16,12 +17,6 @@ namespace receiver_detail { class ReceiverBulkBackend; }
 // Automatic may choose Q15 products on a supported native AVX2 geometry.
 // FP32 permits higher precision fallback. Explicit Q15 requires support.
 enum class NativeCoarsePrecision { automatic, fp64, q15, fp32 };
-
-// Receiver-local heuristic, not a calibrated wrong-key probability or a
-// waveform/key change. Current preserves the existing sensitivity policy.
-enum class WrongKeyAdmission { current, guarded, strict };
-const char* wrong_key_admission_name(WrongKeyAdmission);
-WrongKeyAdmission parse_wrong_key_admission(std::string_view);
 
 inline constexpr std::array<std::int64_t, 13> receiver_epoch_offsets{
     -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6};

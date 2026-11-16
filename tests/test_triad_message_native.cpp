@@ -26,6 +26,10 @@ ReceiverSlotScore slot(std::uint64_t index, SlotDecision decision, std::uint8_t 
     row.complete=row.all_valid=row.zero_h0_verified=row.noise_statistics_valid=true;
     row.operational_passes_conditional_bound=decision==SlotDecision::data;
     row.operational_log_e=30; row.operational_threshold=20;
+    if (decision==SlotDecision::data && bit<2) {
+        row.operational_bit_evidence[bit]=30;
+        row.operational_bit_log_separation=30;
+    }
     row.quiet_energy=1; row.quiet_threshold=2; row.quiet_modes=20;
     row.quiet_noise_upper_tail_probability=.001;
     return row;
@@ -88,6 +92,49 @@ void incomplete_and_erased() {
     const auto& truncated=leading.consume_slot(3,slot(3,SlotDecision::quiet));
     check(truncated.state==MessageState::incomplete_message && truncated.erasure_slot_indices.front()==0,
           "ambiguous prefix was discarded");
+}
+void admission_history_evidence() {
+    QuietSlotMessageReceiver receiver;
+    auto weak=slot(0,SlotDecision::data,0);
+    weak.operational_bit_evidence={115,100};
+    weak.operational_bit_log_separation=15;
+    weak.operational_log_e=115;
+    receiver.consume_slot(0,weak);
+    const auto& pending=receiver.result().wrong_key_evidence;
+    check(pending.available && pending.data_bits==1 && pending.passing_bits[0]==1 &&
+          pending.passing_bits[1]==1 && pending.passing_bits[2]==0,
+          "pending baseline evidence did not retain a Strict-hidden bit");
+    receiver.consume_slot(1,slot(1,SlotDecision::data,0));
+    receiver.consume_slot(2,slot(2,SlotDecision::data,1));
+    receiver.consume_slot(3,slot(3,SlotDecision::quiet));
+    const auto& done=receiver.consume_slot(4,slot(4,SlotDecision::quiet));
+    check(done.physical_complete && done.filtered_text=="e" && done.received_bits==Bytes({0,0,1}),
+          "browser evidence changed baseline bits, decode or physical completion");
+    check(done.wrong_key_evidence.available && done.wrong_key_evidence.data_bits==3 &&
+          done.wrong_key_evidence.passing_bits[0]==3 && done.wrong_key_evidence.passing_bits[1]==3 &&
+          done.wrong_key_evidence.passing_bits[2]==2 && done.wrong_key_evidence.passing_bits.back()==2,
+          "browser evidence counted quiet or omitted accepted DATA");
+
+    auto decoder=[](auto) {StreamContent c;c.message.data={'e'};return c;};
+    ContinuousMessageReceiver stream(decoder);
+    stream.consume(slot(0,SlotDecision::data));
+    stream.consume(slot(1,SlotDecision::ambiguous));
+    auto absent=slot(2,SlotDecision::data);
+    absent.operational_bit_evidence={}; absent.operational_bit_log_separation=0;
+    stream.consume(absent);
+    stream.consume(slot(3,SlotDecision::data));
+    stream.consume(slot(4,SlotDecision::quiet));stream.consume(slot(5,SlotDecision::quiet));
+    const auto missing=stream.drain_messages();
+    check(missing.size()==1 && missing[0].message.wrong_key_evidence.data_bits==3 &&
+          !missing[0].message.wrong_key_evidence.available && missing[0].message.missing_slots==1,
+          "missing rating metadata invented confidence or counted an erasure");
+    stream.consume(slot(6,SlotDecision::data));
+    stream.consume(slot(7,SlotDecision::quiet));stream.consume(slot(8,SlotDecision::quiet));
+    const auto fresh=stream.drain_messages();
+    check(fresh.size()==1 && fresh[0].message.wrong_key_evidence.available &&
+          fresh[0].message.wrong_key_evidence.data_bits==1 &&
+          fresh[0].message.wrong_key_evidence.passing_bits.back()==1,
+          "new episode inherited stale browser evidence");
 }
 void evidence_and_geometry() {
     const auto valid=slot(1,SlotDecision::quiet);
@@ -483,6 +530,9 @@ void long_counted_source() {
     check(end.decoded_content && end.decoded_content->message.data==text &&
           end.observed_bits==bits.size() && end.received_bits.size()==4096 &&
           !end.raw_bits_complete(), "long bounded diagnostic prefix misrepresented the source extent");
+    check(end.wrong_key_evidence.available && end.wrong_key_evidence.data_bits==bits.size() &&
+          end.wrong_key_evidence.passing_bits.back()==bits.size(),
+          "long admission evidence was truncated with the diagnostic bit prefix");
 
     PublicProfileConfig config;
     config.format.epoch=1700000000;
@@ -510,7 +560,7 @@ int main() {
     try {
         short_completion();incomplete_and_erased();evidence_and_geometry();
         continuous_messages();decoder_boundary();fec_profiles();leading_fec_prefix();
-        long_intervals();long_rejections();long_counted_source();
+        long_intervals();long_rejections();long_counted_source();admission_history_evidence();
         rejects(continuous_lifecycle,"empty decoder was accepted");
         std::cout<<"native Robust short/long message lifecycle and configured FEC checks passed\n";
     } catch(const std::exception& error) {

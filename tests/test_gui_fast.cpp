@@ -545,14 +545,16 @@ void presentation_and_retention() {
     const auto& wrong_key=control(F::wrong_key_admission);
     check(wrong_key.kind==ui::Kind::choice&&wrong_key.label==std::string("Wrong Key Admission")&&wrong_key.persistent&&
           wrong_key.font_size==11&&control(F::symbol_burst_random).font_size==11&&
-          wrong_key.purpose==ui::ControlPurpose::setup&&!wrong_key.open_upward&&
-          std::string(wrong_key.help).find("No calibrated wrong-key/day rate or authentication")!=std::string::npos&&
+          wrong_key.purpose==ui::ControlPurpose::presentation&&!wrong_key.open_upward&&
+          std::string(wrong_key.help).find("1/10 means 90% filtered")!=std::string::npos&&
+          std::string(wrong_key.help).find("No guaranteed rejection fraction, fixed dB cost, daily rate or authentication")!=std::string::npos&&
           app.control(wrong_key).visible&&app.control(wrong_key).enabled&&
-          app.field(F::wrong_key_admission).selected=="current"&&app.field(F::wrong_key_admission).options.size()==3&&
-          app.field(F::wrong_key_admission).options[0].label=="Current (best sensitivity)"&&
-          app.field(F::wrong_key_admission).options[1].label=="Guarded (heuristic)"&&
-          app.field(F::wrong_key_admission).options[2].label=="Strict (heuristic)",
-          "Wrong Key Admission must expose the three Robust-only policies and their limits");
+          app.field(F::wrong_key_admission).selected=="current"&&app.field(F::wrong_key_admission).options.size()==6&&
+          app.field(F::wrong_key_admission).options[0].label=="Current (unfiltered)"&&
+          app.field(F::wrong_key_admission).options[1].label=="2/3 reduction (est.)"&&
+          app.field(F::wrong_key_admission).options[2].label=="1/3 reduction (est.)"&&
+          app.field(F::wrong_key_admission).options.back().label=="1/1000 reduction (model)",
+          "Wrong Key Admission must expose reversible Robust browser filters and their limits");
     app.select(wrong_key,"guarded");
     check(app.field(F::wrong_key_admission).selected=="guarded","Wrong Key Admission choice was not accepted");
     app.select(mode,"fast");

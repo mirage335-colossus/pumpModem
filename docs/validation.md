@@ -43,6 +43,217 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Reversible Wrong Key Admission history — 15 November 2026
+
+The follow-up over `3d29090a` separates baseline GUI reception from the selected
+browser filter. The user explicitly chose filtering the view and reporting how
+many DATA bits pass while preserving original decoded content, rather than
+re-decoding filtered bits. Native quiet completion and codecs remain unchanged.
+The existing 256 MiB workspace is RAM history, not persistent disk storage.
+
+A fresh bounded static-HF comparison was declared before its outcomes: 64
+independent wrong-key draws in each long/short stratum and 16 independent
+paired wanted panels at mixed C/N0 +7/+10/+13/+16 and clean −7/−4/+10 dB-Hz.
+All six scalar tiers share one canonical native score per observation, for
+240 total calls. Receiver key, public slot 1 and ordinal remain fixed; foreign
+keys, source bits, phases and noise are independently drawn by episode.
+The fixture uses 30 MHz Shift plus 500 Hz IF, Rate 36, requested 180 seconds
+(actual bit 180.4 seconds), 1,500 Hz sampling, exact baseband clock, IC-7100
+Shift oscillator, one arrival and all 43,938 frequency positions. Foreign
+frequency offset is +6 Hz. Long/short foreign-only cases use requested
+180/30 seconds at +18/+30 dB-Hz with uniform nominal-window overlap. Mixed
+panels use requested 30 seconds at +26 dB-Hz and a fixed +60-second offset.
+
+The Ryzen 5 PRO 5650U uses four disjoint three-logical-CPU allocations,
+automatic `W=6` each, aggregate `W=24`, and 1.5 GiB per call. Native and
+subprocess deadlines are 60/75 seconds, with a fixed 3,600-second total cap;
+an error or incomplete score stops the cohort. No outcome-driven sample
+extension is allowed. Manifest SHA256:
+`13383071e7c0d7db0e617c7c33c1a06df6bc8012a0647135da219483253b5817`.
+Relative retention uses baseline false admissions as its denominator; ten
+nonbaseline-policy/foreign-stratum comparisons use `alpha=.05/10` for
+simultaneous 95% one-sided bounds. Wanted crossings are descriptive and
+paired levels do not multiply the independent panel count. Inclusion of the
+provisional Maximum tier requires at least 15/16 correct at mixed +16 and
+at least one additional foreign rejection beyond Extreme in a fixed stratum.
+That selection criterion evaluates a useful option, not a calibrated risk.
+
+Temporary receipts and analysis in `local-evidence/wrong-key-history/` served
+this comparison and implementation review; their cleanup follows the retained
+findings and current calibration sample below. An initial plan
+incorrectly assigned the RF-only IC-7100 preset as the baseband clock and
+failed profile validation; the corrected declared geometry above passed.
+No statistical outcomes were collected by that setup failure.
+
+The pilot completed **240/240** native calls in 299.22 seconds. Its source
+manifest was `8db4a2c9ba0b9b50ec7788d95214bc3d24b36282a8e907b0b912803230066b04`,
+probe binary `0b898014a642044a0626e2e60719d411ec1ee27cbd14dfe1d02ba51476966146`.
+Current admitted 53/64 long and 58/64 short foreign draws. The original
+competing-excess-only Maximum (`rho=2`) met its descriptive inclusion criterion:
+it retained 0/53 and 1/58 baseline foreign admissions and received 16/16 wanted
+bits at mixed +16, but only 0/16 at +10 and 3/16 at +13. Those exploratory
+results are not the final stronger-tier equation.
+
+While this pilot was running, the user explicitly requested 1/10, 1/100 and
+1/1000 reduction labels and allowed trend extrapolation. The resulting model
+choice was frozen before aggregate score inspection: rank baseline foreign
+DATA by its gap divided by the **whole Strict margin**, fit exponential mean
+excesses at the upper third and upper fifth separately in each stratum, and
+compare Pareto alternatives and largest-observation influence. Use the largest
+primary-model threshold across fits, rounded upward to a quarter. The tenth
+uses the empirical order statistic instead. All finite extreme observations
+remain included. This is a separate exploratory calibration, not retrospective
+replacement of the pilot's original measured endpoint or selection criterion.
+
+The resulting multipliers of the whole Strict margin are **1.5 / 2.75 / 4.0**.
+They increase the absolute gap floor too, avoiding the structurally unaffected
+below-threshold competitor class of slope-only scaling. Current, Guarded and
+Strict remain exact. Counterfactual pilot retained/baseline foreign counts are:
+
+| Static-HF reference target | Long foreign bits | Short foreign bits |
+| --- | ---: | ---: |
+| 1/3 (original Strict) | 12/53 | 7/58 |
+| 1/10, multiplier 1.5 | 2/53 | 3/58 |
+| 1/100 model, multiplier 2.75 | 1/53 | 1/58 |
+| 1/1000 model, multiplier 4 | 0/53 | 0/58 |
+
+These calibration-sample counts are not independent post-selection validation.
+At multiplier 2.75 the exponential fits predict 0.169–0.785% retention, while
+Pareto alternatives predict 0.407–2.638%. At multiplier 4 the corresponding
+ranges are 0.0048–0.0884% and 0.0859–1.4123%. These are **model differences,
+not confidence intervals**. For a 1/1000 target, alternate fitted cutoffs span
+3.86–19.57 versus the deployed 4; the tail assumption matters substantially.
+Omitting the largest observation as a diagnostic only lowers the worst
+exponential 1/100 and 1/1000 cutoffs from 2.6116/3.9292 to 2.2259/3.3032.
+The actual calibration keeps those observations. Both deepest survivors were
+partial overlaps with competing scores above `T`; this is an observation,
+not a causal classification of overlap types.
+
+Under the final scalar rule, the pilot's clean wanted outcomes were identical
+for all policies: 3/16 correct at −7 and 16/16 at −4 and +10 dB-Hz. Mixed
+correct counts at +7/+10/+13/+16 were Current 13/16/16/16, Strict 6/15/16/16,
+1/10 4/15/16/16, 1/100 2/9/16/16, and 1/1000 0/5/15/16 (each out of 16).
+Current had three wrong bits at +7; the stronger policies had no wrong bits
+on these mixed levels, with remainders hidden/erased. First empirical 90%
+crossings occupy `(7,10]` for Current and 1/10 and `(10,13]` for the deeper
+targets. The 3 dB grid does not establish an exact 3 dB penalty or a universal
+6/9 dB cost. The previous strong clean Sub-9 counterexample remains applicable
+to every nested stronger filter, now reversibly hiding rather than discarding
+the GUI's original reception.
+
+The [minimal scalar calibration sample](validation-data/triad-v3/wrong-key-reference.json)
+retains 111 ranks plus their native source/configuration and seed recipe. It is
+needed to recompute the **current dropdown constants** and compare tail models;
+aggregate counts alone cannot answer that question. Replace/remove this small
+dataset when the calibration is superseded. Full receipts, sampled signals and
+campaign scripts are temporary, not retained as a second implementation.
+
+A fresh **256-call holdout** was then frozen with all final constants: 64
+foreign draws per stratum and 16 paired panels each at clean −4/+10/+22/+28
+and mixed +10/+16/+22/+28 dB-Hz. Its one-sided 95% conditional retention bounds
+use the same ten-comparison family. No threshold retuning or sample extension
+follows its outcomes. The receiver key/calendar remain fixed and the foreign
+draws are fresh; this does not qualify other traffic or multi-bit row error rates.
+Manifest `60bd34ae1170819a567bf2438b0efc36d40ebabeef81394f9ff32cfdb1d66d01`.
+The holdout completed **256/256** calls in 298.33 seconds. Every native receipt
+used three effective hardware threads and six workers, one arrival and the full
+43,938-frequency search. Source manifest:
+`c88b47795be01dd8a73bce7f7948e922df3aada80c97b91c0a27b030add712c1`.
+Probe binary SHA256:
+`936d13c653ce3e63b3de21be418a8c937338e8104006daf4b3acc15165464545`.
+Independent recomputation verified all 256 × 6 scalar decisions, disjoint pilot
+and holdout seeds, and exact calibration-data reproduction. The two foreign
+strata admitted 41/64 and 62/64 bits under Current:
+
+| Reference target | Long retained / baseline admitted | Short retained / baseline admitted | Simultaneous 95% retention upper bound, long / short |
+| --- | ---: | ---: | ---: |
+| 2/3 (Guarded) | 20/41 | 34/62 | 69.22% / 71.00% |
+| 1/3 (Strict) | 5/41 | 13/62 | 30.83% / 37.04% |
+| 1/10 | 2/41 | 4/62 | 20.71% / 18.95% |
+| 1/100 model target | 0/41 | 0/62 | 12.12% / 8.19% |
+| 1/1000 model target | 0/41 | 0/62 | 12.12% / 8.19% |
+
+For the deep targets, the separate marginal one-sided 95% upper bounds are
+7.05% and 4.72%. Zero survivors therefore does not verify 1% or 0.1% retention;
+the distinction between the two deep labels comes from the tail model, not
+measured different holdout rates. Neither conditional retention bounds nor
+model ranges qualify arbitrary foreign traffic or the majority-bit row rule.
+
+All clean wanted policies agreed: 15/16 correct at −4 and 16/16 at +10/+22/+28,
+with no wrong bits. Mixed wanted counts at +10 were Current/Guarded/Strict
+16/16, 1/10 15/16, 1/100 7/16 and 1/1000 3/16. At +16/+22/+28 all six choices
+received 16/16 correctly, with no wrong bits anywhere on this mixed grid.
+Thus a **6 dB increase restored the two deep filters across the tested
++10-to-+16 step**; their empirical 90% crossing lies in `(10,16]`, while Current
+already met that endpoint at +10. This is not an exact 6 dB sensitivity loss.
+The independent pilot supplied finer, 3 dB grid evidence; neither study
+supports a universal dB penalty, and their paired levels are not independent
+trials. No threshold was retuned after the holdout.
+
+The GUI implementation retains up to 4,096 baseline records, uses a combined
+retained-history/content bound rather than a second independent 256 MiB cache,
+and renders 64-record pages. Evidence follows cached files beyond signal-row
+eviction. Filter changes do not restart active reception or transmission,
+re-decode content, or invalidate original exports. Hidden selections cannot
+copy/paste/save; Current restores retained records. Pending and unrated records
+remain visible, and physical quiet never comes from the browser filter.
+An independent source review caught and removed an existing whole-history
+copy that would have grown from 64 to 4,096 records per receive update.
+Counters add a fixed 64-byte summary and bounded scalar work per admitted bit;
+there is no extra DSP hypothesis, search, fallback, worker or retained I/Q.
+This is not a refreshed complete-receiver capacity qualification.
+
+Checks: the final native group passed 38/38 in 76.46 seconds and the GUI
+group passed 30/30 in 154.45 seconds. An earlier native run passed 37/38 because
+a new exact-coefficient test assumed `(T+20)-T` was exactly 20; it differed by
+one ULP. The test now uses exactly representable coefficient inputs while
+retaining actual-threshold boundaries. Metadata also rejects a score whose
+gap contradicts its declared baseline minimum. The dense-history web bridge
+test passes with all 4,096 retained records and a near-maximum escaped draft,
+remaining below the existing 8 MiB frame envelope. The final application build
+completed, and the rebuilt targeted web bridge/audio/renderer checks passed
+3/3 in 0.84 seconds after the final help and fixture changes.
+
+The broader web group initially passed 10/13. Two preview checks could not
+create local sockets inside the sandbox; both passed when rerun with approved
+loopback access. **Fast `web_live` remains failed**, rather than being counted
+as qualified by those passes. It underflowed at 48 kHz before transmit drain
+and before received replay, on an unchanged Fast path. The same kind of
+failure is recorded in the pre-feature
+[September web log](validation-data/bookworm-offline-20260930/test-web.log).
+The later pre-feature Fast waveform change lengthened the fixture's emission
+from about 9.8 to 32.67 seconds, exposing its stale 30-second replay deadline.
+
+The test now derives that deadline from the actual replay/end-of-absence time
+plus the same 20-second processing allowance; its bounded two-rate CTest
+envelope is 900 seconds, with all individual phase and underrun assertions
+preserved. Its purported 10 Mb/s relay previously rounded every 4,096-byte
+fragment's delay upward to 4 ms, imposing an ideal ceiling of 8.192 Mb/s before
+overhead. A matched instrumented comparison measured 7.825 Mb/s originally
+and 9.750 Mb/s with carried fractional-byte pacing. That fixture-model repair
+was adopted; FIFO, fixed chunks, backpressure and the production quarter-second
+audio credit remain unchanged.
+
+Corrected pacing still underflowed after 861,600 actual played frames, with no
+endpoint/drain. In the late interval, snapshots plus PCM required 10.200 Mb/s
+per emitted sample time; a 114,681-byte snapshot occupied 90.43 ms. The original
+matched trace underflowed after 321,600 frames. These results identify an
+existing shared-pipe presentation/audio bandwidth limitation; they do not prove
+that correcting timer rounding repairs the runtime. The growing Fast snapshots
+do not contain the hidden Robust control or this task's reception history.
+Production transport/credit was not changed, and the second sample-rate case
+was not reached. The final tracked relay/deadline code matches the executed
+instrumented variant; syntax and CMake configuration checks passed. This
+remaining Fast web qualification limit is separate from the passing native
+Robust, GUI history and bounded-frame checks.
+
+All 496 statistical calls used the canonical native CPU implementation and
+finished in about ten minutes combined, so this follow-up needed no additional
+RunPod allocation. This is an outcome study, not a complete-service benchmark.
+After final review, owned full receipts, manifests, scripts and diagnostic
+copies were removed. Only the justified 6,221-byte current-calibration input
+remains; useful build caches and unrelated evidence were retained.
+
 ## Wrong Key Admission rate and sensitivity study — 15 November 2026
 
 This follow-up quantifies the existing policies; it does not retune them.

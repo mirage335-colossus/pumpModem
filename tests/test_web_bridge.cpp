@@ -2,6 +2,7 @@
 #include "web_pixels.hpp"
 #include "plot_render.hpp"
 #include "document_presentation.hpp"
+#include "record_presentations.hpp"
 #include <array>
 #include <iostream>
 #include <map>
@@ -150,6 +151,30 @@ void robust_long_editor_bounds() {
     snapshot=bridge.snapshot();
     check(snapshot.size()<8*1024*1024&&snapshot.find("\\\\x00")!=std::string::npos,
           "Maximum escaped edit escaped its bounded literal presentation");
+    // The full receive history is retained, but only one bounded page enters
+    // any frontend snapshot. Exercise JSON's six-byte HTML escaping together
+    // with the maximum legal escaped draft and a full file-history page.
+    Signals history;Inbox received;
+    for(std::size_t i=0;i<Signals::maximum_records;++i) {
+        SignalLine row;row.id=i;row.text=std::string(4096,'<');row.complete=true;
+        row.robust_reception=true;row.wrong_key_evidence.available=true;
+        row.wrong_key_evidence.data_bits=4096;row.wrong_key_evidence.passing_bits.fill(4096);
+        history.update(std::move(row));
+        datapump::StreamContent file;file.message.kind=datapump::MessageKind::file;
+        file.message.local_id[0]=static_cast<std::uint8_t>(i);
+        file.message.local_id[1]=static_cast<std::uint8_t>(i>>8);
+        file.message.filename=std::string(255,'a');received.put(std::move(file));
+    }
+    auto& signal_field=const_cast<ui::FieldState&>(app.field(F::signals));
+    auto& file_field=const_cast<ui::FieldState&>(app.field(F::files));
+    signal_field.records=signal_records(history,true,WrongKeyAdmission::current,63);
+    file_field.records=file_records(received,WrongKeyAdmission::current,63);
+    check(history.lines().size()==4096&&signal_field.records.size()==65&&file_field.records.size()==65,
+          "Receive pagination dropped history or exposed more than one bounded page");
+    snapshot=bridge.snapshot();
+    check(snapshot.size()<8*1024*1024&&snapshot.find("Older records")!=std::string::npos,
+          "Long receive history and maximum draft exceeded the bridge envelope");
+    signal_field.records.clear();file_field.records.clear();
     edit=event(bridge,web::EventKind::edit,editor,2);edit.value=std::string(2*1024*1024,'<');
     const auto expansion=bridge.accept(edit);
     bool bounded=true;

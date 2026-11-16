@@ -324,26 +324,75 @@ void receiver_detail::classify_fine_slot(ReceiverSlotScore& score, const Admissi
     classify_varying_slot(score, grid, nullptr, nullptr, 0.);
 }
 
+namespace {
+double required_wrong_key_gap(const ReceiverSlotScore& score, WrongKeyAdmission policy) {
+    // An unrelated strong keyed waveform can fit fragments of BOTH bit
+    // alternatives far better than white noise. A fixed additive threshold
+    // cannot address that near-far case. Increase the required gap smoothly
+    // with the competing bit's positive excess above the ordinary threshold.
+    // The stronger levels scale the WHOLE Strict margin, including its floor:
+    // scaling only the competing excess leaves dominant accidental fits with
+    // a below-threshold alternative untouched. The 1.5/2.75/4 multipliers are
+    // extrapolated static-HF reference choices, not calibrated probabilities
+    // or fixed dB losses; see the Wrong Key Admission study in validation.md.
+    double fraction = .25, multiplier = 1.;
+    switch (policy) {
+    case WrongKeyAdmission::current: return 0;
+    case WrongKeyAdmission::guarded: fraction = .10; break;
+    case WrongKeyAdmission::strict: break;
+    case WrongKeyAdmission::very_strict: multiplier = 1.5; break;
+    case WrongKeyAdmission::extreme: multiplier = 2.75; break;
+    case WrongKeyAdmission::maximum: multiplier = 4.; break;
+    default: throw Error("invalid Robust wrong-key admission policy");
+    }
+    const auto floor = (policy == WrongKeyAdmission::guarded ? 1. : 2.) * std::numbers::ln10;
+    const auto competing = std::min(score.operational_bit_evidence[0], score.operational_bit_evidence[1]);
+    return multiplier * (std::max(score.operational_minimum_bit_log_separation, floor) +
+        fraction * std::max(0., competing - score.operational_threshold));
+}
+
+bool baseline_rating_valid(const ReceiverSlotScore& score) {
+    const auto& evidence = score.operational_bit_evidence;
+    const auto gap = std::abs(evidence[0] - evidence[1]);
+    return score.complete && score.all_valid && score.operational_passes_conditional_bound &&
+        score.wrong_key_admission == WrongKeyAdmission::current && !score.wrong_key_rejected &&
+        score.bit && *score.bit <= 1 && *score.bit == (evidence[1] > evidence[0]) &&
+        !std::isnan(evidence[0]) && !std::isnan(evidence[1]) &&
+        std::isfinite(std::max(evidence[0], evidence[1])) &&
+        std::isfinite(score.operational_threshold) &&
+        std::isfinite(score.operational_minimum_bit_log_separation) &&
+        score.operational_minimum_bit_log_separation >= 0 && gap > 0 &&
+        gap >= score.operational_minimum_bit_log_separation &&
+        score.operational_bit_log_separation == gap;
+}
+} // namespace
+
+bool wrong_key_admission_passes(const ReceiverSlotScore& score, WrongKeyAdmission policy) {
+    (void)wrong_key_admission_name(policy);
+    return score.decision == SlotDecision::data &&
+        (policy == WrongKeyAdmission::current ||
+         score.operational_bit_log_separation >= required_wrong_key_gap(score, policy));
+}
+
+void accumulate_wrong_key_admission(WrongKeyAdmissionEvidence& evidence, const ReceiverSlotScore& score) {
+    if (score.decision != SlotDecision::data) return;
+    if (evidence.data_bits == std::numeric_limits<std::uint64_t>::max())
+        throw Error("Robust wrong-key evidence count overflow");
+    const auto valid = baseline_rating_valid(score);
+    evidence.available = valid && (!evidence.data_bits || evidence.available);
+    ++evidence.data_bits;
+    if (!valid) return;
+    for (std::size_t i = 0; i < wrong_key_admission_count; ++i)
+        if (wrong_key_admission_passes(score, wrong_key_admission_policies[i])) ++evidence.passing_bits[i];
+}
+
 void receiver_detail::apply_wrong_key_admission(ReceiverSlotScore& score, WrongKeyAdmission policy) {
     (void)wrong_key_admission_name(policy);
     score.wrong_key_admission = policy;
     score.wrong_key_required_log_separation = 0;
     score.wrong_key_rejected = false;
     if (policy == WrongKeyAdmission::current || score.decision != SlotDecision::data) return;
-
-    // An unrelated strong keyed waveform can fit fragments of BOTH bit
-    // alternatives far better than white noise. A fixed additive threshold
-    // cannot address that near-far case. Increase the required gap smoothly
-    // with the competing bit's positive excess above the ordinary threshold.
-    // This is a bounded empirical rule, NOT a likelihood against a wrong-key
-    // null. A dominant accidental single-bit fit can still pass.
-    const bool strict = policy == WrongKeyAdmission::strict;
-    const auto floor = (strict ? 2. : 1.) * std::numbers::ln10;
-    const auto fraction = strict ? .25 : .10;
-    const auto competing = std::min(score.operational_bit_evidence[0], score.operational_bit_evidence[1]);
-    score.wrong_key_required_log_separation =
-        std::max(score.operational_minimum_bit_log_separation, floor) +
-        fraction * std::max(0., competing - score.operational_threshold);
+    score.wrong_key_required_log_separation = required_wrong_key_gap(score, policy);
     if (!(score.operational_bit_log_separation >= score.wrong_key_required_log_separation)) {
         score.decision = SlotDecision::ambiguous;
         score.bit.reset();

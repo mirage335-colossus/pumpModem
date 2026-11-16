@@ -193,6 +193,10 @@ struct Controller::Impl {
     live::Snapshot snapshot;
     Inbox inbox;
     Signals signals;
+    std::size_t hidden_signals=0,hidden_files=0;
+    std::size_t signal_page=0,file_page=0,visible_signals=0,visible_files=0;
+    bool signals_follow_tail=true,files_follow_tail=true;
+    std::string admission_filter_status;
     PlotUpdate plot_update;
     bool started=false,active_requested=false,closing=false,preparing=false,key_loading=false,key_failed=false,file_loading=false;
     std::vector<audio::Device> audio_devices;
@@ -316,8 +320,8 @@ struct Controller::Impl {
         f(UiField::search_arithmetic).options={{"default","Default — automatic"},
             {"fp32-min","FP32 minimum"},{"fp64-force","FP64 force"}};
         f(UiField::search_arithmetic).selected="default";
-        f(UiField::wrong_key_admission).options={{"current","Current (best sensitivity)"},
-            {"guarded","Guarded (heuristic)"},{"strict","Strict (heuristic)"}};
+        for(const auto policy:triad::v3::wrong_key_admission_policies)
+            f(UiField::wrong_key_admission).options.push_back({triad::v3::wrong_key_admission_name(policy),admission_filter_label(policy)});
         f(UiField::wrong_key_admission).selected="current";
         f(UiField::receiver_strategy).options={{"auto","Automatic"},{"existing","Existing only"},
             {"complex","Complex only"},{"amplitude","Amplitude only"}};
@@ -661,7 +665,7 @@ struct Controller::Impl {
         if(started)session.configure(settings);
         snapshot.bit_seconds.reset();snapshot.slot_stride_seconds.reset();
         if(started)accept_snapshot(session.snapshot());
-        dirty();sync_launch_command();
+        dirty();sync_launch_command();refresh_files();refresh_signals();
         } catch(const std::exception& error) {
             fields=previous_fields;settings=previous_settings;keys=previous_keys;key_origin=previous_key_origin;
             key_path=previous_key_path;fhss_list=previous_fhss_list;planner_inputs=previous_planner;
@@ -946,12 +950,18 @@ struct Controller::Impl {
         }
         dirty();
     }
+    WrongKeyAdmission admission_policy() const {
+        return triad::v3::parse_wrong_key_admission(f(UiField::wrong_key_admission).selected);
+    }
     const StreamContent* selected_file() const {
-        for(const auto& stream:inbox.items()) if(id_label(stream.message)==f(UiField::files).selected) return &stream;
+        for(const auto& stream:inbox.items())
+            if(id_label(stream.message)==f(UiField::files).selected&&file_visible(inbox,stream.message,admission_policy()))return &stream;
         return nullptr;
     }
     std::optional<std::size_t> selected_signal() const {
-        for(std::size_t i=0;i<signals.lines().size();++i) if(std::to_string(signals.lines()[i].id)==f(UiField::signals).selected) return i;
+        for(std::size_t i=0;i<signals.lines().size();++i)
+            if(std::to_string(signals.lines()[i].id)==f(UiField::signals).selected&&
+               signal_visible(signals.lines()[i],admission_policy()))return i;
         return std::nullopt;
     }
     bool enabled(Command command) const {
@@ -1029,7 +1039,6 @@ struct Controller::Impl {
             UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::carrier,
             UiField::bandwidth,UiField::doppler,UiField::spread_preset,UiField::selective_perturbation,
             UiField::search_margin,UiField::dsss_factor,UiField::dsss_version,UiField::fhss,
-            UiField::wrong_key_admission,
             UiField::symbol_burst,UiField::symbol_burst_random,UiField::helper_power,
             UiField::fec,UiField::dsp_workspace,UiField::snr,UiField::planner_target,
             UiField::search_arithmetic,UiField::receiver_strategy,UiField::receiver_cpu_budget})
@@ -1054,15 +1063,51 @@ struct Controller::Impl {
         f(UiField::fhss_list_status).text=fhss_list_error.empty()?"Configured synthetic hopping list; physical audio/radio tuning stays fixed.":fhss_list_error;
         short_bits_status();
     }
-    void refresh_files() {
+    void refresh_files(bool locate_selection=false) {
         auto& state=f(UiField::files);
-        state.records=file_records(inbox);
-        if(std::none_of(state.records.begin(),state.records.end(),[&](const auto& row){return row.id==state.selected;}))state.selected=state.records.empty()?"":state.records.back().id;
+        const auto files=inbox.file_items();visible_files=0;
+        std::optional<std::size_t> selected_index;
+        for(const auto* item:files)if(file_visible(inbox,item->message,admission_policy())) {
+            if(id_label(item->message)==state.selected)selected_index=visible_files;
+            ++visible_files;
+        }
+        if(locate_selection) {
+            files_follow_tail=!selected_index;
+            if(selected_index)file_page=*selected_index/reception_page_size;
+        }
+        const auto last=visible_files?(visible_files-1)/reception_page_size:0;
+        file_page=files_follow_tail?last:std::min(file_page,last);
+        state.records=file_records(inbox,admission_policy(),file_page);
+        hidden_files=files.size()-visible_files;
+        if(std::none_of(state.records.begin(),state.records.end(),[&](const auto& row){return row.id==state.selected;})) {
+            state.selected.clear();
+            if(!locate_selection)for(auto row=state.records.rbegin();row!=state.records.rend();++row)
+                if(row->id!=files_older_id&&row->id!=files_newer_id) {state.selected=row->id;break;}
+        }
+        refresh_admission_status();
     }
-    void refresh_signals() {
+    void refresh_signals(bool locate_selection=false) {
         auto& state=f(UiField::signals);
-        state.records=signal_records(signals,shellcode_mode);
+        visible_signals=0;std::optional<std::size_t> selected_index;
+        for(const auto& line:signals.lines())if(signal_visible(line,admission_policy())) {
+            if(std::to_string(line.id)==state.selected)selected_index=visible_signals;
+            ++visible_signals;
+        }
+        if(locate_selection) {
+            signals_follow_tail=!selected_index;
+            if(selected_index)signal_page=*selected_index/reception_page_size;
+        }
+        const auto last=visible_signals?(visible_signals-1)/reception_page_size:0;
+        signal_page=signals_follow_tail?last:std::min(signal_page,last);
+        state.records=signal_records(signals,shellcode_mode,admission_policy(),signal_page);
+        hidden_signals=signals.lines().size()-visible_signals;
         if(std::none_of(state.records.begin(),state.records.end(),[&](const auto& row){return row.id==state.selected;}))state.selected.clear();
+        refresh_admission_status();
+    }
+    void refresh_admission_status() {
+        admission_filter_status=admission_policy()==WrongKeyAdmission::current?std::string{}:
+            "Wrong Key Admission "+admission_filter_label(admission_policy())+": "+std::to_string(hidden_signals)+
+            " signals / "+std::to_string(hidden_files)+" files hidden; Current restores retained records.";
     }
     void start_worker(std::function<void(Prepared&,std::stop_token)> work,Prepared result) {
         preparing=true;active_kind=result.kind;
@@ -1218,9 +1263,13 @@ struct Controller::Impl {
             if(!f(UiField::diagnostics).text.empty())f(UiField::diagnostics).text+=" | ";
             f(UiField::diagnostics).text+=active_fhss;
         }
-        if(Clock::now()>=notice_until)f(UiField::status).text=!snapshot.error.empty()?snapshot.error:
-            !settings_error.empty()?settings_error:!snapshot.receiver_error.empty()?snapshot.receiver_error:
-            snapshot.transmit_unavailable?*snapshot.transmit_unavailable:snapshot.status;
+        if(Clock::now()>=notice_until) {
+            auto& status=f(UiField::status).text;
+            status=!snapshot.error.empty()?snapshot.error:
+                !settings_error.empty()?settings_error:!snapshot.receiver_error.empty()?snapshot.receiver_error:
+                snapshot.transmit_unavailable?*snapshot.transmit_unavailable:snapshot.status;
+            if(!admission_filter_status.empty())status+=(status.empty()?"":" · ")+admission_filter_status;
+        }
         f(UiField::transmit_scope).records=transmit_scope_records(snapshot.transmit_trace,
             f(UiField::transmit_scope_format).selected=="bits");
         f(UiField::transmit_scope_caption).text=transmit_scope_caption(snapshot.transmit_trace);
@@ -1241,8 +1290,8 @@ struct Controller::Impl {
             text<<"Slot "<<step.index<<" · epoch "<<step.epoch<<" / ordinal "<<step.ordinal<<" · "
                 <<(step.decision==live::PatternDecision::data?"DATA":step.decision==live::PatternDecision::quiet?"QUIET":"AMBIGUOUS");
             if(step.bit)text<<" "<<unsigned(*step.bit);
-            text<<" · Wrong Key Admission selected "<<f(UiField::wrong_key_admission).selected
-                <<" / actual "<<step.wrong_key_admission
+            text<<" · Browser filter "<<admission_filter_label(admission_policy())
+                <<" / acquired "<<step.wrong_key_admission
                 <<" · required log gap "<<step.wrong_key_required_log_separation;
             if(step.wrong_key_rejected)text<<" · admission withheld (evidence below selected margin)";
             if(!step.evidence_complete) {
@@ -1675,6 +1724,19 @@ void Controller::select(UiField field,std::string id) {
             std::any_of(state.options.begin(),state.options.end(),[&](const auto& option){return option.id==id&&option.enabled;});
         if(!available)throw Error("Select an available item");
         if(field==UiField::helper_power) {edit(field,std::move(id));return;}
+        if((field==UiField::signals&&(id==signals_older_id||id==signals_newer_id))||
+           (field==UiField::files&&(id==files_older_id||id==files_newer_id))) {
+            const bool signals=field==UiField::signals;
+            auto& page=signals?p.signal_page:p.file_page;
+            auto& follow=signals?p.signals_follow_tail:p.files_follow_tail;
+            const auto total=signals?p.visible_signals:p.visible_files;
+            const auto last=total?(total-1)/reception_page_size:0;
+            const bool older=id==signals_older_id||id==files_older_id;
+            page=older?(page?page-1:0):std::min(page+1,last);
+            follow=page==last;state.selected.clear();
+            if(signals)p.refresh_signals();else p.refresh_files();
+            ++p.revision;p.controls();return;
+        }
         const auto previous_selection=state.selected;
         state.selected=std::move(id);
         if(field==UiField::volume) {
@@ -1689,6 +1751,16 @@ void Controller::select(UiField field,std::string id) {
             if(p.started)p.session.set_channel_mode(p.settings.channel_mode);
         }
         else if(field==UiField::key) p.configure();
+        else if(field==UiField::wrong_key_admission) {
+            // A reversible browser preference never restarts capture, drops
+            // pending events or changes the original decoded content.
+            p.settings.wrong_key_admission=state.selected;
+            p.refresh_files(true);p.refresh_signals(true);p.refresh_pattern_steps();
+            p.sync_launch_command();++p.revision;
+            p.notice(p.admission_filter_status.empty()?"Current: showing all retained receptions.":p.admission_filter_status);
+        }
+        else if(field==UiField::signals)p.signals_follow_tail=false;
+        else if(field==UiField::files)p.files_follow_tail=false;
         else if(field==UiField::dsss_version&&previous_selection=="off"&&state.selected=="interleave") {
             const auto factor=number(p.f(UiField::dsss_factor).selected,"DSSS factor");
             p.f(UiField::bandwidth).text=exact_frequency_text(3600./factor);
@@ -1702,8 +1774,7 @@ void Controller::select(UiField field,std::string id) {
         else if(field==UiField::helper_power||field==UiField::helper_ratio_limit||field==UiField::simulation||field==UiField::simulation_oscillator||field==UiField::rf_oscillator||
             field==UiField::fec||field==UiField::dsp_workspace||field==UiField::fhss||
             field==UiField::symbol_burst||field==UiField::symbol_burst_random||
-            field==UiField::dsss_version||field==UiField::search_arithmetic||field==UiField::receiver_strategy||
-            field==UiField::wrong_key_admission) p.configure();
+            field==UiField::dsss_version||field==UiField::search_arithmetic||field==UiField::receiver_strategy) p.configure();
         else if(field==UiField::dsss_factor) {
             p.f(UiField::dsss_version).selected="interleave";
             const auto factor=static_cast<unsigned>(number(state.selected,"DSSS factor"));

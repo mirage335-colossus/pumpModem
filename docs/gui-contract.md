@@ -134,7 +134,7 @@ Display timing never controls receiver decisions or completion.
 | Rate, Shift | Rate is native inner rate; audio IF is Carrier minus Shift. Shift also contributes to the oscillator error model. |
 | Additional Symbols, Spreading | Off uses one lane; Interleave with `N×` selects `N` native added-symbol lanes. Nominal occupied DATA bandwidth is `0.625 × Rate × N`. |
 | Symbol burst, Random extra | Shared whole-bit calendar waits; see [burst scheduling](symbol-burst.md). |
-| Wrong Key Admission | Robust-only receiver policy: Current (best sensitivity), Guarded (heuristic), or Strict (heuristic). The stronger policies can erase wanted signals, including strong signals in long fading windows; higher SNR may not restore reception. No wrong-key-per-day rate is calibrated, and this is not authentication. It does not change the transmitted waveform or duration. Current preserves existing behavior. |
+| Wrong Key Admission | Reversible Robust history/browser filter. Current shows the baseline; stronger choices hide completed records when fewer than half their admitted DATA bits pass, and show the pass count. Original decoded content is retained. Strong wanted signals can also be hidden; higher SNR may not restore visibility. No wrong-key-per-day rate, fixed dB cost or authentication is implied. |
 | FHSS | Canonical envelope and illustrative frequency schedule; no external radio retuning. |
 | Target SNR dB/1Hz | One shared C/N0 target, default 32 dB-Hz, for provisional duration planning; separate from actual simulated C/N0. |
 | Error correction | Configured Off, RS20 or RS60 native short/long text profiles. Raw bits bypass text coding and FEC exactly. |
@@ -204,14 +204,35 @@ frequency controls and their launch overrides remain removed.
 
 The Robust **Wrong Key Admission** choice is immediately left of Encryption key
 entry and persists in launch settings as
-`--wrong-key-admission current|guarded|strict`. It defaults to `current`, which
-preserves existing reception behavior. Guarded and Strict use a local heuristic to require stronger
-evidence against unrelated keyed signals; either may erase wanted signals,
-including strong signals in long fading windows. Higher SNR may not restore
-reception; see the measured [rate and sensitivity tradeoffs](validation.md#wrong-key-admission-rate-and-sensitivity-study--15-november-2026).
-No calibrated wrong-key/day rate or authentication guarantee
-is provided. This receive-only setting does not alter the transmitted waveform
-or duration and remains retained while Fast or Legacy is selected.
+`--wrong-key-admission`. It defaults to `current`. GUI reception always uses
+Current for acquisition and decoding, retaining compact counts for the stronger
+choices. Changing this dropdown refreshes Signals and Files without
+reconfiguring the receiver, including during reception/transmission. It leaves
+the transmitted waveform, duration and original decoded content intact and
+remains retained while Fast or Legacy is selected.
+
+Choices are Current (unfiltered), 2/3 reduction (est.), 1/3 reduction (est.),
+1/10 reduction (est.), 1/100 reduction (model) and 1/1000 reduction (model).
+Here a fraction means wrong-key DATA bits **remaining relative to Current**
+in the static-HF reference: 1/10 means 90% filtered. The two deepest choices
+are extrapolated model targets. Saved tokens are respectively `current`,
+`guarded`, `strict`, `very-strict`, `extreme`, `maximum`; existing settings
+remain valid. The numeric target is distinct from the multi-bit row rule.
+
+Completed rated Robust records are visible when at least half their baseline
+DATA bits pass the chosen filter; ties stay visible. The view reports passing
+bits over admitted DATA bits, excluding physical erasures and quiet slots.
+Pending records remain visible until completion. Fast, Legacy, Helper and
+unrated records stay visible; missing Robust evidence is identified rather than
+assigned confidence. Hidden selections cannot supply copy, paste or save
+actions. Selecting Current restores hidden records still retained in memory;
+already exported files are unchanged. This is a browser visibility policy,
+not bit erasure followed by FEC re-decoding or a message-level probability.
+The display reports the hidden count. Strong wanted signals can also be hidden,
+and higher SNR need not restore visibility; see the measured
+[tradeoffs](validation.md#reversible-wrong-key-admission-history--15-november-2026).
+No calibrated wrong-key/day rate, universal dB loss or authentication guarantee
+is provided.
 
 Robust text accepts up to 1 MiB of decoded bytes, with up to 4 MiB of escaped
 editor representation. Local edit frames allow up to 4 MiB for this declared
@@ -261,6 +282,19 @@ updates must not overwrite a newer selection. Pending content, when supplied by
 an active modem, must remain visibly pending and must not gain completed-message
 copy or save actions prematurely. Shared rows, selection, and safe copy behavior
 belong in the application layer, not separate toolkit-specific modem logic.
+
+Reception history remains RAM-only. Signals retain at most 4,096 records
+(formerly 64), with the existing bounded text/raw-bit previews. The GUI applies
+one combined 256 MiB retained-workspace budget to cached content and charged
+history/metadata, evicting old records/content as necessary. This is not raw
+audio/IQ retention or persistent storage across restarts. File filter evidence
+shares the cached payload's identity/lifetime, even if its signal row expires.
+Changing a filter never itself evicts or supersedes an underlying reception.
+The lists show bounded pages of 64 records, with Older/Newer navigation and
+stable reception identities; all retained matching records remain reachable.
+Navigation rows cannot supply content actions. This keeps dense history within
+the shared 8 MiB frontend snapshot envelope even with a large editor draft.
+Retained-workspace charging is distinct from total process or transient RSS.
 
 ## Audio and lifecycle
 

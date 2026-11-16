@@ -1619,7 +1619,7 @@ void admission_run(Json& report, const Options& o, const Profile& profile, const
         throw Incomplete("Admission diagnostic did not score the complete valid public slot");
 
     auto policies = object({});
-    for (const auto policy : {WrongKeyAdmission::current, WrongKeyAdmission::guarded, WrongKeyAdmission::strict}) {
+    for (const auto policy : wrong_key_admission_policies) {
         auto decision = score;
         apply_wrong_key_admission(decision, policy);
         const auto data = decision.decision == SlotDecision::data;

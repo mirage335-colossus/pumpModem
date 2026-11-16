@@ -80,6 +80,71 @@ std::vector<const StreamContent*> Inbox::file_items() const {
     }
     return files;
 }
+const Inbox::ReceptionIdentity* Inbox::identity(const Message& message) const noexcept {
+    const auto found=identities_.find(message.local_id);
+    return found==identities_.end()?nullptr:&found->second;
+}
+std::size_t Inbox::retained_bytes() const noexcept {
+    std::size_t total=0;
+    for(const auto& item:items_) {
+        const auto& message=item.message;
+        // Charge a map node even for records without a receive identity, and
+        // allow fixed container/allocation overhead per retained item.
+        total+=sizeof(StreamContent)+sizeof(ReceptionIdentity)+128+
+            message.data.capacity()+message.filename.capacity()+message.callsign.capacity()+message.grid.capacity();
+    }
+    return total;
+}
+bool Inbox::discard_oldest() noexcept {
+    if(items_.empty())return false;
+    used_-=items_.front().message.data.size();
+    identities_.erase(items_.front().message.local_id);
+    items_.pop_front();
+    return true;
+}
+
+namespace {
+std::optional<std::uint64_t> admission_passes(const triad::v3::WrongKeyAdmissionEvidence& evidence,
+                                             WrongKeyAdmission policy) {
+    const auto index=static_cast<std::size_t>(policy);
+    if(!evidence.available || !evidence.data_bits || index>=evidence.passing_bits.size())return {};
+    if(evidence.passing_bits[0]!=evidence.data_bits)return {};
+    for(std::size_t i=1;i<evidence.passing_bits.size();++i)
+        if(evidence.passing_bits[i]>evidence.passing_bits[i-1])return {};
+    return evidence.passing_bits[index];
+}
+}
+bool admission_visible(const triad::v3::WrongKeyAdmissionEvidence& evidence, WrongKeyAdmission policy) {
+    if(policy==WrongKeyAdmission::current)return true;
+    const auto passed=admission_passes(evidence,policy);
+    // Missing/invalid local evidence is unrated, never invented rejection.
+    return !passed || *passed>=evidence.data_bits-*passed;
+}
+std::string admission_filter_label(WrongKeyAdmission policy) {
+    switch(policy) {
+    case WrongKeyAdmission::current:return "Current (unfiltered)";
+    case WrongKeyAdmission::guarded:return "2/3 reduction (est.)";
+    case WrongKeyAdmission::strict:return "1/3 reduction (est.)";
+    case WrongKeyAdmission::very_strict:return "1/10 reduction (est.)";
+    case WrongKeyAdmission::extreme:return "1/100 reduction (model)";
+    case WrongKeyAdmission::maximum:return "1/1000 reduction (model)";
+    }
+    throw Error("Unknown Wrong Key Admission browser filter");
+}
+std::string admission_label(const triad::v3::WrongKeyAdmissionEvidence& evidence, WrongKeyAdmission policy) {
+    const auto passed=admission_passes(evidence,policy);
+    if(!passed)return "Wrong Key Admission: evidence unavailable";
+    return admission_filter_label(policy)+": "+std::to_string(*passed)+"/"+
+        std::to_string(evidence.data_bits)+" DATA bits pass";
+}
+bool signal_visible(const SignalLine& line, WrongKeyAdmission policy) {
+    return !line.robust_reception || line.helper_carrier || !line.complete ||
+        admission_visible(line.wrong_key_evidence,policy);
+}
+bool file_visible(const Inbox& inbox, const Message& message, WrongKeyAdmission policy) {
+    const auto* identity=inbox.identity(message);
+    return !identity || !identity->robust_reception || admission_visible(identity->wrong_key_evidence,policy);
+}
 
 void TransmissionPolicy::started(bool simulation, bool encrypted, Clock::time_point now, bool force) {
     if (active_ || (!force && remaining(simulation, encrypted, now).count() > 0))
@@ -288,6 +353,7 @@ bool Signals::update(SignalLine line) {
         line.received_bits=line.expected_bits=0;line.raw_bits.clear();line.pattern_score.reset();
         line.preamble_received_percent.reset();line.pre_fec_accuracy.reset();line.fec_stats={};
         line.missing_symbols=0;line.recovery_progress={};
+        line.wrong_key_evidence={};line.robust_reception=false;
     }
     if (line.binary) {
         line.validated=false; line.reception_id.clear(); line.text_message=false;
@@ -304,7 +370,7 @@ bool Signals::update(SignalLine line) {
             ((found->binary || found->pattern_score || found->helper_carrier) && found->complete && !line.complete)))return false;
         *found=std::move(line);
     } else {
-        if (lines_.size()>=64) {
+        if (lines_.size()>=maximum_records) {
             const auto helper=std::find_if(lines_.begin(),lines_.end(),[](const auto& row){return row.helper_carrier;});
             if(helper!=lines_.end())lines_.erase(helper);
             // Optional helper history cannot displace a retained payload row.
@@ -319,15 +385,25 @@ bool Signals::update(SignalLine line) {
 void Signals::erase(std::uint64_t id) {
     std::erase_if(lines_,[&](const auto& line){return line.id==id;});
     if(std::find(retired_ids_.begin(),retired_ids_.end(),id)!=retired_ids_.end())return;
-    if(retired_ids_.size()>=64)retired_ids_.pop_front();
+    if(retired_ids_.size()>=maximum_records)retired_ids_.pop_front();
     retired_ids_.push_back(id);
 }
 bool Signals::retired(std::uint64_t id) const noexcept {
     return std::find(retired_ids_.begin(),retired_ids_.end(),id)!=retired_ids_.end();
 }
+std::size_t Signals::retained_bytes() const noexcept {
+    std::size_t total=retired_ids_.size()*(sizeof(std::uint64_t)+16);
+    for(const auto& line:lines_)
+        total+=sizeof(SignalLine)+128+line.text.capacity()+line.raw_bits.capacity()+line.reception_id.capacity();
+    return total;
+}
+bool Signals::discard_oldest() noexcept {
+    if(!lines_.empty()) {lines_.pop_front();return true;}
+    if(!retired_ids_.empty()) {retired_ids_.pop_front();return true;}
+    return false;
+}
 void apply_receptions(Inbox& inbox, Signals& signals, live::Snapshot& snapshot) {
     if(snapshot.signals.empty() && snapshot.received.empty())return;
-    Signals staged=signals;
     std::set<std::string> referenced_receptions;
     std::map<std::uint64_t,const live::SignalUpdate*> accepted;
     const auto retract=[&](const std::string& reception_id) {
@@ -343,30 +419,31 @@ void apply_receptions(Inbox& inbox, Signals& signals, live::Snapshot& snapshot) 
         const auto cached_revision=inbox.revision(signal.id);
         if(cached_revision && (signal.revision<*cached_revision ||
             (signal.revision==*cached_revision && (!signal.complete || !signal.validated))))continue;
-        const auto previous=std::find_if(staged.lines().begin(),staged.lines().end(),[&](const auto& line) {
+        const auto previous=std::find_if(signals.lines().begin(),signals.lines().end(),[&](const auto& line) {
             return line.id==signal.id;
         });
-        const auto old_reception=previous!=staged.lines().end() && signal.revision>previous->revision?
+        const auto old_reception=previous!=signals.lines().end() && signal.revision>previous->revision?
             previous->reception_id:std::string{};
         const bool short_text=signal.complete&&!signal.validated&&!signal.binary&&!signal.raw_bits.empty();
         SignalLine line{signal.id,signal.frequency_hz,signal.text,signal.validated,signal.reception_id,short_text,
             signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,
             signal.received_bits,signal.expected_bits,signal.pattern_score};
         line.helper_carrier=signal.helper_carrier;
+        line.wrong_key_evidence=signal.wrong_key_evidence;line.robust_reception=signal.robust_reception;
         line.raw_bits=signal.raw_bits;line.missing_symbols=signal.missing_symbols;
         line.fec_stats=signal.fec_stats;line.revision=signal.revision;line.recovery_progress=signal.recovery_progress;
-        if(!staged.update(std::move(line)))continue;
+        if(!signals.update(std::move(line)))continue;
         if(cached_revision && signal.revision>*cached_revision)retract_signal(signal.id);
         retract(old_reception);
         accepted[signal.id]=&signal;
         for(const auto id:signal.superseded_ids) {
             if(id==signal.id)continue;
-            const auto obsolete=std::find_if(staged.lines().begin(),staged.lines().end(),[&](const auto& value) {
+            const auto obsolete=std::find_if(signals.lines().begin(),signals.lines().end(),[&](const auto& value) {
                 return value.id==id;
             });
             retract_signal(id);
-            if(obsolete!=staged.lines().end())retract(obsolete->reception_id);
-            staged.erase(id);accepted.erase(id);
+            if(obsolete!=signals.lines().end())retract(obsolete->reception_id);
+            signals.erase(id);accepted.erase(id);
         }
     }
     std::map<std::string,const live::SignalUpdate*> completed_receptions;
@@ -379,14 +456,15 @@ void apply_receptions(Inbox& inbox, Signals& signals, live::Snapshot& snapshot) 
         if(referenced_receptions.contains(reception_id)&&!completed_receptions.contains(reception_id))continue;
         const auto completed=completed_receptions.find(reception_id);
         const auto identity=completed==completed_receptions.end()?std::optional<Inbox::ReceptionIdentity>{}:
-            Inbox::ReceptionIdentity{completed->second->id,completed->second->revision};
+            Inbox::ReceptionIdentity{completed->second->id,completed->second->revision,
+                completed->second->wrong_key_evidence,completed->second->robust_reception};
         inbox.put(std::move(received.content),identity);
     }
     for(const auto& [id,signal]:accepted) {
-        const auto current=std::find_if(staged.lines().begin(),staged.lines().end(),[&](const auto& line) {
+        const auto current=std::find_if(signals.lines().begin(),signals.lines().end(),[&](const auto& line) {
             return line.id==id;
         });
-        if(current==staged.lines().end())continue;
+        if(current==signals.lines().end())continue;
         const auto stream=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& item) {
             return id_label(item.message)==signal->reception_id;
         });
@@ -400,9 +478,19 @@ void apply_receptions(Inbox& inbox, Signals& signals, live::Snapshot& snapshot) 
                 static_cast<std::ptrdiff_t>(std::min<std::size_t>(message.data.size(),4096)));
             else line.text=received_text(message.filename)+" ("+std::to_string(message.data.size())+" bytes)";
         }
-        staged.update(std::move(line));
+        signals.update(std::move(line));
     }
-    signals=std::move(staged);
+    // One receive-history allowance covers original decoded sources, compact
+    // policy counts and bounded signal previews. New history may evict oldest
+    // cached sources; changing the browser filter never reaches this path.
+    const auto over_budget=[&] {
+        const auto signal_bytes=signals.retained_bytes();
+        return signal_bytes>inbox.capacity() || inbox.retained_bytes()>inbox.capacity()-signal_bytes;
+    };
+    while(over_budget()) {
+        if(inbox.discard_oldest())continue;
+        if(!signals.discard_oldest())break;
+    }
 }
 std::optional<std::string> Signals::copy_id(std::size_t index) const {
     if (index>=lines_.size() || lines_[index].helper_carrier || recovery_pending(lines_[index]) || lines_[index].binary || !lines_[index].validated || !lines_[index].text_message || lines_[index].reception_id.empty()) return std::nullopt;

@@ -232,6 +232,12 @@ lifecycle/stack-alignment and secure-entropy tests compiled for Wasm. Both web
 profiles also drive production browser audio and actual C++ Fast live RX/TX/RX
 at 44.1 and 48 kHz with a simulated physical device. The native fixture caps its
 anonymous-pipe relay at 10 Mbit/s to exercise backpressure and concurrent edits.
+It carries fractional-byte pacing across fragments and waits for the actual
+replay/absence duration plus bounded processing allowance; the two-rate outer
+envelope is 900 seconds. The current native 48 kHz fixture still exposes a
+shared-pipe snapshot/PCM bandwidth underrun at that relay rate. This is a
+remaining qualification failure, not a reason to raise audio credit or weaken
+completion assertions; see the [recorded checks and diagnosis](validation.md#reversible-wrong-key-admission-history--15-november-2026).
 These wall-clock tests run serially; do not overlap native and Wasm live suites
 on the same host. They check every emitted sample and physical-drain acknowledgment. They supplement the normal contract/general
 regressions. Successful C++ compilation, Node tests and static import checks do

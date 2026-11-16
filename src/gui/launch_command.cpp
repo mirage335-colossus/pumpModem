@@ -3,6 +3,7 @@
 #include "fhss_profile.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/clock_sync.hpp"
+#include "datapump/wrong_key_admission.hpp"
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -204,7 +205,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             result.fec=value;
         }
         else if(flag=="--wrong-key-admission") {
-            if(value!="current"&&value!="guarded"&&value!="strict")invalid("--wrong-key-admission must be current, guarded or strict.");
+            (void)triad::v3::parse_wrong_key_admission(value);
             result.wrong_key_admission=value;
         }
         else if(flag=="--clock-sync")result.clock_sync=clock_sync::format(clock_sync::parse(value));

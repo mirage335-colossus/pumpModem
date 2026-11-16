@@ -68,6 +68,7 @@ struct StreamReceiverReport {
     unsigned peak_running_owners = 0, peak_executor_workers = 0;
     std::optional<std::uint64_t> episode_first_public_slot;
     std::size_t observed_bits = 0, erasures = 0;
+    WrongKeyAdmissionEvidence wrong_key_evidence;
     bool input_closed = false, output_backpressured = false, recovering = false;
     // Measured time spent inside the controller's condition-variable wait.
     std::optional<double> controller_wait_seconds;

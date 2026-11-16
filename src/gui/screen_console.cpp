@@ -17,7 +17,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.purpose=ControlPurpose::planning;break;
     case Slot::device:case Slot::mono:case Slot::live_duplex:case Slot::exclusive:case Slot::key:case Slot::key_actions:
     case Slot::dsss_factor:case Slot::dsss_version:case Slot::fhss:
-    case Slot::symbol_burst:case Slot::symbol_burst_random:case Slot::wrong_key_admission:
+    case Slot::symbol_burst:case Slot::symbol_burst_random:
     case Slot::helper_power:case Slot::helper_ratio_limit:case Slot::helper_callsign:
     case Slot::fec:case Slot::dsp_workspace:
     case Slot::gpu:case Slot::developer_mode:case Slot::shellcode_mode:case Slot::send_key:
@@ -26,7 +26,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     case Slot::use_text:case Slot::copy_signal:case Slot::paste_signal:case Slot::save_file:
         control.purpose=ControlPurpose::content;break;
     case Slot::qr_brightness:case Slot::clear_waterfall:case Slot::zoom_in:case Slot::zoom_out:
-    case Slot::reset_zoom:case Slot::transmit_scope_format:
+    case Slot::reset_zoom:case Slot::transmit_scope_format:case Slot::wrong_key_admission:
         control.purpose=ControlPurpose::presentation;break;
     default:break;
     }
@@ -83,7 +83,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::fhss)control.help="Canonical FHSS envelope and synthetic sequential hopping profile. This does not retune physical hardware or enable simultaneous reception.";
     if(slot==Slot::symbol_burst)control.help="Minimum whole-bit waiting periods between scheduled DATA slots. Scheduled waiting is not a scored quiet slot and cannot finish a message.";
     if(slot==Slot::symbol_burst_random)control.help="Additional shared-calendar waiting periods from zero through this limit. Both peers need the same calendar and key/profile; waits never count as missing DATA or quiet completion.";
-    if(slot==Slot::wrong_key_admission)control.help="Receiver-only heuristic against unrelated keyed signals. Guarded and Strict can erase wanted signals, including strong signals in long fading windows; higher SNR may not restore reception. No calibrated wrong-key/day rate or authentication. Does not change the transmitted waveform or duration.";
+    if(slot==Slot::wrong_key_admission)control.help="Fractions estimate wrong-key DATA-bit admissions remaining relative to Current in the static-HF reference, not the fraction of messages shown; 1/10 means 90% filtered. The 1/100 and 1/1000 labels are extrapolated model targets. This browser filter preserves original reception and decoded content in bounded memory history. Completed records remain visible when at least half their admitted DATA bits pass; pending and unrated records stay visible. Current restores all retained baseline records. Stronger filters can hide wanted signals, including strong signals in long fading windows; higher SNR may not restore visibility. No guaranteed rejection fraction, fixed dB cost, daily rate or authentication. Does not restart reception or alter the waveform.";
     if(slot==Slot::symbol_burst_random||slot==Slot::wrong_key_admission)control.font_size=11;
 
     if(slot==Slot::mode)control.help="Native three-carrier Robust session state. Live reception needs the shared public calendar and a declared local input-noise model; set these in Robust setup.";

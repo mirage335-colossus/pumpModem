@@ -3,6 +3,7 @@
 #include "datapump/transfer.hpp"
 #include "datapump/helper_carrier.hpp"
 #include "datapump/transmit_trace.hpp"
+#include "datapump/wrong_key_admission.hpp"
 #include <array>
 #include <memory>
 #include <utility>
@@ -20,7 +21,8 @@ struct Settings {
     bool mono=true,simulation=false,full_duplex=false,exclusive=false;
     // Local processing choice; it does not change the on-air profile.
     bool gpu=false;
-    // Local receive evidence policy; waveform and transmit duration are unchanged.
+    // Reversible browser filter; the GUI receiver always preserves Current
+    // baseline decisions and the original decoded content.
     std::string wrong_key_admission="current";
     audio::ChannelMode channel_mode=audio::ChannelMode::left_mono;
     double transmit_gain=1;
@@ -59,6 +61,8 @@ struct SignalUpdate {
     std::vector<std::uint64_t> superseded_ids;
     transfer::RecoveryProgress recovery_progress;
     bool helper_carrier=false;
+    bool robust_reception=false;
+    triad::v3::WrongKeyAdmissionEvidence wrong_key_evidence;
 };
 enum class ConstellationSource {input,transmitted,received};
 enum class PatternDecision { ambiguous, data, quiet };

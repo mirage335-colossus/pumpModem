@@ -705,6 +705,8 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
     // Both score at most five complete windows, 600,000 samples and 90s.
     const auto captures = fixture::capture_opens.load(), playbacks = fixture::playback_opens.load();
     auto simulated = settings(true);
+    // A saved browser filter must not discard the native reception baseline.
+    simulated.wrong_key_admission = "strict";
     simulated.gpu = gpu;
     if (gpu_fp32) simulated.transfer.modem.search_arithmetic = modem::SearchArithmetic::fp32;
     if (gpu) {
@@ -750,8 +752,10 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
           "Robust simulation exceeds its predeclared sample budget");
     session.transmit(Message{.data = {'e'}});
     std::vector<transfer::Received> received;
+    std::vector<live::SignalUpdate> signal_events;
     auto completed = wait(session, [&](auto& out) {
         for (auto& event : out.received) received.push_back(std::move(event));
+        signal_events.insert(signal_events.end(), out.signals.begin(), out.signals.end());
         check(out.error.empty() && out.receiver_error.empty(), "Native simulation failed: " + out.error + "; " + out.receiver_error);
         check(out.pattern_steps.size() <= 5, "Native simulation exceeded five public scoring windows");
         return !out.transmitting;
@@ -776,6 +780,13 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
     }
     check(decoded,
           "Actual native DSP did not decode physically complete e/001");
+    const auto final_signal=std::find_if(signal_events.rbegin(),signal_events.rend(),[](const auto& signal) {
+        return signal.robust_reception && signal.complete && signal.validated;
+    });
+    check(final_signal!=signal_events.rend() && final_signal->raw_bits=="001" &&
+          final_signal->wrong_key_evidence.available && final_signal->wrong_key_evidence.data_bits==3 &&
+          final_signal->wrong_key_evidence.passing_bits[0]==3,
+          "native GUI completion lost baseline content or reversible filter evidence");
     check(completed.pattern_steps.size() == 5, "Robust message did not score all three DATA and two quiet slots");
     for (std::size_t i = 0; i < completed.pattern_steps.size(); ++i) {
         const auto& row = completed.pattern_steps[i];
@@ -784,6 +795,8 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
               "Pattern steps lack actual ordered native evidence");
         check(row.decision == (i < 3 ? live::PatternDecision::data : live::PatternDecision::quiet),
               "Native message completion did not come from two physical quiet decisions");
+        check(row.wrong_key_admission=="current" && !row.wrong_key_rejected,
+              "saved browser filter changed native acquisition or decoding");
         if (i < 3) check(row.bit == received[0].raw_bits[i], "Pattern DATA evidence disagrees with decoded bits");
         else check(row.quiet_modes > 0 && !row.bit, "Quiet completion lacks scored noise modes");
     }

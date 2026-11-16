@@ -117,7 +117,7 @@ def main(executable):
     for name in ("bit_seconds", "slot_plan", "receiver_slot_workspace_bytes", "coarse_full_prior"):
         assert strict_plan["configuration"][name] == plan["configuration"][name]
     run("plan", "--wrong-key-admission", "invalid", code=1,
-        parse_error="Wrong Key Admission expects current, guarded or strict")
+        parse_error="Wrong Key Admission expects current, guarded, strict, very-strict, extreme or maximum")
     run("admission", "--wrong-key-admission", "strict", code=1,
         parse_error="Admission diagnostics score Current once")
     run("admission", "--interferer-cn0", "20", code=1,
@@ -143,10 +143,14 @@ def main(executable):
     assert result["one_native_score_for_all_policies"] and result["complete_public_slot"]
     assert not result["complete_receiver_service"] and result["interferer_present"] and not result["wanted_present"]
     policies = result["policies"]
-    assert set(policies) == {"current", "guarded", "strict"}
-    assert (policies["strict"]["decision"] == "data") <= (policies["guarded"]["decision"] == "data") <= (policies["current"]["decision"] == "data")
+    policy_names = ("current", "guarded", "strict", "very-strict", "extreme", "maximum")
+    assert set(policies) == set(policy_names)
+    for weaker, stronger in zip(policy_names, policy_names[1:]):
+        assert (policies[stronger]["decision"] == "data") <= (policies[weaker]["decision"] == "data")
+    for policy, multiplier in (("very-strict", 1.5), ("extreme", 2.75), ("maximum", 4.0)):
+        assert policies[policy]["required_log_gap"] == multiplier * policies["strict"]["required_log_gap"]
     assert all((p["decision"] == "quiet") == (policies["current"]["decision"] == "quiet") for p in policies.values())
-    for policy in ("guarded", "strict"):
+    for policy in policy_names[1:]:
         if policies[policy]["policy_rejected"]:
             assert policies[policy]["bit"] is None and policies[policy]["decision"] == "ambiguous"
     assert plan["result"]["planned"] and plan["observation"] is None

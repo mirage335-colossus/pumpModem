@@ -124,7 +124,10 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
     if(DATAPUMP_BUILD_WEB_WORKER)
       add_test(NAME web_live COMMAND "${DATAPUMP_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_web_live.mjs"
         --native "$<TARGET_FILE:datapump-worker>")
-      set_tests_properties(web_live PROPERTIES LABELS "web" TIMEOUT 180 RUN_SERIAL TRUE)
+      # The two rates run serially. Each has bounded startup and UI checks,
+      # 40 seconds of idle capture, physical playback and then captured replay.
+      # Leave the fixture's phase deadlines in force through both scenarios.
+      set_tests_properties(web_live PROPERTIES LABELS "web" TIMEOUT 900 RUN_SERIAL TRUE)
     endif()
     add_test(NAME web_renderer COMMAND "${DATAPUMP_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_web_renderer.mjs")
     set_tests_properties(web_renderer PROPERTIES LABELS "web")

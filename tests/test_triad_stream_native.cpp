@@ -77,6 +77,8 @@ ReceiverSlotScore row(const ReceiverConfig& c, const ReceiverSlotPlan& p,
     if (decision==SlotDecision::data) {
         r.bit = bit;
         r.operational_passes_conditional_bound = true;
+        if (bit<2) r.operational_bit_evidence[bit]=30;
+        r.operational_bit_log_separation=30;
     }
     return r;
 }
@@ -160,6 +162,10 @@ void order_and_backpressure() {
     check(messages.size()==1 && messages.front().first_public_slot==0 && messages.front().stop_public_slot==5 &&
           messages.front().message.physical_complete && messages.front().message.filtered_text=="e",
           "ordered native scheduler did not emit the completed short message");
+    check(messages.front().message.wrong_key_evidence.available &&
+          messages.front().message.wrong_key_evidence.data_bits==3 &&
+          messages.front().message.wrong_key_evidence.passing_bits.back()==3,
+          "ordered completion lost whole-message browser evidence");
     check(!stream.report().output_backpressured && stream.report().next_public_slot==rejected.next_public_slot,
           "draining output did not free ingress independently of slot progress");
     check(stream.push(state.input_stop, extra)==StreamPushResult::accepted, "unchanged retry after drain was rejected");
@@ -709,12 +715,18 @@ void inter_window_gap_and_rearm() {
     const auto first_stop = p.slot(0).observation.stop;
     check(first_stop+1<p.slot(1).observation.first, "fixture does not place the gap outside either window");
     feed(stream, first_stop);
-    check(stream.resume(true).observed_bits==1, "first DATA slot did not reach the codec");
+    const auto pending=stream.resume(true);
+    check(pending.observed_bits==1, "first DATA slot did not reach the codec");
+    check(pending.wrong_key_evidence.available && pending.wrong_key_evidence.data_bits==1 &&
+          pending.wrong_key_evidence.passing_bits.back()==1,
+          "pending stream report omitted baseline browser evidence");
     feed(stream, p.slot(4).observation.stop, 1);
     const auto recovered = stream.resume(true);
     check(recovered.state==StreamReceiverState::receiving && !recovered.recovering &&
           recovered.next_public_slot==5 && stream.drain_messages().empty(),
           "loss between observations decoded a suffix or failed quiet rearm");
+    check(recovered.wrong_key_evidence.data_bits==0 && !recovered.wrong_key_evidence.available,
+          "capture-gap rearm retained stale admission counts");
     feed(stream, p.slot(9).observation.stop);
     stream.resume(true);
     const auto messages = stream.drain_messages();

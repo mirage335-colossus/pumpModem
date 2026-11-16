@@ -11,15 +11,17 @@ const char* wrong_key_admission_name(WrongKeyAdmission policy) {
     case WrongKeyAdmission::current: return "current";
     case WrongKeyAdmission::guarded: return "guarded";
     case WrongKeyAdmission::strict: return "strict";
+    case WrongKeyAdmission::very_strict: return "very-strict";
+    case WrongKeyAdmission::extreme: return "extreme";
+    case WrongKeyAdmission::maximum: return "maximum";
     }
     throw Error("invalid Robust wrong-key admission policy");
 }
 
 WrongKeyAdmission parse_wrong_key_admission(std::string_view name) {
-    if (name == "current") return WrongKeyAdmission::current;
-    if (name == "guarded") return WrongKeyAdmission::guarded;
-    if (name == "strict") return WrongKeyAdmission::strict;
-    throw Error("Wrong Key Admission expects current, guarded or strict");
+    for (const auto policy : wrong_key_admission_policies)
+        if (name == wrong_key_admission_name(policy)) return policy;
+    throw Error("Wrong Key Admission expects current, guarded, strict, very-strict, extreme or maximum");
 }
 
 double receiver_operational_threshold() {
