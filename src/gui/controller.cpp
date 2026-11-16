@@ -1107,7 +1107,7 @@ struct Controller::Impl {
     void refresh_admission_status() {
         admission_filter_status=admission_policy()==WrongKeyAdmission::current?std::string{}:
             "Wrong Key Admission "+admission_filter_label(admission_policy())+": "+std::to_string(hidden_signals)+
-            " signals / "+std::to_string(hidden_files)+" files hidden; Current restores retained records.";
+            " signals / "+std::to_string(hidden_files)+" files hidden; Unfiltered restores retained records.";
     }
     void start_worker(std::function<void(Prepared&,std::stop_token)> work,Prepared result) {
         preparing=true;active_kind=result.kind;
@@ -1757,7 +1757,7 @@ void Controller::select(UiField field,std::string id) {
             p.settings.wrong_key_admission=state.selected;
             p.refresh_files(true);p.refresh_signals(true);p.refresh_pattern_steps();
             p.sync_launch_command();++p.revision;
-            p.notice(p.admission_filter_status.empty()?"Current: showing all retained receptions.":p.admission_filter_status);
+            p.notice(p.admission_filter_status.empty()?"Unfiltered: showing all retained receptions.":p.admission_filter_status);
         }
         else if(field==UiField::signals)p.signals_follow_tail=false;
         else if(field==UiField::files)p.files_follow_tail=false;

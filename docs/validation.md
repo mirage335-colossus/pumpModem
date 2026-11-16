@@ -45,6 +45,18 @@ already overlap, so Helper overlap is inapplicable to that profile.
 
 ## Reversible Wrong Key Admission history — 15 November 2026
 
+The label-only follow-up over `8d4d747b` names the default **Unfiltered** and
+adds approximate HF visibility-loss estimates: ~1/~2 dB for 2/3 and 1/3,
+~0–3 dB for 1/10, and ~0–6 dB for both deeper model targets. These reuse the
+scoped observations below and the earlier finer-grid Guarded/Strict comparison;
+they are not statistical bounds or universal sensitivity penalties. The deep
+targets carry an asterisk explained in the control's help. Compact labels fit
+the existing Encryption-key row without changing its geometry. Saved tokens,
+scalar thresholds and reception/history behavior are unchanged.
+The rebuilt `gui_fast`, `gui_layout`, `gui_launch_command` and
+`gui_native_policy` checks passed **4/4** in 3.98 seconds, and the native
+application build completed. No new receiver study or capacity claim is made.
+
 The follow-up over `3d29090a` separates baseline GUI reception from the selected
 browser filter. The user explicitly chose filtering the view and reporting how
 many DATA bits pass while preserving original decoded content, rather than

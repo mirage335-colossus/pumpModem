@@ -157,21 +157,31 @@ transmitted waveform or its duration. An erasure cannot count as physical
 quiet; the usual two scored quiet slots remain required for completion.
 
 In the GUI this is now a reversible **browser** choice: the native session
-always receives/decodes Current and retains per-message DATA-bit pass counts.
+always receives/decodes the unfiltered baseline and retains per-message DATA-bit
+pass counts.
 Completed rated records remain visible when at least half their admitted bits
 pass the selected tier, with ties visible. This avoids a single-bit veto on a
 long message, but it is still a chosen presentation rule, not a calibrated
 message probability. Original decoded content and explicit saved files do not
-change, and no second DSP or codec pass is performed. Current restores hidden
+change, and no second DSP or codec pass is performed. Unfiltered restores hidden
 records within the bounded RAM history; pending/unrated records remain visible.
 The single-bit studies below measure per-bit admission/retention, not the
 multi-bit browser rule's message-level error rate. See
 [reversible history validation](validation.md#reversible-wrong-key-admission-history--15-november-2026).
 
-The dropdown uses the requested reduction fractions: Current, **2/3 reduction
-(est.)**, **1/3 reduction (est.)**, **1/10 reduction (est.)**, **1/100 reduction
-(model)** and **1/1000 reduction (model)**. Fractions mean the target proportion
-of wrong-key DATA bits **remaining relative to Current** in the static-HF
+The dropdown uses `Unfiltered`, `2/3 reduction ~1dB`,
+`1/3 reduction ~2dB`, `1/10 reduction ~0-3dB`,
+`1/100 reduction ~0-6dB*` and `1/1000 reduction ~0-6dB*`.
+The asterisk identifies an extrapolated model target in the control's help.
+The dB values are approximate HF reference visibility-loss estimates. The
+1/10 pilot crossing shares the baseline's `(7,10]` interval; both deeper
+crossings occupy `(10,13]`. Those grids motivate coarse 0–3 and 0–6 dB
+ranges, not confidence bounds or distinct exact penalties for the deep tiers.
+The earlier finer-grid Guarded/Strict shifts motivate ~1/~2 dB. Clean HF showed
+no extra losses, and long Sub-9 counterexamples still prevent a universal
+added-dB interpretation. Original reception remains retained at every choice.
+Fractions mean the target proportion
+of wrong-key DATA bits **remaining relative to Unfiltered** in the static-HF
 reference, not the fraction removed. The corresponding saved tokens remain
 `current`, `guarded`, `strict`, `very-strict`, `extreme`, `maximum`.
 These names do not set universal admission rates or the fraction of multi-bit

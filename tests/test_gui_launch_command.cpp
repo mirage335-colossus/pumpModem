@@ -24,7 +24,7 @@ void parsing_and_formatting() {
         check(policy.wrong_key_admission==value&&launch_command::parse(launch_command::format(policy))==policy,
               "Wrong Key Admission policy did not round trip");
     }
-    for(const auto* value:{"heuristic","CURRENT","fp64",""})
+    for(const auto* value:{"heuristic","CURRENT","Unfiltered","fp64",""})
         rejects([&]{launch_command::parse(std::string("--wrong-key-admission ")+value);},
                 "invalid Wrong Key Admission token accepted");
     check(!launch_command::parse("--rate 1200").gpu,

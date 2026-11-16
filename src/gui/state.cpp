@@ -122,12 +122,12 @@ bool admission_visible(const triad::v3::WrongKeyAdmissionEvidence& evidence, Wro
 }
 std::string admission_filter_label(WrongKeyAdmission policy) {
     switch(policy) {
-    case WrongKeyAdmission::current:return "Current (unfiltered)";
-    case WrongKeyAdmission::guarded:return "2/3 reduction (est.)";
-    case WrongKeyAdmission::strict:return "1/3 reduction (est.)";
-    case WrongKeyAdmission::very_strict:return "1/10 reduction (est.)";
-    case WrongKeyAdmission::extreme:return "1/100 reduction (model)";
-    case WrongKeyAdmission::maximum:return "1/1000 reduction (model)";
+    case WrongKeyAdmission::current:return "Unfiltered";
+    case WrongKeyAdmission::guarded:return "2/3 reduction ~1dB";
+    case WrongKeyAdmission::strict:return "1/3 reduction ~2dB";
+    case WrongKeyAdmission::very_strict:return "1/10 reduction ~0-3dB";
+    case WrongKeyAdmission::extreme:return "1/100 reduction ~0-6dB*";
+    case WrongKeyAdmission::maximum:return "1/1000 reduction ~0-6dB*";
     }
     throw Error("Unknown Wrong Key Admission browser filter");
 }

@@ -547,13 +547,18 @@ void presentation_and_retention() {
           wrong_key.font_size==11&&control(F::symbol_burst_random).font_size==11&&
           wrong_key.purpose==ui::ControlPurpose::presentation&&!wrong_key.open_upward&&
           std::string(wrong_key.help).find("1/10 means 90% filtered")!=std::string::npos&&
+          std::string(wrong_key.help).find("* Extrapolated model target")!=std::string::npos&&
+          std::string(wrong_key.help).find("visibility in coarse HF reference tests")!=std::string::npos&&
+          std::string(wrong_key.help).find("not exact power costs or statistical bounds")!=std::string::npos&&
           std::string(wrong_key.help).find("No guaranteed rejection fraction, fixed dB cost, daily rate or authentication")!=std::string::npos&&
           app.control(wrong_key).visible&&app.control(wrong_key).enabled&&
           app.field(F::wrong_key_admission).selected=="current"&&app.field(F::wrong_key_admission).options.size()==6&&
-          app.field(F::wrong_key_admission).options[0].label=="Current (unfiltered)"&&
-          app.field(F::wrong_key_admission).options[1].label=="2/3 reduction (est.)"&&
-          app.field(F::wrong_key_admission).options[2].label=="1/3 reduction (est.)"&&
-          app.field(F::wrong_key_admission).options.back().label=="1/1000 reduction (model)",
+          app.field(F::wrong_key_admission).options[0].label=="Unfiltered"&&
+          app.field(F::wrong_key_admission).options[1].label=="2/3 reduction ~1dB"&&
+          app.field(F::wrong_key_admission).options[2].label=="1/3 reduction ~2dB"&&
+          app.field(F::wrong_key_admission).options[3].label=="1/10 reduction ~0-3dB"&&
+          app.field(F::wrong_key_admission).options[4].label=="1/100 reduction ~0-6dB*"&&
+          app.field(F::wrong_key_admission).options.back().label=="1/1000 reduction ~0-6dB*",
           "Wrong Key Admission must expose reversible Robust browser filters and their limits");
     app.select(wrong_key,"guarded");
     check(app.field(F::wrong_key_admission).selected=="guarded","Wrong Key Admission choice was not accepted");

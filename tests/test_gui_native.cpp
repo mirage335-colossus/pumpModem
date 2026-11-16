@@ -377,7 +377,7 @@ void reversible_admission_history() {
     check(gui::signal_records(signals,false,P::guarded).size()==1);
     check(gui::signal_records(signals,false,P::strict).empty());
     check(gui::signal_records(signals).size()==1&&signals.copy_bits(0)=="101");
-    check(gui::admission_label(evidence,P::guarded)=="2/3 reduction (est.): 2/3 DATA bits pass");
+    check(gui::admission_label(evidence,P::guarded)=="2/3 reduction ~1dB: 2/3 DATA bits pass");
     check(signals.lines()[0].text=="101"&&signals.lines()[0].raw_bits=="101");
     auto tie=evidence;tie.data_bits=4;tie.passing_bits={4,3,2,1,0,0};
     check(gui::admission_visible(tie,P::strict)&&!gui::admission_visible(tie,P::very_strict));
@@ -446,6 +446,9 @@ void admission_browser_controller() {
           !controller.enabled(C::copy_raw_signal)&&!controller.enabled(C::save_file));
     controller.select(F::wrong_key_admission,"current");
     check(controller.field(F::signals).records.size()==1&&controller.field(F::files).records.size()==1);
+    check(controller.field(F::status).text=="Unfiltered: showing all retained receptions."&&
+          controller.settings().wrong_key_admission=="current"&&
+          controller.field(F::planner_command).text.find("--wrong-key-admission current")!=std::string::npos);
     controller.select(F::signals,"42");
     check(controller.enabled(C::copy_signal)&&controller.enabled(C::copy_raw_signal)&&controller.enabled(C::save_file));
     check(signals.copy_bits(0)=="1"&&inbox.items()[0].message.data==file.message.data);

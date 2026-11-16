@@ -48,7 +48,7 @@ For a completed rated record, the browser requires at least half its admitted
 DATA bits to pass the chosen filter; ties remain visible. The pass count is
 shown separately from physical erasures. Pending, non-Robust and unrated
 records remain visible. This is an explicit visibility rule, not a whole-message
-confidence decision. Current restores filtered records while they remain in
+confidence decision. Unfiltered restores filtered records while they remain in
 the bounded RAM history. The standalone native receiver/probe still supports
 applying the same scalar policy directly as DATA-to-erasure admission; that
 headless option is distinct from the GUI's preservation policy.

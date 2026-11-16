@@ -134,7 +134,7 @@ Display timing never controls receiver decisions or completion.
 | Rate, Shift | Rate is native inner rate; audio IF is Carrier minus Shift. Shift also contributes to the oscillator error model. |
 | Additional Symbols, Spreading | Off uses one lane; Interleave with `N×` selects `N` native added-symbol lanes. Nominal occupied DATA bandwidth is `0.625 × Rate × N`. |
 | Symbol burst, Random extra | Shared whole-bit calendar waits; see [burst scheduling](symbol-burst.md). |
-| Wrong Key Admission | Reversible Robust history/browser filter. Current shows the baseline; stronger choices hide completed records when fewer than half their admitted DATA bits pass, and show the pass count. Original decoded content is retained. Strong wanted signals can also be hidden; higher SNR may not restore visibility. No wrong-key-per-day rate, fixed dB cost or authentication is implied. |
+| Wrong Key Admission | Reversible Robust history/browser filter. Unfiltered shows the baseline; stronger choices hide completed records when fewer than half their admitted DATA bits pass, and show the pass count. Original decoded content is retained. The dB labels are approximate HF reference visibility losses. Strong wanted signals can also be hidden; higher SNR may not restore visibility. No wrong-key-per-day rate, fixed dB cost or authentication is implied. |
 | FHSS | Canonical envelope and illustrative frequency schedule; no external radio retuning. |
 | Target SNR dB/1Hz | One shared C/N0 target, default 32 dB-Hz, for provisional duration planning; separate from actual simulated C/N0. |
 | Error correction | Configured Off, RS20 or RS60 native short/long text profiles. Raw bits bypass text coding and FEC exactly. |
@@ -205,15 +205,30 @@ frequency controls and their launch overrides remain removed.
 The Robust **Wrong Key Admission** choice is immediately left of Encryption key
 entry and persists in launch settings as
 `--wrong-key-admission`. It defaults to `current`. GUI reception always uses
-Current for acquisition and decoding, retaining compact counts for the stronger
-choices. Changing this dropdown refreshes Signals and Files without
+the unfiltered baseline for acquisition and decoding, retaining compact counts
+for the stronger choices. Changing this dropdown refreshes Signals and Files without
 reconfiguring the receiver, including during reception/transmission. It leaves
 the transmitted waveform, duration and original decoded content intact and
 remains retained while Fast or Legacy is selected.
 
-Choices are Current (unfiltered), 2/3 reduction (est.), 1/3 reduction (est.),
-1/10 reduction (est.), 1/100 reduction (model) and 1/1000 reduction (model).
-Here a fraction means wrong-key DATA bits **remaining relative to Current**
+Choices show approximate HF reference visibility losses:
+
+| Choice | Estimated loss shown |
+| --- | --- |
+| Unfiltered | No added filter loss |
+| 2/3 reduction | ~1 dB |
+| 1/3 reduction | ~2 dB |
+| 1/10 reduction | ~0–3 dB |
+| 1/100 reduction | ~0–6 dB* |
+| 1/1000 reduction | ~0–6 dB* |
+
+The compact labels omit the space before `dB`; `*` identifies an extrapolated
+model target, as explained in the control's help.
+The ranges reflect coarse tested grids, not confidence bounds or universal
+sensitivity limits. The deeper choices share a range because the measurements
+do not resolve distinct dB costs. These estimates concern visibility; the
+original unfiltered reception is preserved.
+Here a fraction means wrong-key DATA bits **remaining relative to Unfiltered**
 in the static-HF reference: 1/10 means 90% filtered. The two deepest choices
 are extrapolated model targets. Saved tokens are respectively `current`,
 `guarded`, `strict`, `very-strict`, `extreme`, `maximum`; existing settings
@@ -225,7 +240,7 @@ bits over admitted DATA bits, excluding physical erasures and quiet slots.
 Pending records remain visible until completion. Fast, Legacy, Helper and
 unrated records stay visible; missing Robust evidence is identified rather than
 assigned confidence. Hidden selections cannot supply copy, paste or save
-actions. Selecting Current restores hidden records still retained in memory;
+actions. Selecting Unfiltered restores hidden records still retained in memory;
 already exported files are unchanged. This is a browser visibility policy,
 not bit erasure followed by FEC re-decoding or a message-level probability.
 The display reports the hidden count. Strong wanted signals can also be hidden,
