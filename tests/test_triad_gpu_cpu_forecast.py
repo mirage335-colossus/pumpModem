@@ -145,6 +145,60 @@ class NativeForecastTests(unittest.TestCase):
         with self.assertRaisesRegex(forecast.ProbeError, "fixed-affine operational"):
             forecast.observation(legacy, "active", measure_timing=False)
 
+    def test_zero_helper_phase_is_valid_and_old_acquisition_work_cannot_be_reused(self):
+        receipt = forecast_inputs()[0]["cases"][0]["measurements"]["strata"]["active"][0]
+        phase = forecast.phase_once(receipt, "helper")
+        phase["wall_seconds"] = phase["process_cpu_seconds"] = 0.
+        phase["work"].update(reason="common_motion_requires_full_data_frequency_prior", narrowed=False,
+                             prefix_samples=0, onset_apertures=0, retained_intervals=0,
+                             workspace_peak_bytes=0, observation_seconds=0.)
+        current = forecast.observation(receipt, "active")["phases"]["helper"]
+        self.assertEqual(current["service"], 0.)
+        self.assertEqual(current["demand"], (0, 0, 0))
+        self.assertEqual(forecast.demand_scale(current, current), (1., 1.))
+        for name, value in (("reason", None), ("narrowed", True), ("prefix_samples", 1),
+                            ("workspace_peak_bytes", None), ("observation_seconds", 1)):
+            malformed = deepcopy(receipt)
+            work = forecast.phase_once(malformed, "helper")["work"]
+            if value is None:
+                del work[name]
+            else:
+                work[name] = value
+            error = "lacks its acquisition outcome" if name == "reason" else "recorded work or time"
+            with self.subTest(name=name), self.assertRaisesRegex(forecast.ProbeError, error):
+                forecast.observation(malformed, "active")
+        phase["wall_seconds"] = .05
+        with self.assertRaisesRegex(forecast.ProbeError, "Skipped native Helper recorded work or time"):
+            forecast.observation(receipt, "active")
+
+        phase["work"].update(reason="onset_branch_frequency_fallback", prefix_samples=100)
+        previous = forecast.observation(receipt, "active")["phases"]["helper"]
+        with self.assertRaisesRegex(forecast.ProbeError, "phase geometry changed"):
+            forecast.demand_scale(previous, current)
+        with self.assertRaisesRegex(forecast.ProbeError, "Required phase work appeared or disappeared"):
+            forecast.demand_scale(dict(previous, geometry=current["geometry"]), current)
+
+        local = [observation(seed, .01) for seed in (1, 2, 3)]
+        gpu, holdout = observation(4, .01), observation(5, .01)
+        for row in [*local, gpu, holdout]:
+            row["phases"]["helper"] = current.copy()
+        gpu["phases"]["helper"]["service"] = None  # Only remote work is used.
+        helper = forecast._fit_stratum(local, gpu, holdout, alpha=.025)["helper"]
+        self.assertEqual(helper, dict(point=0., interval=[0., 0.], holdout=0.,
+                                      local_observations=3, gpu_useful_work=[0, 0, 0]))
+        local[0]["phases"]["helper"] = previous
+        with self.assertRaisesRegex(forecast.ProbeError, "phase geometry changed"):
+            forecast._fit_stratum(local, gpu, holdout, alpha=.025)
+        local[0]["phases"]["helper"] = current
+        local[0]["phases"]["coarse_search"]["service"] = 0
+        with self.assertRaisesRegex(forecast.ProbeError, "Nonpositive CPU phase timing"):
+            forecast._fit_stratum(local, gpu, holdout, alpha=.025)
+        local[0]["phases"]["coarse_search"]["service"] = .01
+        for row in [*local, gpu, holdout]:
+            row["phases"]["helper"] = dict(current, geometry=("ordinary_acquisition", False))
+        with self.assertRaisesRegex(forecast.ProbeError, "Nonpositive CPU phase timing"):
+            forecast._fit_stratum(local, gpu, holdout, alpha=.025)
+
     def test_native_gpu_wall_cannot_change_cpu_forecast(self):
         local = [observation(seed, .01) for seed in (1, 2, 3)]
         holdout = observation(5, .01)

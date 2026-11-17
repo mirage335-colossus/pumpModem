@@ -43,6 +43,317 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Weak Helper follow-through — 17 November 2026
+
+This investigation starts from `6571cadadf504974a55f6d58cb44c16fcd674f3f`.
+The source audit finds no persistent rejected Helper state and no Helper-only
+veto on DATA: absent/weak acquisition restores the full constant-frequency
+search. Accepted Helper intervals narrow the coarse constant-frequency bank,
+while varying and drift alternatives retain wider public support. The retained
+9 dB-Hz common-frequency example succeeds with stale assistance, but loses
+about 6.18 nats and takes 5.36 rather than 1.15 seconds. That leaves a useful
+weak-signal discriminator, rather than evidence of universal fallback sensitivity.
+
+Predeclare one matched **6 dB-Hz DATA / unchanged Helper** pair using the
+retained native fixture. Keep its 6 kHz sample rate, 10.4-second bit one,
+public epoch 1793850000, ordinal 15, thermal seed 37, 0.18-second actual arrival,
+3 Hz atmospheric allowance, 7 ms declared delay and original key. Scale only
+DATA amplitude to `10^(-6/20)` against the existing 12 dB-Hz noise buffer.
+Compare aligned +1.10 Hz against the continuous common-frequency transition
+from −0.95 to +1.10 Hz during source seconds 58.6–59.7, before DATA begins.
+Require exact post-transition IQ equality, complete valid observations and
+verified zero-hypothesis statistics. Record actual Helper intervals, bit/null
+evidence, branch work and elapsed service. Preserve automatic `W=24`, at most
+360,000 aperture samples / 1.1 million channel-prefix samples, the existing
+768 MiB workspace limit, and 45 seconds for the two ordered scores.
+
+Aligned DATA with a transition miss demonstrates an assistance-related loss;
+two passes or two misses do not demonstrate that gap at this point. No extra
+level, seed or duration follows automatically. Fixture setup/censoring remains
+distinct from reception failure. The thin fixture and compact frozen evidence
+belong in `local-evidence/weak-helper-followthrough/`; retain the original
+Helper receipts. Any successful generic repair needs its own bounded controls
+and affected native checks before promotion.
+
+The single pair demonstrates an actual assistance-related miss. Aligned
+Helper gives interval `[1.00778,1.18667]` Hz, containing the +1.10 Hz DATA
+frequency, and receives correct DATA one at log evidence **24.67816**.
+The transition yields the earlier interval `[-1.02,-0.868889]` Hz and scores
+the same DATA as **QUIET**, at **17.36909**, below 21.49338. Both observations
+are complete, valid and zero-hypothesis verified. The entire post-transition
+suffix from sample 370200 matches SHA-256
+`3eb62f27729669e9abca71508f6fb0e0b2bdbe85d262318d5cd4500b32221de1`;
+DATA and noise vectors also match. The correct-bit separation remains ample
+in both arms; missing presence evidence is the immediate failure.
+
+Aligned and stale arms take 1.097 and 4.721 seconds respectively. Both retain
+`W=24`, the 359,228,115-byte quote, selected fine prior mass
+`1.27619672955e-6` and 15,102,864 fine basis rows. The aligned affine wanted
+score is 41.02237; stale assistance reduces it to 1.73851. The wider short,
+coherent-gain and drift alternatives execute but do not recover the bit.
+The full invocation takes 8.192 seconds, with no extra level or seed. Summary
+`local-evidence/weak-helper-followthrough/summary.json` (`0be7e2ac…`) binds
+fixture `6121468d…`, native source `7ec93490…` and receiver archive `a725a26b…`.
+Build-identity and ccache setup corrections occurred before DSP; their original
+logs are retained. This is a constructed in-bound frequency history, not a
+measurement of its natural incidence or persistent alarm outage duration.
+
+The first repair candidate changes the transferred interval, not the pilot
+fit or DATA threshold. If the declared common atmospheric excursion is
+`[-A,A]` at both Helper and DATA times, its change can reach `2*A`. Expand
+accepted Helper proposals by that amount after pilot consistency checks,
+clip to the existing coherent DATA prior, and retain the existing broad/empty
+interval fallback. No new historical search, second coarse pass or finer
+frequency grid is introduced. This may forgo Helper's speedup when the allowed
+motion is large relative to that prior, so measure both matched arms and a
+quiet control before accepting it. Reusing existing zero-slope drift peaks for
+a few extra coherent candidates is a conditional lower-cost alternative;
+it does not itself guarantee timing support or apply where drift is unavailable.
+First require focused transfer-bound checks, then repeat the frozen 6 dB-Hz
+pair once on unchanged captures within the same 45-second cap. Further tests
+need separate bounded declarations.
+For an enabled changing-channel profile, `A` is the maximum of its common
+Doppler and atmospheric excursion declarations, rather than their sum: the
+GUI's common allowance already includes atmospheric motion and explicit Doppler.
+The two existing fields are not independent powers or additional bandwidths.
+Native physical motion is sampled in receiver time, so the nominal-frequency
+guard also divides by `1 - endpoint_clock_bound_ppm*1e-6`, using the slowest
+allowed receiver clock. Clamping the one-sided excursion to the existing
+frequency bound before doubling avoids unnecessary range growth; the resulting
+intervals still clip to that unchanged public prior. Focused tests include
+nonzero endpoint-clock conversion and unsaturated intervals.
+
+The candidate passes the exact pair: both aligned and stale captures now
+receive correct DATA one at log evidence **25.11317**, correct-bit separation
+34.58601 and the unchanged 21.49338 threshold. Each full capture matches its
+own baseline hash; both retain the identical DATA/noise suffix. Broad transfer
+uses the existing full-search fallback, with 136 coarse frequencies instead
+of 10 aligned / 8 stale. Stale affine wanted evidence rises from 1.73851 to
+41.45739, making the later medium/drift fallback unnecessary. All observations
+are complete, valid and zero-hypothesis verified, with `W=24` and the same
+359,228,115-byte quote.
+
+Matched core slot time changes **1.097 → 1.162 seconds** aligned (about 6%
+more) and **4.721 → 1.155 seconds** stale (about 76% less). Total ordered
+acquisition/slot scoring changes 6.110 → 2.629 seconds; the candidate process
+takes 4.269 seconds. These are one paired local observation, not sustained
+capacity measurements. Candidate fixture binary `c0c98342…` links receiver
+archive `620d424f…`; the unchanged fixture source is `7436e971…`.
+
+After that positive gate, predeclare two further candidate-only observations
+within one 45-second invocation and the same sample/workspace limits: the
+stale-transition bit zero at the same 6 dB-Hz DATA level, then actual Helper
+plus the unchanged thermal noise with zero transmitted DATA. Preserve the
+same channel history, key, ordinal and public bounds; the opposite polarity
+is a source-waveform holdout, not an independent natural history. Verify the
+quiet capture against its retained exact Helper/noise digest and require valid
+physical absence scoring. Record any opposite-bit miss without an automatic
+level/seed extension. Then run the applicable native triad and GUI groups on
+the finalized source.
+
+Both controls complete within the cap, but the opposite bit remains a miss:
+bit zero is QUIET at log evidence **16.59397**, despite correct-bit separation
+25.23040. Its affine wanted evidence is 32.93060. Actual Helper-plus-noise is
+correctly QUIET at −7.73723, with full IQ matching the historical
+`4af2f6ae…ac6fb8` absence digest. Both are complete, valid, zero-hypothesis and
+noise-statistics verified, with the same `W=24` and workspace. This does not
+claim both polarities receive at 6 dB-Hz. The summary is
+`candidate-controls/summary.json` (`7ad258b1…`) under the Helper evidence
+directory. Control binary `44258224…` executes exactly one two-score invocation.
+
+The bit-zero slot takes 5.786 seconds and absence takes 15.376 seconds, despite
+equal reported coarse/fine/varying counts. The latter is not a conditional-line
+rescore; its cause cannot be attributed from those counters alone. Predeclare
+one cost comparison using the preserved current pre-repair binary `6121468d…`
+and its existing `lower-data-common-frequency-controls` command, capped at
+45 seconds with unchanged sample/workspace bounds. Its two existing observations
+are 9 dB-Hz bit zero and the exact same Helper/noise absence; the first is an
+ancillary old control, not a new sensitivity point. Compare the latter's exact
+capture and complete service with the candidate. No automatic repetitions
+follow, and historical pre-power-mixture timing is not a matched baseline.
+
+The current pre-repair binary scores the exact absence input in 5.343 seconds
+(plus 0.154 seconds of separate Helper measurement), against the candidate's
+15.376 seconds. The ancillary 9 dB-Hz bit-zero control remains correct DATA
+zero. The single command completes in 15.442 seconds; its summary is
+`pre-helper-baseline/summary.json` (`32e7bbb9…`). This preserves the observed
+2.88-fold quiet timing difference rather than dismissing it as an old-version
+comparison.
+
+However, the candidate quiet run's standalone Helper measurement also takes
+1.022 seconds, against 0.146 for the preceding candidate bit-zero observation
+and 0.154 for baseline absence. Its pilot-fit values are unchanged. Wider DATA
+frequency search cannot explain that earlier slowdown. Predeclare one further
+candidate-only quiet timing observation, capped at 45 seconds, on the exact
+same absence input. Print existing native phase times and drift-work counters,
+plus process CPU/fault/context-switch deltas around standalone Helper and full
+slot scoring, with passive host/cgroup CPU-pressure snapshots. This adds no
+receiver instrumentation or new communication history. Overlapping phase times
+are not additive. A return to ordinary timing would support a transient
+explanation; a repeated slowdown requires phase-level diagnosis. No capacity
+claim follows from either result, and no automatic repetition is authorized.
+
+That one timing observation completes in 7.952 seconds and returns the same
+valid QUIET decision and exact input. Core receiver time is **5.971 seconds**,
+with 43.684 user / 0.727 system CPU seconds and zero major faults; standalone
+Helper time returns to **0.148 seconds**. Existing fields report 0.240 seconds
+coarse, 5.729 fine and 4.393 drift, with their nested/overlapping scope retained.
+No cgroup throttling is recorded; cgroup totals can include other activity and
+are not receiver CPU counters. Summary `quiet-timing/summary.json` (`3b11eff2…`)
+binds the reviewed instrumentation and unchanged guarded receiver. The earlier
+15.376-second outlier is not reproduced; the observations support variability,
+not an established threefold algorithmic cost or sustained-capacity pass.
+
+The source audit separately proves avoidable work: when the effective common
+excursion covers the coherent frequency bound, every valid transferred Helper
+interval spans that full prior, while every failed fit already falls back to
+it. A shared planning/execution predicate can therefore omit acquisition in
+the production driver and quote zero Helper scratch in that case, preserving
+standalone Helper diagnostics, full input validation and all DATA hypotheses.
+This is a separate optimization, not an explanation for the timing outlier.
+Its candidate must preserve exact matched DATA/quiet scores and public work,
+resource admission and the full worker budget before final acceptance.
+
+The production skip passes focused Helper/receiver checks and a four-window
+matched replay: aligned and stale bit one remain DATA at 25.11317; opposite
+bit zero remains the recorded QUIET miss at 16.59397; absence remains valid
+QUIET at −7.73723. Every shared evidence/prior/work field and input/noise hash
+matches the transfer-guard-only version. All windows keep `W=24` and the
+359,228,115-byte peak quote. The explicit production status is
+`common_motion_requires_full_data_frequency_prior`; standalone Helper
+measurement remains available. Bit-one core times are 0.995 / 1.008 seconds,
+with 2.294 seconds for both standalone acquisitions plus native scores;
+the two control scores/acquisitions total 10.435 seconds. These are scoped
+measurements, not a complete capacity qualification.
+
+The final matched parity receipt is `final-skip-gate/parity.json`
+(`836aaac8…`); its file inventory excludes its own digest. Raw results are
+unchanged by that metadata correction. The native source then passes
+**40/40 triad** checks in 108.48 seconds and **28/28 GUI** checks in 154.73
+seconds. A focused-test compile initially used an unqualified internal type;
+the test-only namespace correction precedes the passing runs and is retained
+in the build log.
+
+A measurement audit also found that the staged probe's `acquire()` still
+charged standalone Helper when production omitted it. It now uses the same
+shared predicate and retains a named Helper phase with zero time/work and the
+explicit skip reason. The GPU-to-CPU forecast accepts that deterministic zero
+only with the exact reason, matching geometry and every required zero counter;
+other zero-time stages, missing fields and stale acquisition calibration remain
+rejected. Direct standalone Helper diagnostics remain available.
+
+The actual probe CLI check passes **1/1** in 23.06 seconds, covering saturated
+motion with the full 91-center frequency grid, stationary acquisition and
+unsaturated motion. Each slot deliberately executes one coarse tile and remains
+incomplete; this is bounded interface validation, not capacity evidence. The
+test initially looked for a plan-only field in a slot receipt; a zero-DSP plan
+of identical options corrects that test lookup, and the original failure log is
+retained. Capacity/workload/forecast contracts pass **39/39**. These changes do
+not remove the staged changing-channel path's other incomplete-work gates or
+refresh any manual capacity calibration.
+
+The rebuilt appraisal application passes all **six** scoped channel, HF GUI
+profile, correlated-gain, normalized-null, integration and runner checks in
+50.10 seconds. Production DSP is unchanged after the 40/40 triad and 28/28 GUI
+runs. The final receiver archive is `79bb9417…e8f2`, probe binary
+`5850ec0c…9aaf7`, probe source manifest `4cbd6c6d…54c6` and appraisal binary
+`a5444c63…4035`. Full identities and log digests are recorded in
+`_appraisal/highFidelity-triple_Robust_Modem/local-evidence/weak-combined-modulation/final-validation/final-identities-and-checks.json`
+(`52daf24e…`). The appraisal rebuild retains an existing-source compiler warning
+about the optional CPU timing value in `ServiceTiming::add`; no appraisal source
+change or failed check is hidden by that passing result.
+
+Keep the thin native fixture `local-evidence/current-helper/discriminator.cpp`
+(`ccc3e637…ed3f`) and the compact frozen commands, hashes, raw decisions and
+setup/failure/check logs for the current matched Helper regression claims.
+The ten obsolete task-owned fixture executables/objects are removed after
+verification, with identities retained in `cleanup.json`; compatible build
+caches remain. Retire the fixture and redundant receipts once
+an equivalent maintained replay supersedes these claims. No cloud resource or
+new complete-receiver capacity calibration was used. Opposite-bit sensitivity,
+weaker physical failures and hours- or days-long natural availability remain
+outside the successful qualification.
+
+## Weak physical gain-level discriminator — 17 November 2026
+
+The remaining zero-delay, one-template physical two-hop rows cannot execute
+the recently added independent short-gain power mixture. An earlier 8/32-second
+non-additive coherence extension already failed to recover the +3 dB-Hz last
+bit; the additive .5/2-second alternative improves it but remains below
+threshold. Repeating that coherence sweep is not a new discriminator. A future
+matched physical preparation must test a distinct supported mechanism, rather
+than merely relabel an old miss with a new source identity.
+
+Predeclare one native physical preparation for the original +3 dB-Hz `E`
+history: `hf-vector-two-hop`, requested 128-second / actual 139.2-second DATA,
+reference/RRC, oscillator seed 73613, noise seed 93613, Helper/FEC Off and
+unchanged zero declared spread/clock with the 5 Hz atmospheric allowance.
+The complete 4,300,572-row render must reproduce the archived table `ff2b3…`
+and full IQ `fed418cd…`. Retain only the contiguous 844,697-row tail spanning
+DATA slot 12 and physical quiet slots 13–14. Require ordinary evidence parity
+with 16.603733824, −6.858888619 and −6.775606922 before interpreting the contrast.
+
+For each unchanged aperture and its ordinary fine coordinates, use existing
+native `score_fine` with half the DATA basis amplitude, equivalent to one fixed
+quarter-power gain covariance. Combine it using the existing supplement
+interface with fixed mass 1/8, retaining 7/8 for the ordinary receiver and all
+public coordinate/noise/line accounting. This is a private causal diagnostic,
+not a promoted receiver model or channel-truth input. One preparation and one
+render are allowed, at most 720 seconds aggregate, 4.35 million full samples,
+0.9 million retained tail rows, automatic `W=24` and the exact ordinary workspace
+admission. Plan/sample preflights precede field computation. Keep the bounded
+capture until disposition so a positive result can be evaluated without another
+field solve. No variance, coherence, energy or seed sweep follows automatically.
+
+The recorded-voltage Gannon variance-only failures in
+[the appraisal](../_appraisal/highFidelity-triple_Robust_Modem/hf-recorded-diagnosis.md#frozen-selected-cell-variance-check)
+remain contrary evidence: their unpartitioned and independently partitioned
+banks do not qualify this different correlated stationary-plus-OU physical
+aperture, and this experiment cannot overturn those failures by implication.
+
+The single physical invocation completes in **568.234 seconds**: 491.151 for
+field preparation, 5.735 for rendering, and 71.195 for receiver/verification
+work. Full table/IQ hashes match exactly, as do all three archived ordinary
+log-evidence values. The verified retained suffix contains 844,697 samples,
+14,359,849 bytes, digest `afe6a7f4…517184`. All six ordinary/alternative
+observations are complete, valid, zero-hypothesis and noise-statistics verified,
+with `W=24` and no retained line.
+
+| Public slot | Ordinary log evidence | Quarter-power mixture | Decision in both |
+| --- | ---: | ---: | --- |
+| 12, expected DATA 1 | 16.603734 | 20.824883 | QUIET, missed bit |
+| 13, physical absence | −6.858889 | −6.712395 | QUIET |
+| 14, physical absence | −6.775607 | −6.866212 | QUIET |
+
+The alternative improves presence evidence by **4.22115 nats**, but remains
+0.66850 below the unchanged 21.49338 threshold. Its raw affine wanted score
+improves 24.77449 → 29.67585 with identical public selected mass 0.0045248869.
+This is useful mechanistic evidence, not a demonstrated communication repair;
+changing the mixture weight from this near miss alone would not provide fresh
+validation. Actual signal energy is zero in both quiet successors. The active
+aperture has about 107.03 clean energy/noise units, which does not remove
+unknown-channel or public-search costs.
+
+The compact receipt is
+`weak-physical-gain/physical-quarter-summary.json` (`5bd258fa…`), and raw
+stdout has digest `c9719eb1…dc06`. The generic top-level
+`outcomes.quiet_active_slots=0` is an unused stream aggregate in this
+`component_only` command; direct ordinary and alternative slot decisions above
+are authoritative and show the active miss. Preserve this reporting correction
+and the original bytes; no rerun is needed for that metadata defect. The
+existing +4 dB-Hz physical recovery remains a separate earlier result. No
+additional covariance, coherence or energy trial has been run.
+That separately validated +4 recovery uses the same `E` physical history:
+the selected +3 miss lies within the existing **1 dB energy-recovery bracket**,
+not a demonstrated high-energy blind spot. It is not an outage-duration claim.
+Keep the positive model-fit finding and reconsider a reusable gain-level
+alternative when independent evidence shows an incremental reception benefit
+and its complete-service cost is qualified. Do not promote a heavier weight
+from this near miss alone. The one-off comparison code and 14,359,849-byte
+bounded capture are retired after disposition; retain the frozen commands,
+hashes, valid failures and
+compact receipts until equivalent source-bound evidence supersedes this claim.
+
 ## Weak combined-modulation follow-through — 17 November 2026
 
 This investigation starts from `c1f1f0f`, following the committed direct-gain

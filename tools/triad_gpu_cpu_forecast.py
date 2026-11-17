@@ -22,6 +22,7 @@ SCHEMA = "datapump.triad.native-gpu-cpu-forecast.v1"
 CAPACITY = "datapump.triad.native-capacity.v1"
 SCOPE = "configured_public_calendar_and_keyed_ordinal"
 PHASES = ("frontend", "helper", "coarse_prepare", "coarse_search", "coarse_selection", "fine")
+FULL_PRIOR_HELPER_SKIP = ("common_motion_requires_full_data_frequency_prior", False)
 HOLDOUT = {"nominal": (.15, .10), "conservative": (.20, .15)}
 ALLOCATION_KEYS = ("workers", "slot_owners", "memory_limit_bytes", "receiver_numerical_threads_per_worker")
 
@@ -181,7 +182,19 @@ def observation(receipt, stratum, *, measure_timing=True):
         costs = slot_costs(receipt)
         frontend = phase_once(receipt, "audio_frontend")["work"]
         input_check = phase_once(receipt, "input_validation")["work"]
-        helper = phase_once(receipt, "helper")["work"]
+        helper_phase = phase_once(receipt, "helper")
+        helper = helper_phase["work"]
+        reason, narrowed = helper.get("reason"), helper.get("narrowed")
+        require(isinstance(reason, str) and reason and type(narrowed) is bool,
+                "Native Helper receipt lacks its acquisition outcome")
+        helper_geometry = (reason, narrowed)
+        helper_demand = _counts(helper, ("prefix_samples", "onset_apertures", "retained_intervals"))
+        if reason == FULL_PRIOR_HELPER_SKIP[0]:
+            zero_fields = (helper.get("workspace_peak_bytes"), helper.get("observation_seconds"),
+                           helper_phase["wall_seconds"], helper_phase.get("process_cpu_seconds"))
+            require(not narrowed and helper_demand == (0, 0, 0) and
+                    all(type(value) in (int, float) and value == 0 for value in zero_fields),
+                    "Skipped native Helper recorded work or time")
         prepare = phase_once(receipt, "coarse_prepare")["work"]
         coarse = phase_once(receipt, "coarse_selection")["work"]
         selection = coarse["selection"]
@@ -193,8 +206,7 @@ def observation(receipt, stratum, *, measure_timing=True):
             "frontend": (audio_per_slot + costs["input_validation"],
                          (_select(frontend, ("input_rows", "output_rows", "halo_samples")),
                           tuple(sorted(input_check))), _counts(frontend, ("input_rows", "output_rows"))),
-            "helper": (costs["helper"], _select(helper, ("reason", "narrowed")),
-                       _counts(helper, ("prefix_samples", "onset_apertures", "retained_intervals"))),
+            "helper": (costs["helper"], helper_geometry, helper_demand),
             "coarse_prepare": (costs["coarse_prepare"], grid,
                                _counts(prepare["template_bank"], ("source_render_rows", "projected_columns"))
                                + _counts(prepare["observation"], ("fir_input_rows",))),
@@ -243,6 +255,19 @@ def _fit_stratum(local, gpu, holdout, *, alpha):
         points, lowers, uppers = [], [], []
         observed = holdout["phases"][name]
         remote = gpu["phases"][name]
+        if name == "helper" and observed["geometry"] == FULL_PRIOR_HELPER_SKIP:
+            for sample in local:
+                calibrated = sample["phases"][name]
+                demand_scale(calibrated, remote)
+                demand_scale(calibrated, observed)
+                require(calibrated["service"] == 0, "Skipped native Helper recorded service time")
+            require(observed["service"] == 0 and observed["demand"] == (0, 0, 0),
+                    "Skipped native Helper recorded work or time")
+            # This is a declared absent operation, so no estimate from a
+            # positive-runtime sample or statistical interval is needed.
+            modeled[name] = dict(point=0., interval=[0., 0.], holdout=0., local_observations=len(local),
+                                 gpu_useful_work=list(remote["demand"]))
+            continue
         for sample in local:
             calibrated = sample["phases"][name]
             lo, hi = demand_scale(calibrated, remote)

@@ -50,9 +50,14 @@ bool bounded_uncertainty(const ReceiverConfig& c) {
     for (double value : {c.clock_bound_ppm * 1e-6, c.endpoint_clock_bound_ppm * 1e-6, c.spread_delay_seconds,
                         c.delay_excursion_seconds, c.random_doppler_width_hz, c.spread_doppler_hz,
                         c.delay_motion_doppler_bound_hz, c.capture_tail_bound_seconds,
-                        c.relative_phase_diffusion_rad_sqrt_s})
+                        c.relative_phase_diffusion_rad_sqrt_s, c.time_varying_atmospheric_hz,
+                        c.time_varying_common_doppler_hz})
         if (!std::isfinite(value) || value < 0) return false;
     return true;
+}
+double received_common_excursion(const ReceiverConfig& c, double endpoint) {
+    if (!c.time_varying_channel) return 0;
+    return std::max(c.time_varying_common_doppler_hz, c.time_varying_atmospheric_hz) / (1 - endpoint);
 }
 bool finite_calendar(const ReceiverSlotPlan& s) {
     return std::isfinite(s.arrival_lower_seconds) && std::isfinite(s.arrival_upper_seconds) &&
@@ -495,9 +500,17 @@ FrequencyResult final_frequency(const ReceiverConfig& c, const ReceiverSlotPlan&
         for (auto a : usable[0]) for (auto b : usable[1]) intersect |= std::max(a[0], b[0]) <= std::min(a[1], b[1]);
         if (!intersect) return finish("pilot_frequency_regions_inconsistent");
     }
+    // The fitted intervals describe the Helper aperture. A shared
+    // atmospheric offset can move from either end of its signed allowance
+    // to the other before DATA starts. Apply that transfer guard after
+    // checking the two simultaneous pilot fits for consistency. The common
+    // allowance can already include atmospheric motion. Convert the signed
+    // excursion with the slowest receive clock before clipping to the DATA prior.
+    const auto transfer = 2 * std::min(received_common_excursion(c, endpoint), c.frequency_bound_hz);
     std::vector<Interval> all;
     for (const auto& pilot : usable) for (auto v : pilot) {
-        const double lo = std::max(-c.frequency_bound_hz, v[0]), hi = std::min(c.frequency_bound_hz, v[1]);
+        const double lo = std::max(-c.frequency_bound_hz, v[0] - transfer);
+        const double hi = std::min(c.frequency_bound_hz, v[1] + transfer);
         if (lo <= hi) all.push_back({lo, hi});
     }
     result.intervals = merge(std::move(all));
@@ -629,6 +642,21 @@ bool supported(const ReceiverConfig& c, const ReceiverSlotPlan& s, std::size_t p
     return std::max(c.clock_bound_ppm, c.endpoint_clock_bound_ppm) * 1e-6 < .1;
 }
 } // namespace
+
+bool helper_transfer_requires_full_prior(const ReceiverConfig& c, const ReceiverSlotPlan& s) {
+    if (!c.helper_enabled || !c.time_varying_channel || !std::isfinite(c.frequency_bound_hz) ||
+        c.frequency_bound_hz <= 0) return false;
+    const auto prefix = prefix_samples(c, s);
+    if (!supported(c, s, prefix) || received_common_excursion(c, c.endpoint_clock_bound_ppm * 1e-6) <
+            c.frequency_bound_hz) return false;
+    // A failed fit already uses the full prior. Each usable region comes
+    // from a fit over [-B-a, B+a] with audio-clock padding a, and is expanded
+    // by at least a before transfer. It therefore intersects [-B, B]. At
+    // this excursion the transfer is 2B on both ends, covering all of that
+    // prior regardless of the pilot samples. Keep ordinary handling of an
+    // unsupported aperture and retain standalone pilot diagnostics.
+    return coarse_support(c, s, prefix).enough;
+}
 
 std::size_t helper_workspace(const ReceiverConfig& c, const ReceiverSlotPlan& s) {
     const auto prefix = prefix_samples(c, s);

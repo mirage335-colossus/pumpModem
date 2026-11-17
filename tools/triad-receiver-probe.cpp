@@ -1279,15 +1279,24 @@ CoarseResult acquire(Json& report, const Options& o, const Profile& profile, con
     phase(report, "input_validation", check.elapsed(), seconds,
           object({{"rows", capture.iq.size()}, {"all_valid", all_valid}}));
     const auto memory = standalone_scratch(resources);
-    const auto helper_bound = helper_workspace(config, slot);
+    const bool full_data_prior = helper_transfer_requires_full_prior(config, slot);
+    const auto helper_bound = full_data_prior ? 0 : helper_workspace(config, slot);
     if (helper_bound > memory) throw Incomplete("Native Helper preflight exceeds the local memory lease");
     // These phases keep the sequential order, each on the same lanes: their
     // walls add. A slot with a wider lease overlaps the first two instead.
     ReceiverExecutor executor(resources.workers);
-    const Timer helper_time;
-    const auto helper = score_helper(config, slot, capture.iq, capture.valid, helper_bound, stop,
-                                     lane_wave(executor, slot.index, resources.workers, stop));
-    phase(report, "helper", helper_time.elapsed(), seconds, object({
+    HelperResult helper;
+    Timing helper_elapsed{0, 0.};
+    if (full_data_prior) {
+        check_stop(stop);
+        helper.reason = "common_motion_requires_full_data_frequency_prior";
+    } else {
+        const Timer helper_time;
+        helper = score_helper(config, slot, capture.iq, capture.valid, helper_bound, stop,
+                              lane_wave(executor, slot.index, resources.workers, stop));
+        helper_elapsed = helper_time.elapsed();
+    }
+    phase(report, "helper", helper_elapsed, seconds, object({
         {"reason", helper.reason}, {"narrowed", helper.narrowed}, {"prefix_samples", helper.prefix_samples},
         {"onset_apertures", helper.onset_apertures}, {"workspace_peak_bytes", helper.workspace_peak_bytes},
         {"retained_intervals", helper.intervals.size()}, {"observation_seconds", helper.frequency_observation_seconds}}));

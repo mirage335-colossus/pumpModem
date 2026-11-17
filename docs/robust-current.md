@@ -392,10 +392,25 @@ and unchanged noise/energy. On the frozen source, triad passes 40/40, GUI
 also passes (see the [source-bound record](validation.md#final-source-repeated-long-alarm-check--16-november-2026)).
 These finite outcomes do not qualify full text messages, capacity or physical
 availability.
-Weak-Helper fallback and common-frequency tests pass selected synthetic cases,
-but the latter costs more when stale Helper support misses DATA. See the
-[late-clock/delay/Helper record](validation.md#late-clock-and-interior-delay-probes--16-november-2026)
-for conditions, receipts and limits.
+The earlier weak-Helper/common-frequency tests passed selected synthetic cases
+with extra work when a stale interval missed DATA. A weaker matched observation
+then lost the bit despite identical DATA and noise. Helper frequency transfer
+now accounts for the maximum change of the declared common excursion between
+the Helper and DATA windows, after pilot consistency checks. It uses twice the
+larger of the common and atmospheric allowances, converted through the slowest
+allowed receive clock, and clips to the original coherent DATA frequency prior.
+Existing broad/empty-interval fallback restores the full prior; a useful narrow
+interval remains available when the motion allowance permits it. No timing,
+phase or gain is transferred, and no second coarse pass is added. When the
+clock-adjusted excursion covers the entire coherent frequency bound, a shared
+planning/execution predicate omits the necessarily non-narrowing Helper fit
+and its scratch in the production driver, reporting
+`common_motion_requires_full_data_frequency_prior`. Input/mask validation,
+DATA filtering, full prior and worker allocation remain intact; direct Helper
+diagnostics still measure the pilots when requested. See the
+[matched repair and costs](validation.md#weak-helper-follow-through--17-november-2026)
+and the [earlier Helper record](validation.md#late-clock-and-interior-delay-probes--16-november-2026)
+for source-bound outcomes and limits.
 The [repeated-bit diagnosis](validation.md#repeated-single-bit-channel-diagnosis--16-november-2026)
 records the nominal-epoch omission and subsequent calendar-age clock-resolution
 diagnosis motivating these two bounded timing supplements. Sequential and

@@ -65,6 +65,28 @@ also distinguish physical outage/estimation cost from avoidable receiver loss.
 
 ## Applicability after the admission and carrier-key changes
 
+The [weak Helper follow-through](../../docs/validation.md#weak-helper-follow-through--17-november-2026)
+finds a current in-bound failure at 6 dB-Hz with 10.4-second DATA: a stale
+Helper interval makes the receiver declare QUIET while aligned assistance
+receives the same DATA/noise correctly. Widening the transferred interval for
+declared inter-window common motion restores the bit on identical captures,
+without new thresholds or a second coarse search. When every possible Helper
+fit would restore the full DATA prior, the finalized receiver also omits those
+fits. Matched bit-one core service changes from 1.097/4.721 seconds for aligned/
+stale assistance to 0.995/1.008 seconds; this single local pair is not a capacity
+claim. The opposite bit remains a miss at the same 6 dB-Hz point, and actual
+Helper/noise absence remains QUIET. This is one constructed history, not a
+qualification of all weak Helper levels or natural outage duration.
+
+The [physical gain-level discriminator](../../docs/validation.md#weak-physical-gain-level-discriminator--17-november-2026)
+reproduces the difficult +3 dB-Hz two-hop last-bit miss and both quiet successors
+on exact historical IQ. A fixed quarter-power covariance alternative improves
+presence evidence by 4.22115 nats but still misses the bit; neither it nor a
+post-hoc heavier weight is promoted. The same physical history has a separately
+validated +4 dB-Hz recovery, bounding this selected miss within a 1 dB energy
+bracket. That is a source-specific sensitivity result, not a natural outage
+frequency or duration estimate; the earlier weaker physical failures remain.
+
 The [weak combined-modulation follow-through](../../docs/validation.md#weak-combined-modulation-follow-through--17-november-2026)
 now reduces the same continuous GUI history to one late DATA aperture and two
 real quiet successors, with exact full-stream control parity. At +4/+10 dB-Hz

@@ -1342,6 +1342,36 @@ void helper_composite_observation() {
         compare_packed(active_capture, active);
         compare_packed(quiet_capture, absent);
     }
+
+    // The same input still contains Helper, including its energy in the
+    // receiver's projection. Only a necessarily useless pilot fit is skipped.
+    auto broad = config;
+    broad.time_varying_channel = true;
+    broad.time_varying_common_doppler_hz = broad.frequency_bound_hz;
+    const auto score_broad = [&](const Capture& capture) {
+        const auto workspace = receiver_slot_workspace(broad, capture.plan, 2);
+        check(workspace == receiver_slot_overlap_workspace(broad, capture.plan, 2),
+              "non-narrowing Helper must not reserve overlapping acquisition scratch");
+        const auto result = score_receiver_slot(broad, capture.plan, key, capture.iq, capture.valid, 2, workspace);
+        const std::array full{receiver_detail::FrequencyInterval{-broad.frequency_bound_hz, broad.frequency_bound_hz}};
+        const auto full_grid = receiver_detail::coarse_work_plan(broad, capture.plan, full, 2);
+        check(result.complete && result.all_valid && result.zero_h0_verified && result.noise_statistics_valid &&
+              result.consumed_samples == capture.iq.size() && !result.helper_overlapped && result.helper_seconds == 0 &&
+              result.helper_status == "common_motion_requires_full_data_frequency_prior" &&
+              result.coarse_frequency_points == full_grid.frequency_points && result.workspace_peak_bytes == workspace,
+              "the full-prior receiver must skip the fit and score the complete public aperture and grid");
+        return result;
+    };
+    const auto broad_data = score_broad(active_capture);
+    const auto broad_quiet = score_broad(quiet_capture);
+    check(broad_data.decision == SlotDecision::data && broad_data.bit == 1 &&
+          broad_quiet.decision == SlotDecision::quiet && !broad_quiet.bit,
+          "the no-narrowing optimized path must preserve DATA and quiet decisions");
+    auto invalid = active_capture.valid;
+    invalid.back() = 2;
+    const auto workspace = receiver_slot_workspace(broad, active_capture.plan, 2);
+    rejects<Error>([&] { (void)score_receiver_slot(broad, active_capture.plan, key, active_capture.iq, invalid, 2, workspace); },
+                   "omitting Helper bypassed full-aperture validity validation");
 }
 
 void native_precision_near_decision_sides() {

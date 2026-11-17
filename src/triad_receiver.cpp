@@ -81,6 +81,7 @@ struct StageWorkspace {
     VaryingFinePlan line_coherent_gain;
     std::size_t evidence_supplement = 0;
     std::string_view midpoint_timing_status;
+    bool helper_transfer_full_prior;
 };
 
 StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
@@ -103,7 +104,8 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
         }
     }
     const auto input = checked_multiply(rows, sizeof(Complex) + sizeof(std::uint8_t));
-    const auto helper = helper_workspace(config, slot);
+    const bool helper_transfer_full_prior = helper_transfer_requires_full_prior(config, slot);
+    const auto helper = helper_transfer_full_prior ? 0 : helper_workspace(config, slot);
     auto varying = varying_fine_plan(config, slot, workers);
     const auto drift = drift_plan(config, slot, workers);
     const auto coherent_gain = varying_fine_plan(config, slot, workers, false, true);
@@ -135,7 +137,7 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
             overlappable, overlapped_coarse,
             lease(std::max({helper, overlapped_coarse, fine, supplemental})),
             varying, drift, coherent_gain, line, line_varying, line_drift, line_coherent_gain,
-            evidence_supplement, midpoint_support.status};
+            evidence_supplement, midpoint_support.status, helper_transfer_full_prior};
 }
 
 double round_even(double value) {
@@ -513,9 +515,14 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     HelperResult helper;
     FrequencyInterval fallback;
     const auto acquire = [&](const LaneWave& wave, std::stop_token job_stop) {
-        const auto began = Clock::now();
-        helper = score_helper(config, slot, iq, valid, workspace.helper, job_stop, wave);
-        score.helper_seconds = elapsed(began);
+        if (workspace.helper_transfer_full_prior) {
+            check_cancelled(job_stop);
+            helper.reason = "common_motion_requires_full_data_frequency_prior";
+        } else {
+            const auto began = Clock::now();
+            helper = score_helper(config, slot, iq, valid, workspace.helper, job_stop, wave);
+            score.helper_seconds = elapsed(began);
+        }
         score.helper_status = helper.reason;
         return public_frequency_intervals(config, helper, fallback);
     };

@@ -27,6 +27,11 @@ struct HelperResult {
 // The most jobs one acquisition wave runs at once.
 inline constexpr std::size_t helper_widest_wave = 4;
 
+// Public geometry can make every possible Helper fit yield the full DATA
+// frequency prior. The receiver can omit acquisition in that case. Direct
+// Helper callers can still measure and inspect the pilot fits.
+bool helper_transfer_requires_full_prior(const ReceiverConfig&, const ReceiverSlotPlan&);
+
 // Scratch only: the caller separately owns and charges the immutable input.
 // The bound follows the public calendar. Steps that run at once use only
 // what the largest single step already needs, so it has no lane term.

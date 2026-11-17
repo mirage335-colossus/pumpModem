@@ -220,6 +220,30 @@ def main(executable):
     assert acquisition["selection_completed"] is False
     assert not any(row["name"] in ("coarse_selection", "fine_work") for row in partial["phases"])
 
+    helper_options = ("--case", "hf", "--rate", "120", "--seconds", ".1", "--max-samples", "600000",
+                      "--rf-hz", "1000000", "--shift-oscillator", "ic-7100", "--coarse-tiles", "1")
+    broad = run("slot", *helper_options, code=2)
+    assert broad["configuration"]["helper_enabled"] and broad["configuration"]["time_varying_channel"]
+    phases = [row for row in broad["phases"] if row["name"] == "helper"]
+    assert len(phases) == 1
+    assert phases[0]["wall_seconds"] == phases[0]["process_cpu_seconds"] == 0
+    assert phases[0]["work"] == {
+        "reason": "common_motion_requires_full_data_frequency_prior", "narrowed": False,
+        "prefix_samples": 0, "onset_apertures": 0, "workspace_peak_bytes": 0,
+        "retained_intervals": 0, "observation_seconds": 0,
+    }
+    full_grid = run("plan", *helper_options)["configuration"]["coarse_full_prior"]
+    prepared = next(row["work"] for row in broad["phases"] if row["name"] == "coarse_prepare")
+    assert prepared["frequency_points"] == full_grid["frequency_points"]
+    assert broad["result"]["acquisition"]["completed_tiles"] == 1
+    for shift in ("0", ".5"):
+        ordinary = run("slot", *helper_options, "--spread-preset", "none", "--doppler-hz", shift, code=2)
+        assert ordinary["configuration"]["time_varying_channel"] == (shift != "0")
+        helper = next(row for row in ordinary["phases"] if row["name"] == "helper")
+        assert helper["work"]["reason"] != phases[0]["work"]["reason"]
+        assert helper["wall_seconds"] > 0 and helper["work"]["prefix_samples"] > 0
+        assert helper["work"]["workspace_peak_bytes"] > 0
+
     continuation = run("continuation", "--stratum", "active")
     phases = [row for row in continuation["phases"] if row["name"] in ("fine_prefix", "fine_continuation")]
     assert [row["represented_seconds"] for row in phases] == [2, 1, 1, 2]

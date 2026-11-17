@@ -361,6 +361,20 @@ diagnosis](../../docs/validation.md#repeated-single-bit-channel-diagnosis--16-no
 [short-model comparison](../../docs/validation.md#bounded-short-model-competition--16-november-2026),
 and [HF follow-through](../../docs/validation.md#hf-worst-30-hz--7-ms-follow-through--16-november-2026).
 
+[Wang et al. (2023), cross-frequency Doppler-assisted carrier tracking](https://link.springer.com/article/10.1007/s10291-023-01434-4)
+provides a complementary successful example: BDS B1C pilot assistance lowers
+the B2b tracking threshold by about 4 dB in preliminary field tests. Their
+analysis explicitly accounts for assistance noise, frequency bias and dynamic
+response; an overly narrow aided loop responds slowly to changing frequency.
+The model assumes AWGN and a shared satellite frequency relationship, treating
+ionospheric delay as slowly varying. Its numerical gain therefore does not
+qualify HF skywave acquisition or this modem. The applicable engineering lesson
+is to preserve uncertainty and test time evolution when transferring frequency
+information, rather than treating an earlier narrow estimate as exact during
+DATA. The [weak Helper discriminator](../../docs/validation.md#weak-helper-follow-through--17-november-2026)
+isolates that issue with identical post-transition DATA/noise and unchanged
+public bounds; it is not a port of the GNSS tracking loop.
+
 Physical loss and receiver misses also need separate treatment.
 [Gillies et al. (2026)](https://doi.org/10.1029/2025SW004906) report that 62%
 of expected scheduled Ottawa–Alert pulses (5–14 MHz, 2013–2019) were not

@@ -390,12 +390,72 @@ void fallbacks_and_bounds() {
     std::stop_source cancelled; cancelled.request_stop();
     rejects([&] { score_helper(f.config, f.slot, f.input, f.valid, scratch_limit, cancelled.get_token()); }, "Helper ignored cancellation");
 }
+
+void atmospheric_motion_guards_data_frequency_transfer() {
+    auto f = fixture();
+    f.config.time_varying_channel = true;
+    const auto stationary = score(f);
+    check(stationary.narrowed && stationary.intervals.size() == 1,
+          "Helper transfer fixture did not acquire its stable interval");
+
+    f.config.time_varying_atmospheric_hz = .25;
+    const auto widened = score(f);
+    check(widened.narrowed && widened.intervals.size() == 1 &&
+          widened.onset_intervals == stationary.onset_intervals &&
+          widened.frequency_observation_seconds == stationary.frequency_observation_seconds &&
+          widened.workspace_peak_bytes == stationary.workspace_peak_bytes,
+          "bounded atmospheric motion should widen the transfer without changing the pilot observation");
+    const auto transfer = [&](double excursion) { return 2 * excursion / (1 - f.config.endpoint_clock_bound_ppm * 1e-6); };
+    near(widened.intervals.front().lower_hz, stationary.intervals.front().lower_hz - transfer(.25),
+         "Helper transfer omitted negative inter-window atmospheric motion");
+    near(widened.intervals.front().upper_hz, stationary.intervals.front().upper_hz + transfer(.25),
+         "Helper transfer omitted positive inter-window atmospheric motion");
+
+    f.config.time_varying_atmospheric_hz = 0;
+    f.config.time_varying_common_doppler_hz = .375;
+    const auto common = score(f);
+    check(common.narrowed && common.intervals.size() == 1, "explicit common motion should retain useful narrowing");
+    near(common.intervals.front().lower_hz, stationary.intervals.front().lower_hz - transfer(.375),
+         "Helper transfer omitted explicit common motion");
+    near(common.intervals.front().upper_hz, stationary.intervals.front().upper_hz + transfer(.375),
+         "Helper transfer omitted explicit common motion");
+    f.config.time_varying_atmospheric_hz = .25;
+    check(same(score(f), common), "Helper transfer counted the common and atmospheric allowances twice");
+
+    f.config.time_varying_atmospheric_hz = 3.;
+    const auto broad = score(f);
+    check(!broad.narrowed && broad.intervals.empty() && broad.reason == "onset_branch_frequency_fallback" &&
+          broad.onset_intervals == stationary.onset_intervals && !helper_transfer_requires_full_prior(f.config, f.slot),
+          "a broad transfer must leave the full DATA frequency prior available");
+
+    f.config.time_varying_channel = false;
+    check(same(score(f), stationary), "stationary DATA search must keep the original Helper proposal");
+
+    f.config.time_varying_channel = true;
+    f.config.frequency_bound_hz = 4;
+    f.config.time_varying_atmospheric_hz = 0;
+    const auto saturation = 4 * (1 - f.config.endpoint_clock_bound_ppm * 1e-6);
+    f.config.time_varying_common_doppler_hz = std::nextafter(saturation, 0.);
+    check(!helper_transfer_requires_full_prior(f.config, f.slot),
+          "Helper should still be available immediately below the full-prior transfer guarantee");
+    f.config.time_varying_common_doppler_hz = saturation;
+    check(helper_transfer_requires_full_prior(f.config, f.slot) && helper_workspace(f.config, f.slot) > 0,
+          "the receiver skip must apply at the clock-scaled support boundary while standalone Helper remains measurable");
+    auto unsupported = f.slot;
+    unsupported.source_start_seconds = unsupported.helper_begin_seconds + 1;
+    check(!helper_transfer_requires_full_prior(f.config, unsupported),
+          "the transfer skip must preserve insufficient-Helper-support handling");
+    f.config.time_varying_channel = false;
+    check(!helper_transfer_requires_full_prior(f.config, f.slot),
+          "the transfer skip must preserve stationary Helper acquisition");
+}
 } // namespace
 
 int main() {
     try {
         numerical_parity();
         fallbacks_and_bounds();
+        atmospheric_motion_guards_data_frequency_transfer();
         lanes_do_not_change_the_result();
         signed_calendars_and_multiple_apertures();
         workspace_bound_covers_live_scratch();
