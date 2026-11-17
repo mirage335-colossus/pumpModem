@@ -169,6 +169,75 @@ def gui_varying_episode(**overrides) -> dict:
             "waveform": "reference", "seed": 1, "capture_digest_slot": 2, **overrides}
 
 
+def repeated_bit_episode(**overrides) -> dict:
+    return {"id": "repeat", "scenario": "hf-gui-native", "mode": "gui-repeated-bit",
+            "waveform": "reference", "seed": 62013, "noise_seed": 72013,
+            "cn0_db_hz": 43, "control": "wanted", "backend": "cpu", "helper": False,
+            "fec": "off", "bit_seconds": 2, "repeat_bit": 1,
+            "repeat_path_scale": .5, "repeat_path_seed": 62032,
+            "gui_spread": "hf-worst", "gui_selective": "each-65", "gui_arrival": "tight",
+            "gui_margin": 3, "gui_audio_ppm": 100, "gui_rf_ppm": 1,
+            "gui_audio_phase_degrees_sqrt_s": .5, "gui_rf_phase_degrees_sqrt_s": .05,
+            "gui_target_cn0_db_hz": 32, "gui_clock_edge": True, **overrides}
+
+
+def repeated_bit_receipt(episode: dict | None = None) -> tuple[dict, dict]:
+    episode = episode or repeated_bit_episode()
+    separate = episode.get("repeat_separate_attempts", False)
+    q0, horizon = (16, 18) if separate else (6, 8)
+    active_indices = {3 * index for index in range(6)} if separate else set(range(6))
+    horizon_samples = max(1000, horizon * 100)
+    public_slots, slots = [], []
+    for index in range(horizon):
+        first, stop = index * 100, index * 100 + 90
+        quiet_first, quiet_stop = first + 10, stop - 10
+        public = {"index": index, "pattern_epoch": 1_800_000_000 + index * 60,
+                  "symbol_ordinal": index, "observation": {"first": first, "stop": stop},
+                  "quiet_aperture": {"first": quiet_first, "stop": quiet_stop},
+                  "evaluator_transmitting": index in active_indices}
+        active = index in active_indices
+        slots.append({"index": index, "pattern_epoch": public["pattern_epoch"], "symbol_ordinal": index,
+                      "first_sample": first, "stop_sample": stop, "quiet_first_sample": quiet_first,
+                      "quiet_stop_sample": quiet_stop, "decision": "data" if active else "quiet",
+                      "bit": episode["repeat_bit"] if active else None, "complete": True, "all_valid": True,
+                      "expected_bit": episode["repeat_bit"] if active else None,
+                      "raw_bit_correct": True if active else None, "noise_statistics_valid": not active,
+                      "zero_h0_verified": not active})
+        public_slots.append(public)
+    plan = {"repeated_bit": {"bit": episode["repeat_bit"], "active_slots": 6,
+              "path_scale": episode["repeat_path_scale"], "path_seed": episode["repeat_path_seed"],
+              "oscillator_seed": episode["seed"], "noise_seed": episode["noise_seed"],
+              "thermal_noise_enabled": not episode.get("repeat_thermal_off", False),
+              "public_key_fingerprint_sha256": "a" * 64, "used_for_receiver_decisions": False},
+            "first_uncontaminated_quiet_slot": q0, "scored_slot_horizon": horizon,
+            "sample_rate_hz": 1920, "horizon_samples": horizon_samples,
+            "noise_variance": 1.0,
+            "max_samples": 2_400 if separate else 1_200,
+            "max_wall_seconds": 120, "represented_seconds": horizon_samples / 1920,
+            "fits_sample_budget": True, "public_slots": public_slots}
+    receipt = {"plan": plan, "slots": slots, "messages": [],
+               "channel": {"samples": horizon_samples, "hashed_samples": horizon_samples, "input_sha256": "b" * 64},
+               "outcomes": {"receiver_executed": True, "component_only": True,
+                   "completion_evaluated": False, "communication_endpoint": "repeated_raw_bit",
+                   "actual_scored_slots": horizon},
+               "repeated_bit": {"active_slots": 6, "correct_data": 6, "wrong_data": 0,
+                   "ambiguous_active_slots": 0, "quiet_active_slots": 0,
+                   "longest_no_correct_run": 0, "trailing_quiet_slots": 2,
+                   "physical_quiet_complete": True, "ordered_valid_complete": True}}
+    if separate:
+        plan["repeated_bit"]["separate_attempts"] = True
+        plan["wire_bits"] = 1
+        receipt["repeated_bit"].update({"separate_attempts": True, "inter_attempt_quiet_slots": 10,
+                                        "completed_quiet_pairs": 6})
+    return receipt, plan
+
+
+
+
+
+
+
+
 def fake_gui_varying_diagnostic(selected: int, bounds: dict, *, drift_reserved=True, line_reserved=True) -> dict:
     """Receipt fixture only; all component DSP remains in the native probe."""
     def presence(values):
@@ -913,6 +982,134 @@ def complete_service_messages(receipt: dict) -> None:
 
 
 class CampaignValidationTests(unittest.TestCase):
+    def test_separate_raw_campaign_allows_mixed_thermal_conditions(self):
+        episodes = [
+            repeated_bit_episode(id="off-bit0", repeat_bit=0, repeat_path_scale=1,
+                repeat_path_seed=62033, repeat_thermal_off=True, repeat_separate_attempts=True,
+                capture_digest_slot=12, max_samples=2_400_000),
+            repeated_bit_episode(id="on-bit1", repeat_bit=1, repeat_path_scale=1,
+                repeat_path_seed=62033, repeat_thermal_off=False, repeat_separate_attempts=True,
+                max_samples=2_400_000),
+        ]
+        campaign = {"schema_version": 1, "name": "mixed-thermal-separated-raw",
+                    "max_trials": 2, "max_wall_seconds": 240,
+                    "per_trial_wall_seconds": 120, "max_samples": 2_400_000,
+                    "episodes": episodes}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.json"
+            path.write_text(json.dumps(campaign))
+            validated = runner._read_campaign(path)
+        self.assertEqual([episode["repeat_thermal_off"] for episode in validated["episodes"]],
+                         [True, False])
+
+    def test_repeated_bit_episode_is_bounded_and_maps_native_flags(self):
+        episode = repeated_bit_episode()
+        runner._validate_episode(episode, 0, set(), 120, 1_200_000)
+        command = runner._command(Path("/native/probe"), episode, 1_200_000, 120)
+        for option, value in (("--mode", "gui-repeated-bit"), ("--repeat-bit", "1"),
+                              ("--repeat-path-scale", "0.5"), ("--repeat-path-seed", "62032")):
+            self.assertEqual(command[command.index(option) + 1], value)
+        self.assertNotIn("--repeat-thermal-off", command)
+        thermal_off = dict(episode, repeat_thermal_off=True)
+        runner._validate_episode(thermal_off, 0, set(), 120, 1_200_000)
+        self.assertIn("--repeat-thermal-off", runner._command(Path("/native/probe"), thermal_off, 1_200_000, 120))
+        thermal_off_separate = dict(episode, repeat_separate_attempts=True,
+                                    repeat_thermal_off=True, capture_digest_slot=12,
+                                    max_samples=2_400_000)
+        runner._validate_episode(thermal_off_separate, 0, set(), 120, 2_400_000)
+        separate_command = runner._command(Path("/native/probe"), thermal_off_separate, 2_400_000, 120)
+        self.assertIn("--repeat-separate-attempts", separate_command)
+        self.assertIn("--repeat-thermal-off", separate_command)
+        self.assertEqual(separate_command[separate_command.index("--capture-digest-slot") + 1], "12")
+        thermal_receipt, thermal_plan = repeated_bit_receipt(thermal_off_separate)
+        runner._validate_repeated_bit_receipt(thermal_receipt, thermal_off_separate, thermal_plan)
+        thermal_plan["noise_variance"] = 0.0
+        with self.assertRaisesRegex(runner.CampaignError, "positive receiver noise variance"):
+            runner._validate_repeated_bit_receipt(thermal_receipt, thermal_off_separate, thermal_plan)
+        for invalid in (dict(episode, repeat_bit=True), dict(episode, repeat_bit=2),
+                        dict(episode, repeat_path_scale=.25), dict(episode, repeat_path_seed=True),
+                        dict(episode, mode="receive"), dict(episode, helper=True),
+                        dict(episode, max_samples=1_200_001), dict(episode, max_wall_seconds=120.01)):
+            with self.subTest(invalid=invalid), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(invalid, 0, set(), 120, 1_200_000)
+
+
+
+    def test_repeated_bit_receipt_validates_raw_counts_calendar_and_not_codec(self):
+        episode = repeated_bit_episode()
+        receipt, plan = repeated_bit_receipt(episode)
+        runner._validate_repeated_bit_receipt(receipt, episode, plan)
+        summary = runner._repeated_bit_summary(receipt)
+        self.assertEqual(summary["correct_data"], 6)
+        self.assertEqual(summary["longest_no_correct_run"], 0)
+        self.assertTrue(summary["physical_quiet_complete"])
+        self.assertAlmostEqual(summary["elapsed_calendar_seconds"], 1000 / 1920)
+        broken = json.loads(json.dumps(receipt))
+        broken["repeated_bit"]["correct_data"] = 5
+        with self.assertRaisesRegex(runner.CampaignError, "counts"):
+            runner._validate_repeated_bit_receipt(broken, episode, broken["plan"])
+        broken = json.loads(json.dumps(receipt))
+        broken["slots"][0]["raw_bit_correct"] = False
+        with self.assertRaisesRegex(runner.CampaignError, "truth-aligned raw correctness"):
+            runner._validate_repeated_bit_receipt(broken, episode, broken["plan"])
+
+
+
+    def test_repeated_bit_separate_attempts_validates_18_slot_quiet_calendar(self):
+        episode = repeated_bit_episode(repeat_separate_attempts=True, max_samples=2_400_000)
+        runner._validate_episode(episode, 0, set(), 120, 2_400_000)
+        command = runner._command(Path("/native/probe"), episode, 2_400_000, 120)
+        self.assertIn("--repeat-separate-attempts", command)
+        receipt, plan = repeated_bit_receipt(episode)
+        runner._validate_repeated_bit_receipt(receipt, episode, plan)
+        self.assertEqual([slot["index"] for slot in receipt["slots"] if slot["expected_bit"] is not None],
+                         [0, 3, 6, 9, 12, 15])
+        broken = json.loads(json.dumps(receipt))
+        broken["repeated_bit"]["completed_quiet_pairs"] = 5
+        with self.assertRaisesRegex(runner.CampaignError, "quiet accounting"):
+            runner._validate_repeated_bit_receipt(broken, episode, broken["plan"])
+
+        # A fully scored ambiguous internal aperture is still ordered-valid;
+        # it prevents that attempt's quiet pair from completing without
+        # invalidating the other scored slots or the entire raw-bit receipt.
+        ambiguous_quiet = json.loads(json.dumps(receipt))
+        ambiguous_quiet["slots"][8]["decision"] = "ambiguous"
+        ambiguous_quiet["repeated_bit"].update({
+            "inter_attempt_quiet_slots": 9,
+            "completed_quiet_pairs": 5,
+            "physical_quiet_complete": False,
+        })
+        runner._validate_repeated_bit_receipt(ambiguous_quiet, episode, ambiguous_quiet["plan"])
+        forged_quiet = json.loads(json.dumps(ambiguous_quiet))
+        forged_quiet["repeated_bit"]["inter_attempt_quiet_slots"] = 10
+        with self.assertRaisesRegex(runner.CampaignError, "quiet counts"):
+            runner._validate_repeated_bit_receipt(forged_quiet, episode, forged_quiet["plan"])
+        forged_pairs = json.loads(json.dumps(ambiguous_quiet))
+        forged_pairs["repeated_bit"]["completed_quiet_pairs"] = 6
+        forged_pairs["repeated_bit"]["physical_quiet_complete"] = True
+        with self.assertRaisesRegex(runner.CampaignError, "quiet counts"):
+            runner._validate_repeated_bit_receipt(forged_pairs, episode, forged_pairs["plan"])
+
+        # Separate-attempt captures legitimately exceed the six-contiguous-bit
+        # cap. Exercise the receipt validator at the actual boundary, rather
+        # than only checking tiny synthetic fixtures.
+        above_contiguous_cap = json.loads(json.dumps(receipt))
+        above_contiguous_cap["plan"]["max_samples"] = 1_200_001
+        above_contiguous_cap["plan"]["horizon_samples"] = 1_200_001
+        above_contiguous_cap["plan"]["represented_seconds"] = 1_200_001 / 1920
+        above_contiguous_cap["channel"]["samples"] = 1_200_001
+        above_contiguous_cap["channel"]["hashed_samples"] = 1_200_001
+        runner._validate_repeated_bit_receipt(above_contiguous_cap, episode, above_contiguous_cap["plan"])
+
+        above_separate_cap = json.loads(json.dumps(above_contiguous_cap))
+        above_separate_cap["plan"]["max_samples"] = 2_400_001
+        above_separate_cap["plan"]["horizon_samples"] = 2_400_001
+        above_separate_cap["plan"]["represented_seconds"] = 2_400_001 / 1920
+        above_separate_cap["channel"]["samples"] = 2_400_001
+        above_separate_cap["channel"]["hashed_samples"] = 2_400_001
+        with self.assertRaisesRegex(runner.CampaignError, "full hashed capture within its declared finite bounds"):
+            runner._validate_repeated_bit_receipt(above_separate_cap, episode, above_separate_cap["plan"])
+
     def test_frozen_reception_requirement_is_receive_only_and_not_native_cli(self):
         base = {"id": "required", "scenario": "awgn", "mode": "receive",
                 "waveform": "reference", "seed": 4, "control": "wanted",
@@ -4733,6 +4930,32 @@ class CampaignExecutionTests(unittest.TestCase):
         self.assertEqual(repaired["receipt"]["fake_spool_bytes"], 9 * 1024 * 1024)
         self.assertLess((self.work / repaired["raw_stdout"]).stat().st_size, runner.MAX_OUTPUT_BYTES)
 
+    @unittest.skipUnless(os.name == "posix" and runner.resource is not None, "POSIX bounded boundary spool")
+    def test_additive_boundary_internal_spool_exceeds_output_limit_without_raising_pipe_caps(self) -> None:
+        episode = {"id": "boundary", "scenario": "hf-vector-two-hop", "mode": "receive",
+                   "waveform": "reference", "seed": 73613, "two_hop_additive_boundary": True}
+        probe = self.work / "boundary_probe.py"
+        command = runner._command(probe, episode, 4_350_000, 3.5)
+        receipt = fake_completed_receipt(command)
+        probe.write_text(f"#!{sys.executable}\n" +
+            "import json,pathlib,signal,sys\n"
+            "signal.signal(signal.SIGXFSZ,signal.SIG_DFL)\n"
+            "path=pathlib.Path(__file__).with_suffix('.spool')\n"
+            "with path.open('wb') as target:\n"
+            "    for _ in range(9): target.write(b'x'*(1024*1024))\n"
+            "size=path.stat().st_size\npath.unlink()\n" +
+            f"receipt=json.loads({json.dumps(receipt)!r})\n" +
+            "receipt['fake_internal_spool_bytes']=size\nsys.stdout.write(json.dumps(receipt))\n", encoding="utf-8")
+        probe.chmod(0o700)
+        self.assertTrue(runner._native_child_uses_temporary_spool(episode))
+        self.assertEqual(runner._native_child_file_limit(episode, 4_350_000), 73_950_000)
+        with patch.object(runner, "_validate_completed_receipt"):
+            repaired = runner._trial(probe, episode, 4_350_000, 4, self.work, 0)
+        self.assertEqual(repaired["status"], "completed", repaired.get("error"))
+        self.assertEqual(repaired["child_file_limit_bytes"], 73_950_000)
+        self.assertEqual(repaired["receipt"]["fake_internal_spool_bytes"], 9 * 1024 * 1024)
+        self.assertLess((self.work / repaired["raw_stdout"]).stat().st_size, runner.MAX_OUTPUT_BYTES)
+
     @unittest.skipUnless(os.name == "posix" and runner.resource is not None, "POSIX bounded pipe capture")
     def test_service_larger_file_cap_does_not_raise_stdout_or_stderr_caps(self) -> None:
         episode = {"id": "output", "scenario": "awgn", "mode": "receive", "waveform": "reference", "seed": 1,
@@ -5279,6 +5502,429 @@ class CampaignExecutionTests(unittest.TestCase):
         self.assertEqual(short["seed"], long["seed"])
         self.assertEqual(short["cn0_db_hz"], long["cn0_db_hz"])
         self.assertLess(short["bit_seconds"], long["bit_seconds"])
+
+
+def matrix_plan_receipt() -> tuple[dict, dict]:
+    campaign = json.loads((RUNNER.parent / "campaigns" / "two-hop-long-alarm-matrix.json").read_text())
+    episode = dict(campaign["episodes"][0])
+    episode["mode"] = "plan"
+    episode.pop("reception_requirement")
+    episode.pop("control", None)
+    identity = {"appraisal_source_sha256": "a" * 64, "native_source_sha256": "b" * 64}
+    rows = []
+    fingerprint = "c" * 64
+    cases = runner.TWO_HOP_ALARM_MATRIX_CASES
+    for case_id, _cn0, _message, bit in cases:
+        active = set(range(13)) if bit is None else {0, 3, 6, 9, 12}
+        public_slots = [{"index": i, "symbol_ordinal": i, "pattern_epoch": 1_793_404_800 + 150 * i,
+                         "evaluator_transmitting": i in active} for i in range(15)]
+        plan = {"max_wall_seconds": 1200, "max_samples": 4_350_000, "cn0_db_hz": _cn0,
+                "scored_slot_horizon": 15, "first_uncontaminated_quiet_slot": 13,
+                "initial_ordinal": 0, "public_slots": public_slots}
+        if bit is not None:
+            plan["repeated_bit"] = {"bit": bit, "active_slots": 5, "attempts": 5,
+                                    "requested_active_slots": 5, "separate_attempts": True,
+                                    "used_for_receiver_decisions": False,
+                                    "transmission_scope": "Five one-bit emissions advance the public ordinal. Each has two scored quiet windows through one continuous two-hop channel.",
+                                    "public_key_fingerprint_sha256": fingerprint}
+        child = {"status": "completed", "requested_scenario": "hf-vector-two-hop", "mode": "plan",
+                 "waveform": "reference", "seed": 73613, "control": "wanted",
+                 "source_identity": identity, "plan": plan}
+        rows.append({"case_id": case_id, "receipt": child})
+    return episode, {"status": "completed", "requested_scenario": "hf-vector-two-hop", "mode": "plan",
+                     "waveform": "reference", "seed": 73613, "control": "wanted",
+                     "source_identity": identity,
+                     "two_hop_alarm_matrix": {"planned_rows": 6,
+                         "aggregate_wall_limit_seconds": 1200,
+                         "per_row_sample_limit": 4_350_000, "rows": rows}}
+
+
+def matrix_receive_receipt() -> tuple[dict, dict]:
+    episode, receipt = matrix_plan_receipt()
+    episode.update(mode="receive", reception_requirement="characterization")
+    matrix = receipt["two_hop_alarm_matrix"]
+    matrix["aggregate_wall_limit_seconds"] = 1199.5
+    matrix["wall_seconds"] = 1000.
+    receipt["mode"] = "receive"
+    components = {"scope": "Public candidate-averaged log evidence before global coordinate and branch priors.",
+                  "fixed_affine": None, "short_varying": None, "short_fixed_gain": None,
+                  "short_frequency_track": None, "medium_coherent_gain": None, "linear_drift": None,
+                  "slow_gain_coherence_seconds": None,
+                  "affine_selected_prior_mass": None, "short_frequency_log_prior_adjustment": None}
+    for index, row in enumerate(matrix["rows"]):
+        child = row["receipt"]
+        child["mode"] = "receive"
+        child["plan"]["max_wall_seconds"] = 1199.5
+        child["timing"] = {"wall_seconds": 1.}
+        child["channel"] = {
+            "vector_two_hop": {"table_sha256": "e" * 64,
+                               "incident_energy_sample_sum": 4., "selected_energy_sample_sum": 3.},
+            "vector_two_hop_table_use": {"table_reused": index != 0,
+                                         "table_sha256": "e" * 64,
+                                         "preparation_seconds": 500. if index == 0 else 1.}}
+        child["slots"] = [{"likelihood_components": dict(components)} for _ in range(15)]
+        child["repeated_bit"] = {"correct_data": 0, "attempts": 5}
+    return episode, receipt
+
+
+def additive_boundary_plan_receipt() -> tuple[dict, dict]:
+    episode = json.loads((RUNNER.parent / "campaigns" / "two-hop-additive-boundary.json").read_text())["episodes"][0]
+    episode = dict(episode, mode="plan")
+    episode.pop("reception_requirement")
+    identity = {"appraisal_source_sha256": "a" * 64, "native_source_sha256": "b" * 64}
+    rows = []
+    for case_id, cn0, policy, _spool in runner.TWO_HOP_ADDITIVE_BOUNDARY_CASES:
+        plan = {"max_wall_seconds": 899.5, "max_samples": 4_350_000,
+                "cn0_db_hz": cn0, "affine_gain_evaluation": policy,
+                "wire_bits": 13, "scored_slot_horizon": 15, "horizon_samples": 4_300_000,
+                "sample_rate_hz": 31_000., "requested_bit_seconds": 128., "actual_bit_seconds": 139.2,
+                "message": "E", "requested_message": "E", "fec": "off", "helper_enabled": False,
+                "public_bounds": {"lo": 1}, "receiver_resources": {"hardware_threads": 12, "workers": 24,
+                    "slot_owners": 24, "workers_explicit": False, "owners_explicit": False,
+                    "total_memory_limit_bytes": 8_000_000_000},
+                "channel_renderer": "vector_two_hop", "channel_tail_seconds": 5.,
+                "seed": 73613, "noise_seed": 93613, "hf_trajectory_seed": None,
+                "hf_trajectory_offset_seconds": 0.,
+                "public_slots": [{"index": i, "symbol_ordinal": i, "pattern_epoch": 1_793_404_800 + i * 150,
+                                  "observation": {"first": i * 100, "stop": (i + 1) * 100}}
+                                 for i in range(15)]}
+        child = {"status": "completed", "requested_scenario": "hf-vector-two-hop", "scenario": "hf-vector-two-hop",
+                 "mode": "plan", "waveform": "reference", "seed": 73613, "control": "wanted",
+                 "source_identity": dict(identity), "plan": plan}
+        rows.append({"case_id": case_id, "receipt": child})
+    receipt = {"status": "completed", "requested_scenario": "hf-vector-two-hop", "mode": "plan",
+               "waveform": "reference", "seed": 73613, "control": "wanted", "source_identity": identity,
+               "two_hop_additive_boundary": {"planned_rows": 3, "aggregate_wall_limit_seconds": 899.5,
+                   "per_row_sample_limit": 4_350_000, "rows": rows}}
+    return episode, receipt
+
+
+def physical_repeat_receipt(bit: int = 0) -> tuple[dict, dict, dict]:
+    active = {0, 3, 6, 9, 12}
+    q0, horizon, horizon_samples = 13, 15, 1500
+    public_slots, slots = [], []
+    for index in range(horizon):
+        first, stop = index * 100, index * 100 + 90
+        quiet_first, quiet_stop = first + 10, stop - 10
+        public = {"index": index, "pattern_epoch": 1_793_404_800 + 150 * index,
+                  "symbol_ordinal": index, "observation": {"first": first, "stop": stop},
+                  "quiet_aperture": {"first": quiet_first, "stop": quiet_stop},
+                  "evaluator_transmitting": index in active}
+        source = index in active
+        public_slots.append(public)
+        slots.append({"index": index, "pattern_epoch": public["pattern_epoch"],
+                      "symbol_ordinal": index, "first_sample": first, "stop_sample": stop,
+                      "quiet_first_sample": quiet_first, "quiet_stop_sample": quiet_stop,
+                      "decision": "quiet", "bit": None, "complete": True, "all_valid": True,
+                      "expected_bit": bit if source else None,
+                      "raw_bit_correct": False if source else None,
+                      "noise_statistics_valid": not source, "zero_h0_verified": not source})
+    plan = {"repeated_bit": {"bit": bit, "active_slots": 5, "attempts": 5,
+              "requested_active_slots": 5, "separate_attempts": True,
+              "public_key_fingerprint_sha256": "c" * 64, "used_for_receiver_decisions": False,
+              "transmission_scope": "Five one-bit emissions advance the public ordinal. Each has two scored quiet windows through one continuous changing-rate channel."},
+            "first_uncontaminated_quiet_slot": q0, "scored_slot_horizon": horizon,
+            "sample_rate_hz": 1920, "horizon_samples": horizon_samples, "noise_variance": 1.0,
+            "max_samples": 4_350_000, "max_wall_seconds": 179.5,
+            "represented_seconds": horizon_samples / 1920, "fits_sample_budget": True,
+            "wire_bits": 1, "message": None, "requested_message": None,
+            "initial_ordinal": 0, "public_slots": public_slots}
+    receipt = {"status": "completed", "plan": plan, "slots": slots, "messages": [],
+               "channel": {"samples": horizon_samples, "hashed_samples": horizon_samples,
+                           "input_sha256": "d" * 64},
+               "outcomes": {"receiver_executed": True, "component_only": True,
+                            "completion_evaluated": False, "communication_endpoint": "repeated_raw_bit",
+                            "actual_scored_slots": horizon},
+               "repeated_bit": {"active_slots": 5, "correct_data": 0, "wrong_data": 0,
+                   "ambiguous_active_slots": 0, "quiet_active_slots": 5, "longest_no_correct_run": 5,
+                   "trailing_quiet_slots": 2, "physical_quiet_complete": True,
+                   "ordered_valid_complete": True, "separate_attempts": True,
+                   "inter_attempt_quiet_slots": 8, "completed_quiet_pairs": 5}}
+    episode = {"id": "physical-bit", "scenario": "hf-ensemble-changing-rate", "mode": "receive",
+               "waveform": "reference", "pulse": "rrc", "backend": "cpu", "seed": 30107,
+               "noise_seed": 40107, "hf_trajectory_seed": 20107,
+               "hf_trajectory_offset_seconds": 197, "bit_seconds": 128, "cn0_db_hz": 0,
+               "control": "wanted", "fec": "off", "helper": False,
+               "repeat_bit": bit, "repeat_separate_attempts": True,
+               "reception_requirement": "characterization"}
+    return receipt, episode, plan
+
+
+class TwoHopAlarmMatrixRunnerTests(unittest.TestCase):
+    def test_frozen_campaign_is_accepted_and_budget_mutations_are_rejected(self) -> None:
+        campaign = runner._read_campaign(RUNNER.parent / "campaigns" / "two-hop-long-alarm-matrix.json")
+        self.assertEqual(len(campaign["episodes"]), 1)
+        for field, value in (("max_wall_seconds", 1201), ("per_trial_wall_seconds", 1201),
+                             ("max_samples", 4_350_001)):
+            mutated = dict(campaign)
+            mutated[field] = value
+            path = Path(tempfile.mkstemp(suffix=".json")[1])
+            try:
+                path.write_text(json.dumps(mutated))
+                with self.assertRaises(runner.CampaignError, msg=field):
+                    runner._read_campaign(path)
+            finally:
+                path.unlink(missing_ok=True)
+        episode = dict(campaign["episodes"][0], cn0_db_hz=3)
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_episode(episode, 0, set(), 1200, 4_350_000)
+
+    def test_matrix_plan_binds_order_config_and_calendar(self) -> None:
+        episode, receipt = matrix_plan_receipt()
+        with patch.object(runner, "_validate_completed_receipt") as child_validator:
+            runner._validate_two_hop_alarm_matrix_receipt(receipt, episode)
+        self.assertEqual(child_validator.call_count, 6)
+        calls = [call.args[1] for call in child_validator.call_args_list]
+        self.assertEqual([(item["cn0_db_hz"], item["message"], item.get("two_hop_alarm_matrix_bit"))
+                          for item in calls], [(-3, "E", None), (3, "E", None), (-3, None, 0),
+                                               (3, None, 0), (-3, None, 1), (3, None, 1)])
+
+    def test_matrix_rejects_row_order_truth_schedule_and_horizon_mutations(self) -> None:
+        for mutate in (
+            lambda rows: rows.reverse(),
+            lambda rows: rows[2]["receipt"]["plan"]["public_slots"][3].update(evaluator_transmitting=False),
+            lambda rows: rows[4]["receipt"]["plan"].update(scored_slot_horizon=14),
+            lambda rows: rows[5]["receipt"]["plan"]["public_slots"][12].update(symbol_ordinal=11),
+        ):
+            episode, receipt = matrix_plan_receipt()
+            mutate(receipt["two_hop_alarm_matrix"]["rows"])
+            with patch.object(runner, "_validate_completed_receipt"):
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_two_hop_alarm_matrix_receipt(receipt, episode)
+
+    def test_matrix_rejects_source_identity_and_key_mismatches(self) -> None:
+        for target, field, value in ((0, "source_identity", {"appraisal_source_sha256": "d" * 64,
+                                                                "native_source_sha256": "b" * 64}),
+                                     (2, "public_key_fingerprint_sha256", "d" * 64)):
+            episode, receipt = matrix_plan_receipt()
+            child = receipt["two_hop_alarm_matrix"]["rows"][target]["receipt"]
+            if field == "source_identity":
+                child[field] = value
+            else:
+                child["plan"]["repeated_bit"][field] = value
+            with patch.object(runner, "_validate_completed_receipt"):
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_two_hop_alarm_matrix_receipt(receipt, episode)
+
+    def test_receive_matrix_accepts_zero_correct_bits_and_checks_shared_table_evidence(self) -> None:
+        episode, receipt = matrix_receive_receipt()
+        with patch.object(runner, "_validate_completed_receipt") as child_validator, \
+             patch.object(runner, "_validate_repeated_bit_receipt") as raw_validator:
+            runner._validate_two_hop_alarm_matrix_receipt(receipt, episode, 1199.5)
+        self.assertEqual(child_validator.call_count, 6)
+        self.assertEqual(raw_validator.call_count, 4)
+        for mutate in (
+            lambda rows: rows[1]["receipt"]["channel"]["vector_two_hop_table_use"].update(table_reused=False),
+            lambda rows: rows[1]["receipt"]["channel"]["vector_two_hop_table_use"].update(table_sha256="f" * 64),
+            lambda rows: rows[1]["receipt"]["channel"]["vector_two_hop"].update(selected_energy_sample_sum=3.1),
+            lambda rows: rows[0]["receipt"]["slots"][0].pop("likelihood_components"),
+        ):
+            episode, broken = matrix_receive_receipt()
+            mutate(broken["two_hop_alarm_matrix"]["rows"])
+            with patch.object(runner, "_validate_completed_receipt"), \
+                 patch.object(runner, "_validate_repeated_bit_receipt"):
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_two_hop_alarm_matrix_receipt(broken, episode, 1199.5)
+
+    def test_matrix_summary_counts_text_failures_separately_from_quiet_raw_rows(self) -> None:
+        episode, receipt = matrix_receive_receipt()
+        for entry in receipt["two_hop_alarm_matrix"]["rows"]:
+            child = entry["receipt"]
+            if entry["case_id"].startswith("text-"):
+                child["outcomes"] = {"correct_complete": False, "accepted_messages": 0,
+                                     "wrong_bits": 0, "ambiguous_active_slots": 2,
+                                     "quiet_active_slots": 3}
+            else:
+                child["repeated_bit"].update(correct_data=0, wrong_data=0,
+                                             ambiguous_active_slots=0, quiet_active_slots=5,
+                                             completed_quiet_pairs=5)
+        trial = {"episode": episode, "receipt": receipt, "status": "completed", "elapsed_seconds": 1.}
+        summary = runner._two_hop_alarm_matrix_campaign_summary([trial])
+        matrix = summary["matrices"][0]
+        self.assertEqual(matrix["status"], "completed")
+        self.assertEqual(matrix["text_counts"], {
+            "status": "receipts_complete",
+            "scope": matrix["text_counts"]["scope"],
+            "completed_rows": 2, "correct_complete_rows": 0,
+            "rows_without_completed_receipts": 0, "communication_miss_rows": 2})
+        text_rows = [row for row in matrix["rows"] if str(row["case_id"]).startswith("text-")]
+        self.assertTrue(all(row["active_slot_erasures"] == 5 for row in text_rows))
+        raw_rows = [row for row in matrix["rows"] if "raw_bit" in row]
+        self.assertTrue(all(row["raw_bit"]["correct_data"] == 0 and
+                            row["raw_bit"]["completed_quiet_pairs"] == 5 for row in raw_rows))
+        report = runner._markdown({"name": "matrix-test", "episodes": [episode]}, {
+            "campaign_sha256": "a" * 64, "probe_sha256": "b" * 64, "executed_trials": 1,
+            "elapsed_seconds": 1., "execution_failures": 0, "valid_communication_failures": 0,
+            "status": "completed", "stop_reason": None, "trials": [trial], "statistics": {},
+            "repeated_bit_summary": None, "two_hop_alarm_matrix_summary": summary})
+        self.assertIn("0/2 correct-complete, 2 message misses, 0 rows without completed receipts", report)
+        self.assertIn("| text-weak | -3 | no | 0 | 5 |", report)
+        self.assertIn("| bit0-weak | -3 | 0/5 | 0 | 0 |", report)
+
+        incomplete_receipt = json.loads(json.dumps(receipt))
+        incomplete_receipt["two_hop_alarm_matrix"]["rows"][1]["receipt"]["status"] = "error"
+        incomplete_trial = {"episode": episode, "receipt": incomplete_receipt,
+                            "status": "completed", "elapsed_seconds": 1.}
+        incomplete = runner._two_hop_alarm_matrix_campaign_summary([incomplete_trial])["matrices"][0]["text_counts"]
+        self.assertEqual((incomplete["status"], incomplete["completed_rows"],
+                          incomplete["correct_complete_rows"], incomplete["rows_without_completed_receipts"],
+                          incomplete["communication_miss_rows"]),
+                         ("receipts_incomplete", 1, 0, 1, 1))
+
+    def test_additive_boundary_plan_validates_fixed_order_and_external_parity_scope(self) -> None:
+        episode, receipt = additive_boundary_plan_receipt()
+        with patch.object(runner, "_validate_completed_receipt") as child_validator:
+            runner._validate_two_hop_additive_boundary_receipt(receipt, episode, 899.5)
+        self.assertEqual(child_validator.call_count, 3)
+        self.assertEqual([call.args[1]["cn0_db_hz"] for call in child_validator.call_args_list], [3, 4, 4])
+        for mutate in (
+            lambda rows: rows.reverse(),
+            lambda rows: rows[0]["receipt"]["plan"].update(affine_gain_evaluation="operational"),
+            lambda rows: rows[2]["receipt"]["plan"].update(max_samples=4_350_001),
+            lambda rows: rows[1]["receipt"]["source_identity"].update(native_source_sha256="c" * 64),
+        ):
+            episode, broken = additive_boundary_plan_receipt()
+            mutate(broken["two_hop_additive_boundary"]["rows"])
+            with patch.object(runner, "_validate_completed_receipt"):
+                with self.assertRaises(runner.CampaignError):
+                    runner._validate_two_hop_additive_boundary_receipt(broken, episode, 899.5)
+
+    def test_additive_boundary_manifest_and_native_flag_stay_narrow(self) -> None:
+        campaign = runner._read_campaign(RUNNER.parent / "campaigns" / "two-hop-additive-boundary.json")
+        episode = campaign["episodes"][0]
+        command = runner._command(Path("/native/probe"), episode, 4_350_000, 899.5)
+        self.assertIn("--two-hop-additive-boundary", command)
+        self.assertEqual(command[command.index("--cn0") + 1], "4")
+        for changes in ({"cn0_db_hz": 5}, {"max_wall_seconds": 900.1},
+                        {"hf_predictive_quiet": True}, {"noise_seed": 93614}):
+            invalid = dict(episode, **changes)
+            with self.subTest(changes=changes), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(invalid, 0, set(), 900, 4_350_000)
+
+    def test_additive_boundary_receive_requires_complete_independently_verified_spool_replays(self) -> None:
+        episode, receipt = additive_boundary_plan_receipt()
+        episode.update(mode="receive", reception_requirement="characterization")
+        receipt["mode"] = "receive"
+        boundary = receipt["two_hop_additive_boundary"]
+        boundary["wall_seconds"] = 35.
+        table = "e" * 64
+        capture = "f" * 64
+        for index, entry in enumerate(boundary["rows"]):
+            child = entry["receipt"]
+            child["mode"] = "receive"
+            child["plan"]["mode"] = "receive"
+            child["timing"] = {"wall_seconds": 10. if index == 0 else 15.,
+                               **({"wall_includes_shared_render_per_policy": True} if index else {})}
+            child["slots"] = [{"index": i, "complete": True, "all_valid": True,
+                               "affine_gain_model": "stationary_plus_ou" if index == 2 else "original"}
+                              for i in range(15)]
+            child["channel"] = {"vector_two_hop_table_use": {"table_reused": index != 0,
+                                  "table_sha256": table, "preparation_seconds": 1. if index == 0 else .1},
+                                "vector_two_hop": {"table_sha256": table}}
+            if index:
+                child["plan"]["service_replay"] = {"planned_spool_bytes": 73_109_724}
+                child["service_replay"] = {"work_complete": True, "digest_match": True,
+                    "replayed_samples": child["plan"]["horizon_samples"],
+                    "captured_input_sha256": capture, "verified_input_sha256": capture,
+                    "spool_bytes": 73_109_724, "render_wall_seconds": 5.}
+        with patch.object(runner, "_validate_completed_receipt"):
+            runner._validate_two_hop_additive_boundary_receipt(receipt, episode, 899.5)
+            receipt["two_hop_additive_boundary"]["rows"][1]["receipt"]["service_replay"]["work_complete"] = False
+            with self.assertRaises(runner.CampaignError):
+                runner._validate_two_hop_additive_boundary_receipt(receipt, episode, 899.5)
+
+    def test_additive_boundary_summary_keeps_four_pair_outcomes_conditional(self) -> None:
+        expected = {(False, True): "endpoint_gain", (True, True): "both_recover_no_boundary_separation",
+                    (False, False): "neither_recovers", (True, False): "candidate_regression"}
+        for pair, name in expected.items():
+            episode, receipt = additive_boundary_plan_receipt()
+            episode.update(mode="receive", reception_requirement="characterization")
+            rows = receipt["two_hop_additive_boundary"]["rows"]
+            rows[1]["receipt"]["outcomes"] = {"correct_complete": pair[0]}
+            rows[2]["receipt"]["outcomes"] = {"correct_complete": pair[1]}
+            summary = runner._two_hop_additive_boundary_campaign_summary([{
+                "episode": episode, "receipt": receipt, "status": "completed"}])
+            comparison = summary["comparisons"][0]
+            self.assertEqual(comparison["observed_plus4_pair_outcome"], name)
+            self.assertEqual(comparison["interpretation_status"], "pending_external_plus3_historical_parity")
+
+    def test_physical_raw_bit_validator_accepts_five_ordered_valid_misses(self) -> None:
+        receipt, episode, plan = physical_repeat_receipt()
+        runner._validate_physical_raw_bit_plan(plan, episode,
+            native_max_wall_seconds=179.5, native_max_samples=4_350_000)
+        runner._validate_repeated_bit_receipt(receipt, episode, plan,
+                                              physical_attempt_count=5, expected_bit=0)
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_physical_raw_bit_plan(plan, episode,
+                native_max_wall_seconds=179.4, native_max_samples=4_350_000)
+        components = {"scope": "Public candidate-averaged log evidence before global coordinate and branch priors.",
+                      "fixed_affine": [None, 0.], "short_varying": None, "short_fixed_gain": [1., 2.],
+                      "short_frequency_track": None, "medium_coherent_gain": None,
+                      "linear_drift": None, "slow_gain_coherence_seconds": [None, None],
+                      "affine_selected_prior_mass": None, "short_frequency_log_prior_adjustment": 0.}
+        receipt["slots"] = [{"likelihood_components": dict(components)} for _ in range(15)]
+        runner._validate_public_likelihood_components(receipt, 15)
+        receipt["slots"][0]["likelihood_components"]["fixed_affine"] = [float("nan"), 0.]
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_public_likelihood_components(receipt, 15)
+
+    def test_frozen_physical_raw_campaign_and_native_flags(self) -> None:
+        campaign_path = RUNNER.parent / "local-evidence/current-physical-alarm/physical-random-long-alarm.json"
+        campaign = runner._read_campaign(campaign_path)
+        self.assertEqual({item["repeat_bit"] for item in campaign["episodes"]}, {0, 1})
+        for episode in campaign["episodes"]:
+            runner._validate_episode(episode, 0, set(), 180, 4_350_000)
+            command = runner._command(Path("/native/probe"), episode, 4_350_000, 180)
+            self.assertIn("--repeat-bit", command)
+            self.assertIn("--repeat-separate-attempts", command)
+            self.assertNotIn("--repeat-path-scale", command)
+        base = dict(campaign["episodes"][0])
+        for changes in ({"seed": 30108}, {"hf_trajectory_offset_seconds": 198},
+                        {"hf_phase_refinement": True}, {"max_wall_seconds": 180.01},
+                        {"max_samples": 4_350_001}, {"repeat_separate_attempts": False}):
+            invalid = dict(base, **changes)
+            with self.subTest(changes=changes), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(invalid, 0, set(), 180, 4_350_000)
+
+    def test_physical_raw_reporting_does_not_count_text_success_or_failure(self) -> None:
+        trials = []
+        for bit in (0, 1):
+            receipt, episode, _plan = physical_repeat_receipt(bit)
+            episode.update(control="wanted", reception_requirement="characterization")
+            for index in (0, 3, 6, 9, 12):
+                slot = receipt["slots"][index]
+                slot.update(decision="data", bit=bit, raw_bit_correct=True)
+            receipt["repeated_bit"].update(correct_data=5, quiet_active_slots=0,
+                                           longest_no_correct_run=0)
+            trials.append({"episode": episode, "receipt": receipt, "status": "completed"})
+        self.assertEqual(runner._valid_communication_failure_count(trials), 0)
+        self.assertTrue(all(runner._communication_outcome(trial["receipt"], trial["episode"]) is None
+                            for trial in trials))
+        self.assertTrue(all(runner._wanted_outcome_counts(trial) is None for trial in trials))
+        self.assertEqual(runner._wanted_outcome_summary(trials)["completed_trials"], 0)
+        summary = runner._repeated_bit_campaign_summary(trials)
+        self.assertTrue(summary["physical_scenario"])
+        self.assertIn("trajectory", summary["scope"])
+        self.assertEqual([row["correct_data"] for row in summary["rows"]], [5, 5])
+        self.assertTrue(all(row["completed_quiet_pairs"] == 5 for row in summary["rows"]))
+        self.assertTrue(all(row["source_scope"] == "continuous changing-rate HF channel" for row in summary["rows"]))
+        self.assertTrue(all("repeat_path_scale" not in row for row in summary["rows"]))
+
+        missed_receipt, missed_episode, _plan = physical_repeat_receipt(0)
+        missed_trial = {"episode": missed_episode, "receipt": missed_receipt, "status": "completed",
+                        "elapsed_seconds": 1.0}
+        missed_summary = runner._repeated_bit_summary(missed_receipt, missed_episode)
+        self.assertEqual((missed_summary["correct_data"], missed_summary["longest_no_correct_run"],
+                          missed_summary["completed_quiet_pairs"]), (0, 5, 5))
+        report = runner._markdown({"name": "raw-test", "episodes": [missed_episode]}, {
+            "campaign_sha256": "a" * 64, "probe_sha256": "b" * 64, "executed_trials": 1,
+            "elapsed_seconds": 1., "execution_failures": 0, "valid_communication_failures": 0,
+            "status": "completed", "stop_reason": None, "trials": [missed_trial], "statistics": {},
+            "repeated_bit_summary": runner._repeated_bit_campaign_summary([missed_trial]),
+            "two_hop_alarm_matrix_summary": None})
+        self.assertIn("raw hf-ensemble-changing-rate bit 0: correct=0/5", report)
+        self.assertIn("quiet pairs=5/5; text completion not evaluated", report)
+        self.assertNotIn("no correct physical message completion", report)
 
 if __name__ == "__main__":
     unittest.main()

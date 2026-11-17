@@ -599,7 +599,7 @@ struct Channel::Impl {
     Complex stationary_tx_decay{1, 0}, stationary_tx_drive{};
 
     Impl(Source input, ChannelSpec config, std::uint64_t seed, std::uint64_t count, std::stop_token stop,
-         std::span<const SignalEnergyInterval> signal_energy_intervals)
+         std::span<const SignalEnergyInterval> signal_energy_intervals, HfVectorTwoHopPreparation* two_hop_preparation)
         : source(std::move(input)), spec(std::move(config)), horizon(count),
           white(spec.noise_seed.value_or(seed), 2), colored(spec.noise_seed.value_or(seed), 6),
           events(spec.noise_seed.value_or(seed), 3), marks(spec.noise_seed.value_or(seed), 4) {
@@ -884,7 +884,11 @@ struct Channel::Impl {
         if (spec.phase_screens) bytes = checked_add(bytes, PhaseScreens::preparation_workspace_bound_bytes);
         if (spec.vector_oblique) bytes = checked_add(bytes,
             hf_vector_oblique_preparation_workspace_bound_bytes(*spec.vector_oblique));
-        if (spec.vector_two_hop) bytes = checked_add(bytes, HfVectorTwoHopTable::preparation_workspace_bound_bytes);
+        if (spec.vector_two_hop) {
+            bytes = checked_add(bytes, HfVectorTwoHopTable::preparation_workspace_bound_bytes);
+            // The retained receipt adds a hexadecimal SHA-256 and its terminator.
+            if (two_hop_preparation) bytes = checked_add(bytes, sizeof(HfVectorTwoHopPreparation) + 2 * 32 + 1);
+        }
         bytes = checked_add(bytes, checked_multiply(signal_energy_intervals.size(), sizeof(SignalEnergyObservation)));
         if (bytes > spec.maximum_workspace_bytes) throw ChannelWorkspaceError("channel exceeds explicit workspace limit");
         report.signal_energy_observations.reserve(signal_energy_intervals.size());
@@ -962,26 +966,33 @@ struct Channel::Impl {
         if (spec.vector_two_hop) {
             const auto start = std::chrono::steady_clock::now();
             const auto& selected = *spec.vector_two_hop;
-            auto built = build_hf_vector_two_hop_table(selected, stop);
-            if (!built.table || !built.checks.qualified)
-                throw HfVectorTwoHopUnavailable("coupled vector two-hop table failed its Maxwell, route-composition, finite-band, or causal-kernel qualification");
-            const auto fit_coefficient_count=built.moving_angle_fit_coefficients.size();
-            const auto table_digest=vector_two_hop_table_sha256(*built.table, selected,
-                built.moving_angle_fit_coefficients);
-            std::vector<std::complex<double>>().swap(built.moving_angle_fit_coefficients);
-            vector_two_hop.emplace(built.table, selected);
+            const bool reused = two_hop_preparation && two_hop_preparation->entry_.has_value();
+            HfVectorTwoHopPreparation::Entry local;
+            if (!reused) {
+                auto built = build_hf_vector_two_hop_table(selected, stop);
+                if (!built.table || !built.checks.qualified)
+                    throw HfVectorTwoHopUnavailable("coupled vector two-hop table failed its Maxwell, route-composition, finite-band, or causal-kernel qualification");
+                const auto digest = vector_two_hop_table_sha256(*built.table, selected, built.moving_angle_fit_coefficients);
+                local = {selected, std::move(built.table), std::move(built.checks), digest,
+                         built.moving_angle_fit_coefficients.size()};
+                if (two_hop_preparation) two_hop_preparation->entry_.emplace(std::move(local));
+            }
+            const auto& prepared = two_hop_preparation ? *two_hop_preparation->entry_ : local;
+            require(prepared.spec == selected, "coupled vector two-hop preparation requires identical physical specifications");
+            vector_two_hop.emplace(prepared.table, selected);
             require(vector_two_hop->tail_samples() == HfVectorTwoHopTable::last_lag_samples(),
                     "coupled vector two-hop tail differs from its declared complete causal support");
             auto& receipt = report.vector_two_hop.emplace();
-            receipt.checks = built.checks;
+            receipt.checks = prepared.checks;
             receipt.spec = selected;
-            receipt.table_sha256 = table_digest;
-            receipt.table_workspace_bytes = built.table->workspace_bytes();
+            receipt.table_sha256 = prepared.table_sha256;
+            receipt.table_workspace_bytes = prepared.table->workspace_bytes();
             receipt.stream_workspace_bytes = vector_two_hop->workspace_bytes();
-            receipt.moving_angle_fit_coefficient_count=fit_coefficient_count;
+            receipt.moving_angle_fit_coefficient_count=prepared.moving_angle_fit_coefficient_count;
+            if (two_hop_preparation) receipt.table_reused = reused;
             const auto preparation_bytes = HfVectorTwoHopTable::preparation_workspace_bound_bytes;
             const auto retained_bytes = checked_add(receipt.table_workspace_bytes, receipt.stream_workspace_bytes);
-            require(built.checks.preparation_peak_workspace_bytes <= preparation_bytes &&
+            require(prepared.checks.preparation_peak_workspace_bytes <= preparation_bytes &&
                     retained_bytes <= preparation_bytes,
                     "coupled vector two-hop table, stream and peak preparation exceed their workspace admission");
             // The Maxwell solve and coefficient digest scratch are released.
@@ -1469,9 +1480,10 @@ struct Channel::Impl {
 };
 
 Channel::Channel(Source source, ChannelSpec spec, std::uint64_t seed, std::uint64_t horizon_samples,
-                 std::stop_token stop, std::span<const SignalEnergyInterval> signal_energy_intervals)
+                 std::stop_token stop, std::span<const SignalEnergyInterval> signal_energy_intervals,
+                 HfVectorTwoHopPreparation* two_hop_preparation)
     : impl_(std::make_unique<Impl>(std::move(source), std::move(spec), seed, horizon_samples, stop,
-                                  signal_energy_intervals)) {}
+                                  signal_energy_intervals, two_hop_preparation)) {}
 Channel::~Channel() = default;
 Channel::Channel(Channel&&) noexcept = default;
 Channel& Channel::operator=(Channel&&) noexcept = default;

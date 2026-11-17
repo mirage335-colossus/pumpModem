@@ -1,5 +1,6 @@
 #include "appraisal/hf_gui_profile.hpp"
 
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -155,6 +156,65 @@ void edge_and_arrival_and_helper() {
     near(helper.channel.effects.rf_hz, hf_gui_rf_shift_hz, 0, "RF shift remains physical LO configuration");
 }
 
+void repeated_bit_fixture() {
+    using namespace datapump::triad::v3;
+    HfGuiProfileOptions options;
+    options.clock_edge = true;
+    options.fixture_bit_seconds = 2;
+    options.seed = 62013;
+    options.noise_seed = 72013;
+    const auto profile = prepare_hf_gui_profile(options);
+    const auto& original = profile.channel;
+    const auto& waveform = profile.waveform;
+    const auto first = waveform.slot(0);
+    const auto last = waveform.slot(hf_gui_repeated_bit_slots - 1);
+    check(last.symbol_ordinal == first.symbol_ordinal + hf_gui_repeated_bit_slots - 1 &&
+          last.pattern_epoch > first.pattern_epoch,
+          "repeated raw DATA must use advancing public ordinals and epochs");
+
+    for (const auto scale : {0., .5, 1.}) {
+        auto actual = original;
+        const auto path_seed = static_cast<std::uint64_t>(62031 + 2 * scale);
+        configure_hf_gui_repeated_bit_channel(actual, scale, path_seed, scale != 1.);
+        check(actual.effects.seed == path_seed && actual.path_seed == path_seed &&
+              actual.oscillator_seed == options.seed && actual.noise_seed == options.noise_seed,
+              "repeated path seeds must not replace oscillator and noise roots");
+        check(actual.effects.timing_offset_seconds == original.effects.timing_offset_seconds &&
+              actual.effects.tx.audio_ppm == original.effects.tx.audio_ppm &&
+              actual.effects.rx.audio_ppm == original.effects.rx.audio_ppm &&
+              actual.effects.tx.rf_ppm == original.effects.tx.rf_ppm &&
+              actual.effects.rx.rf_ppm == original.effects.rx.rf_ppm &&
+              actual.complex_noise_variance == original.complex_noise_variance &&
+              profile.receiver.noise_variance == original.complex_noise_variance &&
+              profile.receiver.time_varying_atmospheric_hz == 90 &&
+              waveform.slot(hf_gui_repeated_bit_slots - 1).observation.stop == last.observation.stop,
+              "actual path scaling must preserve clocks, declared receiver support and public calendar");
+        check(actual.effects.spread_delay_ms == original.effects.spread_delay_ms * scale &&
+              actual.effects.spread_doppler_hz == original.effects.spread_doppler_hz * scale &&
+              actual.path_evolution.common_doppler_wander_hz == original.path_evolution.common_doppler_wander_hz * scale &&
+              actual.path_evolution.bounded_spread_knot_seconds ==
+                  (scale ? original.path_evolution.bounded_spread_knot_seconds : 0.) &&
+              actual.effects.perturbation_slow_depth == original.effects.perturbation_slow_depth * scale &&
+              actual.effects.perturbation_fast_depth == original.effects.perturbation_fast_depth * scale &&
+              *actual.selective_model.modulation_rate_hz == *original.selective_model.modulation_rate_hz * scale &&
+              actual.effects.noise_enabled == (scale != 1.),
+              "repeated-bit strata must scale only actual propagation and allow a matched thermal-off replay");
+    }
+
+    std::array<std::uint8_t, hf_gui_repeated_bit_slots> zeros{}, ones{};
+    ones.fill(1);
+    Emission zero(waveform, profile.key, {.bits = zeros});
+    Emission one(waveform, profile.key, {.bits = ones});
+    const auto expected_rows = waveform.calendar().distance(waveform.origin(), last.tx.helper_end);
+    check(zero.source().geometry.source_samples == expected_rows &&
+          one.source().geometry.source_samples == expected_rows,
+          "equal raw repetition counts must use one continuous matching transmit calendar");
+    std::array<Complex, 4096> prefix0, prefix1;
+    check(zero.read(prefix0) == prefix0.size() && one.read(prefix1) == prefix1.size() && prefix0 != prefix1 &&
+          zero.report().data_gain == one.report().data_gain,
+          "opposite raw bits must produce different native IQ at the same fixed power reference");
+}
+
 template<class Mutate>
 void rejects(Mutate mutate) {
     auto options = baseline();
@@ -188,6 +248,7 @@ int main() {
         off_and_independent_noise();
         margin_each65_and_actual_clocks();
         edge_and_arrival_and_helper();
+        repeated_bit_fixture();
         invalid_options();
         std::cout << checks << " native GUI profile checks passed\n";
     } catch (const std::exception& error) {

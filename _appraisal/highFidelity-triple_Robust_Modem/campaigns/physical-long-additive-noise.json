@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "name": "physical-long-additive-noise",
+  "purpose": "Conditional preservation after the matched additive-gain boundary comparison demonstrates a reception benefit. One predeclared fresh-noise ordinary long receive observation uses the existing changing-rate physical profile, canonical receiver only, at the same 139.2-second DATA geometry as the raw pair. Control=noise removes the transmitted waveform; the receiver must still execute its public one-basis additive family, complete all 15 scored public windows as quiet, and produce no false DATA, messages or physical message completions. Use fresh additive-noise seed 40109, with source/profile/trajectory seeds 30107/20107 and offset197 unchanged. This is a finite negative-control observation, not a false-alarm-rate estimate. Stop after this row or on execution/validation failure; no seed replacement. No additional two-hop physical-table solve or new numerical implementation is required.",
+  "max_trials": 1,
+  "max_wall_seconds": 180,
+  "per_trial_wall_seconds": 180,
+  "max_samples": 4350000,
+  "stop_on_execution_failure": true,
+  "episodes": [
+    {
+      "id": "long-additive-noise-preservation",
+      "scenario": "hf-ensemble-changing-rate",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "rrc",
+      "backend": "cpu",
+      "seed": 30107,
+      "noise_seed": 40109,
+      "hf_trajectory_seed": 20107,
+      "hf_trajectory_offset_seconds": 197,
+      "bit_seconds": 128,
+      "message": "E",
+      "control": "noise",
+      "cn0_db_hz": 0,
+      "fec": "off",
+      "helper": false,
+      "max_wall_seconds": 180,
+      "max_samples": 4350000,
+      "reception_requirement": "negative_control"
+    }
+  ]
+}

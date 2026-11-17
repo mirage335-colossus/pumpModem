@@ -161,8 +161,26 @@ struct HfVectorTwoHopReport {
     std::string table_sha256;
     std::size_t table_workspace_bytes = 0, stream_workspace_bytes = 0;
     std::size_t moving_angle_fit_coefficient_count = 0;
+    std::optional<bool> table_reused;
     double preparation_seconds = 0., source_minimum_frequency_hz = 0., source_maximum_frequency_hz = 0.;
     long double incident_energy = 0., selected_energy = 0.;
+};
+// An optional caller-owned preparation for sequential observations of one
+// immutable physical specification. Every Channel keeps independent state.
+class HfVectorTwoHopPreparation {
+    friend class Channel;
+    struct Entry {
+        HfVectorTwoHopSpec spec;
+        std::shared_ptr<const HfVectorTwoHopTable> table;
+        HfVectorTwoHopChecks checks;
+        std::string table_sha256;
+        std::size_t moving_angle_fit_coefficient_count = 0;
+    };
+    std::optional<Entry> entry_;
+public:
+    HfVectorTwoHopPreparation() = default;
+    HfVectorTwoHopPreparation(const HfVectorTwoHopPreparation&) = delete;
+    HfVectorTwoHopPreparation& operator=(const HfVectorTwoHopPreparation&) = delete;
 };
 // Evaluator-only clean-signal energy apertures. These are never propagated to
 // a receiver; samples use the channel's zero-based output clock and exclusive stop.
@@ -196,7 +214,8 @@ struct ChannelReport {
 class Channel {
 public:
     Channel(Source, ChannelSpec, std::uint64_t seed, std::uint64_t horizon_samples, std::stop_token = {},
-            std::span<const SignalEnergyInterval> signal_energy_intervals = {});
+            std::span<const SignalEnergyInterval> signal_energy_intervals = {},
+            HfVectorTwoHopPreparation* = nullptr);
     ~Channel();
     Channel(Channel&&) noexcept;
     Channel& operator=(Channel&&) noexcept;

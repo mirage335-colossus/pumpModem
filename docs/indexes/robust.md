@@ -40,6 +40,15 @@ message completion. These rules also explain why a missing final uncompressed
 interval may leave a valid shorter message. The
 [protocol reference](../protocol.md) has the bit-level layout and limits.
 
+For an agreed single-bit signal, **Pattern Steps** exposes each received DATA
+bit and its public ordinal before text decoding or physical completion. A
+completed sequence with no missing bits can also appear as binary raw
+observations in Signals when text decoding rejects it. Browser filtering can
+hide that completed row; it does not alter Pattern Steps or repair a wrong bit.
+Repeating the same raw bit with the same key advances the public ordinal and
+therefore changes the keyed waveform. Keep the receiver's agreed calendar in
+step; a retry is not an instruction to restart either peer at ordinal zero.
+
 Use duration planning to estimate airtime and set reasonable expectations; it
 is a model, not a sensitivity, reliability or real-time guarantee. Public
 calendar waits add wall-clock time but do not lower the peak workspace of one
@@ -119,10 +128,35 @@ The current default also compares an admitted short-coherence likelihood when
 the fixed-affine lane already says DATA. With Helper Off and no segmented
 coarse timing result, frequency tracking can score up to eight quarter-clock
 nominees derived from the strongest ordinary coarse proposal for each bit.
-The existing clock prior and 32-coordinate fine-search cap remain in force;
-longer coherent-gain and drift models keep their fallback policy. This accepts
+Up to eight nominal-epoch intermediate-clock/arrival-endpoint cells additionally
+prevent that public epoch from disappearing from the raw timing shortlist;
+the existing atom priors remain in force, with a charged raw timing cap of 40.
+For supported raw or Helper-projected short tracking, a separate public
+midpoint-lag family adds at most six coordinates with finer clock placement as
+calendar age grows. Its
+fixed one-eighth tracker share charges the full public lag/epoch domain,
+including unselected points; the old family retains seven-eighths. The expensive
+nominee count is bounded, but observation and FFT support still reflect clock
+uncertainty. See the [repeated-bit findings](../validation.md#repeated-single-bit-channel-diagnosis--16-november-2026)
+for scope, controls and unresolved modes.
+Longer coherent-gain and drift models keep their fallback policy. This accepts
 bounded added work for natural changing-channel resilience while preserving the
-public search and full worker budget. The GUI Wrong Key Admission option
+public search and full worker budget.
+
+A stable component and a changing component can coexist within one unresolved
+spatial channel. Fast-cadence changing-channel reception now includes that
+additive alternative using existing correlations and bounded state, without a
+duration cutoff. It recovers the selected +4 dB-Hz two-hop message that the
+original bank misses; the +3 miss remains. The original family retains 75% of
+its affine prior mass, bounding that matched contribution's log-evidence loss
+by 0.288 nats, not a guaranteed dB or bit-error bound. Existing two-spatial-basis
+profiles and slow VLF alternatives remain separate. Wider-bound direct-template
+support merits reconsideration when a weak case demonstrates an admission loss;
+the strong zero/7-ms declared-spread check passes both settings. Ordinary
+two-tap posteriors also use stable covariance factors to prevent a reproduced
+high-information rank-one failure. See the [evidence and limits](../validation.md#weak-physical-channel-alarm-investigation--16-november-2026).
+
+The GUI Wrong Key Admission option
 remains a retrospective filter on retained baseline results; it is neither
 receiver authentication nor a replacement for the native bit decision. See
 the [current short-model and clock findings](../validation.md#bounded-short-model-competition--16-november-2026)

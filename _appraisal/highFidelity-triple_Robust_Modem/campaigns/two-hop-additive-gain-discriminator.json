@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "name": "two-hop-additive-gain-discriminator",
+  "purpose": "One predeclared matched current-waveform +3 dB-Hz E capture tests a bounded additive persistent-plus-OU gain family after the pure 8/32-second alternatives failed to recover slot 12. Each new model has an unknown static proper-complex Gaussian component with variance 0.5 and an independent OU component with variance 0.5, using the existing 0.5/2-second scales. A fixed 0.75 share retains the original affine family and each additive alternative receives 0.125. Eligibility is public fast-cadence DATA of at least 32 seconds with one spatial basis; original VLF models, public hypotheses, thresholds and worker/resource bounds remain. Exact normalized dense-covariance parity, repeated high-Gram observations including zero and tiny elapsed intervals, and additive-only separation in a simultaneous stable/changing synthetic check must pass before execution. Match the baseline full noisy IQ, qualified table, source/noise seeds, profile and all 15 public windows. The repair criterion is 13/13 correct DATA including improved correct-bit affine/operational evidence at slot 12, with both genuine ending quiet slots preserved and correct E completion. Report model kind, work, workspace, source identity and field preparation separately. A score gain without recovery is an informative partial result, not repair or automatic permission to tune. Stop after this row; no automatic variance, scale, seed or model-bank sweep. If repaired, separately freeze the original weak/raw-polarity matrix and changing-rate/negative preservation checks before production acceptance. This selected mechanism test is not a holdout or field-outage probability estimate. The 900-second bound includes physical table construction; no private path strength, frequency or state reaches the receiver.",
+  "max_trials": 1,
+  "max_wall_seconds": 900,
+  "per_trial_wall_seconds": 900,
+  "max_samples": 4350000,
+  "stop_on_execution_failure": true,
+  "episodes": [
+    {
+      "id": "current-E-plus3-additive-gain",
+      "scenario": "hf-vector-two-hop",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "rrc",
+      "backend": "cpu",
+      "seed": 73613,
+      "noise_seed": 93613,
+      "bit_seconds": 128,
+      "message": "E",
+      "control": "wanted",
+      "cn0_db_hz": 3,
+      "fec": "off",
+      "helper": false,
+      "max_wall_seconds": 900,
+      "max_samples": 4350000,
+      "reception_requirement": "characterization"
+    }
+  ]
+}

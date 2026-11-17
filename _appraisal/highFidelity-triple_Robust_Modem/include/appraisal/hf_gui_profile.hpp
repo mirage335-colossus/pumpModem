@@ -33,6 +33,7 @@ inline constexpr double hf_gui_rf_shift_hz = 3.4e6;
 inline constexpr double hf_gui_inner_rate_hz = 120;
 inline constexpr unsigned hf_gui_added_symbols = 1;
 inline constexpr double hf_gui_helper_additional_power_w = 1;
+inline constexpr std::size_t hf_gui_repeated_bit_slots = 6;
 
 struct HfGuiProfileUnavailable : datapump::Error { using Error::Error; };
 
@@ -49,5 +50,10 @@ struct HfGuiProfileUnavailable : datapump::Error { using Error::Error; };
 // retained when false. This override is deliberately not called a GUI draw.
 datapump::live::detail::Profile prepare_hf_gui_profile(
     const HfGuiProfileOptions&, std::stop_token = {});
+
+// Change the actual atmosphere of a prepared GUI capture without changing
+// its oscillator/noise roots, receiver support or public calendar.
+void configure_hf_gui_repeated_bit_channel(datapump::triad::v3::StreamChannelConfig&,
+                                           double path_scale, std::uint64_t path_seed, bool thermal_noise);
 
 } // namespace appraisal

@@ -97,6 +97,8 @@ struct ReceiverSlotScore {
     std::array<double, 2> bit_evidence{}, adaptive_bit_evidence{}, combined_bit_evidence{};
     // Added fixed-affine gain priors, or zeros outside their public support.
     std::array<double, 2> slow_gain_coherence_seconds{};
+    // Both added priors combine a stationary and an OU gain on one template.
+    bool affine_stationary_fading_gain = false;
     // Prior-corrected evidence actually used for operational bit selection.
     std::array<double, 2> operational_bit_evidence{};
     double operational_bit_log_separation = 0, operational_minimum_bit_log_separation = 0;
@@ -117,6 +119,9 @@ struct ReceiverSlotScore {
     double varying_coarse_seconds = 0, varying_fine_seconds = 0;
     std::size_t varying_timing_blocks = 0, varying_timing_frequencies = 0;
     std::string varying_timing_status;
+    std::string midpoint_timing_status, midpoint_timing_precision;
+    std::size_t midpoint_timing_lags = 0, midpoint_timing_candidates = 0, midpoint_timing_workspace_bytes = 0;
+    std::uint64_t midpoint_timing_basis_rows = 0, midpoint_timing_widened_inverses = 0, midpoint_timing_scored_lags = 0;
     std::array<double, 2> varying_bit_evidence{};
     std::string varying_status;
     std::size_t varying_frequency_states = 0;

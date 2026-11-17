@@ -1,6 +1,7 @@
 #include "triad_receiver_fine.hpp"
 #include "triad_receiver_executor.hpp"
 #include "triad_receiver_basis.hpp"
+#include "triad_gaussian_kernel.hpp"
 #include "search_fft.hpp"
 #include "datapump/execution.hpp"
 
@@ -14,12 +15,6 @@
 #include <memory>
 #include <numbers>
 #include <numeric>
-
-extern "C" int triad_gaussian_update_v1(
-    std::size_t taps, std::size_t candidates, std::size_t models, std::size_t blocks,
-    std::size_t first, std::size_t stop, const double* correlations, const double* grams,
-    const double* power, const double* transitions, double* mean, double* covariance,
-    double* scores, double* diagnostics) noexcept;
 
 namespace datapump::triad::v3::receiver_detail {
 namespace {
@@ -40,16 +35,30 @@ double seconds_since(FineClock::time_point began) {
     return std::chrono::duration<double>(FineClock::now() - began).count();
 }
 
-std::array<double, slow_models> slow_gain_coherence(const ReceiverConfig& config,
-                                                   const ReceiverSlotPlan& slot) {
+struct AffineGainPlan {
+    std::array<double, slow_models> coherence{};
+    bool stationary_fading = false;
+};
+
+AffineGainPlan affine_gain_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                               AffineGainEvaluation evaluation = AffineGainEvaluation::operational) {
     if (!config.time_varying_channel) return {};
-    const double cells = 2 / geometry(slot.format).fine_chip_rate_hz;
+    const auto waveform = geometry(slot.format);
+    const double cells = 2 / waveform.fine_chip_rate_hz;
+    if (cells < 1.) {
+        // A stationary and a changing component share one spatial template
+        // here. Applying that model to both rendered taps needs four latent
+        // gains. A direct-template-only submodel has a different spatial prior.
+        if (evaluation == AffineGainEvaluation::operational &&
+            !config.spread_delay_seconds && !config.spread_doppler_hz)
+            return {{coherence_seconds[0], coherence_seconds[1]}, true};
+        return {};
+    }
     // The medium-duration likelihood cannot span two cells at this rate.
     // An upper variation bound also admits slower actual channels. Keep
     // the extra gain scales at least two fine cells long, even when that
     // bound would suggest a shorter coherence. This heuristic does not
     // identify a physical Doppler spectrum from an excursion bound.
-    if (cells < 1.) return {};
     const auto frequency = std::max({config.time_varying_common_doppler_hz,
         config.time_varying_atmospheric_hz, std::abs(config.spread_doppler_hz),
         3 * config.random_doppler_width_hz + config.delay_motion_doppler_bound_hz,
@@ -59,7 +68,7 @@ std::array<double, slow_models> slow_gain_coherence(const ReceiverConfig& config
     if (!(rate > 0)) return {};
     const auto seconds = std::max(cells, 1 / rate);
     if (!std::isfinite(4 * seconds)) return {};
-    return {seconds, 4 * seconds};
+    return {{seconds, 4 * seconds}};
 }
 
 double log_add(double a, double b) {
@@ -301,8 +310,14 @@ private:
 
 struct ChannelPosterior {
     std::array<Complex, 2> mean{};
-    std::array<Complex, 4> covariance{};
+    // Two spatial taps store a persistent covariance root. One spatial
+    // tap and the separate additive latent model store covariance.
+    GaussianRoot2 uncertainty{};
 };
+
+double initial_gain_diagonal(std::size_t spatial_taps, double variance) {
+    return spatial_taps == 2 ? std::sqrt(variance) : variance;
+}
 
 struct State {
     FineStateKey key;
@@ -408,7 +423,7 @@ struct TimingGrid {
             state.weights.fill(log_prior);
             for (auto& channel : state.posterior)
                 for (std::size_t tap = 0; tap < taps; ++tap)
-                    channel.covariance[tap * taps + tap] = 1. / static_cast<double>(taps);
+                    channel.uncertainty[tap * taps + tap] = initial_gain_diagonal(taps, 1. / static_cast<double>(taps));
         }
         return states;
     }
@@ -527,6 +542,10 @@ std::vector<State> predict(const std::vector<State>& previous, const TimingGrid&
                 const auto p = weight(edge);
                 for (std::size_t k = 0; k < taps; ++k) out.mean[k] += p * in.mean[k] * edge.phase;
             }
+            if (taps == 2 && target.stop_edge == target.first_edge + 1) {
+                out.uncertainty = previous[edges[target.first_edge].source].posterior[c].uncertainty;
+                continue;
+            }
             for (auto i = target.first_edge; i < target.stop_edge; ++i) {
                 const auto& edge = edges[i];
                 const auto& in = previous[edge.source].posterior[c];
@@ -534,16 +553,20 @@ std::vector<State> predict(const std::vector<State>& previous, const TimingGrid&
                 std::array<Complex, 2> difference{};
                 for (std::size_t k = 0; k < taps; ++k)
                     difference[k] = in.mean[k] * edge.phase - out.mean[k];
-                for (std::size_t k = 0; k < taps; ++k)
-                    for (std::size_t l = k; l < taps; ++l)
-                        out.covariance[k * taps + l] += p *
-                            (in.covariance[k * taps + l] + difference[k] * std::conj(difference[l]));
+                if (taps == 2) {
+                    const auto root_weight = std::sqrt(p);
+                    append_gaussian_root_column(out.uncertainty,
+                        root_weight * in.uncertainty[0], root_weight * in.uncertainty[2]);
+                    append_gaussian_root_column(out.uncertainty,
+                        root_weight * in.uncertainty[1], root_weight * in.uncertainty[3]);
+                    append_gaussian_root_column(out.uncertainty,
+                        root_weight * difference[0], root_weight * difference[1]);
+                } else {
+                    out.uncertainty[0] += p *
+                        (in.uncertainty[0] + difference[0] * std::conj(difference[0]));
+                }
             }
-            for (std::size_t k = 0; k < taps; ++k) {
-                out.covariance[k * taps + k] = out.covariance[k * taps + k].real();
-                for (std::size_t l = k + 1; l < taps; ++l)
-                    out.covariance[l * taps + k] = std::conj(out.covariance[k * taps + l]);
-            }
+            if (taps == 1) out.uncertainty[0] = out.uncertainty[0].real();
         }
         result.push_back(state);
     }
@@ -558,6 +581,11 @@ struct ObservationBlock {
     double elapsed = 0;
     bool observed = true;
 };
+
+unsigned highest_observation_rank(const ObservationBlock& block) {
+    return block.observed ? static_cast<unsigned>(std::min<std::size_t>(2,
+        block.projected.size() - !block.line.empty())) : 0;
+}
 
 void remove_line(std::span<Complex> values, std::span<const Complex> unit_line) {
     Complex component{};
@@ -668,30 +696,43 @@ struct StateBlockWork {
 template <std::size_t Count, class GainState>
 void advance_gain(GainState& state, std::size_t tap_count, std::size_t block_count,
                   const std::array<Complex, 2 * 3 * 2>& correlations,
-                  const std::array<Complex, 2 * 3 * 4>& grams, const std::array<double, 2>& powers,
-                  const std::array<double, 4 * 2 * Count>& transitions, std::stop_token stop) {
-    const auto tap_square = tap_count * tap_count;
+                  const std::array<Complex, 2 * 3 * 4>& grams, const std::array<unsigned, 2>& ranks,
+                  const std::array<double, 2>& powers,
+                  const std::array<double, 4 * 2 * Count>& transitions, std::stop_token stop,
+                  bool stationary_fading = false) {
+    const auto dimensions = stationary_fading ? 2 : tap_count;
+    const auto state_square = dimensions * dimensions;
     std::array<Complex, Count * 3 * 2> means{};
-    std::array<Complex, Count * 3 * 4> covariance{};
+    std::array<Complex, Count * 3 * 4> uncertainty{};
     std::array<double, Count * 3> scores{};
     std::array<double, 2 * Count> diagnostics{};
     for (std::size_t model = 0; model < Count; ++model) {
-        const auto null = model * 3 * tap_square;
-        for (std::size_t tap = 0; tap < tap_count; ++tap)
-            covariance[null + tap * tap_count + tap] = powers[tap];
+        const auto null = model * 3 * state_square;
+        for (std::size_t tap = 0; tap < dimensions; ++tap)
+            uncertainty[null + tap * dimensions + tap] = initial_gain_diagonal(tap_count, powers[tap]);
+        if (stationary_fading) {
+            uncertainty[null] += powers[1];
+            uncertainty[null + 1] = uncertainty[null + 2] = powers[1];
+        }
         for (std::size_t bit = 0; bit < 2; ++bit) {
             const auto h = model * 3 + bit + 1;
             const auto& channel = state.posterior[model * 2 + bit];
-            std::copy_n(channel.mean.begin(), tap_count, means.data() + h * tap_count);
-            std::copy_n(channel.covariance.begin(), tap_square, covariance.data() + h * tap_square);
+            std::copy_n(channel.mean.begin(), dimensions, means.data() + h * dimensions);
+            std::copy_n(channel.uncertainty.begin(), state_square, uncertainty.data() + h * state_square);
         }
     }
 
     check_cancelled(stop);
-    const auto status = triad_gaussian_update_v1(tap_count, 1, Count, block_count, 0, 1,
-        reinterpret_cast<const double*>(correlations.data()), reinterpret_cast<const double*>(grams.data()),
-        powers.data(), transitions.data(), reinterpret_cast<double*>(means.data()),
-        reinterpret_cast<double*>(covariance.data()), scores.data(), diagnostics.data());
+    const auto update = stationary_fading ? triad_gaussian_additive_update_v1 : triad_gaussian_update_v1;
+    const auto correlation_data = reinterpret_cast<const double*>(correlations.data());
+    const auto gram_data = reinterpret_cast<const double*>(grams.data());
+    const auto mean_data = reinterpret_cast<double*>(means.data());
+    const auto uncertainty_data = reinterpret_cast<double*>(uncertainty.data());
+    const auto status = tap_count == 2 ?
+        triad_gaussian_factor2_update_v1(1, Count, block_count, 0, 1, correlation_data, gram_data,
+            ranks.data(), powers.data(), transitions.data(), mean_data, uncertainty_data, scores.data(), diagnostics.data()) :
+        update(tap_count, 1, Count, block_count, 0, 1, correlation_data, gram_data,
+            powers.data(), transitions.data(), mean_data, uncertainty_data, scores.data(), diagnostics.data());
     if (status) throw Error("Robust fine Gaussian update failed (" + std::to_string(status) + ")");
 
     for (std::size_t model = 0; model < Count; ++model) {
@@ -700,8 +741,8 @@ void advance_gain(GainState& state, std::size_t tap_count, std::size_t block_cou
             const auto h = model * 3 + bit + 1;
             const auto component = model * 2 + bit;
             auto& channel = state.posterior[component];
-            std::copy_n(means.data() + h * tap_count, tap_count, channel.mean.begin());
-            std::copy_n(covariance.data() + h * tap_square, tap_square, channel.covariance.begin());
+            std::copy_n(means.data() + h * dimensions, dimensions, channel.mean.begin());
+            std::copy_n(uncertainty.data() + h * state_square, state_square, channel.uncertainty.begin());
             state.weights[component] += scores[h];
             if (!std::isfinite(state.weights[component]))
                 throw Error("Robust Gaussian likelihood evidence is nonfinite");
@@ -715,16 +756,19 @@ void advance_state(State& state, const MappedBasisRow& row, MappedBasis& basis,
                    const std::array<double, 4 * 2 * models>& transitions,
                    double variance, WorkerScratch& scratch, StateBlockWork* work, std::stop_token stop,
                    double path_power = 1, SlowGainState* slow = nullptr,
-                   const SlowGainTransitions& slow_transitions = no_slow_transitions) {
+                   const SlowGainTransitions& slow_transitions = no_slow_transitions,
+                   bool stationary_fading = false) {
     const auto tap_count = taps.size(), tap_square = tap_count * tap_count;
     std::array<Complex, 2 * 3 * 2> correlations{};
     std::array<Complex, 2 * 3 * 4> grams{};
+    std::array<unsigned, 2> ranks{};
     const double tap_power = path_power / tap_count;
     std::array<double, 2> powers{tap_power, tap_power};
     if (work) *work = {};
     const auto basis_began = work ? FineClock::now() : FineClock::time_point{};
     for (std::size_t i = 0; i < blocks.size(); ++i) {
         if (blocks[i].observed) {
+            ranks[i] = highest_observation_rank(blocks[i]);
             const auto gram = std::span(grams).subspan(i * 3 * tap_square, 3 * tap_square);
             const auto correlation = std::span(correlations).subspan(i * 3 * tap_count, 3 * tap_count);
             if (const auto* bulk = prepared[i]) {
@@ -748,9 +792,12 @@ void advance_state(State& state, const MappedBasisRow& row, MappedBasis& basis,
     if (work) scratch.basis_statistics_seconds += seconds_since(basis_began);
     const auto gaussian_began = work ? FineClock::now() : FineClock::time_point{};
 
-    advance_gain<models>(state, tap_count, blocks.size(), correlations, grams, powers, transitions, stop);
-    if (slow)
-        advance_gain<slow_models>(*slow, tap_count, blocks.size(), correlations, grams, powers, slow_transitions, stop);
+    advance_gain<models>(state, tap_count, blocks.size(), correlations, grams, ranks, powers, transitions, stop);
+    if (slow) {
+        const std::array split_power{.5 * path_power, .5 * path_power};
+        advance_gain<slow_models>(*slow, tap_count, blocks.size(), correlations, grams, ranks,
+            stationary_fading ? split_power : powers, slow_transitions, stop, stationary_fading);
+    }
     if (work) scratch.gaussian_seconds += seconds_since(gaussian_began);
 }
 
@@ -881,7 +928,7 @@ FineWorkspaceQuote workspace_for_plan(const ReceiverConfig& config, const Receiv
     add(fft_rows + 4 * max_rows, sizeof(Complex));
     // Both lane states can coexist with the predicted/merged adaptive states.
     add(3 * maximum_proposals, sizeof(State));
-    if (slow_gain_coherence(config, plan)[0] > 0)
+    if (affine_gain_plan(config, plan).coherence[0] > 0)
         add(maximum_proposals, sizeof(SlowGainState));
     add(2 * maximum_states * (2 * maximum_rate_radius + 1),
         sizeof(TransitionTarget) + sizeof(TransitionEdge) + sizeof(RankedIndex));
@@ -1032,7 +1079,7 @@ struct FineSession::Impl {
     std::vector<StateBlockWork> adaptive_state_work;
     std::vector<RankedIndex> ranking;
     std::vector<State> nominal, adaptive;
-    std::array<double, slow_models> slow_coherence;
+    AffineGainPlan additional_gain;
     std::vector<SlowGainState> slow_nominal;
 
     long double first_anchor = 0, segment_anchor = 0, previous_anchor = 0, previous_last = 0, previous_block_center = 0;
@@ -1050,14 +1097,14 @@ struct FineSession::Impl {
          FineObservation extent, std::span<const Complex> samples, std::span<const std::uint8_t> valid,
          std::span<const FineCoordinate> selected, double projected_rate, double clock_gap,
          unsigned allocation, std::size_t scratch_limit, std::stop_token cancellation,
-         ReceiverExecutor* shared)
+         ReceiverExecutor* shared, AffineGainEvaluation evaluation)
         : config(input_config), observation(extent), plan(observation_plan(config, slot, observation)),
           iq(samples), validity(valid), stop(cancellation), calendar(config, plan), grid(projected_rate, clock_gap),
           paths{{{0, 0}, {config.spread_delay_seconds, config.spread_doppler_hz}}},
           tap_count(paths[1].delay_seconds || paths[1].doppler_hz ? 2 : 1), workers(allocation),
           stage_workers(useful_fine_workers(workers)),
           owned_executor(shared ? nullptr : std::make_unique<ReceiverExecutor>(std::max(1U, stage_workers))),
-          executor(shared ? *shared : *owned_executor), slow_coherence(slow_gain_coherence(config, plan)) {
+          executor(shared ? *shared : *owned_executor), additional_gain(affine_gain_plan(config, plan, evaluation)) {
         check_cancelled(stop);
         if (iq.size() != observation.rows || (!validity.empty() && validity.size() != iq.size()))
             throw Error("fine input lease differs from the declared observation");
@@ -1084,14 +1131,18 @@ struct FineSession::Impl {
         coordinates.assign(selected.begin(), selected.end());
         nominal = grid.initial(coordinates.size(), tap_count, cold);
         adaptive = nominal;
-        if (slow_coherence[0] > 0) {
+        if (additional_gain.coherence[0] > 0) {
             slow_nominal.resize(nominal.size());
             const auto prior = -std::log(static_cast<double>(nominal.size())) - log_two;
+            const auto dimensions = additional_gain.stationary_fading ? 2 : tap_count;
             for (auto& state : slow_nominal) {
                 state.weights.fill(prior);
-                for (auto& channel : state.posterior)
-                    for (std::size_t tap = 0; tap < tap_count; ++tap)
-                        channel.covariance[tap * tap_count + tap] = 1. / static_cast<double>(tap_count);
+                for (auto& channel : state.posterior) {
+                    if (additional_gain.stationary_fading) channel.uncertainty = {1., .5, .5, .5};
+                    else for (std::size_t tap = 0; tap < dimensions; ++tap)
+                        channel.uncertainty[tap * dimensions + tap] =
+                            initial_gain_diagonal(dimensions, 1. / static_cast<double>(dimensions));
+                }
             }
         }
         nominal_work.initial_states = adaptive_work.initial_states = nominal.size();
@@ -1254,7 +1305,7 @@ struct FineSession::Impl {
                     }
                 };
                 write_transitions(coherence_seconds, pair.transitions);
-                if (!slow_nominal.empty()) write_transitions(slow_coherence, pair.slow_transitions);
+                if (!slow_nominal.empty()) write_transitions(additional_gain.coherence, pair.slow_transitions);
                 if (!block.observed) continue;
                 const auto rows = block.projection->rows();
                 pair.observed_rows += rows;
@@ -1403,7 +1454,8 @@ struct FineSession::Impl {
                 StateBlockWork* work, std::stop_token leaf_stop, SlowGainState* slow = nullptr) {
         check_cancelled(leaf_stop);
         advance_state(state, row, *basis, taps(), pair.observations(), prepared, pair.transitions,
-                      config.noise_variance, scratch[lane], work, leaf_stop, 1., slow, pair.slow_transitions);
+                      config.noise_variance, scratch[lane], work, leaf_stop, 1., slow, pair.slow_transitions,
+                      additional_gain.stationary_fading);
     }
 
     // The tiles one keyed source must render for later dispatches. That
@@ -1611,10 +1663,11 @@ FineSession::FineSession(const ReceiverConfig& config, const ReceiverSlotPlan& s
                          FineObservation observation, std::span<const Complex> iq,
                          std::span<const std::uint8_t> valid, std::span<const FineCoordinate> coordinates,
                          double projected_rate, double clock_gap, unsigned workers,
-                         std::size_t scratch_limit, std::stop_token stop, ReceiverExecutor* executor) {
+                         std::size_t scratch_limit, std::stop_token stop, ReceiverExecutor* executor,
+                         AffineGainEvaluation evaluation) {
     const auto began = observation.record_work ? FineClock::now() : FineClock::time_point{};
     impl_ = std::make_unique<Impl>(config, slot, key, observation, iq, valid, coordinates,
-                                   projected_rate, clock_gap, workers, scratch_limit, stop, executor);
+                                   projected_rate, clock_gap, workers, scratch_limit, stop, executor, evaluation);
     if (observation.record_work) impl_->times.preparation_seconds = seconds_since(began);
 }
 
@@ -1684,7 +1737,7 @@ FineProgress FineSession::progress() const {
     result.observation_complete = p.observation_complete();
     result.representative_work = p.representative_work();
     result.finished = p.finished;
-    result.slow_gain_coherence_seconds = p.slow_coherence;
+    result.slow_gain_coherence_seconds = p.additional_gain.coherence;
     result.cache = p.basis->report();
     if (p.bulk) result.bulk = p.bulk->receipt();
     result.times = p.times;
@@ -1735,7 +1788,8 @@ void FineSession::finish(ReceiverSlotScore& score) {
             score.zero_h0_verified = p.scored_blocks != 0;
             score.noise_statistics_valid = score.complete && score.all_valid && p.quiet_modes;
             score.bit_evidence = nominal;
-            score.slow_gain_coherence_seconds = p.slow_coherence;
+            score.slow_gain_coherence_seconds = p.additional_gain.coherence;
+            score.affine_stationary_fading_gain = p.additional_gain.stationary_fading;
             score.adaptive_bit_evidence = adaptive;
             for (std::size_t bit = 0; bit < 2; ++bit)
                 score.combined_bit_evidence[bit] = log_add(nominal[bit], adaptive[bit]) - log_two;
@@ -1759,9 +1813,9 @@ void score_fine(const ReceiverConfig& config, const ReceiverSlotPlan& plan, cons
                 std::span<const Complex> iq, std::span<const FineCoordinate> coordinates,
                 double projected_sample_rate_hz, double coarse_clock_gap_ppm,
                 unsigned workers, ReceiverSlotScore& score, std::size_t scratch_limit, std::stop_token stop,
-                ReceiverExecutor* executor) {
+                ReceiverExecutor* executor, AffineGainEvaluation evaluation) {
     FineSession session(config, plan, key, whole_slot(plan), iq, {}, coordinates, projected_sample_rate_hz,
-                        coarse_clock_gap_ppm, workers, scratch_limit, stop, executor);
+                        coarse_clock_gap_ppm, workers, scratch_limit, stop, executor, evaluation);
     session.advance_to(iq.size());
     session.finish(score);
 }
@@ -1782,7 +1836,12 @@ struct DriftGram {
         const auto scale = 1 / (variance * precision);
         first = std::sqrt(1 + g0 * scale);
         lower = std::conj(cross) * (scale / first);
-        second = std::sqrt(1 + g1 * scale - std::norm(lower));
+        const auto echo = 1 + g1 * scale;
+        const auto second_pivot = echo - std::norm(lower);
+        // Use the same identity term even when direct subtraction can no
+        // longer resolve it. Bound this slower formula to delicate pivots.
+        const auto fragile = second_pivot <= 256 * std::numeric_limits<double>::epsilon() * echo;
+        second = std::sqrt(fragile ? gaussian_positive_second_pivot(g0, g1, cross, scale) : second_pivot);
         logdet = 2 * (std::log(first) + std::log(second));
         if (!(first > 0 && second > 0 && std::isfinite(logdet)))
             throw Error("Robust varying likelihood has invalid template Gram");
@@ -1833,8 +1892,15 @@ using TrackingPosteriors =
 constexpr std::size_t span_maximum_rows = 32'768, span_maximum_blocks = 256, span_maximum_coordinates = 24;
 
 double tracking_emission(double direct, double echo, Complex cross, Complex r0, Complex r1,
-                         std::size_t taps, double power, double variance) {
+                         std::size_t taps, double power, double variance, unsigned rank_bound) {
     const double precision = taps / power;
+    if (!rank_bound) return 0.;
+    if (taps == 2 && rank_bound == 1) {
+        const auto score = gaussian_rank_one_log_likelihood(direct, echo, cross, r0, r1,
+            1. / (variance * precision), 1. / variance);
+        if (!std::isfinite(score)) throw Error("Robust projected rank-one tracking evidence is nonfinite");
+        return score;
+    }
     const DriftGram gram(direct, echo, cross, precision, variance);
     const double scaling = 1. / (std::sqrt(precision) * std::sqrt(variance));
     return gram.score(r0 * scaling, r1 * scaling, 1 / variance);
@@ -1842,13 +1908,13 @@ double tracking_emission(double direct, double echo, Complex cross, Complex r0, 
 
 double coherent_gain_update(ChannelPosterior& posterior, double direct, double echo, Complex cross,
                             Complex r0, Complex r1, std::size_t taps, double power, double variance,
-                            double correlation) {
+                            double correlation, unsigned rank_bound) {
     const double path_power = power / taps;
     const std::array<double, 2> powers{path_power, path_power};
     const std::array<double, 4> transition{correlation * correlation,
         1 - correlation * correlation, correlation, 0.};
     std::array<Complex, 3 * 2> r{}, mean{};
-    std::array<Complex, 3 * 4> g{}, covariance{};
+    std::array<Complex, 3 * 4> g{}, uncertainty{};
     const auto square = taps * taps;
     r[taps] = r0 / variance;
     g[square] = direct / variance;
@@ -1859,17 +1925,22 @@ double coherent_gain_update(ChannelPosterior& posterior, double direct, double e
         g[square + 3] = echo / variance;
     }
     std::copy_n(posterior.mean.begin(), taps, mean.data() + taps);
-    std::copy_n(posterior.covariance.begin(), square, covariance.data() + square);
+    std::copy_n(posterior.uncertainty.begin(), square, uncertainty.data() + square);
     std::array<double, 3> score{};
     std::array<double, 2> diagnostic{};
-    const auto status = triad_gaussian_update_v1(taps, 1, 1, 1, 0, 1,
-        reinterpret_cast<const double*>(r.data()), reinterpret_cast<const double*>(g.data()),
-        powers.data(), transition.data(), reinterpret_cast<double*>(mean.data()),
-        reinterpret_cast<double*>(covariance.data()), score.data(), diagnostic.data());
+    const auto correlation_data = reinterpret_cast<const double*>(r.data());
+    const auto gram_data = reinterpret_cast<const double*>(g.data());
+    const auto mean_data = reinterpret_cast<double*>(mean.data());
+    const auto uncertainty_data = reinterpret_cast<double*>(uncertainty.data());
+    const auto status = taps == 2 ? triad_gaussian_factor2_update_v1(1, 1, 1, 0, 1,
+        correlation_data, gram_data, &rank_bound, powers.data(), transition.data(), mean_data,
+        uncertainty_data, score.data(), diagnostic.data()) :
+        triad_gaussian_update_v1(taps, 1, 1, 1, 0, 1, correlation_data, gram_data,
+            powers.data(), transition.data(), mean_data, uncertainty_data, score.data(), diagnostic.data());
     if (status || score[0] != 0. || score[2] != 0.)
         throw Error("Robust coherent gain update failed (" + std::to_string(status) + ")");
     std::copy_n(mean.data() + taps, taps, posterior.mean.begin());
-    std::copy_n(covariance.data() + square, square, posterior.covariance.begin());
+    std::copy_n(uncertainty.data() + square, square, posterior.uncertainty.begin());
     return score[1];
 }
 
@@ -1915,6 +1986,7 @@ void track_projected_block(std::span<const Complex> templates, std::size_t taps,
         bins[i] = std::clamp(static_cast<std::int64_t>(std::llround(half_bins)), -last, last);
     }
     const auto indices = projection.indices();
+    const auto rank_bound = highest_observation_rank(block);
     // The second lattice reuses the same columns shifted half a DFT bin.
     // Integer shifts then rotate the full transformed template; the actual
     // likelihood observes only orthogonal DATA bins outside Helper support.
@@ -1964,7 +2036,7 @@ void track_projected_block(std::span<const Complex> templates, std::size_t taps,
                 }
                 for (std::size_t power = 0; power < tracking_powers.size(); ++power) {
                     evidence[bit][power][state] = tracking_emission(diagonal[0], diagonal[1], cross,
-                        correlation[0], correlation[1], taps, tracking_powers[power], variance);
+                        correlation[0], correlation[1], taps, tracking_powers[power], variance, rank_bound);
                     if (persistent) {
                         // Correct the deterministic per-state frequency
                         // reference before transporting a complex gain.
@@ -1973,7 +2045,7 @@ void track_projected_block(std::span<const Complex> templates, std::size_t taps,
                         auto& posterior = (*persistent)[bit][power][state];
                         const auto value = coherent_gain_update(posterior.posterior, diagonal[0], diagonal[1], cross,
                             correlation[0] * phase, correlation[1] * phase, taps, tracking_powers[power],
-                            variance, gain_correlation);
+                            variance, gain_correlation, rank_bound);
                         // The persistent branch uses its own accumulated
                         // likelihood. Keep its independent gain peer below.
                         posterior.log_evidence += value;
@@ -2131,7 +2203,8 @@ void track_frequency_block(MappedBasis& basis, const MappedBasisRow& map, std::s
                     const auto phase = std::polar(1., -tau * hz * first / sample_rate);
                     auto& posterior = (*persistent)[bit][power][i];
                     posterior.log_evidence += coherent_gain_update(posterior.posterior, direct_energy, echo_energy, cross,
-                        r0 * phase, r1 * phase, taps.size(), tracking_powers[power], variance, gain_correlation);
+                        r0 * phase, r1 * phase, taps.size(), tracking_powers[power], variance, gain_correlation,
+                        static_cast<unsigned>(std::min<std::size_t>(2, rows)));
                 }
             }
             update_frequency_weights(std::span(evidence).first(plan.states),
@@ -2199,6 +2272,20 @@ bool projected_block_supported(std::size_t rows, const ProjectionBands& bands) {
     return false;
 }
 } // namespace
+
+std::size_t nominal_epoch_timing_capacity(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
+    if (!config.time_varying_channel || config.helper_enabled) return 0;
+    return (config.clock_bound_ppm ? 4 : 1) * (slot.arrival_lower_seconds == slot.arrival_upper_seconds ? 1 : 2);
+}
+
+void enable_midpoint_tracking(VaryingFinePlan& plan) {
+    if (!plan.track_frequency || plan.coherent_gain_blocks || plan.midpoint_tracking)
+        throw Error("Robust midpoint family requires its ordinary short tracking plan");
+    plan.workspace_bytes = checked_add(plan.workspace_bytes,
+        maximum_midpoint_timing_coordinates * (sizeof(TrackingLogWeights) + sizeof(MappedBasisRow) +
+            2 * sizeof(FineCoordinate)));
+    plan.midpoint_tracking = true;
+}
 
 VaryingFinePlan varying_fine_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
                                  bool project_line_atom, bool coherent_gain_blocks) {
@@ -2285,6 +2372,9 @@ VaryingFinePlan varying_fine_plan(const ReceiverConfig& config, const ReceiverSl
         add(track.fft_rows, sizeof(Complex));
         add(maximum_varying_coordinates + maximum_segmented_timing_coordinates,
             sizeof(TrackingLogWeights) + sizeof(MappedBasisRow));
+        if (!coherent_gain_blocks && !project_line_atom)
+            add(nominal_epoch_timing_capacity(config, slot),
+                sizeof(TrackingLogWeights) + sizeof(MappedBasisRow) + 2 * sizeof(FineCoordinate));
         if (coherent_gain_blocks)
             add(maximum_varying_coordinates + maximum_segmented_timing_coordinates, sizeof(TrackingPosteriors));
         add(checked_multiply(active, 4 * track.fft_rows), sizeof(Complex));
@@ -2310,19 +2400,27 @@ std::size_t tracked_frequency_span_workspace(const ReceiverSlotPlan& slot, const
 
 void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                         const VaryingFinePlan& plan, std::span<const Complex> iq,
-                        std::span<const FineCoordinate> selected, std::span<const FineCoordinate> segmented_timing,
+                        std::span<const FineCoordinate> selected, std::span<const FineCoordinate> supplemental_timing,
                         double projected_rate, double clock_gap,
                         unsigned workers, ReceiverSlotScore& score, std::stop_token stop,
                         ReceiverExecutor& executor, const LineAtom* line, TrackedFrequencySpan* span,
-                        TrackedFrequencyClockShadow* clock_shadow) {
+                        TrackedFrequencyClockShadow* clock_shadow,
+                        const MidpointTrackInput* midpoint) {
     check_cancelled(stop);
+    const auto extra_timing = plan.track_frequency && !plan.coherent_gain_blocks && !line ?
+        nominal_epoch_timing_capacity(config, slot) : 0;
     if (!plan.block_rows || selected.empty() || selected.size() > maximum_varying_coordinates ||
-        segmented_timing.size() > maximum_segmented_timing_coordinates ||
+        supplemental_timing.size() > maximum_segmented_timing_coordinates + extra_timing ||
         iq.size() != slot.stop_sample - slot.first_sample)
         throw Error("varying fine scorer requires its bounded public slot and coordinates");
+    if (plan.midpoint_tracking != (midpoint != nullptr) ||
+        (midpoint && (line || span || clock_shadow ||
+            !midpoint->public_lag_count || !std::isfinite(midpoint->original_timing_log_count) ||
+            midpoint->nominations.size() > maximum_midpoint_timing_coordinates)))
+        throw Error("Robust midpoint family requires its bounded ordinary short tracking lease");
     if (clock_shadow) {
         if (!plan.track_frequency || plan.coherent_gain_blocks || config.helper_enabled || line ||
-            !segmented_timing.empty() || clock_shadow->nominations.size() > maximum_segmented_timing_coordinates)
+            !supplemental_timing.empty() || clock_shadow->nominations.size() > maximum_segmented_timing_coordinates)
             throw Error("Robust clock shadow requires room in the unprojected short track timing bank");
         const auto nominations = clock_shadow->nominations;
         *clock_shadow = {};
@@ -2358,7 +2456,7 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
     tracking_config.helper_enabled |= line != nullptr;
     const auto track = plan.track_frequency ?
         tracking_plan(tracking_config, block_rows, final_rows, plan.coherent_gain_blocks) : FrequencyTrackingPlan{};
-    if ((span || clock_shadow) && !track.states)
+    if ((span || clock_shadow || midpoint) && !track.states)
         throw Error("Robust short track evaluation has no resolved frequency states");
     std::optional<modem::detail::search_fft::DoublePlan> tracking_fft;
     std::vector<TrackingLogWeights> tracking_weights;
@@ -2367,22 +2465,42 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
     std::vector<std::vector<Complex>> tracking_scratch;
     std::vector<MappedBasisRow> tracking_maps;
     std::size_t ordinary_tracking_coordinates = 0;
+    std::array<std::size_t, maximum_midpoint_timing_coordinates> midpoint_indices{};
+    std::size_t midpoint_count = 0;
     if (track.states) {
         tracking_fft.emplace(track.fft_rows, stop);
-        tracking_coordinates.reserve(selected.size() + segmented_timing.size() +
-            (clock_shadow ? clock_shadow->nominations.size() : 0));
+        tracking_coordinates.reserve(selected.size() + supplemental_timing.size() +
+            (clock_shadow ? clock_shadow->nominations.size() : 0) +
+            (midpoint ? midpoint->nominations.size() : 0));
         const auto append = [&](FineCoordinate coordinate) {
             coordinate.frequency_hz = 0;
-            if (std::ranges::find(tracking_coordinates, coordinate) == tracking_coordinates.end())
-                tracking_coordinates.push_back(coordinate);
+            const auto found = std::ranges::find(tracking_coordinates, coordinate);
+            const auto index = static_cast<std::size_t>(found - tracking_coordinates.begin());
+            if (found == tracking_coordinates.end()) tracking_coordinates.push_back(coordinate);
+            return index;
         };
         for (const auto& coordinate : selected) append(coordinate);
-        for (const auto& coordinate : segmented_timing) append(coordinate);
+        for (const auto& coordinate : supplemental_timing) append(coordinate);
         ordinary_tracking_coordinates = tracking_coordinates.size();
         if (clock_shadow) {
             for (const auto& coordinate : clock_shadow->nominations) append(coordinate);
             clock_shadow->ordinary_coordinates = ordinary_tracking_coordinates;
             clock_shadow->added_coordinates = tracking_coordinates.size() - ordinary_tracking_coordinates;
+        }
+        if (midpoint) {
+            for (const auto& coordinate : midpoint->nominations) {
+                if (std::ranges::find(receiver_epoch_offsets, coordinate.epoch_offset_seconds) == receiver_epoch_offsets.end() ||
+                    coordinate.frequency_hz != 0 || !std::isfinite(coordinate.clock_ppm) ||
+                    std::abs(coordinate.clock_ppm) > config.clock_bound_ppm ||
+                    !(coordinate.arrival_seconds >= slot.arrival_lower_seconds &&
+                        coordinate.arrival_seconds <= slot.arrival_upper_seconds))
+                    throw Error("Robust midpoint timing nomination exceeds the declared public bounds");
+                const auto index = append(coordinate);
+                const auto retained = std::span(midpoint_indices).first(midpoint_count);
+                if (std::ranges::find(retained, index) == retained.end())
+                    midpoint_indices[midpoint_count++] = index;
+            }
+            score.midpoint_timing_candidates = midpoint_count;
         }
         if (span) {
             if (!clock_shadow && tracking_coordinates.size() > span_maximum_coordinates)
@@ -2409,7 +2527,8 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
                         for (auto& state : std::span(bit[power]).first(track.states)) {
                             state.log_evidence = prior;
                             for (std::size_t tap = 0; tap < taps; ++tap)
-                                state.posterior.covariance[tap * taps + tap] = tracking_powers[power] / taps;
+                                state.posterior.uncertainty[tap * taps + tap] =
+                                    initial_gain_diagonal(taps, tracking_powers[power] / taps);
                         }
         }
         tracking_scratch.resize(active);
@@ -2426,7 +2545,7 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
         state.weights.fill(prior);
         for (auto& channel : state.posterior)
             for (std::size_t tap = 0; tap < taps; ++tap)
-                channel.covariance[tap * taps + tap] = varying_power / taps;
+                channel.uncertainty[tap * taps + tap] = initial_gain_diagonal(taps, varying_power / taps);
     }
     std::vector<Complex> observation_scratch(fft_rows);
     std::vector<Complex> line_storage(line ? final_rows : 0);
@@ -2499,7 +2618,9 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
         if (track.states) {
             const auto per_coordinate = checked_multiply(rows,
                 2 * (config.spread_delay_seconds || (plan.coherent_gain_blocks && config.spread_doppler_hz) ? 2 : 1));
-            add_work(rendered_rows, checked_multiply(per_coordinate, ordinary_tracking_coordinates));
+            const auto extra = midpoint ? tracking_coordinates.size() - ordinary_tracking_coordinates : 0;
+            add_work(rendered_rows, checked_multiply(per_coordinate, ordinary_tracking_coordinates + extra));
+            if (midpoint) add_work(score.midpoint_timing_basis_rows, checked_multiply(per_coordinate, extra));
             if (clock_shadow)
                 add_work(clock_shadow->added_basis_rows, checked_multiply(per_coordinate, clock_shadow->added_coordinates));
         }
@@ -2542,7 +2663,21 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
                 total = log_add(total, persistent) - log_two;
             }
             score.tracked_frequency_bit_evidence[bit] = total;
-            const auto calibrated = total + log_adjustment;
+            auto calibrated = total + log_adjustment;
+            if (midpoint) {
+                double added = -infinity;
+                for (const auto index : std::span(midpoint_indices).first(midpoint_count))
+                    for (const auto& power : tracking_weights[index][bit])
+                        added = std::accumulate(power.begin(), power.begin() + track.states, added, log_add);
+                // Every state starts with the ordinary coordinate count.
+                // Change only the new family's full timing-cell measure:
+                // old (epoch, arrival, clock) cells to (epoch, signed lag).
+                const auto midpoint_adjustment = log_adjustment + midpoint->original_timing_log_count -
+                    std::log(static_cast<double>(receiver_epoch_offsets.size())) -
+                    std::log(static_cast<double>(midpoint->public_lag_count));
+                calibrated = log_add(calibrated + std::log(7. / 8),
+                    added + midpoint_adjustment + std::log(1. / 8));
+            }
             score.varying_bit_evidence[bit] = plan.coherent_gain_blocks ? calibrated :
                 log_add(score.varying_bit_evidence[bit], calibrated) - log_two;
             if (clock_shadow) {

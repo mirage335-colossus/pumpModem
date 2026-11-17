@@ -28,6 +28,10 @@ FinePreparation prepare_fine_coordinates(const ReceiverConfig&, const ReceiverSl
 // only when the coarse plan did not reserve segmented timing.
 std::vector<FineCoordinate> prepare_quarter_clock_timing(const ReceiverConfig&, const ReceiverSlotPlan&,
                                                          const CoarseResult&, const AdmissionGrid&);
+// Ordinary Helper-off short tracking keeps the coarse quarter-clock rows
+// and supplements them with a bounded grid at the configured epoch.
+std::vector<FineCoordinate> prepare_short_tracking_timing(const ReceiverConfig&, const ReceiverSlotPlan&,
+                                                          const CoarseResult&, const AdmissionGrid&);
 
 // Apply once after ordinary model selection and quiet scoring. Never feeds
 // back into fallback scheduling, and can only turn DATA into an erasure.
@@ -75,6 +79,13 @@ ReceiverSlotScore score_slot_with_supplement(
 // Internal comparison for stream fixtures. Uses the normal sequential and
 // overlapped workspace quotes; admitted stages still run one at a time.
 ReceiverSlotScore score_slot_comparing_admitted_evidence(
+    const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
+    std::span<const Complex>, std::span<const std::uint8_t>, unsigned,
+    std::size_t, std::stop_token, ReceiverExecutor*);
+
+// Test-only comparison. Disable the stationary-plus-OU alternative before
+// affine scoring and admission, using the conservative operational quote.
+ReceiverSlotScore score_slot_without_stationary_fading(
     const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
     std::span<const Complex>, std::span<const std::uint8_t>, unsigned,
     std::size_t, std::stop_token, ReceiverExecutor*);

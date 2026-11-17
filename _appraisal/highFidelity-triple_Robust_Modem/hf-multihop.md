@@ -908,3 +908,38 @@ claims. Applied preparation patches and superseded build-only logs are removed;
 the compatible build and source-bound full/affected test logs remain. When a
 claim is superseded, distill its finding and provenance here before removing
 redundant evidence.
+
+## Current-waveform repeated-alarm follow-up — 16 November 2026
+
+The [current physical-alarm record](../../docs/validation.md#weak-physical-channel-alarm-investigation--16-november-2026)
+reuses the identical qualified table digest with the current carrier-v1 waveform
+and native receiver `a497b7fa…`. The historical +3/128 success above is not a
+current pass: `E` now receives 12/13 correct bits, misses slot 12 and is rejected
+after truncated completion. At −3/128 it still misses all thirteen. The frozen
+matrix also sends five separated raw alarms of each polarity through continuous
+channel evolution, advancing actual public ordinals. At −3 both polarities
+receive 0/5; at +3 they receive 5/5 zeros and 4/5 ones. The text/raw-one last-slot
+miss has identical scores and substantial received energy, exposing a current
+likelihood-model question without establishing a natural outage rate.
+
+The matrix shares only the immutable qualified table between its six rows;
+it preserves independent source/noise/receiver construction for comparisons and
+continuous state within each retry episode. The linked record binds current
+binary/source and noisy-IQ hashes, physical apertures, resource use, the corrected
+offline runner validation, and the separately declared receiver discriminator.
+No old receipt is relabeled current, and the historical aggregate failed audit
+remains unchanged. This field's sinusoidal retarded layer motion and one-ray
+receiver profile are distinct from a stochastic HF Worst / Each 65% GUI episode.
+
+A subsequent fixed +4 dB-Hz comparison demonstrates a current receiver
+improvement. A normalized additive stationary-plus-OU gain family receives all
+thirteen bits and correctly completes `E`, while the original family still
+misses slot 12 on the same sealed IQ capture. The +3 replay first reproduces
+the earlier baseline exactly. The failed +3 additive discriminator remains a
+failure; the +4 result establishes an endpoint gain without determining a
+minimum sensitivity or natural outage probability. The linked record gives
+source/capture identities, sequential full-W service measurements and the
+completed final-source preservation checks. The final six-row matrix retains
+all baseline decisions, including the weak misses; changing-frequency retries
+remain 5/5 for each polarity, and all fifteen eligible fresh-noise slots stay
+quiet. No historical aggregate qualification is rewritten.

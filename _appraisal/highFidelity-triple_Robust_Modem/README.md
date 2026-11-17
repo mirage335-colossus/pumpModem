@@ -669,6 +669,104 @@ that root. Communication failure, false DATA, wrong messages, physical completio
 and execution censoring are separate outcomes. A completed campaign means its
 observations were collected, not that every communication succeeded.
 
+### Weak physical long-alarm campaigns
+
+The maintained
+[two-hop long-alarm matrix](campaigns/two-hop-long-alarm-matrix.json) shares
+one qualified immutable physical table across six matched rows: text `E` at
+−3/+3 dB-Hz and raw `0`/`1` at −3/+3 dB-Hz. Each requested 128-second bit is
+139.2 seconds in the current waveform. Raw rows contain five distinct attempts
+at slots 0, 3, 6, 9 and 12, with one continuous channel/receiver within each
+row; only the qualified physical table is shared between rows. It retains the
+full `W=2*H` automatic worker budget, a 1,200-second aggregate cap and
+4,350,000 samples per row.
+
+The complementary
+[physical random long-alarm pair](campaigns/physical-random-long-alarm.json)
+uses the scalar changing-rate physical trajectory for both raw-bit polarities.
+Each row has the same five-attempt spacing and actual 139.2-second bits; the
+two-row campaign is capped at 180 seconds per row / 360 seconds total. The
+polarities share one constructed physical history and are not independent
+natural trials.
+
+Run either frozen manifest with the usual native probe and a fresh output
+directory under ignored `local-evidence/`:
+
+```sh
+python3 -B _appraisal/highFidelity-triple_Robust_Modem/run.py \
+  --probe _appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal \
+  --campaign _appraisal/highFidelity-triple_Robust_Modem/campaigns/two-hop-long-alarm-matrix.json \
+  --output-dir _appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-physical-alarm/two-hop-long-alarm-matrix
+
+python3 -B _appraisal/highFidelity-triple_Robust_Modem/run.py \
+  --probe _appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal \
+  --campaign _appraisal/highFidelity-triple_Robust_Modem/campaigns/physical-random-long-alarm.json \
+  --output-dir _appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-physical-alarm/physical-random-long-alarm
+```
+
+The [validation record](../../docs/validation.md#weak-physical-channel-alarm-investigation--16-november-2026)
+keeps historical results, current native outcomes and runner validation status
+separate; runner completion is not message success. Current physical-alarm
+receipts and binaries are temporary evidence for the active matched diagnosis.
+After disposition, remove superseded binaries and prototype outputs. Retain
+unresolved failure receipts only until their evidence is summarized and the
+associated revalidation duty ends.
+
+### Additive-gain discriminator and conditional checks
+
+The [additive-gain discriminator](campaigns/two-hop-additive-gain-discriminator.json)
+is the frozen +3 dB-Hz matched test of the additive persistent-plus-OU gain
+family. It validly increased wanted evidence but **did not repair** the missed
+slot or complete `E`; retain that failed criterion as part of the result. The
+[boundary campaign](campaigns/two-hop-additive-boundary.json) required a +3
+baseline parity row before its matched +4 dB-Hz existing/additive pair. Its
+first invocation hit the runner's file-size limit before either +4 receive;
+the resource-corrected run reproduced the +3 baseline and completed the paired
+replays. On that same capture, the existing model remained 12/13 while the
+additive model received 13/13 and completed `E`. This is one fixed-history
+endpoint gain; it does not repair the +3 gate, establish a sensitivity
+threshold, or qualify broad field reliability. See the
+[source-bound validation record](../../docs/validation.md#weak-physical-channel-alarm-investigation--16-november-2026)
+for full hashes, costs, failure provenance and limits.
+
+That endpoint gain activated the
+[fresh long-noise control](campaigns/physical-long-additive-noise.json),
+which must retain all-quiet/no-message behavior while executing the additive
+family. Final-source checks complete: the six-row physical matrix preserves
+its original decisions and weak misses, the changing-rate pair retains 5/5
+correct raw bits for both polarities, and all fifteen noise apertures stay
+quiet with the additive bank active. The K2 factor repair and the removal of
+the obsolete 32-second duration cutoff also pass their scoped checks; broad
+field reliability remains unqualified. Use a fresh `--output-dir` for each
+campaign run (under ignored `local-evidence/`):
+
+```sh
+run_id=choose-a-new-unique-run-id
+
+python3 -B _appraisal/highFidelity-triple_Robust_Modem/run.py \
+  --probe _appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal \
+  --campaign _appraisal/highFidelity-triple_Robust_Modem/campaigns/two-hop-additive-gain-discriminator.json \
+  --output-dir _appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-physical-alarm/${run_id}-additive-gain
+
+python3 -B _appraisal/highFidelity-triple_Robust_Modem/run.py \
+  --probe _appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal \
+  --campaign _appraisal/highFidelity-triple_Robust_Modem/campaigns/two-hop-additive-boundary.json \
+  --output-dir _appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-physical-alarm/${run_id}-additive-boundary
+
+python3 -B _appraisal/highFidelity-triple_Robust_Modem/run.py \
+  --probe _appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal \
+  --campaign _appraisal/highFidelity-triple_Robust_Modem/campaigns/physical-long-additive-noise.json \
+  --output-dir _appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-physical-alarm/${run_id}-additive-noise
+```
+
+These binaries and receipts are temporary validation artifacts, not additional
+operating implementations. Superseded prototype binaries, duplicate setup
+outputs and the retired 8/32-model trial outputs have been removed after their
+findings were summarized. Keep the active counterfactual/final binary pair and
+compact raw receipts while they support current qualification or unresolved
+weak points. Remove them once superseded or their release-assurance duty ends;
+keep compatible build caches that still serve current work.
+
 ## Native modes and bounds
 
 - `plan` reports exact public geometry, source assumptions, workspace and sample/

@@ -15,6 +15,7 @@
 #include <random>
 #include <string_view>
 #include <thread>
+#include <utility>
 
 using namespace datapump;
 using namespace std::chrono_literals;
@@ -696,6 +697,74 @@ void dated_live_data_then_eof() {
     }
 }
 
+void raw_bit_session_transmission_and_ordinal() {
+    auto simulated = settings(true);
+    simulated.transfer.modem.sample_rate = 1500;
+    simulated.transfer.modem.carrier_hz = 500;
+    live::Session session;
+    session.start(simulated);
+    const auto prepared = ready(session);
+    check(prepared.bit_seconds && prepared.slot_stride_seconds &&
+          *prepared.slot_stride_seconds * 3 * simulated.transfer.modem.sample_rate < 600000,
+          "Single-bit Robust fixture exceeds its three-window sample budget");
+
+    const auto playback_opens = fixture::playback_opens.load();
+    const auto rejects_raw = [&](std::span<const std::uint8_t> bits, const char* reason) {
+        bool rejected = false;
+        try { session.transmit_bits(bits); }
+        catch (const Error&) { rejected = true; }
+        check(rejected, reason);
+        const auto state = session.snapshot();
+        check(!state.transmitting && state.pattern_steps.empty() && state.signals.empty() && state.received.empty() &&
+              fixture::playback_opens == playback_opens,
+              "Invalid raw bits changed the Robust session or opened audio playback");
+    };
+    rejects_raw(std::span<const std::uint8_t>{}, "Robust accepted an empty raw-bit transmission");
+    const std::array<std::uint8_t, 2> nonbinary{0, 2};
+    rejects_raw(nonbinary, "Robust accepted a nonbinary raw-bit transmission");
+    const std::array<std::uint8_t, transfer::short_message_bits + 1> oversized{};
+    rejects_raw(oversized, "Robust accepted raw bits beyond the public short-message bound");
+
+    const auto initial_ordinal = simulated.calendar->initial_ordinal;
+    const std::array raw_messages{
+        std::pair<std::uint8_t, std::uint64_t>{1, initial_ordinal},
+        std::pair<std::uint8_t, std::uint64_t>{0, initial_ordinal + 3}
+    };
+    for (const auto& [bit, expected_ordinal] : raw_messages) {
+        const std::array<std::uint8_t, 1> raw_bit{bit};
+        session.transmit_bits(raw_bit);
+        std::vector<live::SignalUpdate> signals;
+        std::size_t received_messages = 0;
+        const auto completed = wait(session, [&](auto& out) {
+            signals.insert(signals.end(), out.signals.begin(), out.signals.end());
+            received_messages += out.received.size();
+            check(out.error.empty() && out.receiver_error.empty(),
+                  "Raw-bit Robust simulation failed: " + out.error + "; " + out.receiver_error);
+            check(out.pattern_steps.size() <= 3,
+                  "One raw bit scheduled more than one DATA bit and its two quiet windows");
+            return !out.transmitting;
+        }, "Single raw-bit Robust transmission did not finish", 90s);
+
+        const auto record = std::find_if(signals.rbegin(), signals.rend(), [](const auto& signal) {
+            return signal.complete && signal.robust_reception;
+        });
+        check(record != signals.rend() && record->binary && record->raw_bits == (bit ? "1" : "0") &&
+              !record->validated && received_messages == 0 && completed.received.empty(),
+              "Raw bit was text-coded, decoded as a message, or lost from the native signal record");
+        check(completed.pattern_steps.size() == 3,
+              "Single raw bit did not finish from one DATA slot and two physical quiet slots");
+        for (std::size_t i = 0; i < completed.pattern_steps.size(); ++i) {
+            const auto& row = completed.pattern_steps[i];
+            check(row.index == i && row.ordinal == expected_ordinal + i && row.evidence_complete &&
+                  row.decision == (i == 0 ? live::PatternDecision::data : live::PatternDecision::quiet),
+                  "Raw-bit transmission changed its addressed ordinal or physical completion sequence");
+            if (!i) check(row.bit == bit, "Native raw-bit reception changed the transmitted bit");
+            else check(!row.bit, "Scored quiet window was reported as DATA");
+        }
+    }
+    close(session);
+}
+
 void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dynamic_channel = false) {
     // One predeclared functional stratum, not a sensitivity/capacity claim:
     // public calendar, clear e=001, FEC/Helper/FHSS Off and exact
@@ -1009,6 +1078,8 @@ int main(int argc, char** argv) {
         late_affine_clock_support();
         simulation_cancel_is_not_completion();
         std::cout << "Native Robust lifecycle, duplex routing, and cancellation passed\n" << std::flush;
+        raw_bit_session_transmission_and_ordinal();
+        std::cout << "Native Robust single-bit raw transmission and ordinal checks passed\n" << std::flush;
         complete_native_simulation();
         std::cout << "Native Robust simulation decoded e/001 with two physical quiet slots\n" << std::flush;
         dated_live_data_then_eof();

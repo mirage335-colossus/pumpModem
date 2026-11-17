@@ -239,6 +239,27 @@ and does not enumerate frequency histories. The public score receipt reports
 the admitted coherence times; zero values mean the slow family was not
 supported. See the [channel-model limits](triad-stochastic.md#nonstationary-channel-research-reconciliation)
 before interpreting these scales physically.
+At faster fine cadence, changing-channel operation with one spatial basis also
+admits a simultaneous stationary-plus-fading gain. Two alternatives use the
+existing 0.5/2-second OU timescales and equal stationary/dynamic prior variances;
+they share 0.25 prior mass while the original family retains 0.75. There is no
+bit-duration cutoff. They reuse the existing template correlations and Gram,
+adding only bounded posterior state and updates. Off and the original slow VLF
+family remain unchanged. Two-spatial-basis profiles retain their existing model
+bank; a direct-template additive subset is possible but unqualified under those
+wider bounds. The receipt distinguishes `stationary_plus_ou` from the original
+or slow whole-gain family. See the [physical-channel investigation](validation.md#weak-physical-channel-alarm-investigation--16-november-2026)
+for the fixed-history endpoint gain, original failures and remaining coverage limits.
+
+Ordinary two-tap Gaussian state stores a covariance factor in the existing four
+complex slots, preserving a thin observable direction across updates. Fixed,
+adaptive, slow and medium-tracking callers use that representation; process
+noise and adaptive covariance merging use bounded QR operations. Known one-mode
+projection geometry also prevents rounded evidence in an unobservable direction.
+This adds no spatial, frequency, timing or historical hypotheses. The one-tap
+and additive arithmetic remains distinct, and no hardware-capacity or all-range
+numerical qualification follows from the factor representation.
+
 The default receiver also evaluates an admitted short-coherence likelihood
 when the fixed-affine score already says DATA, then makes the bit decision from
 the weighted combined evidence. This spends bounded additional work to retain
@@ -246,14 +267,41 @@ changing-channel coverage under a strong coherent observation. When Helper is
 Off and coarse search has no segmented timing result, frequency tracking may
 also score up to eight quarter-clock nominees based on each bit's strongest
 ordinary coarse proposal. These nominees stay within the existing clock prior;
-the total fine-coordinate cap remains 32. The line-conditioned short model is
+the raw tracker also retains up to eight deterministic nominal-epoch cells at
+the intermediate clocks and public arrival endpoints. This prevents the noisy
+proposal ranking from omitting the configured epoch entirely. Degenerate clock
+or arrival axes deduplicate naturally; that raw timing bank is capped at 40.
+An additional public midpoint-lag family can contribute at most six coordinates
+when the ordinary short tracker and exact integer template layout support it,
+including its separable Helper-projected route. It
+reuses the clock-zero differential spectra over the transformed public
+arrival/clock interval, then maps retained signed lags back to bounded physical
+arrival and clock values without rounding them to the old clock lattice. The
+frequency tracker reserves a fixed one-eighth share for this family and seven-eighths
+for the old family; the new denominator includes all public epochs and lags,
+including unselected points. Shared coordinates execute once but retain both
+families' separate mass. Eligible empty nomination sets do not reclaim that
+share. Publicly unsupported geometry retains the old model and reports why.
+The maximum raw union is 46 coordinates, with extra workspace charged before
+admission. Expensive tracker count stays bounded, while the input/FFT support
+still reflects accumulated clock uncertainty; this is not constant total cost
+at arbitrary calendar age. Native FP32/FP64 differential proposals also accept
+the existing bulk filter's identical layout; that routing is distinct from an
+actual-device qualification. The line-conditioned short model is
 compared when its workspace is admitted. Longer coherent-gain and drift models
 remain fallback work unless a full comparison is requested. The existing
 search, public hypotheses, priors, and `W=2*H` worker budget are preserved.
 This is a bounded receiver policy, not authentication or a claim that all
 wrong-bit cases are resolved. See the dated
 [short-model and clock-support findings](validation.md#bounded-short-model-competition--16-november-2026)
-for measured benefits and remaining failures.
+for source-bound outcomes and measured cost limits.
+The [repeated-bit diagnosis](validation.md#repeated-single-bit-channel-diagnosis--16-november-2026)
+records the nominal-epoch omission and subsequent calendar-age clock-resolution
+diagnosis motivating these two bounded timing supplements. Sequential and
+overlapped Helper preparation quote and pass the same midpoint work. The late
+Helper regression covers attempted acquisition with projected DATA fallback;
+it is distinct from a new successful-acquisition or field qualification. Mapped
+template layouts without exact unit-step support report the unavailable family.
 Differential and segmented spectral statistics propose candidates; they are
 not admission statistics. Retained candidates keep their original public
 prior mass, and a skipped model does not transfer its weight to another model.

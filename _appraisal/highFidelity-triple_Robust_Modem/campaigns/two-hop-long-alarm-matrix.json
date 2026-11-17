@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "name": "two-hop-current-long-alarm-matrix",
+  "purpose": "Current native waveform/receiver disposition of the historical long two-hop failure and recovery bracket, followed by actual repeated raw alarms. Exactly six ordered rows share only one immutable qualified physical table: text E at -3/+3 dB-Hz, raw bit 0 at -3/+3, raw bit 1 at -3/+3. All use requested 128 seconds (actual 139.2-second DATA), source/channel seed 73613 and noise seed 93613. Raw rows send five separate one-bit emissions at public slots 0,3,6,9,12, each followed by two scored quiet opportunities, through one continuously evolving channel and receiver. The 15-slot horizon fits the existing finite 2400-second physical model; no time compression, state reset between attempts, favorable seed selection or field extension. Share qualified table/checks only across rows; fresh source, noise and receiver state per comparison row. Stop on execution/validation failure or aggregate limits; retain valid communications failures. No population or field outage probability is inferred. A failure admits a separately declared mechanism discriminator, not an automatic sensitivity sweep.",
+  "max_trials": 1,
+  "max_wall_seconds": 1200,
+  "per_trial_wall_seconds": 1200,
+  "max_samples": 4350000,
+  "stop_on_execution_failure": true,
+  "episodes": [
+    {
+      "id": "current-long-two-hop-text-and-alarm-bracket",
+      "scenario": "hf-vector-two-hop",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "rrc",
+      "backend": "cpu",
+      "seed": 73613,
+      "noise_seed": 93613,
+      "bit_seconds": 128,
+      "message": "E",
+      "control": "wanted",
+      "cn0_db_hz": -3,
+      "fec": "off",
+      "helper": false,
+      "two_hop_alarm_matrix": true,
+      "max_wall_seconds": 1200,
+      "max_samples": 4350000,
+      "reception_requirement": "characterization"
+    }
+  ]
+}

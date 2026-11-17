@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "name": "two-hop-additive-boundary",
+  "purpose": "Prospective matched +1 dB characterization after the additive family improved all thirteen wanted scores at +3 dB-Hz but failed the declared repair gate: slot 12 remains quiet, operational evidence 16.603734 versus 21.493379. No model, variance, coherence scale or threshold is retuned. One process shares the unchanged qualified two-hop field table across three ordered roles: plus3-existing, plus4-existing, plus4-additive. The private existing-model-only scorer uses the same canonical driver and original normalized affine bank before all classification/fallback decisions; it is not a copied DSP implementation or public receiver control. First require identical +3 input hash, all fifteen evidence vectors/decisions and public geometry against the saved native a497b7fa text-recovery baseline. The finite native process may collect all three rows; execution failure stops it. Before any +4 comparative inference, an offline parity gate must validate the +3 row against the saved baseline. A parity mismatch invalidates the comparison, even if both +4 receipts are otherwise valid. This pre-execution refinement avoids embedding historical output literals or introducing a runtime handshake into the receiver harness. The +4 roles use fresh sequential full-W receivers and the same sealed 73,109,724-byte IQ/validity spool; each replay verifies its complete digest. Outcomes are fixed prospectively: only additive succeeds demonstrates an endpoint improvement; both succeed demonstrates 1 dB energy recovery without measured sensitivity separation; neither succeeds stops this energy extension; only existing succeeds is a regression requiring investigation. A successful endpoint requires all thirteen DATA bits correct and two genuine ending quiet slots with exact E completion. Record other outcomes, work and source provenance. Conservative current workspace may be charged to the comparator; its time is not old-binary CPU capacity. The aggregate 900-second cap includes field preparation, all three receives and spool I/O, with 4,350,000 samples per point. No automatic +5/+6 point, scale search or seed replacement follows. This selected fixed-history comparison is not an independent natural-condition trial or an outage probability.",
+  "max_trials": 1,
+  "max_wall_seconds": 900,
+  "per_trial_wall_seconds": 900,
+  "max_samples": 4350000,
+  "stop_on_execution_failure": true,
+  "episodes": [
+    {
+      "id": "two-hop-plus3-parity-and-plus4-pair",
+      "scenario": "hf-vector-two-hop",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "rrc",
+      "backend": "cpu",
+      "seed": 73613,
+      "noise_seed": 93613,
+      "bit_seconds": 128,
+      "message": "E",
+      "control": "wanted",
+      "cn0_db_hz": 4,
+      "fec": "off",
+      "helper": false,
+      "two_hop_additive_boundary": true,
+      "max_wall_seconds": 900,
+      "max_samples": 4350000,
+      "reception_requirement": "characterization"
+    }
+  ]
+}

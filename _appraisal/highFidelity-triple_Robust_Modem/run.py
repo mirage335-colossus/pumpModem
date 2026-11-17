@@ -214,8 +214,29 @@ EPISODE_KEYS = {"id", "scenario", "mode", "waveform", "seed", "cn0_db_hz", "cont
                 "hf_trajectory_seed", "hf_trajectory_offset_seconds", "noise_seed", "hf_gannon_native_diagnostic",
                 "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic",
                 "hf_correlated_gain_shadow", "hf_correlated_gain_receiver", "hf_predictive_quiet", "reception_requirement",
-                "hf_gui_tracked_frequency_span", "hf_gui_quarter_clock_shadow"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS
-MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose", "hf-search", "gui-varying"}
+                "hf_gui_tracked_frequency_span", "hf_gui_quarter_clock_shadow", "repeat_bit",
+                "repeat_path_scale", "repeat_path_seed", "repeat_thermal_off", "repeat_separate_attempts",
+                "two_hop_alarm_matrix", "two_hop_additive_boundary"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS
+TWO_HOP_ALARM_MATRIX_CASES = (
+    ("text-weak", -3, "E", None),
+    ("text-recovery", 3, "E", None),
+    ("bit0-weak", -3, None, 0),
+    ("bit0-recovery", 3, None, 0),
+    ("bit1-weak", -3, None, 1),
+    ("bit1-recovery", 3, None, 1),
+)
+TWO_HOP_ALARM_MATRIX_MAX_WALL_SECONDS = 1200
+TWO_HOP_ALARM_MATRIX_MAX_SAMPLES_PER_ROW = 4_350_000
+TWO_HOP_ADDITIVE_BOUNDARY_CASES = (
+    ("plus3-existing", 3, "without_stationary_plus_ou", False),
+    ("plus4-existing", 4, "without_stationary_plus_ou", True),
+    ("plus4-additive", 4, "operational", True),
+)
+TWO_HOP_ADDITIVE_BOUNDARY_MAX_WALL_SECONDS = 900
+TWO_HOP_ADDITIVE_BOUNDARY_MAX_SAMPLES_PER_ROW = 4_350_000
+PHYSICAL_RAW_BIT_MAX_WALL_SECONDS = 180
+PHYSICAL_RAW_BIT_MAX_SAMPLES = 4_350_000
+MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose", "hf-search", "gui-varying", "gui-repeated-bit"}
 CONTROLS = {"wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap", "eof"}
 BACKENDS = {"cpu", "cuda", "vulkan", "gpu"}
 STATUSES = {"completed", "resource_limit", "time_limit", "unavailable", "error"}
@@ -227,6 +248,27 @@ class CampaignError(ValueError):
 
 def _uses_spool(episode: dict[str, Any]) -> bool:
     return episode.get("service_replay", False) or episode.get("hf_predictive_quiet", False)
+
+
+def _native_child_uses_temporary_spool(episode: dict[str, Any]) -> bool:
+    # The additive-boundary native comparison owns its sealed IQ spool
+    # internally; that execution detail is deliberately absent from the public
+    # episode's service-replay controls and endpoint semantics.
+    return _uses_spool(episode) or episode.get("two_hop_additive_boundary") is True
+
+
+def _native_child_file_limit(episode: dict[str, Any], max_samples: int) -> int:
+    if not _native_child_uses_temporary_spool(episode):
+        return MAX_OUTPUT_BYTES
+    return max(MAX_OUTPUT_BYTES, min(episode.get("service_spool_byte_limit", max_samples * 17),
+                                     max_samples * 17))
+
+
+def _is_physical_raw_bit_episode(episode: dict[str, Any]) -> bool:
+    return (episode.get("scenario") == "hf-ensemble-changing-rate" and
+            episode.get("mode") in {"plan", "receive"} and
+            episode.get("repeat_bit") in (0, 1) and
+            episode.get("repeat_separate_attempts") is True)
 
 
 def _sha256(path: Path) -> str:
@@ -274,6 +316,45 @@ def _read_campaign(path: Path) -> dict[str, Any]:
     for index, episode in enumerate(episodes):
         episode_wall_cap = min(value["per_trial_wall_seconds"], value["max_wall_seconds"])
         _validate_episode(episode, index, ids, episode_wall_cap, value["max_samples"])
+    matrix_episodes = [episode for episode in episodes if episode.get("two_hop_alarm_matrix") is True]
+    if matrix_episodes:
+        if (len(episodes) != 1 or len(matrix_episodes) != 1 or
+                value["max_trials"] != 1 or
+                value["max_wall_seconds"] > TWO_HOP_ALARM_MATRIX_MAX_WALL_SECONDS or
+                value["per_trial_wall_seconds"] > TWO_HOP_ALARM_MATRIX_MAX_WALL_SECONDS or
+                value["max_samples"] > TWO_HOP_ALARM_MATRIX_MAX_SAMPLES_PER_ROW):
+            raise CampaignError("two-hop alarm matrix requires one frozen row and aggregate/per-row budgets no greater than 1200 s and 4,350,000 samples")
+        if value.get("confirmatory_strata", {}):
+            raise CampaignError("two-hop alarm matrix cannot claim independent confirmatory strata")
+    additive_boundary_episodes = [episode for episode in episodes
+                                 if episode.get("two_hop_additive_boundary") is True]
+    if additive_boundary_episodes:
+        if (len(episodes) != 1 or len(additive_boundary_episodes) != 1 or
+                value["max_trials"] != 1 or
+                value["max_wall_seconds"] > TWO_HOP_ADDITIVE_BOUNDARY_MAX_WALL_SECONDS or
+                value["per_trial_wall_seconds"] > TWO_HOP_ADDITIVE_BOUNDARY_MAX_WALL_SECONDS or
+                value["max_samples"] > TWO_HOP_ADDITIVE_BOUNDARY_MAX_SAMPLES_PER_ROW or
+                value.get("confirmatory_strata", {})):
+            raise CampaignError("two-hop additive boundary requires one frozen row and 900-second/4,350,000-sample caps")
+    physical_raw_episodes = [episode for episode in episodes if _is_physical_raw_bit_episode(episode)]
+    if physical_raw_episodes:
+        if (len(episodes) != 2 or len(physical_raw_episodes) != 2 or
+                {episode["repeat_bit"] for episode in physical_raw_episodes} != {0, 1} or
+                value["max_trials"] != 2 or
+                value["max_wall_seconds"] > 360 or
+                value["per_trial_wall_seconds"] > PHYSICAL_RAW_BIT_MAX_WALL_SECONDS or
+                value["max_samples"] > PHYSICAL_RAW_BIT_MAX_SAMPLES or
+                value.get("confirmatory_strata", {})):
+            raise CampaignError("physical raw-bit campaign requires its two fixed polarity rows and 360-second/180-second/4,350,000-sample caps")
+    repeated = [episode for episode in episodes if episode["mode"] == "gui-repeated-bit"]
+    if repeated:
+        if len(repeated) != len(episodes):
+            raise CampaignError("a repeated-bit campaign may contain only repeated-bit episodes")
+        separate = [episode for episode in repeated if episode.get("repeat_separate_attempts", False)]
+        if separate and len(separate) != len(repeated):
+            raise CampaignError("separate-attempt campaigns may contain only separate-attempt episodes")
+        if len(separate) > 2:
+            raise CampaignError("separate-attempt cohorts are limited to two paired truth-bit rows")
     confirmatory = value.get("confirmatory_strata", {})
     if not isinstance(confirmatory, dict):
         raise CampaignError("confirmatory_strata must be an object")
@@ -354,6 +435,101 @@ def _validate_episode(item: Any, index: int, ids: set[str],
             _bounded_number(item["hf_" + field], f"episodes[{index}].hf_{field}", low, high)
     if not isinstance(item["mode"], str) or item["mode"] not in MODES:
         raise CampaignError(f"episodes[{index}].mode must be one of {sorted(MODES)}")
+    repeated_fields = {"repeat_bit", "repeat_path_scale", "repeat_path_seed", "repeat_thermal_off",
+                       "repeat_separate_attempts"}
+    physical_raw_bit = _is_physical_raw_bit_episode(item)
+    matrix = item.get("two_hop_alarm_matrix", False)
+    if not isinstance(matrix, bool):
+        raise CampaignError(f"episodes[{index}].two_hop_alarm_matrix must be boolean")
+    additive_boundary = item.get("two_hop_additive_boundary", False)
+    if not isinstance(additive_boundary, bool):
+        raise CampaignError(f"episodes[{index}].two_hop_additive_boundary must be boolean")
+    if matrix:
+        allowed = {"id", "scenario", "mode", "waveform", "seed", "noise_seed", "cn0_db_hz",
+                   "bit_seconds", "message", "pulse", "backend", "control", "helper", "fec",
+                   "two_hop_alarm_matrix", "max_wall_seconds", "max_samples", "reception_requirement"}
+        if set(item) - allowed:
+            raise CampaignError(f"episodes[{index}]: two-hop alarm matrix has unsupported extra controls")
+        if (item["scenario"] != "hf-vector-two-hop" or item["mode"] not in {"plan", "receive"} or
+                item["waveform"] != "reference" or item.get("pulse", "rrc") != "rrc" or
+                item.get("backend", "cpu") != "cpu" or item.get("helper", False) is not False or
+                item.get("fec", "off") != "off" or item.get("control", "wanted") != "wanted" or
+                item.get("message") != "E" or item.get("bit_seconds") != 128 or
+                item.get("seed") != 73613 or item.get("noise_seed") != 93613 or
+                item.get("cn0_db_hz") != -3 or
+                (item["mode"] == "receive" and item.get("reception_requirement") != "characterization") or
+                (item["mode"] == "plan" and item.get("reception_requirement") is not None) or
+                item.get("max_wall_seconds", campaign_per_trial_wall_seconds) > TWO_HOP_ALARM_MATRIX_MAX_WALL_SECONDS or
+                item.get("max_samples", campaign_max_samples) > TWO_HOP_ALARM_MATRIX_MAX_SAMPLES_PER_ROW):
+            raise CampaignError(f"episodes[{index}]: two-hop alarm matrix is limited to the frozen 128 s E/73613/93613 primary CPU reference and -3 dB-Hz base point")
+    if additive_boundary:
+        allowed = {"id", "scenario", "mode", "waveform", "pulse", "backend", "seed", "noise_seed",
+                   "bit_seconds", "message", "control", "fec", "helper", "cn0_db_hz",
+                   "two_hop_additive_boundary", "max_wall_seconds", "max_samples", "reception_requirement"}
+        if (set(item) - allowed or item["scenario"] != "hf-vector-two-hop" or
+                item["mode"] not in {"plan", "receive"} or item["waveform"] != "reference" or
+                item.get("pulse", "rrc") != "rrc" or item.get("backend", "cpu") != "cpu" or
+                item.get("seed") != 73613 or item.get("noise_seed") != 93613 or
+                item.get("bit_seconds") != 128 or item.get("message") != "E" or
+                item.get("control", "wanted") != "wanted" or item.get("fec", "off") != "off" or
+                item.get("helper", False) is not False or item.get("cn0_db_hz") != 4 or
+                item.get("max_wall_seconds", campaign_per_trial_wall_seconds) > TWO_HOP_ADDITIVE_BOUNDARY_MAX_WALL_SECONDS or
+                item.get("max_samples", campaign_max_samples) > TWO_HOP_ADDITIVE_BOUNDARY_MAX_SAMPLES_PER_ROW or
+                (item["mode"] == "receive" and item.get("reception_requirement") != "characterization") or
+                (item["mode"] == "plan" and item.get("reception_requirement") is not None)):
+            raise CampaignError(f"episodes[{index}]: additive boundary is limited to the frozen +4 dB-Hz E/73613/93613 CPU reference and 900-second/4,350,000-sample caps")
+    if repeated_fields & item.keys() and item["mode"] != "gui-repeated-bit" and not physical_raw_bit:
+        raise CampaignError(f"episodes[{index}]: repeated-bit controls require the GUI mode or the frozen changing-rate physical raw-bit case")
+    if physical_raw_bit:
+        allowed = {"id", "scenario", "mode", "waveform", "pulse", "backend", "seed", "noise_seed",
+                   "hf_trajectory_seed", "hf_trajectory_offset_seconds", "bit_seconds", "cn0_db_hz",
+                   "control", "fec", "helper", "repeat_bit", "repeat_separate_attempts",
+                   "max_samples", "max_wall_seconds", "reception_requirement"}
+        wall = item.get("max_wall_seconds", campaign_per_trial_wall_seconds)
+        samples = item.get("max_samples", campaign_max_samples)
+        if (set(item) - allowed or item["scenario"] != "hf-ensemble-changing-rate" or
+                item["mode"] not in {"plan", "receive"} or item["waveform"] != "reference" or
+                item.get("pulse", "rrc") != "rrc" or item.get("backend", "cpu") != "cpu" or
+                item.get("seed") != 30107 or item.get("noise_seed") != 40107 or
+                item.get("hf_trajectory_seed") != 20107 or
+                item.get("hf_trajectory_offset_seconds") != 197 or item.get("bit_seconds") != 128 or
+                item.get("cn0_db_hz") != 0 or item.get("control", "wanted") != "wanted" or
+                item.get("fec", "off") != "off" or item.get("helper", False) is not False or
+                isinstance(item.get("repeat_bit"), bool) or item.get("repeat_bit") not in (0, 1) or
+                item.get("repeat_separate_attempts") is not True or
+                not _is_finite_number(wall) or wall > PHYSICAL_RAW_BIT_MAX_WALL_SECONDS or
+                not _is_nonnegative_int(samples) or samples > PHYSICAL_RAW_BIT_MAX_SAMPLES or
+                (item["mode"] == "receive" and item.get("reception_requirement") != "characterization") or
+                (item["mode"] == "plan" and item.get("reception_requirement") is not None)):
+            raise CampaignError(f"episodes[{index}]: physical raw bits are limited to the frozen changing-rate 128 s, 0 dB-Hz CPU case and finite 180-second/4,350,000-sample bounds")
+    if item["mode"] == "gui-repeated-bit":
+        if item["scenario"] != "hf-gui-native" or item["waveform"] != "reference":
+            raise CampaignError(f"episodes[{index}]: repeated-bit reception requires the native HF GUI reference waveform")
+        if not {"repeat_bit", "repeat_path_scale", "repeat_path_seed"} <= item.keys():
+            raise CampaignError(f"episodes[{index}]: repeated-bit reception requires bit, path scale and path seed")
+        bit = item["repeat_bit"]
+        if isinstance(bit, bool) or not isinstance(bit, int) or bit not in (0, 1):
+            raise CampaignError(f"episodes[{index}].repeat_bit must be 0 or 1")
+        scale = item["repeat_path_scale"]
+        if isinstance(scale, bool) or not isinstance(scale, (int, float)) or scale not in (0, .5, 1):
+            raise CampaignError(f"episodes[{index}].repeat_path_scale must be 0, 0.5 or 1")
+        if not _is_nonnegative_int(item["repeat_path_seed"]) or item["repeat_path_seed"] >= 2**64:
+            raise CampaignError(f"episodes[{index}].repeat_path_seed must be an unsigned 64-bit integer")
+        if "repeat_thermal_off" in item and not isinstance(item["repeat_thermal_off"], bool):
+            raise CampaignError(f"episodes[{index}].repeat_thermal_off must be boolean")
+        if (item.get("control", "wanted") != "wanted" or item.get("backend", "cpu") != "cpu" or
+                item.get("helper", False) or item.get("fec", "off") != "off"):
+            raise CampaignError(f"episodes[{index}]: repeated-bit reception requires Helper-off and FEC-off")
+        sample_cap = 2_400_000 if item.get("repeat_separate_attempts", False) else 1_200_000
+        if campaign_max_samples > sample_cap or campaign_per_trial_wall_seconds > 120:
+            raise CampaignError(f"episodes[{index}]: repeated-bit campaign exceeds its frozen sample/120-second cap")
+        episode_samples = item.get("max_samples", campaign_max_samples)
+        episode_wall = item.get("max_wall_seconds", campaign_per_trial_wall_seconds)
+        if ((_is_nonnegative_int(episode_samples) and episode_samples > sample_cap) or
+                (_is_finite_number(episode_wall) and episode_wall > 120)):
+            raise CampaignError(f"episodes[{index}]: repeated-bit episode exceeds its frozen sample/120-second cap")
+    elif repeated_fields & item.keys() and not physical_raw_bit:
+        raise CampaignError(f"episodes[{index}]: repeated-bit controls require gui-repeated-bit mode")
     if not isinstance(item["waveform"], str) or item["waveform"] not in {"smoke", "reference"}:
         raise CampaignError(f"episodes[{index}].waveform must be smoke or reference")
     if "pulse" in item and (not isinstance(item["pulse"], str) or
@@ -426,7 +602,7 @@ def _validate_episode(item: Any, index: int, ids: set[str],
     if "history_reference_delay_seconds" in item:
         _bounded_number(item["history_reference_delay_seconds"],
                         f"episodes[{index}].history_reference_delay_seconds", 0, sys.float_info.max)
-    for field in ("hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "hf_predictive_quiet"):
+    for field in ("hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "hf_predictive_quiet", "repeat_separate_attempts"):
         if field in item and not isinstance(item[field], bool):
             raise CampaignError(f"episodes[{index}].{field} must be boolean")
     if "chunk" in item:
@@ -503,10 +679,10 @@ def _validate_episode(item: Any, index: int, ids: set[str],
                 any(item.get(field, False) for field in incompatible)):
             raise CampaignError(f"episodes[{index}]: predictive quiet requires exclusive Helper-off reference CPU plan/receive, one episode and FEC off or the frozen protected oblique case")
     if item["scenario"] == "hf-gui-native":
-        if (mode not in {"plan", "slot", "receive", "gui-varying"} or item["waveform"] != "reference" or
+        if (mode not in {"plan", "slot", "receive", "gui-varying", "gui-repeated-bit"} or item["waveform"] != "reference" or
                 item.get("pulse", "rrc") != "rrc" or
                 control not in {"wanted", "noise", "wrong-key", "wrong-ordinal"}):
-            raise CampaignError(f"episodes[{index}]: native GUI requires reference RRC plan/slot/receive/gui-varying and a supported control")
+            raise CampaignError(f"episodes[{index}]: native GUI requires reference RRC plan/slot/receive/diagnostic and a supported control")
         forbidden = {"hf_trajectory_seed", "hf_trajectory_offset_seconds", "capture_lead_seconds",
                      "history_reference_delay_seconds", "hf_phase_bank", "hf_public_phase_receiver",
                      "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "duration_seconds"} & item.keys()
@@ -634,9 +810,22 @@ def _validate_episode(item: Any, index: int, ids: set[str],
             ((cn0 == 6 and seconds == 64) or (cn0 == 3 and seconds == 128)) and
             item.get("message") == "E" and item.get("seed") == 73613 and
             item.get("noise_seed") == 93613)
+        matrix_point = (
+            item.get("two_hop_alarm_matrix", False) is True and
+            not chain and item["scenario"] == "hf-vector-two-hop" and
+            field == "primary" and routes == "both" and cn0 in {-3, 3} and seconds == 128 and
+            (item.get("message") == "E" or item.get("two_hop_alarm_matrix_bit") in (0, 1)) and
+            item.get("seed") == 73613 and
+            item.get("noise_seed") == 93613)
+        additive_boundary_point = (
+            item.get("two_hop_additive_boundary", False) is True and
+            not chain and item["scenario"] == "hf-vector-two-hop" and
+            field == "primary" and routes == "both" and cn0 == 4 and seconds == 128 and
+            item.get("message") == "E" and item.get("seed") == 73613 and
+            item.get("noise_seed") == 93613)
         expected_wanted = ((anchor_point and requirement == "required_complete") or
                            (characterization_point and requirement == "characterization") or
-                           ((lower_followup_point or boundary_followup_point) and
+                           ((lower_followup_point or boundary_followup_point or matrix_point or additive_boundary_point) and
                             requirement == "characterization"))
         expected_negative = (not chain and item["scenario"] == "hf-vector-two-hop" and routes == "both" and
                              ((control in {"noise", "wrong-key"} and cn0 == 30 and seconds == 64) or
@@ -649,7 +838,7 @@ def _validate_episode(item: Any, index: int, ids: set[str],
                 item.get("helper", False) or item.get("fec", "off") != "off" or
                 (item["mode"] != "receive" and (control != "wanted" or not (
                     anchor_point or characterization_point or lower_followup_point or
-                    boundary_followup_point))) or
+                    boundary_followup_point or matrix_point or additive_boundary_point))) or
                 (item["mode"] == "channel" and
                  (lower_followup_point or boundary_followup_point)) or
                 (item["mode"] == "receive" and
@@ -674,9 +863,9 @@ def _validate_episode(item: Any, index: int, ids: set[str],
         raise CampaignError(f"episodes[{index}]: fade_slots is valid only for interior-fade control")
     gannon_control = item["scenario"] in GANNON_REPLAY and mode in {"channel", "oracle"}
     magnetic_oracle_control = item["scenario"] in MAGNETOIONIC_REFLECTION and mode == "oracle" and control == "wanted"
-    if mode not in {"receive", "slot", "diagnose", "hf-search", "gui-varying"} and "control" in item and not service_requested and not gannon_control and not magnetic_oracle_control:
+    if mode not in {"receive", "slot", "diagnose", "hf-search", "gui-varying", "gui-repeated-bit"} and "control" in item and not service_requested and not gannon_control and not magnetic_oracle_control:
         raise CampaignError(f"episodes[{index}]: control is valid only for receiver or diagnostic mode")
-    if mode in {"receive", "slot", "diagnose", "hf-search", "gui-varying"} and control not in CONTROLS:
+    if mode in {"receive", "slot", "diagnose", "hf-search", "gui-varying", "gui-repeated-bit"} and control not in CONTROLS:
         raise CampaignError(f"episodes[{index}]: invalid receiver control")
     if mode == "slot" and control not in {"wanted", "noise"}:
         raise CampaignError(f"episodes[{index}]: slot mode requires wanted or noise control")
@@ -734,12 +923,16 @@ def _validate_episode(item: Any, index: int, ids: set[str],
         if mode not in {"receive", "slot"} or item.get("helper", False) or item.get("backend", "cpu") != "cpu":
             raise CampaignError(f"episodes[{index}]: HF public phase receiver requires receive/slot with Helper-off CPU")
     if "capture_digest_slot" in item:
-        if mode not in {"receive", "slot", "hf-search", "gui-varying"}:
-            raise CampaignError(f"episodes[{index}]: capture_digest_slot requires receive, slot, hf-search or gui-varying mode")
+        if mode not in {"receive", "slot", "hf-search", "gui-varying", "gui-repeated-bit"}:
+            raise CampaignError(f"episodes[{index}]: capture_digest_slot requires receive, slot, hf-search or a GUI diagnostic mode")
         if mode == "slot" and item["capture_digest_slot"] != 0:
             raise CampaignError(f"episodes[{index}]: slot mode can hash only public slot 0")
         if mode == "hf-search" and item["capture_digest_slot"] != item.get("search_slot", 0):
             raise CampaignError(f"episodes[{index}]: hf-search capture_digest_slot must match search_slot")
+        if mode == "gui-repeated-bit":
+            repeated_slots = tuple(3 * ordinal for ordinal in range(6)) if item.get("repeat_separate_attempts", False) else tuple(range(6))
+            if item["capture_digest_slot"] not in repeated_slots:
+                raise CampaignError(f"episodes[{index}]: repeated-bit capture digest must select an active source slot")
     if ({"search_slot", "search_timing"} & item.keys()) and mode != "hf-search":
         raise CampaignError(f"episodes[{index}]: search options are valid only for hf-search mode")
     if "oracle_slot" in item and mode != "oracle":
@@ -812,15 +1005,24 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
                         ("hf_phase_filter_sticky", "--hf-phase-filter-sticky"),
                         ("hf_phase_bridge", "--hf-phase-bridge"),
                         ("hf_gui_clean_diagnostic", "--hf-gui-clean-diagnostic"),
-                        ("hf_compare_admitted_models", "--hf-compare-admitted-models")) + tuple(
+                        ("hf_compare_admitted_models", "--hf-compare-admitted-models"),
+                        ("repeat_bit", "--repeat-bit"),
+                        ("repeat_path_scale", "--repeat-path-scale"),
+                        ("repeat_path_seed", "--repeat-path-seed"),
+                        ("repeat_thermal_off", "--repeat-thermal-off"),
+                        ("repeat_separate_attempts", "--repeat-separate-attempts")) + tuple(
                             (key, "--" + key.replace("_", "-")) for key in sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS)):
         if key in episode:
             value = episode[key]
-            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "hf_gannon_native_diagnostic", "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic", "hf_correlated_gain_shadow", "hf_correlated_gain_receiver", "hf_predictive_quiet", "gui_clock_edge", "service_replay"}:
+            if key in {"helper", "hf_phase_bank", "hf_public_phase_receiver", "hf_physical_diagnostic", "hf_phase_refinement", "hf_phase_filter", "hf_phase_filter_receiver", "hf_phase_filter_paths", "hf_phase_filter_sticky", "hf_phase_bridge", "hf_compare_admitted_models", "hf_gui_clean_diagnostic", "hf_gannon_native_diagnostic", "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic", "hf_correlated_gain_shadow", "hf_correlated_gain_receiver", "hf_predictive_quiet", "repeat_thermal_off", "repeat_separate_attempts", "gui_clock_edge", "service_replay"}:
                 if value:
                     command.append(option)
             else:
                 command.extend((option, str(value)))
+    if episode.get("two_hop_alarm_matrix", False):
+        command.append("--two-hop-alarm-matrix")
+    if episode.get("two_hop_additive_boundary", False):
+        command.append("--two-hop-additive-boundary")
     if episode.get("hf_gui_tracked_frequency_span", False):
         command.append("--hf-gui-tracked-frequency-span")
     if episode.get("hf_gui_quarter_clock_shadow", False):
@@ -1000,15 +1202,100 @@ def _validate_refinement_trace(trace: Any, *, full: bool, timing_count: int,
 
 
 def _communication_endpoint(episode: dict[str, Any]) -> str:
+    if (_is_physical_raw_bit_episode(episode) or episode.get("mode") == "gui-repeated-bit" or
+            episode.get("two_hop_alarm_matrix") is True):
+        return "repeated_raw_bit"
     if _uses_spool(episode) and episode.get("service_episodes", 1) == 2:
         return "service_replay.communication_complete"
     return "correct_decoded_complete" if episode.get("fec", "off") != "off" else "correct_complete"
 
 
 def _communication_outcome(receipt: dict[str, Any], episode: dict[str, Any]) -> Any:
+    if _communication_endpoint(episode) == "repeated_raw_bit":
+        return None  # This endpoint reports truth-aligned raw bits, not codec/message success.
     if _communication_endpoint(episode) == "service_replay.communication_complete":
         return receipt.get("service_replay", {}).get("communication_complete")
     return receipt.get("outcomes", {}).get(_communication_endpoint(episode))
+
+
+def _valid_communication_failure_count(trials: list[dict[str, Any]]) -> int:
+    return sum(trial.get("status") == "completed" and
+               trial.get("receipt", {}).get("status") == "completed" and
+               trial.get("episode", {}).get("mode") == "receive" and
+               trial.get("episode", {}).get("control", "wanted") == "wanted" and
+               _communication_outcome(trial.get("receipt", {}), trial.get("episode", {})) is False
+               for trial in trials)
+
+
+def _repeated_bit_summary(receipt: dict[str, Any], episode: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Summarize the native raw-bit observation without consulting codec output."""
+    result = receipt.get("repeated_bit")
+    slots = receipt.get("slots")
+    plan = receipt.get("plan")
+    channel = receipt.get("channel")
+    if not isinstance(result, dict) or not isinstance(slots, list) or not isinstance(plan, dict):
+        return None
+    source_slots = [slot for slot in slots if isinstance(slot, dict) and slot.get("expected_bit") is not None]
+    correct_slots = [slot for slot in source_slots if slot.get("raw_bit_correct") is True]
+    first_correct = min(correct_slots, key=lambda slot: slot.get("index", 2**64)) if correct_slots else None
+    sample_rate = plan.get("sample_rate_hz")
+    first_correct_time = None
+    if first_correct is not None and _is_finite_number(sample_rate) and sample_rate > 0:
+        first_sample = first_correct.get("first_sample")
+        if _is_nonnegative_int(first_sample):
+            first_correct_time = first_sample / sample_rate
+    decision_counts: dict[str, int] = {}
+    for slot in slots:
+        if isinstance(slot, dict) and isinstance(slot.get("decision"), str):
+            decision = slot["decision"]
+            decision_counts[decision] = decision_counts.get(decision, 0) + 1
+    samples = channel.get("samples") if isinstance(channel, dict) else None
+    elapsed_calendar = samples / sample_rate if _is_nonnegative_int(samples) and _is_finite_number(sample_rate) and sample_rate > 0 else None
+    episode = episode if isinstance(episode, dict) else {}
+    transmission_scope = (plan.get("repeated_bit", {}).get("transmission_scope")
+                          if isinstance(plan.get("repeated_bit"), dict) else None)
+    summary = {
+        "scenario": episode.get("scenario"),
+        "source_scope": ("continuous changing-rate HF channel" if _is_physical_raw_bit_episode(episode) else
+                         "GUI repeated-bit channel" if episode.get("mode") == "gui-repeated-bit" else
+                         transmission_scope),
+        "trajectory_seed": episode.get("hf_trajectory_seed"),
+        "trajectory_offset_seconds": episode.get("hf_trajectory_offset_seconds"),
+        "noise_seed": episode.get("noise_seed"),
+        "cn0_db_hz": episode.get("cn0_db_hz"),
+        "bit_seconds": episode.get("bit_seconds"),
+        "expected_bit": (plan.get("repeated_bit", {}).get("bit")
+                         if isinstance(plan.get("repeated_bit"), dict) else None),
+        "path_scale": (plan.get("repeated_bit", {}).get("path_scale")
+                       if isinstance(plan.get("repeated_bit"), dict) else None),
+        "path_seed": (plan.get("repeated_bit", {}).get("path_seed")
+                      if isinstance(plan.get("repeated_bit"), dict) else None),
+        "separate_attempts": (plan.get("repeated_bit", {}).get("separate_attempts", False)
+                               if isinstance(plan.get("repeated_bit"), dict) else None),
+        "thermal_noise_enabled": (plan.get("repeated_bit", {}).get("thermal_noise_enabled")
+                                  if isinstance(plan.get("repeated_bit"), dict) else None),
+        "public_key_fingerprint_sha256": (plan.get("repeated_bit", {}).get("public_key_fingerprint_sha256")
+                                           if isinstance(plan.get("repeated_bit"), dict) else None),
+        "active_slots": result.get("active_slots"),
+        "correct_data": result.get("correct_data"),
+        "wrong_data": result.get("wrong_data"),
+        "ambiguous_active_slots": result.get("ambiguous_active_slots"),
+        "quiet_active_slots": result.get("quiet_active_slots"),
+        "longest_no_correct_run": result.get("longest_no_correct_run"),
+        "first_correct_ordinal": first_correct.get("symbol_ordinal") if first_correct else None,
+        "first_correct_calendar_seconds": first_correct_time,
+        "trailing_quiet_slots": result.get("trailing_quiet_slots"),
+        "inter_attempt_quiet_slots": result.get("inter_attempt_quiet_slots"),
+        "completed_quiet_pairs": result.get("completed_quiet_pairs"),
+        "physical_quiet_complete": result.get("physical_quiet_complete"),
+        "ordered_valid_complete": result.get("ordered_valid_complete"),
+        "elapsed_calendar_seconds": elapsed_calendar,
+        "decision_counts": decision_counts,
+    }
+    if episode.get("mode") != "gui-repeated-bit":
+        for field in ("path_scale", "path_seed", "thermal_noise_enabled"):
+            summary.pop(field, None)
+    return summary
 
 
 def _validate_phase_filter(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
@@ -2620,18 +2907,65 @@ def _validate_wave_public_calendar(plan: dict[str, Any], episode: dict[str, Any]
             not isinstance(slots, list) or len(slots) != expected_slots):
         raise CampaignError("wave receipt must retain the full expected public slot prefix")
     source_enabled = episode.get("control", "wanted") != "noise"
+    matrix_bit = episode.get("two_hop_alarm_matrix_bit")
+    matrix_active = ({3 * index for index in range(5)} if matrix_bit in (0, 1) else None)
+    physical_raw_active = ({3 * index for index in range(5)} if _is_physical_raw_bit_episode(episode) else None)
     for index, slot in enumerate(slots):
         observation = slot.get("observation") if isinstance(slot, dict) else None
         if (not isinstance(observation, dict) or slot.get("index") != index or
                 not _is_nonnegative_int(observation.get("first")) or
                 not _is_nonnegative_int(observation.get("stop")) or
                 not observation["first"] < observation["stop"] <= horizon or
-                slot.get("evaluator_transmitting") is not (source_enabled and index < wire) or
+                slot.get("evaluator_transmitting") is not (
+                    source_enabled and (index in matrix_active if matrix_active is not None else
+                                        index in physical_raw_active if physical_raw_active is not None else index < wire)) or
                 index >= quiet and observation["first"] < first_clean_sample):
             raise CampaignError("wave public slots must preserve their source map, complete observations and causal quiet tail")
     if slots[-1]["observation"]["stop"] != horizon or (
             shadow and plan.get("search_observation") != slots[-1]["observation"]):
         raise CampaignError("wave capture must end after the last complete expected observation")
+
+
+def _validate_physical_raw_bit_plan(plan: dict[str, Any], episode: dict[str, Any], *,
+                                   native_max_wall_seconds: float | None = None,
+                                   native_max_samples: int | None = None) -> None:
+    bit = episode["repeat_bit"]
+    repeated = plan.get("repeated_bit")
+    scope = repeated.get("transmission_scope") if isinstance(repeated, dict) else None
+    if (not isinstance(repeated, dict) or
+            any(repeated.get(field) != value for field, value in {
+                "bit": bit, "active_slots": 5, "attempts": 5, "requested_active_slots": 5,
+                "separate_attempts": True, "used_for_receiver_decisions": False}.items()) or
+            not isinstance(repeated.get("public_key_fingerprint_sha256"), str) or
+            re.fullmatch(r"[0-9a-fA-F]{64}", repeated["public_key_fingerprint_sha256"]) is None or
+            not isinstance(scope, str) or any(term not in scope.lower() for term in
+                ("one-bit emissions", "public ordinal", "two scored quiet windows",
+                 "one continuous", "changing-rate"))):
+        raise CampaignError("physical raw-bit plan must bind five truth-independent changing-rate emissions")
+    slots = plan.get("public_slots")
+    wall_cap = native_max_wall_seconds if native_max_wall_seconds is not None else episode.get(
+        "max_wall_seconds", PHYSICAL_RAW_BIT_MAX_WALL_SECONDS)
+    sample_cap = native_max_samples if native_max_samples is not None else episode.get(
+        "max_samples", PHYSICAL_RAW_BIT_MAX_SAMPLES)
+    if (not _is_finite_number(plan.get("max_wall_seconds")) or
+            not math.isclose(plan["max_wall_seconds"], wall_cap, rel_tol=1e-12, abs_tol=1e-9) or
+            not _is_nonnegative_int(plan.get("max_samples")) or plan["max_samples"] != sample_cap or
+            plan.get("wire_bits") != 1 or plan.get("requested_message") is not None or
+            plan.get("message") is not None or plan.get("first_uncontaminated_quiet_slot") != 13 or
+            plan.get("scored_slot_horizon") != 15 or plan.get("initial_ordinal") != 0 or
+            not isinstance(slots, list) or len(slots) != 15):
+        raise CampaignError("physical raw-bit plan must preserve one raw bit and its complete 15-slot public horizon")
+    first_epoch = slots[0].get("pattern_epoch") if isinstance(slots[0], dict) else None
+    if not _is_nonnegative_int(first_epoch):
+        raise CampaignError("physical raw-bit plan requires a finite public pattern epoch")
+    active = {0, 3, 6, 9, 12}
+    for index, slot in enumerate(slots):
+        if (not isinstance(slot, dict) or slot.get("index") != index or
+                slot.get("symbol_ordinal") != index or
+                not _is_nonnegative_int(slot.get("pattern_epoch")) or
+                (index and slot["pattern_epoch"] <= slots[index - 1]["pattern_epoch"]) or
+                slot.get("evaluator_transmitting") is not (index in active)):
+            raise CampaignError("physical raw-bit public calendar must preserve five ordered source emissions and advancing ordinals")
 
 
 def _validate_wave_optics(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
@@ -3787,6 +4121,31 @@ def _validate_vector_private_signal_energy(channel: Any, plan: Any) -> None:
             observed > aggregate + max(1e-8, aggregate * 1e-10) or
             not math.isclose(observed + outside, aggregate, rel_tol=1e-10, abs_tol=1e-8)):
         raise CampaignError("private per-slot and outside-aperture energies must account for the aggregate pre-noise signal plane")
+
+
+def _validate_public_likelihood_components(receipt: dict[str, Any], expected_slots: int) -> None:
+    slots = receipt.get("slots")
+    if not isinstance(slots, list) or len(slots) != expected_slots:
+        raise CampaignError("physical raw-bit receive must report every public likelihood-component slot")
+    pair_fields = ("fixed_affine", "short_varying", "short_fixed_gain", "short_frequency_track",
+                   "medium_coherent_gain", "linear_drift", "slow_gain_coherence_seconds")
+    scalar_fields = ("affine_selected_prior_mass", "short_frequency_log_prior_adjustment")
+    expected_keys = set(pair_fields) | set(scalar_fields) | {"scope"}
+    for index, slot in enumerate(slots):
+        parts = slot.get("likelihood_components") if isinstance(slot, dict) else None
+        scope = parts.get("scope") if isinstance(parts, dict) else None
+        if (not isinstance(parts, dict) or set(parts) != expected_keys or
+                not isinstance(scope, str) or any(term not in scope.lower() for term in
+                    ("public", "candidate-averaged", "before", "priors"))):
+            raise CampaignError(f"physical raw-bit slot {index} has invalid public likelihood-component scope")
+        for field in pair_fields:
+            value = parts[field]
+            if value is not None and (not isinstance(value, list) or len(value) != 2 or
+                                      any(item is not None and not _is_finite_number(item) for item in value)):
+                raise CampaignError(f"physical raw-bit {field} must be a null or finite two-model pair")
+        for field in scalar_fields:
+            if parts[field] is not None and not _is_finite_number(parts[field]):
+                raise CampaignError(f"physical raw-bit {field} must be finite or null")
 
 
 def _validate_vector_oblique(receipt: dict[str, Any], episode: dict[str, Any]) -> None:
@@ -5700,8 +6059,483 @@ def _validate_predictive_slot(diagnostic: dict[str, Any], baseline: dict[str, An
         raise CampaignError("unaccepted predictive quiet attempt cannot report a passed decision")
 
 
+def _validate_repeated_bit_receipt(receipt: dict[str, Any], episode: dict[str, Any], plan: dict[str, Any], *,
+                                   physical_attempt_count: int | None = None,
+                                   expected_bit: int | None = None) -> None:
+    physical = physical_attempt_count is not None
+    active_count = physical_attempt_count if physical else 6
+    bit_value = expected_bit if physical else episode["repeat_bit"]
+    separate_attempts = physical or episode.get("repeat_separate_attempts", False)
+    if physical:
+        requested = {"bit": bit_value, "active_slots": active_count,
+                     "attempts": active_count, "requested_active_slots": active_count,
+                     "separate_attempts": True, "used_for_receiver_decisions": False}
+    else:
+        requested = {"bit": bit_value, "active_slots": active_count,
+                     "path_scale": episode["repeat_path_scale"], "path_seed": episode["repeat_path_seed"],
+                     "oscillator_seed": episode["seed"], "noise_seed": episode.get("noise_seed", episode["seed"]),
+                     "thermal_noise_enabled": not episode.get("repeat_thermal_off", False),
+                     "used_for_receiver_decisions": False}
+    planned = plan.get("repeated_bit")
+    if (not isinstance(planned, dict) or any(planned.get(key) != value for key, value in requested.items()) or
+            planned.get("separate_attempts", False) is not separate_attempts):
+        raise CampaignError("repeated-bit plan does not match the frozen channel and raw-bit request")
+    if physical:
+        expected_scope_channel = "changing-rate" if episode.get("scenario") == "hf-ensemble-changing-rate" else "two-hop"
+        scope = planned.get("transmission_scope")
+        if (not isinstance(scope, str) or
+                any(term not in scope.lower() for term in ("one-bit emissions", "public ordinal",
+                    "two scored quiet windows", "one continuous", expected_scope_channel))):
+            raise CampaignError("physical repeated-bit plan must describe its public schedule and continuous channel without truth use")
+    fingerprint = planned.get("public_key_fingerprint_sha256")
+    if not isinstance(fingerprint, str) or re.fullmatch(r"[0-9a-fA-F]{64}", fingerprint) is None:
+        raise CampaignError("repeated-bit plan must identify the public key without exposing it")
+
+    result = receipt.get("repeated_bit")
+    if (not isinstance(result, dict) or result.get("active_slots") != active_count or
+            result.get("separate_attempts", False) is not separate_attempts):
+        raise CampaignError(f"completed repeated-bit receipt must report {active_count} active raw apertures")
+    count_fields = ("correct_data", "wrong_data", "ambiguous_active_slots", "quiet_active_slots")
+    counts: dict[str, int] = {}
+    for field in count_fields:
+        value = result.get(field)
+        if not _is_nonnegative_int(value):
+            raise CampaignError(f"repeated-bit receipt requires nonnegative {field}")
+        counts[field] = value
+    if (not _is_nonnegative_int(result.get("longest_no_correct_run")) or
+            result["longest_no_correct_run"] > active_count):
+        raise CampaignError(f"repeated-bit longest no-correct run must be between zero and {active_count}")
+    trailing = result.get("trailing_quiet_slots")
+    if not _is_nonnegative_int(trailing) or trailing > 2:
+        raise CampaignError("repeated-bit trailing quiet count must be between zero and two")
+    if (not isinstance(result.get("physical_quiet_complete"), bool) or
+            (not separate_attempts and result["physical_quiet_complete"] is not (trailing == 2)) or
+            not isinstance(result.get("ordered_valid_complete"), bool)):
+        raise CampaignError("repeated-bit quiet and ordered-valid outcomes are inconsistent")
+    if separate_attempts:
+        if (not _is_nonnegative_int(result.get("inter_attempt_quiet_slots")) or
+                result["inter_attempt_quiet_slots"] > 2 * (active_count - 1) or
+                not _is_nonnegative_int(result.get("completed_quiet_pairs")) or
+                result["completed_quiet_pairs"] > active_count or
+                result["physical_quiet_complete"] is not (result["completed_quiet_pairs"] == active_count)):
+            raise CampaignError("separate-attempt quiet accounting must match all inter-attempt quiet slots and completion pairs")
+
+    q0 = plan.get("first_uncontaminated_quiet_slot")
+    horizon = plan.get("scored_slot_horizon")
+    sample_rate = plan.get("sample_rate_hz")
+    receiver_noise_variance = plan.get("noise_variance")
+    horizon_samples = plan.get("horizon_samples")
+    repeat_max_samples = (TWO_HOP_ALARM_MATRIX_MAX_SAMPLES_PER_ROW if physical else
+                          2_400_000 if separate_attempts else 1_200_000)
+    channel = receipt.get("channel")
+    if (not _is_finite_number(receiver_noise_variance) or receiver_noise_variance <= 0):
+        raise CampaignError("repeated-bit reception requires positive receiver noise variance")
+    if (not _is_finite_number(sample_rate) or sample_rate <= 0 or
+            not _is_nonnegative_int(horizon_samples) or horizon_samples == 0 or
+            not isinstance(channel, dict) or channel.get("samples") != horizon_samples or
+            channel.get("hashed_samples") != horizon_samples or
+            not isinstance(channel.get("input_sha256"), str) or
+            re.fullmatch(r"[0-9a-fA-F]{64}", channel["input_sha256"]) is None or
+            not _is_nonnegative_int(plan.get("max_samples")) or plan["max_samples"] > repeat_max_samples or
+            horizon_samples > plan["max_samples"] or
+            not _is_finite_number(plan.get("max_wall_seconds")) or
+            plan["max_wall_seconds"] > ((PHYSICAL_RAW_BIT_MAX_WALL_SECONDS
+                if episode.get("scenario") == "hf-ensemble-changing-rate" else TWO_HOP_ALARM_MATRIX_MAX_WALL_SECONDS)
+                if physical else 120)):
+        raise CampaignError("repeated-bit receipt must bind the full hashed capture within its declared finite bounds")
+    if (plan.get("represented_seconds") != horizon_samples / sample_rate or
+            plan.get("fits_sample_budget") is not True):
+        raise CampaignError("repeated-bit plan must preserve its complete finite calendar and sample admission")
+    slots = receipt.get("slots")
+    expected_first_quiet = 3 * active_count - 2 if separate_attempts else active_count
+    if (not _is_nonnegative_int(q0) or q0 != expected_first_quiet or not _is_nonnegative_int(horizon) or horizon != q0 + 2 or
+            (separate_attempts and (horizon != 3 * active_count or plan.get("wire_bits") != 1)) or
+            not isinstance(slots, list) or len(slots) != horizon):
+        raise CampaignError(f"repeated-bit receipt must include {active_count} source and two final physical quiet apertures")
+    public_slots = plan.get("public_slots")
+    if not isinstance(public_slots, list) or len(public_slots) != horizon:
+        raise CampaignError("repeated-bit receipt must preserve its complete public calendar")
+    actual_counts = {field: 0 for field in count_fields}
+    miss_run = longest_miss_run = 0
+    quiet_count = 0
+    first_source_seen = 0
+    active_indices = (tuple(3 * index for index in range(active_count)) if separate_attempts
+                      else tuple(range(active_count)))
+    active_set = set(active_indices)
+    for index, (slot, public) in enumerate(zip(slots, public_slots)):
+        if not isinstance(slot, dict) or not isinstance(public, dict):
+            raise CampaignError("repeated-bit receipt public slot arrays must contain objects")
+        if (slot.get("index") != index or public.get("index") != index or
+                not _is_nonnegative_int(slot.get("pattern_epoch")) or
+                not _is_nonnegative_int(slot.get("symbol_ordinal")) or
+                slot.get("pattern_epoch") != public.get("pattern_epoch") or
+                slot.get("symbol_ordinal") != public.get("symbol_ordinal")):
+            raise CampaignError("repeated-bit receipt must preserve ordered public epoch and ordinal geometry")
+        observation, quiet = public.get("observation"), public.get("quiet_aperture")
+        if (not isinstance(observation, dict) or not isinstance(quiet, dict) or
+                any(not _is_nonnegative_int(observation.get(field)) for field in ("first", "stop")) or
+                any(not _is_nonnegative_int(quiet.get(field)) for field in ("first", "stop")) or
+                observation["stop"] <= observation["first"] or quiet["stop"] <= quiet["first"] or
+                observation["stop"] > horizon_samples or not observation["first"] <= quiet["first"] < quiet["stop"] <= observation["stop"] or
+                slot.get("first_sample") != observation["first"] or
+                slot.get("stop_sample") != observation["stop"] or
+                slot.get("quiet_first_sample") != quiet["first"] or
+                slot.get("quiet_stop_sample") != quiet["stop"]):
+            raise CampaignError("repeated-bit slot bounds must match the frozen public aperture and quiet window")
+        if (not isinstance(slot.get("complete"), bool) or not isinstance(slot.get("all_valid"), bool) or
+                slot.get("decision") not in {"data", "quiet", "ambiguous"}):
+            raise CampaignError("repeated-bit slot is missing its complete, validity or decision fields")
+        expected = bit_value if index in active_set else None
+        if slot.get("expected_bit") != expected:
+                raise CampaignError("repeated-bit slot truth annotation does not match the frozen raw-bit source")
+        if public.get("evaluator_transmitting") is not (index in active_set):
+            raise CampaignError("repeated-bit public calendar must match the frozen active source apertures")
+        if index in active_set:
+            first_source_seen += 1
+            raw_correct = slot.get("raw_bit_correct")
+            if not isinstance(raw_correct, bool):
+                raise CampaignError("active repeated-bit slot requires a raw correctness boolean")
+            decision = slot["decision"]
+            bit = slot.get("bit")
+            if decision == "data":
+                if not _is_nonnegative_int(bit) or bit > 1:
+                    raise CampaignError("repeated-bit DATA decision must identify raw bit zero or one")
+                if bit != expected:
+                    actual_counts["wrong_data"] += 1
+                if raw_correct:
+                    actual_counts["correct_data"] += 1
+            elif decision == "ambiguous":
+                actual_counts["ambiguous_active_slots"] += 1
+            else:
+                actual_counts["quiet_active_slots"] += 1
+            if raw_correct and (decision != "data" or bit != expected or
+                                slot.get("complete") is not True or slot.get("all_valid") is not True):
+                raise CampaignError("a correct repeated-bit receipt requires a matching complete valid DATA decision")
+            if result["ordered_valid_complete"] and raw_correct is not (decision == "data" and bit == expected):
+                raise CampaignError("ordered-valid repeated-bit slots must report exact truth-aligned raw correctness")
+            miss_run = 0 if raw_correct else miss_run + 1
+            longest_miss_run = max(longest_miss_run, miss_run)
+        else:
+            if slot.get("raw_bit_correct") is not None:
+                raise CampaignError("off-source repeated-bit slots must not report raw bit correctness")
+            if (index >= q0 and slot["decision"] == "quiet" and
+                    slot.get("noise_statistics_valid") is True):
+                quiet_count += 1
+    actual_counts["correct_data"] = sum(slots[index].get("raw_bit_correct") is True for index in active_indices)
+    if first_source_seen != active_count or actual_counts != counts or longest_miss_run != result["longest_no_correct_run"]:
+        raise CampaignError("repeated-bit aggregate counts must match truth-aligned per-slot decisions")
+    if result["ordered_valid_complete"] and sum(counts.values()) != active_count:
+        raise CampaignError("ordered-valid repeated-bit counts must partition all active apertures")
+    if quiet_count != trailing:
+        raise CampaignError("repeated-bit trailing quiet count must match the final scored public apertures")
+    if separate_attempts:
+        def fully_scored_quiet(slot: dict[str, Any]) -> bool:
+            return (slot.get("decision") == "quiet" and slot.get("complete") is True and
+                    slot.get("all_valid") is True and slot.get("noise_statistics_valid") is True)
+        internal = [index for index in range(q0) if index not in active_set]
+        internal_quiet = sum(fully_scored_quiet(slots[index]) for index in internal)
+        completed_pairs = sum(all(fully_scored_quiet(slots[index + offset]) for offset in (1, 2))
+                              for index in active_indices)
+        if (internal_quiet != result["inter_attempt_quiet_slots"] or
+                completed_pairs != result["completed_quiet_pairs"]):
+            raise CampaignError("separate-attempt quiet counts must match the fully scored in-order quiet apertures")
+    if result["ordered_valid_complete"] and any(slot.get("complete") is not True or slot.get("all_valid") is not True
+                                                   for slot in slots):
+        raise CampaignError("ordered-valid repeated-bit completion requires every declared aperture")
+    if receipt.get("messages") != []:
+        raise CampaignError("repeated-bit reception must not publish codec messages as its raw-bit outcome")
+    outcomes = receipt.get("outcomes")
+    if (not isinstance(outcomes, dict) or outcomes.get("receiver_executed") is not True or
+            outcomes.get("component_only") is not True or outcomes.get("completion_evaluated") is not False or
+            outcomes.get("communication_endpoint") != "repeated_raw_bit" or
+            outcomes.get("actual_scored_slots") != horizon):
+        raise CampaignError("repeated-bit outcomes must report the raw receiver scope, not codec completion")
+
+
+def _validate_two_hop_alarm_matrix_receipt(receipt: dict[str, Any], episode: dict[str, Any],
+                                           native_max_wall_seconds: float | None = None) -> None:
+    matrix = receipt.get("two_hop_alarm_matrix")
+    declared_limit = episode.get("max_wall_seconds", TWO_HOP_ALARM_MATRIX_MAX_WALL_SECONDS)
+    limit = (native_max_wall_seconds if native_max_wall_seconds is not None else declared_limit)
+    sample_limit = episode.get("max_samples", TWO_HOP_ALARM_MATRIX_MAX_SAMPLES_PER_ROW)
+    expected_matrix_keys = {"planned_rows", "aggregate_wall_limit_seconds", "per_row_sample_limit", "rows"}
+    has_aggregate_time = episode["mode"] == "receive" or (
+        isinstance(matrix, dict) and "wall_seconds" in matrix)
+    if has_aggregate_time:
+        expected_matrix_keys.add("wall_seconds")
+    if (not isinstance(matrix, dict) or set(matrix) - expected_matrix_keys - {"wall_seconds"} or
+            episode["mode"] == "receive" and "wall_seconds" not in matrix or
+            matrix.get("planned_rows") != len(TWO_HOP_ALARM_MATRIX_CASES) or
+            not _is_finite_number(matrix.get("aggregate_wall_limit_seconds")) or
+            matrix["aggregate_wall_limit_seconds"] > declared_limit or
+            not math.isclose(matrix["aggregate_wall_limit_seconds"], limit, rel_tol=1e-12, abs_tol=1e-9) or
+            matrix.get("per_row_sample_limit") != sample_limit):
+        raise CampaignError("two-hop alarm matrix must report its six-row order and frozen aggregate/sample limits")
+    rows = matrix.get("rows")
+    expected_ids = [case_id for case_id, _cn0, _message, _bit in TWO_HOP_ALARM_MATRIX_CASES]
+    if (not isinstance(rows, list) or len(rows) != len(expected_ids) or
+            [row.get("case_id") if isinstance(row, dict) else None for row in rows] != expected_ids):
+        raise CampaignError("two-hop alarm matrix must contain its six frozen rows in order")
+    base_identity = receipt.get("source_identity")
+    if not isinstance(base_identity, dict):
+        raise CampaignError("two-hop alarm matrix must bind its source identity")
+    key_fingerprints: list[str] = []
+    table_hashes: list[str] = []
+    preparation_times: list[float] = []
+    energy_pairs: dict[str, tuple[float, float]] = {}
+    row_wall_seconds = 0.
+    for row, (case_id, cn0, message, bit) in zip(rows, TWO_HOP_ALARM_MATRIX_CASES):
+        child = row.get("receipt")
+        if not isinstance(child, dict) or child.get("status") != "completed":
+            raise CampaignError(f"two-hop alarm matrix row {case_id} is not a completed native receipt")
+        child_identity = child.get("source_identity")
+        if child_identity != base_identity:
+            raise CampaignError("two-hop alarm matrix rows must share the exact compiled source identity")
+        child_episode = dict(episode)
+        child_episode.update(mode=episode["mode"], cn0_db_hz=cn0, message=message,
+                             control="wanted", two_hop_alarm_matrix=True)
+        if bit is not None:
+            child_episode["two_hop_alarm_matrix_bit"] = bit
+        if episode["mode"] == "receive":
+            child_episode["reception_requirement"] = "characterization"
+        else:
+            child_episode.pop("reception_requirement", None)
+        _validate_completed_receipt(child, child_episode, _two_hop_matrix_child=True,
+                                    _native_max_wall_seconds=limit if episode["mode"] == "receive" else None)
+        child_plan = child.get("plan")
+        if not isinstance(child_plan, dict):
+            raise CampaignError(f"two-hop alarm matrix row {case_id} has no public plan")
+        if (child_plan.get("max_wall_seconds") != limit or
+                child_plan.get("max_samples") != sample_limit):
+            raise CampaignError(f"two-hop alarm matrix row {case_id} must bind the actual per-row native process limits")
+        public_slots = child_plan.get("public_slots")
+        horizon = 13
+        if (not isinstance(public_slots, list) or len(public_slots) != 15 or
+                child_plan.get("scored_slot_horizon") != 15 or
+                child_plan.get("first_uncontaminated_quiet_slot") != horizon or
+                child_plan.get("initial_ordinal") != 0 or
+                not isinstance(public_slots[0], dict) or
+                not _is_nonnegative_int(public_slots[0].get("pattern_epoch"))):
+            raise CampaignError(f"two-hop alarm matrix row {case_id} must fit the same complete 15-slot physical horizon")
+        first_epoch = public_slots[0]["pattern_epoch"]
+        active_indices = {3 * index for index in range(5)} if bit is not None else set(range(13))
+        for index, slot in enumerate(public_slots):
+            if (not isinstance(slot, dict) or slot.get("index") != index or
+                    slot.get("symbol_ordinal") != index or
+                    slot.get("pattern_epoch") != first_epoch + 150 * index or
+                    slot.get("evaluator_transmitting") is not (index in active_indices)):
+                raise CampaignError(f"two-hop alarm matrix row {case_id} must preserve advancing ordinals and its frozen emission schedule")
+        if bit is not None:
+            if episode["mode"] == "receive":
+                _validate_repeated_bit_receipt(child, child_episode, child_plan,
+                                               physical_attempt_count=5, expected_bit=bit)
+            repeated_plan = child_plan.get("repeated_bit")
+            if (not isinstance(repeated_plan, dict) or repeated_plan.get("bit") != bit or
+                    repeated_plan.get("active_slots") != 5 or repeated_plan.get("attempts") != 5 or
+                    repeated_plan.get("requested_active_slots") != 5 or
+                    repeated_plan.get("separate_attempts") is not True or
+                    repeated_plan.get("used_for_receiver_decisions") is not False or
+                    not isinstance(repeated_plan.get("transmission_scope"), str) or
+                    any(term not in repeated_plan["transmission_scope"].lower() for term in
+                        ("one-bit emissions", "public ordinal", "two scored quiet windows",
+                         "one continuous two-hop channel"))):
+                raise CampaignError(f"two-hop alarm matrix row {case_id} must preserve its five public bit emissions without receiver truth use")
+            fingerprint = repeated_plan.get("public_key_fingerprint_sha256")
+            if not isinstance(fingerprint, str) or re.fullmatch(r"[0-9a-fA-F]{64}", fingerprint) is None:
+                raise CampaignError("two-hop repeated-bit plan must identify one public key without exposing it")
+            key_fingerprints.append(fingerprint)
+        if episode["mode"] == "receive":
+            channel = child.get("channel")
+            use = channel.get("vector_two_hop_table_use") if isinstance(channel, dict) else None
+            expected_reused = case_id != expected_ids[0]
+            if (not isinstance(use, dict) or use.get("table_reused") is not expected_reused or
+                    not _is_finite_number(use.get("preparation_seconds")) or use["preparation_seconds"] < 0):
+                raise CampaignError(f"two-hop alarm matrix row {case_id} has invalid physical table reuse or timing")
+            digest = use.get("table_sha256")
+            vector = channel.get("vector_two_hop")
+            if (not isinstance(vector, dict) or digest != vector.get("table_sha256") or
+                    not isinstance(digest, str) or re.fullmatch(r"[0-9a-fA-F]{64}", digest) is None):
+                raise CampaignError(f"two-hop alarm matrix row {case_id} does not bind its shared qualified channel table")
+            slots = child.get("slots")
+            component_pairs = ("fixed_affine", "short_varying", "short_fixed_gain", "short_frequency_track",
+                               "medium_coherent_gain", "linear_drift")
+            component_scalars = ("affine_selected_prior_mass", "short_frequency_log_prior_adjustment")
+            component_keys = set(component_pairs) | set(component_scalars) | {"scope", "slow_gain_coherence_seconds"}
+            if not isinstance(slots, list) or len(slots) != 15:
+                raise CampaignError(f"two-hop alarm matrix row {case_id} must report all 15 scored public slots")
+            for slot_index, slot in enumerate(slots):
+                parts = slot.get("likelihood_components") if isinstance(slot, dict) else None
+                scope = parts.get("scope") if isinstance(parts, dict) else None
+                if (not isinstance(parts, dict) or set(parts) != component_keys or
+                        not isinstance(scope, str) or not scope or
+                        any(term not in scope.lower() for term in ("public", "candidate-averaged", "before", "priors"))):
+                    raise CampaignError(f"two-hop alarm matrix row {case_id} slot {slot_index} has invalid likelihood-component scope")
+                for field in component_pairs:
+                    value = parts[field]
+                    if value is not None and (not isinstance(value, list) or len(value) != 2 or
+                                              any(v is not None and not _is_finite_number(v) for v in value)):
+                        raise CampaignError(f"two-hop alarm matrix {field} must be a null or a finite two-bit pair")
+                for field in component_scalars:
+                    value = parts[field]
+                    if value is not None and not _is_finite_number(value):
+                        raise CampaignError(f"two-hop alarm matrix {field} must be finite or null")
+                slow = parts["slow_gain_coherence_seconds"]
+                if slow is not None and (not isinstance(slow, list) or len(slow) != 2 or
+                                         any(value is not None and not _is_finite_number(value) for value in slow)):
+                    raise CampaignError("two-hop alarm matrix slow-gain coherence must be a null or finite two-model pair")
+            table_hashes.append(digest)
+            preparation_times.append(use["preparation_seconds"])
+            vector_fields = ("incident_energy_sample_sum", "selected_energy_sample_sum")
+            if any(not _is_finite_number(vector.get(field)) or vector[field] < 0 for field in vector_fields):
+                raise CampaignError(f"two-hop alarm matrix row {case_id} must retain its route-independent physical energy measurements")
+            energy_pairs[case_id] = tuple(vector[field] for field in vector_fields)
+            timing = child.get("timing", {})
+            if isinstance(timing, dict) and _is_finite_number(timing.get("wall_seconds")):
+                row_wall_seconds += timing["wall_seconds"]
+    if len(set(key_fingerprints)) != 1 or len(key_fingerprints) != 4:
+        raise CampaignError("two-hop repeated-bit rows must use one key identity for both truth bits and energy levels")
+    if episode["mode"] == "receive":
+        if (len(table_hashes) != len(expected_ids) or len(set(table_hashes)) != 1 or
+                len(preparation_times) != len(expected_ids) or preparation_times[0] <= 0 or
+                any(value >= preparation_times[0] for value in preparation_times[1:]) or
+                not _is_finite_number(matrix.get("wall_seconds")) or matrix["wall_seconds"] < row_wall_seconds or
+                matrix["wall_seconds"] > limit):
+            raise CampaignError("two-hop receive matrix must use one physical table and account for bounded ordered row service")
+        for prefix in ("text", "bit0", "bit1"):
+            weak, recovery = energy_pairs[f"{prefix}-weak"], energy_pairs[f"{prefix}-recovery"]
+            if any(not math.isclose(a, b, rel_tol=1e-12, abs_tol=1e-7) for a, b in zip(weak, recovery)):
+                raise CampaignError(f"two-hop {prefix} weak/recovery rows must preserve the same emitted source and propagated physical history")
+    elif (table_hashes or "wall_seconds" in matrix and
+          (not _is_finite_number(matrix["wall_seconds"]) or matrix["wall_seconds"] < 0 or
+           matrix["wall_seconds"] > limit)):
+        raise CampaignError("two-hop planning cannot claim table reuse and must keep optional aggregate planning time bounded")
+
+
+def _validate_two_hop_additive_boundary_receipt(receipt: dict[str, Any], episode: dict[str, Any],
+                                                native_max_wall_seconds: float | None = None) -> None:
+    boundary = receipt.get("two_hop_additive_boundary")
+    declared_limit = episode.get("max_wall_seconds", TWO_HOP_ADDITIVE_BOUNDARY_MAX_WALL_SECONDS)
+    limit = native_max_wall_seconds if native_max_wall_seconds is not None else declared_limit
+    sample_limit = episode.get("max_samples", TWO_HOP_ADDITIVE_BOUNDARY_MAX_SAMPLES_PER_ROW)
+    expected_keys = {"planned_rows", "aggregate_wall_limit_seconds", "per_row_sample_limit", "rows"}
+    if episode["mode"] == "receive":
+        expected_keys.add("wall_seconds")
+    if (not isinstance(boundary, dict) or set(boundary) != expected_keys or
+            boundary.get("planned_rows") != len(TWO_HOP_ADDITIVE_BOUNDARY_CASES) or
+            not _is_finite_number(boundary.get("aggregate_wall_limit_seconds")) or
+            not 0 < boundary["aggregate_wall_limit_seconds"] <= declared_limit or
+            not math.isclose(boundary["aggregate_wall_limit_seconds"], limit, rel_tol=1e-12, abs_tol=1e-9) or
+            boundary.get("per_row_sample_limit") != sample_limit):
+        raise CampaignError("two-hop additive boundary must report its three-row order and frozen aggregate/sample limits")
+    rows = boundary.get("rows")
+    expected_ids = [case_id for case_id, _cn0, _marker, _spool in TWO_HOP_ADDITIVE_BOUNDARY_CASES]
+    if (not isinstance(rows, list) or len(rows) != 3 or
+            [row.get("case_id") if isinstance(row, dict) else None for row in rows] != expected_ids):
+        raise CampaignError("two-hop additive boundary must contain its three frozen rows in order")
+    source_identity = receipt.get("source_identity")
+    if not isinstance(source_identity, dict):
+        raise CampaignError("two-hop additive boundary must bind its source identity")
+    table_hashes: list[str] = []
+    spool_digests: list[str] = []
+    shared_render_times: list[float] = []
+    row_wall = 0.0
+    reference_plan: dict[str, Any] | None = None
+    for row, (case_id, cn0, affine_policy, uses_spool) in zip(rows, TWO_HOP_ADDITIVE_BOUNDARY_CASES):
+        child = row.get("receipt")
+        if not isinstance(child, dict) or child.get("status") != "completed":
+            raise CampaignError(f"two-hop additive boundary row {case_id} is not a completed native receipt")
+        if child.get("source_identity") != source_identity:
+            raise CampaignError("two-hop additive boundary rows must share the exact compiled source identity")
+        child_episode = dict(episode, cn0_db_hz=cn0, message="E", control="wanted",
+                             two_hop_additive_boundary=True)
+        if episode["mode"] == "receive":
+            child_episode["reception_requirement"] = "characterization"
+        if uses_spool:
+            # These are internal copies of the two native full-spool replays;
+            # the public episode does not expose service controls.
+            child_episode.update(service_replay=True, service_episodes=1)
+        _validate_completed_receipt(child, child_episode, _two_hop_boundary_child=True,
+                                    _native_max_wall_seconds=limit if episode["mode"] == "receive" else None,
+                                    _native_max_samples=sample_limit)
+        plan = child.get("plan")
+        if (not isinstance(plan, dict) or plan.get("affine_gain_evaluation") != affine_policy or
+                plan.get("max_samples") != sample_limit or plan.get("max_wall_seconds") != limit):
+            raise CampaignError(f"two-hop additive boundary row {case_id} must bind its fixed policy and actual native caps")
+        if reference_plan is None:
+            reference_plan = plan
+        else:
+            for field in ("wire_bits", "scored_slot_horizon", "horizon_samples", "sample_rate_hz",
+                          "requested_bit_seconds", "actual_bit_seconds", "message", "requested_message",
+                          "fec", "helper_enabled", "public_slots", "public_bounds",
+                          "channel_renderer", "channel_tail_seconds", "seed", "noise_seed",
+                          "hf_trajectory_seed", "hf_trajectory_offset_seconds"):
+                if plan.get(field) != reference_plan.get(field):
+                    raise CampaignError(f"two-hop additive boundary row {case_id} changed common public geometry {field}")
+            for resource_field in ("hardware_threads", "workers", "slot_owners", "workers_explicit", "owners_explicit"):
+                if plan.get("receiver_resources", {}).get(resource_field) != reference_plan.get("receiver_resources", {}).get(resource_field):
+                    raise CampaignError(f"two-hop additive boundary row {case_id} changed automatic receiver allocation {resource_field}")
+        if episode["mode"] != "receive":
+            continue
+        channel = child.get("channel")
+        if not isinstance(channel, dict):
+            raise CampaignError(f"two-hop additive boundary row {case_id} is missing its physical channel receipt")
+        use = channel.get("vector_two_hop_table_use")
+        if (not isinstance(use, dict) or use.get("table_reused") is not (case_id != expected_ids[0]) or
+                not _is_finite_number(use.get("preparation_seconds")) or use["preparation_seconds"] < 0):
+            raise CampaignError(f"two-hop additive boundary row {case_id} has invalid table reuse or preparation time")
+        table_hash = use.get("table_sha256")
+        vector = channel.get("vector_two_hop")
+        if (not isinstance(table_hash, str) or re.fullmatch(r"[0-9a-fA-F]{64}", table_hash) is None or
+                not isinstance(vector, dict) or vector.get("table_sha256") != table_hash):
+            raise CampaignError("two-hop additive boundary rows must bind the shared qualified physical table")
+        table_hashes.append(table_hash)
+        timing = child.get("timing")
+        if uses_spool:
+            if not isinstance(timing, dict) or timing.get("wall_includes_shared_render_per_policy") is not True:
+                raise CampaignError("both +4 fresh receivers must account for the shared rendering interval")
+            render_seconds = child.get("service_replay", {}).get("render_wall_seconds")
+            if not _is_finite_number(render_seconds):
+                raise CampaignError("both +4 fresh receivers must report their shared render time")
+            shared_render_times.append(render_seconds)
+            replay = child.get("service_replay")
+            if (not isinstance(replay, dict) or replay.get("work_complete") is not True or
+                    replay.get("digest_match") is not True or
+                    replay.get("replayed_samples") != plan.get("horizon_samples") or
+                    replay.get("captured_input_sha256") != replay.get("verified_input_sha256") or
+                    replay.get("spool_bytes") != 73_109_724 or
+                    not isinstance(child.get("slots"), list) or len(child["slots"]) != plan.get("scored_slot_horizon") or
+                    any(slot.get("index") != index or slot.get("complete") is not True or slot.get("all_valid") is not True
+                        for index, slot in enumerate(child["slots"]))):
+                raise CampaignError(f"two-hop additive boundary {case_id} requires full ordered, digest-verified spool work")
+            spool_digests.append(replay["captured_input_sha256"])
+        if isinstance(timing, dict) and _is_finite_number(timing.get("wall_seconds")):
+            row_wall += timing["wall_seconds"]
+        for slot in child.get("slots", []):
+            if not isinstance(slot, dict) or slot.get("affine_gain_model") != (
+                    "stationary_plus_ou" if affine_policy == "operational" else "original"):
+                raise CampaignError(f"two-hop additive boundary row {case_id} must expose the declared affine model per scored slot")
+    if episode["mode"] == "receive":
+        if (len(table_hashes) != 3 or len(set(table_hashes)) != 1 or len(spool_digests) != 2 or
+                len(set(spool_digests)) != 1 or len(shared_render_times) != 2 or
+                shared_render_times[0] != shared_render_times[1] or
+                not _is_finite_number(boundary.get("wall_seconds")) or
+                boundary["wall_seconds"] + 1e-6 < row_wall - shared_render_times[0] or
+                boundary["wall_seconds"] > limit):
+            raise CampaignError("two-hop additive receive boundary must share one table and one fully replayed +4 capture within its wall cap")
+    elif "wall_seconds" in boundary:
+        raise CampaignError("two-hop additive planning must not claim aggregate receive timing")
+
+
+
+
+
+
 def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any], *,
-                                _predictive_candidate: bool = False) -> None:
+                                _predictive_candidate: bool = False,
+                                _two_hop_matrix_child: bool = False,
+                                _two_hop_boundary_child: bool = False,
+                                _native_max_wall_seconds: float | None = None,
+                                _native_max_samples: int | None = None) -> None:
     identity_fields = ("requested_scenario", "mode", "waveform", "seed", "control")
     missing_identity = [field for field in identity_fields if field not in receipt]
     if missing_identity:
@@ -5715,6 +6549,17 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
         if receipt[field] != expected:
             raise CampaignError(f"native receipt {field} does not match the frozen episode")
 
+    if episode.get("two_hop_alarm_matrix", False) and not _two_hop_matrix_child:
+        if receipt.get("status") != "completed":
+            raise CampaignError("two-hop alarm matrix outer status must be completed")
+        _validate_two_hop_alarm_matrix_receipt(receipt, episode, _native_max_wall_seconds)
+        return
+    if episode.get("two_hop_additive_boundary", False) and not _two_hop_boundary_child:
+        if receipt.get("status") != "completed":
+            raise CampaignError("two-hop additive boundary outer status must be completed")
+        _validate_two_hop_additive_boundary_receipt(receipt, episode, _native_max_wall_seconds)
+        return
+
     source_identity = receipt.get("source_identity")
     if not isinstance(source_identity, dict):
         raise CampaignError("completed receipt is missing source_identity")
@@ -5726,6 +6571,14 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     plan = receipt.get("plan")
     if not isinstance(plan, dict):
         raise CampaignError("completed receipt is missing plan")
+    physical_raw_bit = _is_physical_raw_bit_episode(episode)
+    matrix_raw_bit = (episode.get("two_hop_alarm_matrix") is True and
+                      episode.get("two_hop_alarm_matrix_bit") in (0, 1))
+    raw_bit_receipt = physical_raw_bit or matrix_raw_bit
+    if physical_raw_bit:
+        _validate_physical_raw_bit_plan(plan, episode,
+            native_max_wall_seconds=_native_max_wall_seconds,
+            native_max_samples=_native_max_samples)
     predictive = episode.get("hf_predictive_quiet", False)
     if (plan.get("hf_predictive_quiet_requested", False) is not predictive or
             plan.get("hf_predictive_quiet_active", False) is not _predictive_candidate):
@@ -5742,6 +6595,11 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     _validate_phase_screens(receipt, episode)
     _validate_gannon_replay(receipt, episode)
     _validate_known_target(receipt, episode)
+    if episode["mode"] == "gui-repeated-bit":
+        _validate_repeated_bit_receipt(receipt, episode, plan)
+    elif physical_raw_bit and episode["mode"] == "receive":
+        _validate_repeated_bit_receipt(receipt, episode, plan,
+                                       physical_attempt_count=5, expected_bit=episode["repeat_bit"])
     if episode["mode"] != "gui-varying" and "hf_gui_varying_diagnostic" in receipt:
         raise CampaignError("unrequested GUI varying diagnostic in native receipt")
     expected_digest_slot = episode.get("capture_digest_slot", episode.get("search_slot", 0) if episode["mode"] == "hf-search" else None)
@@ -5803,14 +6661,15 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
                 plan.get("short_wire_bit_limit") != limit or plan.get("content_limit_bytes") != 16 or
                 plan.get("long_form") is not False):
             raise CampaignError("native FEC receipt has invalid bounded short-frame geometry")
-    requested_message = episode.get("message", "e")
-    if plan.get("requested_message") != requested_message:
-        raise CampaignError("native requested message does not match the frozen episode")
-    effective_message = requested_message
-    if episode.get("control", "wanted") in {"interior-fade", "capture-gap"} and requested_message == "e":
-        effective_message = "A"
-    if plan.get("message") != effective_message:
-        raise CampaignError("native effective message does not match the frozen episode control")
+    if episode["mode"] != "gui-repeated-bit" and not raw_bit_receipt:
+        requested_message = episode.get("message", "e")
+        if plan.get("requested_message") != requested_message:
+            raise CampaignError("native requested message does not match the frozen episode")
+        effective_message = requested_message
+        if episode.get("control", "wanted") in {"interior-fade", "capture-gap"} and requested_message == "e":
+            effective_message = "A"
+        if plan.get("message") != effective_message:
+            raise CampaignError("native effective message does not match the frozen episode control")
     if "cn0_db_hz" in episode and not math.isclose(
             float(plan["cn0_db_hz"]), float(episode["cn0_db_hz"]), rel_tol=1e-9, abs_tol=1e-9):
         raise CampaignError("native plan C/N0 does not match the frozen episode")
@@ -5938,7 +6797,7 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     device = backend.get("device")
     if not isinstance(backend.get("executed_gpu_work"), bool):
         raise CampaignError("completed receipt backend.executed_gpu_work must be boolean")
-    if episode["mode"] in {"receive", "slot", "channel", "diagnose", "hf-search", "gui-varying"}:
+    if episode["mode"] in {"receive", "slot", "channel", "diagnose", "hf-search", "gui-varying", "gui-repeated-bit"}:
         if not isinstance(device, str) or not device:
             raise CampaignError("completed processing receipt backend.device must identify the actual device")
         if requested_backend == "cpu" and device != "cpu":
@@ -5951,7 +6810,14 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
                 requested_label = requested_backend if requested_backend != "gpu" else "CUDA or Vulkan"
                 raise CampaignError(f"requested {requested_label} episode did not report executed GPU device work")
 
-    if episode["mode"] == "receive":
+    if episode["mode"] == "receive" and raw_bit_receipt:
+        # Raw-bit evidence is validated above. It has no codec message or
+        # complete-message endpoint, so do not reinterpret its DATA/null
+        # decisions as text completion outcomes.
+        if physical_raw_bit:
+            _validate_vector_private_signal_energy(receipt.get("channel"), plan)
+            _validate_public_likelihood_components(receipt, 15)
+    elif episode["mode"] == "receive":
         outcomes = receipt.get("outcomes")
         if not isinstance(outcomes, dict):
             raise CampaignError("completed receive receipt is missing outcomes")
@@ -6377,8 +7243,7 @@ def _trial(probe: Path, episode: dict[str, Any], max_samples: int, timeout: floa
     return_code: int | None = None
     # The native spool cannot contain more than the declared sample budget,
     # even if its separately declared byte limit is larger.
-    child_file_limit = max(MAX_OUTPUT_BYTES, min(episode.get("service_spool_byte_limit", max_samples * 17),
-        max_samples * 17)) if _uses_spool(episode) else MAX_OUTPUT_BYTES
+    child_file_limit = _native_child_file_limit(episode, max_samples)
     def limit_output() -> None:
         if resource is not None:
             resource.setrlimit(resource.RLIMIT_FSIZE, (child_file_limit, child_file_limit))
@@ -6389,7 +7254,7 @@ def _trial(probe: Path, episode: dict[str, Any], max_samples: int, timeout: floa
                 options: dict[str, Any] = {}
                 if os.name == "posix" and resource is not None:
                     options["preexec_fn"] = limit_output
-                if _uses_spool(episode):
+                if _native_child_uses_temporary_spool(episode):
                     return_code, output_overflow = _run_service_child(command, out, err, timeout, options)
                 else:
                     result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
@@ -6427,7 +7292,9 @@ def _trial(probe: Path, episode: dict[str, Any], max_samples: int, timeout: floa
                 result["error"] = f"native receipt {field} does not match the frozen episode"
                 return result
         if receipt["status"] == "completed":
-            _validate_completed_receipt(receipt, episode)
+            _validate_completed_receipt(receipt, episode,
+                                       _native_max_wall_seconds=native_budget,
+                                       _native_max_samples=max_samples)
         else:
             _validate_service_replay(receipt, episode)
             _validate_predictive_comparison(receipt, episode)
@@ -6545,6 +7412,8 @@ def _wanted_outcome_counts(trial: dict[str, Any]) -> dict[str, int | None] | Non
     if (trial.get("status") != "completed" or receipt.get("status") != "completed" or
             episode.get("mode") != "receive" or episode.get("control", "wanted") != "wanted"):
         return None
+    if _communication_endpoint(episode) == "repeated_raw_bit":
+        return None
     if _uses_spool(episode):
         service = receipt.get("service_replay", {})
         if (not isinstance(service, dict) or service.get("work_complete") is not True or
@@ -6572,8 +7441,9 @@ def _wanted_outcome_counts(trial: dict[str, Any]) -> dict[str, int | None] | Non
 
 def _wanted_outcome_summary(trials: list[dict[str, Any]]) -> dict[str, Any]:
     observations = [counts for trial in trials if (counts := _wanted_outcome_counts(trial)) is not None]
-    scope = ("Descriptive counts for completed validated receive trials with wanted control. "
-             "Premature completions and active-slot erasures may overlap a delivery outcome.")
+    scope = ("Descriptive counts for top-level completed validated receive trials with wanted control. "
+             "Nested matrix-child outcomes are reported only in the matrix-specific summary. Premature completions "
+             "and active-slot erasures may overlap a delivery outcome.")
     summary: dict[str, Any] = {
         "scope": scope, "completed_trials": len(observations),
         "trials_without_delivery": sum(counts["accepted_messages"] == 0 for counts in observations)}
@@ -6582,6 +7452,157 @@ def _wanted_outcome_summary(trials: list[dict[str, Any]]) -> dict[str, Any]:
         summary[field] = {"total": sum(values), "trials_with_any": sum(value > 0 for value in values),
                           "trials_unavailable": len(observations) - len(values)}
     return summary
+
+
+def _repeated_bit_campaign_summary(trials: list[dict[str, Any]]) -> dict[str, Any] | None:
+    repeated_trials = [trial for trial in trials
+                       if (trial.get("episode", {}).get("mode") == "gui-repeated-bit" or
+                           _is_physical_raw_bit_episode(trial.get("episode", {})))]
+    if not repeated_trials:
+        return None
+    rows = []
+    for trial in repeated_trials:
+        episode = trial.get("episode", {})
+        observation = _repeated_bit_summary(trial.get("receipt", {}), episode)
+        if observation is not None:
+            row = {"id": episode["id"], "status": trial.get("status"),
+                   "scenario": episode.get("scenario"),
+                   "source_scope": observation.get("source_scope"),
+                   "trajectory_seed": episode.get("hf_trajectory_seed"),
+                   "trajectory_offset_seconds": episode.get("hf_trajectory_offset_seconds"),
+                   "repeat_bit": trial["episode"].get("repeat_bit"), **observation}
+            if episode.get("mode") == "gui-repeated-bit":
+                row.update(repeat_path_scale=episode.get("repeat_path_scale"),
+                           repeat_path_seed=episode.get("repeat_path_seed"),
+                           repeat_thermal_off=episode.get("repeat_thermal_off", False))
+            rows.append(row)
+    fingerprints = {row["public_key_fingerprint_sha256"] for row in rows
+                    if row.get("public_key_fingerprint_sha256") is not None}
+    return {
+        "physical_scenario": bool(repeated_trials) and all(
+            _is_physical_raw_bit_episode(trial.get("episode", {})) for trial in repeated_trials),
+        "scope": (("Truth-aligned raw-bit observations over five-attempt changing-rate physical episodes. Opposite bits "
+                   "share the same fixed trajectory and noise seeds and are not independent natural-condition trials "
+                   "or a population success-rate estimate. Codec decoding is outside this endpoint.")
+                  if repeated_trials and all(_is_physical_raw_bit_episode(trial.get("episode", {}))
+                                             for trial in repeated_trials) else
+                  "Truth-aligned raw-bit observations over one six-bit GUI episode per row. Opposite bits are paired "
+                  "under each fixed path/noise seed; these source apertures are not independent trials or a "
+                  "population success-rate estimate. Codec message decoding is outside this endpoint."),
+        "rows": rows,
+        "public_key_fingerprint_count": len(fingerprints),
+        "public_key_fingerprint_consistent": len(fingerprints) <= 1,
+    }
+
+
+def _two_hop_alarm_matrix_campaign_summary(trials: list[dict[str, Any]]) -> dict[str, Any] | None:
+    matrix_trials = [trial for trial in trials
+                     if trial.get("episode", {}).get("two_hop_alarm_matrix") is True]
+    if not matrix_trials:
+        return None
+    summaries = []
+    for trial in matrix_trials:
+        outer_receipt = trial.get("receipt", {})
+        matrix = outer_receipt.get("two_hop_alarm_matrix", {})
+        rows = []
+        completed_text_rows = correct_text_rows = 0
+        text_row_count = 0
+        trial_valid = (trial.get("status") == "completed" and outer_receipt.get("status") == "completed")
+        for entry in matrix.get("rows", []) if isinstance(matrix, dict) else []:
+            if not isinstance(entry, dict) or not isinstance(entry.get("receipt"), dict):
+                continue
+            case_id, receipt = entry.get("case_id"), entry["receipt"]
+            plan = receipt.get("plan", {})
+            channel = receipt.get("channel", {})
+            use = channel.get("vector_two_hop_table_use", {}) if isinstance(channel, dict) else {}
+            row = {"case_id": case_id, "cn0_db_hz": plan.get("cn0_db_hz"),
+                   "source_identity": receipt.get("source_identity"),
+                   "table_sha256": use.get("table_sha256"),
+                   "table_reused": use.get("table_reused"),
+                   "table_preparation_seconds": use.get("preparation_seconds"),
+                   "wall_seconds": receipt.get("timing", {}).get("wall_seconds")}
+            if str(case_id).startswith("text-"):
+                text_row_count += 1
+                outcomes = receipt.get("outcomes", {})
+                correct_complete = outcomes.get("correct_complete") if isinstance(outcomes, dict) else None
+                ambiguous = outcomes.get("ambiguous_active_slots") if isinstance(outcomes, dict) else None
+                quiet = outcomes.get("quiet_active_slots") if isinstance(outcomes, dict) else None
+                row.update({"correct_complete": correct_complete,
+                            "accepted_messages": outcomes.get("accepted_messages") if isinstance(outcomes, dict) else None,
+                            "wrong_bits": outcomes.get("wrong_bits") if isinstance(outcomes, dict) else None,
+                            "active_slot_erasures": (ambiguous + quiet if _is_nonnegative_int(ambiguous) and
+                                                      _is_nonnegative_int(quiet) else None)})
+                if trial_valid and receipt.get("status") == "completed":
+                    completed_text_rows += 1
+                    correct_text_rows += int(correct_complete is True)
+            else:
+                raw = _repeated_bit_summary(receipt)
+                if raw is not None:
+                    row["raw_bit"] = {key: raw.get(key) for key in (
+                        "expected_bit", "active_slots", "correct_data", "wrong_data", "ambiguous_active_slots",
+                        "quiet_active_slots", "longest_no_correct_run", "first_correct_ordinal",
+                        "completed_quiet_pairs", "physical_quiet_complete", "ordered_valid_complete")}
+            rows.append(row)
+        rows_without_completed_receipts = 2 - completed_text_rows
+        text_status = ("receipts_complete" if rows_without_completed_receipts == 0 and text_row_count == 2
+                       else "receipts_incomplete")
+        text_scope = ("Descriptive counts for the two E-message rows in this one constructed two-hop episode. "
+                      "They are not an outage probability or a population estimate; all six rows share the selected physical history.")
+        summaries.append({"runner_status": trial.get("status"),
+                          "native_status": outer_receipt.get("status"),
+                          "status": "completed" if trial_valid else "incomplete",
+                          "text_counts": {"status": text_status, "scope": text_scope,
+                                          "completed_rows": completed_text_rows,
+                                          "correct_complete_rows": correct_text_rows,
+                                          "rows_without_completed_receipts": rows_without_completed_receipts,
+                                          "communication_miss_rows": completed_text_rows - correct_text_rows},
+                          "wall_seconds": matrix.get("wall_seconds") if isinstance(matrix, dict) else None,
+                          "rows": rows})
+    return {"scope": ("One frozen constructed two-hop history with matched source/channel/noise seeds and public ordinals. "
+                      "The three signal patterns at two noise levels are correlated observations, not natural-field or outage-rate trials."),
+            "matrices": summaries}
+
+
+def _two_hop_additive_boundary_campaign_summary(trials: list[dict[str, Any]]) -> dict[str, Any] | None:
+    selected = [trial for trial in trials if trial.get("episode", {}).get("two_hop_additive_boundary") is True]
+    if not selected:
+        return None
+    summaries = []
+    for trial in selected:
+        receipt = trial.get("receipt", {})
+        boundary = receipt.get("two_hop_additive_boundary", {})
+        rows = []
+        for entry in boundary.get("rows", []) if isinstance(boundary, dict) else []:
+            if not isinstance(entry, dict) or not isinstance(entry.get("receipt"), dict):
+                continue
+            child = entry["receipt"]
+            outcomes = child.get("outcomes", {})
+            replay = child.get("service_replay", {})
+            rows.append({"case_id": entry.get("case_id"),
+                         "cn0_db_hz": child.get("plan", {}).get("cn0_db_hz"),
+                         "affine_gain_evaluation": child.get("plan", {}).get("affine_gain_evaluation"),
+                         "correct_complete": outcomes.get("correct_complete") if isinstance(outcomes, dict) else None,
+                         "wrong_bits": outcomes.get("wrong_bits") if isinstance(outcomes, dict) else None,
+                         "active_slot_erasures": ((outcomes.get("ambiguous_active_slots", 0) + outcomes.get("quiet_active_slots", 0))
+                                                  if isinstance(outcomes, dict) and
+                                                  _is_nonnegative_int(outcomes.get("ambiguous_active_slots")) and
+                                                  _is_nonnegative_int(outcomes.get("quiet_active_slots")) else None),
+                         "work_complete": replay.get("work_complete") if isinstance(replay, dict) else None,
+                         "digest_match": replay.get("digest_match") if isinstance(replay, dict) else None,
+                         "captured_input_sha256": replay.get("captured_input_sha256") if isinstance(replay, dict) else None})
+        pair = {row.get("case_id"): row.get("correct_complete") for row in rows}
+        existing, additive = pair.get("plus4-existing"), pair.get("plus4-additive")
+        outcomes = {(False, True): "endpoint_gain", (True, True): "both_recover_no_boundary_separation",
+                    (False, False): "neither_recovers", (True, False): "candidate_regression"}
+        summaries.append({"status": "completed" if trial.get("status") == "completed" and receipt.get("status") == "completed" else "incomplete",
+                          "runner_status": trial.get("status"), "native_status": receipt.get("status"),
+                          "scope": "One fixed three-row two-hop boundary comparison; rows are nested counterfactuals, not independent trials.",
+                          "interpretation_status": "pending_external_plus3_historical_parity",
+                          "observed_plus4_pair_outcome": outcomes.get((existing, additive)),
+                          "rows": rows,
+                          "external_parity_gate": "The +3 existing-only row must be compared offline against the retained a497 baseline before interpreting the +4 pair. This summary does not claim that parity or a sensitivity gain was established."})
+    return {"scope": "Nested additive-boundary rows are conditional fixed-history comparisons. No natural-condition rate or sensitivity claim is derived.",
+            "comparisons": summaries}
 
 
 def _wanted_outcome_label(counts: dict[str, int | None], completed: Any) -> str:
@@ -6701,6 +7722,7 @@ def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
             f"Execution failures: {run['execution_failures']}; valid incomplete communications: {run['valid_communication_failures']}  ",
             f"Run status: **{run['status']}**; stop reason: {run['stop_reason'] or 'all declared episodes completed'}", "",
             "Every native receipt is one declared finite episode. Different physical models and channel strata are not pooled.",
+            "Top-level wanted reception and communication-failure counts count campaign episodes only; nested matrix-child rows appear in the matrix-specific summary and are not extra independent campaign trials.",
             "Communication failures are observations, not runner failures. An incomplete fixed sample has no confidence interval.",
             "With FEC off, communication success uses the unchanged raw-clean `correct_complete` endpoint. Explicit rs20/rs60 episodes use `correct_decoded_complete`: exact decoded bytes and strict physical framing may include native FEC repairs. Raw slot errors and the raw-clean endpoint remain separate.", "",
             "Two-episode service replay uses its aggregate endpoint after complete replay work: both expected messages for wanted traffic, or no accepted messages or false DATA for negative controls.", "",
@@ -6730,6 +7752,26 @@ def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
             correct_data = "yes" if outcomes.get("first_public_observation_correct_data") else "no"
             outcome = "one public slot; message completion not evaluated"
         elif episode["mode"] == "receive":
+            if episode.get("two_hop_alarm_matrix"):
+                outcome = "one ordered six-row native matrix; communication outcomes shown below"
+                rows.append(f"| {trial['episode']['id']} | {trial['episode']['scenario']} | {trial['episode']['mode']} | "
+                            f"{episode.get('control', '—')} | {trial.get('status')} | {native_status} | {outcome} | — | — | — | "
+                            f"{trial.get('elapsed_seconds', 0):.3f} |")
+                continue
+            if _communication_endpoint(episode) == "repeated_raw_bit":
+                raw = _repeated_bit_summary(receipt, episode) or {}
+                active = raw.get("active_slots", "unavailable")
+                outcome = (f"raw {episode['scenario']} bit {raw.get('expected_bit', episode.get('repeat_bit'))}: "
+                           f"correct={raw.get('correct_data', 'unavailable')}/{active}, "
+                           f"wrong={raw.get('wrong_data', 'unavailable')}, "
+                           f"ambiguous={raw.get('ambiguous_active_slots', 'unavailable')}, "
+                           f"active quiet={raw.get('quiet_active_slots', 'unavailable')}, "
+                           f"quiet pairs={raw.get('completed_quiet_pairs', 'unavailable')}/{active}; "
+                           "text completion not evaluated")
+                rows.append(f"| {episode['id']} | {episode['scenario']} | {episode['mode']} | "
+                            f"{episode.get('control', '—')} | {trial.get('status')} | {native_status} | {outcome} | — | — | — | "
+                            f"{trial.get('elapsed_seconds', 0):.3f} |")
+                continue
             if episode.get("control") in NEGATIVE_RECEIVE_CONTROLS:
                 outcome = _negative_control_label(receipt, episode)
             elif _communication_endpoint(episode) == "service_replay.communication_complete":
@@ -6763,12 +7805,75 @@ def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
                        "public shadow search complete; no receiver decision")
         elif episode["mode"] == "gui-varying":
             outcome = "canonical varying component complete; no receiver decision or message completion"
+        elif episode["mode"] == "gui-repeated-bit":
+            raw = _repeated_bit_summary(receipt) or {}
+            first = raw.get("first_correct_ordinal")
+            first_desc = (f"first correct ordinal={first} at {raw['first_correct_calendar_seconds']:.3f}s"
+                          if first is not None and _is_finite_number(raw.get("first_correct_calendar_seconds"))
+                          else "no correct raw bit")
+            calendar = (f"calendar={raw['elapsed_calendar_seconds']:.3f}s"
+                        if _is_finite_number(raw.get("elapsed_calendar_seconds")) else "calendar unavailable")
+            outcome = (f"raw correct={raw.get('correct_data', 'unavailable')}/6, wrong={raw.get('wrong_data', 'unavailable')}, "
+                       f"ambiguous={raw.get('ambiguous_active_slots', 'unavailable')}, active quiet={raw.get('quiet_active_slots', 'unavailable')}, "
+                       f"longest no-correct run={raw.get('longest_no_correct_run', 'unavailable')}; {first_desc}; "
+                       f"trailing quiet={raw.get('trailing_quiet_slots', 'unavailable')}/2; {calendar}; "
+                       f"ordered-valid={'yes' if raw.get('ordered_valid_complete') is True else 'no'}")
         else:
             outcome = "plan only"
         rows.append(f"| {trial['episode']['id']} | {trial['episode']['scenario']} | {trial['episode']['mode']} | "
                     f"{episode.get('control', '—')} | {trial.get('status')} | {native_status} | {outcome} | "
                     f"{slot_decision} | {correct_data} | {receive_counts} | "
                     f"{trial.get('elapsed_seconds', 0):.3f} |")
+    matrix_summary = run.get("two_hop_alarm_matrix_summary")
+    if matrix_summary is not None:
+        rows.extend(["", "## Physical two-hop long alarm matrix", "", matrix_summary["scope"], "",
+                     "| Native row | C/N0 dB-Hz | Correct complete (text) or correct raw attempts | Wrong bits | Erased / ambiguous | Accepted messages | First correct ordinal | Quiet pairs / 5 | Table reused | Table SHA-256 | Table prep (s) |",
+                     "|---|---:|---:|---:|---:|---:|---:|---:|---|---|---:|"])
+        for matrix_run in matrix_summary["matrices"]:
+            for item in matrix_run["rows"]:
+                raw = item.get("raw_bit")
+                if raw is None:
+                    accepted = item.get("correct_complete")
+                    correct = "yes" if accepted is True else "no" if accepted is False else "unavailable"
+                    wrong = item.get("wrong_bits", "unavailable")
+                    erased = item.get("active_slot_erasures", "unavailable")
+                    first = quiet = "—"
+                    accepted_messages = item.get("accepted_messages", "unavailable")
+                else:
+                    correct = f"{raw.get('correct_data', 'unavailable')}/5"
+                    wrong = raw.get("wrong_data", "unavailable")
+                    erased = raw.get("ambiguous_active_slots", "unavailable")
+                    first = raw.get("first_correct_ordinal")
+                    quiet = raw.get("completed_quiet_pairs", "unavailable")
+                    accepted_messages = "— (raw-bit row)"
+                rows.append(f"| {item.get('case_id')} | {item.get('cn0_db_hz')} | {correct} | {wrong} | {erased} | "
+                            f"{accepted_messages} | {first} | {quiet} | {item.get('table_reused')} | "
+                            f"`{item.get('table_sha256') or 'planning only'}` | {item.get('table_preparation_seconds', '—')} |")
+            rows.append("")
+            text_counts = matrix_run["text_counts"]
+            rows.append(f"Matrix status `{matrix_run['status']}` (runner `{matrix_run['runner_status']}`, "
+                        f"native `{matrix_run['native_status']}`); text-row receipt coverage `{text_counts['status']}`: "
+                        f"{text_counts['correct_complete_rows']}/{text_counts['completed_rows']} correct-complete, "
+                        f"{text_counts['communication_miss_rows']} message misses, "
+                        f"{text_counts['rows_without_completed_receipts']} rows without completed receipts. "
+                        f"{text_counts['scope']} Native wall "
+                        f"{matrix_run['wall_seconds'] if matrix_run['wall_seconds'] is not None else 'planning only'} s.")
+            rows.append("")
+    boundary_summary = run.get("two_hop_additive_boundary_summary")
+    if boundary_summary is not None:
+        rows.extend(["", "## Two-hop additive boundary comparison", "", boundary_summary["scope"], "",
+                     "| Comparison | Status | +4 existing complete | +4 additive complete | Conditional pair outcome | Shared spool/digest work |",
+                     "|---|---|---:|---:|---|---|"])
+        for comparison in boundary_summary["comparisons"]:
+            outcomes = {row.get("case_id"): row for row in comparison["rows"]}
+            existing = outcomes.get("plus4-existing", {}).get("correct_complete")
+            additive = outcomes.get("plus4-additive", {}).get("correct_complete")
+            work = all(outcomes.get(case, {}).get("work_complete") is True and
+                       outcomes.get(case, {}).get("digest_match") is True
+                       for case in ("plus4-existing", "plus4-additive"))
+            rows.append(f"| fixed-history pair | {comparison['status']} | {existing} | {additive} | "
+                        f"{comparison['observed_plus4_pair_outcome'] or 'unavailable'} | {'complete' if work else 'unavailable'} |")
+            rows.extend(["", f"Interpretation `{comparison['interpretation_status']}`. {comparison['external_parity_gate']}", ""])
     paired = _predictive_comparison_summary(run["trials"])
     if paired["pairs"]:
         rows.extend(["", "## Predictive quiet paired comparison", "", paired["scope"], "",
@@ -6779,16 +7884,40 @@ def _markdown(campaign: dict[str, Any], run: dict[str, Any]) -> str:
             rows.append(f"| {pair['episode_id']} | {pair['trial_status']} | {baseline['correct_complete']} | "
                         f"{candidate['correct_complete']} | {candidate['false_data']} | {candidate['premature_completions']} | "
                         f"{baseline['service_wall_seconds']} / {candidate['service_wall_seconds']} |")
-    wanted = _wanted_outcome_summary(run["trials"])
-    rows.extend(["", "## Completed wanted reception", "", wanted["scope"],
-                 f"Completed wanted trials {wanted['completed_trials']}. Trials without an accepted message "
-                 f"{wanted['trials_without_delivery']}.", "",
-                 "| Observation | Total observed | Trials with any | Count unavailable |", "|---|---:|---:|---:|"])
-    for label, field in (("Accepted messages", "accepted_messages"),
-                         ("Accepted incorrect payloads", "accepted_incorrect_messages"),
-                         ("Premature completions", "premature_completions"), ("Active-slot erasures", "active_slot_erasures")):
-        counts = wanted[field]
-        rows.append(f"| {label} | {counts['total']} | {counts['trials_with_any']} | {counts['trials_unavailable']} |")
+    if any(trial.get("episode", {}).get("mode") == "receive" and
+           _communication_endpoint(trial.get("episode", {})) != "repeated_raw_bit"
+           for trial in run["trials"]):
+        wanted = _wanted_outcome_summary(run["trials"])
+        rows.extend(["", "## Completed wanted reception", "", wanted["scope"],
+                     f"Completed wanted trials {wanted['completed_trials']}. Trials without an accepted message "
+                     f"{wanted['trials_without_delivery']}.", "",
+                     "| Observation | Total observed | Trials with any | Count unavailable |", "|---|---:|---:|---:|"])
+        for label, field in (("Accepted messages", "accepted_messages"),
+                             ("Accepted incorrect payloads", "accepted_incorrect_messages"),
+                             ("Premature completions", "premature_completions"), ("Active-slot erasures", "active_slot_erasures")):
+            counts = wanted[field]
+            rows.append(f"| {label} | {counts['total']} | {counts['trials_with_any']} | {counts['trials_unavailable']} |")
+    repeated = run.get("repeated_bit_summary")
+    if repeated is not None:
+        heading = ("Physical changing-rate raw-bit observations" if repeated.get("physical_scenario")
+                   else "GUI repeated raw-bit observations")
+        rows.extend(["", f"## {heading}", "", repeated["scope"],
+                     f"Same public-key fingerprint across rows: {'yes' if repeated['public_key_fingerprint_consistent'] else 'no'}.",
+                     "Raw DATA correctness is separate from codec/message decoding. No binomial interval or communication-success estimate is derived from repeated apertures.", "",
+                     "| Episode | Scenario | Bit | Correct / active | Wrong | Ambiguous | Active quiet | Longest miss run | First correct ordinal / calendar s | Quiet pairs / active | Elapsed calendar s | Trajectory seed / offset s |",
+                     "|---|---|---:|---:|---:|---:|---:|---:|---|---:|---:|---|"])
+        for raw in repeated["rows"]:
+            first_ordinal = raw.get("first_correct_ordinal")
+            first_time = raw.get("first_correct_calendar_seconds")
+            first = (f"{first_ordinal} / {first_time:.3f}"
+                     if first_ordinal is not None and _is_finite_number(first_time) else "none")
+            calendar = raw.get("elapsed_calendar_seconds")
+            calendar_text = f"{calendar:.3f}" if _is_finite_number(calendar) else "unavailable"
+            rows.append(f"| {raw['id']} | {raw.get('scenario', '—')} | {raw.get('repeat_bit')} | "
+                        f"{raw.get('correct_data')} | {raw.get('wrong_data')} | {raw.get('ambiguous_active_slots')} | "
+                        f"{raw.get('quiet_active_slots')} | {raw.get('longest_no_correct_run')} | {first} | "
+                        f"{raw.get('completed_quiet_pairs', raw.get('trailing_quiet_slots'))} / {raw.get('active_slots')} | {calendar_text} | "
+                        f"{raw.get('trajectory_seed', '—')} / {raw.get('trajectory_offset_seconds', '—')} |")
     negative = _negative_control_summary(run["trials"])
     rows.extend(["", "## Completed negative controls", "", negative["scope"],
                  "Counts exclude censored, invalid and execution-failed trials. Accepted messages are counted once from the native aggregate; false DATA decisions are a separate outcome.", "",
@@ -6905,6 +8034,13 @@ def run_campaign(probe: Path, campaign_path: Path, output_dir: Path) -> dict[str
             status = "incomplete_checks"
             stop_reason = stop_reason or result["status"]
     stats = _statistical_summary(campaign, trials)
+    repeated_summary = _repeated_bit_campaign_summary(trials)
+    matrix_summary = _two_hop_alarm_matrix_campaign_summary(trials)
+    boundary_summary = _two_hop_additive_boundary_campaign_summary(trials)
+    if (repeated_summary is not None and len(repeated_summary["rows"]) == len(campaign["episodes"]) and
+            not repeated_summary["public_key_fingerprint_consistent"]):
+        status = "incomplete_checks"
+        stop_reason = "repeated_bit_public_key_changed"
     if status == "completed" and len(trials) != len(campaign["episodes"]):
         status = "incomplete_checks"
     run = {"schema_version": 1, "status": status, "stop_reason": stop_reason,
@@ -6912,16 +8048,13 @@ def run_campaign(probe: Path, campaign_path: Path, output_dir: Path) -> dict[str
            "planned_trials": len(campaign["episodes"]), "elapsed_seconds": time.monotonic() - started,
            "campaign_sha256": campaign_hash, "probe_sha256": probe_hash,
            "execution_failures": sum(trial.get("status") != "completed" for trial in trials),
-           "valid_communication_failures": sum(
-               trial.get("status") == "completed" and
-               trial.get("receipt", {}).get("status") == "completed" and
-               trial.get("episode", {}).get("mode") == "receive" and
-               trial.get("episode", {}).get("control", "wanted") == "wanted" and
-               _communication_outcome(trial.get("receipt", {}), trial.get("episode", {})) is False
-               for trial in trials),
+           "valid_communication_failures": _valid_communication_failure_count(trials),
            "retained_output_bytes": sum(path.stat().st_size for path in output_dir.iterdir() if path.is_file()),
            "retained_output_limit_bytes": MAX_CAMPAIGN_OUTPUT_BYTES,
            "statistics": stats, "wanted_outcomes": _wanted_outcome_summary(trials),
+           "repeated_bit_summary": repeated_summary,
+           "two_hop_alarm_matrix_summary": matrix_summary,
+           "two_hop_additive_boundary_summary": boundary_summary,
            "negative_controls": _negative_control_summary(trials),
            "predictive_quiet_comparisons": _predictive_comparison_summary(trials), "trials": trials}
     # The full native receipt remains in its raw stdout file. Keep run.json
@@ -6940,6 +8073,9 @@ def run_campaign(probe: Path, campaign_path: Path, output_dir: Path) -> dict[str
         wanted_counts = _wanted_outcome_counts(trial)
         if wanted_counts is not None:
             item["wanted_outcomes"] = wanted_counts
+        repeated_outcomes = _repeated_bit_summary(trial.get("receipt", {}), trial.get("episode", {}))
+        if repeated_outcomes is not None:
+            item["repeated_bit_outcomes"] = repeated_outcomes
         persisted["trials"].append(item)
     (output_dir / "run.json").write_bytes(_json_bytes(persisted))
     (output_dir / "report.md").write_text(_markdown(campaign, run), encoding="utf-8")
@@ -6963,7 +8099,8 @@ def main(argv: list[str] | None = None) -> int:
     print(json.dumps({key: result[key] for key in
                       ("status", "executed_trials", "planned_trials", "execution_failures",
                        "valid_communication_failures", "stop_reason", "elapsed_seconds", "statistics",
-                       "wanted_outcomes", "negative_controls")},
+                       "wanted_outcomes", "repeated_bit_summary", "two_hop_alarm_matrix_summary",
+                       "two_hop_additive_boundary_summary", "negative_controls")},
                      sort_keys=True))
     return 0 if result["status"] == "completed" else 1
 

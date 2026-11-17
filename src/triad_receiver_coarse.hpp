@@ -14,6 +14,28 @@ struct CoarseProposal {
     unsigned rank = 0;
 };
 
+struct CoarseMidpointTiming {
+    std::vector<CoarseProposal> proposals;
+    std::int64_t first_lag = 0, last_lag = 0;
+    std::size_t lag_count = 0, workspace_bytes = 0;
+    std::uint64_t widened_inverses = 0, scored_lags = 0, verified_peaks = 0;
+    std::string_view precision;
+};
+
+enum class MidpointTimingEvaluation { off, short_tracking, verify };
+// Pure public support. Only the ordinary unprojected short tracker uses
+// these proposals. Realized clock, channel and samples never select the plan.
+struct CoarseMidpointSupport {
+    bool available;
+    std::string_view status;
+    std::int64_t first_lag = 0, last_lag = 0;
+    long double middle_seconds = 0;
+    std::size_t projected_rate = 0;
+};
+CoarseMidpointSupport coarse_midpoint_timing_support(const ReceiverConfig&, const ReceiverSlotPlan&);
+FineCoordinate midpoint_timing_coordinate(const ReceiverSlotPlan&, long double middle_seconds,
+    double clock_bound_ppm, std::size_t projected_rate, std::int64_t lag, std::int64_t epoch);
+
 struct CoarseArrivalPeaks {
     std::array<std::size_t, 2> indices{};
     std::size_t count = 0;
@@ -96,6 +118,7 @@ struct CoarseResult {
     bool lag_frequency_search = false;
     std::string reason;
     CoarseProgress work;
+    std::optional<CoarseMidpointTiming> midpoint_timing;
 };
 
 // Optional shortlist for the short frequency tracker when its segmented
@@ -129,14 +152,14 @@ public:
     CoarseSession(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                   std::span<const Complex>, std::span<const FrequencyInterval>,
                   unsigned workers, std::size_t scratch_limit_bytes, std::stop_token = {},
-                  ReceiverExecutor* = nullptr);
+                  ReceiverExecutor* = nullptr, MidpointTimingEvaluation = MidpointTimingEvaluation::off);
     // Acquisition runs beside the template bank and observation filter. This
     // requires coarse_defers_frequency_grid(). Results are identical to a
     // session given the acquired intervals.
     CoarseSession(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                   std::span<const Complex>, const FrequencyAssistance&,
                   unsigned workers, std::size_t scratch_limit_bytes, std::stop_token = {},
-                  ReceiverExecutor* = nullptr);
+                  ReceiverExecutor* = nullptr, MidpointTimingEvaluation = MidpointTimingEvaluation::off);
     ~CoarseSession();
     CoarseSession(CoarseSession&&) noexcept;
     CoarseSession& operator=(CoarseSession&&) noexcept;
@@ -163,7 +186,8 @@ private:
 // the worker allocation. Coordinates are snapped by the fine admission grid.
 // An overlapped acquisition is charged beside the whole of preparation.
 std::size_t coarse_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers,
-                             AssistanceBound overlapped = {});
+                             AssistanceBound overlapped = {},
+                             MidpointTimingEvaluation = MidpointTimingEvaluation::off);
 // Public geometry alone decides whether preparation can precede the grid.
 bool coarse_defers_frequency_grid(const ReceiverConfig&, const ReceiverSlotPlan&);
 // Geometry and workspace quote from the same planner as a scoring session.
@@ -178,10 +202,10 @@ CoarseFineGeometry coarse_fine_geometry(const ReceiverConfig&, const ReceiverSlo
 CoarseResult score_coarse(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                           std::span<const Complex>, std::span<const FrequencyInterval>,
                           unsigned workers, std::size_t scratch_limit_bytes, std::stop_token,
-                          ReceiverExecutor* = nullptr);
+                          ReceiverExecutor* = nullptr, MidpointTimingEvaluation = MidpointTimingEvaluation::off);
 CoarseResult score_coarse(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                           std::span<const Complex>, const FrequencyAssistance&,
                           unsigned workers, std::size_t scratch_limit_bytes, std::stop_token,
-                          ReceiverExecutor* = nullptr);
+                          ReceiverExecutor* = nullptr, MidpointTimingEvaluation = MidpointTimingEvaluation::off);
 
 } // namespace datapump::triad::v3::receiver_detail

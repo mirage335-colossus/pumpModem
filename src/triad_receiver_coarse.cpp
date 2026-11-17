@@ -218,6 +218,52 @@ struct Plan {
     }
 };
 
+struct MidpointPlan {
+    long double middle_seconds = 0;
+    std::int64_t first_lag = 0, last_lag = 0;
+    std::size_t lag_count = 0, extra_workspace_bytes = 0;
+    bool verify = false;
+    std::string_view status = "signed_lags_outside_capture";
+};
+
+MidpointPlan midpoint_plan(const Plan& plan, const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                           unsigned workers, MidpointTimingEvaluation evaluation) {
+    MidpointPlan result;
+    result.verify = evaluation == MidpointTimingEvaluation::verify;
+    if (!config.clock_bound_ppm) {
+        result.status = "clock_axis_collapsed";
+        return result;
+    }
+    if (!plan.varying_passband) {
+        result.status = "varying_passband_unavailable";
+        return result;
+    }
+    if (plan.source_step != 1 || (result.verify && config.bulk_backend)) {
+        result.status = "exact_integer_template_required";
+        return result;
+    }
+    result.middle_seconds = slot.source_start_seconds + .5L * plan.layout.source_rows / plan.fs;
+    const long double bound = config.clock_bound_ppm * 1e-6L;
+    const long double arrival_width = slot.arrival_upper_seconds - slot.arrival_lower_seconds;
+    const auto first = std::ceil(-result.middle_seconds * bound / (1 + bound) * plan.output_fs);
+    const auto last = std::floor((arrival_width + result.middle_seconds * bound / (1 - bound)) * plan.output_fs);
+    if (!(first <= 0 && last >= 0 && last - first < std::min<std::size_t>(plan.layout.crop_rows, UINT32_MAX) &&
+        -first < plan.layout.nfft && last < plan.layout.nfft && plan.layout.nfft <= INT64_MAX))
+        return result;
+    if (result.verify && (plan.layout.nfft > 32768 || last - first >= 4096)) {
+        result.status = "midpoint_diagnostic_limit";
+        return result;
+    }
+    result.first_lag = static_cast<std::int64_t>(first);
+    result.last_lag = static_cast<std::int64_t>(last);
+    result.lag_count = static_cast<std::size_t>(result.last_lag - result.first_lag + 1);
+    result.extra_workspace_bytes = add(mul(plan.layout.nfft + 1, sizeof(Complex)),
+        mul(mul(std::min<std::size_t>(workers, lanes), result.lag_count), sizeof(double) + sizeof(std::uint32_t)));
+    result.extra_workspace_bytes = add(result.extra_workspace_bytes, 64 * 1024);
+    result.status = "public_midpoint_lags";
+    return result;
+}
+
 std::size_t filtered_rows(std::size_t source_rows, const Plan& plan) {
     return add(source_rows, plan.taps - 2) / plan.decimation + 1;
 }
@@ -885,6 +931,13 @@ struct Workspace {
 using DifferentialPeaks = std::array<CoarseProposal, retained_per_bit>;
 class DifferentialSearch;
 
+struct DifferentialSupport {
+    std::size_t first = 0, stop = 0;
+    Complex typed_mean{};
+    double roundoff_energy = 0;
+    bool verify = false;
+};
+
 // Lag-one products of an aligned single path have a frequency-dependent
 // rotation rather than a phase history. Subtract the common product mean
 // of the template so stationary colored noise and a residual tone cannot
@@ -893,17 +946,21 @@ class DifferentialSearch;
 template<class T>
 void differential_spectrum(std::span<const Complex> input, std::vector<std::complex<T>>& output,
                            bool template_column, double scale, std::size_t fft_rows,
-                           CoarseOperationCounts& work, std::stop_token stop) {
+                           CoarseOperationCounts& work, std::stop_token stop,
+                           DifferentialSupport* support = nullptr) {
     output.assign(fft_rows, {});
     Complex mean{};
     for (std::size_t i = 0; i + 1 < input.size(); ++i) {
         if (!(i % 4096)) check_stop(stop);
         const auto value = (input[i + 1] * scale) * std::conj(input[i] * scale);
         output[i] = static_cast<std::complex<T>>(value);
+        if (support && support->verify && (i < support->first || i >= support->stop))
+            support->roundoff_energy += std::norm(static_cast<Complex>(output[i]));
         mean += value;
     }
     if (template_column && input.size() > 1) {
         mean /= input.size() - 1;
+        if (support) support->typed_mean = static_cast<Complex>(static_cast<std::complex<T>>(mean));
         for (std::size_t i = 0; i + 1 < input.size(); ++i)
             output[i] -= static_cast<std::complex<T>>(mean);
     }
@@ -1159,8 +1216,9 @@ std::array<Peak, retained_per_bit> arrival_peaks(std::span<const double> values,
 class DifferentialSearch {
 public:
     DifferentialSearch(const Plan& plan, const ReceiverSlotPlan& slot, const ReceiverConfig& config,
-                       PhaseSpan& span, std::stop_token stop)
-        : plan_(plan), slot_(slot), config_(config), peaks_(plan.workspaces()), work_(plan.workspaces()), span_(span) {
+                       PhaseSpan& span, std::stop_token stop, const MidpointPlan* midpoint)
+        : plan_(plan), slot_(slot), config_(config), midpoint_(midpoint), peaks_(plan.workspaces()),
+          midpoint_work_(midpoint ? plan.workspaces() : 0), work_(plan.workspaces()), span_(span) {
         if (config.native_coarse_precision == NativeCoarsePrecision::fp64)
             double_fft_.emplace(plan.layout.nfft, stop);
         else
@@ -1220,7 +1278,8 @@ public:
     }
 
     void finish(std::array<CoarseProposal, 2 * retained_per_bit>& result, std::size_t& count,
-                std::vector<FineCoordinate>& segmented, CoarseOperationCounts& work) {
+                std::vector<FineCoordinate>& segmented, CoarseOperationCounts& work,
+                CoarseMidpointTiming* midpoint) {
         combine(work, observation_work_);
         for (const auto& operations : work_) combine(work, operations);
         for (std::size_t bit = 0; bit < 2; ++bit) {
@@ -1236,6 +1295,7 @@ public:
             for (const auto& peak : best)
                 if (peak.score > 0) result[count++] = peak;
         }
+        if (midpoint) finish_midpoint(*midpoint);
         if (segmented_peaks_.empty()) return;
         const auto append = [&](const auto& pool, std::size_t limit) {
             std::vector<CoarseProposal> peaks;
@@ -1256,6 +1316,43 @@ public:
     }
 
 private:
+    struct MidpointWork {
+        DifferentialPeaks peaks{};
+        std::size_t inverse = 0, scored_lags = 0, verified_peaks = 0;
+    };
+
+    void finish_midpoint(CoarseMidpointTiming& result) {
+        result.first_lag = midpoint_->first_lag;
+        result.last_lag = midpoint_->last_lag;
+        result.lag_count = midpoint_->lag_count;
+        result.workspace_bytes = midpoint_->extra_workspace_bytes;
+        result.precision = double_fft_ ? "native_fp64" : "native_fp32";
+        for (const auto& worker : midpoint_work_) {
+            result.widened_inverses += worker.inverse;
+            result.scored_lags += worker.scored_lags;
+            result.verified_peaks += worker.verified_peaks;
+        }
+        for (std::size_t bit = 0; bit < 2; ++bit) {
+            std::vector<CoarseProposal> pool;
+            CoarseProposal center;
+            for (std::size_t workspace = bit; workspace < midpoint_work_.size(); workspace += 2)
+                for (const auto& peak : midpoint_work_[workspace].peaks)
+                    if (peak.score > 0) {
+                        pool.push_back(peak);
+                        if (peak.coordinate.epoch_offset_seconds == 0 && peak.score > center.score)
+                            center = peak;
+                    }
+            std::stable_sort(pool.begin(), pool.end(), [](const auto& a, const auto& b) { return a.score > b.score; });
+            const auto insert = [&](const CoarseProposal& peak) {
+                if (peak.score > 0 && std::ranges::none_of(result.proposals,
+                    [&](const auto& prior) { return prior.coordinate == peak.coordinate; }))
+                    result.proposals.push_back(peak);
+            };
+            for (const auto& peak : std::span(pool).first(std::min<std::size_t>(2, pool.size()))) insert(peak);
+            insert(center);
+        }
+    }
+
     void wait_ready(std::stop_token stop) {
         if (!ready_.load(std::memory_order_acquire)) {
             std::stop_callback wake(stop, [this] {
@@ -1412,6 +1509,13 @@ private:
         const auto exponent = max ? std::clamp(std::ilogb(max), -1022, 1023) : 0;
         differential_spectrum(input, observation, false, std::scalbn(1., -exponent),
                               plan_.layout.nfft, observation_work_, stop);
+        if (midpoint_) {
+            midpoint_prefix_.resize(observation.size() + 1);
+            for (std::size_t i = 0; i < observation.size(); ++i) {
+                if (!(i % 4096)) check_stop(stop);
+                midpoint_prefix_[i + 1] = midpoint_prefix_[i] + static_cast<Complex>(observation[i]);
+            }
+        }
         tracked_fft(observation, false, fft, observation_work_, stop);
         native_fft::permute(std::span(observation), stop);
     }
@@ -1422,10 +1526,21 @@ private:
         const PhaseSpan::Scope timing(span_);
         auto& work = work_[workspace];
         std::vector<std::complex<T>> product;
-        differential_spectrum(direct, product, true, 1, plan_.layout.nfft, work, stop);
+        const auto clock = workspace / 2 % plan_.clock_count;
+        const bool midpoint = midpoint_ && plan_.clocks[clock] == 0;
+        auto support = midpoint ? clock_zero_support() : DifferentialSupport{};
+        support.verify = midpoint && midpoint_->verify;
+        differential_spectrum(direct, product, true, 1, plan_.layout.nfft, work, stop, midpoint ? &support : nullptr);
         double energy = 0;
         for (const auto& value : product) energy += std::norm(static_cast<Complex>(value));
         if (!(energy > 0 && std::isfinite(energy))) return;
+        double support_energy = 0.;
+        if (midpoint)
+            for (std::size_t i = support.first; i < support.stop; ++i)
+                support_energy += std::norm(static_cast<Complex>(product[i]));
+        if (midpoint && midpoint_->verify)
+            require_coarse(support.roundoff_energy <= 1e-20 * support_energy,
+                "Robust midpoint template has material energy outside its finite FIR support");
         tracked_fft(product, false, fft, work, stop);
         native_fft::permute(std::span(product), stop);
         wait_ready(stop);
@@ -1434,11 +1549,10 @@ private:
             product[i] = observation[i] * std::conj(product[i]);
         }
         const auto arrivals = plan_.layout.lag_count;
-        tracked_fft(product, true, fft, work, stop, arrivals, true);
+        tracked_fft(product, true, fft, work, stop, midpoint ? product.size() : arrivals, true);
         std::vector<double> scores(arrivals);
         const auto bit = static_cast<std::uint8_t>(workspace % 2);
         const auto epoch = workspace / (2 * plan_.clock_count);
-        const auto clock = workspace / 2 % plan_.clock_count;
         for (std::size_t lag = 0; lag < arrivals; ++lag)
             scores[lag] = std::norm(static_cast<Complex>(product[lag])) / energy;
         note(work.score_rows, scores.size());
@@ -1456,11 +1570,92 @@ private:
                                      scores[lag], bit, 1};
             note(work.retained_peaks, 1);
         }
+        if (midpoint) {
+            auto& local = midpoint_work_[workspace];
+            local.inverse = 1;
+            score_midpoint<T>(direct, product, support, support_energy, bit, epoch, distance, local, stop);
+        }
+    }
+
+    DifferentialSupport clock_zero_support() const {
+        const auto& layout = plan_.layout;
+        // The exact cubic interpolant vanishes for positions <= -2 and
+        // >= source_rows+1. Extend that complete support by the causal FIR.
+        const auto origin = (layout.origin - layout.source_start) * plan_.fs;
+        const auto first = std::max(0.L, std::floor(-2 - origin) + 1);
+        const auto stop = std::min(static_cast<long double>(layout.raw_rows),
+            std::ceil(layout.source_rows + 1.L - origin));
+        if (stop <= first) return {};
+        const auto projected_first = ceil_div(extent(first), plan_.decimation);
+        const auto projected_stop = std::min(layout.kernel_rows,
+            ceil_div(add(extent(stop), plan_.taps - 1), plan_.decimation));
+        if (projected_stop <= projected_first + 1) return {};
+        return {projected_first, projected_stop - 1};
+    }
+
+    template<class T>
+    void score_midpoint(std::span<const Complex> direct, std::span<const std::complex<T>> product,
+            const DifferentialSupport& support, double energy, std::uint8_t bit, std::size_t epoch,
+            std::size_t distance, MidpointWork& work, std::stop_token stop) {
+        if (!(energy > 0) || !support.stop) return;
+        const auto nfft = static_cast<std::int64_t>(product.size());
+        // All nonzero adjacent products must fit inside the real observation.
+        // Any wrapped part is solely the template's subtracted constant.
+        const auto first = std::max(midpoint_->first_lag, -static_cast<std::int64_t>(support.first));
+        const auto last = std::min(midpoint_->last_lag,
+            static_cast<std::int64_t>(plan_.layout.crop_rows - 1) - static_cast<std::int64_t>(support.stop));
+        if (first > last) return;
+        const auto wrap = [&](std::int64_t lag) { return static_cast<std::size_t>(lag < 0 ? lag + nfft : lag); };
+        const auto moment = [&](std::int64_t lag) {
+            const auto index = wrap(lag);
+            const auto length = direct.size() - 1;
+            const auto segment = std::min(product.size() - index, length);
+            const auto circular = midpoint_prefix_[index + segment] - midpoint_prefix_[index] +
+                midpoint_prefix_[length - segment];
+            const auto physical = midpoint_prefix_[static_cast<std::int64_t>(support.stop) + lag] -
+                midpoint_prefix_[static_cast<std::int64_t>(support.first) + lag];
+            return static_cast<Complex>(product[index]) + std::conj(support.typed_mean) * (circular - physical);
+        };
+        std::vector<double> scores(static_cast<std::size_t>(last - first + 1));
+        for (std::size_t i = 0; i < scores.size(); ++i) {
+            if (!(i % 4096)) check_stop(stop);
+            scores[i] = std::norm(moment(first + static_cast<std::int64_t>(i))) / energy;
+        }
+        work.scored_lags = scores.size();
+        std::vector<std::uint32_t> interiors;
+        const auto selected = select_arrivals(scores, distance, interiors);
+        for (std::size_t i = 0; i < selected.count; ++i) {
+            const auto j = selected.indices[i];
+            if (!(std::isfinite(scores[j]) && scores[j] > 0)) continue;
+            const auto lag = first + static_cast<std::int64_t>(j);
+            if (midpoint_->verify) {
+                Complex direct_sum{};
+                double observation_energy = 0;
+                for (std::size_t row = support.first; row < support.stop; ++row) {
+                    if (!(row % 4096)) check_stop(stop);
+                    const auto index = static_cast<std::int64_t>(row) + lag;
+                    const auto y = midpoint_prefix_[index + 1] - midpoint_prefix_[index];
+                    const auto x = static_cast<Complex>(static_cast<std::complex<T>>(
+                        direct[row + 1] * std::conj(direct[row])) - static_cast<std::complex<T>>(support.typed_mean));
+                    direct_sum += std::conj(x) * y;
+                    observation_energy += std::norm(y);
+                }
+                constexpr double roundoff = std::is_same_v<T, double> ? 2e-10 : 3e-4;
+                require_coarse(std::abs(direct_sum - moment(lag)) <=
+                    roundoff * std::sqrt(energy * observation_energy) + 1e-12,
+                    "Robust signed midpoint FFT disagrees with finite linear correlation");
+                ++work.verified_peaks;
+            }
+            work.peaks[i] = {midpoint_timing_coordinate(slot_, midpoint_->middle_seconds,
+                config_.clock_bound_ppm, plan_.output_fs, lag,
+                receiver_epoch_offsets[epoch]), scores[j], bit, 1};
+        }
     }
 
     const Plan& plan_;
     const ReceiverSlotPlan& slot_;
     const ReceiverConfig& config_;
+    const MidpointPlan* midpoint_;
     std::optional<native_fft::FloatPlan> float_fft_;
     std::optional<native_fft::DoublePlan> double_fft_;
     std::optional<native_fft::FloatPlan> segmented_float_fft_;
@@ -1474,6 +1669,8 @@ private:
     std::vector<std::complex<float>> fast_float_;
     std::vector<Complex> fast_double_;
     std::vector<DifferentialPeaks> peaks_;
+    std::vector<Complex> midpoint_prefix_;
+    std::vector<MidpointWork> midpoint_work_;
     std::vector<DifferentialPeaks> segmented_peaks_;
     std::vector<DifferentialPeaks> smooth_peaks_;
     std::vector<DifferentialPeaks> fast_peaks_;
@@ -2614,11 +2811,38 @@ CoarseArrivalPeaks select_coarse_arrivals(std::span<const double> scores, std::s
 }
 
 std::size_t coarse_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
-                             AssistanceBound overlapped) {
+                              AssistanceBound overlapped, MidpointTimingEvaluation midpoint_timing) {
     const auto plan = make_plan(config, slot);
     require_coarse(!overlapped.workspace_bytes || defers_frequency_grid(plan, config),
                    "coarse preparation cannot overlap frequency acquisition for this profile");
-    return scratch_workspace(plan, config, frequency_bound(plan, config), workers, overlapped).total;
+    const auto normal = scratch_workspace(plan, config, frequency_bound(plan, config), workers, overlapped).total;
+    if (midpoint_timing == MidpointTimingEvaluation::off) return normal;
+    const auto midpoint = midpoint_plan(plan, config, slot, workers, midpoint_timing);
+    require_coarse(midpoint.lag_count, "Robust midpoint timing plan is outside supported public geometry");
+    return add(normal, midpoint.extra_workspace_bytes);
+}
+
+CoarseMidpointSupport coarse_midpoint_timing_support(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
+    const auto geometry = make_plan(config, slot);
+    const auto plan = midpoint_plan(geometry, config, slot, 1, MidpointTimingEvaluation::short_tracking);
+    return {plan.lag_count != 0, plan.status, plan.first_lag, plan.last_lag, plan.middle_seconds, geometry.output_fs};
+}
+
+FineCoordinate midpoint_timing_coordinate(const ReceiverSlotPlan& slot, long double middle_seconds,
+        double bound_ppm, std::size_t output_fs, std::int64_t lag, std::int64_t epoch) {
+    const long double d = static_cast<long double>(lag) / output_fs;
+    const long double width = slot.arrival_upper_seconds - slot.arrival_lower_seconds;
+    const long double bound = bound_ppm * 1e-6L;
+    const auto lower = std::max(0.L, d - middle_seconds * bound / (1 - bound));
+    const auto upper = std::min(width, d + middle_seconds * bound / (1 + bound));
+    require_coarse(lower <= upper, "Robust midpoint lag lies outside the coupled clock/arrival support");
+    const auto arrival = std::clamp(.5L * width, lower, upper);
+    const auto rate_offset = (arrival - d) / (middle_seconds + d - arrival);
+    require_coarse(std::isfinite(rate_offset) && std::abs(rate_offset) <= bound * (1 + 1e-12L),
+        "Robust midpoint timing mapped outside its public clock bound");
+    return {epoch, std::clamp(static_cast<double>(slot.arrival_lower_seconds + arrival),
+                             slot.arrival_lower_seconds, slot.arrival_upper_seconds), 0,
+            std::clamp(static_cast<double>(rate_offset * 1e6L), -bound_ppm, bound_ppm)};
 }
 
 bool coarse_defers_frequency_grid(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
@@ -2659,6 +2883,8 @@ struct CoarseSession::Impl {
     std::vector<Peak> peaks;
     std::vector<FineCoordinate> varying_coordinates;
     std::vector<FineCoordinate> segmented_timing_coordinates;
+    std::optional<MidpointPlan> midpoint_geometry;
+    std::optional<CoarseMidpointTiming> midpoint_timing;
     std::optional<CoarseResult> result;
     double variance = 0;
     bool q15_products = false;
@@ -2672,7 +2898,8 @@ struct CoarseSession::Impl {
     Impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
          std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
          const FrequencyAssistance* assistance,
-         unsigned workers, std::size_t limit, std::stop_token outer_stop, ReceiverExecutor* shared)
+         unsigned workers, std::size_t limit, std::stop_token outer_stop, ReceiverExecutor* shared,
+         MidpointTimingEvaluation midpoint_evaluation)
         : config(config), slot(slot),
           owned_executor(shared ? nullptr : std::make_unique<ReceiverExecutor>(std::max(1U, workers))),
           executor(shared ? *shared : *owned_executor), external_stop(outer_stop, PropagateStop{cancellation}) {
@@ -2691,8 +2918,14 @@ struct CoarseSession::Impl {
         const bool overlapped = assistance != nullptr;
         require_coarse(!overlapped || (assistance->acquire && defers_frequency_grid(geometry, config)),
                        "coarse preparation cannot overlap frequency acquisition for this profile");
-        const auto workspace = scratch_workspace(geometry, config, frequency_bound(geometry, config), workers,
+        auto workspace = scratch_workspace(geometry, config, frequency_bound(geometry, config), workers,
                                                  overlapped ? assistance->bound : AssistanceBound{});
+        if (midpoint_evaluation != MidpointTimingEvaluation::off) {
+            midpoint_geometry = midpoint_plan(geometry, config, slot, workers, midpoint_evaluation);
+            require_coarse(midpoint_geometry->lag_count, "Robust midpoint timing plan is outside supported public geometry");
+            workspace.total = add(workspace.total, midpoint_geometry->extra_workspace_bytes);
+            midpoint_timing.emplace();
+        }
         if (workspace.total > limit) throw ReceiverWorkspaceError("complete coarse receiver exceeds its admitted workspace");
         const auto plan_search = [&](std::span<const FrequencyInterval> chosen) {
             grid = frequencies(geometry, config, chosen);
@@ -2865,7 +3098,8 @@ struct CoarseSession::Impl {
         const auto origin = PhaseClock::now();
         PhaseSpan varying_span(origin);
         std::optional<DifferentialSearch> differential;
-        if (geometry.varying_passband) differential.emplace(geometry, slot, config, varying_span, stop);
+        if (geometry.varying_passband) differential.emplace(geometry, slot, config, varying_span, stop,
+            midpoint_geometry ? &*midpoint_geometry : nullptr);
         const auto filter = [&](std::stop_token job_stop) {
             observation = projection.apply(iq.size(), layout.crop_first, layout.crop_rows,
                 [&](std::size_t first, std::span<Complex> values) {
@@ -2938,7 +3172,8 @@ struct CoarseSession::Impl {
         if (differential) {
             std::array<CoarseProposal, 2 * retained_per_bit> proposals{};
             std::size_t count = 0;
-            differential->finish(proposals, count, segmented_timing_coordinates, receipt.varying_proposals.operations);
+            differential->finish(proposals, count, segmented_timing_coordinates, receipt.varying_proposals.operations,
+                midpoint_timing ? &*midpoint_timing : nullptr);
             refine(varying_coordinates, std::span(proposals).first(count), geometry, config, slot);
             receipt.varying_proposals.wall_seconds = varying_span.seconds();
         }
@@ -3119,11 +3354,15 @@ struct CoarseSession::Impl {
         bytes = add(bytes, mul(peaks.capacity(), sizeof(Peak)));
         bytes = add(bytes, mul(varying_coordinates.capacity(), sizeof(FineCoordinate)));
         bytes = add(bytes, mul(segmented_timing_coordinates.capacity(), sizeof(FineCoordinate)));
+        if (midpoint_timing)
+            bytes = add(bytes, mul(midpoint_timing->proposals.capacity(), sizeof(CoarseProposal)));
         if (result) {
             bytes = add(bytes, mul(result->coordinates.capacity(), sizeof(FineCoordinate)));
             bytes = add(bytes, mul(result->varying_coordinates.capacity(), sizeof(FineCoordinate)));
             bytes = add(bytes, mul(result->segmented_timing_coordinates.capacity(), sizeof(FineCoordinate)));
             bytes = add(bytes, mul(result->epoch_timing_coordinates.capacity(), sizeof(FineCoordinate)));
+            if (result->midpoint_timing)
+                bytes = add(bytes, mul(result->midpoint_timing->proposals.capacity(), sizeof(CoarseProposal)));
             bytes = add(bytes, result->reason.capacity() + 1);
         }
         if (bytes > receipt.plan.workspace_reserved_bytes)
@@ -3134,14 +3373,16 @@ struct CoarseSession::Impl {
 
 CoarseSession::CoarseSession(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                              std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
-                             unsigned workers, std::size_t limit, std::stop_token stop, ReceiverExecutor* executor)
-    : impl_(std::make_unique<Impl>(config, slot, key, iq, intervals, nullptr, workers, limit, stop, executor)) {}
+                             unsigned workers, std::size_t limit, std::stop_token stop, ReceiverExecutor* executor,
+                             MidpointTimingEvaluation midpoint_timing)
+    : impl_(std::make_unique<Impl>(config, slot, key, iq, intervals, nullptr, workers, limit, stop, executor, midpoint_timing)) {}
 
 CoarseSession::CoarseSession(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                              std::span<const Complex> iq, const FrequencyAssistance& assistance,
-                             unsigned workers, std::size_t limit, std::stop_token stop, ReceiverExecutor* executor)
+                             unsigned workers, std::size_t limit, std::stop_token stop, ReceiverExecutor* executor,
+                             MidpointTimingEvaluation midpoint_timing)
     : impl_(std::make_unique<Impl>(config, slot, key, iq, std::span<const FrequencyInterval>{}, &assistance,
-                                   workers, limit, stop, executor)) {}
+                                   workers, limit, stop, executor, midpoint_timing)) {}
 
 CoarseSession::~CoarseSession() = default;
 CoarseSession::CoarseSession(CoarseSession&&) noexcept = default;
@@ -3245,6 +3486,7 @@ std::optional<CoarseResult> CoarseSession::finish() {
                impl.geometry, impl.config, impl.slot);
         result.varying_coordinates = std::move(impl.varying_coordinates);
         result.segmented_timing_coordinates = std::move(impl.segmented_timing_coordinates);
+        result.midpoint_timing = std::move(impl.midpoint_timing);
         check_stop(stop);
         impl.result.emplace(std::move(result));
         impl.refresh_retained_bytes();
@@ -3284,15 +3526,15 @@ CoarseResult complete(CoarseSession session) {
 CoarseResult score_coarse(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                           std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
                           unsigned workers, std::size_t scratch_limit_bytes, std::stop_token stop,
-                          ReceiverExecutor* executor) {
-    return complete(CoarseSession(config, slot, key, iq, intervals, workers, scratch_limit_bytes, stop, executor));
+                          ReceiverExecutor* executor, MidpointTimingEvaluation midpoint_timing) {
+    return complete(CoarseSession(config, slot, key, iq, intervals, workers, scratch_limit_bytes, stop, executor, midpoint_timing));
 }
 
 CoarseResult score_coarse(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                           std::span<const Complex> iq, const FrequencyAssistance& assistance,
                           unsigned workers, std::size_t scratch_limit_bytes, std::stop_token stop,
-                          ReceiverExecutor* executor) {
-    return complete(CoarseSession(config, slot, key, iq, assistance, workers, scratch_limit_bytes, stop, executor));
+                          ReceiverExecutor* executor, MidpointTimingEvaluation midpoint_timing) {
+    return complete(CoarseSession(config, slot, key, iq, assistance, workers, scratch_limit_bytes, stop, executor, midpoint_timing));
 }
 
 } // namespace datapump::triad::v3::receiver_detail

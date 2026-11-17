@@ -1,5 +1,6 @@
 #include "triad_receiver_fine.hpp"
 #include "triad_receiver_executor.hpp"
+#include "triad_gaussian_kernel.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -11,14 +12,9 @@
 #include <mutex>
 #include <numbers>
 #include <numeric>
+#include <random>
 #include <stdexcept>
 #include <thread>
-
-extern "C" int triad_gaussian_update_v1(
-    std::size_t taps, std::size_t candidates, std::size_t models, std::size_t blocks,
-    std::size_t first, std::size_t stop, const double* correlations, const double* grams,
-    const double* power, const double* transitions, double* mean, double* covariance,
-    double* scores, double* diagnostics) noexcept;
 
 namespace {
 using namespace datapump;
@@ -58,7 +54,8 @@ struct Fixture {
     std::array<FineCoordinate, 1> coordinates{{{0, 0, 0, 0}}};
     unsigned fs;
 
-    explicit Fixture(unsigned sample_rate = 2400, double inner_rate = 120, bool extend_for_source = false)
+    explicit Fixture(unsigned sample_rate = 2400, double inner_rate = 120, bool extend_for_source = false,
+                     double bit_seconds = .001)
         : fs(sample_rate) {
         config.sample_rate_hz = fs;
         config.data_if_hz = 1725;
@@ -72,7 +69,7 @@ struct Fixture {
         slot.format.sample_rate = fs;
         slot.format.inner_rate_hz = inner_rate;
         slot.format.added_symbols = 1;
-        slot.format.bit_seconds = .001;
+        slot.format.bit_seconds = bit_seconds;
         slot.format.pulse_shape = PulseShape::TaperedRrc;
         slot.format.epoch = 1793850000;
         slot.format.symbol_ordinal = 3117;
@@ -649,10 +646,11 @@ void slow_gain_coherence_is_bounded_and_normalized() {
     const FineObservation extent{f.slot.first_sample, samples.size(), FineRunKind::probe, true};
 
     struct Result { FineProgress progress; ReceiverSlotScore score; };
-    const auto run = [&](ReceiverConfig config, unsigned workers, bool prefix) {
+    const auto run = [&](ReceiverConfig config, unsigned workers, bool prefix,
+                         AffineGainEvaluation evaluation = AffineGainEvaluation::operational) {
         const auto memory = fine_workspace(config, f.slot, extent, workers);
         FineSession session(config, f.slot, f.key, extent, samples, {}, f.coordinates,
-                            100, 12, workers, memory);
+                            100, 12, workers, memory, {}, nullptr, evaluation);
         if (prefix) session.advance_to(f.fs * 11);
         session.advance_to(extent.rows);
         Result result;
@@ -669,6 +667,7 @@ void slow_gain_coherence_is_bounded_and_normalized() {
     slow_config.time_varying_atmospheric_hz = .04;
     const auto slow_serial = run(slow_config, 1, false);
     const auto slow_parallel = run(slow_config, 2, true);
+    const auto slow_comparator = run(slow_config, 1, false, AffineGainEvaluation::without_stationary_fading);
     const auto old_workspace = fine_workspace(static_config, f.slot, extent, 1);
     const auto slow_workspace = fine_workspace(slow_config, f.slot, extent, 1);
 
@@ -714,6 +713,10 @@ void slow_gain_coherence_is_bounded_and_normalized() {
           slow_parallel.progress.initial_affine.basis_rows == new_lane.basis_rows &&
           slow_parallel.progress.adaptive.transition_edges == slow_serial.progress.adaptive.transition_edges,
           "slow gain likelihood must be invariant to prefix checkpoints and worker count");
+    check(slow_comparator.score.bit_evidence == slow_serial.score.bit_evidence &&
+          slow_comparator.progress.slow_gain_bit_evidence == slow_serial.progress.slow_gain_bit_evidence &&
+          slow_comparator.progress.initial_affine.gaussian_updates == new_lane.gaussian_updates,
+          "the stationary-fading comparison must retain the existing slow gain family");
 
     // A larger declared allowance must retain the slower actual trajectory
     // above. Two fine cells, rather than the upper bound, set the scale floor.
@@ -743,45 +746,131 @@ void slow_gain_coherence_is_bounded_and_normalized() {
           "wide bounds must preserve basis/adaptive work, two-model cost and prefix/worker invariance");
 }
 
-void slow_gain_coherence_gate_preserves_fast_and_off_paths() {
-    const Fixture f(240, 60); // 0.1 s per fine cell
-    const FineObservation extent{f.slot.first_sample, f.iq.size(), FineRunKind::probe, true};
-    const auto run = [&](ReceiverConfig config) {
-        const auto memory = fine_workspace(config, f.slot, extent, 1);
+void stationary_fading_gain_covers_short_single_tap_data() {
+    Fixture clean(240, 60, true, 16.);
+    const auto duration = geometry(clean.slot.format).bit_seconds;
+    check(duration >= 10. && duration < 32.,
+          "the stationary-fading check must use a complete DATA aperture below the former duration cutoff");
+    auto varying = clean.config;
+    varying.time_varying_channel = true;
+    varying.time_varying_common_doppler_hz = 12;
+    varying.time_varying_atmospheric_hz = 12;
+    auto mixed = clean, noise = clean;
+    const auto stationary = std::polar(std::sqrt(.5), -.63);
+    std::mt19937_64 rng(761);
+    std::normal_distribution<double> gaussian(0.,std::sqrt(varying.noise_variance / 2.));
+    for (std::size_t i = 0; i < clean.iq.size(); ++i) {
+        const auto t = static_cast<double>(i) / clean.fs;
+        const auto phase = .9 * std::sin(2 * std::numbers::pi * t / 7.) +
+                           .3 * std::sin(2 * std::numbers::pi * t / 13.);
+        noise.iq[i] = {gaussian(rng), gaussian(rng)};
+        mixed.iq[i] = (stationary + std::polar(std::sqrt(.5), phase)) * clean.iq[i] + noise.iq[i];
+        clean.iq[i] += noise.iq[i];
+    }
+    struct Result {
+        FineProgress work;
+        ReceiverSlotScore score;
+        double wall_seconds;
+    };
+    const auto run = [](const Fixture& f, ReceiverConfig config, unsigned workers = 1, bool prefix = false,
+                        AffineGainEvaluation evaluation = AffineGainEvaluation::operational) {
+        const FineObservation extent{f.slot.first_sample, f.iq.size(), FineRunKind::operational, true};
+        const auto memory = fine_workspace(config, f.slot, extent, workers);
+        const auto start = std::chrono::steady_clock::now();
         FineSession session(config, f.slot, f.key, extent, f.iq, {}, f.coordinates,
-                            100, 12, 1, memory);
+                            100, 12, workers, memory, {}, nullptr, evaluation);
+        if (prefix) session.advance_to(f.fs * 11);
         session.advance_to(extent.rows);
         ReceiverSlotScore score;
         session.finish(score);
-        return std::pair{session.progress(), score};
+        classify_fine_slot(score, AdmissionGrid(f.slot.arrival_lower_seconds,f.slot.arrival_upper_seconds,
+            config.frequency_bound_hz,config.clock_bound_ppm,receiver_coarse_frequency_step(f.slot.format,f.fs)));
+        const auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+        return Result{session.progress(),score,seconds};
     };
-    auto fast = f.config;
-    fast.time_varying_channel = true;
-    fast.time_varying_common_doppler_hz = 12; // coherence is shorter than two cells
-    const auto fast_result = run(fast);
-    auto off = f.config;
-    off.time_varying_common_doppler_hz = .04;
-    const auto off_result = run(off);
-    check(fast_result.first.slow_gain_coherence_seconds == std::array<double, 2>{} &&
-          fast_result.first.slow_gain_bit_evidence == std::array<double, 2>{} &&
-          off_result.first.slow_gain_coherence_seconds == std::array<double, 2>{} &&
-          off_result.first.slow_gain_bit_evidence == std::array<double, 2>{},
-          "fast variation and explicit Off must retain the existing fine model set");
-    check(fast_result.first.initial_affine.gaussian_updates == off_result.first.initial_affine.gaussian_updates &&
-          fast_result.first.initial_affine.basis_rows == off_result.first.initial_affine.basis_rows &&
-          fast_result.second.bit_evidence == off_result.second.bit_evidence,
-          "an ineligible slow model must not alter fast or Off likelihood work");
+    constexpr auto existing = AffineGainEvaluation::without_stationary_fading;
+    const auto off = run(mixed, clean.config);
+    const auto base = run(mixed, varying, 1, false, existing);
+    const auto extended = run(mixed, varying);
+    const auto split = run(mixed, varying, 2, true);
+    check(!base.score.affine_stationary_fading_gain && !off.score.affine_stationary_fading_gain &&
+          base.work.slow_gain_coherence_seconds == std::array<double, 2>{} &&
+          base.score.bit_evidence == off.score.bit_evidence &&
+          base.work.initial_affine.gaussian_updates == off.work.initial_affine.gaussian_updates,
+          "the comparison must omit the additive bank and restore the original affine weights");
+    check(extended.score.affine_stationary_fading_gain && split.score.affine_stationary_fading_gain &&
+          extended.work.slow_gain_coherence_seconds == std::array<double, 2>{.5, 2.} &&
+          extended.work.slow_gain_bit_evidence[1] > extended.work.slow_gain_bit_evidence[0] &&
+          split.work.slow_gain_bit_evidence == extended.work.slow_gain_bit_evidence &&
+          split.score.bit_evidence == extended.score.bit_evidence &&
+          extended.score.decision == SlotDecision::data && extended.score.bit == 1,
+          "short one-template DATA must score stationary and fading gains with checkpoint and worker parity");
+    check(extended.work.workspace_bytes > off.work.workspace_bytes &&
+          extended.work.initial_affine.basis_rows == base.work.initial_affine.basis_rows &&
+          extended.work.initial_affine.gaussian_updates == base.work.initial_affine.gaussian_updates +
+              extended.work.blocks * base.work.initial_affine.initial_states * 3 * 2 &&
+          extended.work.adaptive.transition_edges == base.work.adaptive.transition_edges &&
+          extended.work.adaptive.basis_rows == base.work.adaptive.basis_rows,
+          "the additive gain must be charged and reuse the original basis without expanding adaptive work");
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        const auto expected = test_log_add(std::log(.75) + base.score.bit_evidence[bit],
+            std::log(.25) + extended.work.slow_gain_bit_evidence[bit]);
+        check(std::abs(expected - extended.score.bit_evidence[bit]) < 1e-10,
+              "the additive gain alternatives must retain the fixed normalized affine mixture");
+    }
+    const auto clean_base = run(clean, varying, 1, false, existing);
+    const auto clean_extended = run(clean, varying);
+    const auto quiet_base = run(noise, varying, 1, false, existing);
+    const auto quiet_extended = run(noise, varying);
+    check(clean_base.score.decision == SlotDecision::data && clean_extended.score.decision == SlotDecision::data &&
+          clean_base.score.bit == 1 && clean_extended.score.bit == 1,
+          "the same public changing-channel bounds must preserve constant-channel DATA");
+    check(quiet_base.score.decision == SlotDecision::quiet && quiet_extended.score.decision == SlotDecision::quiet &&
+          quiet_base.score.noise_statistics_valid && quiet_extended.score.noise_statistics_valid &&
+          quiet_base.score.quiet_energy == quiet_extended.score.quiet_energy,
+          "the matched short noise observation must preserve scored physical quiet");
+
+    auto two_taps = varying;
+    two_taps.spread_delay_seconds = .007;
+    auto two_taps_off = two_taps;
+    two_taps_off.time_varying_channel = false;
+    check(fine_workspace(two_taps, mixed.slot, 1) == fine_workspace(two_taps_off, mixed.slot, 1),
+          "a two-tap aperture must not reserve the one-template additive model");
+    const auto full_score = [&](const ReceiverConfig& config) {
+        constexpr unsigned workers = 2;
+        return score_receiver_slot(config,mixed.slot,mixed.key,mixed.iq,{},workers,
+            receiver_slot_overlap_workspace(config,mixed.slot,workers));
+    };
+    const auto full_single = full_score(varying);
+    const auto full_double = full_score(two_taps);
+    check(full_single.complete && full_double.complete && full_single.all_valid && full_double.all_valid &&
+          full_single.affine_stationary_fading_gain && !full_double.affine_stationary_fading_gain &&
+          full_single.decision == SlotDecision::data && full_double.decision == SlotDecision::data &&
+          full_single.bit == 1 && full_double.bit == 1,
+          "the same short changing single-path DATA must pass when the public geometry declares a possible echo");
+    std::cout << "short stationary fading: DATA " << duration << " s; mixed log-e "
+              << base.score.operational_log_e << " -> " << extended.score.operational_log_e
+              << "; clean " << clean_base.score.operational_log_e << " -> " << clean_extended.score.operational_log_e
+              << "; quiet " << quiet_base.score.operational_log_e << " -> " << quiet_extended.score.operational_log_e
+              << "; mixed fine seconds " << base.wall_seconds << " -> " << extended.wall_seconds
+              << "; Gaussian updates " << base.work.initial_affine.gaussian_updates << " -> "
+              << extended.work.initial_affine.gaussian_updates
+              << "; added admitted bytes " << extended.work.workspace_bytes - off.work.workspace_bytes
+              << "; complete scores without/with declared 7 ms spread "
+              << full_single.operational_log_e << " / " << full_double.operational_log_e << '\n';
 }
 
-void gaussian_update_matches_dense_complex_covariance() {
+void gaussian_update_matches_dense_complex_covariance(double coherence = 3.7, bool stationary_fading = false) {
     using C = std::complex<double>;
     constexpr std::size_t count = 4;
     constexpr double variance = .7;
-    constexpr double gain_power = .7;
-    constexpr double coherence = 3.7;
+    const double gain_power = stationary_fading ? 1. : .7;
     const std::array<double, count> times{0., .25, .5, .9};
     const std::array<C, count> basis{{{1., 0.}, {}, {.8, .25}, {-.6, .4}}};
-    const std::array<C, count> observation{{{.8, -.2}, {}, {-.3, .7}, {.2, .1}}};
+    std::array<C, count> observation{{{.8, -.2}, {}, {-.3, .7}, {.2, .1}}};
+    if (stationary_fading)
+        for (std::size_t i = 0; i < count; ++i)
+            observation[i] += basis[i] * (C{.45, -.3} + std::polar(.65, .38 + .7 * times[i]));
 
     // Dense H1 output covariance over observed blocks {0,2,3}. Block 1 is
     // erased. Its time remains in the AR recurrence: the gap from observed
@@ -791,7 +880,9 @@ void gaussian_update_matches_dense_complex_covariance() {
     const auto covariance_at = [&](std::size_t row, std::size_t col) {
         const auto i = observed[row], j = observed[col];
         const auto separation = std::abs(times[i] - times[j]);
-        const auto channel = gain_power * std::exp(-separation / coherence) * basis[i] * std::conj(basis[j]);
+        const auto fading = std::exp(-separation / coherence);
+        const auto correlation = stationary_fading ? .5 + .5 * fading : fading;
+        const auto channel = gain_power * correlation * basis[i] * std::conj(basis[j]);
         return channel + (row == col ? C{variance, 0.} : C{});
     };
     double log_determinant = 0;
@@ -824,9 +915,20 @@ void gaussian_update_matches_dense_complex_covariance() {
     const auto dense_log_likelihood_ratio = observed_energy - whitened_energy - log_determinant +
         observed.size() * std::log(variance);
 
-    std::array<double, 1> power{gain_power};
-    std::array<C, 3> means{};
-    std::array<C, 3> posterior{{C{}, C{gain_power, 0.}, C{gain_power, 0.}}};
+    const auto dimensions = stationary_fading ? 2U : 1U;
+    const auto covariance_size = dimensions * dimensions;
+    const std::array<double, 2> power{gain_power / dimensions, gain_power / dimensions};
+    std::array<C, 3 * 2> means{};
+    std::array<C, 3 * 4> posterior{};
+    for (std::size_t hypothesis = 0; hypothesis < 3; ++hypothesis) {
+        const auto start = hypothesis * covariance_size;
+        for (std::size_t component = 0; component < dimensions; ++component)
+            posterior[start + component * (dimensions + 1)] = power[component];
+        if (stationary_fading) {
+            posterior[start] += power[1];
+            posterior[start + 1] = posterior[start + 2] = power[1];
+        }
+    }
     std::array<double, 3> scores{};
     std::array<double, 2> diagnostics{std::numeric_limits<double>::infinity(), 0.};
     double last_center = times[0];
@@ -856,15 +958,247 @@ void gaussian_update_matches_dense_complex_covariance() {
             block_grams[h1] = std::norm(basis[index]) / variance;
             block_grams[h2] = block_grams[h1];
         }
-        const auto status = triad_gaussian_update_v1(1, 1, 1, blocks, 0, 1,
+        const auto update = stationary_fading ? triad_gaussian_additive_update_v1 : triad_gaussian_update_v1;
+        const auto status = update(1, 1, 1, blocks, 0, 1,
             reinterpret_cast<const double*>(block_correlations.data()),
             reinterpret_cast<const double*>(block_grams.data()), power.data(), transitions.data(),
             reinterpret_cast<double*>(means.data()), reinterpret_cast<double*>(posterior.data()),
             scores.data(), diagnostics.data());
-        check(status == 0, "Gaussian update kernel must accept the fixed finite slow-gain likelihood");
+        check(status == 0, "Gaussian update kernel must accept the fixed finite gain likelihood");
     }
-    check(std::abs(scores[1] - dense_log_likelihood_ratio) < 2e-12,
+    check(scores[0] == 0. && scores[1] == scores[2] &&
+          std::abs(scores[1] - dense_log_likelihood_ratio) < 2e-12,
           "block Gaussian updates must equal the dense complex covariance likelihood across an erased block and merged tail");
+    if (stationary_fading)
+        check(std::abs(posterior[5]) > .01 && posterior[5] == std::conj(posterior[6]),
+              "additive gain prediction and observation must retain the correlated posterior");
+}
+
+void additive_gain_preserves_large_gram_precision() {
+    constexpr double gram = 1e18, coherence = .5, tiny_elapsed = 1e-19;
+    const Complex measured_gain{1., 1.};
+    const std::array<double, 2> power{.5, .5};
+    std::array<Complex, 3 * 2> means{};
+    std::array<Complex, 3 * 4> posterior{1., .5, .5, .5, 1., .5, .5, .5, 1., .5, .5, .5};
+    std::array<double, 3> scores{};
+    std::array<double, 2> diagnostics{std::numeric_limits<double>::infinity(), 0.};
+    const auto update = [&](double elapsed, bool observed) {
+        const auto exponent = -elapsed / coherence;
+        const auto decay = std::exp(exponent);
+        const std::array transition{decay * decay, -std::expm1(2 * exponent), decay, 0.};
+        const auto energy = observed ? gram : 0.;
+        const std::array<Complex, 3> r{0., energy * measured_gain, 0.};
+        const std::array<Complex, 3> g{0., energy, energy};
+        const auto status = triad_gaussian_additive_update_v1(1, 1, 1, 1, 0, 1,
+            reinterpret_cast<const double*>(r.data()), reinterpret_cast<const double*>(g.data()),
+            power.data(), transition.data(), reinterpret_cast<double*>(means.data()),
+            reinterpret_cast<double*>(posterior.data()), scores.data(), diagnostics.data());
+        check(status == 0 && scores[0] == 0.,
+              "large rank-one observations must preserve a finite likelihood and exact zero null");
+    };
+
+    // Both observations measure the same latent gain. The scalar posterior
+    // therefore has total Gram 2G without a transition between observations.
+    update(0., true);
+    update(0., true);
+    const auto summed_gram = 2 * gram;
+    const auto expected_variance = 1. / (1. + summed_gram);
+    const auto expected_mean = (summed_gram * expected_variance) * measured_gain;
+    const auto expected_evidence = summed_gram * std::norm(measured_gain) *
+        (summed_gram * expected_variance) - std::log1p(summed_gram);
+    check(std::abs(means[2] - expected_mean) < 1e-14 &&
+          std::abs(means[3] - .5 * expected_mean) < 1e-14 &&
+          std::abs(scores[1] / expected_evidence - 1.) < 1e-14 &&
+          std::abs(scores[2] + std::log1p(summed_gram)) < 1e-12 &&
+          std::abs(posterior[4].real() / expected_variance - 1.) < 1e-14 &&
+          std::abs(2. * posterior[5].real() / expected_variance - 1.) < 1e-14,
+          "repeated large-Gram observations must preserve means, small covariance and the log determinant");
+
+    // An erased block still evolves the gain. The new innovation is
+    // measurable against the small posterior even though rho rounds to one.
+    const auto preserved_scores = scores;
+    update(tiny_elapsed, false);
+    const auto difference = std::expm1(-tiny_elapsed / coherence);
+    const auto innovation = -.5 * std::expm1(-2 * tiny_elapsed / coherence);
+    const auto predicted_variance = expected_variance + difference * expected_variance +
+        difference * difference * (.25 + .25 * expected_variance) + innovation;
+    check(scores == preserved_scores &&
+          std::abs(posterior[8].real() / predicted_variance - 1.) < 1e-14,
+          "a tiny positive erased interval must advance the observable covariance without evidence");
+    update(0., true);
+    const auto increment = -std::log1p(gram * predicted_variance);
+    const auto final_variance = predicted_variance / (1. + gram * predicted_variance);
+    check(std::abs(scores[2] - (preserved_scores[2] + increment)) < 1e-12 &&
+          std::abs(posterior[8].real() / final_variance - 1.) < 1e-14 &&
+          posterior[8].real() > 0. && posterior[11].real() > 0.,
+          "small positive predicted variance must affect later normalized evidence and posterior");
+}
+
+void two_tap_factor_preserves_large_gram_precision() {
+    const auto gram = std::ldexp(1., 60);
+    const double root_prior = std::sqrt(.5);
+    const std::array<double, 2> power{.5, .5};
+    const std::array<double, 4> no_elapsed{1., 0., 1., 0.};
+    for (const auto phase : {Complex{1.}, Complex{0.,1.}}) {
+        std::array<Complex, 6> means{};
+        std::array<Complex, 12> factors{};
+        for (const auto start : {0,4,8}) factors[start] = factors[start+3] = root_prior;
+        const auto update = [&](Complex correlation, const std::array<double, 4>& transition,
+                                unsigned rank, double echo = 0.) {
+            std::array<Complex, 6> r{};
+            std::array<Complex, 12> g{};
+            std::array<double, 3> scores{};
+            std::array<double, 2> diagnostic{};
+            if (rank) {
+                r[2] = correlation;
+                r[3] = std::conj(phase) * correlation;
+                g[4] = gram; g[5] = gram * phase; g[6] = std::conj(g[5]);
+                g[7] = echo ? echo : gram;
+            }
+            const auto status = triad_gaussian_factor2_update_v1(1,1,1,0,1,
+                reinterpret_cast<const double*>(r.data()), reinterpret_cast<const double*>(g.data()), &rank,
+                power.data(), transition.data(), reinterpret_cast<double*>(means.data()),
+                reinterpret_cast<double*>(factors.data()), scores.data(), diagnostic.data());
+            check(status == 0 && scores[0] == 0. && scores[2] == 0.,
+                  "high-Gram two-tap update must complete and preserve the exact common null");
+            return scores[1];
+        };
+        const auto observed_variance = [&] {
+            return std::norm(factors[4] + phase * factors[6]) +
+                   std::norm(factors[5] + phase * factors[7]);
+        };
+        const auto first = update({}, no_elapsed, 2);
+        const auto second = update({}, no_elapsed, 2);
+        check(std::abs(first + std::log1p(gram)) < 1e-12 &&
+              std::abs(second + std::log(2.)) < 1e-12 &&
+              std::abs(observed_variance() * (1. + 2. * gram) - 1.) < 1e-12,
+              "persistent factors must retain the thin direction across a split high-Gram update");
+        const auto unobserved = std::norm(factors[4] - phase * factors[6]) +
+                                std::norm(factors[5] - phase * factors[7]);
+        check(std::abs(unobserved - 1.) < 1e-12, "rank-one observations must preserve the orthogonal gain");
+
+        const auto variance = observed_variance();
+        constexpr auto tiny = 1e-19;
+        const std::array<double, 4> elapsed{1., -std::expm1(-2. * tiny), 1., 0.};
+        check(update({}, elapsed, 0) == 0., "an erased block must predict the factor without adding evidence");
+        const auto predicted = variance + elapsed[1];
+        check(std::abs(update({}, no_elapsed, 2) + std::log1p(gram * predicted)) < 1e-12,
+              "the preserved thin factor and tiny process innovation must both affect the next evidence");
+
+        factors.fill({});
+        for (const auto start : {0,4,8}) factors[start] = factors[start+3] = root_prior;
+        means.fill({});
+        const Complex wanted{1., 1.};
+        const auto fitted = update(gram * wanted, no_elapsed, 2);
+        check(std::abs(means[2] - .5 * wanted) < 1e-13 &&
+              std::abs(means[3] - .5 * std::conj(phase) * wanted) < 1e-13 &&
+              std::abs(fitted / (gram * std::norm(wanted)) - 1.) < 1e-13,
+              "large correlations must retain the two posterior means and normalized wanted evidence");
+        const std::array<double, 4> refreshed{.25, .75, .5, 0.};
+        const auto refreshed_variance = .75 + .25 / (1. + gram);
+        const auto expected = -std::log1p(gram * refreshed_variance)
+            - (gram / (1. + gram * refreshed_variance)) * std::norm(.5 * wanted);
+        check(std::abs(update({}, refreshed, 2) - expected) < 1e-12,
+              "a strong nonzero predicted mean must not lose the cancellation-free innovation exponent");
+
+        const auto near_collinear = std::nextafter(gram, std::numeric_limits<double>::infinity());
+        const auto near_score = [&](unsigned physical_rank) {
+            factors.fill({}); means.fill({});
+            for (const auto start : {0,4,8}) factors[start] = factors[start+3] = root_prior;
+            return update({}, no_elapsed, physical_rank, near_collinear);
+        };
+        const auto true_det = 1. + .5 * (gram + near_collinear) + .25 * gram * (near_collinear - gram);
+        check(std::abs(near_score(2) + std::log(true_det)) < 1e-12 &&
+              std::abs(near_score(1) + std::log1p(gram)) < 1e-12,
+              "a small represented positive mode must be retained unless projection physically limits rank");
+    }
+    const auto naive = 1. + gram - std::norm(Complex{gram / std::sqrt(1. + gram)});
+    check(naive == 0. && std::abs(gaussian_positive_second_pivot(gram, gram, gram, 1.) - 2.) < 1e-14,
+          "the existing subtractive stateless pivot is zero while the positive formula retains both identity terms");
+}
+
+void projected_rank_one_preserves_phased_orthogonality() {
+    const auto gram = std::ldexp(1., 60);
+    const auto echo = std::nextafter(1., 2.);
+    const auto logdet = std::log1p(2. * gram);
+    // Independent scalar one-bin model: project (1, echo) onto (1,1)/sqrt(2)
+    // before integrating the unit-power Gaussian gain.
+    const long double parallel = 1.L + static_cast<long double>(echo);
+    const auto expected = static_cast<double>(parallel * parallel * gram * gram /
+        (2.L * (1.L + 2.L * gram)) - logdet);
+    const auto ulp = std::nextafter(expected, std::numeric_limits<double>::infinity()) - expected;
+    for (const auto phase : {Complex{1.}, Complex{0.,1.}}) {
+        const auto one_ulp = gaussian_rank_one_log_likelihood(1.,1.,phase,
+            Complex{1.}, std::conj(phase) * echo, gram, gram);
+        const auto orthogonal = gaussian_rank_one_log_likelihood(1.,1.,phase,
+            Complex{1.}, -std::conj(phase), gram, gram);
+        check(std::abs(one_ulp - expected) < 8. * ulp && std::abs(orthogonal + logdet) < 1e-12,
+              "the known projected rank must ignore even amplified correlation orthogonal to the phased template");
+    }
+    check(gaussian_rank_one_log_likelihood(0.,0.,{}, {}, {}, gram, gram) == 0.,
+          "an empty physical template span must preserve exact zero evidence");
+}
+
+void two_tap_factor_matches_moderate_dense_likelihood() {
+    using C = Complex;
+    const std::array<C, 6> r{{{}, {}, {.4,-1.}, {-.2,.5}, {}, {}}};
+    const C cross{.3,.7};
+    const std::array<C, 12> g{{{}, {}, {}, {}, 2., cross, std::conj(cross), 1.5, {}, {}, {}, {}}};
+    const std::array<double, 2> power{.5,.5};
+    const std::array<double, 4> transition{1.,0.,1.,0.};
+    const auto determinant = 4. * 3.5 - std::norm(cross);
+    const auto m0 = (3.5 * r[2] - cross * r[3]) / determinant;
+    const auto m1 = (4. * r[3] - std::conj(cross) * r[2]) / determinant;
+    const auto expected = (std::conj(r[2]) * m0 + std::conj(r[3]) * m1).real()
+        - std::log(determinant / 4.);
+    for (const auto native_factor : {false,true}) {
+        std::array<C, 6> means{};
+        std::array<C, 12> state{};
+        std::array<double, 3> scores{};
+        std::array<double, 2> diagnostic{};
+        const auto diagonal = native_factor ? std::sqrt(.5) : .5;
+        for (const auto start : {0,4,8}) state[start] = state[start+3] = diagonal;
+        const auto input_r = reinterpret_cast<const double*>(r.data());
+        const auto input_g = reinterpret_cast<const double*>(g.data());
+        const auto output_m = reinterpret_cast<double*>(means.data());
+        const auto output_p = reinterpret_cast<double*>(state.data());
+        const unsigned rank = 2;
+        const auto status = native_factor ? triad_gaussian_factor2_update_v1(1,1,1,0,1,input_r,input_g,
+            &rank,power.data(),transition.data(),output_m,output_p,scores.data(),diagnostic.data()) :
+            triad_gaussian_update_v1(2,1,1,1,0,1,input_r,input_g,
+                power.data(),transition.data(),output_m,output_p,scores.data(),diagnostic.data());
+        check(status == 0 && scores[0] == 0. && scores[2] == 0. &&
+              std::abs(scores[1] - expected) < 1e-13 &&
+              std::abs(means[2] - m0) < 1e-13 && std::abs(means[3] - m1) < 1e-13,
+              "native factor and legacy dense interfaces must agree with a separate full-rank proper-complex solve");
+    }
+}
+
+void two_tap_native_dc_projection_preserves_complete_scores() {
+    const Fixture f(120, 3, true);
+    auto config = f.config;
+    config.spread_delay_seconds = .013;
+    config.noise_variance = std::ldexp(1., -62);
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = config.time_varying_atmospheric_hz = .04;
+    const FineObservation extent{f.slot.first_sample,f.iq.size(),FineRunKind::operational,true};
+    const auto run = [&](unsigned workers, bool prefix) {
+        const auto memory = fine_workspace(config,f.slot,extent,workers);
+        FineSession session(config,f.slot,f.key,extent,f.iq,{},f.coordinates,100,12,workers,memory);
+        if (prefix) session.advance_to(f.fs * 2);
+        session.advance_to(extent.rows);
+        ReceiverSlotScore score;
+        session.finish(score);
+        const auto progress = session.progress();
+        check(score.complete && score.all_valid && score.zero_h0_verified &&
+              progress.tap_count == 2 && progress.observed_projection_modes == progress.blocks &&
+              progress.adaptive.transition_edges > 0 && progress.slow_gain_coherence_seconds[0] > 0 &&
+              std::ranges::all_of(score.bit_evidence, [](double value) { return std::isfinite(value); }),
+              "the actual two-tap receiver must retain finite fixed/adaptive/slow gain evidence in a DC-only projection");
+        return score.bit_evidence;
+    };
+    check(run(1,false) == run(2,true),
+          "native two-tap DC-only evidence must preserve prefix and worker partitioning");
 }
 
 void tracked_span_matches_signed_correlation_without_changing_evidence() {
@@ -961,6 +1295,107 @@ void tracked_span_matches_signed_correlation_without_changing_evidence() {
           "a nearly coincident second column must carry a rank uncertainty bound");
 }
 
+void added_epoch_track_keeps_prior_mass_and_work() {
+    const Fixture f(480);
+    auto config = f.config;
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = config.time_varying_atmospheric_hz = 12;
+    config.spread_delay_seconds = .004;
+    auto slot = f.slot;
+    slot.arrival_lower_seconds = -.004;
+    slot.arrival_upper_seconds = .004;
+    const auto plan = varying_fine_plan(config, slot, 2);
+    auto exact_clock = config;
+    exact_clock.clock_bound_ppm = 0;
+    const auto exact_plan = varying_fine_plan(exact_clock, slot, 2);
+    check(plan.track_frequency && exact_plan.track_frequency &&
+          plan.workspace_bytes > exact_plan.workspace_bytes &&
+          nominal_epoch_timing_capacity(config, slot) == 8 && nominal_epoch_timing_capacity(exact_clock, slot) == 2,
+          "raw track must reserve scratch for its public unresolved clock and arrival axes");
+    std::vector<FineCoordinate> original, epoch;
+    for (const auto clock : {-30., -10., 10., 30.})
+        for (const auto arrival : {slot.arrival_lower_seconds, slot.arrival_upper_seconds}) {
+            original.push_back({2, arrival, 0, clock});
+            epoch.push_back({0, arrival, 0, clock});
+        }
+    const auto base = f.coordinates;
+    auto all = original;
+    all.insert(all.end(), epoch.begin(), epoch.end());
+    ReceiverExecutor executor(2);
+    const auto run = [&](std::span<const FineCoordinate> candidates, std::span<const FineCoordinate> timing) {
+        ReceiverSlotScore score;
+        score_varying_fine(config, slot, f.key, plan, f.iq, candidates, timing,
+            100, 12, 2, score, {}, executor);
+        return score;
+    };
+    const auto ordinary = run(base, original);
+    const auto added = run(epoch, {});
+    const auto complete = run(base, all);
+    const auto old_count = static_cast<double>(base.size() + original.size());
+    const auto extra_count = static_cast<double>(epoch.size());
+    const auto total_count = old_count + extra_count;
+    const auto log_add = [](double a, double b) { return std::max(a, b) + std::log1p(std::exp(-std::abs(a - b))); };
+    check(ordinary.fixed_varying_bit_evidence == complete.fixed_varying_bit_evidence &&
+          complete.varying_basis_rows == ordinary.varying_basis_rows + 4 * epoch.size() * f.iq.size() &&
+          complete.varying_candidates == ordinary.varying_candidates &&
+          complete.varying_frequency_states == ordinary.varying_frequency_states,
+          "new epoch tracking must preserve the original fixed branch and charge only its added raw basis rows");
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        const auto expected = log_add(ordinary.tracked_frequency_bit_evidence[bit] + std::log(old_count),
+            added.tracked_frequency_bit_evidence[bit] + std::log(extra_count)) - std::log(total_count);
+        check(std::abs(complete.tracked_frequency_bit_evidence[bit] - expected) < 2e-10 &&
+              std::abs(complete.tracked_frequency_log_prior_adjustment - ordinary.tracked_frequency_log_prior_adjustment -
+                  std::log(total_count / old_count)) < 1e-12,
+              "expanded raw track may add original public atom weights without diluting older weights");
+    }
+
+    auto midpoint_plan = plan;
+    enable_midpoint_tracking(midpoint_plan);
+    check(midpoint_plan.workspace_bytes > plan.workspace_bytes,
+          "midpoint production shape must charge its extra candidate state before inference");
+    constexpr std::size_t public_lags = 282;
+    const AdmissionGrid grid(slot.arrival_lower_seconds, slot.arrival_upper_seconds,
+        config.frequency_bound_hz + config.time_varying_atmospheric_hz, config.clock_bound_ppm,
+        std::min(.01, receiver_coarse_frequency_step(slot.format, config.sample_rate_hz)));
+    const auto log_original_timing = grid.log_count() - std::log1p(2 * grid.frequency_radius);
+    const auto measure_midpoint = [&](std::span<const FineCoordinate> nominations) {
+        ReceiverSlotScore observed;
+        const MidpointTrackInput family{nominations, public_lags, log_original_timing};
+        score_varying_fine(config, slot, f.key, midpoint_plan, f.iq, base, original,
+            100, 12, 2, observed, {}, executor, nullptr, nullptr, nullptr, &family);
+        return observed;
+    };
+    const std::array nominations{base.front(), epoch.front(), epoch.front()};
+    const auto mixed = measure_midpoint(nominations);
+    const auto distinct = measure_midpoint(std::span(nominations).first(2));
+    const auto empty = measure_midpoint({});
+    const auto shared_atom = run(std::span(nominations).first(1), {});
+    const auto new_atom = run(std::span(nominations).subspan(1, 1), {});
+    check(mixed.midpoint_timing_candidates == 2 && mixed.midpoint_timing_basis_rows == 4 * f.iq.size() &&
+          mixed.varying_basis_rows == ordinary.varying_basis_rows + mixed.midpoint_timing_basis_rows &&
+          mixed.varying_bit_evidence == distinct.varying_bit_evidence &&
+          mixed.tracked_frequency_bit_evidence == ordinary.tracked_frequency_bit_evidence &&
+          empty.midpoint_timing_candidates == 0 && empty.varying_basis_rows == ordinary.varying_basis_rows,
+          "midpoint shares rendered coordinates across families and retains the exact original track evidence");
+    const double caller = std::log(static_cast<double>(base.size())) - grid.log_count();
+    const double full_midpoint_cells = static_cast<double>(receiver_epoch_offsets.size() * public_lags);
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        const double old_lr = ordinary.tracked_frequency_bit_evidence[bit] + std::log(old_count) - log_original_timing;
+        const double shared_lr = shared_atom.tracked_frequency_bit_evidence[bit];
+        const double new_lr = new_atom.tracked_frequency_bit_evidence[bit];
+        const double fixed_lr = ordinary.fixed_varying_bit_evidence[bit] + caller;
+        const double scale = std::max({old_lr, shared_lr, new_lr, fixed_lr});
+        const double old = std::exp(old_lr - scale);
+        const double middle = (std::exp(shared_lr - scale) + std::exp(new_lr - scale)) / full_midpoint_cells;
+        const double fixed = std::exp(fixed_lr - scale);
+        const double expected = scale + std::log(.5 * (fixed + .875 * old + .125 * middle));
+        const double missing = scale + std::log(.5 * (fixed + .875 * old));
+        check(std::abs(mixed.varying_bit_evidence[bit] + caller - expected) < 2e-10 &&
+              std::abs(empty.varying_bit_evidence[bit] + caller - missing) < 2e-10,
+              "receiver evidence must keep the whole public timing mass, including omitted midpoint candidates");
+    }
+}
+
 enum class IncompleteBulk { mapping_only, missing_counts, missing_statistics, nonzero_null };
 
 class IncompleteFineBulk final : public FineBulk {
@@ -1049,9 +1484,17 @@ int main() {
         erasure_and_failure();
         cold_maximum_states();
         slow_gain_coherence_is_bounded_and_normalized();
-        slow_gain_coherence_gate_preserves_fast_and_off_paths();
+        stationary_fading_gain_covers_short_single_tap_data();
         gaussian_update_matches_dense_complex_covariance();
+        gaussian_update_matches_dense_complex_covariance(.5, true);
+        gaussian_update_matches_dense_complex_covariance(2., true);
+        additive_gain_preserves_large_gram_precision();
+        two_tap_factor_preserves_large_gram_precision();
+        projected_rank_one_preserves_phased_orthogonality();
+        two_tap_factor_matches_moderate_dense_likelihood();
+        two_tap_native_dc_projection_preserves_complete_scores();
         tracked_span_matches_signed_correlation_without_changing_evidence();
+        added_epoch_track_keeps_prior_mass_and_work();
         incomplete_bulk_cannot_publish_quiet();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

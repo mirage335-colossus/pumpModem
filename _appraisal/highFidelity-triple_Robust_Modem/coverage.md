@@ -65,22 +65,75 @@ also distinguish physical outage/estimation cost from avoidable receiver loss.
 
 ## Applicability after the admission and carrier-key changes
 
-The latest [bounded short-model competition](../../docs/validation.md#bounded-short-model-competition--16-november-2026)
+The [current long-bit physical investigation](../../docs/validation.md#weak-physical-channel-alarm-investigation--16-november-2026)
+now exercises 139.2-second bits and five separated retries through the existing
+continuous coupled two-hop field. At native `a497b7fa…`, both raw polarities
+miss all five attempts at −3 dB-Hz; at +3 dB-Hz, bit zero receives 5/5 and bit
+one 4/5. The current `E` message similarly changes from 0/13 to 12/13 correct
+bits, with truncation at the stronger level. This is a current-waveform failure,
+not merely the historical plasma result. A complementary seeded, changing-rate
+scalar physical field receives 5/5 for both raw polarities at 0 dB-Hz with the
+canonical receiver, all quiet pairs preserved. Its received energy is higher
+than the two-hop captures, so it does not establish equal-energy superiority or
+weak-signal reliability. These constructed episodes do not establish natural
+incidence, multi-day availability, the full GUI allowance, or the other four
+link families. The linked record separates the native outcomes from corrected
+runner validation/reporting errors and the completed bounded receiver comparison.
+
+The bounded additive stationary-plus-fading model then demonstrates an actual
+endpoint gain: at +4 dB-Hz, two fresh receivers replay the same verified physical
+capture; the original model receives 12/13 bits and truncates, whereas the
+additive model receives all 13 and completes `E` using the two genuine ending
+quiet slots. The +3 miss remains. The full-W replay takes 51.191 versus 44.751
+seconds in this single comparison because earlier sufficient evidence avoids
+some fallback work; neither a sensitivity threshold nor a hardware-capacity
+claim follows. Final-source preservation completes: all six long-bit matrix
+decision vectors remain unchanged, the changing-frequency pair retains 5/5
+correct raw bits for each polarity, and all fifteen fresh-noise apertures stay
+quiet while the additive family executes. The obsolete 32-second duration
+cutoff is removed after short wanted/constant/noise checks. The separate
+two-path covariance-factor repair passes its focused and native checks.
+These results preserve the remaining −3/+3 failures and do not qualify weak
+two-spatial-path additive behavior or natural availability.
+
+The latest [repeated single-bit timing repair](../../docs/validation.md#repeated-single-bit-channel-diagnosis--16-november-2026)
+retains nominal-epoch candidates and adds at most six public midpoint-lag
+nominees with a fixed normalized timing-family weight. It repairs an observed
+clock-resolution gap as the public calendar ages, without searching channel
+histories or using transmitter truth. Original matched contiguous/separated
+captures improve **36/48 → 48/48 correct DATA bits**. Four fresh separated
+captures at 40/43 dB-Hz improve **20/24 → 24/24** against the nominal-only
+candidate. Each fresh capture still has the same ambiguous internal quiet slot,
+so only five of six quiet pairs complete in each capture; correct raw bits do
+not imply every frame completed. Native late Helper-projected DATA and Helper-only quiet checks
+also pass. A four-score signed-echo contrast receives both bits at either sign,
+with lower evidence at negative Doppler and no measured sensitivity claim.
+Different severity seeds, correlated repetitions and a single key do not qualify
+natural outage frequency, arbitrary keys, long-bit sensitivity or all channel
+laws. These results concern the configured public calendar/ordinal contract.
+
+The preceding [bounded short-model competition](../../docs/validation.md#bounded-short-model-competition--16-november-2026)
 reopens timing coverage together with the policy that invokes it. The default
 now compares admitted short models despite strong affine DATA, while preserving
 long-model fallback and the slow VLF path. Matched current-source replays repair
 the bright HF and EME 30 dB-Hz messages, preserve the weaker HF success, and
-reduce fresh-`A` errors from six to four. The latter still accepts incorrect
+reduce fresh-`A` errors from six to four. At that source it accepts incorrect
 content; Guarded hides its 6/13-passing record without correcting its bits.
+The subsequent timing repair now receives that same capture as the correct `A`
+with zero wrong bits and physical completion, while preserving all three earlier
+HF/EME successes and the noise-only control.
 Complete replay costs rise approximately 14–28% in these four observations,
 with unchanged slot workspace. These net reception/cost tradeoffs are assessed
 under the resilience priority; an isolated raw admission regression is not a
 blanket veto. The earlier source-bound findings below remain historical evidence,
 including the experiments that used a stricter pointwise criterion.
 Three fresh physical histories, each with a paired +3 dB point, retain all four
-previously correct complete messages. The fresh longer HF history remains
-failed: errors worsen seven→eight/nine, and +3 dB does not recover it. Guarded
-hides the incorrect accepted record (3/13 pass), but does not repair its bits.
+previously correct complete messages. At that preceding source, the fresh
+longer HF history remains failed: errors worsen seven→eight/nine, and +3 dB
+does not recover it. The final timing-repair replay of this exact 40/43 dB-Hz
+pair now has zero wrong bits and correct `A` completion at both levels. The
+earlier Guarded filter hides the incorrect accepted record (3/13 pass), but does
+not repair its bits.
 Forcing all admitted longer models on that same 43 dB-Hz input gives identical
 scores and decisions at 26% more elapsed time. The existing noise control stays
 quiet, Guarded hides the bright wrong-key control (0/3 pass), and weak VLF keeps

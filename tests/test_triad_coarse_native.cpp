@@ -1075,6 +1075,38 @@ void quarter_clocks_nominate_only_missing_public_cells() {
           ordinary.segmented_timing_coordinates.empty() && ordinary.epoch_timing_coordinates.empty() &&
           expanded.grid.log_count() == ordinary.grid.log_count(),
           "clock nominations must snap without modifying original fine cells or prior size");
+    const auto supplemented = r::prepare_short_tracking_timing(config, slot, coarse, ordinary.grid);
+    check(r::nominal_epoch_timing_capacity(config, slot) == 8 && supplemented.size() == tracking.size() + 8 &&
+          std::equal(tracking.begin(), tracking.end(), supplemented.begin()),
+          "raw short tracking must keep every prior quarter-clock nomination in order");
+    for (std::size_t i = 0; i < clock_cells.size(); ++i) {
+        const auto first = tracking.size() + 2 * i;
+        check(supplemented[first] == r::FineCoordinate{0, slot.arrival_lower_seconds, 0, clock_cells[i]} &&
+              supplemented[first + 1] == r::FineCoordinate{0, slot.arrival_upper_seconds, 0, clock_cells[i]},
+              "configured epoch must receive both public arrivals at each intermediate clock cell");
+    }
+    auto on_epoch = coarse;
+    on_epoch.proposals[1].coordinate = {0, slot.arrival_lower_seconds, 1, 400};
+    check(r::prepare_short_tracking_timing(config, slot, on_epoch, ordinary.grid).size() == 12,
+          "configured-epoch timing must deduplicate the same public cells nominated by ordinary proposals");
+    auto exact_clock = config;
+    exact_clock.clock_bound_ppm = 0;
+    auto exact_work = coarse;
+    exact_work.work.plan.clock_gap_ppm = 0;
+    const r::AdmissionGrid exact_grid(slot.arrival_lower_seconds, slot.arrival_upper_seconds, 1, 0, .01);
+    const std::vector<r::FineCoordinate> edges{{0, slot.arrival_lower_seconds, 0, 0},
+                                               {0, slot.arrival_upper_seconds, 0, 0}};
+    check(r::nominal_epoch_timing_capacity(exact_clock, slot) == 2 &&
+          r::prepare_short_tracking_timing(exact_clock, slot, exact_work, exact_grid) == edges,
+          "an exact clock must retain a configured-epoch arrival witness through atmospheric motion");
+    auto coincident_edges = slot;
+    coincident_edges.arrival_upper_seconds = coincident_edges.arrival_lower_seconds;
+    const r::AdmissionGrid collapsed_grid(coincident_edges.arrival_lower_seconds,
+        coincident_edges.arrival_upper_seconds, 1, 0, .01);
+    check(r::nominal_epoch_timing_capacity(exact_clock, coincident_edges) == 1 &&
+          r::prepare_short_tracking_timing(exact_clock, coincident_edges, exact_work, collapsed_grid) ==
+              std::vector<r::FineCoordinate>{edges.front()},
+          "identical arrival bounds must collapse without duplicate likelihood mass");
     auto shared_timing = coarse;
     shared_timing.proposals[3].coordinate = coarse.proposals[1].coordinate;
     shared_timing.proposals[3].coordinate.frequency_hz = -1;
@@ -1082,12 +1114,155 @@ void quarter_clocks_nominate_only_missing_public_cells() {
           "matching bit winners must nominate each distinct timing cell only once");
     auto off = config;
     off.time_varying_channel = false;
+    auto helper = config;
+    helper.helper_enabled = true;
     check(r::nominate_quarter_clock_timing(off, slot, coarse).empty() &&
           r::nominate_quarter_clock_timing(config, slot, shadow).empty(),
           "Off and existing segmented timing nominations must not activate the quarter-clock rule");
+    check(r::prepare_short_tracking_timing(off, slot, coarse, ordinary.grid).empty() &&
+          r::prepare_short_tracking_timing(helper, slot, coarse, ordinary.grid).empty() &&
+          r::prepare_short_tracking_timing(config, slot, shadow, ordinary.grid).empty(),
+          "configured-epoch rows must remain confined to ordinary unsegmented raw tracking");
     coarse.work.plan.segmented_timing_blocks = 8;
-    check(r::nominate_quarter_clock_timing(config, slot, coarse).empty(),
+    check(r::nominate_quarter_clock_timing(config, slot, coarse).empty() &&
+          r::prepare_short_tracking_timing(config, slot, coarse, ordinary.grid).empty(),
           "planned segmented work must suppress the rule even when no segmented coordinates survive");
+}
+
+void midpoint_lag_nominations_preserve_ordinary_search(const datapump::Crypto& crypto) {
+    for (const double clock : {-310., 310.}) {
+        auto f = capture(crypto, false, 0, 0);
+        f.config.helper_enabled = clock > 0;
+        f.config.time_varying_channel = true;
+        f.config.time_varying_common_doppler_hz = f.config.time_varying_atmospheric_hz = 5;
+        if (clock > 0) f.config.native_coarse_precision = v::NativeCoarsePrecision::fp64;
+        f.slot.source_start_seconds += 600;
+        f.slot.window_capture_lead_seconds -= 600;
+        auto format = f.slot.format;
+        format.epoch += f.epoch;
+        v::PatternSource source(format, crypto, f.bit);
+        const auto fs = f.config.sample_rate_hz;
+        for (std::size_t i = 0; i < f.iq.size(); ++i) {
+            const auto t = static_cast<long double>(i) / fs - f.slot.window_capture_lead_seconds;
+            const auto position = ((t - f.arrival) * (1 + clock * 1e-6) - f.slot.source_start_seconds) * fs;
+            f.iq[i] = source.sample_at(position) * rotation(.1L * t + .09L * std::sin(t));
+        }
+        const auto bound = f.config.helper_enabled ? .1 : .2;
+        const std::array intervals{r::FrequencyInterval{-bound, bound}};
+        const auto normal_bytes = r::coarse_workspace(f.config, f.slot, 2);
+        const auto probe_bytes = r::coarse_workspace(f.config, f.slot, 2, {}, r::MidpointTimingEvaluation::verify);
+        const auto normal = r::score_coarse(f.config, f.slot, crypto, f.iq, intervals, 2, normal_bytes, {});
+        const auto expanded = r::score_coarse(f.config, f.slot, crypto, f.iq, intervals, 2, probe_bytes, {}, nullptr,
+            r::MidpointTimingEvaluation::verify);
+        const auto production = r::score_coarse(f.config, f.slot, crypto, f.iq, intervals, 2, probe_bytes, {}, nullptr,
+            r::MidpointTimingEvaluation::short_tracking);
+        check(!normal.midpoint_timing && expanded.midpoint_timing &&
+              normal.coordinates == expanded.coordinates && normal.varying_coordinates == expanded.varying_coordinates &&
+              normal.segmented_timing_coordinates == expanded.segmented_timing_coordinates,
+              "midpoint shadow must preserve existing coarse nominees");
+        const auto& proposal = *expanded.midpoint_timing;
+        check(proposal.first_lag < 0 && proposal.last_lag > 0 && proposal.widened_inverses == 26 &&
+              proposal.verified_peaks >= proposal.proposals.size() && proposal.workspace_bytes == probe_bytes - normal_bytes &&
+              proposal.proposals.size() <= 6 && proposal.precision == (clock > 0 ? "native_fp64" : "native_fp32"),
+              "midpoint shadow must quote and verify bounded signed-lag work in the executed precision");
+        check(production.midpoint_timing && !production.midpoint_timing->verified_peaks &&
+              production.varying_coordinates == expanded.varying_coordinates &&
+              production.midpoint_timing->proposals.size() == proposal.proposals.size(),
+              "ordinary midpoint tracking must avoid verification work and preserve the original proposal bank");
+        for (std::size_t i = 0; i < proposal.proposals.size(); ++i)
+            check(production.midpoint_timing->proposals[i].coordinate == proposal.proposals[i].coordinate &&
+                  production.midpoint_timing->proposals[i].score == proposal.proposals[i].score,
+                  "private midpoint verification must not change public lag nominations");
+        if (f.config.helper_enabled) {
+            unsigned calls = 0;
+            const r::FrequencyAssistance assistance{[&](const r::LaneWave&, std::stop_token)
+                    -> std::span<const r::FrequencyInterval> {
+                ++calls;
+                return intervals;
+            }, acquisition_bound};
+            const auto lease = r::coarse_workspace(f.config, f.slot, 2, acquisition_bound,
+                r::MidpointTimingEvaluation::short_tracking);
+            const auto overlap = r::score_coarse(f.config, f.slot, crypto, f.iq, assistance, 2, lease, {}, nullptr,
+                r::MidpointTimingEvaluation::short_tracking);
+            check(calls == 1 && same_search(production, overlap) && overlap.midpoint_timing &&
+                  overlap.work.plan.workspace_reserved_bytes == lease &&
+                  overlap.midpoint_timing->workspace_bytes == production.midpoint_timing->workspace_bytes &&
+                  overlap.midpoint_timing->scored_lags == production.midpoint_timing->scored_lags &&
+                  overlap.midpoint_timing->proposals.size() == proposal.proposals.size(),
+                  "overlapped acquisition must retain the same admitted midpoint timing family");
+            for (std::size_t i = 0; i < proposal.proposals.size(); ++i)
+                check(overlap.midpoint_timing->proposals[i].coordinate == proposal.proposals[i].coordinate &&
+                      overlap.midpoint_timing->proposals[i].score == proposal.proposals[i].score,
+                      "acquisition overlap changed public midpoint nominations");
+        }
+        const auto midpoint = f.slot.source_start_seconds + .5L * normal.work.plan.source_rows / fs;
+        const auto movement = [&](double rate, double arrival) {
+            const long double epsilon = rate * 1e-6L;
+            return arrival - f.slot.arrival_lower_seconds - midpoint * epsilon / (1 + epsilon);
+        };
+        const auto wanted = movement(clock, f.arrival);
+        bool found = false;
+        for (const auto& candidate : proposal.proposals) {
+            const auto& coordinate = candidate.coordinate;
+            const auto lag = movement(coordinate.clock_ppm, coordinate.arrival_seconds) * expanded.projected_sample_rate_hz;
+            check(std::abs(lag - std::round(lag)) < 1e-8L && lag >= proposal.first_lag - 1e-8L &&
+                  lag <= proposal.last_lag + 1e-8L && coordinate.arrival_seconds >= f.slot.arrival_lower_seconds &&
+                  coordinate.arrival_seconds <= f.slot.arrival_upper_seconds &&
+                  std::abs(coordinate.clock_ppm) <= f.config.clock_bound_ppm,
+                  "mapped midpoint nomination must retain its signed lag and physical bounds");
+            // The data path tests both hypotheses at every admitted timing
+            // coordinate. Differential ranks only nominate geometry.
+            found |= coordinate.epoch_offset_seconds == f.epoch &&
+                std::abs(lag - wanted * expanded.projected_sample_rate_hz) <= 2;
+        }
+        if (!found) {
+            std::cerr << "Clock " << clock << " expected lag " << wanted * expanded.projected_sample_rate_hz << '\n';
+            for (const auto& candidate : proposal.proposals)
+                std::cerr << "epoch " << candidate.coordinate.epoch_offset_seconds << " bit " << +candidate.bit
+                    << " lag " << movement(candidate.coordinate.clock_ppm, candidate.coordinate.arrival_seconds) *
+                        expanded.projected_sample_rate_hz << " score " << candidate.score << '\n';
+        }
+        check(found, "midpoint differential nominations missed a known signed local arrival");
+    }
+}
+
+void midpoint_support_scales_with_declared_capture_geometry() {
+    v::ReceiverConfig config;
+    config.sample_rate_hz = 600;
+    config.frequency_bound_hz = .2;
+    config.noise_variance = .05;
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = config.time_varying_atmospheric_hz = 5;
+    config.clock_bound_ppm = .4;
+    v::ReceiverSlotPlan slot;
+    slot.first_sample = 1'000;
+    slot.stop_sample = slot.first_sample + 550'000;
+    slot.source_start_seconds = 1'000'000'000.L;
+    slot.window_capture_lead_seconds = -slot.source_start_seconds + 402;
+    slot.arrival_lower_seconds = slot.arrival_upper_seconds = 0;
+    slot.format.sample_rate = 600;
+    slot.format.inner_rate_hz = 36;
+    slot.format.added_symbols = 4;
+    slot.format.bit_seconds = .1;
+    slot.format.epoch = 1793850000;
+    const auto support = r::coarse_midpoint_timing_support(config, slot);
+    check(support.available && support.first_lag < -4096 && support.last_lag > 4096 &&
+          support.last_lag - support.first_lag + 1 < static_cast<std::int64_t>(slot.stop_sample - slot.first_sample) &&
+          r::coarse_workspace(config, slot, 2, {}, r::MidpointTimingEvaluation::short_tracking) >
+              r::coarse_workspace(config, slot, 2),
+          "elapsed calendar age uses the admitted capture geometry without the private midpoint probe cap");
+    for (const auto lag : {support.first_lag, std::int64_t{0}, support.last_lag}) {
+        const auto coordinate = r::midpoint_timing_coordinate(slot, support.middle_seconds,
+            config.clock_bound_ppm, support.projected_rate, lag, 1);
+        const long double epsilon = coordinate.clock_ppm * 1e-6L;
+        const auto reconstructed = -support.middle_seconds * epsilon / (1 + epsilon) * support.projected_rate;
+        check(coordinate.epoch_offset_seconds == 1 && coordinate.arrival_seconds == 0 && !coordinate.frequency_hz &&
+              std::abs(coordinate.clock_ppm) <= config.clock_bound_ppm && std::abs(lag - reconstructed) < 1e-7,
+              "edge lags at a large calendar age must map to legal fixed-arrival coordinates");
+    }
+    config.clock_bound_ppm = 0;
+    check(r::coarse_midpoint_timing_support(config, slot).status == "clock_axis_collapsed",
+          "the exact-clock route must keep the existing timing and workspace");
 }
 } // namespace
 
@@ -1097,13 +1272,19 @@ void quarter_clocks_nominate_only_missing_public_cells() {
 int main(int argc, char** argv) try {
     const bool overlap_failures = argc == 2 && std::string_view(argv[1]) == "--overlap-failures";
     const bool quarter_clock = argc == 2 && std::string_view(argv[1]) == "--quarter-clock";
-    if (argc != 1 && !overlap_failures && !quarter_clock) {
-        std::cerr << "Usage: test_triad_coarse_native [--overlap-failures | --quarter-clock]\n";
+    const bool midpoint = argc == 2 && std::string_view(argv[1]) == "--midpoint-timing";
+    if (argc != 1 && !overlap_failures && !quarter_clock && !midpoint) {
+        std::cerr << "Usage: test_triad_coarse_native [--overlap-failures | --quarter-clock | --midpoint-timing]\n";
         return 2;
     }
     quarter_clocks_nominate_only_missing_public_cells();
     if (quarter_clock) return 0;
     const auto crypto = key();
+    if (!overlap_failures) {
+        midpoint_lag_nominations_preserve_ordinary_search(crypto);
+        midpoint_support_scales_with_declared_capture_geometry();
+    }
+    if (midpoint) return 0;
     tied_arrival_frontier();
     if (overlap_failures) {
         acquisition_failures(crypto, capture(crypto, false), true);

@@ -5,6 +5,7 @@
 #include "../src/triad_receiver_driver.hpp"
 #include "../src/triad_receiver_executor.hpp"
 #include "../src/triad_receiver_fine.hpp"
+#include "../src/triad_receiver_helper.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -15,6 +16,7 @@
 #include <limits>
 #include <numbers>
 #include <optional>
+#include <random>
 #include <stdexcept>
 #include <string_view>
 #include <thread>
@@ -400,6 +402,21 @@ void bounded_short_competition() {
     // bit. Neither the original IQ nor the public calendar changes.
     check_data(fixture(0, false, false), 0);
     check_data(fixture(1, false, false), 1);
+    for (const std::uint8_t bit : {0, 1}) {
+        auto moving = fixture(bit, false, false);
+        declare_variation(moving);
+        for (std::size_t i = 0; i < moving.iq.size(); ++i) {
+            const auto time = static_cast<double>(i) / sample_rate;
+            moving.iq[i] *= std::polar(1., 1.4 * std::sin(2 * std::numbers::pi * 1.25 * time));
+        }
+        const auto result = score(moving, 2);
+        check(moving.config.clock_bound_ppm == 0 && result.varying_frequency_states > 1 &&
+              result.midpoint_timing_status == "clock_axis_collapsed" &&
+              !result.midpoint_timing_lags && !result.midpoint_timing_basis_rows &&
+              result.complete && result.all_valid && result.zero_h0_verified &&
+              result.decision == SlotDecision::data && result.bit == bit,
+              "configured-epoch short tracking must retain both bits under moving frequency with ideal timing");
+    }
 
     auto quiet = fixture(std::nullopt, false, false);
     const auto affine_quiet = score(quiet, 2);
@@ -893,6 +910,98 @@ void varying_helper_coexistence() {
           "projected dynamic receiver did not recover the drift with Helper present");
 }
 
+void late_helper_timing_recovery() {
+    using namespace receiver_detail;
+    constexpr double fs = 1500, center = 475, clock_ppm = 100, auxiliary = 970;
+    ReceiverConfig config;
+    config.sample_rate_hz = fs;
+    config.data_if_hz = center;
+    config.noise_variance = .03;
+    config.frequency_bound_hz = 8;
+    config.clock_bound_ppm = 300;
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = config.time_varying_atmospheric_hz = 36;
+    config.helper_enabled = true;
+    config.helper.low_frequency_hz = 175;
+    config.helper.auxiliary_frequency_hz = auxiliary;
+    config.helper.frequency_hz = 1050;
+    ReceiverSlotPlan slot;
+    slot.index = 12;
+    slot.first_sample = 20'000;
+    slot.source_start_seconds = 720;
+    slot.window_capture_lead_seconds = 2.25L - slot.source_start_seconds;
+    slot.helper_begin_seconds = slot.source_start_seconds - 1.5;
+    slot.helper_end_seconds = slot.source_start_seconds + 20;
+    slot.arrival_lower_seconds = -.0025;
+    slot.arrival_upper_seconds = .0025;
+    slot.format.sample_rate = fs;
+    slot.format.inner_rate_hz = 120;
+    slot.format.added_symbols = 1;
+    slot.format.epoch = 1793405520;
+    slot.format.symbol_ordinal = 12;
+    slot.format.bit_seconds = .001;
+    const auto source_rows = geometry(slot.format).source_samples;
+    const auto rows = static_cast<std::size_t>(3 * fs) + source_rows;
+    check(rows < 23'000, "late Helper comparison exceeds its fixed single-aperture budget");
+    slot.stop_sample = slot.first_sample + rows;
+    slot.quiet_first_sample = slot.first_sample + static_cast<std::size_t>(2 * fs);
+    slot.quiet_stop_sample = slot.quiet_first_sample + source_rows;
+    std::vector<Complex> noise(rows), common(rows), helper(rows), pattern(rows);
+    std::vector<double> offsets(rows);
+    std::mt19937_64 rng(62033);
+    std::normal_distribution<double> normal(0, std::sqrt(config.noise_variance / 2));
+    for (std::size_t i = 0; i < rows; ++i) {
+        offsets[i] = i;
+        noise[i] = {normal(rng), normal(rng)};
+        const double t = i / fs;
+        const auto tone = [t](double f) { return std::polar(1., 2 * std::numbers::pi * f * t); };
+        common[i] = std::polar(1., 16 * std::sin(2 * std::numbers::pi * 1.7 * t) +
+                                   7.2 * std::sin(2 * std::numbers::pi * .29 * t));
+        if (t > .5) helper[i] = common[i] * (.2 * (tone(175 - center) + tone(1050 - center)) + .06 * tone(auxiliary - center));
+    }
+    const auto key = Crypto::amateur();
+    auto quiet = noise;
+    for (std::size_t i = 0; i < rows; ++i) quiet[i] += helper[i];
+    const auto capture = [&](std::uint8_t bit) {
+        Candidate truth;
+        truth.clock_ppm = clock_ppm;
+        const auto ratio = 1 + clock_ppm * 1e-6;
+        truth.arrival_seconds = static_cast<double>(slot.window_capture_lead_seconds + .001 +
+            slot.source_start_seconds / ratio);
+        truth.frequency_hz = -center * (ratio - 1);
+        PatternSource source(slot.format, key, bit);
+        shaped_basis_mapped(source, truth, fs, 0, offsets, pattern, center);
+        auto observation = noise;
+        for (std::size_t i = 0; i < rows; ++i) {
+            observation[i] += .55 * pattern[i] * common[i];
+            observation[i] += helper[i];
+        }
+        return observation;
+    };
+    const auto planned = varying_fine_plan(config, slot, 2);
+    const auto lease = receiver_slot_workspace(config, slot, 2);
+    check(planned.track_frequency && !helper_workspace(config, slot),
+          "late Helper fixture requires projected short tracking after unsupported acquisition");
+    const auto uses_midpoint = [](const ReceiverSlotScore& score) {
+        return score.midpoint_timing_status == "public_midpoint_lags" && score.midpoint_timing_lags > 0 &&
+            score.midpoint_timing_widened_inverses == 26 && score.midpoint_timing_candidates > 0 &&
+            score.midpoint_timing_candidates <= maximum_midpoint_timing_coordinates &&
+            score.midpoint_timing_basis_rows > 0 && score.varying_frequency_states > 0;
+    };
+    for (const std::uint8_t bit : {0, 1}) {
+        const auto observation = capture(bit);
+        const auto score = score_receiver_slot(config, slot, key, observation, {}, 2, lease);
+        check(score.complete && score.all_valid && score.zero_h0_verified && score.decision == SlotDecision::data &&
+              score.bit == bit && !score.helper_overlapped && uses_midpoint(score) &&
+              score.helper_status == "insufficient_guaranteed_coarse_support",
+              "late projected tracking lost DATA after unsuccessful Helper acquisition");
+    }
+    const auto absent = score_receiver_slot(config, slot, key, quiet, {}, 2, lease);
+    check(absent.complete && absent.all_valid && absent.zero_h0_verified && absent.noise_statistics_valid &&
+          absent.decision == SlotDecision::quiet && !absent.bit && uses_midpoint(absent),
+          "late midpoint tracking turned separated Helper tones and noise into DATA or ambiguity");
+}
+
 void physical_quiet_and_limits() {
     auto f = fixture(std::nullopt, false, false);
     const auto bound = receiver_slot_workspace(f.config, f.slot, 1);
@@ -1320,6 +1429,7 @@ int main(int argc, char** argv) {
             else if (part == "long-drift") long_drift_recovery(false);
             else if (part == "broad-drift") long_drift_recovery(true);
             else if (part == "fading") weak_diffuse_fading_recovery();
+            else if (part == "late-helper") late_helper_timing_recovery();
             else throw std::runtime_error("unknown native receiver test stratum");
             return 0;
         }

@@ -80,6 +80,7 @@ struct StageWorkspace {
     DriftPlan line_drift;
     VaryingFinePlan line_coherent_gain;
     std::size_t evidence_supplement = 0;
+    std::string_view midpoint_timing_status;
 };
 
 StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
@@ -103,12 +104,17 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
     }
     const auto input = checked_multiply(rows, sizeof(Complex) + sizeof(std::uint8_t));
     const auto helper = helper_workspace(config, slot);
-    const auto varying = varying_fine_plan(config, slot, workers);
+    auto varying = varying_fine_plan(config, slot, workers);
     const auto drift = drift_plan(config, slot, workers);
     const auto coherent_gain = varying_fine_plan(config, slot, workers, false, true);
     auto search = config;
     search.time_varying_channel = varying.block_rows || drift.workspace_bytes || coherent_gain.block_rows;
-    const auto coarse = coarse_workspace(search, slot, workers);
+    const auto midpoint_support = varying.track_frequency ?
+        coarse_midpoint_timing_support(search, slot) : CoarseMidpointSupport{false, "short_tracking_unavailable"};
+    const auto midpoint = midpoint_support.available ?
+        MidpointTimingEvaluation::short_tracking : MidpointTimingEvaluation::off;
+    if (midpoint_support.available) enable_midpoint_tracking(varying);
+    const auto coarse = coarse_workspace(search, slot, workers, {}, midpoint);
     const auto fine = fine_workspace(config, slot, workers);
     const auto varying_quiet = varying_quiet_workspace(config, slot);
     const auto line = search.time_varying_channel ? varying_line_workspace(config, slot) : 0;
@@ -123,13 +129,13 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
     // One lane runs acquisition and preparation in turn: nothing coexists.
     const bool overlappable = quote_overlap && workers > 1 && helper && coarse_defers_frequency_grid(config, slot);
     const auto overlapped_coarse = overlappable ?
-        coarse_workspace(search, slot, workers, {helper, helper_widest_wave}) : coarse;
+        coarse_workspace(search, slot, workers, {helper, helper_widest_wave}, midpoint) : coarse;
     return {input, helper, coarse, fine,
             lease(std::max({helper, coarse, fine, supplemental})),
             overlappable, overlapped_coarse,
             lease(std::max({helper, overlapped_coarse, fine, supplemental})),
             varying, drift, coherent_gain, line, line_varying, line_drift, line_coherent_gain,
-            evidence_supplement};
+            evidence_supplement, midpoint_support.status};
 }
 
 double round_even(double value) {
@@ -243,6 +249,27 @@ std::vector<FineCoordinate> receiver_detail::prepare_quarter_clock_timing(const 
         if (std::find(timing.begin(), next, coordinate) == next) *next++ = coordinate;
     }
     timing.erase(next, timing.end());
+    return timing;
+}
+
+std::vector<FineCoordinate> receiver_detail::prepare_short_tracking_timing(const ReceiverConfig& config,
+        const ReceiverSlotPlan& slot, const CoarseResult& coarse, const AdmissionGrid& grid) {
+    const auto capacity = nominal_epoch_timing_capacity(config, slot);
+    if (!capacity || coarse.work.plan.segmented_timing_blocks || !coarse.segmented_timing_coordinates.empty())
+        return {};
+    auto timing = prepare_quarter_clock_timing(config, slot, coarse, grid);
+    timing.reserve(timing.size() + capacity);
+    const auto append = [&](double clock) {
+        for (const auto arrival : {grid.lower, grid.upper}) {
+            const auto coordinate = snap_timing({0, arrival, 0, clock}, grid);
+            if (std::ranges::find(timing, coordinate) == timing.end()) timing.push_back(coordinate);
+        }
+    };
+    if (config.clock_bound_ppm) {
+        for (const auto fraction : {-.75, -.25, .25, .75}) append(fraction * config.clock_bound_ppm);
+    } else {
+        append(0.);
+    }
     return timing;
 }
 
@@ -448,7 +475,8 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
                                std::span<const std::uint8_t> valid, unsigned workers,
                                std::size_t memory_limit_bytes, std::stop_token stop, ReceiverExecutor* shared,
                                bool may_overlap, const SlotEvidenceSupplement* supplement = nullptr,
-                               EvidenceEvaluation evaluation = EvidenceEvaluation::bounded_competition) {
+                               EvidenceEvaluation evaluation = EvidenceEvaluation::bounded_competition,
+                               AffineGainEvaluation gain = AffineGainEvaluation::operational) {
     check_cancelled(stop);
     const auto workspace = plan_workspace(config, slot, workers, may_overlap, supplement);
     require(iq.size() == slot.stop_sample - slot.first_sample &&
@@ -458,6 +486,7 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
 
     ReceiverSlotScore score;
     score.wrong_key_admission = config.wrong_key_admission;
+    score.midpoint_timing_status = workspace.midpoint_timing_status;
     score.index = slot.index;
     score.first_sample = slot.first_sample;
     score.stop_sample = slot.stop_sample;
@@ -505,15 +534,17 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     auto search = config;
     search.time_varying_channel = workspace.varying.block_rows || workspace.drift.workspace_bytes ||
         workspace.coherent_gain.block_rows;
+    const auto midpoint_evaluation = workspace.varying.midpoint_tracking ?
+        MidpointTimingEvaluation::short_tracking : MidpointTimingEvaluation::off;
     if (overlap) {
         score.helper_overlapped = true;
         coarse = score_coarse(search, slot, key, iq,
             FrequencyAssistance{acquire, {workspace.helper, helper_widest_wave}},
-            workers, workspace.overlapped_coarse, stop, executor);
+            workers, workspace.overlapped_coarse, stop, executor, midpoint_evaluation);
     } else {
         const auto intervals = acquire(lanes, stop);
         began = Clock::now();
-        coarse = score_coarse(search, slot, key, iq, intervals, workers, workspace.coarse, stop, executor);
+        coarse = score_coarse(search, slot, key, iq, intervals, workers, workspace.coarse, stop, executor, midpoint_evaluation);
     }
     score.coarse_seconds = elapsed(began);
     score.coarse_workspaces = coarse.workspaces;
@@ -536,13 +567,30 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
 
     began = Clock::now();
     score_fine(config, slot, key, iq, fine.coordinates, coarse.projected_sample_rate_hz,
-               coarse.clock_gap_ppm, workers, score, workspace.fine, stop, executor);
+               coarse.clock_gap_ppm, workers, score, workspace.fine, stop, executor, gain);
     const bool varying = workspace.varying.block_rows != 0;
     const auto drift = workspace.drift.workspace_bytes ? &workspace.drift : nullptr;
     const auto separation = config.time_varying_channel ? config.time_varying_minimum_bit_log_separation : 0.;
     const AdmissionGrid varying_grid(fine.grid.lower, fine.grid.upper,
         config.frequency_bound_hz + config.time_varying_atmospheric_hz,
         config.clock_bound_ppm, fine.grid.frequency_step);
+    std::array<FineCoordinate, maximum_midpoint_timing_coordinates> midpoint_coordinates{};
+    std::optional<MidpointTrackInput> midpoint;
+    if (workspace.varying.midpoint_tracking) {
+        require(coarse.midpoint_timing && coarse.midpoint_timing->lag_count &&
+            coarse.midpoint_timing->proposals.size() <= midpoint_coordinates.size(),
+            "Robust coarse midpoint timing did not retain its admitted public family");
+        const auto& timing = *coarse.midpoint_timing;
+        std::ranges::transform(timing.proposals, midpoint_coordinates.begin(),
+            [](const auto& proposal) { return proposal.coordinate; });
+        midpoint.emplace(std::span(midpoint_coordinates).first(timing.proposals.size()), timing.lag_count,
+            varying_grid.log_count() - std::log1p(2 * varying_grid.frequency_radius));
+        score.midpoint_timing_lags = timing.lag_count;
+        score.midpoint_timing_workspace_bytes = timing.workspace_bytes;
+        score.midpoint_timing_precision = timing.precision;
+        score.midpoint_timing_widened_inverses = timing.widened_inverses;
+        score.midpoint_timing_scored_lags = timing.scored_lags;
+    }
     const auto selected = fine.varying_coordinates.empty() ? std::span(fine.coordinates) :
                                                             std::span(fine.varying_coordinates);
     const auto varying_prior = varying ? &varying_grid : nullptr;
@@ -613,13 +661,13 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     // A short-block plan can compete with strong affine evidence from the
     // same observation. Longer models still run as needed for admission.
     if (varying) {
-        const auto quarter_clock_timing = workspace.varying.track_frequency && !config.helper_enabled ?
-            prepare_quarter_clock_timing(config, slot, coarse, fine.grid) : std::vector<FineCoordinate>{};
-        const auto timing = quarter_clock_timing.empty() ? std::span(fine.segmented_timing_coordinates) :
-                                                           std::span(quarter_clock_timing);
+        const auto raw_timing = workspace.varying.track_frequency ?
+            prepare_short_tracking_timing(config, slot, coarse, fine.grid) : std::vector<FineCoordinate>{};
+        const auto timing = raw_timing.empty() ? std::span(fine.segmented_timing_coordinates) : std::span(raw_timing);
         score_varying_fine(config, slot, key, workspace.varying, iq, selected,
                            timing,
-                           coarse.projected_sample_rate_hz, coarse.clock_gap_ppm, workers, score, stop, *executor);
+                           coarse.projected_sample_rate_hz, coarse.clock_gap_ppm, workers, score, stop, *executor,
+                           nullptr, nullptr, nullptr, midpoint ? &*midpoint : nullptr);
         classify_supplement();
     }
     if (coherent_gain_prior && (compare_all || score.decision != SlotDecision::data)) {
@@ -715,6 +763,15 @@ ReceiverSlotScore receiver_detail::score_slot_comparing_admitted_evidence(const 
         std::stop_token stop, ReceiverExecutor* shared) {
     return score_stages(config, slot, key, iq, valid, workers, memory_limit_bytes, stop, shared,
                         true, nullptr, EvidenceEvaluation::compare_admitted);
+}
+
+ReceiverSlotScore receiver_detail::score_slot_without_stationary_fading(const ReceiverConfig& config,
+        const ReceiverSlotPlan& slot, const Crypto& key, std::span<const Complex> iq,
+        std::span<const std::uint8_t> valid, unsigned workers, std::size_t memory_limit_bytes,
+        std::stop_token stop, ReceiverExecutor* shared) {
+    return score_stages(config, slot, key, iq, valid, workers, memory_limit_bytes, stop, shared,
+                        true, nullptr, EvidenceEvaluation::bounded_competition,
+                        AffineGainEvaluation::without_stationary_fading);
 }
 
 ReceiverSlotScore receiver_detail::score_slot_in_sequence(const ReceiverConfig& config,

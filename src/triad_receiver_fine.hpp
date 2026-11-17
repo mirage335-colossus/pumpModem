@@ -18,6 +18,7 @@ struct FineCoordinate {
 };
 
 enum class FineRunKind { operational, probe, cold_maximum };
+enum class AffineGainEvaluation { operational, without_stationary_fading };
 
 struct FineObservation {
     std::uint64_t first_sample = 0;
@@ -98,7 +99,8 @@ public:
                 std::span<const Complex> iq, std::span<const std::uint8_t> valid,
                 std::span<const FineCoordinate>, double projected_sample_rate_hz,
                 double coarse_clock_gap_ppm, unsigned workers, std::size_t scratch_limit_bytes,
-                std::stop_token = {}, ReceiverExecutor* = nullptr);
+                std::stop_token = {}, ReceiverExecutor* = nullptr,
+                AffineGainEvaluation = AffineGainEvaluation::operational);
     ~FineSession();
     FineSession(const FineSession&) = delete;
     FineSession& operator=(const FineSession&) = delete;
@@ -125,7 +127,7 @@ void score_fine(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                 std::span<const Complex> iq, std::span<const FineCoordinate>,
                 double projected_sample_rate_hz, double coarse_clock_gap_ppm,
                 unsigned workers, ReceiverSlotScore&, std::size_t scratch_limit_bytes, std::stop_token,
-                ReceiverExecutor* = nullptr);
+                ReceiverExecutor* = nullptr, AffineGainEvaluation = AffineGainEvaluation::operational);
 // Optional, separately normalized fixed-affine likelihood. Public geometry
 // determines whether a short-block projection can separate DATA and Helper.
 struct VaryingFinePlan {
@@ -133,6 +135,7 @@ struct VaryingFinePlan {
     std::string_view status;
     bool track_frequency = false;
     bool coherent_gain_blocks = false;
+    bool midpoint_tracking = false;
 };
 struct LineAtom {
     std::size_t first = 0, stop = 0;
@@ -167,14 +170,23 @@ struct TrackedFrequencyClockShadow {
     std::array<double, 2> tracked_bit_evidence{}, varying_bit_evidence{};
     double tracked_log_prior_adjustment = 0;
 };
+inline constexpr std::size_t maximum_midpoint_timing_coordinates = 6;
+struct MidpointTrackInput {
+    std::span<const FineCoordinate> nominations;
+    std::size_t public_lag_count = 0;
+    double original_timing_log_count = 0;
+};
+void enable_midpoint_tracking(VaryingFinePlan&);
 std::size_t tracked_frequency_span_workspace(const ReceiverSlotPlan&, const VaryingFinePlan&,
                                               bool clock_shadow = false);
+std::size_t nominal_epoch_timing_capacity(const ReceiverConfig&, const ReceiverSlotPlan&);
 void score_varying_fine(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                         const VaryingFinePlan&, std::span<const Complex>, std::span<const FineCoordinate>,
-                        std::span<const FineCoordinate> segmented_timing,
+                        std::span<const FineCoordinate> supplemental_timing,
                         double projected_sample_rate_hz, double coarse_clock_gap_ppm, unsigned workers,
                         ReceiverSlotScore&, std::stop_token, ReceiverExecutor&, const LineAtom* = nullptr,
-                        TrackedFrequencySpan* = nullptr, TrackedFrequencyClockShadow* = nullptr);
+                        TrackedFrequencySpan* = nullptr, TrackedFrequencyClockShadow* = nullptr,
+                        const MidpointTrackInput* = nullptr);
 std::size_t varying_quiet_workspace(const ReceiverConfig&, const ReceiverSlotPlan&);
 void score_varying_quiet(const ReceiverConfig&, const ReceiverSlotPlan&, std::span<const Complex>,
                          ReceiverSlotScore&, std::stop_token);

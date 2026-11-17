@@ -116,7 +116,150 @@ lesson: check physically meaningful observables (power, phase, delay-Doppler,
 cross-frequency/time covariance and tails) and modem decisions. Do not use one
 aggregate distribution score as fidelity proof.
 
+## Repeated single-bit reception and channel timescales
+
+The weak long-bit follow-up uses the existing coupled two-hop field, whose
+retarded sinusoidal reflector motion is a constructed stress rather than
+random storm FM. Recent measurements motivate testing persistent evolution
+without supplying that model's occurrence probability. [Aricoche et al.
+(2026)](https://www.frontiersin.org/journals/astronomy-and-space-sciences/articles/10.3389/fspas.2026.1848834/full)
+observe approximately 20 dB of relative fading in a quiet postsunset Alaskan
+2.9/3.4-MHz beacon episode; their fastest fades exceed the ionospheric
+inversion's tracking ability. They report common multihop returns but no
+observed multipath in that setup, so these data do not establish two-ray
+cancellation. Their 10-μs PRN code intervals repeat every 0.1 s; processing
+uses 10-second coherent observations and one-minute incoherent products.
+Neither those processing intervals nor fitted Doppler widths establish a
+universal fade-coherence time or weak-payload reliability. This motivates a
+current native continuous-channel retry check, while keeping the finite-block
+channel-knowledge limits above and the historical oracle's unavailable
+information explicit.
+
+Repeated payloads need a direct bit/null test. The native raw-bit transmitter
+bypasses the text codec; successive public ordinals change the keyed waveform
+even when the key and bit stay fixed. A retry test must preserve that ordinal
+progression and continuous channel state, report the expected and received bit
+at each address, and separate wrong DATA, active-slot QUIET and absence controls.
+Codec rejection or browser visibility cannot establish whether the agreed bit
+arrived. Replaying one ordinal or resetting the channel before every bit answers
+a different question. Neither six correlated attempts nor six noise draws
+establish a population outage probability.
+
+Clock uncertainty also accumulates through the quiet intervals between retries.
+Centering the affine time map on each observation is an exact coordinate change:
+the local offset includes the global rate error multiplied by elapsed time. It
+does not remove that uncertainty or justify resetting the local offset to zero.
+[Dun et al. (ION GNSS+, 2019)](https://doi.org/10.33012/2019.16958)
+derive a sampling-clock-induced matched-filter delay bias at the observation
+midpoint. Their known OFDM signals, small-skew approximation and high-SNR ranging
+experiments support the timing convention, not this modem's blind weak-signal
+sensitivity. A bounded local-delay proposal/refinement scheme must retain the
+transformed global arrival/clock support and its prior mass, and account for
+independently varying multipath. Its compute or reception benefit requires native
+matched evidence; recentering alone is not a new synchronization observation.
+Transporting an earlier clock posterior between slots could narrow this search,
+but cannot replace initial acquisition or recovery after an outage.
+[Stumper and Rosich (EUSIPCO, 2015)](https://www.eurasip.org/Proceedings/Eusipco/Eusipco2015/papers/1570104717.pdf)
+study one-dimensional tracking with prior timing information and noise-sensitive
+convergence. Their result supports investigating tracking after acquisition,
+not assuming a trustworthy previous estimate in the repeated-distress-bit case.
+
+Measured temporal scales argue against one universal retry model.
+[Balser and Smith (1962)](https://doi.org/10.6028/jres.066D.072) studied a
+1,566-km Atlanta–Ipswich link using path-resolved pulses: one-hop amplitude
+fading had a median near 20 seconds with longer examples, while multiple-hop
+returns faded over a few seconds. Nonstationary records and unresolved modes
+limit stationary-model interpretations. This is a particular measured link,
+not a calibrated law for the GUI's changing two-ray realization.
+[Chilcote et al. (2015)](https://doi.org/10.1002/2014RS005617) found correlated,
+few-tenths-Hz Doppler variations with approximately 40-minute periods in
+medium-frequency broadcast observations. This supports a separate slow
+centroid-variation class; it does not supply HF tap-gain statistics.
+
+The current two-hop investigation therefore tests a missing intermediate
+coherence family before adding trajectory searches. A mixture that chooses
+one whole-slot coherence law is not equivalent to an additive persistent-plus-
+varying gain. Likewise, matching a Gaussian temporal covariance at one lag
+with an AR(1) transition does not reproduce that covariance at all lags.
+These are distinct model limitations, not demonstrated causes of every miss.
+[Särkkä and Hartikainen (2012)](https://proceedings.mlr.press/v22/sarkka12.html)
+show how suitable covariance models admit state-space filtering with linear
+time scaling; that provides a possible bounded alternative to historical-path
+enumeration. It does not select the right HF covariance. In particular,
+increasing smoothness at a fixed long scale can suppress spectral support
+needed for a rotating component. Any such replacement needs normalized
+native likelihood checks, matched reception evidence and measured complete
+cost, rather than an assumption that a smoother or more detailed prior helps.
+
+The subsequent additive candidate has a related but narrower physical
+motivation. [Nickisch et al., HiCIRF (2012)](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2011RS004928)
+separate coherent and decorrelating contributions to avoid over-randomizing
+weak-scattering paths. They also warn that omitting large-scale TEC phase
+changes from the coherent term can overstate long coherent-integration gains.
+Thus an unknown persistent component plus a finite-coherence residual is a
+defensible bounded alternative, not a universal HF model. The current
+two-hop simulator itself sums fixed and moving voltage contributions, but
+that does not calibrate their occurrence or justify giving their strength,
+phase or trajectory to the receiver. The candidate uses fixed equal prior
+variance halves, preserves the original model mixture, and requires changing-
+channel and physical-absence preservation before any adoption.
+
+Physical propagation loss also needs separate treatment.
+[Gillies et al. (2026)](https://doi.org/10.1029/2025SW004906) compared the
+2013–2019 Ottawa–Alert 5–14 MHz link with remote 30 MHz riometers. Absorption
+above 0.5 dB corresponded to only about 30% lost signals in that study, partly
+because the measurements were not colocated with the link. That conditional
+association is neither a universal dropout rate nor a modem outage forecast.
+Keep fast fading, slow Doppler change and path-support/absorption episodes
+distinct. Record elapsed physical time and failures clustered within each
+episode; do not assume independent retries or three independent carrier fades.
+`Each 65%` specifies two synthetic selective depths of 0.65, not a natural
+percentile. A receiver failure with substantial retained signal energy needs
+model/support diagnosis before attributing it to physical outage.
+
+For independent ray dynamics, compact state-space marginalization remains a
+conditional alternative to a Cartesian frequency-history search.
+[Arikan and Arikan (2003)](https://doi.org/10.1029/2003RS002879) track HF taps
+with Kalman recursion, but use simulated Watterson-derived channels, known
+pulses and 10–40 dB SNR; this is not blind low-SNR modem qualification.
+[Guimarães et al. (2009)](https://doi.org/10.1109/TWC.2009.081694) integrate
+linear Gaussian channel states conditional on symbol paths, with particle
+smoothing for blind detection. Their two-tap coded-BPSK simulations retain
+finite-particle, lag and channel-order limitations. The existing
+[proper-complex covariance analysis](hf-correlated-presence.md) is a reusable
+native starting point, not a demonstrated repair for within-block chirp and
+independently moving echoes. Marginalization avoids enumerating gain histories,
+but unknown diffuse gains yield only approximately `gamma^2/2` information per
+low-SNR mode. Shorter independent blocks can therefore incur substantial
+sensitivity loss. Preserve fixed priors and compare both bit hypotheses;
+truth-fitted covariance or a best-fitting path is not a calibrated likelihood.
+
+[Ji and Wu (2026)](https://pmc.ncbi.nlm.nih.gov/articles/PMC12986613/)
+provide newer evidence that composite-path tracking can remain biased as noise
+decreases, and that separate path estimation can help. Their main simulations
+use 20 dB SNR and 2.4 kHz bandwidth; a further −10-to-20-dB sweep at fixed
+0.4-ms path separation reports benefits, so the evidence is not exclusively
+high-SNR. Their field comparison uses one second of 9.6-kHz observations with
+43-dB in-band SNR. Local-reference correlation, MUSIC initialization and parallel
+tracking do not establish this modem's blind minute-long-bit sensitivity or
+native computational ceiling. Reconsider such separation after a matched
+residual failure identifies independent-ray dynamics rather than omitted timing;
+do not import the reported gains as an automatic replacement for the bounded
+tracker.
+
 ## Corrections and unresolved evidence
+
+The subsequent [repeated-bit timing repair](../../docs/validation.md#repeated-single-bit-channel-diagnosis--16-november-2026)
+locates a different causal defect: fixed clock cells lose timing resolution as
+calendar age grows. Received-data midpoint nominations recover all 48 original
+raw DATA bits and all 24 fresh DATA bits, with a retained ambiguous quiet slot
+and five of six completed quiet pairs in each fresh capture. They also repair
+the earlier four-error `A` capture and
+the separate eight/nine-error 40/43 dB-Hz pair. Those earlier failures below
+remain source-bound negative findings, not current unrepaired outcomes. The
+four-score signed-echo contrast receives both bits at either sign, but negative
+Doppler has lower evidence; its noise-free observation is not a measured
+sensitivity penalty or proof about all changing independent-ray histories.
 
 The later [bounded short-model competition](../../docs/validation.md#bounded-short-model-competition--16-november-2026)
 revises the tradeoff assessment, not the recorded earlier outcomes. Short-model
@@ -319,3 +462,22 @@ covariance and moments as well as receiver decisions. Their synthetic laws
 remain separate from environmental observations.
 [NBS (1962)](https://nvlpubs.nist.gov/nistpubs/jres/66D/jresv66Dn6p713_A1b.pdf),
 [NTIA TR-93-293](https://its.ntia.gov/publications/details?pub=2319)
+
+The weak-channel investigation also exposed a separate high-information
+numerical weakness. A direct native two-spatial-tap update with prior covariance
+`0.5 I` and rank-one Gram `2^60 [[1,1],[1,1]]` returns
+`invalid_innovation`, even though the exact innovation is positive definite.
+This reproduces a numerical defect; it does not show that the defect caused
+the weak two-hop misses. A positive pivot alone cannot preserve repeated
+updates when a dense covariance loses its tiny observable eigenvalue.
+[Chin's 2023 JPL square-root filtering report](https://ipnpr.jpl.nasa.gov/progress_report/42-233/42-233A.pdf)
+supports factor-based propagation to avoid subtractive covariance degradation;
+the linked version incorporates its subsequent errata. This motivated the
+bounded native two-state factor repair, without a larger search or a new channel
+model. Analytic extreme-condition tests, native projection checks and two matched
+ordinary HF captures now support that repair within the
+[recorded scope](../../docs/validation.md#separate-two-path-numerical-investigation).
+Factorization cannot reconstruct information already lost in forming a Gram:
+an exactly one-bin observation can supply an explicit rank bound, while genuinely
+multidimensional observations must retain their supported modes. Numerical
+robustness, receiver sensitivity and real-time service remain separate claims.

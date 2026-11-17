@@ -102,4 +102,25 @@ datapump::live::detail::Profile prepare_hf_gui_profile(
     return prepared;
 }
 
+void configure_hf_gui_repeated_bit_channel(datapump::triad::v3::StreamChannelConfig& channel,
+                                           double scale, std::uint64_t path_seed, bool thermal_noise) {
+    require(scale == 0 || scale == .5 || scale == 1, "invalid repeated-bit atmosphere scale");
+    auto& effects = channel.effects;
+    auto& path = channel.path_evolution;
+    // The selective coefficient stream uses effects.seed, independently of
+    // the path_seed override that controls the common and echo trajectories.
+    channel.oscillator_seed = channel.oscillator_seed.value_or(effects.seed);
+    channel.noise_seed = channel.noise_seed.value_or(effects.seed);
+    effects.seed = path_seed;
+    channel.path_seed = path_seed;
+    effects.spread_delay_ms *= scale;
+    effects.spread_doppler_hz *= scale;
+    path.common_doppler_wander_hz *= scale;
+    if (scale == 0) path.bounded_spread_knot_seconds = 0;
+    effects.perturbation_slow_depth *= scale;
+    effects.perturbation_fast_depth *= scale;
+    if (channel.selective_model.modulation_rate_hz) *channel.selective_model.modulation_rate_hz *= scale;
+    effects.noise_enabled = thermal_noise;
+}
+
 } // namespace appraisal
