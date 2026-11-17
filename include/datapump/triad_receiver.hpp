@@ -116,6 +116,10 @@ struct ReceiverSlotScore {
     bool affine_stationary_fading_gain = false;
     // Prior-corrected evidence actually used for operational bit selection.
     std::array<double, 2> operational_bit_evidence{};
+    // Only fixed-repeat attempts publish a separate factor. The ordinary
+    // decision and completion still use the single-slot score above.
+    std::optional<std::array<double, 2>> repeat_bit_evidence;
+    double repeat_extra_line_seconds = 0;
     double operational_bit_log_separation = 0, operational_minimum_bit_log_separation = 0;
     WrongKeyAdmission wrong_key_admission = WrongKeyAdmission::current;
     double wrong_key_required_log_separation = 0;

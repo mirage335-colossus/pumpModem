@@ -22,6 +22,21 @@ struct StreamReceiverOptions {
     std::size_t maximum_pending_messages = 16;
     std::size_t recent_slot_receipts = 32;
     bool record_commit_timing = false; // Optional native measurement receipt.
+    // Explicit dedicated same-bit schedule. By default the caller must supply
+    // calibrated proper-white independent complex noise with no overlapping
+    // unaccounted preprocessing; a zero halo alone does not establish this.
+    // This does not change physical slot or codec decisions.
+    bool fixed_repeated_bit = false;
+    // Opt in to a logical-PCM Gaussian covariance envelope: independent real
+    // logical PCM samples with variance bounded by noise_variance/2, processed
+    // by the known centered AudioInput FIR. The value must equal the public
+    // filter halo. This does not characterize actual device noise or hardware.
+    std::optional<std::uint64_t> repeat_audio_input_halo_samples;
+    // Explicit public padding without noise preprocessing. The caller asserts
+    // independent proper-Gaussian complex noise is added after the channel
+    // and is not subsequently filtered. Must equal the positive public halo;
+    // mutually exclusive with repeat_audio_input_halo_samples.
+    std::optional<std::uint64_t> repeat_unfiltered_iq_padding_samples;
 };
 
 struct StreamReceiverResources {
@@ -56,6 +71,14 @@ struct StreamSlotReceipt {
     std::uint64_t pattern_epoch = 0, symbol_ordinal = 0;
     unsigned workers = 0; // Maximum lane shape used for the slot's DSP lease.
     std::optional<StreamCommitTiming> commit_timing;
+};
+
+struct RepeatedBitEvent {
+    std::uint64_t first_public_slot = 0, last_public_slot = 0;
+    std::uint64_t first_symbol_ordinal = 0, last_symbol_ordinal = 0;
+    unsigned attempts = 0;
+    std::uint8_t bit = 0;
+    double log_evidence = 0, threshold = 0, bit_log_separation = 0;
 };
 
 struct StreamReceiverReport {
@@ -98,12 +121,15 @@ public:
                           std::span<const std::uint8_t> valid = {});
     // Collect available slot results, waiting for at most one completion
     // before returning. Retry the unchanged chunk after input backpressure.
-    // When output is backpressured, drain messages and retry without waiting.
+    // When output is backpressured, drain messages and repeated-bit events
+    // and retry without waiting.
     StreamReceiverReport wait_for_slot_completion();
     // With wait=true, drain all ready work subject to output backpressure.
     StreamReceiverReport resume(bool wait = false);
     std::vector<CompletedMessage> drain_messages();
     std::vector<StreamSlotReceipt> drain_recent_slots();
+    // Separate logical-bit observations, not physical DATA or completion.
+    std::vector<RepeatedBitEvent> drain_repeated_bits();
     StreamReceiverReport report() const;
 
     // Drains accepted complete windows, subject to output backpressure.

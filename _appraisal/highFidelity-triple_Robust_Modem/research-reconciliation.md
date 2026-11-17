@@ -237,6 +237,106 @@ lesson: check physically meaningful observables (power, phase, delay-Doppler,
 cross-frequency/time covariance and tails) and modem decisions. Do not use one
 aggregate distribution score as fidelity proof.
 
+### Real PCM covariance and scheduled repeated-bit evidence
+
+The live receiver's `AudioInput` maps real PCM `r` to a rotated
+`(r + i H r)/sqrt(2)`. In exact arithmetic the finite Fejér-tapered Hilbert
+convolution `H` has operator norm at most one. Finite restrictions, the
+stacked real and quadrature map with its `1/sqrt(2)` factor, and the per-row
+rotation therefore have operator norm at most one. For zero-mean jointly
+Gaussian PCM with covariance bounded above by `sigma² I`, the real-augmented
+IQ covariance is bounded by `sigma² I` in positive-semidefinite order. The
+complex score's proper reference variance is `nu=2 sigma²`, as provided by
+`Fs` times the declared one-sided PCM noise PSD. IQ after this projection can
+be colored and improper even when the PCM is white. The bound concerns the
+actual normalized PCM entering `AudioInput`. Hardware resampling, filtering,
+interference and clipping do not certify that assumption. Equal raw and
+logical rates and zero origins in the fixed nominal capture-transport recipe
+witness the local identity conversion. Its equal-rate nonadjustable route
+copies PCM in the absence of gain or transformation. [PCM projection](../../src/robust_audio_frontend.cpp#L22),
+[profile variance](../../src/robust_profile.cpp#L379),
+[capture transport](../../src/resampler.cpp#L165).
+
+Each fixed bit hypothesis adds zero-mean Gaussian signal covariance `C >= 0`
+to the proper reference. In real coordinates with reference `sigma² I`, its
+likelihood ratio has the form `c exp(xᵀ A x / 2)`, with
+`A = (sigma² I)^−1 − (sigma² I + C)^−1 >= 0`. For Gaussian covariance
+`Sigma <= sigma² I`, its expectation is
+`c det(I − A^(1/2) Sigma A^(1/2))^−1/2 <= 1`. The determinant is monotone
+here because the inner matrix is positive definite and ordered above its
+value at the reference. The same upper bound holds with a *joint*
+sub-Gaussian moment-generating-function envelope `sigma² I` by introducing
+an auxiliary standard Gaussian `z` and applying the envelope to
+`zᵀ A^(1/2) x` before integrating `z`. Per-sample moments or a measured noise
+floor alone do not imply that joint envelope. This uses the Gaussian
+integration step in [Hsu, Kakade and Zhang (2012)](https://arxiv.org/abs/1110.2842).
+
+The native fixed-affine and drift likelihoods preserve the covariance
+determinant for each retained public coordinate. The short frequency tracker
+sums a fixed Markov prior over frequency histories, with Gaussian gains for
+each history. The persistent gain alternatives use fixed-centroid Gaussian
+state models. These are mixtures of covariance enlargements on the complete
+slot, despite the use of data-dependent posterior means inside the Gaussian
+update. Coarse nominations, timing deduplication and early fallback retain
+fixed public mass for each executed term, so omitting terms gives a pointwise
+lower bound on their full prior mixture. Reduced precision in coarse and
+drift FFT proposals selects terms. Retained drift scores recompute the direct
+FP64 statistics. The adaptive timing and covariance-merging diagnostic is
+outside the operational affine lane. The audit concerns the likelihood in
+exact arithmetic, with the implemented FP64 transforms and recurrences
+retaining their ordinary numerical error. [Public mass and fallback](../../src/triad_receiver.cpp#L285),
+[Gaussian updates](../../src/triad_receiver_fine.cpp#L711),
+[operating affine lane](../../src/triad_receiver_fine.hpp#L39),
+[frequency history](../../src/triad_receiver_fine.cpp#L2035),
+[drift statistics](../../src/triad_receiver_fine.cpp#L3716).
+
+For a fixed retained tone atom `j`, the residual DATA transform removes the
+normalized projected tone in each intersecting block. The short and coherent
+gain blocks and the drift scorer use the same required band as tone
+nomination, with Helper Off. The projection therefore retains a closest
+wrapped DFT bin for that tone. If the block has `m` rows and intersects the
+tone support in `l >= 1` consecutive rows, the closest-bin angular-step error
+is at most `pi/m`. The unitary DFT coefficient has magnitude at least
+`2 l / (pi sqrt(m))`, by the geometric sum and the sine lower bound on
+`[0, pi/2]`. This exceeds the `1e−12` projection norm cutoff even at the
+64-bit row-count limit. A disjoint block has an exactly zero tone projection.
+The raw tone atom and block projections use the same ideal frequency and
+support, with a block constant phase that cancels in the projection. The
+likelihood product for that tone and its DATA complement is consequently a
+single covariance enlargement under the fixed proper reference. The
+selected atom retains its full public lattice divisor `M`. For ordinary
+likelihood `O` and tone/residual likelihoods `L_j,R_j`, the scored factor
+`(O + (L_j/M) R_j) / (2 (1 + L_j/M))` is bounded by the fixed mixture of
+`O` and the entire tone/DATA dictionary. The line-selection threshold only
+selects the retained term. If a planned line branch retains no atom, it
+contributes no evidence and the ordinary `O/2` keeps its fixed half mass.
+This nearest-bin argument requires Helper Off,
+where the projection has no excluded Helper bins. [DATA bins](../../src/triad_receiver_fine.cpp#L223),
+[tone projection](../../src/triad_receiver_fine.cpp#L610),
+[tone lattice](../../src/triad_receiver_fine.cpp#L3006),
+[mixture normalization](../../src/triad_receiver.cpp#L649).
+
+For the simplest scheduled product argument, condition on the fixed local
+configuration and dated capture geometry, use independent PCM with the
+declared noise envelope, and require disjoint primitive input supports. A
+scored interval `[a,b)` reads `AudioInput` PCM on `[a−h,b+h)` for FIR half-width
+`h`. A live repeat guard must account for this dependency outside the scored
+IQ interval even when the calendar padded that interval with the same halo.
+An overflow-safe separation test is `a >= previous_stop` and
+`a − previous_stop >= 2h`. Invalid or incomplete windows only remove a
+candidate group. With the explicit bit and look priors, the two declared
+prefix decisions each use half the fixed group allowance. Cross-group
+independence is unnecessary for their calendar union bound. Under the
+stronger *joint* covariance envelope the fixed-prefix tensor product on
+disjoint scored IQ indices also has the determinant bound directly, even if
+the FIR dependencies overlap. The disjoint primitive-support condition gives
+the simpler conditional argument. These are noise-model conditions, not an
+interference rejection rate, sender authentication or field availability
+estimate. [Sample support](../../src/robust_audio_frontend.cpp#L74),
+[calendar observation support](../../src/triad_stream.cpp#L298),
+[scheduled looks](../../src/triad_stream_receiver.cpp#L563),
+[Vovk and Wang (2024)](https://sas.uwaterloo.ca/~wang/papers/2024Vovk-Wang-EJS.pdf).
+
 ## Repeated single-bit reception and channel timescales
 
 The weak long-bit follow-up uses the existing coupled two-hop field, whose
@@ -326,6 +426,30 @@ variance halves, preserves the original model mixture, and requires changing-
 channel and physical-absence preservation before any adoption.
 
 ### Timing, delay and cross-carrier evidence
+
+Additional measurements support testing distinct, continuously evolving mode
+histories without treating them as calibrated outage rates. [Jia et al. (2026)](https://doi.org/10.1029/2026JA035199)
+observe nighttime E/F dominance changes and different Doppler timescales in one
+MF campaign; this is not a measurement of a 30 Hz HF spread. [Dear et al.
+(2024)](https://doi.org/10.1029/2023RS007877) report multipath and intermediate
+delay/Doppler on a quiet Java NVIS path. Their published raw example is one
+sounder capture, not a calibrated multi-hour complex-channel replay. These
+findings motivate mode-dependent and intermediate conditions within wide public
+receiver allowances, but do not supply their incidence on a given alarm path.
+[Sun et al. (2026)](https://arxiv.org/abs/2604.16062) study correlated
+noncoherent fading with stop feedback; its feedback and channel assumptions do
+not match this one-way modem. Correlated retries must not be treated as
+independent based on those results.
+
+For an explicitly agreed repeated logical bit, the conditional e-value
+construction of [Vovk and Wang](https://arxiv.org/pdf/2007.06382) motivates
+combining prior-corrected bit evidence across predetermined, disjoint windows.
+Marginal validity alone does not justify multiplication; the conditional
+noise model and all input dependencies must be checked. Such a group result
+is not a physical DATA decision for every constituent slot and does not replace
+scored quiet-slot completion. Exploratory arithmetic on the two weak physical
+histories is documented in [validation](../../docs/validation.md#weak-physical-gain-level-discriminator--17-november-2026);
+it does not qualify a deployed repetition profile or natural outage rate.
 
 [Sayeed and Aazhang (1999), joint multipath-Doppler diversity](https://amsayeed.wordpress.com/wp-content/uploads/2020/08/47f05-sayeed_com_mddiv99.pdf)
 derive a joint delay/frequency representation and coherent or noncoherent

@@ -1,11 +1,13 @@
 #include "datapump/triad_helper_burst.hpp"
 #include "datapump/triad_stream.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <stop_token>
 #include <stdexcept>
 #include <vector>
@@ -270,6 +272,87 @@ void emission_modes_and_cancellation() {
         "local playback changed the configured lead or first DATA coordinate");
 }
 
+void fixed_repeat_emission() {
+    PublicProfileConfig c;
+    c.format.sample_rate=960;
+    c.format.epoch=epoch;
+    c.format.inner_rate_hz=36;
+    c.format.added_symbols=1;
+    c.format.bit_seconds=8;
+    c.format.symbol_ordinal=41;
+    c.format.encrypt=false;
+    c.data_if_hz=240;
+    const PublicProfile profile(c);
+    const auto key=datapump::Crypto::amateur();
+    EmissionOptions request;
+    request.repeated_bit=1;
+    request.first_slot=15;
+    Emission emitted(profile,key,request);
+    const auto expected_stop=profile.calendar().distance(profile.origin(),profile.transmit_slot(29).helper_end);
+    check(emitted.source().geometry.source_samples==expected_stop,
+          "fixed repeat source does not include both final quiet slots");
+    std::array<long double,FixedRepeatedBit::group_slots> energy{};
+    std::array<bool,FixedRepeatedBit::attempts> addressed{};
+    std::array<std::unique_ptr<PatternSource>,FixedRepeatedBit::attempts> expected;
+    std::array<std::uint64_t,FixedRepeatedBit::group_slots> starts{};
+    for (std::uint64_t i=0;i<FixedRepeatedBit::group_slots;++i)
+        starts[i]=profile.calendar().distance(profile.origin(),profile.transmit_slot(15+i).support_begin);
+    for (std::uint64_t i=0;i<FixedRepeatedBit::attempts;++i) {
+        const auto slot=profile.transmit_slot(15+i*FixedRepeatedBit::spacing_slots);
+        auto format=profile.config().format;
+        format.epoch=slot.pattern_begin.epoch;
+        format.symbol_ordinal+=slot.index;
+        expected[i]=std::make_unique<PatternSource>(format,key,1);
+    }
+    std::array<Complex,8192> buffer{};
+    std::uint64_t cursor=0, relative=0;
+    while (const auto count=emitted.read(buffer)) {
+        for (std::size_t j=0;j<count;++j) {
+            const auto index=cursor+j;
+            while (relative<FixedRepeatedBit::group_slots &&
+                   index>=starts[relative]+profile.geometry().source_samples) ++relative;
+            if (relative<FixedRepeatedBit::group_slots) {
+                const auto first=starts[relative];
+                if (index<first) {
+                    check(buffer[j]==Complex{},"fixed repeat emitted outside a public DATA support");
+                    continue;
+                }
+                energy[relative]+=std::norm(buffer[j]);
+                if (FixedRepeatedBit::is_attempt(relative) && index==first+profile.geometry().calendar_origin_sample) {
+                    const auto attempt=relative/FixedRepeatedBit::spacing_slots;
+                    const auto reference=expected[attempt]->sample_at(index-first)*emitted.report().data_gain;
+                    check(std::abs(buffer[j]-reference)<1e-11*(1+std::abs(reference)),
+                          "repeat DATA changed keyed epoch or ordinal");
+                    addressed[attempt]=true;
+                }
+            } else check(buffer[j]==Complex{},"fixed repeat emitted after the final support");
+        }
+        cursor+=count;
+    }
+    check(cursor==expected_stop,"fixed repeat emitted wrong source extent");
+    for(std::uint64_t i=0;i<FixedRepeatedBit::group_slots;++i)
+        check(FixedRepeatedBit::is_attempt(i) ? energy[i]>0 : energy[i]==0,
+              "fixed repeat emitted DATA in wrong public slot");
+    check(std::all_of(addressed.begin(),addressed.end(),[](bool found){return found;}),
+          "repeat address comparison did not visit every attempt");
+    check(emitted.report().helper_energy==0,"fixed repeat emitted Helper during quiet slots");
+    request.first_slot=1;
+    rejects([&]{Emission invalid(profile,key,request);},"misaligned fixed repeat accepted");
+    request.first_slot=0; request.repeated_bit=2;
+    rejects([&]{Emission invalid(profile,key,request);},"nonbinary fixed repeat accepted");
+    request.repeated_bit=0; request.slot_count=2;
+    rejects([&]{Emission invalid(profile,key,request);},"ambiguous fixed repeat count accepted");
+    request.slot_count=1; const std::array<std::uint8_t,1> bit{0};request.bits=bit;
+    rejects([&]{Emission invalid(profile,key,request);},"fixed repeat accepted another bit source");
+    request.bits={};request.bit_at=[](std::uint64_t) {return std::uint8_t{0};};
+    rejects([&]{Emission invalid(profile,key,request);},"fixed repeat accepted a bit callback");
+    request.bit_at={};request.mode=EmissionMode::Noise;
+    rejects([&]{Emission invalid(profile,key,request);},"fixed repeat accepted Noise mode");
+    request.mode=EmissionMode::Message;c.helper_enabled=true;
+    c.helper.power_w=c.helper.data_power_w+1;c.helper.callsign="TRIAD";
+    rejects([&]{Emission invalid(PublicProfile(c),key,request);},"fixed repeat accepted enabled Helper");
+}
+
 void centered_receiver_filter_support() {
     PublicProfileConfig config;
     config.format.sample_rate=6000;
@@ -343,7 +426,7 @@ int main() {
     try {
         grid_and_geometry();waits_and_quiet_intervals();protected_tail();
         indexed_public_calendar();random_extra_waits();public_epoch_and_ordinal_boundaries();
-        emission_modes_and_cancellation();centered_receiver_filter_support();rejection_boundaries();
+        emission_modes_and_cancellation();fixed_repeat_emission();centered_receiver_filter_support();rejection_boundaries();
         std::cout<<"triad Helper whole-bit calendar checks passed\n";
     } catch(const std::exception& e) {
         std::cerr<<e.what()<<'\n';return 1;

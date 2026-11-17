@@ -4,6 +4,7 @@
 #include "datapump/helper_carrier.hpp"
 #include "datapump/transmit_trace.hpp"
 #include "datapump/wrong_key_admission.hpp"
+#include "datapump/triad_stream_receiver.hpp"
 #include <array>
 #include <memory>
 #include <utility>
@@ -21,6 +22,9 @@ struct Settings {
     bool mono=true,simulation=false,full_duplex=false,exclusive=false;
     // Local processing choice; it does not change the on-air profile.
     bool gpu=false;
+    // Explicit dedicated fixed-repeat schedule for independent live reception.
+    // Conditional on the declared independent Gaussian logical PCM noise model.
+    bool fixed_repeated_bit_live=false;
     // Reversible browser filter; the GUI receiver always preserves Current
     // baseline decisions and the original decoded content.
     std::string wrong_key_admission="current";
@@ -106,9 +110,13 @@ struct Snapshot {
     std::vector<transfer::Received> received;
     modem::TransmitTrace transmit_trace;
     std::vector<PatternStep> pattern_steps;
+    // Separate fixed-repeat logical observations, never physical completion.
+    // Produced by explicit simulation or the dedicated live repeat profile.
+    std::vector<triad::v3::RepeatedBitEvent> repeated_bits;
     std::optional<double> bit_seconds, slot_stride_seconds;
     std::optional<std::pair<double,double>> search_band_hz, helper_band_hz;
     std::optional<std::string> transmit_unavailable;
+    std::optional<std::string> repeat_transmit_unavailable;
     std::optional<std::string> noise_transmit_unavailable;
     std::string status,error,receiver_error;
     std::string gpu_device,gpu_precision;
@@ -157,6 +165,7 @@ public:
     void clear_received();
     void transmit(const Message&,bool force=false);
     void transmit_bits(std::span<const std::uint8_t>,bool force=false);
+    void transmit_repeated_bit(std::uint8_t bit);
     void transmit_noise();
     void transmit_helper();
     void cancel_transmit();

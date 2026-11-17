@@ -321,7 +321,8 @@ void supported_sizes() {
         const auto page=layout[Slot::page];
         for(const auto slot:{Slot::compression_explanation,Slot::short_bits_label,Slot::short_bits,Slot::short_bits_detail,
                 Slot::compression_codes,Slot::short_use_text,Slot::short_send_key,Slot::short_transmit,Slot::short_transmit_noise,
-                Slot::short_cancel,Slot::short_airtime,Slot::compression_signals,Slot::copy_raw_signal,
+                Slot::short_cancel,Slot::short_airtime,Slot::repeated_bit_transmit,Slot::repeated_bit_result,
+                Slot::compression_signals,Slot::copy_raw_signal,
                 Slot::paste_raw_signal,Slot::raw_recovery_actions,Slot::received_raw_bits})
             check(!persistent_slot(slot)&&contains(page,layout[slot]),"Compression page control escaped its viewport");
         const auto short_bits=layout[Slot::short_bits],codes=layout[Slot::compression_codes];
@@ -330,6 +331,10 @@ void supported_sizes() {
               layout[Slot::short_bits_detail].x+layout[Slot::short_bits_detail].w<codes.x,
               "Exact-bit editor overlaps the lowercase compression reference");
         const auto raw_signals=layout[Slot::compression_signals],raw_copy=layout[Slot::copy_raw_signal];
+        const auto repeat=layout[Slot::repeated_bit_transmit],repeat_result=layout[Slot::repeated_bit_result];
+        check(repeat.x+repeat.w<repeat_result.x&&repeat.y==repeat_result.y&&
+              repeat.y+repeat.h<raw_signals.y&&repeat_result.y+repeat_result.h<raw_signals.y,
+              "Repeat simulation action/result overlaps the signal history");
         const auto raw_paste=layout[Slot::paste_raw_signal],raw_detail=layout[Slot::received_raw_bits];
         check(raw_signals.h>=134&&raw_signals.y+raw_signals.h<raw_copy.y&&
               raw_copy.y==raw_paste.y&&raw_copy.x+raw_copy.w<raw_paste.x&&

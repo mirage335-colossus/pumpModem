@@ -105,6 +105,19 @@ DataPowerReference data_power_reference(const Format&, const Crypto&, std::stop_
 
 enum class EmissionMode { Message, Noise, HelperOnly, Quiet };
 
+// One explicitly agreed logical bit uses five attempts separated by two
+// physical quiet slots, including the final two slots of the group. This is
+// independent of the normal message/codec completion rules.
+struct FixedRepeatedBit {
+    static constexpr std::uint64_t attempts = 5;
+    static constexpr std::uint64_t spacing_slots = 3;
+    static constexpr std::uint64_t group_slots = attempts * spacing_slots;
+    static constexpr std::uint64_t first_look = 4;
+    static constexpr bool is_attempt(std::uint64_t public_index) {
+        return public_index % group_slots % spacing_slots == 0;
+    }
+};
+
 struct EmissionOptions {
     EmissionMode mode = EmissionMode::Message;
     std::uint64_t first_slot = 0;
@@ -119,6 +132,10 @@ struct EmissionOptions {
     // Message mode only, with an empty bits span. The reader receives a
     // draft-relative slot and supplies exactly one 0/1 value on demand.
     std::function<std::uint8_t(std::uint64_t)> bit_at = {};
+    // Explicit fixed repeated-bit group, distinct from an ordinary bit draft.
+    // Requires Message mode, Helper Off, no other source, slot_count==1 and
+    // first_slot at a group boundary. The source spans all 15 public slots.
+    std::optional<std::uint8_t> repeated_bit;
 };
 
 struct EmissionReport {

@@ -75,6 +75,23 @@ including strong long-window signals, may be hidden. See the
 | `audio.hpp`, `robust_audio_frontend.hpp` | Native device ownership, routing, gain, timestamped capture and bounded real-PCM-to-I/Q filtering. |
 | `triad_acceleration.hpp` | Optional compiled ATen/Vulkan leaves under the production receiver's control, state and resource contracts. |
 
+With the dedicated fixed-repeat option, `CompleteStreamReceiver` queues a
+separate `RepeatedBitEvent` after four or five scheduled attempts. The event
+describes the observed prefix and can precede an incomplete fifth attempt.
+All input through the accepted look must be valid. For calibrated independent
+proper complex noise supplied directly to the receiver, the complete scored
+attempt apertures must be disjoint. An explicit unfiltered-I/Q declaration
+can retain the public aperture padding when that padding describes geometry
+only, such as a channel renderer that adds independent noise after all
+filtering. For identity-rate live capture under the independent Gaussian
+PCM envelope, expand each complete scored aperture by the actual
+`AudioInput` FIR half-width on both sides before checking disjointness.
+The configured geometry stays the same. Both declarations require evidence
+for the input assumptions. `drain_repeated_bits()` participates in output
+backpressure. Ordinary slot receipts and codec completion are independent
+of this logical event. The GUI exposes the option for native CPU simulation
+or a dedicated live schedule with Helper Off. See the [operating scope](indexes/robust.md#start-with-a-configuration-both-peers-can-receive).
+
 The GUI links `datapump_robust_session`, `datapump_triad_receiver` and
 `datapump_triad` statically. Source generation, Helper acquisition, coarse
 screening and fine scoring use the canonical native components. Independent

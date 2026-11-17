@@ -39,7 +39,7 @@ struct TransmitTrace {
     double fhss_arrival_shift_hz=0,fhss_arrival_offset_seconds=0;
     // active is message generation only; temporary_key enables noise diagnostics
     // without inventing a message, source bytes or a finite wire endpoint.
-    bool active=false, raw=false, short_text=false;
+    bool active=false, raw=false, short_text=false, repeated_bit=false;
     bool source_available=false, compressed_available=false;
     bool data_masked=false, pattern_private=false, pattern_available=false;
     bool dsss=false, tone=false;

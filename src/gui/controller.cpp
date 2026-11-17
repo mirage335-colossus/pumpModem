@@ -443,7 +443,13 @@ struct Controller::Impl {
         // The accepted TX owns this count, even if the user edits the next
         // draft. Long compression and interval encoding stay off the UI thread.
         if(snapshot.transmitting&&snapshot.transmit_trace.active) {
-            if(snapshot.transmit_trace.total_wire_bits)show_count(snapshot.transmit_trace.total_wire_bits,"TX: ");
+            if(snapshot.transmit_trace.repeated_bit) {
+                ordinary_airtime="TX: 5 DATA + 10 quiet slots";
+                if(snapshot.slot_stride_seconds) {
+                    std::ostringstream out;out<<std::setprecision(5)<<15* *snapshot.slot_stride_seconds;
+                    ordinary_airtime+=" (~"+out.str()+" s)";
+                }
+            } else if(snapshot.transmit_trace.total_wire_bits)show_count(snapshot.transmit_trace.total_wire_bits,"TX: ");
             else ordinary_airtime="TX preparation · exact length pending";
             return;
         }
@@ -607,6 +613,8 @@ struct Controller::Impl {
             sync_link_fields();
         }
         settings.device=f(UiField::device).text;settings.simulation=f(UiField::simulation).selected=="yes";
+        if(settings.simulation)f(UiField::fixed_repeated_bit_live).checked=false;
+        settings.fixed_repeated_bit_live=f(UiField::fixed_repeated_bit_live).checked;
         settings.full_duplex=f(UiField::live_duplex).checked;settings.exclusive=f(UiField::exclusive).checked;
         settings.gpu=f(UiField::gpu).checked;
         settings.tx_dbm=planner_inputs.tx_dbm;settings.path_loss_db=planner_inputs.path_loss_db;
@@ -984,14 +992,21 @@ struct Controller::Impl {
         case Command::planner_weaker: return (link_plan()->available||link_plan()->calculating)&&link_plan()->weaker_fit_target.has_value();
         case Command::transmit_short_bits: return !attachment&&!file_loading&&draft_error.empty()&&
             !f(UiField::short_bits).text.empty()&&enabled(Command::transmit);
+        case Command::transmit_repeated_bit: return started&&active_requested&&!busy&&!key_loading&&!key_failed&&settings_valid&&
+            !attachment&&!file_loading&&draft_error.empty()&&!settings.gpu&&settings.helper.power_w<=0&&
+            (settings.simulation||(settings.fixed_repeated_bit_live&&settings.calendar&&settings.live_noise_dbfs_hz))&&
+            link_inputs_valid()&&planner_target_valid&&!snapshot.repeat_transmit_unavailable&&
+            (f(UiField::short_bits).text=="0"||f(UiField::short_bits).text=="1");
         case Command::transmit: return started&&active_requested&&!busy&&!key_loading&&!key_failed&&settings_valid&&
-            link_inputs_valid()&&planner_target_valid&&!snapshot.transmit_unavailable&&supported_draft();
+            !settings.fixed_repeated_bit_live&&link_inputs_valid()&&planner_target_valid&&
+            !snapshot.transmit_unavailable&&supported_draft();
         case Command::force_transmit: return started&&active_requested&&!busy&&!key_loading&&!key_failed&&settings_valid&&
-            link_inputs_valid()&&planner_target_valid&&snapshot.force_transmit_available&&supported_draft();
+            !settings.fixed_repeated_bit_live&&link_inputs_valid()&&planner_target_valid&&
+            snapshot.force_transmit_available&&supported_draft();
         case Command::transmit_noise: return started&&active_requested&&!busy&&!key_loading&&!key_failed&&settings_valid&&
-            link_inputs_valid()&&planner_target_valid&&!snapshot.noise_transmit_unavailable;
+            !settings.fixed_repeated_bit_live&&link_inputs_valid()&&planner_target_valid&&!snapshot.noise_transmit_unavailable;
         case Command::transmit_helper: return started&&active_requested&&!busy&&!key_loading&&!key_failed&&settings_valid&&
-            link_inputs_valid()&&planner_target_valid&&settings.helper.power_w>0&&!snapshot.transmit_unavailable;
+            !settings.fixed_repeated_bit_live&&link_inputs_valid()&&planner_target_valid&&settings.helper.power_w>0&&!snapshot.transmit_unavailable;
         case Command::cancel: return busy||snapshot.simulation_replay;
         case Command::open_keyfile: case Command::generate_keyfile:
         case Command::load_amateur: case Command::unload_keys: return !busy&&!key_loading;
@@ -1035,7 +1050,7 @@ struct Controller::Impl {
         for(const auto id:{UiField::device,UiField::exclusive,UiField::mono,UiField::live_duplex,
             UiField::simulation,UiField::link_power,UiField::link_loss,UiField::link_noise,
             UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error,
-            UiField::calendar_epoch,UiField::calendar_ordinal,UiField::live_noise_dbfs_hz,
+            UiField::calendar_epoch,UiField::calendar_ordinal,UiField::live_noise_dbfs_hz,UiField::fixed_repeated_bit_live,
             UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::carrier,
             UiField::bandwidth,UiField::doppler,UiField::spread_preset,UiField::selective_perturbation,
             UiField::search_margin,UiField::dsss_factor,UiField::dsss_version,UiField::fhss,
@@ -1044,6 +1059,7 @@ struct Controller::Impl {
             UiField::search_arithmetic,UiField::receiver_strategy,UiField::receiver_cpu_budget})
             f(id).enabled=!closing&&!busy;
         f(UiField::gpu).enabled=!closing&&!busy&&live::gpu_receiver_available();
+        f(UiField::fixed_repeated_bit_live).enabled=!closing&&!busy&&!settings.simulation;
         for(const auto id:{UiField::callsign,UiField::grid})f(id).enabled=!closing;
         f(UiField::oscillator_reference).visible=false;f(UiField::oscillator_reference).enabled=false;
         f(UiField::message).enabled=f(UiField::binary).enabled=f(UiField::short_bits).enabled=!attachment&&!closing;
@@ -1212,7 +1228,11 @@ struct Controller::Impl {
             (!value.pattern_steps.empty()&&!snapshot.pattern_steps.empty()&&
                 value.pattern_steps.back().index!=snapshot.pattern_steps.back().index);
         const bool state_changed=value.status!=snapshot.status||value.error!=snapshot.error||
+            value.repeated_bits.size()!=snapshot.repeated_bits.size()||
+            (!value.repeated_bits.empty()&&!snapshot.repeated_bits.empty()&&
+                value.repeated_bits.back().last_symbol_ordinal!=snapshot.repeated_bits.back().last_symbol_ordinal)||
             value.receiver_error!=snapshot.receiver_error||value.transmitting!=snapshot.transmitting||
+            value.repeat_transmit_unavailable!=snapshot.repeat_transmit_unavailable||
             value.running!=snapshot.running||value.bit_seconds!=snapshot.bit_seconds||
             value.gpu_device!=snapshot.gpu_device||value.gpu_score_rows!=snapshot.gpu_score_rows||
             value.gpu_backend!=snapshot.gpu_backend||value.gpu_precision!=snapshot.gpu_precision||
@@ -1234,6 +1254,14 @@ struct Controller::Impl {
             value.gpu_native_coarse_lag_sessions!=snapshot.gpu_native_coarse_lag_sessions||
             value.transmit_trace.revision!=snapshot.transmit_trace.revision;
         snapshot=std::move(value);
+        auto& repeated=f(UiField::repeated_bit_result).text;
+        repeated=snapshot.simulation?"Simulation repeated-bit result: none":"Live repeated-bit result: none";
+        if(!snapshot.repeated_bits.empty()) {
+            const auto& event=snapshot.repeated_bits.back();
+            repeated=std::string(snapshot.simulation?"Simulation":"Live")+" repeated-bit result: "+std::to_string(event.bit)+
+                " after "+std::to_string(event.attempts)+" attempts (ordinal "+
+                std::to_string(event.last_symbol_ordinal)+")";
+        }
         apply_receptions(inbox,signals,snapshot);
         if(reception_changed) {refresh_files();refresh_signals();}
         plot_update.append_waterfall=plot_update.append_waterfall||spectrum_changed;
@@ -1407,6 +1435,9 @@ struct Controller::Impl {
         case Command::planner_power_1mw: set_link_budget(UiField::link_power,0);break;
         case Command::planner_power_30uw: set_link_budget(UiField::link_power,10*std::log10(.03));break;
         case Command::planner_power_1uw: set_link_budget(UiField::link_power,-30);break;
+        case Command::transmit_repeated_bit:
+            session.transmit_repeated_bit(static_cast<std::uint8_t>(f(UiField::short_bits).text[0]-'0'));
+            accept_snapshot(session.snapshot());notice(settings.simulation?"Repeated-bit simulation requested.":"Repeated-bit transmission requested.");break;
         case Command::transmit_short_bits:case Command::force_transmit:case Command::transmit: {
             const bool force=command==Command::force_transmit;
             if(command==Command::transmit_short_bits)
@@ -1790,7 +1821,17 @@ void Controller::select(UiField field,std::string id) {
 void Controller::toggle(UiField field,bool value) {
     auto& p=*impl_;
     if(p.f(field).enabled&&p.f(field).checked!=value) {
-        if(field==UiField::exclusive||field==UiField::live_duplex) {
+        if(field==UiField::fixed_repeated_bit_live) {
+            const bool previous=p.f(field).checked;
+            p.f(field).checked=value;
+            try {p.configure();}
+            catch(const std::exception& error) {
+                p.f(field).checked=previous;
+                try {p.configure();} catch(const std::exception&) {}
+                p.notice(error.what(),10);
+            }
+        }
+        else if(field==UiField::exclusive||field==UiField::live_duplex) {
             p.f(field).checked=value;p.configure();
         }
         else if(field==UiField::gpu) {

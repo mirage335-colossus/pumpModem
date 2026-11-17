@@ -26,6 +26,7 @@ enum class Slot {
     constellation, pattern_scores_label, pattern_scores,
     compression_explanation, short_bits_label, short_bits, short_bits_detail, compression_codes,
     short_use_text, short_send_key, short_transmit, short_transmit_noise, short_cancel, short_airtime,
+    repeated_bit_transmit, repeated_bit_result,
     compression_signals, copy_raw_signal, paste_raw_signal, raw_recovery_actions, received_raw_bits,
     device, mono, live_duplex, volume, exclusive, bandwidth, carrier, rf_shift, doppler, snr, fec, dsp_workspace, diagnostics, status,
     fhss_list, fhss_apply, fhss_list_status,
@@ -324,9 +325,11 @@ struct DesktopLayout {
         out[Slot::short_transmit_noise] = {411, short_actions_y, 130, action_height};
         out[Slot::short_cancel] = {551, short_actions_y, 115, action_height};
         out[Slot::short_airtime] = {676, short_actions_y, width - margin - 676, action_height};
+        out[Slot::repeated_bit_transmit] = {margin, 443, 190, action_height};
+        out[Slot::repeated_bit_result] = {margin + 200, 443, compression_width - 200, action_height};
         const int raw_detail_y = out[Slot::page].y + out[Slot::page].h - 62;
         const int raw_actions_y = raw_detail_y - 38;
-        out[Slot::compression_signals] = {margin, 469, compression_width, raw_actions_y - 479};
+        out[Slot::compression_signals] = {margin, 484, compression_width, raw_actions_y - 494};
         out[Slot::copy_raw_signal] = {margin, raw_actions_y, 150, action_height};
         out[Slot::paste_raw_signal] = {margin + 160, raw_actions_y, 180, action_height};
         out[Slot::raw_recovery_actions] = {margin + 350, raw_actions_y, 150, action_height};

@@ -49,6 +49,34 @@ Repeating the same raw bit with the same key advances the public ordinal and
 therefore changes the keyed waveform. Keep the receiver's agreed calendar in
 step; a retry is not an instruction to restart either peer at ordinal zero.
 
+**Transmit repeated bit** in the raw-bit editor sends the single entered bit
+at slot offsets 0, 3, 6, 9 and 12 of one 15-slot group. Use native CPU
+simulation with Helper Off. The separate result reports the detected logical
+bit and number of attempts at the first qualified look, after four or five
+attempts. All windows and intervening input through that look must be complete
+and valid. A four-attempt result can precede a later erased or unobserved fifth
+attempt. Physical DATA and quiet decisions, ordinary message completion and
+regular transmit operate independently. The next simulation starts
+15 keyed ordinals later. For live operation, explicitly enable the dedicated
+repeat schedule in Robust setup and configure the shared calendar, live noise
+density, native CPU and Helper Off. The receiver listens independently of any
+local transmit request and skips an incomplete group when joining late. Live
+transmission starts at the next available group boundary; its scheduled UTC
+time is reported. Half-duplex receive may pause during local transmission.
+The existing dated-playback provider capability gate remains required, including
+for receive-only sessions.
+
+This profile presumes the same bit in all five agreed positions and calibrated
+independent complex white noise for simulation; live use assumes independent
+Gaussian logical PCM with the declared conservative noise variance and an
+identity-rate capture witness. Overlapping expanded filter supports invalidate
+the group. These are assumptions about the actual input, not verified field
+noise or a guarantee for arbitrary devices. An unrelated mixed
+word can pass when the contract is violated. Use a dedicated schedule and key
+purpose for a repetition experiment. Its success on synthetic captures does
+not qualify natural outage duration or the live audio noise model. See the
+[weak physical and native repeat evidence](../validation.md#native-soft-evidence-and-coherent-line-probe-for-configured-repetition).
+
 Use duration planning to estimate airtime and set reasonable expectations; it
 is a model, not a sensitivity, reliability or real-time guarantee. Public
 calendar waits add wall-clock time but do not lower the peak workspace of one

@@ -65,6 +65,22 @@ also distinguish physical outage/estimation cost from avoidable receiver loss.
 
 ## Applicability after the admission and carrier-key changes
 
+The native opt-in repeated-bit receiver now has a matched production replay
+of the earlier −3 dB-Hz bit-one alarm history. On the exact archived two-hop
+field, input and fifteen public apertures, all five individual attempts still
+miss, but a separate grouped event correctly receives bit one after four;
+all five genuine quiet pairs remain QUIET. This result covers one constructed
+history and one polarity, not a natural outage rate or an independent
+requalification of bit zero. [Physical grouped replay](../../docs/validation.md#production-repeat-receiver-on-the-frozen-weak-two-hop-bit-one-history)
+and [live PCM tests](../../docs/validation.md#calibrated-live-pcm-repeated-bit-check)
+describe the fixed schedule, calibrated noise model and other limits.
+
+The [current 1 MHz groundwave pair](../../docs/validation.md#weak-groundwave-energy-boundary--17-november-2026)
+replays the same weak 100 km single-ray source at −16/−10 dB-Hz. All three weak
+bits miss, while the stronger case receives the correct full message and two
+quiet successors. This resolves a missing matched 6 dB energy bracket for one
+constructed history, not a physical path occurrence or optimality claim.
+
 The later [calendar-admission correction](../../docs/validation.md#public-calendar-admission-investigation--17-november-2026)
 removes an unnecessary presence penalty: a fixed whole-bit calendar has far
 fewer opportunities than the historical 0.4-second reference. Native plans now

@@ -9,7 +9,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     case Slot::fast_mode:case Slot::bandwidth:case Slot::carrier:case Slot::rf_shift:case Slot::doppler:case Slot::snr:
     case Slot::volume:
         control.purpose=ControlPurpose::operating_parameter;break;
-    case Slot::clear:case Slot::transmit:case Slot::transmit_noise:case Slot::transmit_helper:case Slot::cancel:
+    case Slot::clear:case Slot::transmit:case Slot::transmit_noise:case Slot::transmit_helper:case Slot::cancel:case Slot::repeated_bit_transmit:
         control.purpose=ControlPurpose::operation;break;
     case Slot::simulation:case Slot::link_power:case Slot::link_loss:case Slot::link_noise:
     case Slot::simulation_oscillator:case Slot::rf_oscillator:case Slot::spread_preset:case Slot::selective_perturbation:
@@ -112,6 +112,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     }
     if(slot==Slot::compression_codes)control.font_size=12;
     if(slot==Slot::short_bits_detail)control.help="Raw patterns preserve the exact entered bits. Physical completion requires two fully scored quiet public slots.";
+    if(slot==Slot::repeated_bit_transmit)control.help="Transmit one agreed bit at five fixed calendar positions with quiet gaps. CPU and Helper off are required; live use also requires the fixed-repeat option and matching public calendar. The separate result is not physical message completion.";
     if(slot==Slot::transmit_noise||slot==Slot::short_transmit_noise)
         control.help="Noise DATA uses fresh temporary CSPRNG keys and encryption; enabled Helper callsign uses the public Amateur key. Runs until Cancel TX. Does not change your message or selected-key settings.";
     if(slot==Slot::transmit_helper)
@@ -181,6 +182,10 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(control.field==Field::live_noise_dbfs_hz) {
         control.purpose=ControlPurpose::setup;
         control.help="Declared one-sided audio input noise density in dBFS/Hz, using normalized PCM squared per hertz. A finite conservative model is required for live likelihoods; this setting is not an automatic calibration or physical-noise qualification. Unspecified keeps live reception unconfigured.";
+    }
+    if(control.field==Field::fixed_repeated_bit_live) {
+        control.purpose=ControlPurpose::setup;
+        control.help="Opt in only on a dedicated agreed same-bit schedule: five attempts at slots 0, 3, 6, 9 and 12 in each 15-slot group. Mixed data can be admitted as a repeated bit. The conditional noise bound assumes independent Gaussian PCM with a conservative declared noise level; real interference and field availability are not qualified. Requires a matching calendar, CPU processing and Helper off.";
     }
     if(slot==Slot::diagnostics)control.help="Actual session diagnostics. Functional reception and modeled duration do not establish physical sensitivity or sustained CPU capacity.";
     if(slot==Slot::waterfall) {control.footer_height=24;control.click=Command::toggle_waterfall_expanded;control.right_click=Command::toggle_helper_waterfall_expanded;control.help="With Helper Carrier enabled, right-click to zoom in on the low pilot, auxiliary and high pilot tones. Click for the fullscreen configured search band and a little surrounding spectrum with adjacent amplitude/phase columns. Phase brightness follows amplitude; quiet noise stays dim. Escape or another click restores this environmental view. Clear waterfall clears history separately. Simulation uses a fixed 40 dB range; hardware spans the captured sample rate, including surrounding interference.";}
@@ -253,6 +258,8 @@ const std::vector<Control>& console_screen() {
         placed({Kind::text,Field::live_noise_dbfs_hz,Command::none,Bitmap::none,Page::robust_setup,2,"Live input noise (dBFS/Hz)",2,false,64}, Slot::none),
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,3,"Live reception uses a declared local noise model. Simulation uses the sampled channel noise."}, Slot::none),
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,4,"Unknown transmission starts are not acquired. Message completion requires two scored quiet slots."}, Slot::none),
+        placed({Kind::toggle,Field::fixed_repeated_bit_live,Command::none,Bitmap::none,Page::robust_setup,5,"Enable dedicated live repeated-bit schedule"}, Slot::none),
+        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,6,"Use only for an agreed repeated bit; mixed data can cross. Independent Gaussian PCM and the declared noise level are assumptions, not field qualification."}, Slot::none),
         placed({Kind::action,Field::count,Command::open_keyfile,Bitmap::none,Page::console,2,"Open keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::generate_keyfile,Bitmap::none,Page::console,2,"Generate keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::load_amateur,Bitmap::none,Page::console,2,"WARNING - Load Amateur"}, Slot::key_actions, Menu::keyfile),
@@ -331,6 +338,8 @@ const std::vector<Control>& console_screen() {
         placed({Kind::action,Field::count,Command::transmit_noise,Bitmap::none,Page::compression,3,"Transmit noise"}, Slot::short_transmit_noise),
         placed({Kind::action,Field::count,Command::cancel,Bitmap::none,Page::compression,3,"Cancel TX"}, Slot::short_cancel),
         placed({Kind::label,Field::airtime,Command::none,Bitmap::none,Page::compression,3,""}, Slot::short_airtime),
+        placed({Kind::action,Field::count,Command::transmit_repeated_bit,Bitmap::none,Page::compression,3,"Transmit repeated bit"}, Slot::repeated_bit_transmit),
+        placed({Kind::label,Field::repeated_bit_result,Command::none,Bitmap::none,Page::compression,3,""}, Slot::repeated_bit_result),
         placed({Kind::list,Field::signals,Command::none,Bitmap::none,Page::compression,4,"Received signals - select to inspect exact bits"}, Slot::compression_signals),
         placed({Kind::action,Field::count,Command::copy_raw_signal,Bitmap::none,Page::compression,5,"Copy raw bits"}, Slot::copy_raw_signal),
         placed({Kind::action,Field::count,Command::paste_raw_signal,Bitmap::none,Page::compression,5,"Use received bits"}, Slot::paste_raw_signal),

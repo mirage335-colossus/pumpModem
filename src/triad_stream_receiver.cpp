@@ -2,6 +2,8 @@
 
 #include "datapump/execution.hpp"
 #include "triad_receiver_executor.hpp"
+#include "triad_receiver_driver.hpp"
+#include "triad_receiver_detail.hpp"
 #include "triad_receiver_bulk.hpp"
 #include "triad_stream_backend.hpp"
 #include "triad_stream_resources.hpp"
@@ -13,6 +15,7 @@
 #include <ctime>
 #include <deque>
 #include <limits>
+#include <numbers>
 #include <utility>
 
 #ifdef _WIN32
@@ -31,6 +34,7 @@ constexpr std::size_t input_overhead = 4096;
 constexpr std::size_t raw_block_overhead = 512;
 constexpr std::size_t slot_receipt_bytes = 4096;
 constexpr std::size_t maximum_chunk = 16384;
+constexpr std::size_t maximum_repeat_events = 16;
 // Four bounded local diagnostic strings, including the executed coarse policy.
 static_assert(sizeof(StreamSlotReceipt) + 4 * 256 < slot_receipt_bytes);
 
@@ -60,7 +64,9 @@ std::size_t receipt_reservation(const StreamReceiverOptions& stream, const Messa
     const auto message_records = add(4, times(2, stream.maximum_pending_messages));
     const auto slot_records = add(times(2, stream.recent_slot_receipts), times(2, owners));
     return add(add(storage.episode_bytes, times(storage.receipt_bytes, message_records)),
-        add(times(slot_receipt_bytes, slot_records), times(64, stream.maximum_input_chunk_samples)));
+        add(add(times(slot_receipt_bytes, slot_records), times(64, stream.maximum_input_chunk_samples)),
+            // Include deque block metadata and a drained returned copy.
+            stream.fixed_repeated_bit ? times(2 * maximum_repeat_events, 256) : 0));
 }
 
 MessageReceiverOptions with_public_message_address(MessageReceiverOptions message, const PublicProfile& profile) {
@@ -226,6 +232,13 @@ struct CompleteStreamReceiver::Impl {
     ReceiverExecutor executor;
     std::deque<Job> jobs;
     std::deque<StreamSlotReceipt> receipts;
+    std::deque<RepeatedBitEvent> repeated_bits;
+    struct RepeatGroup {
+        bool valid = false, emitted = false;
+        std::uint64_t first_slot = 0, first_ordinal = 0, last_stop = 0;
+        unsigned attempts = 0;
+        std::array<double, 2> evidence{};
+    } repeat;
     const Clock::time_point commit_origin = options.record_commit_timing ? Clock::now() : Clock::time_point{};
     double controller_wait_seconds = 0;
 
@@ -251,6 +264,19 @@ struct CompleteStreamReceiver::Impl {
             !options.recent_slot_receipts || options.recent_slot_receipts>1024)
             throw Error("Invalid local Robust stream input or receipt limits");
         if (options.first_slot>last_public_slot) throw Error("Robust initial slot is outside the configured calendar");
+        const auto halo = profile.config().receiver_filter_halo_samples;
+        const auto pcm_halo = options.repeat_audio_input_halo_samples;
+        const auto iq_padding = options.repeat_unfiltered_iq_padding_samples;
+        if (pcm_halo && (!options.fixed_repeated_bit || !*pcm_halo || *pcm_halo > 2048 || *pcm_halo != halo))
+            throw Error("Repeated-bit PCM provenance requires the exact bounded public filter halo");
+        if (iq_padding && (!options.fixed_repeated_bit || !*iq_padding || *iq_padding != halo || pcm_halo))
+            throw Error("Repeated-bit white IQ provenance requires the exact positive public padding and no PCM projection");
+        if (options.fixed_repeated_bit && (config.helper_enabled || profile.config().helper_enabled ||
+                config.bulk_backend || (!pcm_halo && !iq_padding && halo) || !std::isfinite(config.noise_variance) ||
+                config.noise_variance <= 0 ||
+                !profile.maximum_slot_opportunities_per_day() ||
+                profile.maximum_slot_opportunities_per_day() >= receiver_reference_opportunities_per_day))
+            throw Error("Repeated-bit reception requires calibrated input, a bounded fixed calendar, Helper Off and native CPU");
         peak_reserved = add(initial_footprint, fixed_reservation);
         if (peak_reserved>=resources.memory_limit_bytes)
             throw ReceiverWorkspaceError("Robust receiver controller exhausts the local memory limit");
@@ -273,7 +299,8 @@ struct CompleteStreamReceiver::Impl {
         return result;
     }
 
-    bool backpressured() const { return codec.pending_messages()>=codec.maximum_pending_messages(); }
+    bool backpressured() const { return codec.pending_messages()>=codec.maximum_pending_messages() ||
+        (options.fixed_repeated_bit && repeated_bits.size()>=maximum_repeat_events); }
     bool ready() const { return next && input_stop>=next->stop_sample; }
     unsigned active() const {
         return static_cast<unsigned>(std::count_if(jobs.begin(), jobs.end(), [](const Job& job) { return bool(job.task); }));
@@ -541,6 +568,58 @@ struct CompleteStreamReceiver::Impl {
         return completed;
     }
 
+    void commit_repeat(const Job& job) {
+        if (!options.fixed_repeated_bit) return;
+        const auto& plan = job.work.plan;
+        const auto& score = *job.score;
+        const auto offset = plan.index % FixedRepeatedBit::group_slots;
+        if (!offset) {
+            repeat = {};
+            repeat.valid = true;
+            repeat.first_slot = plan.index;
+            repeat.first_ordinal = plan.format.symbol_ordinal;
+        }
+        if (!repeat.valid || repeat.first_slot + offset != plan.index) return;
+        // Every scheduled window, including quiet slots, must be complete.
+        if (!job.valid_observation || !job.valid_interval || !score.complete || !score.all_valid ||
+                !score.zero_h0_verified || !score.noise_statistics_valid ||
+                score.consumed_samples != window_samples(plan) ||
+                plan.format.symbol_ordinal != repeat.first_ordinal + offset) {
+            repeat.valid = false;
+            return;
+        }
+        if (!FixedRepeatedBit::is_attempt(plan.index)) return;
+        if (!score.repeat_bit_evidence || (repeat.attempts && !repeat_input_dependencies_disjoint(
+                plan.first_sample, repeat.last_stop, options.repeat_audio_input_halo_samples.value_or(0))) ||
+                !score.calendar_opportunities_per_day) {
+            repeat.valid = false;
+            return;
+        }
+        for (unsigned bit = 0; bit < 2; ++bit) {
+            const auto value = (*score.repeat_bit_evidence)[bit];
+            if (std::isnan(value) || value == std::numeric_limits<double>::infinity()) {
+                repeat.valid = false;
+                return;
+            }
+            repeat.evidence[bit] += value;
+        }
+        repeat.last_stop = plan.stop_sample;
+        ++repeat.attempts;
+        if (repeat.emitted || repeat.attempts < FixedRepeatedBit::first_look) return;
+        const auto high = std::max(repeat.evidence[0], repeat.evidence[1]);
+        if (!std::isfinite(high)) return;
+        const auto low = std::min(repeat.evidence[0], repeat.evidence[1]);
+        // Equal bit priors and a fixed half budget at each of the two looks.
+        const auto log_e = high + std::log1p(std::exp(low - high)) - 2 * std::numbers::ln2;
+        const auto gap = high - low;
+        if (log_e < score.operational_threshold || gap < std::log(199.)) return;
+        repeated_bits.push_back({repeat.first_slot, plan.index, repeat.first_ordinal,
+            plan.format.symbol_ordinal, repeat.attempts,
+            static_cast<std::uint8_t>(repeat.evidence[1] > repeat.evidence[0]),
+            log_e, score.operational_threshold, gap});
+        repeat.emitted = true;
+    }
+
     void commit() {
         while (!jobs.empty() && jobs.front().score && !backpressured() && !stop.stop_requested()) {
             auto& job = jobs.front();
@@ -556,6 +635,7 @@ struct CompleteStreamReceiver::Impl {
                     throw ReceiverWorkspaceError("Robust source decoder exceeds the local memory limit");
                 peak_reserved = std::max(peak_reserved, admitted);
             }
+            commit_repeat(job);
             if (!codec.consume(*job.score) || codec.stopped()) throw Error("Robust public slot commit failed");
             if (receipts.size()==options.recent_slot_receipts) receipts.pop_front();
             receipts.push_back({std::move(*job.score), job.work.plan.format.epoch,
@@ -692,7 +772,17 @@ struct CompleteStreamReceiver::Impl {
 CompleteStreamReceiver::CompleteStreamReceiver(PublicProfile profile, ReceiverConfig config, Crypto key,
     StreamReceiverOptions options, MessageDecoder decoder, MessageReceiverOptions message)
     : impl_(std::make_unique<Impl>(std::move(profile), std::move(config), std::move(key), options,
-        std::move(decoder), message, receiver_slot_workspace, receiver_detail::score_slot, StreamFootprint{},
+        std::move(decoder), message, receiver_slot_workspace,
+        options.fixed_repeated_bit ? StreamExecutorScorer([](const ReceiverConfig& c, const ReceiverSlotPlan& p,
+                const Crypto& k, std::span<const Complex> iq, std::span<const std::uint8_t> valid,
+                unsigned workers, std::size_t memory, std::stop_token stop, ReceiverExecutor* executor) {
+            if (!FixedRepeatedBit::is_attempt(p.index))
+                return receiver_detail::score_slot(c, p, k, iq, valid, workers, memory, stop, executor);
+            receiver_detail::RepeatedBitSlotEvidence repeat;
+            return receiver_detail::score_slot_with_repeat_evidence(c, p, k, iq, valid, workers, memory, stop,
+                receiver_detail::calendar_operational_threshold(p.calendar_admission) / FixedRepeatedBit::attempts,
+                repeat, executor);
+        }) : StreamExecutorScorer(receiver_detail::score_slot), StreamFootprint{},
         receiver_slot_overlap_workspace)) {}
 CompleteStreamReceiver::CompleteStreamReceiver(PublicProfile profile, ReceiverConfig config, Crypto key,
     StreamReceiverOptions options, NativeMessageProfile message)
@@ -719,6 +809,13 @@ std::vector<StreamSlotReceipt> CompleteStreamReceiver::drain_recent_slots() {
     result.reserve(impl_->receipts.size());
     for (auto& receipt : impl_->receipts) result.push_back(std::move(receipt));
     impl_->receipts.clear();
+    return result;
+}
+std::vector<RepeatedBitEvent> CompleteStreamReceiver::drain_repeated_bits() {
+    std::vector<RepeatedBitEvent> result;
+    result.reserve(impl_->repeated_bits.size());
+    for (auto& event : impl_->repeated_bits) result.push_back(std::move(event));
+    impl_->repeated_bits.clear();
     return result;
 }
 StreamReceiverReport CompleteStreamReceiver::report() const { return impl_->report(); }

@@ -3,6 +3,7 @@
 #include "datapump/triad_stream_receiver.hpp"
 #include "../src/search_fft.hpp"
 #include "../src/triad_receiver_coarse.hpp"
+#include "../src/triad_receiver_detail.hpp"
 #include "../src/triad_receiver_driver.hpp"
 #include "../src/triad_receiver_executor.hpp"
 #include "../src/triad_receiver_fine.hpp"
@@ -1010,6 +1011,159 @@ void calendar_line_and_separation() {
           "calendar presence admission must preserve the wrong-key policy's reference pressure");
 }
 
+void repeat_line_probe_boundary() {
+    using namespace receiver_detail;
+    auto input = fixture(std::nullopt, false, false);
+    input.config.time_varying_channel = true;
+    input.config.time_varying_atmospheric_hz = 8;
+    input.config.time_varying_common_doppler_hz = 8;
+    bind_varying_calendar(input);
+    const auto threshold = calendar_operational_threshold(input.slot.calendar_admission);
+    const auto rows = input.slot.quiet_stop_sample - input.slot.quiet_first_sample;
+    const auto variance = input.config.noise_variance;
+    const auto unit_power = (rows / variance) / (1 + variance / rows);
+    input.iq.assign(input.iq.size(), Complex{1});
+    const auto unit = find_varying_line(input.config, input.slot, input.iq, {});
+    check(unit && unit->frequency_hz == 0., "repeat line boundary requires an exact DC tone");
+    const auto line_log_e = threshold / 2;
+    const auto amplitude = std::sqrt((line_log_e + unit_power - unit->log_weighted_evidence) / unit_power);
+    input.iq.assign(input.iq.size(), Complex{amplitude});
+
+    const auto reference = score(input, 2);
+    RepeatedBitSlotEvidence evidence;
+    const auto ordinary = score_slot_with_repeat_evidence(input.config, input.slot, input.key,
+        input.iq, input.valid, 2, workspace_limit, {}, threshold / 5, evidence);
+    check(reference.complete && reference.all_valid && reference.zero_h0_verified &&
+          reference.noise_statistics_valid && reference.varying_line_log_evidence == 0 &&
+          ordinary.decision == reference.decision && ordinary.bit == reference.bit &&
+          ordinary.reason == reference.reason && ordinary.operational_log_e == reference.operational_log_e &&
+          ordinary.operational_bit_evidence == reference.operational_bit_evidence &&
+          ordinary.workspace_peak_bytes == reference.workspace_peak_bytes,
+          "extra repeat line probe changed the ordinary native result");
+    check(evidence.extra_line_probe && evidence.bit_log_e && evidence.line_log_e &&
+          std::abs(*evidence.line_log_e - line_log_e) < 1e-8,
+          "repeat soft evidence skipped the coherent line below the ordinary threshold");
+    const auto line_penalty = std::log1p(std::exp(*evidence.line_log_e));
+    for (std::size_t bit = 0; bit < 2; ++bit)
+        check((*evidence.bit_log_e)[bit] >= ordinary.operational_bit_evidence[bit] - line_penalty - 1e-10,
+              "repeat line-conditioned mixture lost the reserved ordinary mass");
+
+    input.valid[0] = 0;
+    const auto erased = score_slot_with_repeat_evidence(input.config, input.slot, input.key,
+        input.iq, input.valid, 2, workspace_limit, {}, threshold / 5, evidence);
+    check(!erased.complete && !erased.all_valid && !evidence.bit_log_e && !evidence.extra_line_probe,
+          "an erased repeat attempt retained a reusable factor");
+}
+
+void repeated_stream_integration() {
+    ReceiverConfig config;
+    config.sample_rate_hz = sample_rate;
+    config.data_if_hz = 100;
+    config.noise_variance = .25;
+    config.time_varying_channel = true;
+    config.time_varying_atmospheric_hz = config.time_varying_common_doppler_hz = 8;
+    PublicProfileConfig declaration;
+    declaration.format.sample_rate = sample_rate;
+    declaration.format.inner_rate_hz = 120;
+    declaration.format.added_symbols = 1;
+    declaration.format.bit_seconds = .001;
+    declaration.format.pulse_shape = PulseShape::TaperedRrc;
+    declaration.format.epoch = 1'793'855'000;
+    declaration.format.symbol_ordinal = 7037343;
+    declaration.format.ramp_seconds = .1;
+    declaration.data_if_hz = config.data_if_hz;
+    declaration.cfo_bound_hz = config.time_varying_atmospheric_hz;
+    declaration.capture_lead_seconds = .4;
+    declaration.capture_trail_seconds = .12;
+    const auto key = Crypto::amateur();
+    const PublicProfile profile(declaration, key);
+    const auto last = FixedRepeatedBit::group_slots - 1;
+    const auto extent = profile.slot(last).observation.stop;
+    const auto noiseless_scale = std::sqrt(22. * config.noise_variance / profile.geometry().source_samples);
+    bool recovered_without_single_slot_data = false;
+    for (const auto bit : {std::optional<std::uint8_t>{0}, std::optional<std::uint8_t>{1},
+                           std::optional<std::uint8_t>{}}) {
+        EmissionOptions request;
+        if (bit) request.repeated_bit = bit;
+        else {
+            request.mode = EmissionMode::Quiet;
+            request.slot_count = FixedRepeatedBit::group_slots;
+        }
+        Emission emission(profile, key, request);
+        auto receiver_config = config;
+        receiver_config.data_basis_gain = emission.report().data_gain;
+        StreamChannelConfig channel_config;
+        channel_config.effects.sample_rate = sample_rate;
+        channel_config.effects.occupied_bandwidth_hz = profile.geometry().occupied_bandwidth_hz;
+        channel_config.effects.capture_lead_seconds = declaration.capture_lead_seconds;
+        channel_config.effects.capture_trail_seconds = declaration.capture_trail_seconds;
+        channel_config.effects.nominal_conversion_if_hz = declaration.data_if_hz;
+        channel_config.effects.seed = 373133;
+        channel_config.effects.noise_enabled = true;
+        channel_config.minimum_capture_samples = extent;
+        channel_config.signal_gain = noiseless_scale;
+        channel_config.complex_noise_variance = config.noise_variance;
+        StreamingChannel channel(emission.source(), channel_config);
+        check(channel.total_samples() >= extent && channel.total_samples() <= 450'000 &&
+              channel.total_samples() < profile.slot(last + 1).observation.stop,
+              "native repeat integration expanded past its fixed public group");
+        StreamReceiverOptions options;
+        options.fixed_repeated_bit = true;
+        options.memory_limit_bytes = 1024ULL * 1024 * 1024;
+        CompleteStreamReceiver receiver(profile, receiver_config, key, options);
+        std::array<Complex, 4096> iq{};
+        std::array<std::uint8_t, 4096> valid{};
+        while (channel.position() < channel.total_samples()) {
+            const auto first = channel.position();
+            const auto count = channel.read(iq, valid);
+            check(count > 0, "native repeat integration truncated its continuous capture");
+            while (receiver.push(first, std::span(iq).first(count), std::span(valid).first(count)) ==
+                   StreamPushResult::backpressured)
+                check(receiver.wait_for_slot_completion().state == StreamReceiverState::receiving,
+                      "native repeat stream failed during receive backpressure");
+        }
+        const auto report = receiver.finish_input();
+        const auto events = receiver.drain_repeated_bits();
+        const auto slots = receiver.drain_recent_slots();
+        check(report.state == StreamReceiverState::input_ended && slots.size() == FixedRepeatedBit::group_slots,
+              "native repeat receiver did not score exactly one complete group");
+        unsigned ordinary_data = 0, quiet = 0;
+        double group_extra_line_s = 0;
+        for (std::size_t i = 0; i < slots.size(); ++i) {
+            const auto& row = slots[i];
+            check(row.score.complete && row.score.all_valid && row.score.zero_h0_verified &&
+                  row.score.noise_statistics_valid && row.score.index == i &&
+                  row.symbol_ordinal == declaration.format.symbol_ordinal + i &&
+                  row.score.repeat_bit_evidence.has_value() == FixedRepeatedBit::is_attempt(i),
+                  "native repeat receipt lost fixed attempt or calendar provenance");
+            if (!FixedRepeatedBit::is_attempt(i) || !bit) {
+                check(row.score.decision == SlotDecision::quiet && !row.score.bit,
+                      "native repeat disturbed a genuine quiet aperture");
+                ++quiet;
+            }
+            if (row.score.decision == SlotDecision::data) {
+                check(row.score.bit == bit, "native repeat changed a raw bit decision to the wrong value");
+                ++ordinary_data;
+            }
+            group_extra_line_s += row.score.repeat_extra_line_seconds;
+        }
+        std::cout << "repeat_stream bit=" << (bit ? int(*bit) : -1) << " events=" << events.size()
+                  << " ordinary_data=" << ordinary_data << " quiet=" << quiet
+                  << " samples=" << channel.total_samples() << " W=" << report.resources.workers
+                  << " reserved=" << report.peak_reserved_bytes << " extra_line_s=" << group_extra_line_s;
+        if (!events.empty()) std::cout << " attempts=" << events.front().attempts << " log_e=" << events.front().log_evidence;
+        std::cout << '\n';
+        check(bit ? events.size() == 1 && events.front().bit == *bit &&
+                     events.front().first_symbol_ordinal == declaration.format.symbol_ordinal &&
+                     events.front().last_public_slot ==
+                        (events.front().attempts - 1) * FixedRepeatedBit::spacing_slots : events.empty(),
+              "native repeat integration lost the agreed bit or admitted an absent group");
+        recovered_without_single_slot_data |= bit && ordinary_data == 0;
+    }
+    check(recovered_without_single_slot_data,
+          "native repeat integration needs one wanted group with no admitted single-slot DATA");
+}
+
 void varying_bit_separation() {
     using namespace receiver_detail;
     const AdmissionGrid grid(0, 0, 0, 0, .01);
@@ -1759,6 +1913,8 @@ int main(int argc, char** argv) {
                 calendar_line_and_separation();
                 varying_quiet_band(.5, false, true);
             }
+            else if (part == "repeat-line-boundary") repeat_line_probe_boundary();
+            else if (part == "repeat-stream") repeated_stream_integration();
             else throw std::runtime_error("unknown native receiver test stratum");
             return 0;
         }
