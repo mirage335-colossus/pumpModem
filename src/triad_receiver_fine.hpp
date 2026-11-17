@@ -136,6 +136,9 @@ struct VaryingFinePlan {
     bool track_frequency = false;
     bool coherent_gain_blocks = false;
     bool midpoint_tracking = false;
+    // Finite unit-power spatial alternatives at the configured nominal
+    // epoch, central clock and public arrival endpoints.
+    std::size_t nominal_independent_gain_candidates = 0;
 };
 struct LineAtom {
     std::size_t first = 0, stop = 0;

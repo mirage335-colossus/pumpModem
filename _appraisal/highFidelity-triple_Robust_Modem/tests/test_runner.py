@@ -5869,7 +5869,7 @@ class TwoHopAlarmMatrixRunnerTests(unittest.TestCase):
             runner._validate_public_likelihood_components(receipt, 15)
 
     def test_frozen_physical_raw_campaign_and_native_flags(self) -> None:
-        campaign_path = RUNNER.parent / "local-evidence/current-physical-alarm/physical-random-long-alarm.json"
+        campaign_path = RUNNER.parent / "campaigns/physical-random-long-alarm.json"
         campaign = runner._read_campaign(campaign_path)
         self.assertEqual({item["repeat_bit"] for item in campaign["episodes"]}, {0, 1})
         for episode in campaign["episodes"]:
@@ -5925,6 +5925,114 @@ class TwoHopAlarmMatrixRunnerTests(unittest.TestCase):
         self.assertIn("raw hf-ensemble-changing-rate bit 0: correct=0/5", report)
         self.assertIn("quiet pairs=5/5; text completion not evaluated", report)
         self.assertNotIn("no correct physical message completion", report)
+
+
+class HfDisturbedRawBitRunnerTests(unittest.TestCase):
+    def test_hf_disturbed_campaign_admits_only_the_fixed_matched_pair(self) -> None:
+        path = RUNNER.parent / "campaigns" / "hf-disturbed-long-alarm.json"
+        campaign = runner._read_campaign(path)
+        self.assertEqual([episode["repeat_bit"] for episode in campaign["episodes"]], [0, 1])
+        self.assertEqual({episode["seed"] for episode in campaign["episodes"]}, {9202})
+        for episode in campaign["episodes"]:
+            runner._validate_episode(episode, 0, set(), 180, 4_350_000)
+            command = runner._command(Path("/native/probe"), episode, 4_350_000, 179.5)
+            self.assertIn("--repeat-separate-attempts", command)
+            self.assertIn("--chunk", command)
+            self.assertEqual(command[command.index("--chunk") + 1], "4096")
+            self.assertEqual(command[command.index("--seed") + 1], "9202")
+            self.assertNotIn("--noise-seed", command)
+            self.assertNotIn("--hf-trajectory-seed", command)
+
+        base = dict(campaign["episodes"][0])
+        for changes in ({"cn0_db_hz": 11.99}, {"seed": 9203}, {"noise_seed": 9202},
+                        {"chunk": 4097}, {"helper": True}, {"fec": "rs20"},
+                        {"hf_phase_refinement": True}, {"max_wall_seconds": 180.01},
+                        {"max_samples": 4_350_001}, {"repeat_separate_attempts": False}):
+            invalid = dict(base, **changes)
+            with self.subTest(changes=changes), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(invalid, 0, set(), 180, 4_350_000)
+        unpaired = json.loads(path.read_text(encoding="utf-8"))
+        unpaired["episodes"][1]["seed"] = 9203
+        with tempfile.TemporaryDirectory() as temporary:
+            candidate = Path(temporary) / "unpaired.json"
+            candidate.write_text(json.dumps(unpaired), encoding="utf-8")
+            with self.assertRaises(runner.CampaignError):
+                runner._read_campaign(candidate)
+
+    def test_hf_disturbed_raw_receipt_accepts_valid_misses_but_binds_profile(self) -> None:
+        receipt, episode, plan = physical_repeat_receipt(0)
+        episode.update(scenario="hf-disturbed", seed=9202, noise_seed=None,
+                       hf_trajectory_seed=None, hf_trajectory_offset_seconds=None,
+                       cn0_db_hz=12, chunk=4096, bit_seconds=128,
+                       max_wall_seconds=180, max_samples=4_350_000)
+        episode.pop("noise_seed")
+        plan["repeated_bit"]["transmission_scope"] = (
+            "Five one-bit emissions advance the public ordinal. Each has two scored quiet windows "
+            "through one continuous standard Gaussian hf-disturbed channel.")
+        runner._validate_physical_raw_bit_plan(plan, episode, native_max_wall_seconds=179.5,
+                                                native_max_samples=4_350_000)
+        runner._validate_repeated_bit_receipt(receipt, episode, plan,
+                                               physical_attempt_count=5, expected_bit=0)
+        summary = runner._repeated_bit_summary(receipt, episode)
+        self.assertEqual(summary["correct_data"], 0)
+        self.assertEqual(summary["completed_quiet_pairs"], 5)
+        self.assertEqual(summary["source_scope"], "continuous hf-disturbed standard Gaussian channel")
+
+        wrong_channel = json.loads(json.dumps(plan))
+        wrong_channel["repeated_bit"]["transmission_scope"] = wrong_channel["repeated_bit"]["transmission_scope"].replace(
+            "standard Gaussian hf-disturbed", "changing-rate")
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_physical_raw_bit_plan(wrong_channel, episode,
+                native_max_wall_seconds=179.5, native_max_samples=4_350_000)
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_episode(dict(episode, noise_seed=9202), 0, set(), 180, 4_350_000)
+
+    def test_fresh_history_campaign_is_only_the_matched_seed_9601_pair(self) -> None:
+        path = RUNNER.parent / "campaigns" / "hf-disturbed-long-alarm-fresh-history.json"
+        campaign = runner._read_campaign(path)
+        self.assertEqual([episode["repeat_bit"] for episode in campaign["episodes"]], [0, 1])
+        self.assertEqual({episode["seed"] for episode in campaign["episodes"]}, {9601})
+        for episode in campaign["episodes"]:
+            runner._validate_episode(episode, 0, set(), 180, 4_350_000)
+            command = runner._command(Path("/native/probe"), episode, 4_350_000, 179.5)
+            self.assertEqual(command[command.index("--seed") + 1], "9601")
+            self.assertNotIn("--noise-seed", command)
+
+        for changes in ({"seed": 9203}, {"noise_seed": 9601}, {"cn0_db_hz": 18},
+                        {"chunk": 2048}, {"max_wall_seconds": 180.01}):
+            invalid = dict(campaign["episodes"][0], **changes)
+            with self.subTest(changes=changes), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(invalid, 0, set(), 180, 4_350_000)
+        unpaired = json.loads(path.read_text(encoding="utf-8"))
+        unpaired["episodes"][1]["seed"] = 9202
+        with tempfile.TemporaryDirectory() as temporary:
+            candidate = Path(temporary) / "unpaired.json"
+            candidate.write_text(json.dumps(unpaired), encoding="utf-8")
+            with self.assertRaises(runner.CampaignError):
+                runner._read_campaign(candidate)
+
+    def test_post_pair_noise_control_is_one_unfiltered_ordinary_receive(self) -> None:
+        path = RUNNER.parent / "campaigns" / "hf-disturbed-long-alarm-noise-control.json"
+        campaign = runner._read_campaign(path)
+        self.assertEqual((campaign["max_trials"], campaign["max_wall_seconds"],
+                          campaign["per_trial_wall_seconds"], campaign["max_samples"]),
+                         (1, 180, 180, 4_350_000))
+        episode = campaign["episodes"][0]
+        runner._validate_episode(episode, 0, set(), 180, 4_350_000)
+        self.assertEqual((episode["scenario"], episode["seed"], episode["cn0_db_hz"],
+                          episode["bit_seconds"], episode["message"], episode["control"]),
+                         ("hf-disturbed", 9602, 12, 128, "e", "noise"))
+        command = runner._command(Path("/native/probe"), episode, 4_350_000, 179.5)
+        self.assertIn("--control", command)
+        self.assertEqual(command[command.index("--control") + 1], "noise")
+        self.assertIn("--message", command)
+        self.assertEqual(command[command.index("--message") + 1], "e")
+        self.assertFalse(any(argument.startswith("--repeat-") for argument in command))
+        for changes in ({"repeat_bit": 0},
+                        {"max_samples": 4_350_001}, {"max_wall_seconds": 180.01}):
+            invalid = dict(episode, **changes)
+            with self.subTest(changes=changes), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(invalid, 0, set(), 180, 4_350_000)
 
 if __name__ == "__main__":
     unittest.main()

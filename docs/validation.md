@@ -43,6 +43,125 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## HF Worst 30 Hz / 7 ms follow-through — 16 November 2026
+
+This appraisal test is the standard `hf-disturbed` fixed-grid Gaussian model,
+not the changing GUI **HF Worst** realization. Each of its independent,
+zero-mean proper-complex rays has a 30 Hz full 2σ width at 0/7 ms; GUI HF Worst
+uses 7 ms / 30 Hz as pre-margin support and adds common wander, with Margin 3
+declaring 21 ms / 90 Hz. Keep the realized spectrum separate from declared
+allowance; see [HF profile distinctions](channel-models.md#distinguish-hf-stress-profiles)
+and the [appraisal model definition](../_appraisal/highFidelity-triple_Robust_Modem/models.md#hf-standard-and-nonstationary-controls).
+
+At base HEAD `54c9c` / native source `8d36…`, the old short-message binary
+`f062…` requalification completes `e` with 3/3 correct DATA at 20 dB-Hz,
+seed 9201; seed 9202 at 0 dB-Hz yields three QUIET slots. A separately
+predeclared +12 dB-Hz test on seed 9202 still misses all three short slots
+(two QUIET, one ambiguous). These different-seed/energy cases are not a paired
+sensitivity threshold. A separate same-IQ control uses the same 10.4-second
+shaped native synthetic bit-1 fixture (seed 37, 5,974 rows, unchanged noise)
+at two fixed pre-noise aperture energy/noise-variance ratios, 128 and 32; each
+calm/wide comparison uses the same IQ. At ratio 128, both conditions produce
+DATA. At ratio 32, calm evidence is 22.914 (DATA), while wide evidence is 14.941
+(QUIET) against 21.493; the noise-only control remains quiet. These levels are
+6.0206 dB apart, but this selected aperture contrast is not a sensitivity
+threshold or universal energy guarantee, and the ratios are not seconds or
+message labels. See the [ratio-128 receipt](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-worst/same-iq-calm-vs-worst-margin1.txt)
+and [ratio-32 receipt](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-worst/same-iq-calm-vs-worst-margin1-e32.txt).
+
+The current long-bit raw baseline binds appraisal `c49d4eed…`, appraisal
+source `2e501cd…`, and native `8d36…`. At C/N0 12 dB-Hz it sends five
+139.2-second attempts of each polarity through one continuous 15-slot channel
+and receiver per polarity (starts 0, 3, 6, 9 and 12), fixed key fingerprint
+`eb846…ba1de`, seed 9202,
+on a Ryzen 5 PRO 5650U CPU with H=12 / full W=24. Both polarities receive 0/5
+correct bits; for each polarity, all five active slots are ambiguous and all
+five quiet pairs complete. There are no wrong bits or physical message
+completions. The original wrapper process was interrupted after bit zero at
+130 seconds. Its valid bit-zero receipt took 93.443 seconds; bit one completed
+in 94.371 seconds
+and both saved receipts passed offline audit. This does not mean the original
+campaign wrapper passed. See the
+[source-bound reconciliation](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-worst/hf-disturbed-long-alarm-plus12-reconciliation.json)
+(`b1fa3de…`) and [offline receipt audit](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-worst/hf-disturbed-long-alarm-plus12-pair-offline-validation.json)
+(`09c63bb…`).
+The short requalification likewise does not establish behavior over multiple
+days, a population outage rate, or complete long-message reception.
+
+Matched public scoring motivates a bounded nominal independent-gain and
+common-frequency receive-model extension: at the
+first long +12 dB-Hz aperture, the full-prior flat 1/16 and flat-unit models
+score 4.295 and 37.514, while the public-endpoint, noise-whitened exact
+observed-Gaussian reference scores 93.283 against a 21.493 presence threshold.
+This exact reference is diagnostic; it cannot supply hidden phase or
+channel-history truth to the receiver. Unit-only half-delay and support-only
+low-power attempts remain insufficient. A nine-fixed/two-cell-block
+expectation check supports the per-block unit-power normalization used by the
+bounded family, but does not bound the whole-window score. Three matched-IQ
+aperture checks originally motivated the nominal independent-gain/frequency
+extension (mean-zero evidence 51.658, GUI-like
+support 26.958 and digitally shifted +30 Hz 50.136), all above the 21.493
+presence threshold. These component scores are not complete-reception evidence.
+The measured candidate binds binary
+`e82e8ab2a1fc36ca75fed0c012a1019dc44828bf2602869b02e8e2349118a0a0`, native
+source `3ae114932087707799a4650e7c10385475008a446670b6c5b8e55b364ab7ec67`,
+and appraisal source
+`282c817afdb2d88f3c615034aaf4237931d3db494964c5ee73b55d27ad3d0f8f`; its
+source-bound reconciliation receipt is
+[here](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-worst/frequency-gain-candidate-reconciliation.json)
+(SHA-256 `38acdc6677fd290721c7e81895e2835eff8fd8f2debe9eb39269c5a8e5258d36`).
+These identities are the campaign's exact measured provenance; the later
+test-registration update changes the current native-source hash but does not
+change this already measured receiver binary or its source binding.
+On regenerated continuous captures whose full-capture hashes verify identical
+IQ to the seed-9202 baseline failure, both bit polarities improve from 0/5
+correct to 5/5 correct. An independent seed-9601 fresh pair also gives 5/5
+for each polarity. The seed-9602 noise-only control remains 5/5 QUIET while
+the new family is active. These are finite characterizations of seeded
+standard-Gaussian histories, not independent natural-channel trials or outage
+rates; this cohort does not qualify plasma or GUI-HF-Worst channel laws. The
+separate GUI preservation replay below is scoped evidence for its named case.
+Candidate matched bit-zero/bit-one wall times are 108.268/110.750 s,
+versus 93.443/94.371 s at baseline (+15.9%/+17.4%); reserved memory is 9.79 GB
+at baseline and 9.79/9.99 GB for the candidate. A separate preservation replay
+retains GUI HF-Worst A40 completion (13 correct DATA plus two quiet slots;
+13.0455→13.5578 s, +3.9%) and EME30 `e` completion plus two quiet slots
+(17.7581 s on candidate).
+
+Additional same-IQ aperture checks remain component diagnostics: final
+bit-one GUI-like evidence is 26.6728 and the +30-Hz case is 52.3978; for
+moving bit zero, GUI D=21 scores 25.7585 with actual bounded phase-rate
+support −29.83236…+29.84666 Hz. Each exceeds the 21.493 presence threshold,
+but none independently proves complete reception. The earlier f0-only
+candidate failed preservation and is retired; no additional delay-grid search
+is implemented or needed for the observed case. `./build.sh test triad` passed 38/38 in the
+cache-fixed run; the preceding `final-triad.log` attempt failed during
+read-only ccache setup and executed zero tests. The refreshed lightweight
+runner passes 173/173 in 1.144 s. The positive-delay Helper stratum passes
+2/2 after a combined 55.57 s attempt came too close to its 60 s harness timeout:
+the split checks took 16.13 s for the original case and 36.49 s for the new
+late-helper-delay case. Those two cases complete the scoped Helper stratum;
+there is no further Helper check pending. The current GUI suite passes 28/28
+in 154.62 s (`final-gui.log`). Final appraisal tests pass 5/5 in 69.55 s,
+including integration in 68.25 s (`final-appraisal-tests.log`;
+build receipt `final-appraisal-build.log`). The current compiled appraisal
+binary is `8305dfda5c783eab6c68ddb73044c195a6392577c55ca0f3d5e2bc5bcf6081c9`,
+with native source `b8945c6d6a927f6b37020591f9a1d8bbdf382202b0a0a78f95fe0560352dc87c`
+and appraisal source `282c817afdb2d88f3c615034aaf4237931d3db494964c5ee73b55d27ad3d0f8f`;
+its only delta from the measured campaign binary above is test-registration
+metadata, with production receiver code unchanged. These scoped software checks
+pass, without qualifying broader field sensitivity or availability. The 38/38
+triad result is the base suite; it was not rerun as a combined expanded
+inventory after splitting the Helper stratum. The added family uses
+nominal epoch/clock and two public arrival endpoints;
+arbitrary clock ages, all delay values and weak Helper sensitivity remain
+unqualified. Recent path-scale evidence and its measurement limits are
+reconciled in the [maintained HF research summary](../_appraisal/highFidelity-triple_Robust_Modem/research-reconciliation.md#hf-disturbed-scales-are-not-interchangeable).
+After recording the conclusions, the scratch diffuse-block-covariance source
+and executable and four obsolete preflight directories were removed. Compact
+diagnostic receipts and current source pins, failures and results remain as
+the source-bound record of the completed checks and unresolved channel limits.
+
 ## Weak physical-channel alarm investigation — 16 November 2026
 
 The receiver now admits a simultaneous stationary-plus-fading gain, recovering

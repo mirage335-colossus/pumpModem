@@ -152,6 +152,31 @@ support and a receiver parameter are not themselves a reception guarantee.
 See [research reconciliation](triad-stochastic.md#nonstationary-channel-research-reconciliation)
 for the distinctions and contrary findings that guide qualification.
 
+### Distinguish HF stress profiles
+
+GUI **HF Worst** and appraisal `hf-disturbed` share nominal 7 ms / 30 Hz
+labels, but are different channel laws. GUI values are pre-margin support;
+Margin 3 declares 21 ms / 90 Hz, and the changing realization includes common
+frequency wander as well as relative echo motion (the direct ray can reach
+±90 Hz and the echo ±180 Hz). The standard `hf-disturbed` case is the existing
+fixed-grid Gaussian comparison: two independent zero-mean proper-complex taps
+at 0 and 7 ms, each with 30 Hz full 2σ power-spectrum width. It does not add the
+GUI's common-wander mechanism or define a new channel law; see the [HF model
+catalog](../_appraisal/highFidelity-triple_Robust_Modem/models.md#hf-standard-and-nonstationary-controls).
+ITU-R F.1487 Annex 3 calls 2σ the frequency-spread convention and lists
+high-latitude disturbed at 7 ms / 30 Hz, while disturbed NVIS is 7 ms / 1 Hz
+with a groundwave component added only if required [F.1487 Annex 3](https://www.itu.int/dms_pubrec/itu-r/rec/f/R-REC-F.1487-0-200005-I!!PDF-E.pdf).
+
+A separate moving-plasma two-hop realization produced about 0.17 Hz frequency
+excursion and 0.325 ms delay with zero declared GUI spread and a 5 Hz receiver
+allowance. Its small delay/Doppler spread does not remove its deep cancellation
+or weak-reception failures, but it is not a severe-spread qualification.
+Keep the channel's realized spectrum distinct from its declared
+search/capture allowance: test calm realizations inside broad public bounds as
+well as separate severe statistical and moving-plasma cases. Neither profile
+guarantees a fixed transmission time, energy, or reception outcome relative to
+AWGN.
+
 ## Interpretation limits
 
 - The fixed two-ray control has equal-power direct and delayed rays; the GUI

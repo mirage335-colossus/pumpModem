@@ -96,6 +96,24 @@ two-path covariance-factor repair passes its focused and native checks.
 These results preserve the remaining −3/+3 failures and do not qualify weak
 two-spatial-path additive behavior or natural availability.
 
+The separate standard 30 Hz / 7 ms `hf-disturbed` follow-through records a
+long C/N0 12 dB-Hz raw baseline with 0/5 correct attempts for either polarity;
+all active windows are ambiguous, with all quiet pairs preserved. The final
+bounded nominal independent-gain/common-frequency extension recovers both
+matched seed-9202 polarities on regenerated continuous captures whose
+full-capture hashes verify identical IQ (5/5 each), passes a fresh seed-9601
+pair (5/5 each), and preserves a seed-9602 noise-only control (5/5 QUIET).
+Matched bit wall times rise 15.9% and
+17.4%; GUI HF-Worst A40 and EME30 `e` preservation rows also complete. These are
+finite standard-Gaussian seeded checks, not GUI HF-Worst or plasma qualification,
+a sensitivity threshold, or a field reliability estimate. The separate GUI
+preservation row is scoped to its named case. Both split positive-delay Helper
+checks and the current GUI suite pass (28/28); final appraisal tests pass 5/5
+and application integration passes. The earlier f0-only candidate failed
+preservation and is retired; no additional delay-grid search is implemented or needed for the
+observed cases. The [source-bound record](../../docs/validation.md#hf-worst-30-hz--7-ms-follow-through--16-november-2026)
+preserves hashes, costs, completed checks and applicability limits.
+
 The latest [repeated single-bit timing repair](../../docs/validation.md#repeated-single-bit-channel-diagnosis--16-november-2026)
 retains nominal-epoch candidates and adds at most six public midpoint-lag
 nominees with a fixed normalized timing-family weight. It repairs an observed

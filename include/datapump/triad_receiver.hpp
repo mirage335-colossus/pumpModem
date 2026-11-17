@@ -129,6 +129,11 @@ struct ReceiverSlotScore {
     std::array<double, 2> fixed_varying_bit_evidence{};
     std::array<double, 2> tracked_frequency_bit_evidence{};
     double tracked_frequency_log_prior_adjustment = 0;
+    std::size_t nominal_independent_gain_candidates = 0, nominal_independent_gain_frequency_states = 0;
+    std::uint64_t nominal_independent_gain_basis_rows = 0;
+    std::array<double, 2> nominal_independent_gain_bit_evidence{};
+    std::array<double, 2> nominal_independent_fixed_centroid_bit_evidence{}, nominal_independent_moving_centroid_bit_evidence{};
+    double nominal_independent_gain_log_prior_adjustment = 0;
     std::size_t coherent_gain_candidates = 0, coherent_gain_blocks = 0, coherent_gain_frequency_states = 0;
     std::array<double, 2> coherent_gain_bit_evidence{};
     double coherent_gain_seconds = 0;

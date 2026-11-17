@@ -910,7 +910,7 @@ void varying_helper_coexistence() {
           "projected dynamic receiver did not recover the drift with Helper present");
 }
 
-void late_helper_timing_recovery() {
+void late_helper_timing_recovery(bool declared_delay) {
     using namespace receiver_detail;
     constexpr double fs = 1500, center = 475, clock_ppm = 100, auxiliary = 970;
     ReceiverConfig config;
@@ -921,6 +921,8 @@ void late_helper_timing_recovery() {
     config.clock_bound_ppm = 300;
     config.time_varying_channel = true;
     config.time_varying_common_doppler_hz = config.time_varying_atmospheric_hz = 36;
+    // Keep the original samples and widen only the declared delay support.
+    if (declared_delay) config.spread_delay_seconds = .007;
     config.helper_enabled = true;
     config.helper.low_frequency_hz = 175;
     config.helper.auxiliary_frequency_hz = auxiliary;
@@ -982,11 +984,25 @@ void late_helper_timing_recovery() {
     const auto lease = receiver_slot_workspace(config, slot, 2);
     check(planned.track_frequency && !helper_workspace(config, slot),
           "late Helper fixture requires projected short tracking after unsupported acquisition");
+    if (declared_delay)
+        check(planned.nominal_independent_gain_candidates == 2 && lease <= workspace_limit,
+              "declared delay must admit the two nominal spatial candidates with Helper enabled");
     const auto uses_midpoint = [](const ReceiverSlotScore& score) {
         return score.midpoint_timing_status == "public_midpoint_lags" && score.midpoint_timing_lags > 0 &&
             score.midpoint_timing_widened_inverses == 26 && score.midpoint_timing_candidates > 0 &&
             score.midpoint_timing_candidates <= maximum_midpoint_timing_coordinates &&
             score.midpoint_timing_basis_rows > 0 && score.varying_frequency_states > 0;
+    };
+    const auto uses_independent_gain = [&](const ReceiverSlotScore& score) {
+        return score.complete && score.all_valid && score.zero_h0_verified &&
+            score.first_sample == slot.first_sample && score.stop_sample == slot.stop_sample &&
+            score.quiet_first_sample == slot.quiet_first_sample && score.quiet_stop_sample == slot.quiet_stop_sample &&
+            score.consumed_samples == rows && score.workspace_peak_bytes == lease &&
+            !score.helper_overlapped && score.helper_status == "insufficient_guaranteed_coarse_support" && uses_midpoint(score) &&
+            score.nominal_independent_gain_candidates == 2 && score.nominal_independent_gain_frequency_states > 1 &&
+            score.nominal_independent_gain_frequency_states <= 65 && score.nominal_independent_gain_basis_rows == 8 * rows &&
+            std::ranges::all_of(score.nominal_independent_gain_bit_evidence,
+                [](double value) { return std::isfinite(value); });
     };
     for (const std::uint8_t bit : {0, 1}) {
         const auto observation = capture(bit);
@@ -995,11 +1011,15 @@ void late_helper_timing_recovery() {
               score.bit == bit && !score.helper_overlapped && uses_midpoint(score) &&
               score.helper_status == "insufficient_guaranteed_coarse_support",
               "late projected tracking lost DATA after unsuccessful Helper acquisition");
+        if (declared_delay)
+            check(uses_independent_gain(score), "late Helper DATA must score both nominal delay candidates within its lease");
     }
     const auto absent = score_receiver_slot(config, slot, key, quiet, {}, 2, lease);
     check(absent.complete && absent.all_valid && absent.zero_h0_verified && absent.noise_statistics_valid &&
           absent.decision == SlotDecision::quiet && !absent.bit && uses_midpoint(absent),
           "late midpoint tracking turned separated Helper tones and noise into DATA or ambiguity");
+    if (declared_delay)
+        check(uses_independent_gain(absent), "Helper-only quiet must score both nominal delay candidates within its lease");
 }
 
 void physical_quiet_and_limits() {
@@ -1429,7 +1449,8 @@ int main(int argc, char** argv) {
             else if (part == "long-drift") long_drift_recovery(false);
             else if (part == "broad-drift") long_drift_recovery(true);
             else if (part == "fading") weak_diffuse_fading_recovery();
-            else if (part == "late-helper") late_helper_timing_recovery();
+            else if (part == "late-helper") late_helper_timing_recovery(false);
+            else if (part == "late-helper-delay") late_helper_timing_recovery(true);
             else throw std::runtime_error("unknown native receiver test stratum");
             return 0;
         }

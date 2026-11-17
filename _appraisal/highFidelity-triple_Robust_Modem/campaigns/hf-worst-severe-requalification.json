@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "name": "hf-worst-severe-requalification",
+  "purpose": "Current-source requalification of the two frozen hf-disturbed propagation-breadth rows, with no experimental receiver policies. This model uses two independent Gaussian taps at 0 and 7 ms, each with 30 Hz full 2-sigma power-spectrum width, against the production HF Worst receiver allowance of 90 Hz and a 7 ms delay bound. The reference and weak rows retain their original seeds 9201/9202 and C/N0 levels 20/0 dB-Hz; they are separate seed/energy cases, not a matched-energy pair. Report complete delivery, DATA/null/erasure and physical quiet completion separately. Characterization preserves observed misses without converting them into process failures.",
+  "max_wall_seconds": 180,
+  "per_trial_wall_seconds": 90,
+  "max_trials": 2,
+  "max_samples": 8000000,
+  "stop_on_execution_failure": true,
+  "episodes": [
+    {
+      "id": "hf-disturbed-reference-requalification",
+      "scenario": "hf-disturbed",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 9201,
+      "cn0_db_hz": 20,
+      "control": "wanted",
+      "backend": "cpu",
+      "helper": false,
+      "fec": "off",
+      "max_wall_seconds": 90,
+      "max_samples": 8000000,
+      "reception_requirement": "characterization"
+    },
+    {
+      "id": "hf-disturbed-weak-requalification",
+      "scenario": "hf-disturbed",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 9202,
+      "cn0_db_hz": 0,
+      "control": "wanted",
+      "backend": "cpu",
+      "helper": false,
+      "fec": "off",
+      "max_wall_seconds": 90,
+      "max_samples": 8000000,
+      "reception_requirement": "characterization"
+    }
+  ]
+}

@@ -265,7 +265,7 @@ def _native_child_file_limit(episode: dict[str, Any], max_samples: int) -> int:
 
 
 def _is_physical_raw_bit_episode(episode: dict[str, Any]) -> bool:
-    return (episode.get("scenario") == "hf-ensemble-changing-rate" and
+    return (episode.get("scenario") in {"hf-ensemble-changing-rate", "hf-disturbed"} and
             episode.get("mode") in {"plan", "receive"} and
             episode.get("repeat_bit") in (0, 1) and
             episode.get("repeat_separate_attempts") is True)
@@ -338,14 +338,21 @@ def _read_campaign(path: Path) -> dict[str, Any]:
             raise CampaignError("two-hop additive boundary requires one frozen row and 900-second/4,350,000-sample caps")
     physical_raw_episodes = [episode for episode in episodes if _is_physical_raw_bit_episode(episode)]
     if physical_raw_episodes:
+        scenarios = {episode["scenario"] for episode in physical_raw_episodes}
         if (len(episodes) != 2 or len(physical_raw_episodes) != 2 or
                 {episode["repeat_bit"] for episode in physical_raw_episodes} != {0, 1} or
+                len(scenarios) != 1 or
                 value["max_trials"] != 2 or
                 value["max_wall_seconds"] > 360 or
                 value["per_trial_wall_seconds"] > PHYSICAL_RAW_BIT_MAX_WALL_SECONDS or
                 value["max_samples"] > PHYSICAL_RAW_BIT_MAX_SAMPLES or
                 value.get("confirmatory_strata", {})):
-            raise CampaignError("physical raw-bit campaign requires its two fixed polarity rows and 360-second/180-second/4,350,000-sample caps")
+            raise CampaignError("physical raw-bit campaign requires two paired polarity rows from one admitted profile and 360-second/180-second/4,350,000-sample caps")
+        if "hf-disturbed" in scenarios:
+            paired = [{key: val for key, val in episode.items() if key not in {"id", "repeat_bit"}}
+                      for episode in physical_raw_episodes]
+            if paired[0] != paired[1] or len({episode["mode"] for episode in physical_raw_episodes}) != 1:
+                raise CampaignError("hf-disturbed raw-bit campaign requires matched rows in one mode differing only in bit polarity")
     repeated = [episode for episode in episodes if episode["mode"] == "gui-repeated-bit"]
     if repeated:
         if len(repeated) != len(episodes):
@@ -479,7 +486,7 @@ def _validate_episode(item: Any, index: int, ids: set[str],
                 (item["mode"] == "plan" and item.get("reception_requirement") is not None)):
             raise CampaignError(f"episodes[{index}]: additive boundary is limited to the frozen +4 dB-Hz E/73613/93613 CPU reference and 900-second/4,350,000-sample caps")
     if repeated_fields & item.keys() and item["mode"] != "gui-repeated-bit" and not physical_raw_bit:
-        raise CampaignError(f"episodes[{index}]: repeated-bit controls require the GUI mode or the frozen changing-rate physical raw-bit case")
+        raise CampaignError(f"episodes[{index}]: repeated-bit controls require the GUI mode or an admitted physical raw-bit profile")
     if physical_raw_bit:
         allowed = {"id", "scenario", "mode", "waveform", "pulse", "backend", "seed", "noise_seed",
                    "hf_trajectory_seed", "hf_trajectory_offset_seconds", "bit_seconds", "cn0_db_hz",
@@ -487,13 +494,23 @@ def _validate_episode(item: Any, index: int, ids: set[str],
                    "max_samples", "max_wall_seconds", "reception_requirement"}
         wall = item.get("max_wall_seconds", campaign_per_trial_wall_seconds)
         samples = item.get("max_samples", campaign_max_samples)
-        if (set(item) - allowed or item["scenario"] != "hf-ensemble-changing-rate" or
+        changing_rate = item["scenario"] == "hf-ensemble-changing-rate"
+        profile_valid = (
+            changing_rate and item.get("seed") == 30107 and item.get("noise_seed") == 40107 and
+            item.get("hf_trajectory_seed") == 20107 and item.get("hf_trajectory_offset_seconds") == 197 and
+            item.get("cn0_db_hz") == 0 and "chunk" not in item
+        ) or (
+            item["scenario"] == "hf-disturbed" and item.get("seed") in {9202, 9601} and
+            "noise_seed" not in item and "hf_trajectory_seed" not in item and
+            "hf_trajectory_offset_seconds" not in item and item.get("cn0_db_hz") == 12 and
+            item.get("chunk") == 4096
+        )
+        if (set(item) - allowed - ({"chunk"} if item["scenario"] == "hf-disturbed" else set()) or
+                item["scenario"] not in {"hf-ensemble-changing-rate", "hf-disturbed"} or
                 item["mode"] not in {"plan", "receive"} or item["waveform"] != "reference" or
                 item.get("pulse", "rrc") != "rrc" or item.get("backend", "cpu") != "cpu" or
-                item.get("seed") != 30107 or item.get("noise_seed") != 40107 or
-                item.get("hf_trajectory_seed") != 20107 or
-                item.get("hf_trajectory_offset_seconds") != 197 or item.get("bit_seconds") != 128 or
-                item.get("cn0_db_hz") != 0 or item.get("control", "wanted") != "wanted" or
+                not profile_valid or item.get("bit_seconds") != 128 or
+                item.get("control", "wanted") != "wanted" or
                 item.get("fec", "off") != "off" or item.get("helper", False) is not False or
                 isinstance(item.get("repeat_bit"), bool) or item.get("repeat_bit") not in (0, 1) or
                 item.get("repeat_separate_attempts") is not True or
@@ -501,7 +518,7 @@ def _validate_episode(item: Any, index: int, ids: set[str],
                 not _is_nonnegative_int(samples) or samples > PHYSICAL_RAW_BIT_MAX_SAMPLES or
                 (item["mode"] == "receive" and item.get("reception_requirement") != "characterization") or
                 (item["mode"] == "plan" and item.get("reception_requirement") is not None)):
-            raise CampaignError(f"episodes[{index}]: physical raw bits are limited to the frozen changing-rate 128 s, 0 dB-Hz CPU case and finite 180-second/4,350,000-sample bounds")
+            raise CampaignError(f"episodes[{index}]: physical raw bits require an exact admitted long-profile configuration and finite 180-second/4,350,000-sample bounds")
     if item["mode"] == "gui-repeated-bit":
         if item["scenario"] != "hf-gui-native" or item["waveform"] != "reference":
             raise CampaignError(f"episodes[{index}]: repeated-bit reception requires the native HF GUI reference waveform")
@@ -1256,7 +1273,9 @@ def _repeated_bit_summary(receipt: dict[str, Any], episode: dict[str, Any] | Non
                           if isinstance(plan.get("repeated_bit"), dict) else None)
     summary = {
         "scenario": episode.get("scenario"),
-        "source_scope": ("continuous changing-rate HF channel" if _is_physical_raw_bit_episode(episode) else
+        "source_scope": ("continuous hf-disturbed standard Gaussian channel" if episode.get("scenario") == "hf-disturbed" and
+                         _is_physical_raw_bit_episode(episode) else
+                         "continuous changing-rate HF channel" if _is_physical_raw_bit_episode(episode) else
                          "GUI repeated-bit channel" if episode.get("mode") == "gui-repeated-bit" else
                          transmission_scope),
         "trajectory_seed": episode.get("hf_trajectory_seed"),
@@ -2940,8 +2959,8 @@ def _validate_physical_raw_bit_plan(plan: dict[str, Any], episode: dict[str, Any
             re.fullmatch(r"[0-9a-fA-F]{64}", repeated["public_key_fingerprint_sha256"]) is None or
             not isinstance(scope, str) or any(term not in scope.lower() for term in
                 ("one-bit emissions", "public ordinal", "two scored quiet windows",
-                 "one continuous", "changing-rate"))):
-        raise CampaignError("physical raw-bit plan must bind five truth-independent changing-rate emissions")
+                 "one continuous", "standard gaussian" if episode.get("scenario") == "hf-disturbed" else "changing-rate"))):
+        raise CampaignError("physical raw-bit plan must bind five truth-independent emissions through its admitted continuous channel")
     slots = plan.get("public_slots")
     wall_cap = native_max_wall_seconds if native_max_wall_seconds is not None else episode.get(
         "max_wall_seconds", PHYSICAL_RAW_BIT_MAX_WALL_SECONDS)
@@ -6081,7 +6100,8 @@ def _validate_repeated_bit_receipt(receipt: dict[str, Any], episode: dict[str, A
             planned.get("separate_attempts", False) is not separate_attempts):
         raise CampaignError("repeated-bit plan does not match the frozen channel and raw-bit request")
     if physical:
-        expected_scope_channel = "changing-rate" if episode.get("scenario") == "hf-ensemble-changing-rate" else "two-hop"
+        expected_scope_channel = ("standard gaussian" if episode.get("scenario") == "hf-disturbed" else
+                                  "changing-rate" if episode.get("scenario") == "hf-ensemble-changing-rate" else "two-hop")
         scope = planned.get("transmission_scope")
         if (not isinstance(scope, str) or
                 any(term not in scope.lower() for term in ("one-bit emissions", "public ordinal",
@@ -6140,7 +6160,7 @@ def _validate_repeated_bit_receipt(receipt: dict[str, Any], episode: dict[str, A
             horizon_samples > plan["max_samples"] or
             not _is_finite_number(plan.get("max_wall_seconds")) or
             plan["max_wall_seconds"] > ((PHYSICAL_RAW_BIT_MAX_WALL_SECONDS
-                if episode.get("scenario") == "hf-ensemble-changing-rate" else TWO_HOP_ALARM_MATRIX_MAX_WALL_SECONDS)
+                if episode.get("scenario") in {"hf-ensemble-changing-rate", "hf-disturbed"} else TWO_HOP_ALARM_MATRIX_MAX_WALL_SECONDS)
                 if physical else 120)):
         raise CampaignError("repeated-bit receipt must bind the full hashed capture within its declared finite bounds")
     if (plan.get("represented_seconds") != horizon_samples / sample_rate or
@@ -7481,7 +7501,12 @@ def _repeated_bit_campaign_summary(trials: list[dict[str, Any]]) -> dict[str, An
     return {
         "physical_scenario": bool(repeated_trials) and all(
             _is_physical_raw_bit_episode(trial.get("episode", {})) for trial in repeated_trials),
-        "scope": (("Truth-aligned raw-bit observations over five-attempt changing-rate physical episodes. Opposite bits "
+        "scope": (("Truth-aligned raw-bit observations over five-attempt hf-disturbed standard Gaussian episodes. "
+                   "The opposite-bit rows share one fixed source/noise realization and are not independent natural-condition "
+                   "trials or a population success-rate estimate. Codec decoding is outside this endpoint.")
+                  if repeated_trials and all(trial.get("episode", {}).get("scenario") == "hf-disturbed"
+                                             for trial in repeated_trials) else
+                  ("Truth-aligned raw-bit observations over five-attempt changing-rate physical episodes. Opposite bits "
                    "share the same fixed trajectory and noise seeds and are not independent natural-condition trials "
                    "or a population success-rate estimate. Codec decoding is outside this endpoint.")
                   if repeated_trials and all(_is_physical_raw_bit_episode(trial.get("episode", {}))

@@ -143,6 +143,31 @@ Longer coherent-gain and drift models keep their fallback policy. This accepts
 bounded added work for natural changing-channel resilience while preserving the
 public search and full worker budget.
 
+For a supported short-frequency plan with nonzero declared delay, an additional
+nominal-epoch two-path model uses independent proper-complex per-block gains
+(variance 0.5 per path), with zero relative-Doppler offset and the full declared
+delay at the public arrival endpoints. Its fixed-common-frequency whole-aperture
+component and changing-common-frequency Markov component are mixed equally
+over the same grid of up to 65 states; the branch receives 1/8 short-family
+mass while the old short family retains 7/8.
+That mixture is applied at whole-slot evidence combination; the 7/8 retention
+costs the old branch at most `-log(7/8) ≈ 0.134` nats, not a dB sensitivity,
+pointwise-decision or CPU-capacity bound.
+The frequency states cover the declared range (maximum 65), while no delay grid
+or historical path search is introduced. A zero
+`nominal_independent_gain_frequency_states` receipt with a nonzero
+`nominal_independent_gain_candidates` means the projected tracker fell back to
+central frequency only. The finite full-stream cohort passes both matched
+seed-9202 polarities and both fresh seed-9601 polarities (5/5 each), while a
+seed-9602 noise control remains 5/5 QUIET. This supports only those sampled
+standard-Gaussian histories; the scoped positive-delay Helper checks and current
+GUI suite (28/28) pass, as do final appraisal checks (5/5) and application
+integration. These do not qualify broader channel sensitivity. Arbitrary clock
+ages, all delay values, plasma histories and weak Helper sensitivity remain
+unqualified. See the
+[HF Worst follow-through](../validation.md#hf-worst-30-hz--7-ms-follow-through--16-november-2026)
+for hashes, runtime costs and source-bound limits.
+
 A stable component and a changing component can coexist within one unresolved
 spatial channel. Fast-cadence changing-channel reception now includes that
 additive alternative using existing correlations and bounded state, without a

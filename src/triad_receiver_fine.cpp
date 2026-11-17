@@ -1826,6 +1826,7 @@ constexpr std::size_t maximum_segmented_timing_coordinates = 8;
 constexpr double varying_power = 1. / 16;
 constexpr std::array tracking_powers{varying_power, 1. / 256, 1. / 512, 1. / 4096};
 constexpr std::size_t maximum_tracking_states = 65;
+constexpr double nominal_independent_gain_weight = 1. / 8;
 
 struct DriftGram {
     // Cholesky factor of I + A^H A/(noise variance * precision).
@@ -1864,6 +1865,7 @@ struct FrequencyTrackingPlan {
 FrequencyTrackingPlan tracking_plan(const ReceiverConfig& config, std::size_t block_rows,
                                      std::size_t final_rows, bool coherent_gain_blocks = false) {
     const auto bound = config.frequency_bound_hz + config.time_varying_atmospheric_hz;
+    if (!(bound >= 0 && bound < .5 * config.sample_rate_hz)) return {};
     if (!coherent_gain_blocks && (config.time_varying_common_doppler_hz * block_rows /
         config.sample_rate_hz <= .25 || !(bound > 0)))
         return {};
@@ -1872,17 +1874,32 @@ FrequencyTrackingPlan tracking_plan(const ReceiverConfig& config, std::size_t bl
     result.fft_rows = std::bit_ceil((coherent_gain_blocks ? 4 : 2) * final_rows);
     const auto bin_hz = config.sample_rate_hz /
         (config.helper_enabled ? 2 * block_rows : result.fft_rows);
+    constexpr auto maximum_radius = static_cast<std::int64_t>(maximum_tracking_states / 2);
     result.step_bins = std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(
-        bound / (bin_hz * (maximum_tracking_states / 2)))));
-    result.step_hz = result.step_bins * bin_hz;
-    result.radius = static_cast<std::int64_t>(std::ceil(bound / result.step_hz));
-    if (result.radius * result.step_hz >= .5 * config.sample_rate_hz) return {};
+        bound / (bin_hz * maximum_radius))));
+    const auto resolve_radius = [&] {
+        result.step_hz = result.step_bins * bin_hz;
+        result.radius = static_cast<std::int64_t>(std::ceil(bound / result.step_hz));
+        if (result.radius * result.step_hz < bound) ++result.radius;
+    };
+    resolve_radius();
+    // The two floating-point quotients can round on opposite sides of
+    // the same integer boundary. Coarsen the lattice, never drop its edge.
+    if (result.radius > maximum_radius) {
+        ++result.step_bins;
+        resolve_radius();
+    }
+    if (result.radius > maximum_radius || result.radius * result.step_hz >= .5 * config.sample_rate_hz) return {};
     result.states = static_cast<std::size_t>(2 * result.radius + 1);
     return result;
 }
 
 using FrequencyWeights = std::array<double, maximum_tracking_states>;
 using TrackingLogWeights = std::array<std::array<FrequencyWeights, tracking_powers.size()>, 2>;
+struct IndependentGainState {
+    std::array<FrequencyWeights, 2> fixed_centroid{}, moving_centroid{};
+    bool nonzero_basis = false;
+};
 struct CoherentGainState {
     ChannelPosterior posterior;
     double log_evidence = 0;
@@ -1904,6 +1921,28 @@ double tracking_emission(double direct, double echo, Complex cross, Complex r0, 
     const DriftGram gram(direct, echo, cross, precision, variance);
     const double scaling = 1. / (std::sqrt(precision) * std::sqrt(variance));
     return gram.score(r0 * scaling, r1 * scaling, 1 / variance);
+}
+
+// Normalize the two equal-power independent spatial gains against the
+// same projected white null as the short tracked/fixed alternatives.
+void accumulate_independent_center(IndependentGainState& state, MappedBasis& basis, const MappedBasisRow& map,
+                                   double delay, const ObservationBlock& observation, double variance,
+                                   WorkerScratch& scratch, std::stop_token stop) {
+    const std::array<Tap, 2> paths{{{0, 0}, {delay, 0}}};
+    std::array<Complex, 6> correlations{};
+    std::array<Complex, 12> gram{};
+    sufficient_statistics(basis, map, paths, observation, variance, scratch,
+        correlations, gram, state.nonzero_basis, stop);
+    const auto rank = highest_observation_rank(observation);
+    for (std::size_t bit = 0; bit < state.fixed_centroid.size(); ++bit) {
+        const auto hypothesis = bit + 1;
+        const auto g = std::span(gram).subspan(4 * hypothesis, 4);
+        const auto r = std::span(correlations).subspan(2 * hypothesis, 2);
+        // These statistics already include the inverse noise variance.
+        state.fixed_centroid[bit][0] += tracking_emission(g[0].real(), g[3].real(), g[1], r[0], r[1], 2, 1., 1., rank);
+        if (!std::isfinite(state.fixed_centroid[bit][0]))
+            throw Error("Robust nominal independent gain evidence is nonfinite");
+    }
 }
 
 double coherent_gain_update(ChannelPosterior& posterior, double direct, double echo, Complex cross,
@@ -1968,15 +2007,12 @@ void update_frequency_weights(std::span<const double> evidence, std::span<double
     std::copy_n(next.begin(), previous.size(), previous.begin());
 }
 
-void track_projected_block(std::span<const Complex> templates, std::size_t taps,
-                            const ObservationBlock& block, double variance, double fs,
-                            const FrequencyTrackingPlan& plan, WorkerScratch& scratch,
-                            std::span<Complex> spectrum, TrackingLogWeights& log_weights,
-                            TrackingPosteriors* persistent, double gain_correlation,
-                            std::stop_token stop) {
+template<class Visitor>
+void visit_projected_tracks(std::span<const Complex> templates, std::size_t taps, const ObservationBlock& block,
+                            double fs, const FrequencyTrackingPlan& plan, WorkerScratch& scratch,
+                            std::span<Complex> spectrum, const Visitor& visit, std::stop_token stop) {
     const auto& projection = *block.projection;
     const auto rows = projection.rows();
-    TrackingLogWeights evidence{};
     std::array<std::int64_t, maximum_tracking_states> bins{};
     for (std::size_t i = 0; i < plan.states; ++i) {
         const auto half_bins = 2 * rows * plan.step_hz * (static_cast<std::int64_t>(i) - plan.radius) / fs;
@@ -2034,30 +2070,74 @@ void track_projected_block(std::span<const Complex> templates, std::size_t taps,
                         diagonal[path] = std::max(0., diagonal[path] - std::norm(line_correlation[path]));
                     cross -= std::conj(line_correlation[0]) * line_correlation[1];
                 }
+                visit(bit, state, bins[state], rank_bound, correlation, diagonal, cross);
+            }
+        }
+    }
+}
+
+void track_projected_block(std::span<const Complex> templates, std::size_t taps,
+                            const ObservationBlock& block, double variance, double fs,
+                            const FrequencyTrackingPlan& plan, WorkerScratch& scratch,
+                            std::span<Complex> spectrum, TrackingLogWeights& log_weights,
+                            TrackingPosteriors* persistent, double gain_correlation,
+                            std::stop_token stop) {
+    TrackingLogWeights evidence{};
+    visit_projected_tracks(templates, taps, block, fs, plan, scratch, spectrum,
+        [&](std::size_t bit, std::size_t state, std::int64_t half_bin, unsigned rank,
+            const auto& correlation, const auto& diagonal, Complex cross) {
                 for (std::size_t power = 0; power < tracking_powers.size(); ++power) {
                     evidence[bit][power][state] = tracking_emission(diagonal[0], diagonal[1], cross,
-                        correlation[0], correlation[1], taps, tracking_powers[power], variance, rank_bound);
+                        correlation[0], correlation[1], taps, tracking_powers[power], variance, rank);
                     if (persistent) {
                         // Correct the deterministic per-state frequency
                         // reference before transporting a complex gain.
-                        const auto hz = bins[state] * fs / (2 * rows);
+                        const auto hz = half_bin * fs / (2 * block.projection->rows());
                         const auto phase = std::polar(1., -tau * hz * block.first / fs);
                         auto& posterior = (*persistent)[bit][power][state];
                         const auto value = coherent_gain_update(posterior.posterior, diagonal[0], diagonal[1], cross,
                             correlation[0] * phase, correlation[1] * phase, taps, tracking_powers[power],
-                            variance, gain_correlation, rank_bound);
+                            variance, gain_correlation, rank);
                         // The persistent branch uses its own accumulated
                         // likelihood. Keep its independent gain peer below.
                         posterior.log_evidence += value;
                     }
                 }
-            }
-        }
-    }
+        }, stop);
     for (std::size_t bit = 0; bit < 2; ++bit)
         for (std::size_t power = 0; power < tracking_powers.size(); ++power)
             update_frequency_weights(std::span(evidence[bit][power]).first(plan.states),
                                      std::span(log_weights[bit][power]).first(plan.states), plan.coherent_gain_blocks);
+}
+
+void accumulate_independent_gain(IndependentGainState& state, MappedBasis& basis, const MappedBasisRow& map,
+                                 double delay, const ObservationBlock& block, double variance, double fs,
+                                 const FrequencyTrackingPlan& plan, WorkerScratch& scratch,
+                                 std::span<Complex> spectrum, std::stop_token stop) {
+    if (!plan.states) {
+        accumulate_independent_center(state, basis, map, delay, block, variance, scratch, stop);
+        return;
+    }
+    const auto rows = block.projection->rows();
+    const std::array<Tap, 2> paths{{{0, 0}, {delay, 0}}};
+    auto templates = std::span(scratch.raw).first(4 * rows);
+    basis.render_pair(map, paths, block.first, std::span(scratch.offsets).first(rows), templates, stop);
+    if (!state.nonzero_basis)
+        state.nonzero_basis = std::ranges::any_of(templates, [](auto value) { return value != Complex{}; });
+    std::array<FrequencyWeights, 2> evidence{};
+    visit_projected_tracks(templates, paths.size(), block, fs, plan, scratch, spectrum,
+        [&](std::size_t bit, std::size_t frequency, std::int64_t, unsigned rank,
+            const auto& correlation, const auto& diagonal, Complex cross) {
+            const auto value = tracking_emission(diagonal[0], diagonal[1], cross, correlation[0], correlation[1],
+                paths.size(), 1., variance, rank);
+            evidence[bit][frequency] = value;
+            state.fixed_centroid[bit][frequency] += value;
+            if (!std::isfinite(state.fixed_centroid[bit][frequency]))
+                throw Error("Robust stationary centroid evidence is nonfinite");
+        }, stop);
+    for (std::size_t bit = 0; bit < evidence.size(); ++bit)
+        update_frequency_weights(std::span(evidence[bit]).first(plan.states),
+                                 std::span(state.moving_centroid[bit]).first(plan.states), false);
 }
 
 TrackedFrequencySpanBlock track_span_maximum(
@@ -2342,7 +2422,6 @@ VaryingFinePlan varying_fine_plan(const ReceiverConfig& config, const ReceiverSl
     std::size_t geometry_count = 0;
     (void)varying_bases(config, slot, geometry_count);
     const auto states = maximum_varying_coordinates * geometry_count;
-    const auto active = std::min<std::size_t>(workers, states);
     const auto mapped = std::min(maximum_basis_rows, final);
     auto tracking_config = config;
     tracking_config.helper_enabled |= project_line_atom;
@@ -2363,7 +2442,11 @@ VaryingFinePlan varying_fine_plan(const ReceiverConfig& config, const ReceiverSl
         if (!non_dc(block) || !non_dc(final)) track = {};
     }
     if (coherent_gain_blocks && !track.states) return {0, 0, "coherent_gain_blocks_unavailable"};
+    const std::size_t independent = !coherent_gain_blocks && track.states && config.spread_delay_seconds > 0 ?
+        (slot.arrival_lower_seconds == slot.arrival_upper_seconds ? 1 : 2) : 0;
+    const auto active = std::min<std::size_t>(workers, states + independent);
     if (!coherent_gain_blocks) add(states, sizeof(State) + sizeof(MappedBasisRow));
+    add(independent, sizeof(IndependentGainState) + sizeof(MappedBasisRow));
     add(active, sizeof(WorkerScratch));
     add(checked_multiply(active, 4 * final + fft + (final > mapped ? 4 * mapped : 0)), sizeof(Complex));
     add(checked_multiply(active, mapped), sizeof(double));
@@ -2382,7 +2465,7 @@ VaryingFinePlan varying_fine_plan(const ReceiverConfig& config, const ReceiverSl
     add(1, 64 * 1024);
     return {block, bytes, coherent_gain_blocks ? "coherent_gain_blocks" :
             (residual * final / fs > .25 ? "short_block_partial_bandwidth" : "short_block"),
-            track.states != 0, coherent_gain_blocks};
+            track.states != 0, coherent_gain_blocks, false, independent};
 }
 
 std::size_t tracked_frequency_span_workspace(const ReceiverSlotPlan& slot, const VaryingFinePlan& plan,
@@ -2413,6 +2496,10 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
         supplemental_timing.size() > maximum_segmented_timing_coordinates + extra_timing ||
         iq.size() != slot.stop_sample - slot.first_sample)
         throw Error("varying fine scorer requires its bounded public slot and coordinates");
+    const auto independent_count = plan.nominal_independent_gain_candidates;
+    if (independent_count && (plan.coherent_gain_blocks || !plan.track_frequency || !(config.spread_delay_seconds > 0) ||
+        independent_count != (slot.arrival_lower_seconds == slot.arrival_upper_seconds ? 1U : 2U)))
+        throw Error("Robust nominal independent gain requires its bounded short varying plan");
     if (plan.midpoint_tracking != (midpoint != nullptr) ||
         (midpoint && (line || span || clock_shadow ||
             !midpoint->public_lag_count || !std::isfinite(midpoint->original_timing_log_count) ||
@@ -2443,7 +2530,7 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
     const TimingGrid grid(projected_rate, clock_gap);
     std::size_t model_count = 0;
     const auto bases = varying_bases(config, slot, model_count);
-    const auto active = std::min<std::size_t>(workers, selected.size() * model_count);
+    const auto active = std::min<std::size_t>(workers, selected.size() * model_count + independent_count);
     MappedBasis basis(config, slot, key, std::min(final_rows, maximum_basis_rows), static_cast<unsigned>(active));
     std::vector<WorkerScratch> scratch;
     scratch.reserve(active);
@@ -2452,10 +2539,37 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
     mapped.reserve(selected.size());
     for (const auto& coordinate : selected)
         mapped.push_back(mapped_row(config, slot, grid, coordinate, {}, 0, true));
+    std::array<MappedBasisRow, 2> independent_maps{};
+    std::array<IndependentGainState, 2> independent_states{};
+    if (independent_count) {
+        const AdmissionGrid arrival_grid(slot.arrival_lower_seconds, slot.arrival_upper_seconds, 0., 0., 1.);
+        const auto lower = arrival_grid.lower;
+        const auto upper = independent_count == 2 ? lower + arrival_grid.arrival_intervals *
+            ((arrival_grid.upper - lower) / arrival_grid.arrival_intervals) : lower;
+        const std::array arrivals{lower, upper};
+        for (std::size_t i = 0; i < independent_count; ++i)
+            independent_maps[i] = mapped_row(config, slot, grid, {0, arrivals[i], 0, 0}, {}, 0, true);
+    }
     auto tracking_config = config;
     tracking_config.helper_enabled |= line != nullptr;
     const auto track = plan.track_frequency ?
         tracking_plan(tracking_config, block_rows, final_rows, plan.coherent_gain_blocks) : FrequencyTrackingPlan{};
+    auto projected_tracking_config = tracking_config;
+    projected_tracking_config.helper_enabled = true;
+    const auto nontrivial_projection = [](const Projection& projection) {
+        return projection.modes() > 1 || projection.indices().front() != 0;
+    };
+    const auto independent_track = independent_count && track.states && nontrivial_projection(block_projection) &&
+        nontrivial_projection(final_projection) ? tracking_plan(projected_tracking_config, block_rows, final_rows) :
+                                                FrequencyTrackingPlan{};
+    if (independent_track.states) {
+        const auto log_prior = -std::log(static_cast<double>(independent_track.states));
+        for (auto& state : std::span(independent_states).first(independent_count))
+            for (std::size_t bit = 0; bit < state.fixed_centroid.size(); ++bit) {
+                state.fixed_centroid[bit].fill(log_prior);
+                state.moving_centroid[bit].fill(log_prior);
+            }
+    }
     if ((span || clock_shadow || midpoint) && !track.states)
         throw Error("Robust short track evaluation has no resolved frequency states");
     std::optional<modem::detail::search_fft::DoublePlan> tracking_fft;
@@ -2590,8 +2704,17 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
             transitions[4 * model + 1] = -std::expm1(2 * exponent);
             transitions[4 * model + 2] = std::exp(exponent);
         }
-        executor.parallel(slot.index, states.size() + tracking_weights.size(), static_cast<unsigned>(active), stop,
+        const auto original = states.size() + tracking_weights.size();
+        executor.parallel(slot.index, original + independent_count, static_cast<unsigned>(active), stop,
             [&](unsigned lane, std::size_t candidate, std::stop_token leaf_stop) {
+                if (candidate >= original) {
+                    const auto index = candidate - original;
+                    accumulate_independent_gain(independent_states[index], basis, independent_maps[index],
+                        config.spread_delay_seconds, block, config.noise_variance, config.sample_rate_hz,
+                        independent_track, scratch[lane], independent_track.states ? std::span(tracking_scratch[lane]) :
+                        std::span<Complex>{}, leaf_stop);
+                    return;
+                }
                 if (candidate >= states.size()) {
                     const auto index = candidate - states.size();
                     // One short interior echo with a free gain. A stable
@@ -2615,6 +2738,7 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
             });
         for (std::size_t model = 0; !plan.coherent_gain_blocks && model < model_count; ++model)
             add_work(rendered_rows, checked_multiply(rows, 2 * bases[model].count * selected.size()));
+        if (independent_count) add_work(score.nominal_independent_gain_basis_rows, checked_multiply(rows, 4 * independent_count));
         if (track.states) {
             const auto per_coordinate = checked_multiply(rows,
                 2 * (config.spread_delay_seconds || (plan.coherent_gain_blocks && config.spread_doppler_hz) ? 2 : 1));
@@ -2627,23 +2751,27 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
         first += rows;
         ++score.varying_blocks;
     }
-    if (!plan.coherent_gain_blocks && !std::ranges::any_of(states, [](const State& state) { return state.nonzero_basis; })) {
+    const auto independent = std::span(independent_states).first(independent_count);
+    if (!plan.coherent_gain_blocks && !std::ranges::any_of(states, [](const State& state) { return state.nonzero_basis; }) &&
+        !std::ranges::any_of(independent, [](const auto& state) { return state.nonzero_basis; })) {
         score.varying_status = "no_observed_varying_basis";
         return;
     }
     score.varying_candidates = selected.size();
     score.varying_block_rows = block_rows;
+    add_work(rendered_rows, score.nominal_independent_gain_basis_rows);
     score.varying_basis_rows = rendered_rows;
     score.varying_bit_evidence = plan.coherent_gain_blocks ?
         std::array<double, 2>{-infinity, -infinity} : bit_scores(states);
     score.fixed_varying_bit_evidence = score.varying_bit_evidence;
+    const auto frequency_log_count = track.states ? std::log1p(2 * std::ceil(
+        (config.frequency_bound_hz + config.time_varying_atmospheric_hz) /
+        std::min(.01, receiver_coarse_frequency_step(slot.format, config.sample_rate_hz)))) : 0.;
     if (track.states) {
         // The same selected full-grid mass is applied by the caller. Undo
         // that factor locally for this branch's separate timing prior.
         const auto log_adjustment = std::log(static_cast<double>(ordinary_tracking_coordinates)) -
-            std::log(static_cast<double>(selected.size())) +
-            std::log1p(2 * std::ceil((config.frequency_bound_hz + config.time_varying_atmospheric_hz) /
-                std::min(.01, receiver_coarse_frequency_step(slot.format, config.sample_rate_hz))));
+            std::log(static_cast<double>(selected.size())) + frequency_log_count;
         score.varying_frequency_states = track.states;
         score.tracked_frequency_log_prior_adjustment = log_adjustment;
         const auto log_extra_average = clock_shadow ? std::log(static_cast<double>(tracking_coordinates.size()) /
@@ -2688,6 +2816,38 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
                 clock_shadow->varying_bit_evidence[bit] =
                     log_add(score.fixed_varying_bit_evidence[bit], total + log_adjustment) - log_two;
             }
+        }
+    }
+    score.nominal_independent_gain_candidates = independent_count;
+    if (independent_count) {
+        // As for the ordinary tracker, this finite frequency family owns
+        // a complete, normalized frequency prior. Restore only the old
+        // frequency-grid divisor, leaving the full public timing mass.
+        // The central-only projection fallback still pays the entire grid.
+        score.nominal_independent_gain_frequency_states = independent_track.states;
+        if (independent_track.states) score.nominal_independent_gain_log_prior_adjustment = frequency_log_count;
+        const auto log_mass = score.nominal_independent_gain_log_prior_adjustment - std::log(static_cast<double>(selected.size()));
+        const auto old_weight = std::log1p(-nominal_independent_gain_weight);
+        const auto new_weight = std::log(nominal_independent_gain_weight);
+        for (std::size_t bit = 0; bit < 2; ++bit) {
+            double fixed = -infinity, moving = -infinity;
+            const auto frequencies = std::max<std::size_t>(1, independent_track.states);
+            for (const auto& state : independent) {
+                fixed = std::accumulate(state.fixed_centroid[bit].begin(),
+                    state.fixed_centroid[bit].begin() + frequencies, fixed, log_add);
+                if (independent_track.states)
+                    moving = std::accumulate(state.moving_centroid[bit].begin(),
+                        state.moving_centroid[bit].begin() + frequencies, moving, log_add);
+            }
+            score.nominal_independent_fixed_centroid_bit_evidence[bit] = fixed + log_mass;
+            score.nominal_independent_moving_centroid_bit_evidence[bit] = moving + log_mass;
+            score.nominal_independent_gain_bit_evidence[bit] = independent_track.states ?
+                log_add(fixed, moving) - log_two + log_mass : fixed + log_mass;
+            score.varying_bit_evidence[bit] = log_add(score.varying_bit_evidence[bit] + old_weight,
+                score.nominal_independent_gain_bit_evidence[bit] + new_weight);
+            if (clock_shadow)
+                clock_shadow->varying_bit_evidence[bit] = log_add(clock_shadow->varying_bit_evidence[bit] + old_weight,
+                    score.nominal_independent_gain_bit_evidence[bit] + new_weight);
         }
     }
     score.varying_fine_seconds = seconds_since(began);

@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "name": "hf-disturbed-long-alarm-noise-control",
+  "purpose": "One predeclared ordinary noise-only negative control after the two paired long raw-bit histories (four receive rows). Use hf-disturbed seed 9602, C/N0 12 dB-Hz, requested 128-second bits, message e, CPU/reference/RRC, Helper/FEC off, default automatic workers, no filters or raw-repeat controls, and the same 4,350,000-sample/180-second caps. The native message fixture has three DATA bits and five scored slots. Require complete valid quiet observations and no DATA decisions to support the absence-control expectation; retain any unexpected admission as evidence without retries.",
+  "max_trials": 1,
+  "max_wall_seconds": 180,
+  "per_trial_wall_seconds": 180,
+  "max_samples": 4350000,
+  "stop_on_execution_failure": true,
+  "episodes": [
+    {
+      "id": "hf-disturbed-long-alarm-noise-only",
+      "scenario": "hf-disturbed",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "rrc",
+      "backend": "cpu",
+      "seed": 9602,
+      "chunk": 4096,
+      "bit_seconds": 128,
+      "message": "e",
+      "cn0_db_hz": 12,
+      "control": "noise",
+      "fec": "off",
+      "helper": false,
+      "max_samples": 4350000,
+      "max_wall_seconds": 180
+    }
+  ]
+}

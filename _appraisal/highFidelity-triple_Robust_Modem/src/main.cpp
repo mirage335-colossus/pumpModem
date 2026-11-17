@@ -33,6 +33,7 @@
 #include "hf_protected_reassembly.hpp"
 #include "hf_admission_replay.hpp"
 #include "hf_normalized_null.hpp"
+#include "triad_random_process.hpp"
 #include <openssl/evp.h>
 #include <openssl/crypto.h>
 #include <algorithm>
@@ -106,6 +107,9 @@ struct Options {
     bool hf_gannon_gain_variance_diagnostic=false;
     bool hf_target_presence_diagnostic=false;
     bool hf_normalized_null=false;
+    bool hf_nominal_gain_witness=false;
+    bool hf_nominal_gain_witness_bit_one=false;
+    bool hf_nominal_gain_witness_motion=false;
     bool hf_correlated_gain_shadow=false;
     bool hf_correlated_gain_receiver=false;
     unsigned service_episodes=1;
@@ -146,6 +150,15 @@ Options parse(int argc,char** argv) {
         if(key=="--hf-gannon-gain-variance-diagnostic") {o.hf_gannon_gain_variance_diagnostic=true;continue;}
         if(key=="--hf-target-presence-diagnostic") {o.hf_target_presence_diagnostic=true;continue;}
         if(key=="--hf-normalized-null") {o.hf_normalized_null=true;continue;}
+        if(key=="--hf-nominal-gain-witness") {o.hf_nominal_gain_witness=true;continue;}
+        if(key=="--hf-nominal-gain-witness-bit-one") {
+            o.hf_nominal_gain_witness=o.hf_nominal_gain_witness_bit_one=true;
+            continue;
+        }
+        if(key=="--hf-nominal-gain-witness-motion") {
+            o.hf_nominal_gain_witness=o.hf_nominal_gain_witness_motion=true;
+            continue;
+        }
         if(key=="--hf-correlated-gain-shadow") {o.hf_correlated_gain_shadow=true;continue;}
         if(key=="--hf-correlated-gain-receiver") {o.hf_correlated_gain_receiver=true;continue;}
         if(key=="--helper") {o.helper=true;continue;}
@@ -240,8 +253,11 @@ Options parse(int argc,char** argv) {
     require(o.mode=="plan"||o.mode=="channel"||o.mode=="receive"||o.mode=="slot"||o.mode=="oracle"||
         o.mode=="diagnose"||o.mode=="hf-search"||o.mode=="gui-varying"||o.mode=="gui-repeated-bit","unknown mode");
     const bool gui_repeated=o.mode=="gui-repeated-bit";
-    const bool physical_repeated=o.repeat_bit&&o.scenario=="hf-ensemble-changing-rate"&&
+    const bool changing_rate_repeated=o.repeat_bit&&o.scenario=="hf-ensemble-changing-rate"&&
         (o.mode=="plan"||o.mode=="receive");
+    const bool disturbed_repeated=o.repeat_bit&&o.scenario=="hf-disturbed"&&
+        (o.mode=="plan"||o.mode=="receive");
+    const bool physical_repeated=changing_rate_repeated||disturbed_repeated;
     require((gui_repeated||physical_repeated)==(o.repeat_bit||o.repeat_path_scale||o.repeat_path_seed||
             o.repeat_thermal_off||o.repeat_separate_attempts),
         "repeated-bit options require a supported GUI or physical receive profile");
@@ -257,13 +273,29 @@ Options parse(int argc,char** argv) {
     if(physical_repeated)
         require(*o.repeat_bit<=1&&o.repeat_separate_attempts&&!o.repeat_path_scale&&!o.repeat_path_seed&&
             !o.repeat_thermal_off&&o.waveform=="reference"&&o.pulse=="rrc"&&o.control=="wanted"&&
-            o.backend=="cpu"&&!o.helper&&o.fec=="off"&&o.bit_seconds==128.&&o.cn0==0.&&
-            o.seed==30107&&o.noise_seed==40107&&o.hf_trajectory_seed==20107&&o.hf_trajectory_offset_seconds==197.&&
+            o.backend=="cpu"&&!o.helper&&o.fec=="off"&&o.bit_seconds==128.&&
             !o.capture_lead_seconds&&!o.duration_override&&!o.capture_digest_slot&&!o.workers&&!o.owners&&
             !o.service_replay&&!o.hf_compare_admitted_models&&!o.hf_predictive_quiet&&!o.hf_public_phase_receiver&&
             !o.hf_phase_refinement&&!o.hf_correlated_gain_receiver&&!o.hf_correlated_gain_shadow&&
-            !o.hf_target_presence_diagnostic&&o.max_wall_seconds<=180&&o.max_samples<=4'350'000&&o.chunk<=4096,
-            "changing-rate raw alarms require the frozen long reference profile and bounded default reception");
+            !o.hf_target_presence_diagnostic&&o.max_wall_seconds<=180&&o.max_samples<=4'350'000&&o.chunk<=4096&&
+            (changing_rate_repeated ?
+                (o.cn0==0.&&o.seed==30107&&o.noise_seed==40107&&o.hf_trajectory_seed==20107&&
+                 o.hf_trajectory_offset_seconds==197.) :
+                (o.cn0==12.&&(o.seed==9202||o.seed==9601)&&!o.noise_seed&&!o.hf_trajectory_seed&&
+                 !o.hf_trajectory_offset_seconds&&o.chunk==4096&&!o.memory_bytes&&!o.fade_slots&&
+                 o.message=="e"&&o.service_episodes==1&&!o.service_backlog_begin&&
+                 !o.service_backlog_end&&!o.service_spool_limit&&!o.history_reference_delay_seconds&&
+                 !o.search_options&&!o.gui_options&&!o.design_options&&!o.service_options&&
+                 !o.hf_phase_bank&&!o.hf_physical_diagnostic&&!o.hf_gannon_native_diagnostic&&
+                 !o.hf_gannon_gain_variance_diagnostic&&!o.hf_target_presence_diagnostic&&
+                 !o.hf_normalized_null&&!o.hf_phase_filter&&!o.hf_phase_filter_receiver&&
+                 !o.hf_phase_filter_paths&&!o.hf_phase_filter_sticky&&!o.hf_phase_bridge&&
+                 !o.hf_gui_clean_diagnostic&&!o.hf_gui_tracked_frequency_span&&
+                 !o.hf_gui_quarter_clock_shadow&&!o.hf_correlated_gain_receiver&&
+                 !o.hf_correlated_gain_shadow&&!o.hf_phase_refinement&&!o.hf_public_phase_receiver&&
+                 !o.hf_physical_diagnostic&&!o.hf_compare_admitted_models&&!o.two_hop_alarm_matrix&&
+                 !o.two_hop_additive_boundary)),
+            "physical raw alarms require an admitted long reference profile and bounded default reception");
     if(o.two_hop_alarm_matrix)
         require((o.mode=="plan"||o.mode=="receive")&&o.scenario=="hf-vector-two-hop"&&
             o.waveform=="reference"&&o.pulse=="rrc"&&o.control=="wanted"&&o.backend=="cpu"&&
@@ -348,6 +380,14 @@ Options parse(int argc,char** argv) {
         o.waveform=="reference"&&!o.helper&&o.backend=="cpu"&&!o.service_replay&&!o.hf_public_phase_receiver&&
         !o.hf_compare_admitted_models),
         "target-presence diagnostic requires ordinary wanted Helper-off CPU receive with a selected reference aperture");
+    if(o.hf_nominal_gain_witness) {
+        require(!o.hf_normalized_null&&o.seed==9202&&o.cn0==12&&o.control=="wanted"&&o.message=="e"&&
+            o.pulse=="rrc"&&!o.noise_seed&&!o.duration_override&&o.bit_seconds==128.&&
+            o.max_samples<=270'000&&o.max_wall_seconds<=120&&
+            !(o.hf_nominal_gain_witness_bit_one&&o.hf_nominal_gain_witness_motion),
+            "nominal gain witness requires the frozen 139.2 s first aperture and bounded resources");
+        o.hf_normalized_null=true;
+    }
     if(o.hf_normalized_null) {
         require(o.mode=="slot"&&o.scenario=="hf-disturbed"&&o.backend=="cpu"&&o.waveform=="reference"&&
             !o.helper&&o.fec=="off"&&(o.control=="wanted"||o.control=="wrong-key")&&
@@ -1083,7 +1123,9 @@ std::size_t repeated_bit_count(const Options& o) {
 }
 void evaluate_source_extent(Setup& s,const Options& o) {
     const auto lookup=[&](std::uint64_t i){return message_address(s.transmit_profile,i);};
-    if(o.repeat_bit) {
+    if(o.hf_nominal_gain_witness_bit_one) {
+        s.truth.assign(1,std::uint8_t{1});
+    } else if(o.repeat_bit) {
         s.truth.assign(o.repeat_separate_attempts?1:repeated_bit_count(o),static_cast<std::uint8_t>(*o.repeat_bit));
         if(o.repeat_separate_attempts)
             for(std::size_t attempt=1;attempt<repeated_bit_count(o);++attempt) {
@@ -1802,6 +1844,8 @@ Json plan_json(const Setup& s,const Options& o) {
             repeated["requested_active_slots"]=repeated_bit_count(o);
             repeated["transmission_scope"]=o.two_hop_alarm_matrix?
                 "Five one-bit emissions advance the public ordinal. Each has two scored quiet windows through one continuous two-hop channel.":
+                o.scenario=="hf-disturbed"?
+                "Five one-bit emissions advance the public ordinal. Each has two scored quiet windows through one continuous standard Gaussian hf-disturbed channel.":
                 "Five one-bit emissions advance the public ordinal. Each has two scored quiet windows through one continuous changing-rate channel.";
         } else {
             const auto& channel=*s.native_channel;
@@ -2134,6 +2178,14 @@ Json score_json(const StreamSlotReceipt& receipt) {
         {"coarse_fft_precision",r.coarse_fft_precision},{"coarse_precision_reason",r.coarse_precision_reason},
         {"varying_status",r.varying_status},{"varying_candidates",r.varying_candidates},{"varying_blocks",r.varying_blocks},
         {"varying_basis_rows",r.varying_basis_rows},{"varying_coarse_seconds",r.varying_coarse_seconds},{"varying_fine_seconds",r.varying_fine_seconds},
+        {"nominal_independent_gain",r.nominal_independent_gain_candidates?object({
+            {"candidates",r.nominal_independent_gain_candidates},{"basis_rows",r.nominal_independent_gain_basis_rows},
+            {"frequency_states",r.nominal_independent_gain_frequency_states},
+            {"frequency_log_prior_adjustment",r.nominal_independent_gain_log_prior_adjustment},
+            {"fixed_centroid_bit_evidence",Json::Array{r.nominal_independent_fixed_centroid_bit_evidence[0],r.nominal_independent_fixed_centroid_bit_evidence[1]}},
+            {"moving_centroid_bit_evidence",r.nominal_independent_gain_frequency_states?Json(Json::Array{
+                r.nominal_independent_moving_centroid_bit_evidence[0],r.nominal_independent_moving_centroid_bit_evidence[1]}):Json{}},
+            {"bit_evidence_before_public_prior",Json::Array{r.nominal_independent_gain_bit_evidence[0],r.nominal_independent_gain_bit_evidence[1]}}}):Json{}},
         {"midpoint_timing",object({{"status",r.midpoint_timing_status},{"precision",r.midpoint_timing_precision},
             {"public_lags",r.midpoint_timing_lags},{"candidates",r.midpoint_timing_candidates},
             {"workspace_bytes",r.midpoint_timing_workspace_bytes},{"basis_rows",r.midpoint_timing_basis_rows},
@@ -2163,6 +2215,45 @@ Json slot_likelihood_components(const ReceiverSlotScore& score) {
         {"slow_gain_coherence_seconds",pair(score.slow_gain_coherence_seconds,score.slow_gain_coherence_seconds[0]>0)},
         {"affine_selected_prior_mass",score.fine_candidates?finite(score.selected_prior_mass):Json{}},
         {"short_frequency_log_prior_adjustment",score.varying_frequency_states?finite(score.tracked_frequency_log_prior_adjustment):Json{}}});
+}
+ReceiverConfig hf_worst_margin3_declaration(ReceiverConfig config) {
+    config.spread_delay_seconds=.021;
+    config.spread_doppler_hz=90.;
+    config.random_doppler_width_hz=0.;
+    return config;
+}
+Json nominal_gain_witness_json(const ReceiverConfig& config,const ReceiverSlotPlan& slot,const Crypto& key,
+    std::span<const Complex> iq,unsigned workers,std::size_t memory,std::string_view observation_sha256,
+    const Json& ordinary,bool raw_bit_one,std::stop_token stop) {
+    require(iq.size()==268'361&&config.sample_rate_hz==1920&&config.spread_delay_seconds==.007&&
+        config.spread_doppler_hz==0&&config.clock_bound_ppm==0&&config.random_doppler_width_hz==30,
+        "nominal gain witness requires the original statistical reference aperture");
+    const auto reserve=add_bytes(execution::process_footprint_bytes(), add_bytes(1024*1024,
+        add_bytes(iq.size_bytes()+iq.size(),receiver_detail::checked_multiply(workers-1,execution::worker_stack_bytes()))));
+    if(reserve>=memory)throw Limit("nominal gain witness exceeds its resident, worker and rotation memory budget");
+    const auto rescore=[&](const ReceiverConfig& declaration,std::span<const Complex> capture) {
+        const auto r=score_receiver_slot(declaration,slot,key,capture,{},workers,memory-reserve,stop);
+        require(r.complete&&r.all_valid&&r.zero_h0_verified,"nominal gain witness did not score the full public aperture");
+        auto row=score_json({r,slot.format.epoch,slot.format.symbol_ordinal,workers,{}});
+        row["likelihood_components"]=slot_likelihood_components(r);
+        return row;
+    };
+    const auto gui=raw_bit_one?ordinary:rescore(hf_worst_margin3_declaration(config),iq);
+    std::vector<Complex> shifted(iq.size());
+    const std::vector<std::uint8_t> valid(iq.size(),1);
+    constexpr double offset=30.;
+    for(std::size_t i=0;i<iq.size();++i) {
+        if(!(i%4096)&&stop.stop_requested())throw Timeout("nominal gain witness rotation cancelled");
+        shifted[i]=iq[i]*std::polar(1.,2*std::numbers::pi*offset*i/config.sample_rate_hz);
+    }
+    Hash hash;
+    hash.samples(shifted,valid);
+    auto rotated=rescore(config,shifted);
+    return object({{"statistical_reference",raw_bit_one?Json{}:ordinary},{"gui_hf_worst_margin3",gui},
+        {"statistical_shifted_30_hz",std::move(rotated)},{"expected_bit",raw_bit_one?1:0},
+        {"shifted_observation_sha256",hash.finish()},{"observation_sha256",observation_sha256},{"observed_samples",iq.size()},
+        {"known_noise_variance",config.noise_variance},{"configured_workers",workers},{"resident_and_rotation_reserved_bytes",reserve},
+        {"scope","Configured Gaussian two-ray aperture with its public nominal calendar. The shifted score applies +30 Hz digitally to the full complex observation, including circular white noise. All scores use the ordinary native decisions and their declared priors."}});
 }
 Json wrong_key_evidence_json(const WrongKeyAdmissionEvidence& evidence) {
     bool rated = evidence.available && evidence.data_bits > 0 &&
@@ -3744,7 +3835,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
     const ServiceTimer render_timer;
     EmissionOptions eo;eo.mode=o.control=="noise"?EmissionMode::Quiet:EmissionMode::Message;
     eo.slot_count=s.truth.size();eo.stop=deadline.stop.get_token();
-    if(o.repeat_bit)eo.bits=s.truth;
+    if(o.repeat_bit||o.hf_nominal_gain_witness_bit_one)eo.bits=s.truth;
     else if(eo.mode==EmissionMode::Message)eo.bit_at=s.draft->bit_source(0,[&](std::uint64_t i){return message_address(s.transmit_profile,i);});
     std::vector<Emission> emissions;emissions.reserve(s.episode_starts.size());
     emissions.emplace_back(s.transmit_profile,s.tx_key,eo);
@@ -4090,9 +4181,11 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
             receiver_detail::score_slot_comparing_admitted_evidence,message_decoder(s.message_profile.fec),
             message_receiver_options(s.message_profile),datapump::triad::v3::detail::StreamFootprint{},receiver_slot_overlap_workspace)));
     } else if(receive) {
-        result["plan"]["first_slot_workspace_bytes"]=receiver_slot_workspace(s.receiver,
-            make_receiver_slot_plan(s.profile,s.receiver,0),s.resources.workers);
-        receiver=std::make_unique<CompleteStreamReceiver>(s.profile,s.receiver,s.key,s.stream,s.message_profile);
+        const auto declaration=o.hf_nominal_gain_witness_bit_one||o.hf_nominal_gain_witness_motion?
+            hf_worst_margin3_declaration(s.receiver):s.receiver;
+        result["plan"]["first_slot_workspace_bytes"]=receiver_slot_workspace(declaration,
+            make_receiver_slot_plan(s.profile,declaration,0),s.resources.workers);
+        receiver=std::make_unique<CompleteStreamReceiver>(s.profile,declaration,s.key,s.stream,s.message_profile);
     }
     const bool receiver_executed=bool(receiver);
     const auto cancel_receiver=[&]{if(receiver)receiver->request_cancel();};
@@ -4209,7 +4302,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
                 else {++ambiguous;++episode_ambiguous[*episode];}
             }
             auto row=score_json(receipt);
-            if((o.mode=="receive"&&s.scenario.id=="hf-vector-two-hop")||(o.repeat_bit&&!s.native_channel))
+            if((o.mode=="receive"&&s.scenario.id=="hf-vector-two-hop")||(o.repeat_bit&&!s.native_channel)||o.hf_nominal_gain_witness)
                 row["likelihood_components"]=slot_likelihood_components(r);
             if(o.repeat_bit) {
                 const auto plan=make_receiver_slot_plan(s.profile,s.receiver,r.index);
@@ -4371,6 +4464,17 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
     std::uint64_t clean_hashed_samples=0,clean_selected_samples=0;
     long double clean_selected_energy=0,difference_selected_energy=0;
     bool quiet_clean_is_zero=true;
+    constexpr auto motion_seed=70031U;
+    constexpr auto motion_bound=30.;
+    constexpr auto motion_knot_seconds=1.;
+    std::optional<datapump::triad::v3::detail::BoundedRandomSpread> common_motion;
+    std::optional<Hash> before_motion_hash;
+    double observed_motion_min=std::numeric_limits<double>::infinity();
+    double observed_motion_max=-std::numeric_limits<double>::infinity();
+    if(o.hf_nominal_gain_witness_motion) {
+        common_motion.emplace(0.,motion_bound,motion_knot_seconds,motion_seed);
+        before_motion_hash.emplace();
+    }
     Hash hash;double control_seconds=0,public_search_seconds=0;std::uint64_t first=0,hashed_samples=0;
     std::string run_status="completed",reason;
     try {
@@ -4394,6 +4498,16 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
             deadline.check();
             if(!spool&&!native_channel&&!native_chain)
                 for(std::size_t i=0;i<n;++i)valid[i]=(o.control!="capture-gap"||first+i<s.gap_first||first+i>=s.gap_stop)?1:0;
+            if(common_motion) {
+                before_motion_hash->samples(rows,mask);
+                for(std::size_t i=0;i<n;++i) {
+                    if(!(i%4096))deadline.check();
+                    const auto state=common_motion->at(static_cast<long double>(first+i)/s.receiver.sample_rate_hz);
+                    observed_motion_min=std::min(observed_motion_min,state.doppler_hz);
+                    observed_motion_max=std::max(observed_motion_max,state.doppler_hz);
+                    rows[i]*=std::polar(1.,state.phase_radians);
+                }
+            }
             hash.samples(std::span(iq).first(n),std::span(valid).first(n));
             hashed_samples+=n;
             if(clean_channel) {
@@ -4579,12 +4693,21 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
             // all started receiver stacks before starting any shadow work.
             interrupt.reset();
             receiver.reset();
-            auto diagnostic=appraisal::diagnose_hf_normalized_null(s.receiver,diagnostic_slot,s.key,
-                diagnostic_capture,s.resources.workers,*s.stream.memory_limit_bytes,deadline.stop.get_token());
+            auto diagnostic=common_motion?object({{"gui_hf_worst_margin3",slots.front()},{"expected_bit",s.truth.front()},
+                {"unrotated_observation_sha256",before_motion_hash->finish()},{"effective_seed",motion_seed},
+                {"knot_seconds",motion_knot_seconds},{"frequency_bound_hz",motion_bound},
+                {"minimum_frequency_hz",observed_motion_min},{"maximum_frequency_hz",observed_motion_max},
+                {"scope","The native smooth-knot common-frequency law rotates the complete statistical observation, including circular white noise. The receiver uses the broad GUI-like declaration and receives no trajectory samples or path truth."}}):
+                o.hf_nominal_gain_witness?
+                nominal_gain_witness_json(s.receiver,diagnostic_slot,s.key,diagnostic_capture,s.resources.workers,
+                    *s.stream.memory_limit_bytes,*selected_digest,slots.front(),o.hf_nominal_gain_witness_bit_one,
+                    deadline.stop.get_token()):
+                appraisal::diagnose_hf_normalized_null(s.receiver,diagnostic_slot,s.key,
+                    diagnostic_capture,s.resources.workers,*s.stream.memory_limit_bytes,deadline.stop.get_token());
             diagnostic["observation_sha256"]=*selected_digest;
             diagnostic["observation_hashed_samples"]=selected_hashed_samples;
-            diagnostic["shadow_executed_after_receiver_closed"]=true;
-            result["hf_normalized_null"]=std::move(diagnostic);
+            diagnostic["shadow_executed_after_receiver_closed"]=!common_motion;
+            result[o.hf_nominal_gain_witness?"hf_nominal_gain_witness":"hf_normalized_null"]=std::move(diagnostic);
         }
         deadline.check();
     }catch(const Timeout& e){run_status="time_limit";reason=e.what();}
@@ -5008,7 +5131,7 @@ int main(int argc,char** argv) {
             result["gui_repeated_bit_usage"]="--mode gui-repeated-bit --scenario hf-gui-native --repeat-bit 0|1 --repeat-path-scale 0|0.5|1 --repeat-path-seed N replays six contiguous raw bits followed by two scored quiet windows. --repeat-separate-attempts emits each bit separately with two scored quiet windows after each. --repeat-thermal-off removes added thermal noise only. Requires a finite sample and wall cap.";
             result["two_hop_alarm_matrix_usage"]="--two-hop-alarm-matrix --mode plan|receive --scenario hf-vector-two-hop --message E --bit-seconds 128 --cn0 -3 --seed 73613 --noise-seed 93613 --max-samples 4350000 --max-wall-seconds 1200 evaluates fixed weak/recovery text and raw-bit pairs, reusing only the qualified physical table between independent rows.";
             result["two_hop_additive_boundary_usage"]="--two-hop-additive-boundary --mode plan|receive --scenario hf-vector-two-hop --message E --bit-seconds 128 --cn0 4 --seed 73613 --noise-seed 93613 --max-samples 4350000 --max-wall-seconds 900 evaluates an existing-bank calibration at +3 dB-Hz and compares two sequential receiver replays of a single +4 dB-Hz capture.";
-            result["physical_repeated_bit_usage"]="--mode plan|receive --scenario hf-ensemble-changing-rate --repeat-bit 0|1 --repeat-separate-attempts --bit-seconds 128 --cn0 0 --seed 30107 --noise-seed 40107 --hf-trajectory-seed 20107 --hf-trajectory-offset-seconds 197 --max-samples 4350000 --max-wall-seconds 180 evaluates five separate raw-bit attempts through one continuous changing-rate channel.";
+            result["physical_repeated_bit_usage"]="--mode plan|receive --scenario hf-ensemble-changing-rate --repeat-bit 0|1 --repeat-separate-attempts --bit-seconds 128 --cn0 0 --seed 30107 --noise-seed 40107 --hf-trajectory-seed 20107 --hf-trajectory-offset-seconds 197 --max-samples 4350000 --max-wall-seconds 180 evaluates five separate raw-bit attempts through one continuous changing-rate channel. The bounded hf-disturbed profile is limited to C/N0 12, seed 9202 or 9601, omitted noise seed, 4096-sample chunks and otherwise the same CPU reference bounds.";
             result["service_replay_usage"]="--service-replay in receive/plan pre-renders native I/Q into the canonical bounded ObservationSpool; accepts --service-episodes 1|2, --service-spool-byte-limit N, paired --service-backlog-begin-slot N --service-backlog-end-slot N, and chunks <=4096. Full service includes receiver construction, unchanged-chunk replay, drain/destruction and separately reported replay reads/hash; rendering is excluded. Two episodes retain the global ordinal and fixed two-quiet gap, with a final extra quiet slot. Backlog eligibility and communication completion are separate; no capacity qualification.";
             result["hf_compare_admitted_models_usage"]="--hf-compare-admitted-models opts CPU receive/plan into comparison of all supported models with unchanged ordinary/overlap workspace quotes; excludes --hf-public-phase-receiver";
             result["hf_phase_filter_usage"]="--hf-phase-filter requires hf-search, --hf-phase-refinement and --search-timing full; reports a bounded public phase-filter diagnostic without changing receiver decisions";

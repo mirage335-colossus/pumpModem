@@ -60,6 +60,43 @@ supports.
 | **1–30 MHz skywave** | Begin with a stationary F.1487/Watterson comparison: each path's complex zero-mean diffuse gain and Gaussian Doppler spectrum use an explicitly stated **2σ** width; separate taps for materially separated delays or O/X modes. Add a time-varying centroid/drift, mode transition or fade only as a named episode. Keep arrival delay, mean shift, drift, spread, absorption and oscillator error distinct. | [ITU-R F.1487](https://www.itu.int/dms_pubrec/itu-r/rec/f/R-REC-F.1487-0-200005-I!!PDF-E.pdf) gives reproducible test profiles, not a worldwide channel distribution. [Fable 31](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/31-skywave-dispersion-midlatitude-nvis-longhaul.md) summarizes measured paths and estimator limits; the 2024 Java NVIS report, for example, is a one-week observation. | Watterson selected nearly stationary intervals, not all HF. Its Gaussian spectrum is not universal: references retain Lorentzian observations, diffuse within-mode delay, coupled delay/Doppler and nonstationarity. New peer-reviewed [Fernandes et al. (2026)](https://doi.org/10.3389/fspas.2026.1713968) analyze one 10 MHz WWV–K2MFF residual link and report daytime Cauchy versus nighttime log-normal/exponential-power best fits in the detailed analysis. These are *estimated frequency residuals on one link*, not a tap-gain spectrum, and the study did not analyze joint channel amplitude/phase. Do not directly drive tap gains from those residuals. IRI-2020 ray tracing supplies large-scale path context, not the short-term residual law. | Check stationary tap covariance, delay profile and 2σ spectrum using the source's observable definitions. Then compare one same-mean constant-shift path against a measured/declared within-window drift trajectory; use session-held-out records if available. Keep spread-F/O-X/mode birth-death or absorption as separate hypotheses. A blackout is outage, not high-rate fading. |
 | **5.76–5.8 GHz EME** | Use the existing Fable 84 retarded two-leg DE440 geometry and a low-dimensional beam-weighted lunar-surface scattering sum. Calculate excess delay from the same total path length and Doppler from its time derivative. Keep mean radar-equation return, beam/polarization loss, delay-Doppler kernel shape and receiver (T_{sys}) separate. Retain same-surface phase as a correlation hypothesis, with alternatives where useful. | [Fable 84](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/84-scenarios-eme.md) contains the reproducible DE440 geometry, assumed link inputs and finite competing kernels. [Zhang et al. (2020)](https://pmc.ncbi.nlm.nih.gov/articles/PMC7180880/) report bistatic 7.209125 GHz lunar radar observations with localized projected footprints about 503 km / 1,118 km; the observed/calculated spectra differ by station and their Doppler widths are about 35 and 90 Hz (40/90 Hz were used in one SNR calculation). [Taylor's 5.76 GHz analysis](https://wsjt.sourceforge.io/EME2010_K1JT.pdf) supplies conditional geometry-dependent width calculations, not observations of this modem. | The 2026 [JEIT EME channel model](https://doi.org/10.11999/JEIT251028) is recent but its 1.296 GHz ±39.88 Hz spread and BER are model/link-simulation outputs, not field measurements and not a 5.8 GHz transfer. A narrow beam and a disk-wide model yield different kernels. No cited measurement calibrates a complete whole-disk 5.8 GHz complex channel. Geometry-only Doppler is not scattering validation. | Verify center delay against 2R/c, disk delay support against 2a/c, beam-weighted cell power, and finite-difference versus analytic two-leg Doppler. Converge independent cell grids using the *same* scattering law. Validate the selected kernel against only the radar footprint/observable it shares; retain uncalibrated models as alternatives. Never re-randomize surface phase each short interval just to force fading. |
 
+### HF disturbed scales are not interchangeable
+
+ITU-R F.1487 Annex 3 defines its frequency-spread values as **2σ** and lists
+high-latitude disturbed as 7 ms differential delay / 30 Hz spread; disturbed
+near-vertical incidence is 7 ms / 1 Hz, with groundwave added if needed. This
+is a repeatable statistical test profile, not a universal storm spectrum.
+The GUI's HF Worst starts from 7 ms / 30 Hz support before its user margin;
+Margin 3 expands those allowances to 21 ms / 90 Hz and also permits common
+atmospheric wander in its changing realization. The named `hf-disturbed`
+appraisal is a separate existing fixed-grid Gaussian model with independent
+zero-mean rays and 30 Hz full 2σ width per ray. The named moving-plasma example
+with about 0.17 Hz excursion and 0.325 ms delay used zero declared GUI spread
+and a 5 Hz receiver allowance. Its deep cancellation and weak-reception failures
+remain significant, but its small spreads do not qualify the severe profile.
+It can separately be tested inside broad GUI search bounds
+without implying that its realized spectrum reaches their edge.
+
+Recent polar-path evidence supports taking severe excursions seriously, but
+does not equate these models. [Cameron et al. (2024)](https://doi.org/10.1029/2023RS007897)
+report Doppler spread up to about 35 Hz at 11.1 MHz and isolated 45–65 Hz
+signals on the single Qaanaaq–Alert polar link. Their received-signal spread
+measure is not explicitly the ITU 2σ convention, and their data exclude
+transmissions not detected at Alert; the primary year is solar maximum. These
+are not a worldwide occurrence distribution or an outage-rate estimate.
+The abstract of [Ponomarchuk et al. (2026)](https://doi.org/10.1016/j.asr.2026.03.068)
+reports observations from ten storms on two 2023–2025 mid-latitude paths,
+including delayed diffuse reflections, path/mode changes and increased total
+propagation loss. It does not calibrate a 30 Hz per-ray fading spectrum.
+
+Keep GUI allowance, realized GUI spectrum, standard Gaussian 2σ width, and
+physical path evolution as separate recorded quantities. Qualification should
+pair calm realizations within broad bounds with severe statistical profiles and
+named physical paths, reporting the realized spectrum and path loss separately.
+AWGN bounds remain useful under their stated assumptions, but AWGN-derived time
+or energy targets do not guarantee a fixed reception time, energy or success
+on these fading, multipath, or path-loss episodes.
+
 ## Noise, references and decision statistics
 
 Model input noise at a stated plane. Keep external atmospheric/man-made noise,

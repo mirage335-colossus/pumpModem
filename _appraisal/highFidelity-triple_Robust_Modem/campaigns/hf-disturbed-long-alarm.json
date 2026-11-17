@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "name": "hf-disturbed-long-alarm",
+  "purpose": "Bounded paired raw-bit characterization through the current standard Gaussian hf-disturbed profile. Both polarities use scenario seed 9202 with the noise seed omitted, requested 128-second bits, C/N0 12 dB-Hz, 4096-sample chunks, CPU/reference/RRC, Helper and FEC off, and the full automatic worker allocation. Each row sends five identical one-bit emissions at public slots 0, 3, 6, 9, and 12 through one continuous channel and receiver, with two scored quiet opportunities after each emission. This is one fixed channel/noise history, not independent natural-condition trials or a probability estimate. Valid misses are retained as characterization outcomes.",
+  "max_trials": 2,
+  "max_wall_seconds": 360,
+  "per_trial_wall_seconds": 180,
+  "max_samples": 4350000,
+  "stop_on_execution_failure": true,
+  "episodes": [
+    {
+      "id": "hf-disturbed-long-bit0",
+      "scenario": "hf-disturbed",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "rrc",
+      "backend": "cpu",
+      "seed": 9202,
+      "chunk": 4096,
+      "bit_seconds": 128,
+      "cn0_db_hz": 12,
+      "control": "wanted",
+      "fec": "off",
+      "helper": false,
+      "repeat_bit": 0,
+      "repeat_separate_attempts": true,
+      "max_samples": 4350000,
+      "max_wall_seconds": 180,
+      "reception_requirement": "characterization"
+    },
+    {
+      "id": "hf-disturbed-long-bit1",
+      "scenario": "hf-disturbed",
+      "mode": "receive",
+      "waveform": "reference",
+      "pulse": "rrc",
+      "backend": "cpu",
+      "seed": 9202,
+      "chunk": 4096,
+      "bit_seconds": 128,
+      "cn0_db_hz": 12,
+      "control": "wanted",
+      "fec": "off",
+      "helper": false,
+      "repeat_bit": 1,
+      "repeat_separate_attempts": true,
+      "max_samples": 4350000,
+      "max_wall_seconds": 180,
+      "reception_requirement": "characterization"
+    }
+  ]
+}

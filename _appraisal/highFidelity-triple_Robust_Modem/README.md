@@ -767,6 +767,84 @@ compact raw receipts while they support current qualification or unresolved
 weak points. Remove them once superseded or their release-assurance duty ends;
 keep compatible build caches that still serve current work.
 
+### HF Worst severe-spread regression
+
+The maintained `hf-disturbed` profile has two independent proper-complex
+Gaussian rays at 0/7 ms, each with a 30 Hz full 2σ Doppler width. It is a
+standard severe statistical profile, not a plasma reconstruction or the GUI's
+bounded frequency-wander law. The [profile distinctions](../../docs/channel-models.md#distinguish-hf-stress-profiles)
+and [current results](../../docs/validation.md#hf-worst-30-hz--7-ms-follow-through--16-november-2026)
+record why the earlier small-spread physical episode cannot qualify this case.
+
+Three frozen manifests exercise the canonical receiver: the
+[matched raw pair](campaigns/hf-disturbed-long-alarm.json),
+[fresh-history raw pair](campaigns/hf-disturbed-long-alarm-fresh-history.json),
+and [noise control](campaigns/hf-disturbed-long-alarm-noise-control.json).
+Each wanted row sends five separate 139.2-second bits, retaining one channel
+history and receiver through 15 slots with two scored quiet slots per attempt.
+The two polarities share a seed; they are not independent natural histories.
+The noise control scores five ordinary slots with no transmitted signal.
+Each row is capped at 180 seconds and 4,350,000 samples, with automatic W=2H.
+Use a new output directory and inspect the raw decisions: characterization
+mode deliberately preserves valid misses rather than declaring them execution
+failures.
+
+```sh
+run_id=choose-a-new-unique-run-id
+for campaign in hf-disturbed-long-alarm hf-disturbed-long-alarm-fresh-history hf-disturbed-long-alarm-noise-control; do
+  python3 -B _appraisal/highFidelity-triple_Robust_Modem/run.py \
+    --probe _appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal \
+    --campaign "_appraisal/highFidelity-triple_Robust_Modem/campaigns/$campaign.json" \
+    --output-dir "_appraisal/highFidelity-triple_Robust_Modem/local-evidence/${run_id}-${campaign}" || break
+done
+```
+
+Three bounded native appraisal hooks retain the same long first-aperture
+checks with broader GUI-like declarations and common-frequency motion:
+
+```sh
+for witness in --hf-nominal-gain-witness --hf-nominal-gain-witness-bit-one --hf-nominal-gain-witness-motion; do
+  timeout -k 0.5s 119.5s \
+    _appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal \
+    --mode slot --scenario hf-disturbed --waveform reference --seed 9202 \
+    --cn0 12 --bit-seconds 128 --backend cpu --control wanted --fec off \
+    --max-samples 270000 --max-wall-seconds 119.5 --capture-digest-slot 0 \
+    "$witness" > "_appraisal/highFidelity-triple_Robust_Modem/local-evidence/${run_id}${witness}.json" || break
+done
+```
+
+The first hook scores bit zero with the statistical declaration, GUI-like
+Margin 3 declaration (21 ms delay, 90 Hz relative Doppler and ±90 Hz common
+frequency allowance), and a +30 Hz unitary rotation. The bit-one hook scores
+the latter two controls for bit one. The motion hook applies the existing
+native `BoundedRandomSpread` phase law (±30 Hz, one-second knots, seed 70031)
+and makes one GUI-like decision for bit zero. These rotations affect both
+signal and circular white noise; their noise law is unchanged, but this is not
+an exact replay with unrotated noise. The receiver never sees the trajectory.
+The hooks require the frozen settings and use the ordinary native decisions,
+full public priors and memory admission. They do not execute a separate
+receiver algorithm or assert natural occurrence probabilities.
+
+Expected current invariants are correct DATA in every wanted control, complete
+valid apertures, active bounded gain/frequency telemetry, five correct raw
+attempts and quiet pairs per wanted stream, and five QUIET decisions in the
+noise control. Preserve failures and source/configuration/input hashes when
+repeating; a successful command alone is not a reception pass. The current
+validation binds the measured native source `3ae11493…`, appraisal source
+`282c817a…`, and pinned binary `e82e8ab2…`; subsequent source changes require
+their own applicable evidence. These are nominal-epoch/clock witnesses, not a
+qualification of arbitrary clock age, every delay inside the declared bound,
+all paths, processor capacity or multi-day availability.
+
+Keep these three hooks while they are the maintained repeatable regression
+path for the severe-spread, broader-bound and moving-frequency cases. Remove
+them when equivalent generic paired-IQ controls replace them or the receive
+model is retired. Current baseline/candidate pins and compact receipts under
+`local-evidence/current-hf-worst/` support the source-bound matched comparison;
+remove them once superseded or their validation duty ends. Retire diagnostic
+prototype executables and scratch implementations after their positive and
+negative findings are distilled into the maintained validation record.
+
 ## Native modes and bounds
 
 - `plan` reports exact public geometry, source assumptions, workspace and sample/

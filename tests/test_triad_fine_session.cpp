@@ -1295,6 +1295,104 @@ void tracked_span_matches_signed_correlation_without_changing_evidence() {
           "a nearly coincident second column must carry a rank uncertainty bound");
 }
 
+void independent_gain_keeps_full_public_prior_and_bounded_work() {
+    const Fixture f(480);
+    auto config = f.config;
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = config.time_varying_atmospheric_hz = 12;
+    config.spread_delay_seconds = .004;
+    config.spread_doppler_hz = 12;
+    config.clock_bound_ppm = 0;
+    auto slot = f.slot;
+    slot.arrival_lower_seconds = -.004;
+    slot.arrival_upper_seconds = .004;
+    const auto plan = varying_fine_plan(config, slot, 2);
+    const auto narrow = std::array{f.coordinates[0], FineCoordinate{2, .001, 0, 0}, FineCoordinate{-2, -.001, 0, 0}};
+    check(plan.track_frequency && plan.nominal_independent_gain_candidates == 2 &&
+          config.random_doppler_width_hz == 0,
+          "nominal unit-power spatial gain must support public relative-spread declarations without a diffuse-width field");
+
+    ReceiverExecutor executor(2);
+    const auto run = [&](const ReceiverSlotPlan& slot, const VaryingFinePlan& shape, std::span<const Complex> iq) {
+        ReceiverSlotScore result;
+        score_varying_fine(config, slot, f.key, shape, iq, narrow, {}, 100, 12, 2, result, {}, executor);
+        return result;
+    };
+    auto original = plan;
+    original.nominal_independent_gain_candidates = 0;
+    const auto old = run(slot, original, f.iq);
+    const auto added = run(slot, plan, f.iq);
+    check(added.nominal_independent_gain_candidates == 2 &&
+          added.nominal_independent_gain_frequency_states > 1 && added.nominal_independent_gain_frequency_states <= 65 &&
+          added.nominal_independent_gain_basis_rows == 8 * f.iq.size() &&
+          added.varying_basis_rows == old.varying_basis_rows + added.nominal_independent_gain_basis_rows &&
+          added.varying_candidates == old.varying_candidates &&
+          added.fixed_varying_bit_evidence == old.fixed_varying_bit_evidence &&
+          added.tracked_frequency_bit_evidence == old.tracked_frequency_bit_evidence,
+          "the nominal spatial family preserves the previous evidence and charges exactly two mapped pairs");
+    const auto single = [&](double arrival) {
+        auto collapsed = slot;
+        collapsed.arrival_lower_seconds = collapsed.arrival_upper_seconds = arrival;
+        const auto shape = varying_fine_plan(config, collapsed, 2);
+        check(shape.nominal_independent_gain_candidates == 1 && shape.workspace_bytes < plan.workspace_bytes,
+              "a collapsed arrival axis must quote and score exactly one independent atom");
+        return run(collapsed, shape, f.iq);
+    };
+    const auto first = single(slot.arrival_lower_seconds);
+    const auto second = single(slot.arrival_upper_seconds);
+    const auto log_add = [](double a, double b) { return std::max(a, b) + std::log1p(std::exp(-std::abs(a - b))); };
+    const AdmissionGrid grid(slot.arrival_lower_seconds, slot.arrival_upper_seconds, 12, 0, .01);
+    const double caller_prior = std::log(static_cast<double>(narrow.size())) - grid.log_count();
+    check(added.nominal_independent_gain_log_prior_adjustment == std::log1p(2 * grid.frequency_radius),
+          "the separate finite frequency family restores only the original frequency divisor");
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        const double left = first.nominal_independent_gain_bit_evidence[bit] + caller_prior;
+        const double right = second.nominal_independent_gain_bit_evidence[bit] + caller_prior;
+        const double retained = old.varying_bit_evidence[bit] + caller_prior;
+        const double reference = std::max({left, right, retained});
+        const double expected = reference + std::log(.875 * std::exp(retained - reference) +
+            .125 * (std::exp(left - reference) + std::exp(right - reference)));
+        check(std::abs(added.nominal_independent_gain_bit_evidence[bit] + caller_prior - log_add(left, right)) < 2e-10 &&
+              std::abs(added.nominal_independent_gain_bit_evidence[bit] - log_add(
+                  added.nominal_independent_fixed_centroid_bit_evidence[bit],
+                  added.nominal_independent_moving_centroid_bit_evidence[bit]) + std::numbers::ln2) < 2e-10 &&
+              std::abs(added.varying_bit_evidence[bit] + caller_prior - expected) < 2e-10,
+              "each new public atom must retain its full-grid mass and the old model its fixed retained weight");
+    }
+    const std::vector<Complex> zero(f.iq.size());
+    const auto null = run(slot, plan, zero);
+    const auto null_adjustment = null.nominal_independent_gain_log_prior_adjustment + std::log(2. / narrow.size());
+    check(std::ranges::all_of(null.nominal_independent_gain_bit_evidence,
+          [&](double value) { return value < null_adjustment; }),
+          "independent gain must charge the Gaussian determinant under zero input, with no fitted noise power");
+}
+
+void projected_tracking_grid_preserves_the_rounded_edge() {
+    const Fixture f(1920, 6. * 2 * 1920 / 181);
+    auto config = f.config;
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = config.time_varying_atmospheric_hz = 509.17127071823205;
+    config.spread_delay_seconds = .004;
+    config.clock_bound_ppm = 0;
+    const auto plan = varying_fine_plan(config, f.slot, 2);
+    check(plan.block_rows == 181 && plan.track_frequency && plan.nominal_independent_gain_candidates == 1,
+          "fractional projected tracking grid fixture must execute a nominal model over the complete aperture");
+    const double bin_hz = f.fs / (2. * plan.block_rows);
+    check(std::ceil(config.time_varying_atmospheric_hz / (32 * bin_hz)) == 3 &&
+          std::ceil(config.time_varying_atmospheric_hz / (3 * bin_hz)) == 33,
+          "projected tracking fixture must cross the original rounded state limit");
+    ReceiverExecutor executor(2);
+    ReceiverSlotScore result;
+    score_varying_fine(config, f.slot, f.key, plan, f.iq, f.coordinates, {}, 100, 12, 2, result, {}, executor);
+    const auto next_spacing = 4 * bin_hz;
+    check(24 * next_spacing < config.time_varying_atmospheric_hz &&
+          25 * next_spacing >= config.time_varying_atmospheric_hz &&
+          result.nominal_independent_gain_frequency_states == 51 &&
+          result.nominal_independent_gain_frequency_states <= 65 &&
+          std::ranges::all_of(result.nominal_independent_gain_bit_evidence, [](double value) { return std::isfinite(value); }),
+          "coarsened projection must score the declared frequency edge within the fixed state budget");
+}
+
 void added_epoch_track_keeps_prior_mass_and_work() {
     const Fixture f(480);
     auto config = f.config;
@@ -1384,12 +1482,14 @@ void added_epoch_track_keeps_prior_mass_and_work() {
         const double shared_lr = shared_atom.tracked_frequency_bit_evidence[bit];
         const double new_lr = new_atom.tracked_frequency_bit_evidence[bit];
         const double fixed_lr = ordinary.fixed_varying_bit_evidence[bit] + caller;
-        const double scale = std::max({old_lr, shared_lr, new_lr, fixed_lr});
+        const double independent_lr = ordinary.nominal_independent_gain_bit_evidence[bit] + caller;
+        const double scale = std::max({old_lr, shared_lr, new_lr, fixed_lr, independent_lr});
         const double old = std::exp(old_lr - scale);
         const double middle = (std::exp(shared_lr - scale) + std::exp(new_lr - scale)) / full_midpoint_cells;
         const double fixed = std::exp(fixed_lr - scale);
-        const double expected = scale + std::log(.5 * (fixed + .875 * old + .125 * middle));
-        const double missing = scale + std::log(.5 * (fixed + .875 * old));
+        const double independent = std::exp(independent_lr - scale);
+        const double expected = scale + std::log(.875 * .5 * (fixed + .875 * old + .125 * middle) + .125 * independent);
+        const double missing = scale + std::log(.875 * .5 * (fixed + .875 * old) + .125 * independent);
         check(std::abs(mixed.varying_bit_evidence[bit] + caller - expected) < 2e-10 &&
               std::abs(empty.varying_bit_evidence[bit] + caller - missing) < 2e-10,
               "receiver evidence must keep the whole public timing mass, including omitted midpoint candidates");
@@ -1494,6 +1594,8 @@ int main() {
         two_tap_factor_matches_moderate_dense_likelihood();
         two_tap_native_dc_projection_preserves_complete_scores();
         tracked_span_matches_signed_correlation_without_changing_evidence();
+        independent_gain_keeps_full_public_prior_and_bounded_work();
+        projected_tracking_grid_preserves_the_rounded_edge();
         added_epoch_track_keeps_prior_mass_and_work();
         incomplete_bulk_cannot_publish_quiet();
     } catch (const std::exception& error) {

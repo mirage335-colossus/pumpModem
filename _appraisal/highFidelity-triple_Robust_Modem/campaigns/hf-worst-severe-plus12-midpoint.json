@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "name": "hf-worst-severe-plus12-midpoint",
+  "purpose": "One preauthorized final energy midpoint for the current hf-disturbed weak history after the frozen 0 dB-Hz row produced three quiet active slots. Reuse weak seed 9202 and every other weak-row setting exactly, changing only C/N0 to +12 dB-Hz. This is a single fixed-history energy contrast, not an independent trial or the start of an energy sweep; preserve either a recovery or another valid miss.",
+  "max_wall_seconds": 90,
+  "per_trial_wall_seconds": 90,
+  "max_trials": 1,
+  "max_samples": 8000000,
+  "stop_on_execution_failure": true,
+  "episodes": [
+    {
+      "id": "hf-disturbed-seed9202-plus12-midpoint",
+      "scenario": "hf-disturbed",
+      "mode": "receive",
+      "waveform": "reference",
+      "seed": 9202,
+      "cn0_db_hz": 12,
+      "control": "wanted",
+      "backend": "cpu",
+      "helper": false,
+      "fec": "off",
+      "max_wall_seconds": 90,
+      "max_samples": 8000000,
+      "reception_requirement": "characterization"
+    }
+  ]
+}

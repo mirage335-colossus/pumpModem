@@ -291,6 +291,40 @@ actual-device qualification. The line-conditioned short model is
 compared when its workspace is admitted. Longer coherent-gain and drift models
 remain fallback work unless a full comparison is requested. The existing
 search, public hypotheses, priors, and `W=2*H` worker budget are preserved.
+When a nonzero declared path delay and the existing short-frequency plan are
+both supported, the short family also admits a nominal-epoch independent-gain
+alternative. It uses at most two coordinates: epoch and capture-clock offsets
+zero, at the public arrival lower and upper endpoints, with direct/delayed
+paths with zero relative-Doppler offset and the full declared delay. Each path
+has an independent proper-complex gain of variance 0.5 in each short block.
+The same projected correlations and Gram matrices feed two equally mixed
+components over the full configured frequency range: one integrates a common
+frequency held fixed across the whole aperture, and the other uses a bounded
+Markov track of changing common frequency. Both use at most 65 frequency
+states. This alternative gets
+one eighth of the short-family mass and the existing short model keeps seven
+eighths at the whole-slot evidence combination, not block by block. That
+retention bounds only the old branch's log-e reduction by
+`-log(7/8) ≈ 0.134` nats; it is not a dB sensitivity, pointwise-decision or
+CPU-capacity bound. Endpoint atoms retain their public timing mass, and
+frequency normalization still charges the full declared range; no delay grid
+or historical path bank is added. If the projected frequency state plan is
+unavailable, the alternative falls back to its central-frequency likelihood;
+when `nominal_independent_gain_candidates > 0`, a zero
+`nominal_independent_gain_frequency_states` receipt makes that narrower scope
+explicit. The frequency planner coarsens its step when floating-point rounding
+would otherwise exceed 65 states, preserving both declared edges. Unsupported
+plans add no branch, leaving Off, medium and slow
+VLF paths unchanged. Public bounds do not guarantee that actual channel
+behavior fills the bound. The finite source-bound full-stream cohort passes:
+both matched seed-9202 polarities and both fresh seed-9601 polarities decode
+5/5, while the seed-9602 noise control remains 5/5 QUIET. This supports the
+sampled standard-Gaussian histories only, not all plasma, arbitrary clock-age,
+all-delay or weak-Helper cases. The two scoped positive-delay Helper checks
+pass, the current GUI suite passes 28/28, and the final appraisal/application
+checks pass (5/5 plus integration). These are scoped software checks, not
+broader channel-sensitivity qualification. See the
+[source-bound HF Worst follow-through](validation.md#hf-worst-30-hz--7-ms-follow-through--16-november-2026).
 This is a bounded receiver policy, not authentication or a claim that all
 wrong-bit cases are resolved. See the dated
 [short-model and clock-support findings](validation.md#bounded-short-model-competition--16-november-2026)
