@@ -49,9 +49,13 @@ def slot_receipt(backend="cuda", *, command="continuation", stratum="active"):
     lane.update(states_sha256="2" * 64, bit_scores=[1., 0.])
     fine = dict.fromkeys(workload.FINE_GEOMETRY, 1)
     fine.update(observation_complete=True, representative_work=True, input_sha256="3" * 64,
-                observation_first_sample=0, quiet_modes=10, initial_affine=lane, adaptive=deepcopy(lane),
+                observation_first_sample=0, quiet_modes=10, initial_affine=lane,
+                adaptive_diagnostics=False, adaptive=None,
                 cache=dict.fromkeys(workload.CACHE_GEOMETRY + workload.CACHE_WORK, 10),
                 bulk=accelerator)
+    if stratum == "cold-maximum":
+        fine.update(segments=2)
+        fine["initial_affine"].update(initial_states=256, peak_emission_states=256)
     fine["cache"]["fallback_reason"] = ""
     phases = [make_phase("coarse_prepare", {"frequency_grid_sha256": "1" * 64})]
     phases += [make_phase("coarse_tiles", dict(step_tiles=step, completed_tiles=done, planned_tiles=4))
@@ -67,8 +71,9 @@ def slot_receipt(backend="cuda", *, command="continuation", stratum="active"):
     score = dict(decision="data" if command == "slot" else "ambiguous", bit=0 if command == "slot" else None,
                  complete=command == "slot", all_valid=True, zero_h0_verified=True, quiet_modes=10,
                  operational_passes_conditional_bound=True, operational_log_e=20., operational_threshold=21.)
-    score.update({key: [1., 0.] for key in
-                  ("bit_evidence", "adaptive_bit_evidence", "combined_bit_evidence")})
+    score.update(bit_evidence=[1., 0.], adaptive_diagnostics=False,
+                 adaptive_bit_evidence=None, combined_bit_evidence=None,
+                 adaptive_blocks=0, adaptive_peak_states=0, adaptive_transition_edges=0)
     return dict(schema="datapump.triad.native-probe.v1", command=command, status="complete",
                 configuration=dict(receiver_slot_workspace_bytes=10 if accelerator else 5,
                                    actual_cn0_db_hz=55., target_cn0_db_hz=30.),
@@ -77,7 +82,8 @@ def slot_receipt(backend="cuda", *, command="continuation", stratum="active"):
                 identity=dict(backend=backend, requested_tensor_coarse_math="fft", source_manifest_sha256="1" * 64), phases=phases,
                 result=dict(work_complete=True, checkpoints_complete=True, continued_cache_fill=True,
                             coordinate_scope="complete_public_selection",
-                            maximum_state_transition_covered=True, explicit_erasure_covered=True,
+                            maximum_fixed_affine_states_covered=stratum == "cold-maximum",
+                            explicit_erasure_covered=True,
                             receiver_decision_eligible=command == "slot",
                             evaluator_expected_decision_observed=True, stratum=stratum, score=score))
 
@@ -211,8 +217,45 @@ class NativeWorkloadTests(unittest.TestCase):
         cuda["observation"]["input_sha256"] = "b" * 64
         self.assertFalse(workload.compare_work(cpu, cuda, "active")["same_input"])
         cuda["observation"]["input_sha256"] = cpu["observation"]["input_sha256"]
-        cuda["phases"][-1]["work"]["adaptive"]["transition_edges"] = 22
-        self.assertGreater(workload.compare_work(cpu, cuda, "active")["maximum_relative_adaptive_cost_drift"], .05)
+        cuda["phases"][-1]["work"]["initial_affine"]["basis_rows"] = 22
+        comparison = workload.compare_work(cpu, cuda, "active")
+        self.assertGreater(comparison["maximum_relative_fixed_affine_cost_drift"], .05)
+        self.assertFalse(comparison["fixed_work_match"])
+        close_mismatch = slot_receipt()
+        close_mismatch["phases"][-1]["work"]["initial_affine"]["basis_rows"] = 21
+        comparison = workload.compare_work(cpu, close_mismatch, "active")
+        self.assertFalse(comparison["fixed_work_match"])
+
+    def test_operational_receipts_require_explicit_consistent_fixed_only_mode(self):
+        mutations = (
+            lambda receipt: receipt["phases"][-1]["work"].pop("adaptive_diagnostics"),
+            lambda receipt: receipt["phases"][-1]["work"].pop("adaptive"),
+            lambda receipt: receipt["phases"][-1]["work"].update(adaptive_diagnostics=True),
+            lambda receipt: receipt["phases"][-1]["work"].update(adaptive=deepcopy(receipt["phases"][-1]["work"]["initial_affine"])),
+            lambda receipt: receipt["phases"][-1]["work"].update(adaptive_transition_edges=0),
+            lambda receipt: receipt["result"]["score"].update(adaptive_diagnostics=True),
+            lambda receipt: receipt["result"]["score"].pop("combined_bit_evidence"),
+            lambda receipt: receipt["result"]["score"].update(adaptive_bit_evidence=[1., 0.]),
+            lambda receipt: receipt["result"]["score"].update(adaptive_transition_edges=1),
+        )
+        for mutate in mutations:
+            receipt = slot_receipt()
+            mutate(receipt)
+            with self.subTest(mutation=mutate), self.assertRaises(workload.ProbeError):
+                workload.validate_work(receipt, "cuda", "active")
+
+    def test_cold_maximum_is_two_segments_of_fixed_256_state_work(self):
+        receipt = slot_receipt(stratum="cold-maximum")
+        workload.validate_work(receipt, "cuda", "cold-maximum")
+        for phase_name, change in (("fine_work", "segments"), ("fine_finish", "peak_emission_states")):
+            damaged = slot_receipt(stratum="cold-maximum")
+            work = next(phase["work"] for phase in damaged["phases"] if phase["name"] == phase_name)
+            if change == "segments":
+                work[change] = 1
+            else:
+                work["initial_affine"][change] = 255
+            with self.subTest(phase=phase_name), self.assertRaises(workload.ProbeError):
+                workload.validate_work(damaged, "cuda", "cold-maximum")
 
     def test_matrix_parity_does_not_qualify_fft_cpu_cost_forecast(self):
         for mode in ("fp16", "int8"):

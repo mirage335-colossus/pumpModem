@@ -16,6 +16,15 @@ struct CoarseProposal {
 
 struct CoarseMidpointTiming {
     std::vector<CoarseProposal> proposals;
+    std::array<CoarseProposal, 2> gain_proposals{};
+    std::array<std::int64_t, 2> gain_proposal_lags{};
+    long double middle_seconds = 0;
+    std::size_t gain_proposal_count = 0, gain_fft_rows = 0, gain_frequency_points = 0;
+    std::size_t gain_blocks = 0, gain_projected_rows = 0, gain_workspace_bytes = 0;
+    std::size_t gain_available_blocks = 0, gain_sampled_blocks = 0, gain_verified_correlations = 0;
+    std::uint64_t gain_fft_row_stages = 0, gain_score_rows = 0;
+    double gain_seconds = 0;
+    std::string_view gain_status;
     std::int64_t first_lag = 0, last_lag = 0;
     std::size_t lag_count = 0, workspace_bytes = 0;
     std::uint64_t widened_inverses = 0, scored_lags = 0, verified_peaks = 0;
@@ -69,6 +78,9 @@ struct CoarseWorkPlan {
     unsigned workers = 0;
     std::size_t source_rows = 0, raw_template_rows = 0, projected_template_rows = 0;
     std::size_t projected_observation_rows = 0, template_sampling_step = 0;
+    // Prospective exact preparation work. Zero on the mapped route.
+    std::size_t exact_render_and_projected_rows = 0, exact_raw_column_rows = 0;
+    std::uint64_t exact_preparation_fft_row_stages = 0;
     std::size_t fir_taps = 0, fir_fft_rows = 0, correlation_fft_rows = 0;
     std::size_t frequency_groups = 0, frequency_points = 0, arrival_points = 0;
     std::size_t segmented_timing_blocks = 0, segmented_timing_frequencies = 0, segmented_timing_hop = 0;
@@ -98,6 +110,7 @@ struct CoarseProgress {
     // Native differential products after channel isolation. This proposal
     // pass has no statistical admission authority or device-work credit.
     CoarsePhaseWork varying_proposals;
+    CoarsePhaseWork signed_gain_proposal;
     std::size_t segmented_timing_blocks = 0, segmented_timing_frequencies = 0;
     std::string_view segmented_timing_status;
     std::optional<BulkReceipt> bulk;

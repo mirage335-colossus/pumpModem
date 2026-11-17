@@ -121,7 +121,7 @@ void helper_terminal_geometry() {
     slot.format.symbol_ordinal = 7000037;
     const std::vector<Complex> zero(slot.stop_sample - slot.first_sample);
     const std::array<FineCoordinate, 1> coordinates{{{0, 0, 0, 0}}};
-    const FineObservation extent{slot.first_sample, zero.size(), FineRunKind::operational, true};
+    const FineObservation extent{slot.first_sample, zero.size(), FineRunKind::operational, true, FineLanes::fixed_and_adaptive};
     const auto workspace = fine_workspace(config, slot, extent, 1);
     FineSession session(config, slot, Crypto::amateur(), extent, zero, {}, coordinates,
                         100, 12, 1, workspace);
@@ -132,7 +132,7 @@ void helper_terminal_geometry() {
     short_slot.stop_sample = short_slot.first_sample + 13;
     short_slot.quiet_first_sample = short_slot.first_sample;
     short_slot.quiet_stop_sample = short_slot.stop_sample;
-    const FineObservation short_extent{short_slot.first_sample, 13, FineRunKind::operational, true};
+    const FineObservation short_extent{short_slot.first_sample, 13, FineRunKind::operational, true, FineLanes::fixed_and_adaptive};
     rejects_with([&] { (void)fine_workspace(config, short_slot, short_extent, 1); },
                  "cannot resolve DATA and Helper bands",
                  "workspace admission must reject an unresolvable real DFT before constructing a receiver");
@@ -300,7 +300,7 @@ struct FineOverlapGate {
 
 void compiled_observation_overlap() {
     const Fixture f(240, 60);
-    const FineObservation extent{f.slot.first_sample + 2 * f.fs, 3 * f.fs + 17, FineRunKind::probe, true};
+    const FineObservation extent{f.slot.first_sample + 2 * f.fs, 3 * f.fs + 17, FineRunKind::probe, true, FineLanes::fixed_and_adaptive};
     struct Result {
         ReceiverSlotScore score;
         FineProgress progress;
@@ -432,7 +432,7 @@ void terminal_projection_boundaries() {
         witness->quiet_stop = test.rows - 1;
         witness->variance = config.noise_variance;
         config.bulk_backend = std::make_shared<ProjectionWitnessBackend>(witness);
-        const FineObservation extent{slot.first_sample, test.rows, FineRunKind::probe, true};
+        const FineObservation extent{slot.first_sample, test.rows, FineRunKind::probe, true, FineLanes::fixed_and_adaptive};
         const auto workspace = fine_workspace(config, slot, extent, 1);
         rejects<ReceiverWorkspaceError>([&] {
             FineSession undersized(config, slot, Crypto::amateur(), extent, input, {}, coordinates,
@@ -469,11 +469,15 @@ void production_equivalence() {
     const auto bound = fine_workspace(f.config, f.slot, 1);
     ReceiverSlotScore direct;
     score_fine(f.config, f.slot, f.key, f.iq, f.coordinates, 100, 12, 1, direct, bound, {});
-    check(direct.complete && direct.bit_evidence[1] > direct.bit_evidence[0],
+    check(direct.complete && !direct.adaptive_diagnostics &&
+          direct.bit_evidence[1] > direct.bit_evidence[0],
           "whole-slot production wrapper must recover the reference score ordering");
 
-    const FineObservation observation{f.slot.first_sample, f.iq.size(), FineRunKind::operational, true};
+    const FineObservation observation{f.slot.first_sample, f.iq.size(), FineRunKind::operational, true, FineLanes::fixed_and_adaptive};
     const auto measured_bound = fine_workspace(f.config, f.slot, observation, 1);
+    ReceiverSlotScore full;
+    score_fine(f.config, f.slot, f.key, f.iq, f.coordinates, 100, 12, 1, full, measured_bound, {},
+               nullptr, AffineGainEvaluation::operational, FineLanes::fixed_and_adaptive);
     rejects<ReceiverWorkspaceError>([&] {
         FineSession too_small(f.config, f.slot, f.key, observation, f.iq, {}, f.coordinates,
                               100, 12, 1, measured_bound - 1);
@@ -497,20 +501,28 @@ void production_equivalence() {
     const auto finished = split.progress();
     check(finished.observation_complete && finished.last_block_rows == f.fs / 4 + 17 &&
           finished.finished && incremental.complete, "the enlarged terminal block must be scored once");
-    check(direct.bit_evidence == incremental.bit_evidence &&
-          direct.adaptive_bit_evidence == incremental.adaptive_bit_evidence &&
-          direct.combined_bit_evidence == incremental.combined_bit_evidence &&
-          direct.quiet_modes == incremental.quiet_modes && direct.quiet_energy == incremental.quiet_energy &&
-          direct.quiet_threshold == incremental.quiet_threshold && direct.basis_rows == incremental.basis_rows &&
-          direct.adaptive_transition_edges == incremental.adaptive_transition_edges &&
-          direct.affine_blocks == incremental.affine_blocks,
-          "whole and checkpointed production evidence must match exactly");
+    check(full.adaptive_diagnostics && incremental.adaptive_diagnostics &&
+          full.bit_evidence == incremental.bit_evidence &&
+          full.adaptive_bit_evidence == incremental.adaptive_bit_evidence &&
+          full.combined_bit_evidence == incremental.combined_bit_evidence &&
+          full.quiet_modes == incremental.quiet_modes && full.quiet_energy == incremental.quiet_energy &&
+          full.quiet_threshold == incremental.quiet_threshold && full.basis_rows == incremental.basis_rows &&
+          full.adaptive_transition_edges == incremental.adaptive_transition_edges &&
+          full.affine_blocks == incremental.affine_blocks,
+          "whole and checkpointed diagnostic evidence must match exactly");
+    check(direct.bit_evidence == full.bit_evidence && direct.zero_h0_verified == full.zero_h0_verified &&
+          direct.quiet_energy == full.quiet_energy && direct.quiet_threshold == full.quiet_threshold &&
+          direct.quiet_modes == full.quiet_modes && direct.affine_blocks == full.affine_blocks &&
+          direct.consumed_samples == full.consumed_samples && direct.basis_rows == finished.initial_affine.basis_rows &&
+          direct.basis_rows < full.basis_rows && !direct.adaptive_blocks && !direct.adaptive_transition_edges &&
+          !direct.adaptive_peak_states && bound < measured_bound,
+          "fixed-only fine work must retain the same operational evidence and lease no adaptive work");
     rejects([&] { split.finish(incremental); }, "finish cannot be repeated");
 }
 
 void uninterrupted_interior_probe() {
     const Fixture f;
-    const FineObservation extent{f.slot.first_sample + 2 * f.fs + 23, 6 * f.fs, FineRunKind::probe, true};
+    const FineObservation extent{f.slot.first_sample + 2 * f.fs + 23, 6 * f.fs, FineRunKind::probe, true, FineLanes::fixed_and_adaptive};
     const auto bound = fine_workspace(f.config, f.slot, extent, 1);
     FineSession measured(f.config, f.slot, f.key, extent, f.samples(extent), {}, f.coordinates,
                          100, 12, 1, bound);
@@ -571,7 +583,7 @@ void uninterrupted_interior_probe() {
 
 void erasure_and_failure() {
     const Fixture f;
-    const FineObservation extent{f.slot.first_sample + 2 * f.fs, 2 * f.fs, FineRunKind::probe, true};
+    const FineObservation extent{f.slot.first_sample + 2 * f.fs, 2 * f.fs, FineRunKind::probe, true, FineLanes::fixed_and_adaptive};
     const auto bound = fine_workspace(f.config, f.slot, extent, 1);
     std::vector<std::uint8_t> validity(extent.rows, 1);
     validity[f.fs / 4 - 1] = validity[f.fs / 4] = 0;
@@ -586,6 +598,24 @@ void erasure_and_failure() {
           work.adaptive.transition_edges > 0 && work.initial_affine.gaussian_updates > 0 &&
           !score.all_valid && !score.noise_statistics_valid && !score.complete && score.quiet_threshold == 0,
           "erased DFT blocks must advance tracking while supplying no samples or quiet admission");
+
+    const FineObservation whole{f.slot.first_sample, f.iq.size(), FineRunKind::operational, true};
+    auto whole_validity = validity;
+    whole_validity.resize(whole.rows, 1);
+    const auto whole_bound = fine_workspace(f.config, f.slot, whole, 1);
+    FineSession fixed(f.config, f.slot, f.key, whole, f.iq, whole_validity, f.coordinates,
+                      100, 12, 1, whole_bound);
+    fixed.advance_to(whole.rows);
+    ReceiverSlotScore fixed_score;
+    fixed.finish(fixed_score);
+    const auto fixed_work = fixed.progress();
+    check(fixed_score.complete && fixed_score.consumed_samples == whole.rows &&
+          fixed_score.zero_h0_verified && !fixed_score.all_valid && !fixed_score.noise_statistics_valid &&
+          !fixed_score.adaptive_diagnostics && fixed_score.quiet_threshold == 0 &&
+          fixed_work.erased_blocks == 2 && fixed_work.requested_invalid_rows == 2 &&
+          fixed_work.additional_discarded_rows == f.fs / 2 - 2 &&
+          fixed_work.initial_affine.gaussian_updates > 0 && !fixed_work.adaptive.initial_states,
+          "fixed-only fine must finish its physical extent while denying quiet credit to erased input");
 
     std::vector<std::uint8_t> corrupt(extent.rows, 1);
     corrupt[f.fs] = 2;
@@ -609,7 +639,7 @@ void erasure_and_failure() {
 
 void cold_maximum_states() {
     const Fixture f(240, 60);
-    const FineObservation extent{f.slot.first_sample + 3 * f.fs, f.fs, FineRunKind::cold_maximum, true};
+    const FineObservation extent{f.slot.first_sample + 3 * f.fs, f.fs, FineRunKind::cold_maximum, true, FineLanes::fixed_and_adaptive};
     FineSession cold(f.config, f.slot, f.key, extent, f.samples(extent), {}, f.coordinates,
                      100, 40, 1, fine_workspace(f.config, f.slot, extent, 1));
     cold.advance_to(extent.rows);
@@ -624,6 +654,24 @@ void cold_maximum_states() {
           work.initial_affine.gaussian_updates == work.blocks * 256 * 3 * receiver_coherence_count &&
           work.cache.native_preparation_calls > 0 && !score.complete && !score.bit,
           "cold ceiling must execute actual capped emission and posterior transitions without admission");
+
+    auto fixed_extent = extent;
+    fixed_extent.lanes = FineLanes::fixed_affine;
+    const auto fixed_bound = fine_workspace(f.config, f.slot, fixed_extent, 1);
+    FineSession fixed(f.config, f.slot, f.key, fixed_extent, f.samples(extent), {}, f.coordinates,
+                      100, 40, 1, fixed_bound);
+    fixed.advance_to(extent.rows);
+    ReceiverSlotScore fixed_score;
+    fixed.finish(fixed_score);
+    const auto fixed_work = fixed.progress();
+    check(fixed_work.observation_complete && fixed_work.representative_work && fixed_work.segments == 2 &&
+          fixed_work.initial_affine.initial_states == 256 && fixed_work.initial_affine.peak_emission_states == 256 &&
+          fixed_work.initial_affine.gaussian_updates == work.initial_affine.gaussian_updates &&
+          fixed_work.initial_affine.basis_rows == work.initial_affine.basis_rows &&
+          fixed_work.initial_affine.bit_scores == work.initial_affine.bit_scores &&
+          !fixed_work.adaptive.initial_states && !fixed_work.adaptive.transition_edges &&
+          !fixed_score.adaptive_diagnostics && !fixed_score.complete && !fixed_score.bit,
+          "fixed-only cold probe must execute all 256 affine states in both segments without admission");
 }
 
 double test_log_add(double left, double right) {
@@ -643,7 +691,7 @@ void slow_gain_coherence_is_bounded_and_normalized() {
         const auto elapsed = static_cast<double>(i) / f.fs;
         samples[i] *= std::polar(1., 2.2 * std::sin(2 * std::numbers::pi * elapsed / 400.));
     }
-    const FineObservation extent{f.slot.first_sample, samples.size(), FineRunKind::probe, true};
+    const FineObservation extent{f.slot.first_sample, samples.size(), FineRunKind::probe, true, FineLanes::fixed_and_adaptive};
 
     struct Result { FineProgress progress; ReceiverSlotScore score; };
     const auto run = [&](ReceiverConfig config, unsigned workers, bool prefix,
@@ -774,7 +822,7 @@ void stationary_fading_gain_covers_short_single_tap_data() {
     };
     const auto run = [](const Fixture& f, ReceiverConfig config, unsigned workers = 1, bool prefix = false,
                         AffineGainEvaluation evaluation = AffineGainEvaluation::operational) {
-        const FineObservation extent{f.slot.first_sample, f.iq.size(), FineRunKind::operational, true};
+        const FineObservation extent{f.slot.first_sample, f.iq.size(), FineRunKind::operational, true, FineLanes::fixed_and_adaptive};
         const auto memory = fine_workspace(config, f.slot, extent, workers);
         const auto start = std::chrono::steady_clock::now();
         FineSession session(config, f.slot, f.key, extent, f.iq, {}, f.coordinates,
@@ -1181,7 +1229,7 @@ void two_tap_native_dc_projection_preserves_complete_scores() {
     config.noise_variance = std::ldexp(1., -62);
     config.time_varying_channel = true;
     config.time_varying_common_doppler_hz = config.time_varying_atmospheric_hz = .04;
-    const FineObservation extent{f.slot.first_sample,f.iq.size(),FineRunKind::operational,true};
+    const FineObservation extent{f.slot.first_sample,f.iq.size(),FineRunKind::operational,true, FineLanes::fixed_and_adaptive};
     const auto run = [&](unsigned workers, bool prefix) {
         const auto memory = fine_workspace(config,f.slot,extent,workers);
         FineSession session(config,f.slot,f.key,extent,f.iq,{},f.coordinates,100,12,workers,memory);
@@ -1367,6 +1415,64 @@ void independent_gain_keeps_full_public_prior_and_bounded_work() {
           "independent gain must charge the Gaussian determinant under zero input, with no fitted noise power");
 }
 
+void signed_gain_retains_full_unselected_mass() {
+    const Fixture f(480);
+    auto config = f.config;
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = config.time_varying_atmospheric_hz = 12;
+    config.spread_delay_seconds = .004;
+    config.spread_doppler_hz = 12;
+    // On zero IQ a very large receiver variance makes every component
+    // likelihood unity to working precision, isolating the prior weights.
+    config.noise_variance = 1e200;
+    auto slot = f.slot;
+    slot.arrival_lower_seconds = -.01;
+    slot.arrival_upper_seconds = .01;
+    auto plan = varying_fine_plan(config, slot, 2);
+    check(plan.track_frequency && plan.nominal_independent_gain_candidates == 2,
+          "signed timing fixture requires the native independent-gain route");
+    enable_midpoint_tracking(plan);
+    const std::vector<Complex> zero(f.iq.size());
+    ReceiverExecutor executor(2);
+    constexpr std::size_t lags = 3;
+    constexpr long double midpoint = 26.5L;
+    const AdmissionGrid grid(slot.arrival_lower_seconds, slot.arrival_upper_seconds,
+        config.time_varying_atmospheric_hz, config.clock_bound_ppm,
+        std::min(.01, receiver_coarse_frequency_step(slot.format, config.sample_rate_hz)));
+    const auto timing_log_count = grid.log_count() - std::log1p(2 * grid.frequency_radius);
+    const auto run = [&](bool admit_gain, std::span<const std::int64_t> choices) {
+        ReceiverSlotScore result;
+        const MidpointTrackInput public_lags{{}, lags, timing_log_count, choices, admit_gain, 0, midpoint};
+        score_varying_fine(config, slot, f.key, plan, zero, f.coordinates, {}, 100, 12, 2,
+                          result, {}, executor, nullptr, nullptr, nullptr, &public_lags);
+        return result;
+    };
+    const std::array<std::int64_t, 2> choices{0, 2};
+    const auto joint = run(true, choices);
+    const auto unavailable = run(false, {});
+    const auto unselected = run(true, {});
+    check(joint.signed_lag_gain_candidates == 2 &&
+          joint.signed_lag_gain_basis_rows == 8 * zero.size() &&
+          joint.nominal_independent_gain_bit_evidence == unselected.nominal_independent_gain_bit_evidence &&
+          joint.nominal_independent_gain_bit_evidence == unavailable.nominal_independent_gain_bit_evidence &&
+          !unselected.signed_lag_gain_candidates &&
+          unselected.varying_bit_evidence == unavailable.varying_bit_evidence &&
+          joint.varying_basis_rows == unselected.varying_basis_rows + joint.signed_lag_gain_basis_rows,
+          "retained lag atoms must retain and charge the original and subselected families");
+    const auto nominal_mass = 2 * std::exp(-timing_log_count);
+    const auto remaining = 1 - nominal_mass;
+    const auto caller = -grid.log_count();
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        check(std::abs(std::exp(joint.nominal_independent_gain_bit_evidence[bit] + caller) -
+                       nominal_mass) < 2e-12 &&
+              std::abs(std::exp(joint.signed_lag_gain_bit_evidence[bit] + caller) -
+                       remaining * choices.size() / (receiver_epoch_offsets.size() * lags)) < 2e-12,
+              "retained timing atoms must spend only their complete public finite-grid weights");
+    }
+    const std::array<std::int64_t, 2> repeated{0, 0};
+    rejects([&] { (void)run(true, repeated); }, "duplicate signed lag identifiers must fail before scoring");
+}
+
 void projected_tracking_grid_preserves_the_rounded_edge() {
     const Fixture f(1920, 6. * 2 * 1920 / 181);
     auto config = f.config;
@@ -1542,9 +1648,9 @@ private:
     IncompleteBulk fault_;
 };
 
-void incomplete_bulk_cannot_publish_quiet() {
+void incomplete_bulk_cannot_publish_quiet(FineLanes lanes) {
     const Fixture f(240, 60);
-    const FineObservation extent{f.slot.first_sample, f.iq.size(), FineRunKind::operational, true};
+    const FineObservation extent{f.slot.first_sample, f.iq.size(), FineRunKind::operational, true, lanes};
     const std::vector<Complex> noise_free(f.iq.size());
     for (const auto fault : {IncompleteBulk::mapping_only, IncompleteBulk::missing_counts,
                             IncompleteBulk::missing_statistics, IncompleteBulk::nonzero_null}) {
@@ -1595,9 +1701,11 @@ int main() {
         two_tap_native_dc_projection_preserves_complete_scores();
         tracked_span_matches_signed_correlation_without_changing_evidence();
         independent_gain_keeps_full_public_prior_and_bounded_work();
+        signed_gain_retains_full_unselected_mass();
         projected_tracking_grid_preserves_the_rounded_edge();
         added_epoch_track_keeps_prior_mass_and_work();
-        incomplete_bulk_cannot_publish_quiet();
+        incomplete_bulk_cannot_publish_quiet(FineLanes::fixed_affine);
+        incomplete_bulk_cannot_publish_quiet(FineLanes::fixed_and_adaptive);
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

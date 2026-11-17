@@ -595,6 +595,7 @@ Json profile_json(const Options& o, const Profile& profile, const ReceiverSlotPl
         {"symbol_burst_wait_bits", o.waits}, {"fec", fec_name(o.fec)}, {"compression", o.compression},
         {"bit_seconds", geometry.bit_seconds}, {"slot_interval_seconds", stride},
         {"nominal_payload_energy_seconds", geometry.nominal_payload_energy_seconds},
+        {"fine_component_omits_varying_operational_work", config.time_varying_channel},
         {"nominal_continuation_eligible", geometry.nominal_payload_energy_seconds >= 6 &&
             slot.stop_sample - slot.first_sample >= 6 * config.sample_rate_hz},
         {"source_samples", geometry.source_samples}, {"public_window_samples", slot.stop_sample - slot.first_sample},
@@ -1056,8 +1057,10 @@ Json score_json(const ReceiverSlotScore& score) {
         {"reason", score.reason}, {"operational_threshold", score.operational_threshold},
         {"operational_log_e", score.operational_log_e}, {"selected_prior_mass", score.selected_prior_mass},
         {"operational_passes_conditional_bound", score.operational_passes_conditional_bound},
-        {"bit_evidence", scores(score.bit_evidence)}, {"adaptive_bit_evidence", scores(score.adaptive_bit_evidence)},
-        {"combined_bit_evidence", scores(score.combined_bit_evidence)}, {"quiet_energy", score.quiet_energy},
+        {"bit_evidence", scores(score.bit_evidence)}, {"adaptive_diagnostics", score.adaptive_diagnostics},
+        {"adaptive_bit_evidence", score.adaptive_diagnostics ? scores(score.adaptive_bit_evidence) : Json{}},
+        {"combined_bit_evidence", score.adaptive_diagnostics ? scores(score.combined_bit_evidence) : Json{}},
+        {"quiet_energy", score.quiet_energy},
         {"quiet_threshold", score.quiet_threshold}, {"quiet_modes", score.quiet_modes},
         {"fine_candidates", score.fine_candidates}, {"adaptive_peak_states", score.adaptive_peak_states},
         {"adaptive_transition_edges", score.adaptive_transition_edges}, {"basis_rows", score.basis_rows},
@@ -1075,6 +1078,20 @@ Json score_json(const ReceiverSlotScore& score) {
             {"candidates", score.midpoint_timing_candidates}, {"workspace_bytes", score.midpoint_timing_workspace_bytes},
             {"basis_rows", score.midpoint_timing_basis_rows}, {"widened_inverses", score.midpoint_timing_widened_inverses},
             {"scored_lags", score.midpoint_timing_scored_lags}})},
+        {"signed_lag_gain", object({
+            {"proposal_status", score.signed_lag_gain_proposal_status}, {"maps", score.signed_lag_gain_proposal_maps},
+            {"available_blocks", score.signed_lag_gain_proposal_available_blocks},
+            {"sampled_blocks", score.signed_lag_gain_proposal_sampled_blocks},
+            {"scored_blocks", score.signed_lag_gain_proposal_scored_blocks},
+            {"projected_rows", score.signed_lag_gain_proposal_projected_rows},
+            {"fft_rows", score.signed_lag_gain_proposal_fft_rows},
+            {"frequency_points", score.signed_lag_gain_proposal_frequency_points},
+            {"fft_row_stages", score.signed_lag_gain_proposal_fft_stages},
+            {"score_rows", score.signed_lag_gain_proposal_score_rows},
+            {"workspace_bytes", score.signed_lag_gain_proposal_workspace_bytes},
+            {"proposal_seconds", score.signed_lag_gain_proposal_seconds},
+            {"candidates", score.signed_lag_gain_candidates}, {"basis_rows", score.signed_lag_gain_basis_rows},
+            {"bit_evidence", score.signed_lag_gain_candidates ? scores(score.signed_lag_gain_bit_evidence) : Json{}}})},
         {"tracked_frequency_bit_evidence", scores(score.tracked_frequency_bit_evidence)},
         {"operational_bit_evidence", scores(score.operational_bit_evidence)},
         {"operational_bit_log_separation", score.operational_bit_log_separation},
@@ -1139,6 +1156,9 @@ Json coarse_json(const CoarseProgress& p) {
         {"frequency_groups", g.frequency_groups}, {"arrival_points", g.arrival_points},
         {"source_rows", g.source_rows}, {"raw_template_rows", g.raw_template_rows},
         {"projected_template_rows", g.projected_template_rows}, {"projected_observation_rows", g.projected_observation_rows},
+        {"exact_render_and_projected_rows", g.exact_render_and_projected_rows},
+        {"exact_raw_column_rows", g.exact_raw_column_rows},
+        {"exact_preparation_fft_row_stages", g.exact_preparation_fft_row_stages},
         {"template_sampling_step", g.template_sampling_step}, {"fir_taps", g.fir_taps}, {"fir_fft_rows", g.fir_fft_rows},
         {"correlation_fft_rows", g.correlation_fft_rows}, {"maximum_frequency_step_hz", g.maximum_frequency_step_hz},
         {"projected_sample_rate_hz", g.projected_sample_rate_hz}, {"clock_gap_ppm", g.clock_gap_ppm},
@@ -1156,6 +1176,7 @@ Json coarse_json(const CoarseProgress& p) {
         {"template_bank", coarse_counts(p.template_bank)}, {"observation", coarse_counts(p.observation)},
         {"lag_setup", coarse_counts(p.lag_setup)}, {"bulk_prepare", coarse_counts(p.bulk_prepare)},
         {"search", coarse_counts(p.search)}, {"selection", coarse_counts(p.selection)},
+        {"signed_gain_proposal", coarse_counts(p.signed_gain_proposal)},
         {"bulk", p.bulk ? bulk_json(*p.bulk) : Json{}}});
 }
 
@@ -1199,6 +1220,7 @@ Json fine_lane(const FineLaneWork& lane) {
 Json fine_json(const FineProgress& p) {
     const auto& cache = p.cache;
     const auto& t = p.times;
+    const bool adaptive = p.observation.lanes == FineLanes::fixed_and_adaptive;
     return object({{"observation_first_sample", p.observation.first_sample}, {"observation_rows", p.observation.rows},
         {"available_rows", p.available_rows}, {"processed_rows", p.processed_rows}, {"segments", p.segments},
         {"blocks", p.blocks}, {"block_rows", p.block_rows}, {"segment_rows", p.segment_rows},
@@ -1211,7 +1233,8 @@ Json fine_json(const FineProgress& p) {
         {"delay_step_seconds", p.delay_step_seconds}, {"rate_step_ppm", p.rate_step_ppm}, {"rate_radius", p.rate_radius},
         {"public_slot", p.public_slot}, {"pattern_epoch", p.pattern_epoch}, {"symbol_ordinal", p.symbol_ordinal},
         {"observation_complete", p.observation_complete}, {"representative_work", p.representative_work},
-        {"finished", p.finished}, {"initial_affine", fine_lane(p.initial_affine)}, {"adaptive", fine_lane(p.adaptive)},
+        {"finished", p.finished}, {"initial_affine", fine_lane(p.initial_affine)},
+        {"adaptive_diagnostics", adaptive}, {"adaptive", adaptive ? fine_lane(p.adaptive) : Json{}},
         {"slow_gain_coherence_seconds", scores(p.slow_gain_coherence_seconds)},
         {"cache", object({{"calls", cache.calls}, {"interpolated_rows", cache.interpolated_rows}, {"direct_rows", cache.direct_rows},
             {"prepared_calls", cache.prepared_calls}, {"prepared_mapped_columns", cache.prepared_mapped_columns},
@@ -1382,7 +1405,7 @@ void fine_run(Json& report, const Options& o, const Profile& profile, const Rece
     std::size_t previous = 0;
     const std::array checkpoints{continued ? 2 * fs : extent.rows, 3 * fs, 4 * fs, 6 * fs};
     std::uint64_t prefix_fills = 0;
-    std::uint64_t affine_positive = 0, adaptive_positive = 0;
+    std::uint64_t affine_positive = 0;
     bool complete_checkpoints = true;
     for (unsigned i = 0; i < (continued ? checkpoints.size() : 1); ++i) {
         const auto timer = i == 0 ? prefix_time : Timer{};
@@ -1399,10 +1422,8 @@ void fine_run(Json& report, const Options& o, const Profile& profile, const Rece
               elapsed, static_cast<double>(endpoint - previous) / fs, std::move(work));
         previous = endpoint;
         complete_checkpoints &= progress.processed_rows == endpoint && progress.representative_work &&
-            progress.initial_affine.positive_basis_blocks > affine_positive &&
-            progress.adaptive.positive_basis_blocks > adaptive_positive;
+            progress.initial_affine.positive_basis_blocks > affine_positive;
         affine_positive = progress.initial_affine.positive_basis_blocks;
-        adaptive_positive = progress.adaptive.positive_basis_blocks;
     }
     const Timer finish_time;
     ReceiverSlotScore score;
@@ -1423,7 +1444,7 @@ void fine_run(Json& report, const Options& o, const Profile& profile, const Rece
     phase(report, "fine_finish", total_finish, 0, std::move(final_work));
     const auto qualifying_cache_progress = final_progress.cache.native_preparation_calls > prefix_fills;
     const bool cold_covered = final_progress.initial_affine.initial_states == 256 &&
-        final_progress.adaptive.initial_states == 256 && final_progress.adaptive.transition_edges > 0 &&
+        final_progress.initial_affine.peak_emission_states == 256 &&
         final_progress.segments == 2;
     const bool erased = final_progress.requested_invalid_rows == 2 && final_progress.erased_blocks >= 2;
     const bool work_complete = final_progress.observation_complete &&
@@ -1432,7 +1453,7 @@ void fine_run(Json& report, const Options& o, const Profile& profile, const Rece
         (o.stratum != "cold-maximum" || cold_covered) && (o.stratum != "erasure" || erased);
     auto result = object({{"score", score_json(score)}, {"stratum", o.stratum},
         {"work_complete", work_complete}, {"checkpoints_complete", complete_checkpoints},
-        {"continued_cache_fill", qualifying_cache_progress}, {"maximum_state_transition_covered", cold_covered},
+        {"continued_cache_fill", qualifying_cache_progress}, {"maximum_fixed_affine_states_covered", cold_covered},
         {"explicit_erasure_covered", erased}, {"independent_holdout_requires_fresh_seed", true},
         {"coordinate_scope", o.work_only ? "declared_public_work_coordinate" : "complete_public_selection"},
         {"receiver_decision_eligible", extent.kind == FineRunKind::operational},

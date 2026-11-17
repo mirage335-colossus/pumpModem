@@ -1307,9 +1307,10 @@ struct Controller::Impl {
                 <<" · Helper"<<(step.helper_overlapped?" (within coarse)":"")<<"/coarse/fine "
                 <<step.helper_seconds<<" / "<<step.coarse_seconds<<" / "<<step.fine_seconds
                 <<" s · "<<step.fine_candidates<<" candidates / "<<step.workers<<" workers"
-                <<" · affine diagnostic ["<<step.bit_evidence[0]<<", "<<step.bit_evidence[1]<<"]"
-                <<" · adaptive diagnostic ["<<step.adaptive_bit_evidence[0]<<", "<<step.adaptive_bit_evidence[1]
-                <<"] · combined diagnostic ["<<step.combined_bit_evidence[0]<<", "<<step.combined_bit_evidence[1]<<"]";
+                <<" · affine diagnostic ["<<step.bit_evidence[0]<<", "<<step.bit_evidence[1]<<"]";
+            if(step.adaptive_diagnostics)
+                text<<" · adaptive diagnostic ["<<step.adaptive_bit_evidence[0]<<", "<<step.adaptive_bit_evidence[1]
+                    <<"] · combined diagnostic ["<<step.combined_bit_evidence[0]<<", "<<step.combined_bit_evidence[1]<<"]";
             if(!step.helper_status.empty())text<<" · "<<step.helper_status;
             if(!step.varying_status.empty())text<<" · "<<step.varying_status;
             if(!step.drift_status.empty())text<<" · "<<step.drift_status;

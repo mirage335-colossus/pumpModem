@@ -89,7 +89,11 @@ with queued roots using otherwise unneeded lanes. Within a slot, serial steps
 Helper acquisition's pilot fits, refinements and branch filters as waves; the
 observation filter beside the template bank; and the fine fixed-affine lane,
 the next dispatch's observation and later source tiles beside the
-chronological adaptive lane. A slot whose lease has room also acquires beside
+chronological adaptive lane in explicit fine diagnostic mode. Ordinary
+operational fine scoring uses the fixed-affine `FineLanes` branch and skips
+adaptive per-block prediction and pruning; separately configured varying,
+drift and coherent-gain alternatives remain independent branches. A slot whose
+lease has room also acquires beside
 coarse preparation, which then plans its frequency grid afterwards.
 Per-owner lane/scratch limits are fixed DSP bounds, not worker permits held
 exclusively through a slot. For an incoming window, admission now quotes its
@@ -320,15 +324,58 @@ behavior fills the bound. The finite source-bound full-stream cohort passes:
 both matched seed-9202 polarities and both fresh seed-9601 polarities decode
 5/5, while the seed-9602 noise control remains 5/5 QUIET. This supports the
 sampled standard-Gaussian histories only, not all plasma, arbitrary clock-age,
-all-delay or weak-Helper cases. The two scoped positive-delay Helper checks
-pass, the current GUI suite passes 28/28, and the final appraisal/application
-checks pass (5/5 plus integration). These are scoped software checks, not
-broader channel-sensitivity qualification. See the
+all-delay or weak-Helper cases. At the prior checkpoint, the two scoped
+positive-delay Helper checks passed, GUI passed 28/28, and appraisal/application
+checks passed (5/5 plus integration). Those checks predate the later receiver
+patch; final-source group outcomes are recorded below. These are scoped software
+checks, not broader channel-sensitivity qualification. See the
 [source-bound HF Worst follow-through](validation.md#hf-worst-30-hz--7-ms-follow-through--16-november-2026).
 This is a bounded receiver policy, not authentication or a claim that all
 wrong-bit cases are resolved. See the dated
 [short-model and clock-support findings](validation.md#bounded-short-model-competition--16-november-2026)
 for source-bound outcomes and measured cost limits.
+
+The base-`6ac502a` late-clock baseline exposed a separate work ceiling: a
+slot-12, ordinal-12 severe long bit with ±150 ppm public clock support predicted
+41.8M exact-column templates and was refused at its old 30M hard limit before
+IQ scoring. Current production removes that absolute refusal while retaining
+the mapped-route heuristic and 120M mapped-route limit, full workspace/FIR/grid
+checks and pre-DSP cancellation. A measured production build with the bounded
+signal-derived clock proposer scored the original two full-capture hashes
+without overrides: DATA bit 0 at 0 ppm (69.873, 41.269 s) and −100 ppm
+(63.708, 46.098 s); the older fixed-only run was ambiguous on the latter
+capture. The 548-lag × 13-CFO
+proposal ranks in 0.303/0.346 s and the pair totals 87.384 s. A 278.4-second
+bit preparation covers all 156 columns under the 3-GiB DSP lease, but stops
+before IQ scoring. Evaluator-known timing remains oracle diagnostic evidence.
+Ordinary fine scoring uses the fixed-affine `FineLanes` branch and skips its
+adaptive per-block branch; other separately admitted channel alternatives are
+unchanged. Adaptive mode remains explicit for diagnostics. Strict capacity and
+forecast consumers require `adaptive_diagnostics=false`, null adaptive
+lane/score fields and zero adaptive counters. The fixed-only Helper replay
+preserves selected DATA and QUIET outcomes to 12 significant digits, with
+slightly slower slot times. The clock-pair binary predates final delay-tier
+removal; final-source triad, GUI, appraisal and repeated-bit checks now pass as
+recorded in validation. Capacity remains unqualified, and these probes do not
+qualify long-run reception or general availability.
+The previously reported +12 ambiguous / +20 DATA delay pair used a fixture
+without the canonical 0.25 s preroll: its direct-path start fell outside the
+declared arrival bounds and establishes no in-bound delay floor. The frozen
+source now passes corrected canonical 15.75/5.25/10.5 ms bit-0 apertures,
+15.75 ms bit 1 and true absence QUIET, each at +12 dB-Hz with the direct start
+inside public rows 480–499.2. A separate age-1,800 s / ordinal-12 case at
+−100 ppm and 15.75 ms also scores DATA with matched noise QUIET. These finite
+single-bit outcomes also survive a bounded common-frequency motion replay
+(log-e 37.8052 vs 21.493) with sampled Doppler −29.83236…+29.84666 Hz
+and unchanged noise/energy. On the frozen source, triad passes 40/40, GUI
+28/28 and appraisal 5/5; the candidate-only five-attempt-per-polarity replay
+also passes (see the [source-bound record](validation.md#final-source-repeated-long-alarm-check--16-november-2026)).
+These finite outcomes do not qualify full text messages, capacity or physical
+availability.
+Weak-Helper fallback and common-frequency tests pass selected synthetic cases,
+but the latter costs more when stale Helper support misses DATA. See the
+[late-clock/delay/Helper record](validation.md#late-clock-and-interior-delay-probes--16-november-2026)
+for conditions, receipts and limits.
 The [repeated-bit diagnosis](validation.md#repeated-single-bit-channel-diagnosis--16-november-2026)
 records the nominal-epoch omission and subsequent calendar-age clock-resolution
 diagnosis motivating these two bounded timing supplements. Sequential and

@@ -170,10 +170,23 @@ length must not choose the receiver's hypotheses, endpoint or decision. Coarse
 proposals may select fine candidates, but coarse and refined scores from the
 same observations must not be added as independent evidence.
 
-Operational DATA admission and final bit selection use the fixed initial-affine
-lane with the complete public-prior correction. The adaptive lane and combined
-scores remain diagnostic but are fully executed and charged. Fine Gaussian
-processing defaults explicitly to FP64 after a reproduced high-SNR FP32
+Ordinary operational DATA admission and final bit selection use the fixed
+initial-affine `FineLanes` branch with the complete public-prior correction;
+the current working source skips its adaptive-state prediction and scoring.
+Other separately configured varying, drift and coherent-gain alternatives are
+unchanged. An explicit diagnostic route can still run the adaptive branch and
+combined scores.
+Native capacity consumers require its mode flag to be false, adaptive lane and
+score fields to be explicitly null, and adaptive work counters to be zero.
+They also require an explicit `fine_component_omits_varying_operational_work`
+configuration marker. If configured varying production work was omitted by a
+fixed-affine fine-component measurement, the consumer records that work as
+missing and cannot report a complete capacity result; an absent marker is also
+unqualified.
+Historical adaptive-path costs remain diagnostic evidence and must not be
+included in a fixed-only operational capacity estimate; conversely, a
+fixed-only measurement does not qualify the adaptive diagnostic route.
+Fine Gaussian processing defaults explicitly to FP64 after a reproduced high-SNR FP32
 innovation failure; numerical guards remain enforced and precision does not
 change in response to an observation. This localized numerical requirement does
 not prohibit qualified lower-precision bulk work; see the

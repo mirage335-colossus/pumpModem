@@ -6,7 +6,8 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from triad_case_capacity import (INTERVAL, RATIO, _compatible_work, _continued_component, _stream_plan, _stream_ratios,
-                                 combine_components, fine_continuation, slot_costs, worker_plan)
+                                 combine_components, direct_fine, fine_continuation, slot_costs, worker_plan)
+from triad_case_capacity import varying_scope_gap
 from triad_native import ProbeError
 
 
@@ -21,7 +22,8 @@ def continuation_receipt():
                 "block_rows": 375, "segment_rows": 750, "tap_count": 2,
                 "delay_step_seconds": .0001, "rate_step_ppm": .001, "rate_radius": 2,
                 "checkpoint_seconds": seconds, "processed_rows": seconds * 1500,
-                "representative_work": True, "initial_affine": lane.copy(), "adaptive": lane.copy(),
+                "representative_work": True, "initial_affine": lane.copy(),
+                "adaptive_diagnostics": False, "adaptive": None,
                 "cache": {"tile_samples": 1024, "cache_limit_bytes": 2**20, "dense_factor": 1,
                           "dense_sample_rate_hz": 1500, "fallback_reason": None,
                           "cache_misses": fills, "native_preparation_calls": fills,
@@ -33,7 +35,10 @@ def continuation_receipt():
     return {"status": "complete", "configuration": {
                 "clock_bound_ppm": 1, "sample_rate_hz": 1500, "public_window_samples": 12_000},
             "result": {"work_complete": True, "checkpoints_complete": True,
-                       "continued_cache_fill": True, "receiver_decision_eligible": False},
+                       "continued_cache_fill": True, "receiver_decision_eligible": False,
+                       "score": {"adaptive_diagnostics": False, "adaptive_bit_evidence": None,
+                                 "combined_bit_evidence": None, "adaptive_blocks": 0,
+                                 "adaptive_peak_states": 0, "adaptive_transition_edges": 0}},
             "phases": [
                 phase("input_validation", .01, 8, {}),
                 phase("helper", .02, 8, {}),
@@ -51,6 +56,12 @@ def continuation_receipt():
 
 
 class NativeWorkTests(unittest.TestCase):
+    def test_fixed_affine_component_requires_explicit_varying_work_scope(self):
+        self.assertIsNone(varying_scope_gap({"fine_component_omits_varying_operational_work": False}))
+        self.assertIn("Configured varying", varying_scope_gap(
+            {"fine_component_omits_varying_operational_work": True}))
+        self.assertIn("lacks an explicit", varying_scope_gap({}))
+
     def test_same_session_continuation_charges_prefix_and_finish_once(self):
         row = fine_continuation(continuation_receipt())
         self.assertEqual(row["continuation_rates"], [.1, .1, .1])
@@ -58,25 +69,23 @@ class NativeWorkTests(unittest.TestCase):
         self.assertAlmostEqual(summary[RATIO], (.2 + .05 + .1 * 6) / 20)
         self.assertEqual(summary["realtime_status"], "pass")
 
-    def test_retained_and_emission_state_counts_have_separate_drift_limits(self):
+    def test_fixed_affine_state_counts_remain_exact_across_continuation(self):
         def receipt_with_counts(retained, emitted):
             receipt = continuation_receipt()
             for phase in receipt["phases"][-5:]:
-                phase["work"]["adaptive"].update(states=retained, last_emission_states=emitted)
+                phase["work"]["initial_affine"].update(states=retained, last_emission_states=emitted)
             return receipt
 
-        stable = fine_continuation(receipt_with_counts(64, 88))
-        self.assertTrue(_compatible_work(stable, fine_continuation(receipt_with_counts(64, 98))))
-        for key, retained, emitted in (("states", 48, 88), ("last_emission_states", 64, 116)):
+        stable = fine_continuation(receipt_with_counts(64, 64))
+        self.assertTrue(_compatible_work(stable, fine_continuation(receipt_with_counts(64, 64))))
+        for key, retained, emitted in (("states", 48, 64), ("last_emission_states", 64, 80)):
             with self.subTest(counter=key):
-                different_regime = fine_continuation(receipt_with_counts(retained, emitted))
-                self.assertFalse(_compatible_work(stable, different_regime))
-                drift = receipt_with_counts(64, 88)
-                drift["phases"][-3]["work"]["adaptive"][key] = (
+                drift = receipt_with_counts(64, 64)
+                drift["phases"][-3]["work"]["initial_affine"][key] = (
                     retained if key == "states" else emitted)
-                with self.assertRaisesRegex(ProbeError, "adaptive state geometry drifted"):
+                with self.assertRaisesRegex(ProbeError, "initial_affine state geometry drifted"):
                     fine_continuation(drift)
-        invalid_affine = receipt_with_counts(64, 88)
+        invalid_affine = receipt_with_counts(64, 64)
         for phase in invalid_affine["phases"][-5:]:
             phase["work"]["initial_affine"]["last_emission_states"] = 16
         with self.assertRaisesRegex(ProbeError, "initial_affine state geometry drifted"):
@@ -88,11 +97,11 @@ class NativeWorkTests(unittest.TestCase):
             phase = next(row for row in receipt["phases"] if row["name"] == "fine_continuation")
             work = phase["work"]
             if change == "state":
-                work["adaptive"]["last_emission_states"] = 20
+                work["initial_affine"]["last_emission_states"] = 20
             elif change == "fixed_state_identity":
                 work["initial_affine"]["states_sha256"] = "b" * 64
             elif change == "finish_state_identity":
-                receipt["phases"][-1]["work"]["adaptive"]["states_sha256"] = "b" * 64
+                receipt["phases"][-1]["work"]["initial_affine"]["states_sha256"] = "b" * 64
             elif change == "address":
                 work["pattern_epoch"] += 1
             elif change == "cache":
@@ -103,6 +112,43 @@ class NativeWorkTests(unittest.TestCase):
                 phase["represented_seconds"] = 2
             with self.subTest(change=change), self.assertRaises(ProbeError):
                 fine_continuation(receipt)
+
+    def test_capacity_continuation_requires_explicit_fixed_only_mode(self):
+        mutations = (
+            lambda receipt: receipt["phases"][-1]["work"].pop("adaptive_diagnostics"),
+            lambda receipt: receipt["phases"][-1]["work"].pop("adaptive"),
+            lambda receipt: receipt["phases"][-1]["work"].update(adaptive_diagnostics=True),
+            lambda receipt: receipt["phases"][-1]["work"].update(adaptive={}),
+            lambda receipt: receipt["result"]["score"].pop("combined_bit_evidence"),
+            lambda receipt: receipt["result"]["score"].update(adaptive_diagnostics=True),
+            lambda receipt: receipt["result"]["score"].update(adaptive_transition_edges=1),
+        )
+        for mutate in mutations:
+            receipt = continuation_receipt()
+            mutate(receipt)
+            with self.subTest(mutation=mutate), self.assertRaises(ProbeError):
+                fine_continuation(receipt)
+
+    def test_cold_maximum_requires_two_segments_of_fixed_256_state_work(self):
+        def receipt():
+            fine_work = {"segments": 2, "initial_affine": {"initial_states": 256,
+                          "peak_emission_states": 256}, "adaptive_diagnostics": False, "adaptive": None}
+            finish = fine_work | {"finished": True, "observation_complete": True}
+            return {"status": "complete", "result": {"maximum_fixed_affine_states_covered": True,
+                    "explicit_erasure_covered": False, "score": {"adaptive_diagnostics": False,
+                    "adaptive_bit_evidence": None, "combined_bit_evidence": None, "adaptive_blocks": 0,
+                    "adaptive_peak_states": 0, "adaptive_transition_edges": 0}},
+                    "phases": [{"name": "fine_work", "wall_seconds": .2, "work": fine_work},
+                               {"name": "fine_finish", "wall_seconds": .05, "work": finish}]}
+        current = receipt()
+        self.assertAlmostEqual(direct_fine(current, "cold-maximum")[0], .25)
+        for mutation in (lambda row: row["phases"][0]["work"].update(segments=1),
+                         lambda row: row["phases"][0]["work"]["initial_affine"].update(peak_emission_states=255),
+                         lambda row: row["result"].pop("maximum_fixed_affine_states_covered")):
+            damaged = receipt()
+            mutation(damaged)
+            with self.subTest(mutation=mutation), self.assertRaises(ProbeError):
+                direct_fine(damaged, "cold-maximum")
 
     def test_coarse_cost_counts_every_completed_tile_once(self):
         original = continuation_receipt()

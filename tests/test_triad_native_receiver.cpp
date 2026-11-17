@@ -1,5 +1,6 @@
 #include "datapump/triad_receiver.hpp"
 #include "datapump/triad_stream.hpp"
+#include "datapump/triad_stream_receiver.hpp"
 #include "../src/search_fft.hpp"
 #include "../src/triad_receiver_coarse.hpp"
 #include "../src/triad_receiver_driver.hpp"
@@ -152,15 +153,15 @@ void complete_data() {
           result.all_valid && result.zero_h0_verified, "encrypted DATA one must be admitted");
     check(result.index == encrypted.slot.index && result.consumed_samples == encrypted.iq.size(),
           "complete score must retain the public slot identity and physical extent");
-    check(result.adaptive_transition_edges > 0 && result.adaptive_peak_states > 0 &&
-          result.affine_blocks == result.adaptive_blocks && result.affine_blocks > 1 &&
+    check(!result.adaptive_diagnostics && !result.adaptive_transition_edges &&
+          !result.adaptive_peak_states && !result.adaptive_blocks && result.affine_blocks > 1 &&
           result.coarse_workspaces >= receiver_epoch_offsets.size() * 2,
-          "complete score must execute the full coarse and both persistent fine lanes");
+          "complete score must execute the full coarse and operational affine lane without adaptive diagnostics");
     check(result.selected_prior_mass > 0 && result.selected_prior_mass < 1,
-          "adaptive selection must retain the original public grid prior");
+          "fine selection must retain the original public grid prior");
     const auto serial = score(encrypted);
     check(serial.bit_evidence == result.bit_evidence &&
-          serial.adaptive_bit_evidence == result.adaptive_bit_evidence &&
+          serial.operational_bit_evidence == result.operational_bit_evidence &&
           serial.quiet_energy == result.quiet_energy && serial.bit == result.bit,
           "same-window evidence must match under independent worker shares");
 }
@@ -1180,8 +1181,7 @@ void helper_composite_observation() {
     };
     for (std::size_t i = 0; i < active.bit_evidence.size(); ++i)
         check(score_close(active.bit_evidence[i], active_fp64.bit_evidence[i]) &&
-              score_close(active.adaptive_bit_evidence[i], active_fp64.adaptive_bit_evidence[i]) &&
-              score_close(active.combined_bit_evidence[i], active_fp64.combined_bit_evidence[i]),
+              score_close(active.operational_bit_evidence[i], active_fp64.operational_bit_evidence[i]),
               "automatic post-filter FP32 changed complete DATA evidence beyond tolerance");
     check(score_close(active.operational_log_e, active_fp64.operational_log_e) &&
           score_close(active.operational_threshold, active_fp64.operational_threshold),
@@ -1388,7 +1388,7 @@ void native_precision_near_decision_sides() {
         };
         for (std::size_t i = 0; i < low.bit_evidence.size(); ++i)
             check(close(low.bit_evidence[i], full.bit_evidence[i]) &&
-                  close(low.combined_bit_evidence[i], full.combined_bit_evidence[i]),
+                  close(low.operational_bit_evidence[i], full.operational_bit_evidence[i]),
                   "near-decision FP32 changed the complete DATA evidence beyond tolerance");
         check(close(low.operational_log_e, full.operational_log_e) &&
               close(low.operational_threshold, full.operational_threshold),
@@ -1433,6 +1433,91 @@ void native_precision_near_decision_sides() {
         }
     }
 }
+void signed_gain_timing_and_exact_admission() {
+    using namespace receiver_detail;
+    PublicProfileConfig profile_config;
+    auto& format = profile_config.format;
+    format.sample_rate = 1920;
+    format.inner_rate_hz = 36;
+    format.added_symbols = 10;
+    format.bit_seconds = 278.4;
+    format.epoch = 1793404800;
+    format.encrypt = true;
+    profile_config.data_if_hz = 240;
+    profile_config.clock_bound_ppm = 150;
+    profile_config.spread_delay_ms = 7;
+    profile_config.arrival_high_seconds = .01;
+    profile_config.cfo_bound_hz = 90;
+    profile_config.capture_lead_seconds = .25;
+    ReceiverConfig config;
+    config.sample_rate_hz = format.sample_rate;
+    config.data_if_hz = profile_config.data_if_hz;
+    config.clock_bound_ppm = profile_config.clock_bound_ppm;
+    config.spread_delay_seconds = .007;
+    config.time_varying_atmospheric_hz = 90;
+    config.time_varying_common_doppler_hz = 90;
+    config.time_varying_channel = true;
+    config.random_doppler_width_hz = 30;
+    config.noise_variance = .003;
+    const std::array intervals{FrequencyInterval{0, 0}};
+    const PublicProfile long_profile(profile_config);
+    const auto long_slot = make_receiver_slot_plan(long_profile, config, 6);
+    const auto long_plan = coarse_work_plan(config, long_slot, intervals, 2);
+    check(long_plan.template_sampling_step == 1 &&
+          long_plan.workspaces == 6 * receiver_epoch_offsets.size() && long_plan.rays == 2 &&
+          long_plan.exact_raw_column_rows > 60'000'000 &&
+          long_plan.exact_render_and_projected_rows > 30'000'000 &&
+          long_plan.exact_preparation_fft_row_stages > (std::uint64_t{1} << 32) &&
+          receiver_slot_workspace(config, long_slot, 2) > long_plan.workspace_reserved_bytes,
+          "long late-clock exact work must retain every ray/clock/epoch and the full memory lease");
+
+    format.bit_seconds = 1.;
+    const PublicProfile short_profile(profile_config);
+    const auto slot = make_receiver_slot_plan(short_profile, config, 5);
+    const auto key = Crypto::amateur();
+    PatternSource source(slot.format, key, 0);
+    std::vector<Complex> iq(slot.stop_sample - slot.first_sample);
+    constexpr long double realized_scale = 1 - 100e-6L;
+    check(iq.size() < 25'000, "signed gain timing fixture must remain bounded");
+    for (std::size_t i = 0; i < iq.size(); ++i) {
+        const auto t = i / static_cast<long double>(format.sample_rate) - slot.window_capture_lead_seconds;
+        const auto position = (t * realized_scale - slot.source_start_seconds) * format.sample_rate;
+        const auto delayed = position - config.spread_delay_seconds * realized_scale * format.sample_rate;
+        const auto phase = std::polar(1., .4 + .08 * std::sin(.013 * i));
+        iq[i] = source.sample_at(position) + .5 * phase * source.sample_at(delayed);
+    }
+    const auto quote = coarse_workspace(config, slot, 2, {}, MidpointTimingEvaluation::verify);
+    rejects<ReceiverWorkspaceError>([&] {
+        (void)score_coarse(config, slot, key, iq, intervals, 2, quote - 1, {}, nullptr, MidpointTimingEvaluation::verify);
+    }, "signed gain timing must not run one byte below its full coarse lease");
+    const auto coarse = score_coarse(config, slot, key, iq, intervals, 2, quote,
+                                     {}, nullptr, MidpointTimingEvaluation::verify);
+    const auto& timing = *coarse.midpoint_timing;
+    check(timing.lag_count > coarse.arrival_points && timing.gain_proposal_count > 0 &&
+          timing.gain_proposal_count <= 2 && timing.gain_verified_correlations > 0 &&
+          timing.gain_blocks <= timing.gain_sampled_blocks &&
+          timing.gain_sampled_blocks <= timing.gain_available_blocks &&
+          coarse.work.signed_gain_proposal.operations.fft_row_stages == timing.gain_fft_row_stages,
+          "signed rank must check linear correlations and charge real work across the complete lag family");
+    const auto strongest = timing.gain_proposals[0].coordinate;
+    const auto lag = timing.gain_proposal_lags[0];
+    check(strongest == midpoint_timing_coordinate(slot, timing.middle_seconds, config.clock_bound_ppm,
+              static_cast<std::size_t>(coarse.projected_sample_rate_hz), lag, 0),
+          "the retained timing atom must belong to the predeclared finite lag dictionary");
+    for (const auto t : {slot.source_start_seconds, slot.source_start_seconds + short_profile.geometry().bit_seconds}) {
+        const auto error = strongest.arrival_seconds + t * (1 / (1 + strongest.clock_ppm * 1e-6L) - 1 / realized_scale);
+        check(std::abs(error) < .5 / short_profile.geometry().fine_chip_rate_hz,
+              "receiver-derived signed timing must support both ends of the aged aperture");
+    }
+    const auto receiver_bound = receiver_slot_workspace(config, slot, 2);
+    const auto result = score_receiver_slot(config, slot, key, iq, {}, 2, receiver_bound);
+    check(result.complete && result.all_valid && result.zero_h0_verified &&
+          result.decision == SlotDecision::data && result.bit == 0 &&
+          result.signed_lag_gain_candidates == result.signed_lag_gain_proposal_maps &&
+          result.signed_lag_gain_candidates > 0 &&
+          result.signed_lag_gain_basis_rows == 4 * result.signed_lag_gain_candidates * iq.size(),
+          "the ordinary aged-clock receiver must score the nominated family under both bit hypotheses");
+}
 }
 
 int main(int argc, char** argv) {
@@ -1451,6 +1536,7 @@ int main(int argc, char** argv) {
             else if (part == "fading") weak_diffuse_fading_recovery();
             else if (part == "late-helper") late_helper_timing_recovery(false);
             else if (part == "late-helper-delay") late_helper_timing_recovery(true);
+            else if (part == "signed-gain-timing") signed_gain_timing_and_exact_admission();
             else throw std::runtime_error("unknown native receiver test stratum");
             return 0;
         }

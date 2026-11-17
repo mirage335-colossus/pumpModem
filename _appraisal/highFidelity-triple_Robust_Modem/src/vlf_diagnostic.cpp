@@ -208,7 +208,8 @@ void diagnose_vlf_slot(datapump::triad::probe::Json& report, const ReceiverConfi
     if (offset < slot.quiet_first_sample - slot.first_sample ||
         offset + rows > slot.quiet_stop_sample - slot.first_sample)
         throw datapump::Error("VLF fine crop lies outside the public DATA aperture");
-    FineObservation extent{slot.first_sample + offset, rows, FineRunKind::probe, true};
+    FineObservation extent{slot.first_sample + offset, rows, FineRunKind::probe, true,
+                           FineLanes::fixed_and_adaptive};
     report["fine_observation"] = object({{"first_sample", extent.first_sample}, {"rows", rows},
                                          {"block_rows", geometry.block_rows}, {"segment_rows", geometry.segment_rows},
                                          {"pulse_shape", slot.format.pulse_shape == PulseShape::Rrc ? "rrc" : "tapered_rrc"}});

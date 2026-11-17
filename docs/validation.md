@@ -134,25 +134,27 @@ moving bit zero, GUI D=21 scores 25.7585 with actual bounded phase-rate
 support −29.83236…+29.84666 Hz. Each exceeds the 21.493 presence threshold,
 but none independently proves complete reception. The earlier f0-only
 candidate failed preservation and is retired; no additional delay-grid search
-is implemented or needed for the observed case. `./build.sh test triad` passed 38/38 in the
-cache-fixed run; the preceding `final-triad.log` attempt failed during
+is implemented or needed for the observed case. At the prior checkpoint,
+`./build.sh test triad` passed 38/38 in the cache-fixed run; the preceding `final-triad.log` attempt failed during
 read-only ccache setup and executed zero tests. The refreshed lightweight
-runner passes 173/173 in 1.144 s. The positive-delay Helper stratum passes
-2/2 after a combined 55.57 s attempt came too close to its 60 s harness timeout:
-the split checks took 16.13 s for the original case and 36.49 s for the new
-late-helper-delay case. Those two cases complete the scoped Helper stratum;
-there is no further Helper check pending. The current GUI suite passes 28/28
-in 154.62 s (`final-gui.log`). Final appraisal tests pass 5/5 in 69.55 s,
-including integration in 68.25 s (`final-appraisal-tests.log`;
-build receipt `final-appraisal-build.log`). The current compiled appraisal
-binary is `8305dfda5c783eab6c68ddb73044c195a6392577c55ca0f3d5e2bc5bcf6081c9`,
-with native source `b8945c6d6a927f6b37020591f9a1d8bbdf382202b0a0a78f95fe0560352dc87c`
-and appraisal source `282c817afdb2d88f3c615034aaf4237931d3db494964c5ee73b55d27ad3d0f8f`;
-its only delta from the measured campaign binary above is test-registration
-metadata, with production receiver code unchanged. These scoped software checks
-pass, without qualifying broader field sensitivity or availability. The 38/38
-triad result is the base suite; it was not rerun as a combined expanded
-inventory after splitting the Helper stratum. The added family uses
+runner passes 173/173 in 1.144 s. The positive-delay Helper stratum passed 2/2
+at that checkpoint after a combined 55.57 s attempt came too close to its 60 s
+harness timeout: the split checks took 16.13 s for the original case and
+36.49 s for the new late-helper-delay case. The GUI suite then passed 28/28 in
+154.62 s (`final-gui.log`); appraisal tests passed 5/5 in 69.55 s, including
+integration in 68.25 s (`final-appraisal-tests.log`; build receipt
+`final-appraisal-build.log`). These are prior-checkpoint results, not checks of
+the later receiver patch. The prior compiled appraisal binary was
+`8305dfda5c783eab6c68ddb73044c195a6392577c55ca0f3d5e2bc5bcf6081c9`, with
+native source `b8945c6d6a927f6b37020591f9a1d8bbdf382202b0a0a78f95fe0560352dc87c`
+and appraisal source `282c817afdb2d88f3c615034aaf4237931d3db494964c5ee73b55d27ad3d0f8f`.
+At that checkpoint its only delta from the measured campaign binary was
+test-registration metadata, and production receiver code was unchanged; later
+receiver changes supersede that statement as a description of current source.
+These scoped prior-checkpoint checks did not qualify broader field sensitivity
+or availability. The 38/38 triad result is the base suite; it was not rerun as
+a combined expanded inventory after splitting the Helper stratum. Final-source
+triad/GUI/appraisal and repeated-bit outcomes are recorded below. The added family uses
 nominal epoch/clock and two public arrival endpoints;
 arbitrary clock ages, all delay values and weak Helper sensitivity remain
 unqualified. Recent path-scale evidence and its measurement limits are
@@ -161,6 +163,307 @@ After recording the conclusions, the scratch diffuse-block-covariance source
 and executable and four obsolete preflight directories were removed. Compact
 diagnostic receipts and current source pins, failures and results remain as
 the source-bound record of the completed checks and unresolved channel limits.
+
+## Final-source repeated long-alarm check — 16 November 2026
+
+The final candidate-only run sends five separate raw one-bit emissions of each
+polarity through one continuous seed-9202 standard-Gaussian channel and receiver
+per polarity. Each bit is 139.2 s at 12 dB-Hz, maximum public delay 7 ms, with
+starts at slots 0, 3, 6, 9 and 12 and two scored quiet opportunities after each
+emission. The receiver records 5/5 correct bits for both polarities, 5/5
+physical quiet-pair completions for each, and zero wrong bits, ambiguous active
+slots or active quiet decisions. Both ordered episodes complete; text/FEC
+completion is outside this raw-bit endpoint. This is one fixed channel/noise
+history with repeated emissions, not ten independent natural-condition trials
+or an outage-probability estimate.
+
+The candidate's complete input hashes match the saved predecessor for both
+polarity rows: bit 0
+`62b04413a79e81b4168f6ec4cdc58bef3e3787256054ffc0aa700026d98dfe19`, bit 1
+`10d69b55e72d9933ef8107860fb9c17d003ae2cca575a82038a6eae909c9d126`; each
+contains 4,300,361 samples. Key fingerprint is
+`eb846767d659c6bf75cb4847917247cd75cb2935ae86ff3e071cf230d26da1de`. The
+saved candidate predecessor (`e82e8ab2…`) also completed 5/5 correct for each
+polarity on these identical captures. This preserves its already recovered
+outcome; it is not a new 0→5 repair. The pre-extension `c49d4eed…` / native
+`8d36…` baseline remains the historical 0/5-correct result for both polarities,
+with all active slots ambiguous and quiet pairs complete; it was not rerun.
+The campaign changed only its runner budget to 240 s aggregate and
+120 s per trial. Candidate runner elapsed times were 74.368/77.569 s
+(152.077 s total) versus saved-predecessor runner times 108.327/110.838 s.
+Native `timing.wall_seconds` were 74.303/77.500 s versus 108.268/110.746 s;
+these timer fields are distinct and must not be substituted for runner elapsed
+time. Because the predecessor was not rerun, these elapsed differences are not
+a controlled speedup claim.
+
+The [comparison receipt](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-resilience-checks/hf-disturbed-long-alarm-comparison.json)
+has SHA-256 `61af885b96160cf649bc85e91f801d7a2b3dc78089cb620896275b3f54ad5a11`;
+the candidate campaign JSON has SHA-256
+`ba9317a73b0b566f9b61eaa2e00da4b106f78a4bf5a06104ed363883c3102676` and the
+runner-validated campaign hash is
+`bfa5139b8e57536861b5dfd7981dcaef78664c7879fe987463e43171d1357db6`. The
+current source is native `b89b2a973c264a049c83d154fd30f70b282a83fe57a8de6b37589a0c6303644c`,
+appraisal `ec9f94f124cf66214d5be941d04103b9693b56e2356696886fb50114567cd93b`,
+and probe binary `c7672a55e517ebe83887e5e75c5fa2d7d5acabc6dd1793ee31f87d62afbe51e2`.
+The run is configured at HEAD `6ac502a2281ce23923a43915e26ee44ec408c431`
+with code-diff SHA-256
+`284d4a1cb3a44dad18c884e9d9f305fd4f77ceedc14a8068f532250bb782b23e`.
+
+On the frozen source, `triad` passes 40/40 in 104.23 s, GUI passes 28/28 in
+154.57 s, and the five focused appraisal groups pass 5/5 in 45.78 s. The
+existing appraisal compile warning about possibly uninitialized
+`spool_read_time` in `src/main.cpp:468` remains; no source change was made for
+it. Source review found `ServiceTiming::cpu` initializes to optional zero and
+`add()` dereferences it only when both optionals are engaged; the file is
+unchanged and no uninitialized-use failure was observed. These checks and this
+candidate-only repeated-bit result do not qualify complete text reception,
+sustained capacity, physical outage duration, a
+population success rate, or other channel laws.
+
+Lifecycle cleanup is complete: 26 obsolete scratch files (52,670,292 bytes)
+were removed, including 17 generated executables, seven obsolete private
+sources/scripts and two full ranking dumps. Four thin fixtures and current
+outcome/source-hash receipts remain for the exact claims above until maintained
+replay integration or same-scope superseding qualification. The 1,096-row
+private rank output was reduced to
+[`lag-rank-private-42m.summary.txt`](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-timing/lag-rank-private-42m.summary.txt),
+which keeps the plan/work totals, top six cells per bit and strongest separated
+competitors while retaining the original source digest.
+
+## Late-clock and interior-delay probes — 16 November 2026
+
+These checks began at base HEAD `6ac502a2281ce23923a43915e26ee44ec408c431`.
+On a severe standard `hf-disturbed` 30 Hz / 7 ms episode at +12 dB-Hz, a
+139.2-second bit at slot 12 / ordinal 12 reaches about 1,800 seconds of
+calendar age under a declared ±150 ppm clock bound. That baseline estimated
+41.8 million exact-column timing templates against a hard 30-million limit
+and refused before rendering or scoring IQ. This was a conservative proxy
+refusal even when the older fixed-affine lane was shared, not a new
+double-counting bug. The current working source removes that absolute
+30-million hard refusal: 30M remains a heuristic for the mapped route, while
+the existing 120M mapped-route limit and full workspace, FIR/grid and
+cancellation checks remain. Admission no longer adds a new absolute 42M,
+60M or 4.29B cap. The old refusal receipt records its source context in
+[`late-clock-baseline.refusal.txt`](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-timing/late-clock-baseline.refusal.txt).
+
+An initial private diagnostic raised only the legacy integer-template
+admission limit to 42 million. At the actual 0 ppm capture it decided bit 0
+DATA with log evidence 69.69057 (threshold 21.493), but cost 106.65 s at W=24
+and used 1.070 GB; coarse work was 1.925 s and adaptive ordinary fixed-affine
+fine scoring 104.239 s, including 16.559 s for the short model. A −100 ppm
+capture was rendered and coarse-processed, then its aggregate 119.5 s timeout
+expired before fine scoring completed. The first diagnostic therefore supplied
+no displaced-bit decision.
+
+A subsequent private fixed-only rerun on the same two capture hashes finishes
+the pair in 78.04 s. At 0 ppm it preserves exactly the bit-0 DATA decision and
+69.69057 evidence while reducing wall time 106.654→36.581 s (−65.7%); coarse
+work is 1.956 s, fixed-affine fine work 34.181 s, and peak workspace remains
+1.070 GB because coarse search sets the lease. The −100 ppm capture now
+completes, but is AMBIGUOUS at operational evidence 7.16867 below 21.493,
+taking 41.439 s. Thus omitting adaptive diagnostic work recovers useful
+service on the nominal control but does not recover this displaced bit. The
+fixed-only run remains a private diagnostic, not production admission or
+capacity qualification; its exact revised source identity was not recorded.
+Receipts
+and fixture are in
+[`current-hf-timing`](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-timing/).
+The evaluator-known follow-up completed on the shifted capture
+`cb3b0189…`. Changing only the gain-map clock to the known −100 ppm takes
+44.640 s and raises raw gain evidence from 27.11416 to 87.09030 (+59.97614
+nats); the counterfactual operational score would change from 7.16867
+AMBIGUOUS to 67.14461 DATA bit 0. This isolates a strong timing-nomination
+effect in this one capture, but uses evaluator truth and is not operational
+receiver evidence. See
+[`exact-clock-private-42m.stdout.txt`](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-timing/exact-clock-private-42m.stdout.txt).
+A bounded signal-derived signed-lag proposer is now in the current production
+path. Its unmodified operational result is recorded below; evaluator-known
+results remain a diagnostic only.
+
+The working source routes the ordinary fine likelihood through fixed-affine
+`FineLanes` and skips its adaptive per-block lane; separate varying, drift and
+coherent-gain alternatives remain unchanged. The adaptive lane remains
+available on an explicit diagnostic route. Capacity and forecast consumers
+require the fixed-only receipt shape (`adaptive_diagnostics=false`, adaptive
+lane and score fields explicitly null, adaptive work counters zero) before
+accepting an operational work receipt. The production clock pair and current
+source details follow; this is still not a final merged qualification or a
+capacity pass.
+Focused fixed-only erasure, cold-256, two-segment and bulk-fault mode checks
+pass; the native fine-session check passes in 3.89 s and the `abbreviated42`
+suite passes. The updated strict fixed-only capacity/forecast consumer schema
+has 38 Python test passes, including the
+`fine_component_omits_varying_operational_work` guard that prevents a component
+measurement omitting configured varying work from counting as complete
+capacity. On the frozen final source, focused `fine_session` (3.63 s) and
+`signed_gain_timing` (10.57 s) pass, triad passes 40/40, GUI passes 28/28,
+appraisal passes 5/5, and the candidate-only five-attempt-per-polarity replay
+passes; the replay's exact input/source comparison is recorded in the
+[final-source entry](#final-source-repeated-long-alarm-check--16-november-2026).
+This does not qualify complete text reception or capacity. Do not attribute the private
+65.7% service reduction to the production
+pair, forecast a sustained throughput gain, or treat this as late-clock
+reception acceptance.
+
+A production build with the bounded signed-lag proposer scores the original two
+full-capture IQ hashes without overrides: 0 ppm (`6d279587…`) is DATA bit 0,
+evidence 69.873, in 41.269 s; −100 ppm (`cb3b0189…`) is DATA bit 0, evidence
+63.708, in 46.098 s. The previous private fixed-only lane was AMBIGUOUS on that same
+−100 ppm capture at 7.169; its original nominal-gain diagnostics remain
+bitwise unchanged in the production run. The bounded signal-derived search
+uses 548 lag candidates × 13 CFO candidates over 4,185 valid blocks, ranking
+in 0.303 / 0.346 s with 2.443 billion logical FFT stages and 5,027,840 bytes
+of additional state. Full W=24 DSP workspace is 1,075,115,663 bytes; the two
+single-bit runs total 87.384 s. The measured binary is
+`d5b4e1eec0e2deb4117f385ccf9bd9974e451a0cac9358b805f8a3475ffe11eb`, linked
+receiver archive `b10b1ae47164724ca3f2835525689a49102414fab86373eda600143f09e2a65e`;
+the [identity manifest](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-timing/production-clock-build.hash.txt)
+and [pair receipt](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-timing/production-clock-pair.stdout.txt)
+bind the run. The later frozen source removes the static delay third tier and
+has distinct binary `8489f086…`; the earlier clock-pair build is therefore
+kept as exact build-bound evidence, not silently rebound to that binary. These
+two selected bit decisions do not show message completion,
+long-run availability or capacity.
+
+A separate production preflight asked for a 278.4-second bit at the same
+approximately 1,800-second calendar age, slot 6 / ordinal 12, with ±150 ppm
+support and 24 tiles. The earlier 256-second request produced a 266.8-second
+actual interval at 1,620 seconds of age but was rejected during setup before
+DSP. The 278.4-second preparation now plans and covers all 156 columns: 55.744M
+shared-plus-projected and 83.644M raw rows, 6.648G planned versus 6.615G
+actual bank FFT stages, and a 2,113,628,343-byte full DSP lease under the
+3-GiB limit. Preparation takes 5.478 s; bounded ranking adds 4.286G logical
+FFT stages and 0.542 s. This check ends at preparation/ranking, before IQ
+scoring or a bit decision, so it is not a reception or capacity result. See
+the [plan](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-timing/production-double-plan.stdout.txt)
+and [preparation receipt](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-timing/production-double-preparation.stdout.txt).
+
+**Correction: the earlier interior-delay aperture was invalid and does not
+establish an in-bound delay floor.** The fixture omitted the canonical 0.25 s
+public preroll: although its metadata reported a 15.75 ms second-path delay,
+the capture window began at row zero while the earliest declared direct
+arrival was row 480 (0.25 s later); its direct-path start was therefore before
+the earliest allowed DATA start and outside the 0–10 ms arrival bounds. Its
+reported +12 dB-Hz AMBIGUOUS score
+(2.054 < 21.493) and +20 dB-Hz DATA score (536.514) therefore cannot be
+interpreted as reception at any exact in-bound delay. Preserve them as
+historical observations of that invalid setup only; the 8 dB contrast is not a
+sensitivity bracket. The 5.25 ms comparison was absent from that old invalid
+campaign; its later corrected result is recorded below. The old [12 dB receipt](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-delay/interior-delay-aperture.stdout.txt)
+and [20 dB receipt](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-delay/interior-delay-plus8db.stdout.txt)
+remain linked as invalid-setup provenance; the [origin audit](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-delay/corrected-delay-no-interior.stdout.txt)
+records original row zero, corrected row 480 and the 480–499.2 allowed range.
+The corrected isolated no-third-tier pilot used
+the canonical 0.25 s preroll, with direct origin row 480 inside the public
+480–499.2 arrival rows, and scored DATA bit 0 at +12 dB-Hz (log-e 27.570) in
+8.984 s. The final frozen source completely removes the unsupported static
+`D/3, 2D/3` third tier and its tests. Its corrected canonical five-aperture
+series now passes: at +12 dB-Hz and 139.2 s per bit, log-e values are 27.570
+(15.75 ms, bit 0), 23.644 (5.25 ms, bit 0), 39.907 (10.5 ms, bit 0), and
+22.346 (15.75 ms, bit 1), all above 21.493; true absence is QUIET. Every
+capture has direct origin row 480 within public arrival rows 480–499.2, uses
+the original full-D model, W=24 and a 629,011,988-byte workspace quote. The
+[five-aperture receipt](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-delay/corrected-production-five.stdout.txt)
+has SHA-256 `927f16329cf5bc2d9b1f3138fc34002d44d508165e9d74a7afb90769f601b218`,
+measured binary `8489f08623ff1fb7997a898ed9a7ac6961d93e2872f376eb7351d8aa14eb134f`,
+and linked receiver archive `b1eb7336c3242f081398e4ca9161bb74cb5dbb5b3c945adea2137a471a528ac6`.
+These are five single-bit / null checks, not complete messages or a sensitivity
+curve.
+
+The frozen production build also passes the combined age-1,800-second case:
+source ordinal 12, actual −100 ppm clock and 15.75 ms echo under public ±150 ppm
+and 21 ms bounds, Gaussian 30 Hz 2σ per-ray Doppler, +12 dB-Hz, DATA bit 0 at
+log-e 38.935 in 61.807 s. The matched noise-only capture is QUIET at −6.249 in
+59.581 s. Both use 269,482 rows, W=24, a 1,075,126,314-byte quote, two received
+maps and the full 548-lag × 13-CFO proposer; no oracle timing or delay-tier
+override is used. See the [active](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-delay/joint-production-active.stdout.txt)
+and [noise](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-delay/joint-production-noise.stdout.txt)
+receipts. The compiled binary is
+`8c5a58cdc467a47807b8afdf9587ebad8f4681e613039e9f2e39a74fa7ce4391`, linked
+receiver archive `b1eb7336c3242f081398e4ca9161bb74cb5dbb5b3c945adea2137a471a528ac6`.
+These are selected bit/null receptions, not complete-message,
+population or outage-duration evidence.
+
+The same final-source active IQ also passes a bounded common-frequency motion
+replay: `BoundedRandomSpread(0,30,1,70031)` rotates the complete parent capture
+with sampled Doppler from −29.83236 to +29.84666 Hz. The verified parent IQ
+hash is `e1898144a9410b6eee8cad82802efac3d5361087592368e1ea9ac030dbbbbca9`;
+the rotated IQ hash is
+`64b2f74ff984cbba1e4d10581cc58d316cfc9ebb72fb1be90552cf3f72c75335`. The
+white-noise law and full-capture energy are unchanged (maximum relative row-
+energy error `6.66e-16`). At −100 ppm / 15.75 ms the receiver remains DATA bit 0
+at log-e 37.8052384 versus 21.493, against 38.9354114 on unrotated IQ. It uses
+W=24, a 1,075,126,314-byte quote, all 548 lag × 13 CFO hypotheses and 4,186
+common-valid blocks. Receiver scoring takes 45.397 s; total process time is
+47.780 s including a 2.363 s independent same-buffer coarse audit. Selected
+lags 194/265 are independent same-buffer audit output only; no receiver truth
+is supplied. Receipt SHA-256 is
+`9c0a5a094e3e27875e56c0e90dfe427cf55acd7794f7ec34b600649fe359b001`, binary
+`1b1cd40971ddc4c0f01e4553665c10b9d903925ff09edf532e8f952eface1a5a`, and
+linked receiver archive
+`b1eb7336c3242f081398e4ca9161bb74cb5dbb5b3c945adea2137a471a528ac6`; see the
+[motion receipt](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-delay/joint-production-motion.stdout.txt)
+and [command](../_appraisal/highFidelity-triple_Robust_Modem/local-evidence/current-hf-delay/joint-production-motion.command.txt).
+This is one synthetic motion preservation point, not broad Doppler or
+availability qualification.
+
+The same base-source Helper discriminator has three narrower outcomes. A
+0.5-voltage Helper at 12 dB-Hz yields no usable narrow interval and restores
+full DATA frequency search; the tested bit remains correct. In the stronger common-mode
+case, an in-bound physical common-frequency transition from −0.95 to +1.10 Hz
+finishes before the DATA portion of each 10.4-second bit. At 9 dB-Hz, both bit
+values decode and Helper-plus-noise remains QUIET. The successful Helper
+interval is stale at DATA time ([−1.02, −0.869] Hz, excluding the +1.10-Hz
+DATA frequency), yet the receiver's broader DATA search recovers the bits. For
+bit one, evidence changes 65.60→59.42 (threshold 21.493) and slot wall time
+1.15→5.36 s; all arms use 24 workers and the same 359 MB workspace lease.
+This demonstrates correct fallback on one constructed trajectory, with extra
+work, not a general absence of Helper-induced communication cliffs or sustained
+throughput evidence. The deliberate independent-cross-band control at 12 dB-Hz
+also decodes both DATA arms, but it assigns distinct Helper and DATA frequency
+offsets contrary to this physical fixture's common-frequency assumption; treat
+it as a controlled mismatch diagnostic, not field or declared-model evidence.
+No production Helper change is justified by these selected checks alone. See
+the [weak-Helper receipt](../local-evidence/current-helper/baseline.log),
+[independent cross-band control](../local-evidence/current-helper/canonical-helper.log),
+[common-frequency pair](../local-evidence/current-helper/common-frequency.log),
+and [bit-zero/quiet controls](../local-evidence/current-helper/common-frequency-controls.log).
+
+The production fixed-only route also passed a matched three-slot preservation
+replay on the common-frequency Helper fixture: bit one DATA evidence
+59.4243753231, bit zero DATA 49.5220157555, and physical absence QUIET
+−7.76914589889, unchanged to 12 significant digits from the adaptive
+reference on identical full-capture IQ hashes. W=24 and the 359,228,115-byte
+lease are unchanged. Slot times were 5.356→5.547, 5.533→5.582, and
+5.559→5.590 s; these single drift-dominated slots are slightly slower, so this
+is preservation evidence, not a speedup or capacity claim. Reported basis rows
+fall from 30,205,728 to 15,102,864, but the former count includes both old
+fixed and adaptive lanes and is not a fixed-only lane-work counter. The
+[fixed-only replay receipt](../local-evidence/current-helper/fixed-only-common-frequency.log)
+and [binary/archive identity](../local-evidence/current-helper/fixed-only-identity.log)
+record the comparison. The bounded clock-pair and Helper checks remain finite
+preservation evidence, not a general ionospheric coverage guarantee.
+
+These checks complete the named functional groups and candidate-only replay,
+but do not qualify receiver capacity. On the frozen source, triad passes 40/40,
+GUI passes 28/28 and appraisal passes 5/5; the candidate-only repeated-bit
+outcomes are in the [final-source entry](#final-source-repeated-long-alarm-check--16-november-2026).
+The corrected delay series spans only the five named aperture/null cases; the
+Helper cases likewise cover selected trajectories. Neither set qualifies
+arbitrary clock age, all
+channel combinations, physical outage duration or five-path field reliability.
+
+For lifecycle, the repeated-message replay is now complete. Retain the four thin
+current fixture programs—
+`late-clock-production-aperture.cpp`, `corrected-interior-delay.cpp`,
+`corrected-joint-clock-delay.cpp` (including motion mode), and
+`local-evidence/current-helper/discriminator.cpp`—plus compact outcome and
+source-hash receipts until maintained replay integration or same-scope
+superseding qualification. The cleanup has removed the 17 generated
+executables, seven obsolete private sources/scripts and two full ranking dumps
+(26 files, 52,670,292 bytes). The 1,096-row private ranking dump was reduced to
+the linked bounded rank summary, which preserves plan/work totals, top six
+cells per bit, strongest separated competitors and the original source digest.
 
 ## Weak physical-channel alarm investigation — 16 November 2026
 

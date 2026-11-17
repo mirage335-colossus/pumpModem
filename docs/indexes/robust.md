@@ -160,13 +160,35 @@ or historical path search is introduced. A zero
 central frequency only. The finite full-stream cohort passes both matched
 seed-9202 polarities and both fresh seed-9601 polarities (5/5 each), while a
 seed-9602 noise control remains 5/5 QUIET. This supports only those sampled
-standard-Gaussian histories; the scoped positive-delay Helper checks and current
-GUI suite (28/28) pass, as do final appraisal checks (5/5) and application
-integration. These do not qualify broader channel sensitivity. Arbitrary clock
+standard-Gaussian histories. At the prior checkpoint, scoped positive-delay
+Helper checks passed, as did GUI (28/28), appraisal (5/5) and application
+integration; these were prior-checkpoint results. Final-source triad (40/40),
+GUI (28/28), appraisal (5/5) and the seed-9202 candidate-only replay now pass;
+details are in the [final-source record](../validation.md#final-source-repeated-long-alarm-check--16-november-2026).
+These do not qualify broader channel sensitivity. Arbitrary clock
 ages, all delay values, plasma histories and weak Helper sensitivity remain
 unqualified. See the
 [HF Worst follow-through](../validation.md#hf-worst-30-hz--7-ms-follow-through--16-november-2026)
 for hashes, runtime costs and source-bound limits.
+The original late-clock baseline refused an ordinal-12 case at an absolute 30M
+template-work cap; current production removes that cap while retaining the
+mapped-route heuristic and other resource guards. A bounded signal-derived
+clock proposer returns DATA on two matched long-bit captures at 0 and −100 ppm.
+A 278.4-second-bit preparation covers its 156 columns under the 3-GiB lease but
+does not score IQ. The Helper fixed-only replay preserves selected DATA/QUIET
+results with slightly higher elapsed time. Evaluator-known clock remains
+diagnostic. The frozen-source functional groups and candidate-only repeated-bit
+replay pass; fixed-only consumer details are in the
+[follow-on record](../validation.md#late-clock-and-interior-delay-probes--16-november-2026).
+Complete capacity remains unqualified.
+The prior delay fixture omitted its 0.25 s public preroll, so its +12/+20 pair
+establishes no in-bound delay floor. The frozen source passes five corrected
+15.75/5.25/10.5 ms bit/null cases, one combined old-age/clock/delay case, and a
+selected common-frequency motion replay. Full triad 40/40, GUI 28/28, appraisal
+5/5 and the candidate-only repeated-bit replay pass. These do not qualify
+complete text reception or capacity. The Helper fallback still decodes selected
+cases with added work on a stale frequency bound. These do not provide broad delay,
+clock-age or availability guarantee; see the [follow-on record](../validation.md#late-clock-and-interior-delay-probes--16-november-2026).
 
 A stable component and a changing component can coexist within one unresolved
 spatial channel. Fast-cadence changing-channel reception now includes that

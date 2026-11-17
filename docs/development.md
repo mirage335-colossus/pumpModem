@@ -130,10 +130,13 @@ Current overlap, all on one admitted lane/scratch shape per owner:
   owner, acquisition runs whole on one lane instead.
 - A native coarse advance searches its tiles as one span of dynamically claimed
   jobs. A fixed per-lane share idles every lane that finishes early.
-- The fine fixed-affine lane has no chronological barrier, so its states are
-  background leaves, at most one dispatch ahead. They overlap the adaptive
-  lane's prediction, pruning and wave tails. The dispatch ahead is observed,
-  and later dispatches' source tiles are filled, while the current one scores.
+- Ordinary fine scoring now runs the fixed-affine lane only; it has no
+  chronological barrier, so its states are background leaves, at most one
+  dispatch ahead, and it overlaps the next dispatch's observation and later
+  source-tile fills. The adaptive lane is available only through an explicit
+  diagnostic mode. In that mode the fixed-affine leaves also overlap adaptive
+  prediction, pruning and wave tails while the current dispatch scores. The
+  diagnostic overlap does not describe ordinary production service.
 
 Keep these properties when changing a stage:
 

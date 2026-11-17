@@ -17,6 +17,38 @@ ACQUISITION = ("input_validation", "helper", "coarse_prepare", "coarse_tiles", "
 STATE_COUNTS = ("states", "last_emission_states")
 RATIO = "ratio_processing_seconds_per_baseband_second"
 INTERVAL = RATIO + "_interval"
+FINE_MODE_KEY = "adaptive_diagnostics"
+VARYING_SCOPE_KEY = "fine_component_omits_varying_operational_work"
+
+
+def varying_scope_gap(configuration):
+    """Explain why fixed-affine fine costs cannot qualify configured varying work."""
+    if isinstance(configuration, dict) and configuration.get(VARYING_SCOPE_KEY) is False:
+        return None
+    if isinstance(configuration, dict) and configuration.get(VARYING_SCOPE_KEY) is True:
+        return "Configured varying production work is omitted from the measured fixed-affine fine component"
+    return "Native configuration lacks an explicit varying-work coverage marker"
+
+
+def _fixed_affine_work(work, label):
+    if (not isinstance(work, dict) or work.get(FINE_MODE_KEY) is not False
+            or "adaptive" not in work or work["adaptive"] is not None
+            or not isinstance(work.get("initial_affine"), dict)
+            or any(key.startswith("adaptive_") for key in work if key != FINE_MODE_KEY)):
+        raise ProbeError(f"Native {label} is not explicitly fixed-affine operational work")
+    return work["initial_affine"]
+
+
+def _fixed_affine_score(receipt):
+    score = (receipt.get("result") or {}).get("score")
+    if (not isinstance(score, dict) or score.get(FINE_MODE_KEY) is not False
+            or "adaptive_bit_evidence" not in score or "combined_bit_evidence" not in score
+            or score.get("adaptive_bit_evidence") is not None
+            or score.get("combined_bit_evidence") is not None
+            or any(type(score.get(key)) is not int or score[key] != 0 for key in
+                   ("adaptive_blocks", "adaptive_peak_states", "adaptive_transition_edges"))):
+        raise ProbeError("Native score is not explicitly fixed-affine operational work")
+    return score
 
 
 def measurement_policy(case_count, unit_seconds):
@@ -29,7 +61,7 @@ def measurement_policy(case_count, unit_seconds):
                          "looks": list(LOOKS), "maximum_observed_baseband_seconds_per_stratum": 54,
                          "state_relative_range_limit": 1.3,
                          "stop": "Precision at a declared look, failed work/holdout gate, or bounded limit"},
-        "cold_maximum": "Two actual half-second segments with 256 states per lane and a transition",
+        "cold_maximum": "Two actual half-second segments at 256 fixed-affine states; adaptive diagnostics disabled",
         "pilot": "One bounded matched native stream per serial, physical and logical allocation. Inference uses fresh native observations.",
         "normalization": "Elapsed service per unique baseband second or per shortest declared public slot interval",
         "sustained_allocation_extra_observations": 3,
@@ -141,13 +173,9 @@ def partial_acquisition(receipt, *, cadence):
     return out
 
 
-def _compatible_state_counts(lane, counts):
-    if lane == "initial_affine":
-        fixed_count = counts["states"][0]
-        return all(value == fixed_count for values in counts.values() for value in values)
-    # Emission expands the retained states before pruning. Compare each
-    # counter across observations, without treating that expansion as drift.
-    return all(max(values) / min(values) <= 1.3 for values in counts.values())
+def _compatible_state_counts(counts):
+    fixed_count = counts["states"][0]
+    return all(value == fixed_count for values in counts.values() for value in values)
 
 
 def fine_continuation(receipt):
@@ -170,7 +198,7 @@ def fine_continuation(receipt):
     rate = finite_number(work[0]["sample_rate_hz"], "sample rate", nonnegative=True)
     if rate <= 0 or not rate.is_integer():
         raise ProbeError("Native fine sample rate must be a positive integer")
-    identity_keys = ("input_sha256", "observation_first_sample", "observation_rows",
+    identity_keys = (FINE_MODE_KEY, "input_sha256", "observation_first_sample", "observation_rows",
                      "public_slot", "pattern_epoch", "symbol_ordinal", "workers",
                      "sample_rate_hz", "block_rows", "segment_rows", "tap_count",
                      "delay_step_seconds", "rate_step_ppm", "rate_radius")
@@ -202,24 +230,24 @@ def fine_continuation(receipt):
     if minimum_scale <= 0 or crossed_widths <= 1:
         raise ProbeError("Native continued input did not span a complete public cache tile")
     states = {}
-    for lane in ("initial_affine", "adaptive"):
-        observations = [row[lane] for row in work]
-        state_ids = [row.get("states_sha256") for row in observations]
-        if (not all(is_sha256(value) for value in state_ids)
-                or final[lane].get("states_sha256") != state_ids[-1]
-                or (lane == "initial_affine" and len(set(state_ids)) != 1)):
-            raise ProbeError(f"{lane} persistent native state identity changed")
-        counts = {key: [positive_int(row[key], f"{lane} {key} count") for row in observations]
-                  for key in STATE_COUNTS}
-        if not _compatible_state_counts(lane, counts):
-            raise ProbeError(f"{lane} state geometry drifted during native continuation")
-        fixed = (observations[0]["state_cap"], observations[0]["proposal_cap"])
-        if any((row["state_cap"], row["proposal_cap"]) != fixed for row in observations):
-            raise ProbeError("Native fine state or proposal cap changed")
-        energies = [row["projected_template_energy"] for row in observations]
-        if not all(later > earlier for earlier, later in zip((0., *energies[:-1]), energies)):
-            raise ProbeError("Native continuation checkpoint did not render positive template work")
-        states[lane] = {"counts": counts, "caps": list(fixed)}
+    affine_observations = [_fixed_affine_work(row, "continuation checkpoint") for row in work]
+    affine_finish = _fixed_affine_work(final, "continuation finish")
+    _fixed_affine_score(receipt)
+    state_ids = [row.get("states_sha256") for row in affine_observations]
+    if (not all(is_sha256(value) for value in state_ids)
+            or affine_finish.get("states_sha256") != state_ids[-1] or len(set(state_ids)) != 1):
+        raise ProbeError("initial_affine persistent native state identity changed")
+    counts = {key: [positive_int(row[key], f"initial_affine {key} count") for row in affine_observations]
+              for key in STATE_COUNTS}
+    if not _compatible_state_counts(counts):
+        raise ProbeError("initial_affine state geometry drifted during native continuation")
+    fixed = (affine_observations[0]["state_cap"], affine_observations[0]["proposal_cap"])
+    if any((row["state_cap"], row["proposal_cap"]) != fixed for row in affine_observations):
+        raise ProbeError("Native fine state or proposal cap changed")
+    energies = [row["projected_template_energy"] for row in affine_observations]
+    if not all(later > earlier for earlier, later in zip((0., *energies[:-1]), energies)):
+        raise ProbeError("Native continuation checkpoint did not render positive template work")
+    states["initial_affine"] = {"counts": counts, "caps": list(fixed)}
     durations = [row["wall_seconds"] for row in continuation]
     elapsed = 0.
     rates = []
@@ -238,8 +266,18 @@ def direct_fine(receipt, stratum):
     work = phase_once(receipt, "fine_work")
     finish = phase_once(receipt, "fine_finish")
     result = receipt["result"]
-    if stratum == "cold-maximum" and result.get("maximum_state_transition_covered") is not True:
-        raise ProbeError("Native cold-state probe missed its 256-state transition")
+    affine = _fixed_affine_work(work["work"], "fine work")
+    finish_affine = _fixed_affine_work(finish["work"], "fine finish")
+    _fixed_affine_score(receipt)
+    if stratum == "cold-maximum":
+        if (result.get("maximum_fixed_affine_states_covered") is not True
+                or affine.get("initial_states") != 256
+                or affine.get("peak_emission_states") != 256
+                or finish_affine.get("initial_states") != 256
+                or finish_affine.get("peak_emission_states") != 256
+                or work["work"].get("segments") != 2
+                or finish["work"].get("segments") != 2):
+            raise ProbeError("Native cold-state probe missed its two-segment 256-state fixed-affine bound")
     if stratum == "erasure" and result.get("explicit_erasure_covered") is not True:
         raise ProbeError("Native erasure probe missed its erased block")
     if not finish["work"].get("finished") or not finish["work"].get("observation_complete"):
@@ -335,12 +373,9 @@ def _continued_component(samples, *, window_seconds, cadence, family_size):
 def _compatible_work(first, current):
     if first["fixed_geometry"] != current["fixed_geometry"]:
         return False
-    for lane in ("initial_affine", "adaptive"):
-        a, b = first["states"][lane], current["states"][lane]
-        counts = {key: a["counts"][key] + b["counts"][key] for key in STATE_COUNTS}
-        if a["caps"] != b["caps"] or not _compatible_state_counts(lane, counts):
-            return False
-    return True
+    a, b = first["states"]["initial_affine"], current["states"]["initial_affine"]
+    counts = {key: a["counts"][key] + b["counts"][key] for key in STATE_COUNTS}
+    return a["caps"] == b["caps"] and _compatible_state_counts(counts)
 
 
 def _stream_ratios(receipt, expected_slots):
@@ -471,6 +506,11 @@ def measure_complete_case(case, *, invoke, plan, worker_allocation, family_size,
         missing.append(plan.get("reason") or "native profile unavailable")
         return row
     configuration = plan["configuration"]
+    varying_gap = varying_scope_gap(configuration)
+    if varying_gap:
+        # Keep collecting and report the measured same-stream point, but never
+        # call fixed-only component/cold work a complete varying-channel bound.
+        missing.append(varying_gap)
     fixed = configuration.get("fixed_active_seconds", configuration.get("fixture_active_seconds"))
     if (fixed != policy.get("requested_fixed_active_seconds") or configuration.get("scope") != SCOPE
             or configuration.get("target_cn0_db_hz") != policy.get("target_cn0_db_hz")):

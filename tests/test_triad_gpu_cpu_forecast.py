@@ -26,6 +26,7 @@ def forecast_inputs():
     case = parsed["cases"][0]
     config = dict(scope=forecast.SCOPE, actual_cn0_db_hz=55., target_cn0_db_hz=30.,
                   public_window_seconds=1., public_window_samples=100, sample_rate_hz=100.,
+                  fine_component_omits_varying_operational_work=False,
                   recurring_horizon=dict(complete_declared_horizon=True, shortest_interval_seconds=10.))
 
     def identity(backend, *, paired=False):
@@ -132,6 +133,17 @@ class NativeForecastTests(unittest.TestCase):
         modified["identity"]["source_manifest_sha256"] = "5" * 64
         with self.assertRaisesRegex(forecast.ProbeError, "source changed"):
             forecast.validate_native(modified, source, same_build=False)
+
+    def test_cpu_forecast_fingerprints_only_fixed_affine_work_and_rejects_legacy_mode(self):
+        receipt = forecast_inputs()[0]["cases"][0]["measurements"]["strata"]["active"][0]
+        measured = forecast.observation(receipt, "active", measure_timing=False)
+        fine = measured["phases"]["fine"]
+        self.assertIs(fine["geometry"][-1], False)
+        self.assertEqual(len(fine["demand"]), 5)
+        legacy = deepcopy(receipt)
+        next(row for row in legacy["phases"] if row["name"] == "fine_finish")["work"].pop("adaptive_diagnostics")
+        with self.assertRaisesRegex(forecast.ProbeError, "fixed-affine operational"):
+            forecast.observation(legacy, "active", measure_timing=False)
 
     def test_native_gpu_wall_cannot_change_cpu_forecast(self):
         local = [observation(seed, .01) for seed in (1, 2, 3)]
@@ -271,6 +283,45 @@ class NativeForecastTests(unittest.TestCase):
         changed["description"]["identity"]["source_manifest_sha256"] = "9" * 64
         with self.assertRaisesRegex(forecast.ProbeError, "Native receiver source changed"):
             estimate(target=changed)
+
+    def test_configured_varying_work_withholds_complete_forecast_but_keeps_estimates(self):
+        cpu, gpu, parsed, held = forecast_inputs()
+
+        def estimate():
+            return forecast.estimate(cpu, gpu, parsed, cpu["description"], holdout=held,
+                                     gpu_reference=gpu, case_indices=[1], holdout_indices=[1])
+
+        for marker in (True, None):
+            with self.subTest(marker=marker):
+                changed_cpu, changed_gpu, _, changed_held = deepcopy((cpu, gpu, parsed, held))
+                for source in (changed_cpu["cases"][0]["plan"], changed_held["cases"][0]["plan"]):
+                    config = source["configuration"]
+                    if marker is None:
+                        config.pop("fine_component_omits_varying_operational_work", None)
+                    else:
+                        config["fine_component_omits_varying_operational_work"] = marker
+                row = forecast.estimate(changed_cpu, changed_gpu, parsed, changed_cpu["description"],
+                                        holdout=changed_held, gpu_reference=changed_gpu,
+                                        case_indices=[1], holdout_indices=[1])["cases"][0]
+                self.assertIsNotNone(row["nominal_service"])
+                self.assertIsNotNone(row["conservative_service"])
+                self.assertEqual(row["complete_receiver_capacity"], "unresolved")
+                self.assertIn("varying production work", " ".join(row["unresolved_work"]))
+
+        changed_gpu = deepcopy(gpu)
+        changed_gpu["cases"][0]["strata"]["active"]["configuration"][
+            "fine_component_omits_varying_operational_work"] = True
+        result = forecast.estimate(cpu, changed_gpu, parsed, cpu["description"], holdout=held,
+                                   gpu_reference=changed_gpu, case_indices=[1], holdout_indices=[1])
+        self.assertEqual(result["cases"][0]["complete_receiver_capacity"], "unresolved")
+
+        changed_cpu = deepcopy(cpu)
+        changed_cpu["cases"][0]["measurements"]["work_only"].pop("terminal")
+        row = forecast.estimate(changed_cpu, gpu, parsed, changed_cpu["description"], holdout=held,
+                                gpu_reference=gpu, case_indices=[1], holdout_indices=[1])["cases"][0]
+        self.assertIsNotNone(row["nominal_service"])
+        self.assertEqual(row["complete_receiver_capacity"], "unresolved")
+        self.assertIn("terminal", " ".join(row["unresolved_work"]))
 
 
 if __name__ == "__main__":

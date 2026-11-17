@@ -241,18 +241,63 @@ phase or trajectory to the receiver. The candidate uses fixed equal prior
 variance halves, preserves the original model mixture, and requires changing-
 channel and physical-absence preservation before any adoption.
 
-Physical propagation loss also needs separate treatment.
-[Gillies et al. (2026)](https://doi.org/10.1029/2025SW004906) compared the
-2013–2019 Ottawa–Alert 5–14 MHz link with remote 30 MHz riometers. Absorption
-above 0.5 dB corresponded to only about 30% lost signals in that study, partly
-because the measurements were not colocated with the link. That conditional
-association is neither a universal dropout rate nor a modem outage forecast.
-Keep fast fading, slow Doppler change and path-support/absorption episodes
-distinct. Record elapsed physical time and failures clustered within each
-episode; do not assume independent retries or three independent carrier fades.
-`Each 65%` specifies two synthetic selective depths of 0.65, not a natural
-percentile. A receiver failure with substantial retained signal energy needs
-model/support diagnosis before attributing it to physical outage.
+### Timing, delay and cross-carrier evidence
+
+Synchronization cost depends on how delay evolves across observations.
+[Kislal et al. (2024)](https://research.chalmers.se/publication/543021/file/543021_Fulltext.pdf)
+analyze pilot-assisted finite-blocklength reception on a block-fading waveform:
+when delay is shared across blocks, joint observations can reuse timing
+information; independent per-block delays can make synchronization the
+bottleneck. Residual timing error also creates intersymbol interference in
+their model. This is a useful reason to compare shared and changing delay
+structure with the actual waveform; its pilot-assisted URLLC assumptions
+provide no quantitative delay or sensitivity bound for this modem.
+
+Measured HF response is path-conditioned. [Nissen and Bello (2003)](https://doi.org/10.1029/2002RS002746)
+found impulse-response tap correlation falling to small values over a few
+microseconds on their 3,100-km high-latitude probe; the instrument's filter
+response limits that inference. [Fitzgerald, Argo and Carlos (1993)](https://www.osti.gov/servlets/purl/7368684)
+report a trans-equatorial spread-F event in which coherence bandwidth narrowed
+from above 70 kHz to below 1 kHz. These distinct paths support frequency
+selectivity as a real, episode-dependent effect, not one universal
+cross-carrier correlation law. In particular, periodic recorrelation from
+`|cos(π Δf τ)|` is a two-equal-ray model artifact. Use each fixture's actual
+carrier spacings and path structure; do not infer coherence recovery from the
+two-ray recurrence.
+
+Three carriers may share slow disturbance geometry without sharing their
+complex gains. [Marew et al. (2025)](https://doi.org/10.1186/s40623-025-02147-3)
+estimated similar structure drift speeds at 4.63 and 6.80 MHz for five of six
+selected simultaneous sharp-front events. Their reflection heights differ,
+and the authors explicitly did not cross-correlate the frequency channels.
+This supports testing a shared slow physical state alongside distinct
+frequency-specific complex channel states; it does not justify hard transfer
+of a Helper gain, phase or DATA-frequency estimate. Keep Helper-driven narrowing
+conditional on matched evidence: a shared physical drift prior can guide
+proposals, but weak or selectively faded Helper carriers must not erase viable
+DATA hypotheses without demonstrated receiver benefit. For delay, compare a
+shared-delay explanation with a bounded independent-delay case on the actual
+waveform; do not convert the URLLC block model into an unbounded per-block
+search. The source-bound receiver outcomes and limits remain in the [timing
+diagnosis](../../docs/validation.md#repeated-single-bit-channel-diagnosis--16-november-2026),
+[short-model comparison](../../docs/validation.md#bounded-short-model-competition--16-november-2026),
+and [HF follow-through](../../docs/validation.md#hf-worst-30-hz--7-ms-follow-through--16-november-2026).
+
+Physical loss and receiver misses also need separate treatment.
+[Gillies et al. (2026)](https://doi.org/10.1029/2025SW004906) report that 62%
+of expected scheduled Ottawa–Alert pulses (5–14 MHz, 2013–2019) were not
+received under an assumption of continuous endpoint operation on retained data
+days, excluding July–August 2016 as likely endpoint downtime. The source audit
+reconstructs 62.38% or 64.39% under two plausible active-day denominators and
+notes there is no endpoint-operation ledger; misses cannot be assigned solely
+to propagation. Remote riometers also do not measure the path's coherent
+channel. This scheduled-pulse missingness is not an outage duration, probability
+for another path, or modem forecast. Keep fast fading, slow Doppler change and
+path-support/absorption episodes distinct; record elapsed time and within-episode
+clustering rather than treating retries or carriers as independent. The
+[Ottawa–Alert source audit](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/32-skywave-dispersion-highlatitude-equatorial.md)
+details the denominator sensitivity. `Each 65%` remains a synthetic setting,
+not a natural percentile.
 
 For independent ray dynamics, compact state-space marginalization remains a
 conditional alternative to a Cartesian frequency-history search.

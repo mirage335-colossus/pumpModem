@@ -19,7 +19,7 @@ DIAGNOSTIC_STRATA = ("cold-maximum", "terminal", "erasure")
 STRATA = ACQUISITION_STRATA + DIAGNOSTIC_STRATA
 CHALLENGES = ("near-decision", "high-snr", "scored-quiet")
 SCORE_ATOL, SCORE_RTOL = 2e-3, 2e-4
-ADAPTIVE_COST_RTOL = .05
+WORK_COST_RTOL = .05
 CUDA_RUNTIME_FIELDS = ("device", "device_name", "library_version", "cuda_runtime_version",
                        "cuda_driver_version", "cuda_blas_version", "cuda_compute_major", "cuda_compute_minor",
                        "numerical_threads", "workspace_limit_bytes",
@@ -152,6 +152,28 @@ def _phase_work(receipt, name):
     return phase_once(receipt, name)["work"]
 
 
+def _validate_fixed_affine_mode(receipt):
+    fine_phases = [phase for phase in receipt["phases"] if phase.get("name", "").startswith("fine_")]
+    require(bool(fine_phases) and any(phase.get("name") == "fine_finish" for phase in fine_phases),
+            "Native receipt has no complete fine work to qualify")
+    for phase in fine_phases:
+        work = phase.get("work")
+        require(isinstance(work, dict) and work.get("adaptive_diagnostics") is False
+                and "adaptive" in work and work["adaptive"] is None
+                and isinstance(work.get("initial_affine"), dict)
+                and not any(key.startswith("adaptive_") for key in work if key != "adaptive_diagnostics"),
+                "Native fine work is not explicitly fixed-affine operational work")
+    score = (receipt.get("result") or {}).get("score")
+    require(isinstance(score, dict) and score.get("adaptive_diagnostics") is False
+            and "adaptive_bit_evidence" in score and "combined_bit_evidence" in score
+            and score.get("adaptive_bit_evidence") is None
+            and score.get("combined_bit_evidence") is None
+            and all(type(score.get(key)) is int and score[key] == 0 for key in
+                    ("adaptive_blocks", "adaptive_peak_states", "adaptive_transition_edges")),
+            "Native score is not explicitly fixed-affine operational work")
+    return fine_phases
+
+
 def validate_work(receipt, backend, stratum, *, command="continuation", declared=False):
     result = receipt["result"]
     require(receipt["status"] == "complete" and receipt["command"] == command,
@@ -161,6 +183,7 @@ def validate_work(receipt, backend, stratum, *, command="continuation", declared
             f"Missing {stratum} observation digest")
     require(result.get("stratum") == stratum, "Probe changed the requested work stratum")
     fine = _phase_work(receipt, "fine_finish")
+    _validate_fixed_affine_mode(receipt)
     representative = fine.get("representative_work") is True
     require(fine.get("observation_complete") is True and (representative or
             stratum == "terminal" and fine.get("blocks", 0) > 0) and is_sha256(fine.get("input_sha256")),
@@ -201,8 +224,17 @@ def validate_work(receipt, backend, stratum, *, command="continuation", declared
             require(receipt["result"].get("continued_cache_fill") is True,
                     "Fine continuation did not fill new native cache tiles")
     if stratum == "cold-maximum":
-        require(receipt["result"].get("maximum_state_transition_covered") is True,
-                "Native maximum-state transition was not measured")
+        cold_work = _phase_work(receipt, "fine_work")
+        finish_work = _phase_work(receipt, "fine_finish")
+        work_initial = cold_work.get("initial_affine") or {}
+        finish_initial = finish_work.get("initial_affine") or {}
+        require(receipt["result"].get("maximum_fixed_affine_states_covered") is True
+                and work_initial.get("initial_states") == 256
+                and work_initial.get("peak_emission_states") == 256
+                and finish_initial.get("initial_states") == 256
+                and finish_initial.get("peak_emission_states") == 256
+                and cold_work.get("segments") == 2 and finish_work.get("segments") == 2,
+                "Native two-segment maximum fixed-affine bound was not measured")
     if stratum == "erasure":
         require(receipt["result"].get("explicit_erasure_covered") is True,
                 "Native interior erasure was not measured")
@@ -294,24 +326,32 @@ def compare_work(cpu, cuda, stratum, *, command="continuation", declared=False):
     score_a, score_b = (receipt["result"]["score"] for receipt in (cpu, cuda))
     decision_match = (same_fields(score_a, score_b, ("decision", "bit", "complete", "all_valid",
                                                     "zero_h0_verified", "quiet_modes",
-                                                    "operational_passes_conditional_bound"))
-                      and all(_score_pair(score_a.get(key), score_b.get(key)) for key in
-                              ("bit_evidence", "adaptive_bit_evidence", "combined_bit_evidence")))
+                                                    "operational_passes_conditional_bound",
+                                                    "adaptive_diagnostics", "adaptive_blocks",
+                                                    "adaptive_peak_states", "adaptive_transition_edges"))
+                      and score_a.get("adaptive_bit_evidence") is None
+                      and score_b.get("adaptive_bit_evidence") is None
+                      and score_a.get("combined_bit_evidence") is None
+                      and score_b.get("combined_bit_evidence") is None
+                      and _score_pair(score_a.get("bit_evidence"), score_b.get("bit_evidence")))
     checkpoints = ("fine_prefix", "fine_continuation", "fine_work", "fine_finish")
     fine_a, fine_b = ([phase["work"] for phase in receipt["phases"] if phase["name"] in checkpoints]
                       for receipt in (cpu, cuda))
     fixed_match = len(fine_a) == len(fine_b) and bool(fine_a)
-    adaptive_cost_drift = 0.
+    fixed_cost_drift = 0.
     for a, b in zip(fine_a, fine_b):
         fixed_match &= (
-            same_fields(a, b, FINE_GEOMETRY + ("input_sha256", "observation_first_sample", "quiet_modes"))
-            and same_fields(a["initial_affine"], b["initial_affine"], LANE_CAPS + LANE_COUNTS + ("states_sha256",))
-            and same_fields(a["adaptive"], b["adaptive"], LANE_CAPS)
+            same_fields(a, b, FINE_GEOMETRY + ("input_sha256", "observation_first_sample", "quiet_modes",
+                                               "adaptive_diagnostics"))
+            and a.get("adaptive_diagnostics") is False and b.get("adaptive_diagnostics") is False
+            and a.get("adaptive") is None and b.get("adaptive") is None
+            and same_fields(a["initial_affine"], b["initial_affine"],
+                            LANE_CAPS + LANE_COUNTS + ("states_sha256",))
             and same_fields(a["cache"], b["cache"], CACHE_GEOMETRY + CACHE_WORK)
-            and all(_score_pair(a[lane]["bit_scores"], b[lane]["bit_scores"])
-                    for lane in ("initial_affine", "adaptive"))
+            and _score_pair(a["initial_affine"]["bit_scores"], b["initial_affine"]["bit_scores"])
         )
-        adaptive_cost_drift = max(adaptive_cost_drift, _cost_drift(a["adaptive"], b["adaptive"], LANE_COUNTS))
+        fixed_cost_drift = max(fixed_cost_drift,
+                               _cost_drift(a["initial_affine"], b["initial_affine"], LANE_COUNTS))
     # Matrix replacements still lack a qualified CPU-demand mapping. Exact
     # arrival reduction is different: it preserves FFT scoring and the complete
     # native search/selection demand consumed by observation(). Its GPU timing
@@ -337,8 +377,7 @@ def compare_work(cpu, cuda, stratum, *, command="continuation", declared=False):
             unqualified_cost_leaves.add("cuda_arrival_peak_rows")
     unqualified_cost_leaves = sorted(unqualified_cost_leaves)
     cpu_cost_work_match = not unqualified_cost_leaves and logical_coarse_cpu_work_match is not False
-    numerical_match = (same_input and acquisition_match is not False and decision_match and fixed_match
-                       and adaptive_cost_drift <= ADAPTIVE_COST_RTOL)
+    numerical_match = same_input and acquisition_match is not False and decision_match and fixed_match
     accepted = numerical_match and cpu_cost_work_match
     return dict(accepted=accepted, numerical_parity_accepted=numerical_match,
                 cpu_cost_work_match=cpu_cost_work_match, cpu_cost_unqualified_leaves=unqualified_cost_leaves,
@@ -346,7 +385,7 @@ def compare_work(cpu, cuda, stratum, *, command="continuation", declared=False):
                 exact_arrival_cpu_demand_mapping=exact_arrival_mapping, same_native_source=same_native_source,
                 same_input=same_input, acquisition_match=acquisition_match,
                 decisions_and_scores_match=decision_match, fixed_work_match=fixed_match,
-                maximum_relative_adaptive_cost_drift=adaptive_cost_drift,
+                maximum_relative_fixed_affine_cost_drift=fixed_cost_drift,
                 precision=list(precision), cuda_runtime=runtime)
 
 
@@ -499,7 +538,7 @@ def run_probe(*, case_list=DEFAULT_CASES, case_indices=None, executable=DEFAULT_
                               maximum_commands=1 + (6 + 2 * bool(backlog_slots)) * len(selected) +
                                                (len(STRATA) + 2 * len(CHALLENGES)) * len(references),
                               score_atol=SCORE_ATOL, score_rtol=SCORE_RTOL,
-                              adaptive_cost_rtol=ADAPTIVE_COST_RTOL,
+                              work_cost_rtol=WORK_COST_RTOL,
                               stop_rule="One bounded native observation per stratum and one paired observation "
                                         "per declared reference stratum or challenge"))
     if description["status"] == "complete":

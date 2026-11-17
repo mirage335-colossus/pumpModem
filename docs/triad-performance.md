@@ -633,8 +633,18 @@ the target for one paired row; otherwise the planned target is used. Reports
 record requested and effective coarse/fine arithmetic. `--tensor-precision fp64`
 is an explicit diagnostic override, not a default qualification shortcut.
 Pairing requires winner/order and fixed-work agreement, score tolerance
-`atol=2e-3, rtol=2e-4`, and at most 5% adaptive work-demand drift. Equal final bits
-alone do not establish matched inputs or adequate precision.
+`atol=2e-3, rtol=2e-4`. The 5% adaptive work-demand drift gate applies only
+when both arms explicitly select the adaptive diagnostic route. Ordinary
+operational scoring is fixed-affine only; its native receipt must say
+`adaptive_diagnostics=false`, give null adaptive lane and score fields, and
+report zero adaptive work counters. Capacity and forecast consumers also
+require the explicit `fine_component_omits_varying_operational_work` marker;
+when configured varying work is missing from a component measurement, the
+consumer keeps that work unresolved instead of granting a complete-capacity
+result. An absent marker is unqualified. Historical adaptive comparisons
+remain evidence about their diagnostic mode, not current fixed-only service
+cost. Equal final bits alone do not establish matched inputs or adequate
+precision.
 
 The current coarse arithmetic selector is `--tensor-coarse-math fft|fp16|int8`,
 with `fft` the full-search default. The bounded native FP16/INT8 bulk wins and

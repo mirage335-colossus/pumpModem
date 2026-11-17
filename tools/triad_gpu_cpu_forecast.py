@@ -6,13 +6,14 @@ import argparse
 import math
 from pathlib import Path
 
-from triad_case_capacity import direct_fine, fine_continuation, slot_costs
+from triad_case_capacity import (direct_fine, fine_continuation, slot_costs,
+                                 varying_scope_gap)
 from triad_case_metrics import ALPHA, LOOKS, arithmetic_interval
 from triad_cases import DEFAULT_CASES, load_cases
-from triad_gpu_workload import (ACQUISITION_STRATA, ADAPTIVE_COST_RTOL, CACHE_GEOMETRY, CHALLENGES,
+from triad_gpu_workload import (ACQUISITION_STRATA, WORK_COST_RTOL, CACHE_GEOMETRY, CHALLENGES,
                                 COARSE_GEOMETRY, DIAGNOSTIC_STRATA,
                                 FINE_GEOMETRY, LANE_CAPS, STRATA, SCHEMA as WORKLOAD,
-                                compare_work, cuda_runtime, public_configuration, reference_challenge, require, row_matches,
+                                _validate_fixed_affine_mode, compare_work, cuda_runtime, public_configuration, reference_challenge, require, row_matches,
                                 same_fields, select_cases, validate_work)
 from triad_native import (DEFAULT_PROBE, NativeProbe, ProbeError, allocation, environment, is_sha256,
                           named_phases, phase_once, read_report, sha256_file, write_result)
@@ -168,12 +169,12 @@ def observation(receipt, stratum, *, measure_timing=True):
     result = dict(config=public_configuration(config), seed=receipt["observation"]["seed"],
                   input_sha256=receipt["observation"]["input_sha256"], phases={})
     fine = phase_once(receipt, "fine_finish")["work"]
+    _validate_fixed_affine_mode(receipt)
     fine_geometry = (_select(fine, FINE_GEOMETRY) + _select(fine["cache"], CACHE_GEOMETRY)
-                     + _select(fine["initial_affine"], LANE_CAPS) + _select(fine["adaptive"], LANE_CAPS))
+                     + _select(fine["initial_affine"], LANE_CAPS) + (fine["adaptive_diagnostics"],))
     timed = {
         "fine": (_fine_cost(receipt, stratum, window) if measure_timing else 0., fine_geometry,
                  _counts(fine["initial_affine"], ("basis_rows", "gaussian_updates"))
-                 + _counts(fine["adaptive"], ("basis_rows", "transition_edges", "gaussian_updates"))
                  + _counts(fine["cache"], ("cache_misses", "native_preparation_samples", "evictions"))),
     }
     if stratum in ACQUISITION_STRATA:
@@ -217,7 +218,7 @@ def demand_scale(calibration, target):
             "Required phase work appeared or disappeared")
     ratios = [y / x for x, y in zip(a, b) if x]
     lower, upper = min(ratios + [1.]), max(ratios + [1.])
-    require(lower >= 1 - ADAPTIVE_COST_RTOL and upper <= 1 + ADAPTIVE_COST_RTOL,
+    require(lower >= 1 - WORK_COST_RTOL and upper <= 1 + WORK_COST_RTOL,
             "Native useful work is outside the calibrated cost regime")
     # Wall time is attributable to a mixture of these work and fixed costs.
     # Retain their complete range because a unique phase weighting is unknown.
@@ -365,6 +366,17 @@ def _fit_row(cpu, gpu, holdout, cpu_description, gpu_description, precision_clas
     cpu_description = cpu["plan"]
     fits = {}
     missing = []
+    scope_configurations = [cpu["plan"].get("configuration", {}),
+                            holdout["plan"].get("configuration", {})]
+    for stratum in STRATA:
+        scope_configurations.extend(receipt.get("configuration", {}) for receipt in
+                                    (gpu.get("strata", {}).get(stratum, {}),
+                                     holdout.get("strata", {}).get(stratum, {})))
+        scope_configurations.extend(receipt.get("configuration", {}) for receipt in
+                                    cpu["measurements"]["work_only" if stratum in DIAGNOSTIC_STRATA
+                                                        else "strata"].get(stratum, []))
+    if any(varying_scope_gap(config) for config in scope_configurations):
+        missing.append("Fixed-affine measurements omit configured varying production work or lack its coverage marker")
     for stratum in STRATA:
         try:
             declared = stratum in DIAGNOSTIC_STRATA

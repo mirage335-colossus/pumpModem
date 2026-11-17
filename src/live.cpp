@@ -222,6 +222,7 @@ PatternStep pattern_step(const StreamSlotReceipt& receipt) {
     row.decision = s.decision == SlotDecision::data ? PatternDecision::data :
         s.decision == SlotDecision::quiet ? PatternDecision::quiet : PatternDecision::ambiguous;
     row.bit = s.bit;
+    row.adaptive_diagnostics = s.adaptive_diagnostics;
     row.bit_evidence = s.bit_evidence;
     row.adaptive_bit_evidence = s.adaptive_bit_evidence;
     row.combined_bit_evidence = s.combined_bit_evidence;

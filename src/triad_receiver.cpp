@@ -578,18 +578,33 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     std::optional<MidpointTrackInput> midpoint;
     if (workspace.varying.midpoint_tracking) {
         require(coarse.midpoint_timing && coarse.midpoint_timing->lag_count &&
-            coarse.midpoint_timing->proposals.size() <= midpoint_coordinates.size(),
+            coarse.midpoint_timing->proposals.size() <= midpoint_coordinates.size() &&
+            coarse.midpoint_timing->gain_proposal_count <= coarse.midpoint_timing->gain_proposal_lags.size(),
             "Robust coarse midpoint timing did not retain its admitted public family");
         const auto& timing = *coarse.midpoint_timing;
         std::ranges::transform(timing.proposals, midpoint_coordinates.begin(),
             [](const auto& proposal) { return proposal.coordinate; });
+        const auto proposed_gain = std::span(timing.gain_proposal_lags).first(timing.gain_proposal_count);
         midpoint.emplace(std::span(midpoint_coordinates).first(timing.proposals.size()), timing.lag_count,
-            varying_grid.log_count() - std::log1p(2 * varying_grid.frequency_radius));
+            varying_grid.log_count() - std::log1p(2 * varying_grid.frequency_radius),
+            proposed_gain, timing.gain_fft_rows != 0, timing.first_lag, timing.middle_seconds);
         score.midpoint_timing_lags = timing.lag_count;
         score.midpoint_timing_workspace_bytes = timing.workspace_bytes;
         score.midpoint_timing_precision = timing.precision;
         score.midpoint_timing_widened_inverses = timing.widened_inverses;
         score.midpoint_timing_scored_lags = timing.scored_lags;
+        score.signed_lag_gain_proposal_status = timing.gain_status;
+        score.signed_lag_gain_proposal_maps = proposed_gain.size();
+        score.signed_lag_gain_proposal_fft_rows = timing.gain_fft_rows;
+        score.signed_lag_gain_proposal_frequency_points = timing.gain_frequency_points;
+        score.signed_lag_gain_proposal_available_blocks = timing.gain_available_blocks;
+        score.signed_lag_gain_proposal_sampled_blocks = timing.gain_sampled_blocks;
+        score.signed_lag_gain_proposal_scored_blocks = timing.gain_blocks;
+        score.signed_lag_gain_proposal_projected_rows = timing.gain_projected_rows;
+        score.signed_lag_gain_proposal_workspace_bytes = timing.gain_workspace_bytes;
+        score.signed_lag_gain_proposal_fft_stages = timing.gain_fft_row_stages;
+        score.signed_lag_gain_proposal_score_rows = timing.gain_score_rows;
+        score.signed_lag_gain_proposal_seconds = timing.gain_seconds;
     }
     const auto selected = fine.varying_coordinates.empty() ? std::span(fine.coordinates) :
                                                             std::span(fine.varying_coordinates);

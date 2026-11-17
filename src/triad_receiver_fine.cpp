@@ -1,4 +1,5 @@
 #include "triad_receiver_fine.hpp"
+#include "triad_receiver_coarse.hpp"
 #include "triad_receiver_executor.hpp"
 #include "triad_receiver_basis.hpp"
 #include "triad_gaussian_kernel.hpp"
@@ -906,7 +907,7 @@ struct FineWorkspaceQuote {
 };
 
 FineWorkspaceQuote workspace_for_plan(const ReceiverConfig& config, const ReceiverSlotPlan& plan,
-                                      const BlockCalendar& calendar, unsigned workers, bool record_work,
+                                      const BlockCalendar& calendar, unsigned workers, const FineObservation& observation,
                                       std::stop_token stop = {}) {
     if (!workers) throw Error("fine observation requires a positive worker share");
     // Reject unsupported public support before leasing a slot.
@@ -926,18 +927,21 @@ FineWorkspaceQuote workspace_for_plan(const ReceiverConfig& config, const Receiv
     }
     // The dispatch being scored and the one observed ahead of it.
     add(fft_rows + 4 * max_rows, sizeof(Complex));
-    // Both lane states can coexist with the predicted/merged adaptive states.
-    add(3 * maximum_proposals, sizeof(State));
+    const bool adaptive = observation.lanes == FineLanes::fixed_and_adaptive;
+    // Only the diagnostic route can own both retained and predicted adaptive states.
+    add((adaptive ? 3 : 1) * maximum_proposals, sizeof(State));
     if (affine_gain_plan(config, plan).coherence[0] > 0)
         add(maximum_proposals, sizeof(SlowGainState));
-    add(2 * maximum_states * (2 * maximum_rate_radius + 1),
-        sizeof(TransitionTarget) + sizeof(TransitionEdge) + sizeof(RankedIndex));
+    if (adaptive)
+        add(2 * maximum_states * (2 * maximum_rate_radius + 1),
+            sizeof(TransitionTarget) + sizeof(TransitionEdge) + sizeof(RankedIndex));
     // Every dispatch's public geometry for one call.
     add(maximum_dispatches(calendar), dispatch_extent_bytes);
     // The fixed-affine lane's maps, source groups and chain progress.
     add(maximum_proposals, sizeof(MappedBasisRow) + 3 * sizeof(std::uint32_t));
     add(receiver_epoch_offsets.size(), sizeof(std::vector<std::uint32_t>));
-    if (record_work) add(3 * maximum_proposals, sizeof(StateBlockWork));
+    if (observation.record_work)
+        add((adaptive ? 3 : 2) * maximum_proposals, sizeof(StateBlockWork));
     const auto active = useful_fine_workers(workers);
     const auto mapped_rows = std::min(max_rows, maximum_basis_rows);
     const auto taps = config.spread_delay_seconds || config.spread_doppler_hz ? 2U : 1U;
@@ -946,9 +950,9 @@ FineWorkspaceQuote workspace_for_plan(const ReceiverConfig& config, const Receiv
         : std::string_view{};
     if (config.bulk_backend && fallback.empty()) {
         bytes = checked_add(bytes, config.bulk_backend->fine_host_bytes(max_rows, taps));
-        add(4 * maximum_proposals, sizeof(FineBulkStatistics));
-        add(2 * maximum_proposals, sizeof(MappedBasisRow));
-        add(2 * maximum_proposals, sizeof(std::size_t));
+        const auto bulk_states = (adaptive ? 2 : 1) * maximum_proposals;
+        add(2 * bulk_states, sizeof(FineBulkStatistics));
+        add(bulk_states, sizeof(MappedBasisRow) + sizeof(std::size_t));
         add(mapped_rows, sizeof(double));
         add(active, sizeof(WorkerScratch));
     } else {
@@ -993,7 +997,7 @@ std::size_t fine_workspace(const ReceiverConfig& config, const ReceiverSlotPlan&
                            FineObservation observation, unsigned workers) {
     const auto plan = observation_plan(config, slot, observation);
     const BlockCalendar calendar(config, plan);
-    return workspace_for_plan(config, plan, calendar, workers, observation.record_work).bytes;
+    return workspace_for_plan(config, plan, calendar, workers, observation).bytes;
 }
 
 std::size_t fine_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers) {
@@ -1124,13 +1128,13 @@ struct FineSession::Impl {
         if (cold && observation.rows != 2 * calendar.segment_rows)
             throw Error("cold maximum-state work requires exactly two complete fine segments");
 
-        const auto quote = workspace_for_plan(config, plan, calendar, workers, observation.record_work, stop);
+        const auto quote = workspace_for_plan(config, plan, calendar, workers, observation, stop);
         workspace = quote.bytes;
         if (workspace > scratch_limit)
             throw ReceiverWorkspaceError("complete fine receiver exceeds its admitted workspace");
         coordinates.assign(selected.begin(), selected.end());
         nominal = grid.initial(coordinates.size(), tap_count, cold);
-        adaptive = nominal;
+        if (adaptive_enabled()) adaptive = nominal;
         if (additional_gain.coherence[0] > 0) {
             slow_nominal.resize(nominal.size());
             const auto prior = -std::log(static_cast<double>(nominal.size())) - log_two;
@@ -1145,10 +1149,13 @@ struct FineSession::Impl {
                 }
             }
         }
-        nominal_work.initial_states = adaptive_work.initial_states = nominal.size();
+        nominal_work.initial_states = nominal.size();
         nominal_work.state_cap = nominal_work.proposal_cap = nominal.size();
-        adaptive_work.state_cap = maximum_states;
-        adaptive_work.proposal_cap = maximum_proposals;
+        if (adaptive_enabled()) {
+            adaptive_work.initial_states = adaptive.size();
+            adaptive_work.state_cap = maximum_states;
+            adaptive_work.proposal_cap = maximum_proposals;
+        }
 
         const auto lengths = calendar.lengths();
         projections.reserve(lengths.size());
@@ -1167,11 +1174,12 @@ struct FineSession::Impl {
             bulk = config.bulk_backend->make_fine(projected_rate, 2 * config.clock_bound_ppm);
             if (!bulk) throw Error("requested Robust bulk backend did not construct a fine session");
             bulk_work = bulk->completed_work();
-            bulk_rows.reserve(2 * maximum_proposals);
-            bulk_progress.reserve(2 * maximum_proposals);
+            const auto bulk_states = (adaptive_enabled() ? 2 : 1) * maximum_proposals;
+            bulk_rows.reserve(bulk_states);
+            bulk_progress.reserve(bulk_states);
             bulk_offsets.resize(mapped_rows);
             std::iota(bulk_offsets.begin(), bulk_offsets.end(), 0.);
-            for (auto& item : bulk_statistics) item.reserve(2 * maximum_proposals);
+            for (auto& item : bulk_statistics) item.reserve(bulk_states);
         } else if (config.bulk_backend) {
             config.bulk_backend->record_native_fine(quote.native_fallback_reason);
         }
@@ -1189,10 +1197,10 @@ struct FineSession::Impl {
                 std::round(2 * tile_rows / static_cast<double>(calendar.segment_rows)), 1., 8.));
         }
         nominal_progress.resize(nominal.size());
-        ranking.reserve(2 * maximum_states * (2 * maximum_rate_radius + 1));
+        if (adaptive_enabled()) ranking.reserve(2 * maximum_states * (2 * maximum_rate_radius + 1));
         if (observation.record_work) {
             for (auto& item : nominal_state_work) item.resize(nominal.size());
-            adaptive_state_work.resize(maximum_proposals);
+            if (adaptive_enabled()) adaptive_state_work.resize(maximum_proposals);
         }
     }
 
@@ -1204,7 +1212,8 @@ struct FineSession::Impl {
     }
 
     bool observation_complete() const { return processed == observation.rows; }
-    bool representative_work() const { return nominal_nonzero && adaptive_nonzero; }
+    bool adaptive_enabled() const { return observation.lanes == FineLanes::fixed_and_adaptive; }
+    bool representative_work() const { return nominal_nonzero && (!adaptive_enabled() || adaptive_nonzero); }
     std::span<const Tap> taps() const { return std::span(paths).first(tap_count); }
 
     // The public geometry of the dispatch after `previous`, or of the first
@@ -1341,7 +1350,7 @@ struct FineSession::Impl {
                 }
                 epoch_states[slot].push_back(static_cast<std::uint32_t>(i));
             }
-        } else {
+        } else if (adaptive_enabled()) {
             const auto boundary = (previous_last + static_cast<long double>(first) / fs) / 2 - previous_anchor;
             time(times.transition_seconds, [&] {
                 adaptive = predict(adaptive, grid, static_cast<double>(segment_anchor - previous_anchor),
@@ -1358,15 +1367,17 @@ struct FineSession::Impl {
 
     void close_segment(const Extent& pair) {
         const auto fs = static_cast<long double>(config.sample_rate_hz);
-        adaptive_nonzero |= std::any_of(adaptive.begin(), adaptive.end(),
-            [](const State& state) { return state.nonzero_basis; });
-        time(times.pruning_seconds, [&] {
-            if (observation.record_work && adaptive.size() > maximum_states) {
-                ++adaptive_work.pruning_events;
-                adaptive_work.states_dropped += adaptive.size() - maximum_states;
-            }
-            retain(adaptive, maximum_states, ranking);
-        });
+        if (adaptive_enabled()) {
+            adaptive_nonzero |= std::any_of(adaptive.begin(), adaptive.end(),
+                [](const State& state) { return state.nonzero_basis; });
+            time(times.pruning_seconds, [&] {
+                if (observation.record_work && adaptive.size() > maximum_states) {
+                    ++adaptive_work.pruning_events;
+                    adaptive_work.states_dropped += adaptive.size() - maximum_states;
+                }
+                retain(adaptive, maximum_states, ranking);
+            });
+        }
         nominal_work.peak_retained_states = nominal.size();
         adaptive_work.peak_retained_states = std::max(adaptive_work.peak_retained_states, adaptive.size());
         previous_anchor = segment_anchor;
@@ -1627,8 +1638,9 @@ struct FineSession::Impl {
             posted += leaves;
             add_work(basis_rows, pair.observed_rows * 2 * tap_count * (fixed + adaptive.size()));
             if (observation.record_work) {
-                charge(adaptive_work, pair, adaptive.size(), bulk ? bulk_calls[1] : pair.basis_calls * adaptive.size(),
-                       std::span(adaptive_state_work).first(adaptive.size()));
+                if (adaptive_enabled())
+                    charge(adaptive_work, pair, adaptive.size(), bulk ? bulk_calls[1] : pair.basis_calls * adaptive.size(),
+                           std::span(adaptive_state_work).first(adaptive.size()));
                 if (!overlap)
                     charge(nominal_work, pair, fixed, bulk_calls[0], nominal_state_work[0], nominal_models);
             }
@@ -1752,7 +1764,7 @@ FineProgress FineSession::progress() const {
         }
     };
     lane(result.initial_affine, p.nominal_work, p.nominal, p.nominal_scores(&result.slow_gain_bit_evidence));
-    lane(result.adaptive, p.adaptive_work, p.adaptive, bit_scores(p.adaptive));
+    if (p.adaptive_enabled()) lane(result.adaptive, p.adaptive_work, p.adaptive, bit_scores(p.adaptive));
     for (const auto& worker : p.scratch) {
         result.times.worker_basis_statistics_seconds += worker.basis_statistics_seconds;
         result.times.worker_gaussian_seconds += worker.gaussian_seconds;
@@ -1767,7 +1779,6 @@ void FineSession::finish(ReceiverSlotScore& score) {
         p.time(p.times.finish_seconds, [&] {
             check_cancelled(p.stop);
             const auto nominal = p.nominal_scores();
-            const auto adaptive = bit_scores(p.adaptive);
             const bool all_valid = p.observation_complete() && !p.invalid_rows;
             if (all_valid && p.quiet_modes) p.quiet_threshold = quiet_noise_threshold(p.quiet_modes);
             check_cancelled(p.stop);
@@ -1790,14 +1801,20 @@ void FineSession::finish(ReceiverSlotScore& score) {
             score.bit_evidence = nominal;
             score.slow_gain_coherence_seconds = p.additional_gain.coherence;
             score.affine_stationary_fading_gain = p.additional_gain.stationary_fading;
-            score.adaptive_bit_evidence = adaptive;
-            for (std::size_t bit = 0; bit < 2; ++bit)
-                score.combined_bit_evidence[bit] = log_add(nominal[bit], adaptive[bit]) - log_two;
+            score.adaptive_diagnostics = p.adaptive_enabled() && p.scored_blocks;
+            score.adaptive_bit_evidence.fill(-infinity);
+            score.combined_bit_evidence.fill(-infinity);
+            if (score.adaptive_diagnostics) {
+                score.adaptive_bit_evidence = bit_scores(p.adaptive);
+                for (std::size_t bit = 0; bit < 2; ++bit)
+                    score.combined_bit_evidence[bit] = log_add(nominal[bit], score.adaptive_bit_evidence[bit]) - log_two;
+            }
             score.quiet_energy = p.quiet_energy;
             score.quiet_threshold = p.quiet_threshold;
             score.quiet_modes = p.quiet_modes;
             score.fine_candidates = p.coordinates.size();
-            score.affine_blocks = score.adaptive_blocks = p.scored_blocks;
+            score.affine_blocks = p.scored_blocks;
+            score.adaptive_blocks = score.adaptive_diagnostics ? p.scored_blocks : 0;
             score.adaptive_peak_states = p.adaptive_work.peak_emission_states;
             score.adaptive_transition_edges = p.adaptive_edges;
             score.basis_rows = p.basis_rows;
@@ -1813,8 +1830,10 @@ void score_fine(const ReceiverConfig& config, const ReceiverSlotPlan& plan, cons
                 std::span<const Complex> iq, std::span<const FineCoordinate> coordinates,
                 double projected_sample_rate_hz, double coarse_clock_gap_ppm,
                 unsigned workers, ReceiverSlotScore& score, std::size_t scratch_limit, std::stop_token stop,
-                ReceiverExecutor* executor, AffineGainEvaluation evaluation) {
-    FineSession session(config, plan, key, whole_slot(plan), iq, {}, coordinates, projected_sample_rate_hz,
+                ReceiverExecutor* executor, AffineGainEvaluation evaluation, FineLanes lanes) {
+    auto observation = whole_slot(plan);
+    observation.lanes = lanes;
+    FineSession session(config, plan, key, observation, iq, {}, coordinates, projected_sample_rate_hz,
                         coarse_clock_gap_ppm, workers, scratch_limit, stop, executor, evaluation);
     session.advance_to(iq.size());
     session.finish(score);
@@ -1827,6 +1846,7 @@ constexpr double varying_power = 1. / 16;
 constexpr std::array tracking_powers{varying_power, 1. / 256, 1. / 512, 1. / 4096};
 constexpr std::size_t maximum_tracking_states = 65;
 constexpr double nominal_independent_gain_weight = 1. / 8;
+constexpr std::size_t maximum_gain_timing_nominations = 2;
 
 struct DriftGram {
     // Cholesky factor of I + A^H A/(noise variance * precision).
@@ -2444,9 +2464,12 @@ VaryingFinePlan varying_fine_plan(const ReceiverConfig& config, const ReceiverSl
     if (coherent_gain_blocks && !track.states) return {0, 0, "coherent_gain_blocks_unavailable"};
     const std::size_t independent = !coherent_gain_blocks && track.states && config.spread_delay_seconds > 0 ?
         (slot.arrival_lower_seconds == slot.arrival_upper_seconds ? 1 : 2) : 0;
-    const auto active = std::min<std::size_t>(workers, states + independent);
+    const auto nominated = independent && !project_line_atom && config.clock_bound_ppm ?
+        maximum_gain_timing_nominations : 0;
+    const auto gain_atoms = independent + nominated;
+    const auto active = std::min<std::size_t>(workers, states + gain_atoms);
     if (!coherent_gain_blocks) add(states, sizeof(State) + sizeof(MappedBasisRow));
-    add(independent, sizeof(IndependentGainState) + sizeof(MappedBasisRow));
+    add(gain_atoms, sizeof(IndependentGainState) + sizeof(MappedBasisRow));
     add(active, sizeof(WorkerScratch));
     add(checked_multiply(active, 4 * final + fft + (final > mapped ? 4 * mapped : 0)), sizeof(Complex));
     add(checked_multiply(active, mapped), sizeof(double));
@@ -2496,14 +2519,16 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
         supplemental_timing.size() > maximum_segmented_timing_coordinates + extra_timing ||
         iq.size() != slot.stop_sample - slot.first_sample)
         throw Error("varying fine scorer requires its bounded public slot and coordinates");
-    const auto independent_count = plan.nominal_independent_gain_candidates;
-    if (independent_count && (plan.coherent_gain_blocks || !plan.track_frequency || !(config.spread_delay_seconds > 0) ||
-        independent_count != (slot.arrival_lower_seconds == slot.arrival_upper_seconds ? 1U : 2U)))
+    const auto nominal_count = plan.nominal_independent_gain_candidates;
+    if (nominal_count && (plan.coherent_gain_blocks || !plan.track_frequency || !(config.spread_delay_seconds > 0) ||
+        nominal_count != (slot.arrival_lower_seconds == slot.arrival_upper_seconds ? 1U : 2U)))
         throw Error("Robust nominal independent gain requires its bounded short varying plan");
     if (plan.midpoint_tracking != (midpoint != nullptr) ||
         (midpoint && (line || span || clock_shadow ||
             !midpoint->public_lag_count || !std::isfinite(midpoint->original_timing_log_count) ||
-            midpoint->nominations.size() > maximum_midpoint_timing_coordinates)))
+            midpoint->nominations.size() > maximum_midpoint_timing_coordinates ||
+            midpoint->gain_nominations.size() > maximum_gain_timing_nominations ||
+            (!midpoint->gain_nominations.empty() && !midpoint->gain_family_admitted))))
         throw Error("Robust midpoint family requires its bounded ordinary short tracking lease");
     if (clock_shadow) {
         if (!plan.track_frequency || plan.coherent_gain_blocks || config.helper_enabled || line ||
@@ -2530,6 +2555,9 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
     const TimingGrid grid(projected_rate, clock_gap);
     std::size_t model_count = 0;
     const auto bases = varying_bases(config, slot, model_count);
+    const bool lag_family = nominal_count && midpoint && midpoint->gain_family_admitted;
+    const auto lag_count = lag_family ? midpoint->gain_nominations.size() : 0;
+    const auto independent_count = nominal_count + lag_count;
     const auto active = std::min<std::size_t>(workers, selected.size() * model_count + independent_count);
     MappedBasis basis(config, slot, key, std::min(final_rows, maximum_basis_rows), static_cast<unsigned>(active));
     std::vector<WorkerScratch> scratch;
@@ -2539,16 +2567,36 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
     mapped.reserve(selected.size());
     for (const auto& coordinate : selected)
         mapped.push_back(mapped_row(config, slot, grid, coordinate, {}, 0, true));
-    std::array<MappedBasisRow, 2> independent_maps{};
-    std::array<IndependentGainState, 2> independent_states{};
+    std::vector<MappedBasisRow> independent_maps;
+    std::vector<IndependentGainState> independent_states(independent_count);
+    independent_maps.reserve(independent_count);
     if (independent_count) {
         const AdmissionGrid arrival_grid(slot.arrival_lower_seconds, slot.arrival_upper_seconds, 0., 0., 1.);
         const auto lower = arrival_grid.lower;
-        const auto upper = independent_count == 2 ? lower + arrival_grid.arrival_intervals *
+        const auto upper = nominal_count == 2 ? lower + arrival_grid.arrival_intervals *
             ((arrival_grid.upper - lower) / arrival_grid.arrival_intervals) : lower;
         const std::array arrivals{lower, upper};
-        for (std::size_t i = 0; i < independent_count; ++i)
-            independent_maps[i] = mapped_row(config, slot, grid, {0, arrivals[i], 0, 0}, {}, 0, true);
+        const auto append = [&](const FineCoordinate& coordinate) {
+            independent_maps.push_back(mapped_row(config, slot, grid, coordinate, {}, 0, true));
+        };
+        for (std::size_t i = 0; i < nominal_count; ++i) append({0, arrivals[i], 0, 0});
+        if (lag_family) {
+            const auto nominations = midpoint->gain_nominations;
+            if (!(midpoint->middle_seconds > 0 && std::isfinite(midpoint->middle_seconds)) ||
+                midpoint->public_lag_count > UINT32_MAX || midpoint->first_lag > 0)
+                throw Error("signed lag gain family requires its fixed public timing dictionary");
+            for (std::size_t i = 0; i < nominations.size(); ++i) {
+                const auto lag = nominations[i];
+                if (lag < midpoint->first_lag ||
+                    lag >= midpoint->first_lag + static_cast<std::int64_t>(midpoint->public_lag_count) ||
+                    std::find(nominations.begin(), nominations.begin() + static_cast<std::ptrdiff_t>(i), lag) !=
+                        nominations.begin() + static_cast<std::ptrdiff_t>(i))
+                    throw Error("signed lag gain nomination is outside its public timing lease");
+                const auto coordinate = midpoint_timing_coordinate(slot, midpoint->middle_seconds, config.clock_bound_ppm,
+                    static_cast<std::size_t>(projected_rate), lag, 0);
+                append(coordinate);
+            }
+        }
     }
     auto tracking_config = config;
     tracking_config.helper_enabled |= line != nullptr;
@@ -2738,7 +2786,8 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
             });
         for (std::size_t model = 0; !plan.coherent_gain_blocks && model < model_count; ++model)
             add_work(rendered_rows, checked_multiply(rows, 2 * bases[model].count * selected.size()));
-        if (independent_count) add_work(score.nominal_independent_gain_basis_rows, checked_multiply(rows, 4 * independent_count));
+        add_work(score.nominal_independent_gain_basis_rows, checked_multiply(rows, 4 * nominal_count));
+        add_work(score.signed_lag_gain_basis_rows, checked_multiply(rows, 4 * lag_count));
         if (track.states) {
             const auto per_coordinate = checked_multiply(rows,
                 2 * (config.spread_delay_seconds || (plan.coherent_gain_blocks && config.spread_doppler_hz) ? 2 : 1));
@@ -2760,6 +2809,7 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
     score.varying_candidates = selected.size();
     score.varying_block_rows = block_rows;
     add_work(rendered_rows, score.nominal_independent_gain_basis_rows);
+    add_work(rendered_rows, score.signed_lag_gain_basis_rows);
     score.varying_basis_rows = rendered_rows;
     score.varying_bit_evidence = plan.coherent_gain_blocks ?
         std::array<double, 2>{-infinity, -infinity} : bit_scores(states);
@@ -2818,8 +2868,9 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
             }
         }
     }
-    score.nominal_independent_gain_candidates = independent_count;
-    if (independent_count) {
+    score.nominal_independent_gain_candidates = nominal_count;
+    score.signed_lag_gain_candidates = lag_count;
+    if (nominal_count) {
         // As for the ordinary tracker, this finite frequency family owns
         // a complete, normalized frequency prior. Restore only the old
         // frequency-grid divisor, leaving the full public timing mass.
@@ -2829,10 +2880,23 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
         const auto log_mass = score.nominal_independent_gain_log_prior_adjustment - std::log(static_cast<double>(selected.size()));
         const auto old_weight = std::log1p(-nominal_independent_gain_weight);
         const auto new_weight = std::log(nominal_independent_gain_weight);
+        // The existing K nominal maps retain their full-prior weight 1/T.
+        // Give every signed lag and epoch in the fixed public dictionary an
+        // equal part of the remaining mass. Unselected maps spend nothing.
+        double lag_adjustment = 0.;
+        if (lag_count) {
+            const auto timing_log_count = midpoint->original_timing_log_count;
+            const auto old_mass = std::exp(std::log(static_cast<double>(nominal_count)) - timing_log_count);
+            if (!(old_mass > 0 && old_mass < 1))
+                throw Error("signed lag gain has no remaining public timing mass");
+            lag_adjustment = timing_log_count + std::log1p(-old_mass) -
+                std::log(static_cast<double>(receiver_epoch_offsets.size())) -
+                std::log(static_cast<double>(midpoint->public_lag_count));
+        }
         for (std::size_t bit = 0; bit < 2; ++bit) {
             double fixed = -infinity, moving = -infinity;
             const auto frequencies = std::max<std::size_t>(1, independent_track.states);
-            for (const auto& state : independent) {
+            for (const auto& state : independent.first(nominal_count)) {
                 fixed = std::accumulate(state.fixed_centroid[bit].begin(),
                     state.fixed_centroid[bit].begin() + frequencies, fixed, log_add);
                 if (independent_track.states)
@@ -2843,11 +2907,26 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
             score.nominal_independent_moving_centroid_bit_evidence[bit] = moving + log_mass;
             score.nominal_independent_gain_bit_evidence[bit] = independent_track.states ?
                 log_add(fixed, moving) - log_two + log_mass : fixed + log_mass;
+            auto gain = score.nominal_independent_gain_bit_evidence[bit];
+            if (lag_count) {
+                double stationary = -infinity, wandering = -infinity;
+                for (const auto& state : independent.last(lag_count)) {
+                    stationary = std::accumulate(state.fixed_centroid[bit].begin(),
+                        state.fixed_centroid[bit].begin() + frequencies, stationary, log_add);
+                    if (independent_track.states)
+                        wandering = std::accumulate(state.moving_centroid[bit].begin(),
+                            state.moving_centroid[bit].begin() + frequencies, wandering, log_add);
+                }
+                const auto candidate = independent_track.states ?
+                    log_add(stationary, wandering) - log_two : stationary;
+                score.signed_lag_gain_bit_evidence[bit] = candidate + log_mass + lag_adjustment;
+                gain = log_add(gain, score.signed_lag_gain_bit_evidence[bit]);
+            }
             score.varying_bit_evidence[bit] = log_add(score.varying_bit_evidence[bit] + old_weight,
-                score.nominal_independent_gain_bit_evidence[bit] + new_weight);
+                gain + new_weight);
             if (clock_shadow)
                 clock_shadow->varying_bit_evidence[bit] = log_add(clock_shadow->varying_bit_evidence[bit] + old_weight,
-                    score.nominal_independent_gain_bit_evidence[bit] + new_weight);
+                    gain + new_weight);
         }
     }
     score.varying_fine_seconds = seconds_since(began);

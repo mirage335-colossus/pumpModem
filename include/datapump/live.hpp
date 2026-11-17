@@ -71,6 +71,7 @@ struct PatternStep {
     std::uint64_t index=0, epoch=0, ordinal=0;
     PatternDecision decision=PatternDecision::ambiguous;
     std::optional<std::uint8_t> bit;
+    bool adaptive_diagnostics=false;
     std::array<double,2> bit_evidence{}, adaptive_bit_evidence{}, combined_bit_evidence{};
     // Actual bit alternatives, including all operational channel-model and
     // public-coordinate priors. The affine diagnostics above can disagree.

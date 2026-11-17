@@ -19,12 +19,14 @@ struct FineCoordinate {
 
 enum class FineRunKind { operational, probe, cold_maximum };
 enum class AffineGainEvaluation { operational, without_stationary_fading };
+enum class FineLanes { fixed_affine, fixed_and_adaptive };
 
 struct FineObservation {
     std::uint64_t first_sample = 0;
     std::size_t rows = 0;
     FineRunKind kind = FineRunKind::operational;
     bool record_work = false;
+    FineLanes lanes = FineLanes::fixed_affine;
     // Optional internal diagnostic witness, after a dispatch's projection.
     // It may run on an executor leaf: captured state must be thread-safe and
     // remain alive until advance_to has drained, including on failure. The
@@ -127,7 +129,8 @@ void score_fine(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                 std::span<const Complex> iq, std::span<const FineCoordinate>,
                 double projected_sample_rate_hz, double coarse_clock_gap_ppm,
                 unsigned workers, ReceiverSlotScore&, std::size_t scratch_limit_bytes, std::stop_token,
-                ReceiverExecutor* = nullptr, AffineGainEvaluation = AffineGainEvaluation::operational);
+                ReceiverExecutor* = nullptr, AffineGainEvaluation = AffineGainEvaluation::operational,
+                FineLanes = FineLanes::fixed_affine);
 // Optional, separately normalized fixed-affine likelihood. Public geometry
 // determines whether a short-block projection can separate DATA and Helper.
 struct VaryingFinePlan {
@@ -178,6 +181,10 @@ struct MidpointTrackInput {
     std::span<const FineCoordinate> nominations;
     std::size_t public_lag_count = 0;
     double original_timing_log_count = 0;
+    std::span<const std::int64_t> gain_nominations{};
+    bool gain_family_admitted = false;
+    std::int64_t first_lag = 0;
+    long double middle_seconds = 0;
 };
 void enable_midpoint_tracking(VaryingFinePlan&);
 std::size_t tracked_frequency_span_workspace(const ReceiverSlotPlan&, const VaryingFinePlan&,

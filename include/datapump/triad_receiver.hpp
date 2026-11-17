@@ -94,6 +94,7 @@ struct ReceiverSlotScore {
     std::optional<std::uint8_t> bit;
     bool complete = false, all_valid = false, zero_h0_verified = false;
     bool noise_statistics_valid = false, operational_passes_conditional_bound = false;
+    bool adaptive_diagnostics = false;
     std::array<double, 2> bit_evidence{}, adaptive_bit_evidence{}, combined_bit_evidence{};
     // Added fixed-affine gain priors, or zeros outside their public support.
     std::array<double, 2> slow_gain_coherence_seconds{};
@@ -131,6 +132,16 @@ struct ReceiverSlotScore {
     double tracked_frequency_log_prior_adjustment = 0;
     std::size_t nominal_independent_gain_candidates = 0, nominal_independent_gain_frequency_states = 0;
     std::uint64_t nominal_independent_gain_basis_rows = 0;
+    std::size_t signed_lag_gain_candidates = 0;
+    std::uint64_t signed_lag_gain_basis_rows = 0;
+    std::array<double, 2> signed_lag_gain_bit_evidence{};
+    std::string signed_lag_gain_proposal_status;
+    std::size_t signed_lag_gain_proposal_maps = 0, signed_lag_gain_proposal_fft_rows = 0;
+    std::size_t signed_lag_gain_proposal_frequency_points = 0, signed_lag_gain_proposal_projected_rows = 0;
+    std::size_t signed_lag_gain_proposal_available_blocks = 0, signed_lag_gain_proposal_sampled_blocks = 0;
+    std::size_t signed_lag_gain_proposal_scored_blocks = 0, signed_lag_gain_proposal_workspace_bytes = 0;
+    std::uint64_t signed_lag_gain_proposal_fft_stages = 0, signed_lag_gain_proposal_score_rows = 0;
+    double signed_lag_gain_proposal_seconds = 0;
     std::array<double, 2> nominal_independent_gain_bit_evidence{};
     std::array<double, 2> nominal_independent_fixed_centroid_bit_evidence{}, nominal_independent_moving_centroid_bit_evidence{};
     double nominal_independent_gain_log_prior_adjustment = 0;

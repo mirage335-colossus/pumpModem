@@ -288,6 +288,11 @@ def stream_unit(receipt):
             raise ProbeError("Native stream slot completion, bits or address chronology changed")
         previous_start, previous_stop = first, stop
         counts = {key: positive_int(slot.get(key), f"stream {key}", allow_zero=True) for key in work_fields}
+        if (slot.get("adaptive_diagnostics") is not False
+                or "adaptive_bit_evidence" not in slot or slot["adaptive_bit_evidence"] is not None
+                or "combined_bit_evidence" not in slot or slot["combined_bit_evidence"] is not None
+                or any(counts[key] for key in ("adaptive_blocks", "adaptive_peak_states", "adaptive_transition_edges"))):
+            raise ProbeError("Native stream service does not use the fixed-affine receiver work shape")
         if any(counts[key] == 0 for key in ("coarse_workspaces", "coarse_frequency_points",
                                            "coarse_arrival_points", "fine_candidates", "affine_blocks", "basis_rows")):
             raise ProbeError("Native stream slot lacks complete useful receiver work")
@@ -301,7 +306,7 @@ def stream_unit(receipt):
             raise ProbeError("Native stream committed an incomplete public window")
         work.append({"index": index, "first_sample": first, "stop_sample": stop,
                      "pattern_epoch": address_epoch, "symbol_ordinal": ordinal + index,
-                     "decision": slot["decision"], "bit": slot.get("bit"), **counts})
+                     "decision": slot["decision"], "bit": slot.get("bit"), "adaptive_diagnostics": False, **counts})
     if previous_stop != rows:
         raise ProbeError("Native stream did not score its declared final window")
     message = messages[0]

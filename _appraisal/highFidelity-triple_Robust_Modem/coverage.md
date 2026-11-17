@@ -107,14 +107,60 @@ Matched bit wall times rise 15.9% and
 17.4%; GUI HF-Worst A40 and EME30 `e` preservation rows also complete. These are
 finite standard-Gaussian seeded checks, not GUI HF-Worst or plasma qualification,
 a sensitivity threshold, or a field reliability estimate. The separate GUI
-preservation row is scoped to its named case. Both split positive-delay Helper
-checks and the current GUI suite pass (28/28); final appraisal tests pass 5/5
-and application integration passes. The earlier f0-only candidate failed
+preservation row is scoped to its named case. At the prior checkpoint, both
+split positive-delay Helper checks passed, GUI passed 28/28, and appraisal
+tests passed 5/5 with application integration; these are historical
+checkpoint results. The frozen-source 40/40 triad, 28/28 GUI, 5/5 appraisal
+and candidate-only long-bit replay now pass; see the [final-source record](../../docs/validation.md#final-source-repeated-long-alarm-check--16-november-2026).
+The earlier f0-only candidate failed
 preservation and is retired; no additional delay-grid search is implemented or needed for the
 observed cases. The [source-bound record](../../docs/validation.md#hf-worst-30-hz--7-ms-follow-through--16-november-2026)
 preserves hashes, costs, completed checks and applicability limits.
 
-The latest [repeated single-bit timing repair](../../docs/validation.md#repeated-single-bit-channel-diagnosis--16-november-2026)
+Follow-on probes at HEAD `6ac502a` remain separate from that accepted cohort.
+The severe late-clock ±150 ppm baseline (slot 12, ordinal 12, about 1,800 s age)
+estimated 41.8M exact-column templates and refused at the old 30M hard limit.
+Current production removes that absolute refusal while retaining the mapped
+route heuristic and 120M mapped-route limit, workspace/FIR/grid and cancellation
+checks. A measured production build with its bounded signal-derived clock
+proposer receives both original full-capture IQ hashes without overrides: DATA
+bit 0 at 0 ppm (69.873, 41.269 s) and −100 ppm (63.708, 46.098 s), where the
+old fixed-only arm was ambiguous.
+The selected 548×13 search ranks in 0.303/0.346 s; total pair time is 87.384 s.
+Evaluator-known timing raises one raw map by 59.97614 nats but remains oracle
+diagnostic evidence. The measured clock-pair binary predates final delay-tier
+removal. A separate 278.4-second-bit preparation fits all 156
+columns under the 3-GiB DSP lease, but stops before IQ scoring. The fixed-only
+Helper three-slot replay preserves both DATA bits and physical
+QUIET to 12 significant digits, with slightly slower slot times. Strict
+consumers require the fixed-only disabled/null/zero receipt shape. Final-source
+triad, GUI, appraisal and candidate-only repeated-bit checks pass; complete
+capacity, broad sensitivity and outage-duration qualification remain
+unqualified. The earlier purported
+15.75 ms-in-21 ms delay aperture omitted the 0.25 s public preroll; its direct
+start was outside the declared 0–10 ms arrival bounds. Its +12 ambiguous / +20
+DATA outcomes are retained as invalid-fixture history and establish no delay
+floor. The frozen canonical five-aperture no-third-tier series now passes
+15.75/5.25/10.5 ms bit-0 cases, a 15.75 ms bit-1 case, and true absence QUIET
+at +12 dB-Hz, with the 0.25 s preroll and direct start inside public rows
+480–499.2. A separate age-1,800 s / ordinal-12 case at −100 ppm and 15.75 ms
+also scores DATA, with matched noise QUIET. A bounded common-frequency motion
+replay on that active IQ remains DATA (log-e 37.805 vs 21.493) over sampled
+Doppler −29.83236…+29.84666 Hz with unchanged noise energy. These remain
+selected single-bit checks.
+On the frozen source, triad passes 40/40, GUI 28/28 and appraisal 5/5; the
+candidate-only five-attempt-per-polarity replay also passes. These finite
+results do not qualify capacity, full text reception or physical outage rates.
+Weak-Helper fallback and a
+physically consistent common-frequency transition decode selected short-bit
+cases, but show added work when stale Helper bounds miss DATA; an independent
+cross-band offset control is intentionally outside the common-frequency
+physical model. The fixed-only Helper preservation replay passes three matched
+DATA/DATA/QUIET slots with unchanged evidence, but takes slightly longer in
+these drift-dominated slots. None establishes arbitrary clock/delay tolerance
+or field availability; detail remains in the [late-clock/delay/helper record](../../docs/validation.md#late-clock-and-interior-delay-probes--16-november-2026).
+
+The prior [six-midpoint repeated single-bit timing repair](../../docs/validation.md#repeated-single-bit-channel-diagnosis--16-november-2026)
 retains nominal-epoch candidates and adds at most six public midpoint-lag
 nominees with a fixed normalized timing-family weight. It repairs an observed
 clock-resolution gap as the public calendar ages, without searching channel
@@ -137,7 +183,7 @@ long-model fallback and the slow VLF path. Matched current-source replays repair
 the bright HF and EME 30 dB-Hz messages, preserve the weaker HF success, and
 reduce fresh-`A` errors from six to four. At that source it accepts incorrect
 content; Guarded hides its 6/13-passing record without correcting its bits.
-The subsequent timing repair now receives that same capture as the correct `A`
+The subsequent six-midpoint repair now receives that same capture as the correct `A`
 with zero wrong bits and physical completion, while preserving all three earlier
 HF/EME successes and the noise-only control.
 Complete replay costs rise approximately 14–28% in these four observations,
