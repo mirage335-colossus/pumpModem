@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string_view>
 #include <thread>
@@ -734,6 +735,58 @@ void inter_window_gap_and_rearm() {
           messages.front().message.filtered_text=="e", "rearmed receiver did not accept the next complete episode");
 }
 
+void rejected_episode_requires_two_contiguous_quiet_slots() {
+    const auto p = profile();
+    constexpr std::uint64_t first = 41;
+    auto o = options();
+    o.first_slot = first;
+    o.first_input_sample = p.slot(first).observation.first;
+    o.require_quiet_rearm = true;
+    const std::array decisions{
+        SlotDecision::ambiguous, SlotDecision::data, SlotDecision::quiet,
+        SlotDecision::ambiguous, SlotDecision::quiet, SlotDecision::quiet,
+        SlotDecision::data, SlotDecision::quiet, SlotDecision::quiet};
+    const auto score = [&](const ReceiverConfig& c, const ReceiverSlotPlan& plan, const Crypto&,
+        auto, auto, unsigned, std::size_t, std::stop_token) {
+        const auto offset = static_cast<std::size_t>(plan.index-first);
+        return row(c, plan, decisions.at(offset), offset==6 ? 1 : 0);
+    };
+    auto stream = StreamReceiverFixture::make(p, receiver(p), Crypto::amateur(), o, workspace, score);
+    std::vector<StreamSlotReceipt> receipts;
+    for (std::size_t i=0; i<decisions.size(); ++i) {
+        const auto index = first+i;
+        feed(stream, p.slot(index).observation.stop);
+        (void)stream.resume(true);
+        auto ready = stream.drain_recent_slots();
+        receipts.insert(receipts.end(), std::make_move_iterator(ready.begin()), std::make_move_iterator(ready.end()));
+        if (i<5)
+            check(stream.report().recovering,
+                  "a single quiet slot or interrupted quiet sequence rearmed the receiver");
+        if (i==5)
+            check(!stream.report().recovering && !stream.report().episode_first_public_slot,
+                  "two contiguous quiet slots did not rearm the receiver cleanly");
+        if (i==6)
+            check(stream.report().episode_first_public_slot==first+6,
+                  "post-rearm DATA did not start a fresh episode at its public slot");
+    }
+    check(receipts.size()==decisions.size(), "recovery sequence did not preserve all nine slot receipts");
+    for (std::size_t i=0; i<receipts.size(); ++i) {
+        const auto expected=p.slot(first+i).symbol_ordinal;
+        check(receipts[i].score.index==first+i && receipts[i].symbol_ordinal==expected &&
+              receipts[i].score.decision==decisions[i],
+              "recovery failed to preserve addressed raw slot decisions");
+    }
+    check(receipts[1].score.bit==0 && receipts[6].score.bit==1,
+          "recovery suppressed or altered a prearranged raw alarm bit");
+    const auto messages=stream.drain_messages();
+    check(messages.size()==1 && messages.front().first_public_slot==first+6 &&
+          messages.front().stop_public_slot==first+9 && messages.front().message.physical_complete &&
+          messages.front().message.raw_bits_complete() && messages.front().message.observed_bits==1 &&
+          messages.front().message.received_bits==Bytes({1}) &&
+          !messages.front().message.decoded_content,
+          "rejected prefix decoded as a suffix or the rearmed complete episode failed");
+}
+
 void application_growth_keeps_live_dsp_reservations() {
     constexpr std::size_t mib = 1024 * 1024;
     constexpr std::size_t dsp = 48*mib;
@@ -902,6 +955,7 @@ int main() {
         stage_urgent_priority_and_failure();
         idle_pool_stacks_remain_reserved();
         inter_window_gap_and_rearm();
+        rejected_episode_requires_two_contiguous_quiet_slots();
         application_growth_keeps_live_dsp_reservations();
         eof_cancel_and_workspace();
         long_addressed_episode_and_decode_reservation();

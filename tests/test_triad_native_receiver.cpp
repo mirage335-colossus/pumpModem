@@ -472,6 +472,8 @@ void bounded_drift_recovery() {
         input.config.time_varying_channel = true;
         input.config.time_varying_common_doppler_hz = 8;
         const auto changed = score(input, 2);
+        const auto original_bank = receiver_detail::score_slot_without_stationary_fading(
+            input.config, input.slot, input.key, input.iq, input.valid, 2, workspace_limit, {}, nullptr);
         check(original.complete && original.decision != SlotDecision::data,
               "linear-drift discriminator no longer exercises the original loss of admission");
         check(changed.decision == SlotDecision::data && changed.bit == expected && changed.complete &&
@@ -481,11 +483,24 @@ void bounded_drift_recovery() {
                   changed.drift_bit_evidence[1 - expected],
               "bounded coherent drift search did not recover the DATA alternative");
         strict_preserves_wanted(changed);
-        check(changed.coarse_workspaces == original.coarse_workspaces &&
-              changed.coarse_frequency_points == original.coarse_frequency_points &&
-              changed.coarse_arrival_points == original.coarse_arrival_points &&
-              changed.bit_evidence == original.bit_evidence,
-              "varying-channel proposals changed the original search coverage or evidence");
+        for (const auto* varying : {&original_bank, &changed})
+            check(varying->complete && varying->all_valid && varying->zero_h0_verified &&
+                  varying->coarse_workspaces == original.coarse_workspaces &&
+                  varying->coarse_frequency_points == original.coarse_frequency_points &&
+                  varying->coarse_arrival_points == original.coarse_arrival_points &&
+                  varying->fine_candidates == original.fine_candidates &&
+                  varying->basis_rows == original.basis_rows &&
+                  varying->selected_prior_mass == original.selected_prior_mass,
+                  "varying-channel scoring changed the original public search coverage or prior mass");
+        check(!original.affine_stationary_fading_gain && !original_bank.affine_stationary_fading_gain &&
+              original_bank.bit_evidence == original.bit_evidence,
+              "excluding only the additive family must recover the exact original affine evidence");
+        check(changed.affine_stationary_fading_gain &&
+              changed.slow_gain_coherence_seconds == std::array<double, 2>{.5, 2.},
+              "the short two-tap receiver must execute the added direct-path gain family");
+        for (std::size_t bit = 0; bit < original.bit_evidence.size(); ++bit)
+            check(changed.bit_evidence[bit] >= original_bank.bit_evidence[bit] + std::log1p(-.25),
+                  "the weighted additive model must preserve the original affine contribution");
     };
     auto rising = prepare(37);
     const double duration = geometry(rising.slot.format).source_samples / effective_sample_rate(rising.slot.format);

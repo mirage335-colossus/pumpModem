@@ -298,6 +298,13 @@ an active modem, must remain visibly pending and must not gain completed-message
 copy or save actions prematurely. Shared rows, selection, and safe copy behavior
 belong in the application layer, not separate toolkit-specific modem logic.
 
+An abandoned pending Robust episode is marked rejected before its display
+identity is released. While boundary recovery is active, its status explains
+that the receiver is waiting for two scored quiet slots. Raw Pattern steps
+continue during recovery, and a later episode gets a fresh identity. Rejection
+does not grant completed-message actions or transfer a later episode's evidence
+to the old row.
+
 Reception history remains RAM-only. Signals retain at most 4,096 records
 (formerly 64), with the existing bounded text/raw-bit previews. The GUI applies
 one combined 256 MiB retained-workspace budget to cached content and charged

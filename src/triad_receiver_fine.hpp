@@ -21,6 +21,11 @@ enum class FineRunKind { operational, probe, cold_maximum };
 enum class AffineGainEvaluation { operational, without_stationary_fading };
 enum class FineLanes { fixed_affine, fixed_and_adaptive };
 
+// After consuming the two-tap statistics, reuse their storage for the
+// scalar direct-path r/G, laid out as block × {null, bit 0, bit 1}.
+void pack_direct_gain_statistics(std::span<Complex, 12> correlations, std::span<Complex, 24> gram,
+                                 std::span<const unsigned, 2> ranks) noexcept;
+
 struct FineObservation {
     std::uint64_t first_sample = 0;
     std::size_t rows = 0;

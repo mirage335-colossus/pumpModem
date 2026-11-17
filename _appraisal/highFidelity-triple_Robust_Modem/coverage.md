@@ -65,6 +65,28 @@ also distinguish physical outage/estimation cost from avoidable receiver loss.
 
 ## Applicability after the admission and carrier-key changes
 
+The [17 November persistent-reception investigation](../../docs/validation.md#persistent-reception-investigation--17-november-2026)
+finds and repairs another current weak-signal loss: on identical physical
+two-hop IQ, declaring 7 ms delay instead of zero lost the last of 13 DATA bits.
+Retaining the direct-template stationary-plus-fading submodel within the broad
+two-path configuration restores all 13 and genuine quiet completion, with the
+same candidates, basis work and public prior. This is a current same-config
+repair, not a new severe-plasma reconstruction or natural outage distribution.
+The same audit distinguishes continued raw slot scoring from codec boundary
+recovery and corrects stale browser status after rejected episodes. A separate
+matched 30 MHz static groundwave pair recovers its three missed bits at +6 dB;
+that resolves one missing energy bracket, not field propagation coverage.
+One fresh, continuous HF Worst / Each 65% / Margin 3 history also receives all
+six 41.6-second bit-one attempts and all six quiet pairs. The first run is
+censored at 80 seconds; an identical-input, separately bounded replay completes
+in 223 seconds. Its large DATA evidence makes this a combined-support check,
+not a weak selective-fading sensitivity boundary. The validation retains the
+timeout, corrected report-validator defect and measured work growth.
+Final-source preservation also retains 5/5 correct 139.2-second alarms and all
+quiet pairs for each polarity in the frozen standard-Gaussian 30 Hz / 7 ms
+history, plus five quiet noise-control windows. Those checks use Helper off
+and remain distinct from the GUI combined-modulation case and natural availability.
+
 The [current long-bit physical investigation](../../docs/validation.md#weak-physical-channel-alarm-investigation--16-november-2026)
 now exercises 139.2-second bits and five separated retries through the existing
 continuous coupled two-hop field. At native `a497b7fa…`, both raw polarities

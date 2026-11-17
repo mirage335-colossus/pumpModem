@@ -18,6 +18,20 @@
 #include <numeric>
 
 namespace datapump::triad::v3::receiver_detail {
+
+void pack_direct_gain_statistics(std::span<Complex, 12> correlations, std::span<Complex, 24> gram,
+                                  std::span<const unsigned, 2> ranks) noexcept {
+    // Each destination precedes all later source entries. A rank-zero
+    // block advances the additive posterior without observational evidence.
+    for (std::size_t block = 0; block < ranks.size(); ++block) {
+        for (std::size_t hypothesis = 0; hypothesis < 3; ++hypothesis) {
+            const auto index = 3 * block + hypothesis;
+            correlations[index] = ranks[block] ? correlations[2 * index] : Complex{};
+            gram[index] = ranks[block] ? gram[4 * index] : Complex{};
+        }
+    }
+}
+
 namespace {
 constexpr std::size_t maximum_states = 64, maximum_proposals = 256;
 constexpr std::size_t maximum_segment_rows = 1'048'576, maximum_basis_rows = 16'384;
@@ -47,11 +61,10 @@ AffineGainPlan affine_gain_plan(const ReceiverConfig& config, const ReceiverSlot
     const auto waveform = geometry(slot.format);
     const double cells = 2 / waveform.fine_chip_rate_hz;
     if (cells < 1.) {
-        // A stationary and a changing component share one spatial template
-        // here. Applying that model to both rendered taps needs four latent
-        // gains. A direct-template-only submodel has a different spatial prior.
-        if (evaluation == AffineGainEvaluation::operational &&
-            !config.spread_delay_seconds && !config.spread_doppler_hz)
+        // A stationary and a changing component share the direct template.
+        // Keep this single-path alternative when the public delay/Doppler
+        // bounds also admit a second tap in the original family.
+        if (evaluation == AffineGainEvaluation::operational)
             return {{coherence_seconds[0], coherence_seconds[1]}, true};
         return {};
     }
@@ -796,7 +809,9 @@ void advance_state(State& state, const MappedBasisRow& row, MappedBasis& basis,
     advance_gain<models>(state, tap_count, blocks.size(), correlations, grams, ranks, powers, transitions, stop);
     if (slow) {
         const std::array split_power{.5 * path_power, .5 * path_power};
-        advance_gain<slow_models>(*slow, tap_count, blocks.size(), correlations, grams, ranks,
+        if (stationary_fading && tap_count == 2)
+            pack_direct_gain_statistics(correlations, grams, ranks);
+        advance_gain<slow_models>(*slow, stationary_fading ? 1 : tap_count, blocks.size(), correlations, grams, ranks,
             stationary_fading ? split_power : powers, slow_transitions, stop, stationary_fading);
     }
     if (work) scratch.gaussian_seconds += seconds_since(gaussian_began);

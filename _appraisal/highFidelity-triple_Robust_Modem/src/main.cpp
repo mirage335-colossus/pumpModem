@@ -74,6 +74,12 @@ using namespace datapump;
 using namespace datapump::triad::v3;
 using namespace datapump::triad::probe;
 using Clock = std::chrono::steady_clock;
+constexpr double two_hop_comparison_delay_seconds = .007;
+constexpr double two_hop_comparison_replay_seconds = 180.;
+constexpr std::uint64_t retained_two_hop_samples = 4'300'572;
+constexpr std::uint64_t two_hop_comparison_samples = 4'300'585;
+constexpr std::string_view retained_two_hop_prefix_sha = "4c1cfc29c2ccada26914c1c007f63849a58955d73991bc914ba2beff9cf25ef2";
+constexpr std::string_view two_hop_comparison_sha = "ea887215dc1109d78ddc05da605f129d8a72e21c2529c9e631b7429e0a8dcf73";
 struct Limit : Error { using Error::Error; };
 struct Timeout : Error { using Error::Error; };
 struct Unavailable : Error { using Error::Error; };
@@ -87,6 +93,8 @@ struct Options {
     std::optional<double> repeat_path_scale;
     bool repeat_thermal_off=false, repeat_separate_attempts=false, two_hop_alarm_matrix=false;
     bool two_hop_additive_boundary=false;
+    bool two_hop_spread_comparison=false;
+    std::string two_hop_spread_capture, two_hop_spread_replay;
     double max_wall_seconds=60, duration_seconds=10;
     bool duration_override=false;
     std::optional<double> cn0, bit_seconds, history_reference_delay_seconds, capture_lead_seconds;
@@ -146,6 +154,7 @@ Options parse(int argc,char** argv) {
         if(key=="--repeat-separate-attempts") {o.repeat_separate_attempts=true;continue;}
         if(key=="--two-hop-alarm-matrix") {o.two_hop_alarm_matrix=true;continue;}
         if(key=="--two-hop-additive-boundary") {o.two_hop_additive_boundary=true;continue;}
+        if(key=="--two-hop-spread-comparison") {o.two_hop_spread_comparison=true;continue;}
         if(key=="--hf-gannon-native-diagnostic") {o.hf_gannon_native_diagnostic=true;continue;}
         if(key=="--hf-gannon-gain-variance-diagnostic") {o.hf_gannon_gain_variance_diagnostic=true;continue;}
         if(key=="--hf-target-presence-diagnostic") {o.hf_target_presence_diagnostic=true;continue;}
@@ -248,6 +257,8 @@ Options parse(int argc,char** argv) {
         }
         else if(key=="--max-wall-seconds") o.max_wall_seconds=number(value);
         else if(key=="--duration-seconds") {o.duration_seconds=number(value);o.duration_override=true;}
+        else if(key=="--two-hop-spread-capture") o.two_hop_spread_capture=value;
+        else if(key=="--two-hop-spread-replay") o.two_hop_spread_replay=value;
         else throw Error("unknown option: "+key);
     }
     require(o.mode=="plan"||o.mode=="channel"||o.mode=="receive"||o.mode=="slot"||o.mode=="oracle"||
@@ -266,8 +277,19 @@ Options parse(int argc,char** argv) {
             o.backend=="cpu"&&!o.helper&&o.fec=="off"&&o.repeat_bit&&*o.repeat_bit<=1&&o.repeat_path_seed&&
             o.repeat_path_scale&&(*o.repeat_path_scale==0||*o.repeat_path_scale==.5||*o.repeat_path_scale==1),
             "gui-repeated-bit requires the native GUI, wanted reference CPU, Helper/FEC off and a bit and path scale/seed");
+        // The one longer holdout exhausted its initial deadline after all
+        // input was rendered. Keep its waveform and full receive unchanged
+        // while bounding its single larger replay separately from shorter rows.
+        const bool long_holdout=o.repeat_separate_attempts&&o.bit_seconds==32.&&o.cn0==34.&&
+            o.repeat_bit==1&&o.repeat_path_scale==1.&&!o.repeat_thermal_off&&
+            o.seed==62014&&o.noise_seed==72014&&o.repeat_path_seed==62034&&
+            o.gui.spread=="hf-worst"&&o.gui.selective=="each-65"&&o.gui.arrival=="tight"&&o.gui.clock_edge&&
+            o.gui.margin==3.&&o.gui.audio_ppm==100.&&o.gui.rf_ppm==1.&&
+            o.gui.audio_phase_degrees_sqrt_s==.5&&o.gui.rf_phase_degrees_sqrt_s==.05&&o.gui.target_cn0_db_hz==32.&&
+            o.chunk==4096&&!o.workers&&!o.owners&&!o.memory_bytes&&!o.capture_digest_slot&&!o.duration_override&&
+            !o.hf_compare_admitted_models&&!o.hf_predictive_quiet&&!o.service_replay;
         const std::uint64_t maximum_samples=o.repeat_separate_attempts?2'400'000:1'200'000;
-        require(o.max_wall_seconds<=120&&o.max_samples<=maximum_samples&&o.chunk<=4096,
+        require(o.max_wall_seconds<=(long_holdout?300:120)&&o.max_samples<=maximum_samples&&o.chunk<=4096,
             "gui-repeated-bit trial exceeds its finite wall, sample or chunk bound");
     }
     if(physical_repeated)
@@ -303,7 +325,7 @@ Options parse(int argc,char** argv) {
             o.seed==73613&&o.noise_seed==93613&&!o.workers&&!o.owners&&!o.capture_digest_slot&&
             o.max_wall_seconds<=1200&&o.max_samples<=4'350'000&&o.chunk<=4096,
             "two-hop alarm matrix requires the frozen long physical profile, full default workers and bounded resources");
-    if(o.two_hop_additive_boundary)
+    if(o.two_hop_additive_boundary||o.two_hop_spread_comparison)
         require((o.mode=="plan"||o.mode=="receive")&&o.scenario=="hf-vector-two-hop"&&
             o.waveform=="reference"&&o.pulse=="rrc"&&o.control=="wanted"&&o.backend=="cpu"&&
             o.message=="E"&&!o.helper&&o.fec=="off"&&o.bit_seconds==128.&&o.cn0==4.&&
@@ -312,6 +334,12 @@ Options parse(int argc,char** argv) {
             !o.hf_predictive_quiet&&!o.memory_bytes&&o.max_wall_seconds<=900&&
             o.max_samples==4'350'000&&o.chunk==4096,
             "two-hop additive comparison requires the frozen +4 dB-Hz long physical profile and default receiver resources");
+    require(!(o.two_hop_additive_boundary&&o.two_hop_spread_comparison)&&
+        (o.two_hop_spread_capture.empty()||o.two_hop_spread_replay.empty())&&
+        ((o.two_hop_spread_capture.empty()&&o.two_hop_spread_replay.empty())||
+         (o.two_hop_spread_comparison&&o.two_hop_spread_capture.size()<=4096&&o.two_hop_spread_replay.size()<=4096&&
+          std::endian::native==std::endian::little)),
+        "named capture or read-only replay requires the scoped two-hop spread comparison alone");
     require(!o.service_options||o.service_replay||o.hf_predictive_quiet,"service options require a bounded replay");
     require(!o.service_replay||o.mode=="receive"||o.mode=="plan","service replay requires receive or plan mode");
     require(!(o.service_replay||o.hf_predictive_quiet)||o.chunk<=ObservationSpool::maximum_chunk_rows,"service replay chunk must be 1..4096");
@@ -1279,7 +1307,7 @@ Setup setup(const Options& o,std::stop_token stop) {
             ((low_short&&o.control=="noise")||(low_long&&o.control=="wrong-key"));
         const bool boundary_pair=primary&&o.message=="E"&&o.seed==73613&&o.noise_seed==93613&&
             ((cn0==6.&&bit_seconds==64.)||(cn0==3.&&bit_seconds==128.)||
-             (o.two_hop_additive_boundary&&cn0==4.&&bit_seconds==128.));
+             ((o.two_hop_additive_boundary||o.two_hop_spread_comparison)&&cn0==4.&&bit_seconds==128.));
         const bool wanted_sensitivity=(low_short||low_long||boundary_pair)&&o.control=="wanted"&&
             (o.mode=="plan"||o.mode=="receive");
         const bool sensitivity_point=wanted_sensitivity||negative_sensitivity;
@@ -1467,7 +1495,9 @@ Setup setup(const Options& o,std::stop_token stop) {
     // capture_stop already includes the receiver filter halo.
     pc.receiver_tail_samples=0;
     const auto key=Crypto::amateur();
-    PublicProfile profile(pc);
+    auto capture_config=pc;
+    if(o.two_hop_spread_comparison) capture_config.spread_delay_ms=1000*two_hop_comparison_delay_seconds;
+    PublicProfile profile(capture_config);
     auto txpc=pc;if(o.control=="wrong-ordinal")txpc.format.symbol_ordinal=1;
     PublicProfile transmit_profile(txpc);
     std::string message=o.message;
@@ -1566,11 +1596,15 @@ Setup setup(const Options& o,std::stop_token stop) {
         guess=next;
         require(iteration!=7,"channel-tail horizon did not converge");
     }
-    if(o.two_hop_alarm_matrix||o.repeat_bit) {
+    if(o.two_hop_alarm_matrix||o.two_hop_spread_comparison||o.repeat_bit) {
         const auto horizon_seconds=static_cast<double>(s.horizon)/rc.sample_rate_hz;
         require(s.slot_horizon==15&&s.q0==13&&s.horizon<=o.max_samples&&
             (s.scenario.numerical_horizon_seconds<=0||horizon_seconds<=s.scenario.numerical_horizon_seconds),
             "physical alarm appraisal requires fifteen complete slots inside the admitted horizon");
+        if(o.two_hop_spread_comparison)
+            require(pc.capture_lead_seconds==.25&&rc.spread_delay_seconds==0&&s.truth.size()==13&&
+                std::abs(s.profile.geometry().bit_seconds-139.2)<1e-8&&s.horizon==two_hop_comparison_samples,
+                "two-hop spread comparison changed the frozen reference waveform or aperture");
         if(o.repeat_bit)
             for(const auto index:s.episode_starts) {
                 const auto stop_sample=s.transmit_profile.calendar().distance(s.transmit_profile.origin(),
@@ -1815,8 +1849,10 @@ Json plan_json(const Setup& s,const Options& o) {
             {"workers_explicit",o.workers.has_value()},{"owners_explicit",o.owners.has_value()}})},
         {"capture_gap",range({s.gap_first,s.gap_stop})},{"public_slots",std::move(slots)},
         {"configured_calendar_only",true},{"capacity_qualified",false},{"empirically_validated",false}});
-    if(o.service_replay||o.hf_predictive_quiet||o.two_hop_additive_boundary)
+    if(o.service_replay||o.hf_predictive_quiet||o.two_hop_additive_boundary||o.two_hop_spread_comparison)
         result["service_replay"]=service_plan_json(s,o);
+    if(o.two_hop_spread_comparison)
+        result["capture_profile_spread_seconds"]=p.spread_delay_ms*.001;
     if(o.hf_predictive_quiet) {
         result["hf_predictive_quiet_requested"]=true;
         result["hf_predictive_quiet_active"]=false;
@@ -3782,31 +3818,40 @@ Json diagnose_known_target(const Setup& s,const Options& o,const ReceiverSlotPla
         {"binary_correct_vs_wrong",comparison(binary)},{"target_wanted_vs_absent",comparison(presence)}});
 }
 
-enum class AffineBoundaryPolicy { standard, existing, additive };
+enum class AffineBoundaryPolicy { standard, existing, additive, declared_spread };
+
+AffineBoundaryPolicy second_boundary_policy(const Options& options) {
+    return options.two_hop_spread_comparison ? AffineBoundaryPolicy::declared_spread : AffineBoundaryPolicy::additive;
+}
 
 void record_affine_boundary_policy(Json& receipt,AffineBoundaryPolicy policy) {
     if(policy==AffineBoundaryPolicy::standard)return;
     receipt["plan"]["affine_gain_evaluation"]=policy==AffineBoundaryPolicy::existing?
         "without_stationary_plus_ou":"operational";
+    if(policy==AffineBoundaryPolicy::declared_spread)
+        receipt["plan"]["public_bounds"]["spread_seconds"]=two_hop_comparison_delay_seconds;
 }
 
 void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
              appraisal::HfVectorTwoHopPreparation* two_hop_preparation=nullptr,
-             AffineBoundaryPolicy gain_policy=AffineBoundaryPolicy::standard,Json* additive_replay=nullptr) {
+             AffineBoundaryPolicy gain_policy=AffineBoundaryPolicy::standard,Json* comparison_replay=nullptr) {
     if(s.horizon>o.max_samples)throw Limit("canonical physical horizon exceeds predeclared sample budget; use plan or explicitly increase it");
     if(s.scenario.numerical_horizon_seconds>0&&static_cast<double>(s.horizon)/s.receiver.sample_rate_hz>s.scenario.numerical_horizon_seconds)
         throw Unavailable("channel numerical qualification is limited to its declared horizon; use slot mode or a shorter channel component");
     if(execution::process_footprint_bytes()>=s.resources.memory_limit_bytes)
         throw Limit("application baseline exhausts the declared total memory limit");
+    const bool retained_replay=!o.two_hop_spread_replay.empty();
     std::unique_ptr<ObservationSpool> spool;
     std::size_t spool_reservation=0;
-    if(o.service_replay||o.hf_predictive_quiet||additive_replay) {
+    if(o.service_replay||o.hf_predictive_quiet||comparison_replay||retained_replay) {
         const auto limit=service_spool_limit(o);
         if(s.horizon>limit/ObservationSpool::row_bytes)throw Limit("service capture exceeds the predeclared spool byte limit");
         const auto baseline=execution::process_footprint_bytes();
         if(baseline>=s.resources.memory_limit_bytes||sizeof(ObservationSpool)>=s.resources.memory_limit_bytes-baseline)
             throw Limit("service spool buffers exhaust total memory limit");
-        spool=std::make_unique<ObservationSpool>(s.horizon,limit);
+        spool=std::make_unique<ObservationSpool>(s.horizon,limit,
+            retained_replay?o.two_hop_spread_replay:o.two_hop_spread_capture,
+            retained_replay?ObservationSpool::OpenMode::retained_read_only:ObservationSpool::OpenMode::capture);
         if(spool->resident_reservation_bytes()>=s.resources.memory_limit_bytes)
             throw Limit("service spool backing reservation exhausts total memory limit");
         spool_reservation=static_cast<std::size_t>(spool->resident_reservation_bytes());
@@ -3914,7 +3959,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
     const bool protected_oblique=o.scenario==appraisal::hf_vector_oblique_protected_scenario;
     const std::size_t per_slot_bytes=(o.hf_phase_refinement||o.hf_correlated_gain_receiver)?65536:16384;
     // Compare two retained receipt sets after sequential replay.
-    const auto pair_slot_bytes=protected_oblique||additive_replay?2*per_slot_bytes:per_slot_bytes;
+    const auto pair_slot_bytes=protected_oblique||comparison_replay?2*per_slot_bytes:per_slot_bytes;
     const std::size_t reassembly_reserve=protected_oblique?65536+appraisal::hf_admission_replay_reserve_bytes:0;
     require(s.slot_horizon<=SIZE_MAX/pair_slot_bytes,"evaluator receipt reservation overflow");
     if(o.hf_correlated_gain_receiver)result["plan"]["correlated_gain_evaluator_reserved_bytes"]=
@@ -3981,7 +4026,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
                 clean_channel->report().working_bytes<=native_channel_source_bound,
                 "clean channel differs from the original geometry or exceeds its admitted bound");
         }
-    } else {
+    } else if(!retained_replay) {
         std::vector<appraisal::SignalEnergyInterval> signal_energy_intervals;
         const bool evolution_energy_case=o.mode=="receive"&&
             (s.scenario.id=="hf-vector-evolving"||s.scenario.id=="hf-vector-evolving-rigid"||
@@ -4025,43 +4070,72 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
             result["plan"]["vector_two_hop_table_built"]=true;
         }
     }
-    const double channel_preparation_seconds=std::chrono::duration<double>(Clock::now()-channel_begin).count();
+    const double channel_preparation_seconds=retained_replay?0.:
+        std::chrono::duration<double>(Clock::now()-channel_begin).count();
     ServiceTiming render_time,spool_write_time;
+    double retained_verification_seconds=0;
     std::string captured_digest;
     std::optional<Json> frozen_channel;
     double render_seconds=0;
     if(spool) {
+        const auto verification_began=Clock::now();
         Hash capture_hash;
+        std::optional<Hash> historical_prefix_hash;
+        if(o.two_hop_spread_comparison) historical_prefix_hash.emplace();
         std::vector<Complex> capture_iq(o.chunk);
         std::vector<std::uint8_t> capture_valid(o.chunk,1);
+        if(retained_replay) spool->rewind();
         for(std::uint64_t at=0;at<s.horizon;) {
             deadline.check();
             const auto n=static_cast<std::size_t>(std::min<std::uint64_t>(o.chunk,s.horizon-at));
             auto rows=std::span(capture_iq).first(n);auto mask=std::span(capture_valid).first(n);
-            const auto started=Clock::now();
-            const auto count=native_chain?native_chain->read(rows,mask):
-                native_channel?native_channel->read(rows,mask):channel->read(rows,deadline.stop.get_token());
-            require(count==n,"channel returned a short service capture chunk");
-            render_seconds+=std::chrono::duration<double>(Clock::now()-started).count();
-            if(!native_channel&&!native_chain)for(std::size_t i=0;i<n;++i)
-                mask[i]=(o.control!="capture-gap"||at+i<s.gap_first||at+i>=s.gap_stop)?1:0;
+            if(retained_replay) spool->read(rows,mask);
+            else {
+                const auto started=Clock::now();
+                const auto count=native_chain?native_chain->read(rows,mask):
+                    native_channel?native_channel->read(rows,mask):channel->read(rows,deadline.stop.get_token());
+                require(count==n,"channel returned a short service capture chunk");
+                render_seconds+=std::chrono::duration<double>(Clock::now()-started).count();
+                if(!native_channel&&!native_chain)for(std::size_t i=0;i<n;++i)
+                    mask[i]=(o.control!="capture-gap"||at+i<s.gap_first||at+i>=s.gap_stop)?1:0;
+            }
             deadline.check();capture_hash.samples(rows,mask);
-            const ServiceTimer io;spool->append(rows,mask);spool_write_time.add(io.elapsed());
+            if(historical_prefix_hash&&at<retained_two_hop_samples) {
+                const auto prefix_rows=std::min<std::uint64_t>(n,retained_two_hop_samples-at);
+                historical_prefix_hash->samples(rows.first(prefix_rows),mask.first(prefix_rows));
+            }
+            if(!retained_replay) {const ServiceTimer io;spool->append(rows,mask);spool_write_time.add(io.elapsed());}
             at+=n;
         }
-        {const ServiceTimer io;spool->seal();spool_write_time.add(io.elapsed());}
+        if(!retained_replay) {const ServiceTimer io;spool->seal();spool_write_time.add(io.elapsed());}
         captured_digest=capture_hash.finish();
+        if(retained_replay) {
+            require(captured_digest==two_hop_comparison_sha,
+                "retained replay differs from the frozen complete two-hop capture SHA-256");
+            retained_verification_seconds=std::chrono::duration<double>(Clock::now()-verification_began).count();
+            result["retained_input"]=object({{"path",o.two_hop_spread_replay},{"samples",s.horizon},
+                {"bytes",spool->bytes()},{"sha256",captured_digest},{"verified_before_receiver",true}});
+        }
+        if(historical_prefix_hash) {
+            const auto prefix_digest=historical_prefix_hash->finish();
+            result["historical_capture_prefix"]=object({{"samples",retained_two_hop_samples},{"sha256",prefix_digest}});
+            require(prefix_digest==retained_two_hop_prefix_sha,
+                "two-hop spread comparison did not reproduce the retained +4 dB-Hz IQ prefix");
+            std::cerr<<(retained_replay?"two-hop retained capture verified, ":"two-hop spread capture sealed, ")
+                     <<s.horizon<<" rows, SHA-256 "<<captured_digest<<'\n'<<std::flush;
+        }
         frozen_emission=emission_report();
-        frozen_channel=native_chain?channel_json(native_chain->report(),s.receiver.sample_rate_hz,*frozen_emission,s.scenario.id):
+        frozen_channel=retained_replay?object({{"field_generation_executed",false},{"recorded_capture_replay",true}}):
+            native_chain?channel_json(native_chain->report(),s.receiver.sample_rate_hz,*frozen_emission,s.scenario.id):
             native_channel?channel_json(native_channel->report(),s.receiver.sample_rate_hz,*frozen_emission):
             channel_json(channel->report(),s.receiver.sample_rate_hz,s.scenario.id);
         // The retained observation owns replay input. Rendering caches and
         // source callbacks end here, before receiver construction and timing.
         native_chain.reset();native_channel.reset();channel.reset();source.sample_at={};episode_sources.clear();emissions.clear();
         future=add_bytes(evaluator_future,spool->working_bytes());
-        render_time=render_timer.elapsed();
+        if(!retained_replay)render_time=render_timer.elapsed();
     }
-    const auto run_policy=[&](Json& result,bool predictive,AffineBoundaryPolicy policy) {
+    const auto run_policy=[&](Json& result,bool predictive,AffineBoundaryPolicy policy,Deadline& deadline) {
     const auto policy_begin=Clock::now();
     ServiceTiming spool_read_time,service_time;
     std::optional<ServiceTimer> service_timer;
@@ -4737,6 +4811,11 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
         (spool&&(!digest_match||!service_receipts_complete||service_commits.size()!=s.slot_horizon)))) {
         run_status="error";reason="two-hop additive comparison did not score the complete ordered valid observation";
     }
+    if(!o.two_hop_spread_capture.empty()&&run_status=="completed"&&digest_match) {
+        result["retained_capture"]=object({{"path",o.two_hop_spread_capture},{"samples",s.horizon},
+            {"bytes",spool->bytes()},{"sha256",captured_digest},{"replay_verified",true},
+            {"format","real/imag IEEE binary64 and validity byte, little-endian"}});
+    }
     if(spool) {
         // Unregister and join any active cancellation callback before changing
         // its receiver pointer. Destruction joins the native executor as part
@@ -4775,13 +4854,14 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
         {"reference_relative_standard_error",source_report.data_reference.tile_relative_standard_error},
         {"generated_samples",source_report.generated_samples},{"data_energy_sample_sum",static_cast<double>(source_report.data_energy)},
         {"helper_energy_sample_sum",static_cast<double>(source_report.helper_energy)}});
-    const bool shared_render=o.hf_predictive_quiet||additive_replay;
+    const bool shared_render=o.hf_predictive_quiet||comparison_replay;
     result["timing"]=object({{"wall_seconds",shared_render?render_time.wall+std::chrono::duration<double>(end-policy_begin).count():std::chrono::duration<double>(end-begin).count()},
         {"source_preparation_seconds",std::chrono::duration<double>(prepared-begin).count()},
         {"channel_preparation_seconds",channel_preparation_seconds},
         {"source_and_channel_render_seconds",render_seconds},{"receiver_control_and_wait_seconds",control_seconds},
         {"public_search_seconds",public_search_seconds},{"receiver_dsp_may_overlap_rendering",receiver_executed&&!spool},{"isolated_receiver_service_measured",bool(spool)},{"capacity_qualified",false}});
     if(shared_render)result["timing"]["wall_includes_shared_render_per_policy"]=true;
+    if(retained_replay)result["timing"]["retained_capture_verification_seconds"]=retained_verification_seconds;
     result["outcomes"]=object({{"receiver_executed",receiver_executed},{"public_search_executed",public_search_executed},{"correct_complete",o.service_episodes==1&&o.mode!="slot"&&correct&&wrong_bits==0&&false_data==0&&
             ambiguous==0&&quiet_active==0&&physical==1&&accepted_messages==1&&run_status=="completed"},
         {"correct_decoded_complete",o.service_episodes==1&&o.mode=="receive"&&correct_decoded_candidate&&false_data==0&&premature==0&&
@@ -4979,16 +5059,33 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
         result["service_replay"]=std::move(service);
     }
     };
+    const auto run_boundary=[&](Json& out,AffineBoundaryPolicy policy) {
+        if(!o.two_hop_spread_comparison) {
+            run_policy(out,false,policy,deadline);
+            return;
+        }
+        Deadline replay_deadline(two_hop_comparison_replay_seconds);
+        std::stop_callback cancel_replay(deadline.stop.get_token(),[&] {replay_deadline.stop.request_stop();});
+        const auto replay_began=Clock::now();
+        run_policy(out,false,policy,replay_deadline);
+        if(Clock::now()-replay_began>std::chrono::duration<double>(two_hop_comparison_replay_seconds)) {
+            out["status"]="time_limit";
+            out["reason"]="two-hop spread comparison exceeded its per-replay wall bound";
+        }
+    };
     const Json policy_template=result;
-    run_policy(result,false,gain_policy);
-    if(additive_replay&&std::get<std::string>(result["status"].value)=="completed") {
-        std::cerr<<"two-hop additive boundary plus4-existing completed; replaying the same sealed capture\n"<<std::flush;
-        *additive_replay=policy_template;
-        run_policy(*additive_replay,false,AffineBoundaryPolicy::additive);
+    run_boundary(result,gain_policy);
+    if(comparison_replay&&std::get<std::string>(result["status"].value)=="completed") {
+        std::cerr<<(o.two_hop_spread_comparison?"two-hop zero-spread comparison":"two-hop additive boundary plus4-existing")
+                 <<" completed; replaying the same sealed capture\n"<<std::flush;
+        *comparison_replay=policy_template;
+        const auto second=second_boundary_policy(o);
+        if(second==AffineBoundaryPolicy::declared_spread)s.receiver.spread_delay_seconds=two_hop_comparison_delay_seconds;
+        run_boundary(*comparison_replay,second);
     }
     if(o.hf_predictive_quiet) {
         Json candidate=policy_template;
-        try {run_policy(candidate,true,AffineBoundaryPolicy::standard);}
+        try {run_policy(candidate,true,AffineBoundaryPolicy::standard,deadline);}
         catch(const Timeout& e){candidate["status"]="time_limit";candidate["reason"]=e.what();}
         catch(const ReceiverWorkspaceError& e){candidate["status"]="resource_limit";candidate["reason"]=e.what();}
         catch(const Limit& e){candidate["status"]="resource_limit";candidate["reason"]=e.what();}
@@ -5006,23 +5103,39 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
 
 void run_observation(Json& result,const Options& o,Deadline& deadline,
                      appraisal::HfVectorTwoHopPreparation* two_hop_preparation=nullptr,
-                     AffineBoundaryPolicy gain_policy=AffineBoundaryPolicy::standard,Json* additive_replay=nullptr) {
+                     AffineBoundaryPolicy gain_policy=AffineBoundaryPolicy::standard,Json* comparison_replay=nullptr) {
     result["mode"]=o.mode;result["waveform"]=o.waveform;result["control"]=o.control;result["seed"]=o.seed;
     result["requested_scenario"]=o.scenario;
     auto s=setup(o,deadline.stop.get_token());deadline.check();
+    if(!o.two_hop_spread_replay.empty())s.receiver.spread_delay_seconds=two_hop_comparison_delay_seconds;
     result["scenario"]=scenario_json(s.scenario);result["plan"]=plan_json(s,o);
     result["slots"]=Json::Array{};result["messages"]=Json::Array{};result["outcomes"]=object({});
     result["backend"]=object({{"requested",o.backend},{"executed_gpu_work",false}});
     if(o.mode=="plan") {
         result["status"]="completed";
         record_affine_boundary_policy(result,gain_policy);
-        if(additive_replay) {
-            *additive_replay=result;
-            record_affine_boundary_policy(*additive_replay,AffineBoundaryPolicy::additive);
+        if(comparison_replay) {
+            *comparison_replay=result;
+            record_affine_boundary_policy(*comparison_replay,second_boundary_policy(o));
+        }
+        if(o.two_hop_spread_comparison) {
+            const auto workspace=[&] {
+                std::size_t maximum=0;
+                for(std::uint64_t index=0;index<s.slot_horizon;++index) {
+                    const auto slot=make_receiver_slot_plan(s.profile,s.receiver,index);
+                    maximum=std::max(maximum,receiver_slot_workspace(s.receiver,slot,s.resources.workers));
+                }
+                return maximum;
+            };
+            result["plan"]["maximum_single_owner_workspace_bytes"]=workspace();
+            if(comparison_replay) {
+                s.receiver.spread_delay_seconds=two_hop_comparison_delay_seconds;
+                (*comparison_replay)["plan"]["maximum_single_owner_workspace_bytes"]=workspace();
+            }
         }
     }
     else if(o.mode=="oracle")oracle(result,s,o,deadline);
-    else execute(result,s,o,deadline,two_hop_preparation,gain_policy,additive_replay);
+    else execute(result,s,o,deadline,two_hop_preparation,gain_policy,comparison_replay);
 }
 
 void run_two_hop_alarm_matrix(Json& result,const Options& options,Deadline& deadline) {
@@ -5114,6 +5227,25 @@ void run_two_hop_additive_boundary(Json& result,const Options& options,Deadline&
     if(!completed(1)||!completed(2))return;
     result["status"]="completed";
 }
+
+void run_two_hop_spread_comparison(Json& result,const Options& options,Deadline& deadline) {
+    if(!options.two_hop_spread_replay.empty()) {
+        run_observation(result,options,deadline,nullptr,AffineBoundaryPolicy::declared_spread);
+        return;
+    }
+    result["mode"]=options.mode;result["waveform"]=options.waveform;
+    result["control"]=options.control;result["seed"]=options.seed;result["requested_scenario"]=options.scenario;
+    auto& comparison=result["two_hop_spread_comparison"];
+    comparison=object({{"aggregate_wall_limit_seconds",options.max_wall_seconds},
+        {"per_replay_wall_limit_seconds",two_hop_comparison_replay_seconds},{"sample_limit",options.max_samples},
+        {"truth_information_passed_to_receiver",false},{"zero",object({{"source_identity",identity()},{"status","error"}})},
+        {"seven_ms",object({{"source_identity",identity()},{"status","error"}})}});
+    const auto began=Clock::now();
+    run_observation(comparison["zero"],options,deadline,nullptr,AffineBoundaryPolicy::additive,&comparison["seven_ms"]);
+    const auto& zero_status=std::get<std::string>(comparison["zero"]["status"].value);
+    result["status"]=zero_status=="completed"?std::get<std::string>(comparison["seven_ms"]["status"].value):zero_status;
+    comparison["wall_seconds"]=std::chrono::duration<double>(Clock::now()-began).count();
+}
 }
 
 int main(int argc,char** argv) {
@@ -5131,6 +5263,8 @@ int main(int argc,char** argv) {
             result["gui_repeated_bit_usage"]="--mode gui-repeated-bit --scenario hf-gui-native --repeat-bit 0|1 --repeat-path-scale 0|0.5|1 --repeat-path-seed N replays six contiguous raw bits followed by two scored quiet windows. --repeat-separate-attempts emits each bit separately with two scored quiet windows after each. --repeat-thermal-off removes added thermal noise only. Requires a finite sample and wall cap.";
             result["two_hop_alarm_matrix_usage"]="--two-hop-alarm-matrix --mode plan|receive --scenario hf-vector-two-hop --message E --bit-seconds 128 --cn0 -3 --seed 73613 --noise-seed 93613 --max-samples 4350000 --max-wall-seconds 1200 evaluates fixed weak/recovery text and raw-bit pairs, reusing only the qualified physical table between independent rows.";
             result["two_hop_additive_boundary_usage"]="--two-hop-additive-boundary --mode plan|receive --scenario hf-vector-two-hop --message E --bit-seconds 128 --cn0 4 --seed 73613 --noise-seed 93613 --max-samples 4350000 --max-wall-seconds 900 evaluates an existing-bank calibration at +3 dB-Hz and compares two sequential receiver replays of a single +4 dB-Hz capture.";
+            result["two_hop_spread_comparison_usage"]="--two-hop-spread-comparison uses the frozen +4 dB-Hz two-hop options above and a common 7 ms capture aperture to compare operational receivers with 0 and 7 ms modeled spread. --two-hop-spread-capture PATH optionally retains the single sealed local I/Q/validity file by exclusive creation.";
+            result["two_hop_spread_replay_usage"]="--two-hop-spread-comparison --two-hop-spread-replay PATH reuses the frozen verified comparison capture for only the operational 7 ms declared-spread receiver; no field regeneration.";
             result["physical_repeated_bit_usage"]="--mode plan|receive --scenario hf-ensemble-changing-rate --repeat-bit 0|1 --repeat-separate-attempts --bit-seconds 128 --cn0 0 --seed 30107 --noise-seed 40107 --hf-trajectory-seed 20107 --hf-trajectory-offset-seconds 197 --max-samples 4350000 --max-wall-seconds 180 evaluates five separate raw-bit attempts through one continuous changing-rate channel. The bounded hf-disturbed profile is limited to C/N0 12, seed 9202 or 9601, omitted noise seed, 4096-sample chunks and otherwise the same CPU reference bounds.";
             result["service_replay_usage"]="--service-replay in receive/plan pre-renders native I/Q into the canonical bounded ObservationSpool; accepts --service-episodes 1|2, --service-spool-byte-limit N, paired --service-backlog-begin-slot N --service-backlog-end-slot N, and chunks <=4096. Full service includes receiver construction, unchanged-chunk replay, drain/destruction and separately reported replay reads/hash; rendering is excluded. Two episodes retain the global ordinal and fixed two-quiet gap, with a final extra quiet slot. Backlog eligibility and communication completion are separate; no capacity qualification.";
             result["hf_compare_admitted_models_usage"]="--hf-compare-admitted-models opts CPU receive/plan into comparison of all supported models with unchanged ordinary/overlap workspace quotes; excludes --hf-public-phase-receiver";
@@ -5160,6 +5294,7 @@ int main(int argc,char** argv) {
             auto& deadline=*active_deadline;
             if(o.two_hop_alarm_matrix)run_two_hop_alarm_matrix(result,o,deadline);
             else if(o.two_hop_additive_boundary)run_two_hop_additive_boundary(result,o,deadline);
+            else if(o.two_hop_spread_comparison)run_two_hop_spread_comparison(result,o,deadline);
             else run_observation(result,o,deadline);
         }
     }catch(const Timeout& e){result["status"]="time_limit";result["reason"]=e.what();code=4;}

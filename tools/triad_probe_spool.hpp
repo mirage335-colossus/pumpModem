@@ -12,6 +12,7 @@
 #include <memory>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <type_traits>
 
@@ -36,22 +37,38 @@
 namespace datapump::triad::probe {
 
 // Stores one native I/Q pair and its validity byte per row in a private
-// temporary file. Normal destruction closes and removes incomplete captures
-// too. The internal representation is local to this process.
+// temporary file by default. An explicit evidence path is created exclusively
+// and owned by its caller, which must distinguish partial from verified output.
 class ObservationSpool {
 public:
     using Complex = v3::Complex;
     static constexpr std::size_t row_bytes = 17;
     static constexpr std::size_t maximum_chunk_rows = 4096;
+    enum class OpenMode { capture, retained_read_only };
 
-    ObservationSpool(std::uint64_t expected_rows, std::uint64_t max_bytes)
+    ObservationSpool(std::uint64_t expected_rows, std::uint64_t max_bytes, const std::string& evidence_path = {},
+                     OpenMode mode = OpenMode::capture)
         : expected_rows_(expected_rows) {
         if (expected_rows_ == 0 || expected_rows_ > max_bytes / row_bytes)
             throw std::invalid_argument("observation spool exceeds its byte quota or has no rows");
-        file_.reset(open_temporary_file());
+        if (mode == OpenMode::retained_read_only) {
+            if (evidence_path.empty()) throw std::invalid_argument("retained replay needs an explicit input file");
+            file_.reset(std::fopen(evidence_path.c_str(), "rb"));
+        } else file_.reset(evidence_path.empty() ? open_temporary_file() : std::fopen(evidence_path.c_str(), "w+bx"));
         if (!file_) throw std::runtime_error("could not create the observation spool");
         if (std::setvbuf(file_.get(), stdio_buffer_.data(), _IOFBF, stdio_buffer_.size()) != 0)
             throw std::runtime_error("could not install the observation spool buffer");
+        if (mode == OpenMode::retained_read_only) {
+            // The caller supplies an independently bounded shape. Input
+            // length only confirms that shape and never sizes allocations.
+            const auto bytes = expected_rows_ * row_bytes;
+            if (bytes > static_cast<std::uint64_t>(std::numeric_limits<long>::max()) ||
+                std::fseek(file_.get(), 0, SEEK_END) != 0 ||
+                std::ftell(file_.get()) != static_cast<long>(bytes))
+                throw std::invalid_argument("retained replay file differs from the declared byte extent");
+            rows_ = expected_rows_;
+            sealed_ = true;
+        }
         account_backing();
     }
 

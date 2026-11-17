@@ -794,7 +794,35 @@ void slow_gain_coherence_is_bounded_and_normalized() {
           "wide bounds must preserve basis/adaptive work, two-model cost and prefix/worker invariance");
 }
 
-void stationary_fading_gain_covers_short_single_tap_data() {
+void direct_gain_packs_two_tap_statistics() {
+    std::array<Complex, 6> direct_r{}, direct_g{};
+    std::array<Complex, 12> correlations{};
+    std::array<Complex, 24> gram{};
+    for (std::size_t h = 0; h < direct_r.size(); ++h) {
+        if (h % 3 == 0) continue; // exact common null per block
+        direct_r[h] = {static_cast<double>(h) - 2.5, .6 * h - .4};
+        direct_g[h] = 1. + .2 * h;
+        correlations[2 * h] = direct_r[h];
+        correlations[2 * h + 1] = {-.8 * h, .3 + h};
+        gram[4 * h] = direct_g[h];
+        gram[4 * h + 1] = {.2 * h, .3};
+        gram[4 * h + 2] = std::conj(gram[4 * h + 1]);
+        gram[4 * h + 3] = 2.5 - .3 * h;
+    }
+    for (const auto ranks : {std::array{2u, 1u}, std::array{0u, 2u}, std::array{2u, 0u}}) {
+        auto packed_r = correlations;
+        auto packed_g = gram;
+        pack_direct_gain_statistics(packed_r, packed_g, ranks);
+        for (std::size_t h = 0; h < direct_r.size(); ++h) {
+            const bool observed = ranks[h / 3] != 0;
+            check(packed_r[h] == (observed ? direct_r[h] : Complex{}) &&
+                  packed_g[h] == (observed ? direct_g[h] : Complex{}),
+                  "additive packing must retain both direct blocks and bits, excluding echo, cross terms and rank-zero residuals");
+        }
+    }
+}
+
+void stationary_fading_gain_covers_direct_paths() {
     Fixture clean(240, 60, true, 16.);
     const auto duration = geometry(clean.slot.format).bit_seconds;
     check(duration >= 10. && duration < 32.,
@@ -882,8 +910,34 @@ void stationary_fading_gain_covers_short_single_tap_data() {
     two_taps.spread_delay_seconds = .007;
     auto two_taps_off = two_taps;
     two_taps_off.time_varying_channel = false;
-    check(fine_workspace(two_taps, mixed.slot, 1) == fine_workspace(two_taps_off, mixed.slot, 1),
-          "a two-tap aperture must not reserve the one-template additive model");
+    const auto wide_off = run(mixed, two_taps_off, 2, true);
+    const auto wide_original = run(mixed, two_taps, 1, false, existing);
+    const auto wide_extended = run(mixed, two_taps, 2, true);
+    const auto wide_noise = run(noise, two_taps);
+    check(wide_extended.work.tap_count == 2 && wide_extended.score.affine_stationary_fading_gain &&
+          wide_extended.score.zero_h0_verified && wide_extended.work.slow_gain_bit_evidence == extended.work.slow_gain_bit_evidence,
+          "both two-tap direct statistics must give the same additive evidence as the one-tap reference");
+    check(!wide_off.score.affine_stationary_fading_gain && !wide_original.score.affine_stationary_fading_gain &&
+          wide_off.score.bit_evidence == wide_original.score.bit_evidence &&
+          wide_off.work.initial_affine.gaussian_updates == wide_original.work.initial_affine.gaussian_updates,
+          "the fixed two-tap original bank must agree with the explicit excluded-family comparator");
+    check(wide_extended.work.workspace_bytes > wide_off.work.workspace_bytes &&
+          wide_extended.work.initial_affine.basis_rows == wide_original.work.initial_affine.basis_rows &&
+          wide_extended.work.initial_affine.basis_calls == wide_original.work.initial_affine.basis_calls &&
+          wide_extended.work.initial_affine.gaussian_updates == wide_original.work.initial_affine.gaussian_updates +
+              wide_extended.work.blocks * wide_extended.work.initial_affine.initial_states * 3 * 2 &&
+          wide_extended.work.adaptive.transition_edges == wide_original.work.adaptive.transition_edges &&
+          wide_extended.work.adaptive.basis_rows == wide_original.work.adaptive.basis_rows,
+          "two-tap additive gain must reserve its posterior state and charge its updates without extra basis work");
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        const auto expected = test_log_add(std::log(.75) + wide_original.score.bit_evidence[bit],
+            std::log(.25) + extended.work.slow_gain_bit_evidence[bit]);
+        check(std::abs(expected - wide_extended.score.bit_evidence[bit]) < 1e-10,
+              "the original two-tap bank must retain its fixed weight beside the direct-template additive model");
+    }
+    check(wide_noise.score.decision == SlotDecision::quiet && wide_noise.score.noise_statistics_valid &&
+          wide_noise.score.quiet_energy == quiet_extended.score.quiet_energy,
+          "the direct additive family in a two-tap aperture must preserve observed quiet");
     const auto full_score = [&](const ReceiverConfig& config) {
         constexpr unsigned workers = 2;
         return score_receiver_slot(config,mixed.slot,mixed.key,mixed.iq,{},workers,
@@ -892,7 +946,7 @@ void stationary_fading_gain_covers_short_single_tap_data() {
     const auto full_single = full_score(varying);
     const auto full_double = full_score(two_taps);
     check(full_single.complete && full_double.complete && full_single.all_valid && full_double.all_valid &&
-          full_single.affine_stationary_fading_gain && !full_double.affine_stationary_fading_gain &&
+          full_single.affine_stationary_fading_gain && full_double.affine_stationary_fading_gain &&
           full_single.decision == SlotDecision::data && full_double.decision == SlotDecision::data &&
           full_single.bit == 1 && full_double.bit == 1,
           "the same short changing single-path DATA must pass when the public geometry declares a possible echo");
@@ -1690,7 +1744,8 @@ int main() {
         erasure_and_failure();
         cold_maximum_states();
         slow_gain_coherence_is_bounded_and_normalized();
-        stationary_fading_gain_covers_short_single_tap_data();
+        direct_gain_packs_two_tap_statistics();
+        stationary_fading_gain_covers_direct_paths();
         gaussian_update_matches_dense_complex_covariance();
         gaussian_update_matches_dense_complex_covariance(.5, true);
         gaussian_update_matches_dense_complex_covariance(2., true);

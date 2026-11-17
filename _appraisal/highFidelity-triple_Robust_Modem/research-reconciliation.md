@@ -1,6 +1,6 @@
 # Research reconciliation for the native appraisal
 
-Updated 16 November 2026. This is an implementation map that reconciles the
+Updated 17 November 2026. This is an implementation map that reconciles the
 existing [`_ref` evidence](../../_ref/highFidelity-triple_Robust_Modem/Astra-6/README.md)
 with focused primary-source checks. It selects bounded model families and
 records evidence limits; it is not a channel calibration or modem result. The
@@ -96,6 +96,47 @@ named physical paths, reporting the realized spectrum and path loss separately.
 AWGN bounds remain useful under their stated assumptions, but AWGN-derived time
 or energy targets do not guarantee a fixed reception time, energy or success
 on these fading, multipath, or path-loss episodes.
+
+### Persistent deterioration versus physical loss
+
+The duration of a disturbance and the receiver's ability to tolerate its
+distortion are separate questions. In the selected polar episode of
+[Cameron et al. (2024)](https://doi.org/10.1029/2023RS007897), elevated spread
+and repeated Doppler swings continued over hours. The later clear patch
+crossing had comparatively little spread: moving structure does not imply one
+universal fading law. These are received-signal observations on one polar
+link, not a worldwide outage distribution or an ITU 2σ calibration.
+
+Recent passive European ionosonde observations give a complementary physical
+limit. [Verhulst et al. (2026)](https://doi.org/10.1029/2026RS008688) report
+15–16 MHz broadcast amplitudes below their quiet reference's lower quartile
+for about an hour during an X9 flare. Another flare nearly removed the
+integrated signals in their selected bands; a May 2024 particle event affected
+observations into the next day. This proof-of-principle study observes
+transmitters of opportunity, and changing reflection availability also affects
+reception. It supplies neither calibrated per-link attenuation nor this modem's
+outage probability. More receiver hypotheses cannot recover information lost
+to inadequate received energy.
+
+The actionable software question is narrower: does useful signal recover when
+conditions improve, and does a broad configured allowance retain useful
+simpler-channel explanations? A persistent component plus changing residual
+can remain relevant when the operator allows delayed paths. Test that
+eligibility with identical received samples before introducing more latent
+paths or historical trajectory searches. Separately test recovery across
+ambiguous DATA and interrupted quiet intervals; codec boundary recovery must
+not suppress the raw slot receipts needed by a prearranged-bit alarm. These
+are implementation checks, not substitutes for path-specific availability
+measurements.
+
+The [native wide-delay comparison](../../docs/validation.md#persistent-reception-investigation--17-november-2026)
+subsequently supplies that implementation evidence: broadening only the
+receiver's declared delay loses a bit on the same weak physical capture, and
+restoring the direct additive submodel under the same broad configuration
+recovers it. The existing two-path family and public coordinates remain. This
+supports retaining a useful simpler explanation within broader bounds; it does
+not establish a universal covariance, require an additive model on every tap,
+or justify tuning to the simulator's realized gains.
 
 ## Noise, references and decision statistics
 
@@ -507,7 +548,7 @@ initialization costs, while preserving the current negative controls.
   unknown-ordinal or address acquisition. Physical transmission-level feasibility
   also needs measured antenna, system/noise, station and environmental inputs.
 
-External sources were checked 13–16 November 2026. This file is a concise decision
+External sources were checked 13–17 November 2026. This file is a concise decision
 map, not an exhaustive literature review; detailed source passages, search
 limits, arithmetic and alternatives remain in the linked research chapters.
 

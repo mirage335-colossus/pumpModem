@@ -212,6 +212,10 @@ scored quiet slots after DATA establish physical completion. Interior missing
 slots remain erasures if transmission resumes. Transport EOF drains accepted
 work without inventing quiet slots. Invalid or over-limit episodes require two
 scored quiet slots before rearming, preventing suffix decoding.
+Raw slot decisions continue during this boundary recovery. An abandoned pending
+browser row is marked rejected, including when recovery and a new episode occur
+between deliveries; it does not remain labelled as actively receiving. See the
+[persistent-reception audit](validation.md#persistent-reception-investigation--17-november-2026).
 
 Unknown waveform epoch, ordinal and start-time acquisition remains outside this
 scope. A removed fresh-onset prototype admitted an active signal under a wrong
@@ -243,17 +247,22 @@ and does not enumerate frequency histories. The public score receipt reports
 the admitted coherence times; zero values mean the slow family was not
 supported. See the [channel-model limits](triad-stochastic.md#nonstationary-channel-research-reconciliation)
 before interpreting these scales physically.
-At faster fine cadence, changing-channel operation with one spatial basis also
-admits a simultaneous stationary-plus-fading gain. Two alternatives use the
+At faster fine cadence, changing-channel operation also admits a simultaneous
+stationary-plus-fading gain on the direct spatial template. Two alternatives use the
 existing 0.5/2-second OU timescales and equal stationary/dynamic prior variances;
 they share 0.25 prior mass while the original family retains 0.75. There is no
 bit-duration cutoff. They reuse the existing template correlations and Gram,
 adding only bounded posterior state and updates. Off and the original slow VLF
-family remain unchanged. Two-spatial-basis profiles retain their existing model
-bank; a direct-template additive subset is possible but unqualified under those
-wider bounds. The receipt distinguishes `stationary_plus_ou` from the original
-or slow whole-gain family. See the [physical-channel investigation](validation.md#weak-physical-channel-alarm-investigation--16-november-2026)
-for the fixed-history endpoint gain, original failures and remaining coverage limits.
+family remain unchanged. When the public bounds also admit a second path, the
+original two-path family keeps its 0.75 share; the additive direct-only subset
+uses the existing direct correlation and Gram diagonal after that calculation.
+It does not fit simultaneous stationary and fading gains on both paths or
+add templates, timing hypotheses or historical searches. Rank-zero and erased
+blocks supply no observational evidence. The receipt distinguishes
+`stationary_plus_ou` from the original or slow whole-gain family. See the
+[wide-bound repair](validation.md#persistent-reception-investigation--17-november-2026)
+and earlier [physical-channel investigation](validation.md#weak-physical-channel-alarm-investigation--16-november-2026)
+for fixed-history gains, original failures and remaining coverage limits.
 
 Ordinary two-tap Gaussian state stores a covariance factor in the existing four
 complex slots, preserving a thin observable direction across updates. Fixed,

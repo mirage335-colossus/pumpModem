@@ -982,6 +982,39 @@ def complete_service_messages(receipt: dict) -> None:
 
 
 class CampaignValidationTests(unittest.TestCase):
+    def test_frozen_long_gui_holdout_accepts_one_bounded_replay(self):
+        episode = repeated_bit_episode(seed=62014, noise_seed=72014, repeat_path_seed=62034,
+            cn0_db_hz=34, bit_seconds=32, repeat_path_scale=1, repeat_separate_attempts=True,
+            max_wall_seconds=300, max_samples=2_400_000)
+        runner._validate_episode(episode, 0, set(), 300, 2_400_000)
+        for invalid in (dict(episode, max_wall_seconds=300.01), dict(episode, seed=62015),
+                        dict(episode, repeat_thermal_off=True), dict(episode, gui_clock_edge=False),
+                        dict(episode, bit_seconds=2), dict(episode, max_samples=2_400_001)):
+            with self.subTest(invalid=invalid), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(invalid, 0, set(), 300, 2_400_000)
+        receipt, plan = repeated_bit_receipt(episode)
+        plan.update(max_wall_seconds=299.5, max_samples=2_400_000)
+        runner._validate_repeated_bit_receipt(receipt, episode, plan, native_max_wall_seconds=299.5,
+                                              native_max_samples=2_400_000)
+        with self.assertRaisesRegex(runner.CampaignError, "actual frozen invocation"):
+            runner._validate_repeated_bit_receipt(receipt, episode, plan, native_max_wall_seconds=299.75)
+        with self.assertRaisesRegex(runner.CampaignError, "full hashed capture"):
+            runner._validate_repeated_bit_receipt(receipt, dict(episode, bit_seconds=2), plan)
+        plan["max_wall_seconds"] = 300.01
+        with self.assertRaisesRegex(runner.CampaignError, "full hashed capture"):
+            runner._validate_repeated_bit_receipt(receipt, episode, plan)
+        campaign = {"schema_version": 1, "name": "bounded long holdout", "max_trials": 1,
+                    "max_wall_seconds": 300, "per_trial_wall_seconds": 300,
+                    "max_samples": 2_400_000, "episodes": [episode]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.json"
+            path.write_text(json.dumps(campaign))
+            self.assertEqual(runner._read_campaign(path)["episodes"], [episode])
+            campaign.update(max_trials=2, episodes=[episode, dict(episode, id="duplicate-physics")])
+            path.write_text(json.dumps(campaign))
+            with self.assertRaisesRegex(runner.CampaignError, "one episode"):
+                runner._read_campaign(path)
+
     def test_separate_raw_campaign_allows_mixed_thermal_conditions(self):
         episodes = [
             repeated_bit_episode(id="off-bit0", repeat_bit=0, repeat_path_scale=1,

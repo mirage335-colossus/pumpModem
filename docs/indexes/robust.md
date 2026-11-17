@@ -196,10 +196,15 @@ additive alternative using existing correlations and bounded state, without a
 duration cutoff. It recovers the selected +4 dB-Hz two-hop message that the
 original bank misses; the +3 miss remains. The original family retains 75% of
 its affine prior mass, bounding that matched contribution's log-evidence loss
-by 0.288 nats, not a guaranteed dB or bit-error bound. Existing two-spatial-basis
-profiles and slow VLF alternatives remain separate. Wider-bound direct-template
-support merits reconsideration when a weak case demonstrates an admission loss;
-the strong zero/7-ms declared-spread check passes both settings. Ordinary
+by 0.288 nats, not a guaranteed dB or bit-error bound. A later weak same-IQ check
+finds that declaring 7 ms spread removed this useful simpler explanation and
+lost the final message bit. The direct-only additive subset now remains
+available within broad two-path settings, alongside the original two-path
+family; it restores the complete message under the same broad configuration.
+It reuses existing statistics and adds no rendered template or timing search.
+Slow VLF alternatives remain separate. See the
+[wide-bound results and limits](../validation.md#persistent-reception-investigation--17-november-2026).
+Ordinary
 two-tap posteriors also use stable covariance factors to prevent a reproduced
 high-information rank-one failure. See the [evidence and limits](../validation.md#weak-physical-channel-alarm-investigation--16-november-2026).
 

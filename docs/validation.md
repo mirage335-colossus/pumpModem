@@ -12,7 +12,7 @@ Earlier Ryzen CPU and RTX 4090 CUDA results retain their original source and
 hardware scope. No complete receiver-capacity or Tensor Core utilization claim
 follows.
 
-Updated 16 November 2026. The prior native history, matrix/preparation and
+Updated 17 November 2026. The prior native history, matrix/preparation and
 wide-search follow-through remains complete with its scoped checks below,
 including the fine-tail repair. Current overlap follow-up has focused functional
 and paired service evidence below; complete-receiver capacity and refreshed CPU
@@ -42,6 +42,233 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 [Helper follow-through](#helper-acquisition-overlap-follow-through). The exact
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
+
+## Persistent-reception investigation — 17 November 2026
+
+This follow-through starts from `f825306e`, reuses the retained weak two-hop
+endpoint, and separates receiver support loss from insufficient physical
+propagation. The [research reconciliation](../_appraisal/highFidelity-triple_Robust_Modem/research-reconciliation.md#persistent-deterioration-versus-physical-loss)
+adds recent absorption observations while retaining path-specific Doppler,
+mode-change and cross-carrier limits. It does not infer an outage rate from
+selected storms or successful seeded retries.
+
+The native state audit finds fresh Helper, coarse and fine state for each
+public slot; ordinary misses do not retain rejected search coordinates into
+the next attempt. Message assembly deliberately waits for two consecutive
+scored quiet slots after a rejected/incomplete episode or joining an unknown
+suffix. Ambiguous or DATA slots interrupt that wait, but raw slot receipts
+continue. Explicit resource/processing failures can terminate a receiver and
+are reported separately; they are not ordinary atmospheric acquisition misses.
+
+The live presentation previously skipped rejected episodes because their report
+omits the first-slot identity. It could leave a prior browser row displaying
+“Receiving Robust content.” The correction marks an abandoned pending row as
+rejected before releasing its identity, including when rejection, rearm and a
+new episode occur between deliveries. It preserves the old row's own counters,
+does not manufacture completed content, and leaves raw bit publication intact.
+A deterministic nine-slot sequence starts at public slot 41 and exercises
+ambiguity, DATA during recovery, interrupted quiet, rearm, and later one-bit
+physical completion. This is an orchestration check, not atmospheric sensitivity
+or a direct UI-rendering test.
+
+The physical discriminator predeclares a single +4 dB-Hz `E` capture from the
+retained two-hop field, actual 139.2-second DATA, and two operational receivers
+whose only model difference is declared delay spread, 0 versus 7 ms. Both use
+one common capture aperture and source calendar, 13 DATA slots and two real
+quiet successors. A single native field preparation serves both receivers;
+the complete IQ/validity digest and historical capture-prefix digest must
+match before inference. The fixed envelope is 4.35 million samples, full
+`H=12/W=24`, 180 seconds per replay and under 900 seconds aggregate. The new
+scoped probe can retain its bounded sealed capture by exclusive creation to
+avoid repeating physical preparation during diagnosis. Explicit named outputs
+remain caller-owned, including partial failed captures; only a full matching
+readback digest marks one verified. Ordinary anonymous spools still clean up
+automatically. Neither an unavailable model alone nor a bright successful test is
+treated as a demonstrated weak reception failure.
+
+The baseline comparison completes in 615.504 seconds, including 486.896 seconds
+of field-table preparation. The common 4,300,585-row capture is the historical
+4,300,572-row +4 capture plus 13 tail rows; its historical prefix is verified.
+Both full replay digests equal
+`ea887215dc1109d78ddc05da605f129d8a72e21c2529c9e631b7429e0a8dcf73`.
+Probe `e0dbbb5b…` binds native `985bcaa0…`, appraisal `7eef3e8d…`, GNU 14.2.0
+Release and the unchanged production receiver archive `b1eb7336…`.
+The host is an AMD Ryzen 5 PRO 5650U, 12 logical threads and 15,677,412 KiB
+physical RAM. These are native CPU runs, not Radeon or NVIDIA measurements.
+The 7 ms coarse receipt reports FP32 FFT arithmetic; fine likelihood/state
+remains double precision. The narrower eligible geometry reports Q15 products
+with FP32 FFTs. Automatic memory admission is resolved per run, not fixed to
+an old machine-specific limit.
+
+| Declared delay spread, same input | Correct active bits | Message | Final DATA slot log evidence | Complete replay wall time |
+| --- | ---: | --- | ---: | ---: |
+| 0 ms | 13/13 | Correct `E` | 31.88684 | 35.993 s |
+| 7 ms | 12/13 | Truncated/rejected | 15.44955 | 86.891 s |
+| 7 ms, direct additive repair | 13/13 | Correct `E` | 31.15931 | 79.605 s |
+
+The threshold is 21.49338. Both actual ending windows remain QUIET, with no
+wrong bits or false DATA. The original 7 ms arm calls the final active slot QUIET,
+causing premature physical completion when the next real quiet slot arrives.
+All 15 windows are complete and valid; there is no deadline or resource censor.
+Baseline 0/7 ms peak replay reservations are 3.263/4.706 GB with full `W=24`.
+These are complete services for this loaded capture, not a hardware-capacity
+qualification or a general speed ratio.
+
+This establishes a receiver-support loss when the operator widens the
+allowance while the physical waveform remains unchanged. It is not an isolated
+likelihood ablation: changing delay geometry also changes fine candidates
+(four versus three at the missed slot). The useful additive family is enabled
+only in the original 0 ms arm. The matched **7 ms old/new** replay then
+demonstrates the repair: all fine candidate counts, basis rows, public coordinate
+mass, calibration and apertures remain identical. At the missed slot these are
+three candidates, 9,673,560 basis rows and mass 0.003393665. Wanted affine
+evidence increases 23.90798 → 39.61774, while the short fixed-gain scores are
+unchanged. Earlier admission skips the previous medium/drift fallback there.
+The repaired message has no premature completion, wrong bits or false DATA.
+
+The change retains the existing two-path model at 0.75 affine mass and gives
+0.25 to the existing direct-template stationary-plus-OU alternatives. It
+reuses the direct correlation and Gram diagonal after the original update;
+there is no extra template, timing candidate or channel-history enumeration.
+Focused native checks cover two-block packing with nonzero cross terms,
+rank-zero/erased blocks, one-/two-tap direct-model evidence parity, normalized
+mixture, charged state updates, unchanged basis work, Off and slow-model
+behavior, and quiet scoring. The retained-file probe checks exact extent and
+digest before DSP, then hashes actual canonical consumption again; a same-sized
+incorrect input is rejected before reception.
+
+Candidate probe `5bada1b4…` binds native
+`e9087e04f33dbb43c19145cefa81ef571377143efd16e59833e3f0afb3844e70`,
+appraisal `e0a01288c35e8d76dd5cb394fb349451235867973d89d517a8213bc9d2ec4e93`
+and receiver archive `13958c0d…`. It performs no field generation. Both input
+digest checks match the original common capture. Complete replay CPU time
+falls 831.166 → 756.913 seconds, with wall time shown above. The largest
+single-owner quote stays 275,913,870 bytes because another stage dominates;
+additional gain state is still charged. Aggregate peaks vary with live RSS and
+owner scheduling, so 4.706 → 4.571 GB is descriptive, not a guaranteed memory
+reduction. These measurements do not qualify general receiver capacity.
+
+The longer coupled GUI holdout freezes bit one, requested 32 seconds (actual
+41.6), C/N0 34 dB-Hz, six separated attempts, and fresh oscillator/arrival,
+atmosphere and thermal seeds 62014/62034/72014. It keeps HF Worst, Each 65%,
+Margin 3 and the original full clock-edge bounds. Exact-mode preflight uses
+the early sample-budget guard before channel/DSP work: 18 public windows need
+2,041,521 samples, within the existing 2.4-million cap. Fourfold DATA duration
+and 6 dB lower C/N0 relative to earlier 10.4-second/40-dB rows are only an
+approximate source-energy comparison, not matched realized energy or coherence.
+
+The first 80-second invocation is **censored**, not a communication miss or a
+six-attempt pass. It renders and accepts all input, but commits only slots
+0–4: two correct DATA, three QUIET and one completed quiet pair. The receiver
+then cancels at its deadline. It uses all 24 workers, reaches eight running
+owners and reserves 5.125 GB against 11.395 GB, without input backpressure or
+memory refusal. The retained receipt has no final live-owner/queue snapshot;
+the uncommitted prefix cannot be treated as unstarted work. Its DATA evidence
+is already very large, so this is a coupled-support check, not a weak Each 65%
+sensitivity boundary.
+
+The short-case timing estimate understated the longer search. Coarse frequency
+centres grow 929 → 3513, while the public aperture grows about 3.64×. Source
+geometry gives FFT lengths 8192 → 32768 and about 17.45× logical transform-row
+stages for this path. That is a work calculation, not an elapsed-time forecast
+or an isolated attribution to the new gain model. Three completed quiet windows
+also execute fallback work. A separately frozen, single **300-second** replay
+therefore keeps every physical/source/receiver parameter and the sample bound.
+The appraisal exception is limited to this exact case; other repeated-GUI
+rows retain 120 seconds. Boundary tests cover the allowed tuple and rejection
+of excessive time, samples or a different seed. The 80-second failure remains
+in the record; there is no automatic further timeout extension.
+
+The amended invocation completes in **223.343 seconds native / 223.644 seconds
+including the runner**, with all **6/6 DATA bits and 6/6 quiet pairs**, no wrong
+or ambiguous bits, and all 18 complete, valid windows. Its full input hash
+`5cdac17c2551652eae8cf0f6b6d9473be4e474612dcff955dc06750f67efef93`
+matches the censored run; the five completed prefix records are identical in
+evidence, work and public geometry. The continuous channel realizes common
+frequency excursions about −89.988 to +89.955 Hz, echo Doppler about −89.946
+to +89.959 Hz, and 18.108 ms excess delay inside the margin-expanded 90 Hz /
+21 ms allowances. Selective component depths are 0.65/0.65 at 0.9/9 Hz.
+It uses `W=24` and peaks at 5.202 GB reserved. The 17.72-minute capture is one
+constructed history, not independent natural retries or a capacity measurement.
+
+The wrapper initially rejects that complete native output because a second
+receipt-validation branch still enforces 120 seconds. Input admission and
+receipt validation now share the same scoped cap, while all full-hash, sample,
+calendar, bit/null and physical-completion checks remain. Validation also binds
+the receipt to the actual invoked wall and sample limits. The saved native
+bytes (`5d8d12d8…`) are revalidated offline against their original command;
+there is no new DSP trial or rewritten successful runner record. The original
+invalid-wrapper result and the separate corrected validation remain. This run
+binds probe `514e537b…`, unchanged native `e9087e04…`, and appraisal `eef06b08…`;
+the later Python-only validation fix has its own source identity. Offline
+validation receipt `c59b43c3…` binds the unchanged native output to that command.
+
+Final preservation uses probe
+`9836958ad4050f3a7529b5c8356af1ff5f70086e9d7bcb7843f7d085ace1af27`,
+appraisal `a641c09b919195bafcec7bec956587561d07006ba4ab20c5408e9a262a6d19ef`
+and unchanged native `e9087e04…`. The frozen `hf-disturbed-long-alarm` campaign
+retains the standard Gaussian 30 Hz full-2σ / 7 ms model, seed 9202,
+139.2-second DATA and 12 dB-Hz, with Helper/FEC off. Both bit values receive
+**5/5 correct DATA and 5/5 physical quiet pairs**: all 15 slots per row are
+complete and valid, without wrong or ambiguous bits. Each row has 4,300,361
+input samples; full IQ hashes are `62b04413…` and `10d69b55…` for zero and one.
+The pair takes 168.644 seconds total (83.853/84.661 native), with runner receipt
+`a1236d77…`. The separately frozen noise-only seed 9602 produces five complete,
+valid QUIET decisions and zero DATA in 28.637 seconds; its 1,420,361-sample IQ
+hash is `4b0ca1e6…` and runner receipt `0dc28530…`. These preserve one selected
+statistical history and its absence control; they do not estimate a natural
+outage probability or qualify weak Helper acquisition.
+
+Software checks finish with **40/40 triad**, **28/28 GUI**, and **6/6 appraisal**
+tests passing. The initial triad run passed 39/40: its short-drift test still
+required unchanged affine evidence when changing-channel support was enabled.
+The corrected test uses a same-input additive-disabled ablation to preserve
+that equality, and separately checks the original model's retained 0.75 mass,
+new OU receipts, unchanged search work and both-polarity drift recovery. No
+production change was needed for that correction. After the appraisal-only
+cap/receipt fixes, runner and integration tests pass again, **2/2 in 49.88 s**
+(log `a6179786…`); the runner's 174 checks and native boundary preflights also
+pass. Original timeout, failed assertion and wrapper-error receipts remain
+alongside their dispositions. No local CPU-capacity or actual-GPU qualification
+follows from these correctness checks, and no RunPod resource was created.
+
+The coarse implementation has an existing chirp-Z route limited to a single
+arrival and ray. A future broader eligibility change would need exact
+two-ray/projection statistics, workspace and complete-service evidence, not
+fewer public hypotheses. This work makes no such dispatch change and does not
+call the observed computational growth a hardware ceiling. See the
+[arithmetic contract](search-arithmetic.md).
+
+The repaired physical case retains its constructed moving-layer history and
+5 Hz atmospheric allowance; declaring 7 ms does not make it a severe plasma
+reconstruction. The earlier −3 dB-Hz two-hop 0/5-per-polarity results are neither
+repaired nor rerun here, and the +3 boundary retains its prior limits. These
+findings do not establish a weak Each 65% sensitivity floor, all allowed joint
+channel histories, or hours-/days-long natural availability. The useful result
+is removal of a demonstrated weak reception loss caused by broad receiver
+settings, alongside bounded recovery and preservation evidence.
+
+A separate two-row groundwave check replays the retained 30 MHz land seed 9202
+on that same baseline binary at 0 and +6 dB-Hz. At 0, all three active bits
+remain QUIET; its 506,412-sample IQ hash `d0a63020…` exactly reproduces the
+retained weak case. At +6, all three bits and the two quiet successors correctly
+complete `e`, without wrong bits or premature completion. Path, seed and clean
+signal energy are unchanged; noise energy falls by the specified 6 dB.
+The two rows complete in 2.377 seconds total. This closes the missing matched
+energy bracket for that static constructed episode, not a threshold estimate,
+an atmospheric-drift test, or a real 30 MHz route qualification. The separate
+weak 1 MHz case has no such matched bracket here. Earlier successful VLF
+phase-wander and EME repairs retain their original scope and source identity.
+
+Temporary evidence is under appraisal `local-evidence/current-two-hop-spread/`
+and `local-evidence/current-persistent-reception/`. The matched repair and
+preservation question is resolved: the 73,109,945-byte physical capture and
+ten superseded build/progress logs are removed (73,140,617 bytes total).
+Compact source/configuration/input hashes, commands and outcome receipts remain
+for this current validation claim, including the original failed-check receipts
+with their dispositions above. Retire those local receipts when a superseding
+validation or release record no longer needs them. No private executable/source
+copy was retained; compatible shared build caches remain in use.
 
 ## HF Worst 30 Hz / 7 ms follow-through — 16 November 2026
 
@@ -702,8 +929,8 @@ These bounded checks do not estimate natural outage or false-admission rates.
 
 Completion review removes an obsolete restriction before the final preservation
 run: the 32-second cutoff came from the rejected 8/32-second experiment and is
-not a boundary for the retained 0.5/2-second additive dynamics. Eligibility now
-depends on fast fine cadence, changing-channel mode and one spatial basis,
+not a boundary for the retained 0.5/2-second additive dynamics. At that checkpoint,
+eligibility depends on fast fine cadence, changing-channel mode and one spatial basis,
 without a bit-duration cutoff. Off, two-spatial-tap and original slow VLF
 behavior remain separate and unchanged.
 
@@ -724,9 +951,12 @@ operational evidence approximately 178555/178385 against 21.49. Only the
 zero-spread case selects the additive family. This bright case finds no
 material admission failure; it does not qualify weak two-spatial-tap behavior.
 A direct-template additive submodel under wider declared bounds could reuse
-existing statistics without four latent gains; it remains an unqualified
-alternative, rather than a mathematically impossible one. Full simultaneous
-additive dynamics for both spatial templates would require more latent state.
+existing statistics without four latent gains; it was then an unqualified
+alternative, rather than a mathematically impossible one. The later
+[weak same-IQ comparison and repair](#persistent-reception-investigation--17-november-2026)
+qualifies that direct subset in a previously failing broad-bound case. Full
+simultaneous additive dynamics for both spatial templates would require more
+latent state and remain separate.
 The final focused test passes in 3.34 seconds with independent source review.
 
 Final preservation uses binary

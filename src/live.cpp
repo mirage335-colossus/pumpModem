@@ -507,6 +507,25 @@ struct Session::Impl {
                 append_signal(std::move(signal));
                 if (matched) display = {};
             }
+            // A missing or changed episode identity means the old pending
+            // episode has been abandoned. This also catches recovery and
+            // rearm that both happened between UI deliveries. Never create a
+            // row from receiver state alone.
+            if (display.pending_slot && display.pending_slot != report.episode_first_public_slot) {
+                SignalUpdate signal;
+                signal.id = display.pending_id;
+                signal.revision = ++display.revision;
+                signal.frequency_hz = s.transfer.modem.carrier_hz;
+                signal.received_bits = display.observed_bits;
+                signal.missing_symbols = display.missing;
+                signal.robust_reception = true;
+                signal.wrong_key_evidence = display.wrong_key_evidence;
+                signal.text = report.recovering
+                    ? "Robust episode rejected; listening for two quiet slots"
+                    : "Robust episode rejected";
+                append_signal(std::move(signal));
+                display = {};
+            }
             if (!report.episode_first_public_slot || !report.observed_bits) return;
             const bool existing = display.pending_slot == report.episode_first_public_slot;
             if (existing && display.observed_bits == report.observed_bits && display.missing == report.erasures)
@@ -527,7 +546,7 @@ struct Session::Impl {
             signal.missing_symbols = display.missing;
             signal.robust_reception = true;
             signal.wrong_key_evidence = display.wrong_key_evidence;
-            signal.text = report.recovering ? "Robust episode rejected; listening for two quiet slots" : "Receiving Robust content";
+            signal.text = "Receiving Robust content";
             append_signal(std::move(signal));
         });
     }

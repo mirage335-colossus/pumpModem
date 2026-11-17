@@ -236,6 +236,7 @@ TWO_HOP_ADDITIVE_BOUNDARY_MAX_WALL_SECONDS = 900
 TWO_HOP_ADDITIVE_BOUNDARY_MAX_SAMPLES_PER_ROW = 4_350_000
 PHYSICAL_RAW_BIT_MAX_WALL_SECONDS = 180
 PHYSICAL_RAW_BIT_MAX_SAMPLES = 4_350_000
+GUI_LONG_HOLDOUT_MAX_WALL_SECONDS = 300
 MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose", "hf-search", "gui-varying", "gui-repeated-bit"}
 CONTROLS = {"wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap", "eof"}
 BACKENDS = {"cpu", "cuda", "vulkan", "gpu"}
@@ -269,6 +270,23 @@ def _is_physical_raw_bit_episode(episode: dict[str, Any]) -> bool:
             episode.get("mode") in {"plan", "receive"} and
             episode.get("repeat_bit") in (0, 1) and
             episode.get("repeat_separate_attempts") is True)
+
+
+def _is_long_gui_holdout(episode: dict[str, Any]) -> bool:
+    required = {"mode": "gui-repeated-bit", "scenario": "hf-gui-native", "bit_seconds": 32,
+                "cn0_db_hz": 34, "repeat_bit": 1, "repeat_path_scale": 1, "repeat_path_seed": 62034,
+                "seed": 62014, "noise_seed": 72014}
+    gui = {**GUI_DEFAULTS, "gui_clock_edge": True}
+    return (all(episode.get(key) == value for key, value in required.items()) and
+            all(episode.get(key, GUI_DEFAULTS[key]) == value for key, value in gui.items()) and
+            episode.get("repeat_separate_attempts") is True and not episode.get("repeat_thermal_off") and
+            episode.get("chunk", 4096) == 4096 and
+            not any(key in episode for key in ("capture_digest_slot", "duration_seconds")) and
+            not any(episode.get(key) for key in ("hf_compare_admitted_models", "hf_predictive_quiet", "service_replay")))
+
+
+def _gui_repeated_wall_cap(episode: dict[str, Any]) -> int:
+    return GUI_LONG_HOLDOUT_MAX_WALL_SECONDS if _is_long_gui_holdout(episode) else 120
 
 
 def _sha256(path: Path) -> str:
@@ -313,8 +331,8 @@ def _read_campaign(path: Path) -> dict[str, Any]:
     if len(episodes) > value["max_trials"]:
         raise CampaignError("episode count exceeds max_trials")
     ids: set[str] = set()
+    episode_wall_cap = min(value["per_trial_wall_seconds"], value["max_wall_seconds"])
     for index, episode in enumerate(episodes):
-        episode_wall_cap = min(value["per_trial_wall_seconds"], value["max_wall_seconds"])
         _validate_episode(episode, index, ids, episode_wall_cap, value["max_samples"])
     matrix_episodes = [episode for episode in episodes if episode.get("two_hop_alarm_matrix") is True]
     if matrix_episodes:
@@ -362,6 +380,10 @@ def _read_campaign(path: Path) -> dict[str, Any]:
             raise CampaignError("separate-attempt campaigns may contain only separate-attempt episodes")
         if len(separate) > 2:
             raise CampaignError("separate-attempt cohorts are limited to two paired truth-bit rows")
+        if episode_wall_cap > 120 and (len(episodes) != 1 or value["max_trials"] != 1 or
+                value["max_wall_seconds"] > GUI_LONG_HOLDOUT_MAX_WALL_SECONDS or
+                value["per_trial_wall_seconds"] > GUI_LONG_HOLDOUT_MAX_WALL_SECONDS):
+            raise CampaignError("long GUI holdout replay requires one episode and a 300-second aggregate cap")
     confirmatory = value.get("confirmatory_strata", {})
     if not isinstance(confirmatory, dict):
         raise CampaignError("confirmatory_strata must be an object")
@@ -538,13 +560,14 @@ def _validate_episode(item: Any, index: int, ids: set[str],
                 item.get("helper", False) or item.get("fec", "off") != "off"):
             raise CampaignError(f"episodes[{index}]: repeated-bit reception requires Helper-off and FEC-off")
         sample_cap = 2_400_000 if item.get("repeat_separate_attempts", False) else 1_200_000
-        if campaign_max_samples > sample_cap or campaign_per_trial_wall_seconds > 120:
-            raise CampaignError(f"episodes[{index}]: repeated-bit campaign exceeds its frozen sample/120-second cap")
+        wall_cap = _gui_repeated_wall_cap(item)
+        if campaign_max_samples > sample_cap or campaign_per_trial_wall_seconds > wall_cap:
+            raise CampaignError(f"episodes[{index}]: repeated-bit campaign exceeds its frozen sample/{wall_cap}-second cap")
         episode_samples = item.get("max_samples", campaign_max_samples)
         episode_wall = item.get("max_wall_seconds", campaign_per_trial_wall_seconds)
         if ((_is_nonnegative_int(episode_samples) and episode_samples > sample_cap) or
-                (_is_finite_number(episode_wall) and episode_wall > 120)):
-            raise CampaignError(f"episodes[{index}]: repeated-bit episode exceeds its frozen sample/120-second cap")
+                (_is_finite_number(episode_wall) and episode_wall > wall_cap)):
+            raise CampaignError(f"episodes[{index}]: repeated-bit episode exceeds its frozen sample/{wall_cap}-second cap")
     elif repeated_fields & item.keys() and not physical_raw_bit:
         raise CampaignError(f"episodes[{index}]: repeated-bit controls require gui-repeated-bit mode")
     if not isinstance(item["waveform"], str) or item["waveform"] not in {"smoke", "reference"}:
@@ -6080,7 +6103,9 @@ def _validate_predictive_slot(diagnostic: dict[str, Any], baseline: dict[str, An
 
 def _validate_repeated_bit_receipt(receipt: dict[str, Any], episode: dict[str, Any], plan: dict[str, Any], *,
                                    physical_attempt_count: int | None = None,
-                                   expected_bit: int | None = None) -> None:
+                                   expected_bit: int | None = None,
+                                   native_max_wall_seconds: float | None = None,
+                                   native_max_samples: int | None = None) -> None:
     physical = physical_attempt_count is not None
     active_count = physical_attempt_count if physical else 6
     bit_value = expected_bit if physical else episode["repeat_bit"]
@@ -6147,6 +6172,11 @@ def _validate_repeated_bit_receipt(receipt: dict[str, Any], episode: dict[str, A
     horizon_samples = plan.get("horizon_samples")
     repeat_max_samples = (TWO_HOP_ALARM_MATRIX_MAX_SAMPLES_PER_ROW if physical else
                           2_400_000 if separate_attempts else 1_200_000)
+    repeat_max_wall_seconds = _gui_repeated_wall_cap(episode)
+    if physical:
+        repeat_max_wall_seconds = (PHYSICAL_RAW_BIT_MAX_WALL_SECONDS
+            if episode.get("scenario") in {"hf-ensemble-changing-rate", "hf-disturbed"}
+            else TWO_HOP_ALARM_MATRIX_MAX_WALL_SECONDS)
     channel = receipt.get("channel")
     if (not _is_finite_number(receiver_noise_variance) or receiver_noise_variance <= 0):
         raise CampaignError("repeated-bit reception requires positive receiver noise variance")
@@ -6159,10 +6189,12 @@ def _validate_repeated_bit_receipt(receipt: dict[str, Any], episode: dict[str, A
             not _is_nonnegative_int(plan.get("max_samples")) or plan["max_samples"] > repeat_max_samples or
             horizon_samples > plan["max_samples"] or
             not _is_finite_number(plan.get("max_wall_seconds")) or
-            plan["max_wall_seconds"] > ((PHYSICAL_RAW_BIT_MAX_WALL_SECONDS
-                if episode.get("scenario") in {"hf-ensemble-changing-rate", "hf-disturbed"} else TWO_HOP_ALARM_MATRIX_MAX_WALL_SECONDS)
-                if physical else 120)):
+            not 0 < plan["max_wall_seconds"] <= repeat_max_wall_seconds):
         raise CampaignError("repeated-bit receipt must bind the full hashed capture within its declared finite bounds")
+    if ((native_max_samples is not None and plan["max_samples"] != native_max_samples) or
+            (native_max_wall_seconds is not None and not math.isclose(plan["max_wall_seconds"],
+                native_max_wall_seconds, rel_tol=1e-12, abs_tol=1e-12))):
+        raise CampaignError("repeated-bit receipt limits must match the actual frozen invocation")
     if (plan.get("represented_seconds") != horizon_samples / sample_rate or
             plan.get("fits_sample_budget") is not True):
         raise CampaignError("repeated-bit plan must preserve its complete finite calendar and sample admission")
@@ -6616,7 +6648,8 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
     _validate_gannon_replay(receipt, episode)
     _validate_known_target(receipt, episode)
     if episode["mode"] == "gui-repeated-bit":
-        _validate_repeated_bit_receipt(receipt, episode, plan)
+        _validate_repeated_bit_receipt(receipt, episode, plan, native_max_wall_seconds=_native_max_wall_seconds,
+                                       native_max_samples=_native_max_samples)
     elif physical_raw_bit and episode["mode"] == "receive":
         _validate_repeated_bit_receipt(receipt, episode, plan,
                                        physical_attempt_count=5, expected_bit=episode["repeat_bit"])

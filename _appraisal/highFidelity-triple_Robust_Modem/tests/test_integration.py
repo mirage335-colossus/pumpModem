@@ -200,6 +200,19 @@ def main() -> None:
     assert gui_other_noise["noise_seed"] == 53 and gui_other_noise["public_slots"] == gui["public_slots"], gui_other_noise
     gui_too_short = invoke("--mode", "receive", *gui_args, "--max-samples", "1", code=3)
     assert gui_too_short["status"] == "resource_limit" and gui_too_short["plan"]["channel_renderer"] == gui["channel_renderer"], gui_too_short
+    # The previously censored extended holdout reaches sample admission at its
+    # larger cap, but these parser checks never execute channel or receiver.
+    long_gui = ["--mode", "gui-repeated-bit", "--scenario", "hf-gui-native", "--seed", "62014",
+                "--noise-seed", "72014", "--repeat-path-seed", "62034", "--repeat-path-scale", "1",
+                "--gui-clock-edge", "--bit-seconds", "32", "--cn0", "34", "--repeat-bit", "1",
+                "--repeat-separate-attempts", "--max-samples", "1"]
+    bounded_long = invoke(*long_gui, "--max-wall-seconds", "300", code=3)
+    assert bounded_long["status"] == "resource_limit" and "channel" not in bounded_long, bounded_long
+    assert bounded_long["plan"]["actual_bit_seconds"] == 41.6 and bounded_long["plan"]["scored_slot_horizon"] == 18, bounded_long
+    for extra in (["--max-wall-seconds", "300.01"], ["--max-wall-seconds", "120.01", "--seed", "62015"],
+                  ["--max-wall-seconds", "300", "--max-samples", "2400001"]):
+        unsupported_long = invoke(*long_gui, *extra, code=2)
+        assert unsupported_long["status"] == "error" and "plan" not in unsupported_long, unsupported_long
     gui_varying_args = ["--mode", "gui-varying", *gui_args, "--message", "e"]
     for extra in ([], ["--capture-digest-slot", "3"], ["--capture-digest-slot", "2", "--helper"]):
         rejected = invoke(*gui_varying_args, *extra, code=2)

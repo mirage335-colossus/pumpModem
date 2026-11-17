@@ -1,6 +1,9 @@
 #include "triad_probe_spool.hpp"
 
 #include <bit>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <vector>
 
@@ -76,6 +79,59 @@ void roundtrip_and_limits() {
     }
 }
 
+void retain_complete_capture() {
+    namespace fs = std::filesystem;
+    struct TemporaryDirectory {
+        fs::path path = fs::temp_directory_path() / ("datapump-spool-test-" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+        TemporaryDirectory() { check(fs::create_directory(path), "could not create spool test directory"); }
+        ~TemporaryDirectory() { std::error_code error; fs::remove_all(path, error); }
+    } directory;
+    const auto path = (directory.path / "retained.iq").string();
+    const auto partial_path = (directory.path / "partial.iq").string();
+    constexpr auto bytes = ObservationSpool::row_bytes;
+    const std::array sample{Complex{1.25, -2.5}};
+    const std::array<std::uint8_t, 1> mask{1};
+    {
+        ObservationSpool partial(2, 2 * bytes, partial_path);
+        partial.append(sample, mask);
+        rejects<std::logic_error>([&] { partial.seal(); });
+        rejects<std::logic_error>([&] { partial.rewind(); });
+    }
+    check(fs::file_size(partial_path) == bytes, "unverified explicit output must remain under caller ownership");
+    {
+        ObservationSpool complete(1, bytes, path);
+        complete.append(sample, mask);
+        complete.seal();
+        complete.rewind();
+        std::array<Complex, 1> iq{};
+        std::array<std::uint8_t, 1> valid{};
+        complete.read(iq, valid);
+        check(iq == sample && valid == mask, "the named spool did not replay its sealed row");
+    }
+    rejects<std::runtime_error>([&] { ObservationSpool existing(1, bytes, path); });
+    std::ifstream retained(path, std::ios::binary);
+    std::array<char, bytes> row{};
+    check(retained.read(row.data(), row.size()).gcount() == row.size() && retained.peek() == EOF &&
+        std::memcmp(row.data(), sample.data(), sizeof(Complex)) == 0 && row.back() == mask.front(),
+        "exclusive create altered the exact retained I/Q and validity bytes");
+    const auto read_only = ObservationSpool::OpenMode::retained_read_only;
+    ObservationSpool reopened(1, bytes, path, read_only);
+    reopened.rewind();
+    std::array<Complex, 1> iq{};
+    std::array<std::uint8_t, 1> valid{};
+    reopened.read(iq, valid);
+    check(iq == sample && valid == mask, "retained read-only replay differs from its original spool");
+    rejects<std::logic_error>([&] { reopened.append(sample, mask); });
+    rejects<std::invalid_argument>([&] { ObservationSpool short_file(2, 2 * bytes, partial_path, read_only); });
+    {
+        std::ofstream trailing(partial_path, std::ios::binary | std::ios::app);
+        trailing.put('x');
+        check(bool(trailing), "could not make a replay file with a trailing byte");
+    }
+    rejects<std::invalid_argument>([&] { ObservationSpool long_file(1, bytes, partial_path, read_only); });
+}
+
 #ifdef DATAPUMP_TEST_SPOOL_IO_WRAPPERS
 enum class Fault { none, write, read, flush, seek };
 Fault pending = Fault::none;
@@ -146,6 +202,7 @@ int __wrap_fseek(std::FILE* file, long offset, int direction) {
 int main() {
     try {
         roundtrip_and_limits();
+        retain_complete_capture();
 #ifdef DATAPUMP_TEST_SPOOL_IO_WRAPPERS
         short_io_is_terminal();
 #endif
