@@ -21,6 +21,7 @@ enum class NativeCoarsePrecision { automatic, fp64, q15, fp32 };
 inline constexpr std::array<std::int64_t, 13> receiver_epoch_offsets{
     -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6};
 inline constexpr std::size_t receiver_coherence_count = 3;
+inline constexpr std::size_t receiver_independent_gain_power_count = 4;
 
 // Public operational attempt/grid penalty shared by admission and local
 // transmit duration planning. This is a conditional model bound.
@@ -132,6 +133,7 @@ struct ReceiverSlotScore {
     double tracked_frequency_log_prior_adjustment = 0;
     std::size_t nominal_independent_gain_candidates = 0, nominal_independent_gain_frequency_states = 0;
     std::uint64_t nominal_independent_gain_basis_rows = 0;
+    std::uint64_t independent_gain_emission_cells = 0;
     std::size_t signed_lag_gain_candidates = 0;
     std::uint64_t signed_lag_gain_basis_rows = 0;
     std::array<double, 2> signed_lag_gain_bit_evidence{};
@@ -143,6 +145,7 @@ struct ReceiverSlotScore {
     std::uint64_t signed_lag_gain_proposal_fft_stages = 0, signed_lag_gain_proposal_score_rows = 0;
     double signed_lag_gain_proposal_seconds = 0;
     std::array<double, 2> nominal_independent_gain_bit_evidence{};
+    std::array<std::array<double, 2>, receiver_independent_gain_power_count> nominal_independent_gain_power_bit_evidence{};
     std::array<double, 2> nominal_independent_fixed_centroid_bit_evidence{}, nominal_independent_moving_centroid_bit_evidence{};
     double nominal_independent_gain_log_prior_adjustment = 0;
     std::size_t coherent_gain_candidates = 0, coherent_gain_blocks = 0, coherent_gain_frequency_states = 0;

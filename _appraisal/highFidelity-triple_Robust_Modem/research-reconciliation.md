@@ -174,6 +174,30 @@ known-channel AWGN smoothness as a universal acceptance criterion. It does not
 excuse implementation cliffs; compare matched observations, available known-
 channel information, declared inference assumptions and executed receiver work.
 
+The retained resilience review also cites [Sethuraman et al., *Low SNR Capacity
+of Noncoherent Fading Channels*](https://arxiv.org/pdf/0712.2872). Their
+stationary Rayleigh model, square-summable temporal covariance and fixed
+peak-to-average constraint yield quadratic low-SNR capacity scaling; changing
+the peak constraint changes that conclusion. This motivates comparing time
+and energy separately under rapid unknown fading. It does not turn the GUI's
+declared frequency bound into a measured coherence time, or supply an exact
+sensitivity limit for its nonstationary two-ray/selective-filter history.
+Linear extrapolation of a bright run's log evidence is therefore only a
+test-level selection heuristic, not an achievable receiver bound.
+
+Signal-level mismatch is a different potential floor. For a scalar independent
+zero-mean proper-complex Gaussian block, let the true signal/noise ratio be `g_t` and
+the likelihood model assume `g_m`. Direct evaluation against unit-variance
+noise gives expected log likelihood ratio
+`g_m*(1+g_t)/(1+g_m) - log(1+g_m)`.
+An excessively large `g_m` can make this negative despite real signal; merely
+adding identically modeled blocks then need not repair reception. This is an
+analytic special case, not an outage prediction for the modem. The
+[same-IQ live-level contrast](../../docs/validation.md#weak-combined-modulation-follow-through--17-november-2026)
+now demonstrates an operational loss from expected-amplitude calibration.
+A normalized whole-window power mixture addresses that uncertainty without
+choosing a new amplitude from each block or changing the noise denominator.
+
 Keep sensitivity sweeps paired by complete episode and fixed waveform/channel
 history. Never renormalize each received window or select favorable parts of a
 long episode. Report correct complete messages, wrong bits, erasures, missed or
@@ -305,6 +329,19 @@ cross-carrier correlation law. In particular, periodic recorrelation from
 `|cos(π Δf τ)|` is a two-equal-ray model artifact. Use each fixture's actual
 carrier spacings and path structure; do not infer coherence recovery from the
 two-ray recurrence.
+
+[Auterman, NBS Technical Note 165 (1962)](https://www.govinfo.gov/content/pkg/GOVPUB-C13-152cf80d492665dd7ee599c97d850018/pdf/GOVPUB-C13-152cf80d492665dd7ee599c97d850018.pdf)
+adds measured coupling between amplitude and instantaneous frequency. On one
+4,470-km transauroral path, the median envelope-correlation bandwidth at
+correlation 0.5 was about 4 kHz; the sampled bandwidth exceeded 1 kHz in 90%
+of observations and varied from minute to minute. Frequency excursions arise
+from both ionospheric change and multipath beating. The limited 1961 records
+do not calibrate this modem's carrier correlation or outage incidence.
+The engineering implication is to preserve coupled amplitude/phase stresses
+and avoid assuming independent fade diversity merely because three carriers
+exist. The [weak combined-modulation discriminator](../../docs/validation.md#weak-combined-modulation-follow-through--17-november-2026)
+keeps one channel history while changing only receiver noise; GUI independent
+knob laws still do not replace measured joint channel statistics.
 
 Three carriers may share slow disturbance geometry without sharing their
 complex gains. [Marew et al. (2025)](https://doi.org/10.1186/s40623-025-02147-3)

@@ -309,7 +309,18 @@ both supported, the short family also admits a nominal-epoch independent-gain
 alternative. It uses at most two coordinates: epoch and capture-clock offsets
 zero, at the public arrival lower and upper endpoints, with direct/delayed
 paths with zero relative-Doppler offset and the full declared delay. Each path
-has an independent proper-complex gain of variance 0.5 in each short block.
+has an independent proper-complex gain in each short block. The original
+unit-power component assigns variance 0.5 to each path. A whole-aperture
+mixture also admits total powers `1/16`, `1/256` and `1/4096`, sharing 0.25
+mass while the unit component retains 0.75. Each power keeps its own fixed
+and moving frequency likelihood until the complete aperture is scored; power
+is not reselected block by block. The signed-lag independent branch uses the
+same mixture. This reuses correlations, Gram matrices and templates, adding
+bounded likelihood state and updates. State and temporary emission storage
+are charged. The `independent_gain_emission_cells` receipt counts primary
+short-score emissions; a separate line-conditioned rescore is outside that
+counter, though included in complete elapsed service. See the
+[live-level mismatch and repair](validation.md#weak-combined-modulation-follow-through--17-november-2026).
 The same projected correlations and Gram matrices feed two equally mixed
 components over the full configured frequency range: one integrates a common
 frequency held fixed across the whole aperture, and the other uses a bounded
@@ -446,8 +457,9 @@ bandwidth or fixed Helper placement fails configuration explicitly. None/Off
 channel choices preserve an explicit unperturbed baseline.
 
 Target SNR is one shared C/N0 value, default 32 dB-Hz. It drives provisional
-native duration planning, separately from the simulated link's actual
-transmit-power/path-loss/noise-density calculation. Planning uses a fixed
+native duration planning and, with the declared input-noise density, the live
+receiver's reference DATA amplitude. The simulated link's actual
+transmit-power/path-loss/noise-density calculation remains separate. Planning uses a fixed
 public message assumption rather than the draft length. A predicted duration
 is not a sensitivity guarantee or a real-time capacity result. FHSS profiles
 control the canonical envelope and illustrative schedule; they do not retune

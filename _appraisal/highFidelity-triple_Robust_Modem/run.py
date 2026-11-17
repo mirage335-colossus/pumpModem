@@ -215,7 +215,7 @@ EPISODE_KEYS = {"id", "scenario", "mode", "waveform", "seed", "cn0_db_hz", "cont
                 "hf_gannon_gain_variance_diagnostic", "hf_target_presence_diagnostic",
                 "hf_correlated_gain_shadow", "hf_correlated_gain_receiver", "hf_predictive_quiet", "reception_requirement",
                 "hf_gui_tracked_frequency_span", "hf_gui_quarter_clock_shadow", "repeat_bit",
-                "repeat_path_scale", "repeat_path_seed", "repeat_thermal_off", "repeat_separate_attempts",
+                "repeat_path_scale", "repeat_path_seed", "repeat_thermal_off", "repeat_separate_attempts", "repeat_selected_attempt",
                 "two_hop_alarm_matrix", "two_hop_additive_boundary"} | GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS
 TWO_HOP_ALARM_MATRIX_CASES = (
     ("text-weak", -3, "E", None),
@@ -281,7 +281,7 @@ def _is_long_gui_holdout(episode: dict[str, Any]) -> bool:
             all(episode.get(key, GUI_DEFAULTS[key]) == value for key, value in gui.items()) and
             episode.get("repeat_separate_attempts") is True and not episode.get("repeat_thermal_off") and
             episode.get("chunk", 4096) == 4096 and
-            not any(key in episode for key in ("capture_digest_slot", "duration_seconds")) and
+            not any(key in episode for key in ("capture_digest_slot", "duration_seconds", "repeat_selected_attempt")) and
             not any(episode.get(key) for key in ("hf_compare_admitted_models", "hf_predictive_quiet", "service_replay")))
 
 
@@ -466,6 +466,13 @@ def _validate_episode(item: Any, index: int, ids: set[str],
         raise CampaignError(f"episodes[{index}].mode must be one of {sorted(MODES)}")
     repeated_fields = {"repeat_bit", "repeat_path_scale", "repeat_path_seed", "repeat_thermal_off",
                        "repeat_separate_attempts"}
+    if "repeat_selected_attempt" in item:
+        selected = item["repeat_selected_attempt"]
+        if (item["mode"] != "gui-repeated-bit" or item.get("repeat_separate_attempts") is not True or
+                not _is_nonnegative_int(selected) or selected not in range(0, 18, 3) or
+                any(key in item for key in ("capture_digest_slot", "duration_seconds")) or SERVICE_FIELDS & item.keys() or
+                item.get("hf_compare_admitted_models") or item.get("hf_predictive_quiet")):
+            raise CampaignError(f"episodes[{index}]: selected attempt requires a scheduled GUI raw bit and its two quiet successors")
     physical_raw_bit = _is_physical_raw_bit_episode(item)
     matrix = item.get("two_hop_alarm_matrix", False)
     if not isinstance(matrix, bool):
@@ -1049,6 +1056,7 @@ def _command(probe: Path, episode: dict[str, Any], max_samples: int, max_wall_se
                         ("repeat_bit", "--repeat-bit"),
                         ("repeat_path_scale", "--repeat-path-scale"),
                         ("repeat_path_seed", "--repeat-path-seed"),
+                        ("repeat_selected_attempt", "--repeat-selected-attempt"),
                         ("repeat_thermal_off", "--repeat-thermal-off"),
                         ("repeat_separate_attempts", "--repeat-separate-attempts")) + tuple(
                             (key, "--" + key.replace("_", "-")) for key in sorted(GUI_DEFAULTS.keys() | HF_DESIGN_FIELDS | SERVICE_FIELDS)):
@@ -1296,7 +1304,9 @@ def _repeated_bit_summary(receipt: dict[str, Any], episode: dict[str, Any] | Non
                           if isinstance(plan.get("repeated_bit"), dict) else None)
     summary = {
         "scenario": episode.get("scenario"),
-        "source_scope": ("continuous hf-disturbed standard Gaussian channel" if episode.get("scenario") == "hf-disturbed" and
+        "source_scope": ("selected DATA aperture and two quiet successors within a continuous GUI episode"
+                         if episode.get("repeat_selected_attempt") is not None else
+                         "continuous hf-disturbed standard Gaussian channel" if episode.get("scenario") == "hf-disturbed" and
                          _is_physical_raw_bit_episode(episode) else
                          "continuous changing-rate HF channel" if _is_physical_raw_bit_episode(episode) else
                          "GUI repeated-bit channel" if episode.get("mode") == "gui-repeated-bit" else
@@ -1319,6 +1329,7 @@ def _repeated_bit_summary(receipt: dict[str, Any], episode: dict[str, Any] | Non
         "public_key_fingerprint_sha256": (plan.get("repeated_bit", {}).get("public_key_fingerprint_sha256")
                                            if isinstance(plan.get("repeated_bit"), dict) else None),
         "active_slots": result.get("active_slots"),
+        "selected_attempt_slot": result.get("selected_attempt_slot"),
         "correct_data": result.get("correct_data"),
         "wrong_data": result.get("wrong_data"),
         "ambiguous_active_slots": result.get("ambiguous_active_slots"),
@@ -6107,15 +6118,17 @@ def _validate_repeated_bit_receipt(receipt: dict[str, Any], episode: dict[str, A
                                    native_max_wall_seconds: float | None = None,
                                    native_max_samples: int | None = None) -> None:
     physical = physical_attempt_count is not None
-    active_count = physical_attempt_count if physical else 6
+    transmitted_count = physical_attempt_count if physical else 6
+    selected = episode.get("repeat_selected_attempt")
+    active_count = 1 if selected is not None else transmitted_count
     bit_value = expected_bit if physical else episode["repeat_bit"]
     separate_attempts = physical or episode.get("repeat_separate_attempts", False)
     if physical:
-        requested = {"bit": bit_value, "active_slots": active_count,
+        requested = {"bit": bit_value, "active_slots": transmitted_count,
                      "attempts": active_count, "requested_active_slots": active_count,
                      "separate_attempts": True, "used_for_receiver_decisions": False}
     else:
-        requested = {"bit": bit_value, "active_slots": active_count,
+        requested = {"bit": bit_value, "active_slots": transmitted_count,
                      "path_scale": episode["repeat_path_scale"], "path_seed": episode["repeat_path_seed"],
                      "oscillator_seed": episode["seed"], "noise_seed": episode.get("noise_seed", episode["seed"]),
                      "thermal_noise_enabled": not episode.get("repeat_thermal_off", False),
@@ -6140,6 +6153,9 @@ def _validate_repeated_bit_receipt(receipt: dict[str, Any], episode: dict[str, A
     if (not isinstance(result, dict) or result.get("active_slots") != active_count or
             result.get("separate_attempts", False) is not separate_attempts):
         raise CampaignError(f"completed repeated-bit receipt must report {active_count} active raw apertures")
+    if (result.get("selected_attempt_slot") != selected or
+            (selected is None and "selected_attempt" in planned)):
+        raise CampaignError("repeated-bit receipt must preserve the requested attempt scope")
     count_fields = ("correct_data", "wrong_data", "ambiguous_active_slots", "quiet_active_slots")
     counts: dict[str, int] = {}
     for field in count_fields:
@@ -6199,22 +6215,33 @@ def _validate_repeated_bit_receipt(receipt: dict[str, Any], episode: dict[str, A
             plan.get("fits_sample_budget") is not True):
         raise CampaignError("repeated-bit plan must preserve its complete finite calendar and sample admission")
     slots = receipt.get("slots")
-    expected_first_quiet = 3 * active_count - 2 if separate_attempts else active_count
+    expected_first_quiet = 3 * transmitted_count - 2 if separate_attempts else transmitted_count
     if (not _is_nonnegative_int(q0) or q0 != expected_first_quiet or not _is_nonnegative_int(horizon) or horizon != q0 + 2 or
-            (separate_attempts and (horizon != 3 * active_count or plan.get("wire_bits") != 1)) or
-            not isinstance(slots, list) or len(slots) != horizon):
+            (separate_attempts and (horizon != 3 * transmitted_count or plan.get("wire_bits") != 1)) or
+            not isinstance(slots, list) or len(slots) != (3 if selected is not None else horizon)):
         raise CampaignError(f"repeated-bit receipt must include {active_count} source and two final physical quiet apertures")
     public_slots = plan.get("public_slots")
     if not isinstance(public_slots, list) or len(public_slots) != horizon:
         raise CampaignError("repeated-bit receipt must preserve its complete public calendar")
+    source_indices = (tuple(3 * index for index in range(transmitted_count)) if separate_attempts
+                      else tuple(range(transmitted_count)))
+    first = selected if selected is not None else 0
+    stop = first + len(slots)
+    scored_quiet_start = first + 1 if selected is not None else q0
+    if selected is not None:
+        if selected not in source_indices or not result["ordered_valid_complete"]:
+            raise CampaignError("selected attempt requires three complete valid ordered apertures")
+        for index, public in enumerate(public_slots):
+            if (not isinstance(public, dict) or public.get("index") != index or
+                    public.get("evaluator_transmitting") is not (index in source_indices)):
+                raise CampaignError("selected attempt must retain the complete raw transmitter calendar")
     actual_counts = {field: 0 for field in count_fields}
     miss_run = longest_miss_run = 0
     quiet_count = 0
     first_source_seen = 0
-    active_indices = (tuple(3 * index for index in range(active_count)) if separate_attempts
-                      else tuple(range(active_count)))
+    active_indices = (selected,) if selected is not None else source_indices
     active_set = set(active_indices)
-    for index, (slot, public) in enumerate(zip(slots, public_slots)):
+    for index, (slot, public) in enumerate(zip(slots, public_slots[first:stop]), first):
         if not isinstance(slot, dict) or not isinstance(public, dict):
             raise CampaignError("repeated-bit receipt public slot arrays must contain objects")
         if (slot.get("index") != index or public.get("index") != index or
@@ -6270,10 +6297,10 @@ def _validate_repeated_bit_receipt(receipt: dict[str, Any], episode: dict[str, A
         else:
             if slot.get("raw_bit_correct") is not None:
                 raise CampaignError("off-source repeated-bit slots must not report raw bit correctness")
-            if (index >= q0 and slot["decision"] == "quiet" and
+            if (index >= scored_quiet_start and slot["decision"] == "quiet" and
                     slot.get("noise_statistics_valid") is True):
                 quiet_count += 1
-    actual_counts["correct_data"] = sum(slots[index].get("raw_bit_correct") is True for index in active_indices)
+    actual_counts["correct_data"] = sum(slots[index - first].get("raw_bit_correct") is True for index in active_indices)
     if first_source_seen != active_count or actual_counts != counts or longest_miss_run != result["longest_no_correct_run"]:
         raise CampaignError("repeated-bit aggregate counts must match truth-aligned per-slot decisions")
     if result["ordered_valid_complete"] and sum(counts.values()) != active_count:
@@ -6284,9 +6311,9 @@ def _validate_repeated_bit_receipt(receipt: dict[str, Any], episode: dict[str, A
         def fully_scored_quiet(slot: dict[str, Any]) -> bool:
             return (slot.get("decision") == "quiet" and slot.get("complete") is True and
                     slot.get("all_valid") is True and slot.get("noise_statistics_valid") is True)
-        internal = [index for index in range(q0) if index not in active_set]
-        internal_quiet = sum(fully_scored_quiet(slots[index]) for index in internal)
-        completed_pairs = sum(all(fully_scored_quiet(slots[index + offset]) for offset in (1, 2))
+        internal = [index for index in range(first, scored_quiet_start) if index not in active_set]
+        internal_quiet = sum(fully_scored_quiet(slots[index - first]) for index in internal)
+        completed_pairs = sum(all(fully_scored_quiet(slots[index - first + offset]) for offset in (1, 2))
                               for index in active_indices)
         if (internal_quiet != result["inter_attempt_quiet_slots"] or
                 completed_pairs != result["completed_quiet_pairs"]):
@@ -6300,8 +6327,23 @@ def _validate_repeated_bit_receipt(receipt: dict[str, Any], episode: dict[str, A
     if (not isinstance(outcomes, dict) or outcomes.get("receiver_executed") is not True or
             outcomes.get("component_only") is not True or outcomes.get("completion_evaluated") is not False or
             outcomes.get("communication_endpoint") != "repeated_raw_bit" or
-            outcomes.get("actual_scored_slots") != horizon):
+            outcomes.get("actual_scored_slots") != len(slots)):
         raise CampaignError("repeated-bit outcomes must report the raw receiver scope, not codec completion")
+    if selected is not None:
+        receiver = receipt.get("receiver")
+        first_sample, stop_sample = slots[0]["first_sample"], slots[-1]["stop_sample"]
+        if (planned.get("selected_attempt") != {"first_public_slot": first, "stop_public_slot": stop,
+                "first_input_sample": first_sample, "stop_input_sample": stop_sample} or
+                plan.get("capture_digest_first_sample") != first_sample or
+                plan.get("capture_digest_stop_sample") != slots[0]["stop_sample"] or
+                not isinstance(receiver, dict) or receiver.get("next_public_slot") != stop or
+                receiver.get("input_stop") != stop_sample or receiver.get("input_closed") is not True or
+                receiver.get("state") != "input_ended" or outcomes.get("accepted_samples") != stop_sample - first_sample or
+                not _is_nonnegative_int(receiver.get("hardware_threads")) or not receiver["hardware_threads"] or
+                receiver.get("workers") != 2 * receiver["hardware_threads"] or
+                any(slot.get("zero_h0_verified") is not True or
+                    slot.get("consumed_samples") != slot["stop_sample"] - slot["first_sample"] for slot in slots)):
+            raise CampaignError("selected attempt must bind its actual full-worker native observation scope")
 
 
 def _validate_two_hop_alarm_matrix_receipt(receipt: dict[str, Any], episode: dict[str, Any],
@@ -6655,7 +6697,8 @@ def _validate_completed_receipt(receipt: dict[str, Any], episode: dict[str, Any]
                                        physical_attempt_count=5, expected_bit=episode["repeat_bit"])
     if episode["mode"] != "gui-varying" and "hf_gui_varying_diagnostic" in receipt:
         raise CampaignError("unrequested GUI varying diagnostic in native receipt")
-    expected_digest_slot = episode.get("capture_digest_slot", episode.get("search_slot", 0) if episode["mode"] == "hf-search" else None)
+    expected_digest_slot = (episode.get("search_slot", 0) if episode["mode"] == "hf-search" else
+                            episode.get("repeat_selected_attempt", episode.get("capture_digest_slot")))
     if "capture_digest_slot" in plan or expected_digest_slot is not None:
         actual_digest_slot = plan.get("capture_digest_slot")
         if (actual_digest_slot != expected_digest_slot or
@@ -7534,7 +7577,10 @@ def _repeated_bit_campaign_summary(trials: list[dict[str, Any]]) -> dict[str, An
     return {
         "physical_scenario": bool(repeated_trials) and all(
             _is_physical_raw_bit_episode(trial.get("episode", {})) for trial in repeated_trials),
-        "scope": (("Truth-aligned raw-bit observations over five-attempt hf-disturbed standard Gaussian episodes. "
+        "scope": (("Selected raw DATA and its two quiet successors are scored within a continuous six-attempt GUI capture. "
+                   "Other attempts are unscored. Codec decoding is outside this endpoint.")
+                  if all(trial.get("episode", {}).get("repeat_selected_attempt") is not None for trial in repeated_trials) else
+                  ("Truth-aligned raw-bit observations over five-attempt hf-disturbed standard Gaussian episodes. "
                    "The opposite-bit rows share one fixed source/noise realization and are not independent natural-condition "
                    "trials or a population success-rate estimate. Codec decoding is outside this endpoint.")
                   if repeated_trials and all(trial.get("episode", {}).get("scenario") == "hf-disturbed"

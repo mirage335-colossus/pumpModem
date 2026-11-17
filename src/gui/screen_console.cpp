@@ -153,7 +153,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::exclusive)control.help=exclusive_audio_help;
     if(slot==Slot::bandwidth)control.help="Canonical inner pattern rate in Hz, from 0.001 Hz through 30 MHz. Added Symbols and shaping determine occupied bandwidth; unsupported audio profiles report a validation error.";
     if(slot==Slot::carrier)control.help="Physical carrier frequency in Hz, kHz, MHz, GHz or THz. Carrier minus Shift is the audio coordinate. This does not retune hardware.";
-    if(slot==Slot::snr)control.help="Locally agreed target C/N0 in dB-Hz used by provisional native duration planning. Both peers must use the same target; it does not change simulated actual signal/noise power or qualify sensitivity.";
+    if(slot==Slot::snr)control.help="Locally agreed target C/N0 in dB-Hz for provisional duration planning and the expected live DATA level relative to the declared input noise floor. Both peers must use the same target; it does not change simulated actual signal/noise power or guarantee sensitivity.";
     if(control.field==Field::planner_command) {
         control.document_only=true;control.tab_navigation=true;control.font_size=11;control.submit=Command::none;control.submit_mode=Field::count;
         control.help="Copy to launch with this plan. Paste settings, then Load. The target is shared with Robust Console. Enter inserts a new line.";

@@ -1931,10 +1931,14 @@ FrequencyTrackingPlan tracking_plan(const ReceiverConfig& config, std::size_t bl
 
 using FrequencyWeights = std::array<double, maximum_tracking_states>;
 using TrackingLogWeights = std::array<std::array<FrequencyWeights, tracking_powers.size()>, 2>;
-struct IndependentGainState {
+struct GainCentroidState {
     std::array<FrequencyWeights, 2> fixed_centroid{}, moving_centroid{};
+};
+struct IndependentGainState {
+    std::array<GainCentroidState, independent_gain_powers.size()> powers;
     bool nonzero_basis = false;
 };
+using IndependentGainEmissions = std::array<std::array<FrequencyWeights, 2>, independent_gain_powers.size()>;
 struct CoherentGainState {
     ChannelPosterior posterior;
     double log_evidence = 0;
@@ -1969,14 +1973,17 @@ void accumulate_independent_center(IndependentGainState& state, MappedBasis& bas
     sufficient_statistics(basis, map, paths, observation, variance, scratch,
         correlations, gram, state.nonzero_basis, stop);
     const auto rank = highest_observation_rank(observation);
-    for (std::size_t bit = 0; bit < state.fixed_centroid.size(); ++bit) {
+    for (std::size_t bit = 0; bit < 2; ++bit) {
         const auto hypothesis = bit + 1;
         const auto g = std::span(gram).subspan(4 * hypothesis, 4);
         const auto r = std::span(correlations).subspan(2 * hypothesis, 2);
         // These statistics already include the inverse noise variance.
-        state.fixed_centroid[bit][0] += tracking_emission(g[0].real(), g[3].real(), g[1], r[0], r[1], 2, 1., 1., rank);
-        if (!std::isfinite(state.fixed_centroid[bit][0]))
-            throw Error("Robust nominal independent gain evidence is nonfinite");
+        for (std::size_t power = 0; power < state.powers.size(); ++power) {
+            auto& evidence = state.powers[power].fixed_centroid[bit][0];
+            evidence += tracking_emission(g[0].real(), g[3].real(), g[1], r[0], r[1], 2,
+                                          independent_gain_powers[power], 1., rank);
+            if (!std::isfinite(evidence)) throw Error("Robust nominal independent gain evidence is nonfinite");
+        }
     }
 }
 
@@ -2159,20 +2166,52 @@ void accumulate_independent_gain(IndependentGainState& state, MappedBasis& basis
     basis.render_pair(map, paths, block.first, std::span(scratch.offsets).first(rows), templates, stop);
     if (!state.nonzero_basis)
         state.nonzero_basis = std::ranges::any_of(templates, [](auto value) { return value != Complex{}; });
-    std::array<FrequencyWeights, 2> evidence{};
+    IndependentGainEmissions evidence{};
     visit_projected_tracks(templates, paths.size(), block, fs, plan, scratch, spectrum,
         [&](std::size_t bit, std::size_t frequency, std::int64_t, unsigned rank,
             const auto& correlation, const auto& diagonal, Complex cross) {
-            const auto value = tracking_emission(diagonal[0], diagonal[1], cross, correlation[0], correlation[1],
-                paths.size(), 1., variance, rank);
-            evidence[bit][frequency] = value;
-            state.fixed_centroid[bit][frequency] += value;
-            if (!std::isfinite(state.fixed_centroid[bit][frequency]))
-                throw Error("Robust stationary centroid evidence is nonfinite");
+            for (std::size_t power = 0; power < state.powers.size(); ++power) {
+                const auto value = tracking_emission(diagonal[0], diagonal[1], cross, correlation[0], correlation[1],
+                    paths.size(), independent_gain_powers[power], variance, rank);
+                evidence[power][bit][frequency] = value;
+                auto& fixed = state.powers[power].fixed_centroid[bit][frequency];
+                fixed += value;
+                if (!std::isfinite(fixed)) throw Error("Robust stationary centroid evidence is nonfinite");
+            }
         }, stop);
-    for (std::size_t bit = 0; bit < evidence.size(); ++bit)
-        update_frequency_weights(std::span(evidence[bit]).first(plan.states),
-                                 std::span(state.moving_centroid[bit]).first(plan.states), false);
+    for (std::size_t power = 0; power < state.powers.size(); ++power)
+        for (std::size_t bit = 0; bit < 2; ++bit)
+            update_frequency_weights(std::span(evidence[power][bit]).first(plan.states),
+                std::span(state.powers[power].moving_centroid[bit]).first(plan.states), false);
+}
+
+struct IndependentGainEvidence {
+    double fixed = -infinity, moving = -infinity;
+    std::array<double, independent_gain_powers.size()> powers{};
+};
+
+IndependentGainEvidence independent_gain_evidence(std::span<const IndependentGainState> atoms,
+                                                  std::size_t bit, std::size_t frequency_states) {
+    IndependentGainEvidence result;
+    const auto frequencies = std::max<std::size_t>(1, frequency_states);
+    for (std::size_t power = 0; power < result.powers.size(); ++power) {
+        double fixed = -infinity, moving = -infinity;
+        for (const auto& atom : atoms) {
+            const auto& state = atom.powers[power];
+            fixed = std::accumulate(state.fixed_centroid[bit].begin(),
+                state.fixed_centroid[bit].begin() + frequencies, fixed, log_add);
+            if (frequency_states)
+                moving = std::accumulate(state.moving_centroid[bit].begin(),
+                    state.moving_centroid[bit].begin() + frequencies, moving, log_add);
+        }
+        result.powers[power] = frequency_states ? log_add(fixed, moving) - log_two : fixed;
+        // A level is common to the complete aperture. Marginalize only
+        // after accumulating its fixed or moving frequency likelihood.
+        const auto log_prior = std::log(independent_gain_power_priors[power]);
+        result.fixed = log_add(result.fixed, fixed + log_prior);
+        result.moving = log_add(result.moving, moving + log_prior);
+    }
+    return result;
 }
 
 TrackedFrequencySpanBlock track_span_maximum(
@@ -2485,6 +2524,7 @@ VaryingFinePlan varying_fine_plan(const ReceiverConfig& config, const ReceiverSl
     const auto active = std::min<std::size_t>(workers, states + gain_atoms);
     if (!coherent_gain_blocks) add(states, sizeof(State) + sizeof(MappedBasisRow));
     add(gain_atoms, sizeof(IndependentGainState) + sizeof(MappedBasisRow));
+    add(std::min<std::size_t>(active, gain_atoms), sizeof(IndependentGainEmissions));
     add(active, sizeof(WorkerScratch));
     add(checked_multiply(active, 4 * final + fft + (final > mapped ? 4 * mapped : 0)), sizeof(Complex));
     add(checked_multiply(active, mapped), sizeof(double));
@@ -2627,11 +2667,12 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
                                                 FrequencyTrackingPlan{};
     if (independent_track.states) {
         const auto log_prior = -std::log(static_cast<double>(independent_track.states));
-        for (auto& state : std::span(independent_states).first(independent_count))
-            for (std::size_t bit = 0; bit < state.fixed_centroid.size(); ++bit) {
-                state.fixed_centroid[bit].fill(log_prior);
-                state.moving_centroid[bit].fill(log_prior);
-            }
+        for (auto& atom : independent_states)
+            for (auto& state : atom.powers)
+                for (std::size_t bit = 0; bit < state.fixed_centroid.size(); ++bit) {
+                    state.fixed_centroid[bit].fill(log_prior);
+                    state.moving_centroid[bit].fill(log_prior);
+                }
     }
     if ((span || clock_shadow || midpoint) && !track.states)
         throw Error("Robust short track evaluation has no resolved frequency states");
@@ -2803,6 +2844,8 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
             add_work(rendered_rows, checked_multiply(rows, 2 * bases[model].count * selected.size()));
         add_work(score.nominal_independent_gain_basis_rows, checked_multiply(rows, 4 * nominal_count));
         add_work(score.signed_lag_gain_basis_rows, checked_multiply(rows, 4 * lag_count));
+        add_work(score.independent_gain_emission_cells, checked_multiply(2 * independent_gain_powers.size() *
+            independent_count, std::max<std::size_t>(1, independent_track.states)));
         if (track.states) {
             const auto per_coordinate = checked_multiply(rows,
                 2 * (config.spread_delay_seconds || (plan.coherent_gain_blocks && config.spread_doppler_hz) ? 2 : 1));
@@ -2909,31 +2952,18 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
                 std::log(static_cast<double>(midpoint->public_lag_count));
         }
         for (std::size_t bit = 0; bit < 2; ++bit) {
-            double fixed = -infinity, moving = -infinity;
-            const auto frequencies = std::max<std::size_t>(1, independent_track.states);
-            for (const auto& state : independent.first(nominal_count)) {
-                fixed = std::accumulate(state.fixed_centroid[bit].begin(),
-                    state.fixed_centroid[bit].begin() + frequencies, fixed, log_add);
-                if (independent_track.states)
-                    moving = std::accumulate(state.moving_centroid[bit].begin(),
-                        state.moving_centroid[bit].begin() + frequencies, moving, log_add);
-            }
-            score.nominal_independent_fixed_centroid_bit_evidence[bit] = fixed + log_mass;
-            score.nominal_independent_moving_centroid_bit_evidence[bit] = moving + log_mass;
+            const auto nominal = independent_gain_evidence(independent.first(nominal_count), bit, independent_track.states);
+            for (std::size_t power = 0; power < nominal.powers.size(); ++power)
+                score.nominal_independent_gain_power_bit_evidence[power][bit] = nominal.powers[power] + log_mass;
+            score.nominal_independent_fixed_centroid_bit_evidence[bit] = nominal.fixed + log_mass;
+            score.nominal_independent_moving_centroid_bit_evidence[bit] = nominal.moving + log_mass;
             score.nominal_independent_gain_bit_evidence[bit] = independent_track.states ?
-                log_add(fixed, moving) - log_two + log_mass : fixed + log_mass;
+                log_add(nominal.fixed, nominal.moving) - log_two + log_mass : nominal.fixed + log_mass;
             auto gain = score.nominal_independent_gain_bit_evidence[bit];
             if (lag_count) {
-                double stationary = -infinity, wandering = -infinity;
-                for (const auto& state : independent.last(lag_count)) {
-                    stationary = std::accumulate(state.fixed_centroid[bit].begin(),
-                        state.fixed_centroid[bit].begin() + frequencies, stationary, log_add);
-                    if (independent_track.states)
-                        wandering = std::accumulate(state.moving_centroid[bit].begin(),
-                            state.moving_centroid[bit].begin() + frequencies, wandering, log_add);
-                }
+                const auto lag = independent_gain_evidence(independent.last(lag_count), bit, independent_track.states);
                 const auto candidate = independent_track.states ?
-                    log_add(stationary, wandering) - log_two : stationary;
+                    log_add(lag.fixed, lag.moving) - log_two : lag.fixed;
                 score.signed_lag_gain_bit_evidence[bit] = candidate + log_mass + lag_adjustment;
                 gain = log_add(gain, score.signed_lag_gain_bit_evidence[bit]);
             }

@@ -65,6 +65,23 @@ also distinguish physical outage/estimation cost from avoidable receiver loss.
 
 ## Applicability after the admission and carrier-key changes
 
+The [weak combined-modulation follow-through](../../docs/validation.md#weak-combined-modulation-follow-through--17-november-2026)
+now reduces the same continuous GUI history to one late DATA aperture and two
+real quiet successors, with exact full-stream control parity. At +4/+10 dB-Hz
+the alarm is missed; at +16 dB-Hz the same source/channel history receives the
+correct bit and both quiet successors. This bounds recovery for one 41.6-second
+Each 65% observation: it does not establish a theoretical sensitivity penalty,
+six-attempt success, or a natural outage distribution. Transferring stronger
+capture timing nominations improves the weak evidence but does not rescue +10,
+so that private diagnostic does not justify a new production proposal bank. A separate
+same-IQ Gaussian-channel comparison identifies a live-calibration defect:
+expecting 20 dB more signal power makes a previously correct 139.2-second bit
+ambiguous. A bounded, normalized power mixture in the short independent-gain
+model restores that bit, preserves its matched-reference and noise controls,
+and costs about 10–13% more complete paired service on the tested CPU. This
+does not establish all-level gain tolerance or natural outage duration; the
+ordinary live PCM/noise estimator and weak Helper are outside that contrast.
+
 The [17 November persistent-reception investigation](../../docs/validation.md#persistent-reception-investigation--17-november-2026)
 finds and repairs another current weak-signal loss: on identical physical
 two-hop IQ, declaring 7 ms delay instead of zero lost the last of 13 DATA bits.

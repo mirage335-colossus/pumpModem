@@ -1015,6 +1015,56 @@ class CampaignValidationTests(unittest.TestCase):
             with self.assertRaisesRegex(runner.CampaignError, "one episode"):
                 runner._read_campaign(path)
 
+    def test_selected_gui_attempt_binds_complete_capture_and_three_ordered_scores(self):
+        episode = repeated_bit_episode(seed=62014, noise_seed=72014, repeat_path_seed=62034,
+            cn0_db_hz=34, bit_seconds=32, repeat_path_scale=1, repeat_separate_attempts=True,
+            repeat_selected_attempt=12, max_wall_seconds=120, max_samples=2_400_000)
+        runner._validate_episode(episode, 0, set(), 120, 2_400_000)
+        command = runner._command(Path("/native/probe"), episode, 2_400_000, 120)
+        self.assertEqual(command[command.index("--repeat-selected-attempt") + 1], "12")
+        for overrides in ({"repeat_selected_attempt": 13}, {"repeat_selected_attempt": 18},
+                          {"repeat_selected_attempt": True}, {"repeat_selected_attempt": None},
+                          {"repeat_separate_attempts": False}, {"capture_digest_slot": 12},
+                          {"max_wall_seconds": 300}, {"service_replay": True}):
+            with self.subTest(overrides=overrides), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(episode, **overrides), 0, set(), 120, 2_400_000)
+
+        receipt, plan = repeated_bit_receipt(episode)
+        receipt["slots"] = receipt["slots"][12:15]
+        for slot in receipt["slots"]:
+            slot.update(zero_h0_verified=True, consumed_samples=slot["stop_sample"] - slot["first_sample"])
+        plan["repeated_bit"]["selected_attempt"] = {"first_public_slot": 12, "stop_public_slot": 15,
+            "first_input_sample": 1200, "stop_input_sample": 1490}
+        plan.update(capture_digest_first_sample=1200, capture_digest_stop_sample=1290)
+        receipt["receiver"] = {"next_public_slot": 15, "input_stop": 1490, "input_closed": True,
+            "state": "input_ended", "hardware_threads": 12, "workers": 24}
+        receipt["outcomes"].update(actual_scored_slots=3, accepted_samples=290)
+        receipt["repeated_bit"].update(active_slots=1, correct_data=1, selected_attempt_slot=12,
+                                       inter_attempt_quiet_slots=0, completed_quiet_pairs=1)
+        runner._validate_repeated_bit_receipt(receipt, episode, plan)
+        self.assertEqual(runner._repeated_bit_summary(receipt, episode)["selected_attempt_slot"], 12)
+
+        # One scored quiet successor can be unresolved without corrupting the receipt.
+        ambiguous = json.loads(json.dumps(receipt))
+        ambiguous["slots"][2]["decision"] = "ambiguous"
+        ambiguous["repeated_bit"].update(trailing_quiet_slots=1, completed_quiet_pairs=0,
+                                          physical_quiet_complete=False)
+        runner._validate_repeated_bit_receipt(ambiguous, episode, ambiguous["plan"])
+
+        for mutate in (lambda r: r["receiver"].update(workers=12),
+                       lambda r: r["slots"][0].update(symbol_ordinal=0),
+                       lambda r: r["slots"][1].update(zero_h0_verified=False),
+                       lambda r: r["slots"][2].update(complete=False),
+                       lambda r: r["slots"][1].update(all_valid=False),
+                       lambda r: r["channel"].update(hashed_samples=1490),
+                       lambda r: r["plan"].update(capture_digest_first_sample=1300, capture_digest_stop_sample=1390),
+                       lambda r: r["plan"]["public_slots"][0].update(evaluator_transmitting=False),
+                       lambda r: r["outcomes"].update(actual_scored_slots=18)):
+            broken = json.loads(json.dumps(receipt))
+            mutate(broken)
+            with self.assertRaises(runner.CampaignError):
+                runner._validate_repeated_bit_receipt(broken, episode, broken["plan"])
+
     def test_separate_raw_campaign_allows_mixed_thermal_conditions(self):
         episodes = [
             repeated_bit_episode(id="off-bit0", repeat_bit=0, repeat_path_scale=1,

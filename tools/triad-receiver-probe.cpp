@@ -1066,6 +1066,7 @@ Json score_json(const ReceiverSlotScore& score) {
         {"adaptive_transition_edges", score.adaptive_transition_edges}, {"basis_rows", score.basis_rows},
         {"varying_candidates", score.varying_candidates}, {"varying_blocks", score.varying_blocks},
         {"varying_block_rows", score.varying_block_rows}, {"varying_basis_rows", score.varying_basis_rows},
+        {"independent_gain_emission_cells", score.independent_gain_emission_cells},
         {"varying_coarse_seconds", score.varying_coarse_seconds},
         {"varying_fine_seconds", score.varying_fine_seconds},
         {"varying_bit_evidence", scores(score.varying_bit_evidence)}, {"varying_status", score.varying_status},

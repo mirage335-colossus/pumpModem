@@ -21,6 +21,11 @@ enum class FineRunKind { operational, probe, cold_maximum };
 enum class AffineGainEvaluation { operational, without_stationary_fading };
 enum class FineLanes { fixed_affine, fixed_and_adaptive };
 
+inline constexpr std::array<double, receiver_independent_gain_power_count> independent_gain_powers{
+    1., 1. / 16, 1. / 256, 1. / 4096};
+inline constexpr std::array<double, receiver_independent_gain_power_count> independent_gain_power_priors{
+    .75, 1. / 12, 1. / 12, 1. / 12};
+
 // After consuming the two-tap statistics, reuse their storage for the
 // scalar direct-path r/G, laid out as block × {null, bit 0, bit 1}.
 void pack_direct_gain_statistics(std::span<Complex, 12> correlations, std::span<Complex, 24> gram,

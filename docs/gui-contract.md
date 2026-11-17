@@ -136,7 +136,7 @@ Display timing never controls receiver decisions or completion.
 | Symbol burst, Random extra | Shared whole-bit calendar waits; see [burst scheduling](symbol-burst.md). |
 | Wrong Key Admission | Reversible Robust history/browser filter. Unfiltered shows the baseline; stronger choices hide completed records when fewer than half their admitted DATA bits pass, and show the pass count. Original decoded content is retained. The dB labels are approximate HF reference visibility losses. Strong wanted signals can also be hidden; higher SNR may not restore visibility. No wrong-key-per-day rate, fixed dB cost or authentication is implied. |
 | FHSS | Canonical envelope and illustrative frequency schedule; no external radio retuning. |
-| Target SNR dB/1Hz | One shared C/N0 target, default 32 dB-Hz, for provisional duration planning; separate from actual simulated C/N0. |
+| Target SNR dB/1Hz | One shared C/N0 target, default 32 dB-Hz, for provisional duration planning and live reference DATA amplitude relative to declared input noise; separate from actual simulated C/N0. |
 | Error correction | Configured Off, RS20 or RS60 native short/long text profiles. Raw bits bypass text coding and FEC exactly. |
 | Search arithmetic | Default selects qualified automatic routing; FP32 minimum selects FP32 products/FFT with higher-precision guards; FP64 force selects its native CPU reference policy. Sensitive stages retain higher precision. |
 | GPU | Optional native CUDA or Vulkan DATA processing, shared by live reception and simulation; the compiled selector prefers usable CUDA, then a compatible physical Vulkan device. GPU remains off by default. |

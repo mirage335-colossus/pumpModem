@@ -43,6 +43,267 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Weak combined-modulation follow-through — 17 November 2026
+
+This investigation starts from `c1f1f0f`, following the committed direct-gain
+repair below. The next discriminator targets the previously bright GUI
+HF Worst / Each 65% / Margin 3 history, rather than treating the standard
+Gaussian tests as equivalent coverage. Keep the 41.6-second DATA profile,
+bit one, public calendar/key/ordinals, oscillator/arrival seed 62014,
+atmosphere seed 62034 and thermal seed 72014. Changing actual C/N0 changes
+receiver noise variance against the fixed normalized DATA reference, not the
+transmitted waveform or channel history.
+
+The retained weak two-hop receipts already select `stationary_plus_ou` with
+one spatial template: their declared delay is zero. The preceding repair
+changes the two-template case, so it does not alter that one-template
+likelihood path. The old −3 dB-Hz misses are complete, valid observations with
+ordinary coarse/fine, varying-channel and drift work, not absent search or a
+timeout. The appraisal's `public_search_executed=false` denotes that its
+separate `hf-search` diagnostic was not requested; it does not mean the native
+receiver skipped search. The +3 dB-Hz final-bit log evidence of 16.60 remains
+below 21.49. Those source-bound failures remain relevant; another expensive
+field-table regeneration without a new discriminator would add little.
+
+Predeclared first stage: render the continuous six-attempt source and channel,
+but score only late public DATA slot 12 and its real quiet successors 13–14
+through the canonical native slot scorer, with full `W=24` and the original
+public bounds. This measures three apertures, not six-attempt completion or
+continuous receiver throughput. First compare a 34 dB-Hz control with the
+saved full-stream input hash and the same three decision receipts, excluding
+orchestration/timing counters. Then score +4 dB-Hz; score +10 only if the
+active bit is missed, or 0 only if it is correctly received. Preserve any
+wrong bit or ambiguous/false quiet observation separately. The maximum is
+three executions, 2.4 million samples and 120 seconds per execution, 360
+seconds aggregate. Execution censoring is not a communication failure and
+does not authorize an automatic extension. Stop after the selected pair and
+inspect per-branch evidence, candidate availability and physical energy
+before choosing any production change or additional test.
+
+The selected-aperture harness passes independent review, 175 runner checks and
+native no-DSP sample-budget preflights. It uses `CompleteStreamReceiver` with
+the original global first slot and sample offsets. Full channel rendering
+still covers all 2,041,521 samples; the receiver accepts only
+`[1381980,1695817)`, 313,837 samples. The 34 dB-Hz control exactly matches
+the saved full-IQ hash `5cdac17c…` and every common non-timing decision/work
+field for slots 12–14. All three invocations bind native `e9087e04…`,
+appraisal `82cda018…`, and probe `4dbe76cd…`.
+
+| Actual reference C/N0 | Slot 12 decision | Operational log evidence | Elapsed |
+| --- | --- | ---: | ---: |
+| 34 dB-Hz, control | Correct DATA 1 | 87943.2260 | 40.099 s |
+| +4 dB-Hz | QUIET, missed DATA | −5.6689 | 41.211 s |
+| +10 dB-Hz, conditional | AMBIGUOUS, missed DATA | 2.2350 | 40.386 s |
+
+The threshold stays 21.4934. Both real quiet successors are QUIET at every
+level; all nine observations are complete and valid, with no wrong or false
+DATA. The source and non-noise channel are identical, including source DATA
+energy 479,725.3732 sample units. Noise variance changes as declared; full IQ
+hashes therefore differ. Aggregate elapsed time is 121.696 seconds. The
+conditional 0 dB-Hz branch is not run. The comparison receipt is
+`weak-combined-modulation/three-point-selected-slot12-comparison.json`
+(`3de77282…`). The +10 case still lacks bit separation, even before the full
+public prior penalty; lowering that penalty would not demonstrate a repair.
+These two weak misses are not yet evidence of an avoidable model deficiency
+or, by themselves, a measured sensitivity boundary. The later +16 endpoint
+below establishes a finite recovery interval for this history.
+
+A separate source audit identifies a live-calibration distinction. Simulation
+changes additive noise against a fixed DATA basis; live mode sets its expected
+basis amplitude from Target C/N0 and declared input-noise density. Original
+affine/additive and nominal independent-gain branches use fixed normalized
+gain power, while the ordinary short-frequency bank already includes weaker
+power scales. The next predeclared causal contrast reuses the successful
+standard-Gaussian `hf-disturbed` first aperture, seed 9202, +12 dB-Hz,
+139.2-second DATA, bit zero from `e`, Helper/FEC off. On the same retained IQ
+and noise covariance, compare the ordinary receiver with only its DATA basis
+gain multiplied by ten: the live-amplitude equivalent of Target 32 against
+actual +12 dB-Hz, with public geometry unchanged. One wanted and one noise-only
+case are allowed, at most 270,000 samples and 120 seconds each / 240 seconds
+aggregate. Require the wanted baseline's prior input digest and correct DATA
+before attributing any change; inspect candidates and likelihood components
+separately. This is a receiver-setting contrast, not an atmosphere change or
+a production power-prior modification.
+
+That contrast demonstrates a real calibration loss. Wanted capture
+`4cb05606981b401acad364c6d37fcbe1a7b7ce74c3e627ac81ef64eec7b810c0`
+matches the archived input and scores correct DATA zero at log evidence
+51.65795. Increasing only the receiver basis gain by ten makes the same
+observation AMBIGUOUS: log evidence is 22.91656, but the bit scores
+21.12119 / 23.52302 weakly favor the wrong value and fail the unchanged
+separation requirement. Both use all 268,361 valid samples, `W=24`, identical
+candidate counts and a 629,000,553-byte DSP quote. The nominal independent-gain
+wanted score collapses from 70.21734 to −15805.95878 under the oversized fixed
+covariance. Existing weaker ordinary-short scales do not recover the wanted
+bit. The matched noise capture remains QUIET in both arms. These are
+16.010 / 17.011-second wrapper invocations, with probe `44757f0b…`, appraisal
+`991e48cd…` and unchanged production native `e9087e04…`. The compact receipt
+is `weak-combined-modulation/live-gain-contrast/live-gain-contrast-summary.json`
+(`cf400d69…`). This isolates the expected-amplitude setting; it is not a
+live-device noise-estimator or duration-planner qualification.
+
+The candidate therefore adds a whole-aperture power mixture to the nominal
+and signed-lag independent short-gain branches: total powers
+`1, 1/16, 1/256, 1/4096`, with weights `3/4, 1/12, 1/12, 1/12`.
+The weaker scales reuse established ordinary-short support and reach about
+36 dB below the configured reference; they are not fitted to the contrast's
+particular 20 dB offset. Original unit-power contribution retains three
+quarters of its conditional mass. This bounds only that contribution's
+log-evidence reduction by `log(4/3)`, not sensitivity or bit-error loss.
+Use the same templates, frequency/timing coordinates, observations and
+thresholds, and charge the additional small likelihood/Markov state. Focused
+normalization, erased/rank-zero and workspace checks precede any candidate
+receive run. The first candidate gate repeats the exact two captured-case
+configurations above, with the same finite sample/time budget and original
+failure receipts preserved. There is no assumption that this also repairs
+the weak combined-GUI misses.
+
+After that gate passes, one further candidate preservation run reuses the
+exact +10 dB-Hz selected GUI manifest and its 120-second / 2.4-million-sample
+bounds. Require the original full IQ hash, three complete valid observations,
+no wrong/false DATA and both real quiet successors. Record the wanted decision
+whether recovered or still missed; do not extend the original three-run
+baseline stage or alter its results. Then run the affected named correctness
+groups. Primary emission counts are not complete-service counters: a separate
+line-conditioned rescore is excluded, while measured end-to-end time includes
+all executed work.
+
+The candidate passes the frozen calibration contrast. On identical wanted IQ,
+the matched-reference arm remains correct DATA zero at log evidence 51.37026;
+the oversized-reference arm changes from AMBIGUOUS to correct DATA zero at
+70.81670 (bit scores 71.50984 / 23.52307). The original unit-power raw scores
+are exactly retained; the predeclared `1/256` level supplies the useful
+alternative in the oversized-reference arm. Both noise arms remain QUIET on
+the same noise IQ hash `4f33a070…`. All four scores are complete and valid,
+with verified zero hypothesis, `W=24`, unchanged candidate/basis/frequency
+geometry and the same dominating 629,000,553-byte DSP quote. Primary gain
+emission cells increase fourfold to 872,144 per score; the additional state
+is charged even though it does not increase that maximum quote.
+
+Candidate probe `9c9c40c7…` binds native
+`104db8fa51a68de1f28199fa446afc664d02dd1e49512c8547b1dfaccdb56124`
+and appraisal `b880e6b4…`. Complete paired native service changes about
+15.997 → 17.614 seconds for wanted input and 17.000 → 19.209 seconds for
+noise (about 10% / 13% more on this host). These are bounded serial
+observations, not sustained CPU-capacity or GPU measurements. Old unit-only
+short-score timings do not calibrate this version. Rendering,
+projection and Gram/correlation work already share the four powers. A further
+determinant/eigen simplification could reintroduce near-rank-one cancellation;
+no such unqualified numerical shortcut is adopted. Minor scalar hoisting has
+no demonstrated complete-service benefit here.
+
+The +10 dB-Hz GUI preservation keeps exact full IQ `9bd27a5e…`, unchanged
+source energy and public work, with slot 12 still AMBIGUOUS and both quiet
+successors QUIET. Its active evidence changes 2.23501 → 1.94753; it does not
+recover the missing bit. All three windows remain complete and valid without
+wrong or false DATA, and the 39.067-second wrapper / 38.871-second native
+timing is a single overlapping-stream observation. The compact comparison
+receipts are `candidate-live-gain/candidate-live-gain-comparison.json`
+(`9ceac09e…`) and
+`candidate-each65-plus10/candidate-plus10-preservation-comparison.json`
+(`599c8647…`) under the current evidence directory.
+
+The repaired native source passes **40/40 triad** (103.42 seconds), **28/28
+GUI** (154.46 seconds), and **6/6 appraisal** checks (49.24 seconds), including
+the clarified Target C/N0 tooltip. Runner checks remain 175/175. These are
+correctness checks; no manual-capacity refresh, actual-GPU run or RunPod
+resource was used. Their command/output summary is
+`weak-combined-modulation/final-validation/` (`c18febb0…`).
+
+Independent completion review requires one further discriminator for the
+unresolved +10 GUI miss. Reconstruct at most two public signed-lag cells
+nominated by the successful +34 same-history observation, and compare them
+with +10 nominations. If different, evaluate those cells on unchanged +10 IQ
+using the existing short independent-gain scorer and full `13*L` public
+normalization. Keep the ordinary weak result and all physical/source settings.
+This is a private proposal-support diagnostic: a rescue would establish useful
+missing timing support, not prove that the weak receiver can discover it.
+No additional SNR, seed, duration or covariance sweep follows automatically;
+the frozen native command is `weak-combined-modulation/signed-lag-contrast-plan.json`
+(`a9e0769d…`). Its single execution allows 120 seconds total, two continuous
+2,041,521-sample renders, two retained 83,368-sample DATA apertures, full
+automatic `W=24`, and a diagnostic 3 GiB workspace ceiling with resident and
+stack charges. The native sample-budget preflight must stop before rendering.
+If transferred support crosses the admission threshold, retain ordinary
+conditional-line processing or label the result as a pre-line diagnostic.
+
+The timing contrast completes in 36.483 seconds with exact input and weak
+ordinary-score parity. Bright nominations are `[-100,-58]`; weak nominations
+are `[48,29]`. Transferring the two cells raises the correct-bit-one margin
+from −0.69843 to 2.58266 nats and operational-scale pre-line evidence from
+1.94753 to 4.40405. Both remain below their respective 5.29330 and 21.49338
+requirements, so no conditional-line stage is triggered. Other affine, drift,
+fixed and ordinary tracking components are unchanged. A union of these two
+sets cannot close the gap: even adding both complete likelihoods, double-
+counting their shared components, gives an upper bound of 4.48631 nats.
+This is a demonstrated timing-selection loss but not a complete receiver
+repair. The private receipt leaves `affine_selected_prior_mass` at its default
+zero; this is a reporting defect, not the calculated mass. Exact component
+and posterior parity verifies the original nonzero public weight was used.
+Preserve the raw receipt and this correction rather than rerun the experiment.
+Its compact summary is `signed-lag-contrast/signed-lag-contrast-comparison.json`
+(`8f761625…`); probe `4112b1ce…`, appraisal `8001386e…`, native `7ec93490…`.
+The latter native identity includes the tooltip change; DSP matches the
+earlier calibrated candidate. This executes native component scoring, not a
+complete receiver session or operational acquisition of the transferred cells.
+
+One further fixed recovery endpoint is predeclared after that causal test:
+ordinary selected slot 12 and quiet 13–14 at **+16 dB-Hz**, exactly 6 dB above
+the +10 miss, with every source/channel/calendar parameter unchanged. Use the
+existing 120-second / 2.4-million-sample cap and full W; expected noise variance
+is `192 / 10^0.6`. The manifest is
+`weak-combined-modulation/each65-cn0-16-slot12-recovery-endpoint.json`.
+It uses ordinary nominations, with no transferred cells. No bisection, new
+seed, further level or model expansion follows automatically. This addresses
+the remaining 24 dB gap to the demonstrated bright success, not an outage
+probability or sensitivity curve.
+
+That ordinary +16 dB-Hz run receives **correct DATA one**, followed by two
+complete, valid QUIET decisions and one physical quiet pair. Slot 12 has bit
+scores 155.14718 / 289.97711, correct-bit separation 134.82993 and operational
+log evidence 289.28397 against the unchanged 21.49338 threshold. Clean source
+DATA energy 479,725.3732 and propagated signal energy 613,030.1472 sample units
+exactly match +10; noise variance is 48.228219485, as predeclared. Full IQ is
+`71f68c0158585b56cd9eee092c7703b06f5b8d9cab5f7ddb9c89fa675cb94ce2`.
+The original key, six source emissions, channel history, public ordinals,
+clock bounds and selected interval remain unchanged. This is ordinary receiver
+nomination, without transferred timing support.
+
+The run completes in 37.804 native / 37.992 wrapper seconds, with `W=24`,
+434 active blocks, 9 fine / 18 varying candidates and a 259,827,608-byte peak
+DSP workspace. It binds the same `4112b1ce…` probe and `7ec93490…` native
+source as the timing contrast. Its compact receipt is
+`plus16-recovery-run/plus16-recovery-comparison.json` (`b13b8d42…`). An initial
+runner output-directory setup error executes no native trial; its separate
+receipt is retained. Exactly one actual +16 trial executes.
+
+Thus +10 misses and +16 succeeds for this fixed 41.6-second combined-channel
+observation: a 6 dB signal-to-noise increase restores reception. This is not
+a measured 6 dB penalty relative to theory, a complete sensitivity curve,
+six successful attempts, or an estimate of natural outage duration. The timing
+contrast does not justify another production proposal bank. Earlier weak
+physical-channel failures and weak Helper remain outside this new result.
+
+Temporary manifests, input/source identities and receipts belong in appraisal
+`local-evidence/weak-combined-modulation/` for this discriminator and any
+resulting repair. The one-off signed-lag transfer command and capture-only
+scaffolding are removed after resolving its question; its exact receipt and
+reporting correction remain evidence of why no timing change is promoted.
+The reusable selected-attempt and live-gain contrasts remain in the appraisal.
+After removal, the appraisal rebuild and all six affected checks pass again
+(49.39 seconds). Native source remains `7ec93490…`; the rebuilt appraisal
+probe returns to `d31daf40…`. The closure summary is
+`closure-validation/closure-summary.json` (`c1c7b30b…`); historical diagnostic
+binary identities remain attached to their actual runs. Independent review
+confirms that the reusable contrasts remain and the private command is gone.
+No large IQ capture or private comparison binary is retained. Original failures,
+frozen commands/manifests and compact matched receipts support the current
+repair and unresolved weak-channel boundary; retain them until those claims
+are superseded by an equivalent source-bound regression or release record,
+then distill the conclusions here and remove redundant outputs. No natural
+outage distribution, weak Helper qualification or actual-GPU measurement
+follows from this stage.
+
 ## Persistent-reception investigation — 17 November 2026
 
 This follow-through starts from `f825306e`, reuses the retained weak two-hop

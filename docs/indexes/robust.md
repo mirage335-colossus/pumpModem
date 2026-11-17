@@ -76,7 +76,10 @@ geometry. See the [arithmetic controls](../search-arithmetic.md) and
 
 Keep the GUI Target SNR (C/N0, default 32 dB-Hz) separate from the simulated
 link's transmit power, path loss and noise density. Live input noise is a local
-dBFS/Hz setting; it is not the same quantity as link noise in dBm/Hz. The
+dBFS/Hz setting; it is not the same quantity as link noise in dBm/Hz. In live
+mode, Target C/N0 also sets the reference DATA amplitude relative to that
+declared noise floor. Weaker gain alternatives reduce a demonstrated
+calibration loss, but do not establish all-level sensitivity. The
 Transmit noise action creates an outgoing noise waveform; it does not measure
 or configure the receiver noise floor. See [GUI meanings](../gui-contract.md#modems-and-current-availability)
 and [duration-planning limits](../triad-duration-planning.md).
@@ -144,15 +147,24 @@ bounded added work for natural changing-channel resilience while preserving the
 public search and full worker budget.
 
 For a supported short-frequency plan with nonzero declared delay, an additional
-nominal-epoch two-path model uses independent proper-complex per-block gains
-(variance 0.5 per path), with zero relative-Doppler offset and the full declared
+nominal-epoch two-path model uses independent proper-complex per-block gains,
+with zero relative-Doppler offset and the full declared
 delay at the public arrival endpoints. Its fixed-common-frequency whole-aperture
 component and changing-common-frequency Markov component are mixed equally
 over the same grid of up to 65 states; the branch receives 1/8 short-family
-mass while the old short family retains 7/8.
-That mixture is applied at whole-slot evidence combination; the 7/8 retention
-costs the old branch at most `-log(7/8) ≈ 0.134` nats, not a dB sensitivity,
-pointwise-decision or CPU-capacity bound.
+mass while the old short family retains 7/8. That branch mixture is applied
+at whole-slot evidence combination; the 7/8 retention costs the old branch at
+most `-log(7/8) ≈ 0.134` nats, not a dB sensitivity, pointwise-decision or
+CPU-capacity bound.
+
+Within the independent-gain branch, the original unit-total-power component
+retains 3/4 mass and powers
+`1/16`, `1/256`, `1/4096` share 1/4. They reuse the same basis statistics and
+remain separate over the whole aperture. The same mixture applies to signed
+timing-lag candidates; it repairs a demonstrated loss when the live expected
+signal power exceeds the received level. The bounded scales are not an
+all-amplitude sensitivity guarantee; see the [matched calibration contrast](../validation.md#weak-combined-modulation-follow-through--17-november-2026).
+
 The frequency states cover the declared range (maximum 65), while no delay grid
 or historical path search is introduced. A zero
 `nominal_independent_gain_frequency_states` receipt with a nonzero

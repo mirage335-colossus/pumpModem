@@ -89,7 +89,7 @@ struct Options {
     std::string search_timing="selected";
     std::optional<std::uint64_t> capture_digest_slot;
     std::optional<std::uint64_t> hf_trajectory_seed, noise_seed;
-    std::optional<std::uint64_t> repeat_bit, repeat_path_seed;
+    std::optional<std::uint64_t> repeat_bit, repeat_path_seed, repeat_selected_attempt;
     std::optional<double> repeat_path_scale;
     bool repeat_thermal_off=false, repeat_separate_attempts=false, two_hop_alarm_matrix=false;
     bool two_hop_additive_boundary=false;
@@ -116,6 +116,7 @@ struct Options {
     bool hf_target_presence_diagnostic=false;
     bool hf_normalized_null=false;
     bool hf_nominal_gain_witness=false;
+    bool hf_live_gain_contrast=false;
     bool hf_nominal_gain_witness_bit_one=false;
     bool hf_nominal_gain_witness_motion=false;
     bool hf_correlated_gain_shadow=false;
@@ -159,6 +160,7 @@ Options parse(int argc,char** argv) {
         if(key=="--hf-gannon-gain-variance-diagnostic") {o.hf_gannon_gain_variance_diagnostic=true;continue;}
         if(key=="--hf-target-presence-diagnostic") {o.hf_target_presence_diagnostic=true;continue;}
         if(key=="--hf-normalized-null") {o.hf_normalized_null=true;continue;}
+        if(key=="--hf-live-gain-contrast") {o.hf_live_gain_contrast=true;continue;}
         if(key=="--hf-nominal-gain-witness") {o.hf_nominal_gain_witness=true;continue;}
         if(key=="--hf-nominal-gain-witness-bit-one") {
             o.hf_nominal_gain_witness=o.hf_nominal_gain_witness_bit_one=true;
@@ -229,6 +231,7 @@ Options parse(int argc,char** argv) {
         else if(key=="--repeat-bit") o.repeat_bit=integer(value);
         else if(key=="--repeat-path-scale") o.repeat_path_scale=number(value);
         else if(key=="--repeat-path-seed") o.repeat_path_seed=integer(value);
+        else if(key=="--repeat-selected-attempt") o.repeat_selected_attempt=integer(value);
         else if(key=="--search-slot") {o.search_slot=integer(value);o.search_options=true;}
         else if(key=="--search-timing") {o.search_timing=value;o.search_options=true;}
         else if(key=="--max-samples") o.max_samples=integer(value);
@@ -264,6 +267,11 @@ Options parse(int argc,char** argv) {
     require(o.mode=="plan"||o.mode=="channel"||o.mode=="receive"||o.mode=="slot"||o.mode=="oracle"||
         o.mode=="diagnose"||o.mode=="hf-search"||o.mode=="gui-varying"||o.mode=="gui-repeated-bit","unknown mode");
     const bool gui_repeated=o.mode=="gui-repeated-bit";
+    require(!o.repeat_selected_attempt||(gui_repeated&&o.repeat_separate_attempts&&
+        *o.repeat_selected_attempt%3==0&&*o.repeat_selected_attempt<3*appraisal::hf_gui_repeated_bit_slots&&
+        !o.capture_digest_slot&&!o.duration_override&&!o.service_replay&&!o.service_options&&!o.workers&&
+        !o.hf_compare_admitted_models&&!o.hf_predictive_quiet),
+        "selected attempt requires a scheduled GUI raw bit and its two quiet successors");
     const bool changing_rate_repeated=o.repeat_bit&&o.scenario=="hf-ensemble-changing-rate"&&
         (o.mode=="plan"||o.mode=="receive");
     const bool disturbed_repeated=o.repeat_bit&&o.scenario=="hf-disturbed"&&
@@ -280,7 +288,7 @@ Options parse(int argc,char** argv) {
         // The one longer holdout exhausted its initial deadline after all
         // input was rendered. Keep its waveform and full receive unchanged
         // while bounding its single larger replay separately from shorter rows.
-        const bool long_holdout=o.repeat_separate_attempts&&o.bit_seconds==32.&&o.cn0==34.&&
+        const bool long_holdout=!o.repeat_selected_attempt&&o.repeat_separate_attempts&&o.bit_seconds==32.&&o.cn0==34.&&
             o.repeat_bit==1&&o.repeat_path_scale==1.&&!o.repeat_thermal_off&&
             o.seed==62014&&o.noise_seed==72014&&o.repeat_path_seed==62034&&
             o.gui.spread=="hf-worst"&&o.gui.selective=="each-65"&&o.gui.arrival=="tight"&&o.gui.clock_edge&&
@@ -416,9 +424,17 @@ Options parse(int argc,char** argv) {
             "nominal gain witness requires the frozen 139.2 s first aperture and bounded resources");
         o.hf_normalized_null=true;
     }
+    if(o.hf_live_gain_contrast) {
+        require(!o.hf_normalized_null&&o.seed==9202&&o.cn0==12&&o.bit_seconds==128.&&o.message=="e"&&
+            (o.control=="wanted"||o.control=="noise")&&o.pulse=="rrc"&&!o.noise_seed&&!o.duration_override&&
+            !o.capture_lead_seconds&&!o.fade_slots&&!o.memory_bytes&&o.max_samples<=270'000&&
+            o.max_wall_seconds<=120&&o.chunk==4096,
+            "live gain contrast requires the frozen first aperture and bounded default resources");
+        o.hf_normalized_null=true;
+    }
     if(o.hf_normalized_null) {
         require(o.mode=="slot"&&o.scenario=="hf-disturbed"&&o.backend=="cpu"&&o.waveform=="reference"&&
-            !o.helper&&o.fec=="off"&&(o.control=="wanted"||o.control=="wrong-key")&&
+            !o.helper&&o.fec=="off"&&(o.control=="wanted"||o.control=="wrong-key"||o.hf_live_gain_contrast)&&
             (!o.capture_digest_slot||*o.capture_digest_slot==0)&&!o.workers&&!o.owners&&
             !o.hf_predictive_quiet&&!o.hf_public_phase_receiver&&!o.hf_compare_admitted_models&&
             !o.hf_correlated_gain_receiver&&!o.hf_correlated_gain_shadow&&!o.hf_target_presence_diagnostic&&
@@ -1745,12 +1761,18 @@ Setup setup(const Options& o,std::stop_token stop) {
 }
 std::string_view observation_scope(const Options& o) {
     if(o.mode=="gui-varying")return "shadow_canonical_varying_of_selected_complete_observation";
+    if(o.repeat_selected_attempt)return "one_selected_raw_attempt_and_two_scored_quiet_successors";
     if(o.repeat_bit)return "repeated_raw_data_and_scored_quiet";
     if(o.mode=="hf-search")return "shadow_public_search_of_selected_complete_observation";
     if(o.mode=="diagnose")return "bounded_native_phases_from_complete_first_observation";
     if(o.mode=="slot")return "first_complete_public_observation";
     if(o.mode=="channel")return "bounded_channel_episode";
     return "physical_message_completion";
+}
+
+std::optional<std::uint64_t> observation_digest_slot(const Options& o) {
+    if(o.mode=="hf-search")return o.search_slot;
+    return o.repeat_selected_attempt?o.repeat_selected_attempt:o.capture_digest_slot;
 }
 
 Json service_plan_json(const Setup& s,const Options& o) {
@@ -1776,7 +1798,7 @@ Json service_plan_json(const Setup& s,const Options& o) {
 
 Json plan_json(const Setup& s,const Options& o) {
     const auto& f=s.profile.config().format;const auto& g=s.profile.geometry();const auto& p=s.profile.config();
-    const auto digest_index=o.mode=="hf-search"?std::optional<std::uint64_t>(o.search_slot):o.capture_digest_slot;
+    const auto digest_index=observation_digest_slot(o);
     std::optional<ReceiverSlotPlan> digest_plan;
     if(digest_index)digest_plan=make_receiver_slot_plan(s.profile,s.receiver,*digest_index);
     Json::Array slots;
@@ -1890,14 +1912,23 @@ Json plan_json(const Setup& s,const Options& o) {
             repeated["oscillator_seed"]=*channel.oscillator_seed;
             repeated["noise_seed"]=*channel.noise_seed;
             repeated["thermal_noise_enabled"]=channel.effects.noise_enabled;
-            repeated["transmission_scope"]=o.repeat_separate_attempts?
+            repeated["transmission_scope"]=o.repeat_selected_attempt?
+                "Six one-bit emissions advance public ordinals through one continuous channel. Only the selected DATA slot and its two quiet successors are scored.":
+                o.repeat_separate_attempts?
                 "Six one-bit emissions at advancing public ordinals; each is followed by two scored quiet windows through one continuous channel.":
                 "One emission of six contiguous raw DATA slots with advancing public ordinals.";
         }
         if(o.repeat_separate_attempts)repeated["separate_attempts"]=true;
+        if(o.repeat_selected_attempt) {
+            const auto first=*o.repeat_selected_attempt;
+            const auto last=make_receiver_slot_plan(s.profile,s.receiver,first+2);
+            repeated["selected_attempt"]=object({{"first_public_slot",first},{"stop_public_slot",first+3},
+                {"first_input_sample",digest_plan->first_sample},{"stop_input_sample",last.stop_sample}});
+        }
         result["repeated_bit"]=std::move(repeated);
     }
     if(o.hf_phase_filter)result["hf_phase_filter_requested"]=true;
+    if(o.hf_live_gain_contrast)result["hf_live_gain_contrast_requested"]=true;
     if(o.hf_target_presence_diagnostic)result["hf_target_presence_diagnostic_requested"]=true;
     if(o.hf_correlated_gain_shadow) {
         result["hf_correlated_gain_shadow_requested"]=true;
@@ -2199,6 +2230,14 @@ Json backend_json(const Options& o,const std::shared_ptr<receiver_detail::Receiv
 }
 Json score_json(const StreamSlotReceipt& receipt) {
     const auto& r=receipt.score;
+    Json::Array gain_powers;
+    if(r.nominal_independent_gain_candidates)
+        for(std::size_t i=0;i<receiver_detail::independent_gain_powers.size();++i) {
+            const auto& evidence=r.nominal_independent_gain_power_bit_evidence[i];
+            gain_powers.push_back(object({{"relative_power",receiver_detail::independent_gain_powers[i]},
+                {"prior",receiver_detail::independent_gain_power_priors[i]},
+                {"bit_evidence_before_power_and_public_priors",Json::Array{evidence[0],evidence[1]}}}));
+        }
     return object({{"index",r.index},{"pattern_epoch",receipt.pattern_epoch},{"symbol_ordinal",receipt.symbol_ordinal},{"workers",receipt.workers},
         {"decision",r.decision==SlotDecision::data?"data":r.decision==SlotDecision::quiet?"quiet":"ambiguous"},
         {"bit",r.bit?Json(*r.bit):Json{}},{"complete",r.complete},{"all_valid",r.all_valid},
@@ -2214,10 +2253,12 @@ Json score_json(const StreamSlotReceipt& receipt) {
         {"coarse_fft_precision",r.coarse_fft_precision},{"coarse_precision_reason",r.coarse_precision_reason},
         {"varying_status",r.varying_status},{"varying_candidates",r.varying_candidates},{"varying_blocks",r.varying_blocks},
         {"varying_basis_rows",r.varying_basis_rows},{"varying_coarse_seconds",r.varying_coarse_seconds},{"varying_fine_seconds",r.varying_fine_seconds},
+        {"independent_gain_emission_cells",r.independent_gain_emission_cells},
         {"nominal_independent_gain",r.nominal_independent_gain_candidates?object({
             {"candidates",r.nominal_independent_gain_candidates},{"basis_rows",r.nominal_independent_gain_basis_rows},
             {"frequency_states",r.nominal_independent_gain_frequency_states},
             {"frequency_log_prior_adjustment",r.nominal_independent_gain_log_prior_adjustment},
+            {"power_models",std::move(gain_powers)},
             {"fixed_centroid_bit_evidence",Json::Array{r.nominal_independent_fixed_centroid_bit_evidence[0],r.nominal_independent_fixed_centroid_bit_evidence[1]}},
             {"moving_centroid_bit_evidence",r.nominal_independent_gain_frequency_states?Json(Json::Array{
                 r.nominal_independent_moving_centroid_bit_evidence[0],r.nominal_independent_moving_centroid_bit_evidence[1]}):Json{}},
@@ -2258,6 +2299,16 @@ ReceiverConfig hf_worst_margin3_declaration(ReceiverConfig config) {
     config.random_doppler_width_hz=0.;
     return config;
 }
+Json rescored_aperture_json(const ReceiverConfig& config,const ReceiverSlotPlan& slot,const Crypto& key,
+    std::span<const Complex> iq,unsigned workers,std::size_t workspace,std::stop_token stop) {
+    const auto r=score_receiver_slot(config,slot,key,iq,{},workers,workspace,stop);
+    require(r.complete&&r.all_valid&&r.zero_h0_verified,"aperture witness did not score the full public aperture");
+    auto row=score_json({r,slot.format.epoch,slot.format.symbol_ordinal,workers,{}});
+    row["likelihood_components"]=slot_likelihood_components(r);
+    row["zero_h0_verified"]=r.zero_h0_verified;
+    row["consumed_samples"]=r.consumed_samples;
+    return row;
+}
 Json nominal_gain_witness_json(const ReceiverConfig& config,const ReceiverSlotPlan& slot,const Crypto& key,
     std::span<const Complex> iq,unsigned workers,std::size_t memory,std::string_view observation_sha256,
     const Json& ordinary,bool raw_bit_one,std::stop_token stop) {
@@ -2268,11 +2319,7 @@ Json nominal_gain_witness_json(const ReceiverConfig& config,const ReceiverSlotPl
         add_bytes(iq.size_bytes()+iq.size(),receiver_detail::checked_multiply(workers-1,execution::worker_stack_bytes()))));
     if(reserve>=memory)throw Limit("nominal gain witness exceeds its resident, worker and rotation memory budget");
     const auto rescore=[&](const ReceiverConfig& declaration,std::span<const Complex> capture) {
-        const auto r=score_receiver_slot(declaration,slot,key,capture,{},workers,memory-reserve,stop);
-        require(r.complete&&r.all_valid&&r.zero_h0_verified,"nominal gain witness did not score the full public aperture");
-        auto row=score_json({r,slot.format.epoch,slot.format.symbol_ordinal,workers,{}});
-        row["likelihood_components"]=slot_likelihood_components(r);
-        return row;
+        return rescored_aperture_json(declaration,slot,key,capture,workers,memory-reserve,stop);
     };
     const auto gui=raw_bit_one?ordinary:rescore(hf_worst_margin3_declaration(config),iq);
     std::vector<Complex> shifted(iq.size());
@@ -2290,6 +2337,26 @@ Json nominal_gain_witness_json(const ReceiverConfig& config,const ReceiverSlotPl
         {"shifted_observation_sha256",hash.finish()},{"observation_sha256",observation_sha256},{"observed_samples",iq.size()},
         {"known_noise_variance",config.noise_variance},{"configured_workers",workers},{"resident_and_rotation_reserved_bytes",reserve},
         {"scope","Configured Gaussian two-ray aperture with its public nominal calendar. The shifted score applies +30 Hz digitally to the full complex observation, including circular white noise. All scores use the ordinary native decisions and their declared priors."}});
+}
+Json live_gain_contrast_json(const ReceiverConfig& config,const ReceiverSlotPlan& slot,const Crypto& key,
+    std::span<const Complex> iq,unsigned workers,std::size_t memory,bool wanted,const Json& ordinary,std::stop_token stop) {
+    require(iq.size()==268'361&&slot.index==0&&config.sample_rate_hz==1920&&
+        config.spread_delay_seconds==.007&&config.spread_doppler_hz==0&&config.clock_bound_ppm==0&&
+        config.random_doppler_width_hz==30,"live gain contrast requires the original statistical reference aperture");
+    const auto reserve=add_bytes(execution::process_footprint_bytes(), add_bytes(1024*1024,
+        receiver_detail::checked_multiply(workers-1,execution::worker_stack_bytes())));
+    if(reserve>=memory)throw Limit("live gain contrast exceeds its resident and worker memory budget");
+    auto scaled=config;
+    scaled.data_basis_gain*=10.;
+    const auto start=Clock::now();
+    auto comparison=rescored_aperture_json(scaled,slot,key,iq,workers,memory-reserve,stop);
+    return object({{"scope","Same observed I/Q and receiver noise covariance, with a receiver-only DATA reference amplitude change. Both scorers use the same public search bounds."},
+        {"expected_bit",wanted?Json(0):Json{}},{"bit_reference_cn0_db_hz",12.},{"calibrated_target_cn0_db_hz",32.},
+        {"known_noise_variance",config.noise_variance},{"reference_basis_gain",config.data_basis_gain},
+        {"target_basis_gain",scaled.data_basis_gain},{"target_amplitude_ratio",10.},
+        {"configured_workers",workers},{"resident_and_stack_reservation_bytes",reserve},
+        {"comparison_seconds",std::chrono::duration<double>(Clock::now()-start).count()},
+        {"reference",ordinary},{"target",std::move(comparison)}});
 }
 Json wrong_key_evidence_json(const WrongKeyAdmissionEvidence& evidence) {
     bool rated = evidence.available && evidence.data_bits > 0 &&
@@ -4194,6 +4261,16 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
     std::shared_ptr<appraisal::HfPublicPhaseReceiver> phase_receiver;
     std::optional<appraisal::HfCorrelatedGainReceiver> correlated_gain_receiver;
     std::unique_ptr<CompleteStreamReceiver> receiver;
+    const auto receive_first_slot=o.repeat_selected_attempt.value_or(0);
+    const auto receive_stop_slot=o.repeat_selected_attempt?receive_first_slot+3:s.slot_horizon;
+    const auto receive_input_first=o.repeat_selected_attempt?
+        make_receiver_slot_plan(s.profile,s.receiver,receive_first_slot).first_sample:0;
+    const auto receive_input_stop=o.repeat_selected_attempt?
+        make_receiver_slot_plan(s.profile,s.receiver,receive_stop_slot-1).stop_sample:s.horizon;
+    if(o.repeat_selected_attempt) {
+        s.stream.first_slot=receive_first_slot;
+        s.stream.first_input_sample=receive_input_first;
+    }
     if(receive&&predictive_receiver) {
         const datapump::triad::v3::detail::StreamWorkspace workspace=[&](const auto& config,const auto& slot,unsigned workers) {
             return predictive_receiver->workspace(config,slot,workers,false);
@@ -4258,7 +4335,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
         const auto declaration=o.hf_nominal_gain_witness_bit_one||o.hf_nominal_gain_witness_motion?
             hf_worst_margin3_declaration(s.receiver):s.receiver;
         result["plan"]["first_slot_workspace_bytes"]=receiver_slot_workspace(declaration,
-            make_receiver_slot_plan(s.profile,declaration,0),s.resources.workers);
+            make_receiver_slot_plan(s.profile,declaration,receive_first_slot),s.resources.workers);
         receiver=std::make_unique<CompleteStreamReceiver>(s.profile,declaration,s.key,s.stream,s.message_profile);
     }
     const bool receiver_executed=bool(receiver);
@@ -4292,6 +4369,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
     bool boundary_receipts_complete=true;
     bool correct=false,correct_decoded_candidate=false,ended=false;
     bool first_observation_complete=false,first_observation_correct_data=false,public_search_executed=false;
+    bool first_observation_quiet=false,first_observation_full_workers=false;
     const auto first_observation=make_receiver_slot_plan(s.profile,s.receiver,0);
     const bool target=o.control!="noise"&&o.control!="wrong-key"&&o.control!="wrong-ordinal";
     const auto recovered_exact=[&](const appraisal::ProtectedReassemblyCandidate& candidate) {
@@ -4365,6 +4443,10 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
                     r.stop_sample==first_observation.stop_sample;
                 first_observation_correct_data=first_observation_complete&&r.decision==SlotDecision::data&&
                     r.bit&&*r.bit==s.truth.front()&&target;
+                first_observation_quiet=first_observation_complete&&r.decision==SlotDecision::quiet&&
+                    r.zero_h0_verified&&r.noise_statistics_valid;
+                first_observation_full_workers=receipt.workers==s.resources.workers&&r.zero_h0_verified&&
+                    r.consumed_samples==r.stop_sample-r.first_sample;
             }
             if(r.decision==SlotDecision::data) {
                 if(!target||!active)++false_data;
@@ -4376,12 +4458,17 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
                 else {++ambiguous;++episode_ambiguous[*episode];}
             }
             auto row=score_json(receipt);
-            if((o.mode=="receive"&&s.scenario.id=="hf-vector-two-hop")||(o.repeat_bit&&!s.native_channel)||o.hf_nominal_gain_witness)
+            if((o.mode=="receive"&&s.scenario.id=="hf-vector-two-hop")||(o.repeat_bit&&!s.native_channel)||
+                o.hf_nominal_gain_witness||o.hf_live_gain_contrast||o.repeat_selected_attempt)
                 row["likelihood_components"]=slot_likelihood_components(r);
+            if(o.repeat_selected_attempt||o.hf_live_gain_contrast) {
+                row["zero_h0_verified"]=r.zero_h0_verified;
+                row["consumed_samples"]=r.consumed_samples;
+            }
             if(o.repeat_bit) {
                 const auto plan=make_receiver_slot_plan(s.profile,s.receiver,r.index);
                 const bool scored=r.complete&&r.all_valid&&r.zero_h0_verified&&
-                    r.index==slots.size()&&r.index<s.slot_horizon&&
+                    r.index==receive_first_slot+slots.size()&&r.index<receive_stop_slot&&
                     receipt.pattern_epoch==plan.format.epoch&&receipt.symbol_ordinal==plan.format.symbol_ordinal&&
                     r.first_sample==plan.first_sample&&r.stop_sample==plan.stop_sample&&
                     r.quiet_first_sample==plan.quiet_first_sample&&r.quiet_stop_sample==plan.quiet_stop_sample&&
@@ -4396,9 +4483,10 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
                     repeat_longest_miss=std::max(repeat_longest_miss,repeat_miss_run);
                 }
                 const bool quiet=scored&&r.decision==SlotDecision::quiet&&r.noise_statistics_valid;
-                if(quiet&&r.index>=s.q0)++repeat_quiet;
+                const auto first_trailing_quiet=o.repeat_selected_attempt?receive_first_slot+1:s.q0;
+                if(quiet&&r.index>=first_trailing_quiet)++repeat_quiet;
                 if(o.repeat_separate_attempts&&!active) {
-                    if(quiet&&r.index<s.q0)++repeat_inter_attempt_quiet;
+                    if(quiet&&r.index<first_trailing_quiet)++repeat_inter_attempt_quiet;
                     if(r.index%3==1)repeat_first_quiet=quiet;
                     else if(r.index%3==2)repeat_complete_pairs+=repeat_first_quiet&&quiet;
                 }
@@ -4524,7 +4612,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
     };
     std::vector<Complex> clean_iq(gui_clean?o.chunk:0);
     std::vector<std::uint8_t> clean_valid(gui_clean?o.chunk:0);
-    const auto digest_index=o.mode=="hf-search"?std::optional<std::uint64_t>(o.search_slot):o.capture_digest_slot;
+    const auto digest_index=observation_digest_slot(o);
     std::optional<ReceiverSlotPlan> digest_plan;
     std::optional<Hash> selected_hash;
     if(digest_index) {
@@ -4630,11 +4718,15 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
                 }
             }
             if(replay_io)spool_read_time.add(replay_io->elapsed());
-            if(receiver) {
+            const auto push_start=std::max(first,receive_input_first);
+            const auto push_stop=std::min(first+n,receive_input_stop);
+            if(receiver&&push_start<push_stop) {
+                const auto offset=static_cast<std::size_t>(push_start-first);
+                const auto count=static_cast<std::size_t>(push_stop-push_start);
                 const auto ctl=Clock::now();
                 for(;;) {
                     deadline.check();
-                    const auto accepted=receiver->push(first,std::span(iq).first(n),std::span(valid).first(n));
+                    const auto accepted=receiver->push(push_start,rows.subspan(offset,count),mask.subspan(offset,count));
                     const auto rejected=receiver->report();drain();
                     if(rejected.state==StreamReceiverState::resource_limit)throw Limit(rejected.reason);
                     if(rejected.state==StreamReceiverState::failed)throw Error(rejected.reason);
@@ -4744,9 +4836,12 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
             if(final.state==StreamReceiverState::resource_limit) {run_status="resource_limit";reason=final.reason;}
             else if(final.state==StreamReceiverState::failed){run_status="error";reason=final.reason;}
             else if(final.state==StreamReceiverState::cancelled){run_status=deadline.stop.stop_requested()?"time_limit":"error";reason=final.reason;}
-            else if(final.state!=StreamReceiverState::input_ended||final.input_stop!=s.horizon||
-                    final.next_public_slot!=s.slot_horizon||slots.size()!=s.slot_horizon) {
+            else if(final.state!=StreamReceiverState::input_ended||final.input_stop!=receive_input_stop||
+                    final.next_public_slot!=receive_stop_slot||slots.size()!=receive_stop_slot-receive_first_slot) {
                 run_status="error";reason="incomplete ordered receiver horizon or lost slot receipts";
+            }
+            else if(o.repeat_selected_attempt&&(!repeat_ordered_valid||!selected_digest||hashed_samples!=s.horizon)) {
+                run_status="error";reason="selected attempt did not bind three valid ordered windows and the full capture";
             }
             else if(o.mode=="slot"&&!first_observation_complete) {
                 run_status="error";reason="first public observation did not produce a complete valid slot receipt";
@@ -4767,21 +4862,35 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
             // all started receiver stacks before starting any shadow work.
             interrupt.reset();
             receiver.reset();
-            auto diagnostic=common_motion?object({{"gui_hf_worst_margin3",slots.front()},{"expected_bit",s.truth.front()},
-                {"unrotated_observation_sha256",before_motion_hash->finish()},{"effective_seed",motion_seed},
-                {"knot_seconds",motion_knot_seconds},{"frequency_bound_hz",motion_bound},
-                {"minimum_frequency_hz",observed_motion_min},{"maximum_frequency_hz",observed_motion_max},
-                {"scope","The native smooth-knot common-frequency law rotates the complete statistical observation, including circular white noise. The receiver uses the broad GUI-like declaration and receives no trajectory samples or path truth."}}):
-                o.hf_nominal_gain_witness?
-                nominal_gain_witness_json(s.receiver,diagnostic_slot,s.key,diagnostic_capture,s.resources.workers,
-                    *s.stream.memory_limit_bytes,*selected_digest,slots.front(),o.hf_nominal_gain_witness_bit_one,
-                    deadline.stop.get_token()):
-                appraisal::diagnose_hf_normalized_null(s.receiver,diagnostic_slot,s.key,
-                    diagnostic_capture,s.resources.workers,*s.stream.memory_limit_bytes,deadline.stop.get_token());
-            diagnostic["observation_sha256"]=*selected_digest;
-            diagnostic["observation_hashed_samples"]=selected_hashed_samples;
-            diagnostic["shadow_executed_after_receiver_closed"]=!common_motion;
-            result[o.hf_nominal_gain_witness?"hf_nominal_gain_witness":"hf_normalized_null"]=std::move(diagnostic);
+            if(o.hf_live_gain_contrast) {
+                constexpr std::string_view wanted_digest="4cb05606981b401acad364c6d37fcbe1a7b7ce74c3e627ac81ef64eec7b810c0";
+                const bool wanted=o.control=="wanted";
+                require(first_observation_full_workers&&channel&&channel->report().additive_noise_energy>0&&
+                    (wanted?first_observation_correct_data&&s.truth.front()==0&&*selected_digest==wanted_digest:
+                            first_observation_quiet&&channel->report().signal_energy==0),
+                    "live gain contrast baseline did not reproduce the reference DATA or thermal-noise-only quiet aperture");
+                auto contrast=live_gain_contrast_json(s.receiver,diagnostic_slot,s.key,diagnostic_capture,
+                    s.resources.workers,*s.stream.memory_limit_bytes,wanted,slots.front(),deadline.stop.get_token());
+                contrast["observation_sha256"]=*selected_digest;
+                contrast["observation_hashed_samples"]=selected_hashed_samples;
+                result["hf_live_gain_contrast"]=std::move(contrast);
+            } else {
+                auto diagnostic=common_motion?object({{"gui_hf_worst_margin3",slots.front()},{"expected_bit",s.truth.front()},
+                    {"unrotated_observation_sha256",before_motion_hash->finish()},{"effective_seed",motion_seed},
+                    {"knot_seconds",motion_knot_seconds},{"frequency_bound_hz",motion_bound},
+                    {"minimum_frequency_hz",observed_motion_min},{"maximum_frequency_hz",observed_motion_max},
+                    {"scope","The native smooth-knot common-frequency law rotates the complete statistical observation, including circular white noise. The receiver uses the broad GUI-like declaration and receives no trajectory samples or path truth."}}):
+                    o.hf_nominal_gain_witness?
+                    nominal_gain_witness_json(s.receiver,diagnostic_slot,s.key,diagnostic_capture,s.resources.workers,
+                        *s.stream.memory_limit_bytes,*selected_digest,slots.front(),o.hf_nominal_gain_witness_bit_one,
+                        deadline.stop.get_token()):
+                    appraisal::diagnose_hf_normalized_null(s.receiver,diagnostic_slot,s.key,
+                        diagnostic_capture,s.resources.workers,*s.stream.memory_limit_bytes,deadline.stop.get_token());
+                diagnostic["observation_sha256"]=*selected_digest;
+                diagnostic["observation_hashed_samples"]=selected_hashed_samples;
+                diagnostic["shadow_executed_after_receiver_closed"]=!common_motion;
+                result[o.hf_nominal_gain_witness?"hf_nominal_gain_witness":"hf_normalized_null"]=std::move(diagnostic);
+            }
         }
         deadline.check();
     }catch(const Timeout& e){run_status="time_limit";reason=e.what();}
@@ -4884,14 +4993,18 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
         {"observation_scope",observation_scope(o)},
         {"first_public_observation_complete",first_observation_complete},
         {"first_public_observation_correct_data",first_observation_correct_data},
-        {"backpressure_count",backpressure},{"peak_uncommitted_slots",peak_backlog},{"accepted_samples",receiver_executed?final.input_stop:0}});
+        {"backpressure_count",backpressure},{"peak_uncommitted_slots",peak_backlog},
+        {"accepted_samples",receiver_executed?final.input_stop-receive_input_first:0}});
     if(o.repeat_bit) {
-        const bool all_quiet=o.repeat_separate_attempts?repeat_complete_pairs==repeated_bit_count(o):repeat_quiet==2;
-        result["repeated_bit"]=object({{"active_slots",repeated_bit_count(o)},
+        const auto active_slots=o.repeat_selected_attempt?1:repeated_bit_count(o);
+        const bool all_quiet=o.repeat_separate_attempts?repeat_complete_pairs==active_slots:repeat_quiet==2;
+        result["repeated_bit"]=object({{"active_slots",active_slots},
             {"correct_data",repeat_correct},{"wrong_data",wrong_bits},{"ambiguous_active_slots",ambiguous},
             {"quiet_active_slots",quiet_active},{"longest_no_correct_run",repeat_longest_miss},
             {"trailing_quiet_slots",repeat_quiet},{"physical_quiet_complete",all_quiet},
-            {"ordered_valid_complete",repeat_ordered_valid&&run_status=="completed"&&slots.size()==s.slot_horizon}});
+            {"ordered_valid_complete",repeat_ordered_valid&&run_status=="completed"&&
+                slots.size()==receive_stop_slot-receive_first_slot}});
+        if(o.repeat_selected_attempt)result["repeated_bit"]["selected_attempt_slot"]=receive_first_slot;
         if(o.repeat_separate_attempts) {
             result["repeated_bit"]["separate_attempts"]=true;
             result["repeated_bit"]["inter_attempt_quiet_slots"]=repeat_inter_attempt_quiet;
@@ -5260,7 +5373,7 @@ int main(int argc,char** argv) {
             result["usage"]="high_fidelity_appraisal --mode plan|channel|receive|slot|oracle|diagnose|hf-search --scenario NAME --waveform reference|smoke [--cn0 DBHZ] [--bit-seconds S] [--capture-lead-seconds S] [--pulse rrc|tapered-rrc] [--control wanted|noise|wrong-key|wrong-ordinal|interior-fade|capture-gap|eof] [--helper] [--seed N] [--noise-seed N] [--hf-trajectory-seed N] [--hf-trajectory-offset-seconds S] [--workers N] [--owners N] [--memory-mib N] [--backend cpu|cuda|vulkan|gpu] [--max-samples N] [--max-wall-seconds S] [--duration-seconds S] [--chunk N] [--message TEXT] [--fec off|rs20|rs60] [--fade-slots 1|2] [--oracle-slot N] [--search-slot N] [--search-timing selected|full] [--capture-digest-slot N] [--history-reference-delay-seconds S] [--hf-phase-bank] [--hf-public-phase-receiver] [--hf-physical-diagnostic] [--hf-phase-refinement]; noise-seed separates additive-noise realizations from stochastic path seed; hf-trajectory-seed selects immutable critical-frequency knots only in knot-bearing scenarios; hf-trajectory-offset-seconds accepts -86400..86400 and shifts analytic HF physical time without shifting source/calendar or noise; capture lead defaults to .25s and accepts .25..10s to retain more pre-signal noise history; interior-fade defaults to two consecutive complete observation apertures, with --fade-slots 1 selecting a single physical erasure opportunity; slot observes only the complete first public slot; diagnose measures canonical VLF acquisition and short persistent fine phases without bit/message decisions; capture-digest-slot incrementally hashes one complete public observation in receive/slot/hf-search without changing receiver geometry; hf-phase-refinement opts into bounded public phase refinement in hf-search or the experimental public phase receiver; refinement shadow omits affine comparison and uses the operational block geometry; hf-physical-diagnostic adds a post-search finite physical-template and winning-public-cell evaluator for wanted active hf-search slots; hf-public-phase-receiver enables the experimental fixed-prior supplement inside the canonical receive/slot stream with raw white-noise linear HF/AWGN with a single-public-tap model and Helper-off CPU; hf-search runs a shadow public search on complete selected slot N (default 0), without receiver decisions or completion, using raw white-noise linear HF/AWGN with a single-public-tap model and Helper-off CPU; oracle requires linear Helper-off wanted AWGN, HF or EME with white noise and uses public slot N (default 0) within the prepared message; HF oracle additionally reports private clean-template history diagnostics; optional reference delay is independently declared within public arrival bounds (zero keeps the unshifted baseline), and --hf-phase-bank enables the fixed coherent phase-family evaluator";
             result["gui_profile_usage"]="hf-gui-native with plan, slot or receive on the reference RRC waveform accepts --gui-spread ID --gui-selective ID --gui-arrival tight|default --gui-margin N --gui-audio-ppm N --gui-rf-ppm N --gui-audio-phase-degrees-sqrt-s N --gui-rf-phase-degrees-sqrt-s N --gui-clock-edge --gui-target-cn0-db-hz N; --cn0 is actual link C/N0 and --bit-seconds is an explicit duration fixture override";
             result["gui_varying_usage"]="--mode gui-varying --scenario hf-gui-native --capture-digest-slot N compares canonical affine and short varying evidence on one complete Helper-off CPU observation from the full native capture; accepts wanted, noise and wrong-key";
-            result["gui_repeated_bit_usage"]="--mode gui-repeated-bit --scenario hf-gui-native --repeat-bit 0|1 --repeat-path-scale 0|0.5|1 --repeat-path-seed N replays six contiguous raw bits followed by two scored quiet windows. --repeat-separate-attempts emits each bit separately with two scored quiet windows after each. --repeat-thermal-off removes added thermal noise only. Requires a finite sample and wall cap.";
+            result["gui_repeated_bit_usage"]="--mode gui-repeated-bit --scenario hf-gui-native --repeat-bit 0|1 --repeat-path-scale 0|0.5|1 --repeat-path-seed N replays six contiguous raw bits followed by two scored quiet windows. --repeat-separate-attempts separates the six bits by two quiet windows. --repeat-selected-attempt SLOT scores one scheduled DATA slot and the two following quiet slots with the same full continuous capture. --repeat-thermal-off removes added thermal noise only. Requires a finite sample and wall cap.";
             result["two_hop_alarm_matrix_usage"]="--two-hop-alarm-matrix --mode plan|receive --scenario hf-vector-two-hop --message E --bit-seconds 128 --cn0 -3 --seed 73613 --noise-seed 93613 --max-samples 4350000 --max-wall-seconds 1200 evaluates fixed weak/recovery text and raw-bit pairs, reusing only the qualified physical table between independent rows.";
             result["two_hop_additive_boundary_usage"]="--two-hop-additive-boundary --mode plan|receive --scenario hf-vector-two-hop --message E --bit-seconds 128 --cn0 4 --seed 73613 --noise-seed 93613 --max-samples 4350000 --max-wall-seconds 900 evaluates an existing-bank calibration at +3 dB-Hz and compares two sequential receiver replays of a single +4 dB-Hz capture.";
             result["two_hop_spread_comparison_usage"]="--two-hop-spread-comparison uses the frozen +4 dB-Hz two-hop options above and a common 7 ms capture aperture to compare operational receivers with 0 and 7 ms modeled spread. --two-hop-spread-capture PATH optionally retains the single sealed local I/Q/validity file by exclusive creation.";
@@ -5281,6 +5394,7 @@ int main(int argc,char** argv) {
             result["hf_target_presence_diagnostic_usage"]="--hf-target-presence-diagnostic uses --capture-digest-slot N on an ordinary direct lens, phase-screen, vector-oblique or Gannon receive to compare private known target-present, absent and alternate-bit means after native scoring";
             result["hf_correlated_gain_shadow_usage"]="--hf-correlated-gain-shadow uses hf-search with full timing on a wanted lens or phase-screen aperture; evaluates a normalized stationary complex-gain mixture over the configured band";
             result["hf_normalized_null_usage"]="--hf-normalized-null diagnoses gain-normalized directional evidence after the ordinary first slot in reference CPU hf-disturbed wanted/wrong-key runs, Helper/FEC off, automatic workers; no decisions are changed";
+            result["hf_live_gain_contrast_usage"]="--hf-live-gain-contrast compares receiver-only amplitude calibration on the same hf-disturbed seed9202 C/N0 12 dB-Hz first aperture, wanted or noise, using the ordinary scorer";
             result["hf_correlated_gain_receiver_usage"]="--hf-correlated-gain-receiver opts into the fixed complex-gain fallback inside canonical lens or phase-screen receive, with the public geometry and native thresholds intact";
             result["hf_predictive_quiet_usage"]="--hf-predictive-quiet renders once into the bounded native spool, then compares the canonical receiver with an experimental earlier-public-gap interference predictor. CPU reference plan/receive, Helper off, one episode. FEC off except the frozen hf-vector-oblique-chain-protected-clocks-tone RS20 profile with downstream protected reassembly. DATA search, ordered commits, codec and two physical quiet slots remain canonical. Both full receipts and identical input digests are retained; no operational qualification.";
             result["hf_design_usage"]="hf-ensemble-design on the reference waveform requires all eight coefficients: --hf-primary-amplitude-hz --hf-primary-period-seconds --hf-primary-phase-radians --hf-secondary-amplitude-hz --hf-secondary-period-seconds --hf-secondary-phase-radians --hf-knot-amplitude-hz --hf-knot-seconds";

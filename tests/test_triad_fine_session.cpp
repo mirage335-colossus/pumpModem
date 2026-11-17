@@ -1412,23 +1412,32 @@ void independent_gain_keeps_full_public_prior_and_bounded_work() {
     const auto narrow = std::array{f.coordinates[0], FineCoordinate{2, .001, 0, 0}, FineCoordinate{-2, -.001, 0, 0}};
     check(plan.track_frequency && plan.nominal_independent_gain_candidates == 2 &&
           config.random_doppler_width_hz == 0,
-          "nominal unit-power spatial gain must support public relative-spread declarations without a diffuse-width field");
+          "nominal spatial gain must support public relative-spread declarations without a diffuse-width field");
 
     ReceiverExecutor executor(2);
-    const auto run = [&](const ReceiverSlotPlan& slot, const VaryingFinePlan& shape, std::span<const Complex> iq) {
+    const auto run = [&](const ReceiverSlotPlan& slot, const VaryingFinePlan& shape, std::span<const Complex> iq,
+                         double gain_multiplier = 1.) {
+        auto scaled = config;
+        scaled.data_basis_gain *= gain_multiplier;
         ReceiverSlotScore result;
-        score_varying_fine(config, slot, f.key, shape, iq, narrow, {}, 100, 12, 2, result, {}, executor);
+        score_varying_fine(scaled, slot, f.key, shape, iq, narrow, {}, 100, 12, 2, result, {}, executor);
         return result;
     };
     auto original = plan;
     original.nominal_independent_gain_candidates = 0;
     const auto old = run(slot, original, f.iq);
     const auto added = run(slot, plan, f.iq);
+    const auto raised = run(slot, plan, f.iq, 16.);
     check(added.nominal_independent_gain_candidates == 2 &&
           added.nominal_independent_gain_frequency_states > 1 && added.nominal_independent_gain_frequency_states <= 65 &&
           added.nominal_independent_gain_basis_rows == 8 * f.iq.size() &&
           added.varying_basis_rows == old.varying_basis_rows + added.nominal_independent_gain_basis_rows &&
           added.varying_candidates == old.varying_candidates &&
+          added.varying_blocks > 1 &&
+          old.independent_gain_emission_cells == 0 &&
+          added.independent_gain_emission_cells == 2 * 4 * 2 * added.nominal_independent_gain_frequency_states * added.varying_blocks &&
+          raised.independent_gain_emission_cells == added.independent_gain_emission_cells &&
+          raised.varying_basis_rows == added.varying_basis_rows &&
           added.fixed_varying_bit_evidence == old.fixed_varying_bit_evidence &&
           added.tracked_frequency_bit_evidence == old.tracked_frequency_bit_evidence,
           "the nominal spatial family preserves the previous evidence and charges exactly two mapped pairs");
@@ -1448,6 +1457,15 @@ void independent_gain_keeps_full_public_prior_and_bounded_work() {
     check(added.nominal_independent_gain_log_prior_adjustment == std::log1p(2 * grid.frequency_radius),
           "the separate finite frequency family restores only the original frequency divisor");
     for (std::size_t bit = 0; bit < 2; ++bit) {
+        const auto& by_power = added.nominal_independent_gain_power_bit_evidence;
+        const auto power_ceiling = std::max({by_power[0][bit], by_power[1][bit], by_power[2][bit], by_power[3][bit]});
+        const auto expected_power = power_ceiling + std::log(.75 * std::exp(by_power[0][bit] - power_ceiling) +
+            (std::exp(by_power[1][bit] - power_ceiling) + std::exp(by_power[2][bit] - power_ceiling) +
+             std::exp(by_power[3][bit] - power_ceiling)) / 12.);
+        check(std::abs(by_power[0][bit] - by_power[3][bit]) > .01 &&
+              std::abs(added.nominal_independent_gain_bit_evidence[bit] - expected_power) < 2e-10 &&
+              std::abs(raised.nominal_independent_gain_power_bit_evidence[2][bit] - by_power[0][bit]) < 2e-10,
+              "each power must be fixed across the aperture; a 16x reference amplitude and 1/256 power cancel");
         const double left = first.nominal_independent_gain_bit_evidence[bit] + caller_prior;
         const double right = second.nominal_independent_gain_bit_evidence[bit] + caller_prior;
         const double retained = old.varying_bit_evidence[bit] + caller_prior;
@@ -1506,6 +1524,7 @@ void signed_gain_retains_full_unselected_mass() {
     const auto unavailable = run(false, {});
     const auto unselected = run(true, {});
     check(joint.signed_lag_gain_candidates == 2 &&
+          joint.independent_gain_emission_cells == 2 * unselected.independent_gain_emission_cells &&
           joint.signed_lag_gain_basis_rows == 8 * zero.size() &&
           joint.nominal_independent_gain_bit_evidence == unselected.nominal_independent_gain_bit_evidence &&
           joint.nominal_independent_gain_bit_evidence == unavailable.nominal_independent_gain_bit_evidence &&
