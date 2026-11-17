@@ -72,6 +72,7 @@ public:
     HelperBurstSlot transmit_slot(std::uint64_t index) const;
     std::uint64_t first_slot_not_before(HelperBurstCoordinate earliest_helper) const;
     std::uint64_t last_slot() const;
+    std::uint32_t maximum_slot_opportunities_per_day() const { return maximum_slot_opportunities_per_day_; }
     PublicSlot slot(std::uint64_t index) const;
     Format basis_format(const PublicSlot&) const;
     std::uint64_t capture_stop(long double source_end_seconds) const;
@@ -80,6 +81,8 @@ private:
     std::uint64_t capture_stop(long double source_end_seconds, bool search) const;
     std::uint64_t signal_first(long double source_begin_seconds, bool search) const;
     std::uint64_t signal_stop(long double source_end_seconds, bool search) const;
+    long double capture_end_offset(long double rate) const;
+    std::uint32_t bound_slot_opportunities_per_day() const;
     PublicProfileConfig config_;
     Geometry geometry_;
     HelperBurstPlan calendar_;
@@ -87,6 +90,7 @@ private:
     helper::Plan helper_plan_;
     long double nominal_endpoint_ = 0, receive_endpoint_ = 0;
     double affine_min_scale_ = 1, affine_max_scale_ = 1;
+    std::uint32_t maximum_slot_opportunities_per_day_ = 0;
 };
 
 struct DataPowerReference {

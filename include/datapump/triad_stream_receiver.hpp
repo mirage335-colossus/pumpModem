@@ -31,8 +31,10 @@ struct StreamReceiverResources {
 
 StreamReceiverResources resolve_stream_receiver_resources(const StreamReceiverOptions& = {});
 
-// Shared public geometry. Stream admission separately charges its complete
-// input lease and checks the selected local buffer and workspace limits.
+// Bind shared slot geometry and the fixed PublicProfile's opportunity bound.
+// A standalone scorer uses that bound if given this plan. A manually built
+// plan has no calendar bound and keeps the standalone reference. Stream
+// admission separately checks input, workspace and local buffer limits.
 ReceiverSlotPlan make_receiver_slot_plan(const PublicProfile&, const ReceiverConfig&, std::uint64_t index);
 
 enum class StreamPushResult { accepted, backpressured };

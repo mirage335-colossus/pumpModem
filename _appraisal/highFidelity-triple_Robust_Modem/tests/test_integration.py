@@ -829,9 +829,11 @@ def main() -> None:
     assert not eof["outcomes"]["correct_complete"], eof
     assert eof["outcomes"]["physical_completions"] == 0, eof
 
+    # This checks ordered reacquisition and the two scored quiet successors.
+    # The 25 s deadline cut off quiet scoring. A matched replay needed 31.9 s.
     transition = invoke("--mode", "receive", "--scenario", "hf-transition",
                         "--waveform", "reference", "--seed", "9204", "--cn0", "20",
-                        "--message", "A", "--max-wall-seconds", "25")
+                        "--message", "A", "--max-wall-seconds", "40", timeout=45)
     assert transition["status"] == "completed", transition
     transition_boundary = transition["outcomes"]["resumed_data_boundary_sample"]
     assert transition_boundary == 240 * transition["plan"]["sample_rate_hz"], transition
@@ -850,9 +852,10 @@ def main() -> None:
     # Modal gates have a reporting boundary even without a global Fade. The
     # boundary identifies the last voltage change; it does not itself prove
     # recovery. Recount observed DATA and retain premature completion failures.
+    # A matched replay needed 33.0 s through the final two quiet scores.
     mode_transition = invoke("--mode", "receive", "--scenario", "hf-mode-transition",
                              "--waveform", "reference", "--seed", "10106", "--cn0", "20",
-                             "--message", "A", "--max-wall-seconds", "25")
+                             "--message", "A", "--max-wall-seconds", "40", timeout=45)
     mode_outcomes = mode_transition["outcomes"]
     assert mode_transition["status"] == "completed", mode_transition
     mode_boundary = mode_outcomes["resumed_data_boundary_sample"]

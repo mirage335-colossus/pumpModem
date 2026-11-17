@@ -8,6 +8,8 @@
 
 namespace datapump::triad::v3::receiver_detail {
 
+double calendar_operational_threshold(const CalendarAdmissionContext&);
+
 struct FrequencyInterval { double lower_hz = 0, upper_hz = 0; };
 
 // The wide dynamic proposals depend on the physical frequency support

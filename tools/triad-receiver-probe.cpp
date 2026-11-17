@@ -1055,6 +1055,9 @@ Json score_json(const ReceiverSlotScore& score) {
         {"decision", decision_name(score.decision)}, {"bit", score.bit ? Json(*score.bit) : Json{}},
         {"complete", score.complete}, {"all_valid", score.all_valid}, {"zero_h0_verified", score.zero_h0_verified},
         {"reason", score.reason}, {"operational_threshold", score.operational_threshold},
+        {"admission_opportunity_scope", score.calendar_opportunities_per_day ? "fixed_public_calendar" : "unbound_reference"},
+        {"admission_opportunities_per_day", score.calendar_opportunities_per_day ?
+            score.calendar_opportunities_per_day : receiver_reference_opportunities_per_day},
         {"operational_log_e", score.operational_log_e}, {"selected_prior_mass", score.selected_prior_mass},
         {"operational_passes_conditional_bound", score.operational_passes_conditional_bound},
         {"bit_evidence", scores(score.bit_evidence)}, {"adaptive_diagnostics", score.adaptive_diagnostics},

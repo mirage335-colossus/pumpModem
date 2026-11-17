@@ -85,6 +85,13 @@ public:
         return make_slot(add_checked(current.index,1),next_support(current,extra));
     }
 
+    std::uint64_t minimum_stride_seconds() const {
+        // The UTC30 support grid preserves Helper's modulo2 tail phase.
+        // Random whole-bit waits can only extend the fixed-wait recurrence.
+        const auto reference=make_slot(0,{60,0});
+        return next_support(reference,0).epoch-reference.support_begin.epoch;
+    }
+
     // Every support starts on the UTC30-second grid. Translating by one
     // recurrence therefore preserves both sample phase and Helper's modulo2
     // punctuation phase, including fractional halos and multi-day bits.

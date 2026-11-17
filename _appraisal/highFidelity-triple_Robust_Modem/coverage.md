@@ -65,8 +65,40 @@ also distinguish physical outage/estimation cost from avoidable receiver loss.
 
 ## Applicability after the admission and carrier-key changes
 
-The [weak Helper follow-through](../../docs/validation.md#weak-helper-follow-through--17-november-2026)
-finds a current in-bound failure at 6 dB-Hz with 10.4-second DATA: a stale
+The later [calendar-admission correction](../../docs/validation.md#public-calendar-admission-investigation--17-november-2026)
+removes an unnecessary presence penalty: a fixed whole-bit calendar has far
+fewer opportunities than the historical 0.4-second reference. Native plans now
+carry a conservative count from configured ready timestamps, including quiet
+and missed ordinals, clocks and rounding. The conditional noise-null bound is
+per fixed calendar, not an aggregate across arbitrary keys or configurations.
+Native line, bit-separation, validity and physical-quiet checks remain required;
+duration planning and wrong-key margin references stay conservative. A matched
+four-score Helper comparison now receives the previously missed 6 dB-Hz bit
+zero on unchanged IQ, while actual Helper/noise absence remains QUIET. The
+following earlier Helper miss is therefore historical at that endpoint, not
+the current calendar-bound result. This does not establish all-level Helper
+sensitivity or natural outage duration.
+
+The matched +3 dB-Hz physical comparison also receives the formerly missed
+139.2-second bit at slot 12, with both real quiet successors preserved. It
+verifies exact archived field/full-IQ hashes and the original reference-gate
+miss before native bound scoring; the wanted evidence stays 16.60373 while
+the 150-second calendar threshold becomes 15.56818 (`N=577`). Thus this selected
+endpoint no longer needs the earlier 1 dB increase. The six scores cover three
+apertures, not a full message, five-attempt episode or the weaker −3 dB-Hz
+regime. No physical channel information is supplied to the receiver.
+
+Two separate [weak combined-channel mechanism tests](../../docs/validation.md#differential-echo-motion-investigation--17-november-2026)
+do not repair the retained +10 dB-Hz Each 65% miss. Supplying exact relative
+echo phase to the fixed-delay atoms worsens evidence; a broader normalized
+common-frequency transition prior improves presence slightly but still favors
+the wrong bit and remains AMBIGUOUS. Both private alternatives are retired.
+The first leaves delay/filter and common-motion mismatch unresolved; neither
+negative result establishes an unavoidable physical outage. The +10/+16
+recovery bracket remains the useful measured boundary for that observation.
+
+The earlier [weak Helper follow-through](../../docs/validation.md#weak-helper-follow-through--17-november-2026)
+found an in-bound failure at 6 dB-Hz with 10.4-second DATA: a stale
 Helper interval makes the receiver declare QUIET while aligned assistance
 receives the same DATA/noise correctly. Widening the transferred interval for
 declared inter-window common motion restores the bit on identical captures,
@@ -74,12 +106,13 @@ without new thresholds or a second coarse search. When every possible Helper
 fit would restore the full DATA prior, the finalized receiver also omits those
 fits. Matched bit-one core service changes from 1.097/4.721 seconds for aligned/
 stale assistance to 0.995/1.008 seconds; this single local pair is not a capacity
-claim. The opposite bit remains a miss at the same 6 dB-Hz point, and actual
-Helper/noise absence remains QUIET. This is one constructed history, not a
-qualification of all weak Helper levels or natural outage duration.
+claim. Under that reference gate the opposite bit remained a miss at the same
+6 dB-Hz point, and actual Helper/noise absence remained QUIET. This is one
+constructed history, not a qualification of all weak Helper levels or natural
+outage duration.
 
-The [physical gain-level discriminator](../../docs/validation.md#weak-physical-gain-level-discriminator--17-november-2026)
-reproduces the difficult +3 dB-Hz two-hop last-bit miss and both quiet successors
+The earlier [physical gain-level discriminator](../../docs/validation.md#weak-physical-gain-level-discriminator--17-november-2026)
+reproduced the difficult +3 dB-Hz two-hop last-bit miss and both quiet successors
 on exact historical IQ. A fixed quarter-power covariance alternative improves
 presence evidence by 4.22115 nats but still misses the bit; neither it nor a
 post-hoc heavier weight is promoted. The same physical history has a separately
@@ -381,7 +414,10 @@ the compact word “reduction” does not mean the fraction removed. The last tw
 are extrapolated model targets. The displayed approximately 1/2/3/6/6 dB costs
 are scoped HF visibility estimates, not universal penalties, probabilities or
 authentication. The rule uses the gap between the two operational bit scores
-and the competing score's excess above the ordinary threshold. It is not the
+and the competing score's excess above the historical reference threshold
+`T_ref`, even for calendar-bound admission. The reference formulas stay fixed;
+the historical retention estimates do not qualify the newly admitted
+lower-presence population. It is not the
 old fixed variance penalty or the normalized-covariance diagnostic below.
 
 Existing native admission studies and the later reversible-history study are

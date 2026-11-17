@@ -172,8 +172,9 @@ heuristic. `current` is the default and preserves the previous DATA/erasure
 decision exactly. Stronger policies apply only after ordinary model
 fallback and scored-quiet checks have finished: a baseline DATA result becomes
 an ambiguous erasure when its two operational bit log scores are too close.
-Let `g` be their absolute gap, `m` their minimum, `T` the ordinary DATA
-threshold, and `rho` and `delta` the selected policy constants. The boundary is
+Let `g` be their absolute gap, `m` their minimum, `T` the historical reference
+threshold (unchanged by calendar-scoped admission), and `rho` and `delta` the
+selected policy constants. The boundary is
 
 `g < max(existing_min_gap, delta) + rho * max(0, m - T)`.
 
@@ -246,23 +247,42 @@ methods nor a display threshold justify transferring the reference probabilities
 to an unspecified channel, key, foreign power, repeated-burst mixture or field
 population.
 
-The shared operational threshold is `T=ln((ceil(86400/0.4)+1)/10^-4)`
-`=ln(216001/10^-4)=21.4933786883`, giving `exp(-T)=4.6296082e-10` for
-one opportunity. Under the receiver's conditional noise-null argument, the
-union bound across 216,001 nominal 0.4-second opportunities is
-`216001*exp(-T)=10^-4/day`. `current`, `guarded` and `strict` retain this same
-bound because the extra rule only removes baseline DATA decisions. These are
+The reference threshold is `T_ref=ln((ceil(86400/0.4)+1)/10^-4)`
+`=ln(216001/10^-4)=21.4933786883`, giving `exp(-T_ref)=4.6296082e-10` for
+one reference opportunity. Duration planning, unbound slot plans and the
+wrong-key filter's competing-score term retain this value. A slot made by
+`make_receiver_slot_plan` from a fixed local `PublicProfile` instead carries
+an immutable calendar count `N` and uses `T_calendar=ln(N/10^-4)` for final
+presence admission. The count conservatively bounds planned ready timestamps
+in any input day, including all quiet and missed slots, clock expansion and
+sample rounding. Typical minimum spacings of 60/90/150 seconds give
+`N=1441/961/577`; unsupported numerical bounds retain the reference gate.
+Codec rearming does not reset the calendar or replenish this allowance.
+
+For valid conditional noise-null e-values, the union bound is
+`N*exp(-T_calendar)=10^-4` for **one fixed public calendar**; no independence
+between windows is required. It does not combine arbitrary calendars, keys or
+reconfigurations into an application-wide daily guarantee. Original model
+fallbacks still use the reference gate. Newly eligible slots undergo native
+coherent-line selection at the calendar threshold before final classification;
+bit separation, validity and physical quiet completion remain required.
+The extra wrong-key rules only remove baseline DATA, and keep `T_ref` in their
+existing margin formulas. Their reference boundary is unchanged; historical
+wrong-key retention and visibility-loss estimates are not thereby requalified
+for the newly admitted population of lower-presence windows.
+See the [implementation and matched evidence](validation.md#public-calendar-admission-investigation--17-november-2026).
+These are
 design constants and a conditional bound, not measured radio noise, wrong-key
 traffic, a physical false-admission guarantee or a rate estimated from trials;
 the bound does not cover a structured interferer. Margin nats are not universal
 dB equivalents or tenfold changes in a false-admission rate.
 
-The extra threshold is dormant when the competing score is at or below `T`
+The extra threshold is dormant when the competing score is at or below `T_ref`
 and the pre-existing minimum gap `g0` already meets the selected `delta`:
 then the added score-dependent term is zero and the baseline already enforced
 `g0`. In the changing-channel default, `g0=ln(199)=5.2933`, above the strict
-floor `2*ln(10)=4.6052`; for `m<=T` neither stronger policy changes that
-gap rule. For `m>T`, the `rho*(m-T)` term can still make the filter active.
+floor `2*ln(10)=4.6052`; for `m<=T_ref` neither stronger policy changes that
+gap rule. For `m>T_ref`, the `rho*(m-T_ref)` term can still make the filter active.
 
 ### Interference-time exposure is not window exposure
 

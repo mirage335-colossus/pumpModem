@@ -189,6 +189,9 @@ ReceiverSlotPlan make_receiver_slot_plan(const PublicProfile& profile, const Rec
     result.source_start_seconds = seconds(slot.tx.support_begin);
     result.helper_begin_seconds = seconds(slot.tx.helper_begin);
     result.helper_end_seconds = seconds(slot.tx.helper_end);
+    const auto opportunities = profile.maximum_slot_opportunities_per_day();
+    if (opportunities < receiver_reference_opportunities_per_day)
+        result.calendar_admission.opportunities_per_day_ = opportunities;
     (void)window_samples(result);
     if (result.quiet_first_sample<result.first_sample || result.quiet_stop_sample<result.quiet_first_sample ||
         result.quiet_stop_sample>result.stop_sample)

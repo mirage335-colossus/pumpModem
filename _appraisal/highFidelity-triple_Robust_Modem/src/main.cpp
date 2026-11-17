@@ -2243,6 +2243,9 @@ Json score_json(const StreamSlotReceipt& receipt) {
         {"bit",r.bit?Json(*r.bit):Json{}},{"complete",r.complete},{"all_valid",r.all_valid},
         {"first_sample",r.first_sample},{"stop_sample",r.stop_sample},{"quiet_first_sample",r.quiet_first_sample},{"quiet_stop_sample",r.quiet_stop_sample},
         {"operational_log_e",r.operational_log_e},{"operational_threshold",r.operational_threshold},
+        {"admission_opportunity_scope",r.calendar_opportunities_per_day?"fixed_public_calendar":"unbound_reference"},
+        {"admission_opportunities_per_day",r.calendar_opportunities_per_day?
+            r.calendar_opportunities_per_day:receiver_reference_opportunities_per_day},
         {"bit_evidence",Json::Array{r.operational_bit_evidence[0],r.operational_bit_evidence[1]}},
         {"bit_separation",r.operational_bit_log_separation},{"quiet_energy",r.quiet_energy},{"quiet_threshold",r.quiet_threshold},
         {"noise_statistics_valid",r.noise_statistics_valid},{"helper_status",r.helper_status},{"helper_seconds",r.helper_seconds},

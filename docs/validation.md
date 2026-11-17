@@ -43,6 +43,343 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Differential echo-motion investigation — 17 November 2026
+
+This follow-through starts from clean `a27ead7cc275d30e187b49491040d8a568f47c20`.
+The retained weak HF Worst / Each 65% / Margin 3 observation still misses at
++10 dB-Hz after the independent-gain power mixture; Helper is Off, so the
+subsequent Helper repair cannot alter it. Its weak bit separation also prevents
+a presence-threshold adjustment from resolving the demonstrated loss. The
+earlier bright timing-cell transfer improves evidence without recovering DATA;
+neither that experiment nor the physical quarter-power comparison is repeated.
+
+The source audit identifies another model mismatch worth isolating. The GUI
+echo has a changing relative frequency, while the useful nominal/signed-lag
+short independent-gain atoms assume zero relative shift. Their common-frequency
+tracker does not independently follow the echo. This is a possible cause of
+lost information, not proof that the channel is practically decodable or common.
+
+Predeclare one native +10 dB-Hz render using the retained selected-slot manifest,
+including the full continuous source/channel history. Require its archived
+full-IQ digest `9bd27a5e…`, ordinary slot-12 evidence 1.947534 and complete valid
+quiet successors 13–14 before interpreting a contrast. Retain only the active
+aperture. Compare the ordinary score with one additional complete canonical
+slot score whose private alternative supplies the realized relative echo phase
+to the two nominal and at most two signed-lag full-delay atoms. Recompute the
+ordinary proposals from the same IQ; do not supply alternative timing cells.
+Keep the declared 21 ms delay, common-frequency grid, four power levels,
+projection/noise treatment and public prior charges. No stronger-capture timing,
+true delay, true gain or threshold change is supplied.
+The actual echo delay is 18.10756 ms, leaving 2.89244 ms mismatch to that fixed
+21 ms model. The fixture has 25 Hz carrier spacing and 75 Hz unspread occupied
+bandwidth: that residual delay spans about 0.217 phase cycles across the latter,
+in addition to selective-filter mismatch. Retain these limits when interpreting
+a negative result. Apply
+the phase to raw echo templates before projection, re-form their statistics,
+and use the same stateful physical phase integration as the original channel.
+If the alternative crosses admission gates, ordinary conditional-line processing
+must run before interpreting its decision.
+The extra score repeats complete active-slot work; a changed decision may avoid
+the ordinary drift fallback or trigger a line-conditioned score, so identical
+executed branch counts are not an acceptance requirement.
+
+This is an **evaluator-informed mechanism test**, not operational recovery:
+the receiver does not know that phase. A positive result would motivate a
+bounded generic relative-frequency model and independent reception/cost checks;
+a negative result would limit this explanation at these coordinates, without
+excluding delay or selective-filter mismatch. Allow one render and comparison,
+at most 120 seconds, 2.4 million rendered samples, 90,000 retained active rows
+and automatic `W=24`. Charge the extra phase storage as well as ordinary DSP,
+resident input and stack bounds. No phase, delay, level or seed sweep follows
+automatically. Keep frozen commands, source identities and compact results in
+appraisal `local-evidence/differential-echo-motion/` while the mechanism remains
+under investigation. A fresh `active-slot12.iq` in that directory may retain
+only the verified active aperture using the existing native capture format,
+with exact write/read-back digest validation. This supports a later separately
+justified mechanism comparison without keeping the full continuous render;
+retire the private comparison code and capture at disposition.
+
+The audit also identifies a separate unresolved common-motion assumption. The
+short tracker gives 0.72 transition mass to staying, 0.12 to each adjacent bin
+and 0.04 to a uniform reset. This kernel does not scale with block time or the
+declared motion. Here its 43 states are 5 Hz apart and ordinary blocks are
+100 ms. The GUI's 1-second quintic knots within ±90 Hz permit instantaneous
+rates up to 337.5 Hz/s; those bounds do not imply the particular capture reaches
+that maximum. Nonadjacent moves remain supported through the reset, but receive
+much less prior mass. Within-block common chirp is another possible mismatch.
+The echo-only contrast leaves both effects unchanged, so a failure cannot rule
+them out. This source-derived exposure is not a measured sensitivity loss.
+
+The echo-phase invocation completes in **51.392 seconds** (51.204 native),
+with exact full-stream and retained-aperture hash parity. Ordinary slots 12–14
+retain evidence **1.947534, −5.798362, −5.783023**: one AMBIGUOUS miss and two
+valid QUIET successors. The phase-informed active score remains AMBIGUOUS,
+with evidence **−1.554711**. Its signed correct-bit margin worsens from
+**−0.698434 to −3.143424**; the larger absolute separation favors the wrong bit.
+Unchanged affine, short-fixed, ordinary frequency-tracking and drift components,
+public masses, candidate counts and 43-state/four-power geometry match exactly.
+The changing independent-gain components decline. This is negative evidence for
+this phase substitution at the retained fixed-delay/filter model, not a complete
+known-channel detector or proof that relative echo motion never matters.
+
+The phase recurrence takes 0.116 seconds for 1,465,348 updates; the extra
+complete score takes 11.899 seconds. Its DSP quote is 259,827,608 bytes, with
+565,795,456 other reserved bytes and `W=24`. The verified native capture has
+83,368 rows / 1,417,256 bytes, IQ digest `abef33aa…c98a0`. Frozen plan
+`9198b830…3bdca9`, binary `abd88e94…5bc8`, native source `987667df…e251` and
+appraisal source `24430579…0540` bind the result. Compact `comparison.json`
+has digest `c9223433…7f355`; the corrected signed-margin interpretation retains
+the original raw evidence. Six no-signal preflights precede this single run;
+source-review corrections to the harness occur before any signal processing.
+
+The independent common-motion finding justifies a separate bounded test on
+that retained active IQ. Predeclare one ordinary baseline and one alternative
+complete score, with no channel render, simulator phase or other truth. Reuse
+the same independent-gain emissions and public hypotheses. In a second moving
+frequency state, retain 0.72 staying and 0.04 uniform reset, but distribute each
+0.12 directional mass uniformly over steps 1 through 7; return blocked steps
+to self. Seven bins cover the previously stated GUI knot-rate envelope for
+this geometry, not a universal natural-motion bound. Mix narrow/broad moving
+likelihoods only after the whole aperture, with fixed weights 0.75/0.25, and
+preserve the separate fixed-centroid contribution. The original moving
+contribution therefore retains three quarters of its mass without repeatedly
+paying that factor per block.
+
+Require deterministic transition normalization and old-branch retention checks,
+archived ordinary parity and unchanged public configuration before interpreting
+the comparison. Limit the pair to 60 seconds, 90,000 input rows, `W=24` and
+3 GiB total admitted process/DSP/stack storage. No extra FFT, source template,
+frequency cell or timing nomination is added; account for additional state and
+transition work. A positive diagnostic needs fresh wanted/absence and affected
+service checks before promotion. A failure does not authorize tuning transition
+weights or running a grid. Retire the superseded private echo-phase route while
+retaining its source identities, original result and this capture for the
+new declared comparison.
+
+The broader-transition pair completes in **24.376 seconds**, with no channel
+render and exact baseline/input parity. Both observations are complete, valid
+and H0-verified. Evidence increases only **1.947534 → 2.359400**, below 21.49338;
+the correct-bit signed margin worsens **−0.698434 → −0.736937**. Both remain
+AMBIGUOUS. Fixed-varying, ordinary frequency-tracking, drift and public-prior
+components match; the outer short-stage aggregate changes through the intended
+independent-gain mixture. The candidate executes 597,184 added state cells,
+with radius seven and broad weight 0.25. Complete score times are 11.894/12.318
+seconds, about 3.6% more in this one ordered pair, not sustained-capacity evidence.
+Both peak DSP quotes remain 259,827,608 bytes, with 209,739,872 other reserved
+bytes and `W=24`.
+
+The focused fine-session test passes in 4.37 seconds, including normalization
+over 1/3/16/43/65 states, every source-state row and repeated unit emissions.
+Six no-score preflights pass. Plan `r7-plan.json` has digest `dd7baa63…91dd6`,
+binary `46eafdd1…68422`, native source `0950426d…c7619` and appraisal source
+`9317e038…dae55`. Compact `r7-comparison.json` has digest `26d2d3b7…ce7aae`.
+Neither alternative recovers the bit, so neither is promoted or tuned further.
+Both private implementations and their obsolete tests/hooks, plus the verified
+active capture, are retired after disposition. Retain these compact negative
+findings and source-bound receipts until equivalent evidence supersedes the
+model-selection claim. The +10/+16 recovery bracket and natural-availability
+limits remain unchanged by these tests.
+
+## Public-calendar admission investigation — 17 November 2026
+
+A separate source audit finds that the fixed operational threshold charges
+216,001 opportunities per day, based on a 0.4-second interval. A fixed native
+public calendar instead spaces whole-bit supports at least 60 seconds apart;
+Helper-enabled supports have a still larger minimum. Every ordinal, including
+quiet/missing transmissions, is advanced only once, and codec rearming preserves
+that sequence. This is a deterministic scheduling property, not an estimate
+from successful bits or executed work.
+
+For valid conditional noise-null e-values, at most `N` predetermined
+opportunities give the union bound `P(any false DATA) <= N*exp(-T)`, without
+requiring independent windows. A calendar-derived `T=log(N/1e-4)` can preserve
+the same stated budget for **one fixed public calendar**, rather than paying
+for impossible opportunities. Fixed planned ready timestamps, clock-bound
+geometry and sample rounding must determine the count. Multiple calendars,
+keys or arbitrary reconfigurations do not thereby acquire one shared
+application-wide guarantee. This remains a conditional noise-model bound,
+not a measured interference, wrong-key or natural-availability rate.
+
+The conservative 60-second count with a one-sample guard gives `N=1442` and
+`T=16.48413`. Reclassifying archived final scores predicts correct DATA for the
+Helper bit-zero miss (16.59397, correct separation 25.23040) and the physical
+last-bit miss (16.60373, separation 23.94147); their actual quiet controls remain
+QUIET. These are **counterfactual classifications**, not new receiver successes.
+The +10 combined-channel miss still fails both presence and bit separation.
+
+The implemented native correction carries an explicit locally derived calendar
+context. `make_receiver_slot_plan` mints it from `PublicProfile`; standalone
+scoring of that plan and continuous reception both use it. A bare plan or an
+explicitly cleared context retains the reference gate. The bound uses one
+endpoint roundoff allowance across the entire day, rather than subtracting
+rounding from every gap. Minimum 60/90/150-second recurrences normally give
+`N=1441/961/577`, respectively. An unsupported numerical scale falls back to
+the reference. The larger `N=1442` above remains the preliminary conservative
+counterfactual, not the final implemented count.
+
+Duration planning and intermediate model/fallback selection retain 21.49338;
+earlier weak evidence cannot skip useful later models merely by passing the
+calendar gate. Newly eligible windows enter native coherent-line nomination
+and weighted acceptance at their scoped threshold before final classification.
+Previously eligible windows preserve their original line/fallback path. Bit
+separation, input/H0 validity and physical quiet completion remain required;
+retained unexplained lines remain AMBIGUOUS, not falsely quiet. Wrong-key
+filtering keeps its original reference in the competing-score margin.
+
+The focused native calendar test passes, together with stream and Helper-burst
+tests. It covers Helper/Off recurrences, fixed/random waits, the random sequence
+boundary, large ordinals, clock-expanded ready times, rounding and unsupported
+numeric fallback. Native controls preserve thermal quiet, invalid samples,
+bit separation, pure-line rejection and DATA with a line. A real on-grid line
+between the two thresholds, combined with a test-only raw DATA supplement,
+executes the newly eligible native nuisance path and is vetoed; this verifies
+the execution path rather than merely changing a saved decision.
+
+Predeclare a single four-score Helper comparison: generate the retained stale
+6 dB-Hz bit-zero aperture and its actual zero-DATA Helper/noise control once
+each, then score identical IQ with cleared and factory-bound contexts. Preserve
+the quiet hash, legacy evidence/decisions, full aperture and `W=24`; limit the
+whole process to 60 seconds. A separately frozen physical comparison regenerates
+the original +3 dB-Hz two-hop field/history once, verifies the archived table
+and 4,300,572-row IQ hashes, and retains only the 844,697-row envelope of slots
+12–14. Score those three windows with unbound context first, require archived
+evidence and QUIET decisions, then score all three with their factory context.
+Use the original 139.2-second bits, epoch/key/ordinals, seeds 73613/93613, noise
+variance and 5-Hz allowance; cap preparation, render and six scores at 720
+seconds. This tests late-bit admission and two physical quiet windows, not a
+full message, five-attempt episode or completion horizon. Neither comparison
+supplies receiver channel truth. Frozen plans, compact receipts and source
+identities belong in appraisal `local-evidence/calendar-admission/`; remove
+the one-off physical comparison hook after disposition and retain no new IQ
+file. No endpoint repair is claimed until those native paths run.
+
+The Helper comparison completes in **26.019 seconds**, with four complete,
+all-valid, H0- and noise-statistics-verified scores on 314,643-row apertures.
+The old-context bit-zero miss remains QUIET at **16.59397259 / 21.49337869**;
+the factory context receives **DATA 0** with identical evidence and
+**25.23039664** correct-bit separation, against **16.07831478** (`N=961`).
+The actual Helper-plus-noise zero-DATA observation stays QUIET in both contexts,
+with evidence **−7.73723225**. Wanted IQ digest `cbfa0093…cff67ba` and absence
+`4af2f6ae…a25ac6fb8` match within each pair; the latter also matches its archive.
+No channel truth or newly narrowed search is supplied. The preceding Helper
+repair's full-frequency-prior skip remains active and charges zero Helper-fit
+work.
+
+Wanted service is **5.249 / 5.463 seconds** (unbound/bound), absence service
+**5.587 / 5.741 seconds**. These single ordered pairs include the applicable
+native line search; no line is retained. Workspace remains **359,228,115 bytes**
+and `W=24`, within the original 768 MiB lease cap. Both contexts retain equal
+coarse/fine, varying and drift geometry/work counters and likelihoods.
+This is a matched weak-bit/absence repair, not a sustained-capacity measurement
+or a repeated-alarm availability estimate. Helper plan digest `6833ea6d…cd301e3`,
+fixture source `ec0f81d4…708861`, binary `50977dff…11635b` and native archive
+`d09184d3…d59c8` bind the result. An initial thin-fixture link omitted the
+existing static liblzma; that setup failure is retained, corrected before the
+single signal-processing run, and is not a failed reception trial.
+
+The physical comparison also passes, in **539.36 seconds** externally
+(539.268 native). The field table matches `ff2b3f4e…f0008aa`; the complete
+4,300,572-row stream matches `fed418cd…d3963`. All three unbound scores match
+the archived evidence and QUIET decisions before any bound score runs. All
+six observations are complete, all-valid, H0- and noise-statistics-verified.
+
+| Same physical +3 dB-Hz aperture | Unbound reference | Calendar-bound (`N=577`) |
+| --- | --- | --- |
+| Slot 12, wanted bit 1 | QUIET, missed bit | **DATA 1** |
+| Slot 13, actual absence | QUIET | QUIET |
+| Slot 14, actual absence | QUIET | QUIET |
+
+The wanted evidence remains **16.603733824**, with correct-bit separation
+**23.941471890**. Its threshold changes **21.493378688 → 15.568182638**.
+Quiet evidence remains **−6.858888619 / −6.775606922**. Native line selection
+runs where newly eligible; none is retained. No received signal energy,
+waveform, public hypothesis, channel model or bit-separation requirement changes.
+This is a demonstrated repair of the selected weak physical endpoint, without
+the previously needed 1 dB increase. It does not re-run the full `E` message,
+five attempts or the earlier −3 dB-Hz failures.
+
+The field preparation takes 485.700 seconds, rendering 4.937 and all six
+receiver scores 48.498. Ordered unbound/bound service is **9.532/9.453 seconds**
+for DATA and **6.989/7.013**, **7.767/7.739** for the quiet windows. These are
+single-pair observations, not a speedup or capacity qualification. Maximum DSP
+workspace remains **188,928,842 bytes**, with **249,952,656 bytes** reserved
+outside it and automatic `W=24` on the Ryzen 5 PRO 5650U (`H=12`). Field and
+signal preparation are test costs, not deployed receiver work. Neither local
+comparison uses RunPod or GPU execution. The physical receipt reports native
+automatic CPU arithmetic with Q15 spectral products and FP32 coarse FFTs;
+this does not label all fine/state arithmetic as low precision.
+
+Physical plan `2f51968c…29fe24`, appraisal binary `a6a622dd…4b0c`, native source
+`9282f778…79825081`, appraisal source `46895090…7aab021` and app-main source
+`c6f71e52…14b592` bind the six-score result. The compact/raw receipts preserve
+the original command and conditional scope. The new in-memory tail is released
+at process exit; no IQ file is retained. The temporary comparison hook is
+retired after this result, retaining ordinary calendar count/scope reporting.
+The reusable Helper fixture and compact receipts serve reproduction of these
+specific weak endpoints; retire redundant logs/binaries when that validation
+purpose is superseded. The failed echo/R7 alternatives remain negative findings,
+and weak Each 65% reception and hours- or days-long natural availability remain
+unqualified.
+
+Final checks pass **41/41 triad** and **28/28 GUI** tests. The first affected
+appraisal group passes five of six checks; `high_fidelity_integration` is
+censored by its `hf-transition` child's 25-second limit. Preserve that original
+failure: the complete 1,658,432-row input is already accepted, but only slots
+0–11 commit, the last at 24.887 seconds. All those scores lie outside the newly
+enabled presence band, so they run no added calendar line/model work.
+
+One separately declared exact-case replay uses the same unmodified binary,
+40 seconds natively and 45 externally. It completes all 15 slots in **31.902
+seconds** (31.914 external), with exact input hash `cab687…` and identical
+non-timing results for the first twelve. Slot 12 is DATA 1 at evidence 1966.919;
+slots 13–14 are QUIET at −5.0434/−5.27395 and finish the physical episode.
+No slot enters the newly enabled band or retains a line; stage selection is
+unchanged by this repair. The run retains eight resumed DATA slots, one
+reacquisition, zero wrong/false/premature decisions and one physical completion.
+The known interior fade still prevents correct text completion, as in the
+original fixture contract. This resolves a test deadline, not a new successful
+message or receiver-capacity claim. That integration subprocess's limit
+changes to 40 seconds with a 45-second launcher timeout; all assertions,
+production limits, effects and workers remain intact. Raw diagnostic stdout
+digest is `f7d1133c…8b8e71`, with the original failure and new plan/results in
+`local-evidence/calendar-admission/final-validation/`.
+
+The isolated integration rerun clears that first transition, then reaches the
+adjacent `hf-mode-transition` fixture's unchanged 25-second limit. It also
+commits only twelve slots. Retain this second censor separately. The base
+`a27ead7c` test already requires one premature completion, two eventual physical
+completions and no correct full text: its constructed mode loss leaves a mode
+40 dB weaker while the original gates are closed. That deliberate fault
+control is not a newly demonstrated atmospheric-model failure.
+
+One exact-case 45-second-native/50-second-external discriminator completes in
+**32.961 / 32.974 seconds**, preserving the full 1,658,439-row IQ digest
+`dbe5b7cd…a24` and all non-timing fields of the censored prefix. All fifteen
+scores are complete, valid and outside the newly enabled presence band, with
+no retained line. The final DATA 1 has evidence 993.3232; the last quiet windows
+have −5.4221/−5.2946 and run the existing coherent/drift work. Two physical
+completions, one known premature completion, seven resumed DATA slots and zero
+wrong/false bits exactly satisfy the original modal-fade behavior; correct
+full-text completion remains false. Raw stdout digest is `c3e66b2b…62d025`.
+This second integration child alone receives the same measured 40/45-second
+headroom; later cases are planning/guard checks. Both original 25-second failures
+remain recorded. Neither correction changes a production resource limit or
+supplies capacity qualification.
+
+The final isolated integration check passes **1/1 in 111.56 seconds**. Together
+with the five unchanged appraisal passes, all six selected appraisal checks
+are covered; triad 41/41 and GUI 28/28 remain applicable. Neither whole group
+is repeated after the test-only deadline corrections. All original failures
+remain in separate logs. The final summary has digest `721f99f8…08eb848`.
+The adopted app is `2ad4a9a3…a5ffed`, probe `fab0e593…96641e`, native source
+`c67cdb55…22ab3d` and appraisal source `e3dfb587…e4467`. The native receiver
+archive remains byte-identical to `d09184d3…d59c8` used in both scientific
+comparisons; cleanup changes only temporary appraisal plumbing, receipt scope
+wording and test limits. The one-off Helper binary is removed after checking
+its exact digest. All 557 local documentation targets resolve and whitespace
+checks pass. These checks are not release certification or broader hardware,
+capacity or natural-availability qualification.
+
 ## Weak Helper follow-through — 17 November 2026
 
 This investigation starts from `6571cadadf504974a55f6d58cb44c16fcd674f3f`.

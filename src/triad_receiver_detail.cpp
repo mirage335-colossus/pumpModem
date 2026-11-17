@@ -24,9 +24,14 @@ WrongKeyAdmission parse_wrong_key_admission(std::string_view name) {
     throw Error("Wrong Key Admission expects current, guarded, strict, very-strict, extreme or maximum");
 }
 
+double receiver_detail::calendar_operational_threshold(const CalendarAdmissionContext& calendar) {
+    constexpr double probability_per_day = 1e-4;
+    const auto count = calendar.opportunities_per_day();
+    return std::log((count ? count : receiver_reference_opportunities_per_day) / probability_per_day);
+}
+
 double receiver_operational_threshold() {
-    constexpr double attempt_spacing = .4, probability_per_day = 1e-4;
-    return std::log((std::ceil(86'400 / attempt_spacing) + 1) / probability_per_day);
+    return receiver_detail::calendar_operational_threshold({});
 }
 
 double receiver_coarse_frequency_step(const Format& format, double input_sample_rate_hz) {

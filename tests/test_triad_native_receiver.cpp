@@ -796,11 +796,40 @@ void broad_frequency_timing_plan() {
           "broad frequency timing must reserve its concurrent proposal state");
 }
 
-void varying_quiet_band(double line_amplitude, bool half_bin) {
+void bind_varying_calendar(Fixture& input) {
+    input.config.data_if_hz = 100;
+    PublicProfileConfig public_config;
+    public_config.format = input.slot.format;
+    public_config.data_if_hz = input.config.data_if_hz;
+    public_config.cfo_bound_hz = input.config.frequency_bound_hz + input.config.time_varying_atmospheric_hz;
+    public_config.capture_lead_seconds = .4;
+    public_config.capture_trail_seconds = .12;
+    const PublicProfile profile(public_config);
+    input.slot = make_receiver_slot_plan(profile, input.config, 0);
+    const auto rows = input.slot.stop_sample - input.slot.first_sample;
+    check(rows <= input.iq.size(), "calendar line fixture must use the same full seeded noise prefix");
+    input.iq.resize(rows);
+    input.valid.resize(rows);
+}
+
+void varying_quiet_band(double line_amplitude, bool half_bin, bool calendar_bound = false) {
     auto input = fixture(std::nullopt, false, false);
     input.config.time_varying_channel = true;
     input.config.time_varying_common_doppler_hz = 90;
     input.config.time_varying_atmospheric_hz = 90;
+    if (calendar_bound) {
+        bind_varying_calendar(input);
+        const auto quiet = score(input, 2);
+        check(quiet.complete && quiet.zero_h0_verified && quiet.noise_statistics_valid &&
+              quiet.calendar_opportunities_per_day == 1441 && quiet.operational_threshold == std::log(1441 / 1e-4) &&
+              quiet.decision == SlotDecision::quiet,
+              "calendar admission must preserve real observed quiet under the lower bound");
+        input.valid[0] = 0;
+        const auto erased = score(input, 2);
+        check(!erased.complete && !erased.all_valid && !erased.bit && erased.decision == SlotDecision::ambiguous,
+              "a calendar opportunity with a missing observation must not become DATA or quiet");
+        input.valid[0] = 1;
+    }
     const auto begin = input.slot.quiet_first_sample - input.slot.first_sample;
     const auto end = input.slot.quiet_stop_sample - input.slot.first_sample;
     const auto coarse_fft_spacing = sample_rate / static_cast<double>(std::bit_ceil(2 * (end - begin)));
@@ -822,7 +851,8 @@ void varying_quiet_band(double line_amplitude, bool half_bin) {
     // detecting a line would fail this control.
     PatternSource source(input.slot.format, input.key, 1);
     Candidate truth;
-    truth.arrival_seconds = .4;
+    truth.arrival_seconds = calendar_bound ?
+        static_cast<double>(input.slot.source_start_seconds + input.slot.window_capture_lead_seconds) : .4;
     const auto duration = geometry(input.slot.format).source_samples / effective_sample_rate(input.slot.format);
     truth.frequency_drift_hz_per_second = -9 / duration;
     truth.frequency_hz = 10.5 - truth.arrival_seconds * truth.frequency_drift_hz_per_second;
@@ -836,6 +866,148 @@ void varying_quiet_band(double line_amplitude, bool half_bin) {
           coexist.reason == "varying_data_evidence_with_coherent_line" &&
           std::abs(coexist.varying_line_frequency_hz - frequency) < .01,
           "a coherent line suppressed a separable keyed DATA alternative");
+}
+
+void calendar_opportunity_bound() {
+    using namespace receiver_detail;
+    check(receiver_operational_threshold() == std::log(receiver_reference_opportunities_per_day / 1e-4) &&
+          ReceiverSlotPlan{}.calendar_admission.opportunities_per_day() == 0,
+          "standalone and duration planning must retain the reference opportunity bound");
+    PublicProfileConfig declaration;
+    declaration.format.epoch = 1'793'850'000;
+    declaration.format.symbol_ordinal = 309;
+    declaration.format.sample_rate = 6000;
+    declaration.format.bit_seconds = .001;
+    declaration.format.inner_rate_hz = 120;
+    declaration.format.added_symbols = 1;
+    declaration.data_if_hz = 1700;
+    declaration.capture_lead_seconds = .35;
+    declaration.capture_trail_seconds = .2;
+    declaration.arrival_low_seconds = -.05;
+    declaration.arrival_high_seconds = .1;
+    declaration.receiver_tail_samples = 53;
+    declaration.receiver_filter_halo_samples = 17;
+    ReceiverConfig config;
+    config.sample_rate_hz = declaration.format.sample_rate;
+    config.data_if_hz = declaration.data_if_hz;
+    const PublicProfile off(declaration);
+    check(off.calendar().minimum_stride_seconds() == 60 && off.maximum_slot_opportunities_per_day() == 1441,
+          "the 60-second recurrence must count both endpoints of a nominal day");
+    declaration.helper_enabled = config.helper_enabled = true;
+    declaration.helper.power_w = 8;
+    declaration.helper.data_power_w = 4;
+    declaration.helper.callsign = "TRIAD";
+    const PublicProfile on(declaration);
+    check(on.calendar().minimum_stride_seconds() == 90 && on.maximum_slot_opportunities_per_day() == 961,
+          "the Helper lead and UTC30 rounding must count the actual minimum recurrence");
+    declaration.audio_pair_ppm = 200;
+    declaration.clock_bound_ppm = config.clock_bound_ppm = 301;
+    declaration.random_extra_bits = 3;
+    declaration.wait_bits = 8;
+    const PublicProfile waited(declaration);
+    const auto minimum_stride = waited.calendar().minimum_stride_seconds();
+    const auto count = waited.maximum_slot_opportunities_per_day();
+    check(minimum_stride > 90 && count == 86'400 / minimum_stride + 1,
+          "fixed waits change the proof and random waits cannot raise the opportunity count");
+    for (const std::uint64_t index : {0, 1, 251, 252, 200'000}) {
+        const auto planned = make_receiver_slot_plan(waited, config, index);
+        const auto next = make_receiver_slot_plan(waited, config, index + 1);
+        check(planned.calendar_admission.opportunities_per_day() == count &&
+              next.calendar_admission.opportunities_per_day() == count &&
+              planned.format.symbol_ordinal == declaration.format.symbol_ordinal + index &&
+              next.stop_sample - planned.stop_sample >= minimum_stride * declaration.format.sample_rate - 1,
+              "clock bounds, keyed ordinals and the random wait cycle must preserve the configured ready-time bound");
+    }
+    declaration.capture_lead_seconds = 1e100;
+    check(PublicProfile(declaration).maximum_slot_opportunities_per_day() == 0,
+          "an unboundable ready-time scale must leave admission at the reference limit");
+}
+
+void calendar_line_and_separation() {
+    using namespace receiver_detail;
+    auto input = fixture(std::nullopt, false, false);
+    input.config.time_varying_channel = true;
+    input.config.time_varying_atmospheric_hz = 90;
+    input.config.time_varying_common_doppler_hz = 90;
+    bind_varying_calendar(input);
+    constexpr unsigned opportunities = 1441;
+    const auto threshold = std::log(opportunities / 1e-4);
+    const auto reference = receiver_operational_threshold();
+    const auto between = (threshold + reference) / 2;
+
+    // A coherent DC line has exact on-grid power. Use its unit-amplitude
+    // score to isolate the public grid/determinant penalty, then set the
+    // amplitude to exercise both line-selection thresholds deterministically.
+    const auto rows = input.slot.quiet_stop_sample - input.slot.quiet_first_sample;
+    const auto variance = input.config.noise_variance;
+    const auto unit_power = (rows / variance) / (1 + variance / rows);
+    input.iq.assign(input.iq.size(), Complex{1});
+    const auto unit = find_varying_line(input.config, input.slot, input.iq, {});
+    check(unit && unit->frequency_hz == 0., "line threshold fixture must lie on the exact DC grid");
+    const auto amplitude = std::sqrt((between + unit_power - unit->log_weighted_evidence) / unit_power);
+    input.iq.assign(input.iq.size(), Complex{amplitude});
+    const auto bound_line = find_varying_line(input.config, input.slot, input.iq, {}, threshold);
+    check(!find_varying_line(input.config, input.slot, input.iq, {}) && bound_line &&
+          std::abs(bound_line->log_weighted_evidence - between) < 1e-8,
+          "newly eligible native line evidence must pass the calendar threshold but miss the reference threshold");
+
+    // Put a controlled DATA alternative between the two limits on the real
+    // line observation. A newly eligible score must execute the nuisance
+    // path and veto this raw-only alternative before the physical decision.
+    SlotEvidenceSupplement probe;
+    probe.fixed_weight = .125;
+    probe.supported = [](const auto&, const auto&) { return true; };
+    probe.workspace = [](const auto&, const auto&, unsigned) { return std::size_t{1}; };
+    probe.score = [&](const auto&, const auto&, const auto&, auto, const auto&, unsigned, std::size_t,
+                      std::stop_token, ReceiverExecutor&) {
+        return std::array{-std::numeric_limits<double>::infinity(), between + 2 * std::numbers::ln2 - std::log(probe.fixed_weight)};
+    };
+    const auto full_score = [&](const ReceiverSlotPlan& slot) {
+        const auto memory = receiver_slot_workspace_with_supplement(input.config, slot, 2, probe, true);
+        return score_slot_with_supplement(input.config, slot, input.key, input.iq, input.valid, 2,
+                                          memory, {}, nullptr, probe);
+    };
+    auto unbound = input.slot;
+    unbound.calendar_admission = {};
+    const auto old = full_score(unbound);
+    const auto conditioned = full_score(input.slot);
+    check(old.complete && old.all_valid && old.zero_h0_verified && old.operational_log_e >= threshold &&
+          old.operational_log_e < reference && old.varying_line_log_evidence == 0. &&
+          conditioned.complete && conditioned.all_valid && conditioned.zero_h0_verified && !conditioned.bit &&
+          conditioned.decision == SlotDecision::ambiguous && conditioned.operational_threshold == threshold &&
+          conditioned.reason == "coherent_line_in_public_data_aperture" &&
+          std::abs(conditioned.varying_line_log_evidence - between) < 1e-8,
+          "newly eligible bound DATA must be subject to the actual native coherent-line veto");
+
+    ReceiverSlotScore row;
+    row.complete = row.all_valid = row.zero_h0_verified = row.noise_statistics_valid = true;
+    row.fine_candidates = 1;
+    row.quiet_threshold = 10.;
+    const AdmissionGrid singleton(0, 0, 0, 0, .01);
+    const auto minimum = input.config.time_varying_minimum_bit_log_separation;
+    const auto mass_penalty = singleton.log_count();
+    row.bit_evidence = {between + mass_penalty, between + mass_penalty};
+    classify_varying_slot(row, singleton, nullptr, nullptr, minimum, threshold);
+    check(row.operational_passes_conditional_bound && row.decision == SlotDecision::ambiguous && !row.bit,
+          "meeting the calendar presence threshold cannot admit near-tied bits or scored absence");
+    row.bit_evidence = {between + mass_penalty + std::numbers::ln2, between + mass_penalty - 15};
+    classify_varying_slot(row, singleton, nullptr, nullptr, minimum);
+    check(row.decision == SlotDecision::quiet && !row.operational_passes_conditional_bound,
+          "an unbound observation must miss the original presence threshold");
+    classify_varying_slot(row, singleton, nullptr, nullptr, minimum, threshold);
+    check(row.operational_passes_conditional_bound && row.decision == SlotDecision::data && row.bit == 0,
+          "the calendar bound must admit valid separated evidence between the two presence limits");
+
+    row.bit_evidence = {47. + mass_penalty, 35. + mass_penalty};
+    classify_varying_slot(row, singleton, nullptr, nullptr, minimum);
+    auto calendar = row;
+    classify_varying_slot(calendar, singleton, nullptr, nullptr, minimum, threshold);
+    calendar.calendar_opportunities_per_day = opportunities;
+    apply_wrong_key_admission(row, WrongKeyAdmission::strict);
+    apply_wrong_key_admission(calendar, WrongKeyAdmission::strict);
+    check(calendar.wrong_key_required_log_separation == row.wrong_key_required_log_separation &&
+          calendar.decision == row.decision,
+          "calendar presence admission must preserve the wrong-key policy's reference pressure");
 }
 
 void varying_bit_separation() {
@@ -1582,6 +1754,11 @@ int main(int argc, char** argv) {
             else if (part == "late-helper") late_helper_timing_recovery(false);
             else if (part == "late-helper-delay") late_helper_timing_recovery(true);
             else if (part == "signed-gain-timing") signed_gain_timing_and_exact_admission();
+            else if (part == "calendar-admission") {
+                calendar_opportunity_bound();
+                calendar_line_and_separation();
+                varying_quiet_band(.5, false, true);
+            }
             else throw std::runtime_error("unknown native receiver test stratum");
             return 0;
         }

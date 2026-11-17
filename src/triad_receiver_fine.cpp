@@ -3004,7 +3004,7 @@ std::size_t varying_line_workspace(const ReceiverConfig& config, const ReceiverS
 }
 
 std::optional<LineAtom> find_varying_line(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
-                                        std::span<const Complex> iq, std::stop_token stop) {
+                                        std::span<const Complex> iq, std::stop_token stop, double threshold) {
     const auto fft_rows = line_fft_rows(slot);
     if (!fft_rows) return std::nullopt;
     std::optional<ProjectionBands> bands;
@@ -3045,7 +3045,7 @@ std::optional<LineAtom> find_varying_line(const ReceiverConfig& config, const Re
     }
     // Reject ordinary noise peaks before the more precise search. This
     // only selects which fixed nuisance model, if any, will be scored.
-    if (power <= search_row_count * config.noise_variance * receiver_operational_threshold())
+    if (power <= search_row_count * config.noise_variance * threshold)
         return std::nullopt;
     const auto likelihood_power = [&](double hz, std::span<const Complex> samples) {
         const auto increment = std::polar(1., -tau * hz / fs);
@@ -3096,7 +3096,7 @@ std::optional<LineAtom> find_varying_line(const ReceiverConfig& config, const Re
     // in the orthogonal complement. Keep the selected line's public mass.
     const auto log_weighted = (power / observed.size()) / variance / (1 + inverse_signal_to_noise) -
         log_determinant - std::log1p(2 * public_radius);
-    if (!(log_weighted >= receiver_operational_threshold())) return std::nullopt;
+    if (!(log_weighted >= threshold)) return std::nullopt;
     return LineAtom{first, stop_row, center * spacing, log_weighted};
 }
 

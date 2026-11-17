@@ -319,8 +319,9 @@ std::array<double, 2> varying_operational_scores(const ReceiverSlotScore& score,
 }
 
 void classify_operational_scores(ReceiverSlotScore& score, const std::array<double, 2>& operational,
-                                 double minimum_separation, std::optional<double> combined = std::nullopt) {
-    score.operational_threshold = receiver_operational_threshold();
+                                 double minimum_separation, std::optional<double> combined = std::nullopt,
+                                 double threshold = receiver_operational_threshold()) {
+    score.operational_threshold = threshold;
     score.operational_log_e = combined.value_or(log_add(operational[0], operational[1]) - std::numbers::ln2);
     score.operational_bit_evidence = operational;
     score.operational_bit_log_separation = std::abs(operational[0] - operational[1]);
@@ -353,7 +354,7 @@ void classify_operational_scores(ReceiverSlotScore& score, const std::array<doub
 } // namespace
 
 void receiver_detail::classify_varying_slot(ReceiverSlotScore& score, const AdmissionGrid& grid,
-        const AdmissionGrid* varying_grid, const DriftPlan* drift, double minimum_separation) {
+        const AdmissionGrid* varying_grid, const DriftPlan* drift, double minimum_separation, double threshold) {
     const auto operational = varying_operational_scores(score, grid, varying_grid, drift);
     const auto log_mass = std::log(static_cast<double>(score.fine_candidates)) - grid.log_count();
     score.selected_prior_mass = std::exp(log_mass);
@@ -363,7 +364,7 @@ void receiver_detail::classify_varying_slot(ReceiverSlotScore& score, const Admi
         const auto gap = std::abs(score.bit_evidence[0] - score.bit_evidence[1]);
         combined = best + std::log1p(std::exp(-gap)) - std::numbers::ln2 + log_mass;
     }
-    classify_operational_scores(score, operational, minimum_separation, combined);
+    classify_operational_scores(score, operational, minimum_separation, combined, threshold);
 }
 
 void receiver_detail::classify_fine_slot(ReceiverSlotScore& score, const AdmissionGrid& grid) {
@@ -393,8 +394,10 @@ double required_wrong_key_gap(const ReceiverSlotScore& score, WrongKeyAdmission 
     }
     const auto floor = (policy == WrongKeyAdmission::guarded ? 1. : 2.) * std::numbers::ln10;
     const auto competing = std::min(score.operational_bit_evidence[0], score.operational_bit_evidence[1]);
+    const auto reference_threshold = score.calendar_opportunities_per_day ?
+        receiver_operational_threshold() : score.operational_threshold;
     return multiplier * (std::max(score.operational_minimum_bit_log_separation, floor) +
-        fraction * std::max(0., competing - score.operational_threshold));
+        fraction * std::max(0., competing - reference_threshold));
 }
 
 bool baseline_rating_valid(const ReceiverSlotScore& score) {
@@ -495,6 +498,9 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     score.quiet_first_sample = slot.quiet_first_sample;
     score.quiet_stop_sample = slot.quiet_stop_sample;
     score.sample_rate_hz = config.sample_rate_hz;
+    const auto final_threshold = calendar_operational_threshold(slot.calendar_admission);
+    score.calendar_opportunities_per_day = slot.calendar_admission.opportunities_per_day();
+    if (score.calendar_opportunities_per_day) score.operational_threshold = final_threshold;
     score.all_valid = true;
     for (std::size_t i = 0; i < iq.size(); ++i) {
         if (!(i % 4096)) check_cancelled(stop);
@@ -719,9 +725,19 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     // raw-IQ null model is not a line-conditioned model. Both canonical
     // branches retain (1-weight), with no observation-dependent renormalizing.
     const bool compare_line_short = varying && workspace.line_varying.block_rows;
+    const auto newly_passes_calendar = [&] {
+        return score.calendar_opportunities_per_day && score.complete && score.zero_h0_verified &&
+            !score.operational_passes_conditional_bound && score.operational_log_e >= final_threshold;
+    };
+    bool retained_line = false;
     if (workspace.line && (compare_all || compare_line_short || !coherent_admission) &&
-            score.operational_passes_conditional_bound) {
-        if (const auto line = find_varying_line(config, slot, iq, stop)) {
+            (score.operational_passes_conditional_bound || newly_passes_calendar())) {
+        // Keep the original nuisance selection and residual fallback for
+        // previously eligible slots. Newly eligible slots use the calendar
+        // limit in both phases of line selection.
+        const auto line_threshold = score.operational_passes_conditional_bound ?
+            receiver_operational_threshold() : final_threshold;
+        if (const auto line = find_varying_line(config, slot, iq, stop, line_threshold)) {
             if (has_supplement)
                 supplement_evidence.fill(-std::numeric_limits<double>::infinity());
             ReceiverSlotScore residual;
@@ -742,12 +758,20 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
             }
             score.varying_line_frequency_hz = line->frequency_hz;
             score.varying_line_log_evidence = line->log_weighted_evidence;
-            if (score.decision == SlotDecision::data) score.reason = "varying_data_evidence_with_coherent_line";
-            else {
-                score.decision = SlotDecision::ambiguous;
-                score.reason = "coherent_line_in_public_data_aperture";
-                score_varying_quiet(config, slot, iq, score, stop);
-            }
+            retained_line = true;
+        }
+    }
+    // Only final admission uses the calendar limit. Earlier weak evidence
+    // must still leave the same opportunity for the original fallback models.
+    if (newly_passes_calendar())
+        classify_operational_scores(score, score.operational_bit_evidence, separation, score.operational_log_e, final_threshold);
+    else score.operational_threshold = final_threshold;
+    if (retained_line) {
+        if (score.decision == SlotDecision::data) score.reason = "varying_data_evidence_with_coherent_line";
+        else {
+            score.decision = SlotDecision::ambiguous;
+            score.reason = "coherent_line_in_public_data_aperture";
+            score_varying_quiet(config, slot, iq, score, stop);
         }
     }
     if (config.time_varying_channel && score.decision == SlotDecision::quiet) {

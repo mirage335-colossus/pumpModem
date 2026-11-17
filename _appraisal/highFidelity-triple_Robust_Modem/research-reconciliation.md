@@ -154,6 +154,25 @@ Use calibrated noise captures for a site-specific claim. If absent, label the
 noise law a standardized reference or explicit synthetic stress, and validate
 PSD, APD, correlation, pulse duration/rate and front-end recovery separately.
 
+[Vovk and Wang's e-value formulation](https://sas.uwaterloo.ca/~wang/papers/2020Vovk-Wang-AOS.pdf)
+defines a nonnegative statistic with null expectation at most one; Markov's
+inequality then bounds exceeding `exp(T)` by `exp(-T)`. Applying a union bound
+to a predetermined calendar gives at most `N*exp(-T)` over `N` opportunities,
+without requiring independent windows. This motivates the
+[calendar-admission investigation](../../docs/validation.md#public-calendar-admission-investigation--17-november-2026):
+count locally configured physical decision opportunities, rather than successful
+bits or processed backlog. The scope is one fixed calendar; multiple calendars
+need separate accounting or explicitly separate claims. This derivation still
+requires the receiver's conditional noise-model premises. It does not calibrate
+structured interference, infer natural outage rates, or permit newly admitted
+windows to bypass nuisance-line and quiet-completion checks.
+The native comparisons now recover the selected weak Helper bit and the
+two-hop late bit on identical IQ, with actual absence preserved. Those results
+support removing the excess scheduling penalty; they do not establish channel
+model optimality or a natural availability rate. Wrong-key margin formulas
+retain their reference boundary, while empirical retention estimates remain
+scoped to their original admitted population.
+
 For a theoretical baseline, Shannon's (C=B\log_2(1+S/N)) and finite-block
 AWGN bounds such as [Polyanskiy, Poor & Verdú (2010)](https://doi.org/10.1109/TIT.2010.2043769)
 apply only with their AWGN, bandwidth, energy, block length and known-channel
@@ -307,6 +326,28 @@ variance halves, preserves the original model mixture, and requires changing-
 channel and physical-absence preservation before any adoption.
 
 ### Timing, delay and cross-carrier evidence
+
+[Sayeed and Aazhang (1999), joint multipath-Doppler diversity](https://amsayeed.wordpress.com/wp-content/uploads/2020/08/47f05-sayeed_com_mddiv99.pdf)
+derive a joint delay/frequency representation and coherent or noncoherent
+detectors that combine its components. Their noncoherent detector uses channel
+second-order statistics rather than the realized coefficients. This supports
+testing relative path-frequency support instead of assuming a single common
+shift explains all delayed energy. It does not establish a modem sensitivity
+gain: their analysis assumes perfect synchronization, negligible intersymbol
+interference and a stationary uncorrelated-scattering channel; the noncoherent
+signaling case also has orthogonality assumptions. The
+[current echo-motion discriminator](../../docs/validation.md#differential-echo-motion-investigation--17-november-2026)
+therefore first isolates the possible mismatch with evaluator-supplied phase.
+Such a result cannot qualify a practical receiver until an affordable model
+infers or marginalizes the missing motion without channel truth. The retained
+historical relative-frequency and free-sideband comparisons remain conditional
+evidence, not implementations to restore or permission to fit arbitrary
+per-carrier gains that can absorb the keyed bit pattern.
+The completed phase-informed contrast does not recover the weak bit, and a
+separate normalized broader common-frequency transition prior also fails.
+Both are retired. These bounded negative results leave joint delay/filter and
+within-block motion mismatch as possible mechanisms; they do not warrant an
+unmeasured extra model bank or prove a physical outage floor.
 
 Synchronization cost depends on how delay evolves across observations.
 [Kislal et al. (2024)](https://research.chalmers.se/publication/543021/file/543021_Fulltext.pdf)

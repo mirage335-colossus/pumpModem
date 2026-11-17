@@ -161,6 +161,7 @@ PublicProfile::PublicProfile(PublicProfileConfig config, std::optional<Crypto> c
         const auto reference = helper_reference(config_.format, 42);
         helper_plan_ = helper::plan(config_.helper, placement_, config_.format.sample_rate, 0, 1, &reference);
     }
+    maximum_slot_opportunities_per_day_ = bound_slot_opportunities_per_day();
 }
 
 HelperBurstSlot PublicProfile::transmit_slot(std::uint64_t index) const {
@@ -215,14 +216,40 @@ std::uint64_t PublicProfile::capture_stop(long double source_end_seconds) const 
     return capture_stop(source_end_seconds, true);
 }
 
+long double PublicProfile::capture_end_offset(long double rate) const {
+    const auto tail = config_.spread_delay_ms * .001 + config_.delay_excursion_seconds +
+        2 / (3 * geometry_.carrier_spacing_hz) + 32. / rate;
+    return static_cast<long double>(config_.capture_lead_seconds) + config_.arrival_high_seconds +
+        config_.capture_trail_seconds + tail;
+}
+
+std::uint32_t PublicProfile::bound_slot_opportunities_per_day() const {
+    // Helper-end times translate with the support grid. The ready time is
+    // the maximum of two fixed affine maps of that clock, both with slope
+    // at least one, followed by upward rounding and an additive sample tail.
+    // Bound the loss from floating evaluation and rounding between the two
+    // endpoints of a whole day. Fixed sample tails cancel in the difference.
+    const long double rate = effective_sample_rate();
+    const auto source_span = static_cast<long double>(helper_epoch_limit - origin().epoch);
+    const auto shortest_scale = std::min(1 - receive_endpoint_, static_cast<long double>(affine_min_scale_));
+    const auto magnitude = 2 * rate * ((source_span + 2 / rate) / shortest_scale + std::abs(capture_end_offset(rate)));
+    const auto roundoff_rows = std::ceil(1 + 32 * std::numeric_limits<long double>::epsilon() * magnitude);
+    try {
+        const auto stride_rows = calendar_.minimum_stride_seconds() * rate;
+        const auto count = std::floor((86'400 * rate + roundoff_rows) / stride_rows) + 1;
+        if (std::isfinite(count) && count >= 1 && count <= UINT32_MAX)
+            return static_cast<std::uint32_t>(count);
+    } catch (const Error&) {
+        // A calendar outside the numerical proof keeps the reference gate.
+    }
+    return 0;
+}
+
 std::uint64_t PublicProfile::capture_stop(long double source_end_seconds, bool search) const {
     const long double rate = effective_sample_rate();
     const auto endpoint = search ? receive_endpoint_ : nominal_endpoint_;
     const auto tx_min = 1 - endpoint, rx_max = 1 + endpoint;
-    const auto tail = config_.spread_delay_ms * .001 + config_.delay_excursion_seconds +
-        2 / (3 * geometry_.carrier_spacing_hz) + 32. / rate;
-    const auto offset = static_cast<long double>(config_.capture_lead_seconds) + config_.arrival_high_seconds +
-        config_.capture_trail_seconds + tail;
+    const auto offset = capture_end_offset(rate);
     auto end = rx_max * (source_end_seconds / tx_min + offset);
     if (search) {
         // The coarse source includes two rows past the finite support. Keep

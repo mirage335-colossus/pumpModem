@@ -23,8 +23,8 @@ inline constexpr std::array<std::int64_t, 13> receiver_epoch_offsets{
 inline constexpr std::size_t receiver_coherence_count = 3;
 inline constexpr std::size_t receiver_independent_gain_power_count = 4;
 
-// Public operational attempt/grid penalty shared by admission and local
-// transmit duration planning. This is a conditional model bound.
+// Reference conditional bound for unbound slot scoring and duration planning.
+inline constexpr std::uint32_t receiver_reference_opportunities_per_day = 216'001;
 double receiver_operational_threshold();
 double receiver_coarse_frequency_step(const Format&, double input_sample_rate_hz);
 double receiver_log_grid_count(double arrival_lower_seconds, double arrival_upper_seconds,
@@ -66,6 +66,18 @@ struct ReceiverConfig {
     std::shared_ptr<receiver_detail::ReceiverBulkBackend> bulk_backend;
 };
 
+class PublicProfile;
+struct ReceiverSlotPlan;
+
+class CalendarAdmissionContext {
+public:
+    // Zero means the slot has no locally configured calendar bound.
+    std::uint32_t opportunities_per_day() const { return opportunities_per_day_; }
+private:
+    friend ReceiverSlotPlan make_receiver_slot_plan(const PublicProfile&, const ReceiverConfig&, std::uint64_t);
+    std::uint32_t opportunities_per_day_ = 0;
+};
+
 struct ReceiverSlotPlan {
     std::uint64_t index = 0, first_sample = 0, stop_sample = 0;
     std::uint64_t quiet_first_sample = 0, quiet_stop_sample = 0;
@@ -77,6 +89,7 @@ struct ReceiverSlotPlan {
     // lead is the global capture lead less first_sample / sample_rate_hz.
     long double window_capture_lead_seconds = 0, source_start_seconds = 0;
     long double helper_begin_seconds = 0, helper_end_seconds = 0;
+    CalendarAdmissionContext calendar_admission;
 };
 
 enum class SlotDecision { ambiguous, data, quiet };
@@ -110,6 +123,7 @@ struct ReceiverSlotScore {
     double quiet_energy = 0, quiet_threshold = 0;
     double quiet_noise_upper_tail_probability = .001;
     double operational_log_e = 0, operational_threshold = 0;
+    std::uint32_t calendar_opportunities_per_day = 0;
     double selected_prior_mass = 0;
     std::size_t quiet_modes = 0, workspace_peak_bytes = 0, fine_candidates = 0;
     std::size_t coarse_workspaces = 0, coarse_frequency_points = 0, coarse_arrival_points = 0;

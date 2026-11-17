@@ -225,6 +225,20 @@ appropriate address hypotheses, incorrect-address checks and measured costs;
 no semantic transmitter-identity classifier is required. Different keyed epochs
 cannot reuse waveform prefixes solely because their UTC spans overlap.
 
+Factory-created slot plans carry an admission context derived solely from that
+fixed public calendar. It bounds all planned ready timestamps per input day,
+including quiet/missed ordinals and clock/sample rounding; final presence uses
+`log(N/1e-4)` instead of charging 216,001 impossible short opportunities.
+Bare plans without the context keep the reference threshold. Both standalone
+scoring of a factory-created plan and continuous reception use its context;
+codec resets leave the ordinal sequence intact. The bound is conditional on
+the noise model and scoped to one fixed calendar, not all keys/configurations
+in an application. Original likelihood fallback order and duration planning
+remain conservative; newly eligible scores still pass native line handling,
+bit separation and validity checks. Wrong-key filter margins keep their
+reference threshold. See [equations and scope](triad-stochastic.md#wrong-key-admission)
+and [validation](validation.md#public-calendar-admission-investigation--17-november-2026).
+
 With changing-channel controls Off, the fixed-affine lane supplies operational
 admission and the final bit. The older adaptive timing and combined lanes remain
 diagnostics. Selected atmospheric or selective perturbations add bounded,

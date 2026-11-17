@@ -159,7 +159,8 @@ struct LineAtom {
 };
 std::size_t varying_line_workspace(const ReceiverConfig&, const ReceiverSlotPlan&);
 std::optional<LineAtom> find_varying_line(const ReceiverConfig&, const ReceiverSlotPlan&,
-                                        std::span<const Complex>, std::stop_token);
+                                        std::span<const Complex>, std::stop_token,
+                                        double threshold = receiver_operational_threshold());
 VaryingFinePlan varying_fine_plan(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers,
                                  bool project_line = false, bool coherent_gain_blocks = false);
 // Evaluator only: projections onto the exact unprojected short tracker's
@@ -230,7 +231,8 @@ void score_drift_fine(const ReceiverConfig&, const ReceiverSlotPlan&, const Cryp
                        ReceiverSlotScore&, std::stop_token, ReceiverExecutor&, const LineAtom* = nullptr);
 void classify_fine_slot(ReceiverSlotScore&, const AdmissionGrid&);
 void classify_varying_slot(ReceiverSlotScore&, const AdmissionGrid&, const AdmissionGrid*,
-                            const DriftPlan*, double minimum_separation);
+                           const DriftPlan*, double minimum_separation,
+                           double threshold = receiver_operational_threshold());
 double quiet_noise_threshold(std::size_t modes);
 
 } // namespace datapump::triad::v3::receiver_detail
