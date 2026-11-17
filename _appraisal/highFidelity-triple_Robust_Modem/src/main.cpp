@@ -90,7 +90,7 @@ struct Options {
     std::optional<std::uint64_t> capture_digest_slot;
     std::optional<std::uint64_t> hf_trajectory_seed, noise_seed;
     std::optional<std::uint64_t> repeat_bit, repeat_path_seed, repeat_selected_attempt;
-    std::optional<double> repeat_path_scale;
+    std::optional<double> repeat_path_scale, repeat_direct_power;
     bool repeat_thermal_off=false, repeat_separate_attempts=false, two_hop_alarm_matrix=false;
     bool two_hop_additive_boundary=false;
     bool two_hop_spread_comparison=false;
@@ -230,6 +230,7 @@ Options parse(int argc,char** argv) {
         else if(key=="--capture-digest-slot") o.capture_digest_slot=integer(value);
         else if(key=="--repeat-bit") o.repeat_bit=integer(value);
         else if(key=="--repeat-path-scale") o.repeat_path_scale=number(value);
+        else if(key=="--repeat-direct-power") o.repeat_direct_power=number(value);
         else if(key=="--repeat-path-seed") o.repeat_path_seed=integer(value);
         else if(key=="--repeat-selected-attempt") o.repeat_selected_attempt=integer(value);
         else if(key=="--search-slot") {o.search_slot=integer(value);o.search_options=true;}
@@ -268,10 +269,16 @@ Options parse(int argc,char** argv) {
         o.mode=="diagnose"||o.mode=="hf-search"||o.mode=="gui-varying"||o.mode=="gui-repeated-bit","unknown mode");
     const bool gui_repeated=o.mode=="gui-repeated-bit";
     require(!o.repeat_selected_attempt||(gui_repeated&&o.repeat_separate_attempts&&
-        *o.repeat_selected_attempt%3==0&&*o.repeat_selected_attempt<3*appraisal::hf_gui_repeated_bit_slots&&
-        !o.capture_digest_slot&&!o.duration_override&&!o.service_replay&&!o.service_options&&!o.workers&&
+        *o.repeat_selected_attempt%3==0&&*o.repeat_selected_attempt<=48&&
+        !o.capture_digest_slot&&!o.duration_override&&(!o.service_options||o.service_replay)&&!o.workers&&
+        (!o.service_replay||(o.service_spool_limit&&o.service_episodes==1&&!o.service_backlog_begin&&
+            !o.service_backlog_end&&!o.owners))&&
         !o.hf_compare_admitted_models&&!o.hf_predictive_quiet),
-        "selected attempt requires a scheduled GUI raw bit and its two quiet successors");
+        "selected attempt requires a scheduled GUI raw bit through its guaranteed quiet pair");
+    require(!o.repeat_direct_power||(gui_repeated&&o.repeat_selected_attempt&&
+        *o.repeat_direct_power>=0&&*o.repeat_direct_power<=1&&o.repeat_path_scale&&*o.repeat_path_scale>0&&
+        o.gui.spread!="off"),
+        "fixed direct power requires a selected ordinary GUI attempt with bounded atmospheric spread");
     const bool changing_rate_repeated=o.repeat_bit&&o.scenario=="hf-ensemble-changing-rate"&&
         (o.mode=="plan"||o.mode=="receive");
     const bool disturbed_repeated=o.repeat_bit&&o.scenario=="hf-disturbed"&&
@@ -297,7 +304,8 @@ Options parse(int argc,char** argv) {
             o.chunk==4096&&!o.workers&&!o.owners&&!o.memory_bytes&&!o.capture_digest_slot&&!o.duration_override&&
             !o.hf_compare_admitted_models&&!o.hf_predictive_quiet&&!o.service_replay;
         // Lower Target SNR may select a longer waveform. Retain only the
-        // usual three scored windows, with bounded continuous input rendering.
+        // selected DATA and guaranteed quiet pair, including necessary guards,
+        // with bounded continuous input rendering.
         const bool selected_duration=o.repeat_selected_attempt&&!o.bit_seconds;
         const std::uint64_t maximum_samples=selected_duration?26'000'000:
             o.repeat_separate_attempts?2'400'000:1'200'000;
@@ -354,7 +362,8 @@ Options parse(int argc,char** argv) {
           std::endian::native==std::endian::little)),
         "named capture or read-only replay requires the scoped two-hop spread comparison alone");
     require(!o.service_options||o.service_replay||o.hf_predictive_quiet,"service options require a bounded replay");
-    require(!o.service_replay||o.mode=="receive"||o.mode=="plan","service replay requires receive or plan mode");
+    require(!o.service_replay||o.mode=="receive"||o.mode=="plan"||(gui_repeated&&o.repeat_selected_attempt),
+        "service replay requires receive, plan or a selected GUI raw attempt");
     require(!(o.service_replay||o.hf_predictive_quiet)||o.chunk<=ObservationSpool::maximum_chunk_rows,"service replay chunk must be 1..4096");
     const bool protected_oblique=o.scenario==appraisal::hf_vector_oblique_protected_scenario;
     require(!o.hf_predictive_quiet||((o.mode=="receive"||o.mode=="plan")&&o.backend=="cpu"&&
@@ -1168,7 +1177,11 @@ std::uint8_t source_bit(const Setup& s,std::uint64_t index) {
     return (*episode?s.later_episode_truth[*episode-1]:s.truth)[index-s.episode_starts[*episode]];
 }
 std::size_t repeated_bit_count(const Options& o) {
-    return o.mode=="gui-repeated-bit"?appraisal::hf_gui_repeated_bit_slots:5;
+    if(o.mode!="gui-repeated-bit")return 5;
+    // Preserve the original six-attempt capture byte for byte for its existing
+    // selected windows; older-calendar probes extend the same ordinary schedule.
+    return std::max<std::size_t>(appraisal::hf_gui_repeated_bit_slots,
+        o.repeat_selected_attempt?static_cast<std::size_t>(*o.repeat_selected_attempt/3+1):0);
 }
 void evaluate_source_extent(Setup& s,const Options& o) {
     const auto lookup=[&](std::uint64_t i){return message_address(s.transmit_profile,i);};
@@ -1197,6 +1210,24 @@ void evaluate_source_extent(Setup& s,const Options& o) {
     s.source_stop=s.transmit_profile.calendar().distance(s.transmit_profile.origin(),
         s.transmit_profile.transmit_slot(stop_slot-1).helper_end);
     s.q0=stop_slot;
+}
+
+std::uint64_t selected_quiet_first(const Setup& s,const Options& o) {
+    require(o.repeat_selected_attempt.has_value(),"selected quiet scope requires a selected attempt");
+    const auto selected=*o.repeat_selected_attempt;
+    const auto source_stop=s.transmit_profile.calendar().distance(s.transmit_profile.origin(),
+        s.transmit_profile.transmit_slot(selected).helper_end);
+    const auto clean=s.profile.capture_stop(static_cast<long double>(source_stop)/s.receiver.sample_rate_hz);
+    auto quiet=add(selected,1);
+    while(make_receiver_slot_plan(s.profile,s.receiver,quiet).first_sample<clean) {
+        require(quiet<add(selected,100),"selected quiet horizon exceeds its bounded tail search");
+        ++quiet;
+    }
+    const auto stop=add(quiet,2);
+    const auto next=std::upper_bound(s.episode_starts.begin(),s.episode_starts.end(),selected);
+    require(next==s.episode_starts.end()||*next>=stop,
+        "a later transmission enters the selected guaranteed quiet pair");
+    return quiet;
 }
 
 appraisal::Scenario native_gui_scenario() {
@@ -1233,6 +1264,8 @@ Setup setup_native_gui(const Options& o,std::stop_token stop) {
             "message exceeds bounded appraisal short-frame bit count");
     } else appraisal::configure_hf_gui_repeated_bit_channel(
         prepared.channel,*o.repeat_path_scale,*o.repeat_path_seed,!o.repeat_thermal_off);
+    if(o.repeat_direct_power)
+        prepared.channel.path_evolution.bounded_spread_direct_power_fraction=*o.repeat_direct_power;
     auto scenario=native_gui_scenario();
     scenario.channel.noise_seed=o.noise_seed;
     scenario.reference_cn0_db_hz=o.gui.actual_cn0_db_hz;
@@ -1254,9 +1287,10 @@ Setup setup_native_gui(const Options& o,std::stop_token stop) {
         ++s.q0;
     }
     s.slot_horizon=o.mode=="slot"?1:o.service_episodes==2?add(add(add(s.truth.size(),2),add(s.truth.size(),2)),1):s.q0+2;
-    if(o.repeat_separate_attempts) {
+    if(o.repeat_separate_attempts&&(!o.repeat_selected_attempt||*o.repeat_selected_attempt<18)) {
         if(s.q0!=add(s.episode_starts.back(),1))
-            throw Unavailable("native repeated attempts cannot preserve the requested terminal quiet pair");
+            throw Unavailable("native repeated attempts cannot preserve the requested terminal quiet pair: first uncontaminated slot "+
+                std::to_string(s.q0)+", requested "+std::to_string(add(s.episode_starts.back(),1)));
         for(const auto index:std::span(s.episode_starts).first(s.episode_starts.size()-1)) {
             const auto stop_sample=s.transmit_profile.calendar().distance(s.transmit_profile.origin(),
                 s.transmit_profile.transmit_slot(index).helper_end);
@@ -1265,6 +1299,9 @@ Setup setup_native_gui(const Options& o,std::stop_token stop) {
                 throw Unavailable("native repeated attempt tail would touch its next quiet observation");
         }
     }
+    if(o.repeat_selected_attempt)
+        require(add(selected_quiet_first(s,o),2)<=s.slot_horizon,
+            "selected quiet pair exceeds the complete capture horizon");
     if(o.service_episodes==2) {
         const auto first_stop=s.transmit_profile.calendar().distance(s.transmit_profile.origin(),
             s.transmit_profile.transmit_slot(s.truth.size()-1).helper_end);
@@ -1766,7 +1803,7 @@ Setup setup(const Options& o,std::stop_token stop) {
 }
 std::string_view observation_scope(const Options& o) {
     if(o.mode=="gui-varying")return "shadow_canonical_varying_of_selected_complete_observation";
-    if(o.repeat_selected_attempt)return "one_selected_raw_attempt_and_two_scored_quiet_successors";
+    if(o.repeat_selected_attempt)return "one_selected_raw_attempt_through_guaranteed_quiet_pair";
     if(o.repeat_bit)return "repeated_raw_data_and_scored_quiet";
     if(o.mode=="hf-search")return "shadow_public_search_of_selected_complete_observation";
     if(o.mode=="diagnose")return "bounded_native_phases_from_complete_first_observation";
@@ -1785,20 +1822,32 @@ Json service_plan_json(const Setup& s,const Options& o) {
     const auto limit=service_spool_limit(o);
     const bool expected=o.control!="noise"&&o.control!="wrong-key"&&o.control!="wrong-ordinal"&&o.control!="eof";
     Json::Array intervals;
-    for(const auto first:s.episode_starts)intervals.push_back(object({{"first_public_slot",first},{"stop_public_slot",add(first,s.truth.size()+2)}}));
+    if(!o.repeat_selected_attempt)
+        for(const auto first:s.episode_starts)intervals.push_back(object({{"first_public_slot",first},{"stop_public_slot",add(first,s.truth.size()+2)}}));
     std::string pattern;
-    for(std::uint64_t i=0;i<s.slot_horizon;++i)pattern+=o.control!="noise"&&source_episode(s,i)?'D':'Q';
+    const auto first_slot=o.repeat_selected_attempt.value_or(0);
+    const auto stop_slot=o.repeat_selected_attempt?add(selected_quiet_first(s,o),2):s.slot_horizon;
+    for(auto i=first_slot;i<stop_slot;++i)pattern+=o.control!="noise"&&source_episode(s,i)?'D':'Q';
     std::optional<double> backlog_duration;
     if(o.service_backlog_begin)backlog_duration=static_cast<double>(s.profile.calendar().relative_seconds(
         s.profile.transmit_slot(*o.service_backlog_begin).pattern_begin,s.profile.transmit_slot(*o.service_backlog_end).pattern_begin));
-    return object({{"schema_version",1},{"episodes",o.service_episodes},{"wire_bits_per_episode",s.truth.size()},
-        {"expected_message_count",expected?o.service_episodes:0},{"expected_message_intervals",std::move(intervals)},
+    auto plan=object({{"schema_version",1},{"episodes",o.service_episodes},{"wire_bits_per_episode",s.truth.size()},
+        {"expected_message_count",expected&&!o.repeat_selected_attempt?o.service_episodes:0},{"expected_message_intervals",std::move(intervals)},
         {"slot_pattern",pattern},{"maximum_spool_bytes",limit},
         {"planned_spool_bytes",s.horizon<=UINT64_MAX/ObservationSpool::row_bytes?Json(s.horizon*ObservationSpool::row_bytes):Json{}},
         {"fits_spool_budget",s.horizon<=limit/ObservationSpool::row_bytes},{"input_chunk_samples",o.chunk},
         {"backlog_unique_baseband_seconds",optional_number(backlog_duration)},
         {"backlog_begin_slot",o.service_backlog_begin?Json(*o.service_backlog_begin):Json{}},
         {"backlog_end_slot",o.service_backlog_end?Json(*o.service_backlog_end):Json{}}});
+    if(o.repeat_selected_attempt) {
+        plan["selected_attempt"]=object({{"first_public_slot",first_slot},{"stop_public_slot",stop_slot},
+            {"first_guaranteed_quiet_slot",selected_quiet_first(s,o)},
+            {"first_input_sample",make_receiver_slot_plan(s.profile,s.receiver,first_slot).first_sample},
+            {"stop_input_sample",make_receiver_slot_plan(s.profile,s.receiver,stop_slot-1).stop_sample}});
+        plan["expected_raw_bit_count"]=1;
+        plan["measurement_scope"]="full sealed capture read and hash, selected ordinary DATA through its guaranteed quiet pair including guard slots; denominator is selected unique input span; no backlog qualification";
+    }
+    return plan;
 }
 
 Json plan_json(const Setup& s,const Options& o) {
@@ -1913,12 +1962,16 @@ Json plan_json(const Setup& s,const Options& o) {
         } else {
             const auto& channel=*s.native_channel;
             repeated["path_scale"]=*o.repeat_path_scale;
+            if(o.repeat_direct_power) {
+                repeated["fixed_direct_power_fraction"]=*o.repeat_direct_power;
+                repeated["fixed_delayed_power_fraction"]=1-*o.repeat_direct_power;
+            }
             repeated["path_seed"]=*channel.path_seed;
             repeated["oscillator_seed"]=*channel.oscillator_seed;
             repeated["noise_seed"]=*channel.noise_seed;
             repeated["thermal_noise_enabled"]=channel.effects.noise_enabled;
             repeated["transmission_scope"]=o.repeat_selected_attempt?
-                "Six one-bit emissions advance public ordinals through one continuous channel. Only the selected DATA slot and its two quiet successors are scored.":
+                std::to_string(repeated_bit_count(o))+" one-bit emissions advance public ordinals through one continuous channel. The selected DATA slot, every intervening guard slot and its guaranteed quiet pair are scored.":
                 o.repeat_separate_attempts?
                 "Six one-bit emissions at advancing public ordinals; each is followed by two scored quiet windows through one continuous channel.":
                 "One emission of six contiguous raw DATA slots with advancing public ordinals.";
@@ -1926,8 +1979,10 @@ Json plan_json(const Setup& s,const Options& o) {
         if(o.repeat_separate_attempts)repeated["separate_attempts"]=true;
         if(o.repeat_selected_attempt) {
             const auto first=*o.repeat_selected_attempt;
-            const auto last=make_receiver_slot_plan(s.profile,s.receiver,first+2);
-            repeated["selected_attempt"]=object({{"first_public_slot",first},{"stop_public_slot",first+3},
+            const auto quiet=selected_quiet_first(s,o),stop=add(quiet,2);
+            const auto last=make_receiver_slot_plan(s.profile,s.receiver,stop-1);
+            repeated["selected_attempt"]=object({{"first_public_slot",first},{"stop_public_slot",stop},
+                {"first_guaranteed_quiet_slot",quiet},
                 {"first_input_sample",digest_plan->first_sample},{"stop_input_sample",last.stop_sample}});
         }
         result["repeated_bit"]=std::move(repeated);
@@ -2270,6 +2325,7 @@ Json score_json(const StreamSlotReceipt& receipt) {
         {"nominal_independent_gain",r.nominal_independent_gain_candidates?object({
             {"candidates",r.nominal_independent_gain_candidates},{"basis_rows",r.nominal_independent_gain_basis_rows},
             {"frequency_states",r.nominal_independent_gain_frequency_states},
+            {"frequency_status",r.nominal_independent_gain_frequency_status},
             {"frequency_log_prior_adjustment",r.nominal_independent_gain_log_prior_adjustment},
             {"power_models",std::move(gain_powers)},
             {"fixed_centroid_bit_evidence",Json::Array{r.nominal_independent_fixed_centroid_bit_evidence[0],r.nominal_independent_fixed_centroid_bit_evidence[1]}},
@@ -2284,6 +2340,8 @@ Json score_json(const StreamSlotReceipt& receipt) {
             {"direct_scored_blocks",r.signed_lag_gain_proposal_direct_scored_blocks},
             {"projected_rows",r.signed_lag_gain_proposal_projected_rows},{"fft_rows",r.signed_lag_gain_proposal_fft_rows},
             {"frequency_points",r.signed_lag_gain_proposal_frequency_points},
+            {"frequency_status",r.signed_lag_gain_proposal_frequency_status},
+            {"fixed_frequency_points",r.signed_lag_gain_proposal_fixed_frequency_points},
             {"fft_row_stages",r.signed_lag_gain_proposal_fft_stages},{"score_rows",r.signed_lag_gain_proposal_score_rows},
             {"fft_stage_bound",r.signed_lag_gain_proposal_fft_stage_bound},{"score_row_bound",r.signed_lag_gain_proposal_score_row_bound},
             {"workspace_bytes",r.signed_lag_gain_proposal_workspace_bytes},{"proposal_seconds",r.signed_lag_gain_proposal_seconds},
@@ -2299,7 +2357,13 @@ Json score_json(const StreamSlotReceipt& receipt) {
         {"slow_gain_coherence_seconds",Json::Array{r.slow_gain_coherence_seconds[0],r.slow_gain_coherence_seconds[1]}},
         {"affine_gain_model",r.affine_stationary_fading_gain?"stationary_plus_ou":
             (r.slow_gain_coherence_seconds[0]>0?"slow_ou":"original")},
-        {"drift_status",r.drift_status},{"drift_seconds",r.drift_seconds},{"drift_slopes",r.drift_slopes},
+        {"drift_status",r.drift_status},{"drift_line_status",r.drift_line_status},
+        {"drift_stage_workers",r.drift_stage_workers},{"drift_line_stage_workers",r.drift_line_stage_workers},
+        {"drift_planned_stage_workers",r.drift_planned_stage_workers},
+        {"drift_line_planned_stage_workers",r.drift_line_planned_stage_workers},
+        {"drift_coherent_timing_fft_rows",r.drift_coherent_timing_fft_rows},
+        {"drift_coherent_timing_fft_stages",r.drift_coherent_timing_fft_stages},
+        {"drift_seconds",r.drift_seconds},{"drift_slopes",r.drift_slopes},{"drift_relative_doppler_models",r.drift_relative_doppler_models},
         {"drift_frequency_bins",r.drift_frequency_bins},{"workspace_peak_bytes",r.workspace_peak_bytes},{"reason",r.reason},
         {"commit_wall_seconds",receipt.commit_timing?Json(receipt.commit_timing->wall_seconds):Json{}},
         {"commit_process_cpu_seconds",receipt.commit_timing&&receipt.commit_timing->process_cpu_seconds?Json(*receipt.commit_timing->process_cpu_seconds):Json{}}});
@@ -2928,9 +2992,15 @@ Json channel_json(const StreamChannelReport& r,double fs,const EmissionReport& e
     if(r.bounded_spread) {
         const auto& v=*r.bounded_spread;
         spread=object({{"excess_delay_seconds",v.excess_delay_seconds},{"knot_seconds",v.knot_seconds},
-            {"doppler_bound_hz",v.doppler_bound_hz},{"minimum_echo_ratio",v.minimum_echo_ratio},
-            {"maximum_echo_ratio",v.maximum_echo_ratio},{"minimum_doppler_hz",v.minimum_doppler_hz},
-            {"maximum_doppler_hz",v.maximum_doppler_hz},{"seed",v.seed},{"processed_rows",v.processed_rows}});
+            {"doppler_bound_hz",v.doppler_bound_hz},
+            {"fixed_direct_power_fraction",optional_number(v.fixed_direct_power_fraction)},
+            {"fixed_delayed_power_fraction",v.fixed_direct_power_fraction?Json(1-*v.fixed_direct_power_fraction):Json{}},
+            {"minimum_echo_ratio",optional_number(v.minimum_echo_ratio)},
+            {"maximum_echo_ratio",optional_number(v.maximum_echo_ratio)},{"minimum_doppler_hz",v.minimum_doppler_hz},
+            {"maximum_doppler_hz",v.maximum_doppler_hz},
+            {"minimum_combined_physical_doppler_hz",v.minimum_combined_physical_doppler_hz},
+            {"maximum_combined_physical_doppler_hz",v.maximum_combined_physical_doppler_hz},
+            {"seed",v.seed},{"processed_rows",v.processed_rows}});
     }
     if(r.common_doppler_wander) {
         const auto& v=*r.common_doppler_wander;
@@ -3934,6 +4004,13 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
         throw Unavailable("channel numerical qualification is limited to its declared horizon; use slot mode or a shorter channel component");
     if(execution::process_footprint_bytes()>=s.resources.memory_limit_bytes)
         throw Limit("application baseline exhausts the declared total memory limit");
+    const auto receive_first_slot=o.repeat_selected_attempt.value_or(0);
+    const auto receive_quiet_first=o.repeat_selected_attempt?selected_quiet_first(s,o):s.q0;
+    const auto receive_stop_slot=o.repeat_selected_attempt?add(receive_quiet_first,2):s.slot_horizon;
+    const auto receive_input_first=o.repeat_selected_attempt?
+        make_receiver_slot_plan(s.profile,s.receiver,receive_first_slot).first_sample:0;
+    const auto receive_input_stop=o.repeat_selected_attempt?
+        make_receiver_slot_plan(s.profile,s.receiver,receive_stop_slot-1).stop_sample:s.horizon;
     const bool retained_replay=!o.two_hop_spread_replay.empty();
     std::unique_ptr<ObservationSpool> spool;
     std::size_t spool_reservation=0;
@@ -4169,11 +4246,14 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
     ServiceTiming render_time,spool_write_time;
     double retained_verification_seconds=0;
     std::string captured_digest;
+    std::string captured_receiver_input_digest;
     std::optional<Json> frozen_channel;
     double render_seconds=0;
     if(spool) {
         const auto verification_began=Clock::now();
         Hash capture_hash;
+        std::optional<Hash> receiver_capture_hash;
+        if(o.repeat_selected_attempt)receiver_capture_hash.emplace();
         std::optional<Hash> historical_prefix_hash;
         if(o.two_hop_spread_comparison) historical_prefix_hash.emplace();
         std::vector<Complex> capture_iq(o.chunk);
@@ -4194,6 +4274,10 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
                     mask[i]=(o.control!="capture-gap"||at+i<s.gap_first||at+i>=s.gap_stop)?1:0;
             }
             deadline.check();capture_hash.samples(rows,mask);
+            if(receiver_capture_hash) {
+                const auto first=std::max(at,receive_input_first),stop=std::min(at+n,receive_input_stop);
+                if(first<stop)receiver_capture_hash->samples(rows.subspan(first-at,stop-first),mask.subspan(first-at,stop-first));
+            }
             if(historical_prefix_hash&&at<retained_two_hop_samples) {
                 const auto prefix_rows=std::min<std::uint64_t>(n,retained_two_hop_samples-at);
                 historical_prefix_hash->samples(rows.first(prefix_rows),mask.first(prefix_rows));
@@ -4203,6 +4287,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
         }
         if(!retained_replay) {const ServiceTimer io;spool->seal();spool_write_time.add(io.elapsed());}
         captured_digest=capture_hash.finish();
+        if(receiver_capture_hash)captured_receiver_input_digest=receiver_capture_hash->finish();
         if(retained_replay) {
             require(captured_digest==two_hop_comparison_sha,
                 "retained replay differs from the frozen complete two-hop capture SHA-256");
@@ -4288,12 +4373,6 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
     std::shared_ptr<appraisal::HfPublicPhaseReceiver> phase_receiver;
     std::optional<appraisal::HfCorrelatedGainReceiver> correlated_gain_receiver;
     std::unique_ptr<CompleteStreamReceiver> receiver;
-    const auto receive_first_slot=o.repeat_selected_attempt.value_or(0);
-    const auto receive_stop_slot=o.repeat_selected_attempt?receive_first_slot+3:s.slot_horizon;
-    const auto receive_input_first=o.repeat_selected_attempt?
-        make_receiver_slot_plan(s.profile,s.receiver,receive_first_slot).first_sample:0;
-    const auto receive_input_stop=o.repeat_selected_attempt?
-        make_receiver_slot_plan(s.profile,s.receiver,receive_stop_slot-1).stop_sample:s.horizon;
     if(o.repeat_selected_attempt) {
         s.stream.first_slot=receive_first_slot;
         s.stream.first_input_sample=receive_input_first;
@@ -4370,6 +4449,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
     std::optional<std::stop_callback<decltype(cancel_receiver)>> interrupt;
     interrupt.emplace(deadline.stop.get_token(),cancel_receiver);
     Json::Array slots,messages,reassembled;
+    Json::Array selected_raw_completions;
     std::optional<appraisal::HfProtectedReassembly> reassembly;
     std::vector<StreamSlotReceipt> protected_scores;
     std::vector<CompletedMessage> protected_messages;
@@ -4387,12 +4467,17 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
     std::size_t repeat_inter_attempt_quiet=0,repeat_complete_pairs=0;
     bool repeat_first_quiet=false;
     bool repeat_ordered_valid=true;
+    bool selected_physical_complete=false,selected_clean_completion=false;
+    std::size_t selected_guard_ambiguous=0,selected_guard_data=0;
     std::vector<std::size_t> episode_wrong(s.episode_starts.size()),episode_ambiguous(s.episode_starts.size()),episode_quiet(s.episode_starts.size());
     std::vector<bool> episode_decoded(s.episode_starts.size(),false);
     struct Commit {std::uint64_t index,stop_sample;std::optional<StreamCommitTiming> timing;};
     std::vector<Commit> service_commits;
     if(spool)service_commits.reserve(static_cast<std::size_t>(s.slot_horizon));
     bool service_receipts_complete=true;
+    std::optional<Hash> receiver_input_hash;
+    if(spool&&o.repeat_selected_attempt)receiver_input_hash.emplace();
+    std::uint64_t receiver_hashed_samples=0;
     bool boundary_receipts_complete=true;
     bool correct=false,correct_decoded_candidate=false,ended=false;
     bool first_observation_complete=false,first_observation_correct_data=false,public_search_executed=false;
@@ -4454,9 +4539,9 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
                     r.consumed_samples==plan.stop_sample-plan.first_sample;
             }
             if(spool) {
-                require(service_commits.size()<s.slot_horizon,"service receiver scored beyond the declared horizon");
+                require(service_commits.size()<receive_stop_slot-receive_first_slot,"service receiver scored beyond the declared horizon");
                 const auto address=message_address(s.profile,r.index);
-                service_receipts_complete&=r.index==service_commits.size()&&r.complete&&r.all_valid&&
+                service_receipts_complete&=r.index==receive_first_slot+service_commits.size()&&r.complete&&r.all_valid&&
                     receipt.pattern_epoch==address.epoch&&receipt.symbol_ordinal==address.ordinal;
                 if(!service_receipts_complete)barrier(r.index);
                 service_commits.push_back({r.index,r.stop_sample,receipt.commit_timing});
@@ -4510,9 +4595,16 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
                     repeat_longest_miss=std::max(repeat_longest_miss,repeat_miss_run);
                 }
                 const bool quiet=scored&&r.decision==SlotDecision::quiet&&r.noise_statistics_valid;
-                const auto first_trailing_quiet=o.repeat_selected_attempt?receive_first_slot+1:s.q0;
+                const auto first_trailing_quiet=receive_quiet_first;
                 if(quiet&&r.index>=first_trailing_quiet)++repeat_quiet;
-                if(o.repeat_separate_attempts&&!active) {
+                if(o.repeat_selected_attempt&&!active) {
+                    if(r.index<first_trailing_quiet) {
+                        selected_guard_ambiguous+=r.decision==SlotDecision::ambiguous;
+                        selected_guard_data+=r.decision==SlotDecision::data;
+                    }
+                    if(r.index==first_trailing_quiet)repeat_first_quiet=quiet;
+                    else if(r.index==first_trailing_quiet+1)repeat_complete_pairs+=repeat_first_quiet&&quiet;
+                } else if(o.repeat_separate_attempts&&!active) {
                     if(quiet&&r.index<first_trailing_quiet)++repeat_inter_attempt_quiet;
                     if(r.index%3==1)repeat_first_quiet=quiet;
                     else if(r.index%3==2)repeat_complete_pairs+=repeat_first_quiet&&quiet;
@@ -4588,7 +4680,22 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
             const bool early=m.physical_complete&&active_quiet&&o.control!="noise";
             physical+=m.physical_complete;premature+=early;
             safe_completions+=m.physical_complete&&!early&&m.trailing_quiet_slots.size()>=2;
-            if(o.repeat_bit)continue;
+            if(o.repeat_bit) {
+                if(o.repeat_selected_attempt) {
+                    require(selected_raw_completions.size()<receive_stop_slot-receive_first_slot,
+                        "selected raw completion records exceed their public-window bound");
+                    Json::Array quiet_slots;
+                    for(const auto local:m.trailing_quiet_slots)quiet_slots.push_back(add(event.first_public_slot,local));
+                    selected_raw_completions.push_back(object({{"first_public_slot",event.first_public_slot},
+                        {"stop_public_slot",event.stop_public_slot},{"physical_complete",m.physical_complete},
+                        {"trailing_quiet_public_slots",std::move(quiet_slots)},
+                        {"observed_bits",m.observed_bits},{"missing_slots",m.missing_slots}}));
+                    const bool matching=m.physical_complete&&event.first_public_slot==receive_first_slot;
+                    selected_physical_complete|=matching;
+                    selected_clean_completion|=matching&&m.observed_bits==1&&m.missing_slots==0;
+                }
+                continue;
+            }
             if(!m.decoded_content)++rejections;
             accepted_messages+=m.decoded_content.has_value();
             correct|=target&&m.physical_complete&&matches&&!early&&event.first_public_slot==0&&m.missing_slots==0&&
@@ -4766,6 +4873,10 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
                        after.uncommitted_slots==rejected.uncommitted_slots&&!rejected.output_backpressured)
                         throw Limit("receiver cannot admit next unchanged input chunk");
                 }
+                if(receiver_input_hash) {
+                    receiver_input_hash->samples(rows.subspan(offset,count),mask.subspan(offset,count));
+                    receiver_hashed_samples+=count;
+                }
                 control_seconds+=std::chrono::duration<double>(Clock::now()-ctl).count();
             }
             first+=n;
@@ -4868,7 +4979,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
                 run_status="error";reason="incomplete ordered receiver horizon or lost slot receipts";
             }
             else if(o.repeat_selected_attempt&&(!repeat_ordered_valid||!selected_digest||hashed_samples!=s.horizon)) {
-                run_status="error";reason="selected attempt did not bind three valid ordered windows and the full capture";
+                run_status="error";reason="selected attempt did not bind its complete valid ordered scope and the full capture";
             }
             else if(o.mode=="slot"&&!first_observation_complete) {
                 run_status="error";reason="first public observation did not produce a complete valid slot receipt";
@@ -4937,8 +5048,14 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
     std::string replay_digest;
     {const ServiceTimer io;replay_digest=hash.finish();if(spool)spool_read_time.add(io.elapsed());}
     const bool digest_match=spool&&hashed_samples==s.horizon&&replay_digest==captured_digest;
+    const auto receiver_input_digest=receiver_input_hash?receiver_input_hash->finish():std::string{};
+    const bool receiver_input_digest_match=receiver_input_hash&&receiver_hashed_samples==receive_input_stop-receive_input_first&&
+        receiver_input_digest==captured_receiver_input_digest;
     if(spool&&hashed_samples==s.horizon&&!digest_match) {
         run_status="error";reason="service replay differed from its captured observation";
+    }
+    if(receiver_input_hash&&run_status=="completed"&&!receiver_input_digest_match) {
+        run_status="error";reason="selected service input differed from its captured observation";
     }
     if(policy!=AffineBoundaryPolicy::standard&&run_status=="completed"&&
        (!boundary_receipts_complete||slots.size()!=s.slot_horizon||hashed_samples!=s.horizon||
@@ -5031,7 +5148,18 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
             {"trailing_quiet_slots",repeat_quiet},{"physical_quiet_complete",all_quiet},
             {"ordered_valid_complete",repeat_ordered_valid&&run_status=="completed"&&
                 slots.size()==receive_stop_slot-receive_first_slot}});
-        if(o.repeat_selected_attempt)result["repeated_bit"]["selected_attempt_slot"]=receive_first_slot;
+        if(o.repeat_selected_attempt) {
+            auto& repeated=result["repeated_bit"];
+            repeated["selected_attempt_slot"]=receive_first_slot;
+            repeated["bit_delivered"]=repeat_correct==1;
+            repeated["physical_complete"]=selected_physical_complete;
+            repeated["clean_communication_complete"]=run_status=="completed"&&repeat_ordered_valid&&
+                repeat_correct==1&&wrong_bits==0&&false_data==0&&ambiguous==0&&quiet_active==0&&
+                repeat_quiet==2&&repeat_complete_pairs==1&&physical==1&&premature==0&&selected_clean_completion;
+            repeated["guard_ambiguous_slots"]=selected_guard_ambiguous;
+            repeated["guard_data_slots"]=selected_guard_data;
+            repeated["physical_completion_records"]=std::move(selected_raw_completions);
+        }
         if(o.repeat_separate_attempts) {
             result["repeated_bit"]["separate_attempts"]=true;
             result["repeated_bit"]["inter_attempt_quiet_slots"]=repeat_inter_attempt_quiet;
@@ -5074,8 +5202,9 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
     }
     if(spool) {
         const bool work_complete=run_status=="completed"&&digest_match&&service_receipts_complete&&
-            service_commits.size()==s.slot_horizon&&final.state==StreamReceiverState::input_ended&&
-            final.next_public_slot==s.slot_horizon&&final.input_stop==s.horizon;
+            service_commits.size()==receive_stop_slot-receive_first_slot&&final.state==StreamReceiverState::input_ended&&
+            final.next_public_slot==receive_stop_slot&&final.input_stop==receive_input_stop&&
+            (!o.repeat_selected_attempt||receiver_input_digest_match);
         if(reassembly) {
             const auto& r=reassembly->report();
             result["hf_protected_reassembly"]=object({
@@ -5144,10 +5273,14 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
             }
         }
         const auto expected=target&&o.control!="eof"?s.episode_starts.size():0;
-        const bool communication_complete=work_complete&&accepted_messages==expected&&false_data==0&&premature==0&&
+        const bool decoded_communication_complete=work_complete&&accepted_messages==expected&&false_data==0&&premature==0&&
             (expected?physical==expected&&std::all_of(episode_decoded.begin(),episode_decoded.end(),[](bool value){return value;}):true);
+        const bool communication_complete=o.repeat_selected_attempt?
+            work_complete&&repeat_ordered_valid&&repeat_correct==1&&wrong_bits==0&&false_data==0&&
+                ambiguous==0&&quiet_active==0&&repeat_quiet==2&&repeat_complete_pairs==1&&physical==1&&premature==0&&selected_clean_completion:
+            decoded_communication_complete;
         auto service=service_plan_json(s,o);
-        const double represented=static_cast<double>(s.horizon)/s.receiver.sample_rate_hz;
+        const double represented=static_cast<double>(receive_input_stop-receive_input_first)/s.receiver.sample_rate_hz;
         service["wall_seconds"]=service_time.wall;service["process_cpu_seconds"]=optional_number(service_time.cpu);
         service["spool_read_and_verification_seconds"]=spool_read_time.wall;
         service["spool_read_and_verification_process_cpu_seconds"]=optional_number(spool_read_time.cpu);
@@ -5168,6 +5301,12 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
         service["max_samples"]=o.max_samples;service["max_wall_seconds"]=o.max_wall_seconds;
         service["workers_explicit"]=o.workers.has_value();service["owners_explicit"]=o.owners.has_value();
         service["capacity_qualified"]=false;service["backlog_interval"]=Json{};
+        if(o.repeat_selected_attempt) {
+            service["captured_receiver_input_sha256"]=captured_receiver_input_digest;
+            service["verified_receiver_input_sha256"]=receiver_input_digest;
+            service["receiver_input_hashed_samples"]=receiver_hashed_samples;
+            service["receiver_input_digest_match"]=receiver_input_digest_match;
+        }
         if(o.service_backlog_begin) {
             const auto a=*o.service_backlog_begin,b=*o.service_backlog_end;
             auto interval=object({{"start_after_public_slot",a},{"stop_after_public_slot",b},{"complete",false},
@@ -5400,7 +5539,7 @@ int main(int argc,char** argv) {
             result["usage"]="high_fidelity_appraisal --mode plan|channel|receive|slot|oracle|diagnose|hf-search --scenario NAME --waveform reference|smoke [--cn0 DBHZ] [--bit-seconds S] [--capture-lead-seconds S] [--pulse rrc|tapered-rrc] [--control wanted|noise|wrong-key|wrong-ordinal|interior-fade|capture-gap|eof] [--helper] [--seed N] [--noise-seed N] [--hf-trajectory-seed N] [--hf-trajectory-offset-seconds S] [--workers N] [--owners N] [--memory-mib N] [--backend cpu|cuda|vulkan|gpu] [--max-samples N] [--max-wall-seconds S] [--duration-seconds S] [--chunk N] [--message TEXT] [--fec off|rs20|rs60] [--fade-slots 1|2] [--oracle-slot N] [--search-slot N] [--search-timing selected|full] [--capture-digest-slot N] [--history-reference-delay-seconds S] [--hf-phase-bank] [--hf-public-phase-receiver] [--hf-physical-diagnostic] [--hf-phase-refinement]; noise-seed separates additive-noise realizations from stochastic path seed; hf-trajectory-seed selects immutable critical-frequency knots only in knot-bearing scenarios; hf-trajectory-offset-seconds accepts -86400..86400 and shifts analytic HF physical time without shifting source/calendar or noise; capture lead defaults to .25s and accepts .25..10s to retain more pre-signal noise history; interior-fade defaults to two consecutive complete observation apertures, with --fade-slots 1 selecting a single physical erasure opportunity; slot observes only the complete first public slot; diagnose measures canonical VLF acquisition and short persistent fine phases without bit/message decisions; capture-digest-slot incrementally hashes one complete public observation in receive/slot/hf-search without changing receiver geometry; hf-phase-refinement opts into bounded public phase refinement in hf-search or the experimental public phase receiver; refinement shadow omits affine comparison and uses the operational block geometry; hf-physical-diagnostic adds a post-search finite physical-template and winning-public-cell evaluator for wanted active hf-search slots; hf-public-phase-receiver enables the experimental fixed-prior supplement inside the canonical receive/slot stream with raw white-noise linear HF/AWGN with a single-public-tap model and Helper-off CPU; hf-search runs a shadow public search on complete selected slot N (default 0), without receiver decisions or completion, using raw white-noise linear HF/AWGN with a single-public-tap model and Helper-off CPU; oracle requires linear Helper-off wanted AWGN, HF or EME with white noise and uses public slot N (default 0) within the prepared message; HF oracle additionally reports private clean-template history diagnostics; optional reference delay is independently declared within public arrival bounds (zero keeps the unshifted baseline), and --hf-phase-bank enables the fixed coherent phase-family evaluator";
             result["gui_profile_usage"]="hf-gui-native with plan, slot or receive on the reference RRC waveform accepts --gui-spread ID --gui-selective ID --gui-arrival tight|default --gui-margin N --gui-audio-ppm N --gui-rf-ppm N --gui-audio-phase-degrees-sqrt-s N --gui-rf-phase-degrees-sqrt-s N --gui-clock-edge --gui-target-cn0-db-hz N; --cn0 is actual link C/N0 and --bit-seconds is an explicit duration fixture override";
             result["gui_varying_usage"]="--mode gui-varying --scenario hf-gui-native --capture-digest-slot N compares canonical affine and short varying evidence on one complete Helper-off CPU observation from the full native capture; accepts wanted, noise and wrong-key";
-            result["gui_repeated_bit_usage"]="--mode gui-repeated-bit --scenario hf-gui-native --repeat-bit 0|1 --repeat-path-scale 0|0.5|1 --repeat-path-seed N replays six contiguous raw bits followed by two scored quiet windows. --repeat-separate-attempts separates the six bits by two quiet windows. --repeat-selected-attempt SLOT scores one scheduled DATA slot and the two following quiet slots with the same full continuous capture. --repeat-thermal-off removes added thermal noise only. Requires a finite sample and wall cap.";
+            result["gui_repeated_bit_usage"]="--mode gui-repeated-bit --scenario hf-gui-native --repeat-bit 0|1 --repeat-path-scale 0|0.5|1 --repeat-path-seed N replays six contiguous raw bits followed by two scored quiet windows. --repeat-separate-attempts separates the six bits by two quiet windows. --repeat-selected-attempt SLOT accepts multiples of three through 48 and scores one ordinary DATA slot through its guaranteed quiet pair, including every intervening guard slot, extending the same continuous source schedule only when SLOT exceeds 15. With --service-replay it requires an explicit --service-spool-byte-limit and measures only the selected receiver span, including full capture verification overhead; no backlog qualification. --repeat-direct-power FRACTION sets the actual bounded two-ray direct power fraction in [0,1] for a selected attempt; receiver bounds and signal/noise references remain unchanged. --repeat-thermal-off removes added thermal noise only. Requires a finite sample and wall cap.";
             result["two_hop_alarm_matrix_usage"]="--two-hop-alarm-matrix --mode plan|receive --scenario hf-vector-two-hop --message E --bit-seconds 128 --cn0 -3 --seed 73613 --noise-seed 93613 --max-samples 4350000 --max-wall-seconds 1200 evaluates fixed weak/recovery text and raw-bit pairs, reusing only the qualified physical table between independent rows.";
             result["two_hop_additive_boundary_usage"]="--two-hop-additive-boundary --mode plan|receive --scenario hf-vector-two-hop --message E --bit-seconds 128 --cn0 4 --seed 73613 --noise-seed 93613 --max-samples 4350000 --max-wall-seconds 900 evaluates an existing-bank calibration at +3 dB-Hz and compares two sequential receiver replays of a single +4 dB-Hz capture.";
             result["two_hop_spread_comparison_usage"]="--two-hop-spread-comparison uses the frozen +4 dB-Hz two-hop options above and a common 7 ms capture aperture to compare operational receivers with 0 and 7 ms modeled spread. --two-hop-spread-capture PATH optionally retains the single sealed local I/Q/validity file by exclusive creation.";

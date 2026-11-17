@@ -7,6 +7,15 @@ namespace datapump::triad::v3::receiver_detail {
 struct CoarseResult;
 struct HelperResult;
 
+// Dry receipt from the same frozen complete-slot planner used by scoring.
+// It does not score input or select a different resource policy.
+struct ReceiverDriftAdmission {
+    DriftPlan ordinary, line;
+    std::size_t workspace_bytes = 0, overlap_workspace_bytes = 0;
+};
+ReceiverDriftAdmission receiver_drift_admission(const ReceiverConfig&, const ReceiverSlotPlan&,
+                                               unsigned workers, bool overlap = false);
+
 // The selected span borrows either the Helper result or the caller's fixed
 // full-prior fallback. The original public grid still owns admission mass.
 std::span<const FrequencyInterval> public_frequency_intervals(

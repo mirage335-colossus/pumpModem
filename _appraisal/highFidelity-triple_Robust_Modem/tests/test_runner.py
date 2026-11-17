@@ -181,11 +181,14 @@ def repeated_bit_episode(**overrides) -> dict:
             "gui_target_cn0_db_hz": 32, "gui_clock_edge": True, **overrides}
 
 
-def repeated_bit_receipt(episode: dict | None = None) -> tuple[dict, dict]:
+def repeated_bit_receipt(episode: dict | None = None, *, guard_slots: int = 0) -> tuple[dict, dict]:
     episode = episode or repeated_bit_episode()
     separate = episode.get("repeat_separate_attempts", False)
-    q0, horizon = (16, 18) if separate else (6, 8)
-    active_indices = {3 * index for index in range(6)} if separate else set(range(6))
+    count = max(6, episode.get("repeat_selected_attempt", 0) // 3 + 1)
+    q0, horizon = (3 * count - 2, 3 * count) if separate else (count, count + 2)
+    q0 += guard_slots
+    horizon += guard_slots
+    active_indices = {3 * index for index in range(count)} if separate else set(range(count))
     horizon_samples = max(1000, horizon * 100)
     public_slots, slots = [], []
     for index in range(horizon):
@@ -204,7 +207,7 @@ def repeated_bit_receipt(episode: dict | None = None) -> tuple[dict, dict]:
                       "raw_bit_correct": True if active else None, "noise_statistics_valid": not active,
                       "zero_h0_verified": not active})
         public_slots.append(public)
-    plan = {"repeated_bit": {"bit": episode["repeat_bit"], "active_slots": 6,
+    plan = {"repeated_bit": {"bit": episode["repeat_bit"], "active_slots": count,
               "path_scale": episode["repeat_path_scale"], "path_seed": episode["repeat_path_seed"],
               "oscillator_seed": episode["seed"], "noise_seed": episode["noise_seed"],
               "thermal_noise_enabled": not episode.get("repeat_thermal_off", False),
@@ -212,7 +215,7 @@ def repeated_bit_receipt(episode: dict | None = None) -> tuple[dict, dict]:
             "first_uncontaminated_quiet_slot": q0, "scored_slot_horizon": horizon,
             "sample_rate_hz": 1920, "horizon_samples": horizon_samples,
             "noise_variance": 1.0,
-            "max_samples": 2_400 if separate else 1_200,
+            "max_samples": max(2_400 if separate else 1_200, horizon_samples),
             "max_wall_seconds": 120, "represented_seconds": horizon_samples / 1920,
             "fits_sample_budget": True, "public_slots": public_slots}
     receipt = {"plan": plan, "slots": slots, "messages": [],
@@ -220,16 +223,41 @@ def repeated_bit_receipt(episode: dict | None = None) -> tuple[dict, dict]:
                "outcomes": {"receiver_executed": True, "component_only": True,
                    "completion_evaluated": False, "communication_endpoint": "repeated_raw_bit",
                    "actual_scored_slots": horizon},
-               "repeated_bit": {"active_slots": 6, "correct_data": 6, "wrong_data": 0,
+               "repeated_bit": {"active_slots": count, "correct_data": count, "wrong_data": 0,
                    "ambiguous_active_slots": 0, "quiet_active_slots": 0,
                    "longest_no_correct_run": 0, "trailing_quiet_slots": 2,
                    "physical_quiet_complete": True, "ordered_valid_complete": True}}
     if separate:
         plan["repeated_bit"]["separate_attempts"] = True
         plan["wire_bits"] = 1
-        receipt["repeated_bit"].update({"separate_attempts": True, "inter_attempt_quiet_slots": 10,
-                                        "completed_quiet_pairs": 6})
+        receipt["repeated_bit"].update({"separate_attempts": True, "inter_attempt_quiet_slots": 2 * (count - 1),
+                                        "completed_quiet_pairs": count})
     return receipt, plan
+
+
+def select_raw_attempt_receipt(receipt: dict, first: int, quiet: int | None = None) -> None:
+    """Only construct receipt metadata; native tests supply all actual DSP."""
+    quiet = first + 1 if quiet is None else quiet
+    stop = quiet + 2
+    plan = receipt["plan"]
+    receipt["status"] = "completed"
+    receipt["slots"] = receipt["slots"][first:stop]
+    for slot in receipt["slots"]:
+        slot.update(zero_h0_verified=True, consumed_samples=slot["stop_sample"] - slot["first_sample"])
+    a, b = receipt["slots"][0]["first_sample"], receipt["slots"][-1]["stop_sample"]
+    plan["repeated_bit"]["selected_attempt"] = {"first_public_slot": first, "stop_public_slot": stop,
+        "first_guaranteed_quiet_slot": quiet, "first_input_sample": a, "stop_input_sample": b}
+    plan.update(capture_digest_first_sample=a, capture_digest_stop_sample=receipt["slots"][0]["stop_sample"])
+    receipt["receiver"] = {"next_public_slot": stop, "input_stop": b, "input_closed": True,
+        "state": "input_ended", "hardware_threads": 12, "workers": 24}
+    receipt["outcomes"].update(actual_scored_slots=stop - first, accepted_samples=b - a,
+        physical_completions=1, accepted_messages=None, false_data=0, premature_completions=0)
+    receipt["repeated_bit"].update(active_slots=1, correct_data=1, selected_attempt_slot=first,
+        inter_attempt_quiet_slots=0, completed_quiet_pairs=1, bit_delivered=True, physical_complete=True,
+        clean_communication_complete=True, guard_ambiguous_slots=0, guard_data_slots=0,
+        physical_completion_records=[{"first_public_slot": first, "stop_public_slot": first + 3,
+            "physical_complete": True, "trailing_quiet_public_slots": [first + 1, first + 2],
+            "observed_bits": 1, "missing_slots": 0}])
 
 
 
@@ -1022,7 +1050,7 @@ class CampaignValidationTests(unittest.TestCase):
         runner._validate_episode(episode, 0, set(), 120, 2_400_000)
         command = runner._command(Path("/native/probe"), episode, 2_400_000, 120)
         self.assertEqual(command[command.index("--repeat-selected-attempt") + 1], "12")
-        for overrides in ({"repeat_selected_attempt": 13}, {"repeat_selected_attempt": 18},
+        for overrides in ({"repeat_selected_attempt": 13}, {"repeat_selected_attempt": 51},
                           {"repeat_selected_attempt": True}, {"repeat_selected_attempt": None},
                           {"repeat_separate_attempts": False}, {"capture_digest_slot": 12},
                           {"max_wall_seconds": 300}, {"service_replay": True}):
@@ -1032,6 +1060,7 @@ class CampaignValidationTests(unittest.TestCase):
         planned = dict(episode, gui_target_cn0_db_hz=-9, max_wall_seconds=450, max_samples=26_000_000)
         planned.pop("bit_seconds")
         runner._validate_episode(planned, 0, set(), 450, 26_000_000)
+        runner._validate_episode(dict(planned, repeat_selected_attempt=48), 0, set(), 450, 26_000_000)
         command = runner._command(Path("/native/probe"), planned, 26_000_000, 450)
         self.assertNotIn("--bit-seconds", command)
         for overrides in ({"max_samples": 26_000_001}, {"max_wall_seconds": 450.01}, {"bit_seconds": 32}):
@@ -1050,25 +1079,27 @@ class CampaignValidationTests(unittest.TestCase):
                 runner._read_campaign(path)
 
         receipt, plan = repeated_bit_receipt(episode)
-        receipt["slots"] = receipt["slots"][12:15]
-        for slot in receipt["slots"]:
-            slot.update(zero_h0_verified=True, consumed_samples=slot["stop_sample"] - slot["first_sample"])
-        plan["repeated_bit"]["selected_attempt"] = {"first_public_slot": 12, "stop_public_slot": 15,
-            "first_input_sample": 1200, "stop_input_sample": 1490}
-        plan.update(capture_digest_first_sample=1200, capture_digest_stop_sample=1290)
-        receipt["receiver"] = {"next_public_slot": 15, "input_stop": 1490, "input_closed": True,
-            "state": "input_ended", "hardware_threads": 12, "workers": 24}
-        receipt["outcomes"].update(actual_scored_slots=3, accepted_samples=290)
-        receipt["repeated_bit"].update(active_slots=1, correct_data=1, selected_attempt_slot=12,
-                                       inter_attempt_quiet_slots=0, completed_quiet_pairs=1)
+        select_raw_attempt_receipt(receipt, 12)
         runner._validate_repeated_bit_receipt(receipt, episode, plan)
         self.assertEqual(runner._repeated_bit_summary(receipt, episode)["selected_attempt_slot"], 12)
+
+        late_episode = dict(planned, repeat_selected_attempt=48)
+        late, late_plan = repeated_bit_receipt(late_episode)
+        select_raw_attempt_receipt(late, 48)
+        runner._validate_repeated_bit_receipt(late, late_episode, late_plan)
+        self.assertEqual(len(late_plan["public_slots"]), 51)
+        self.assertEqual(late_plan["repeated_bit"]["active_slots"], 17)
+        late_plan["repeated_bit"]["active_slots"] = 6
+        with self.assertRaisesRegex(runner.CampaignError, "frozen channel"):
+            runner._validate_repeated_bit_receipt(late, late_episode, late_plan)
 
         # One scored quiet successor can be unresolved without corrupting the receipt.
         ambiguous = json.loads(json.dumps(receipt))
         ambiguous["slots"][2]["decision"] = "ambiguous"
         ambiguous["repeated_bit"].update(trailing_quiet_slots=1, completed_quiet_pairs=0,
-                                          physical_quiet_complete=False)
+            physical_quiet_complete=False, physical_complete=False, clean_communication_complete=False,
+            physical_completion_records=[])
+        ambiguous["outcomes"]["physical_completions"] = 0
         runner._validate_repeated_bit_receipt(ambiguous, episode, ambiguous["plan"])
 
         for mutate in (lambda r: r["receiver"].update(workers=12),
@@ -1084,6 +1115,115 @@ class CampaignValidationTests(unittest.TestCase):
             mutate(broken)
             with self.assertRaises(runner.CampaignError):
                 runner._validate_repeated_bit_receipt(broken, episode, broken["plan"])
+
+    def test_selected_fixed_path_power_preserves_requested_and_actual_powers(self):
+        episode = repeated_bit_episode(repeat_separate_attempts=True, repeat_selected_attempt=12,
+                                       repeat_direct_power=0.233, max_samples=2_400_000, max_wall_seconds=120)
+        for power in (0, 1e-320, .233, 1):
+            current = dict(episode, repeat_direct_power=power)
+            runner._validate_episode(current, 0, set(), 120, 2_400_000)
+            command = runner._command(Path("/native/probe"), current, 2_400_000, 120)
+            self.assertEqual(command[command.index("--repeat-direct-power") + 1], str(power))
+            receipt, plan = repeated_bit_receipt(current)
+            select_raw_attempt_receipt(receipt, 12)
+            plan["repeated_bit"].update(fixed_direct_power_fraction=power,
+                                        fixed_delayed_power_fraction=1-power)
+            ratio = (1-power)**.5/power**.5 if power else None
+            receipt["channel"]["bounded_spread"] = {
+                "fixed_direct_power_fraction": power, "fixed_delayed_power_fraction": 1-power,
+                "minimum_echo_ratio": ratio, "maximum_echo_ratio": ratio}
+            runner._validate_repeated_bit_receipt(receipt, current, plan)
+            missing = json.loads(json.dumps(receipt))
+            del missing["channel"]["bounded_spread"]["maximum_echo_ratio"]
+            with self.assertRaisesRegex(runner.CampaignError, "actual direct/delayed"):
+                runner._validate_repeated_bit_receipt(missing, current, missing["plan"])
+            receipt["channel"]["bounded_spread"]["maximum_echo_ratio"] = 99
+            with self.assertRaisesRegex(runner.CampaignError, "actual direct/delayed"):
+                runner._validate_repeated_bit_receipt(receipt, current, plan)
+        for overrides in ({"repeat_direct_power": -0.01}, {"repeat_direct_power": 1.01},
+                          {"repeat_direct_power": True}, {"repeat_direct_power": float("nan")},
+                          {"repeat_selected_attempt": None}, {"repeat_path_scale": 0}, {"gui_spread": "off"}):
+            with self.subTest(overrides=overrides), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(episode, **overrides), 0, set(), 120, 2_400_000)
+        missing = dict(episode)
+        del missing["repeat_selected_attempt"]
+        with self.assertRaises(runner.CampaignError):
+            runner._validate_episode(missing, 0, set(), 120, 2_400_000)
+
+    def test_selected_service_binds_global_slots_and_accepted_span(self):
+        episode = repeated_bit_episode(repeat_selected_attempt=48, repeat_separate_attempts=True,
+            gui_target_cn0_db_hz=-3, service_replay=True, service_spool_byte_limit=500_000,
+            max_samples=26_000_000, max_wall_seconds=450)
+        episode.pop("bit_seconds")
+        runner._validate_episode(episode, 0, set(), 450, 26_000_000)
+        for changes in ({"service_spool_byte_limit": 0}, {"service_episodes": 2}, {"owners": 1},
+                        {"service_backlog_begin_slot": 48, "service_backlog_end_slot": 50}):
+            with self.subTest(changes=changes), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(episode, **changes), 0, set(), 450, 26_000_000)
+        message_episode = {"id": "service", "scenario": "awgn", "mode": "receive", "waveform": "reference",
+            "seed": 1, "service_replay": True, "service_spool_byte_limit": 500_000}
+        standard = fake_completed_receipt(runner._command(Path("/native/probe"), message_episode, 26_000_000, 450))
+        receipt, plan = repeated_bit_receipt(episode, guard_slots=1)
+        select_raw_attempt_receipt(receipt, 48, 50)
+        selected = plan["repeated_bit"]["selected_attempt"]
+        plan.update(max_samples=26_000_000, max_wall_seconds=450,
+            receiver_resources=standard["plan"]["receiver_resources"])
+        receipt["receiver"].update(hardware_threads=2, workers=4)
+        service = dict(standard["plan"]["service_replay"], wire_bits_per_episode=1,
+            expected_message_count=0, expected_message_intervals=[], slot_pattern="DQQQ",
+            planned_spool_bytes=5200 * 17, selected_attempt=selected, expected_raw_bit_count=1,
+            measurement_scope="full sealed capture read and hash, selected ordinary DATA through its guaranteed quiet pair including guard slots; denominator is selected unique input span; no backlog qualification")
+        plan["service_replay"] = service
+        replay = {**standard["service_replay"], **service,
+            "unique_baseband_seconds": 390 / 1920, "service_seconds_per_baseband_second": 2 * 1920 / 390,
+            "captured_input_sha256": "b" * 64, "verified_input_sha256": "b" * 64,
+            "replayed_samples": 5200, "spool_bytes": 5200 * 17,
+            "captured_receiver_input_sha256": "c" * 64, "verified_receiver_input_sha256": "c" * 64,
+            "receiver_input_hashed_samples": 390, "receiver_input_digest_match": True,
+            "communication_complete": True}
+        receipt["service_replay"] = replay
+        runner._validate_service_replay(receipt, episode)
+        # The first actual quiet pair may complete before the conservative
+        # planned pair. A guard erasure changes the physical record, not the bit.
+        erased_guard = json.loads(json.dumps(receipt))
+        erased_guard["slots"][1]["decision"] = "ambiguous"
+        erased_guard["repeated_bit"].update(guard_ambiguous_slots=1, clean_communication_complete=False)
+        erased_guard["repeated_bit"]["physical_completion_records"][0].update(
+            stop_public_slot=52, trailing_quiet_public_slots=[50, 51], missing_slots=1)
+        erased_guard["service_replay"]["communication_complete"] = False
+        runner._validate_service_replay(erased_guard, episode)
+        self.assertTrue(erased_guard["repeated_bit"]["bit_delivered"])
+        extra_data = json.loads(json.dumps(erased_guard))
+        extra_data["slots"][1].update(decision="data", bit=1)
+        extra_data["outcomes"]["false_data"] = 1
+        extra_data["repeated_bit"].update(guard_ambiguous_slots=0, guard_data_slots=1)
+        extra_data["repeated_bit"]["physical_completion_records"][0].update(observed_bits=2, missing_slots=0)
+        runner._validate_service_replay(extra_data, episode)
+        missing_terminal_quiet = json.loads(json.dumps(receipt))
+        missing_terminal_quiet["slots"][3]["decision"] = "ambiguous"
+        missing_terminal_quiet["repeated_bit"].update(trailing_quiet_slots=1, completed_quiet_pairs=0,
+            physical_quiet_complete=False, clean_communication_complete=False)
+        missing_terminal_quiet["service_replay"]["communication_complete"] = False
+        runner._validate_service_replay(missing_terminal_quiet, episode)
+        for mutate in (
+                lambda r: r["service_replay"].update(unique_baseband_seconds=5200 / 1920),
+                lambda r: r["service_replay"].update(verified_receiver_input_sha256="d" * 64),
+                lambda r: r["service_replay"].update(receiver_input_hashed_samples=5200),
+                lambda r: r["outcomes"].update(accepted_samples=5200),
+                lambda r: r["receiver"].update(next_public_slot=3),
+                lambda r: r["slots"][0].update(index=0),
+                lambda r: r["slots"].pop(1),
+                lambda r: r["outcomes"].update(physical_completions=0),
+                lambda r: r["outcomes"].update(accepted_messages=0),
+                lambda r: r["outcomes"].update(accepted_messages=1),
+                lambda r: r["outcomes"].update(accepted_messages=False),
+                lambda r: r["outcomes"].pop("accepted_messages"),
+                lambda r: r["messages"].append({"decoded": True}),
+                lambda r: r["service_replay"].update(capacity_qualified=True)):
+            broken = json.loads(json.dumps(receipt))
+            mutate(broken)
+            with self.assertRaises(runner.CampaignError):
+                runner._validate_service_replay(broken, episode)
 
     def test_separate_raw_campaign_allows_mixed_thermal_conditions(self):
         episodes = [

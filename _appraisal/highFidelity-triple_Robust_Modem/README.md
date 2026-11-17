@@ -19,6 +19,22 @@ Failure guides, source and campaign definitions are versioned; links into
 ignored `local-evidence/` refer to retained local receipts, which a fresh
 checkout does not include.
 
+The latest ordinary-receiver work is recorded in the
+[17 November continuation](../../docs/validation.md#persistent-channel-and-calendar-age-follow-through--17-november-2026)
+and its [preceding weak-signal repairs](../../docs/validation.md#ordinary-reception-with-conservative-settings--17-november-2026).
+It uses ordinary bit decisions and physical quiet completion; the dedicated
+repeated-bit product feature is retired. The appraisal's historical
+`gui-repeated-bit` mode generates separately addressed ordinary attempts.
+Its bounded selected-attempt runner supports every third public slot through
+48, advances the complete native channel from zero, and scores all intervening
+guard windows through a guaranteed clean quiet pair. Selected sealed-spool
+service includes construction and full-spool verification but uses only the
+unique selected input span as its denominator; it is not sustained backlog
+qualification. `--repeat-direct-power` changes only the normalized two-ray
+power allocation for a synthetic path-ordering contrast. Default generation
+remains unchanged; the [channel guide](../../docs/channel-models.md) states
+the frequency and telemetry meanings.
+
 The current continuation demonstrates **protected complete-message recovery**
 through coupled magnetic polarization, oblique reflection and diffraction with
 actual clock errors and a continuing interferer: the baseline cannot complete

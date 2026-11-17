@@ -145,12 +145,30 @@ including Helper, silence, delayed tails and erased observations. The waveform
 generator and real playback remain clean. **Simulation = No** bypasses synthetic
 effects in both duplex states; **Live/Duplex** changes capture ownership.
 
-This two-path family does not cover direct-path disappearance, arbitrary
+The default two-path realization does not cover direct-path disappearance, arbitrary
 diffuse scattering, all independent carrier fades or arbitrary variation rates.
 Other native path laws remain available as independent stresses. Simulation
 support and a receiver parameter are not themselves a reception guarantee.
 See [research reconciliation](triad-stochastic.md#nonstationary-channel-research-reconciliation)
 for the distinctions and contrary findings that guide qualification.
+
+The native bounded-ray simulator also supports an explicit fixed direct-power
+fraction for independent qualification. It replaces only the normalized ray
+amplitudes with `sqrt(p)` and `sqrt(1-p)`, retaining the same delay, integrated
+common/relative frequency, selective filtering, noise and advancing random
+state. It is available only with the bounded-ray law; the default GUI law and
+its arithmetic remain unchanged. Reports identify fixed direct/delayed powers
+and actual echo/direct amplitude ratio, with a null ratio at zero direct
+power. Both endpoint histories and tails remain present in the simulation's
+support accounting. Bounded-ray reports also record simultaneous common-plus-
+relative Doppler extrema in physical Hz over the full processed history,
+including preroll and silence. These exclude static Doppler, oscillator,
+diurnal and selective terms and precede receiver-clock scaling; a zero-power
+ray still has a reported trajectory. They are not selected-bit or measured
+received-carrier extrema. This enables delayed-dominant or missing-direct stress
+without claiming that a selected power ratio, seeded delay or motion law is a
+calibrated channel replay. See the
+[measured motivation and limits](../_appraisal/highFidelity-triple_Robust_Modem/research-reconciliation.md#persistent-path-ordering-clock-age-and-noise).
 
 ### Distinguish HF stress profiles
 

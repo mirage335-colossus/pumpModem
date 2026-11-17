@@ -1,8 +1,10 @@
 #include "datapump/triad_receiver.hpp"
+#include "datapump/robust_profile.hpp"
 #include "datapump/triad_stream.hpp"
 #include "datapump/triad_stream_receiver.hpp"
 #include "../src/search_fft.hpp"
 #include "../src/triad_receiver_coarse.hpp"
+#include "../src/triad_receiver_bulk.hpp"
 #include "../src/triad_receiver_driver.hpp"
 #include "../src/triad_receiver_executor.hpp"
 #include "../src/triad_receiver_fine.hpp"
@@ -722,6 +724,212 @@ void large_aperture_supplemental_plans() {
     check(longer.workspace_bytes && longer.raw_rows > former_raw_limit && longer.ridge_segments > 64 &&
           longer.rows <= 131'072,
           "long drift must shorten the proposal segments to retain coherent curvature coverage");
+}
+
+void long_calm_drift_owner_lease(bool active = true, std::uint8_t bit = 0, bool allocation = false,
+                                bool cache_only = false) {
+    using namespace receiver_detail;
+    constexpr double actual_cn0 = -2.3044892137827393;
+    const auto prepare = [&](double target) {
+        live::Settings settings;
+        settings.simulation = true;
+        settings.device = "native-long-calm-regression";
+        settings.calendar = live::Calendar{1793404800, 0};
+        settings.transfer.key = Crypto::amateur();
+        settings.transfer.fec = FecMode::off;
+        settings.transfer.content_limit = 16;
+        settings.transfer.modem.sample_rate = 1920;
+        settings.transfer.modem.carrier_hz = 500;
+        settings.transfer.modem.bandwidth_hz = 120;
+        settings.transfer.modem.oscillator_search = modem::OscillatorSearchConfig{
+            .lf = {100, .5}, .rf = {1, .05}, .rf_shift_hz = 3.4e6, .margin = 3,
+            .reference = modem::OscillatorReference::independent_audio,
+            .sideband = modem::OscillatorSideband::upper};
+        settings.transfer.clock_sync = clock_sync::Policy{.001, .001, 0};
+        settings.transfer.audio_timing_error_seconds = 0;
+        settings.added_symbols = 1;
+        settings.spread_preset = "hf-worst";
+        settings.selective_perturbation = "each-65";
+        settings.target_cn0_db_hz = target;
+        settings.tx_dbm = 30;
+        settings.noise_dbm_hz = -170;
+        settings.path_loss_db = 200 - actual_cn0;
+        settings.helper.power_w = 0;
+        settings.helper.callsign = "TEST";
+        settings.helper.timecode = true;
+        live::validate_settings(settings);
+        return live::detail::prepare_profile(settings, *settings.calendar, {}, {.simulation_seed = 62014});
+    };
+    const auto profile = prepare(-3);
+    const auto longer = prepare(-9);
+    constexpr unsigned workers = 24;
+    constexpr std::size_t memory_limit = 6ULL * 1024 * 1024 * 1024;
+    for (const auto* current : {&profile, &longer}) {
+        const auto& config = current->receiver;
+        const auto slot = make_receiver_slot_plan(current->waveform, config, 12);
+        const auto preferred = drift_plan(config, slot, workers);
+        check(!preferred.workspace_bytes &&
+              preferred.status == "drift_public_bandwidth_exceeds_reduced_proposal_limit",
+              "long broad fixture no longer exercises the preferred proposal bandwidth boundary");
+        const auto lease = receiver_slot_workspace(config, slot, workers);
+        const auto overlap = receiver_slot_overlap_workspace(config, slot, workers);
+        const auto expected = current == &profile ? 693098478ULL : 2669814011ULL;
+        check(lease == expected && overlap == lease,
+              "optional long drift must preserve the original complete full-worker owner lease");
+        const auto frozen = receiver_drift_admission(config, slot, workers);
+        const auto overlapping = receiver_drift_admission(config, slot, workers, true);
+        check(frozen.ordinary.workspace_bytes && frozen.line.workspace_bytes &&
+              frozen.ordinary.nfft == overlapping.ordinary.nfft &&
+              frozen.line.nfft == overlapping.line.nfft && frozen.workspace_bytes == lease &&
+              frozen.overlap_workspace_bytes == overlap,
+              "quote and execution orchestration must freeze the same admitted long-drift plans");
+        const auto rows = static_cast<std::size_t>(slot.stop_sample - slot.first_sample);
+        const auto allowance = lease - rows * (sizeof(Complex) + sizeof(std::uint8_t)) - 64 * 1024;
+        const auto expanded = drift_plan(config, slot, workers, false, allowance);
+        const auto line = drift_plan(config, slot, workers, true, allowance);
+        check(expanded.workspace_bytes && line.workspace_bytes &&
+              expanded.workspace_bytes <= allowance && line.workspace_bytes <= allowance &&
+              expanded.nfft == (current == &profile ? 524288ULL : 2097152ULL) &&
+              expanded.sample_stride == 2 && expanded.slope_budget >= 3,
+              "the long drift proposal must retain bandwidth and a fair zero/both-bit slope bank");
+        const auto ordinary_only = drift_plan(config, slot, workers, false, expanded.workspace_bytes);
+        const auto line_narrower = drift_plan(config, slot, workers, true, expanded.workspace_bytes);
+        check(ordinary_only.workspace_bytes && line_narrower.workspace_bytes &&
+              line_narrower.stage_workers < ordinary_only.stage_workers &&
+              line_narrower.workspace_bytes <= expanded.workspace_bytes,
+              "the line shape must choose its own largest fitting stage width");
+        const auto rejected = drift_plan(config, slot, workers, false, 1);
+        check(!rejected.workspace_bytes && rejected.status == "drift_extension_exceeds_preserved_owner_lease" &&
+              receiver_slot_workspace(config, slot, workers) == lease,
+              "an optional drift extension beyond its preserved allowance must not invalidate baseline work");
+    }
+    auto narrow_clock = profile.receiver;
+    narrow_clock.clock_bound_ppm = narrow_clock.endpoint_clock_bound_ppm = 0;
+    auto narrow_options = profile.waveform.config();
+    narrow_options.clock_bound_ppm = narrow_options.audio_pair_ppm = 0;
+    const PublicProfile narrow_profile(narrow_options, profile.key);
+    const auto narrow_slot = make_receiver_slot_plan(narrow_profile, narrow_clock, 12);
+    const auto smaller = receiver_drift_admission(narrow_clock, narrow_slot, 8);
+    const auto larger = receiver_drift_admission(narrow_clock, narrow_slot, workers);
+    // This reproduces the formerly omitted model at an eight-lane owner
+    // shape, which automatic W24 can also admit as part of a balanced group.
+    check(smaller.workspace_bytes == 276033982ULL && larger.workspace_bytes == 453996094ULL &&
+          smaller.ordinary.workspace_bytes && smaller.line.workspace_bytes &&
+          smaller.ordinary.stage_workers > 0 && smaller.ordinary.stage_workers < 8 &&
+          smaller.line.stage_workers > 0 && smaller.line.stage_workers < 8 &&
+          larger.ordinary.stage_workers == 8 && larger.line.stage_workers == 8 &&
+          smaller.ordinary.nfft == larger.ordinary.nfft &&
+          smaller.ordinary.slope_budget == larger.ordinary.slope_budget &&
+          smaller.ordinary.frequency_radius == larger.ordinary.frequency_radius &&
+          smaller.ordinary.slope_radius == larger.ordinary.slope_radius &&
+          receiver_slot_workspace(narrow_clock, narrow_slot, 8) == smaller.workspace_bytes &&
+          receiver_drift_admission(narrow_clock, narrow_slot, 8, true).ordinary.stage_workers == smaller.ordinary.stage_workers,
+          "a smaller stage shape must preserve all drift hypotheses inside the original owner lease");
+    std::cerr << "drift stage widths W8=" << smaller.ordinary.stage_workers << '/' << smaller.line.stage_workers
+        << " W24=" << larger.ordinary.stage_workers << '/' << larger.line.stage_workers << '\n';
+    // Exercise the actual complete-slot planner's optional exception
+    // boundary through its supported backend quote interface, without DSP.
+    class PlanningErrorBackend final : public ReceiverBulkBackend {
+    public:
+        PlanningErrorBackend(unsigned fail_at, bool allocation = false, bool cancellation = false)
+            : fail_at_(fail_at), allocation_(allocation), cancellation_(cancellation) {}
+        std::unique_ptr<FineBulk> make_fine(double, double) override { return {}; }
+        std::unique_ptr<CoarseBulk> make_coarse(double, double) override { return {}; }
+        std::size_t fine_host_bytes(std::size_t, std::size_t) const override {
+            if (++calls_ == fail_at_) {
+                if (allocation_) throw std::bad_alloc{};
+                throw Error(cancellation_ ? "Robust reception cancelled" : "mapped basis workspace overflow");
+            }
+            return 0;
+        }
+        std::size_t coarse_host_bytes(std::size_t, std::size_t, std::size_t) const override { return 0; }
+        BulkReceipt receipt() const override { return {}; }
+    private:
+        unsigned fail_at_;
+        bool allocation_, cancellation_;
+        mutable unsigned calls_ = 0;
+    };
+    auto backend_config = profile.receiver;
+    backend_config.bulk_backend = std::make_shared<PlanningErrorBackend>(0);
+    const auto backend_lease = receiver_slot_workspace(backend_config,
+        make_receiver_slot_plan(profile.waveform, backend_config, 12), workers);
+    const auto backend_slot = make_receiver_slot_plan(profile.waveform, backend_config, 12);
+    backend_config.bulk_backend = std::make_shared<PlanningErrorBackend>(2);
+    const auto optional_error = receiver_drift_admission(backend_config, backend_slot, workers);
+    check(!optional_error.ordinary.workspace_bytes &&
+          optional_error.ordinary.status == "drift_extension_shape_unavailable" &&
+          optional_error.workspace_bytes == backend_lease,
+          "an optional backend extent error must retain the mandatory baseline lease");
+    backend_config.bulk_backend = std::make_shared<PlanningErrorBackend>(1);
+    rejects<Error>([&] { receiver_drift_admission(backend_config, backend_slot, workers); },
+        "mandatory baseline planning errors must propagate");
+    backend_config.bulk_backend = std::make_shared<PlanningErrorBackend>(2, true);
+    rejects<std::bad_alloc>([&] { receiver_drift_admission(backend_config, backend_slot, workers); },
+        "allocation failure must not be reclassified as an optional unsupported shape");
+    backend_config.bulk_backend = std::make_shared<PlanningErrorBackend>(2, false, true);
+    rejects<Error>([&] { receiver_drift_admission(backend_config, backend_slot, workers); },
+        "cancellation must not be reclassified as an optional unsupported shape");
+    if (!active) return;
+    const auto& config = profile.receiver;
+    const auto slot = make_receiver_slot_plan(profile.waveform, config, 12);
+    const auto rows = static_cast<std::size_t>(slot.stop_sample - slot.first_sample);
+    check(rows < 400000 && std::abs(profile.waveform.geometry().bit_seconds - 176.8) < 1e-10,
+          "long calm integration fixture exceeds its declared geometry");
+    std::vector<Complex> iq(rows);
+    PatternSource source(slot.format, profile.key, bit);
+    std::mt19937_64 random(83041);
+    std::normal_distribution<double> normal(0, std::sqrt(config.noise_variance / 2));
+    for (std::size_t i = 0; i < rows; ++i) {
+        const auto t = static_cast<long double>(slot.first_sample + i) / config.sample_rate_hz -
+            profile.waveform.config().capture_lead_seconds;
+        const auto at = (t - slot.source_start_seconds + .0005L - config.spread_delay_seconds) * config.sample_rate_hz;
+        const auto phase = std::polar(1., 2 * std::numbers::pi *
+            static_cast<double>(std::remainder(-180.L * t, 1.L)));
+        iq[i] = config.data_basis_gain * source.sample_at(at) * phase + Complex{normal(random), normal(random)};
+    }
+    if (bit == 0) {
+        std::array<FineCoordinate, 9> timings;
+        for (std::size_t i = 0; i < timings.size(); ++i)
+            timings[i] = {static_cast<std::int64_t>(i) - 4, -.0005, 0, 0};
+        const auto plan = receiver_drift_admission(config, slot, workers).ordinary;
+        ReceiverExecutor executor(workers);
+        ReceiverSlotScore cached, recomputed;
+        score_drift_fine(config, slot, profile.key, plan, iq, timings, {}, workers, cached, {}, executor);
+        score_drift_fine(config, slot, profile.key, plan, iq, timings, {}, workers, recomputed, {}, executor,
+            nullptr, DriftZeroSlopeEvaluation::recompute);
+        const auto difference = std::max(std::abs(cached.drift_bit_evidence[0] - recomputed.drift_bit_evidence[0]),
+            std::abs(cached.drift_bit_evidence[1] - recomputed.drift_bit_evidence[1]));
+        check(difference < 1e-9 && cached.drift_timing_atoms == recomputed.drift_timing_atoms &&
+              cached.drift_slopes == recomputed.drift_slopes && cached.drift_coherent_timing_fft_rows > 0,
+              "cached zero-slope frontiers must preserve recomputed native likelihood and selected public atoms");
+        std::cerr << "cached/recomputed drift evidence max difference=" << difference << '\n';
+    }
+    if (cache_only) return;
+    const auto score = score_receiver_slot(config, slot, profile.key, iq, {}, workers, memory_limit);
+    check(score.complete && score.all_valid && score.zero_h0_verified && score.bit == bit &&
+          score.decision == SlotDecision::data && score.operational_passes_conditional_bound &&
+          score.drift_relative_doppler_models == 2 && score.drift_slopes >= 6 &&
+          score.drift_timing_atoms >= 16 && score.drift_timing_atoms <= 20 &&
+          score.drift_coherent_timing_fft_rows > 0 && score.drift_stage_workers == 8 &&
+          score.drift_status == "linear_drift_ridge_proposals_within_preserved_owner_lease" &&
+          score.drift_line_status == "eligible_not_executed",
+          "ordinary reception lost a long calm delayed ray under conservative GUI bounds");
+    if (allocation) {
+        check(narrow_slot.first_sample >= slot.first_sample && narrow_slot.stop_sample <= slot.stop_sample,
+              "the zero-clock diagnostic aperture must be a subspan of the same physical input");
+        const auto cropped = std::span<const Complex>(iq).subspan(narrow_slot.first_sample - slot.first_sample,
+            narrow_slot.stop_sample - narrow_slot.first_sample);
+        const auto eight = score_receiver_slot(narrow_clock, narrow_slot, profile.key, cropped, {}, 8, memory_limit);
+        const auto full = score_receiver_slot(narrow_clock, narrow_slot, profile.key, cropped, {}, workers, memory_limit);
+        check(eight.decision == SlotDecision::data && eight.bit == bit &&
+              full.decision == SlotDecision::data && full.bit == bit &&
+              eight.drift_stage_workers == smaller.ordinary.stage_workers &&
+              full.drift_stage_workers == larger.ordinary.stage_workers &&
+              eight.workspace_peak_bytes == smaller.workspace_bytes && full.workspace_peak_bytes == larger.workspace_bytes &&
+              std::abs(eight.operational_bit_evidence[0] - full.operational_bit_evidence[0]) < 1e-9 &&
+              std::abs(eight.operational_bit_evidence[1] - full.operational_bit_evidence[1]) < 1e-9,
+              "different admitted stage widths must preserve ordinary decisions, likelihoods and owner leases");
+    }
 }
 
 void broad_frequency_timing_plan() {
@@ -1650,6 +1858,85 @@ void native_precision_near_decision_sides() {
         }
     }
 }
+void signed_relative_doppler_endpoints() {
+    using namespace receiver_detail;
+    const std::array first{std::log(4.), std::log(2.)};
+    const std::array second{std::log(8.), std::log(3.)};
+    const auto same = mix_drift_sign_evidence(first, 1, second, 1);
+    const auto unequal = mix_drift_sign_evidence(first, 2, second, 5);
+    const auto missing = mix_drift_sign_evidence(first, 1, {-INFINITY, -INFINITY}, 0);
+    check(std::abs(std::exp(same[0]) * 2 - 6.) < 1e-12 &&
+          std::abs(std::exp(unequal[1]) * 7 - 9.5) < 1e-12 &&
+          std::abs(std::exp(missing[0]) - 2.) < 1e-12,
+          "signed drift must retain half the prior with identical, unequal or absent timing selections");
+
+    PublicProfileConfig settings;
+    settings.format.sample_rate = 1920;
+    settings.format.inner_rate_hz = 120;
+    settings.format.added_symbols = 1;
+    settings.format.bit_seconds = 2;
+    settings.format.epoch = 1793404800;
+    settings.format.encrypt = true;
+    settings.data_if_hz = 500;
+    settings.spread_delay_ms = 21;
+    settings.spread_doppler_hz = 90;
+    settings.cfo_bound_hz = 100.3505;
+    settings.capture_lead_seconds = .25;
+    const PublicProfile profile(settings);
+    ReceiverConfig config;
+    config.sample_rate_hz = 1920;
+    config.data_if_hz = 500;
+    config.frequency_bound_hz = 10.3505;
+    config.spread_delay_seconds = .021;
+    config.spread_doppler_hz = 90;
+    config.time_varying_channel = true;
+    config.time_varying_atmospheric_hz = 90;
+    config.time_varying_common_doppler_hz = 90;
+    config.noise_variance = 192;
+    const auto key = Crypto::amateur();
+    config.data_basis_gain = 1 / std::sqrt(data_power_reference(profile.config().format, key).mean_norm);
+    const auto slot = make_receiver_slot_plan(profile, config, 0);
+    const auto rows = static_cast<std::size_t>(slot.stop_sample - slot.first_sample);
+    check(rows < 25'000, "signed Doppler endpoint fixture exceeds its finite sample budget");
+    std::vector<Complex> iq(rows), noise(rows);
+    std::mt19937_64 random(83041);
+    std::normal_distribution<double> normal(0, std::sqrt(config.noise_variance / 2));
+    for (auto& value : noise) value = {normal(random), normal(random)};
+    const auto lease = receiver_slot_workspace(config, slot, 2);
+    for (auto bit : {std::uint8_t{0}, std::uint8_t{1}}) {
+        PatternSource source(slot.format, key, bit);
+        for (auto sign : {-1, 1}) {
+            for (std::size_t i = 0; i < rows; ++i) {
+                const auto t = static_cast<long double>(i) / config.sample_rate_hz - slot.window_capture_lead_seconds;
+                const auto at = (t - slot.source_start_seconds - config.spread_delay_seconds) * config.sample_rate_hz;
+                const auto phase = std::polar(1., 2 * std::numbers::pi *
+                    static_cast<double>(std::remainder(sign * 180.L * t, 1.L)));
+                iq[i] = config.data_basis_gain * source.sample_at(at) * phase + noise[i];
+            }
+            const auto received = score_receiver_slot(config, slot, key, iq, {}, 2, lease);
+            check(received.complete && received.all_valid && received.zero_h0_verified &&
+                  received.decision == SlotDecision::data && received.bit == bit &&
+                  received.nominal_independent_gain_frequency_states > 65 &&
+                  received.nominal_independent_gain_frequency_status == "common_plus_relative_doppler" &&
+                  received.drift_relative_doppler_models == 2,
+                  "signed relative Doppler support lost an ordinary endpoint bit or its full frequency model");
+        }
+    }
+    const auto quiet = score_receiver_slot(config, slot, key, noise, {}, 2, lease);
+    check(quiet.complete && quiet.all_valid && quiet.zero_h0_verified && quiet.decision == SlotDecision::quiet &&
+          !quiet.bit && quiet.drift_relative_doppler_models == 2,
+          "signed Doppler likelihood admitted genuine noise");
+    auto zero = config;
+    zero.spread_doppler_hz = 0;
+    const auto plan = drift_plan(zero, slot, 2);
+    const std::array coordinate{FineCoordinate{0, 0, 0, 0}};
+    ReceiverSlotScore single;
+    ReceiverExecutor executor(2);
+    score_drift_fine(zero, slot, key, plan, noise, coordinate, {}, 2, single, {}, executor);
+    check(single.drift_relative_doppler_models == 1 && single.drift_timing_atoms == 1,
+          "zero relative Doppler must retain the original single drift model and timing mass");
+}
+
 void signed_gain_timing_and_exact_admission() {
     using namespace receiver_detail;
     PublicProfileConfig profile_config;
@@ -1732,8 +2019,12 @@ void signed_gain_timing_and_exact_admission() {
           timing.gain_score_row_bound == signed_plan.gain_score_row_bound &&
           timing.gain_workspace_bytes == signed_plan.gain_workspace_bytes &&
           timing.gain_fft_row_stages <= timing.gain_fft_stage_bound &&
-          timing.gain_score_rows == 2 * timing.gain_frequency_points * timing.lag_count *
-              (timing.gain_blocks + timing.gain_direct_blocks) &&
+          timing.gain_fixed_frequency_points == signed_plan.gain_fixed_frequency_points &&
+          timing.gain_frequency_points == timing.gain_fixed_frequency_points &&
+          timing.gain_frequency_status == "common_frequency_only" &&
+          timing.gain_score_rows == 2 * timing.lag_count *
+              (timing.gain_fixed_frequency_points * timing.gain_blocks +
+               timing.gain_frequency_points * timing.gain_direct_blocks) &&
           coarse.work.signed_gain_proposal.operations.fft_row_stages == timing.gain_fft_row_stages,
           "signed rank must charge real work across both fixed and full-aperture timing families");
     const auto strongest = timing.gain_proposals[0].coordinate;
@@ -1757,6 +2048,54 @@ void signed_gain_timing_and_exact_admission() {
           result.signed_lag_gain_proposal_lags == timing.gain_proposal_lags &&
           result.signed_lag_gain_basis_rows == 4 * result.signed_lag_gain_candidates * iq.size(),
           "the ordinary aged-clock receiver must score the nominated family under both bit hypotheses");
+
+    // At later calendar ages the short columns span only a fraction of the
+    // lag FFT. Exercise two widths and both clock signs without rendering
+    // a full calendar prefix. The diagnostic checks every tiled lag and
+    // frequency for one block against an independent finite direct sum.
+    for (auto bit : {std::uint8_t{0}, std::uint8_t{1}}) {
+        auto aged_format = profile_config;
+        if (bit) aged_format.format.added_symbols = 5;
+        auto wide_config = config;
+        wide_config.spread_doppler_hz = 90;
+        const PublicProfile aged_profile(aged_format);
+        const auto aged = make_receiver_slot_plan(aged_profile, wide_config, bit ? 192 : 128);
+        const auto plan = coarse_midpoint_timing_support(wide_config, aged, 2);
+        const auto stages_per_fft = std::uint64_t{plan.gain_fft_rows} * std::countr_zero(plan.gain_fft_rows);
+        const auto old_bound = stages_per_fft * (plan.gain_sampled_blocks *
+            (5 + 2 * plan.gain_fixed_frequency_points + 2 * plan.gain_frequency_points) +
+            (plan.gain_available_blocks - plan.gain_sampled_blocks) * (3 + 2 * plan.gain_frequency_points));
+        check(plan.available && plan.gain_sampled_blocks < plan.gain_available_blocks &&
+              plan.gain_frequency_points > plan.gain_fixed_frequency_points &&
+              plan.gain_frequency_status == "common_plus_relative_doppler" &&
+              plan.gain_fft_stage_bound < old_bound && aged.stop_sample - aged.first_sample < 40'000,
+              "aged signed-rank test must quote a bounded tiled transform reduction");
+        const auto rate = 1 + (bit ? 75e-6L : -100e-6L);
+        PatternSource aged_source(aged.format, key, bit);
+        std::vector<Complex> aged_iq(aged.stop_sample - aged.first_sample);
+        for (std::size_t i = 0; i < aged_iq.size(); ++i) {
+            const auto t = i / static_cast<long double>(format.sample_rate) - aged.window_capture_lead_seconds;
+            const auto position = (t * rate - aged.source_start_seconds) * format.sample_rate;
+            const auto delayed = position - config.spread_delay_seconds * rate * format.sample_rate;
+            aged_iq[i] = aged_source.sample_at(position) +
+                std::polar(.5, .4 + .08 * std::sin(.013 * i)) * aged_source.sample_at(delayed);
+        }
+        const auto aged_quote = coarse_workspace(wide_config, aged, 2, {}, MidpointTimingEvaluation::verify);
+        const auto tiled = score_coarse(wide_config, aged, key, aged_iq, intervals, 2, aged_quote,
+                                        {}, nullptr, MidpointTimingEvaluation::verify);
+        check(tiled.midpoint_timing.has_value(), "aged tiled signed gain timing did not execute");
+        const auto& rank = *tiled.midpoint_timing;
+        const auto score_extent = 2 * rank.lag_count * rank.gain_frequency_points;
+        check(rank.gain_tiled_blocks > 0 && rank.gain_tiled_blocks + rank.gain_blocks <= rank.gain_direct_blocks &&
+              rank.gain_tiled_verified_correlations == score_extent && rank.gain_proposal_count > 0 &&
+              rank.gain_score_rows == 2 * rank.lag_count *
+                  (rank.gain_fixed_frequency_points * rank.gain_blocks +
+                   rank.gain_frequency_points * rank.gain_direct_blocks) &&
+              rank.gain_fft_stage_bound == plan.gain_fft_stage_bound &&
+              rank.gain_fft_row_stages <= rank.gain_fft_stage_bound &&
+              rank.gain_workspace_bytes == plan.gain_workspace_bytes,
+              "tiled signed gain timing must verify every lag/frequency on both bits and charge full work");
+    }
 }
 }
 
@@ -1777,6 +2116,11 @@ int main(int argc, char** argv) {
             else if (part == "late-helper") late_helper_timing_recovery(false);
             else if (part == "late-helper-delay") late_helper_timing_recovery(true);
             else if (part == "signed-gain-timing") signed_gain_timing_and_exact_admission();
+            else if (part == "signed-doppler") signed_relative_doppler_endpoints();
+            else if (part == "long-calm") long_calm_drift_owner_lease();
+            else if (part == "long-calm-polarity") long_calm_drift_owner_lease(true, 1, true);
+            else if (part == "long-calm-plans") long_calm_drift_owner_lease(false);
+            else if (part == "long-calm-cache") long_calm_drift_owner_lease(true, 0, false, true);
             else if (part == "calendar-admission") {
                 calendar_opportunity_bound();
                 calendar_line_and_separation();

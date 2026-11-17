@@ -218,17 +218,25 @@ struct DriftPlan {
     std::size_t first = 0, raw_rows = 0, rows = 0, sample_stride = 1, nfft = 0;
     std::size_t slope_budget = 0, workspace_bytes = 0, projection_blocks = 0, ridge_segments = 0;
     std::size_t slow_ridge_segments = 0;
+    unsigned stage_workers = 0;
     std::int64_t slope_radius = 0;
     std::int64_t frequency_radius = 0;
     double frequency_step = 0, slope_step = 0, slope_reference_seconds = 0;
     bool project_data = false;
     std::string_view status;
 };
-DriftPlan drift_plan(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers, bool project_line = false);
+// A positive allowance permits a bandwidth-faithful larger proposal only
+// inside a stage envelope already admitted by the complete receiver.
+DriftPlan drift_plan(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers, bool project_line = false,
+                     std::size_t preserved_workspace_bytes = 0);
+std::array<double, 2> mix_drift_sign_evidence(const std::array<double, 2>& first, std::size_t first_atoms,
+                                           const std::array<double, 2>& second, std::size_t second_atoms);
+enum class DriftZeroSlopeEvaluation { reuse, recompute };
 void score_drift_fine(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&, const DriftPlan&,
                        std::span<const Complex>, std::span<const FineCoordinate>,
                        std::span<const FineCoordinate> epoch_timing, unsigned workers,
-                       ReceiverSlotScore&, std::stop_token, ReceiverExecutor&, const LineAtom* = nullptr);
+                       ReceiverSlotScore&, std::stop_token, ReceiverExecutor&, const LineAtom* = nullptr,
+                       DriftZeroSlopeEvaluation = DriftZeroSlopeEvaluation::reuse);
 void classify_fine_slot(ReceiverSlotScore&, const AdmissionGrid&);
 void classify_varying_slot(ReceiverSlotScore&, const AdmissionGrid&, const AdmissionGrid*,
                            const DriftPlan*, double minimum_separation,

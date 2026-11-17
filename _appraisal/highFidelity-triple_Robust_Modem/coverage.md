@@ -65,6 +65,55 @@ also distinguish physical outage/estimation cost from avoidable receiver loss.
 
 ## Applicability after the admission and carrier-key changes
 
+The [17 November persistent-channel follow-through](../../docs/validation.md#persistent-channel-and-calendar-age-follow-through--17-november-2026)
+adds current evidence for mechanisms that the earlier duration tests did not
+cover. A continuously rendered 144-minute history receives the selected
+slot-48 bit for both values and preserves every intervening guard and quiet
+decision. Only the selected windows are scored; this is neither 17 successful
+attempts nor a natural outage distribution. Exact overlap-save correlation
+reduces redundant old-calendar timing work without removing public hypotheses.
+
+A new constant-frequency counterexample exposes asymmetric combined Doppler
+coverage: an equal-energy +180 Hz delayed ray succeeds while −180 Hz is missed.
+Wider common-plus-relative support alone does not recover the weak short bit.
+Including both relative-Doppler signs in the existing coherent model recovers
+it on identical samples, and nine complete ordinary sign/power/intermediate
+checks pass with real quiet successors. Four separate weak changing-channel
+tests pass for both bit values with a delayed ray 5.18 dB stronger and with
+99% of ray power delayed. These are synthetic mechanism tests motivated by
+measurements, not measured complex-channel replays. Their allocation omission
+and complete-service costs are retained in validation.
+
+The noise investigation finds a different issue: current wanted bits arrive,
+but the constructed correlated/impulsive background can prevent physical quiet
+completion. The existing live-noise-reference scaling remedies the original
+wanted and noise-only captures with unchanged samples. Its fixture-derived
+covariance envelope is neither a universal setting nor a Gaussian-tail
+guarantee for impulsive noise; automatic calibration and actual-device noise
+qualification are not established by those scorer comparisons.
+
+The [long coherent observation investigation](../../docs/validation.md#long-coherent-observations-and-the-fft-planning-boundary)
+also finds a preferred-FFT-size exclusion: a long calm bit is missed even with
+essentially the same energy/noise as a successful short bit. A faithful larger
+transform fits within the existing complete workspace quote and exposes strong
+same-IQ coherent evidence. Further matched checks expose a usable timing
+candidate discarded by the preliminary ranking and an eight-worker owner
+dropping a model that a 24-worker owner receives. The corrections preserve all
+old timing winners, add bounded coherent nominees, and fit the new stage's
+parallel width within the unchanged complete owner lease.
+
+On final source `718f91c5…`, both original long bit values now arrive, and the
+same cropped bit zero arrives with eight or 24 workers at identical evidence.
+One shared Gaussian quiet window legitimately exceeds the unchanged 0.001
+upper-tail absence threshold. Continuing through two more genuine quiet slots
+closes both transmissions physically while preserving two erasures; this is
+**not** clean raw-message completion. Separate final-source severe and
+99%-delayed cases preserve correct bits and clean quiet completion. Complete
+cold service rises to 40.620 / 41.491 seconds for about 539.6 seconds of input,
+with approximately 2.56 GB reserved under 6 GiB and W=24. These are finite
+service checks, not a sustained-capacity qualification. The mechanisms found
+here are avoidable implementation losses, not established atmospheric limits.
+
 The latest [ordinary-reception follow-through](../../docs/validation.md#ordinary-reception-with-conservative-settings--17-november-2026)
 tests fixed receiver gain/noise and HF Worst / Each 65% bounds while actual
 signal alone rises by 30 dB. Both bit values pass the sampled short and
@@ -81,6 +130,15 @@ opportunities, which contributes to bit-one admission. The source/field/start
 and noise seeds are controlled, but later channel evolution enters the longer
 interval. This is an ordinary first-attempt recovery bracket, not a new five-
 retry campaign or a natural availability probability.
+The [final-source matched preservation](../../docs/validation.md#matched-marginal-two-hop-preservation-on-final-source)
+rechecks the more marginal 266.8-second bit one on native `718f91c5…`.
+Both the physical table and all received samples match exactly; DATA1 and
+both genuine QUIET successors pass with no erasures and physical raw-message
+completion. Evidence remains 15.097510 against threshold 14.981781, differing
+from the earlier result by only 3.08e−11. Drift executes on all three windows,
+so this qualifies the changed receiver on that particular weak physical input.
+The original bit-zero duration result and other physical histories retain
+their earlier source scope. Neither result supplies a natural outage rate.
 
 The same investigation removes a 65,536-frequency admission cliff and enables
 the existing CPU chirp-Z computation across multiple rays and arrivals with

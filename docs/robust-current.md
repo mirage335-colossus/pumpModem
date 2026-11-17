@@ -223,6 +223,18 @@ floor in dBFS/Hz; link-budget noise in dBm/Hz is a different quantity. Capture
 uses actual provider timestamp information and its uncertainty. A software
 callback timestamp is not a substitute for sample timing.
 
+The live noise declaration is a receiver noise-model reference, not merely an
+average measured power. At fixed Target SNR it scales noise variance and the
+reference DATA amplitude together; actual received strength need not match
+that reference. Correlated noise can require a higher spectral/covariance
+envelope than its mean power suggests. The bounded atmospheric-noise replay
+in the [persistent-channel follow-through](validation.md#persistent-channel-and-calendar-age-follow-through--17-november-2026)
+recovers physical completion with the existing control's coupled scaling on
+unchanged IQ. Its fixture-derived adjustment is not a universal setting or an
+automatic calibration method, and does not validate Gaussian tail guarantees
+for arbitrary impulsive noise. Keep device, gain and bandwidth calibration
+separate from a propagation sensitivity claim.
+
 The public calendar advances through DATA, quiet and scheduled waits; message
 completion or cancellation does not reset the waveform ordinal. Two fully
 scored quiet slots after DATA establish physical completion. Interior missing
@@ -365,11 +377,27 @@ arithmetic, worker bounds and cancellation apply before execution; the old
 absolute sampling cap does not truncate the new statistic. Complete service
 and clock-age scaling remain separate qualification requirements. See the
 [matched acquisition investigation](validation.md#ordinary-duration-and-weak-channel-follow-through).
+Unsampled direct-rank blocks use exact overlap-save correlation when the bounded
+shape estimate predicts at least a 15% FFT-stage reduction. Short FFT tiles
+retain the complete template overlap and every public lag, including duplicate
+rounded offsets; chunk phase cancels
+in the squared correlation. Input transforms are shared across bit/frequency
+templates. Sampled fixed-rank blocks retain their original transforms and sum
+order. The whole-span transform remains the fallback when a block does not
+meet the tile bounds. Lag-order scratch is charged before admission. This changes
+correlation work, not the search, prior or likelihood; selected-window baseline
+costs and candidate qualification are tracked in the
+[calendar-age follow-through](validation.md#persistent-channel-and-calendar-age-follow-through--17-november-2026).
 The same projected correlations and Gram matrices feed two equally mixed
 components over the full configured frequency range: one integrates a common
 frequency held fixed across the whole aperture, and the other uses a bounded
-Markov track of changing common frequency. Both use at most 65 frequency
-states. This alternative gets
+Markov track of changing common frequency. Their independent-gain lattice now
+extends the original oscillator-plus-common range by the absolute relative
+Doppler allowance, preserving inner nodes and spacing. State vectors and work
+are checked and charged; this lane may exceed 65 states. Original common-
+frequency families keep their existing 65-state plans. The sampled fixed rank
+retains its original range, while the full direct proposer uses the wider ray
+envelope; receipts report both frequency counts. This alternative gets
 one eighth of the short-family mass and the existing short model keeps seven
 eighths at the whole-slot evidence combination, not block by block. That
 retention bounds only the old branch's log-e reduction by
@@ -381,7 +409,12 @@ unavailable, the alternative falls back to its central-frequency likelihood;
 when `nominal_independent_gain_candidates > 0`, a zero
 `nominal_independent_gain_frequency_states` receipt makes that narrower scope
 explicit. The frequency planner coarsens its step when floating-point rounding
-would otherwise exceed 65 states, preserving both declared edges. Unsupported
+would otherwise exceed 65 states in the original common plan, preserving both
+declared edges. The independent extension adds outer nodes without coarsening
+that plan. If the expanded lattice cannot be represented or reaches Nyquist,
+it retains the original usable family with explicit
+`relative_doppler_extension_unavailable` diagnostics; that fallback does not
+qualify the expanded envelope. Unsupported base
 plans add no branch, leaving Off, medium and slow
 VLF paths unchanged. Public bounds do not guarantee that actual channel
 behavior fills the bound. The finite source-bound full-stream cohort passes:
@@ -398,6 +431,56 @@ This is a bounded receiver policy, not authentication or a claim that all
 wrong-bit cases are resolved. See the dated
 [short-model and clock-support findings](validation.md#bounded-short-model-competition--16-november-2026)
 for source-bound outcomes and measured cost limits.
+
+The existing coherent drift family also evaluates both signs of nonzero
+relative Doppler. It evaluates the original sign first, then its mirror using
+the same bounded workspace, and mixes them with equal prior weight inside the
+unchanged outer family. Both retain the original common-frequency, slope,
+power and full public timing priors. Selected timing-atom normalization is
+undone separately before mixing and restored for the shared outer calculation;
+overlapping timing coordinates remain distinct half-weighted sign atoms.
+Zero Doppler keeps the original single call. Retained-line scoring uses the
+same wrapper, and work/time include both evaluations. No additional historical
+search or independent two-frequency grid is introduced. See the
+[matched negative-Doppler failure and repair](validation.md#persistent-channel-and-calendar-age-follow-through--17-november-2026)
+for the source-bound reception and complete-service costs. Earlier CPU
+calibration does not qualify this changed work.
+
+Drift timing selection retains all eight segmented-ridge winners and adds at
+most one normalized whole-aperture, zero-slope coherent winner per bit, with
+deduplication and deterministic ordering. The two statistics select their own
+winners; their numerical scales are not combined. This preserves useful calm-
+channel evidence that the ridge ranking can otherwise discard. The timing
+union and full public prior remain unchanged. A bounded per-call peak-frontier
+cache reuses the zero-slope FFT work during exact scoring; it stores neither
+spectra nor templates for every timing and fits inside the existing metadata
+reservation. Signed and line-conditioned inputs retain separate computations.
+The per-timing slope budget depends on FFT size, not the number of retained
+timings or parallel lanes. Adding coherent nominees therefore does not remove
+nonzero slopes from earlier ridge winners. The selected-count averaging and
+outer refund still cancel against the same full public timing prior.
+
+The coherent planner treats its 262,144-point FFT as a preferred size, not an
+absolute duration limit. If that shape cannot preserve the declared frequency
+bandwidth, it may retain a faithful stride with a larger checked transform
+(including stride one). The extension is fixed before looking at received IQ.
+Ordinary and retained-line routes are admitted independently against **both
+unchanged baseline sequential and overlapped full-worker workspace quotes**,
+including dependent projection/coarse work. A rejected extension preserves the
+original family membership and priors; `drift_status` / `drift_line_status`
+report the chosen preserved-lease boundary. That status does not imply exhausted
+machine RAM or equal sensitivity under every explicit worker allocation.
+Before rejecting an expanded route, its planner selects the largest stage width
+from one through eight (also capped by owner workers) that fits those same
+quotes. Only that new coherent stage's parallel width changes; global W, other
+stages and all timing/frequency hypotheses remain intact. This avoids dropping
+the model when a balanced automatic owner receives fewer workers. Planned and
+executed stage widths are reported separately from global/owner allocation.
+The extended route retains at least three slope proposals, including zero and
+one best proposal per bit, without reducing the public slope prior. These
+rules prevent the observed long-bit model exclusion without lowering the
+existing ready-owner capacity. See the
+[long coherent observation checks](validation.md#long-coherent-observations-and-the-fft-planning-boundary).
 
 The base-`6ac502a` late-clock baseline exposed a separate work ceiling: a
 slot-12, ordinal-12 severe long bit with ±150 ppm public clock support predicted

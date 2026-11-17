@@ -95,6 +95,12 @@ void validate_path_evolution(const PathEvolutionConfig& p) {
             std::isfinite(p.outage_start_seconds) && std::isfinite(p.outage_end_seconds) &&
             std::isfinite(p.outage_gain) && p.outage_gain >= 0 && p.outage_gain <= 1 &&
             finite_nonnegative(p.outage_ramp_seconds), "invalid physical-path evolution");
+    require(!p.bounded_spread_direct_power_fraction ||
+            (p.bounded_spread_knot_seconds > 0 &&
+             std::isfinite(*p.bounded_spread_direct_power_fraction) &&
+             *p.bounded_spread_direct_power_fraction >= 0 &&
+             *p.bounded_spread_direct_power_fraction <= 1),
+            "fixed direct power needs the bounded ray law and a fraction in [0,1]");
     require(static_cast<int>(p.ray_coherence_seconds > 0) +
             static_cast<int>(p.gaussian_doppler_width_hz > 0) +
             static_cast<int>(p.random_doppler_width_hz > 0) <= 1,
@@ -403,6 +409,7 @@ struct StreamingChannel::Impl {
     std::array<std::unique_ptr<detail::FixedGaussianRay>,2> random_path;
     std::unique_ptr<detail::SmoothRandomDelay> random_delay;
     std::unique_ptr<detail::BoundedRandomSpread> bounded_spread;
+    double bounded_direct_gain = 1, bounded_echo_gain = 0;
     std::unique_ptr<detail::BoundedRandomSpread> common_doppler_wander;
     std::unique_ptr<SpreadRay> spread;
     std::unique_ptr<DispersiveSelectivePerturbation> dispersive_perturbation;
@@ -681,6 +688,14 @@ struct StreamingChannel::Impl {
             diagnostic.knot_seconds = config.path_evolution.bounded_spread_knot_seconds;
             diagnostic.doppler_bound_hz = std::abs(effects.spread_doppler_hz);
             diagnostic.seed = seed;
+            if (const auto p = config.path_evolution.bounded_spread_direct_power_fraction) {
+                bounded_direct_gain = std::sqrt(*p);
+                bounded_echo_gain = std::sqrt(1-*p);
+                diagnostic.fixed_direct_power_fraction = p;
+                const auto ratio = *p > 0 ?
+                    std::optional<double>(bounded_echo_gain/bounded_direct_gain) : std::nullopt;
+                diagnostic.minimum_echo_ratio = diagnostic.maximum_echo_ratio = ratio;
+            }
         }
         if (config.path_evolution.common_doppler_wander_hz > 0) {
             const auto seed = root_seed(config.path_seed,effects.seed)^0x434f4d4d4f4e4652ULL;
@@ -892,13 +907,21 @@ struct StreamingChannel::Impl {
         }
         Complex propagated;
         if (bounded_state) {
-            direct *= bounded_state->direct_gain;
-            delayed *= bounded_state->echo_gain;
+            if (config.path_evolution.bounded_spread_direct_power_fraction) {
+                direct *= bounded_direct_gain;
+                delayed *= bounded_echo_gain;
+            } else {
+                // Preserve the original default multiplication order exactly.
+                direct *= bounded_state->direct_gain;
+                delayed *= bounded_state->echo_gain;
+            }
             delayed *= std::polar(1., bounded_state->phase_radians);
             propagated = direct + delayed;
             auto& diagnostic = *stats.bounded_spread;
-            diagnostic.minimum_echo_ratio = std::min(diagnostic.minimum_echo_ratio,bounded_state->echo_ratio);
-            diagnostic.maximum_echo_ratio = std::max(diagnostic.maximum_echo_ratio,bounded_state->echo_ratio);
+            if (!diagnostic.fixed_direct_power_fraction) {
+                diagnostic.minimum_echo_ratio = std::min(*diagnostic.minimum_echo_ratio,bounded_state->echo_ratio);
+                diagnostic.maximum_echo_ratio = std::max(*diagnostic.maximum_echo_ratio,bounded_state->echo_ratio);
+            }
             if (diagnostic.processed_rows == 0)
                 diagnostic.minimum_doppler_hz = diagnostic.maximum_doppler_hz = bounded_state->doppler_hz;
             else {
@@ -909,8 +932,10 @@ struct StreamingChannel::Impl {
         } else {
             propagated = spread ? spread->process(direct, delayed) : direct;
         }
+        double common_doppler_hz = 0;
         if (common_doppler_wander) {
             const auto state = common_doppler_wander->at(physical_time);
+            common_doppler_hz = state.doppler_hz;
             propagated *= std::polar(1., state.phase_radians);
             auto& diagnostic = *stats.common_doppler_wander;
             if (diagnostic.processed_rows == 0)
@@ -920,6 +945,18 @@ struct StreamingChannel::Impl {
                 diagnostic.maximum_hz = std::max(diagnostic.maximum_hz,state.doppler_hz);
             }
             ++diagnostic.processed_rows;
+        }
+        if (bounded_state) {
+            // Both states already advanced at this exact physical sample.
+            // This is a simultaneous sum, not a sum of separate extrema.
+            const auto combined = bounded_state->doppler_hz + common_doppler_hz;
+            auto& diagnostic = *stats.bounded_spread;
+            if (diagnostic.processed_rows == 1)
+                diagnostic.minimum_combined_physical_doppler_hz = diagnostic.maximum_combined_physical_doppler_hz = combined;
+            else {
+                diagnostic.minimum_combined_physical_doppler_hz = std::min(diagnostic.minimum_combined_physical_doppler_hz,combined);
+                diagnostic.maximum_combined_physical_doppler_hz = std::max(diagnostic.maximum_combined_physical_doppler_hz,combined);
+            }
         }
         const auto& path = config.path_evolution;
         if (path.diurnal_phase_amplitude_radians > 0) {

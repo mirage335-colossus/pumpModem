@@ -1894,6 +1894,7 @@ struct FrequencyTrackingPlan {
     double step_hz = 0;
     std::int64_t radius = 0;
     bool coherent_gain_blocks = false;
+    std::string_view frequency_extension_status;
 };
 
 FrequencyTrackingPlan tracking_plan(const ReceiverConfig& config, std::size_t block_rows,
@@ -1928,16 +1929,53 @@ FrequencyTrackingPlan tracking_plan(const ReceiverConfig& config, std::size_t bl
     return result;
 }
 
+// Keep the original common-frequency lattice, extending only its signed
+// outer cells for a dominant ray carrying common and differential Doppler.
+FrequencyTrackingPlan independent_tracking_plan(const ReceiverConfig& config, std::size_t block_rows,
+                                               std::size_t final_rows) {
+    auto plan = tracking_plan(config, block_rows, final_rows);
+    if (!plan.states) return plan;
+    plan.frequency_extension_status = "common_frequency_only";
+    if (config.spread_doppler_hz == 0) return plan;
+    const auto bound = config.frequency_bound_hz + config.time_varying_atmospheric_hz +
+        std::abs(config.spread_doppler_hz);
+    const auto extent = std::ceil(bound / plan.step_hz);
+    if (!(std::isfinite(extent) && extent >= 0 && extent < static_cast<double>(INT64_MAX / 2) &&
+          extent < static_cast<double>(SIZE_MAX / 2))) {
+        plan.frequency_extension_status = "relative_doppler_extension_unavailable";
+        return plan;
+    }
+    auto radius = std::max(plan.radius, static_cast<std::int64_t>(extent));
+    if (radius * plan.step_hz < bound) ++radius;
+    if (radius * plan.step_hz >= .5 * config.sample_rate_hz) {
+        plan.frequency_extension_status = "relative_doppler_extension_unavailable";
+        return plan;
+    }
+    if (radius > plan.radius) plan.frequency_extension_status = "common_plus_relative_doppler";
+    plan.radius = radius;
+    plan.states = checked_add(checked_multiply(static_cast<std::size_t>(radius), 2), 1);
+    return plan;
+}
+
 using FrequencyWeights = std::array<double, maximum_tracking_states>;
 using TrackingLogWeights = std::array<std::array<FrequencyWeights, tracking_powers.size()>, 2>;
 struct GainCentroidState {
-    std::array<FrequencyWeights, 2> fixed_centroid{}, moving_centroid{};
+    std::array<std::vector<double>, 2> fixed_centroid, moving_centroid;
 };
 struct IndependentGainState {
     std::array<GainCentroidState, independent_gain_powers.size()> powers;
+    std::vector<double> emissions, next;
     bool nonzero_basis = false;
+
+    explicit IndependentGainState(std::size_t frequencies) :
+        emissions(2 * independent_gain_powers.size() * frequencies), next(frequencies) {
+        for (auto& power : powers)
+            for (std::size_t bit = 0; bit < 2; ++bit) {
+                power.fixed_centroid[bit].resize(frequencies);
+                power.moving_centroid[bit].resize(frequencies);
+            }
+    }
 };
-using IndependentGainEmissions = std::array<std::array<FrequencyWeights, 2>, independent_gain_powers.size()>;
 struct CoherentGainState {
     ChannelPosterior posterior;
     double log_evidence = 0;
@@ -2024,12 +2062,15 @@ double coherent_gain_update(ChannelPosterior& posterior, double direct, double e
     return score[1];
 }
 
-void update_frequency_weights(std::span<const double> evidence, std::span<double> previous, bool constant) {
+void update_frequency_weights(std::span<const double> evidence, std::span<double> previous, bool constant,
+                              std::span<double> temporary = {}, std::stop_token stop = {}) {
     if (constant) {
         for (std::size_t i = 0; i < previous.size(); ++i) previous[i] += evidence[i];
         return;
     }
-    std::array<double, maximum_tracking_states> next{};
+    std::array<double, maximum_tracking_states> storage{};
+    auto next = temporary.empty() ? std::span(storage).first(previous.size()) : temporary;
+    if (next.size() < previous.size()) throw ReceiverWorkspaceError("Robust frequency transition scratch is too small");
     const auto total = std::accumulate(previous.begin(), previous.end(), -infinity, log_add);
     // Markov prior: 96% stay/local walk and a 4% uniformly distributed
     // reacquisition. Reflect blocked edge steps into the stay mass.
@@ -2039,6 +2080,7 @@ void update_frequency_weights(std::span<const double> evidence, std::span<double
     const auto log_stay = std::log(stay);
     const auto log_edge = std::log(stay + neighbor);
     for (std::size_t i = 0; i < previous.size(); ++i) {
+        if (!(i % 4096)) check_cancelled(stop);
         auto predicted = log_add(previous[i] + (i == 0 || i + 1 == previous.size() ? log_edge : log_stay), reset);
         if (i) predicted = log_add(predicted, previous[i - 1] + log_neighbor);
         if (i + 1 < previous.size()) predicted = log_add(predicted, previous[i + 1] + log_neighbor);
@@ -2054,14 +2096,13 @@ void visit_projected_tracks(std::span<const Complex> templates, std::size_t taps
                             std::span<Complex> spectrum, const Visitor& visit, std::stop_token stop) {
     const auto& projection = *block.projection;
     const auto rows = projection.rows();
-    std::array<std::int64_t, maximum_tracking_states> bins{};
-    for (std::size_t i = 0; i < plan.states; ++i) {
+    const auto frequency_bin = [&](std::size_t i) {
         const auto half_bins = 2 * rows * plan.step_hz * (static_cast<std::int64_t>(i) - plan.radius) / fs;
         // Distinguish the two sampled Nyquist endpoints. Keep a rounding
         // error within the half-bin lattice even on the merged last block.
         const auto last = static_cast<std::int64_t>(rows) - 1;
-        bins[i] = std::clamp(static_cast<std::int64_t>(std::llround(half_bins)), -last, last);
-    }
+        return std::clamp(static_cast<std::int64_t>(std::llround(half_bins)), -last, last);
+    };
     const auto indices = projection.indices();
     const auto rank_bound = highest_observation_rank(block);
     // The second lattice reuses the same columns shifted half a DFT bin.
@@ -2080,9 +2121,11 @@ void visit_projected_tracks(std::span<const Complex> templates, std::size_t taps
             projection.transform_full(values, scratch.fft, stop);
         }
         for (std::size_t state = 0; state < plan.states; ++state) {
-            const auto residue = (bins[state] % 2 + 2) % 2;
+            if (!(state % 4096)) check_cancelled(stop);
+            const auto bin = frequency_bin(state);
+            const auto residue = (bin % 2 + 2) % 2;
             if (residue != half) continue;
-            const auto shift = (bins[state] - half) / 2;
+            const auto shift = (bin - half) / 2;
             for (std::size_t bit = 0; bit < 2; ++bit) {
                 const auto column = bit * taps * rows;
                 std::array<Complex, 2> correlation{};
@@ -2111,7 +2154,7 @@ void visit_projected_tracks(std::span<const Complex> templates, std::size_t taps
                         diagonal[path] = std::max(0., diagonal[path] - std::norm(line_correlation[path]));
                     cross -= std::conj(line_correlation[0]) * line_correlation[1];
                 }
-                visit(bit, state, bins[state], rank_bound, correlation, diagonal, cross);
+                visit(bit, state, bin, rank_bound, correlation, diagonal, cross);
             }
         }
     }
@@ -2165,14 +2208,14 @@ void accumulate_independent_gain(IndependentGainState& state, MappedBasis& basis
     basis.render_pair(map, paths, block.first, std::span(scratch.offsets).first(rows), templates, stop);
     if (!state.nonzero_basis)
         state.nonzero_basis = std::ranges::any_of(templates, [](auto value) { return value != Complex{}; });
-    IndependentGainEmissions evidence{};
+    auto evidence = std::span(state.emissions);
     visit_projected_tracks(templates, paths.size(), block, fs, plan, scratch, spectrum,
         [&](std::size_t bit, std::size_t frequency, std::int64_t, unsigned rank,
             const auto& correlation, const auto& diagonal, Complex cross) {
             for (std::size_t power = 0; power < state.powers.size(); ++power) {
                 const auto value = tracking_emission(diagonal[0], diagonal[1], cross, correlation[0], correlation[1],
                     paths.size(), independent_gain_powers[power], variance, rank);
-                evidence[power][bit][frequency] = value;
+                evidence[(2 * power + bit) * plan.states + frequency] = value;
                 auto& fixed = state.powers[power].fixed_centroid[bit][frequency];
                 fixed += value;
                 if (!std::isfinite(fixed)) throw Error("Robust stationary centroid evidence is nonfinite");
@@ -2180,8 +2223,8 @@ void accumulate_independent_gain(IndependentGainState& state, MappedBasis& basis
         }, stop);
     for (std::size_t power = 0; power < state.powers.size(); ++power)
         for (std::size_t bit = 0; bit < 2; ++bit)
-            update_frequency_weights(std::span(evidence[power][bit]).first(plan.states),
-                std::span(state.powers[power].moving_centroid[bit]).first(plan.states), false);
+            update_frequency_weights(evidence.subspan((2 * power + bit) * plan.states, plan.states),
+                state.powers[power].moving_centroid[bit], false, state.next, stop);
 }
 
 struct IndependentGainEvidence {
@@ -2523,7 +2566,13 @@ VaryingFinePlan varying_fine_plan(const ReceiverConfig& config, const ReceiverSl
     const auto active = std::min<std::size_t>(workers, states + gain_atoms);
     if (!coherent_gain_blocks) add(states, sizeof(State) + sizeof(MappedBasisRow));
     add(gain_atoms, sizeof(IndependentGainState) + sizeof(MappedBasisRow));
-    add(std::min<std::size_t>(active, gain_atoms), sizeof(IndependentGainEmissions));
+    auto independent_config = tracking_config;
+    independent_config.helper_enabled = true;
+    const auto independent_track = gain_atoms ? independent_tracking_plan(independent_config, block, final) : FrequencyTrackingPlan{};
+    // Sixteen accumulated weights, eight emissions and one transition vector
+    // per frequency and independent timing atom. Allocate before scoring.
+    add(checked_multiply(gain_atoms, std::max<std::size_t>(1, independent_track.states)),
+        (4 * independent_gain_powers.size() + 2 * independent_gain_powers.size() + 1) * sizeof(double));
     add(active, sizeof(WorkerScratch));
     add(checked_multiply(active, 4 * final + fft + (final > mapped ? 4 * mapped : 0)), sizeof(Complex));
     add(checked_multiply(active, mapped), sizeof(double));
@@ -2622,7 +2671,7 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
     for (const auto& coordinate : selected)
         mapped.push_back(mapped_row(config, slot, grid, coordinate, {}, 0, true));
     std::vector<MappedBasisRow> independent_maps;
-    std::vector<IndependentGainState> independent_states(independent_count);
+    std::vector<IndependentGainState> independent_states;
     independent_maps.reserve(independent_count);
     if (independent_count) {
         const AdmissionGrid arrival_grid(slot.arrival_lower_seconds, slot.arrival_upper_seconds, 0., 0., 1.);
@@ -2662,15 +2711,18 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
         return projection.modes() > 1 || projection.indices().front() != 0;
     };
     const auto independent_track = independent_count && track.states && nontrivial_projection(block_projection) &&
-        nontrivial_projection(final_projection) ? tracking_plan(projected_tracking_config, block_rows, final_rows) :
+        nontrivial_projection(final_projection) ? independent_tracking_plan(projected_tracking_config, block_rows, final_rows) :
                                                 FrequencyTrackingPlan{};
+    independent_states.reserve(independent_count);
+    for (std::size_t i = 0; i < independent_count; ++i)
+        independent_states.emplace_back(std::max<std::size_t>(1, independent_track.states));
     if (independent_track.states) {
         const auto log_prior = -std::log(static_cast<double>(independent_track.states));
         for (auto& atom : independent_states)
             for (auto& state : atom.powers)
                 for (std::size_t bit = 0; bit < state.fixed_centroid.size(); ++bit) {
-                    state.fixed_centroid[bit].fill(log_prior);
-                    state.moving_centroid[bit].fill(log_prior);
+                    std::ranges::fill(state.fixed_centroid[bit], log_prior);
+                    std::ranges::fill(state.moving_centroid[bit], log_prior);
                 }
     }
     if ((span || clock_shadow || midpoint) && !track.states)
@@ -2933,6 +2985,7 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
         // frequency-grid divisor, leaving the full public timing mass.
         // The central-only projection fallback still pays the entire grid.
         score.nominal_independent_gain_frequency_states = independent_track.states;
+        score.nominal_independent_gain_frequency_status = independent_track.frequency_extension_status;
         if (independent_track.states) score.nominal_independent_gain_log_prior_adjustment = frequency_log_count;
         const auto log_mass = score.nominal_independent_gain_log_prior_adjustment - std::log(static_cast<double>(selected.size()));
         const auto old_weight = std::log1p(-nominal_independent_gain_weight);
@@ -3157,11 +3210,14 @@ void score_varying_quiet(const ReceiverConfig& config, const ReceiverSlotPlan& s
 }
 
 namespace {
-constexpr std::size_t maximum_drift_fft_rows = 262'144;
-// Per retained timing atom: at most four transform rows per slope (two
-// bits and two paths). Bound failure and noise slots as well as positives.
-constexpr std::size_t maximum_drift_fft_rows_per_atom = 2 * 1024 * 1024;
-constexpr std::size_t maximum_drift_timing_atoms = 8;
+constexpr std::size_t preferred_drift_fft_rows = 262'144;
+// Preferred proposal work per retained timing atom. Three slopes are the
+// minimum fair bank: zero followed by the best ridge for each bit.
+constexpr std::size_t target_drift_fft_rows_per_atom = 2 * 1024 * 1024;
+constexpr std::size_t maximum_drift_stage_workers = 8;
+constexpr std::size_t retained_drift_ridge_timing_atoms = 8;
+constexpr std::size_t maximum_drift_public_timing_atoms = maximum_varying_coordinates +
+    2 * receiver_epoch_offsets.size() + maximum_segmented_timing_coordinates;
 constexpr std::size_t minimum_drift_segments = 8;
 constexpr std::int64_t maximum_drift_proposal_slope_radius = 128;
 constexpr std::int64_t maximum_drift_proposal_frequency_radius = 512;
@@ -3245,6 +3301,23 @@ struct DriftProjection {
 };
 
 constexpr std::size_t retained_drift_per_bit = 8;
+struct DriftZeroSlopeCache {
+    std::array<std::array<DriftPeak, retained_drift_per_bit>, 2> peaks{};
+    std::array<double, 2> nomination{-infinity, -infinity};
+    int exponent = 0;
+    bool ready = false;
+};
+// This small cache occupies the existing metadata reservation, not a
+// candidate-wide transform or template bank. Include the timing vectors,
+// lane owners/frontiers/statistics and fixed controls in the same bound.
+constexpr std::size_t drift_metadata_reservation = 64 * 1024;
+constexpr auto drift_metadata_bound = maximum_drift_public_timing_atoms *
+    (sizeof(DriftZeroSlopeCache) + sizeof(FineCoordinate) + sizeof(std::array<double, 2>) +
+     2 * sizeof(std::size_t) + sizeof(double)) + maximum_drift_stage_workers *
+    (sizeof(DriftScratch<double>) + sizeof(std::array<std::array<DriftPeak, retained_drift_per_bit>, 2>) +
+     sizeof(std::array<std::array<DriftStatistics, retained_drift_per_bit>, 2>)) +
+    sizeof(DriftProjection) + 6 * sizeof(std::vector<std::size_t>) + 4096;
+static_assert(drift_metadata_bound <= drift_metadata_reservation);
 
 bool same_timing(const FineCoordinate& a, const FineCoordinate& b) {
     return a.epoch_offset_seconds == b.epoch_offset_seconds && a.arrival_seconds == b.arrival_seconds &&
@@ -3420,7 +3493,7 @@ DriftProposals drift_slope_proposals(
 } // namespace
 
 DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
-                     bool project_line_atom) {
+                     bool project_line_atom, std::size_t preserved_workspace_bytes) {
     if (!config.time_varying_channel || !(config.time_varying_common_doppler_hz > 0)) return {};
     const auto fs = config.sample_rate_hz;
     const auto source_geometry = geometry(slot.format);
@@ -3440,7 +3513,8 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
     DriftPlan result;
     result.first = start_row;
     result.raw_rows = stop_row - start_row;
-    result.sample_stride = 1 + (result.raw_rows - 1) / (maximum_drift_fft_rows / 2);
+    result.sample_stride = 1 + (result.raw_rows - 1) / (preferred_drift_fft_rows / 2);
+    bool extended = false;
     const auto center_bound = config.frequency_bound_hz + config.time_varying_atmospheric_hz;
     const auto edge_bound = center_bound + config.time_varying_common_doppler_hz *
         ((stop - first) / duration);
@@ -3451,9 +3525,14 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
     if (result.sample_stride > 1) {
         const auto largest_stride = std::min<double>(result.raw_rows / 2048,
             fs / ((wide_frequency ? 4 : 8) * edge_bound));
-        if (largest_stride < result.sample_stride)
-            return {.status = "drift_public_bandwidth_exceeds_reduced_proposal_limit"};
-        result.sample_stride = static_cast<std::size_t>(largest_stride);
+        if (largest_stride < result.sample_stride) {
+            if (!preserved_workspace_bytes)
+                return {.status = "drift_public_bandwidth_exceeds_reduced_proposal_limit"};
+            extended = true;
+        }
+        // With no reduction the proposal uses the exact original samples;
+        // the box-sum attenuation bound imposes no additional restriction.
+        result.sample_stride = static_cast<std::size_t>(std::max(1., largest_stride));
     }
     result.rows = 1 + (result.raw_rows - 1) / result.sample_stride;
     const auto proposal_rate = fs / result.sample_stride;
@@ -3473,6 +3552,9 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
             return {.status = "drift_data_and_helper_bands_not_separable"};
         }
     }
+    constexpr auto largest_fft = std::size_t{1} << (std::numeric_limits<std::size_t>::digits - 1);
+    if (result.rows > largest_fft / 2)
+        return {.status = "drift_proposal_transform_shape_overflow"};
     result.nfft = std::bit_ceil(2 * result.rows);
     result.frequency_step = proposal_rate / result.nfft;
     result.frequency_radius = static_cast<std::int64_t>(std::ceil(std::min(fs * .499,
@@ -3482,7 +3564,8 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
     if (!std::isfinite(public_radius) || public_radius >= (1ULL << 40))
         return {.status = "drift_public_slope_bound_overflow"};
     result.slope_radius = static_cast<std::int64_t>(public_radius);
-    result.slope_budget = std::min<std::size_t>(64, maximum_drift_fft_rows_per_atom / result.nfft);
+    result.slope_budget = std::min<std::size_t>(64,
+        std::max<std::size_t>(3, target_drift_fft_rows_per_atom / result.nfft));
     // For a centered quadratic, half-step mismatch at a waveform edge
     // is at most pi/8 radians at this nominal slope spacing.
     result.slope_step = 1 / (duration * duration);
@@ -3501,39 +3584,60 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
     }
     result.status = 2 * result.slope_radius + 1 > static_cast<std::int64_t>(result.slope_budget) ?
         "linear_drift_ridge_proposals" : "linear_drift";
-    const auto active = std::min<std::size_t>(workers, maximum_drift_timing_atoms);
-    const auto tile = std::max(render_rows, projection_rows);
-    const auto segment_extent = [&](std::size_t count) {
-        return count ? std::bit_ceil(2 * ((result.rows + count - 1) / count)) : std::size_t{0};
+    const auto quote = [&](std::size_t active) {
+        const auto tile = std::max(render_rows, projection_rows);
+        const auto segment_extent = [&](std::size_t count) {
+            return count ? std::bit_ceil(2 * (1 + (result.rows - 1) / count)) : std::size_t{0};
+        };
+        const auto fast_fft = segment_extent(result.ridge_segments);
+        const auto slow_fft = segment_extent(result.slow_ridge_segments);
+        const auto segment_fft = std::max(fast_fft, slow_fft);
+        const auto segment_power_rows = std::max(checked_multiply(result.ridge_segments, fast_fft),
+            checked_multiply(result.slow_ridge_segments, slow_fft));
+        const auto fft_value_bytes = config.native_coarse_precision == NativeCoarsePrecision::fp64 ?
+            sizeof(Complex) : sizeof(std::complex<float>);
+        auto bytes = checked_multiply(checked_add(result.nfft, checked_add(fast_fft, slow_fft)), fft_value_bytes);
+        const auto per_lane = checked_add(
+            checked_multiply(checked_multiply(4, checked_add(result.rows, checked_add(tile, render_rows))), sizeof(Complex)),
+            checked_add(checked_multiply(checked_add(checked_multiply(4, result.nfft), segment_fft), fft_value_bytes),
+                        checked_multiply(checked_add(tile, checked_multiply(2, segment_power_rows)), sizeof(double))));
+        const auto ridge_metadata = checked_multiply(result.ridge_segments, sizeof(double) + sizeof(std::int64_t));
+        bytes = checked_add(bytes, checked_multiply(active, checked_add(per_lane, ridge_metadata)));
+        bytes = checked_add(bytes, MappedBasis::workspace_bytes(config, slot, render_rows, static_cast<unsigned>(active)));
+        if (result.project_data) {
+            const auto scratch = DftPlan::scratch_samples(projection_rows);
+            bytes = checked_add(bytes, checked_multiply(2, DftPlan::workspace_bytes(projection_rows)));
+            bytes = checked_add(bytes, checked_multiply(checked_multiply(2, projection_rows), sizeof(std::size_t)));
+            const auto observation = checked_add(checked_multiply(2, result.raw_rows), scratch);
+            bytes = checked_add(bytes, checked_multiply(observation, sizeof(Complex)));
+            if (project_line_atom) bytes = checked_add(bytes, checked_multiply(result.raw_rows, sizeof(Complex)));
+            // Each admitted lane projects two template columns, reused for
+            // each retained bit/hypothesis. No candidate-wide spectra bank.
+            bytes = checked_add(bytes, checked_multiply(active,
+                checked_multiply(checked_add(checked_multiply(2, projection_rows), scratch), sizeof(Complex))));
+        }
+        if (config.spread_doppler_hz != 0) bytes = checked_add(bytes, sizeof(ReceiverSlotScore));
+        return checked_add(bytes, drift_metadata_reservation);
     };
-    const auto fast_fft = segment_extent(result.ridge_segments);
-    const auto slow_fft = segment_extent(result.slow_ridge_segments);
-    const auto segment_fft = std::max(fast_fft, slow_fft);
-    const auto segment_power_rows = std::max(result.ridge_segments * fast_fft, result.slow_ridge_segments * slow_fft);
-    const auto fft_value_bytes = config.native_coarse_precision == NativeCoarsePrecision::fp64 ?
-        sizeof(Complex) : sizeof(std::complex<float>);
-    auto bytes = checked_multiply(result.nfft + fast_fft + slow_fft, fft_value_bytes);
-    const auto per_lane = checked_add(
-        checked_multiply(4 * result.rows + 4 * (tile + render_rows), sizeof(Complex)),
-        checked_add(checked_multiply(4 * result.nfft + segment_fft, fft_value_bytes),
-                    checked_multiply(tile + 2 * segment_power_rows, sizeof(double))));
-    const auto ridge_metadata = checked_multiply(result.ridge_segments, sizeof(double) + sizeof(std::int64_t));
-    bytes = checked_add(bytes, checked_multiply(active, checked_add(per_lane, ridge_metadata)));
-    bytes = checked_add(bytes, MappedBasis::workspace_bytes(config, slot, render_rows, static_cast<unsigned>(active)));
-    if (result.project_data) {
-        const auto scratch = DftPlan::scratch_samples(projection_rows);
-        bytes = checked_add(bytes, checked_multiply(2, DftPlan::workspace_bytes(projection_rows)));
-        bytes = checked_add(bytes, checked_multiply(2 * projection_rows, sizeof(std::size_t)));
-        const auto observation = checked_add(checked_multiply(2, result.raw_rows), scratch);
-        bytes = checked_add(bytes, checked_multiply(observation, sizeof(Complex)));
-        if (project_line_atom) bytes = checked_add(bytes, checked_multiply(result.raw_rows, sizeof(Complex)));
-        // Each admitted lane projects two template columns, reused for
-        // each retained bit/hypothesis. No candidate-wide spectra bank.
-        bytes = checked_add(bytes, checked_multiply(active,
-            checked_multiply(2 * projection_rows + scratch, sizeof(Complex))));
+    const auto widest = static_cast<unsigned>(std::min<std::size_t>(workers, maximum_drift_stage_workers));
+    bool unsupported = false;
+    for (auto active = widest; active; --active) {
+        try {
+            const auto bytes = quote(active);
+            if (!extended || bytes <= preserved_workspace_bytes) {
+                result.workspace_bytes = bytes;
+                result.stage_workers = active;
+                if (extended) result.status = "linear_drift_ridge_proposals_within_preserved_owner_lease";
+                return result;
+            }
+        } catch (const Error& error) {
+            if (!extended || std::string_view(error.what()) == "Robust reception cancelled") throw;
+            unsupported = true;
+        }
+        if (!extended) break;
     }
-    result.workspace_bytes = checked_add(bytes, 64 * 1024);
-    return result;
+    return {.status = unsupported ? "drift_extension_workspace_shape_unavailable" :
+                                   "drift_extension_exceeds_preserved_owner_lease"};
 }
 
 namespace {
@@ -3542,8 +3646,11 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
                        const DriftPlan& plan, std::span<const Complex> iq,
                        std::span<const FineCoordinate> selected, std::span<const FineCoordinate> epoch_timing,
                        unsigned workers,
-                       ReceiverSlotScore& score, std::stop_token stop, ReceiverExecutor& executor, const LineAtom* line) {
-    if (!plan.workspace_bytes || selected.empty() || selected.size() > maximum_varying_coordinates ||
+                       ReceiverSlotScore& score, std::stop_token stop, ReceiverExecutor& executor, const LineAtom* line,
+                       DriftZeroSlopeEvaluation zero_evaluation) {
+    if (!plan.workspace_bytes || !plan.stage_workers || plan.stage_workers > workers ||
+        selected.empty() || selected.size() > maximum_varying_coordinates ||
+        epoch_timing.size() > 2 * receiver_epoch_offsets.size() + maximum_segmented_timing_coordinates ||
         iq.size() != slot.stop_sample - slot.first_sample)
         throw Error("Robust drift scorer requires bounded public timing atoms and observation");
     const auto began = FineClock::now();
@@ -3555,7 +3662,9 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
     };
     for (const auto& coordinate : selected) append(coordinate);
     for (const auto& coordinate : epoch_timing) append(coordinate);
-    const auto active = std::min({static_cast<std::size_t>(workers), timing.size(), maximum_drift_timing_atoms});
+    const auto active = std::min<std::size_t>(plan.stage_workers, timing.size());
+    const bool rank_timing = timing.size() > retained_drift_ridge_timing_atoms;
+    std::vector<DriftZeroSlopeCache> zero(rank_timing ? timing.size() : 0);
     const auto tile = std::min(maximum_basis_rows, plan.raw_rows);
     const auto count = static_cast<std::size_t>(2 * plan.frequency_radius + 1);
     const auto public_slopes = 2 * plan.slope_radius + 1;
@@ -3629,29 +3738,9 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
             const auto normalized = std::scalbn(1., -exponent);
             const auto inverse_variance = 1 / variance;
             const auto projected_rate = config.sample_rate_hz / plan.sample_stride;
-            // Use the same bounded exact slope budget. A small fast
-            // frontier remains even where the slower ridge is more
-            // sensitive. No data-selected slope gets extra prior mass.
-            const auto fast_budget = slow_fft ? std::max<std::size_t>(3, plan.slope_budget / 4) : plan.slope_budget;
-            auto slopes = drift_slope_proposals(own, plan, segment_fft, projected_rate, normalized, taps,
-                                                energy, plan.ridge_segments, fast_budget, leaf_stop);
-            if (slow_fft) {
-                const auto slow = drift_slope_proposals(own, plan, *slow_fft, projected_rate, normalized, taps,
-                    energy, plan.slow_ridge_segments, plan.slope_budget - fast_budget + 1, leaf_stop);
-                slopes.rank = std::max(slopes.rank, slow.rank);
-                for (const auto slope : slow.slopes)
-                    if (std::ranges::find(slopes.slopes, slope) == slopes.slopes.end())
-                        slopes.slopes.push_back(slope);
-            }
-            if (rank_only) {
-                // All atoms use the same physical variance. Undo scaling to
-                // make matched-product ranks comparable between atoms.
-                ranks[index] = std::scalbn(slopes.rank, 2 * exponent);
-                return;
-            }
-            std::array<std::array<DriftPeak, retained_drift_per_bit>, 2> peaks{};
-            scored_slopes[index] = slopes.slopes.size();
-            for (const auto slope : slopes.slopes) {
+            const auto score_slope = [&](std::int64_t slope,
+                    std::array<std::array<DriftPeak, retained_drift_per_bit>, 2>& peaks,
+                    std::array<double, 2>* nomination) {
                 check_cancelled(leaf_stop);
                 const double rate = slope * plan.slope_step;
                 const double delta = plan.sample_stride / config.sample_rate_hz;
@@ -3688,6 +3777,12 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
                             static_cast<Complex>(own.frequency[(column + 1) * plan.nfft + offset]) : Complex{};
                         auto& frontier = peaks[bit];
                         const auto rank = std::norm(r0) + std::norm(r1);
+                        if (nomination) {
+                            double normalized_power = 0;
+                            if (energy[bit][0] > 0) normalized_power += std::norm(r0) / energy[bit][0];
+                            if (taps == 2 && energy[bit][1] > 0) normalized_power += std::norm(r1) / energy[bit][1];
+                            (*nomination)[bit] = std::max((*nomination)[bit], normalized_power);
+                        }
                         const auto where = std::ranges::find_if(frontier, [&](const DriftPeak& peak) {
                             return rank > peak.rank;
                         });
@@ -3697,7 +3792,40 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
                         }
                     }
                 }
+            };
+            // Use the same bounded exact slope budget. A small fast
+            // frontier remains even where the slower ridge is more
+            // sensitive. No data-selected slope gets extra prior mass.
+            const auto fast_budget = slow_fft ? std::max<std::size_t>(3, plan.slope_budget / 4) : plan.slope_budget;
+            auto slopes = drift_slope_proposals(own, plan, segment_fft, projected_rate, normalized, taps,
+                                                energy, plan.ridge_segments, fast_budget, leaf_stop);
+            if (slow_fft) {
+                const auto slow = drift_slope_proposals(own, plan, *slow_fft, projected_rate, normalized, taps,
+                    energy, plan.slow_ridge_segments, plan.slope_budget - fast_budget + 1, leaf_stop);
+                slopes.rank = std::max(slopes.rank, slow.rank);
+                for (const auto slope : slow.slopes)
+                    if (std::ranges::find(slopes.slopes, slope) == slopes.slopes.end())
+                        slopes.slopes.push_back(slope);
             }
+            if (rank_only) {
+                auto& cached = zero[index];
+                score_slope(0, cached.peaks, &cached.nomination);
+                for (auto& rank : cached.nomination)
+                    rank = rank > 0 ? std::log(rank) + 2 * exponent * std::numbers::ln2 - std::log(variance) : -infinity;
+                cached.exponent = exponent;
+                cached.ready = true;
+                // All atoms use the same physical variance. Undo scaling to
+                // make matched-product ranks comparable between atoms.
+                ranks[index] = std::scalbn(slopes.rank, 2 * exponent);
+                return;
+            }
+            std::array<std::array<DriftPeak, retained_drift_per_bit>, 2> peaks{};
+            scored_slopes[index] = slopes.slopes.size();
+            const auto cached = zero_evaluation == DriftZeroSlopeEvaluation::reuse && rank_timing &&
+                zero[index].ready && zero[index].exponent == exponent;
+            if (cached) peaks = zero[index].peaks;
+            for (const auto slope : slopes.slopes)
+                if (slope != 0 || !cached) score_slope(slope, peaks, nullptr);
             std::array<std::array<DriftStatistics, retained_drift_per_bit>, 2> statistics{};
             const auto with_phase = [&](const DriftPeak& peak, std::size_t first, std::size_t rows,
                                         double direction, const auto& accumulate) {
@@ -3803,14 +3931,25 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
                     }
                 }
     };
-    if (survivors.size() > maximum_drift_timing_atoms) {
+    if (rank_timing) {
         executor.parallel(slot.index, timing.size(), static_cast<unsigned>(active), stop,
             [&](unsigned lane, std::size_t index, std::stop_token leaf_stop) {
                 evaluate(lane, index, true, leaf_stop);
             });
-        std::partial_sort(survivors.begin(), survivors.begin() + maximum_drift_timing_atoms, survivors.end(),
+        std::partial_sort(survivors.begin(), survivors.begin() + retained_drift_ridge_timing_atoms, survivors.end(),
             [&](std::size_t a, std::size_t b) { return ranks[a] != ranks[b] ? ranks[a] > ranks[b] : a < b; });
-        survivors.resize(maximum_drift_timing_atoms);
+        survivors.resize(retained_drift_ridge_timing_atoms);
+        // Preserve every old ridge winner. The two additional nominations
+        // use a separately normalized coherent rank, never a comparison of
+        // unlike ridge and coherent statistics. All retain their original
+        // full public timing prior in the exact likelihood below.
+        for (std::size_t bit = 0; bit < 2; ++bit) {
+            std::size_t best = 0;
+            for (std::size_t i = 1; i < zero.size(); ++i)
+                if (zero[i].nomination[bit] > zero[best].nomination[bit]) best = i;
+            if (std::isfinite(zero[best].nomination[bit]) &&
+                std::ranges::find(survivors, best) == survivors.end()) survivors.push_back(best);
+        }
         std::ranges::sort(survivors);
     }
     executor.parallel(slot.index, survivors.size(), static_cast<unsigned>(active), stop,
@@ -3824,6 +3963,11 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
         for (const auto& atom : evidence) total = log_add(total, atom[bit]);
         score.drift_bit_evidence[bit] = total - log_mass;
     }
+    score.drift_stage_workers = static_cast<unsigned>(active);
+    score.drift_coherent_timing_fft_rows = rank_timing ?
+        checked_multiply(timing.size(), checked_multiply(2 * taps, plan.nfft)) : 0;
+    score.drift_coherent_timing_fft_stages = checked_multiply(score.drift_coherent_timing_fft_rows,
+        std::countr_zero(plan.nfft));
     score.drift_timing_atoms = survivors.size();
     score.drift_slopes = std::accumulate(scored_slopes.begin(), scored_slopes.end(), std::size_t{});
     score.drift_frequency_bins = count;
@@ -3833,18 +3977,62 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
 }
 } // namespace
 
+std::array<double, 2> mix_drift_sign_evidence(const std::array<double, 2>& first, std::size_t first_atoms,
+                                           const std::array<double, 2>& second, std::size_t second_atoms) {
+    const auto atoms = checked_add(first_atoms, second_atoms);
+    if (!atoms) throw Error("Robust signed drift mixture requires public timing atoms");
+    const auto first_mass = first_atoms ? std::log(static_cast<double>(first_atoms)) : -infinity;
+    const auto second_mass = second_atoms ? std::log(static_cast<double>(second_atoms)) : -infinity;
+    const auto normalization = log_two + std::log(static_cast<double>(atoms));
+    std::array<double, 2> result;
+    for (std::size_t bit = 0; bit < 2; ++bit)
+        result[bit] = log_add(first[bit] + first_mass, second[bit] + second_mass) - normalization;
+    return result;
+}
+
 void score_drift_fine(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                        const DriftPlan& plan, std::span<const Complex> iq,
                        std::span<const FineCoordinate> selected, std::span<const FineCoordinate> epoch_timing,
                        unsigned workers, ReceiverSlotScore& score, std::stop_token stop,
-                       ReceiverExecutor& executor, const LineAtom* line) {
+                       ReceiverExecutor& executor, const LineAtom* line, DriftZeroSlopeEvaluation zero_evaluation) {
     namespace fft = modem::detail::search_fft;
-    if (config.native_coarse_precision == NativeCoarsePrecision::fp64)
-        score_drift_impl<double, fft::DoublePlan>(config, slot, key, plan, iq, selected, epoch_timing,
-                                                workers, score, stop, executor, line);
-    else
-        score_drift_impl<float, fft::FloatPlan>(config, slot, key, plan, iq, selected, epoch_timing,
-                                               workers, score, stop, executor, line);
+    const auto began = FineClock::now();
+    const auto evaluate = [&](const ReceiverConfig& physical, ReceiverSlotScore& target) {
+        if (config.native_coarse_precision == NativeCoarsePrecision::fp64)
+            score_drift_impl<double, fft::DoublePlan>(physical, slot, key, plan, iq, selected, epoch_timing,
+                                                    workers, target, stop, executor, line, zero_evaluation);
+        else
+            score_drift_impl<float, fft::FloatPlan>(physical, slot, key, plan, iq, selected, epoch_timing,
+                                                   workers, target, stop, executor, line, zero_evaluation);
+    };
+    evaluate(config, score);
+    score.drift_relative_doppler_models = 1;
+    if (config.spread_doppler_hz == 0) return;
+
+    // The public relative-Doppler allowance admits either sign. Evaluate
+    // each coherent spatial basis under half the existing drift mass.
+    // Scratch and workers are reused sequentially for the second sign.
+    auto reflected = config;
+    reflected.spread_doppler_hz = -config.spread_doppler_hz;
+    ReceiverSlotScore mirrored;
+    evaluate(reflected, mirrored);
+    const auto first_atoms = score.drift_timing_atoms;
+    const auto second_atoms = mirrored.drift_timing_atoms;
+    const auto atoms = checked_add(first_atoms, second_atoms);
+    // Each primitive averages its own retained timing atoms. Restore
+    // those sums before mixing signs, then use the combined count for
+    // the caller's unchanged full-public-timing prior adjustment.
+    score.drift_bit_evidence = mix_drift_sign_evidence(score.drift_bit_evidence, first_atoms,
+                                                     mirrored.drift_bit_evidence, second_atoms);
+    score.drift_timing_atoms = atoms;
+    score.drift_slopes = checked_add(score.drift_slopes, mirrored.drift_slopes);
+    score.drift_relative_doppler_models = 2;
+    score.drift_stage_workers = std::max(score.drift_stage_workers, mirrored.drift_stage_workers);
+    score.drift_coherent_timing_fft_rows = checked_add(score.drift_coherent_timing_fft_rows,
+        mirrored.drift_coherent_timing_fft_rows);
+    score.drift_coherent_timing_fft_stages = checked_add(score.drift_coherent_timing_fft_stages,
+        mirrored.drift_coherent_timing_fft_stages);
+    score.drift_seconds = seconds_since(began);
 }
 
 } // namespace datapump::triad::v3::receiver_detail

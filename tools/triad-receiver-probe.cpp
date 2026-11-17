@@ -662,8 +662,13 @@ Json observation(const Capture& capture, std::uint64_t stop, const ReceiverSlotP
         spread = object({{"seed", r->seed}, {"processed_rows", r->processed_rows},
             {"excess_delay_seconds", r->excess_delay_seconds}, {"knot_seconds", r->knot_seconds},
             {"doppler_bound_hz", r->doppler_bound_hz},
-            {"minimum_echo_ratio", r->minimum_echo_ratio}, {"maximum_echo_ratio", r->maximum_echo_ratio},
-            {"minimum_doppler_hz", r->minimum_doppler_hz}, {"maximum_doppler_hz", r->maximum_doppler_hz}});
+            {"minimum_echo_ratio", r->minimum_echo_ratio ? Json(*r->minimum_echo_ratio) : Json{}},
+            {"maximum_echo_ratio", r->maximum_echo_ratio ? Json(*r->maximum_echo_ratio) : Json{}},
+            {"fixed_direct_power_fraction", r->fixed_direct_power_fraction ? Json(*r->fixed_direct_power_fraction) : Json{}},
+            {"fixed_delayed_power_fraction", r->fixed_direct_power_fraction ? Json(1-*r->fixed_direct_power_fraction) : Json{}},
+            {"minimum_doppler_hz", r->minimum_doppler_hz}, {"maximum_doppler_hz", r->maximum_doppler_hz},
+            {"minimum_combined_physical_doppler_hz", r->minimum_combined_physical_doppler_hz},
+            {"maximum_combined_physical_doppler_hz", r->maximum_combined_physical_doppler_hz}});
     }
     if (const auto& r = capture.channel.common_doppler_wander) {
         common = object({{"seed", r->seed}, {"processed_rows", r->processed_rows},
@@ -1117,6 +1122,8 @@ Json score_json(const ReceiverSlotScore& score) {
         {"varying_candidates", score.varying_candidates}, {"varying_blocks", score.varying_blocks},
         {"varying_block_rows", score.varying_block_rows}, {"varying_basis_rows", score.varying_basis_rows},
         {"independent_gain_emission_cells", score.independent_gain_emission_cells},
+        {"nominal_independent_gain_frequency_states", score.nominal_independent_gain_frequency_states},
+        {"nominal_independent_gain_frequency_status", score.nominal_independent_gain_frequency_status},
         {"varying_coarse_seconds", score.varying_coarse_seconds},
         {"varying_fine_seconds", score.varying_fine_seconds},
         {"varying_bit_evidence", scores(score.varying_bit_evidence)}, {"varying_status", score.varying_status},
@@ -1140,6 +1147,8 @@ Json score_json(const ReceiverSlotScore& score) {
             {"projected_rows", score.signed_lag_gain_proposal_projected_rows},
             {"fft_rows", score.signed_lag_gain_proposal_fft_rows},
             {"frequency_points", score.signed_lag_gain_proposal_frequency_points},
+            {"fixed_frequency_points", score.signed_lag_gain_proposal_fixed_frequency_points},
+            {"frequency_status", score.signed_lag_gain_proposal_frequency_status},
             {"fft_row_stages", score.signed_lag_gain_proposal_fft_stages},
             {"score_rows", score.signed_lag_gain_proposal_score_rows},
             {"fft_stage_bound", score.signed_lag_gain_proposal_fft_stage_bound},
@@ -1171,10 +1180,17 @@ Json score_json(const ReceiverSlotScore& score) {
         {"affine_gain_model", score.affine_stationary_fading_gain ? "stationary_plus_ou" :
             (score.slow_gain_coherence_seconds[0] > 0 ? "slow_ou" : "original")},
         {"drift_timing_atoms", score.drift_timing_atoms}, {"drift_slopes", score.drift_slopes},
+        {"drift_relative_doppler_models", score.drift_relative_doppler_models},
         {"drift_observation_rows", score.drift_observation_rows},
         {"drift_proposal_stride", score.drift_proposal_stride},
         {"drift_frequency_bins", score.drift_frequency_bins}, {"drift_seconds", score.drift_seconds},
         {"drift_bit_evidence", scores(score.drift_bit_evidence)}, {"drift_status", score.drift_status},
+        {"drift_line_status", score.drift_line_status},
+        {"drift_stage_workers", score.drift_stage_workers}, {"drift_line_stage_workers", score.drift_line_stage_workers},
+        {"drift_planned_stage_workers", score.drift_planned_stage_workers},
+        {"drift_line_planned_stage_workers", score.drift_line_planned_stage_workers},
+        {"drift_coherent_timing_fft_rows", score.drift_coherent_timing_fft_rows},
+        {"drift_coherent_timing_fft_stages", score.drift_coherent_timing_fft_stages},
         {"coarse_workspaces", score.coarse_workspaces}, {"coarse_frequency_points", score.coarse_frequency_points},
         {"coarse_arrival_points", score.coarse_arrival_points},
         {"coarse_fft_precision", score.coarse_fft_precision}, {"coarse_precision_reason", score.coarse_precision_reason},
@@ -2392,7 +2408,10 @@ void run(Json& report, const Options& o, std::stop_token stop) {
                     {"status", midpoint.available ? midpoint.gain_status : midpoint.status},
                     {"available_blocks", midpoint.gain_available_blocks}, {"sampled_blocks", midpoint.gain_sampled_blocks},
                     {"direct_blocks", midpoint.gain_direct_blocks}, {"fft_rows", midpoint.gain_fft_rows},
-                    {"frequency_points", midpoint.gain_frequency_points}, {"workspace_bytes", midpoint.gain_workspace_bytes},
+                    {"frequency_points", midpoint.gain_frequency_points},
+                    {"fixed_frequency_points", midpoint.gain_fixed_frequency_points},
+                    {"frequency_status", midpoint.gain_frequency_status},
+                    {"workspace_bytes", midpoint.gain_workspace_bytes},
                     {"fft_stage_bound", midpoint.gain_fft_stage_bound}, {"score_row_bound", midpoint.gain_score_row_bound}});
             } catch (const Error& error) {
                 configuration["signed_gain_rank_plan"] = object({{"status", error.what()}});

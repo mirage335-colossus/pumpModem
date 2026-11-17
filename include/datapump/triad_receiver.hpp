@@ -158,6 +158,8 @@ struct ReceiverSlotScore {
     std::array<std::int64_t, receiver_signed_lag_gain_max_candidates> signed_lag_gain_proposal_lags{};
     std::array<std::array<double, 2>, receiver_signed_lag_gain_max_candidates> signed_lag_gain_map_bit_evidence{};
     std::size_t signed_lag_gain_proposal_frequency_points = 0, signed_lag_gain_proposal_projected_rows = 0;
+    std::size_t signed_lag_gain_proposal_fixed_frequency_points = 0;
+    std::string signed_lag_gain_proposal_frequency_status, nominal_independent_gain_frequency_status;
     std::size_t signed_lag_gain_proposal_available_blocks = 0, signed_lag_gain_proposal_sampled_blocks = 0;
     std::size_t signed_lag_gain_proposal_scored_blocks = 0, signed_lag_gain_proposal_workspace_bytes = 0;
     std::size_t signed_lag_gain_proposal_direct_scored_blocks = 0;
@@ -177,10 +179,14 @@ struct ReceiverSlotScore {
     std::string varying_quiet_status;
     double varying_line_frequency_hz = 0, varying_line_log_evidence = 0;
     std::size_t drift_timing_atoms = 0, drift_slopes = 0, drift_frequency_bins = 0;
+    std::size_t drift_relative_doppler_models = 0;
+    unsigned drift_stage_workers = 0, drift_line_stage_workers = 0;
+    unsigned drift_planned_stage_workers = 0, drift_line_planned_stage_workers = 0;
+    std::uint64_t drift_coherent_timing_fft_rows = 0, drift_coherent_timing_fft_stages = 0;
     std::size_t drift_observation_rows = 0, drift_proposal_stride = 0;
     double drift_seconds = 0;
     std::array<double, 2> drift_bit_evidence{};
-    std::string drift_status;
+    std::string drift_status, drift_line_status;
     double helper_seconds = 0, coarse_seconds = 0, fine_seconds = 0;
     // Helper acquisition ran beside coarse preparation: helper_seconds then
     // lies inside coarse_seconds instead of preceding it.

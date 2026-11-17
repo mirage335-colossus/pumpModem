@@ -195,6 +195,13 @@ struct PathEvolutionConfig {
     // keeps the direct path present; it is not a universal HF fading law.
     // Zero preserves the historical fixed equal-power SpreadRay exactly.
     double bounded_spread_knot_seconds = 0;
+    // Optional fixed power allocation for the bounded two-path law only.
+    // Direct and delayed powers are p and 1-p before interference/filtering.
+    // All existing delay/frequency/amplitude states still advance; only their
+    // two normalized amplitude weights are replaced. Absent preserves the
+    // original bounded ratio and exact arithmetic. Endpoints retain both ray
+    // histories and their complete public tail even when one weight is zero.
+    std::optional<double> bounded_spread_direct_power_fraction;
     // Independent stationary proper-complex OU gains on the direct and delayed
     // rays: E[g]=0, E[|g|^2]=1, E[g(t+dt)conj(g(t))]=exp(-dt/coherence).
     // Existing SpreadRay still supplies equal ray powers and Doppler separation.
@@ -330,8 +337,14 @@ struct StreamChannelReport {
     double path_diurnal_initial_phase_radians = 0;
     struct BoundedSpreadReport {
         double excess_delay_seconds = 0, knot_seconds = 0, doppler_bound_hz = 0;
-        double minimum_echo_ratio = 1, maximum_echo_ratio = 0;
+        // Null ratio means the fixed direct power is zero; never infinity.
+        std::optional<double> minimum_echo_ratio = 1, maximum_echo_ratio = 0;
+        std::optional<double> fixed_direct_power_fraction;
         double minimum_doppler_hz = 0, maximum_doppler_hz = 0;
+        // Simultaneous common + relative delayed-ray trajectory in physical
+        // Hz, before RX clock scaling; excludes static Doppler, oscillator/diurnal/selective
+        // terms. Report the trajectory even when its fixed ray power is zero.
+        double minimum_combined_physical_doppler_hz = 0, maximum_combined_physical_doppler_hz = 0;
         std::uint64_t seed = 0, processed_rows = 0;
     };
     // Present only for the optional bounded two-path realization above.

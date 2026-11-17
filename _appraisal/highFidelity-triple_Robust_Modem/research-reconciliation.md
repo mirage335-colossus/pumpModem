@@ -129,6 +129,153 @@ its cause. Thus neither successful spots nor an accurate ray calculation alone
 qualifies alarm outage duration. This is complementary propagation evidence,
 not a reason to leave a reproduced receiver failure unexplained.
 
+## Persistent path ordering, clock age and noise
+
+The follow-through on `24929430` separates three mechanisms rather than
+interpreting every failed completion as unavailable wanted-bit information.
+Full-current-bit timing nomination can still become expensive with calendar
+age; this calls for exact correlation reuse and complete selected-window cost
+measurements, not an arbitrary information cap or calendar reset. Accumulated
+timing uncertainty can also extend the first guaranteed clean quiet interval.
+A test must score every intervening public slot and preserve the actual first
+two-QUIET completion rule; simulation horizon choices cannot declare completion.
+
+The exact overlap-save candidate retains complete linear-correlation support.
+[Johansson and Gustafsson (2023), §II-B](https://arxiv.org/html/2302.08845)
+explain the discarded overlap and show why undersized transforms or coefficient
+quantization can introduce a periodically varying response. Thus smaller FFTs
+must not mean truncated filters or omitted lags. The cache argument has a recent
+independent analogue in [Nitz et al. (2026), §II](https://arxiv.org/html/2601.18835v1):
+large matched-filter transforms can become bandwidth limited. Their gravitational-
+wave algorithm and speedups do not qualify this modem; local matched service
+and unchanged receiver decisions are the relevant acceptance evidence.
+
+The [Java NVIS dataset](https://zenodo.org/records/7552900) accompanying
+[Dear et al. (2024)](https://doi.org/10.1029/2023RS007877) supplies a concrete
+counterweight to assuming the earliest path is strongest. Its power-delay table
+at 21 December 2021, 09:59, first sounding group, lists peaks at 2.942 and
+3.259 ms with reported log-power values −90.70 and −85.52: the later peak is
+5.18 dB stronger and 0.317 ms later. Absolute RF calibration is not established
+by those columns. Separation is about 1.6 of the reported 0.196 ms resolution
+intervals. The downloaded `CIR` is a real dB correlation trace; neither it nor
+the peak workbook supplies complex phase history. Five sounding groups must
+not be mistaken for five simultaneous paths. Thus a fixed delayed-over-direct
+power contrast in the existing continuously changing simulator is motivated by
+measurements, but is not a measured-channel replay. Retaining the simulator's
+different seeded delay must be explicit.
+
+The sampled power ordering also does not establish a failure: a delayed ray
+can be acquired as a shifted direct template when its timing and combined
+common-plus-relative frequency lie within public support. A useful discriminator
+holds total ray power, source, noise and receiver bounds fixed, then checks both
+bit values and genuine quiet successors. The current test first replaces only
+the normalized ray amplitudes with `sqrt(p)` and `sqrt(1-p)`, with
+`p=1/(1+10^(5.18/10))`; all original motion and random state continue advancing.
+The default simulator remains unchanged. A near-direct-null contrast is a
+separately conditional synthetic test, not a prevalence claim.
+
+The workbook also contains a five-peak example at relative delays
+0 / 0.213 / 0.441 / 1.377 / 1.654 ms, with relative powers
+0 / −6.47 / −0.64 / −1.60 / −2.37 dB. Some separations are near the sounder's
+resolution and no complex phases or evolution are supplied. The existing DRM6
+simulator already exercises four independently evolving paths, delayed
+dominance and distinct Doppler centroids at larger separations. Its historical
+stronger pass and weaker miss are retained separately from current source
+qualification. A count of five measured peaks versus two basis rays therefore
+does not alone establish another receiver blind spot: aggregate complex
+response over the waveform bandwidth is the relevant discriminator. A new
+five-tap phase construction merits reconsideration if those response properties
+expose a mechanism absent from existing tests. The raw workbook and real-dB
+CIR download are retired after extracting the values, hashes and provenance;
+they are not phase-resolved receiver replay data.
+
+Source reconciliation also exposes a frequency-support issue independently of
+the measured power ratio. The existing simulator adds common motion `A` and
+relative delayed-ray motion `D`; the delayed ray's absolute envelope is
+`B+A+abs(D)` including oscillator allowance `B`. The projection retains that
+envelope, while two supplemental acquisition/tracking branches originally use
+only `B+A`. A fixed positive relative-Doppler column does not cover the negative
+combined corner. Other short-block models can still recover some inputs, so
+this algebra does not prove a complete-receiver blackout. It does require an
+explicit endpoint discriminator and a support correction, with original grid
+spacing, simpler models, normalized priors and computing bounds preserved.
+Passing one seeded atmosphere cannot substitute for that check.
+
+The executed endpoint discriminator does expose an avoidable loss: ordinary
+reception succeeds for a +180 Hz pure echo but calls the equal-energy −180 Hz
+bit quiet. Expanding the independent-gain lattice improves its evidence without
+recovering that weak short bit. Component provenance identifies the coherent
+drift family as the positive case's successful model, so tripling short tracking
+would address the wrong mechanism. Mirroring the existing drift family's
+relative Doppler, with normalized sign priors and unchanged full timing prior,
+recovers the negative input. Both signs/bits, delayed-dominant and balanced
+negative corners, and a fresh-noise intermediate relative-frequency case then
+pass complete ordinary reception. The wider independent branch remains useful
+for general frequency support; the coherent sign alternative addresses the
+specific demonstrated sensitivity loss. Neither finite result proves that two
+endpoint bases reproduce every independently varying two-ray channel.
+
+The next equal-energy discriminator makes the channel calmer and lengthens the
+ordinary bit. It reveals an implementation discontinuity distinct from the
+unknown-channel estimation costs discussed above: a preferred FFT size makes
+the useful coherent family unavailable at long duration, even though faithful
+processing fits in its existing complete workspace quote. The old ordinary
+receiver misses the long bit; the same canonical coherent statistic finds
+strong evidence on identical samples with a larger FFT. This is evidence for
+removing the planning exclusion, not a claim of monotonic sensitivity in every
+changing channel. The production extension preserves the existing full-worker
+lease and independently admits ordinary and retained-line routes. A rejected
+extension therefore means a chosen capacity envelope, not necessarily a lack
+of physical RAM. The complete-reception and service results, rather than the
+private witness alone, determine its qualification. See the
+[long-observation investigation](../../docs/validation.md#long-coherent-observations-and-the-fft-planning-boundary).
+
+The subsequent complete tests distinguish two more implementation effects.
+For bit one, an already nominated timing receives the signal under exact
+coherent scoring, yet the segmented ridge statistic discards it. Separate
+coherent nominations therefore supplement, rather than numerically mix with,
+the ridge statistic; all earlier winners remain. Also, an eight-worker lease
+rejects the expanded family while a 24-worker lease receives identical input.
+Fitting only that stage's parallel width inside the existing lease repairs the
+loss without reducing global workers or the ready-owner budget. These are
+causal finite counterexamples, not deductions from fading literature alone.
+The separate ambiguous Gaussian quiet window is an expected statistical tail
+under the existing absence gate; preserving its erasure and observing later
+physical silence is appropriate, whereas changing its threshold would obscure
+the distinction between reception failure and delayed message closure.
+
+For noise, [ITU-R P.372-18 (September 2026)](https://www.itu.int/rec/R-REC-P.372-18-202609-I/en)
+is the current recommendation. Its version/scope page was checked; this is not
+a full-text review of its 30 MB document or a source of temporal storm samples.
+[Lemmon (2001), publisher abstract](https://agupubs.onlinelibrary.wiley.com/doi/abs/10.1029/2000RS002364)
+explicitly includes burst correlation in an HF atmospheric-noise waveform
+model. The NTIA anniversary compilation reproduces an abstract and significance
+summary, not that paper's complete model derivation. Neither reference validates
+the appraisal's particular AR(1)/Poisson tuple as a local noise law.
+
+Current replays distinguish the resulting receiver issue: wanted bits arrive,
+but modeled colored/shot noise prevents quiet completion. Matched component
+ablations show AR(1) noise yields ambiguity and shot noise yields false DATA.
+A scalar reference based only on mean power cannot account for temporal
+covariance; even a second-moment covariance envelope is not a Gaussian or
+sub-Gaussian guarantee for compound Poisson tails. A receiver-only reference
+contrast must preserve the original IQ and DATA basis amplitude. It may expose
+a calibration loss, but simulator-derived constants are not an operational
+noise estimator or a generic production correction. See the
+[source-bound outcomes](../../docs/validation.md#persistent-channel-and-calendar-age-follow-through--17-november-2026).
+
+[Besson (2021)](https://arxiv.org/abs/2012.01182) shows that even Gaussian
+training-covariance mismatch changes nominal constant-false-alarm behavior.
+Independent training therefore needs an explicit applicability contract.
+[Chen et al. (March 2026 revision), §§3 and 6](https://arxiv.org/html/2412.07911v3)
+provide a useful counterweight to simple clipping: accounting for burst memory
+can improve detection, and a reduced noise-state model can retain performance
+in their tested regimes. But their finite-state variance model differs from
+this simulator's correlated-voltage Poisson pulses; their bounds assume known
+noise parameters, and short interleavers substantially degrade their reported
+performance. Neither result licenses a universal scalar inflation or an
+unqualified transfer of their detection gains to this modem.
+
 ## Evidence-to-model map
 
 | Family | Smallest defensible first representation | Evidence and provenance | Counterevidence and boundary | First independent check |

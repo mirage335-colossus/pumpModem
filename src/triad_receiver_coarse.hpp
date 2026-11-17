@@ -26,7 +26,9 @@ struct CoarseMidpointTiming {
     std::size_t gain_fixed_proposal_count = 0;
     std::size_t gain_blocks = 0, gain_projected_rows = 0, gain_workspace_bytes = 0;
     std::size_t gain_available_blocks = 0, gain_sampled_blocks = 0, gain_verified_correlations = 0;
-    std::size_t gain_direct_blocks = 0;
+    std::size_t gain_direct_blocks = 0, gain_fixed_frequency_points = 0;
+    std::string_view gain_frequency_status;
+    std::size_t gain_tiled_blocks = 0, gain_tiled_verified_correlations = 0;
     std::uint64_t gain_fft_row_stages = 0, gain_score_rows = 0;
     std::uint64_t gain_fft_stage_bound = 0, gain_score_row_bound = 0;
     double gain_seconds = 0;
@@ -73,6 +75,8 @@ struct CoarseMidpointSupport {
     std::size_t gain_available_blocks = 0, gain_sampled_blocks = 0, gain_direct_blocks = 0;
     std::size_t gain_fft_rows = 0, gain_frequency_points = 0, gain_workspace_bytes = 0;
     std::uint64_t gain_fft_stage_bound = 0, gain_score_row_bound = 0;
+    std::size_t gain_fixed_frequency_points = 0;
+    std::string_view gain_frequency_status;
 };
 CoarseMidpointSupport coarse_midpoint_timing_support(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers = 1);
 FineCoordinate midpoint_timing_coordinate(const ReceiverSlotPlan&, long double middle_seconds,

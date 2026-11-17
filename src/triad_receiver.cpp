@@ -103,41 +103,93 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
             }
         }
     }
-    const auto input = checked_multiply(rows, sizeof(Complex) + sizeof(std::uint8_t));
-    const bool helper_transfer_full_prior = helper_transfer_requires_full_prior(config, slot);
-    const auto helper = helper_transfer_full_prior ? 0 : helper_workspace(config, slot);
-    auto varying = varying_fine_plan(config, slot, workers);
-    const auto drift = drift_plan(config, slot, workers);
-    const auto coherent_gain = varying_fine_plan(config, slot, workers, false, true);
-    auto search = config;
-    search.time_varying_channel = varying.block_rows || drift.workspace_bytes || coherent_gain.block_rows;
-    const auto midpoint_support = varying.track_frequency ?
-        coarse_midpoint_timing_support(search, slot) : CoarseMidpointSupport{false, "short_tracking_unavailable"};
-    const auto midpoint = midpoint_support.available ?
-        MidpointTimingEvaluation::short_tracking : MidpointTimingEvaluation::off;
-    if (midpoint_support.available) enable_midpoint_tracking(varying);
-    const auto coarse = coarse_workspace(search, slot, workers, {}, midpoint);
-    const auto fine = fine_workspace(config, slot, workers);
-    const auto varying_quiet = varying_quiet_workspace(config, slot);
-    const auto line = search.time_varying_channel ? varying_line_workspace(config, slot) : 0;
-    const auto line_varying = line ? varying_fine_plan(config, slot, workers, true) : VaryingFinePlan{};
-    const auto line_drift = line && drift.workspace_bytes ? drift_plan(config, slot, workers, true) : DriftPlan{};
-    const auto line_coherent_gain = line && coherent_gain.block_rows ?
-        varying_fine_plan(config, slot, workers, true, true) : VaryingFinePlan{};
-    const auto supplemental = std::max({varying.workspace_bytes, drift.workspace_bytes,
-        coherent_gain.workspace_bytes, varying_quiet, line, line_varying.workspace_bytes,
-        line_drift.workspace_bytes, line_coherent_gain.workspace_bytes, evidence_supplement});
-    const auto lease = [&](std::size_t stage) { return checked_add(checked_add(input, receipts_bytes), stage); };
-    // One lane runs acquisition and preparation in turn: nothing coexists.
-    const bool overlappable = quote_overlap && workers > 1 && helper && coarse_defers_frequency_grid(config, slot);
-    const auto overlapped_coarse = overlappable ?
-        coarse_workspace(search, slot, workers, {helper, helper_widest_wave}, midpoint) : coarse;
-    return {input, helper, coarse, fine,
-            lease(std::max({helper, coarse, fine, supplemental})),
-            overlappable, overlapped_coarse,
-            lease(std::max({helper, overlapped_coarse, fine, supplemental})),
-            varying, drift, coherent_gain, line, line_varying, line_drift, line_coherent_gain,
-            evidence_supplement, midpoint_support.status, helper_transfer_full_prior};
+    // Freeze the original family membership and complete owner envelope
+    // before considering a larger coherent proposal. This optional route
+    // never raises a quote or reduces the ready prefix admitted by callers.
+    bool inspect_full_overlap = quote_overlap;
+    const auto build = [&](const DriftPlan& drift, std::optional<DriftPlan> line_override = std::nullopt) {
+        const auto input = checked_multiply(rows, sizeof(Complex) + sizeof(std::uint8_t));
+        const bool helper_transfer_full_prior = helper_transfer_requires_full_prior(config, slot);
+        const auto helper = helper_transfer_full_prior ? 0 : helper_workspace(config, slot);
+        auto varying = varying_fine_plan(config, slot, workers);
+        const auto coherent_gain = varying_fine_plan(config, slot, workers, false, true);
+        auto search = config;
+        search.time_varying_channel = varying.block_rows || drift.workspace_bytes || coherent_gain.block_rows;
+        const auto midpoint_support = varying.track_frequency ?
+            coarse_midpoint_timing_support(search, slot) : CoarseMidpointSupport{false, "short_tracking_unavailable"};
+        const auto midpoint = midpoint_support.available ?
+            MidpointTimingEvaluation::short_tracking : MidpointTimingEvaluation::off;
+        if (midpoint_support.available) enable_midpoint_tracking(varying);
+        const auto coarse = coarse_workspace(search, slot, workers, {}, midpoint);
+        const auto fine = fine_workspace(config, slot, workers);
+        const auto varying_quiet = varying_quiet_workspace(config, slot);
+        const auto line = search.time_varying_channel ? varying_line_workspace(config, slot) : 0;
+        const auto line_varying = line ? varying_fine_plan(config, slot, workers, true) : VaryingFinePlan{};
+        const auto line_drift = line_override ? *line_override :
+            (line && drift.workspace_bytes ? drift_plan(config, slot, workers, true) : DriftPlan{});
+        const auto line_coherent_gain = line && coherent_gain.block_rows ?
+            varying_fine_plan(config, slot, workers, true, true) : VaryingFinePlan{};
+        const auto supplemental = std::max({varying.workspace_bytes, drift.workspace_bytes,
+            coherent_gain.workspace_bytes, varying_quiet, line, line_varying.workspace_bytes,
+            line_drift.workspace_bytes, line_coherent_gain.workspace_bytes, evidence_supplement});
+        const auto lease = [&](std::size_t stage) { return checked_add(checked_add(input, receipts_bytes), stage); };
+        // One lane runs acquisition and preparation in turn: nothing coexists.
+        const bool overlap_shape = workers > 1 && helper && coarse_defers_frequency_grid(config, slot);
+        const bool overlappable = quote_overlap && overlap_shape;
+        const auto overlapped_coarse = inspect_full_overlap && overlap_shape ?
+            coarse_workspace(search, slot, workers, {helper, helper_widest_wave}, midpoint) : coarse;
+        return StageWorkspace{input, helper, coarse, fine,
+                lease(std::max({helper, coarse, fine, supplemental})),
+                overlappable, overlapped_coarse,
+                lease(std::max({helper, overlapped_coarse, fine, supplemental})),
+                varying, drift, coherent_gain, line, line_varying, line_drift, line_coherent_gain,
+                evidence_supplement, midpoint_support.status, helper_transfer_full_prior};
+    };
+    auto baseline = build(drift_plan(config, slot, workers));
+    if (baseline.drift.status != "drift_public_bandwidth_exceeds_reduced_proposal_limit") return baseline;
+    const auto original = baseline;
+    try {
+        // Quote and execution callers must choose the same optional family,
+        // including when it activates a different coarse plan. The initial
+        // mandatory baseline above remains intact if any optional public
+        // shape cannot be represented by a particular backend.
+        if (!inspect_full_overlap) {
+            inspect_full_overlap = true;
+            baseline = build(baseline.drift);
+        }
+        const auto preserved_stage = baseline.total - baseline.input - receipts_bytes;
+        const auto expanded = drift_plan(config, slot, workers, false, preserved_stage);
+        if (!expanded.workspace_bytes) {
+            baseline.drift.status = expanded.status;
+            return baseline;
+        }
+        DriftPlan line;
+        try {
+            if (varying_line_workspace(config, slot))
+                line = drift_plan(config, slot, workers, true, preserved_stage);
+        } catch (const Error& error) {
+            if (std::string_view(error.what()) == "Robust reception cancelled") throw;
+            // An unsupported optional line shape retains zero mass in that
+            // branch; it must not discard the usable ordinary likelihood.
+            line.status = "drift_line_extension_shape_unavailable";
+        }
+        auto candidate = build(expanded, line);
+        // A newly available varying family can also alter coarse or line
+        // preparation. Check the complete shape, for both orchestration
+        // modes, rather than just the additional scorer's scratch.
+        if (candidate.total <= baseline.total && candidate.overlapped_total <= baseline.overlapped_total) {
+            candidate.total = baseline.total;
+            candidate.overlapped_total = baseline.overlapped_total;
+            return candidate;
+        }
+        baseline.drift.status = "drift_extension_exceeds_preserved_owner_lease";
+        return baseline;
+    } catch (const Error& error) {
+        if (std::string_view(error.what()) == "Robust reception cancelled") throw;
+        auto preserved = original;
+        preserved.drift.status = "drift_extension_shape_unavailable";
+        return preserved;
+    }
 }
 
 double round_even(double value) {
@@ -460,6 +512,12 @@ std::size_t receiver_slot_workspace(const ReceiverConfig& config, const Receiver
     return plan_workspace(config, slot, workers, false).total;
 }
 
+receiver_detail::ReceiverDriftAdmission receiver_detail::receiver_drift_admission(
+        const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers, bool overlap) {
+    const auto plan = plan_workspace(config, slot, workers, overlap);
+    return {plan.drift, plan.line_drift, plan.total, plan.overlapped_total};
+}
+
 std::size_t receiver_slot_overlap_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                                             unsigned workers) {
     return plan_workspace(config, slot, workers, true).overlapped_total;
@@ -567,6 +625,10 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     score.coarse_precision_reason = coarse.work.plan.precision_reason;
     score.varying_status = workspace.varying.status;
     score.drift_status = workspace.drift.status;
+    score.drift_planned_stage_workers = workspace.drift.stage_workers;
+    score.drift_line_planned_stage_workers = workspace.line_drift.stage_workers;
+    score.drift_line_status = workspace.line_drift.workspace_bytes ? "eligible_not_executed" :
+        (workspace.line_drift.status.empty() ? "not_planned" : workspace.line_drift.status);
     score.coherent_gain_status = workspace.coherent_gain.status;
     score.varying_coarse_seconds = coarse.work.varying_proposals.wall_seconds;
     score.varying_timing_blocks = coarse.work.segmented_timing_blocks;
@@ -612,6 +674,8 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         score.signed_lag_gain_proposal_lags = timing.gain_proposal_lags;
         score.signed_lag_gain_proposal_fft_rows = timing.gain_fft_rows;
         score.signed_lag_gain_proposal_frequency_points = timing.gain_frequency_points;
+        score.signed_lag_gain_proposal_fixed_frequency_points = timing.gain_fixed_frequency_points;
+        score.signed_lag_gain_proposal_frequency_status = timing.gain_frequency_status;
         score.signed_lag_gain_proposal_available_blocks = timing.gain_available_blocks;
         score.signed_lag_gain_proposal_sampled_blocks = timing.gain_sampled_blocks;
         score.signed_lag_gain_proposal_scored_blocks = timing.gain_blocks;
@@ -759,6 +823,12 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
             if (workspace.line_drift.workspace_bytes && (compare_all || score.decision != SlotDecision::data)) {
                 score_drift_fine(config, slot, key, workspace.line_drift, iq, selected, fine.epoch_timing_coordinates,
                     workers, residual, stop, *executor, &*line);
+                score.drift_line_status = workspace.line_drift.status;
+                score.drift_line_stage_workers = residual.drift_stage_workers;
+                score.drift_coherent_timing_fft_rows = checked_add(score.drift_coherent_timing_fft_rows,
+                    residual.drift_coherent_timing_fft_rows);
+                score.drift_coherent_timing_fft_stages = checked_add(score.drift_coherent_timing_fft_stages,
+                    residual.drift_coherent_timing_fft_stages);
                 add_line_branch(score, residual, line->log_weighted_evidence);
             }
             score.varying_line_frequency_hz = line->frequency_hz;
