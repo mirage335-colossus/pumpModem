@@ -34,11 +34,12 @@ FFT. See the [automatic GPU integration contract](triad-performance.md#automatic
 ## Native CPU selection
 
 Automatic reduced precision is confined to frequency search after native channel
-isolation has removed strong out-of-band Helper tones. A qualifying broad native
-single-ray, single-arrival, no-Helper public search can instead use the existing
-FP64 chirp-Z frequency scan when its estimated transform-row work is at least
-four times smaller; it still evaluates every public frequency. A single frequency
-may instead use a bounded direct FP64 dot when the same modeled advantage holds.
+isolation has removed strong out-of-band Helper tones. With Helper Off, a
+qualifying exact-source CPU search can use FP64 chirp-Z when its estimated
+transform-row work is at least four times smaller. It evaluates every public
+frequency and arrival. For multiple rays or arrivals, it must fit the existing
+frequency-route workspace quote. A single ray, arrival and frequency may use a
+bounded direct FP64 dot when the same modeled advantage holds.
 Other qualified AVX2 routes use Q15 spectral products for native exact-projection,
 single-ray geometry;
 FFTs remain FP32 and scoring remains FP64. There is no separate Q15 FFT-size
@@ -51,7 +52,7 @@ public geometry, CPU capability and template conditioning, never decoded bits
 or a favorable observed score.
 
 The following retain FP64 with an explicit reason: lag-group search, including
-the eligible exact one-arrival chirp-Z route; projected
+the eligible exact-source chirp-Z route; projected
 rate at most 10 Hz with a positive clock span at most 0.001 ppm; an
 ill-conditioned template bank; an unqualified CPU kernel, including scalar;
 or the explicit FP64 preference. Coordinates, demodulation phase, Gram matrices,
@@ -83,7 +84,8 @@ The ordinary GUI's Default policy may prefer native FP64 chirp-Z for the scoped
 one-ray, one-arrival, no-Helper geometry when the measured Radeon/CPU crossover
 and worker-dependent cost guards apply. Device initialization remains explicit,
 and the full GPU reservation remains charged where either route can be needed.
-The public frequency group may contain up to 65,536 points. The crossover uses
+The public frequency group can exceed the former 65,536-point ceiling when
+checked transform and workspace bounds admit the full grid. The crossover uses
 the measured 26-workspace, 1,750-row, 1,794-frequency anchor and scales the
 required direct work upward for more native radix work or fewer admitted
 workers; the separate fourfold native transform-work guard also remains. Larger

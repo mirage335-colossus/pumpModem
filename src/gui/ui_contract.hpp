@@ -18,7 +18,7 @@ enum class Field {
     qr_brightness, send_key, device, mono, live_duplex, volume, exclusive, bandwidth, carrier, snr, fec, dsp_workspace,
     files, signals, mode, status, airtime, force_transmit, key_path, message_label, binary_label,
     diagnostics, inspection, flow_detail, transmission_detail, payload_alphabet,
-    reference_alphabet, waveform_zoom, short_bits, short_bits_detail, repeated_bit_result, received_raw_bits,
+    reference_alphabet, waveform_zoom, short_bits, short_bits_detail, received_raw_bits,
     compression_codes, transmit_scope, transmit_scope_caption, transmit_scope_format, profile_reference,
     gpu, developer_mode, shellcode_mode, fast_mode, fast_profile, fast_expected_snr, fast_symbol_rate, fast_constellation, fast_coding, fast_fec, fast_depth,
     fast_device, fast_mono, fast_volume, fast_exclusive, fast_encryption, fast_key, fast_key_path, fast_source, fast_text, fast_file, fast_status,
@@ -27,14 +27,14 @@ enum class Field {
     fast_sim_spread, fast_sim_selective, fast_sim_margin, fast_sim_shift_hz, fast_sim_status,
     legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_status, legacy_device, legacy_volume, legacy_exclusive, legacy_mono,
     search_arithmetic, doppler, fhss_list, fhss_list_status, receiver_strategy, receiver_cpu_budget,
-    symbol_burst, symbol_burst_random, calendar_epoch, calendar_ordinal, live_noise_dbfs_hz, fixed_repeated_bit_live, wrong_key_admission, count
+    symbol_burst, symbol_burst_random, calendar_epoch, calendar_ordinal, live_noise_dbfs_hz, wrong_key_admission, count
 };
 enum class Command {
     none, transmit, force_transmit, transmit_noise, transmit_helper, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
     generate_keyfile, show_key_folder, acknowledge_key_failure, save_file,
     copy_signal, paste_signal, zoom_in, zoom_out, reset_zoom, clear_waterfall,
     pattern_first, pattern_previous, pattern_next, pattern_last, toggle_qr_expanded, dismiss_overlay,
-    transmit_short_bits, transmit_repeated_bit, copy_raw_signal, paste_raw_signal, clear_pattern_scores,
+    transmit_short_bits, copy_raw_signal, paste_raw_signal, clear_pattern_scores,
     resume_recovery, cancel_recovery,
     planner_target, planner_load_command, planner_stronger, planner_weaker, planner_example_short, planner_example_lpi,
     planner_fast, planner_day, planner_clock, planner_toggle_details, planner_toggle_draft,

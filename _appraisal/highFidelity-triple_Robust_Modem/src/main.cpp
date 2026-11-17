@@ -296,8 +296,13 @@ Options parse(int argc,char** argv) {
             o.gui.audio_phase_degrees_sqrt_s==.5&&o.gui.rf_phase_degrees_sqrt_s==.05&&o.gui.target_cn0_db_hz==32.&&
             o.chunk==4096&&!o.workers&&!o.owners&&!o.memory_bytes&&!o.capture_digest_slot&&!o.duration_override&&
             !o.hf_compare_admitted_models&&!o.hf_predictive_quiet&&!o.service_replay;
-        const std::uint64_t maximum_samples=o.repeat_separate_attempts?2'400'000:1'200'000;
-        require(o.max_wall_seconds<=(long_holdout?300:120)&&o.max_samples<=maximum_samples&&o.chunk<=4096,
+        // Lower Target SNR may select a longer waveform. Retain only the
+        // usual three scored windows, with bounded continuous input rendering.
+        const bool selected_duration=o.repeat_selected_attempt&&!o.bit_seconds;
+        const std::uint64_t maximum_samples=selected_duration?26'000'000:
+            o.repeat_separate_attempts?2'400'000:1'200'000;
+        require(o.max_wall_seconds<=(long_holdout?300:selected_duration?450:120)&&
+                o.max_samples<=maximum_samples&&o.chunk<=4096,
             "gui-repeated-bit trial exceeds its finite wall, sample or chunk bound");
     }
     if(physical_repeated)
@@ -2230,6 +2235,11 @@ Json backend_json(const Options& o,const std::shared_ptr<receiver_detail::Receiv
 }
 Json score_json(const StreamSlotReceipt& receipt) {
     const auto& r=receipt.score;
+    Json::Array signed_lags, signed_lag_scores;
+    for(const auto lag:std::span(r.signed_lag_gain_proposal_lags).first(r.signed_lag_gain_proposal_maps))
+        signed_lags.emplace_back(lag);
+    for(const auto& evidence:std::span(r.signed_lag_gain_map_bit_evidence).first(r.signed_lag_gain_candidates))
+        signed_lag_scores.emplace_back(Json::Array{evidence[0],evidence[1]});
     Json::Array gain_powers;
     if(r.nominal_independent_gain_candidates)
         for(std::size_t i=0;i<receiver_detail::independent_gain_powers.size();++i) {
@@ -2266,6 +2276,20 @@ Json score_json(const StreamSlotReceipt& receipt) {
             {"moving_centroid_bit_evidence",r.nominal_independent_gain_frequency_states?Json(Json::Array{
                 r.nominal_independent_moving_centroid_bit_evidence[0],r.nominal_independent_moving_centroid_bit_evidence[1]}):Json{}},
             {"bit_evidence_before_public_prior",Json::Array{r.nominal_independent_gain_bit_evidence[0],r.nominal_independent_gain_bit_evidence[1]}}}):Json{}},
+        {"signed_lag_gain",object({{"proposal_status",r.signed_lag_gain_proposal_status},
+            {"maps",r.signed_lag_gain_proposal_maps},{"fixed_maps",r.signed_lag_gain_proposal_fixed_maps},
+            {"lags",std::move(signed_lags)},{"map_bit_evidence",std::move(signed_lag_scores)},
+            {"available_blocks",r.signed_lag_gain_proposal_available_blocks},
+            {"sampled_blocks",r.signed_lag_gain_proposal_sampled_blocks},{"scored_blocks",r.signed_lag_gain_proposal_scored_blocks},
+            {"direct_scored_blocks",r.signed_lag_gain_proposal_direct_scored_blocks},
+            {"projected_rows",r.signed_lag_gain_proposal_projected_rows},{"fft_rows",r.signed_lag_gain_proposal_fft_rows},
+            {"frequency_points",r.signed_lag_gain_proposal_frequency_points},
+            {"fft_row_stages",r.signed_lag_gain_proposal_fft_stages},{"score_rows",r.signed_lag_gain_proposal_score_rows},
+            {"fft_stage_bound",r.signed_lag_gain_proposal_fft_stage_bound},{"score_row_bound",r.signed_lag_gain_proposal_score_row_bound},
+            {"workspace_bytes",r.signed_lag_gain_proposal_workspace_bytes},{"proposal_seconds",r.signed_lag_gain_proposal_seconds},
+            {"candidates",r.signed_lag_gain_candidates},{"basis_rows",r.signed_lag_gain_basis_rows},
+            {"bit_evidence",r.signed_lag_gain_candidates?Json(Json::Array{
+                r.signed_lag_gain_bit_evidence[0],r.signed_lag_gain_bit_evidence[1]}):Json{}}})},
         {"midpoint_timing",object({{"status",r.midpoint_timing_status},{"precision",r.midpoint_timing_precision},
             {"public_lags",r.midpoint_timing_lags},{"candidates",r.midpoint_timing_candidates},
             {"workspace_bytes",r.midpoint_timing_workspace_bytes},{"basis_rows",r.midpoint_timing_basis_rows},

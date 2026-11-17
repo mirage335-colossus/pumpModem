@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <exception>
+#include <initializer_list>
 #include <limits>
 #include <numbers>
 #include <numeric>
@@ -26,7 +27,6 @@ constexpr std::size_t chunk_samples = coarse_fir_chunk_rows;
 constexpr std::size_t lanes = 2 * receiver_epoch_offsets.size();
 constexpr std::size_t retained_per_bit = 2;
 constexpr std::size_t max_intervals = 64;
-constexpr std::size_t max_frequency_points = 65536;
 constexpr std::size_t max_lag_frequency_points = 4096;
 constexpr std::size_t max_fft_products = 32768;
 // Preserve the existing FHSS mapped-route selection boundary. Exact work is
@@ -229,6 +229,8 @@ struct MidpointPlan {
         std::size_t block_rows = 0, fft_rows = 0, radius = 0, frequency_stride = 0;
         std::size_t blocks = 0, sampled_blocks = 0, scratch = 0;
         std::string_view status = "signed_gain_projection_unavailable";
+        bool full_direct = false;
+        std::uint64_t fft_stage_bound = 0, score_row_bound = 0;
         std::size_t frequencies() const { return 2 * radius + 1; }
     } gain;
     long double middle_seconds = 0;
@@ -260,23 +262,36 @@ struct GainTimingScratch {
     std::array<std::vector<Complex>, 2> templates, correlations;
     std::vector<Complex> observation;
     std::vector<double> scores;
+    std::vector<double> direct_scores;
+    std::vector<GainFrequencyMean> block_means;
     std::vector<std::int64_t> shifts;
     CoarseOperationCounts operations;
-    std::size_t blocks = 0, rows = 0, verified = 0;
-    bool finite = true;
+    std::size_t blocks = 0, direct_blocks = 0, rows = 0, verified = 0;
 
-    GainTimingScratch(std::size_t fft_rows, std::size_t lags, std::size_t frequencies)
-        : observation(fft_rows), scores(2 * lags * frequencies), shifts(lags) {
-        for (auto& values : templates) values.resize(fft_rows);
-        for (auto& values : correlations) values.resize(fft_rows);
+    GainTimingScratch(std::size_t fft_rows, std::size_t lags, std::size_t frequencies, bool fixed, bool direct)
+        : observation(fft_rows), scores(fixed ? 2 * lags * frequencies : 0),
+          direct_scores(direct ? 2 * lags : 0), block_means(direct ? lags : 0), shifts(lags) {
+        for (std::size_t ray = 0; ray < 1 + static_cast<std::size_t>(fixed); ++ray) {
+            templates[ray].resize(fft_rows);
+            correlations[ray].resize(fft_rows);
+        }
     }
 };
+
+std::optional<std::uint64_t> gain_work_count(std::initializer_list<std::uint64_t> factors) {
+    std::uint64_t count = 1;
+    for (auto value : factors) {
+        if (value && count > UINT64_MAX / value) return std::nullopt;
+        count *= value;
+    }
+    return count;
+}
 
 MidpointPlan::GainPlan gain_timing_plan(const Plan& plan, const ReceiverConfig& config,
         const ReceiverSlotPlan& slot, const MidpointPlan& midpoint, unsigned workers) {
     if (!config.spread_delay_seconds || !workers) return {};
     const auto block = fft_size(extent(std::ceil(2.L * plan.output_fs / plan.source_geometry.fine_chip_rate_hz)));
-    if (block > plan.layout.kernel_rows / 2) return {};
+    if (block > plan.layout.kernel_rows / 2) return {.status = "signed_gain_block_span_unavailable"};
     const auto frequency_step = static_cast<double>(plan.output_fs) / (2 * block);
     const auto center = config.frequency_bound_hz + config.time_varying_atmospheric_hz;
     auto stride = std::max<std::size_t>(1, extent(std::ceil(center / (32 * frequency_step))));
@@ -287,35 +302,55 @@ MidpointPlan::GainPlan gain_timing_plan(const Plan& plan, const ReceiverConfig& 
     };
     auto radius = radius_for(stride);
     if (radius > 32) radius = radius_for(++stride);
-    if (radius > 32 || radius * stride * frequency_step >= .5 * plan.output_fs) return {};
+    if (radius > 32 || radius * stride * frequency_step >= .5 * plan.output_fs)
+        return {.status = "signed_gain_frequency_grid_unavailable"};
     const auto last_source_time = std::max(std::abs(plan.layout.origin),
         std::abs(plan.layout.origin + static_cast<long double>(plan.layout.kernel_rows) / plan.output_fs)) +
         (plan.taps - 1.L) / (2 * plan.fs);
     const long double clock_bound = config.clock_bound_ppm * 1e-6L;
     const auto shift_span = (slot.arrival_upper_seconds - slot.arrival_lower_seconds +
         2 * last_source_time * clock_bound / (1 - clock_bound * clock_bound)) * plan.output_fs;
-    if (!(shift_span >= 0 && shift_span < plan.layout.crop_rows)) return {};
+    if (!(shift_span >= 0 && shift_span < plan.layout.crop_rows))
+        return {.status = "signed_gain_arrival_span_unavailable"};
     const auto fft = fft_size(std::max(mul(2, block), add(add(block, extent(std::ceil(shift_span))), 2)));
     const auto blocks = ceil_div(plan.layout.kernel_rows, block);
     const auto frequencies = 2 * radius + 1;
-    const auto stages = static_cast<long double>(fft) * std::countr_zero(fft) * (5 + 4 * frequencies);
-    // Score all timing cells on the same blocks. Shape-only time subsampling
-    // bounds the optional ranking work when the clock envelope grows.
+    const auto levels = static_cast<unsigned>(std::countr_zero(fft));
+    const auto stages = static_cast<long double>(fft) * levels * (5 + 4 * frequencies);
+    // Keep the stationary two-ray rank on its existing subset. The moving
+    // direct-ray rank uses the whole aperture, sharing the selected blocks'
+    // direct transforms without repeating any other work there.
     const auto capture_rows = static_cast<std::size_t>(slot.stop_sample - slot.first_sample);
     const auto budget = std::min<long double>(max_gain_timing_fft_stages,
                                                exact_preparation_stages(plan, capture_rows));
-    const auto sampled = extent(std::floor(std::min<long double>(blocks, budget / stages)));
-    if (sampled < std::min<std::size_t>(8, blocks))
-        return {0, 0, 0, 0, blocks, 0, 0, "signed_gain_proposal_work_limit"};
-    const auto lanes = std::min<std::size_t>(workers, sampled);
-    const auto states = mul(2 * frequencies, midpoint.lag_count);
+    auto sampled = extent(std::floor(std::min<long double>(blocks, budget / stages)));
+    if (sampled < std::min<std::size_t>(8, blocks)) sampled = 0;
+    const auto fixed_stages = gain_work_count({sampled, fft, levels, 5 + 4 * frequencies});
+    const auto fixed_scores = gain_work_count({sampled, 2, frequencies, midpoint.lag_count});
+    if (!fixed_stages || !fixed_scores)
+        return {.blocks = blocks, .status = "signed_gain_proposal_work_unrepresentable"};
+    const auto direct_stages = gain_work_count({blocks - sampled, fft, levels, 3 + 2 * frequencies});
+    const auto direct_scores = gain_work_count({blocks, 2, frequencies, midpoint.lag_count});
+    const bool full_direct = direct_stages && direct_scores &&
+        *direct_stages <= UINT64_MAX - *fixed_stages && *direct_scores <= UINT64_MAX - *fixed_scores;
+    if (!sampled && !full_direct)
+        return {.blocks = blocks, .status = "signed_gain_proposal_work_unrepresentable"};
+    const auto fixed_lanes = std::min<std::size_t>(workers, sampled);
+    const auto rank_lanes = full_direct ? std::min<std::size_t>(workers, blocks) : fixed_lanes;
+    const auto fixed = sampled ? mul(mul(2 * frequencies, midpoint.lag_count), sizeof(double)) : 0;
+    const auto direct = full_direct ? mul(midpoint.lag_count, 2 * sizeof(double)) : 0;
+    const auto block_means = full_direct ? mul(midpoint.lag_count, sizeof(GainFrequencyMean)) : 0;
+    const auto mask = full_direct && sampled && sampled < blocks ? blocks : 0;
     const auto shared = add(add(mul(fft, sizeof(Complex)), mul(midpoint.lag_count, sizeof(FineCoordinate))),
-                            mul(states, sizeof(double)));
-    const auto worker = add(add(mul(mul(5, fft), sizeof(Complex)), mul(states, sizeof(double))),
-                            mul(midpoint.lag_count, sizeof(std::int64_t)));
-    const auto scratch = add(add(shared, mul(lanes, add(worker, sizeof(GainTimingScratch)))), 64 * 1024);
-    return {block, fft, radius, stride, blocks, sampled, scratch,
-            sampled == blocks ? "signed_gain_full_blocks" : "signed_gain_sampled_blocks"};
+                            add(add(fixed, direct), mask));
+    const auto lane_common = add(add(mul(mul(3, fft), sizeof(Complex)), sizeof(GainTimingScratch)),
+                                 add(mul(midpoint.lag_count, sizeof(std::int64_t)), add(direct, block_means)));
+    const auto lane_fixed = add(mul(mul(2, fft), sizeof(Complex)), fixed);
+    const auto scratch = add(add(shared, add(mul(rank_lanes, lane_common), mul(fixed_lanes, lane_fixed))), 64 * 1024);
+    const auto status = full_direct ? (sampled ? "signed_gain_full_direct" : "signed_gain_full_direct_without_fixed") :
+                                    "signed_gain_full_direct_work_unrepresentable";
+    return {block, fft, radius, stride, blocks, sampled, scratch, status, full_direct,
+            *fixed_stages + (full_direct ? *direct_stages : 0), *fixed_scores + (full_direct ? *direct_scores : 0)};
 }
 
 MidpointPlan midpoint_plan(const Plan& plan, const ReceiverConfig& config, const ReceiverSlotPlan& slot,
@@ -2083,10 +2118,12 @@ void validate_mapped_profile(const Plan& plan, const ReceiverConfig& config, con
 }
 
 std::size_t frequency_bound(const Plan& plan, const ReceiverConfig& config) {
-    const auto full_count = std::ceil(2 * config.frequency_bound_hz / plan.max_frequency_step) + 1;
-    require_coarse(full_count <= max_frequency_points, "full fallback coarse grid exceeds its public point limit");
-    const auto count = full_count + (config.helper_enabled ? 3 * (max_intervals - 1) : 0);
-    return count >= max_frequency_points ? max_frequency_points : extent(count);
+    const auto full_steps = std::ceil(2 * config.frequency_bound_hz / plan.max_frequency_step);
+    // As in the fine admission grid, keep public indices exact in binary64.
+    // The complete frequency and peak storage is charged by scratch_workspace.
+    require_coarse(full_steps < 0x1p53, "full fallback coarse grid exceeds its exact index bound");
+    const auto full_count = add(extent(full_steps), 1);
+    return add(full_count, config.helper_enabled ? 3 * (max_intervals - 1) : 0);
 }
 
 struct FrequencyGroup {
@@ -2095,8 +2132,8 @@ struct FrequencyGroup {
 };
 
 struct FrequencyGrid {
-    std::vector<double> values;
     std::vector<FrequencyGroup> groups;
+    std::size_t points = 0;
 };
 
 FrequencyGrid frequencies(const Plan& plan, const ReceiverConfig& config,
@@ -2104,28 +2141,39 @@ FrequencyGrid frequencies(const Plan& plan, const ReceiverConfig& config,
     require_coarse(!intervals.empty() && intervals.size() <= (config.helper_enabled ? max_intervals : 1),
                    "coarse frequency interval union is outside the public limit");
     FrequencyGrid grid;
-    auto& values = grid.values;
     const auto reserved = frequency_bound(plan, config);
-    values.reserve(reserved);
     grid.groups.reserve(intervals.size());
     auto prior_upper = -infinity;
     for (auto [lower, upper] : intervals) {
         require_coarse(std::isfinite(lower) && std::isfinite(upper) && lower <= upper && lower >= prior_upper &&
                        lower >= -config.frequency_bound_hz && upper <= config.frequency_bound_hz,
                        "coarse frequency intervals must be ordered, disjoint and inside the public prior");
-        prior_upper = upper;
         const auto steps = std::ceil((upper - lower) / plan.max_frequency_step);
-        const bool shared_endpoint = !values.empty() && values.back() == lower;
-        require_coarse(std::isfinite(steps) && steps < max_frequency_points &&
-                       values.size() + steps + 1 - shared_endpoint <= reserved,
-                       "complete coarse frequency search exceeds its public point limit");
-        const auto count = extent(steps);
-        const auto step = count ? (upper - lower) / count : 0.;
-        grid.groups.push_back({values.size() - shared_endpoint, count + 1, lower, upper});
-        for (std::size_t i = shared_endpoint; i <= count; ++i)
-            values.push_back(i == count ? upper : lower + i * step);
+        const bool shared_endpoint = prior_upper == lower;
+        const auto count = add(extent(steps), 1);
+        const auto first = grid.points - shared_endpoint;
+        grid.points = add(first, count);
+        require_coarse(grid.points <= reserved, "complete coarse frequency search exceeds its workspace quote");
+        grid.groups.push_back({first, count, lower, upper});
+        prior_upper = upper;
     }
     return grid;
+}
+
+std::vector<double> materialize_frequencies(const FrequencyGrid& grid, std::stop_token stop) {
+    check_stop(stop);
+    std::vector<double> values;
+    values.reserve(grid.points);
+    for (const auto& group : grid.groups) {
+        const auto steps = group.count - 1;
+        const auto step = steps ? (group.upper - group.lower) / steps : 0.;
+        // A touching interval reuses the previous interval's upper endpoint.
+        for (auto i = values.size() - group.first; i < group.count; ++i) {
+            if ((i & 4095U) == 0) check_stop(stop);
+            values.push_back(i == steps ? group.upper : group.lower + i * step);
+        }
+    }
+    return values;
 }
 
 std::size_t tile_points(const Plan& plan, std::size_t frequencies, unsigned workers) {
@@ -2148,16 +2196,21 @@ constexpr double matched_direct_terms = 26. * 1750 * 1794;
 constexpr double matched_chirp_workers = 24.;
 
 bool exact_chirp_z_profile(const Plan& plan, const ReceiverConfig& config) {
-    if (plan.source_step != 1 || plan.ray_count != 1 || plan.layout.lag_count != 1 ||
-        config.helper_enabled || config.native_coarse_precision != NativeCoarsePrecision::automatic)
+    if (plan.source_step != 1 || config.helper_enabled ||
+        config.native_coarse_precision != NativeCoarsePrecision::automatic)
         return false;
     if (!config.bulk_backend) return true;
+    if (plan.ray_count != 1 || plan.layout.lag_count != 1) return false;
     const auto rate = static_cast<double>(plan.output_fs), clock = 2 * config.clock_bound_ppm;
     if (config.bulk_backend->supports_exact_device_chirp_z())
         return config.bulk_backend->coarse_fallback_reason(rate, clock, CoarseRoute::lag_groups).empty();
     return config.bulk_backend->permits_native_exact_chirp_z() && native_float_kernel() &&
            config.bulk_backend->coarse_fallback_reason(rate, clock, CoarseRoute::frequency_tiles).empty() &&
            !config.bulk_backend->coarse_fallback_reason(rate, clock, CoarseRoute::lag_groups).empty();
+}
+
+bool exact_single_arrival(const Plan& plan) {
+    return plan.ray_count == 1 && plan.layout.lag_count == 1;
 }
 
 double chirp_fft_work(std::size_t lanes, std::size_t length) {
@@ -2182,13 +2235,6 @@ std::size_t lag_group_limit(const Plan& plan, const ReceiverConfig& config) {
     return max_fft_products / (lanes * plan.layout.lag_count);
 }
 
-std::size_t lag_point_limit(bool exact_chirp) {
-    // The exact one-arrival native scorer has one uniform group. Extending
-    // that convolution preserves the grid and avoids repeating the long
-    // input transform in many small frequency chunks.
-    return exact_chirp ? max_frequency_points : max_lag_frequency_points;
-}
-
 std::size_t lag_group_fft(const Layout& layout, std::size_t count) {
     return count > 1 ? fft_size(add(layout.kernel_rows, count - 1)) : 0;
 }
@@ -2209,12 +2255,13 @@ static_assert(lag_convolution_rows(4096, 3, 2) >= 2 * std::bit_ceil(std::size_t{
 static_assert(lag_convolution_rows(4096, 1, 3) == 0);
 
 double frequency_fft_work(const Plan& plan, std::size_t points) {
-    return points * (1 + plan.workspaces() * plan.ray_count) * static_cast<double>(plan.layout.nfft) *
+    return static_cast<double>(points) * (1 + plan.workspaces() * plan.ray_count) * plan.layout.nfft *
         std::log2(plan.layout.nfft);
 }
 
 bool prefer_exact_singleton(const Plan& plan, const ReceiverConfig& config) {
-    return (!config.bulk_backend || config.bulk_backend->supports_exact_device_chirp_z()) &&
+    return exact_single_arrival(plan) &&
+        (!config.bulk_backend || config.bulk_backend->supports_exact_device_chirp_z()) &&
         4. * plan.workspaces() * plan.layout.kernel_rows <= frequency_fft_work(plan, 1);
 }
 
@@ -2224,12 +2271,15 @@ bool exact_chirp_device_cost(const Plan& plan, const ReceiverConfig& config,
            enough_device_direct_work(plan, frequencies, stages, workers);
 }
 
-bool choose_lag(const Plan& plan, const FrequencyGrid& grid, const ReceiverConfig& config, unsigned workers) {
+bool choose_lag(const Plan& plan, const FrequencyGrid& grid, const ReceiverConfig& config, unsigned workers,
+                bool exact_multi_lag_admitted) {
     const auto limit = lag_group_limit(plan, config);
     const auto exact_chirp = exact_chirp_z_profile(plan, config);
-    if (grid.values.size() > lag_point_limit(exact_chirp) || grid.groups.size() > limit) return false;
-    const auto lanes = plan.workspaces() * plan.ray_count * plan.layout.lag_count;
-    auto products = 2 * lanes * grid.groups.size();
+    if (exact_chirp && !exact_single_arrival(plan) && !exact_multi_lag_admitted) return false;
+    if ((!exact_chirp && grid.points > max_lag_frequency_points) || grid.groups.size() > limit) return false;
+    const auto workspace_rays = mul(plan.workspaces(), plan.ray_count);
+    const auto lanes = mul(workspace_rays, plan.layout.lag_count);
+    auto products = mul(mul(2, lanes), grid.groups.size());
     double work = 0;
     for (const auto& group : grid.groups) {
         if (const auto length = lag_group_fft(plan.layout, group.count)) {
@@ -2240,7 +2290,7 @@ bool choose_lag(const Plan& plan, const FrequencyGrid& grid, const ReceiverConfi
         }
     }
     if (products > max_fft_products) return false;
-    const auto forward = grid.values.size(), inverse = forward * plan.workspaces() * plan.ray_count;
+    const auto forward = grid.points;
     const double frequency_work = frequency_fft_work(plan, forward);
     if (exact_chirp) {
         if (forward == 1) return prefer_exact_singleton(plan, config);
@@ -2250,7 +2300,7 @@ bool choose_lag(const Plan& plan, const FrequencyGrid& grid, const ReceiverConfi
         // existing packed or floating frequency route.
         return 4 * work <= frequency_work && exact_chirp_device_cost(plan, config, forward, work, workers);
     }
-    return inverse > max_fft_products || work < frequency_work;
+    return mul(forward, workspace_rays) > max_fft_products || work < frequency_work;
 }
 
 bool compact_native_precision(const Plan& plan, const ReceiverConfig& config) {
@@ -2282,11 +2332,14 @@ std::size_t scoring_worker_workspace(const Layout& layout, const Plan& plan,
                mul(interior_peak_bound(layout.lag_count), sizeof(std::uint32_t)));
 }
 
-struct WorkspaceQuote { std::size_t total = 0, bulk_host = 0; };
+struct WorkspaceQuote {
+    std::size_t total = 0, bulk_host = 0;
+    bool exact_multi_lag_admitted = false;
+};
 
 // Preparation can start before the frequency intervals are known when no
 // preparation choice needs them. A compiled backend plans its session from
-// the route, and the exact one-arrival profile selects its bank from it.
+// the route, and an exact chirp-Z profile selects its bank from it.
 // Every other bank is either fixed on the frequency route or stays in the
 // time domain until the route is known.
 bool defers_frequency_grid(const Plan& plan, const ReceiverConfig& config) {
@@ -2312,18 +2365,22 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
     const auto& layout = plan.layout;
     const auto peak_bytes = arrival_peak_slots(layout.lag_count) * sizeof(Peak);
     const auto exact_chirp = exact_chirp_z_profile(plan, config);
-    auto lag_points = std::min(frequency_count, lag_point_limit(exact_chirp));
-    if (exact_chirp) {
-        // Every nonsingleton convolution is at least as long as the
-        // one-arrival frequency FFT. Combine that lower bound with the
-        // maximum possible grid size when quoting either valid route.
-        const auto minimum_chirp = chirp_fft_work(plan.workspaces(), layout.nfft);
-        const auto exact_group_possible = 4 * minimum_chirp <= frequency_fft_work(plan, lag_points) &&
+    const auto exact_multi = exact_chirp && !exact_single_arrival(plan);
+    const auto group_limit = std::min(lag_group_limit(plan, config), config.helper_enabled ? max_intervals : 1);
+    // Exact chirp-Z scores one uniform group. Charge the complete
+    // convolution so a larger grid does not force the slower frequency route.
+    auto lag_points = exact_chirp ? frequency_count : std::min(frequency_count, max_lag_frequency_points);
+    if (exact_chirp && group_limit) {
+        // A two-point group needs the smallest nonsingleton convolution.
+        // Charge every ray at every arrival for every workspace.
+        const auto minimum_chirp = chirp_fft_work(mul(mul(plan.workspaces(), plan.ray_count), layout.lag_count),
+            lag_group_fft(layout, 2));
+        const auto exact_group_possible = lag_points > 1 &&
+            4 * minimum_chirp <= frequency_fft_work(plan, lag_points) &&
             exact_chirp_device_cost(plan, config, lag_points, minimum_chirp, workers);
         if (!exact_group_possible) lag_points = prefer_exact_singleton(plan, config) ? 1 : 0;
     }
-    const auto lag_groups = !lag_points ? 0 :
-        std::min(lag_group_limit(plan, config), config.helper_enabled ? max_intervals : 1);
+    const auto lag_groups = lag_points ? group_limit : 0;
     const auto lag_fft = lag_groups ? lag_group_fft(layout, lag_points) : 0;
     const bool fused_float = single_ray_float_bank(plan, config);
     const bool packed = use_q15_products(config.native_coarse_precision, fused_float);
@@ -2331,11 +2388,13 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
                    "Q15 coarse products require the native exact single-ray AVX2 frequency route");
     const auto complex_bytes = fused_float ? sizeof(std::complex<float>) : sizeof(Complex);
     const auto spectrum_bytes = packed ? 2 * sizeof(std::int16_t) : complex_bytes;
-    const auto nfft = std::max({layout.nfft, plan.filter_fft, plan.fidelity_layout.nfft, lag_fft});
+    const auto frequency_fft = std::max({layout.nfft, plan.filter_fft, plan.fidelity_layout.nfft});
+    const auto nfft = std::max(frequency_fft, lag_fft);
     const auto phases = plan.source_step > 1 ? MappedProjection::phase_count(plan) : 0;
     // Common FFT twiddles, immutable FIR response(s), raw/collapsed taps and
     // bounded controller metadata. Input and the fine stage are external.
-    auto projection = storage(add(fused_float ? plan.filter_fft : nfft, mul(1 + phases, plan.filter_fft)));
+    const auto projection_fft = fused_float ? plan.filter_fft : (exact_multi ? frequency_fft : nfft);
+    auto projection = storage(add(projection_fft, mul(1 + phases, plan.filter_fft)));
     projection = add(projection, mul(add(mul(2, plan.taps), 4 * plan.source_step), sizeof(double)));
     // The frequency grid, controller metadata and one host frontier scratch.
     const auto base = add(add(mul(frequency_count, sizeof(double)), 128 * 1024),
@@ -2412,6 +2471,7 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
     const auto score_base = fused_float ? float_twiddles : projection;
     // Overlapped acquisition holds its own scratch beside all of preparation.
     auto high = std::max(add(add(preparation_base, prep), overlapped.workspace_bytes), add(score_base, score));
+    bool exact_multi_lag_admitted = false;
     if (lag_groups) {
         const auto zoom_plans = storage(add(mul(lag_groups, layout.kernel_rows),
             lag_convolution_rows(layout.kernel_rows, lag_points, lag_groups)));
@@ -2431,8 +2491,11 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
             // the time-domain chirp-Z plan with its own FP64 columns and FFT.
             lag = std::max(lag, preparation(lag_bank, add(storage(plan.filter_fft), raw_columns)));
         }
-        const auto lag_projection = fused_float ? add(projection, storage(nfft - plan.filter_fft)) : projection;
-        high = std::max(high, add(lag_projection, lag));
+        const auto lag_high = add(add(projection, storage(nfft - projection_fft)), lag);
+        // The optional multi-ray or multi-arrival route must fit the old
+        // full-frequency lease. A large lag scratch cannot block reception.
+        if (exact_multi) exact_multi_lag_admitted = lag_high <= high;
+        else high = std::max(high, lag_high);
     }
     if (phases) {
         // A compiled backend runs this gate alone, before its own bank.
@@ -2489,14 +2552,14 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
         }
         high = add(high, add(segmented_shared, mul(jobs, segmented_lane)));
     }
-    return {add(add(add(base, high), task_overhead), bulk_host), bulk_host};
+    return {add(add(add(base, high), task_overhead), bulk_host), bulk_host, exact_multi_lag_admitted};
 }
 
 CoarseWorkPlan make_work_plan(const Plan& geometry, const FrequencyGrid& grid,
                               const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                               unsigned workers, WorkspaceQuote workspace, std::size_t limit) {
     const auto& layout = geometry.layout;
-    const bool lag = choose_lag(geometry, grid, config, workers);
+    const bool lag = choose_lag(geometry, grid, config, workers, workspace.exact_multi_lag_admitted);
     CoarseWorkPlan work;
     work.route = lag ? CoarseRoute::lag_groups : CoarseRoute::frequency_tiles;
     work.public_slot = slot.index;
@@ -2523,7 +2586,7 @@ CoarseWorkPlan make_work_plan(const Plan& geometry, const FrequencyGrid& grid,
         for (const auto& group : grid.groups)
             work.correlation_fft_rows = std::max(work.correlation_fft_rows, lag_group_fft(layout, group.count));
     work.frequency_groups = grid.groups.size();
-    work.frequency_points = grid.values.size();
+    work.frequency_points = grid.points;
     work.arrival_points = layout.lag_count;
     work.workspaces = geometry.workspaces();
     work.rays = geometry.ray_count;
@@ -2958,10 +3021,15 @@ std::size_t coarse_workspace(const ReceiverConfig& config, const ReceiverSlotPla
     return add(normal, midpoint.extra_workspace_bytes);
 }
 
-CoarseMidpointSupport coarse_midpoint_timing_support(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
+CoarseMidpointSupport coarse_midpoint_timing_support(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                                                   unsigned workers) {
     const auto geometry = make_plan(config, slot);
-    const auto plan = midpoint_plan(geometry, config, slot, 1, MidpointTimingEvaluation::short_tracking);
-    return {plan.lag_count != 0, plan.status, plan.first_lag, plan.last_lag, plan.middle_seconds, geometry.output_fs};
+    const auto plan = midpoint_plan(geometry, config, slot, workers, MidpointTimingEvaluation::short_tracking);
+    const auto& gain = plan.gain;
+    return {plan.lag_count != 0, plan.status, plan.first_lag, plan.last_lag, plan.middle_seconds,
+        geometry.output_fs, gain.status, gain.blocks, gain.sampled_blocks, gain.full_direct ? gain.blocks : 0,
+        gain.fft_rows, gain.block_rows ? gain.frequencies() : 0, gain.scratch, gain.fft_stage_bound,
+        gain.score_row_bound};
 }
 
 FineCoordinate midpoint_timing_coordinate(const ReceiverSlotPlan& slot, long double middle_seconds,
@@ -2995,6 +3063,16 @@ CoarseWorkPlan coarse_work_plan(const ReceiverConfig& config, const ReceiverSlot
 CoarseFineGeometry coarse_fine_geometry(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
     const auto plan = make_plan(config, slot);
     return {static_cast<double>(plan.output_fs), plan.max_frequency_step, config.clock_bound_ppm};
+}
+
+double fixed_gain_frequency_rank(std::span<const double> totals, std::size_t lags, std::size_t lag) {
+    const auto frequencies = totals.size() / lags;
+    const auto value = [&](std::size_t frequency) { return totals[frequency * lags + lag]; };
+    double maximum = -infinity;
+    for (std::size_t f = 0; f < frequencies; ++f) maximum = std::max(maximum, value(f));
+    double relative = 0;
+    for (std::size_t f = 0; f < frequencies; ++f) relative += std::exp(value(f) - maximum);
+    return maximum + std::log(relative / frequencies);
 }
 
 namespace {
@@ -3039,33 +3117,101 @@ struct ProposalGram {
     }
 };
 
+std::vector<FineCoordinate> gain_rank_coordinates(const Plan& plan, const ReceiverConfig& config,
+        const ReceiverSlotPlan& slot, const MidpointPlan& midpoint) {
+    std::vector<FineCoordinate> coordinates;
+    coordinates.reserve(midpoint.lag_count);
+    for (auto lag = midpoint.first_lag; lag <= midpoint.last_lag; ++lag)
+        coordinates.push_back(midpoint_timing_coordinate(slot, midpoint.middle_seconds,
+            config.clock_bound_ppm, plan.output_fs, lag, 0));
+    return coordinates;
+}
+
+struct GainRankBlock {
+    std::size_t first, rows, fft_rows, outputs, unit_bin;
+    std::int64_t first_shift, earliest;
+};
+
+std::optional<GainRankBlock> gain_rank_block(const Plan& plan, const ReceiverSlotPlan& slot,
+        const MidpointPlan::GainPlan& geometry, std::size_t block, std::span<const FineCoordinate> coordinates,
+        std::span<std::int64_t> shifts, std::span<const Complex> observation,
+        std::span<Complex> spectrum, const native_fft::DoublePlan& fft, CoarseOperationCounts& work,
+        std::stop_token stop) {
+    const auto& layout = plan.layout;
+    const auto first = block * geometry.block_rows;
+    const auto rows = std::min(geometry.block_rows, layout.kernel_rows - first);
+    const auto time = layout.origin + (first + (rows - 1.L) / 2) / plan.output_fs -
+        (plan.taps - 1.L) / (2 * plan.fs);
+    for (std::size_t i = 0; i < coordinates.size(); ++i) {
+        const auto& coordinate = coordinates[i];
+        const auto epsilon = coordinate.clock_ppm * 1e-6L;
+        shifts[i] = std::llround(plan.output_fs *
+            (coordinate.arrival_seconds - slot.arrival_lower_seconds - time * epsilon / (1 + epsilon)));
+    }
+    const auto [first_shift, last_shift] = std::ranges::minmax(shifts);
+    const auto earliest = static_cast<std::int64_t>(first) + first_shift;
+    const auto latest = static_cast<std::int64_t>(first + rows) + last_shift;
+    if (earliest < 0 || latest > static_cast<std::int64_t>(observation.size())) return {};
+    const auto observation_rows = static_cast<std::size_t>(latest - earliest);
+    const auto nfft = fft_size(std::max(mul(2, geometry.block_rows), observation_rows));
+    require_coarse(nfft <= geometry.fft_rows, "signed gain rank exceeded its finite FFT quote");
+    auto y = spectrum.first(nfft);
+    std::copy_n(observation.begin() + earliest, observation_rows, y.begin());
+    std::fill(y.begin() + observation_rows, y.end(), Complex{});
+    tracked_fft(y, false, fft, work, stop);
+    return GainRankBlock{first, rows, nfft, static_cast<std::size_t>(last_shift - first_shift + 1),
+        geometry.frequency_stride * (nfft / (2 * geometry.block_rows)), first_shift, earliest};
+}
+
+void gain_rank_template(std::span<const Complex> column, std::span<Complex> spectrum,
+                        const native_fft::DoublePlan& fft, CoarseOperationCounts& work, std::stop_token stop) {
+    std::ranges::copy(column, spectrum.begin());
+    std::fill(spectrum.begin() + column.size(), spectrum.end(), Complex{});
+    tracked_fft(spectrum, false, fft, work, stop);
+}
+
+void gain_rank_correlation(std::span<const Complex> observation, std::span<const Complex> spectrum,
+                           std::span<Complex> product, std::int64_t bin, std::size_t outputs,
+                           const native_fft::DoublePlan& fft, CoarseOperationCounts& work, std::stop_token stop) {
+    const auto nfft = product.size();
+    for (std::size_t k = 0; k < nfft; ++k)
+        product[k] = observation[(k + static_cast<std::size_t>(bin)) & (nfft - 1)] * std::conj(spectrum[k]);
+    tracked_fft(product, true, fft, work, stop, outputs);
+}
+
 void rank_gain_timing(const Plan& plan, const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                      const MidpointPlan& midpoint, std::span<const Workspace> bank,
                      std::span<const Complex> observation, double variance, CoarseMidpointTiming& result,
                      CoarsePhaseWork& phase, unsigned workers, ReceiverExecutor& executor, std::stop_token stop) {
     const auto& geometry = midpoint.gain;
     result.gain_status = geometry.status;
+    result.gain_available_blocks = geometry.blocks;
     if (!geometry.block_rows) return;
     result.gain_fft_rows = geometry.fft_rows;
     result.gain_frequency_points = geometry.frequencies();
     result.gain_workspace_bytes = geometry.scratch;
-    result.gain_available_blocks = geometry.blocks;
     result.gain_sampled_blocks = geometry.sampled_blocks;
+    result.gain_fft_stage_bound = geometry.fft_stage_bound;
+    result.gain_score_row_bound = geometry.score_row_bound;
 
     const auto started = PhaseClock::now();
     const auto lags = midpoint.lag_count;
     const auto frequencies = geometry.frequencies();
-    const auto maximum_workers = std::min<std::size_t>(workers, geometry.sampled_blocks);
+    const auto fixed_workers = std::min<std::size_t>(workers, geometry.sampled_blocks);
+    const auto maximum_workers = geometry.full_direct ? std::min<std::size_t>(workers, geometry.blocks) : fixed_workers;
     const native_fft::DoublePlan fft(geometry.fft_rows, stop);
-    std::vector<FineCoordinate> coordinates;
-    coordinates.reserve(lags);
-    for (auto lag = midpoint.first_lag; lag <= midpoint.last_lag; ++lag)
-        coordinates.push_back(midpoint_timing_coordinate(slot, midpoint.middle_seconds,
-            config.clock_bound_ppm, plan.output_fs, lag, 0));
+    const auto coordinates = gain_rank_coordinates(plan, config, slot, midpoint);
+    std::vector<std::uint8_t> sampled;
+    if (geometry.full_direct && geometry.sampled_blocks && geometry.sampled_blocks < geometry.blocks) {
+        sampled.resize(geometry.blocks);
+        for (std::size_t sample = 0; sample < geometry.sampled_blocks; ++sample) {
+            check_stop(stop);
+            sampled[gain_timing_block(geometry, sample, slot)] = 1;
+        }
+    }
 
-    // Coarse rank only: use the free block gain at the configured coarse
-    // ray geometry. The final likelihood evaluates both bits with its own
-    // existing projections, ray priors and common-frequency mixture.
+    // Both proposal ranks keep the configured per-ray gain. The fine
+    // likelihood evaluates both bits with its own projections and priors.
     const auto gain = config.data_basis_gain / std::sqrt(2.);
     const auto correlation_scale = gain / variance;
     const auto gram_scale = gain * gain / variance;
@@ -3074,60 +3220,42 @@ void rank_gain_timing(const Plan& plan, const ReceiverConfig& config, const Rece
         return;
     }
     const auto banks = gain_timing_workspaces(plan);
-    const auto& layout = plan.layout;
+    const auto cells = mul(mul(2, frequencies), lags);
     std::vector<GainTimingScratch> scratch;
     scratch.reserve(maximum_workers);
     for (std::size_t lane = 0; lane < maximum_workers; ++lane)
-        scratch.emplace_back(geometry.fft_rows, lags, frequencies);
+        scratch.emplace_back(geometry.fft_rows, lags, frequencies, lane < fixed_workers, geometry.full_direct);
     parallel(maximum_workers, static_cast<unsigned>(maximum_workers), stop, executor, slot.index,
         [&](unsigned, std::size_t lane, std::stop_token job_stop) {
             auto& work = scratch[lane];
-            for (std::size_t sample = lane; sample < geometry.sampled_blocks; sample += maximum_workers) {
+            const auto score_block = [&](std::size_t block, bool fixed) {
                 check_stop(job_stop);
-                const auto first = gain_timing_block(geometry, sample, slot) * geometry.block_rows;
-                const auto rows = std::min(geometry.block_rows, layout.kernel_rows - first);
-                const auto time = layout.origin + (first + (rows - 1.L) / 2) / plan.output_fs -
-                    (plan.taps - 1.L) / (2 * plan.fs);
-                for (std::size_t i = 0; i < lags; ++i) {
-                    const auto& coordinate = coordinates[i];
-                    const auto epsilon = coordinate.clock_ppm * 1e-6L;
-                    work.shifts[i] = std::llround(plan.output_fs *
-                        (coordinate.arrival_seconds - slot.arrival_lower_seconds - time * epsilon / (1 + epsilon)));
-                }
-                const auto [first_shift, last_shift] = std::ranges::minmax(work.shifts);
-                const auto earliest = static_cast<std::int64_t>(first) + first_shift;
-                const auto latest = static_cast<std::int64_t>(first + rows) + last_shift;
-                if (earliest < 0 || latest > static_cast<std::int64_t>(observation.size())) continue;
-                const auto observation_rows = static_cast<std::size_t>(latest - earliest);
-                const auto nfft = fft_size(std::max(mul(2, geometry.block_rows), observation_rows));
-                require_coarse(nfft <= geometry.fft_rows, "signed gain rank exceeded its finite FFT quote");
-                auto y = std::span(work.observation).first(nfft);
-                std::copy_n(observation.begin() + earliest, observation_rows, y.begin());
-                std::fill(y.begin() + observation_rows, y.end(), Complex{});
-                tracked_fft(y, false, fft, work.operations, job_stop);
-                const auto outputs = static_cast<std::size_t>(last_shift - first_shift + 1);
-                const auto unit_bin = geometry.frequency_stride * (nfft / (2 * geometry.block_rows));
+                const auto prepared = gain_rank_block(plan, slot, geometry, block,
+                    coordinates, work.shifts, observation, work.observation, fft, work.operations, job_stop);
+                if (!prepared) return;
+                const auto [first, rows, nfft, outputs, unit_bin, first_shift, earliest] = *prepared;
+                const auto y = std::span(work.observation).first(nfft);
+                const auto rays = fixed ? 2u : 1u;
                 for (std::size_t bit = 0; bit < 2; ++bit) {
                     std::array<std::span<const Complex>, 2> columns;
-                    for (std::size_t ray = 0; ray < 2; ++ray) {
+                    for (std::size_t ray = 0; ray < rays; ++ray) {
                         columns[ray] = std::span(bank[banks[bit]].columns[ray]).subspan(first, rows);
-                        auto x = std::span(work.templates[ray]).first(nfft);
-                        std::ranges::copy(columns[ray], x.begin());
-                        std::fill(x.begin() + rows, x.end(), Complex{});
-                        tracked_fft(x, false, fft, work.operations, job_stop);
+                        gain_rank_template(columns[ray], std::span(work.templates[ray]).first(nfft),
+                            fft, work.operations, job_stop);
                     }
-                    const ProposalGram gram(columns[0], columns[1], gram_scale);
-                    if (!std::isfinite(gram.logdet)) { work.finite = false; return; }
+                    std::optional<ProposalGram> gram;
+                    if (fixed) gram.emplace(columns[0], columns[1], gram_scale);
+                    const auto direct = gram ? gram->direct : std::sqrt(1 + gram_scale * dot(columns[0], columns[0]).real());
+                    const auto direct_logdet = geometry.full_direct ? 2 * std::log(direct) : 0.;
+                    std::ranges::fill(work.block_means, GainFrequencyMean{});
                     for (std::size_t f = 0; f < frequencies; ++f) {
                         const auto bin = (static_cast<std::int64_t>(f) - static_cast<std::int64_t>(geometry.radius)) *
                             static_cast<std::int64_t>(unit_bin);
-                        for (std::size_t ray = 0; ray < 2; ++ray) {
+                        for (std::size_t ray = 0; ray < rays; ++ray) {
                             auto product = std::span(work.correlations[ray]).first(nfft);
-                            for (std::size_t k = 0; k < nfft; ++k)
-                                product[k] = y[(k + static_cast<std::size_t>(bin)) & (nfft - 1)] *
-                                    std::conj(work.templates[ray][k]);
-                            tracked_fft(product, true, fft, work.operations, job_stop, outputs);
-                            if (midpoint.verify && !work.blocks) {
+                            gain_rank_correlation(y, work.templates[ray], product, bin, outputs,
+                                fft, work.operations, job_stop);
+                            if (midpoint.verify && !(fixed ? work.blocks : work.direct_blocks)) {
                                 for (auto k : {std::size_t{0}, outputs / 2, outputs - 1}) {
                                     Complex direct{};
                                     for (std::size_t i = 0; i < rows; ++i)
@@ -3139,64 +3267,97 @@ void rank_gain_timing(const Plan& plan, const ReceiverConfig& config, const Rece
                                 }
                             }
                         }
-                        auto accumulated = std::span(work.scores).subspan((bit * frequencies + f) * lags, lags);
+                        auto accumulated = fixed ? std::span(work.scores).subspan((bit * frequencies + f) * lags, lags) :
+                                                   std::span<double>{};
                         for (std::size_t i = 0; i < lags; ++i) {
                             const auto at = static_cast<std::size_t>(work.shifts[i] - first_shift);
-                            accumulated[i] += gram.score(correlation_scale * work.correlations[0][at],
-                                                          correlation_scale * work.correlations[1][at]);
+                            const auto r0 = correlation_scale * work.correlations[0][at];
+                            if (fixed) accumulated[i] += gram->score(r0, correlation_scale * work.correlations[1][at]);
+                            if (geometry.full_direct)
+                                work.block_means[i].include(std::norm(r0 / direct) - direct_logdet);
                         }
                     }
+                    if (geometry.full_direct)
+                        for (std::size_t i = 0; i < lags; ++i)
+                            work.direct_scores[bit * lags + i] += work.block_means[i].log_mean(frequencies);
                 }
-                ++work.blocks;
-                work.rows += rows;
-                note(work.operations.score_rows, work.scores.size());
-            }
+                if (fixed) {
+                    ++work.blocks;
+                    work.rows += rows;
+                    note(work.operations.score_rows, cells);
+                }
+                if (geometry.full_direct) {
+                    ++work.direct_blocks;
+                    note(work.operations.score_rows, cells);
+                }
+            };
+            // Keep the stationary rank's lane assignment, sample order
+            // and reduction unchanged while sharing its direct correlations.
+            if (lane < fixed_workers)
+                for (std::size_t sample = lane; sample < geometry.sampled_blocks; sample += fixed_workers)
+                    score_block(gain_timing_block(geometry, sample, slot), true);
+            if (geometry.full_direct && geometry.sampled_blocks < geometry.blocks)
+                for (std::size_t block = lane; block < geometry.blocks; block += maximum_workers) {
+                    check_stop(job_stop);
+                    if (sampled.empty() || !sampled[block]) score_block(block, false);
+                }
         });
     result.gain_seconds = elapsed(started);
     phase.wall_seconds = result.gain_seconds;
-    std::vector<double> reduced(2 * frequencies * lags);
-    bool finite = true;
+    std::vector<double> reduced(geometry.sampled_blocks ? cells : 0);
+    std::vector<double> direct_reduced(geometry.full_direct ? 2 * lags : 0);
     for (const auto& work : scratch) {
         combine(phase.operations, work.operations);
         result.gain_blocks += work.blocks;
+        result.gain_direct_blocks += work.direct_blocks;
         result.gain_projected_rows += work.rows;
         note(result.gain_fft_row_stages, work.operations.fft_row_stages);
         note(result.gain_score_rows, work.operations.score_rows);
         result.gain_verified_correlations += work.verified;
-        for (std::size_t i = 0; i < reduced.size(); ++i) reduced[i] += work.scores[i];
-        finite &= work.finite;
+        for (std::size_t i = 0; i < work.scores.size(); ++i) reduced[i] += work.scores[i];
+        for (std::size_t i = 0; i < work.direct_scores.size(); ++i) direct_reduced[i] += work.direct_scores[i];
     }
-    if (!finite || !std::ranges::all_of(reduced, [](double value) { return std::isfinite(value); })) {
-        result.gain_status = "signed_gain_proposal_numeric_range";
-        return;
-    }
-    if (!result.gain_blocks) {
-        result.gain_status = "signed_gain_no_common_block_support";
-        return;
-    }
+    require_coarse(result.gain_fft_row_stages <= geometry.fft_stage_bound &&
+                   result.gain_score_rows <= geometry.score_row_bound,
+                   "signed gain rank exceeded its exact public work quote");
 
-    for (std::size_t bit = 0; bit < 2; ++bit) {
-        CoarseProposal best{{}, -infinity, static_cast<std::uint8_t>(bit), 2};
-        std::int64_t best_lag = 0;
-        for (std::size_t lag = 0; lag < lags; ++lag) {
-            double maximum = -infinity;
-            const auto value = [&](std::size_t frequency) { return reduced[(bit * frequencies + frequency) * lags + lag]; };
-            for (std::size_t f = 0; f < frequencies; ++f) maximum = std::max(maximum, value(f));
-            double relative = 0;
-            for (std::size_t f = 0; f < frequencies; ++f) relative += std::exp(value(f) - maximum);
-            const auto rank = maximum + std::log(relative / frequencies);
-            if (rank > best.score) {
-                best.coordinate = coordinates[lag];
-                best_lag = midpoint.first_lag + static_cast<std::int64_t>(lag);
-                best.score = rank;
+    const auto nominate = [&](bool direct) {
+        for (std::size_t bit = 0; bit < 2; ++bit) {
+            CoarseProposal best{{}, -infinity, static_cast<std::uint8_t>(bit), 2};
+            std::int64_t best_lag = 0;
+            const auto fixed = direct ? std::span<double>{} :
+                std::span(reduced).subspan(bit * frequencies * lags, frequencies * lags);
+            for (std::size_t lag = 0; lag < lags; ++lag) {
+                const auto rank = direct ? direct_reduced[bit * lags + lag] :
+                    fixed_gain_frequency_rank(fixed, lags, lag);
+                if (rank > best.score) {
+                    best.coordinate = coordinates[lag];
+                    best_lag = midpoint.first_lag + static_cast<std::int64_t>(lag);
+                    best.score = rank;
+                }
+            }
+            const auto selected = std::span(result.gain_proposals).first(result.gain_proposal_count);
+            if (std::ranges::none_of(selected, [&](const CoarseProposal& other) { return other.coordinate == best.coordinate; })) {
+                result.gain_proposal_lags[result.gain_proposal_count] = best_lag;
+                result.gain_proposals[result.gain_proposal_count++] = best;
             }
         }
-        const auto selected = std::span(result.gain_proposals).first(result.gain_proposal_count);
-        if (std::ranges::none_of(selected, [&](const CoarseProposal& other) { return other.coordinate == best.coordinate; })) {
-            result.gain_proposal_lags[result.gain_proposal_count] = best_lag;
-            result.gain_proposals[result.gain_proposal_count++] = best;
-        }
-    }
+    };
+    const auto finite = [](double value) { return std::isfinite(value); };
+    const bool valid_fixed = result.gain_blocks && std::ranges::all_of(reduced, finite);
+    const bool valid_direct = result.gain_direct_blocks && std::ranges::all_of(direct_reduced, finite);
+    if (valid_fixed) nominate(false);
+    result.gain_fixed_proposal_count = result.gain_proposal_count;
+    if (valid_direct) nominate(true);
+    if (!valid_fixed && !valid_direct)
+        result.gain_status = result.gain_blocks || result.gain_direct_blocks ?
+            "signed_gain_proposal_numeric_range" : "signed_gain_no_common_block_support";
+    else if (geometry.full_direct && !valid_direct)
+        result.gain_status = result.gain_direct_blocks ? "signed_gain_direct_numeric_range" :
+                                                       "signed_gain_direct_no_common_block_support";
+    else if (geometry.sampled_blocks && !valid_fixed)
+        result.gain_status = result.gain_blocks ? "signed_gain_fixed_numeric_range_direct_retained" :
+                                                  "signed_gain_fixed_no_common_block_support_direct_retained";
 }
 } // namespace
 
@@ -3210,6 +3371,7 @@ struct CoarseSession::Impl {
     const ReceiverSlotPlan slot;
     Plan geometry;
     FrequencyGrid grid;
+    std::vector<double> frequency_values;
     CoarseProgress receipt;
     std::unique_ptr<native_fft::DoublePlan> fft;
     std::unique_ptr<native_fft::FloatPlan> float_fft;
@@ -3268,6 +3430,7 @@ struct CoarseSession::Impl {
         const auto plan_search = [&](std::span<const FrequencyInterval> chosen) {
             grid = frequencies(geometry, config, chosen);
             receipt.plan = make_work_plan(geometry, grid, config, slot, workers, workspace, limit);
+            frequency_values = materialize_frequencies(grid, stop);
         };
         if (!overlapped) plan_search(intervals);
         auto& work = receipt.plan;
@@ -3364,9 +3527,9 @@ struct CoarseSession::Impl {
             work.fft_precision = "bulk";
             work.precision_reason = "compiled-backend";
         } else if (lag) {
-            work.precision_reason = exact_chirp_z_profile(geometry, config)
-                ? (work.frequency_points == 1 ? "exact-one-arrival-singleton-dot" : "exact-one-arrival-chirp-z")
-                : "lag-groups";
+            work.precision_reason = geometry.source_step != 1 ? "lag-groups" :
+                work.frequency_points == 1 ? "exact-one-arrival-singleton-dot" :
+                exact_single_arrival(geometry) ? "exact-one-arrival-chirp-z" : "exact-chirp-z";
         } else {
             // Selection uses public geometry and template conditioning, never
             // a decoded bit or observed score. Keep the original FP64 scorer.
@@ -3413,7 +3576,7 @@ struct CoarseSession::Impl {
             receipt.lag_setup.wall_seconds = elapsed(lag_started);
         }
         if (bulk) prepare_bulk(stop);
-        peaks.resize(mul(mul(bank.size(), grid.values.size()), arrival_peak_slots(layout.lag_count)));
+        peaks.resize(mul(mul(bank.size(), grid.points), arrival_peak_slots(layout.lag_count)));
         refresh_retained_bytes();
         check_stop(stop);
         receipt.preparation_seconds = elapsed(began);
@@ -3547,12 +3710,12 @@ struct CoarseSession::Impl {
                                  int exponent, bool pack, std::stop_token stop) {
         const auto& plan = receipt.plan;
         if (count >= mul(2, plan.workers))
-            return score_frequencies(geometry, bank, observation, grid.values, peaks, first, count, variance,
+            return score_frequencies(geometry, bank, observation, frequency_values, peaks, first, count, variance,
                                      transform, plan.workers, stop, executor, slot.index, exponent, pack);
         CoarseOperationCounts completed;
         for (std::size_t done = 0; done < count;) {
             const auto width = std::min(plan.tile_width, count - done);
-            combine(completed, score_frequency_pairs(geometry, bank, observation, grid.values, peaks, first + done,
+            combine(completed, score_frequency_pairs(geometry, bank, observation, frequency_values, peaks, first + done,
                 width, variance, transform, plan.workers, stop, executor, slot.index, exponent, pack));
             done += width;
         }
@@ -3657,7 +3820,7 @@ struct CoarseSession::Impl {
         CoarseBulkWork operations;
         if (lag) bulk->lag_tile(first, count, sink, operations, stop);
         else {
-            const auto values = std::span(grid.values).subspan(first, count);
+            const auto values = std::span(frequency_values).subspan(first, count);
             if (!bulk->frequency_peaks(values, distance, peak_sink, operations, stop)) {
                 const auto untouched = bulk->completed_work();
                 require_coarse(next_workspace == first_workspace && operations == CoarseBulkWork{} &&
@@ -3693,7 +3856,7 @@ struct CoarseSession::Impl {
     void refresh_retained_bytes() {
         auto bytes = add(sizeof(*this), fft ? fft->working_bytes() : 0);
         bytes = add(bytes, float_fft ? float_fft->working_bytes() : 0);
-        bytes = add(bytes, mul(grid.values.capacity(), sizeof(double)));
+        bytes = add(bytes, mul(frequency_values.capacity(), sizeof(double)));
         bytes = add(bytes, mul(grid.groups.capacity(), sizeof(FrequencyGroup)));
         bytes = add(bytes, mul(bank.capacity(), sizeof(Workspace)));
         for (const auto& workspace : bank)
@@ -3755,7 +3918,7 @@ CoarseProgress CoarseSession::progress() const {
 
 CoarseState CoarseSession::state() const noexcept { return impl_->state(); }
 
-std::span<const double> CoarseSession::frequency_grid() const { return impl_->grid.values; }
+std::span<const double> CoarseSession::frequency_grid() const { return impl_->frequency_values; }
 
 void CoarseSession::cancel() noexcept {
     if (impl_) impl_->cancellation.request_stop();
@@ -3838,7 +4001,7 @@ std::optional<CoarseResult> CoarseSession::finish() {
         result.arrival_points = plan.arrival_points;
         result.workspaces = plan.workspaces;
         result.lag_frequency_search = plan.route == CoarseRoute::lag_groups;
-        retain_proposals(result, impl.geometry, impl.slot, impl.bank, impl.peaks, impl.grid.values,
+        retain_proposals(result, impl.geometry, impl.slot, impl.bank, impl.peaks, impl.frequency_values,
                          plan.workers, stop, impl.executor);
         refine(result.coordinates, std::span(result.proposals).first(result.proposal_count),
                impl.geometry, impl.config, impl.slot);

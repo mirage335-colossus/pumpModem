@@ -349,7 +349,6 @@ struct Emission::Impl {
     bool data_enabled = false, helper_enabled = false;
     bool noise = false;
     std::uint8_t isolated_bit = 0;
-    std::optional<std::uint8_t> repeated_bit;
 
     Impl(const PublicProfile& selected_profile, const Crypto& key, const EmissionOptions& options,
          std::optional<std::pair<std::uint8_t, bool>> isolated = {})
@@ -382,15 +381,7 @@ struct Emission::Impl {
             require(!helper_enabled || static_cast<long double>(format.epoch) + std::ceil(active_helper_end_seconds) < helper_epoch_limit,
                 "source endpoint exceeds Helper32-bit epoch calendar");
         } else {
-            if (options.repeated_bit) {
-                require(*options.repeated_bit <= 1 && options.mode == EmissionMode::Message &&
-                    !profile.config().helper_enabled && options.bits.empty() && !bit_at &&
-                    options.slot_count == 1 && options.first_slot % FixedRepeatedBit::group_slots == 0,
-                    "invalid fixed repeated-bit transmission");
-                repeated_bit = options.repeated_bit;
-            }
-            const auto count = repeated_bit ? FixedRepeatedBit::group_slots :
-                options.mode == EmissionMode::Message && !bit_at ? options.bits.size() : options.slot_count;
+            const auto count = options.mode == EmissionMode::Message && !bit_at ? options.bits.size() : options.slot_count;
             require(count > 0 && (options.mode == EmissionMode::Message || (options.bits.empty() && !bit_at)) &&
                 (!bit_at || options.bits.empty()),
                 "invalid Robust transmission slot count or unexpected draft");
@@ -468,9 +459,7 @@ struct Emission::Impl {
         if (current && current->index < last_slot && index >= active_helper_stop)
             set_slot(profile.calendar().successor(*current));
         Complex raw_data;
-        const bool transmit_data = data_enabled && (!repeated_bit ||
-            (current && FixedRepeatedBit::is_attempt(current->index)));
-        if (transmit_data && index >= data_first && index - data_first < profile.geometry().source_samples) {
+        if (data_enabled && index >= data_first && index - data_first < profile.geometry().source_samples) {
             if (!data) {
                 auto addressed_format = format;
                 auto bit = isolated_bit;
@@ -479,8 +468,7 @@ struct Emission::Impl {
                     addressed_format.symbol_ordinal += current->index;
                     if (!noise) {
                         const auto relative = current->index-first_slot;
-                        bit = repeated_bit ? *repeated_bit :
-                            bit_at ? bit_at(relative) : bits[static_cast<std::size_t>(relative)];
+                        bit = bit_at ? bit_at(relative) : bits[static_cast<std::size_t>(relative)];
                         require(bit <= 1, "invalid Robust generated transmit bit");
                     }
                 }

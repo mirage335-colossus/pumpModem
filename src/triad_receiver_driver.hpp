@@ -76,20 +76,6 @@ ReceiverSlotScore score_slot_with_supplement(
     std::span<const Complex>, std::span<const std::uint8_t>, unsigned,
     std::size_t, std::stop_token, ReceiverExecutor*, const SlotEvidenceSupplement&);
 
-// The ordinary receipt keeps its existing decisions and line gate. Fixed
-// repeat schedules use separate soft factors from this opt-in scorer.
-struct RepeatedBitSlotEvidence {
-    std::optional<std::array<double, 2>> bit_log_e;
-    std::optional<double> line_log_e;
-    bool extra_line_probe = false;
-    double extra_line_seconds = 0;
-};
-ReceiverSlotScore score_slot_with_repeat_evidence(
-    const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
-    std::span<const Complex>, std::span<const std::uint8_t>, unsigned,
-    std::size_t, std::stop_token, double line_probe_threshold, RepeatedBitSlotEvidence&,
-    ReceiverExecutor* shared = nullptr);
-
 // Internal comparison for stream fixtures. Uses the normal sequential and
 // overlapped workspace quotes; admitted stages still run one at a time.
 ReceiverSlotScore score_slot_comparing_admitted_evidence(

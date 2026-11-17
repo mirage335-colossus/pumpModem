@@ -43,6 +43,520 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Ordinary reception with conservative settings — 17 November 2026
+
+This follow-through starts from `4a50df52` and removes the dedicated repeated-bit
+product feature at the user's request. Ordinary raw drafts, matching waveform
+settings, global ordinals and two-scored-quiet completion remain. The
+[retirement record](#dedicated-repeated-bit-feature-retirement--17-november-2026)
+keeps the useful historical grouped recovery distinct from current reception.
+
+The principal new sensitivity repair is full-current-bit timing nomination.
+It recovers both polarities of the weak combined GUI channel at **176.8
+seconds**, and corrects the previously wrong 696.8-second zero on identical
+samples at both +10 and +13 dB-Hz. A fresh weak history also passes. The final
+likelihood and admission thresholds are unchanged. The experiments below
+separate this acquisition repair, duration/energy recovery and computational
+admission improvements; none establishes a natural-channel outage probability.
+
+### Fixed receiver model, stronger actual signals
+
+The native probe now supports a bounded `--signal-gain-db` / `--channel-severity`
+contrast for CPU, Helper-Off `admission`, `message` and `plan`. Signal gain is
+applied before unchanged independently generated thermal noise; severity scales
+only realized spread, common wander and selective-AM depth. It does not change
+the source, receiver reference amplitude/noise, search bounds or calendar.
+Plan checks verify those invariants and reject unsupported combinations and
+out-of-range values. This avoids the confound in earlier simulated C/N0 sweeps
+that recalibrated the receiver noise model for each link level.
+The stated C/N0 levels are injected reference levels before realized fading,
+not measurements of instantaneous received power. For a fixed history the
+signal-only 30 dB increment scales the channel output by the same amount while
+the noise and receiver model stay fixed.
+
+Predeclared first tier: eight single-aperture outcomes, at most 30 seconds each,
+120,000 rows and 1 GiB per call, fixed Target/reference 16 dB-Hz, HF Worst /
+Each 65%, 1,500 samples/s, 120 Hz inner rate, 497 Hz IF, keyed waveform and full
+automatic `W=24`. Requested eight-second active duration rounds to 10.4 seconds.
+Actual signal-only increments are 0/10/20/30 dB. Clean and full-stress bit-one
+cases pass at actual 16/46 dB-Hz; half-stress bit zero passes at 26/36; full
+stress bit zero passes at 46; the noise-only control remains QUIET. All eight
+complete with 17,648 rows and 0.101–0.350 seconds of native slot service.
+
+A separately declared nine-call holdout uses fresh channel/noise seed 74219
+and public slot 1 (keyed ordinal 7000038). Both polarities pass clean and full
+stress at actual 16/46 dB-Hz; the noise control remains QUIET. These calls
+overlapped an appraisal build, so their times are not performance evidence.
+These small seeded cohorts establish their outcomes, not a success probability
+or universal ordering of channel difficulty.
+
+A further predeclared nine-call duration stratum uses requested 128 seconds,
+rounded to **135.2 seconds** for this waveform, with Target/reference 16 held
+fixed. Both polarities pass clean/full stress at actual 16/46 dB-Hz; the
+severe-configured noise control stays QUIET. Each complete slot consumes
+204,848 valid rows, with a 250,218,448-byte DSP quote and `W=24`. Native service
+is 1.098–2.352 seconds; all nine calls take 22.651 seconds including rendering.
+The stronger wanted signals activate the coherent-line nuisance alternative
+and still receive correctly. This specifically checks long-aperture gain
+tolerance, with the same narrow stationary frequency/clock prior as the short
+probe. It does not cover the cost of a broad oscillator search or the archived
+late-calendar weak Each 65% case.
+The long seed visits nearly ±30 Hz common/relative motion but draws only
+0.39746 ms excess delay; the independent shorter stream below visits 6.21 ms.
+The configured 7 ms allowance is not a claim that every run visits its edge.
+
+A separate five-call joint stratum reuses seed 74219 for its already known
+6.564946 ms realized delay, with slot 1 and the same 135.2-second waveform.
+Both polarities receive at actual 16/46 dB-Hz and noise stays QUIET. The
+continuous rendered prefix/aperture visits −29.813 to +29.995 Hz echo motion,
+−29.896 to +29.780 Hz common motion and an echo/direct ratio up to 0.996885;
+these extrema are not measured separately within each active bit. Each call
+renders 429,847 rows and scores 204,851, with a 250,218,547-byte quote and
+`W=24`. This reused-history, near-delay-edge check executes the later
+multi-path-chirp binary. It is correctness-only because it overlaps field
+preparation. Its five-call / 45-second aggregate / 15-second-call limit and
+binary identity are in `fixed-link/long-near-delay/` below.
+Both 135.2-second probe strata declare zero clock uncertainty, so the later
+signed-lag repair is ineligible (`clock_axis_collapsed`). Their original
+source-bound outcomes remain applicable to that unchanged path; they are not
+reruns or tests of the new timing nomination.
+
+A fresh continuous full-stress seed 74022 receives encrypted `e` (`001`) and
+both quiet successors at actual 46 dB-Hz with the same Target/reference 16.
+It processes 377,648 rows, with 1.1477314 seconds complete service and
+1,069,308,356 bytes peak application reserve. Realized excess delay is
+6.208745 ms, relative echo motion −29.807 to +29.859 Hz and common motion
+−29.982 to +29.908 Hz. These are sampled GUI dynamics, not calibrated ionospheric
+statistics or a processor capacity boundary.
+
+The actual native live `Session` / dated fake-provider / `AudioInput` PCM route
+also receives ordinary `e/001` plus two true QUIET windows at both actual
+16 and 46 dB-Hz, with Target 16, HF Worst / Each 65% bounds, independent noise
+and waveform fixed. It uses a clean realized channel and normal planned
+10.4-second bits. Peak absolute PCM is 0.0139185 / 0.0647858; the two calls take
+6.793 / 6.812 seconds. Both polarities occur in each message. This is software
+PCM execution, not an actual-device or severe-PCM channel measurement. The new
+GUI regressions retain the fixed-target and stronger-than-target comparison.
+
+The first probe-only clean setup incorrectly zeroed an inactive common-wander
+knot period and was rejected before scoring. The test control was corrected
+to leave the required positive cadence intact; no receiver failure or
+sensitivity result came from that rejected setup. The PCM pair above used the
+pre-cap-repair receiver; the IQ cohort used the subsequent cap-repair binary.
+Binary hashes and exact arguments remain in the compact receipts.
+
+Evidence is in ignored `local-evidence/current-resilience/fixed-link/`:
+`matrix-summary.json`, `holdout-summary.json`, `stream-severe-30-seed74022.json`,
+PCM logs, binary digests and the preserved setup rejection. Retain these small
+receipts for the current fixed-reference validation and unresolved weak-duration
+comparison; remove superseded logs after the final evidence is distilled. No
+raw audio or IQ capture is retained. `long/{manifest,plan,summary}.json` records
+the separate duration stratum and its 120-second aggregate / 20-second-call
+stop rule. No upper-level rejection was observed within the tested 30 dB span;
+these tests do not define hardware input range.
+
+### Ordinary duration and weak-channel follow-through
+
+The final ordinary-receiver outcomes are:
+
+| Capture and actual C/N0 | Before full-bit direct timing nomination | Current result |
+| --- | --- | --- |
+| 41.6 s, +10 dB-Hz, bit one | AMBIGUOUS | AMBIGUOUS on identical IQ |
+| 176.8 s, +10 dB-Hz | Bit one AMBIGUOUS; opposite bit not previously run | Correct DATA for both polarities |
+| 696.8 s, +10 dB-Hz, bit zero | Wrong DATA1 | Correct DATA0 on identical IQ |
+| 696.8 s, +10 dB-Hz, bit one | Correct DATA1 | Correct DATA1 on identical IQ |
+| 696.8 s, +13 dB-Hz, bit zero | Wrong DATA1 with stronger separation | Correct DATA0 on identical IQ |
+| Fresh 696.8 s, +10 dB-Hz, bit zero | Independent history, no earlier comparison | Correct DATA0 |
+
+Every row preserves both real QUIET successors; every successful DATA row has
+one physical completion. All use HF Worst / Each 65% / Margin 3, matching
+ordinary waveform settings and `W=24`. Target +4 / −3 / −9 selects the
+41.6 / 176.8 / 696.8-second waveforms. There is no repetition mode or
+cross-attempt soft combination. The intermediate opposite-bit control changes
+only polarity, not key, profile, channel/noise seeds or ordinal. Its raw input
+appropriately differs, so only the existing bit-one input has predecessor-IQ
+parity. The fresh case was fixed before inspection at oscillator/path/noise
+seeds 62015 / 62035 / 72015; key, clock-edge settings, source geometry and
+public bounds stay fixed.
+
+At 176.8 seconds, bit one's correct separation rises from 0.7843 to **38.179**,
+with presence 78.260 versus 15.386; zero has separation **57.725** and presence
+95.730. Native complete times are 41.436 / 41.645 seconds, versus the original
+42.025 seconds for one, with approximately 2.845 / 2.842 GB peak charged
+reserve. Direct nomination scores 1,776 of 1,791 available blocks with common
+support and chooses the useful −142 cell. At the long matched +10 zero / +10
+one / +13 zero points, correct separations are **132.033 / 134.410 / 873.989**.
+The fresh zero has separation **178.460**, presence 281.518 and 219.399-second
+complete time. The 41.6-second miss improves to presence 6.7511 versus 16.4834
+and separation 5.1946 versus 5.2933; it remains a miss, not a qualified weaker
+floor. No additional duration/SNR ladder follows the successful intermediate
+pair.
+
+The following chronology preserves the original failures and distinguishes
+the computational correction from the later timing repair.
+
+The actual Target SNR planner selects 41.6 / 93.6 / 176.8 seconds for targets
++4 / 0 / −3 dB-Hz in the archived GUI HF Worst / Each 65% / Margin 3 geometry,
+with actual C/N0 fixed at +10 dB-Hz. The +4 control exactly reproduces the
+archived 18-slot input hash `9bd27a5e…03744803`; selected ordinal 12 remains
+AMBIGUOUS, with evidence 1.947534 versus threshold 16.483433 and wrong-side bit
+separation only 0.698434. Both real quiet successors stay QUIET. This is an
+ordinary receiver miss, with no wrong DATA admission, after the repeat feature
+has been removed.
+
+The first Target 0 attempt reaches its predeclared 199.5-second native deadline
+without committing a slot. All 4,100,378 capture rows were rendered and 645,006
+selected receiver rows accepted; three owners share `W=24` and peak application
+reserve 1.505 GB. Rendering takes 42.18 seconds and receiver control/wait 156.85
+seconds. The 93.6-second DATA aperture itself has 184,068 rows. This is an
+execution censor, not evidence that the longer bit is undecodable. The Target
+−3 trial was not run at this checkpoint under the stopping rule. A quote of
+the censored geometry identifies 7,818 stationary frequency points, 78
+workspaces, two rays, four arrivals and a 65,536-point frequency-route FFT.
+This motivates evaluating the existing chirp-Z mathematics across the same
+complete multi-path grid, not reducing its hypotheses or increasing the test
+deadline without diagnosis.
+
+The GUI duration points preserve oscillator/path/noise seeds and render
+continuous history. Changing duration moves ordinal 12 to a later physical
+time; it is not a same-time isolated energy multiplier. The normalized
+simulation reference gain is fixed with actual C/N0, whereas changing the
+live target also changes its reference gain. The independent fixed-gain tests
+above address that distinct requirement.
+
+The matched current chirp replay preserves the exact +4-target input and
+operational scores while reducing sampled complete wall time from 42.545 to
+12.03 seconds (3.54×); receiver control/wait changes from 28.25 to 2.43 seconds.
+The previously censored Target 0 capture now completes in 31.484 seconds, with
+the same complete/selected input hashes and full 7,818-frequency grid. It still
+misses the active bit (evidence 2.1475 below 15.791; wrong-side separation
+0.418), while both quiet successors remain QUIET. This separates the repaired
+compute limitation from sensitivity; 199.5/31.484 is a lower bound against the
+unfinished original, not a measured original completion-time speed ratio.
+
+The conditional Target −3 / 176.8-second case completes in 42.025 seconds,
+covering all 14,708 frequencies with a 692,416,638-byte DSP quote. Presence is
+now strong (40.9917 versus 15.3862), but correct-bit separation is only 0.7843
+against the required 5.2933, so ordinary admission correctly remains AMBIGUOUS.
+Both quiet successors remain QUIET.
+
+The predeclared actual +10 dB-Hz, true Target −9 / **696.8-second** interval
+receives bit one correctly, but its conditional opposite-polarity check
+**transmits zero and admits one**. Both quiet successors remain QUIET for each
+polarity. The bit-one run has operational evidence 113.7601 against 14.0061
+and correct-bit separation 9.928364; the zero run has bit scores
+90.03575 / 98.28239 and wrong-bit separation 8.24664. All observations and
+noise-model checks are valid. This is a wanted-bit discrimination failure,
+not wrong-key interference or successful generic weak-channel recovery.
+
+Both runs use the same key, oscillator/path/noise seeds, public ordinal 12,
+source binary and geometry. The complete 24,848,747-row history evolves for
+12,942.05 seconds; 4,116,485 rows cover the selected DATA and two quiet slots.
+Changing the transmitted bit appropriately changes the source and input
+hashes, while quiet energies and channel realization agree. All 57,766
+stationary frequencies, four arrivals and 78 workspaces execute with `W=24`,
+a 2,684,951,615-byte DSP quote and approximately 10.2 GB peak application
+reserve. Native service is 189.295 / 190.406 seconds. These are bounded
+single-episode costs, not a sustained capacity qualification.
+
+The nominal independent-gain moving-centroid model favors one for both
+waveforms; lower-power alternatives also favor one on the zero capture.
+Fixed-affine and short fixed-gain alternatives weakly favor the correct zero
+but cannot meet admission. Aggregate receipts do not isolate the contributions
+of the two executed signed-lag maps. This warrants a matched strength and
+timing/model investigation, not tuning weights or reducing the bit threshold.
+The matched discriminator keeps the failed zero waveform, history and
+Target −9 fixed and uses actual +13 dB-Hz, under the same finite
+26-million-sample / 450-second cap. It again admits the wrong one, with a
+larger separation of **12.89069** and presence 366.70647 versus 14.00613.
+Both quiet successors remain QUIET, and all completeness/validity checks
+pass. Source, propagated energy, path realization and noise innovations are
+unchanged; the declared variance falls from 192 to 96.22795. Native service
+is 189.933 seconds with approximately 10.294 GB peak reserve. This appraisal
+control changes noise and its declared variance; it is separate from the
+fixed-reference gain experiment above. Increasing energy alone has not repaired
+this failure, so no further signal-level or duration sweep follows automatically.
+
+Source review identifies a concrete proposal/scorer mismatch. Signed-lag
+nomination sums block evidence for each fixed frequency and then marginalizes
+frequency. Its final independent-gain scorer also permits changing frequency.
+The bounded candidate preserves those old nominations and adds at most one
+per bit using frequency marginalization within each sampled block before
+summing blocks. It reuses the same correlations and public lag support,
+deduplicates their union, and must charge all four possible maps without
+renormalizing the selected public mass.
+
+On identical +10 zero input this candidate changes wrong DATA1 to AMBIGUOUS:
+the correct-bit margin rises from −8.24664 to +0.78260, still below 5.29330.
+Both quiet successors remain QUIET. The unchanged fixed nominees are
+`[1623,1625]`; moving-frequency nominees add `[-867,163]`. The −867 map
+contributes bit evidence 119.47796 / 116.74552 before the outer public prior,
+but their combined margin is inadequate. Nomination samples 493 of 7,032
+available blocks, scores 489 with common support, and uses the same
+4.25425-billion FFT stages. Its measured stage time is 0.89749 seconds and
+workspace quote 70.91 MB. Complete native time is 190.545 seconds versus
+190.406 for the failed original; this one render-overlapped comparison is not
+a sustained performance bound. Full input/selected hashes, grid and `W=24`
+are preserved. The conditional bit-one and +13 runs are not executed because
+the predeclared correct-zero gate fails.
+
+This is a useful partial diagnosis, not an accepted generic recovery. None of
+the nominees is near the evaluator-derived nearest public direct-path lag
+−572. A bounded private witness scores that existing public coordinate
+(99.7173418 ppm, arrival zero, epoch zero) with the canonical fine likelihood
+on identical, all-valid +10 zero IQ. Its bit scores are 247.54480 / 99.41908
+before the outer public prior, or **224.28937 / 76.16365** after the full prior,
+gain-family, outer-mixture and absent-line weights. Correct-zero separation
+is **148.12572**. This is substantial same-model information omitted by
+operational timing nomination, not a favorable detector supplied with the
+exact distorted waveform. It does use evaluator timing and therefore remains
+a private component witness, not an ordinary receiver pass.
+
+The witness regenerates the identical 17,934,673-row continuous prefix through
+the selected aperture, scores 1,350,855 rows at `W=24`, and takes 63.968 seconds
+including preparation / 1.836 seconds native fine work. It executes no ordinary
+receiver or quiet completion. The temporary entry point is removed after the
+result; the compact `known-lag-witness.*` receipt and command preserve its
+purpose and provenance.
+
+Before increasing sampling work, a second nomination/scorer mismatch needs
+testing: the original coarse echo has the configured +90 Hz relative Doppler,
+while this successful independent-gain likelihood uses delay-only columns.
+The private rank comparison holds the 493 sampled block indices fixed and
+compares canonically prepared zero-relative-Doppler and direct-only moving
+proposals against the existing controls. Equal per-ray power, original control
+winners and input hashes are preserved. Among 3,455 lags, the useful −572 cell
+ranks 2,928th with fixed-frequency scoring, 1,787th with the first moving rank,
+1,114th with zero-relative echo and 91st with direct-only moving scoring.
+The respective gaps to each correct-bit winner are 47.485 / 22.425 / 27.771 /
+6.606 nats. None nominates useful timing support. The zero-echo winner is −867;
+direct-only is −868. Thus matching the two-ray geometry alone is not the fix.
+
+This diagnostic completes in 74.740 seconds including 2.886 seconds native
+preparation/ranking, 6,369,361,920 rank FFT stages and 571,637,760 preparation
+stages, within its 120-second / 26-million-row cap. It runs no ordinary decode.
+Its temporary appraisal entry point is removed; `gain-rank-witness-summary.json`
+retains the failed alternatives and exact provenance.
+
+The single full-aperture direct-only comparison reproduces its 493-block
+control and then succeeds at nomination: its correct-bit winner is **−573**,
+one projected sample from the qualified −572 cell. The latter improves from
+rank 91 to rank 2, with a gap of only 0.84560 nats. Best correct/wrong scores
+are 859.74612 / 746.49557. All 7,032 public blocks are visited, of which 6,977
+have the required common support for every lag. The full 43-frequency,
+3,455-lag dictionary and original per-ray power are retained. No truth enters
+selection and no final decode is executed in this diagnostic.
+
+Native preparation/ranking takes **7.361 seconds**, with 30.521 billion
+executed rank FFT stages against a 30.7617-billion bound. The complete prefix
+run takes 70.391 seconds within the same 120-second bound. Actual private
+preparation is 0.245 billion stages; the normal full bank would quote 14.364
+billion. These are distinct scopes. A single preparation-work allowance would
+fit only 3,283 direct blocks, whose result has not been tested. Retain the
+compact `direct-rank-witness-summary.json`; remove its temporary entry point.
+
+The retained production implementation shares old sampled fixed-proposal work
+with full-current-aperture direct ranking, retaining at most two old and two
+new timing maps and the original public prior. It uses exact workspace/work
+arithmetic, `W` and cancellation bounds rather than a new arbitrary sampling
+cutoff. It does not rescore previous transmissions. Independent review also
+removed a needless single-frequency exclusion and restored the original
+endpoint-alignment regression. A plan with zero legacy sampled blocks retains
+the full direct path. Focused checks cover complete work/memory quotes, a
+one-byte-below rejection, fixed-rank parity and the actual timing endpoints.
+
+The complete long matched zero / one / stronger-zero replays above take
+**215.305 / 216.755 / 215.722 seconds**, versus the original
+190.406 / 189.295 / 189.933: about **13–15% more** complete wall time, including
+overlapped continuous channel rendering. Primary rank work is 7.410–7.881
+seconds, but quiet-slot rank phases also execute and can take longer under
+the shared scheduler. Use complete elapsed service, not a single rank phase,
+for this tradeoff. Peak charged reserves for the three matched and fresh long
+rows are 10.152 / 10.052 / 9.977 / 10.049 GB, each within its reported automatic
+live limit, with three owners and `W=24`. All 57,766 stationary frequencies
+remain. The active rank executes 32.636 billion FFT row-stages within its
+32.894-billion bound, scoring 6,977 of 7,032 blocks; quiet rows score 6,976.
+The original fixed zero nominees `[1623,1625]` remain unchanged, with direct
+nominees `[-573,1308]` at +10 and a useful −572 at +13.
+
+These are source-bound finite CPU measurements on AMD Ryzen 5 PRO 5650U,
+12 visible/affinity logical CPUs, 15,677,412 KiB reported system RAM,
+x86-64 Linux `7.2.6+deb13-amd64`, GCC 14.2.0 Release builds and native CPU
+binary64 ranking. No GPU execution or sustained capacity claim follows.
+Plan-only public slots 1 / 12 / 48 retain full direct histories but quote
+8.500 / 32.894 / 148.838 billion combined FFT row-stages; older clock-age
+service is unmeasured. Growth with clock age remains a capacity question,
+rather than a justification to silently omit information used by this repair.
+
+`direct-lag-candidate-summary.json` and `direct-lag-intermediate-summary.json`
+bind the final wanted/quiet decisions, frozen arguments, original IQ controls,
+new-history identities, work and memory under the evidence directory below.
+The compiled source also removes all private known-timing and alternate-rank
+entry points. Retain the compact failed and successful comparisons for this
+current acquisition claim. Final lifecycle cleanup removes 82 redundant
+launch/build/progress outputs (769,487 bytes), retaining 107 compact evidence
+files (1,017,240 bytes) for the failure, recovery, source and final-check claims.
+Useful build caches and other investigations are unchanged.
+
+### Ordinary weak two-hop duration recovery
+
+The separate physical trial uses the same qualified 2,400-second two-hop
+field (`ff2b3f4e…0008aa`), −3 dB-Hz input reference, source/noise seeds 73613 /
+93613, first DATA time 0.384375 seconds and native ordinary per-slot receiver.
+Each comparison contains one raw bit and two real quiet successors; the field
+is continuous and supplies no receiver truth. The shorter and longer waveforms
+share the field and start, but increasing duration includes later channel
+evolution. These fixed native durations are distinct from the GUI planner
+targets above.
+
+| Ordinary DATA duration | Bit zero | Bit one | Real quiet successors |
+| --- | --- | --- | --- |
+| 139.2 s | QUIET, evidence 5.757925 | QUIET, evidence 1.88807 | Both QUIET for each polarity |
+| 266.8 s | Correct DATA0, evidence 15.76870 | Correct DATA1, evidence 15.09751 | Both QUIET for each polarity |
+
+All six short-window scores match the archived first-attempt comparison.
+Each longer row has one actual physical completion and no wrong/false DATA.
+The longer calendar's ordinary daily-opportunity threshold is 14.98178 versus
+15.56818 for the short interval: bit one depends partly on this valid reduced
+opportunity count and would not pass the short-calendar threshold. Do not
+attribute its recovery solely to integration gain or change thresholds after
+seeing the result. Received energy/N0 rises from about 36.13 to 63.63
+(+2.46 dB); duration rises 1.917×. Complete longer row times are 35.168 / 33.283
+seconds, with 329,254,196-byte DSP quotes versus 188,411,612 bytes for the
+short rows. This is a constructed first-attempt time/energy bracket, not a
+rerun of all five late alarm attempts or a natural outage probability.
+
+The finite bracket stops after both polarities recover at the first longer
+point; the 522-second guard is not executed. Total wall is 628.929 seconds,
+including 527.43 seconds of immutable physical preparation that overlapped
+correctness checks/compilation. Receiver scoring itself had no competing
+timed DSP. The physical run used the cap-repair binary before the multi-path
+chirp extension; its single stationary frequency remains on the unchanged
+singleton dispatch. Its exact source identity is retained, not relabeled as
+the later binary. The temporary physical bracket hook was removed after
+recording this result; compact plans, input/field hashes and
+`physical-duration-summary.json` remain in the directory below.
+
+Compact inputs, exact arguments, censored and completed receipts are in ignored
+`_appraisal/highFidelity-triple_Robust_Modem/local-evidence/ordinary-duration-20261117/`.
+They serve the ordinary-duration comparison and subsequent matched sensitivity
+and service repairs. The completed comparison retains the original
+censor, exact replay arguments and input hashes; redundant intermediate build
+logs and launch scripts have been removed. Retire these compact receipts when
+their source-specific validation claims are superseded.
+
+### Long-duration frequency-grid admission
+
+A separate source audit reproduced an artificial 65,536-point coarse-grid
+limit. With the same 1,500 samples/s, 120 Hz rate, 497 Hz IF, 7 MHz shift,
+crystal audio / IC-7100 RF references and HF Worst / Each 65% bounds,
+Target −10 selects 863.2 seconds and 48,732 stationary frequency points.
+Target −12 selects 1,372.8 seconds / 77,473 points and −13 selects 1,736.8
+seconds / 98,003 points. The −13 rejection was executed on the old probe;
+−12's rejection follows from the old code and its 77,473-point geometry.
+Both exceed that fixed point count. This stationary oscillator grid is distinct from the
+declared atmospheric-motion alternatives.
+
+The corrected preflight computes interval/group shapes without allocating a
+frequency vector. Exact-index and checked byte arithmetic replace the fixed
+point cap; full frequency values and retained peaks are materialized only
+after complete workspace admission. Helper narrowing still pays for its full
+fallback. The selected plans quote 1,611,647,625 / 2,880,740,014 /
+3,203,272,836 bytes respectively with `W=24`; these storage quotes alone
+establish neither elapsed service nor reception.
+
+Removing the cap alone would still leave avoidable compute growth. The native
+CPU automatic path now admits the existing exact chirp-Z scorer for multiple
+rays and arrivals when its complete transform-work estimate has the required
+fourfold margin and its entire workspace fits the original frequency-route
+lease. Every frequency, arrival, bit, epoch and clock alternative remains.
+Explicit arithmetic overrides, GPU eligibility and singleton selection retain
+their previous scope. This is a different evaluation of the same correlations,
+not an added channel model or dropped search dimension.
+
+[Rabiner, Schafer and Rader (1969), §§II–III](https://web.ece.ucsb.edu/Faculty/Rabiner/ece259/Reprints/015_czt.pdf)
+derive the convolution evaluation of uniformly spaced transform points. In
+this receiver, the omitted per-arrival output phase is common to both ray
+correlations and cancels in their Hermitian quadratic score; that final
+statement is a code-specific mathematical deduction. Native regressions compare
+full candidate coordinates, ranks and scores with the FP64 frequency route for
+ordinary and nearly rank-one pairs, and exercise complete searches above
+65,536 points with one and two rays. They also check spacing/endpoints, rejection
+one byte below the required workspace and touching Helper intervals.
+
+The censored weak-HF geometry now selects the chirp route on all three windows:
+7,818 frequencies, four arrivals, two rays, 78 workspaces and `W=24`, with
+131,072-point convolutions and the same complete quota. Its full receiver replay
+is recorded separately from these mathematical and component checks. Keep
+compact cap/control plans and executed regression receipts in ignored
+`local-evidence/current-resilience/coarse-cap/` for this current admission and
+service claim, and retire superseded build logs and unused launch scripts once
+the final comparisons are distilled.
+
+An executed ordinary encrypted `e/001` check crosses the old limit in every
+window: Target −5 dB-Hz, actual reference +15 via a signal-only +20 dB increment,
+262.4-second bits, 600 samples/s, Rate 36, IF 100 Hz, 12 MHz shift, Margin 3,
+GPSDO-OCXO audio and IC-7100 RF declarations. Each of five windows searches all
+76,343 frequencies and 78 workspaces with one arrival. The actual channel is
+clean. All three bits are correct, both physical quiet successors are QUIET,
+the message completes, and the separate EOF control succeeds. Complete native
+replay service is 5.344071803 seconds (including replay reads/verification),
+8.473 seconds for the whole command, over 807,436 rows. `W=24`, an explicit
+2 GiB limit and four admitted owners produce peak reserve 2,133,081,630 bytes.
+The predeclared limit was one message, 1.3 million rows and 60 seconds; no
+isolated long-slot fallback was needed. This is actual above-limit complete
+service for that geometry, not the broad severe-channel capacity inferred from
+the plan-only rows.
+
+### Functional checkpoints and identity
+
+The retirement checkpoint passes triad 42/42 and GUI 30/30. After the chirp and
+fixed-reference changes, `./build.sh test triad` passes 42/42 (111.28 seconds)
+and `./build.sh test gui` passes 32/32 (168.07 seconds), including both new live
+PCM regressions. The later rank-one/rank-two assertion addition was rebuilt and
+the native coarse suite passed again. Initial compilation's read-only default
+ccache failure occurred before assertions; successful commands use the existing
+workspace `build/ccache`. Functional times are not capacity measurements.
+
+These checks precede the subsequent signed-gain nomination candidate. The
+chirp checkpoint's application SHA-256 is
+`f85937381d1260eccc012f78ebd7317ef9bc2e346dd1c5ca6ccba11ed6482f10`,
+native probe
+`aa9644b37aea9f1cfc4f85261d739e75b1993db77e4ce64853a20afc052c612b`,
+and receiver archive
+`cd625188a6e655cc29fc555f09144f04ab9ebd83fba442eda92815f91e9949ad`.
+These bind the code checks; later test-harness-only changes retain their own
+appraisal identities.
+
+After the full-current-aperture timing repair and removal of all private
+diagnostic entry points, the frozen source passes **triad 42/42** in 103.09
+seconds and **GUI 32/32** in 168.04 seconds. The two fixed-reference native
+PCM regressions pass again (6.70 / 6.76 seconds). The independently rebuilt
+appraisal application and three native test executables pass all **six named
+appraisal groups** in 48.71 seconds; the separate Python orchestration runner
+passes **175/175 assertions** in 1.111 seconds. `git diff --check` passes.
+These are functional checks, not additional independent channel trials.
+
+Final development application SHA-256 is
+`509bf637fdd82004e4e5a005d69e222cddd14d85e54d6982107338334cc4bf3e`,
+native probe
+`603b9aad559458f99dbfbd819bb77bd8a7153bdbdc73c58eabdcb28a8e5d6055`,
+and receiver archive
+`3ca504cbd236ceec65e195e031c456e5ec7cd84a5356f629dba0fd845338dc79`.
+The final appraisal application
+`b1c384899c77776a6d8cf0161a465fad9fc62fd03ec38ed0ce8c8ea90c7fdbd4`
+matches the long and intermediate repaired replays; its application/archive
+hashes are verified before and after the final checks. The replay's canonical
+native-source identity is
+`e5c0f10be4bf903a770547840a1856509397c424c11b91ee03d601549b8652b6`.
+Build-profile differences account for separate development and appraisal binary
+identities. Logs, exact hash manifests and final source closure remain in
+the repository's `local-evidence/current-resilience/final-*-full-direct.*` and
+the appraisal evidence directory's
+`ordinary-duration-20261117/final-direct-appraisal-*`.
+No RunPod device or spending, physical radio measurement,
+natural availability probability or release certification is claimed.
+
 ## Long VLF gain-calibration discriminator — 17 November 2026
 
 The short independent-gain power mixture repaired one HF live-level mismatch,
@@ -9224,3 +9738,36 @@ triad data leaves were preserved byte-for-byte. Original source/internal hashes
 remain historical provenance, not qualification of repacked archives or current
 code. Consult the [evidence index](indexes/evidence.md) and Git history for
 superseded results and their limits.
+
+## Dedicated repeated-bit feature retirement — 17 November 2026
+
+The dedicated repeated-bit mode was removed from the current GUI and native
+receiver after the user preferred ordinary raw-bit transmission, shared Target
+SNR settings, or external scripting. The removed path had its own opt-in,
+scheduled five-attempt TX group, distinct logical event, receive schedule and
+assumptions about independently distributed noise. It did not combine arbitrary
+ordinary messages. Current code has no dedicated repeated-bit control or group
+event; an ordinary `0000` draft comprises four separate slot decisions and does
+not soft-combine their evidence. Lowering Target SNR requires matching settings
+at both peers and changes the waveform duration, aperture and channel evolution.
+
+Keep the earlier executed grouped replay as a **historical result of the
+retired feature**: the same −3 dB-Hz two-hop bit-one capture that had five
+ordinary attempts missed could produce the correct dedicated group event on
+attempt four, while all ordinary per-slot scores and quiet decisions stayed
+unchanged. That demonstrates recoverable information in that one modeled
+capture under that feature's noise, calendar and key contract. It is not
+evidence that the current ordinary receiver accumulates repeated bits, nor a
+qualification of broad weak-channel or natural outage availability. The
+[original replay](#production-repeat-receiver-on-the-frozen-weak-two-hop-bit-one-history),
+[live PCM test](#calibrated-live-pcm-repeated-bit-check), and earlier
+[calculation](#native-soft-evidence-and-coherent-line-probe-for-configured-repetition)
+retain their original experimental scope. Timing and likelihood improvements
+that apply to ordinary slot scoring remain part of the production receiver;
+only the dedicated control, schedule, and event mechanism were retired.
+
+The removal itself changes code after those historical triad/GUI/appraisal
+results. They must not be cited as tests of the post-retirement source. The
+current-source correctness checks for the removal are recorded with this task's
+validation run when available; no new ordinary repeated-bit sensitivity or
+capacity result is implied here.

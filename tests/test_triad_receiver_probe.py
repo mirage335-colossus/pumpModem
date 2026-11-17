@@ -118,6 +118,27 @@ def main(executable):
         assert strict_plan["configuration"][name] == plan["configuration"][name]
     run("plan", "--wrong-key-admission", "invalid", code=1,
         parse_error="Wrong Key Admission expects current, guarded, strict, very-strict, extreme or maximum")
+    contrast_options = ("--spread-preset", "hf-worst", "--selective-perturbation", "each-65",
+                        "--data-if", "497", "--target-cn0", "16", "--cn0", "16", "--seconds", "8")
+    full_stress = run("plan", *contrast_options, "--signal-gain-db", "0")["configuration"]
+    strong_clean = run("plan", *contrast_options, "--signal-gain-db", "30", "--channel-severity", "0")["configuration"]
+    for name in ("bit_seconds", "slot_plan", "quiet_first_sample", "quiet_stop_sample", "coarse_full_prior",
+                 "receiver_slot_workspace_bytes", "spread_delay_seconds", "spread_doppler_hz",
+                 "selective_slow_depth", "selective_fast_depth", "time_varying_common_doppler_hz"):
+        assert strong_clean[name] == full_stress[name], name
+    full_link = full_stress["fixed_receiver_link_contrast"]
+    clean_link = strong_clean["fixed_receiver_link_contrast"]
+    for name in ("receiver_reference_cn0_db_hz", "receiver_noise_variance", "receiver_data_basis_gain",
+                 "channel_noise_variance"):
+        assert clean_link[name] == full_link[name], name
+    for name in ("channel_spread_delay_ms", "channel_spread_doppler_hz", "channel_selective_slow_depth",
+                 "channel_selective_fast_depth"):
+        assert clean_link[name] == 0 < full_link[name], name
+    assert abs(strong_clean["actual_cn0_db_hz"] - full_stress["actual_cn0_db_hz"] - 30) < 1e-12
+    run("plan", "--signal-gain-db", "101", code=1,
+        parse_error="--signal-gain-db expects -100 to +100 dB")
+    run("plan", "--channel-severity", "1.01", code=1,
+        parse_error="--channel-severity expects 0 to 1")
     run("admission", "--wrong-key-admission", "strict", code=1,
         parse_error="Admission diagnostics score Current once")
     run("admission", "--interferer-cn0", "20", code=1,

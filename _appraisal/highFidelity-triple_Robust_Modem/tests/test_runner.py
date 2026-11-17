@@ -1029,6 +1029,26 @@ class CampaignValidationTests(unittest.TestCase):
             with self.subTest(overrides=overrides), self.assertRaises(runner.CampaignError):
                 runner._validate_episode(dict(episode, **overrides), 0, set(), 120, 2_400_000)
 
+        planned = dict(episode, gui_target_cn0_db_hz=-9, max_wall_seconds=450, max_samples=26_000_000)
+        planned.pop("bit_seconds")
+        runner._validate_episode(planned, 0, set(), 450, 26_000_000)
+        command = runner._command(Path("/native/probe"), planned, 26_000_000, 450)
+        self.assertNotIn("--bit-seconds", command)
+        for overrides in ({"max_samples": 26_000_001}, {"max_wall_seconds": 450.01}, {"bit_seconds": 32}):
+            with self.subTest(overrides=overrides), self.assertRaises(runner.CampaignError):
+                runner._validate_episode(dict(planned, **overrides), 0, set(), 450, 26_000_000)
+        campaign = {"schema_version": 1, "name": "planned duration witness", "max_trials": 1,
+                    "max_wall_seconds": 450, "per_trial_wall_seconds": 450,
+                    "max_samples": 26_000_000, "episodes": [planned]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "campaign.json"
+            path.write_text(json.dumps(campaign))
+            self.assertEqual(runner._read_campaign(path)["episodes"], [planned])
+            campaign["max_wall_seconds"] = 451
+            path.write_text(json.dumps(campaign))
+            with self.assertRaisesRegex(runner.CampaignError, "450-second aggregate cap"):
+                runner._read_campaign(path)
+
         receipt, plan = repeated_bit_receipt(episode)
         receipt["slots"] = receipt["slots"][12:15]
         for slot in receipt["slots"]:

@@ -79,9 +79,8 @@ struct TxRequest {
     Bytes input;
     bool force = false, raw = false;
     std::optional<PreparedTextMessage> prepared;
-    bool repeated_bit = false;
 
-    std::size_t wire_bits() const { return repeated_bit ? FixedRepeatedBit::attempts : prepared ? prepared->wire_bits() : (raw ? input.size() : 0); }
+    std::size_t wire_bits() const { return prepared ? prepared->wire_bits() : (raw ? input.size() : 0); }
 };
 
 NativeMessageProfile message_profile(const Settings& settings) {
@@ -127,8 +126,7 @@ EmissionOptions emission_options(const TxRequest& request, const PublicProfile& 
                                  std::uint64_t first, std::uint64_t count,
                                  std::uint64_t source_first, std::stop_token stop) {
     EmissionOptions options{request.mode, first, {}, count, source_first, stop};
-    if (request.repeated_bit) { options.slot_count = 1; options.repeated_bit = request.input.front(); }
-    else if (request.raw) options.bits = request.input;
+    if (request.raw) options.bits = request.input;
     else if (request.prepared) {
         options.bit_at = request.prepared->bit_source(first, [&calendar](std::uint64_t index) {
             return message_address(calendar, index);
@@ -463,14 +461,9 @@ struct Session::Impl {
             if (stop.stop_requested() || owner != generation || suspended || stopping) return;
         }
         auto messages = receiver.drain_messages();
-        auto repeated = receiver.drain_repeated_bits();
         const auto report = receiver.report();
-        if (slots.empty() && messages.empty() && repeated.empty()) return;
+        if (slots.empty() && messages.empty()) return;
         publish(owner, stop, [&](Snapshot& out) {
-            for (const auto& event : repeated) {
-                if (out.repeated_bits.size() == history_size) out.repeated_bits.erase(out.repeated_bits.begin());
-                out.repeated_bits.push_back(event);
-            }
             for (const auto& row : slots) {
                 if (out.pattern_steps.size() == history_size) out.pattern_steps.erase(out.pattern_steps.begin());
                 out.pattern_steps.push_back(pattern_step(row));
@@ -663,14 +656,6 @@ struct Session::Impl {
                 }, capture_stop, [&](const audio::StreamFormat& format) {
                     if (format.usable_passband_hz < base.maximum_audio_hz)
                         throw Error("Robust receive band exceeds the selected device passband");
-                    if (s.fixed_repeated_bit_live) {
-                        const auto& transport = format.capture_transport;
-                        if (transport.kind != audio::CaptureTransportKind::fixed_nominal_audio ||
-                            transport.raw_rate != rate || transport.logical_rate != rate ||
-                            format.hardware_rate != rate || format.logical_rate != rate ||
-                            transport.raw_zero != 0 || transport.logical_zero != 0)
-                            throw Error("Live repeated-bit reception requires an identity-rate capture transport; device conversion is unsupported");
-                    }
                     std::lock_guard lock(queue.mutex);
                     queue.provider_bytes = format.workspace_bytes;
                 }, std::move(options));
@@ -771,10 +756,6 @@ struct Session::Impl {
                     options.first_slot = slot;
                     options.first_input_sample = first;
                     options.require_quiet_rearm = slot > 0;
-                    if (s.fixed_repeated_bit_live) {
-                        options.fixed_repeated_bit = true;
-                        options.repeat_audio_input_halo_samples = input.halo_samples();
-                    }
                     receiver = std::make_unique<CompleteStreamReceiver>(adjusted.waveform, adjusted.receiver,
                         adjusted.key, options, message_profile(s));
                     interrupt.emplace(stop, [owned = receiver.get()] { owned->request_cancel(); });
@@ -830,9 +811,9 @@ struct Session::Impl {
         const auto& calendar = prepared.waveform;
         const auto noise = send.mode == EmissionMode::Noise;
         const auto wire_bits = send.wire_bits();
-        const auto slots = send.repeated_bit ? FixedRepeatedBit::group_slots : noise ? add_slot(calendar.last_slot(), 1) :
+        const auto slots = noise ? add_slot(calendar.last_slot(), 1) :
             send.mode == EmissionMode::Message ? wire_bits : std::size_t{1};
-        const auto end_slot = send.repeated_bit ? FixedRepeatedBit::group_slots - 1 : noise ? std::uint64_t{0} : add_slot(slots, 1);
+        const auto end_slot = noise ? std::uint64_t{0} : add_slot(slots, 1);
         if (!noise && end_slot > calendar.last_slot())
             throw Error("The configured Robust calendar has no room for the draft and two quiet slots");
         auto emission = make_emission(send, prepared, 0, slots, 0, owner, stop);
@@ -845,9 +826,8 @@ struct Session::Impl {
         if (!noise) {
             // Channel working bytes include the waveform source but exclude
             // the prepared text shared by its lazy interval reader.
-            auto options = stream_options(s, checked_workspace(channel.report().working_bytes,
+            const auto options = stream_options(s, checked_workspace(channel.report().working_bytes,
                 checked_workspace(retained_request_workspace(send), 2 * 1024 * 1024U)));
-            options.fixed_repeated_bit = send.repeated_bit;
             receiver = std::make_unique<CompleteStreamReceiver>(calendar, prepared.receiver,
                 prepared.key, options, message_profile(s));
         }
@@ -882,8 +862,7 @@ struct Session::Impl {
                     while (generated_bits < wire_bits &&
                            generated >= calendar.calendar().distance(calendar.origin(), tx_slot.support_end)) {
                         ++generated_bits;
-                        if (generated_bits < wire_bits) tx_slot = calendar.transmit_slot(
-                            send.repeated_bit ? generated_bits * FixedRepeatedBit::spacing_slots : generated_bits);
+                        if (generated_bits < wire_bits) tx_slot = calendar.transmit_slot(generated_bits);
                     }
                     publish(owner, stop, [&](Snapshot& out) {
                         if (out.transmit_trace.generated_bits != generated_bits) {
@@ -920,15 +899,6 @@ struct Session::Impl {
     std::uint64_t earliest_tx_slot(const Profile& active, long double minimum_lead) const {
         return active.waveform.first_slot_not_before(coordinate(utc_now() + minimum_lead,
             active.waveform.config().format.sample_rate));
-    }
-
-    std::uint64_t earliest_repeat_slot(const Profile& active, long double minimum_lead) const {
-        const auto first = earliest_tx_slot(active, minimum_lead);
-        const auto remainder = first % FixedRepeatedBit::group_slots;
-        const auto aligned = add_slot(first, remainder ? FixedRepeatedBit::group_slots - remainder : 0);
-        if (add_slot(aligned, FixedRepeatedBit::group_slots - 1) > active.waveform.last_slot())
-            throw Error("The configured Robust calendar has no complete repeated-bit group remaining");
-        return aligned;
     }
 
     bool overlap_locked(const Profile& active, std::uint64_t index, EmissionMode mode) const {
@@ -1013,13 +983,9 @@ struct Session::Impl {
                 if (end <= edge) break;
                 {
                     std::lock_guard lock(mutex);
-                    // Reserve the full addressed repeat group before the first
-                    // submitted sample; cancellation cannot reuse its later keys.
-                    reserve_key(active, send.repeated_bit ? add_slot(first_slot,
-                        FixedRepeatedBit::spacing_slots * (FixedRepeatedBit::attempts - 1)) : next_reservation,
-                        send.mode);
+                    reserve_key(active, next_reservation, send.mode);
                 }
-                if (send.repeated_bit || next_reservation == last_slot) reserved_final = true;
+                if (next_reservation == last_slot) reserved_final = true;
                 else ++next_reservation;
             }
             for (std::size_t i = 0; i < count; ++i) {
@@ -1035,8 +1001,7 @@ struct Session::Impl {
             }
             if (send.mode == EmissionMode::Message) {
                 while (generated_bits < wire_bits && end >= calendar.calendar().distance(calendar.origin(),
-                        calendar.transmit_slot(add_slot(first_slot, send.repeated_bit ?
-                            generated_bits * FixedRepeatedBit::spacing_slots : generated_bits)).support_end))
+                        calendar.transmit_slot(first_slot + generated_bits).support_end))
                     ++generated_bits;
                 publish(owner, stop, [&](Snapshot& snapshot) {
                     if (snapshot.transmit_trace.generated_bits != generated_bits) {
@@ -1055,8 +1020,7 @@ struct Session::Impl {
             if (emission) return;
             // The provider has opened and completed timing preflight. Allow
             // bounded source preparation before the scheduled first sample.
-            first_slot = send.repeated_bit ? earliest_repeat_slot(active, audio::minimum_lead_seconds() + 3) :
-                earliest_tx_slot(active, audio::minimum_lead_seconds() + 3);
+            first_slot = earliest_tx_slot(active, audio::minimum_lead_seconds() + 3);
             {
                 std::lock_guard lock(mutex);
                 if (!send.force && overlap_locked(active, first_slot, send.mode))
@@ -1065,10 +1029,10 @@ struct Session::Impl {
                 if (!send.force && utc_time(first.helper_begin, rate) < separated_after)
                     throw Error("Robust transmit is waiting for its two quiet public slots");
             }
-            const auto slots = send.repeated_bit ? FixedRepeatedBit::group_slots : noise ? calendar.last_slot() - first_slot + 1 :
+            const auto slots = noise ? calendar.last_slot() - first_slot + 1 :
                 send.mode == EmissionMode::Message ? wire_bits : std::size_t{1};
             last_slot = add_slot(first_slot, slots - 1);
-            if (!noise && !send.repeated_bit && add_slot(last_slot, 2) > calendar.last_slot())
+            if (!noise && add_slot(last_slot, 2) > calendar.last_slot())
                 throw Error("The configured Robust calendar has no room for two quiet slots after this draft");
             next_reservation = first_slot;
             const auto first = calendar.transmit_slot(first_slot);
@@ -1111,7 +1075,6 @@ struct Session::Impl {
     void lock_status(Snapshot& out) const {
         out.force_transmit_available = false;
         out.noise_transmit_unavailable = out.transmit_unavailable;
-        out.repeat_transmit_unavailable = out.transmit_unavailable;
         if (!profile || settings.simulation || out.transmitting || suspended || stopping) return;
         try {
             const auto index = earliest_tx_slot(*profile, 5);
@@ -1127,18 +1090,9 @@ struct Session::Impl {
             } else if (waits_for_quiet) {
                 out.transmit_unavailable = "Waiting for two quiet public slots before the next Robust transmission.";
             }
-            if (settings.fixed_repeated_bit_live) {
-                const auto repeat_index = earliest_repeat_slot(*profile, 5);
-                if (overlap_locked(*profile, repeat_index, EmissionMode::Message))
-                    out.repeat_transmit_unavailable = "Repeated-bit group conflicts with an already used key address.";
-                else if (utc_time(profile->waveform.transmit_slot(repeat_index).helper_begin,
-                             profile->waveform.config().format.sample_rate) < separated_after)
-                    out.repeat_transmit_unavailable = "Waiting for the next available repeated-bit group.";
-            }
         } catch (const std::exception& error) {
             out.transmit_unavailable = error.what();
             out.noise_transmit_unavailable = out.transmit_unavailable;
-            out.repeat_transmit_unavailable = out.transmit_unavailable;
         }
     }
 
@@ -1314,8 +1268,7 @@ struct Session::Impl {
                         // A new simulation is a new local source experiment.
                         // Retain a monotonically increasing address between
                         // runs without scoring the idle time between them.
-                        const auto advance = send.repeated_bit ? FixedRepeatedBit::group_slots :
-                            send.mode == EmissionMode::Message ? send.wire_bits() + 2 : 3;
+                        const auto advance = send.mode == EmissionMode::Message ? send.wire_bits() + 2 : 3;
                         next_simulation_ordinal = add_slot(calendar.config().format.symbol_ordinal, advance);
                         const auto first = calendar.transmit_slot(0);
                         last_simulation_epoch = add_slot(first.support_begin.epoch, 30);
@@ -1355,34 +1308,18 @@ struct Session::Impl {
         changed.notify_all();
     }
 
-    void enqueue(EmissionMode mode, std::span<const std::uint8_t> input = {}, bool force = false, bool raw = false,
-                 bool repeated = false) {
+    void enqueue(EmissionMode mode, std::span<const std::uint8_t> input = {}, bool force = false, bool raw = false) {
         std::lock_guard lock(mutex);
         if (stopping || suspended || !started) throw Error(no_transmitter);
         if (current.transmitting || request) throw Error("A Robust transmission is already active");
         if (!profile) throw Error(current.transmit_unavailable.value_or(preparing));
-        if (repeated && settings.simulation && (settings.gpu || profile->receiver.helper_enabled ||
-                         profile->waveform.config().receiver_filter_halo_samples != 0 ||
-                         profile->channel.frontend.active() || profile->channel.effects.slow_agc ||
-                         !profile->channel.effects.noise_enabled ||
-                         profile->channel.diagnostic_iq_noise.mode != background_noise::Mode::Off ||
-                         !std::isfinite(profile->channel.complex_noise_variance) ||
-                         profile->channel.complex_noise_variance <= 0 ||
-                         profile->channel.complex_noise_variance != profile->receiver.noise_variance))
-            throw Error("Repeated-bit reception requires simulation, native CPU and Helper Off with independent complex noise");
-        if (repeated && !settings.simulation && !settings.fixed_repeated_bit_live)
-            throw Error("Enable the dedicated live repeated-bit calendar before transmitting");
-        if (repeated && !settings.simulation && !audio::utc_follow_supported())
-            throw Error("This audio provider cannot schedule the dedicated repeated-bit calendar");
-        if (!repeated && settings.fixed_repeated_bit_live)
-            throw Error("Disable the dedicated live repeated-bit calendar before other transmissions");
         if (mode == EmissionMode::Message && !raw &&
             (input.empty() || input.size() > message_profile(settings).content_limit))
             throw Error("Robust text is empty or exceeds its local content quota");
         if (mode == EmissionMode::HelperOnly && !profile->receiver.helper_enabled)
             throw Error("Set nonzero Helper Carrier power before transmitting Helper only");
         if (!settings.simulation) {
-            const auto index = repeated ? earliest_repeat_slot(*profile, 5) : earliest_tx_slot(*profile, 5);
+            const auto index = earliest_tx_slot(*profile, 5);
             const auto locked = overlap_locked(*profile, index, mode);
             if (force && !locked) throw Error("There is no current Robust key-use lock to override");
             if (!force && locked) throw Error("Robust transmit locked: this key already used a future address");
@@ -1391,7 +1328,6 @@ struct Session::Impl {
                 throw Error("Waiting for two quiet public slots before the next Robust transmission");
         } else if (force) throw Error("Robust simulation has no hardware key-use lock");
         TxRequest send{mode, {input.begin(), input.end()}, force, raw, {}};
-        send.repeated_bit = repeated;
         tx_stop = std::stop_source{};
         current.transmitting = true;
         current.error.clear();
@@ -1400,7 +1336,6 @@ struct Session::Impl {
             "Preparing Robust transmission";
         if (settings.simulation) {
             current.pattern_steps.clear();
-            current.repeated_bits.clear();
             current.spectrum_revision = 0;
         } else if (!settings.full_duplex) current.constellation.clear();
         auto& trace = current.transmit_trace;
@@ -1408,17 +1343,14 @@ struct Session::Impl {
         trace = {};
         trace.revision = revision;
         trace.active = send.mode == EmissionMode::Message;
-        trace.repeated_bit = send.repeated_bit;
         trace.temporary_key = send.mode == EmissionMode::Noise;
         if (trace.active) {
             trace.raw = send.raw;
             trace.short_text = !send.raw && send.input.size() <= transfer::short_message_bytes;
             if (send.raw) {
-                trace.total_wire_bits = send.wire_bits();
+                trace.total_wire_bits = send.input.size();
                 const auto count = std::min(send.input.size(), modem::TransmitTrace::bit_limit);
                 trace.wire_plain_bits.assign(send.input.begin(), send.input.begin() + static_cast<std::ptrdiff_t>(count));
-                if (send.repeated_bit)
-                    trace.wire_plain_bits.assign(FixedRepeatedBit::attempts, send.input.front());
             } else {
                 const auto count = std::min(send.input.size(), modem::TransmitTrace::source_limit);
                 trace.source_available = true;
@@ -1551,7 +1483,6 @@ void Session::clear_received() {
         std::lock_guard lock(p.mutex);
         p.signal_events.clear();
         p.received_events.clear();
-        p.current.repeated_bits.clear();
     }
     p.changed.notify_all();
 }
@@ -1567,11 +1498,6 @@ void Session::transmit_bits(std::span<const std::uint8_t> bits, bool force) {
         std::any_of(bits.begin(), bits.end(), [](std::uint8_t bit) { return bit > 1; }))
         throw Error("Robust raw transmission requires 1 to 208 binary symbols");
     impl_->enqueue(EmissionMode::Message, bits, force, true);
-}
-
-void Session::transmit_repeated_bit(std::uint8_t bit) {
-    if (bit > 1) throw Error("Repeated Robust transmission requires one binary symbol");
-    impl_->enqueue(EmissionMode::Message, std::span(&bit, 1), false, true, true);
 }
 
 void Session::transmit_noise() { impl_->enqueue(EmissionMode::Noise); }

@@ -475,19 +475,13 @@ std::size_t receiver_detail::receiver_slot_workspace_with_supplement(
 namespace {
 enum class EvidenceEvaluation { bounded_competition, compare_admitted };
 
-struct RepeatEvidenceRequest {
-    double line_probe_threshold;
-    RepeatedBitSlotEvidence& result;
-};
-
 ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                                const Crypto& key, std::span<const Complex> iq,
                                std::span<const std::uint8_t> valid, unsigned workers,
                                std::size_t memory_limit_bytes, std::stop_token stop, ReceiverExecutor* shared,
                                bool may_overlap, const SlotEvidenceSupplement* supplement = nullptr,
                                EvidenceEvaluation evaluation = EvidenceEvaluation::bounded_competition,
-                               AffineGainEvaluation gain = AffineGainEvaluation::operational,
-                               RepeatEvidenceRequest* repeat = nullptr) {
+                               AffineGainEvaluation gain = AffineGainEvaluation::operational) {
     check_cancelled(stop);
     const auto workspace = plan_workspace(config, slot, workers, may_overlap, supplement);
     require(iq.size() == slot.stop_sample - slot.first_sample &&
@@ -614,15 +608,20 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         score.midpoint_timing_scored_lags = timing.scored_lags;
         score.signed_lag_gain_proposal_status = timing.gain_status;
         score.signed_lag_gain_proposal_maps = proposed_gain.size();
+        score.signed_lag_gain_proposal_fixed_maps = timing.gain_fixed_proposal_count;
+        score.signed_lag_gain_proposal_lags = timing.gain_proposal_lags;
         score.signed_lag_gain_proposal_fft_rows = timing.gain_fft_rows;
         score.signed_lag_gain_proposal_frequency_points = timing.gain_frequency_points;
         score.signed_lag_gain_proposal_available_blocks = timing.gain_available_blocks;
         score.signed_lag_gain_proposal_sampled_blocks = timing.gain_sampled_blocks;
         score.signed_lag_gain_proposal_scored_blocks = timing.gain_blocks;
+        score.signed_lag_gain_proposal_direct_scored_blocks = timing.gain_direct_blocks;
         score.signed_lag_gain_proposal_projected_rows = timing.gain_projected_rows;
         score.signed_lag_gain_proposal_workspace_bytes = timing.gain_workspace_bytes;
         score.signed_lag_gain_proposal_fft_stages = timing.gain_fft_row_stages;
         score.signed_lag_gain_proposal_score_rows = timing.gain_score_rows;
+        score.signed_lag_gain_proposal_fft_stage_bound = timing.gain_fft_stage_bound;
+        score.signed_lag_gain_proposal_score_row_bound = timing.gain_score_row_bound;
         score.signed_lag_gain_proposal_seconds = timing.gain_seconds;
     }
     const auto selected = fine.varying_coordinates.empty() ? std::span(fine.coordinates) :
@@ -735,24 +734,6 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         return score.calendar_opportunities_per_day && score.complete && score.zero_h0_verified &&
             !score.operational_passes_conditional_bound && score.operational_log_e >= final_threshold;
     };
-    const auto score_line = [&](ReceiverSlotScore& target, const LineAtom& line) {
-        ReceiverSlotScore residual;
-        residual.fine_candidates = target.fine_candidates;
-        if (workspace.line_varying.block_rows)
-            score_varying_fine(config, slot, key, workspace.line_varying, iq, selected,
-                fine.segmented_timing_coordinates,
-                coarse.projected_sample_rate_hz, coarse.clock_gap_ppm, workers, residual, stop, *executor, &line);
-        add_line_branch(target, residual, line.log_weighted_evidence);
-        if (workspace.line_coherent_gain.block_rows && (compare_all || target.decision != SlotDecision::data)) {
-            score_coherent_gain(workspace.line_coherent_gain, residual, &line);
-            add_line_branch(target, residual, line.log_weighted_evidence);
-        }
-        if (workspace.line_drift.workspace_bytes && (compare_all || target.decision != SlotDecision::data)) {
-            score_drift_fine(config, slot, key, workspace.line_drift, iq, selected, fine.epoch_timing_coordinates,
-                workers, residual, stop, *executor, &line);
-            add_line_branch(target, residual, line.log_weighted_evidence);
-        }
-    };
     bool retained_line = false;
     if (workspace.line && (compare_all || compare_line_short || !coherent_admission) &&
             (score.operational_passes_conditional_bound || newly_passes_calendar())) {
@@ -764,7 +745,22 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         if (const auto line = find_varying_line(config, slot, iq, stop, line_threshold)) {
             if (has_supplement)
                 supplement_evidence.fill(-std::numeric_limits<double>::infinity());
-            score_line(score, *line);
+            ReceiverSlotScore residual;
+            residual.fine_candidates = score.fine_candidates;
+            if (workspace.line_varying.block_rows)
+                score_varying_fine(config, slot, key, workspace.line_varying, iq, selected,
+                    fine.segmented_timing_coordinates,
+                    coarse.projected_sample_rate_hz, coarse.clock_gap_ppm, workers, residual, stop, *executor, &*line);
+            add_line_branch(score, residual, line->log_weighted_evidence);
+            if (workspace.line_coherent_gain.block_rows && (compare_all || score.decision != SlotDecision::data)) {
+                score_coherent_gain(workspace.line_coherent_gain, residual, &*line);
+                add_line_branch(score, residual, line->log_weighted_evidence);
+            }
+            if (workspace.line_drift.workspace_bytes && (compare_all || score.decision != SlotDecision::data)) {
+                score_drift_fine(config, slot, key, workspace.line_drift, iq, selected, fine.epoch_timing_coordinates,
+                    workers, residual, stop, *executor, &*line);
+                add_line_branch(score, residual, line->log_weighted_evidence);
+            }
             score.varying_line_frequency_hz = line->frequency_hz;
             score.varying_line_log_evidence = line->log_weighted_evidence;
             retained_line = true;
@@ -792,24 +788,6 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     }
     apply_wrong_key_admission(score, config.wrong_key_admission);
     score.fine_seconds = elapsed(began);
-    if (repeat && score.complete && score.all_valid && score.zero_h0_verified &&
-        score.noise_statistics_valid && score.consumed_samples == iq.size()) {
-        auto& result = repeat->result;
-        result.bit_log_e = score.operational_bit_evidence;
-        if (retained_line) {
-            result.line_log_e = score.varying_line_log_evidence;
-        } else if (workspace.line) {
-            const auto probe_start = Clock::now();
-            result.extra_line_probe = true;
-            if (const auto line = find_varying_line(config, slot, iq, stop, repeat->line_probe_threshold)) {
-                auto conditioned = score;
-                score_line(conditioned, *line);
-                result.bit_log_e = conditioned.operational_bit_evidence;
-                result.line_log_e = line->log_weighted_evidence;
-            }
-            result.extra_line_seconds = elapsed(probe_start);
-        }
-    }
     check_cancelled(stop);
     return score;
 }
@@ -828,24 +806,6 @@ ReceiverSlotScore receiver_detail::score_slot_with_supplement(
         const SlotEvidenceSupplement& supplement) {
     return score_stages(config, slot, key, iq, valid, workers, memory_limit_bytes, stop, shared,
                         true, &supplement);
-}
-
-ReceiverSlotScore receiver_detail::score_slot_with_repeat_evidence(
-        const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
-        std::span<const Complex> iq, std::span<const std::uint8_t> valid, unsigned workers,
-        std::size_t memory_limit_bytes, std::stop_token stop, double line_probe_threshold,
-        RepeatedBitSlotEvidence& result, ReceiverExecutor* shared) {
-    require(!config.helper_enabled && !config.bulk_backend && slot.calendar_admission.opportunities_per_day() &&
-        std::isfinite(line_probe_threshold) && line_probe_threshold >= 0 &&
-        line_probe_threshold <= calendar_operational_threshold(slot.calendar_admission),
-        "Robust repeat evidence requires a fixed calendar, CPU scoring, Helper Off and a bounded line probe");
-    result = {};
-    RepeatEvidenceRequest repeat{line_probe_threshold, result};
-    auto score = score_stages(config, slot, key, iq, valid, workers, memory_limit_bytes, stop, shared,
-        true, nullptr, EvidenceEvaluation::bounded_competition, AffineGainEvaluation::operational, &repeat);
-    score.repeat_bit_evidence = result.bit_log_e;
-    score.repeat_extra_line_seconds = result.extra_line_seconds;
-    return score;
 }
 
 ReceiverSlotScore receiver_detail::score_slot_comparing_admitted_evidence(const ReceiverConfig& config,

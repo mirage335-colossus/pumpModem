@@ -5,6 +5,9 @@
 #include "triad_receiver_detail.hpp"
 #include "triad_receiver_fine.hpp"
 
+#include <cmath>
+#include <limits>
+
 namespace datapump::triad::v3::receiver_detail {
 
 struct CoarseProposal {
@@ -16,20 +19,46 @@ struct CoarseProposal {
 
 struct CoarseMidpointTiming {
     std::vector<CoarseProposal> proposals;
-    std::array<CoarseProposal, 2> gain_proposals{};
-    std::array<std::int64_t, 2> gain_proposal_lags{};
+    std::array<CoarseProposal, receiver_signed_lag_gain_max_candidates> gain_proposals{};
+    std::array<std::int64_t, receiver_signed_lag_gain_max_candidates> gain_proposal_lags{};
     long double middle_seconds = 0;
     std::size_t gain_proposal_count = 0, gain_fft_rows = 0, gain_frequency_points = 0;
+    std::size_t gain_fixed_proposal_count = 0;
     std::size_t gain_blocks = 0, gain_projected_rows = 0, gain_workspace_bytes = 0;
     std::size_t gain_available_blocks = 0, gain_sampled_blocks = 0, gain_verified_correlations = 0;
+    std::size_t gain_direct_blocks = 0;
     std::uint64_t gain_fft_row_stages = 0, gain_score_rows = 0;
+    std::uint64_t gain_fft_stage_bound = 0, gain_score_row_bound = 0;
     double gain_seconds = 0;
-    std::string_view gain_status;
+    std::string_view gain_status{};
     std::int64_t first_lag = 0, last_lag = 0;
     std::size_t lag_count = 0, workspace_bytes = 0;
     std::uint64_t widened_inverses = 0, scored_lags = 0, verified_peaks = 0;
     std::string_view precision;
 };
+
+// An online log mean over one block's frequency emissions. Keeping
+// only the centered sum and its maximum avoids buffering a second frequency
+// grid or exponentiating the original score.
+struct GainFrequencyMean {
+    double maximum = -std::numeric_limits<double>::infinity(), relative = 0;
+
+    void include(double value) {
+        if (value > maximum) {
+            relative = 1 + relative * std::exp(maximum - value);
+            maximum = value;
+        } else {
+            relative += std::exp(value - maximum);
+        }
+    }
+
+    double log_mean(std::size_t frequencies) const {
+        return maximum + std::log(relative / frequencies);
+    }
+};
+
+double fixed_gain_frequency_rank(std::span<const double> frequency_major_totals,
+                                 std::size_t lags, std::size_t lag);
 
 enum class MidpointTimingEvaluation { off, short_tracking, verify };
 // Pure public support. Only the ordinary unprojected short tracker uses
@@ -40,8 +69,12 @@ struct CoarseMidpointSupport {
     std::int64_t first_lag = 0, last_lag = 0;
     long double middle_seconds = 0;
     std::size_t projected_rate = 0;
+    std::string_view gain_status{};
+    std::size_t gain_available_blocks = 0, gain_sampled_blocks = 0, gain_direct_blocks = 0;
+    std::size_t gain_fft_rows = 0, gain_frequency_points = 0, gain_workspace_bytes = 0;
+    std::uint64_t gain_fft_stage_bound = 0, gain_score_row_bound = 0;
 };
-CoarseMidpointSupport coarse_midpoint_timing_support(const ReceiverConfig&, const ReceiverSlotPlan&);
+CoarseMidpointSupport coarse_midpoint_timing_support(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers = 1);
 FineCoordinate midpoint_timing_coordinate(const ReceiverSlotPlan&, long double middle_seconds,
     double clock_bound_ppm, std::size_t projected_rate, std::int64_t lag, std::int64_t epoch);
 

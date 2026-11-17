@@ -131,9 +131,6 @@ bool gpu_receiver_available() noexcept {
 }
 
 void validate_settings(const Settings& s) {
-    check(!s.fixed_repeated_bit_live || (!s.simulation && !s.gpu && s.helper.power_w == 0 &&
-          s.calendar.has_value() && s.live_noise_dbfs_hz.has_value()),
-          "Live repeated-bit reception requires a dedicated calendar, input noise, native CPU and Helper Off");
     (void)triad::v3::parse_wrong_key_admission(s.wrong_key_admission);
     check(!s.gpu || gpu_receiver_available(), "GPU reception is unavailable in this build (CUDA or Vulkan support required)");
     modem::validate(s.transfer.modem);

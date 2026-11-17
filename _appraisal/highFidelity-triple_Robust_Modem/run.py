@@ -237,6 +237,8 @@ TWO_HOP_ADDITIVE_BOUNDARY_MAX_SAMPLES_PER_ROW = 4_350_000
 PHYSICAL_RAW_BIT_MAX_WALL_SECONDS = 180
 PHYSICAL_RAW_BIT_MAX_SAMPLES = 4_350_000
 GUI_LONG_HOLDOUT_MAX_WALL_SECONDS = 300
+GUI_PLANNED_DURATION_MAX_WALL_SECONDS = 450
+GUI_PLANNED_DURATION_MAX_SAMPLES = 26_000_000
 MODES = {"plan", "channel", "receive", "slot", "oracle", "diagnose", "hf-search", "gui-varying", "gui-repeated-bit"}
 CONTROLS = {"wanted", "noise", "wrong-key", "wrong-ordinal", "interior-fade", "capture-gap", "eof"}
 BACKENDS = {"cpu", "cuda", "vulkan", "gpu"}
@@ -286,7 +288,20 @@ def _is_long_gui_holdout(episode: dict[str, Any]) -> bool:
 
 
 def _gui_repeated_wall_cap(episode: dict[str, Any]) -> int:
-    return GUI_LONG_HOLDOUT_MAX_WALL_SECONDS if _is_long_gui_holdout(episode) else 120
+    if _is_long_gui_holdout(episode):
+        return GUI_LONG_HOLDOUT_MAX_WALL_SECONDS
+    return GUI_PLANNED_DURATION_MAX_WALL_SECONDS if _is_gui_planned_duration_attempt(episode) else 120
+
+
+def _is_gui_planned_duration_attempt(episode: dict[str, Any]) -> bool:
+    return (episode.get("mode") == "gui-repeated-bit" and
+            episode.get("repeat_selected_attempt") is not None and "bit_seconds" not in episode)
+
+
+def _gui_repeated_sample_cap(episode: dict[str, Any]) -> int:
+    if _is_gui_planned_duration_attempt(episode):
+        return GUI_PLANNED_DURATION_MAX_SAMPLES
+    return 2_400_000 if episode.get("repeat_separate_attempts", False) else 1_200_000
 
 
 def _sha256(path: Path) -> str:
@@ -380,10 +395,10 @@ def _read_campaign(path: Path) -> dict[str, Any]:
             raise CampaignError("separate-attempt campaigns may contain only separate-attempt episodes")
         if len(separate) > 2:
             raise CampaignError("separate-attempt cohorts are limited to two paired truth-bit rows")
+        limit = _gui_repeated_wall_cap(repeated[0])
         if episode_wall_cap > 120 and (len(episodes) != 1 or value["max_trials"] != 1 or
-                value["max_wall_seconds"] > GUI_LONG_HOLDOUT_MAX_WALL_SECONDS or
-                value["per_trial_wall_seconds"] > GUI_LONG_HOLDOUT_MAX_WALL_SECONDS):
-            raise CampaignError("long GUI holdout replay requires one episode and a 300-second aggregate cap")
+                value["max_wall_seconds"] > limit or value["per_trial_wall_seconds"] > limit):
+            raise CampaignError(f"long GUI replay requires one episode and a {limit}-second aggregate cap")
     confirmatory = value.get("confirmatory_strata", {})
     if not isinstance(confirmatory, dict):
         raise CampaignError("confirmatory_strata must be an object")
@@ -566,7 +581,7 @@ def _validate_episode(item: Any, index: int, ids: set[str],
         if (item.get("control", "wanted") != "wanted" or item.get("backend", "cpu") != "cpu" or
                 item.get("helper", False) or item.get("fec", "off") != "off"):
             raise CampaignError(f"episodes[{index}]: repeated-bit reception requires Helper-off and FEC-off")
-        sample_cap = 2_400_000 if item.get("repeat_separate_attempts", False) else 1_200_000
+        sample_cap = _gui_repeated_sample_cap(item)
         wall_cap = _gui_repeated_wall_cap(item)
         if campaign_max_samples > sample_cap or campaign_per_trial_wall_seconds > wall_cap:
             raise CampaignError(f"episodes[{index}]: repeated-bit campaign exceeds its frozen sample/{wall_cap}-second cap")
@@ -6187,7 +6202,7 @@ def _validate_repeated_bit_receipt(receipt: dict[str, Any], episode: dict[str, A
     receiver_noise_variance = plan.get("noise_variance")
     horizon_samples = plan.get("horizon_samples")
     repeat_max_samples = (TWO_HOP_ALARM_MATRIX_MAX_SAMPLES_PER_ROW if physical else
-                          2_400_000 if separate_attempts else 1_200_000)
+                          _gui_repeated_sample_cap(episode))
     repeat_max_wall_seconds = _gui_repeated_wall_cap(episode)
     if physical:
         repeat_max_wall_seconds = (PHYSICAL_RAW_BIT_MAX_WALL_SECONDS

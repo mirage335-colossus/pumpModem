@@ -56,14 +56,16 @@ v::Complex rotation(long double cycles) {
 }
 
 Fixture capture(const datapump::Crypto& crypto, bool mapped,
-                double spread_delay = .0145, double spread_doppler = 1.25) {
+                double spread_delay = .0145, double spread_doppler = 1.25,
+                double bit_seconds = .1, std::size_t sample_limit = 10'000,
+                double clock_bound_ppm = 400) {
     Fixture f;
     auto& c = f.config;
     auto& s = f.slot;
     c.sample_rate_hz = mapped ? 6000 : 600;
     c.noise_variance = .05;
     c.frequency_bound_hz = mapped ? .005 : .2;
-    c.clock_bound_ppm = mapped ? 0 : 400;
+    c.clock_bound_ppm = mapped ? 0 : clock_bound_ppm;
     c.spread_delay_seconds = mapped ? 0 : spread_delay;
     c.spread_doppler_hz = mapped ? 0 : spread_doppler;
     c.helper_enabled = !mapped;
@@ -75,7 +77,7 @@ Fixture capture(const datapump::Crypto& crypto, bool mapped,
     s.format.sample_rate = static_cast<std::uint32_t>(c.sample_rate_hz);
     s.format.inner_rate_hz = mapped ? 1 : 36;
     s.format.added_symbols = mapped ? 1 : 4;
-    s.format.bit_seconds = .1;
+    s.format.bit_seconds = bit_seconds;
     s.format.symbol_ordinal = 7;
     s.format.encrypt = !mapped;
     f.arrival = mapped ? 0 : .025;
@@ -88,7 +90,7 @@ Fixture capture(const datapump::Crypto& crypto, bool mapped,
     v::PatternSource source(format, crypto, f.bit);
     const auto samples = source.geometry().source_samples;
     const auto count = samples + (mapped ? 100'000 : 720);
-    check(count <= (mapped ? 4'300'000 : 10'000), "coarse test fixture exceeded its bounded capture size");
+    check(count <= (mapped ? 4'300'000 : sample_limit), "coarse test fixture exceeded its bounded capture size");
     s.stop_sample = s.first_sample + count;
     f.iq.resize(count);
     if (mapped) {
@@ -446,32 +448,97 @@ void exact_single_arrival_chirp_z(const datapump::Crypto& crypto) {
           "cancelled exact chirp-Z prefix published a partial result");
 }
 
-void exact_large_frequency_group(const datapump::Crypto& crypto) {
-    auto f = capture(crypto, false, 0, 0);
+void exact_multi_arrival_chirp_z(const datapump::Crypto& crypto) {
+    // Full-grid parity for an independent two-ray channel and a nearly
+    // rank-one pair. Neither fixture gives the receiver the common CFO.
+    for (const auto [delay, doppler] : std::array{std::pair{.0145, 1.25}, std::pair{1e-8, 0.}}) {
+        auto f = capture(crypto, false, delay, doppler);
+        f.config.helper_enabled = false;
+        f.config.frequency_bound_hz = 1.5;
+        f.slot.arrival_lower_seconds = f.arrival - .01;
+        f.slot.arrival_upper_seconds = f.arrival + .01;
+        const std::array<r::FrequencyInterval, 1> prior{{{-1.5, 1.5}}};
+        constexpr unsigned workers = 3;
+        const auto limit = r::coarse_workspace(f.config, f.slot, workers);
+        const auto candidate = r::score_coarse(f.config, f.slot, crypto, f.iq, prior, workers, limit, {});
+        f.config.native_coarse_precision = v::NativeCoarsePrecision::fp64;
+        const auto reference = r::score_coarse(f.config, f.slot, crypto, f.iq, prior, workers,
+            r::coarse_workspace(f.config, f.slot, workers), {});
+        check_winner(f, candidate);
+        const auto& plan = candidate.work.plan;
+        const auto& work = candidate.work.search.operations;
+        const auto& reference_work = reference.work.search.operations;
+        check(plan.route == r::CoarseRoute::lag_groups && plan.precision_reason == "exact-chirp-z" &&
+              plan.rays == 2 && plan.arrival_points > 1 &&
+              reference.work.plan.route == r::CoarseRoute::frequency_tiles &&
+              candidate.work.retained_bytes <= limit && work.score_rows == reference_work.score_rows &&
+              work.score_rows == plan.frequency_points * plan.arrival_points * plan.workspaces &&
+              work.forward_ffts == plan.workspaces * plan.rays * plan.arrival_points &&
+              work.inverse_ffts == work.forward_ffts &&
+              candidate.proposal_count == reference.proposal_count && candidate.coordinates == reference.coordinates,
+              "exact multi-arrival chirp-Z changed the coherent search coverage or candidates");
+        for (std::size_t i = 0; i < candidate.proposal_count; ++i) {
+            const auto& expected = reference.proposals[i];
+            const auto& actual = candidate.proposals[i];
+            const unsigned wanted_rank = delay < 1e-7 ? 1 : 2;
+            check(actual.coordinate == expected.coordinate && actual.bit == expected.bit &&
+                  actual.rank == expected.rank && actual.rank == wanted_rank &&
+                  std::abs(actual.score - expected.score) <= 1e-8 * std::max(1., std::abs(expected.score)),
+                  "exact multi-arrival chirp-Z changed the joint ray score or rank");
+        }
+    }
+}
+
+void exact_large_frequency_group(const datapump::Crypto& crypto, bool multi_arrival) {
+    auto f = capture(crypto, false, multi_arrival ? .0145 : 0., multi_arrival ? 1.25 : 0., 64., 50'000, 0.);
     f.config.helper_enabled = false;
-    f.config.clock_bound_ppm = 0;
-    f.slot.arrival_lower_seconds = f.slot.arrival_upper_seconds = f.arrival;
+    const auto arrival_radius = multi_arrival ? 1 / f.config.sample_rate_hz : 0.;
+    f.slot.arrival_lower_seconds = f.arrival - arrival_radius;
+    f.slot.arrival_upper_seconds = f.arrival + arrival_radius;
     const auto step = v::receiver_coarse_frequency_step(f.slot.format, f.config.sample_rate_hz);
-    const auto bound = 2200 * step;
+    const auto bound = 33'000 * step;
     f.config.frequency_bound_hz = bound;
     const std::array<r::FrequencyInterval, 1> prior{{{-bound, bound}}};
     constexpr unsigned workers = 3;
     const auto limit = r::coarse_workspace(f.config, f.slot, workers);
+    const auto planned = r::coarse_work_plan(f.config, f.slot, prior, workers);
+    check((planned.arrival_points > 1) == multi_arrival && planned.rays == (multi_arrival ? 2 : 1) &&
+          planned.frequency_points == std::ceil(2 * bound / step) + 1 &&
+          planned.frequency_points > 65'536 && planned.workspace_reserved_bytes == limit &&
+          limit < 256 * 1024 * 1024, "large exact public grid changed its full workspace quote");
+    if (!multi_arrival) {
+        auto assisted_config = f.config;
+        assisted_config.helper_enabled = true;
+        const std::array<r::FrequencyInterval, 3> assisted_prior{{{-step, 0}, {0, 0}, {0, step}}};
+        const auto fallback = r::coarse_work_plan(assisted_config, f.slot, prior, workers);
+        const auto narrowed = r::coarse_work_plan(assisted_config, f.slot, assisted_prior, workers);
+        check(fallback.frequency_points == planned.frequency_points &&
+              narrowed.frequency_groups == 3 && narrowed.frequency_points == 3 &&
+              narrowed.workspace_reserved_bytes == fallback.workspace_reserved_bytes,
+              "a narrowed Helper grid changed its full fallback quote or repeated touching endpoints");
+    }
+    rejects<v::ReceiverWorkspaceError>([&] {
+        r::CoarseSession unadmitted(f.config, f.slot, crypto, f.iq, prior, workers, limit - 1);
+    }, "large exact public grid accepted less than its required workspace");
     r::CoarseSession session(f.config, f.slot, crypto, f.iq, prior, workers, limit);
     const auto grid = session.frequency_grid();
     const auto prepared = session.progress().plan;
     check(prepared.route == r::CoarseRoute::lag_groups && prepared.frequency_groups == 1 &&
-          prepared.frequency_points == grid.size() && grid.size() > 4096 &&
+          prepared.frequency_points == grid.size() && grid.size() == planned.frequency_points &&
           grid.front() == -bound && grid.back() == bound && prepared.workspace_reserved_bytes == limit,
           "large exact search lost its uniform public group or bypassed admission");
+    for (std::size_t i = 1; i < grid.size(); ++i)
+        check(grid[i - 1] < grid[i] && grid[i] - grid[i - 1] <= step * (1 + 1e-10),
+              "large exact search changed the public frequency spacing");
     session.advance(64);
     const auto result = session.finish();
     check(result.has_value(), "large exact chirp-Z did not finish its complete public grid");
     check_winner(f, *result);
     const auto& work = result->work.search.operations;
-    check(work.score_rows == prepared.workspaces * grid.size() &&
-          work.workspace_frequency_pairs == work.score_rows && work.forward_ffts == prepared.workspaces &&
-          work.inverse_ffts == prepared.workspaces && result->work.retained_bytes <= limit,
+    check(work.workspace_frequency_pairs == prepared.workspaces * grid.size() &&
+          work.score_rows == work.workspace_frequency_pairs * prepared.arrival_points &&
+          work.forward_ffts == prepared.workspaces * prepared.rays * prepared.arrival_points &&
+          work.inverse_ffts == work.forward_ffts && result->work.retained_bytes <= limit,
           "large exact chirp-Z repeated a transform or missed a public row");
 
     const auto proposals = std::span(result->proposals).first(result->proposal_count);
@@ -1011,6 +1078,33 @@ void tied_arrival_frontier() {
     check(plateau.count == 1 && plateau.indices[0] == 1, "coarse flat peak lost its floor midpoint");
 }
 
+void distinct_gain_frequency_ranks() {
+    using Block = std::array<double, 4>; // Two frequency rows, each with two lags.
+    const auto compare = [](const std::array<Block, 2>& blocks, bool moving_centroid) {
+        Block fixed{};
+        std::array<double, 2> moving{};
+        for (const auto& block : blocks) {
+            std::array<r::GainFrequencyMean, 2> mean{};
+            for (std::size_t f = 0; f < 2; ++f)
+                for (std::size_t lag = 0; lag < 2; ++lag) {
+                    const auto cell = 2 * f + lag;
+                    fixed[cell] += block[cell];
+                    mean[lag].include(block[cell]);
+                }
+            for (std::size_t lag = 0; lag < 2; ++lag) moving[lag] += mean[lag].log_mean(2);
+        }
+        const auto fixed_first = r::fixed_gain_frequency_rank(fixed, 2, 0);
+        const auto fixed_second = r::fixed_gain_frequency_rank(fixed, 2, 1);
+        check(std::isfinite(moving[0]) && std::isfinite(moving[1]) && moving[0] > moving[1] &&
+              (fixed_first < fixed_second) == moving_centroid &&
+              std::abs(moving[0] - (1600. - 2 * std::log(2.))) < 1e-12,
+              "signed timing rank lost the fixed centroid or mishandled blockwise frequency normalization");
+    };
+    const Block first{800, 500, 0, 0};
+    compare({first, Block{0, 500, 800, 0}}, true);
+    compare({first, first}, false);
+}
+
 void quarter_clocks_nominate_only_missing_public_cells() {
     v::ReceiverConfig config;
     config.sample_rate_hz = 800;
@@ -1286,6 +1380,7 @@ int main(int argc, char** argv) try {
     }
     if (midpoint) return 0;
     tied_arrival_frontier();
+    distinct_gain_frequency_ranks();
     if (overlap_failures) {
         acquisition_failures(crypto, capture(crypto, false), true);
         return 0;
@@ -1297,7 +1392,9 @@ int main(int argc, char** argv) try {
     exact_bulk_frontiers(crypto);
     slow_mapped(crypto);
     exact_single_arrival_chirp_z(crypto);
-    exact_large_frequency_group(crypto);
+    exact_multi_arrival_chirp_z(crypto);
+    exact_large_frequency_group(crypto, false);
+    exact_large_frequency_group(crypto, true);
     overlapped_acquisition(crypto);
     return 0;
 } catch (const std::exception& error) {

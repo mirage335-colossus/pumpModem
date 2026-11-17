@@ -99,6 +99,7 @@ struct Options {
     double data_if_hz = 500, rate_hz = 120, rf_hz = 0, margin = 1, doppler_hz = 0;
     double data_w = .1, helper_w = 0, loss_db = 114, noise_dbm_hz = -174;
     std::optional<double> target_cn0, active_seconds, observed_cn0;
+    std::optional<double> signal_gain_db, channel_severity;
     std::optional<double> interferer_cn0, interferer_seconds, interferer_rate;
     std::optional<double> interferer_offset_seconds, interferer_frequency_offset_hz;
     std::optional<std::uint64_t> interferer_seed;
@@ -243,6 +244,8 @@ Options parse(int argc, char** argv) {
     assign("--target-cn0", o.target_cn0);
     if (o.target_cn0 && !duration_supplied) o.active_seconds.reset();
     assign("--cn0", o.observed_cn0);
+    assign("--signal-gain-db", o.signal_gain_db);
+    assign("--channel-severity", o.channel_severity);
     assign("--interferer-cn0", o.interferer_cn0);
     assign("--interferer-seconds", o.interferer_seconds);
     assign("--interferer-rate", o.interferer_rate);
@@ -297,6 +300,15 @@ Options parse(int argc, char** argv) {
         require(o.command == "admission" && o.encrypt && o.interferer_cn0 && o.interferer_seconds &&
                 o.interferer_seed && o.interferer_bit && *o.interferer_seconds > 0 && *o.interferer_bit <= 1,
                 "The admission interferer requires --encrypt on and explicit C/N0, duration, seed and bit");
+    }
+    if (o.signal_gain_db || o.channel_severity) {
+        require(one_of(o.command, {"admission", "message", "plan"}) && o.backend == "cpu" &&
+                !o.helper && !o.interferer_cn0,
+                "A fixed receiver link contrast requires CPU admission, message or plan with Helper and interferer off");
+        require(!o.signal_gain_db || std::abs(*o.signal_gain_db) <= 100,
+                "--signal-gain-db expects -100 to +100 dB");
+        require(!o.channel_severity || (*o.channel_severity >= 0 && *o.channel_severity <= 1),
+                "--channel-severity expects 0 to 1");
     }
     require(!o.interferer_uniform_window.value_or(false) || !o.interferer_offset_seconds,
             "Choose either uniform-window placement or a fixed interferer offset");
@@ -385,6 +397,23 @@ live::Settings settings_for(const Options& o, std::size_t memory_limit) {
     s.calendar = live::Calendar{fixture_epoch, fixture_ordinal};
     live::validate_settings(s);
     return s;
+}
+
+void configure_link_contrast(StreamChannelConfig& channel, const Options& o) {
+    if (o.signal_gain_db) channel.signal_gain *= std::pow(10., *o.signal_gain_db / 20);
+    if (!o.channel_severity || *o.channel_severity == 1) return;
+    const auto severity = *o.channel_severity;
+    auto& effects = channel.effects;
+    auto& evolution = channel.path_evolution;
+    effects.spread_delay_ms *= severity;
+    effects.spread_doppler_hz *= severity;
+    effects.perturbation_slow_depth *= severity;
+    effects.perturbation_fast_depth *= severity;
+    evolution.common_doppler_wander_hz *= severity;
+    if (severity == 0) {
+        evolution.bounded_spread_knot_seconds = 0;
+        channel.selective_model.modulation_rate_hz = 0;
+    }
 }
 
 class Deadline {
@@ -566,7 +595,8 @@ Json profile_json(const Options& o, const Profile& profile, const ReceiverSlotPl
         {"requested_helper_power_w", o.helper_w}, {"effective_helper_power_w", config.helper.effective_power_w},
         {"path_loss_db", o.loss_db}, {"case_noise_dbm_hz", o.noise_dbm_hz},
         {"observed_cn0_override", o.observed_cn0 ? Json(*o.observed_cn0) : Json{}},
-        {"actual_cn0_db_hz", 10 * std::log10(config.sample_rate_hz / config.noise_variance)},
+        {"actual_cn0_db_hz", 10 * std::log10(config.sample_rate_hz / config.noise_variance) +
+            o.signal_gain_db.value_or(0)},
         {"target_cn0_db_hz", o.target_cn0.value_or(o.scenario.empty() ? 80. : 32.)},
         {"duration_policy", o.active_seconds ? "explicit_fixed" : "native_target_model"},
         {"fixed_active_seconds", o.active_seconds ? Json(*o.active_seconds) : Json{}},
@@ -605,6 +635,18 @@ Json profile_json(const Options& o, const Profile& profile, const ReceiverSlotPl
         {"initial_symbol_ordinal", waveform.config().format.symbol_ordinal},
         {"recurring_horizon", recurring_horizon(waveform)},
         {"scope", "configured_public_calendar_and_keyed_ordinal"}});
+    if (o.signal_gain_db || o.channel_severity) {
+        result["fixed_receiver_link_contrast"] = object({
+            {"signal_gain_db", o.signal_gain_db.value_or(0)}, {"signal_gain", channel.signal_gain},
+            {"channel_severity", o.channel_severity.value_or(1)},
+            {"receiver_reference_cn0_db_hz", 10 * std::log10(config.sample_rate_hz / config.noise_variance)},
+            {"receiver_noise_variance", config.noise_variance}, {"receiver_data_basis_gain", config.data_basis_gain},
+            {"channel_noise_variance", channel.complex_noise_variance},
+            {"channel_spread_delay_ms", channel.effects.spread_delay_ms},
+            {"channel_spread_doppler_hz", channel.effects.spread_doppler_hz},
+            {"channel_selective_slow_depth", channel.effects.perturbation_slow_depth},
+            {"channel_selective_fast_depth", channel.effects.perturbation_fast_depth}});
+    }
     try {
         result["receiver_slot_workspace_bytes"] = receiver_slot_workspace(cpu_config, slot, resources.workers);
     } catch (const Error& error) {
@@ -1050,6 +1092,11 @@ Json scores(const std::array<double, 2>& values) {
 }
 
 Json score_json(const ReceiverSlotScore& score) {
+    Json::Array gain_lags, gain_map_evidence;
+    for (const auto lag : std::span(score.signed_lag_gain_proposal_lags).first(score.signed_lag_gain_proposal_maps))
+        gain_lags.emplace_back(lag);
+    for (const auto& map : std::span(score.signed_lag_gain_map_bit_evidence).first(score.signed_lag_gain_candidates))
+        gain_map_evidence.emplace_back(scores(map));
     return object({
         {"index", score.index}, {"first_sample", score.first_sample}, {"stop_sample", score.stop_sample},
         {"decision", decision_name(score.decision)}, {"bit", score.bit ? Json(*score.bit) : Json{}},
@@ -1084,14 +1131,19 @@ Json score_json(const ReceiverSlotScore& score) {
             {"scored_lags", score.midpoint_timing_scored_lags}})},
         {"signed_lag_gain", object({
             {"proposal_status", score.signed_lag_gain_proposal_status}, {"maps", score.signed_lag_gain_proposal_maps},
+            {"fixed_maps", score.signed_lag_gain_proposal_fixed_maps}, {"lags", std::move(gain_lags)},
+            {"map_bit_evidence", std::move(gain_map_evidence)},
             {"available_blocks", score.signed_lag_gain_proposal_available_blocks},
             {"sampled_blocks", score.signed_lag_gain_proposal_sampled_blocks},
             {"scored_blocks", score.signed_lag_gain_proposal_scored_blocks},
+            {"direct_scored_blocks", score.signed_lag_gain_proposal_direct_scored_blocks},
             {"projected_rows", score.signed_lag_gain_proposal_projected_rows},
             {"fft_rows", score.signed_lag_gain_proposal_fft_rows},
             {"frequency_points", score.signed_lag_gain_proposal_frequency_points},
             {"fft_row_stages", score.signed_lag_gain_proposal_fft_stages},
             {"score_rows", score.signed_lag_gain_proposal_score_rows},
+            {"fft_stage_bound", score.signed_lag_gain_proposal_fft_stage_bound},
+            {"score_row_bound", score.signed_lag_gain_proposal_score_row_bound},
             {"workspace_bytes", score.signed_lag_gain_proposal_workspace_bytes},
             {"proposal_seconds", score.signed_lag_gain_proposal_seconds},
             {"candidates", score.signed_lag_gain_candidates}, {"basis_rows", score.signed_lag_gain_basis_rows},
@@ -2218,6 +2270,9 @@ void help() {
         "  --slots N --units 1|2|4 --bit 0|1 --sample-rate HZ --data-if HZ\n"
         "  --doppler-hz HZ (bounded common wander; selected spread adds atmospheric support)\n"
         "  --target-cn0 DB_HZ --cn0 DB_HZ --seconds FIXED_ACTIVE_SECONDS --fec off|rs20|rs60\n"
+        "  --signal-gain-db DB shifts actual C/N0 relative to --cn0 with fixed receiver gain and noise\n"
+        "  --channel-severity 0..1 scales actual spread, common wander and selective AM depth\n"
+        "    (CPU admission/message/plan, Helper Off; preserves receiver bounds and source geometry)\n"
         "JSON output uses datapump.triad.native-probe.v1. Exit 2 indicates unavailable or incomplete work.\n";
 }
 
@@ -2288,6 +2343,7 @@ void run(Json& report, const Options& o, std::stop_token stop) {
         const Timer preparation;
         auto profile = live::detail::prepare_profile(settings, *settings.calendar, stop,
             {.simulation_seed = o.seed, .fixture_active_seconds = o.active_seconds});
+        configure_link_contrast(profile.channel, o);
         const auto preparation_elapsed = preparation.elapsed();
         profile.receiver.bulk_backend = backend;
         if (o.native_coarse_precision == "q15")
@@ -2329,6 +2385,17 @@ void run(Json& report, const Options& o, std::stop_token stop) {
             } catch (const Error& error) {
                 configuration["coarse_full_prior"] = Json{};
                 configuration["coarse_full_prior_reason"] = error.what();
+            }
+            try {
+                const auto midpoint = coarse_midpoint_timing_support(profile.receiver, slot, resources.workers);
+                configuration["signed_gain_rank_plan"] = object({
+                    {"status", midpoint.available ? midpoint.gain_status : midpoint.status},
+                    {"available_blocks", midpoint.gain_available_blocks}, {"sampled_blocks", midpoint.gain_sampled_blocks},
+                    {"direct_blocks", midpoint.gain_direct_blocks}, {"fft_rows", midpoint.gain_fft_rows},
+                    {"frequency_points", midpoint.gain_frequency_points}, {"workspace_bytes", midpoint.gain_workspace_bytes},
+                    {"fft_stage_bound", midpoint.gain_fft_stage_bound}, {"score_row_bound", midpoint.gain_score_row_bound}});
+            } catch (const Error& error) {
+                configuration["signed_gain_rank_plan"] = object({{"status", error.what()}});
             }
             report["result"] = object({{"planned", true}, {"actual_device_work", false},
                 {"duration_is_provisional", true}});

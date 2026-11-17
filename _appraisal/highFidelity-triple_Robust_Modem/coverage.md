@@ -65,7 +65,51 @@ also distinguish physical outage/estimation cost from avoidable receiver loss.
 
 ## Applicability after the admission and carrier-key changes
 
-The native opt-in repeated-bit receiver now has a matched production replay
+The latest [ordinary-reception follow-through](../../docs/validation.md#ordinary-reception-with-conservative-settings--17-november-2026)
+tests fixed receiver gain/noise and HF Worst / Each 65% bounds while actual
+signal alone rises by 30 dB. Both bit values pass the sampled short and
+135.2-second clean/changing-channel comparisons, including a reused history
+with 6.565 ms delay and near-bound common/relative motion; noise controls stay
+QUIET. A dated native PCM message also passes both levels with a clean channel.
+These tests cover their explicit histories and calibrated synthetic noise,
+not every path or input device.
+
+Ordinary longer bits now recover both polarities on the weak −3 dB-Hz two-hop
+field: first-attempt 139.2-second bits miss; 266.8-second bits both pass, with
+both quiet successors preserved. The longer calendar has fewer daily detection
+opportunities, which contributes to bit-one admission. The source/field/start
+and noise seeds are controlled, but later channel evolution enters the longer
+interval. This is an ordinary first-attempt recovery bracket, not a new five-
+retry campaign or a natural availability probability.
+
+The same investigation removes a 65,536-frequency admission cliff and enables
+the existing CPU chirp-Z computation across multiple rays and arrivals with
+all public hypotheses intact. A complete ordinary message executes 76,343
+frequencies per window. The weak Each 65% Target-0 case that previously reached
+its 199.5-second deadline now completes in 31.484 seconds on identical input;
+it still misses at that earlier chirp-only checkpoint. The subsequent timing
+repair now receives **both bit values at 176.8 seconds** with actual +10 dB-Hz,
+HF Worst / Each 65% / Margin 3 and Target −3. It also receives both values at
+696.8 seconds / Target −9, the stronger +13 zero and a fresh weak zero history.
+Every successful row preserves two real QUIET successors and physical
+completion. The 41.6-second +10 observation remains ambiguous; these are bounded
+ordinary duration results, not an optimal sensitivity curve.
+
+The original long zero incorrectly decoded as one at both +10 and +13 on
+samples that the new full-bit timing rank now receives correctly. A private
+public-cell witness first demonstrated strong same-model information at timing
+omitted by acquisition. Full-current-aperture direct ranking then selected
+useful timing from the signal itself, preserving the old nominees, full prior
+and final likelihood. Complete long matched service rises approximately
+13–15% on the tested 5650U CPU. Thus this was a demonstrated avoidable
+acquisition failure, now repaired in ordinary reception; it was not merely
+an oracle comparison supplied with the distorted waveform. Older clock-age
+cost, other physical histories and natural outage probability remain distinct
+qualification questions.
+
+The dedicated repeated-bit option is retired at the user's request. Current
+qualification uses ordinary DATA decisions, matching waveform settings and
+physical quiet completion. The historical opt-in repeated-bit receiver had a matched production replay
 of the earlier −3 dB-Hz bit-one alarm history. On the exact archived two-hop
 field, input and fifteen public apertures, all five individual attempts still
 miss, but a separate grouped event correctly receives bit one after four;
@@ -73,7 +117,9 @@ all five genuine quiet pairs remain QUIET. This result covers one constructed
 history and one polarity, not a natural outage rate or an independent
 requalification of bit zero. [Physical grouped replay](../../docs/validation.md#production-repeat-receiver-on-the-frozen-weak-two-hop-bit-one-history)
 and [live PCM tests](../../docs/validation.md#calibrated-live-pcm-repeated-bit-check)
-describe the fixed schedule, calibrated noise model and other limits.
+describe the retired fixed schedule, calibrated noise model and other limits.
+The recovery remains evidence that the capture contained usable information;
+it is not an ordinary-receiver pass or a currently available operating mode.
 
 The [current 1 MHz groundwave pair](../../docs/validation.md#weak-groundwave-energy-boundary--17-november-2026)
 replays the same weak 100 km single-ray source at −16/−10 dB-Hz. All three weak

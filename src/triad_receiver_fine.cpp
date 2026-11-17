@@ -1861,7 +1861,6 @@ constexpr double varying_power = 1. / 16;
 constexpr std::array tracking_powers{varying_power, 1. / 256, 1. / 512, 1. / 4096};
 constexpr std::size_t maximum_tracking_states = 65;
 constexpr double nominal_independent_gain_weight = 1. / 8;
-constexpr std::size_t maximum_gain_timing_nominations = 2;
 
 struct DriftGram {
     // Cholesky factor of I + A^H A/(noise variance * precision).
@@ -2519,7 +2518,7 @@ VaryingFinePlan varying_fine_plan(const ReceiverConfig& config, const ReceiverSl
     const std::size_t independent = !coherent_gain_blocks && track.states && config.spread_delay_seconds > 0 ?
         (slot.arrival_lower_seconds == slot.arrival_upper_seconds ? 1 : 2) : 0;
     const auto nominated = independent && !project_line_atom && config.clock_bound_ppm ?
-        maximum_gain_timing_nominations : 0;
+        receiver_signed_lag_gain_max_candidates : 0;
     const auto gain_atoms = independent + nominated;
     const auto active = std::min<std::size_t>(workers, states + gain_atoms);
     if (!coherent_gain_blocks) add(states, sizeof(State) + sizeof(MappedBasisRow));
@@ -2582,7 +2581,7 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
         (midpoint && (line || span || clock_shadow ||
             !midpoint->public_lag_count || !std::isfinite(midpoint->original_timing_log_count) ||
             midpoint->nominations.size() > maximum_midpoint_timing_coordinates ||
-            midpoint->gain_nominations.size() > maximum_gain_timing_nominations ||
+            midpoint->gain_nominations.size() > receiver_signed_lag_gain_max_candidates ||
             (!midpoint->gain_nominations.empty() && !midpoint->gain_family_admitted))))
         throw Error("Robust midpoint family requires its bounded ordinary short tracking lease");
     if (clock_shadow) {
@@ -2961,10 +2960,17 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
                 log_add(nominal.fixed, nominal.moving) - log_two + log_mass : nominal.fixed + log_mass;
             auto gain = score.nominal_independent_gain_bit_evidence[bit];
             if (lag_count) {
-                const auto lag = independent_gain_evidence(independent.last(lag_count), bit, independent_track.states);
+                const auto lag_atoms = independent.last(lag_count);
+                const auto lag = independent_gain_evidence(lag_atoms, bit, independent_track.states);
                 const auto candidate = independent_track.states ?
                     log_add(lag.fixed, lag.moving) - log_two : lag.fixed;
                 score.signed_lag_gain_bit_evidence[bit] = candidate + log_mass + lag_adjustment;
+                for (std::size_t i = 0; i < lag_count; ++i) {
+                    const auto atom = independent_gain_evidence(lag_atoms.subspan(i, 1), bit, independent_track.states);
+                    const auto term = independent_track.states ?
+                        log_add(atom.fixed, atom.moving) - log_two : atom.fixed;
+                    score.signed_lag_gain_map_bit_evidence[i][bit] = term + log_mass + lag_adjustment;
+                }
                 gain = log_add(gain, score.signed_lag_gain_bit_evidence[bit]);
             }
             score.varying_bit_evidence[bit] = log_add(score.varying_bit_evidence[bit] + old_weight,

@@ -18,6 +18,16 @@ and [long-coordinate forecast checks](validation-data/triad-v3/2026-11-06-long-f
 record the assumptions and limits. The latter checked integer geometry without
 creating multi-day waveforms; it did not establish blind multi-day acquisition.
 
+The GUI currently selects the fixed-energy true-atom model. The optional
+stochastic calculation uses an equal-mode Gaussian fading surrogate and an
+explicit covariance width; GUI HF Worst bounded frequency motion is not that
+width. Enabling the stochastic flag alone would leave that width zero and
+would not qualify the GUI channel. A lower shared target lengthens the agreed
+waveform in whole native tiles and changes the live reference amplitude. Check
+ordinary reception and complete workspace admission separately from the
+planner's selected duration; neither a longer waveform nor repeated raw zeros
+by itself establishes a specified success probability.
+
 ## Useful accounting distinctions
 
 Count each declared epoch, bit, channel-prior and operational attempt. Helper

@@ -75,22 +75,13 @@ including strong long-window signals, may be hidden. See the
 | `audio.hpp`, `robust_audio_frontend.hpp` | Native device ownership, routing, gain, timestamped capture and bounded real-PCM-to-I/Q filtering. |
 | `triad_acceleration.hpp` | Optional compiled ATen/Vulkan leaves under the production receiver's control, state and resource contracts. |
 
-With the dedicated fixed-repeat option, `CompleteStreamReceiver` queues a
-separate `RepeatedBitEvent` after four or five scheduled attempts. The event
-describes the observed prefix and can precede an incomplete fifth attempt.
-All input through the accepted look must be valid. For calibrated independent
-proper complex noise supplied directly to the receiver, the complete scored
-attempt apertures must be disjoint. An explicit unfiltered-I/Q declaration
-can retain the public aperture padding when that padding describes geometry
-only, such as a channel renderer that adds independent noise after all
-filtering. For identity-rate live capture under the independent Gaussian
-PCM envelope, expand each complete scored aperture by the actual
-`AudioInput` FIR half-width on both sides before checking disjointness.
-The configured geometry stays the same. Both declarations require evidence
-for the input assumptions. `drain_repeated_bits()` participates in output
-backpressure. Ordinary slot receipts and codec completion are independent
-of this logical event. The GUI exposes the option for native CPU simulation
-or a dedicated live schedule with Helper Off. See the [operating scope](indexes/robust.md#start-with-a-configuration-both-peers-can-receive).
+The receiver publishes ordinary DATA, QUIET, or AMBIGUOUS decisions for each
+calendar slot. Transmitting repeated values advances the keyed ordinal and
+creates separate ordinary decisions; there is no special group event or cross-attempt
+soft combiner. The dedicated repeated-bit GUI and receiver path tested in
+November 2026 was retired. Its executed recovery remains a historical result
+for that explicitly configured feature, not a qualification of ordinary
+repeated transmissions. See the [retirement note](validation.md#dedicated-repeated-bit-feature-retirement--17-november-2026).
 
 The GUI links `datapump_robust_session`, `datapump_triad_receiver` and
 `datapump_triad` statically. Source generation, Helper acquisition, coarse
@@ -139,10 +130,12 @@ The operating CPU receiver defaults to qualified reduced-precision frequency
 search after native DATA channel isolation on AVX2. Native single-ray exact
 projection can use Q15 spectral products with FP32 FFTs under checked native
 bounds; other eligible frequency banks use FP32 products and FFTs. For a
-qualifying no-Helper, single-ray, single-arrival search, automatic mode can
-instead choose FP64 chirp-Z when its estimated transform-row work is at least
-four times smaller; a single frequency can instead use a direct FP64 dot under
-the same modeled-advantage requirement. A single-ray bank has Gram ratio 1 and
+qualifying exact-source search with Helper Off, automatic CPU mode can choose
+FP64 chirp-Z when its estimated transform-row work is at least four times
+smaller. A candidate with multiple rays or arrivals must fit the existing
+full frequency-route workspace quote. For a single ray and arrival, a single
+frequency can use a direct FP64 dot under the same modeled-advantage
+requirement. A single-ray bank has Gram ratio 1 and
 can convert each checked template directly, with a phase-aware
 admission bound charging FP64 projection and conversion overlap. Other automatic
 banks remain subject to the complete bank's double-precision conditioning check. Lag/tight-clock and
@@ -159,6 +152,13 @@ the slot lease when coarse is dominant; it does not imply a reduction where
 fine work dominates. The Helper bound follows the public calendar: its largest
 transform step and a 16 MiB allowance for interval lists and records. It no
 longer sets the lease of a Helper slot.
+
+Coarse planning counts the full frequency grid from its interval endpoints
+without allocating a value for each frequency. The receiver admits the full
+workspace before materializing any frequency values or retaining peaks.
+Checked index, transform and workspace bounds govern grids beyond the former
+65,536-point limit. Helper still charges the complete fallback prior. See the
+[long-duration checks](validation.md#ordinary-reception-with-conservative-settings--17-november-2026).
 
 The optional [Vulkan backend](triad-performance.md#local-radeon-vulkan-processing)
 starts after native DATA channel isolation and accelerates GPU frequency-search
@@ -352,6 +352,19 @@ are charged. The `independent_gain_emission_cells` receipt counts primary
 short-score emissions; a separate line-conditioned rescore is outside that
 counter, though included in complete elapsed service. See the
 [live-level mismatch and repair](validation.md#weak-combined-modulation-follow-through--17-november-2026).
+The signed-lag branch now retains up to four signal-derived maps. The original
+sampled two-ray, fixed-frequency nominees remain first. A second proposer
+integrates direct-ray evidence across every supported block in the current
+aperture, marginalizing common frequency separately in each block. It shares
+the old sampled correlations, then visits unsampled blocks once; it does not
+search earlier transmissions. It adds at most one nominee per bit and
+deduplicates the union. The final two-ray likelihood, public lag/epoch prior
+and bit threshold do not change. The full direct rank remains eligible when
+the legacy sampling budget admits no fixed-rank blocks. Workspace, operation
+arithmetic, worker bounds and cancellation apply before execution; the old
+absolute sampling cap does not truncate the new statistic. Complete service
+and clock-age scaling remain separate qualification requirements. See the
+[matched acquisition investigation](validation.md#ordinary-duration-and-weak-channel-follow-through).
 The same projected correlations and Gram matrices feed two equally mixed
 components over the full configured frequency range: one integrates a common
 frequency held fixed across the whole aperture, and the other uses a bounded
@@ -406,8 +419,8 @@ forecast consumers require `adaptive_diagnostics=false`, null adaptive
 lane/score fields and zero adaptive counters. The fixed-only Helper replay
 preserves selected DATA and QUIET outcomes to 12 significant digits, with
 slightly slower slot times. The clock-pair binary predates final delay-tier
-removal; final-source triad, GUI, appraisal and repeated-bit checks now pass as
-recorded in validation. Capacity remains unqualified, and these probes do not
+removal; final-source triad, GUI, appraisal and repeated separate-transmission
+checks passed at that historical checkpoint as recorded in validation. Capacity remains unqualified, and these probes do not
 qualify long-run reception or general availability.
 The previously reported +12 ambiguous / +20 DATA delay pair used a fixture
 without the canonical 0.25 s preroll: its direct-path start fell outside the
@@ -442,7 +455,7 @@ diagnostics still measure the pilots when requested. See the
 [matched repair and costs](validation.md#weak-helper-follow-through--17-november-2026)
 and the [earlier Helper record](validation.md#late-clock-and-interior-delay-probes--16-november-2026)
 for source-bound outcomes and limits.
-The [repeated-bit diagnosis](validation.md#repeated-single-bit-channel-diagnosis--16-november-2026)
+The [historical repeated-transmission diagnosis](validation.md#repeated-single-bit-channel-diagnosis--16-november-2026)
 records the nominal-epoch omission and subsequent calendar-age clock-resolution
 diagnosis motivating these two bounded timing supplements. Sequential and
 overlapped Helper preparation quote and pass the same midpoint work. The late
@@ -511,6 +524,14 @@ is not a sensitivity guarantee or a real-time capacity result. FHSS profiles
 control the canonical envelope and illustrative schedule; they do not retune
 external radio hardware. See [duration planning](triad-duration-planning.md),
 [burst scheduling](symbol-burst.md) and [channel models](channel-models.md).
+
+The target is a weak-signal design point, not a required received level or an
+upper amplitude limit. Peers agree on waveform settings; actual signal strength
+and channel evolution may differ from those assumptions. Qualification must
+hold receiver gain/noise and public bounds fixed while varying actual signal
+gain independently. A simulated C/N0 change that also recalibrates the receiver
+does not establish that tolerance. Hardware clipping and analog input range
+remain separate from the native detector's tested range.
 
 Text up to 16 bytes retains the native short dictionary profile. Longer text
 uses periodic 192-bit markers and 128-byte fixed codewords with configured Off,

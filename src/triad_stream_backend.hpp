@@ -3,19 +3,10 @@
 #include "datapump/triad_stream_receiver.hpp"
 
 #include <functional>
-#include <limits>
 
 namespace datapump::triad::v3::receiver_detail { class ReceiverExecutor; }
 
 namespace datapump::triad::v3::detail {
-
-// Disjoint raw-input dependencies of two half-open logical-IQ apertures.
-// Compare differences only after order, and guard doubling against overflow.
-inline bool repeat_input_dependencies_disjoint(std::uint64_t first, std::uint64_t previous_stop,
-                                                std::uint64_t halo) noexcept {
-    return first >= previous_stop && halo <= std::numeric_limits<std::uint64_t>::max() / 2 &&
-        first - previous_stop >= 2 * halo;
-}
 
 // Test-only scorer injection. Calendar, admission, sample ownership,
 // backpressure, and codec processing still use the ordinary stream controller.

@@ -171,21 +171,6 @@ void text_and_raw_draft_boundaries() {
     using F=gui::ui::Field;using C=gui::ui::Command;
     gui::Application app({.simulation=true});
     app.select(F::fast_mode,"robust");
-    const auto& screen=gui::ui::console_screen();
-    const auto repeated=std::find_if(screen.begin(),screen.end(),[](const auto& control) {
-        return control.command==C::transmit_repeated_bit;
-    });
-    check(repeated!=screen.end()&&repeated->page==gui::ui::Page::compression&&
-          repeated->slot==gui::ui::Slot::repeated_bit_transmit&&
-          std::string_view(repeated->help).find("CPU and Helper off")!=std::string_view::npos);
-    const auto repeat_setting=std::find_if(screen.begin(),screen.end(),[](const auto& control) {
-        return control.field==F::fixed_repeated_bit_live;
-    });
-    check(repeat_setting!=screen.end()&&repeat_setting->page==gui::ui::Page::robust_setup&&
-          std::string_view(repeat_setting->help).find("Mixed data can be admitted")!=std::string_view::npos&&
-          !app.field(F::fixed_repeated_bit_live).checked);
-    app.edit(F::short_bits,"1");
-    check(!app.enabled(C::transmit_repeated_bit)); // A stopped session cannot transmit.
     // The developer prefix uses the long text path; unsupported attachments
     // cannot replace the draft or trigger a native service.
     app.edit(F::message,std::string(236,'x'));

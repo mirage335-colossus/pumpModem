@@ -24,7 +24,6 @@ namespace fixture {
 std::mutex mutex;
 std::atomic<unsigned> capture_opens{0}, capture_active{0}, playback_opens{0}, playback_active{0};
 std::atomic<bool> capture_overlap{false}, hold_playback{false};
-std::atomic<bool> idle_identity_transport{false};
 std::string capture_device, playback_device;
 audio::Options capture_options, playback_options;
 audio::ChannelMode playback_channels = audio::ChannelMode::stereo;
@@ -35,8 +34,6 @@ std::vector<float> playback_prefix;
 struct CaptureInput {
     std::vector<float> samples;
     long double first_utc = 0;
-    std::size_t chunk_rows = 128;
-    bool identity_transport = false;
 };
 std::shared_ptr<const CaptureInput> capture_input;
 }
@@ -58,16 +55,11 @@ void capture(std::uint32_t rate, const std::string& device, const CaptureCallbac
         input = fixture::capture_input;
     }
     ++fixture::capture_opens;
-    if (format) {
-        StreamFormat description{rate, rate, rate * .49, 4096};
-        if ((input && input->identity_transport) || (!input && fixture::idle_identity_transport))
-            description.capture_transport = {CaptureTransportKind::fixed_nominal_audio, rate, rate, 0, 0};
-        format(description);
-    }
+    if (format) format({rate, rate, rate * .49, 4096});
     if (input) {
         if (!options.capture_timing) throw Error("Native Robust did not request dated capture");
         for (std::size_t at = 0; at < input->samples.size() && !stop.stop_requested();) {
-            const auto count = std::min(input->chunk_rows, input->samples.size() - at);
+            const auto count = std::min<std::size_t>(128, input->samples.size() - at);
             TimePrediction stamp;
             stamp.utc_seconds = input->first_utc + static_cast<long double>(at) / rate;
             stamp.uncertainty_seconds = 1e-7;
@@ -644,28 +636,46 @@ void late_affine_clock_support() {
           "Native DSP could not plan a public clock window with a negative arrival offset");
 }
 
-void dated_live_data_then_eof() {
+void dated_live_data_then_eof(std::optional<int> fixed_link_gain_db = {}) {
     using namespace triad::v3;
     auto s = settings(false);
     s.transfer.modem.sample_rate = 1500;
     s.transfer.modem.carrier_hz = 500;
     s.transfer.audio_timing_error_seconds = 0;
     s.live_noise_dbfs_hz = -100;
+    if (fixed_link_gain_db) {
+        s.calendar = live::Calendar{1793850000, 7000037};
+        s.transfer.modem.carrier_hz = 497;
+        s.spread_preset = "hf-worst";
+        s.selective_perturbation = "each-65";
+        s.target_cn0_db_hz = 16;
+        s.live_noise_dbfs_hz = -80;
+        s.receiver_memory_limit = 1024U * 1024 * 1024;
+    }
     const auto profile = live::detail::prepare_profile(s, *s.calendar, {});
     const std::array<std::uint8_t, 1> bit{1};
-    Emission source(profile.waveform, profile.key, {EmissionMode::Message, 0, bit});
+    const std::array<std::uint8_t, 3> text{0, 0, 1}; // Native short-codec representation of 'e'.
+    const std::span<const std::uint8_t> wire = fixed_link_gain_db ? std::span<const std::uint8_t>(text) :
+        std::span<const std::uint8_t>(bit);
+    Emission source(profile.waveform, profile.key, {EmissionMode::Message, 0, wire});
     const auto rate = s.transfer.modem.sample_rate;
     const auto prefix = 2U * rate;
-    const auto after_epoch = profile.waveform.slot(0).observation.stop + rate;
-    check(after_epoch + prefix < 100000, "Dated live fixture exceeds its one-window sample budget");
+    const auto expected_slots = wire.size() + (fixed_link_gain_db ? 2 : 0);
+    const auto after_epoch = profile.waveform.slot(expected_slots - 1).observation.stop + rate;
+    check(after_epoch + prefix < (fixed_link_gain_db ? 500000 : 100000),
+          "Dated live fixture exceeds its sample budget");
+    const auto noise_density = std::pow(10., *s.live_noise_dbfs_hz / 10);
+    const auto actual_cn0 = s.target_cn0_db_hz + fixed_link_gain_db.value_or(0);
+    const auto signal_gain = std::sqrt(noise_density * std::pow(10., actual_cn0 / 10));
     auto input = std::make_shared<fixture::CaptureInput>();
     input->first_utc = static_cast<long double>(s.calendar->epoch) - 2;
     input->samples.resize(prefix + after_epoch);
     std::mt19937_64 rng(0x726f6275737421ULL);
-    std::normal_distribution<double> noise(0, std::sqrt(rate / 2. * 1e-10));
+    std::normal_distribution<double> noise(0, std::sqrt(rate / 2. * noise_density));
     for (auto& sample : input->samples) sample = static_cast<float>(noise(rng));
     std::array<Complex, 512> iq{};
     std::size_t at = 0;
+    float peak = 0;
     for (;;) {
         const auto count = source.read(iq);
         if (!count) break;
@@ -673,231 +683,65 @@ void dated_live_data_then_eof() {
         for (std::size_t i = 0; i < count; ++i) {
             const auto rotation = std::polar(1., 2 * std::numbers::pi * s.transfer.modem.carrier_hz *
                 static_cast<double>(at + i) / rate);
-            input->samples[prefix + at + i] += static_cast<float>(std::numbers::sqrt2 * .1 * (iq[i] * rotation).real());
+            auto& pcm = input->samples[prefix + at + i];
+            pcm += static_cast<float>(std::numbers::sqrt2 * signal_gain * (iq[i] * rotation).real());
+            peak = std::max(peak, std::abs(pcm));
         }
         at += count;
     }
+    check(peak < .9, "Dated live input exceeds the PCM headroom");
     {
         std::lock_guard lock(fixture::mutex);
         fixture::capture_input = input;
     }
     live::Session session;
     session.start(s);
-    ready(session);
-    const auto out = wait(session, [](const auto& snapshot) {
+    unsigned decoded_messages = 0;
+    bool complete_signal = false;
+    const auto out = wait(session, [&](const auto& snapshot) {
         check(snapshot.error.empty(), "Dated Robust input failed: " + snapshot.error);
         check(snapshot.receiver_error.empty() || snapshot.receiver_error == "Robust audio input ended.",
               "Dated Robust receive failed: " + snapshot.receiver_error);
-        check(snapshot.received.empty(), "Live transport EOF fabricated a decoded message");
+        for (const auto& message : snapshot.received) {
+            check(fixed_link_gain_db && message.stream_complete && message.content_validated &&
+                  message.short_text_decoded && message.content.message.data == Bytes{'e'} &&
+                  std::ranges::equal(message.raw_bits, wire) && message.missing_symbols == 0,
+                  "Dated Robust did not decode the expected complete native message");
+            ++decoded_messages;
+        }
+        for (const auto& signal : snapshot.signals) {
+            if (!signal.complete) continue;
+            check(fixed_link_gain_db && signal.robust_reception && signal.validated && signal.raw_bits == "001",
+                  "Dated Robust completed an unexpected reception");
+            complete_signal = true;
+        }
         return snapshot.receiver_error == "Robust audio input ended.";
     }, "Dated native DATA scoring did not finish", 45s);
-    check(out.pattern_steps.size() == 1 && out.pattern_steps[0].index == 0 &&
-          out.pattern_steps[0].decision == live::PatternDecision::data && out.pattern_steps[0].bit == 1 &&
-          out.pattern_steps[0].evidence_complete && out.pattern_steps[0].fine_candidates > 0,
-          "Real dated PCM did not survive Hilbert conversion and complete native DATA scoring");
+    check(out.pattern_steps.size() == expected_slots, "Dated Robust lost a complete public aperture");
+    for (std::size_t i = 0; i < expected_slots; ++i) {
+        const auto& row = out.pattern_steps[i];
+        check(row.index == i && row.ordinal == s.calendar->initial_ordinal + i && row.evidence_complete &&
+              row.fine_candidates > 0,
+              "Dated Robust lost ordered complete native scoring at slot " + std::to_string(i));
+        if (i < wire.size())
+            check(row.decision == live::PatternDecision::data && row.bit == wire[i],
+                  "Dated Robust wanted slot " + std::to_string(i) + " failed: " + row.reason);
+        else
+            check(row.decision == live::PatternDecision::quiet && !row.bit,
+                  "Dated Robust quiet slot " + std::to_string(i) + " failed: " + row.reason);
+    }
     check(!out.waveform.empty() && !out.constellation.empty() && out.constellation_source == live::ConstellationSource::input &&
-          std::none_of(out.signals.begin(), out.signals.end(), [](const auto& signal) { return signal.complete; }),
-          "Live input plots are absent or its unfinished DATA became a completed message");
+          complete_signal == fixed_link_gain_db.has_value() && decoded_messages == (fixed_link_gain_db ? 1U : 0U),
+          "Live input plots or expected physical completion are absent");
     close(session);
     {
         std::lock_guard lock(fixture::mutex);
         fixture::capture_input.reset();
     }
-}
-
-// One fixed physical calendar per case; the Session receives dated PCM via
-// the actual AudioInput projection. No local transmit command is used.
-void dated_live_repeated_bit() {
-    using namespace triad::v3;
-    struct Case { const char* name; std::optional<std::uint8_t> bit; bool truncate; bool identity; bool late; };
-    const std::array cases{
-        Case{"zero", 0, false, true, false}, Case{"one", 1, false, true, false},
-        Case{"noise", {}, false, true, false}, Case{"truncated", 1, true, true, false},
-        Case{"late-join", 1, false, true, true}, Case{"unknown-transport", {}, true, false, false}};
-    std::uint64_t seed = 0x6c697665726570ULL;
-    for (const auto& c : cases) {
-        auto s = settings(false);
-        s.transfer.modem.sample_rate = 1500;
-        s.transfer.modem.carrier_hz = 500;
-        s.transfer.audio_timing_error_seconds = 0;
-        s.live_noise_dbfs_hz = -100;
-        s.fixed_repeated_bit_live = true;
-        const auto profile = live::detail::prepare_profile(s, *s.calendar, {});
-        const auto rate = s.transfer.modem.sample_rate;
-        const auto prefix = c.late ? 0U : 2U * rate;
-        const auto source_skip = c.late ? profile.waveform.calendar().distance(profile.waveform.origin(),
-            profile.waveform.transmit_slot(1).support_begin) + rate : 0;
-        const auto last = c.truncate ? 8 : 14;
-        const auto after_epoch = profile.waveform.slot(last).observation.stop + rate;
-        check(after_epoch + prefix < 1'500'000,
-              "Dated repeat fixture exceeds its predeclared 1.5 million-row budget");
-        auto input = std::make_shared<fixture::CaptureInput>();
-        input->first_utc = static_cast<long double>(s.calendar->epoch) +
-            static_cast<long double>(source_skip) / rate - (c.late ? 0 : 2);
-        input->identity_transport = c.identity;
-        input->chunk_rows = 256;
-        input->samples.resize(prefix + after_epoch - source_skip);
-        std::mt19937_64 rng(seed++);
-        std::normal_distribution<double> noise(0, std::sqrt(rate / 2. * 1e-10));
-        for (auto& sample : input->samples) sample = static_cast<float>(noise(rng));
-        if (c.bit) {
-            EmissionOptions options;
-            options.repeated_bit = *c.bit;
-            Emission source(profile.waveform, profile.key, options);
-            std::array<Complex, 512> iq{};
-            std::size_t at = 0;
-            while (at < after_epoch) {
-                const auto count = source.read(std::span(iq).first(std::min<std::size_t>(iq.size(), after_epoch - at)));
-                if (!count) break;
-                for (std::size_t i = 0; i < count; ++i) {
-                    const auto rotation = std::polar(1., 2 * std::numbers::pi * s.transfer.modem.carrier_hz *
-                        static_cast<double>(at + i) / rate);
-                    if (at + i >= source_skip)
-                        input->samples[prefix + at + i - source_skip] += static_cast<float>(
-                            std::numbers::sqrt2 * .1 * (iq[i] * rotation).real());
-                }
-                at += count;
-            }
-        }
-        {
-            std::lock_guard lock(fixture::mutex);
-            fixture::capture_input = input;
-        }
-        const auto playback = fixture::playback_opens.load();
-        live::Session session;
-        session.start(s);
-        if (c.bit && *c.bit == 0 && c.identity && !c.late) {
-            (void)ready(session);
-            const std::array<std::uint8_t, 1> other{0};
-            bool ordinary_rejected = false, noise_rejected = false;
-            try { session.transmit_bits(other); } catch (const Error&) { ordinary_rejected = true; }
-            try { session.transmit_noise(); } catch (const Error&) { noise_rejected = true; }
-            check(ordinary_rejected && noise_rejected && !session.snapshot().transmitting &&
-                  fixture::playback_opens == playback,
-                  "Dedicated repeat receive mode started an unrelated local transmission");
-        }
-        const auto out = wait(session, [&](const auto& snapshot) {
-            check(snapshot.error.empty(), std::string("Live repeat ") + c.name + " failed: " + snapshot.error);
-            if (!c.identity) return !snapshot.receiver_error.empty();
-            check(snapshot.receiver_error.empty() || snapshot.receiver_error == "Robust audio input ended.",
-                  std::string("Live repeat ") + c.name + " input failed: " + snapshot.receiver_error);
-            return snapshot.receiver_error == "Robust audio input ended.";
-        }, "Dated live repeat capture did not finish", 60s);
-        check(fixture::playback_opens == playback,
-              "Independent live repeated-bit receive opened playback");
-        if (!c.identity)
-            check(out.receiver_error.find("identity-rate capture transport") != std::string::npos &&
-                  out.repeated_bits.empty() && out.pattern_steps.empty(),
-                  "Unknown transport was not rejected before grouped reception");
-        else {
-            check(!out.pattern_steps.empty() && out.pattern_steps.back().index == static_cast<std::uint64_t>(last) &&
-                  (c.late ? out.pattern_steps.front().index > 0 : out.pattern_steps.front().index == 0) &&
-                  std::all_of(out.pattern_steps.begin(), out.pattern_steps.end(),
-                              [](const auto& row) { return row.evidence_complete; }),
-                  std::string("Live repeat ") + c.name + " did not score the expected complete windows");
-            for (std::size_t i = 0; i < out.pattern_steps.size(); ++i) {
-                const auto& row = out.pattern_steps[i];
-                check(row.index == out.pattern_steps.front().index + i &&
-                      row.ordinal == s.calendar->initial_ordinal + row.index,
-                      std::string("Live repeat ") + c.name + " lost public slot/ordinal order");
-                if (!c.bit || row.index % 3 != 0)
-                    check(row.decision != live::PatternDecision::data && !row.bit,
-                          std::string("Live repeat ") + c.name + " admitted DATA in an absence window");
-            }
-        }
-        if (c.identity && c.bit && !c.truncate && !c.late)
-            check(out.repeated_bits.size() == 1 && out.repeated_bits.front().bit == *c.bit &&
-                  out.repeated_bits.front().first_public_slot == 0 &&
-                  (out.repeated_bits.front().last_public_slot == 9 || out.repeated_bits.front().last_public_slot == 12) &&
-                  out.repeated_bits.front().first_symbol_ordinal == s.calendar->initial_ordinal &&
-                  out.repeated_bits.front().last_symbol_ordinal == s.calendar->initial_ordinal +
-                      out.repeated_bits.front().last_public_slot &&
-                  out.repeated_bits.front().attempts >= 4,
-                  std::string("Live repeat ") + c.name + " did not yield its separate logical-bit event");
-        else if (c.identity)
-            check(out.repeated_bits.empty(),
-                  std::string("Live repeat ") + c.name + " fabricated an incomplete or noise-only result");
-        close(session);
-        {
-            std::lock_guard lock(fixture::mutex);
-            fixture::capture_input.reset();
-        }
-    }
-}
-
-void scheduled_live_repeated_bit_cancel() {
-    using namespace triad::v3;
-    auto s = settings(false);
-    s.transfer.modem.sample_rate = 1500;
-    s.transfer.modem.carrier_hz = 500;
-    s.transfer.audio_timing_error_seconds = 0;
-    s.live_noise_dbfs_hz = -100;
-    s.fixed_repeated_bit_live = true;
-    s.full_duplex = true;
-    s.transfer.key = Crypto::amateur();
-    const auto now = std::chrono::duration_cast<std::chrono::seconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
-    s.calendar->epoch = static_cast<std::uint64_t>(now - 61);
-    const auto profile = live::detail::prepare_profile(s, *s.calendar, {});
-    const auto first = profile.waveform.transmit_slot(15).helper_begin;
-    const auto scheduled = static_cast<long double>(first.epoch) +
-        static_cast<long double>(first.phase) / s.transfer.modem.sample_rate;
-    fixture::idle_identity_transport = true;
-    fixture::hold_playback = true;
-    struct Reset { ~Reset() { fixture::idle_identity_transport = false; fixture::hold_playback = false; } } reset;
-    live::Session session;
-    session.start(s);
-    (void)ready(session);
-    session.transmit_repeated_bit(1);
-    wait(session, [](const auto&) {
-        std::lock_guard lock(fixture::mutex);
-        return fixture::playback_active && fixture::scheduled && fixture::playback_samples > 0;
-    }, "Live repeat did not schedule its first output", 30s);
-    {
-        std::lock_guard lock(fixture::mutex);
-        check(fixture::scheduled_epoch && std::abs(*fixture::scheduled_epoch - scheduled) < 1e-6,
-              "Live repeat did not round up to the next fixed group boundary");
-    }
-    check(session.snapshot().transmit_trace.repeated_bit,
-          "Scheduled repeat output lost its explicit trace type");
-    session.cancel_transmit();
-    const auto stopped = wait(session, [](const auto& out) { return !out.transmitting && !fixture::playback_active; },
-                              "Cancelled repeat output did not stop", 30s);
-    check(stopped.repeated_bits.empty(), "Cancelling transmit fabricated a logical repeat event");
-    std::string rejection;
-    try { session.transmit_repeated_bit(1); } catch (const Error& error) { rejection = error.what(); }
-    check(rejection.find("key already used") != std::string::npos,
-          "Cancelled repeat output did not reject reuse of its reserved key group: " + rejection);
-    close(session);
-
-    // A new isolated mock session exercises the whole sparse source. These are
-    // fake audio calls only; no second transmission is sent to real hardware.
-    fixture::hold_playback = false;
-    EmissionOptions expected_options;
-    expected_options.first_slot = 15;
-    expected_options.repeated_bit = 1;
-    expected_options.source_first_sample = profile.waveform.calendar().distance(profile.waveform.origin(), first);
-    Emission expected(profile.waveform, profile.key, expected_options);
-    const auto expected_samples = expected.source().geometry.source_samples;
-    check(expected_samples < 1'500'000, "Scheduled repeat output exceeds the fixture's sample budget");
-    live::Session complete;
-    complete.start(s);
-    (void)ready(complete);
-    complete.transmit_repeated_bit(1);
-    const auto finished = wait(complete, [](const auto& out) {
-        check(out.error.empty(), "Scheduled repeat output failed: " + out.error);
-        return !out.transmitting;
-    }, "Complete scheduled repeat output did not finish", 60s);
-    {
-        std::lock_guard lock(fixture::mutex);
-        check(fixture::scheduled_epoch && std::abs(*fixture::scheduled_epoch - scheduled) < 1e-6 &&
-              fixture::playback_samples == expected_samples,
-              "Complete repeat output changed the aligned group or physical source extent");
-    }
-    check(finished.transmit_trace.repeated_bit && finished.transmit_trace.generated_bits == 5 &&
-          finished.transmit_trace.total_wire_bits == 5 && finished.repeated_bits.empty(),
-          "Full repeat output lost its five-attempt trace or fabricated a receive result");
-    close(complete);
+    if (fixed_link_gain_db)
+        std::cout << "Dated Robust decoded e/001 at " << actual_cn0 << " dB-Hz with Target "
+                  << s.target_cn0_db_hz << " dB-Hz, two quiet slots, " << profile.waveform.geometry().bit_seconds
+                  << " s bits and peak PCM " << peak << '\n';
 }
 
 void raw_bit_session_transmission_and_ordinal() {
@@ -966,77 +810,6 @@ void raw_bit_session_transmission_and_ordinal() {
         }
     }
     close(session);
-}
-
-void repeated_bit_simulation() {
-    auto simulated = settings(true);
-    simulated.transfer.modem.sample_rate = 1500;
-    simulated.transfer.modem.carrier_hz = 500;
-    live::Session session;
-    session.start(simulated);
-    (void)ready(session);
-    bool invalid_rejected = false;
-    try { session.transmit_repeated_bit(2); }
-    catch (const Error&) { invalid_rejected = true; }
-    check(invalid_rejected, "Repeated-bit simulation accepted a nonbinary symbol");
-    const auto ordinal = simulated.calendar->initial_ordinal;
-    session.transmit_repeated_bit(1);
-    const auto starting = session.snapshot();
-    check(starting.transmitting && starting.transmit_trace.repeated_bit &&
-          starting.transmit_trace.total_wire_bits == 5,
-          "Repeated-bit trace did not identify its five-attempt schedule");
-    const auto completed = wait(session, [&](auto& out) {
-        check(out.error.empty() && out.receiver_error.empty(),
-              "Repeated-bit simulation failed: " + out.error + "; " + out.receiver_error);
-        return !out.transmitting;
-    }, "Repeated-bit simulation did not finish", 180s);
-    check(completed.pattern_steps.size() == 15 && completed.repeated_bits.size() == 1 &&
-          completed.repeated_bits.front().bit == 1 &&
-          completed.repeated_bits.front().first_symbol_ordinal == ordinal &&
-          completed.repeated_bits.front().attempts >= 4 &&
-          completed.transmit_trace.total_wire_bits == 5 && completed.transmit_trace.generated_bits == 5,
-          "Repeated-bit simulation did not produce its separate event and five-attempt trace");
-    for (std::size_t i = 0; i < completed.pattern_steps.size(); ++i) {
-        const auto& row = completed.pattern_steps[i];
-        check(row.index == i && row.ordinal == ordinal + i && row.evidence_complete,
-              "Repeated simulation lost an addressed window or changed the keyed ordinal");
-        if (i % 3 == 0)
-            check(row.decision == live::PatternDecision::data && row.bit == 1,
-                  "Repeated simulation lost an active DATA bit");
-        else
-            // This GUI simulation uses a fresh random draw. A genuine silent
-            // window can be AMBIGUOUS; the fixed-seed native test separately
-            // requires its noise controls to be scored QUIET.
-            check(row.decision != live::PatternDecision::data && !row.bit,
-                  "Repeated simulation admitted DATA in a silent window");
-    }
-    const std::array<std::uint8_t, 1> ordinary{0};
-    session.transmit_bits(ordinary);
-    const auto next = wait(session, [&](auto& out) {
-        check(out.error.empty() && out.receiver_error.empty(),
-              "Following ordinary simulation failed: " + out.error + "; " + out.receiver_error);
-        return !out.transmitting;
-    }, "Following ordinary simulation did not finish", 90s);
-    check(next.repeated_bits.empty() && next.pattern_steps.size() == 3 &&
-          next.pattern_steps.front().ordinal == ordinal + 15 && !next.transmit_trace.repeated_bit,
-          "Next ordinary simulation retained a repeat result or reused a repeat ordinal");
-    close(session);
-
-    const auto expect_disabled = [](live::Settings unsupported) {
-        live::Session blocked;
-        blocked.start(unsupported);
-        (void)ready(blocked);
-        bool rejected = false;
-        try { blocked.transmit_repeated_bit(1); }
-        catch (const Error&) { rejected = true; }
-        check(rejected && !blocked.snapshot().transmitting,
-              "Repeated-bit command started in an unsupported receive mode");
-        close(blocked);
-    };
-    auto helper = settings(true);
-    helper.helper.power_w = 1;
-    expect_disabled(helper);
-    expect_disabled(settings(false));
 }
 
 void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dynamic_channel = false) {
@@ -1334,13 +1107,10 @@ int main(int argc, char** argv) {
             complete_native_simulation(false, false, true);
             return 0;
         }
-        if (argc == 2 && std::string_view(argv[1]) == "--repeat-simulation") {
-            repeated_bit_simulation();
-            return 0;
-        }
-        if (argc == 2 && std::string_view(argv[1]) == "--repeat-live-session") {
-            dated_live_repeated_bit();
-            scheduled_live_repeated_bit_cancel();
+        if (argc == 3 && std::string_view(argv[1]) == "--fixed-receiver-link") {
+            const std::string_view gain = argv[2];
+            check(gain == "0" || gain == "30", "The dated fixed-link fixture supports gain 0 or 30 dB");
+            dated_live_data_then_eof(gain == "30" ? 30 : 0);
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--gpu-unavailable") {

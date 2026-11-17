@@ -342,9 +342,11 @@ post-filter Q15 spectral products with FP32 FFTs or FP32 products/FFTs, while
 retaining double-precision conditioning, coordinates, scores and fine state. The
 probe's `--native-coarse-precision automatic|fp32|fp64|q15` records the requested
 policy in runtime identity and actual selection/reason/scales in work receipts.
-Automatic can instead select the scoped exact one-arrival FP64 chirp-Z route
-when its public-geometry cost estimate favors it by at least fourfold. Explicit
-FP32, FP64 and Q15 retain the frequency comparator on that geometry.
+With Helper Off, automatic CPU mode can select the exact-source FP64 chirp-Z
+route when the public-geometry cost estimate favors it by at least fourfold.
+For multiple rays or arrivals, the lag route must fit the existing complete
+frequency-route workspace quote. Explicit FP32, FP64 and Q15 retain their
+frequency comparators on eligible geometry.
 The normal GUI's GPU Default setting can also choose native chirp-Z for a
 qualified Radeon/public-geometry and worker-adjusted crossover; a strict
 accelerator probe or explicit GPU precision still requires device work. Do not
@@ -353,6 +355,38 @@ Explicit Q15 rejects unsupported geometry; explicit FP64 is the CPU reference.
 Keep policies matched for ordinary regression baselines; a precision comparison
 explicitly declares the difference. See the operating guide for current hardware
 and geometry bounds and the distinction between Q15 products and an integer FFT.
+
+Longer bits refine the full oscillator and declared common-offset grid at a
+step of at most a quarter cycle over the rendered source. Coarse geometry
+quotes can now count grids past the previous 65,536-point limit without
+allocating per-frequency arrays. Every point and retained peak still has a
+workspace charge. The exact chirp-Z work scales with the padded convolution
+length and the number of arrival, ray and workspace combinations. A wide
+arrival prior can still favor the frequency FFT route. Capacity evidence
+requires actual complete service for the declared geometry and route.
+
+The signed timing proposer now adds direct-ray accumulation over the full
+current aperture, sharing the original sampled two-ray work. Its planner
+reports `configuration.signed_gain_rank_plan`; runtime receipts distinguish
+available, sampled and common-support scored blocks. The complete transform
+bound includes both old sampled work and all additional direct blocks. A
+fixed stage cap previously prevented longer bits from supplying more timing
+evidence in a demonstrated weak Each 65% case. The new work remains subject
+to exact workspace, checked operation counts, `W` and cancellation; it is not
+constant-cost search at arbitrary clock age. For the same 696.8-second GUI
+waveform, plan-only slot indices 1 / 12 / 48 quote approximately
+8.500 / 32.894 / 148.838 billion FFT row-stages and retain all
+6,984 / 7,032 / 7,187 projected blocks. These are work bounds, not FLOP counts
+or receiver throughput measurements. Previous sampled-rank timings do not
+calibrate this complete work. See the
+[source-bound replays and limits](validation.md#ordinary-duration-and-weak-channel-follow-through).
+
+For each arrival the chirp-Z transform evaluates the windowed template
+correlations on the same frequency grid by padded convolution. The omitted
+output chirp and arrival phase are common to all rays at each frequency, so
+the joint Hermitian score cancels them in exact arithmetic. The two numerical
+routes can still differ by rounding. See the original
+[chirp-Z derivation](https://web.ece.ucsb.edu/Faculty/Rabiner/ece259/Reprints/015_czt.pdf).
 
 After relevant numerical checks, the optional compiled test target provides two
 fixed CPU-only comparisons without creating a Vulkan device:

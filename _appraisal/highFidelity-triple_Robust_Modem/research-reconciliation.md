@@ -50,6 +50,85 @@ mode, and high-Q antennas/front ends can change slowly over the modem's long
 symbols. Preserve full channel state and test the mechanism that the case
 supports.
 
+## Fixed conservative settings and ordinary duration
+
+Target C/N0 is a shared waveform design input, not a measured received level
+or an upper reception limit. A useful qualification holds the waveform,
+receiver reference gain, noise declaration and search bounds fixed, and varies
+only received signal gain and realized channel motion. Increasing the whole
+noisy capture or recalibrating the receiver for each point would not test
+this requirement. A separate lower-target series changes the agreed waveform
+duration and therefore samples a different span of the same continuous channel.
+Ordinary repeated bits are separate opportunities; they do not accumulate
+subthreshold evidence across slots.
+
+The native GUI duration model currently uses a fixed-energy true-atom
+surrogate. Its optional stochastic model instead uses an equal-mode Gaussian
+fading approximation and an explicitly declared covariance width. Merely
+enabling that option for HF Worst would not establish conservative planning:
+GUI bounded common/relative motion is not that Gaussian width. Keep the
+forecast conditional and check actual longer-bit reception and full receiver
+resource admission. [Native planning assumptions](../../docs/triad-duration-planning.md).
+
+[Yang et al. (2012)](https://arxiv.org/abs/1204.2927) show that diversity and
+channel-learning cost compete at finite blocklength in noncoherent Rayleigh
+block fading. This cautions against importing a known-channel AWGN trend as a
+universal sensitivity curve, without excusing avoidable implementation loss.
+A recent [Chen, Durisi and Häger preprint (30 October 2026)](https://arxiv.org/html/2610.41580v1)
+compares joint synchronization/decoding with an achievability bound that includes
+unknown delay and block fading. Its short-packet, pilot-assisted reference and
+learned receiver do not supply a numerical bound for this modem. The transferable
+lesson is to include synchronization and nuisance inference in the reference,
+and distinguish bit from complete-message error.
+
+There is also a relevant counterweight to blanket estimation-cost explanations:
+[Durisi, Morgenshtern and Bölcskei (2009)](https://arxiv.org/abs/0905.0619)
+find capacity near the AWGN reference over practical SNRs for their continuous-
+time, underspread WSSUS Rayleigh class. The related
+[noncoherent-capacity analysis](https://arxiv.org/abs/0804.1748) makes the
+scattering function and peak constraints explicit. These results do not cover
+the present nonstationary GUI realization, but they prevent treating a large
+observed implementation loss as an inevitable cost of unknown channels.
+The GUI excursion bounds alone establish neither spectral Doppler width nor
+the underspread assumptions of those theorems.
+
+The pre-repair ordinary long Each 65% opposite-bit check demonstrates why that
+distinction matters: transmitted zero is decoded as one at +10 dB-Hz, and a
+matched +3 dB increase strengthens the wrong separation. The noise-presence
+likelihood remains valid under its declared null; that alone cannot certify
+the bit when the wanted channel/timing is represented poorly. Source review
+finds symmetric bit priors, but the timing shortlist assumes a fixed frequency
+across sampled blocks whereas the final likelihood also permits moving
+frequency. Test a bounded alternative nomination on the same public support
+before adding channel freedom. The earlier independent
+[research review](../../_ref/resilience-triple_Robust_Modem/Astra-6/report.md#two-useful-deductions-about-model-mismatch)
+warns that freer gains can absorb the differences between bit waveforms;
+earlier short-block/delay experiments did increase presence without sufficient
+bit distinction. These findings favor isolating acquisition from likelihood
+mismatch, not interpreting high presence as successful communication.
+
+The subsequent private timing witness uses the existing fine likelihood and
+full public prior, not the exact distorted waveform: the correct bit has
+148.13 nats of separation at an already supported public timing cell that
+nomination omitted. Changing two-ray proposal geometry alone does not select
+it. A full-current-aperture direct statistic does, and the ordinary production
+replay then receives the previously wrong zero on identical samples, with no
+change to its final channel model or threshold. This is evidence for an
+avoidable acquisition loss, rather than an unknown-channel capacity limit.
+Keeping a fixed proposal-work cap while clock uncertainty and bit duration
+grow can prevent additional received energy from improving acquisition.
+The new rank accumulates current-bit evidence; its growing computational cost
+must still be measured and optimized rather than described as an unavoidable
+physical limit. [Matched investigation and applicability](../../docs/validation.md#ordinary-duration-and-weak-channel-follow-through).
+
+[Weber et al. (2026), §VI-F](https://arxiv.org/html/2609.05811v1) corroborate
+modeled HF maximum usable frequencies with opportunistic FT8 observations and
+ionosondes. The highest observed working band is a lower bound on the true
+maximum usable frequency; silence does not identify a failed transmission or
+its cause. Thus neither successful spots nor an accurate ray calculation alone
+qualifies alarm outage duration. This is complementary propagation evidence,
+not a reason to leave a reproduced receiver failure unexplained.
+
 ## Evidence-to-model map
 
 | Family | Smallest defensible first representation | Evidence and provenance | Counterevidence and boundary | First independent check |
@@ -237,7 +316,13 @@ lesson: check physically meaningful observables (power, phase, delay-Doppler,
 cross-frequency/time covariance and tails) and modem decisions. Do not use one
 aggregate distribution score as fidelity proof.
 
-### Real PCM covariance and scheduled repeated-bit evidence
+### Real PCM covariance and historical scheduled repeated-bit evidence
+
+The dedicated repeated-bit feature is retired at the user's request. The
+per-slot covariance argument below remains relevant to ordinary reception;
+the scheduled product and group-look argument is retained only to interpret
+the historical recovery experiment. Current reception does not multiply
+evidence across arbitrary retries or ordinary repeated-zero drafts.
 
 The live receiver's `AudioInput` maps real PCM `r` to a rotated
 `(r + i H r)/sqrt(2)`. In exact arithmetic the finite Fejér-tapered Hilbert
@@ -334,7 +419,7 @@ the simpler conditional argument. These are noise-model conditions, not an
 interference rejection rate, sender authentication or field availability
 estimate. [Sample support](../../src/robust_audio_frontend.cpp#L74),
 [calendar observation support](../../src/triad_stream.cpp#L298),
-[scheduled looks](../../src/triad_stream_receiver.cpp#L563),
+[historical scheduled-look result](../../docs/validation.md#production-repeat-receiver-on-the-frozen-weak-two-hop-bit-one-history),
 [Vovk and Wang (2024)](https://sas.uwaterloo.ca/~wang/papers/2024Vovk-Wang-EJS.pdf).
 
 ## Repeated single-bit reception and channel timescales

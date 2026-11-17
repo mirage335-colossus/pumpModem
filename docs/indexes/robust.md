@@ -49,33 +49,13 @@ Repeating the same raw bit with the same key advances the public ordinal and
 therefore changes the keyed waveform. Keep the receiver's agreed calendar in
 step; a retry is not an instruction to restart either peer at ordinal zero.
 
-**Transmit repeated bit** in the raw-bit editor sends the single entered bit
-at slot offsets 0, 3, 6, 9 and 12 of one 15-slot group. Use native CPU
-simulation with Helper Off. The separate result reports the detected logical
-bit and number of attempts at the first qualified look, after four or five
-attempts. All windows and intervening input through that look must be complete
-and valid. A four-attempt result can precede a later erased or unobserved fifth
-attempt. Physical DATA and quiet decisions, ordinary message completion and
-regular transmit operate independently. The next simulation starts
-15 keyed ordinals later. For live operation, explicitly enable the dedicated
-repeat schedule in Robust setup and configure the shared calendar, live noise
-density, native CPU and Helper Off. The receiver listens independently of any
-local transmit request and skips an incomplete group when joining late. Live
-transmission starts at the next available group boundary; its scheduled UTC
-time is reported. Half-duplex receive may pause during local transmission.
-The existing dated-playback provider capability gate remains required, including
-for receive-only sessions.
-
-This profile presumes the same bit in all five agreed positions and calibrated
-independent complex white noise for simulation; live use assumes independent
-Gaussian logical PCM with the declared conservative noise variance and an
-identity-rate capture witness. Overlapping expanded filter supports invalidate
-the group. These are assumptions about the actual input, not verified field
-noise or a guarantee for arbitrary devices. An unrelated mixed
-word can pass when the contract is violated. Use a dedicated schedule and key
-purpose for a repetition experiment. Its success on synthetic captures does
-not qualify natural outage duration or the live audio noise model. See the
-[weak physical and native repeat evidence](../validation.md#native-soft-evidence-and-coherent-line-probe-for-configured-repetition).
+The earlier dedicated repeated-bit GUI option has been retired. Ordinary raw
+bits still advance the shared keyed ordinal and calendar; a draft such as
+`0000` is received as four separate DATA slots. Each bit must pass the ordinary
+slot decision. Arbitrary transmissions are not combined and repeated content
+does not identify a logical alarm. Lowering Target SNR at both peers selects a
+longer shared waveform interval, which also changes channel evolution within
+each interval. See the historical [repeat experiment and retirement note](../validation.md#dedicated-repeated-bit-feature-retirement--17-november-2026).
 
 Use duration planning to estimate airtime and set reasonable expectations; it
 is a model, not a sensitivity, reliability or real-time guarantee. Public
@@ -169,8 +149,9 @@ calendar age grows. Its
 fixed one-eighth tracker share charges the full public lag/epoch domain,
 including unselected points; the old family retains seven-eighths. The expensive
 nominee count is bounded, but observation and FFT support still reflect clock
-uncertainty. See the [repeated-bit findings](../validation.md#repeated-single-bit-channel-diagnosis--16-november-2026)
-for scope, controls and unresolved modes.
+uncertainty. These timing improvements remain in ordinary slot scoring. The
+original [repeated-transmission diagnosis](../validation.md#repeated-single-bit-channel-diagnosis--16-november-2026)
+records the trigger and still-open channel modes.
 Longer coherent-gain and drift models keep their fallback policy. This accepts
 bounded added work for natural changing-channel resilience while preserving the
 public search and full worker budget.
@@ -204,8 +185,9 @@ seed-9602 noise control remains 5/5 QUIET. This supports only those sampled
 standard-Gaussian histories. At the prior checkpoint, scoped positive-delay
 Helper checks passed, as did GUI (28/28), appraisal (5/5) and application
 integration; these were prior-checkpoint results. Final-source triad (40/40),
-GUI (28/28), appraisal (5/5) and the seed-9202 candidate-only replay now pass;
-details are in the [final-source record](../validation.md#final-source-repeated-long-alarm-check--16-november-2026).
+GUI (28/28), appraisal (5/5) and the seed-9202 candidate-only ordinary
+repeated-transmission replay passed at that checkpoint. Details are in the
+[final-source record](../validation.md#final-source-repeated-long-alarm-check--16-november-2026).
 These do not qualify broader channel sensitivity. Arbitrary clock
 ages, all delay values, plasma histories and weak Helper sensitivity remain
 unqualified. See the
@@ -218,15 +200,16 @@ clock proposer returns DATA on two matched long-bit captures at 0 and −100 ppm
 A 278.4-second-bit preparation covers its 156 columns under the 3-GiB lease but
 does not score IQ. The Helper fixed-only replay preserves selected DATA/QUIET
 results with slightly higher elapsed time. Evaluator-known clock remains
-diagnostic. The frozen-source functional groups and candidate-only repeated-bit
-replay pass; fixed-only consumer details are in the
+diagnostic. The frozen-source functional groups and candidate-only repeated
+transmissions use ordinary per-slot decisions; fixed-only timing details are in the
 [follow-on record](../validation.md#late-clock-and-interior-delay-probes--16-november-2026).
 Complete capacity remains unqualified.
 The prior delay fixture omitted its 0.25 s public preroll, so its +12/+20 pair
 establishes no in-bound delay floor. The frozen source passes five corrected
 15.75/5.25/10.5 ms bit/null cases, one combined old-age/clock/delay case, and a
 selected common-frequency motion replay. Full triad 40/40, GUI 28/28, appraisal
-5/5 and the candidate-only repeated-bit replay pass. These do not qualify
+5/5 and the candidate-only separate-transmission replay passed at that
+historical checkpoint. These do not qualify
 complete text reception or capacity. The Helper fallback still decodes selected
 cases with added work on a stale frequency bound. These do not provide broad delay,
 clock-age or availability guarantee; see the [follow-on record](../validation.md#late-clock-and-interior-delay-probes--16-november-2026).

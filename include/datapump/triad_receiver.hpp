@@ -22,6 +22,7 @@ inline constexpr std::array<std::int64_t, 13> receiver_epoch_offsets{
     -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6};
 inline constexpr std::size_t receiver_coherence_count = 3;
 inline constexpr std::size_t receiver_independent_gain_power_count = 4;
+inline constexpr std::size_t receiver_signed_lag_gain_max_candidates = 4;
 
 // Reference conditional bound for unbound slot scoring and duration planning.
 inline constexpr std::uint32_t receiver_reference_opportunities_per_day = 216'001;
@@ -116,10 +117,6 @@ struct ReceiverSlotScore {
     bool affine_stationary_fading_gain = false;
     // Prior-corrected evidence actually used for operational bit selection.
     std::array<double, 2> operational_bit_evidence{};
-    // Only fixed-repeat attempts publish a separate factor. The ordinary
-    // decision and completion still use the single-slot score above.
-    std::optional<std::array<double, 2>> repeat_bit_evidence;
-    double repeat_extra_line_seconds = 0;
     double operational_bit_log_separation = 0, operational_minimum_bit_log_separation = 0;
     WrongKeyAdmission wrong_key_admission = WrongKeyAdmission::current;
     double wrong_key_required_log_separation = 0;
@@ -157,10 +154,15 @@ struct ReceiverSlotScore {
     std::array<double, 2> signed_lag_gain_bit_evidence{};
     std::string signed_lag_gain_proposal_status;
     std::size_t signed_lag_gain_proposal_maps = 0, signed_lag_gain_proposal_fft_rows = 0;
+    std::size_t signed_lag_gain_proposal_fixed_maps = 0;
+    std::array<std::int64_t, receiver_signed_lag_gain_max_candidates> signed_lag_gain_proposal_lags{};
+    std::array<std::array<double, 2>, receiver_signed_lag_gain_max_candidates> signed_lag_gain_map_bit_evidence{};
     std::size_t signed_lag_gain_proposal_frequency_points = 0, signed_lag_gain_proposal_projected_rows = 0;
     std::size_t signed_lag_gain_proposal_available_blocks = 0, signed_lag_gain_proposal_sampled_blocks = 0;
     std::size_t signed_lag_gain_proposal_scored_blocks = 0, signed_lag_gain_proposal_workspace_bytes = 0;
+    std::size_t signed_lag_gain_proposal_direct_scored_blocks = 0;
     std::uint64_t signed_lag_gain_proposal_fft_stages = 0, signed_lag_gain_proposal_score_rows = 0;
+    std::uint64_t signed_lag_gain_proposal_fft_stage_bound = 0, signed_lag_gain_proposal_score_row_bound = 0;
     double signed_lag_gain_proposal_seconds = 0;
     std::array<double, 2> nominal_independent_gain_bit_evidence{};
     std::array<std::array<double, 2>, receiver_independent_gain_power_count> nominal_independent_gain_power_bit_evidence{};
