@@ -195,6 +195,49 @@ well as separate severe statistical and moving-plasma cases. Neither profile
 guarantees a fixed transmission time, energy, or reception outcome relative to
 AWGN.
 
+### Noise and frequency assumptions in the 2 mW HF tests
+
+The November 2026 HF comparisons kept the same broad receiver search for
+all three physical channels. Stable controls disabled simulated path motion,
+delay spread and selective modulation while retaining oscillator errors and
+receiver noise. The Gaussian comparison replaced the GUI path evolution with
+the independent 0/7 ms fading taps described above and retained Each 65%
+modulation on the signal. The two hobbyist GPSDO XO presets provided
+illustrative 0.0001 ppm accuracy and 0.5°/√s phase-diffusion parameters.
+The 30 MHz translation and 1,725 Hz upper-sideband tone implied a nominal
+30.001725 MHz carrier coordinate. Fake FCC applied its dwell envelope in
+baseband. [Oscillator conventions](oscillator-models.md#independent-physical-quantities)
+and [editable HF trials](../_tests-RobustModem-HF-simulations-2026-11-18.md).
+
+The assumed −164 dBm/Hz equivalent receiver-input background was realized as
+proper-complex Gaussian white noise. At 2 mW and 180 dB loss, the nominal
+C/N₀ was −12.9897 dB-Hz. The native 6,000 Hz complex stream therefore used
+normalized variance `6000 / 10^(-12.9897/10) ≈ 119432`. A site estimate
+requires the actual RF band, latitude, longitude, month, hour and local noise
+environment. Relating that estimate to the receiver input requires the
+antenna and feeder response, bandwidth and receiver noise. Qualifying
+lightning impulses, local interference or front-end overload additionally
+requires a measured episode or declared amplitude, timing and equipment
+model, with a stated severity percentile or other selection rule.
+These effects remain unmeasured in the HF trials.
+[ITU-R P.372 radio noise](https://www.itu.int/rec/R-REC-P.372-18-202609-I/en)
+and [ITU-R Study Group 3 calculation inputs](https://github.com/ITU-R-Study-Group-3/ITU-R-HF/blob/master/P372/Src/AtmosPlots/README.txt).
+
+The separate `noise-bursts` appraisal fixes its colored and impulse terms
+to the white variance at +32 dB-Hz. Their combined mean power is about 1.25
+times that reference variance. Within that fixture, entering −12.9897 dB-Hz
+for the white term would put their combined mean about 44.02 dB below it
+(`10 log10(1.25) − 12.9897 − 32`). That calculation describes the fixture's
+scaling. Receiver errors still depend on burst peaks and correlation. At the
+original +32 reference the five-slot noise-only trial produced five false
+DATA decisions. On that same capture a diagnostic 128.735× receiver variance
+gave five quiet decisions and recovered the wanted message on the paired
+capture. This calibration applied to that constructed noise process.
+A site-matched impulsive-noise comparison would need wanted
+and silent episodes covering the same physical quiet slots.
+[Noise fixture definition](../_appraisal/highFidelity-triple_Robust_Modem/models.md#noise-and-equipment-controls)
+and [quiet-slot outcomes](validation.md#persistent-channel-and-calendar-age-follow-through--17-november-2026).
+
 ## Interpretation limits
 
 - The fixed two-ray control has equal-power direct and delayed rays; the GUI

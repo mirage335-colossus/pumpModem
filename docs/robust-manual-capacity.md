@@ -325,6 +325,22 @@ labeled coverage assembly must bind all constituent identities and retain every
 original failure. A missing final identity flag remains missing; an external
 posttermination check is a separate receipt.
 
+On the Ryzen 5 PRO 5650U (six cores, 12 logical CPUs, 24 workers), the 2 mW
+severe-HF 36 Hz/10× hopping case took 662.72 s to score one active slot on a
+270 s cadence at Target +4 dB-Hz. It erased the bit. At Target −12.99 dB-Hz
+the 1,797.6 s pattern's 19.2 GiB slot quote exceeded the local 9 GiB allowance.
+Reducing the rate to 3.6 Hz, disabling hopping and spreading, and using Target
+−10 dB-Hz produced 962.4 s patterns on a 990 s cadence. On the stable channel,
+the native receiver decoded the complete three-bit `e` message and both quiet
+slots on two independent five-slot replays. Receiver and audio processing used
+521 and 563 s for 4,964.55 s of input (0.105 and 0.113 s/s). Peak application
+reservations were 8.50 and 9.00 GiB. At the first commit of the prospectively
+selected holdout interval only 11,968,512 of the required 29,787,321 samples
+were ready. The observed replay headroom therefore leaves sustained backlog
+service unresolved. Both individual bits erased at the same settings under the
+severe channel. [Local slot, message and backlog measurements](validation.md#lower-rates-at-the-same-2-mw-link)
+and [editable simulation cases](../_tests-RobustModem-HF-simulations-2026-11-18.md).
+
 The old all-eight one-pool estimates at H=12, W=24 and 9072 MiB are historical.
 Nominal passes covered rows 2–8; conservative passes rows 3 and 5. Row 4's
 conservative point was 4.11055 s/s. Active-fine, noise, terminal and maximum-state

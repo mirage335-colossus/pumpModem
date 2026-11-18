@@ -12,7 +12,9 @@ Earlier Ryzen CPU and RTX 4090 CUDA results retain their original source and
 hardware scope. No complete receiver-capacity or Tensor Core utilization claim
 follows.
 
-Updated 17 November 2026. The prior native history, matrix/preparation and
+Updated 18 November 2026. The [low-power HF study](#bounded-2-mw-hf-fhss-investigation--18-november-2026)
+covers the severe-channel 2 mW misses, the conditional 100 mW success and
+the two complete stable-path alarm replays. The prior native history, matrix/preparation and
 wide-search follow-through remains complete with its scoped checks below,
 including the fine-tail repair. Current overlap follow-up has focused functional
 and paired service evidence below; complete-receiver capacity and refreshed CPU
@@ -45,17 +47,20 @@ already overlap, so Helper overlap is inapplicable to that profile.
 
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 
-Open the [editable HF simulation list](../_tests-RobustModem-HF-simulations-2026-11-18.md)
-in the [Robust test list editor](../tools-endUser/robust-test-list-editor.html)
-to inspect the settings, bit durations and outcomes together.
+The [HF operating results](indexes/robust.md#low-power-hf-alarm-results)
+summarize the power, airtime and CPU tradeoffs. Use the
+[editable simulation list](../_tests-RobustModem-HF-simulations-2026-11-18.md)
+for individual settings and outcomes, or the [native replay](#reproducing-the-stable-alarm-and-severe-bit-tests)
+to reproduce a measured case.
 
-The current investigation uses the row-6 native receiver with the configured
+The investigation used the row-6 native receiver with the configured
 public calendar and keyed ordinal, GUI HF Worst and Each 65% selective
 modulation at full 3× margin. At 2 mW transmit power, 180 dB path loss and the
 test's assumed −164 dBm/Hz noise density, actual C/N0 is −12.9897 dB-Hz.
 Source manifest `f0160701…` identifies the initial GUI receiver build.
-The results below cover individual bit decisions and one separately measured
-stable complete message. Geographic outage probability and acquisition with
+The results cover single-bit decisions, two independently seeded complete
+replays of the stable `e` alarm, and a paired silent five-slot control.
+Geographic outage probability and acquisition with
 an unknown waveform calendar remain unmeasured. The receiver noise in these
 runs is white Gaussian at −164 dBm/Hz. Each 65% modulates the signal.
 Lightning impulses and local interference were outside these realizations.
@@ -429,8 +434,8 @@ s to 115.660 s, including 143,365,638 device inverse FFTs. Input hash,
 decision, public grid, and candidate count matched in each pair. The operational
 bit evidence at 60 Hz / 1× matched exactly. These speedups compare full scored
 slots of the same receiver on the same host. The faster negative decisions still
-count as misses. Retain the paired receipts while extending the lower-target
-search and qualifying automatic device routing.
+count as misses. The paired receipts document the backend comparison. The
+integrated automatic route and its separate timing follow below.
 [Short baseline](../local-evidence/lowrate-2mw-runpod/72hz5x-target-p4-baseline-pod2.json),
 [short device trial](../local-evidence/lowrate-2mw-runpod/72hz5x-target-p4-segmented-pod2.json)
 and [long device trial](../local-evidence/lowrate-2mw-runpod/60hz1x-target-m12p9897-segmented.json).
@@ -603,8 +608,7 @@ The complete trial took 52.9 minutes on a full Blackwell Server Edition with
 13 effective logical CPUs and 26 workers. Simulation took 263.47 s and scoring
 2,911.73 s. The native host slot allowance was 119.69 GiB. The device completed
 1,092,999,648 segmented inverse FFTs; the ordinary affine FFT length increased
-to 16,777,216. The shrinking increments in the bit gap across these three
-trials give no measured passing duration.
+to 16,777,216. None of those three durations decoded seed 940600.
 [100 mW −21 decision](../local-evidence/lowrate-2mw-runpod/100mw-36hz10x-target-m21-admission-seed940600-bit0.json).
 
 On a fresh realization at the **same 100 mW, Target −21 and 12,069.6 s per
@@ -711,6 +715,8 @@ two 2 mW patterns had produced weak evidence for both bits. The separate
 [2 mW −18 decision](../local-evidence/hf-2mw-gpu-20261118/canonical/autolong36m18.json)
 and [2 mW −20 plan](../local-evidence/hf-2mw-gpu-20261118/canonical/pauto36m20.json).
 
+### Channel-history diagnostics at 2 mW
+
 One native diagnostic replayed the 2 mW −18 capture to distinguish timing
 selection from weak bit discrimination. It reproduced the full noisy input
 hash and both scores of an originally selected arrival bin (1871) to within
@@ -770,10 +776,9 @@ GUI priors. Log evidence for DATA was −9.060 against the 13.102 threshold,
 and bit separation was 0.186 against 5.293. This independent propagation
 model reproduced the GUI trial's negative decision on the original link.
 The CPU-only EPYC 4565P (16 cores, 32 logical CPUs, W=64) scored the full
-slot in 927.78 s, with 32.73 s for simulation. The quoted $1.12/h implies
-about $0.30 of running time for this trial, excluding deployment, build and
-other pod time. The CPU-only probe build required including the declaration
-of its GPU availability dispatcher even when both optional backends were off.
+slot in 927.78 s, with 32.73 s for simulation. The CPU-only probe build
+required the declaration of its GPU availability dispatcher even when both
+optional backends were off.
 [Gaussian long receiver receipt](../local-evidence/gaussian-2mw-runpod-cpu/results/original-admission.json).
 
 With the 3.6 Hz / 1× nonhopping setup, the 962.4 s bit that succeeded under
@@ -840,19 +845,11 @@ At the local 9 GiB limit, the Ryzen completed a severe 2 mW slot with Target
 9,397,081,877 bytes (8.75 GiB). The next longer tile selected a 2,406 s bit
 whose slot quote already exceeded 9 GiB. [Local memory-bound trial](../local-evidence/lowrate-2mw-native/local_limit_target_m14.json).
 
-The initial two full RTX PRO 6000 Blackwell Server Edition pods and two CPU-only pods
-used a combined 7.2722 instance-hours, including a restart of one GPU pod.
-Their estimated total cost was $17.50 at the recorded running and ephemeral
-disk rates, versus a $17.49 observed account balance decrease. Peak combined
-rate was about $7.99/h. At that checkpoint all four pods were deleted, there were
-zero campaign network volumes and the displayed running rate was $0.00/h.
-Retain the compact cloud decision receipts and the paired arithmetic and
-timing checks while they support these sensitivity and performance findings.
-The follow-through used one RTX PRO 4500 Blackwell for stable controls, two
-full RTX PRO 6000 Blackwells for the long GUI and Gaussian comparisons, and
-one CPU-only host for the fixed-airtime power sweep. The source bundles were
-about 2 MB. All follow-through results were exported and the instances
-released. No persistent volume was required.
+The CPU-only hosts supported independent power trials. An RTX PRO 4500
+Blackwell handled stable controls, and full RTX PRO 6000 Blackwell devices
+ran the long, full-search GUI and Gaussian comparisons. About 2 MB of
+source was sufficient to build the native probes on the test hosts.
+[Compute selection, memory admission and measured throughput](triad-performance.md#choosing-compute-for-hf-sensitivity-trials).
 
 ### Standard FT8 single-frame comparison
 
@@ -871,7 +868,7 @@ those powers gave nominal −46.97 and −29.98 dB in 2,500 Hz. The FT8 authors
 measured the 50% no-AP threshold at −20.8 dB in AWGN and −8.6 dB at 10 Hz
 / 3 ms. Robust's demonstrated stable bits used substantially greater airtime
 than one FT8 transmission. The following repeat comparison uses the same
-application alarm, transmit-energy ceiling and delivery window.
+application alarm, transmit-energy ceiling and input cutoff.
 The compact reference controls remain while supporting this comparison.
 [Native comparison and decoder receipts](../local-evidence/ft8-reference-20261118/reference.md)
 and [FT4/FT8 authors' Table 6](https://wsjt.sourceforge.io/FT4_FT8_QEX.pdf).
@@ -883,14 +880,20 @@ used 5.782267477 J. The comparison sent the same byte as standard FT8 free
 text `HEX 65`. One-way transmission every 15 s fit 228 complete FT8 frames
 inside that energy ceiling, using 5.76384 J (99.68%). A 229th frame would
 exceed the ceiling. Both receivers had 4,964.5535 s of signal observation
-from first possible support. This is an input cutoff; the offline tests
-did not measure live commit latency. WSJT-X decoded zero messages in the 228 occupied slots
+from first possible support. Both receivers processed the samples offline.
+Live commit latency was unmeasured. WSJT-X decoded zero messages in the 228 occupied slots
 and in the following 102 complete listening slots. The remaining 14.5535 s
 fell short of a full decoder slot.
 
 The stable propagation, white noise density and oscillator assumptions were
-matched. Each modem used its native sample rate and a continuous channel
-realization. The strong FT8 control recovered the exact alarm. The full
+matched. Seed 940600 generated the paired FT8 signal-plus-noise and noise-only
+streams continuously at 12 kHz. Robust used its native 6 kHz sample rate.
+The measured FT8 SNR was −46.9686 dB in 2,500 Hz against −46.9691 dB
+from the link budget, with no clipping. Each chronologically labelled 15 s
+audio file went to a fresh WSJT-X 2.7.0 `jt9` process with the flags
+`-8 -p 15 -d 3 -w 0 -m 1 -Q 1 -c b -x b -X 0`. The decoder had blank
+calls, QSO state 1 and no usable prior-message hints or previous-frame history.
+The strong FT8 control recovered the exact alarm. The full
 matched noise-only episodes gave zero messages from either receiver.
 This establishes a stable-path advantage for the tested alarm and ordinary
 independent FT8 decoding under the common budgets. It does not measure a
@@ -898,6 +901,68 @@ success probability, a severe-path repeat result or a joint receiver that
 combines complex observations across FT8 transmissions.
 [Comparison and controls](../local-evidence/ft8-reference-20261118/repeated-alarm.md)
 and [per-slot decoder evidence](../local-evidence/ft8-reference-20261118/repeated-alarm.json).
+
+### Reproducing the stable alarm and severe bit tests
+
+The casebook at Git revision `ebbd80f6` contains 58 editor blocks. An
+independent census matched all 50 distinct configurations with completed
+receiver decisions to the power, Target, channel, waveform, bit length and
+cadence in their native records. Eight additional blocks describe planning,
+incomplete, diagnostic or matched-reference cases. Individual control bits,
+seeds and replays at the same settings share a block. The detailed linked
+JSON files are local evidence. The tracked casebook retains the measurements
+and their interpretation without those files.
+
+Firefox ESR 153.7.0 opened all 18 fields per block and all 187 commentary
+lines. Downloading the unchanged list reproduced its original bytes
+(SHA-256 `62a550c4b8ded2629853a2ecda36f162fc9475f6735f259524e933f830a5b766`).
+A custom Target edit changed exactly one field and survived a second
+open/download cycle. The visual editor preserves historical commentary
+when configuration fields change. The separate manual-capacity runner reads
+the original 16-field workload format. [Visual editor](../tools-endUser/robust-test-list-editor.html)
+and [manual capacity workflow](robust-manual-capacity.md).
+
+The first stable 2 mW complete-message replay used the command below from
+the repository root. Its executable is the [native receiver probe](../tools/triad-receiver-probe.cpp).
+The compiled defaults for these captures were 6,000 samples/s, a 1,725 Hz
+DATA IF, −164 dBm/Hz assumed input noise, calendar epoch 1793850000 and
+initial waveform ordinal 7000037. CPU worker allocation was automatic
+(12 effective logical CPUs and 24 workers here). This replay used manifest
+`82bdd9f6…`. For the independent holdout, seed 950101 and manifest
+`a9cdf6d0…` used the same receiver and settings.
+
+```sh
+build/dev/triad_receiver_probe message --case hf --encrypt on \
+  --helper off --helper-power-w 0 --data-power-w 0.002 --path-loss-db 180 \
+  --timing-policy broad --base-oscillator gpsdo-xo --shift-oscillator gpsdo-xo \
+  --spread-preset hf-worst --selective-perturbation each-65 --margin 3 \
+  --fhss off --burst-wait-tiles 0 --rate 3.6 --rf-hz 30000000 \
+  --added-symbols 1 --added-interleave off --target-cn0 -10 --channel-severity 0 \
+  --slots 5 --max-samples 32000000 --max-spool-bytes 805306368 \
+  --memory-limit-bytes 9663676416 --deadline-ms 1200000 --seed 940600
+```
+
+For a cheap geometry check, use the probe’s `plan` command. For single-bit
+sensitivity use `admission` and read the Current-policy decision. A stable
+control uses `--channel-severity 0` with the severe receiver fields intact.
+The severe GUI comparison omits the severity override. The Gaussian comparison
+also selects `--channel-model itu-disturbed`. In a fixed-power duration sweep,
+vary `--target-cn0` while holding physical power, noise, bit and seed fixed.
+For the 100 mW matched pair, use `admission` and retain the HF loss,
+oscillators, spread, selective perturbation, timing policy and margin above.
+Set `--data-power-w .1 --noise-dbm-hz -164 --fhss on --rate 36
+--added-symbols 10 --added-interleave on --bit 1 --seed 940601 --stratum active`.
+The severe GUI run erased at `--target-cn0 -20` and decoded at `-21`.
+The −21 Gaussian transfer and its bit-0 holdout at seed 940603 used
+`--channel-model itu-disturbed`. The full Blackwell GPU ran with
+`--backend gpu --require-accelerator on`, 13 effective logical CPUs and
+26 workers. The Gaussian jobs allowed 110,000,000 samples and a 5,400,000 ms
+deadline. Use the host and device workspace quotes for this larger geometry.
+For an independently seeded bit or a noise-only control, record both the
+signal-presence and bit-separation tests. A stopped run supplies a timing
+or resource limit and leaves the bit decision open.
+[Measured operating points](indexes/robust.md#low-power-hf-alarm-results)
+and [field-by-field configurations](../_tests-RobustModem-HF-simulations-2026-11-18.md).
 
 ## Tiny GPSDO midpoint-bound repair — 17 November 2026
 

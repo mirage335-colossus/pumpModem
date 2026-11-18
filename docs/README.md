@@ -15,6 +15,11 @@ to connect a situation or configuration choice to its transmission contract,
 measured benefits, failures and remaining limits. It also indexes conditional
 techniques worth revisiting without restoring retired implementations.
 
+For the 2 mW and 100 mW HF alarm study, start with the
+[measured operating points](indexes/robust.md#low-power-hf-alarm-results).
+The [editable simulation list](../_tests-RobustModem-HF-simulations-2026-11-18.md)
+gives the settings, bit durations and decisions for each case.
+
 **Automatic CPU/GPU choices must prioritize challenging-case receiver capacity
 and prevent input backlog.** Start with the
 [automatic-mode contract](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling)

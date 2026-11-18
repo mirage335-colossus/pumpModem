@@ -166,6 +166,13 @@ show GPU- and geometry-dependent mixed-service tradeoffs, not a universal
 whole-receiver speedup. See [current qualification and limits](validation.md#current-cuda-precision-and-tensor-dispatch).
 Neither matrix type is an INT8 FFT.
 
+For eligible broad changing-channel searches on SM120, Automatic also batches
+the segmented inverse transforms with FP32 cuFFT and keeps lag ranking and
+frequency tracking on the device. Check the segmented session, inverse-FFT
+and resource-fallback counters in the native receipt. The transform sizes and
+workspace conditions for this route are documented in the
+[precision guide](gpu-precision-controls.md#current-implementation).
+
 The current automatic GUI routes fine work to native CPU only for at most 1024
 public block rows, at most 40 projected modes, one tap, AVX2, and at least 26
 admitted workers. Sampled 750- and 1023-row fine clears were about 4–6× faster
@@ -582,6 +589,37 @@ The explicit sample cap must admit the complete five-window message (below
 Unsupported or incomplete native work remains explicit in the report.
 These measurements do not establish communication sensitivity, whole-case
 real-time capacity or physical-device reception.
+
+## Choosing compute for HF sensitivity trials
+
+The 18 November severe-HF trials illustrate how to investigate an apparently idle
+GPU. On an early build, the 1,797.6 s hopping bit spent 678 of 1,022 receiver
+seconds in CPU varying-channel coarse search despite other stages running on CUDA.
+After eligible segmented search moved to the full RTX PRO 6000 Blackwell Server
+Edition, matched complete-slot tests improved 2.38× and 3.74×. The separately
+tested FP16 Tensor Core inverse, including its packing and reordering, took
+1.87–4.01 times the FP32 cuFFT time on the tested full and tail batches.
+Use stage timings and executed counters to choose the kernel for the actual
+geometry. [Matched receiver measurements](validation.md#blackwell-receiver-trials-at-2-mw)
+and [Tensor Core operator measurements](triad-gpu-optimization.md#hardware-and-library-dispatch).
+
+Independent seeds, power points and channel models can also run on CPU-only
+hosts. Time a representative capture and slot before distributing the remaining
+trials. One 32-vCPU EPYC 9575F allocation reached its 480 s limit generating
+a capture. The OS reported about 599 MHz on its serving vCPU in four samples.
+On a 32-vCPU EPYC 4565P the identical binary generated that capture in 18.63 s
+and scored it in 11.08 s. Treat simultaneous independent trials as batch
+throughput. Assess a continuous receiver with one ordered stream on its target
+hardware. [CPU-only comparison](validation.md#cpu-only-cloud-trials-at-2-mw).
+
+Preflight host memory as well as device memory. The 17,205.6 s hopping case
+quoted 204.57 GB of host workspace at H=27, W=54 against a 188 GB cgroup
+limit. Setting CPU affinity to the 13 logical CPUs used by the paired trial
+gave W=26 automatically. The 144.37 GB quote fit with all public hypotheses.
+This was a scoped sensitivity measurement. Preserve the default full allocation
+for capacity measurements. The campaign uploaded roughly 2 MB of source per
+bundle and built against the remote runtime, with no persistent volume needed.
+[Allocation and results](validation.md#bounded-2-mw-hf-fhss-investigation--18-november-2026).
 
 ## RunPod GPU-assisted manual capacity forecast
 

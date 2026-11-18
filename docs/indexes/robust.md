@@ -92,27 +92,48 @@ Transmit noise action creates an outgoing noise waveform; it does not measure
 or configure the receiver noise floor. See [GUI meanings](../gui-contract.md#modems-and-current-availability)
 and [duration-planning limits](../triad-duration-planning.md).
 
-At 2 mW, 180 dB loss and −164 dBm/Hz noise density, these were the shortest
-tested stable settings to receive both bit values independently. A separate
-noise-only slot correctly scored quiet for each setting. The matched severe
-GUI realizations erased both transmitted bits for both waveforms.
+## Low-power HF alarm results
 
-| Waveform | Tested Target | Stable bit duration | Modeled bit-0 energy | Longest completed severe miss |
-| --- | ---: | ---: | ---: | ---: |
-| 36 Hz, 10× interleaved DSSS, Fake FCC | −12.99 dB-Hz | 1,797.6 s | 2.571 J | 5,906.4 s |
-| 3.6 Hz, DSSS and hopping off | −10 dB-Hz | 962.4 s | 1.928 J | 13,473.6 s |
+**At 2 mW the receiver recovered a complete alarm on the stable path. A
+working severe-channel Target and duration remain unknown.** Both waveforms
+below decoded independently simulated zeros and ones at the listed stable
+Target and correctly scored a fresh silent slot. Both erased the same bits
+under the severe GUI model. These results assume no Helper, a known public
+calendar and keyed sequence, 180 dB loss and −164 dBm/Hz white noise. The
+nominal received C/N₀ was −12.99 dB-Hz at 2 mW and +4 dB-Hz at 100 mW.
+[Channel assumptions and site-specific noise limits](../channel-models.md#noise-and-frequency-assumptions-in-the-2-mw-hf-tests).
 
-For the original 256.8 s pattern, the stable bit-0 transition lay between
-10 and 15.85 mW. The severe transition for the same bit lay between 501 mW
-and 1 W. Each upper endpoint also received an independently simulated one.
-The two passing powers differ by 18 dB. The 4 W example has a further 6 dB
-above the 1 W passing point, and its Target 32 test received the 256.8 s
-bit. These observations measure physical power margin at fixed airtime.
-At 100 mW the same airtime worked on the stable path. On the severe GUI
-path, one fixed bit 1 missed at Target −20 and 9,501.6 s, then decoded at
-Target −21 and 12,069.6 s. Two independent zeros erased at −21. The original
-zero still erased at 17,205.6 s. These results establish a working duration
-for one realization. [Fixed-airtime power trials and duration results](../validation.md#bounded-2-mw-hf-fhss-investigation--18-november-2026).
+| 2 mW waveform | Shorter stable miss | Shortest stable bit received | Modeled bit-0 energy | Longest completed severe GUI miss |
+| --- | ---: | --- | ---: | ---: |
+| 36 Hz, 10× interleaved DSSS, Fake FCC | 1,540.8 s | 1,797.6 s at Target −12.99 | 2.571 J | 5,906.4 s at Target −18 |
+| 3.6 Hz, DSSS and hopping off | 802 s | 962.4 s at Target −10 | 1.928 J | 13,473.6 s at Target −21.5 |
+
+**At 100 mW**, the original 36 Hz waveform received a stable zero at Target
++4 in 256.8 s. On the severe GUI path, bit 1 at seed 940601 missed at
+Target +4 and at −20 (9,501.6 s), then decoded at −21 (12,069.6 s).
+At −21 the GUI model gave one correct bit in three trials and the separate
+30 Hz/7 ms Gaussian model gave one in two. Under both models, the same bit-1
+seed decoded and the same bit-0 holdout erased. Another GUI zero still erased
+at 17,205.6 s. These paired observations leave alarm reliability unresolved.
+[Individual settings and results](../../_tests-RobustModem-HF-simulations-2026-11-18.md).
+
+**At fixed airtime**, a 256.8 s zero went from a miss to a decode between
+10 and 15.85 mW on the stable path and between 501 mW and 1 W on the severe
+GUI path. Both upper endpoints also received a fresh one. Assuming one local
+transition per path, the extra physical link margin lies between 15 and
+20 dB. The passing endpoints differ by 18 dB. The original 4 W, Target 32
+example decoded with another 6.02 dB of power above the tested 1 W passing
+point. This explains how identical planner durations can yield different
+decisions as signal strength or propagation changes.
+[Power sweep and calibrated receiver decisions](../validation.md#bounded-2-mw-hf-fhss-investigation--18-november-2026).
+
+**For an energy-limited alarm**, the lower rate with spreading and hopping
+both off saved about 25% of modeled transmit energy per stable bit zero.
+On the severe GUI path, the same seeded zero used **188.21 J** to decode
+at 1 W and 256.8 s. At 100 mW and 17,205.6 s it used **1,245.61 J** and
+erased. These are integrals over the emitted signal. Estimating battery
+life also requires transmitter efficiency and operating overhead.
+[Why a longer pattern can still erase](../triad-duration-planning.md#when-a-longer-pattern-still-erases).
 
 At 3.6 Hz without spreading the Ryzen 5 PRO 5650U delivered the complete
 stable `e` message on two independent offline replays, including both quiet
@@ -125,13 +146,15 @@ Too few fine cells fit in each short tracking block at this rate. Raising the ra
 With 400 ms Fake FCC dwells, the protected cell and its pulse must fit between
 hops. With hopping off, reducing the rate to 0.01 Hz lengthened the capture
 and raised the slot workspace to 219.68 GiB. [Local CPU and energy measurements](../validation.md#lower-rates-at-the-same-2-mw-link)
-and [full-slot GPU comparisons](../validation.md#blackwell-receiver-trials-at-2-mw).
+and [CPU and GPU choices for these trials](../triad-performance.md#choosing-compute-for-hf-sensitivity-trials).
 
-In one stable 2 mW alarm comparison, the 3.6 Hz receiver delivered the byte
-`e` within the five-slot observation window. Standard FT8 repeated the same
-alarm 228 times using 99.68% of the Robust transmit energy and yielded no
-decoded message by the same deadline. Both full-duration silent controls
-yielded no message. [Matched alarm comparison and limits](../validation.md#stable-alarm-comparison-at-matched-energy-and-deadline).
+In the stable 2 mW comparison, both decoders received 4,964.55 s of input.
+Robust recovered the byte `e` using 5.78227 J. Standard FT8 repeated the
+same alarm 228 times using 5.76384 J and yielded no decoded message over
+330 complete slots. Both full-duration silent controls yielded no message.
+The offline comparison measures recovery from the available samples. Live
+delivery latency and severe-channel superiority remain unmeasured.
+[Matched alarm comparison and limits](../validation.md#stable-alarm-comparison-at-matched-energy-and-deadline).
 
 ## Choose techniques by the situation
 
