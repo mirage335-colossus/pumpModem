@@ -58,6 +58,63 @@ strict FP32, while joint FP8 quantization added misses in a 96-capture sample.
 These are useful counterexamples, not predictions for the current receiver,
 different hardware or different inputs.
 
+## Which arithmetic ran in a remote simulation?
+
+The RunPod build uses the same compiled receiver as the desktop GUI.
+`--backend gpu` asks the [shared GPU selector](../src/triad_gpu_backend.cpp)
+for automatic dispatch. Its choice of CUDA or Vulkan identifies the device.
+The following fields in a completed native probe's
+`identity.backend_receipt` identify the work that device performed.
+
+| Receiver stage | Implementation and evidence to retain |
+| --- | --- |
+| Filtered DATA lag/frequency matrix correlation | [TensorCoarse](../src/triad_tensor_backend.cpp) groups the observations and templates. The [CUDA matrix kernel](../src/triad_tensor_matrix.cu) packs them and checks the cuBLASLt algorithm's numerical implementation flags. FP16 products accumulate into FP32 (HMMA), or INT8 into INT32 (IMMA), before FP64 reconstruction. Inspect `cuda_matrix_lt_hmma_calls`, `cuda_matrix_lt_imma_calls`, `cuda_matrix_unwitnessed_calls` and `matrix_fft_fallback_counts`. Only the first two count calls through a matching Tensor Core algorithm. |
+| Affine frequency search | The guarded CUDA route uses [half cuFFT](../src/triad_tensor_fft.cu) for eligible transforms or the applicable ordinary FFT route. Read `cuda_half_fft_inverse_ffts` and `half_fft_fallback_counts`. A half-FFT count measures half transforms. |
+| Broad changing-channel timing search | `TensorCoarse::plan_segmented` chooses shapes for FP32 cuFFT. The [CUDA scoring kernels](../src/triad_tensor_peaks.cu) track candidate motion and rank lags on device. Check `cuda_segmented_sessions`, `cuda_segmented_inverse_ffts`, `cuda_segmented_score_rows` and `cuda_segmented_native_fallbacks`. |
+| Fine tracking and decisions | The CUDA `TensorFine` class accelerates eligible bulk basis mapping, Gram products and statistics. Check `mapped_values`, `statistics_blocks`, `cuda_direct_gram_values`, `cuda_bmm_gram_values` and `native_fine_sessions`. The native receiver owns chronological state, bit and quiet decisions, codec and completion. For simulator generation time, read the separate `simulator` phase. [Receiver interfaces](robust-current.md#native-interfaces-and-ownership). |
+| Vulkan on integrated Radeon | The [Vulkan backend](../src/triad_vulkan_backend.cpp) runs supported frequency search via VkFFT or direct products. `vulkan_dispatches` and the per-route score-row counters identify actual work. The qualified Vega FP16 direct route uses packed vector arithmetic. VkFFT half storage still computes in FP32. Native CPU retains Helper, lag groups and fine processing. [Vulkan stage scope](gpu-precision-controls.md#vulkan-on-vega-integrated-graphics). |
+
+For example, the 2 mW, 72 Hz/5× severe Blackwell control (manifest
+`4ec7a895…`) recorded 8,075,106 segmented FP32 inverse FFTs and 1,760
+affine half inverse FFTs. It erased the bit in 34.40 s of receiver work.
+The 100 mW, 36 Hz/10× severe GUI run at Target −21, seed 940601 (manifest
+`82bdd9f6…`), decoded bit 1 after 1,092,999,648 segmented inverse FFTs.
+Its affine half route declined the shape. Simulation took 288.22 s and
+receiver scoring took 2,052.09 s. Both receipts had zero HMMA and IMMA
+matrix calls. A utilization graph alone cannot identify any of these paths.
+[2 mW automatic comparison](validation.md#blackwell-receiver-trials-at-2-mw)
+and [100 mW results and holdouts](validation.md#bounded-2-mw-hf-fhss-investigation--18-november-2026).
+
+A separate Blackwell matrix case with 2,711 samples, 213 frequencies, 71
+arrivals and 78 workspaces ran the FP16 HMMA and INT8 IMMA kernel families.
+Tracing the INT8 call identified the loaded kernel, which contained 32 static
+IMMA instructions. That count identifies the implementation. Dynamic issue
+rate and Tensor Core occupancy were unmeasured.
+[Matrix geometry, phase costs and instruction evidence](validation.md#current-cuda-precision-and-tensor-dispatch).
+
+On the provisioned host, run `build/triad-cuda/triad_receiver_probe describe
+--case hf --backend gpu` from the repository root to check the build, model
+and selected device. This command only initializes the backend. To exercise
+production matrix operations, use the [three-pair component command](triad-performance.md#bounded-native-component-comparisons).
+For a simulated bit, use the [HF admission recipe](validation.md#reproducing-the-stable-alarm-and-severe-bit-tests)
+and retain the Current-policy decision, input fingerprint, device receipt,
+workspace limits and phase times together. This command reads the device
+counters from a downloaded receipt.
+
+```sh
+jq '.identity.backend_receipt | {device_name, executed, cuda_segmented_inverse_ffts,
+  cuda_half_fft_inverse_ffts, cuda_matrix_lt_hmma_calls, cuda_matrix_lt_imma_calls,
+  cuda_matrix_unwitnessed_calls, cuda_segmented_native_fallbacks, native_fine_sessions}' result.json
+```
+
+For a new Tensor Core candidate, first verify the executed arithmetic on a
+representative full batch and its tail, including packing and output
+reordering. Then compare matched complete receiver slots on the same host.
+The [measured transform comparison](#hardware-and-library-dispatch) identifies
+packing and rearrangement as the cost to address. Testing a different device
+or a fused transform still needs that comparison. Bit sensitivity and
+single-stream message backlog each require their own measurements.
+
 ## Hardware and library dispatch
 
 Choose paths from queried hardware capabilities, library support, admitted

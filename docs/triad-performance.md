@@ -621,6 +621,149 @@ for capacity measurements. The campaign uploaded roughly 2 MB of source per
 bundle and built against the remote runtime, with no persistent volume needed.
 [Allocation and results](validation.md#bounded-2-mw-hf-fhss-investigation--18-november-2026).
 
+## Run a native simulation on RunPod
+
+One Pod with one GPU runs one complete receiver. A CPU-only Pod can run the
+same simulation with the native CPU backend. Use extra Pods for independent
+seeds, noise controls, channel laws or configurations when parallel completion
+is worth the aggregate cost. The measured receiver has no cross-Pod
+distribution of one public search or ordered message stream. Plan the
+seeds, cutoff and comparison before renting. Account for overlapping Pods by
+elapsed wall time and the sum of their concurrent rates under the applicable
+authorization. Record provider identifiers, prices, account details and
+cleanup receipts privately outside the checkout.
+
+**Select the allocation.** In RunPod's Pods console choose the exact GPU
+with count one, or the CPU type and vCPU count. The API exposes separate
+GPU and CPU catalogues. Request GPU availability with
+`include=AVAILABILITY&product=POD&count=1`. Recheck stock and the quoted
+rate at deployment. The 5090 and 4090 are useful for compatibility tests.
+Both require their own hardware receipts. A 32-vCPU/128 GB CPU allocation
+can serve independent CPU tests, but the 144.37 GB host quote above already
+exceeds even its nominal memory. One GPU's VRAM cannot cover that host
+shortfall. [GPU catalogue](https://docs.runpod.io/api-reference-v2/catalog/list-gpu-types),
+[CPU catalogue](https://docs.runpod.io/api-reference-v2/catalog/list-cpu-types)
+and [Pod creation](https://docs.runpod.io/api-reference-v2/pods/create-a-pod).
+
+**Transfer source.** Use a CUDA **development** image with an NVIDIA driver
+compatible with the toolkit and a CUDA-enabled, C++11-ABI LibTorch on GPU
+Pods. The November Gaussian trials used a full RTX PRO 6000 Blackwell
+Server Edition, SM 12.0, driver 595.112.07, CUDA toolkit 12.8.93, Torch
+2.9.1+cu128, GCC 13.3.0, CMake 3.28.3 and OpenSSL 3.0.13. The CPU runs
+used Ubuntu 24.04 with C/C++ build tools, CMake and OpenSSL development
+headers. Choose an SSH-enabled template, register the public key, then
+read the direct TCP host and mapped port from the Pod's **Connect** panel.
+Use full SSH for file transfer. The basic SSH proxy lacks SCP and SFTP.
+Keep the SSH private key and the provider API key on the local machine.
+[SSH over exposed TCP](https://docs.runpod.io/pods/configuration/use-ssh).
+
+From the project root, set `POD_HOST` to the direct `user@host` and
+`POD_PORT` to the mapped SSH port. Use a fresh local staging directory
+and an unused remote job directory. Run these commands for a newly allocated Pod.
+
+```sh
+set -eu
+stage=$(mktemp -d)
+python3 tools/triad_gpu_bundle.py --output "$stage/source.tar.gz"
+(cd "$stage" && sha256sum source.tar.gz > source.sha256)
+ssh -p "$POD_PORT" "$POD_HOST" 'mkdir /workspace/robust-job'
+scp -P "$POD_PORT" "$stage/source.tar.gz" "$stage/source.sha256" "$POD_HOST:/workspace/robust-job/"
+ssh -p "$POD_PORT" "$POD_HOST"
+```
+
+The [bundler](../tools/triad_gpu_bundle.py) includes CMake, native `src/`
+and `include/`, selected probe tools and tests, and pinned XZ, VkFFT and QR
+sources. This closure builds the receiver and bounded native checks. Use the
+full checkout for the general test suite. On the Pod, verify the archive
+before unpacking it.
+
+```sh
+set -eu
+cd /workspace/robust-job
+sha256sum -c source.sha256
+mkdir source results
+tar -xmzf source.tar.gz -C source
+cd source
+```
+
+**Build the GPU probe.** Read `nvidia-smi -L` and
+`nvidia-smi --query-gpu=name,driver_version,memory.total,compute_cap --format=csv`
+to identify the edition, full device and available architecture. Compare the
+runtime with `nvcc --version` and the Torch CUDA version. On the measured
+PyTorch development image, the installed Python package supplies CMake's
+LibTorch path. Python ends before the compiled receiver runs.
+
+```sh
+export PATH="/usr/local/cuda/bin:$PATH"
+python3 -c 'import torch; assert torch.cuda.is_available() and torch.compiled_with_cxx11_abi(); print(torch.__version__, torch.version.cuda, torch.cuda.get_device_name())'
+torch_prefix=$(python3 -c 'from torch.utils import cmake_prefix_path; print(cmake_prefix_path)')
+TORCH_CUDA_ARCH_LIST=$(python3 -c 'import torch; print(".".join(map(str,torch.cuda.get_device_capability())))')
+export TORCH_CUDA_ARCH_LIST
+native_sm=$(printf '%s' "$TORCH_CUDA_ARCH_LIST" | tr -d .)
+cmake -S . -B build/probe -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_TESTING=OFF -DDATAPUMP_BUILD_GUI=OFF -DDATAPUMP_BUILD_CLI=ON \
+  -DDATAPUMP_PORTABLE=OFF -DDATAPUMP_TRIAD_VULKAN=OFF \
+  -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON \
+  -DCMAKE_PREFIX_PATH="$torch_prefix" -DCMAKE_CUDA_ARCHITECTURES="$native_sm"
+cmake --build build/probe --parallel "$(python3 tools/build_capacity.py)" \
+  --target triad_receiver_probe test_triad_tensor
+build/probe/triad_receiver_probe describe --backend cuda --require-accelerator on > ../results/describe.json
+build/probe/test_triad_tensor --cuda --segmented-only
+if [ "$native_sm" = 120 ]; then build/probe/test_triad_tensor --cuda --segmented-auto-only; fi
+```
+
+**Build the CPU probe.** For a CPU-only allocation use these commands in the
+extracted source directory. This profile needs no CUDA or Torch installation.
+
+```sh
+cmake -S . -B build/probe -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_TESTING=OFF -DDATAPUMP_BUILD_GUI=OFF -DDATAPUMP_BUILD_CLI=ON \
+  -DDATAPUMP_PORTABLE=OFF -DDATAPUMP_TRIAD_TENSOR=OFF -DDATAPUMP_TRIAD_VULKAN=OFF
+cmake --build build/probe --parallel "$(python3 tools/build_capacity.py)" --target triad_receiver_probe
+build/probe/triad_receiver_probe describe --backend cpu > ../results/describe.json
+```
+
+**Run and collect.** Save the executable hash with
+`sha256sum build/probe/triad_receiver_probe > ../results/probe.sha256`
+and keep its `describe` record. In the linked replay, substitute
+`build/probe/triad_receiver_probe` for the local development executable.
+Run `plan` with the intended case options,
+sample and memory budgets, and the same affinity as the measurement. Read
+`configuration.bit_seconds`, `slot_interval_seconds`, `slot_plan`,
+`receiver_slot_workspace_bytes` and the allocation. Check the host cgroup RAM
+and device workspace separately. Run `admission` for a single-bit decision
+or `message` through both physical quiet slots for complete delivery. Use
+`--backend gpu --require-accelerator on` for automatic GPU stage routing, or
+`--backend cpu` for the CPU comparison. Preserve the arguments, result JSON,
+standard error and exit status per trial. Inspect `status`, the Current-policy
+decision and the executed backend counters. A completed plan or an expired
+deadline leaves reception unmeasured.
+[Case settings and replay arguments](validation.md#reproducing-the-stable-alarm-and-severe-bit-tests).
+
+Retrieve `/workspace/robust-job/results` via `scp -P "$POD_PORT" -r
+"$POD_HOST:/workspace/robust-job/results" "$stage/"` from the original local
+shell. Check that the required receipts parse and match the intended build,
+configuration and trial count. On a dropped connection, reconnect to the same
+Pod and check the existing job and saved result before retrying. Terminate
+only the owned Pod after retrieval or cancellation and verify its state in
+the provider inventory. Stopping releases compute but can leave billed
+storage. [RunPod lifecycle](https://docs.runpod.io/pods/manage-pods).
+
+The roughly 2 MB source transfers in this campaign fit the user's short
+upload target. If a dependency or build cache grows to hundreds of MB and
+the same environment will be reused, build it on an authorized network
+volume in the deployment data center. Keep compiler caches or compatible
+dependencies there, keyed by toolkit, LibTorch ABI/version, compiler, target
+SM and build options. Record the source digest of the executable separately.
+An ordinary volume disk persists across stops on its Pod. A network volume
+can outlive Pod termination and continues to incur storage cost. Give a
+retained cache a concrete reuse and cleanup point. Archives deliberately
+use epoch timestamps. Use `tar -xmzf` on an overlay, reconfigure and verify
+the changed objects and probe actually rebuild. Use a fresh source directory
+when a new bundle removes files.
+[Storage types](https://docs.runpod.io/pods/storage/types) and
+[network volume placement and lifetime](https://docs.runpod.io/storage/network-volumes).
+
 ## RunPod GPU-assisted manual capacity forecast
 
 Apply the [GPU selection contract](#gpu-selection-for-accelerated-development)
@@ -641,47 +784,9 @@ CPU calibration/holdout. Automatic `2*H` on a different host is not necessarily
 the same allocation. A cap recorded in bytes cannot be silently rounded to a
 MiB-only command and relabeled as matched.
 
-The source bundle contains a deterministic native build closure, not copied
-Python DSP or a prebuilt exporter/kernel pair:
-
-```sh
-python3 tools/triad_gpu_bundle.py --output /tmp/robust-gpu-source.tar.gz
-```
-
-Bundle entries deliberately have epoch modification times. When updating an
-existing extracted source tree, extract without restoring those timestamps:
-
-```sh
-tar -xmzf /tmp/robust-gpu-source.tar.gz -C /path/to/native-source
-```
-
-Alternatively, use a fresh source/build directory. An ordinary timestamp-preserving
-tar overlay can leave changed sources older than existing Ninja objects, reusing
-stale DSP code even when reconfiguration updates the compiled source manifest.
-After extraction, reconfigure and verify that changed translation units rebuild
-and the probe relinks before accepting measurements. A new manifest alone is
-insufficient evidence. Reuse compatible build profiles and `ccache` to keep this
-fast; do not purge useful caches. Use a fresh source tree when the bundle removes
-files, so an overlay cannot retain obsolete inputs.
-
-Build the probe from that closure with a CUDA-enabled C++11-ABI LibTorch install:
-
-```sh
-cmake -S . -B build/probe \
-  -DBUILD_TESTING=OFF -DDATAPUMP_BUILD_GUI=OFF -DDATAPUMP_BUILD_CLI=ON \
-  -DDATAPUMP_PORTABLE=OFF -DCMAKE_BUILD_TYPE=Release \
-  -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON \
-  -DCMAKE_PREFIX_PATH=/path/to/libtorch
-cmake --build build/probe --target triad_receiver_probe
-```
-
-The CLI configuration remains enabled to satisfy the native install-target
-contract; this command builds only the probe target. Use the full source and
-CI closure for general correctness groups. The allowlisted bundle also includes
-the tensor parity test for a separately declared bounded check. `DATAPUMP_TRIAD_TENSOR=OFF` is the default
-native build; no Torch dependency is introduced into that profile. A requested
-CUDA backend must execute on the selected CUDA device or report unavailable;
-CPU fallback cannot count as GPU evidence.
+Use the [native RunPod deployment procedure](#run-a-native-simulation-on-runpod)
+to prepare the probe. Run the forecasting script from the extracted source
+directory with the matching path to the probe.
 
 The following placeholders are explicit declared limits, not portable defaults:
 
