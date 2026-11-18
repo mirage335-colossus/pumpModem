@@ -202,6 +202,11 @@ struct SegmentedTimingPlan {
     std::size_t frequencies() const { return 2 * radius + 1; }
 };
 
+CoarseSegmentedShape segmented_shape(const Layout& layout, const SegmentedTimingPlan& plan) {
+    return {layout.kernel_rows, layout.lag_count, plan.blocks, plan.fft_rows, plan.radius,
+            plan.phases, plan.bin_stride, plan.tracking_hop};
+}
+
 struct Plan {
     Geometry source_geometry;
     Layout layout;
@@ -1445,8 +1450,8 @@ std::array<Peak, retained_per_bit> arrival_peaks(std::span<const double> values,
 class DifferentialSearch {
 public:
     DifferentialSearch(const Plan& plan, const ReceiverSlotPlan& slot, const ReceiverConfig& config,
-                       PhaseSpan& span, std::stop_token stop, const MidpointPlan* midpoint)
-        : plan_(plan), slot_(slot), config_(config), midpoint_(midpoint), peaks_(plan.workspaces()),
+                       PhaseSpan& span, std::stop_token stop, const MidpointPlan* midpoint, CoarseBulk* bulk)
+        : plan_(plan), slot_(slot), config_(config), midpoint_(midpoint), bulk_(bulk), peaks_(plan.workspaces()),
           midpoint_work_(midpoint ? plan.workspaces() : 0), work_(plan.workspaces()), span_(span) {
         if (config.native_coarse_precision == NativeCoarsePrecision::fp64)
             double_fft_.emplace(plan.layout.nfft, stop);
@@ -1633,14 +1638,51 @@ private:
         const PhaseSpan::Scope timing(span_);
         wait_ready(stop);
         const auto arrivals = plan_.layout.lag_count;
-        const auto frequencies = plan.frequencies();
+        std::vector<double> score(arrivals), smooth_score(plan.tracking_hop ? arrivals : 0);
         auto& work = work_[workspace];
+        bool device_scored = false;
+        if constexpr (std::is_same_v<T, float>) {
+            if (bulk_ && config_.random_doppler_width_hz == 0) {
+                CoarseBulkWork operations;
+                device_scored = bulk_->segmented_scores(segmented_shape(plan_.layout, plan), spectra, columns[0],
+                    segmented_noise_power_, score, smooth_score, operations, stop);
+                require_coarse(device_scored || operations == CoarseBulkWork{},
+                               "declined segmented coarse search reported partial work");
+                combine(work, operations);
+            }
+        }
+        if (!device_scored)
+            score_native_segments(plan, columns, spectra, fft, score, smooth_score, work, stop);
+        std::vector<std::uint32_t> interiors;
+        const auto distance = std::max<std::size_t>(1, extent(std::ceil(plan_.separation * plan_.output_fs)));
+        const auto bit = static_cast<std::uint8_t>(workspace % 2);
+        const auto epoch = workspace / (2 * plan_.clock_count);
+        const auto clock = workspace / 2 % plan_.clock_count;
+        const auto retain = [&](std::span<const double> ranks, auto& peaks) {
+            const auto selected = select_arrivals(ranks, distance, interiors);
+            for (std::size_t i = 0; i < selected.count; ++i) {
+                const auto lag = selected.indices[i];
+                const auto arrival = slot_.arrival_lower_seconds + static_cast<double>(lag) / plan_.output_fs;
+                peaks[i] = {{receiver_epoch_offsets[epoch], arrival, 0., plan_.clocks[clock]}, ranks[lag], bit, 1};
+                note(work.retained_peaks, 1);
+            }
+        };
+        retain(score, retained[workspace]);
+        if (!smooth_score.empty()) retain(smooth_score, smooth_peaks_[workspace]);
+    }
+
+    template<class T, class Fft>
+    void score_native_segments(const SegmentedTimingPlan& plan, const Columns& columns,
+                               const std::vector<std::complex<T>>& spectra, const Fft& fft,
+                               std::span<double> score, std::span<double> smooth_score,
+                               CoarseOperationCounts& work, std::stop_token stop) {
+        const auto arrivals = score.size();
+        const auto frequencies = plan.frequencies();
         std::vector<std::complex<T>> column(plan.fft_rows), product(plan.fft_rows);
         const bool diffuse = config_.random_doppler_width_hz > 0;
-        std::vector<double> score(arrivals), block_score(arrivals);
+        std::vector<double> block_score(arrivals);
         std::vector<double> stationary_scores(diffuse ? mul(frequencies, arrivals) : 0);
         std::vector<T> previous(plan.tracking_hop ? mul(frequencies, arrivals) : 0), next(previous.size());
-        std::vector<double> smooth_score(previous.empty() ? 0 : arrivals);
         const auto noise_power = segmented_noise_power_;
         // A hop pays for choosing an additional local frequency, in
         // units of projected noise energy. The unlinked ranks also retain
@@ -1711,22 +1753,6 @@ private:
             for (std::size_t index = 0; index < frequencies; ++index)
                 for (std::size_t lag = 0; lag < arrivals; ++lag)
                     score[lag] = std::max(score[lag], stationary_scores[index * arrivals + lag]);
-        std::vector<std::uint32_t> interiors;
-        const auto distance = std::max<std::size_t>(1, extent(std::ceil(plan_.separation * plan_.output_fs)));
-        const auto bit = static_cast<std::uint8_t>(workspace % 2);
-        const auto epoch = workspace / (2 * plan_.clock_count);
-        const auto clock = workspace / 2 % plan_.clock_count;
-        const auto retain = [&](std::span<const double> ranks, auto& peaks) {
-            const auto selected = select_arrivals(ranks, distance, interiors);
-            for (std::size_t i = 0; i < selected.count; ++i) {
-                const auto lag = selected.indices[i];
-                const auto arrival = slot_.arrival_lower_seconds + static_cast<double>(lag) / plan_.output_fs;
-                peaks[i] = {{receiver_epoch_offsets[epoch], arrival, 0., plan_.clocks[clock]}, ranks[lag], bit, 1};
-                note(work.retained_peaks, 1);
-            }
-        };
-        retain(score, retained[workspace]);
-        if (hop) retain(smooth_score, smooth_peaks_[workspace]);
     }
 
     template<class T, class Fft>
@@ -1886,6 +1912,7 @@ private:
     const ReceiverSlotPlan& slot_;
     const ReceiverConfig& config_;
     const MidpointPlan* midpoint_;
+    CoarseBulk* bulk_;
     std::optional<native_fft::FloatPlan> float_fft_;
     std::optional<native_fft::DoublePlan> double_fft_;
     std::optional<native_fft::FloatPlan> segmented_float_fft_;
@@ -3102,8 +3129,18 @@ FineCoordinate midpoint_timing_coordinate(const ReceiverSlotPlan& slot, long dou
     const auto [lower, upper] = midpoint_arrival_interval(d, middle_seconds, bound, width);
     require_coarse(lower <= upper, "Robust midpoint lag lies outside the coupled clock/arrival support");
     const auto arrival = std::clamp(.5L * width, lower, upper);
-    const auto rate_offset = (arrival - d) / (middle_seconds + d - arrival);
-    require_coarse(std::isfinite(rate_offset) && std::abs(rate_offset) <= bound * (1 + 1e-12L),
+    const auto denominator = middle_seconds + d - arrival;
+    const auto rate_offset = (arrival - d) / denominator;
+    // The arrival interval is formed by adding a tiny clock displacement to
+    // d.  Mapping its endpoint back subtracts nearly equal values, so a
+    // relative tolerance on the much smaller rate alone loses valid lags.
+    // Bound this cancellation in the input units before converting to rate;
+    // the independent interval check above still rejects unsupported lags.
+    const auto roundoff = 16 * std::numeric_limits<long double>::epsilon() *
+        (std::abs(arrival) + std::abs(d) + std::abs(middle_seconds) * bound) /
+        std::abs(denominator);
+    require_coarse(denominator > 0 && std::isfinite(rate_offset) && std::isfinite(roundoff) &&
+        std::abs(rate_offset) <= bound * (1 + 1e-12L) + roundoff,
         "Robust midpoint timing mapped outside its public clock bound");
     return {epoch, std::clamp(static_cast<double>(slot.arrival_lower_seconds + arrival),
                              slot.arrival_lower_seconds, slot.arrival_upper_seconds), 0,
@@ -3666,6 +3703,12 @@ struct CoarseSession::Impl {
                 fft = std::make_unique<native_fft::DoublePlan>(fft_rows, stop);
             }
             if (bulk && bulk->supports_fir()) {
+                if (geometry.segmented_timing.blocks && config.random_doppler_width_hz == 0 &&
+                    config.native_coarse_precision != NativeCoarsePrecision::fp64) {
+                    const std::array shapes{segmented_shape(layout, geometry.segmented_timing),
+                                            segmented_shape(layout, geometry.faster_timing)};
+                    bulk->plan_segmented(std::span(shapes).first(geometry.faster_timing.blocks ? 2 : 1));
+                }
                 const auto mapped_filters = geometry.source_step > 1 ? MappedProjection::phase_count(geometry) : 0;
                 bulk->begin_fir_projection(geometry.filter_fft, 1 + mapped_filters, layout.crop_rows, stop);
             }
@@ -3772,7 +3815,7 @@ struct CoarseSession::Impl {
         PhaseSpan varying_span(origin);
         std::optional<DifferentialSearch> differential;
         if (geometry.varying_passband) differential.emplace(geometry, slot, config, varying_span, stop,
-            midpoint_geometry ? &*midpoint_geometry : nullptr);
+            midpoint_geometry ? &*midpoint_geometry : nullptr, projection.bulk());
         const auto filter = [&](std::stop_token job_stop) {
             observation = projection.apply(iq.size(), layout.crop_first, layout.crop_rows,
                 [&](std::size_t first, std::span<Complex> values) {

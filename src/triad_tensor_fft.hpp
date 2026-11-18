@@ -12,23 +12,28 @@ namespace datapump::triad::v3::receiver_detail {
 
 int cuda_fft_library_version();
 
-class CudaHalfFftAllocationError : public std::runtime_error {
+class CudaFftAllocationError : public std::runtime_error {
 public:
     using std::runtime_error::runtime_error;
 };
 
-// An owned, single-stream, in-place CUDA_C_16F C2C plan. Make the plan under
+using CudaHalfFftAllocationError = CudaFftAllocationError;
+
+enum class CudaFftPrecision { fp16, fp32 };
+
+// An owned, single-stream, in-place complex FFT plan. Make the plan under
 // the caller's CUDA device guard. The library reports its required work area
 // before the caller admits and allocates device storage.
-class CudaHalfFftPlan {
+template<CudaFftPrecision precision>
+class CudaFftPlan {
 public:
     static constexpr std::size_t alignment = 256;
     // An unsupported device or geometry returns nullptr before execution.
     // CUDA/library failures other than unsupported geometry throw.
-    static std::unique_ptr<CudaHalfFftPlan> make(std::size_t rows, std::size_t batch, cudaStream_t);
-    ~CudaHalfFftPlan();
-    CudaHalfFftPlan(const CudaHalfFftPlan&) = delete;
-    CudaHalfFftPlan& operator=(const CudaHalfFftPlan&) = delete;
+    static std::unique_ptr<CudaFftPlan> make(std::size_t rows, std::size_t batch, cudaStream_t);
+    ~CudaFftPlan();
+    CudaFftPlan(const CudaFftPlan&) = delete;
+    CudaFftPlan& operator=(const CudaFftPlan&) = delete;
 
     std::size_t data_bytes() const noexcept { return data_bytes_; }
     std::size_t workspace_bytes() const noexcept { return workspace_bytes_; }
@@ -39,11 +44,16 @@ public:
     void enqueue(void* data, void* workspace, std::size_t workspace_bytes, bool inverse);
 
 private:
-    CudaHalfFftPlan();
+    CudaFftPlan();
     struct Impl;
     std::unique_ptr<Impl> impl_;
     std::size_t data_bytes_ = 0, workspace_bytes_ = 0;
 };
+
+using CudaHalfFftPlan = CudaFftPlan<CudaFftPrecision::fp16>;
+using CudaSegmentedFftPlan = CudaFftPlan<CudaFftPrecision::fp32>;
+extern template class CudaFftPlan<CudaFftPrecision::fp16>;
+extern template class CudaFftPlan<CudaFftPrecision::fp32>;
 
 struct CudaHalfFftProductShape {
     std::size_t rows, workspaces, frequencies, taps;

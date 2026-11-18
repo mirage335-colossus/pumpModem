@@ -28,6 +28,8 @@ struct TensorReceiverOptions {
     std::size_t workspace_bytes = 0;
     TensorPrecision precision = TensorPrecision::automatic;
     TensorCoarseMath coarse_math = TensorCoarseMath::fft;
+    // Explicit probe qualification of the changing-channel FP32 FFT scorer.
+    bool segmented_timing = false;
 };
 
 // Defined by the optional compiled backend target. A request for CUDA

@@ -1358,6 +1358,27 @@ void midpoint_support_scales_with_declared_capture_geometry() {
     check(r::coarse_midpoint_timing_support(config, slot).status == "clock_axis_collapsed",
           "the exact-clock route must keep the existing timing and workspace");
 }
+
+void midpoint_tiny_clock_bound_preserves_public_lags() {
+    v::ReceiverSlotPlan slot;
+    slot.arrival_lower_seconds = -7;
+    slot.arrival_upper_seconds = 7.07;
+    constexpr double bound_ppm = .000300000000015;
+    constexpr long double middle = 128.53375L;
+    constexpr std::size_t fs = 600;
+    for (std::int64_t lag = 0; lag <= 8442; ++lag) {
+        const auto c = r::midpoint_timing_coordinate(slot, middle, bound_ppm, fs, lag, 0);
+        const long double rate = c.clock_ppm * 1e-6L;
+        const long double reconstructed = (static_cast<long double>(c.arrival_seconds) -
+            slot.arrival_lower_seconds - middle * rate / (1 + rate)) * fs;
+        check(c.arrival_seconds >= slot.arrival_lower_seconds && c.arrival_seconds <= slot.arrival_upper_seconds &&
+              std::abs(c.clock_ppm) <= bound_ppm && std::abs(reconstructed - lag) < 1e-9L,
+              "tiny clock bound must preserve legal lag and public timing bounds");
+    }
+    for (const std::int64_t lag : {-1, 8443})
+        rejects([&] { r::midpoint_timing_coordinate(slot, middle, bound_ppm, fs, lag, 0); },
+                "lag outside the coupled arrival and clock bounds must be rejected");
+}
 } // namespace
 
 // Run test_triad_coarse_native --overlap-failures to check fixed-route
@@ -1377,6 +1398,7 @@ int main(int argc, char** argv) try {
     if (!overlap_failures) {
         midpoint_lag_nominations_preserve_ordinary_search(crypto);
         midpoint_support_scales_with_declared_capture_geometry();
+        midpoint_tiny_clock_bound_preserves_public_lags();
     }
     if (midpoint) return 0;
     tied_arrival_frontier();

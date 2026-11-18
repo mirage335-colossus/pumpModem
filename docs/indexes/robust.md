@@ -92,6 +92,47 @@ Transmit noise action creates an outgoing noise waveform; it does not measure
 or configure the receiver noise floor. See [GUI meanings](../gui-contract.md#modems-and-current-availability)
 and [duration-planning limits](../triad-duration-planning.md).
 
+At 2 mW, 180 dB loss and −164 dBm/Hz noise density, these were the shortest
+tested stable settings to receive both bit values independently. A separate
+noise-only slot correctly scored quiet for each setting. The matched severe
+GUI realizations erased both transmitted bits for both waveforms.
+
+| Waveform | Tested Target | Stable bit duration | Modeled bit-0 energy | Longest completed severe miss |
+| --- | ---: | ---: | ---: | ---: |
+| 36 Hz, 10× interleaved DSSS, Fake FCC | −12.99 dB-Hz | 1,797.6 s | 2.571 J | 5,906.4 s |
+| 3.6 Hz, DSSS and hopping off | −10 dB-Hz | 962.4 s | 1.928 J | 13,473.6 s |
+
+For the original 256.8 s pattern, the stable bit-0 transition lay between
+10 and 15.85 mW. The severe transition for the same bit lay between 501 mW
+and 1 W. Each upper endpoint also received an independently simulated one.
+The two passing powers differ by 18 dB. The 4 W example has a further 6 dB
+above the 1 W passing point, and its Target 32 test received the 256.8 s
+bit. These observations measure physical power margin at fixed airtime.
+At 100 mW the same airtime worked on the stable path. On the severe GUI
+path, one fixed bit 1 missed at Target −20 and 9,501.6 s, then decoded at
+Target −21 and 12,069.6 s. Two independent zeros erased at −21. The original
+zero still erased at 17,205.6 s. These results establish a working duration
+for one realization. [Fixed-airtime power trials and duration results](../validation.md#bounded-2-mw-hf-fhss-investigation--18-november-2026).
+
+At 3.6 Hz without spreading the Ryzen 5 PRO 5650U delivered the complete
+stable `e` message on two independent offline replays, including both quiet
+slots each time. Receiver and audio work took 521–563 s per 4,965 s of input.
+Peak reservation was 8.50–9.00 GiB. The prospective holdout interval did
+not have all its input ready at the start, leaving sustained backlog service
+unqualified.
+Too few fine cells fit in each short tracking block at this rate. Raising the rate to
+60 Hz restored that tracker and still erased the 7,296 s severe test bit.
+With 400 ms Fake FCC dwells, the protected cell and its pulse must fit between
+hops. With hopping off, reducing the rate to 0.01 Hz lengthened the capture
+and raised the slot workspace to 219.68 GiB. [Local CPU and energy measurements](../validation.md#lower-rates-at-the-same-2-mw-link)
+and [full-slot GPU comparisons](../validation.md#blackwell-receiver-trials-at-2-mw).
+
+In one stable 2 mW alarm comparison, the 3.6 Hz receiver delivered the byte
+`e` within the five-slot observation window. Standard FT8 repeated the same
+alarm 228 times using 99.68% of the Robust transmit energy and yielded no
+decoded message by the same deadline. Both full-duration silent controls
+yielded no message. [Matched alarm comparison and limits](../validation.md#stable-alarm-comparison-at-matched-energy-and-deadline).
+
 ## Choose techniques by the situation
 
 | Situation | Supported starting choice | What the evidence says and when to revisit |

@@ -43,6 +43,910 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Bounded 2 mW HF-FHSS investigation — 18 November 2026
+
+Open the [editable HF simulation list](../_tests-RobustModem-HF-simulations-2026-11-18.md)
+in the [Robust test list editor](../tools-endUser/robust-test-list-editor.html)
+to inspect the settings, bit durations and outcomes together.
+
+The current investigation uses the row-6 native receiver with the configured
+public calendar and keyed ordinal, GUI HF Worst and Each 65% selective
+modulation at full 3× margin. At 2 mW transmit power, 180 dB path loss and the
+test's assumed −164 dBm/Hz noise density, actual C/N0 is −12.9897 dB-Hz.
+Source manifest `f0160701…` identifies the initial GUI receiver build.
+The results below cover individual bit decisions and one separately measured
+stable complete message. Geographic outage probability and acquisition with
+an unknown waveform calendar remain unmeasured. The receiver noise in these
+runs is white Gaussian at −164 dBm/Hz. Each 65% modulates the signal.
+Lightning impulses and local interference were outside these realizations.
+Estimating seasonal atmospheric noise requires the actual receiving site,
+RF band, month and time. An installation estimate also requires the antenna
+and receiver noise characteristics. The 30 MHz shift sets the oscillator
+translation reference and Fake FCC applies a dwell envelope in baseband.
+[ITU-R P.372 radio-noise model](https://www.itu.int/rec/R-REC-P.372-18-202609-I/en)
+and [oscillator settings](oscillator-models.md).
+
+**Physical link margin at fixed airtime.** The original 36 Hz / 10× Fake FCC
+waveform used Target +4 dB-Hz and 256.8 s throughout this comparison. Only
+the physical transmit power and stable/severe propagation changed. Source
+bit 0, seed 940600, loss, noise density and public search were held fixed.
+
+| Path | Highest tested miss | Lowest tested decode |
+| --- | --- | --- |
+| Stable | −6 dB-Hz, 10.00 mW | −4 dB-Hz, 15.85 mW |
+| GUI HF Worst, 3×, Each 65% | +11 dB-Hz, 501.19 mW | +14 dB-Hz, 1.00 W |
+
+If each path has one local transition between its tested endpoints, the
+extra received C/N₀ lies between about 15 and 20 dB. The two observed
+passing powers differ by 18 dB. This is a one-realization physical margin;
+it does not specify a GUI Target offset. The normalized simulator changes
+sample noise variance to represent the change in physical power at a fixed
+−164 dBm/Hz link noise density. At severe +11, DATA was detected (44.136
+against 14.982), but the gap of 2.322 fell below the required 5.293. At
+stable −4 the gap was 6.807. A prior Target 32 simulation supplied the +14
+decision: the new Target +4 physical-power preflight produced identical
+noisy samples, normalized receiver settings and public grid. The independent
+CPU-only power sweeps ran on a 16-vCPU/32 GB EPYC 9575F with 32 workers.
+[Physical-power equivalence](../local-evidence/hf-airtime-penalty-20261118/anchor-comparison.json),
+[stable −6](../local-evidence/hf-airtime-penalty-20261118/stable-m6.json),
+[stable −4](../local-evidence/hf-airtime-penalty-20261118/stable-m4.json),
+[severe +11](../local-evidence/hf-airtime-penalty-20261118/severe-11.json)
+and [severe +14](../local-evidence/sensitivity-row6-fixed-severe-14-900s.json).
+Freezing the two passing endpoints before the bit-1 check gave two further
+correct decisions at seed 940601: stable −4 dB-Hz (gap 7.894) and severe
++14 dB-Hz (gap 40.679). These outcomes confirm the two passing settings on
+a second realization. Only seed 940600 brackets the transition at both paths.
+The CPU pod scored the holdouts in 140.80 and 141.03 s, respectively.
+[Paired endpoint results, units and receipts](../local-evidence/hf-airtime-penalty-20261118/summary.json).
+
+At the original 4 W, nominal C/N₀ is +20.02 dB-Hz, 6.02 dB above the
+observed 1 W passing endpoint. The original Target 32 trial received the
+same 256.8 s bit. At weaker physical levels the same duration can yield less
+evidence for the transmitted value or too little evidence of any signal.
+[Original 4 W receiver result](#tiny-gpsdo-midpoint-bound-repair--17-november-2026).
+
+The native planner's 36 Hz/10× waveform at Target −12.99 dB-Hz is 1,797.6 s
+per bit and requires approximately 19.2 GiB of slot workspace, exceeding the
+approximately 9 GiB automatic memory limit in this local invocation. A
+72 Hz/5× plan is similar. The 18 Hz/10× and 36 Hz/5× alternatives reject the
+configured FHSS dwell geometry. A 30 Hz/12× plan at the same target is 1,848 s
+with approximately 19.36 GiB workspace. These are planning and resource
+admission results, not failed reception or sensitivity thresholds.
+
+At Target −6.97 dB-Hz the 36 Hz/10× plan is 513.6 s with approximately
+7.03 GiB slot workspace. The original 2 mW actual link C/N0 remains −12.9897
+dB-Hz; selecting a different planning target does not increase received power.
+The original native trial of this candidate (seed 940600, bit 0) ended
+incomplete at 1,200.12 seconds without a bit decision. Profile preparation took
+0.43 seconds and simulation took 14.85 seconds; no completed receiver-scoring
+phase was reported. The timeout is not a reception failure or sensitivity
+threshold. The bounded stage diagnostic below does not by itself establish a
+population reliability or complete-receiver service claim.
+
+A separate candidate with Target +4 dB-Hz retains 36 Hz/10×, giving a
+256.8-second pattern and 270-second cadence while the actual C/N0 remains
+−12.9897 dB-Hz. With the same seed and bit 0, the complete public-slot Current
+policy returned QUIET, an erasure despite the transmitted bit. This is one
+simulated bit on the configured calendar, not a complete-message result or a
+population threshold. On this H=12, W=24 CPU run, receiver scoring took
+662.717 seconds wall and 6,854.272 CPU seconds. Coarse took 616.188 seconds,
+including 589.700 seconds reported for varying-channel coarse work; fine took
+46.523 seconds. The varying work is included in coarse, not additional time.
+The input hash was `8062109a…`, with source manifest `f0160701…`.
+The separate nine-look fixed-affine diagnostic estimated 0.00540 receiver
+wall-processing seconds per represented baseband second, but its relative
+interval precision was 53.8%, missing the declared 15% goal. It omitted varying
+and acquisition work and is not a whole-receiver rate; that estimate remains
+unresolved.
+
+A 72 Hz/5× candidate at Target +4 dB-Hz and the same 2 mW link, seed and bit
+uses a 128.8-second pattern and 150-second cadence. Its complete public-slot
+Current decision was also QUIET/erasure. The slot workspace bound was
+3,041,578,471 bytes; receiver scoring took 346.971 seconds wall and 3,601.606
+CPU seconds. Coarse took 323.272 seconds, including 310.795 seconds of varying
+coarse work, and fine took 23.696 seconds. Its input hash was `af364b67…`;
+the source manifest remained `f0160701…`. The respective single-slot scoring
+time divided by cadence is 2.455 for the 36 Hz/10× case and 2.313 for this
+candidate. These illustrative single-slot ratios do not establish complete
+receiver capacity or a population communication result. The 72 Hz/5× candidate
+at Target −5 dB-Hz used a 386.4-second pattern and 390-second cadence; with the
+same seed, bit and 2 mW impaired link it also completed the public slot with a
+Current QUIET/erasure. Receiver scoring took 1,182.062 seconds wall and
+12,385.272 CPU seconds; simulation took 10.462 seconds and total elapsed time
+was 1,192.838 seconds. Coarse took 1,103.098 seconds, including 1,054.254
+seconds of varying work; fine took 78.953 seconds. The workspace bound was
+7,102,681,229 bytes, the input hash `522b8d33…` and source manifest
+`f0160701…`. These are individual simulated-bit results, not a success
+threshold or complete-receiver capacity inference.
+
+A 30 Hz/12× candidate at Target +4 dB-Hz and the same seed, bit and 2 mW
+link used a 308-second pattern and 330-second cadence. The Current policy
+completed its public slot with QUIET/erasure. Receiver scoring took 977.053
+seconds wall and 10,302.894 CPU seconds, with 917.815 seconds coarse including
+886.645 seconds varying coarse work, and 59.230 seconds fine. The workspace
+bound was 6,079,223,078 bytes, input hash `da406b73…`, and source manifest
+`f0160701…`. Its single-slot scoring/cadence ratio was 2.96077, about 20.6%
+higher than the 36 Hz/10× case's 2.45451. The waveforms differ and these are
+single observations, not sustained capacity or population communication
+results.
+
+An independently reviewed native genie comparison supplies a conditional
+ideal-observer bound for the same 2 mW seeded channel. For each waveform,
+both equally likely bit patterns use the same path; the ideal
+observer knows the exact signals, channel, timing and bit presence and faces
+complex Gaussian noise on all valid samples, without a frontend model. The
+reported percentages are optimal average errors if it must choose 0 or 1;
+for a receiver that can also erase, the corresponding error-or-erasure
+probability is at least that bound. They are not ordinary receiver results,
+independent channel trials or complete-message reliability estimates.
+
+| Rate / spreading | Target C/N0 | Pattern | Ideal binary error | Genie and matching native capture |
+| --- | --- | ---: | ---: | --- |
+| 72 Hz / 5× | +4 dB-Hz | 128.8 s | 27.88% | [genie](../local-evidence/2mw-oracle-72hz5x-target-p4-seed940600.json), [native](../local-evidence/sensitivity-2mw-row6-rate72-spread5-target-p4-seed940600-bit0.json), input `af364b67…` |
+| 72 Hz / 5× | −5 dB-Hz | 386.4 s | 15.42% | [genie](../local-evidence/2mw-oracle-72hz5x-target-m5-seed940600.json), [native](../local-evidence/sensitivity-2mw-row6-rate72-spread5-target-m5-seed940600-bit0.json), input `522b8d33…` |
+| 72 Hz / 5× | −12.9897 dB-Hz | 1,803.2 s | 1.3378% | [genie](../local-evidence/2mw-oracle-72hz5x-target-m12p9897.json), [native preflight](../local-evidence/2mw-oracle-72hz5x-target-m12p9897-native-preflight.json), input `d0cea61d…` |
+| 36 Hz / 10× | −6.97 dB-Hz | 513.6 s | 11.8767% | [genie](../local-evidence/2mw-oracle-36hz10x-target-m6p97-seed940600.json), [native timeout](../local-evidence/sensitivity-2mw-row6-target-m6p97-seed940600-bit0.json), input `810c9f78…` |
+
+For the 513.6-second case, squared signal distance was 333,255.8471 and complex
+noise variance 119,432.1512; the matching ordinary receiver timed out without
+a bit decision as recorded above. The wrapper used for those GUI genie results
+had source SHA-256 `36cac…`. Its subsequently updated source (`48973cf4…`) and build/run
+instructions are retained in ignored `local-evidence/2mw-oracle-tool/` for this
+unresolved investigation. This helper contains no copied receiver source or
+binaries; it is to be removed when its results are superseded. The source
+manifest of the original native probe was `f0160701…`. In the longest case, a deliberate
+1 GiB memory preflight generated the matching capture but did not score a bit:
+the full quoted slot workspace was approximately 19.18 GiB. That 1 GiB
+explicit limit was not the automatic memory budget.
+
+The native probe now also has opt-in `--channel-model itu-disturbed`, a
+channel-only fixed-grid reference with two independent proper-complex Gaussian
+taps at 0 and 7 ms and 30 Hz full 2σ Doppler width, plus the selected synthetic
+Each 65% modulation. It does not add the GUI bounded-ray/common-wander channel.
+The receiver's public hypotheses remain unchanged, including ±90 Hz relative
+and common Doppler and 21 ms delay: this is an intentional channel/receiver
+model mismatch. The adapter and focused tests in `tools/triad-receiver-probe.cpp`
+and `tests/test_triad_receiver_probe.py` were independently reviewed; focused
+`triad_receiver_probe` and `triad_v3_channel` checks passed 2/2, and
+`high_fidelity_scenarios` passed 1/1. The updated source manifest is `7b8bc203…`.
+
+At 72 Hz/5×, Target +4 dB-Hz, 2 mW and seed 940600, explicit 1 GiB preflights
+generated both captures but ended incomplete without scoring a bit. The GUI
+input hash remained `af364b67…`; the ITU-model input hash was `f87f760f…`.
+The updated genie helper uses the same native channel adapter: for the ITU
+128.8-second capture its hash matched the preflight, and the paired-noise
+residual and variance checks were recorded. Its conditional equal-prior ideal
+binary error is 28.5742%; independent review of this scoped genie result
+passed. This is neither a receiver success rate nor a universal ITU-channel
+claim. The corresponding ordinary native receiver trial completed its public
+slot for bit 0 with the configured calendar and unchanged receiver priors.
+Every admission policy scored QUIET/erasure, despite the bit being present.
+Receiver scoring took 341.801 seconds and simulation 3.489 seconds, for the
+128.8-second pattern and 150-second cadence. The input hash `f87f760f…`
+matches the preflight and the source manifest is `7b8bc203…`. The
+[receiver receipt](../local-evidence/sensitivity-2mw-row6-rate72-spread5-target-p4-itu-disturbed-seed940600-bit0.json)
+is one simulated-bit outcome in a physical-channel stratum distinct from the
+GUI baseline; it is not complete receiver service, message reliability or a
+general climate claim.
+Retain the distinct [GUI preflight](../local-evidence/2mw-adapter-gui-preflight-128.json),
+[ITU preflight](../local-evidence/2mw-adapter-itu-preflight-128.json) and
+[genie result](../local-evidence/2mw-oracle-itu-72hz5x-target-p4-seed940600.json)
+until the unresolved comparison is resolved or superseded.
+
+The initial full `./build.sh test triad` run passed 42/45: tests 116
+(`triad_native_receiver_late-helper-delay`) and 120
+(`triad_native_receiver_long-calm-polarity`) timed out, and test 204
+(`triad_receiver_probe`) failed on a missing phase. An isolated rerun of those
+same three tests passed 3/3 under unchanged deadlines; the original failure
+remains distinct from this follow-up, and the other 42 checks retain their
+original passing outcomes.
+
+Temporary `local-evidence/sensitivity-2mw-*` and `local-evidence/2mw-oracle-*`
+receipts serve the current 2 mW feasibility and ideal-observer investigation.
+Retain the incomplete original receipt, matched captures and diagnostic
+outcomes until their purpose is resolved or superseded, then distill applicable
+findings here and remove redundant outputs.
+
+### Lower rates at the same 2 mW link
+
+The following runs used the configured calendar, broad timing search, seed
+940600, bit 0, 3× margin, GPSDOs, no Helper, GUI HF Worst and Each 65%.
+Transmit power was 2 mW and actual C/N₀ was −12.9897 dB-Hz throughout.
+Changing Target changed the transmitted waveform duration. The native CPU
+receiver used 24 software workers on a Ryzen 5 PRO 5650U with 12 logical CPUs.
+
+| Hopping | Rate / added symbols | Target (dB-Hz) | Pattern / cadence (s) | Slot workspace bound (GiB) | Active-slot scoring (s) | Decision |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| Fake FCC | 36 Hz / 10× | +4 | 256.8 / 270 | 4.26 | 662.72 | Quiet, missed bit |
+| Off | 3.6 Hz / 1× | +4 | 160.4 / 210 | 0.69 | 14.75 | Quiet, missed bit |
+| Off | 3.6 Hz / 1× | −12.9897 | 1,764.4 / 1,800 | 6.09 | 218.14 | Quiet, missed bit |
+
+For the longest nonhopping test, propagation and noise generation took a
+separate 57.97 s. The receiver scored 10,839,321 samples. At 3.6 Hz / 1× the
+fine-chip rate is 0.6 Hz. The short-block channel tracker requires two distinct
+fine cells per fitted block and the drift extension exceeded its slot allowance.
+The receiver used its affine signal models and quiet check. Turning off hopping,
+reducing rate and removing added symbols changed both the bit pattern and the
+available receiver evidence. A single active-slot time gives no sustained
+service or message-completion result. Source manifest `7b8bc203…`.
+[Short trial](../local-evidence/lowrate-2mw-native/admission-off-3.6hz-target4.json)
+and [long trial](../local-evidence/lowrate-2mw-native/admission-off-3.6hz-target-12.9897.json).
+
+On the same 1,764.4 s keyed bit, the 2 mW stable-path control received zero.
+Severity zero removed the changing paths and selected modulation while retaining
+the oscillator, noise, link level and receiver's broad search. The bit separation
+was 52.918 log units under stable propagation and 0.637 under severe propagation,
+against a minimum of 5.293. The stable slot took 182.45 s to score. This paired
+result isolates a channel effect at fixed duration. It measures one channel and
+noise seed and supplies no calibrated dB allowance.
+[Stable control](../local-evidence/lowrate-2mw-native/matched_target_stable_2mw.json).
+The stable 160.4 s control returned quiet. At 4 W the same short severe-channel
+pattern produced an ambiguous decision. That stronger signal raised the actual
+C/N₀ to +20.02 dB-Hz. Both controls used the same public waveform and timing.
+[Short stable control](../local-evidence/lowrate-2mw-native/short_target_stable_2mw.json)
+and [short high-power severe control](../local-evidence/lowrate-2mw-native/lowrate_strong_target4.json).
+
+The stable-path search then varied the number of 160.4 s tiles. At Target
+−9 dB-Hz, five tiles (802.0 s) erased bit 0. At −10 dB-Hz, six tiles
+(962.4 s with a 990 s cadence) received it. A fresh seed, 940601, also
+received bit 1 at six tiles. These are adjacent waveform lengths, with two
+observed successes at the longer length. The two successful slots took 85.48
+and 92.93 s to score. The bit-0 source used 1.928 modeled joules. The
+[stable trial table](../local-evidence/lowrate-2mw-native/stable-threshold-results.md)
+records the other targets, the planner's step boundary and which trial was
+held out. A separate fresh, silent slot at six tiles scored quiet after all
+6,027,321 samples were processed.
+[Quiet control](../local-evidence/lowrate-2mw-native/stable_6tiles_seed940602_noise.json).
+
+After a serial Triad run passed 45/45, a bounded capacity calibration selected
+the +4, 3.6 Hz / 1× severe nonhopping row. The active and noise continuation
+samples reached their 90 s deadlines. The calibration left complete capacity
+unresolved. A separate W=24 native replay processed ten consecutive public
+slots on one input stream. All six transmitted DATA slots and four genuine
+quiet slots scored quiet. There were no delivered messages. Receiver processing
+took 147.206 s for 2,092.554 s of input, plus 0.774 s of audio projection.
+The observed whole-replay ratio was 0.0707 processing seconds per input
+second, including startup, fill and drain. Peak reservation was 8.34 GiB.
+The predeclared steady-state interval had three commits with six prior
+uncommitted slots at its start, so it could not establish steady-state service
+independently of startup. Retain both measurements for the open local capacity
+question. [Bounded calibration](../local-evidence/2mw-capacity-lowrate-p4.json)
+and [ten-slot replay](../local-evidence/2mw-capacity-lowrate-p4-backlog.json).
+
+At the successful 2 mW stable operating point (3.6 Hz / 1×, hopping off,
+Target −10), the local native complete receiver delivered the short message
+`e`. Its three DATA decisions were 0, 0 and 1. It then scored both genuine
+quiet slots as quiet and confirmed physical completion; an EOF-only negative
+control also passed. Each transmitted pattern was 962.4 s, on a 990 s cadence.
+From first possible transmitted pulse to the end of the fifth full receiver
+observation was 4,964.55 s (1 h 22 min 45 s). Offline processing of those
+samples took 519.00 s for the receiver and 1.92 s for audio projection,
+or 0.1049 processing seconds per input second. Separate channel simulation
+took 66.14 s. Peak application reservation was 8.50 GiB, with up to two
+owners sharing 24 workers. This directly measures correct complete-message
+reception and favorable compute headroom for one stable stream. Sustained
+backlog service and severe-channel delivery remain separate qualifications.
+[Complete local stable message](../local-evidence/2mw-capacity-lowrate-stable-m10-message.json).
+
+The independent stable holdout at seed 950101 also received 0, 0, 1,
+classified both quiet slots correctly, delivered `e` and passed the EOF
+control. The same Ryzen and 24 workers used 560.96 s for the receiver and
+2.44 s for audio over 4,964.55 s of input (0.11348 s/s). Peak application
+reservation was 9,663,365,848 bytes against a 9 GiB limit. The prospective
+backlog interval from commit 0 through commit 4 required all 29,787,321
+samples to be ready at commit 0. Only 11,968,512 were ready. The receiver
+therefore completed this second replay faster than real time, while the
+separate sustained-backlog criterion remains unqualified.
+[Holdout and measurements](../local-evidence/2mw-stable-m10-message-holdout-950101.json)
+and [predeclared interval](../local-evidence/2mw-stable-m10-message-holdout-950101.policy.json).
+
+With the first trial's seed, noise calibration, five-slot calendar and
+receiver retained, suppressing all emissions produced five quiet decisions
+and zero decoded messages. The 29,787,321 complex input samples had mean
+power within 0.009% of the configured noise variance. Integrating all three
+transmitted bits of the wanted `e` message gave 5.782267477 J. The portion
+from the end of the emission to the fifth-slot deadline added zero energy.
+One silent episode measures the observed false alarms over that episode.
+[Full silent control](../local-evidence/lowrate-2mw-native/stable-e-five-slot-silence.json)
+and [full message energy](../local-evidence/lowrate-2mw-native/stable-e-full-source-energy.json).
+
+Integrating every sample of the helper-free transmitted complex waveform
+reproduced the native emission counter for bit 0. Under the simulator's
+2 mW DATA reference, 3.6 Hz / 1× with hopping off used 0.321 J for the
+160.4 s pattern and 3.532 J for 1,764.4 s. With Fake FCC hopping, 36 Hz / 10×
+used 0.376 J for 256.8 s and 2.571 J for 1,797.6 s. The hopping power reference
+excludes the quiet parts of dwells. These figures include transmitted cover and
+shaping. Physical transmitter input power and antenna efficiency require
+hardware calibration. [Full waveform energy](../local-evidence/lowrate-2mw-native/emitted-energy.txt).
+
+With Fake FCC hopping, the public 0.4 s dwell must contain a data-bearing cell
+with its pulse support, quiet time, ramp and margin. Rate × added symbols must
+exceed about 343 Hz for even one protected cell under these guards. Actual
+eligibility also depends on placement. The native planner rejected 36, 12, 6,
+3.6, 1, 0.1 and 0.01 Hz at 1×. With hopping off, the 0.01 Hz / 1× plan at
+Target −12.9897 selected 57,600.4 s per bit, 405,209,986 capture samples and
+219.68 GiB of slot workspace. The declared atmospheric motion still requires
+a 500 Hz projected sample rate. The many hours of capture explain why workspace
+increases again at this end of the rate range.
+[Hopping geometry check](../local-evidence/lowrate-2mw-native/plan-on-0.01hz-target-12.9897.json)
+and [nonhopping plan](../local-evidence/lowrate-2mw-native/plan-off-0.01hz-target-12.9897.json).
+
+Retain the named local receipts while assessing low-rate communication and CPU
+service. Remove superseded planning and measurement outputs when that work closes.
+
+### Blackwell receiver trials at 2 mW
+
+The production C++ probe permits the optional disturbed-HF Gaussian channel on
+explicit CUDA as well as CPU. The ordinary GUI channel remains the default.
+Remote Release source manifest `3144c4e6…` includes the channel adapter. The
+native SM 12.0 build ran on a full RTX PRO 6000 Blackwell Server Edition with
+97,887 MiB device memory and MIG off. An approximately 2 MB source upload took
+9.5 s. The 72 Hz / 5×, +4 dB-Hz GUI control used the original seed and bit.
+Cloud and earlier Ryzen runs produced the same input SHA-256 `af364b67…`,
+searched 78 workspaces × 11 coarse frequencies × 10,553 arrival positions,
+and both missed the bit. The cloud receiver scored the slot in 53.079 s
+(37.041 s coarse, 16.028 s fine), compared with 346.971 s on the Ryzen.
+The cloud host had 27 effective logical CPUs and 54 software workers. These
+system times include different host processors and worker allocations. The
+CUDA receipt counted 6,810 FFTs and 9,054,474 score rows. Peak reserved GPU
+allocator memory was 800 MiB, with zero HMMA/IMMA matrix calls. On this initial
+build the segmented changing-channel search ran on the host. [Cloud trial](../local-evidence/hf-2mw-gpu-20261118/base72.json)
+and [device smoke test](../local-evidence/hf-2mw-gpu-20261118/smoke.json).
+
+At the original 36 Hz / 10× hopping settings and Target −12.9897, the full
+1,797.6 s active bit was scored quiet. The native receiver processed 10,874,839
+samples in 1,022.19 s (787.25 s coarse including 678.39 s varying coarse,
+234.85 s fine). Simulation took a separate 44.26 s. The two operational bit
+evidences were −9.032 and −9.212, separated by 0.181 against a required
+5.293. The device completed 117,377 FFTs and
+107,830,554 score rows. The segmented part of coarse search included 202
+blocks and 3,935 frequencies. This is a completed erasure at the calculated
+link budget on a host that admitted the full search.
+[Long hopping trial](../local-evidence/hf-2mw-gpu-20261118/long36.json).
+
+For the Gaussian 30 Hz / 7 ms channel plus Each 65%, the 72 Hz / 5×, +4
+control reproduced the earlier CPU input hash `f87f760f…` and erasure. The
+cloud slot took 53.371 s. This cross-backend check exercises the physical
+channel adapter and records executed device work under the same broad receiver
+priors. [Gaussian-channel CUDA control](../local-evidence/hf-2mw-gpu-20261118/base72itu.json).
+
+The nonhopping 60 Hz / 1× trial retains 10 fine chips per second and therefore
+used the short-block Doppler tracker. At Target −12.9897, it scored the
+1,752 s bit as quiet. Bit separation was 4.514 against a required 5.293,
+and log evidence for DATA was −8.070 against a 13.102 presence threshold.
+On a second full Blackwell with H=13 and W=26, processing took 1,018.675 s,
+including 852.767 s of varying coarse work.
+[Nonhopping trial](../local-evidence/lowrate-2mw-runpod/60hz1x-target-m12p9897-seed940600-bit0.json).
+
+An isolated C++/CUDA revision moved the eligible segmented inverse FFTs,
+frequency tracking and rank accumulation onto the device. It used FP32 cuFFT
+and recorded zero HMMA or IMMA calls. Tests on the same H=13, W=26 pod
+included a direct rank and peak-ordering check. The 72 Hz / 5× hopping control
+improved from 64.734 s to 27.251 s per scored slot, with the varying coarse
+phase improving from 48.427 s to 8.798 s. At 60 Hz / 1×, a 1,752 s bit
+improved from 1,018.675 s to 272.615 s. Varying coarse improved from 852.767
+s to 115.660 s, including 143,365,638 device inverse FFTs. Input hash,
+decision, public grid, and candidate count matched in each pair. The operational
+bit evidence at 60 Hz / 1× matched exactly. These speedups compare full scored
+slots of the same receiver on the same host. The faster negative decisions still
+count as misses. Retain the paired receipts while extending the lower-target
+search and qualifying automatic device routing.
+[Short baseline](../local-evidence/lowrate-2mw-runpod/72hz5x-target-p4-baseline-pod2.json),
+[short device trial](../local-evidence/lowrate-2mw-runpod/72hz5x-target-p4-segmented-pod2.json)
+and [long device trial](../local-evidence/lowrate-2mw-runpod/60hz1x-target-m12p9897-segmented.json).
+
+The integrated source manifest `4ec7a895…` also passed direct CUDA
+operator and two-owner allocation-pressure tests on SM120. In a matched
+GUI Automatic comparison (same H=27, W=54, input and ordinary half-FFT
+selection), the 72 Hz / 5× slot took 53.008 s before and 34.403 s after
+the change. Bit log evidence differed by less than 10⁻¹² and both arms scored
+quiet. Cross-comparing the older explicitly pinned FP32 run to the new GUI
+Automatic run had produced a 0.222 log-evidence difference; the two modes used
+different affine arithmetic and fine banks. The same-mode comparison preserves
+that original selection. [Earlier Automatic](../local-evidence/hf-2mw-gpu-20261118/legacyauto72.json)
+and [integrated Automatic](../local-evidence/hf-2mw-gpu-20261118/canonical/auto72.json).
+
+After integrating the CUDA path, the local serial Triad group passed 43/45.
+`triad_receiver_probe` reached an internal 12 s deadline while preparing
+coarse work, and `long-calm-polarity` reached CTest's 60 s deadline. In an
+unchanged isolated rerun the probe passed and the latter reached the deadline
+again. Its exact test executable and arguments subsequently passed in 59.60 s
+in a separate diagnostic. The broad probe deadline was also reproducible
+with the pre-merge CPU binary on the same host. An exact-source build on the
+CPU-only EPYC 4565P passed both original CTests under their original deadlines
+in 37.97 s total.
+[Original group and focused receipts](../local-evidence/2mw-segmented-validation/)
+and [independent CTest results](../local-evidence/2mw-segmented-validation/epyc-4565p/ctest.log).
+
+Probe manifest `bcb25b10…` enables a pure stable-path channel contrast on the
+explicit CUDA and automatic GPU admission paths. The GUI HF Worst priors stay
+active and the receiver receives no path information. The focused probe test
+passed. Three native CPU preflights reproduced the original noisy IQ and
+validity hashes at 100 mW and 2 mW (256.8 s) and 2 mW (513.6 s). Each stopped
+after capture generation at its explicit 1 GiB memory limit. On the same
+manifest the local Ryzen passed all 45 Triad tests in 412.00 s with unchanged
+deadlines. [Final serial test log](../local-evidence/lowrate-2mw-native/triad-bcb25b10-serial.log).
+
+For long cloud admission tests, manifest `82bdd9f6…` accepts an explicitly
+requested wall deadline of up to 90 minutes on the single-slot `admission`
+command. The default remains 30 s and the other commands retain a 60-minute
+limit. Five option checks passed. Reversing just the console deadline check
+and help text reproduced the earlier 551-file compiled-source manifest.
+The local serial group on this revision passed 43/45 in 440.52 s. The
+long-calm polarity test reached its 60 s limit, and the broad probe fixture
+missed the expected coarse preparation phase. Both recurred under unchanged
+deadlines on the focused retest.
+[Suite results](../local-evidence/lowrate-2mw-native/triad-82bdd9f6-serial.log)
+and [focused retest](../local-evidence/lowrate-2mw-native/triad-82bdd9f6-retest.log).
+On the separate EPYC 7713P host with the same source and both GPU backends
+disabled, the long-calm polarity test passed in 27.20 s and the probe reached
+CTest's unchanged 50 s limit. [EPYC CPU-only retest](../local-evidence/lowrate-2mw-runpod/ctest-cap.log).
+Isolating the broad probe's exact `slot` call on the Ryzen recovered its
+native reason. It reached its original 12 s measurement deadline during
+coarse preparation (12.008 s wall, 11.998 CPU s) after the expected
+full-prior Helper bypass and before completing a score tile. The same plan
+completed in 0.140 s and retained all 91 frequencies, 78 workspaces, 3,518
+arrivals and both rays. The receiver library predated both suite runs.
+[Isolated slot](../local-evidence/lowrate-2mw-native/broad-82bdd9f6-isolated-slot.json)
+and [matching plan](../local-evidence/lowrate-2mw-native/broad-82bdd9f6-isolated-plan.json).
+
+Manifest `a9cdf6d0…` permits the same Gaussian disturbed-HF probe to select
+the automatic GPU backend for a matched propagation comparison. Six option
+checks passed. Its CPU preflight reproduced all 862,039 input rows and the
+historical Gaussian noisy-IQ and validity hash. The integration test passed
+the new checks, then reproduced the Ryzen broad-search deadline above.
+[Gaussian automatic-backend checks](../local-evidence/lowrate-2mw-native/triad-probe-a9cdf6d0-first.log).
+
+Longer 2 mW patterns remained difficult. At 36 Hz / 10× with hopping, Target
+−16 gave 3,595.2 s and the receiver scored zero as quiet. At 60 Hz / 1×
+without hopping, Target −19 gave 7,296 s and also scored quiet, despite active
+short-block tracking. The latter ran 637,664,898 segmented inverse FFTs,
+scored in 1,351.62 s and used a 49.68 GiB host slot allowance. Its bit
+separation was 0.019 against 5.293. [3,595.2 s hopping trial](../local-evidence/hf-2mw-gpu-20261118/long36m16.json)
+and [7,296 s nonhopping trial](../local-evidence/lowrate-2mw-runpod/60hz1x-target-m19-segmented-seed940600-bit0.json).
+
+A third nonhopping comparison kept 1× spreading and raised the rate to
+360 Hz, increasing the subcarrier spacing from 12.5 Hz at 60 Hz to 75 Hz.
+At Target −12.9897, it missed the 1,751.2 s bit. It scored 16 varying-channel
+candidates in a 414.05 s slot computation. Log evidence was −7.518 against
+13.102 required, with a bit separation of 1.561 against 5.293.
+[Wider-spaced nonhopping trial](../local-evidence/lowrate-2mw-runpod/2mw-360hz1x-nohop-target-m12p9897-seed940600-bit0.json).
+
+At 100 mW the same loss and noise density give actual C/N₀ of +4.000 dB-Hz.
+Under the original 36 Hz / 10× hopping GUI stress, both Target +4
+(256.8 s) and Target −12.9897 (1,797.6 s) erased the transmitted zero.
+Log evidence improved from −12.478 to −4.989, while the corresponding
+thresholds were 14.982 and 13.102. Bit separation improved from 0.007
+to 1.652 and remained below 5.293.
+[100 mW short trial](../local-evidence/lowrate-2mw-runpod/100mw-36hz10x-target-p4-seed940600-bit0.json)
+and [100 mW long trial](../local-evidence/lowrate-2mw-runpod/100mw-36hz10x-target-m12p9897-seed940600-bit0.json).
+
+At the same 100 mW, Target +4, seed and original 256.8 s hopping waveform,
+the stable-path control correctly decoded bit 0. DATA presence was 372.302
+against 14.982 required and bit separation was 48.331 against 5.293. The
+local W=24 receiver took 787.88 s to score all 1,630,039 samples with a
+4,569,331,207-byte slot allowance. The matched severe outcome above used the
+same full public search on a different host and build. The two decisions show
+how propagation changes reception even when the planner selects identical
+airtime and nominal received C/N₀.
+[100 mW stable hopping control](../local-evidence/lowrate-2mw-native/original_stable_100mw_p4_admission.json).
+
+Lowering the stable-path transmitter to 2 mW at the same Target +4 and
+256.8 s duration changed the decision to quiet. The same CPU binary and seed
+gave DATA evidence −8.882 against 14.982 required and bit separation 0.669
+against 5.293. Scoring took 796.55 s.
+[2 mW stable hopping control](../local-evidence/lowrate-2mw-native/original_stable_2mw_p4_admission.json).
+At Target −6.97 the 513.6 s stable bit reached the 1,500 s local deadline
+without a decision. Its slot allowance was 7.03 GiB; the next 770.4 s tile
+needed 13.04 GiB, exceeding the local 9 GiB cap. The 513.6 s result remains
+incomplete. [Longer stable control](../local-evidence/lowrate-2mw-native/original_stable_2mw_m6p97_admission.json).
+The 513.6 s control later completed on the RTX PRO 4500 with identical noisy
+input and full receiver priors. It returned quiet after 216.85 s of scoring.
+DATA evidence was −5.684 against 14.292 and bit separation was 2.320 against
+5.293, favoring the wrong bit. [Completed stable control](../local-evidence/lowrate-2mw-runpod/stable2-gpu-target-m6p97-admission-seed940600-bit0.json).
+
+At 2 mW, Target −12.9897 and 1,797.6 s on the original 36 Hz / 10× hopping
+waveform, the stable control decoded bit 0. Its DATA score was 25.821 against
+13.102 required, with a correct-bit gap of 8.181 against 5.293. The same
+bit, seed, waveform duration and nominal power produced a GUI-severe erasure
+with DATA score −9.118 and bit gap 0.181. The stable slot took 622.35 s of
+scoring on the RTX PRO 4500 with W=54 and 31.44 GiB of host slot workspace.
+[2 mW stable original-waveform success](../local-evidence/lowrate-2mw-runpod/stable2-gpu-target-m12p98970004336-admission-seed940600-bit0.json).
+
+The shorter stable 36 Hz / 10× bit-0 controls at Target −10 (1,027.2 s),
+−11 (1,284.0 s) and −12 (1,540.8 s) each scored quiet. On the last one, DATA
+presence was 7.628 against 13.236 and the bit gap was 2.683 against 5.293.
+The next available duration, 1,797.6 s, also decoded bit 1 at a fresh seed,
+940601 (gap 5.942). The planner switched from six to seven 256.8 s tiles
+between −12.45 and −12.46 dB-Hz at hundredth-dB resolution. The scored
+seven-tile test used Target −12.9897. The modeled bit-0 source energy was
+2.571 J at seven tiles, compared with 1.928 J at the shortest demonstrated
+stable 3.6 Hz / 1× nonhopping point. For these two stable modes, reducing
+rate and removing spreading and hopping saved about 25% of modeled energy.
+[Six-tile miss](../local-evidence/lowrate-2mw-runpod/stable2-gpu-target-m12-admission-seed940600-bit0.json),
+[seven-tile bit-1 holdout](../local-evidence/lowrate-2mw-runpod/stable2-gpu-target-m12p98970004336-admission-seed940601-bit1.json),
+[planner transitions](../local-evidence/lowrate-2mw-runpod/2mw-original-stable-tile-thresholds.json)
+and [sample-integrated energy](../local-evidence/lowrate-2mw-native/fhss-stable-bracket-source-energy.json).
+A fresh noise-only slot at seven tiles (seed 940602) correctly scored quiet,
+with DATA evidence −7.081 against 13.102 and bit separation 3.440. These
+three independent one-slot controls leave continuous alarm completion unmeasured.
+[Original waveform quiet control](../local-evidence/lowrate-2mw-runpod/stable2-gpu-target-m12p98970004336-admission-seed940602-bit0-noise.json).
+On the severe GUI realization, the fresh seven-tile bit 1 returned quiet.
+Its DATA score was −9.438 against 13.102, and the bit gap of 1.085 favored
+zero. The same 2 mW bit, seed and airtime decoded on the stable path with
+a DATA score of 32.897 and a 5.942 gap. Thus both seven-tile bit values
+passed on their stable realizations and erased on their matched severe paths.
+[Original 2 mW severe bit-1 holdout](../local-evidence/hf-100mw-extended-20261118/2mw-admission-active-940601-1-target--12.98970004336.json).
+
+At 100 mW, Target −18 and 5,906.4 s, the receiver detected DATA presence
+(38.048 versus 11.918 required). It favored the transmitted zero by 2.645
+log units. The required bit separation was 5.293, so the result was an
+ambiguous erasure. All 427 frequencies, 10,553 arrival positions, 78 banks
+and both rays were included. Scoring took 1,296.75 s on the H=13 Blackwell
+pod. [100 mW −18 decision](../local-evidence/lowrate-2mw-runpod/100mw-36hz10x-target-m18-auto-seed940600-bit0.json).
+
+At the same 100 mW, seed and bit, Target −20 selected 9,501.6 s. DATA
+presence rose to 80.965 against 11.513 required. The correct bit led by
+4.273 against 5.293 required, so the receiver again returned an ambiguous
+erasure. On the H=13, W=26 Blackwell host, simulating 57,098,839 samples took
+221.39 s and scoring them took 1,976.18 s. The fixed 64 GiB CUDA path
+completed the full public grid. This increase in correct-bit evidence was
+the criterion for testing one longer 100 mW pattern.
+[100 mW −20 decision](../local-evidence/lowrate-2mw-runpod/100mw-36hz10x-target-m20-explicit64-seed940600-bit0.json).
+
+Target −21 selected 12,069.6 s (3 h 21 min 9.6 s) at 100 mW. All 72,506,839
+samples were scored. DATA presence reached 107.177 against 11.290 required,
+but the transmitted zero led by only 4.747 against 5.293 required. The
+Current policy again returned an ambiguous erasure. This was 47 times the
+stable 256.8 s passing duration with the original hopping setup and seed.
+The complete trial took 52.9 minutes on a full Blackwell Server Edition with
+13 effective logical CPUs and 26 workers. Simulation took 263.47 s and scoring
+2,911.73 s. The native host slot allowance was 119.69 GiB. The device completed
+1,092,999,648 segmented inverse FFTs; the ordinary affine FFT length increased
+to 16,777,216. The shrinking increments in the bit gap across these three
+trials give no measured passing duration.
+[100 mW −21 decision](../local-evidence/lowrate-2mw-runpod/100mw-36hz10x-target-m21-admission-seed940600-bit0.json).
+
+On a fresh realization at the **same 100 mW, Target −21 and 12,069.6 s per
+bit**, the receiver correctly decoded bit 1 (seed 940601). DATA presence was
+114.834 against 11.290 required and the bit gap was 6.353 against 5.293.
+The native trial on the full PRO 6000 with H=13 and W=26 took 288.22 s for
+simulation and 2,052.09 s for scoring. This establishes reception at the
+specified power on one severe GUI realization. The seed-940600 erasure at
+the same setting remains part of the result.
+[100 mW severe bit-1 success](../local-evidence/hf-100mw-extended-20261118/admission-active-940601-1-target--21.json).
+
+A further independent GUI holdout (seed 940603, bit 0) produced an
+ambiguous erasure at exactly this setting. Presence was 103.110 against
+11.290 required, but bit 1 led by just 0.281 against 5.293 required.
+The three completed GUI trials at −21 therefore yielded one correct one
+and two erased zeros. The sample does not isolate bit polarity from
+channel realization or establish a delivery probability.
+[GUI bit-0 holdout](../local-evidence/hf-100mw-extended-20261118/admission-active-940603-0-target--21.json).
+
+Holding the successful seed 940601 and bit 1 fixed, the original 256.8 s
+pattern at Target +4 scored quiet. At Target −20 and 9,501.6 s the signal
+was clearly present (86.966 against 11.513), but the correct-bit gap was
+4.061 against 5.293 required. At −21 and 12,069.6 s it reached 6.353 and
+decoded. These consecutive tested whole-dB settings bracket the observed
+change for this bit. The planner also permits intervening durations.
+[Short control](../local-evidence/hf-100mw-extended-20261118/admission-active-940601-1-target-4.json)
+and [9,501.6 s control](../local-evidence/hf-100mw-extended-20261118/admission-active-940601-1-target--20.json).
+
+The same 100 mW bit 1 and seed also decoded at Target −21 after replacing
+the GUI propagation with two independent Gaussian fading taps at 0 and 7 ms,
+each with 30 Hz full 2σ Doppler width. The original receiver priors, clock
+settings and Each 65% modulation were retained. DATA presence was 101.730
+against 11.290 required and the correct-bit gap was 5.616 against 5.293.
+The stronger admission policies erased it. The second full RTX PRO 6000
+Blackwell Server Edition scored all 72,506,839 samples in 1,878.21 s,
+following 248.16 s of channel simulation. This paired result tests transfer
+of a known GUI success to a different fading law.
+[Matched Gaussian bit 1](../local-evidence/hf-100mw-gaussian-transfer-20261118/results/admission-active-940601-1-target--21.json)
+and [ITU-R F.1487 channel conventions](https://www.itu.int/rec/R-REC-F.1487/en).
+
+On the Gaussian holdout at seed 940603 the receiver detected DATA (82.051
+against 11.290 required) and favored the transmitted zero, but the 4.949
+bit gap fell short of 5.293. It returned an ambiguous erasure. The two
+paired seeds thus yielded one success in two Gaussian trials, versus one
+in three total GUI trials. The same seeds across the two models are paired
+comparisons and do not provide five independent observations. All 72,506,839
+samples were scored, with 265.20 s for simulation and 2,552.80 s for
+receiver scoring. [Independent Gaussian bit-0 holdout](../local-evidence/hf-100mw-gaussian-transfer-20261118/results/admission-active-940603-0-target--21.json).
+
+At Target −22.5 (17,205.6 s per bit), the original bit 0 at seed 940600 again
+produced an ambiguous erasure. DATA presence reached 152.025 versus 11.002
+required. Bit-0 and bit-1 scores were 152.701 and 148.633; the 4.068 gap fell
+below both the −21 gap of 4.747 and the required 5.293. This 67-tile bit was
+67 times as long as the original stable 100 mW success on the same seed. The
+full 103,322,839-sample trial took 403.93 s to simulate and 3,706.77 s to
+score. The host's default H=27, W=54 required a 204.57 GB slot allowance,
+exceeding its 188 GB cgroup. Explicit H=13 affinity with the default 26 workers
+matched the previous 100 mW trial's allocation, fit the 144.37 GB slot quote
+and kept all 1,240 frequencies, 10,553 arrivals and 78 template workspaces.
+Observed peak process RSS was 74.12 GiB. CUDA ran 1.305 billion segmented
+inverse FFTs with no fallback. The reversal in the operational bit score
+ended same-seed duration extensions.
+[100 mW −22.5 decision](../local-evidence/hf-100mw-extended-20261118/admission-active-940600-0-target--22.5.json).
+At the same seed and bit, the 1 W, 256.8 s severe transmission that decoded
+used 188.21 J of modeled DATA energy. The 100 mW, 17,205.6 s transmission
+that erased used 1,245.61 J. Reducing instantaneous transmit power tenfold
+while lengthening this pattern increased modeled energy 6.62-fold. The native
+energy counter agreed with an independent sum of every emitted sample.
+These are modeled signal joules. Battery, amplifier and radiated energies
+require hardware measurements. [Energy comparison](../local-evidence/lowrate-2mw-native/alarm-pattern-energy.json).
+
+The first −18 test at 2 mW with a fixed 64 GiB device allowance on H=27
+completed the segmented transforms and then exceeded the available device
+workspace during ordinary affine search. It produced no bit decision. Its
+32-frequency tile would have needed about 130.80 GB. On H=13 the initial
+100 mW trial was stopped when its fixed width of 26 proved too large for the
+same limit. The GUI Automatic reruns selected 23-wide tiles on the full
+device. The corrected explicit path, source manifest `1f70e467…`, sizes
+the affine tile before expensive segmented scoring. At 64 GiB it selected
+15 frequencies per tile and covered all 427 frequencies in 29 tiles, including
+the partial last tile.
+The native CUDA tests on SM120 compared all scores and selected peaks on a
+two-ray fixture at 128 MiB, checked the large real geometry and covered
+unavailable one-frequency and opt-out cases.
+[Original explicit resource stop](../local-evidence/hf-2mw-gpu-20261118/canonical/long36m18.json),
+[corrected −18 plan](../local-evidence/lowrate-2mw-runpod/100mw-36hz10x-target-m18-explicit64-plan.json)
+and [device tests](../local-evidence/lowrate-2mw-runpod/explicit64-device-tests.log).
+On this final source the local Ryzen ran the full serial Triad group in
+392.85 s and passed all 45 tests with unchanged deadlines, including
+`long-calm-polarity` in 54.92 s and `triad_receiver_probe` in 31.85 s.
+[Final complete test run](../local-evidence/2mw-segmented-validation/final-capfix-triad.log).
+
+The completed automatic rerun at 2 mW and Target −18 processed all 35,527,639
+samples of the 5,906.4 s original hopping bit. It returned quiet. DATA log
+evidence was −11.326 and bit separation was 0.455. Propagation took 149.53 s
+and receiver scoring 1,882.69 s, including 928.81 s coarse and 953.75 s fine.
+The device completed all 351,478,218 ordinary score rows as well as the
+segmented search. At the same Target and link assumptions, raising power from
+2 mW to 100 mW changed the decision from quiet to ambiguous; both erased the
+bit. The 2 mW plan at −20 had a 9,501.6 s bit and 105.91 GB host slot
+allowance. Its run was stopped during setup because lengthening the preceding
+two 2 mW patterns had produced weak evidence for both bits. The separate
+2 mW endpoint at −20 remains unscored.
+[2 mW −18 decision](../local-evidence/hf-2mw-gpu-20261118/canonical/autolong36m18.json)
+and [2 mW −20 plan](../local-evidence/hf-2mw-gpu-20261118/canonical/pauto36m20.json).
+
+One native diagnostic replayed the 2 mW −18 capture to distinguish timing
+selection from weak bit discrimination. It reproduced the full noisy input
+hash and both scores of an originally selected arrival bin (1871) to within
+1.8×10⁻¹⁵ log units. The evaluator then supplied the nearest public bin to the
+simulated direct arrival (3101 of 10,553), retaining the original search
+penalties. At that bin the signed-lag gain model scored bit 0 at 15.2844 and
+bit 1 at 15.2532. Even with this timing information its preference for the
+correct bit was only 0.0312, against the ordinary 5.293 separation requirement.
+The ordinary receiver had no access to the simulated arrival. This test isolates
+one model and seed. The local replay took 246.34 s with 618 MB peak RSS. Retain
+the compact native wrapper and receipt until the changing-channel statistic is
+superseded or the replay is no longer needed for diagnosis.
+[Known-arrival diagnostic](../local-evidence/hf-2mw-gpu-20261118/known-lag-evaluator.json).
+
+A second evaluator used the same 5,906.4 s, 2 mW capture to isolate the
+effect of the common time-varying Doppler. Both arms used one public timing
+and residual oscillator-frequency bin selected from the known simulation
+values. With the native fixed-affine, persistent-gain scorer, the original
+samples favored the wrong bit by 0.553 log units. Rotating each noisy sample
+by the inverse of the simulator's known common phase history raised the
+correct-bit gap to 16.714. The matched noise-only control remained below the
+DATA gate. The input hash matched, and the maximum relative sample-power
+change was below 8.1×10⁻¹⁶. Selective filtering, relative echoes and noise
+remained present. The output rotation imperfectly inverts a phase applied
+before the simulated selective filter. This isolates a recoverable bit signal
+when a channel history is supplied. An operating receiver must estimate or
+average over the unknown history and pay its search cost. The four arms ran
+in 368.26 s on the Ryzen with 714 MB peak RSS. Retain the compact native replay
+with the known-arrival evidence while investigating the channel estimator.
+[Common-phase and noise controls](../local-evidence/hf-2mw-gpu-20261118/common-phase-evaluator.json).
+
+To test whether a shorter gain history retained that evidence, the evaluator
+partitioned each phase-corrected capture into publicly anchored 4 s windows
+and reset all native per-window gain and local timing state. It reproduced the
+whole-slot controls first, then scored all 35,527,639 samples exactly once in
+each arm (1,481 windows including the tail). The summed noise-relative scores
+for bits 0 and 1 were 4.835 and 5.935 on the wanted input, favoring the wrong
+bit by 1.100. On the matched null they were −3.788 and −1.712. Charging the
+original global coordinate once gave DATA evidence −14.842 for the wanted
+input. Only the 4 s reset model fit the predeclared timing selection. Even
+with the known common phase, this particular short-history scorer did not
+recover the bit. A general minimum coherence time remains unmeasured.
+[Four-second window replay](../local-evidence/hf-2mw-gpu-20261118/window-evaluator/result.json).
+In a separately declared 16 s replay (371 windows), the correct-bit gap rose
+to 3.180, below 5.293 required. Global-coordinate-weighted DATA evidence was
+−3.888 versus 11.918 required. Both whole-window controls and full capture
+hashes again matched. This tests the effect of resetting all local gain and
+timing state at 16 s, with exact common phase supplied within each interval.
+[Sixteen-second window replay](../local-evidence/hf-2mw-gpu-20261118/window-evaluator/result16.json).
+
+### CPU-only cloud trials at 2 mW
+
+The 36 Hz / 10×, 1,797.6 s hopping waveform also erased bit 0 on the separate
+Gaussian channel. The two taps were at 0 and 7 ms with 30 Hz full Doppler
+width, and Each 65% remained enabled. The unchanged receiver used the wider
+GUI priors. Log evidence for DATA was −9.060 against the 13.102 threshold,
+and bit separation was 0.186 against 5.293. This independent propagation
+model reproduced the GUI trial's negative decision on the original link.
+The CPU-only EPYC 4565P (16 cores, 32 logical CPUs, W=64) scored the full
+slot in 927.78 s, with 32.73 s for simulation. The quoted $1.12/h implies
+about $0.30 of running time for this trial, excluding deployment, build and
+other pod time. The CPU-only probe build required including the declaration
+of its GPU availability dispatcher even when both optional backends were off.
+[Gaussian long receiver receipt](../local-evidence/gaussian-2mw-runpod-cpu/results/original-admission.json).
+
+With the 3.6 Hz / 1× nonhopping setup, the 962.4 s bit that succeeded under
+stable propagation scored quiet on the severe GUI channel at the same 2 mW
+link. The original attempt on an EPYC 9575F host timed out after 480 s during
+simulation. On the EPYC 4565P the same CPU binary finished simulation in
+18.63 s and scoring in 11.08 s. At Target −19, the 7,378.4 s bit also scored
+quiet in 309.25 s, with 139.24 s for simulation. These timings illustrate
+how much actual service can vary between rented 32-vCPU allocations.
+[Matched −10 severe trial](../local-evidence/hf-2mw-cpu-20261118/cpu2/cpu2-severe-m10.json)
+and [long −19 trial](../local-evidence/hf-2mw-cpu-20261118/cpu2/cpu2-severe-m19.json).
+
+The separate 962.4 s bit-1 holdout also changed from a stable correct bit to
+a severe erasure. With seed 940601, signal-presence evidence fell from 23.790
+to −11.531 against 13.688 required. Bit separation fell from 35.133 to 0.499
+against 5.293 required. The two paths retain the same waveform, oscillator
+settings, noise density, timing uncertainty and transmitted bit.
+[Stable bit 1](../local-evidence/lowrate-2mw-native/stable_6tiles_seed940601_bit1.json)
+and [severe bit 1](../local-evidence/lowrate-2mw-native/severe_6tiles_seed940601_bit1.json).
+
+At Target −21.5 the 3.6 Hz / 1× waveform reached 13,473.6 s per bit
+(3 h 44 min 33.6 s), fourteen times the 962.4 s stable passing duration.
+The severe-channel receiver scored all 81,094,521 samples and returned quiet.
+Bit separation was 5.288 against 5.293, while the independent DATA-presence
+score was −14.773 against +11.156 required. On the 4565P the slot used a
+56,648,067,997-byte inclusive allowance and took 1,029.78 s to score, with
+261.44 s for simulation. Changing the bit-separation threshold alone would
+leave the presence miss.
+[Near-memory-limit −21.5 trial](../local-evidence/hf-2mw-cpu-20261118/cpu2/cpu2-severe-m21p5.json).
+
+At the same 962.4 s nonhopping settings as the stable 2 mW passing point,
+raising the transmitter to 100 mW on the severe GUI channel gave an ambiguous
+erasure for bit 0. Its bit separation was 2.925 against 5.293 required.
+The Ryzen scored the full slot in 85.03 s, with a separate 31.74 s for channel
+generation and a 3,544,373,557-byte slot allowance.
+[100 mW low-rate severe control](../local-evidence/lowrate-2mw-native/100mw_severe_6tiles_seed940600_bit0.json).
+
+For the 100 mW, 60 Hz / 1× nonhopping alternative, Target −8 selected a
+552 s bit with a 570 s cadence. The full W=24 Ryzen slot fit the local 9 GiB
+allowance (6,191,621,961 bytes). The simulation generated all 3,409,505 samples
+in 16.58 s. Scoring exceeded the remaining 878 s and the probe stopped without
+a bit decision. This is a local processing deadline and an active-slot real-time
+failure. [100 mW 60 Hz local timeout](../local-evidence/lowrate-2mw-native/100mw_severe_60hz_1x_m8_seed940600_bit0.json).
+
+An RTX PRO 4500 Blackwell (32,623 MiB, SM 12.0) became available when the
+full PRO 6000 allocation was sold out. This smaller GPU and its host's 62 GB
+cgroup admitted the 552 s and 1,752 s controls. The 552 s GPU trial reproduced
+the local input hash `e8553c7e…` and finished scoring in 208.04 s at W=54.
+The Current policy returned an ambiguous erasure. DATA presence was −10.916
+against 14.234 required and bit separation was 1.343 against 5.293, favoring
+bit 1 when zero was transmitted. The production CUDA path completed 17,201,184
+segmented inverse FFTs. The local CPU timing remains censored.
+[100 mW 60 Hz GPU decision](../local-evidence/lowrate-2mw-runpod/severe100-gpu-target-m8-admission-seed940600-bit0.json).
+On that same GPU, Target −12.9897 lengthened the 100 mW bit to 1,752 s. The
+correct bit was favored by 2.246 against 5.293 required, and DATA presence was
+−6.568 against 13.102. The full slot again returned an ambiguous erasure.
+Simulation took 59.42 s and scoring took 673.45 s. The GPU completed
+143,365,638 segmented inverse FFTs.
+[100 mW 60 Hz longer GPU decision](../local-evidence/lowrate-2mw-runpod/severe100-gpu-target-m12p98970004336-admission-seed940600-bit0.json).
+
+At the local 9 GiB limit, the Ryzen completed a severe 2 mW slot with Target
+−14, 3.6 Hz / 1× and hopping off. It scored the 2,245.6 s bit as quiet in
+342.34 s within a 2,280 s cadence. The inclusive slot workspace was
+9,397,081,877 bytes (8.75 GiB). The next longer tile selected a 2,406 s bit
+whose slot quote already exceeded 9 GiB. [Local memory-bound trial](../local-evidence/lowrate-2mw-native/local_limit_target_m14.json).
+
+The initial two full RTX PRO 6000 Blackwell Server Edition pods and two CPU-only pods
+used a combined 7.2722 instance-hours, including a restart of one GPU pod.
+Their estimated total cost was $17.50 at the recorded running and ephemeral
+disk rates, versus a $17.49 observed account balance decrease. Peak combined
+rate was about $7.99/h. At that checkpoint all four pods were deleted, there were
+zero campaign network volumes and the displayed running rate was $0.00/h.
+Retain the compact cloud decision receipts and the paired arithmetic and
+timing checks while they support these sensitivity and performance findings.
+The follow-through used one RTX PRO 4500 Blackwell for stable controls, two
+full RTX PRO 6000 Blackwells for the long GUI and Gaussian comparisons, and
+one CPU-only host for the fixed-airtime power sweep. The source bundles were
+about 2 MB. All follow-through results were exported and the instances
+released. No persistent volume was required.
+
+### Standard FT8 single-frame comparison
+
+WSJT-X 2.7.0 decoded 0/2 complete FT8 messages at **each** of 2 mW and
+100 mW on **each** of three channels: stable, Gaussian 30 Hz / 7 ms with
+Each 65%, and GUI HF Worst with 3× margin and Each 65%. All twelve weak
+15 s slots yielded empty decode lists. The +40 dB-Hz reference
+controls decoded 2/2 on the stable channel, and 0/1 on each severe model.
+Two noise-only slots produced no messages. The ordinary decoder used no
+usable prior-message information. The native channel kept each realization's
+physical fading, with noise density independently verified to within 0.033 dB.
+
+A standard FT8 message carries 77 source bits in 12.64 s of transmission.
+This consumed 0.02528 J at 2 mW and 1.264 J at 100 mW. The stable paths at
+those powers gave nominal −46.97 and −29.98 dB in 2,500 Hz. The FT8 authors
+measured the 50% no-AP threshold at −20.8 dB in AWGN and −8.6 dB at 10 Hz
+/ 3 ms. Robust's demonstrated stable bits used substantially greater airtime
+than one FT8 transmission. The following repeat comparison uses the same
+application alarm, transmit-energy ceiling and delivery window.
+The compact reference controls remain while supporting this comparison.
+[Native comparison and decoder receipts](../local-evidence/ft8-reference-20261118/reference.md)
+and [FT4/FT8 authors' Table 6](https://wsjt.sourceforge.io/FT4_FT8_QEX.pdf).
+
+### Stable alarm comparison at matched energy and deadline
+
+At 2 mW the 3.6 Hz unspread Robust message delivered the byte `e` and
+used 5.782267477 J. The comparison sent the same byte as standard FT8 free
+text `HEX 65`. One-way transmission every 15 s fit 228 complete FT8 frames
+inside that energy ceiling, using 5.76384 J (99.68%). A 229th frame would
+exceed the ceiling. Both receivers had 4,964.5535 s of signal observation
+from first possible support. This is an input cutoff; the offline tests
+did not measure live commit latency. WSJT-X decoded zero messages in the 228 occupied slots
+and in the following 102 complete listening slots. The remaining 14.5535 s
+fell short of a full decoder slot.
+
+The stable propagation, white noise density and oscillator assumptions were
+matched. Each modem used its native sample rate and a continuous channel
+realization. The strong FT8 control recovered the exact alarm. The full
+matched noise-only episodes gave zero messages from either receiver.
+This establishes a stable-path advantage for the tested alarm and ordinary
+independent FT8 decoding under the common budgets. It does not measure a
+success probability, a severe-path repeat result or a joint receiver that
+combines complex observations across FT8 transmissions.
+[Comparison and controls](../local-evidence/ft8-reference-20261118/repeated-alarm.md)
+and [per-slot decoder evidence](../local-evidence/ft8-reference-20261118/repeated-alarm.json).
+
+## Tiny GPSDO midpoint-bound repair — 17 November 2026
+
+An exact manual row-6 HF-FHSS single-bit simulation at Target 32 dB-Hz,
+nominal actual C/N0 20.0206 dB-Hz (4 W, 180 dB loss and assumed noise density
+−164 dBm/Hz), seed 940600 and bit 0 reached the native receiver but raised
+`Robust midpoint timing mapped outside its public clock bound` before a bit
+decision. A separate fixed-reference 32 dB-Hz receiver with a −12 dB signal
+contrast reached the same error; that contrast is not the ordinary nominal
+noise calibration. A 120-second single-slot attempt and a 170-second complete
+message attempt timed out without decisions. These errors and timeouts are not
+reception failures or sensitivity measurements.
+
+A focused native regression at the small GPSDO clock bound reproduced the
+original error on a legal midpoint lag. The repair accounts for cancellation
+roundoff when mapping the admitted arrival interval back to clock rate; the
+coupled interval check and exact output clock and arrival bounds remain in
+force. The regression now passes for 8,443 legal grid lags and rejects both
+adjacent outside-support lags. `CCACHE_DISABLE=1 ./build.sh test triad` passed
+45/45. The repaired exact-row rerun of the same 256.8-second bit and seeded
+input (`affe39e3…`, source manifest `f0160701…`) completed the public slot and
+the Current admission policy received bit 0 correctly. Guarded, Strict,
+Very-strict, Extreme and Maximum policies produced erasures from competing
+evidence. On the measured CPU, receiver scoring took 449.36 seconds and the
+separate simulation took 6.40 seconds. At actual C/N0 8 dB-Hz with the same
+seed and waveform target, the impaired-channel Current policy instead returned
+ambiguous/erasure, after 587.64 seconds of receiver scoring; its input hash
+was `7e79724b…`, reflecting the changed noise level. This brackets two observed
+outcomes for one seeded bit, not complete-message delivery, a population
+sensitivity threshold or a capacity qualification. The stable-channel 8 dB-Hz
+comparison ended incomplete at its deadline (600.112 seconds elapsed) without
+a bit decision, so no calm-versus-impaired penalty follows. A severe-channel
+14 dB-Hz midpoint test with the same seed also ended incomplete at its
+deadline (600.103 seconds elapsed) without a bit decision. Neither timeout is
+an erasure or a reception failure. A repeat of the severe 14 dB-Hz case with a
+900-second bound completed and received bit 0 correctly under Current after
+624.34 seconds of receiver scoring. Its input hash was `fdb57f30…` and source
+manifest remained `f0160701…`. This additional outcome narrows the observed
+seeded-bit transition to between the tested 8 and 14 dB-Hz levels, without
+establishing a general threshold or reliable delivery probability.
+
+Temporary root `local-evidence/sensitivity-row6-*` receipts retain the failed,
+incomplete and successful attempts for this investigation. Preserve them until
+the unresolved threshold and calm-versus-impaired comparison are resolved or
+superseded; then distill applicable findings here and remove redundant outputs.
+The [14 dB-Hz completion](../local-evidence/sensitivity-row6-fixed-severe-14-900s.json)
+and its earlier [incomplete attempt](../local-evidence/sensitivity-row6-fixed-severe-14.json)
+remain distinct receipts.
+
 ## Persistent-channel and calendar-age follow-through — 17 November 2026
 
 Final source `718f91c5…` removes demonstrated reception losses from combined

@@ -93,6 +93,21 @@ factorized design can be useful (reported speedups were 1.29–3.24× on V100 an
 copy without resolving project licensing. An ordinary cuFFT half run must not
 be reported as a Tensor Core FFT.
 
+For segmented timing on the full RTX PRO 6000 Blackwell Server Edition, a
+three-stage factored complex inverse used cuBLASLt FP16 HMMA with FP32
+accumulation. The 16,384-point batches of 128 and 33 took 73.70 and 30.69 µs.
+The 32,768-point batches of 128 and 95 took 138.21 and 102.37 µs. FP32 cuFFT
+took 18.40, 16.38, 38.88 and 30.69 µs respectively, with production
+normalization folded into lag scoring. The factored timing included packing,
+twiddles and reordering. All 384 strongest arrival lags matched, including
+the noise-only rows. Use cuFFT for these shapes. Revisit a fused Tensor Core
+factorization if it removes the global packing and rearrangement cost, using
+the actual full and tail batches again. The comparison was an operator test on
+SM120. Moving the complete segmented search onto the same GPU gave a 2.38×
+and 3.74× full-slot improvement in two paired severe-channel receiver trials.
+[Operator measurements](../local-evidence/hf-2mw-gpu-20261118/canonical/tcfft.jsonl)
+and [matched receiver trials](validation.md#blackwell-receiver-trials-at-2-mw).
+
 The authors' RTX 5090 batched-SGEMM study is another useful dispatch warning:
 in its tested matrix shapes and software stack, cuBLAS selected a small SIMT
 kernel that left substantial FMA capacity unused, while a tailored schedule

@@ -11,9 +11,7 @@
 #include "triad_receiver_executor.hpp"
 #include "triad_receiver_helper.hpp"
 #include "triad_stream_resources.hpp"
-#if defined(DATAPUMP_HAVE_TRIAD_TENSOR) || defined(DATAPUMP_HAVE_TRIAD_VULKAN)
 #include "datapump/triad_acceleration.hpp"
-#endif
 
 #include <openssl/evp.h>
 #include <openssl/crypto.h>
@@ -81,12 +79,14 @@ void require(bool condition, const char* message) {
 struct Options {
     std::string command, scenario, backend = "cpu", stratum = "active", tensor_precision = "automatic";
     std::string tensor_coarse_math = "fft";
+    bool cuda_segmented_timing = false;
     std::string vulkan_precision = "automatic";
     bool gpu_fp32_minimum = false;
     std::string native_coarse_precision = "automatic";
     std::string wrong_key_admission = "current";
     std::string base = "exact-fixture", shift = "exact-fixture";
     std::string spread = "none", selective = "off", timing = "fixture";
+    std::string channel_model = "gui";
     std::optional<unsigned> workers, owners;
     std::optional<std::size_t> memory_limit, device_memory_limit;
     std::optional<std::uint64_t> spool_limit;
@@ -181,6 +181,7 @@ Options parse(int argc, char** argv) {
     assign("--backend", o.backend);
     assign("--tensor-precision", o.tensor_precision);
     assign("--tensor-coarse-math", o.tensor_coarse_math);
+    assign("--cuda-segmented-timing", o.cuda_segmented_timing);
     assign("--vulkan-precision", o.vulkan_precision);
     const bool gpu_fp32_minimum_supplied = values.contains("--gpu-fp32-minimum");
     assign("--gpu-fp32-minimum", o.gpu_fp32_minimum);
@@ -246,6 +247,7 @@ Options parse(int argc, char** argv) {
     assign("--cn0", o.observed_cn0);
     assign("--signal-gain-db", o.signal_gain_db);
     assign("--channel-severity", o.channel_severity);
+    assign("--channel-model", o.channel_model);
     assign("--interferer-cn0", o.interferer_cn0);
     assign("--interferer-seconds", o.interferer_seconds);
     assign("--interferer-rate", o.interferer_rate);
@@ -285,8 +287,21 @@ Options parse(int argc, char** argv) {
             "--native-coarse-precision expects automatic, fp32, fp64 or q15");
     require(one_of(o.stratum, {"active", "noise", "cold-maximum", "terminal", "erasure"}),
             "Unknown native probe stratum");
+    require(one_of(o.channel_model, {"gui", "itu-disturbed"}),
+            "--channel-model expects gui or itu-disturbed");
+    if (o.channel_model == "itu-disturbed") {
+        const bool supported_backend = one_of(o.backend, {"cpu", "cuda"}) || (o.backend == "gpu" && o.require_accelerator);
+        require(one_of(o.command, {"plan", "admission", "message"}) && supported_backend &&
+                o.scenario == "hf" && o.spread == "hf-worst" && o.margin == 3 &&
+                o.rf_hz >= 1e6 && o.rf_hz <= 30e6 && o.doppler_hz == 0 &&
+                !o.helper && !o.interferer_cn0 && !o.channel_severity,
+                "ITU disturbed reference requires HF Worst with CPU, explicit CUDA or automatic GPU with "
+                "--require-accelerator on, margin 3, zero explicit Doppler, "
+                "1-30 MHz, Helper Off, no interferer or severity contrast, and plan/admission/message");
+    }
     require(one_of(o.timing, {"broad", "fixture"}), "Unknown native probe timing policy");
-    require(o.sample_limit > 0 && o.deadline_ms > 0 && o.deadline_ms <= 3'600'000 &&
+    const auto maximum_deadline_ms = o.command == "admission" ? 5'400'000u : 3'600'000u;
+    require(o.sample_limit > 0 && o.deadline_ms > 0 && o.deadline_ms <= maximum_deadline_ms &&
             o.maximum_coarse_tiles > 0 && o.maximum_coarse_tiles <= 1'048'576,
             "Native probe requires bounded positive sample, time and tile budgets");
     require(o.units == 1 || o.units == 2 || o.units == 4, "--units expects 1, 2 or 4");
@@ -302,9 +317,12 @@ Options parse(int argc, char** argv) {
                 "The admission interferer requires --encrypt on and explicit C/N0, duration, seed and bit");
     }
     if (o.signal_gain_db || o.channel_severity) {
-        require(one_of(o.command, {"admission", "message", "plan"}) && o.backend == "cpu" &&
-                !o.helper && !o.interferer_cn0,
-                "A fixed receiver link contrast requires CPU admission, message or plan with Helper and interferer off");
+        const bool cpu_contrast = o.backend == "cpu" && one_of(o.command, {"admission", "message", "plan"});
+        const bool gpu_stable_control = one_of(o.backend, {"cuda", "gpu"}) && one_of(o.command, {"admission", "plan"}) &&
+            o.channel_severity == 0. && !o.signal_gain_db && o.scenario == "hf" && o.spread == "hf-worst" && o.margin == 3;
+        require((cpu_contrast || gpu_stable_control) && !o.helper && !o.interferer_cn0,
+                "A fixed receiver link contrast requires Helper and interferer off, with CPU admission/message/plan "
+                "or CUDA/automatic GPU admission/plan at HF Worst, margin 3, severity 0 and no gain override");
         require(!o.signal_gain_db || std::abs(*o.signal_gain_db) <= 100,
                 "--signal-gain-db expects -100 to +100 dB");
         require(!o.channel_severity || (*o.channel_severity >= 0 && *o.channel_severity <= 1),
@@ -329,6 +347,8 @@ Options parse(int argc, char** argv) {
             "Automatic GPU selection does not accept pinned device, workspace or backend arithmetic overrides");
     require(o.tensor_coarse_math != "fp16-fft" || o.backend == "cuda",
             "fp16-fft requires explicit --backend cuda");
+    require(!o.cuda_segmented_timing || (o.backend == "cuda" && o.tensor_precision == "automatic" &&
+            o.tensor_coarse_math == "fft"), "CUDA segmented timing requires explicit CUDA and automatic FFT precision");
     require(o.native_coarse_precision == "automatic" || o.backend == "cpu",
             "Native coarse precision overrides require --backend cpu");
     return o;
@@ -414,6 +434,28 @@ void configure_link_contrast(StreamChannelConfig& channel, const Options& o) {
         evolution.bounded_spread_knot_seconds = 0;
         channel.selective_model.modulation_rate_hz = 0;
     }
+}
+
+// This opt-in reference is deliberately a separate channel stratum.  F.1487
+// uses equal-power independent diffuse taps at 0/7 ms with a 30-Hz full 2-sigma
+// width, rather than the GUI's bounded moving echo and common wander.  Keep the
+// GUI receiver configuration and source waveform unchanged.  The receiver
+// is therefore intentionally mismatched to this diffuse reference law.  The
+// selected synthetic AM is an additional stress, not part of the ITU channel.
+void configure_channel_model(Profile& profile, const Options& o) {
+    if (o.channel_model == "gui") return;
+    auto& evolution = profile.channel.path_evolution;
+    auto& effects = profile.channel.effects;
+    require(profile.receiver.spread_delay_seconds >= .007 &&
+            profile.receiver.time_varying_common_doppler_hz >= 90 &&
+            profile.receiver.time_varying_atmospheric_hz >= 90,
+            "ITU reference needs public delay and Gaussian spectral-tail bounds");
+    effects.spread_delay_ms = 7;
+    effects.spread_doppler_hz = 0;
+    evolution.bounded_spread_knot_seconds = 0;
+    evolution.bounded_spread_direct_power_fraction.reset();
+    evolution.common_doppler_wander_hz = 0;
+    evolution.random_doppler_width_hz = 30;
 }
 
 class Deadline {
@@ -604,6 +646,10 @@ Json profile_json(const Options& o, const Profile& profile, const ReceiverSlotPl
         {"frequency_bound_hz", config.frequency_bound_hz}, {"clock_bound_ppm", config.clock_bound_ppm},
         {"spread_preset", o.spread}, {"spread_delay_seconds", config.spread_delay_seconds},
         {"spread_doppler_hz", config.spread_doppler_hz}, {"selective_perturbation", o.selective},
+        {"channel_model", o.channel_model}, {"receiver_random_doppler_width_hz", config.random_doppler_width_hz},
+        {"channel_spread_delay_ms", channel.effects.spread_delay_ms},
+        {"channel_spread_doppler_hz", channel.effects.spread_doppler_hz},
+        {"channel_random_doppler_width_hz", channel.path_evolution.random_doppler_width_hz},
         {"time_varying_channel", config.time_varying_channel},
         {"time_varying_common_doppler_hz", config.time_varying_common_doppler_hz},
         {"time_varying_atmospheric_hz", config.time_varying_atmospheric_hz},
@@ -635,6 +681,18 @@ Json profile_json(const Options& o, const Profile& profile, const ReceiverSlotPl
         {"initial_symbol_ordinal", waveform.config().format.symbol_ordinal},
         {"recurring_horizon", recurring_horizon(waveform)},
         {"scope", "configured_public_calendar_and_keyed_ordinal"}});
+    if (o.channel_model == "itu-disturbed")
+        result["channel_reference"] = object({
+            {"law", "fixed-grid-gaussian-v1"},
+            {"description", "ITU-R F.1487 high-latitude disturbed tap reference; selected selective AM is additional synthetic stress"},
+            {"tap_delays_ms", Json::Array{0., 7.}}, {"mean_tap_powers", Json::Array{.5, .5}},
+            {"tap_doppler_width_2sigma_hz", 30.}, {"tap_center_separation_hz", 0.},
+            {"receiver_model", "unchanged-gui-prior-intentionally-mismatched"},
+            {"additional_selective_am", channel.effects.perturbation_slow_depth > 0 ||
+                                         channel.effects.perturbation_fast_depth > 0},
+            {"path_seed_root", channel.path_seed.value_or(channel.effects.seed)},
+            {"gaussian_spectral_capture_allowance_per_edge_hz", 90.},
+            {"capture_allowance_is_hard_bandlimit", false}});
     if (o.signal_gain_db || o.channel_severity) {
         result["fixed_receiver_link_contrast"] = object({
             {"signal_gain_db", o.signal_gain_db.value_or(0)}, {"signal_gain", channel.signal_gain},
@@ -728,6 +786,11 @@ Json bulk_json(const BulkReceipt& r) {
         {"cuda_arrival_peak_rows", r.cuda_arrival_peak_rows},
         {"cuda_arrival_peak_values", r.cuda_arrival_peak_values},
         {"cuda_half_fft_forward_ffts", r.cuda_half_fft_forward_ffts},
+        {"cuda_segmented_sessions", r.cuda_segmented_sessions},
+        {"cuda_segmented_forward_ffts", r.cuda_segmented_forward_ffts},
+        {"cuda_segmented_inverse_ffts", r.cuda_segmented_inverse_ffts},
+        {"cuda_segmented_score_rows", r.cuda_segmented_score_rows},
+        {"cuda_segmented_native_fallbacks", r.cuda_segmented_native_fallbacks},
         {"cuda_half_fft_inverse_ffts", r.cuda_half_fft_inverse_ffts},
         {"cuda_half_fft_padded_ffts", r.cuda_half_fft_padded_ffts},
         {"cuda_half_fft_score_rows", r.cuda_half_fft_score_rows},
@@ -851,7 +914,8 @@ std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
             o.tensor_precision == "fp64" ? TensorPrecision::fp64 : TensorPrecision::automatic,
             o.tensor_coarse_math == "fp16-fft" ? TensorCoarseMath::fp16_fft :
                 o.tensor_coarse_math == "fp16" ? TensorCoarseMath::fp16 :
-                    o.tensor_coarse_math == "int8" ? TensorCoarseMath::int8 : TensorCoarseMath::fft});
+                    o.tensor_coarse_math == "int8" ? TensorCoarseMath::int8 : TensorCoarseMath::fft,
+            o.cuda_segmented_timing});
     } catch (const TensorBackendUnavailable& error) {
         throw Unavailable(error.what());
     }
@@ -2275,6 +2339,7 @@ void help() {
         "  --device-index N --device-memory-limit-bytes N\n"
         "  --case hf|eme and the normalized manual-case options from triad_cases.py\n"
         "  --workers N --slot-owners N --memory-limit-bytes N --max-samples N --deadline-ms N\n"
+        "    Deadlines default to 30000 ms. Maximum: 5400000 ms for admission, 3600000 ms otherwise.\n"
         "  --max-spool-bytes N --pilot-workers W1,W2,W3 (CPU backlog replays)\n"
         "  --coarse-tiles N --seed N --slot-index N --stratum active|noise|cold-maximum|terminal|erasure\n"
         "  --work-only on uses a non-admitting local noise crop for nonnominal continuation strata\n"
@@ -2287,8 +2352,12 @@ void help() {
         "  --doppler-hz HZ (bounded common wander; selected spread adds atmospheric support)\n"
         "  --target-cn0 DB_HZ --cn0 DB_HZ --seconds FIXED_ACTIVE_SECONDS --fec off|rs20|rs60\n"
         "  --signal-gain-db DB shifts actual C/N0 relative to --cn0 with fixed receiver gain and noise\n"
+        "  --channel-model gui|itu-disturbed (Gaussian HF reference with cpu, cuda, or gpu --require-accelerator on)\n"
+        "    itu-disturbed uses 0/7ms equal-power independent Gaussian taps, width 30Hz (2-sigma);\n"
+        "    selected synthetic selective AM is additional to, not part of, the reference\n"
         "  --channel-severity 0..1 scales actual spread, common wander and selective AM depth\n"
-        "    (CPU admission/message/plan, Helper Off; preserves receiver bounds and source geometry)\n"
+        "    CPU admission/message/plan with Helper and interferer off preserves receiver bounds and source geometry.\n"
+        "    CUDA/automatic GPU admission/plan also accepts severity 0 alone at HF Worst, margin 3.\n"
         "JSON output uses datapump.triad.native-probe.v1. Exit 2 indicates unavailable or incomplete work.\n";
 }
 
@@ -2330,6 +2399,7 @@ void run(Json& report, const Options& o, std::stop_token stop) {
     report["identity"]["requested_vulkan_precision"] = o.vulkan_precision;
     report["identity"]["requested_tensor_precision"] = o.tensor_precision;
     report["identity"]["requested_tensor_coarse_math"] = o.tensor_coarse_math;
+    report["identity"]["requested_cuda_segmented_timing"] = o.cuda_segmented_timing;
     report["identity"]["requested_native_coarse_precision"] = o.native_coarse_precision;
     const auto backend = selected_backend(o);
     const auto describe_backend = [&] {
@@ -2360,6 +2430,7 @@ void run(Json& report, const Options& o, std::stop_token stop) {
         auto profile = live::detail::prepare_profile(settings, *settings.calendar, stop,
             {.simulation_seed = o.seed, .fixture_active_seconds = o.active_seconds});
         configure_link_contrast(profile.channel, o);
+        configure_channel_model(profile, o);
         const auto preparation_elapsed = preparation.elapsed();
         profile.receiver.bulk_backend = backend;
         if (o.native_coarse_precision == "q15")
@@ -2431,6 +2502,10 @@ void run(Json& report, const Options& o, std::stop_token stop) {
         const auto actual_backend = backend ? backend->receipt() : BulkReceipt{};
         if (o.backend == "cuda" && o.command != "codec") {
             const auto& actual = actual_backend;
+            if (o.cuda_segmented_timing && o.require_accelerator &&
+                (!actual.cuda_segmented_sessions || !actual.cuda_segmented_inverse_ffts ||
+                 !actual.cuda_segmented_score_rows))
+                throw Incomplete("Requested CUDA segmented timing did not score any changing-channel frequency/lag rows");
             if (!actual.cuda || !actual.executed || (!o.work_only && (!actual.fft_calls || !actual.score_rows)) ||
                 (!actual.fft_calls && !actual.dc_reduction_values) || !actual.statistics_blocks ||
                 (!actual.mapped_values && o.stratum != "terminal"))

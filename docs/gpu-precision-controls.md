@@ -144,6 +144,24 @@ bounded envelope and must retain full FFT fallback.
 
 ## Current implementation
 
+On SM120, automatic CUDA can run the broad non-diffuse segmented timing search
+on the device. Its FP32 path batches inverse cuFFTs and keeps lag scores and
+tracking state on the GPU. It covers 16,384- and 32,768-row transforms with at
+least 4,096 arrivals, 32 blocks, 257 frequencies and 32,768 transforms per
+bank, up to two phases and up to four tracking offsets. It shares the existing
+receiver workspace lease and uses the native scorer when a required reservation
+is unavailable. The probe reports segmented sessions, FFTs, score rows and
+resource fallbacks. In explicit CUDA tests, `--cuda-segmented-timing on`
+requests the path. GUI Automatic selects eligible work without this flag.
+The explicit segmented option also sizes the following ordinary frequency
+tiles to its specified device limit. This preserves every frequency and lag.
+For example, at a 64 GiB device limit a length-8,388,608 two-ray search used
+15 frequencies per tile and covered the same 427 frequencies in 29 tiles.
+The full RTX PRO 6000 Blackwell Server Edition has measured results. Other
+SM120 devices and multi-slot service need separate throughput qualification.
+See the [paired full-slot trials](validation.md#blackwell-receiver-trials-at-2-mw)
+and [Tensor Core operator comparison](triad-gpu-optimization.md).
+
 The default compiled receiver uses automatic native CPU arithmetic and has no
 Torch runtime dependency. On qualified native exact single-ray AVX2 frequency
 searches not routed to chirp-Z, post-filter spectra use Q15 products and FP32

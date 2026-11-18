@@ -43,6 +43,10 @@ choose “Custom value…” only to enter an override. Reorder blocks with thei
 handles or Move up/Move down buttons before downloading. The editor runs locally
 and does not run or validate modem tests.
 
+The [18 November 2026 HF simulation list](_tests-RobustModem-HF-simulations-2026-11-18.md)
+opens in the same editor. Each block records a tested configuration or a labeled planning check.
+Expand “other lines preserved” on a block to see its bit duration, channel model and result.
+
 The retired single-carrier and standalone triad/Helper receivers are not
 maintained as parallel implementations. Protocol revisions use Git tags and
 separate binary releases. Computationally intensive Robust checks use the

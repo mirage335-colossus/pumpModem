@@ -52,14 +52,14 @@ bool overlaps(const void* a, std::size_t a_bytes, const void* b, std::size_t b_b
 
 void check_cuda(cudaError_t status, const char* operation) {
     if (status != cudaSuccess)
-        throw std::runtime_error(std::string("Robust half FFT ") + operation + ": " + cudaGetErrorString(status));
+        throw std::runtime_error(std::string("Robust CUDA FFT ") + operation + ": " + cudaGetErrorString(status));
 }
 
 void check_fft(cufftResult status, const char* operation) {
     if (status == CUFFT_SUCCESS) return;
-    auto detail = std::string("Robust half FFT ") + operation + " failed with cuFFT status " +
+    auto detail = std::string("Robust CUDA FFT ") + operation + " failed with cuFFT status " +
         std::to_string(static_cast<int>(status));
-    if (status == CUFFT_ALLOC_FAILED) throw CudaHalfFftAllocationError(detail);
+    if (status == CUFFT_ALLOC_FAILED) throw CudaFftAllocationError(detail);
     throw std::runtime_error(detail);
 }
 
@@ -294,7 +294,8 @@ __global__ void restore_arrivals(const __half2* inverse, const std::int32_t* ban
 
 } // namespace
 
-struct CudaHalfFftPlan::Impl {
+template<CudaFftPrecision precision>
+struct CudaFftPlan<precision>::Impl {
     cufftHandle handle{};
     int device = 0;
     bool created = false;
@@ -309,8 +310,11 @@ struct CudaHalfFftPlan::Impl {
     }
 };
 
-CudaHalfFftPlan::CudaHalfFftPlan() : impl_(std::make_unique<Impl>()) {}
-CudaHalfFftPlan::~CudaHalfFftPlan() = default;
+template<CudaFftPrecision precision>
+CudaFftPlan<precision>::CudaFftPlan() : impl_(std::make_unique<Impl>()) {}
+
+template<CudaFftPrecision precision>
+CudaFftPlan<precision>::~CudaFftPlan() = default;
 
 int cuda_fft_library_version() {
     int version = 0;
@@ -318,42 +322,55 @@ int cuda_fft_library_version() {
     return version;
 }
 
-std::unique_ptr<CudaHalfFftPlan> CudaHalfFftPlan::make(std::size_t rows, std::size_t batch, cudaStream_t stream) {
-    if (!valid_shape(rows, batch)) return nullptr;
-    int device = 0, major = 0, minor = 0;
+template<CudaFftPrecision precision>
+std::unique_ptr<CudaFftPlan<precision>> CudaFftPlan<precision>::make(
+    std::size_t rows, std::size_t batch, cudaStream_t stream) {
+    constexpr bool half = precision == CudaFftPrecision::fp16;
+    constexpr auto element_bytes = half ? sizeof(__half2) : sizeof(cufftComplex);
+    constexpr auto data_type = half ? CUDA_C_16F : CUDA_C_32F;
+    if (!valid_shape(rows, batch) || rows * batch > std::numeric_limits<std::size_t>::max() / element_bytes)
+        return nullptr;
+    int device = 0;
     check_cuda(cudaGetDevice(&device), "device query");
-    check_cuda(cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, device), "architecture query");
-    check_cuda(cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, device), "architecture query");
-    if (major < 5 || (major == 5 && minor < 3)) return nullptr;
+    if constexpr (half) {
+        int major = 0, minor = 0;
+        check_cuda(cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, device), "architecture query");
+        check_cuda(cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, device), "architecture query");
+        if (major < 5 || (major == 5 && minor < 3)) return nullptr;
+    }
 
-    auto plan = std::unique_ptr<CudaHalfFftPlan>(new CudaHalfFftPlan);
+    auto plan = std::unique_ptr<CudaFftPlan>(new CudaFftPlan);
     plan->impl_->device = device;
     auto& handle = plan->impl_->handle;
     check_fft(cufftCreate(&handle), "handle creation");
     plan->impl_->created = true;
     check_fft(cufftSetAutoAllocation(handle, 0), "workspace configuration");
     auto length = static_cast<long long>(rows);
-    const auto status = cufftXtMakePlanMany(handle, 1, &length, nullptr, 1, length, CUDA_C_16F,
-        nullptr, 1, length, CUDA_C_16F, static_cast<long long>(batch), &plan->workspace_bytes_, CUDA_C_16F);
+    const auto status = cufftXtMakePlanMany(handle, 1, &length, nullptr, 1, length, data_type,
+        nullptr, 1, length, data_type, static_cast<long long>(batch), &plan->workspace_bytes_, data_type);
     if (status == CUFFT_INVALID_SIZE || status == CUFFT_NOT_SUPPORTED) return nullptr;
     check_fft(status, "plan creation");
     check_fft(cufftSetStream(handle, stream), "stream configuration");
     check_fft(cufftGetSize(handle, &plan->workspace_bytes_), "workspace query");
-    plan->data_bytes_ = rows * batch * sizeof(__half2);
+    plan->data_bytes_ = rows * batch * element_bytes;
     return plan;
 }
 
-void CudaHalfFftPlan::enqueue(void* data, void* workspace, std::size_t bytes, bool inverse) {
+template<CudaFftPrecision precision>
+void CudaFftPlan<precision>::enqueue(void* data, void* workspace, std::size_t bytes, bool inverse) {
     if (!aligned(data, workspace_alignment) || workspace_bytes_ > bytes ||
         (workspace_bytes_ && (!aligned(workspace, workspace_alignment) ||
             overlaps(data, data_bytes_, workspace, workspace_bytes_))))
-        throw std::invalid_argument("invalid Robust half FFT storage or work area");
+        throw std::invalid_argument("invalid Robust CUDA FFT storage or work area");
     if (workspace_bytes_ && workspace != impl_->workspace) {
         check_fft(cufftSetWorkArea(impl_->handle, workspace), "work area binding");
         impl_->workspace = workspace;
     }
     check_fft(cufftXtExec(impl_->handle, data, data, inverse ? CUFFT_INVERSE : CUFFT_FORWARD), "execution");
 }
+
+template class CudaFftPlan<CudaFftPrecision::fp16>;
+template class CudaFftPlan<CudaFftPrecision::fp32>;
 
 std::size_t cuda_half_fft_pack_workspace_bytes(std::size_t rows, std::size_t valid, std::size_t batch) noexcept {
     if (rows <= parallel_pack_rows || !valid || valid > rows || !valid_shape(rows, batch)) return 0;

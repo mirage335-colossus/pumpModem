@@ -7,10 +7,10 @@ from pathlib import Path
 
 
 def main(executable):
-    def run(command, *args, code=0, default_allocation=False, parse_error=None):
+    def run(command, *args, code=0, default_allocation=False, parse_error=None, deadline_ms=12000):
         allocation = [] if default_allocation else ["--workers", "1", "--slot-owners", "1"]
         completed = subprocess.run(
-            [str(executable), command, *allocation, "--deadline-ms", "12000", *args],
+            [str(executable), command, *allocation, "--deadline-ms", str(deadline_ms), *args],
             check=False, capture_output=True, text=True, timeout=18,
         )
         receipt = json.loads(completed.stdout)
@@ -28,6 +28,12 @@ def main(executable):
         return receipt
 
     description = run("describe")
+    longest_admission = run("admission", "--max-samples", "1", deadline_ms=5_400_000, code=2)
+    assert longest_admission["budget"]["deadline_ms"] == 5_400_000
+    assert longest_admission["reason"] == "Admission capture exceeds the declared probe sample budget"
+    run("admission", deadline_ms=5_400_001, code=1, parse_error="bounded positive sample, time and tile budgets")
+    assert run("describe", deadline_ms=3_600_000)["budget"]["deadline_ms"] == 3_600_000
+    run("message", deadline_ms=3_600_001, code=1, parse_error="bounded positive sample, time and tile budgets")
     assert description["allocation"]["workers"] == 1
     assert description["allocation"]["slot_owners"] == 1
     assert description["result"] == {"available": True, "actual_device_work": False}
@@ -139,6 +145,109 @@ def main(executable):
         parse_error="--signal-gain-db expects -100 to +100 dB")
     run("plan", "--channel-severity", "1.01", code=1,
         parse_error="--channel-severity expects 0 to 1")
+    run("plan", "--channel-model", "bogus", code=1,
+        parse_error="--channel-model expects gui or itu-disturbed")
+    run("plan", "--channel-model", "itu-disturbed", code=1,
+        parse_error="ITU disturbed reference requires HF Worst")
+    reference_args = ("--case", "hf", "--helper", "off", "--spread-preset", "hf-worst",
+                      "--margin", "3", "--selective-perturbation", "each-65", "--seconds", ".1",
+                      "--rate", "120", "--rf-hz", "30000000", "--timing-policy", "fixture")
+    for command, options in (
+        ("plan", ("--backend", "cuda", "--channel-severity", ".5")),
+        ("plan", ("--backend", "gpu", "--channel-severity", "0", "--signal-gain-db", "0")),
+        ("message", ("--backend", "cuda", "--channel-severity", "0")),
+        ("plan", ("--backend", "vulkan", "--channel-severity", "0")),
+    ):
+        run(command, *reference_args, *options, code=1, parse_error="A fixed receiver link contrast requires")
+    run("plan", "--case", "hf", "--helper", "on", "--backend", "gpu", "--margin", "3",
+        "--channel-severity", "0", code=1, parse_error="A fixed receiver link contrast requires")
+    run("plan", "--case", "hf", "--helper", "off", "--backend", "cuda", "--spread-preset", "none",
+        "--margin", "3", "--channel-severity", "0", code=1, parse_error="A fixed receiver link contrast requires")
+    run("plan", *reference_args, "--channel-model", "itu-disturbed", "--channel-severity", "1",
+        code=1, parse_error="ITU disturbed reference requires HF Worst")
+    run("plan", *reference_args, "--backend", "tensor-cpu", "--channel-model", "itu-disturbed",
+        code=1, parse_error="ITU disturbed reference requires HF Worst")
+    run("plan", *reference_args, "--backend", "gpu", "--channel-model", "itu-disturbed",
+        code=1, parse_error="automatic GPU with --require-accelerator on")
+    run("plan", "--case", "hf", "--helper", "off", "--spread-preset", "hf-worst", "--margin", "3",
+        "--rf-hz", "30000001", "--channel-model", "itu-disturbed", code=1,
+        parse_error="ITU disturbed reference requires HF Worst")
+    ordinary_reference = run("plan", *reference_args)["configuration"]
+    gaussian_reference = run("plan", *reference_args, "--channel-model", "itu-disturbed")["configuration"]
+    assert ordinary_reference["channel_model"] == "gui"
+    assert gaussian_reference["channel_model"] == "itu-disturbed"
+    for name in ("bit_seconds", "slot_plan", "quiet_first_sample", "quiet_stop_sample",
+                 "actual_cn0_db_hz", "arrival_lower_seconds", "arrival_upper_seconds", "clock_bound_ppm",
+                 "frequency_bound_hz", "spread_delay_seconds", "spread_doppler_hz",
+                 "receiver_random_doppler_width_hz", "time_varying_atmospheric_hz", "time_varying_common_doppler_hz",
+                 "coarse_full_prior", "receiver_slot_workspace_bytes",
+                 "channel_selective_modulation_rate_hz", "selective_slow_depth", "selective_fast_depth"):
+        assert gaussian_reference[name] == ordinary_reference[name], name
+    assert gaussian_reference["channel_spread_delay_ms"] == 7
+    assert gaussian_reference["channel_spread_doppler_hz"] == 0
+    assert gaussian_reference["channel_random_doppler_width_hz"] == 30
+    assert gaussian_reference["spread_doppler_hz"] == 90
+    assert gaussian_reference["receiver_random_doppler_width_hz"] == 0
+    assert gaussian_reference["channel_bounded_spread_knot_seconds"] == 0
+    assert gaussian_reference["channel_common_doppler_wander_hz"] == 0
+    reference = gaussian_reference["channel_reference"]
+    assert reference["law"] == "fixed-grid-gaussian-v1"
+    assert reference["tap_delays_ms"] == [0, 7] and reference["mean_tap_powers"] == [.5, .5]
+    assert reference["tap_doppler_width_2sigma_hz"] == 30 and reference["tap_center_separation_hz"] == 0
+    assert reference["receiver_model"] == "unchanged-gui-prior-intentionally-mismatched"
+    assert reference["additional_selective_am"] and not reference["capture_allowance_is_hard_bandlimit"]
+    no_selective_args = list(reference_args)
+    no_selective_args[no_selective_args.index("--selective-perturbation") + 1] = "off"
+    pure_reference = run("plan", *no_selective_args, "--channel-model", "itu-disturbed")["configuration"]
+    assert not pure_reference["channel_reference"]["additional_selective_am"]
+
+    # Exercise actual native channel generation without requiring a completed
+    # expensive receiver search.  The explicit local lease admits the capture
+    # but need not admit full scoring; either a finished score or a reported
+    # lease/deadline stop is acceptable for this waveform-generation check.
+    def reference_capture(*extra):
+        proc = subprocess.run([str(executable), "admission", "--workers", "1", "--slot-owners", "1",
+                               "--deadline-ms", "12000", "--memory-limit-bytes", "83886080",
+                               *reference_args, *extra], check=False, capture_output=True, text=True, timeout=18)
+        receipt = json.loads(proc.stdout)
+        assert proc.returncode in (0, 2), receipt
+        assert receipt["observation"] is not None, receipt
+        assert any(row["name"] == "simulator" for row in receipt["phases"]), receipt
+        return receipt
+
+    faded = reference_capture("--channel-model", "itu-disturbed")
+    faded_again = reference_capture("--channel-model", "itu-disturbed")
+    stable = reference_capture("--channel-severity", "0")
+    for backend, discovery in (("cuda", explicit_half_fft), ("gpu", automatic_gpu_floor)):
+        device_args = ("--backend", backend, "--require-accelerator", "on")
+        options = (*device_args, "--channel-severity", "0")
+        gaussian_options = (*device_args, "--channel-model", "itu-disturbed")
+        planned = run("plan", *reference_args, *options, code=discovery.returncode)
+        gaussian_plan = run("plan", *reference_args, *gaussian_options, code=discovery.returncode)
+        if discovery.returncode == 0:
+            device = reference_capture(*options)
+            assert device["observation"]["input_sha256"] == stable["observation"]["input_sha256"]
+            assert device["configuration"]["fixed_receiver_link_contrast"] == stable["configuration"]["fixed_receiver_link_contrast"]
+            gaussian_capture = reference_capture(*gaussian_options)
+            assert gaussian_capture["observation"]["input_sha256"] == faded["observation"]["input_sha256"]
+            assert gaussian_capture["configuration"]["channel_reference"] == faded["configuration"]["channel_reference"]
+            for field in ("spread_doppler_hz", "spread_delay_seconds", "time_varying_common_doppler_hz",
+                          "frequency_bound_hz", "actual_cn0_db_hz", "public_window_samples"):
+                assert planned["configuration"][field] == stable["configuration"][field], (backend, field)
+                assert gaussian_plan["configuration"][field] == gaussian_reference[field], (backend, field)
+        else:
+            assert planned["status"] == "unavailable"
+            assert gaussian_plan["status"] == "unavailable" and not gaussian_plan["phases"]
+    default_capture = reference_capture()
+    explicit_default = reference_capture("--channel-model", "gui")
+    assert faded["observation"]["input_sha256"] == faded_again["observation"]["input_sha256"]
+    assert default_capture["observation"]["input_sha256"] == explicit_default["observation"]["input_sha256"]
+    assert faded["observation"]["input_sha256"] != default_capture["observation"]["input_sha256"]
+    assert faded["observation"]["bounded_spread_realization"] is None
+    assert faded["observation"]["common_doppler_realization"] is None
+    assert default_capture["observation"]["bounded_spread_realization"] is not None
+    assert default_capture["observation"]["common_doppler_realization"] is not None
+    assert faded["configuration"]["channel_reference"]["path_seed_root"] == faded["observation"]["seed"]
     run("admission", "--wrong-key-admission", "strict", code=1,
         parse_error="Admission diagnostics score Current once")
     run("admission", "--interferer-cn0", "20", code=1,

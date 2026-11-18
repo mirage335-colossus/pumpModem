@@ -56,6 +56,11 @@ struct BulkReceipt {
     std::uint64_t score_rows = 0, statistics_blocks = 0, projected_values = 0, dc_reduction_values = 0;
     // Exact CUDA arrival selection, credited after validated frontier readback.
     std::uint64_t cuda_arrival_peak_rows = 0, cuda_arrival_peak_values = 0;
+    // Changing-channel projections have a separate public grid from the
+    // coherent coarse stages accounted in score_rows.
+    std::uint64_t cuda_segmented_sessions = 0, cuda_segmented_forward_ffts = 0;
+    std::uint64_t cuda_segmented_inverse_ffts = 0, cuda_segmented_score_rows = 0;
+    std::uint64_t cuda_segmented_native_fallbacks = 0;
     // Physical cuFFT transforms include padded rows. Score rows count only
     // validated results on the public grid, with no padded hypotheses.
     std::uint64_t cuda_half_fft_forward_ffts = 0, cuda_half_fft_inverse_ffts = 0;
@@ -229,6 +234,14 @@ struct CoarseFrequencyPlan {
     std::string_view native_fallback_reason;
 };
 
+// Public changing-channel frequency/lag geometry. The observation spectra
+// have shape [block][phase][fft row], shared by both bit alternatives.
+struct CoarseSegmentedShape {
+    std::size_t kernel_rows = 0, arrivals = 0, blocks = 0, fft_rows = 0;
+    std::size_t radius = 0, phases = 0, bin_stride = 0, tracking_hop = 0;
+    bool operator==(const CoarseSegmentedShape&) const = default;
+};
+
 // A score view contains [workspace][frequency][arrival] in canonical order.
 // The callback consumes it before the backend reuses host staging.
 using CoarseScoreSink = std::function<void(std::size_t first_workspace, std::size_t workspace_count,
@@ -247,6 +260,14 @@ public:
     // False keeps the canonical native FIR/channelizer before device upload.
     // It does not permit a fallback after any device operation has started.
     virtual bool supports_fir() const noexcept { return true; }
+    // Supply the possible simultaneous FIR/segmented shapes before device
+    // admission. A declined shape keeps the native projected scorer.
+    virtual void plan_segmented(std::span<const CoarseSegmentedShape>) {}
+    // False must leave outputs and operation counts untouched. A device
+    // operation that has started either publishes all ranks or throws.
+    virtual bool segmented_scores(const CoarseSegmentedShape&,
+        std::span<const std::complex<float>>, std::span<const Complex>, double,
+        std::span<double>, std::span<double>, CoarseBulkWork&, std::stop_token) { return false; }
     // Automatic backends can admit an entire FIR phase before it retains any
     // device buffers, avoiding waits while holding another phase's memory.
     virtual void begin_fir_projection(std::size_t, std::size_t, std::size_t, std::stop_token) {}

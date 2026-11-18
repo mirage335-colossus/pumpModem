@@ -155,6 +155,11 @@ void add_work(BulkReceipt& to, const BulkReceipt& from) noexcept {
     TRIAD_COUNT(score_rows);
     TRIAD_COUNT(cuda_arrival_peak_rows);
     TRIAD_COUNT(cuda_arrival_peak_values);
+    TRIAD_COUNT(cuda_segmented_sessions);
+    TRIAD_COUNT(cuda_segmented_native_fallbacks);
+    TRIAD_COUNT(cuda_segmented_forward_ffts);
+    TRIAD_COUNT(cuda_segmented_inverse_ffts);
+    TRIAD_COUNT(cuda_segmented_score_rows);
     TRIAD_COUNT(cuda_half_fft_forward_ffts);
     TRIAD_COUNT(cuda_half_fft_inverse_ffts);
     TRIAD_COUNT(cuda_half_fft_padded_ffts);
@@ -316,7 +321,8 @@ struct Arena {
         return true;
     }
 
-    std::size_t admit(std::size_t minimum, std::size_t preferred, std::stop_token stop) {
+    std::size_t admit(std::size_t minimum, std::size_t preferred, std::stop_token stop,
+                      std::size_t baseline_preferred) {
         require(minimum && preferred >= minimum, "invalid Robust CUDA device lease");
         if (minimum > options.workspace_bytes - existing_allocations)
             throw ReceiverWorkspaceError("Robust CUDA cannot fit one complete device phase");
@@ -338,7 +344,12 @@ struct Arena {
         }
         remove();
         cancelled(stop);
-        const auto bytes = std::min(preferred, options.workspace_bytes - total.reserved_bytes);
+        const auto free = options.workspace_bytes - total.reserved_bytes;
+        // A new optional stage may request a larger preferred lease than
+        // the ordinary phase. Do not let that increase consume headroom for
+        // one more minimum-sized ordinary owner, when that room is available.
+        const auto ceiling = std::max(baseline_preferred, free - minimum);
+        const auto bytes = std::min({preferred, free, ceiling});
         total.reserved_bytes += bytes;
         total.peak_reserved_bytes = std::max(total.peak_reserved_bytes, total.reserved_bytes);
         return bytes;
@@ -426,12 +437,13 @@ public:
         }
     }
 
-    void begin(std::size_t minimum, std::size_t preferred, std::stop_token stop) {
+    void begin(std::size_t minimum, std::size_t preferred, std::stop_token stop,
+               std::size_t baseline_preferred = SIZE_MAX) {
         if (!leased_) return;
         std::lock_guard lock(mutex_);
         require(!used_, "Robust CUDA cannot replace a lease with resident device buffers");
         if (limit_) arena_->release(std::exchange(limit_, 0));
-        limit_ = arena_->admit(minimum, preferred, stop);
+        limit_ = arena_->admit(minimum, preferred, stop, baseline_preferred);
     }
 
     bool reserve(std::size_t bytes) {
@@ -699,9 +711,9 @@ struct Filter final : CoarseBulkFilter {
 class TensorCoarse final : public CoarseBulk {
 public:
     TensorCoarse(std::shared_ptr<Arena> arena, std::shared_ptr<BulkReceipt> backend_work,
-                 bool precise, TensorPrecision precision, TensorCoarseMath math, bool leased)
+                 bool precise, TensorPrecision precision, TensorCoarseMath math, bool leased, bool segmented)
         : device_(std::move(arena), std::move(backend_work), precise, leased), precision_(precision),
-          requested_math_(math), math_(math) {}
+          requested_math_(math), math_(math), segmented_requested_(segmented) {}
 
     std::string_view precision_reason() const noexcept override {
         if (device_.workspace->leased() && lag_ && geometry_.lag_count == 1 && groups_.size() == 1)
@@ -710,26 +722,120 @@ public:
         return half_fft_precision_reason_;
     }
 
+    void plan_segmented(std::span<const CoarseSegmentedShape> shapes) override {
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        if (!device_.arena->device.is_cuda() || device_.precise || requested_math_ != TensorCoarseMath::fft)
+            return;
+        require(shapes.size() <= 2, "unexpected Robust segmented timing families");
+        candidate_segments_.clear();
+        const auto& gpu = device_.arena->total;
+        const bool automatic_sm120 = device_.workspace->leased() &&
+            gpu.cuda_compute_major == 12 && gpu.cuda_compute_minor == 0;
+        for (const auto& shape : shapes) {
+            // The shortest measured Blackwell profile has about 50k inverse
+            // transforms per bank in each family, on a broad retained-lag grid.
+            // Preserve the host route for small searches and other FFT sizes.
+            // At most two uploaded phase spectra serve hundreds of frequencies.
+            // The measured linked families reach up to four neighbor offsets.
+            const bool qualified = automatic_sm120 && (shape.fft_rows == 16'384 || shape.fft_rows == 32'768) &&
+                shape.arrivals >= 4096 && shape.blocks >= 32 && shape.radius >= 128 &&
+                shape.phases <= 2 && shape.tracking_hop <= 4 && shape.radius <= (SIZE_MAX - 1) / 2 &&
+                shape.blocks >= ceil_div(32'768, 2 * shape.radius + 1);
+            if (segmented_requested_ || qualified) candidate_segments_.push_back(shape);
+        }
+#else
+        (void)shapes;
+#endif
+    }
+
     void begin_fir_projection(std::size_t maximum_fft_rows, std::size_t maximum_filters,
                               std::size_t maximum_output_rows, std::stop_token stop) override {
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        if (!device_.workspace->leased() && candidate_segments_.empty()) return;
+#else
         if (!device_.workspace->leased()) return;
+#endif
         const auto spectrum = mul(maximum_fft_rows, device_.item_bytes);
         const auto resident = mul(maximum_filters, spectrum);
         const auto output = mul(maximum_output_rows, 3 * device_.item_bytes);
         const auto batch = mul(16, spectrum);
-        device_.workspace->begin(add(add(resident, output), batch),
-                                 add(add(resident, output), mul(maximum_fir_batch, batch)), stop);
+        const auto minimum = add(add(resident, output), batch);
+        const auto fir_preferred = add(add(resident, output), mul(maximum_fir_batch, batch));
+        auto preferred = fir_preferred;
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        if (!candidate_segments_.empty()) {
+            TensorContext::Operation op(device_);
+            const auto capacity = device_.arena->options.workspace_bytes - device_.arena->existing_allocations;
+            for (const auto& shape : candidate_segments_) {
+                cancelled(stop);
+                const auto spare = capacity > resident ? capacity - resident : 0;
+                // Bound the optional automatic scratch lane relative to this
+                // physical device, even when a single slot has a very wide DP.
+                const auto lane = device_.workspace->leased() ? std::min(spare, capacity / 4) : spare;
+                auto planned = segment_plan(shape, lane);
+                if (planned) {
+                    // FIR jobs and segmented jobs share one serialized device
+                    // context. Only filter spectra remain live across them.
+                    preferred = std::max(preferred, add(resident, planned->charge_bytes));
+                    segments_.push_back(std::move(*planned));
+                }
+            }
+        }
+#endif
+        if (device_.workspace->leased()) device_.workspace->begin(minimum, preferred, stop, fir_preferred);
+    }
+
+    bool segmented_scores(const CoarseSegmentedShape& shape,
+                          std::span<const std::complex<float>> observation_spectra,
+                          std::span<const Complex> time_column, double noise_power,
+                          std::span<double> fixed_ranks, std::span<double> smooth_ranks,
+                          CoarseBulkWork& work, std::stop_token stop) override {
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        if (std::ranges::find(candidate_segments_, shape) == candidate_segments_.end()) return false;
+        const auto plan = std::ranges::find(segments_, shape, &SegmentPlan::shape);
+        TensorContext::Operation op(device_);
+        cancelled(stop);
+        if (plan == segments_.end()) {
+            count(op.work.cuda_segmented_native_fallbacks, 1);
+            return false;
+        }
+        require(observation_spectra.size() == mul(mul(shape.blocks, shape.phases), shape.fft_rows) &&
+                time_column.size() == shape.kernel_rows && fixed_ranks.size() == shape.arrivals &&
+                smooth_ranks.size() == (shape.tracking_hop ? shape.arrivals : 0) &&
+                noise_power > 0 && std::isfinite(noise_power),
+                "invalid Robust CUDA segmented input");
+        // An automatic receiver may have shared the arena with another slot.
+        // Explicit CUDA charges the same arena for every live operation. In
+        // both cases a missed reservation falls back before any device work.
+        std::optional<Charge> charge;
+        try {
+            charge.emplace(device_.workspace, plan->charge_bytes);
+        } catch (const ReceiverWorkspaceError&) {
+            count(op.work.cuda_segmented_native_fallbacks, 1);
+            return false;
+        }
+        score_segment_plan(*plan, observation_spectra, time_column, noise_power,
+                           fixed_ranks, smooth_ranks, work, op, stop);
+        return true;
+#else
+        (void)shape; (void)observation_spectra; (void)time_column; (void)noise_power;
+        (void)fixed_ranks; (void)smooth_ranks; (void)work; (void)stop;
+        return false;
+#endif
     }
 
     static std::size_t maximum_frequency_tile_width(const CoarseBulkGeometry& geometry, std::size_t workspaces,
-        std::size_t requested, std::size_t item_bytes, std::size_t capacity) {
-        if (requested <= 1) return requested;
+        std::size_t requested, std::size_t item_bytes, std::size_t capacity, bool require_fit) {
+        if (!requested || (requested == 1 && !require_fit)) return requested;
         const auto bank = mul(mul(workspaces, geometry.taps), geometry.correlation_fft_rows);
         const auto observation = add(geometry.kernel_rows, geometry.lag_count - 1);
         const auto resident = resident_bytes(add(add(bank, observation), mul(workspaces, 4)), workspaces, item_bytes);
-        if (resident >= capacity) return 1;
+        if (!require_fit && resident >= capacity) return 1;
         const auto one = add(observation_bytes(geometry, 1),
             frequency_batch_bytes(geometry, 1, frontier_overhead(geometry, 1), item_bytes));
+        if (require_fit && (resident >= capacity ||
+                std::max(one, preparation_bytes(geometry.correlation_fft_rows, item_bytes)) > capacity - resident))
+            throw ReceiverWorkspaceError("Robust CUDA workspace cannot fit the affine bank and one frequency");
         return std::clamp((capacity - resident) / one, std::size_t{1}, requested);
     }
 
@@ -882,6 +988,12 @@ public:
         CoarseBulkWork& work, std::stop_token stop) override {
         TensorContext::Operation op(device_);
         cancelled(stop);
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        // Observation and bank preparation have joined. No subsequent stage
+        // of this owner uses the segmented FFT handles.
+        segments_.clear();
+        candidate_segments_.clear();
+#endif
         require(!preparation_started_ && !bank.empty() && geometry.taps && geometry.taps <= 2 &&
                 geometry.kernel_rows && geometry.lag_count && geometry.frequency_count &&
                 observation.size() == add(geometry.kernel_rows, geometry.lag_count - 1) &&
@@ -918,7 +1030,7 @@ public:
         select_automatic_matrix(groups);
         matrix_fallback_ = matrix_policy_reason(geometry, groups, matrix_bytes);
         const auto bytes = resident_bytes(resident, bank.size(), device_.item_bytes);
-        const auto preparation = add(mul(largest_fft, 12 * device_.item_bytes), 2 * maximum_upload_bytes);
+        const auto preparation = preparation_bytes(largest_fft, device_.item_bytes);
         std::size_t fft_preferred = 0;
         if (!use_half && device_.workspace->leased()) {
             // The FIR owner has released its spectra. Quote the resident bank
@@ -1155,6 +1267,156 @@ private:
     };
 
 #if DATAPUMP_TRIAD_TENSOR_CUDA
+    struct SegmentPlan {
+        CoarseSegmentedShape shape;
+        std::size_t frequencies = 0, tile = 0, scratch_bytes = 0, charge_bytes = 0;
+        std::unique_ptr<CudaSegmentedFftPlan> forward, inverse, tail;
+    };
+
+    std::optional<SegmentPlan> segment_plan(const CoarseSegmentedShape& shape, std::size_t capacity) const {
+        if (!shape.blocks || shape.blocks > shape.kernel_rows || !shape.arrivals || !shape.phases ||
+            !std::has_single_bit(shape.fft_rows) || !shape.bin_stride || shape.arrivals > shape.fft_rows ||
+            ceil_div(shape.kernel_rows, shape.blocks) > shape.fft_rows - shape.arrivals + 1 ||
+            shape.radius > (std::numeric_limits<std::int64_t>::max() - 1) / 2 ||
+            (shape.radius && shape.bin_stride > static_cast<std::uint64_t>(INT64_MAX) / shape.radius))
+            return {};
+        SegmentPlan result;
+        result.shape = shape;
+        result.frequencies = add(mul(2, shape.radius), 1);
+        if (shape.tracking_hop >= result.frequencies) return {};
+        const auto fft_bytes = mul(shape.fft_rows, sizeof(std::complex<float>));
+        const auto block_and_column = mul(add(shape.phases, 1), fft_bytes);
+        const auto states = shape.tracking_hop ? mul(result.frequencies, shape.arrivals) : 0;
+        const auto scores = mul(shape.arrivals, (shape.tracking_hop ? 3 : 2) * sizeof(double));
+        const auto raw_rows = ceil_div(shape.kernel_rows, shape.blocks);
+        // Ten possible tensor allocations, including shared cuFFT scratch.
+        // Allow the caching allocator's minimum block rounding for each.
+        constexpr std::size_t rounding = 10 * 512;
+        const auto retained = add(rounding, add(add(block_and_column, mul(raw_rows, sizeof(Complex))),
+                                               add(mul(states, 2 * sizeof(float)), scores)));
+        if (retained > capacity || fft_bytes > capacity - retained) return {};
+        const auto stream = device_.cuda_stream();
+        try {
+            result.forward = CudaSegmentedFftPlan::make(shape.fft_rows, 1, stream);
+            if (!result.forward) return {};
+            // Bound command and scratch size while amortizing launches across
+            // independent frequencies. The last tile gets its true batch size.
+            for (auto width = std::min({std::size_t{128}, result.frequencies,
+                                        (capacity - retained) / fft_bytes}); width; width /= 2) {
+                result.inverse = CudaSegmentedFftPlan::make(shape.fft_rows, width, stream);
+                if (!result.inverse) continue;
+                const auto tail = result.frequencies % width;
+                result.tail = tail ? CudaSegmentedFftPlan::make(shape.fft_rows, tail, stream) : nullptr;
+                if (tail && !result.tail) continue;
+                result.scratch_bytes = std::max({result.forward->workspace_bytes(),
+                    result.inverse->workspace_bytes(), tail ? result.tail->workspace_bytes() : 0});
+                result.charge_bytes = add(retained, add(mul(width, fft_bytes), result.scratch_bytes));
+                if (result.charge_bytes <= capacity) {
+                    result.tile = width;
+                    return result;
+                }
+            }
+        } catch (const CudaFftAllocationError&) {
+            // No transform or DATA score has executed. Keep the native route.
+        }
+        return {};
+    }
+
+    void score_segment_plan(const SegmentPlan& plan, std::span<const std::complex<float>> spectra,
+                            std::span<const Complex> time_column, double noise_power,
+                            std::span<double> fixed_ranks, std::span<double> smooth_ranks,
+                            CoarseBulkWork& work, TensorContext::Operation& op, std::stop_token stop) {
+        const auto& shape = plan.shape;
+        const auto n = shape.fft_rows;
+        const auto stream = device_.cuda_stream();
+        const auto block_spectra = mul(shape.phases, n);
+        const auto states = shape.tracking_hop ? mul(plan.frequencies, shape.arrivals) : 0;
+        const auto lag_bytes = mul(shape.arrivals, sizeof(double));
+        at::Tensor obs, raw, column, product, scratch, block_best, sum, previous, next, smooth;
+        try {
+            obs = at::empty({dim(block_spectra)}, device_.complex_options);
+            raw = at::empty({dim(ceil_div(shape.kernel_rows, shape.blocks))},
+                            device_.options.dtype(at::kComplexDouble));
+            column = at::empty({dim(n)}, device_.complex_options);
+            product = at::empty({dim(mul(plan.tile, n))}, device_.complex_options);
+            if (plan.scratch_bytes) scratch = at::empty({dim(plan.scratch_bytes)}, device_.options.dtype(at::kByte));
+            auto* fft_scratch = plan.scratch_bytes ? scratch.mutable_data_ptr() : nullptr;
+            sum = at::zeros({dim(shape.arrivals)}, device_.double_options);
+            block_best = at::empty_like(sum);
+            if (states) {
+                previous = at::zeros({dim(states)}, device_.options.dtype(at::kFloat));
+                next = at::empty_like(previous);
+                smooth = at::empty_like(sum);
+            }
+            for (std::size_t block = 0; block < shape.blocks; ++block) {
+                cancelled(stop);
+                const auto first = block * shape.kernel_rows / shape.blocks;
+                const auto last = (block + 1) * shape.kernel_rows / shape.blocks;
+                const auto rows = last - first;
+                double energy = 0;
+                const auto source = time_column.subspan(first, rows);
+                for (const auto value : source) energy += std::norm(value);
+                if (!energy) continue;  // No emission, keep both ranks and DP state unchanged.
+                require(std::isfinite(energy), "nonfinite Robust CUDA segmented template energy");
+                const auto selected = spectra.subspan(block * block_spectra, block_spectra);
+                C10_CUDA_CHECK(cudaMemcpyAsync(obs.mutable_data_ptr(), selected.data(), selected.size_bytes(),
+                                               cudaMemcpyHostToDevice, stream));
+                C10_CUDA_CHECK(cudaMemcpyAsync(raw.mutable_data_ptr(), source.data(), source.size_bytes(),
+                                               cudaMemcpyHostToDevice, stream));
+                count(op.work.upload_bytes, add(selected.size_bytes(), source.size_bytes()));
+                // Both host ranges are immutable until the final download.
+                C10_CUDA_CHECK(cuda_segmented_column(raw.const_data_ptr(), column.mutable_data_ptr(), rows, n, stream));
+                C10_CUDA_CHECK(cudaMemsetAsync(block_best.mutable_data_ptr(), 0, lag_bytes, stream));
+                plan.forward->enqueue(column.mutable_data_ptr(), fft_scratch, plan.scratch_bytes, false);
+                record_fft(1, n, false, op.work, &work);
+                count(op.work.cuda_segmented_forward_ffts, 1);
+                for (std::size_t frequency = 0; frequency < plan.frequencies; frequency += plan.tile) {
+                    cancelled(stop);
+                    const auto width = std::min(plan.tile, plan.frequencies - frequency);
+                    C10_CUDA_CHECK(cuda_segmented_product(obs.const_data_ptr(), column.const_data_ptr(),
+                        product.mutable_data_ptr(), n, shape.phases, shape.radius, shape.bin_stride,
+                        frequency, width, stream));
+                    auto& inverse = width == plan.tile ? plan.inverse : plan.tail;
+                    inverse->enqueue(product.mutable_data_ptr(), fft_scratch, plan.scratch_bytes, true);
+                    record_fft(width, n, true, op.work, &work);
+                    count(op.work.cuda_segmented_inverse_ffts, width);
+                    C10_CUDA_CHECK(cuda_segmented_ranks(product.const_data_ptr(), block_best.mutable_data_ptr<double>(),
+                        states ? previous.const_data_ptr<float>() : nullptr,
+                        states ? next.mutable_data_ptr<float>() : nullptr,
+                        n, shape.arrivals, plan.frequencies, frequency, width, shape.tracking_hop,
+                        energy, noise_power, stream));
+                    const auto scored = mul(width, shape.arrivals);
+                    count(work.score_rows, scored);
+                    count(op.work.cuda_segmented_score_rows, scored);
+                }
+                C10_CUDA_CHECK(cuda_segmented_finish(block_best.const_data_ptr<double>(), sum.mutable_data_ptr<double>(),
+                    nullptr, nullptr, shape.arrivals, plan.frequencies, stream));
+                if (states) std::swap(previous, next);
+                // Keep the cancellation drain bounded without serializing
+                // the tiling and transfer of each individual FFT batch.
+                if ((block + 1) % 4 == 0) device_.synchronize(op.work);
+            }
+            if (states) {
+                C10_CUDA_CHECK(cuda_segmented_finish(nullptr, sum.mutable_data_ptr<double>(),
+                    previous.const_data_ptr<float>(), smooth.mutable_data_ptr<double>(),
+                    shape.arrivals, plan.frequencies, stream));
+                device_.download(smooth, smooth_ranks, at::kDouble, op.work);
+            }
+            device_.download(sum, fixed_ranks, at::kDouble, op.work);
+            cancelled(stop);
+            const auto finite = [](double x) { return std::isfinite(x); };
+            require(std::ranges::all_of(fixed_ranks, finite) && std::ranges::all_of(smooth_ranks, finite),
+                    "nonfinite Robust CUDA segmented rank");
+            count(op.work.cuda_segmented_sessions, 1);
+            op.work.executed = true;
+        } catch (...) {
+            // Keep borrowed input and device storage alive until all queued
+            // copies, custom kernels and transforms have stopped using them.
+            op.drain_failure();
+            throw;
+        }
+    }
+
     struct HalfFrequency {
         std::unique_ptr<CudaHalfFftPlan> bank_plan, observation_plan, inverse_plan;
         std::size_t frequencies = 0, batch = 0, workspace_bytes = 0, scratch_bytes = 0;
@@ -1370,6 +1632,10 @@ private:
 
     static std::size_t resident_bytes(std::size_t values, std::size_t workspaces, std::size_t item_bytes) {
         return add(mul(values, item_bytes), mul(workspaces, 48));
+    }
+
+    static std::size_t preparation_bytes(std::size_t fft_rows, std::size_t item_bytes) {
+        return add(mul(fft_rows, 12 * item_bytes), 2 * maximum_upload_bytes);
     }
 
     static std::size_t observation_bytes(const CoarseBulkGeometry& geometry, std::size_t frequencies) {
@@ -1937,11 +2203,14 @@ private:
     std::size_t matrix_fallback_ = no_matrix_fallback;
     std::string_view half_fft_precision_reason_, matrix_precision_reason_;
     bool automatic_matrix_ = false;
+    bool segmented_requested_ = false;
     bool lag_ = false, preparation_started_ = false, prepared_ = false, has_matrix_ = false;
     Charge resident_;
     at::Tensor observation_, bank_, inverse_a_, inverse_b_, inverse_d_;
     std::vector<Group> groups_;
 #if DATAPUMP_TRIAD_TENSOR_CUDA
+    std::vector<CoarseSegmentedShape> candidate_segments_;
+    std::vector<SegmentPlan> segments_;
     std::unique_ptr<CudaComplexMatrix> matrix_;
     std::unique_ptr<HalfFrequency> half_;
 #endif
@@ -2450,7 +2719,7 @@ class TensorBackend final : public ReceiverBulkBackend {
 public:
     explicit TensorBackend(const TensorReceiverOptions& options, bool automatic = false)
         : arena_(arena_for(options, automatic)), precision_(options.precision),
-          coarse_math_(options.coarse_math), automatic_(automatic) {
+          coarse_math_(options.coarse_math), automatic_(automatic), segmented_(options.segmented_timing) {
         (void)coarse_math_name(coarse_math_);
         require(precision_ != TensorPrecision::fp32_minimum || !requests_matrix(coarse_math_),
                 "Robust FP32 minimum conflicts with requested reduced-precision coarse contractions");
@@ -2481,15 +2750,21 @@ public:
     }
 
     std::unique_ptr<CoarseBulk> make_coarse(double rate, double clock_span) override {
-        return std::make_unique<TensorCoarse>(arena_, work_, precise(rate, clock_span), precision_, coarse_math_, automatic_);
+        return std::make_unique<TensorCoarse>(arena_, work_, precise(rate, clock_span), precision_, coarse_math_, automatic_, segmented_);
     }
 
     std::size_t maximum_frequency_tile_width(const CoarseBulkGeometry& geometry, std::size_t workspaces,
         std::size_t requested_width, double clock_span) const override {
-        if (!automatic_) return requested_width;
-        const auto item_bytes = precise(geometry.projected_sample_rate_hz, clock_span) ? 16 : 8;
+        if (!automatic_ && (!segmented_ || !arena_->device.is_cuda() || coarse_math_ != TensorCoarseMath::fft))
+            return requested_width;
+        const bool fp64 = precise(geometry.projected_sample_rate_hz, clock_span);
+        if (!automatic_ && fp64) return requested_width;
+        // The explicitly selected FP32 segmented search prepares its full
+        // bank before scoring these affine tiles. Size the tile while planning
+        // so the next stage fits the pinned budget after preparation finishes.
+        const auto item_bytes = fp64 ? 16 : 8;
         return TensorCoarse::maximum_frequency_tile_width(geometry, workspaces, requested_width, item_bytes,
-            arena_->options.workspace_bytes - arena_->existing_allocations);
+            arena_->options.workspace_bytes - arena_->existing_allocations, !automatic_);
     }
 
     std::size_t fine_host_bytes(std::size_t block_rows, std::size_t taps) const override {
@@ -2550,7 +2825,7 @@ private:
     std::shared_ptr<Arena> arena_;
     TensorPrecision precision_;
     TensorCoarseMath coarse_math_;
-    bool automatic_;
+    bool automatic_, segmented_;
     std::shared_ptr<BulkReceipt> work_ = std::make_shared<BulkReceipt>();
 };
 

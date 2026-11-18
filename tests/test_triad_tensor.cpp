@@ -91,6 +91,146 @@ bool same_coarse_work(const r::CoarseBulkWork& a, const r::CoarseBulkWork& b) {
 }
 
 #if DATAPUMP_TRIAD_TENSOR_CUDA
+void cuda_segmented_timing_oracle() {
+    v::TensorReceiverOptions options{v::TensorDevice::cuda, 0, 128 * mib};
+    options.segmented_timing = true;
+    auto backend = v::make_tensor_receiver_backend(options);
+    const auto initial_reserved = backend->receipt().reserved_bytes;
+    // An odd-sized template and lag count exercise uneven block and partial
+    // frequency tiles. One silent interior block must leave the tracker intact.
+    const r::CoarseSegmentedShape tracked{111, 15, 4, 64, 66, 3, 2, 2};
+    auto unlinked = tracked;
+    unlinked.radius = 11;
+    unlinked.tracking_hop = 0;
+    const std::array shapes{tracked, unlinked};
+    std::vector<Complex> column(tracked.kernel_rows), input(tracked.kernel_rows + tracked.arrivals - 1);
+    std::mt19937_64 generator(92861);
+    std::uniform_real_distribution<double> component(-1., 1.);
+    for (auto& value : input) value = {component(generator), component(generator)};
+    for (auto& value : column) value = {component(generator), component(generator)};
+    std::fill(column.begin() + column.size() / tracked.blocks,
+              column.begin() + 2 * column.size() / tracked.blocks, Complex{});
+    std::vector<std::complex<float>> spectra(tracked.blocks * tracked.phases * tracked.fft_rows);
+    for (std::size_t block = 0; block < tracked.blocks; ++block) {
+        const auto first = block * column.size() / tracked.blocks;
+        const auto rows = (block + 1) * column.size() / tracked.blocks - first + tracked.arrivals - 1;
+        for (std::size_t phase = 0; phase < tracked.phases; ++phase) {
+            for (std::size_t bin = 0; bin < tracked.fft_rows; ++bin) {
+                const double frequency = (bin + static_cast<double>(phase) / tracked.phases) / tracked.fft_rows;
+                Complex spectrum{};
+                for (std::size_t t = 0; t < rows; ++t)
+                    spectrum += input[first + t] * rotation(-frequency * t);
+                spectra[(block * tracked.phases + phase) * tracked.fft_rows + bin] =
+                    static_cast<std::complex<float>>(spectrum);
+            }
+        }
+    }
+    auto device = backend->make_coarse(750., .0003);
+    device->plan_segmented(shapes);
+    device->begin_fir_projection(64, 1, 64, {});
+    constexpr double noise_power = .4;
+    for (const auto& shape : shapes) {
+        const auto frequencies = 2 * shape.radius + 1;
+        std::vector<double> expected(shape.arrivals), tracked_expected(shape.arrivals);
+        std::vector<float> previous(frequencies * shape.arrivals), next(previous.size());
+        for (std::size_t block = 0; block < shape.blocks; ++block) {
+            const auto first = block * column.size() / shape.blocks;
+            const auto end = (block + 1) * column.size() / shape.blocks;
+            double energy = 0;
+            for (auto i = first; i < end; ++i) energy += std::norm(column[i]);
+            if (energy == 0) continue;
+            std::vector<double> block_best(shape.arrivals);
+            for (std::size_t f = 0; f < frequencies; ++f) {
+                const double cycles = (static_cast<double>(f) - shape.radius) * shape.bin_stride /
+                                      (shape.phases * shape.fft_rows);
+                for (std::size_t lag = 0; lag < shape.arrivals; ++lag) {
+                    // Evaluate the correlation in time. This reference does
+                    // not use FFTs, cyclic bin shifts, or device products.
+                    Complex correlation{};
+                    for (auto i = first; i < end; ++i)
+                        correlation += input[i + lag] * std::conj(column[i]) * rotation(-cycles * (i - first + lag));
+                    const auto value = std::norm(correlation) / energy;
+                    block_best[lag] = std::max(block_best[lag], value);
+                    if (shape.tracking_hop) {
+                        const auto at = f * shape.arrivals + lag;
+                        auto best = previous[at];
+                        const auto low = f > shape.tracking_hop ? f - shape.tracking_hop : 0;
+                        const auto high = std::min(frequencies - 1, f + shape.tracking_hop);
+                        for (auto j = low; j <= high; ++j)
+                            if (j != f) best = std::max(best, previous[j * shape.arrivals + lag] - std::log(2.f));
+                        next[at] = best + static_cast<float>(value / noise_power);
+                    }
+                }
+            }
+            for (std::size_t lag = 0; lag < shape.arrivals; ++lag) expected[lag] += block_best[lag];
+            previous.swap(next);
+        }
+        for (std::size_t i = 0; i < previous.size(); ++i)
+            tracked_expected[i % shape.arrivals] =
+                std::max(tracked_expected[i % shape.arrivals], static_cast<double>(previous[i]));
+        r::CoarseBulkWork work{};
+        const auto before = backend->receipt();
+        std::vector<double> fixed(shape.arrivals, -1.), smooth(shape.tracking_hop ? shape.arrivals : 0, -1.);
+        check(device->segmented_scores(shape, spectra, column, noise_power, fixed, smooth, work, {}),
+              "CUDA segmented timing declined its admitted fixture");
+        for (std::size_t lag = 0; lag < shape.arrivals; ++lag) {
+            near(fixed[lag], expected[lag], 3e-5, "CUDA segmented time-domain rank differs");
+            if (shape.tracking_hop)
+                near(smooth[lag], tracked_expected[lag], 3e-5, "CUDA segmented linked rank differs");
+        }
+        const auto same_arrivals = [&](const auto& actual, const auto& reference) {
+            const auto chosen = r::select_coarse_arrivals(actual, 2);
+            const auto oracle = r::select_coarse_arrivals(reference, 2);
+            return chosen.count == oracle.count && std::equal(chosen.indices.begin(),
+                chosen.indices.begin() + chosen.count, oracle.indices.begin());
+        };
+        check(same_arrivals(fixed, expected) && (!shape.tracking_hop || same_arrivals(smooth, tracked_expected)),
+              "CUDA segmented timing changed the fixture's selected public arrivals");
+        const auto after = backend->receipt();
+        const auto nonempty = shape.blocks - 1;
+        const auto inverses = nonempty * frequencies;
+        const auto rows = inverses * shape.arrivals;
+        check(work.forward_ffts == nonempty && work.inverse_ffts == inverses && work.score_rows == rows &&
+              after.cuda_segmented_sessions - before.cuda_segmented_sessions == 1 &&
+              after.cuda_segmented_forward_ffts - before.cuda_segmented_forward_ffts == nonempty &&
+              after.cuda_segmented_inverse_ffts - before.cuda_segmented_inverse_ffts == inverses &&
+              after.cuda_segmented_score_rows - before.cuda_segmented_score_rows == rows &&
+              after.score_rows == before.score_rows && after.peak_reserved_bytes <= after.workspace_limit_bytes,
+              "CUDA segmented timing lost completed work or credited ordinary score rows");
+        std::stop_source stopped;
+        stopped.request_stop();
+        bool cancelled = false;
+        r::CoarseBulkWork cancelled_work;
+        try { (void)device->segmented_scores(shape, spectra, column, noise_power, fixed, smooth,
+                                             cancelled_work, stopped.get_token()); }
+        catch (const datapump::Error& error) {
+            cancelled = std::string_view(error.what()).find("cancel") != std::string_view::npos;
+        }
+        check(cancelled && cancelled_work == r::CoarseBulkWork{} &&
+              backend->receipt().cuda_segmented_sessions == after.cuda_segmented_sessions,
+              "pre-cancelled CUDA segmented timing launched or published work");
+    }
+    device.reset();
+    auto oversized = tracked;
+    oversized.arrivals = 10553;
+    oversized.fft_rows = 16384;
+    oversized.radius = 1967;
+    auto tight = backend->make_coarse(750., .0003);
+    tight->plan_segmented(std::span(&oversized, 1));
+    tight->begin_fir_projection(64, 1, 64, {});
+    spectra.resize(oversized.blocks * oversized.phases * oversized.fft_rows);
+    std::vector<double> fixed(oversized.arrivals, -1.), smooth(oversized.arrivals, -1.);
+    r::CoarseBulkWork declined;
+    const auto before = backend->receipt();
+    check(!tight->segmented_scores(oversized, spectra, column, noise_power, fixed, smooth, declined, {}) &&
+          declined == r::CoarseBulkWork{} && backend->receipt().cuda_segmented_sessions == before.cuda_segmented_sessions &&
+          std::ranges::all_of(fixed, [](double value) { return value == -1.; }) &&
+          std::ranges::all_of(smooth, [](double value) { return value == -1.; }),
+          "unsupported segmented tracking workspace changed results or work");
+    tight.reset();
+    check(backend->receipt().reserved_bytes == initial_reserved, "CUDA segmented owner leaked its device workspace");
+}
+
 void cuda_arrival_peak_oracle() {
     const auto stream = c10::cuda::getStreamFromPool(false, 0);
     const c10::cuda::CUDAStreamGuard guard(stream);
@@ -764,6 +904,95 @@ struct MatrixCoarseFixture {
         return scores;
     }
 };
+
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+void pinned_segmented_frequency_tiles(bool check_large_plan) {
+    v::TensorReceiverOptions options{v::TensorDevice::cuda, 0, 128 * mib};
+    options.segmented_timing = true;
+    const auto large_cap = std::size_t{64} * 1024 * mib;
+    const r::CoarseBulkGeometry long_geometry{2, 4'430'086, 8'388'608, 10'553, 427, 750., 1.};
+    bool large_fits = false;
+    {
+        auto backend = v::make_tensor_receiver_backend(options);
+        const auto identity = backend->receipt();
+        large_fits = identity.initial_free_device_bytes >= large_cap + identity.runtime_headroom_bytes;
+        MatrixCoarseFixture fixture(35, 13, 17, 2);
+        auto geometry = fixture.geometry;
+        // Extra zero padding exercises the memory-bound partition without a
+        // long template. The independent time-domain scores remain unchanged.
+        geometry.correlation_fft_rows = 65536;
+        const auto width = backend->maximum_frequency_tile_width(geometry, fixture.workspaces.size(),
+                                                                  fixture.frequencies, .25);
+        check(width == 4, "pinned segmented CUDA did not bound the ordinary FFT frequency tile at 128 MiB");
+        bool rejected = false;
+        try { (void)backend->maximum_frequency_tile_width(long_geometry, 78, 1, .0003); }
+        catch (const v::ReceiverWorkspaceError&) { rejected = true; }
+        check(rejected && !backend->receipt().executed, "an unfit single-frequency CUDA tile passed preflight");
+        auto ordinary = options;
+        ordinary.segmented_timing = false;
+        const auto legacy = v::make_tensor_receiver_backend(ordinary);
+        check(legacy->maximum_frequency_tile_width(long_geometry, 78, 32, .0003) == 32 &&
+              !legacy->receipt().executed, "explicit CUDA changed its ordinary unpinned frequency tile");
+        geometry.frequency_tile_width = width;
+        auto owner = backend->make_coarse(geometry.projected_sample_rate_hz, .25);
+        r::CoarseBulkWork prep, scores, peaks;
+        owner->prepare(geometry, fixture.active, fixture.workspaces, {}, prep, {});
+        for (std::size_t first = 0; first < fixture.frequencies; first += width) {
+            const auto tile = std::span(fixture.frequency).subspan(first, std::min(width, fixture.frequencies - first));
+            const auto oracle_row = [&](std::size_t w, std::size_t f) {
+                return std::span(fixture.active_scores).subspan(
+                    (w * fixture.frequencies + first + f) * fixture.arrivals, fixture.arrivals);
+            };
+            std::size_t seen = 0;
+            owner->frequency_tile(tile, [&](std::size_t w, std::size_t count, std::span<const double> actual) {
+                check(w == seen && actual.size() == count * tile.size() * fixture.arrivals,
+                      "bounded CUDA frequency tile lost a score row");
+                for (std::size_t b = 0; b < count; ++b)
+                    for (std::size_t f = 0; f < tile.size(); ++f) {
+                        const auto expected = oracle_row(w + b, f);
+                        for (std::size_t lag = 0; lag < fixture.arrivals; ++lag)
+                            near(actual[(b * tile.size() + f) * fixture.arrivals + lag], expected[lag], 5e-5,
+                                 "bounded CUDA frequency score differs from direct two-ray oracle");
+                    }
+                seen += count;
+            }, scores, {});
+            check(seen == fixture.workspaces.size(), "bounded CUDA frequency tile missed a template bank");
+            seen = 0;
+            const auto published = owner->frequency_peaks(tile, 2,
+                [&](std::size_t w, std::size_t count, std::span<const r::CoarseBulkPeaks> actual) {
+                    check(w == seen && actual.size() == count * tile.size(), "bounded CUDA peak tile lost a bank");
+                    for (std::size_t b = 0; b < count; ++b)
+                        for (std::size_t f = 0; f < tile.size(); ++f) {
+                            const auto row = oracle_row(w + b, f);
+                            const auto expected = r::select_coarse_arrivals(row, 2);
+                            const auto& result = actual[b * tile.size() + f];
+                            check(result.count == expected.count, "bounded CUDA tile changed the peak count");
+                            for (std::size_t i = 0; i < expected.count; ++i) {
+                                check(result.lags[i] == expected.indices[i], "bounded CUDA tile changed the peak lag");
+                                near(result.scores[i], row[expected.indices[i]], 5e-5, "bounded CUDA tile changed the peak score");
+                            }
+                        }
+                    seen += count;
+                }, peaks, {});
+            check(published && seen == fixture.workspaces.size(), "bounded CUDA frequency peak tile was incomplete");
+        }
+        const auto report = backend->receipt();
+        for (const auto& work : {scores, peaks})
+            check(work.workspace_frequency_pairs == 26 && work.score_rows == 442 &&
+                  work.forward_ffts == 13 && work.inverse_ffts == 52,
+                  "bounded ordinary CUDA FFT tiles changed the completed public grid");
+        check(report.executed && report.cuda && report.score_rows == 884 && !report.cuda_segmented_sessions &&
+              report.peak_reserved_bytes <= options.workspace_bytes, "bounded CUDA FFT tiles lost device accounting");
+    }
+    if (check_large_plan && large_fits) {
+        // The real 98-minute geometry only needs the planning operation.
+        options.workspace_bytes = large_cap;
+        const auto backend = v::make_tensor_receiver_backend(options);
+        check(backend->maximum_frequency_tile_width(long_geometry, 78, 32, .0003) == 15 &&
+              !backend->receipt().executed, "64 GiB pinned segmented CUDA plan changed the 98-minute tile bound");
+    }
+}
+#endif
 
 std::size_t matrix_fallback_index(std::string_view reason) {
     const auto found = std::find(r::bulk_matrix_fallback_reasons.begin(), r::bulk_matrix_fallback_reasons.end(), reason);
@@ -2378,6 +2607,103 @@ void automatic_cuda_matrix(const std::shared_ptr<r::ReceiverBulkBackend>& backen
     score(*backend, fixture, 32, false, "cuda-int8-matrix-workspace-limit");
 }
 
+void automatic_segmented_lease(r::ReceiverBulkBackend& backend) {
+    const r::CoarseSegmentedShape broad{1024, 7036, 64, 16384, 492, 1, 1, 2};
+    auto small = broad;
+    small.radius = 31;
+    const std::array families{broad, small};
+    const auto initial = backend.status_receipt();
+    const bool sm120 = initial.cuda_compute_major == 12 && initial.cuda_compute_minor == 0;
+    const auto free = initial.workspace_limit_bytes - initial.reserved_bytes;
+    // Only the first template block has energy. Two observed impulses select
+    // an interior and an endpoint; scanning all 985 frequencies leaves their
+    // magnitude unchanged. The remaining 63 block transitions are identities.
+    std::vector<Complex> column(broad.kernel_rows);
+    column.front() = 1.;
+    std::vector<std::complex<float>> spectra(broad.blocks * broad.fft_rows);
+    constexpr std::size_t first_peak = 11;
+    const auto last_peak = broad.arrivals - 1;
+    for (std::size_t k = 0; k < broad.fft_rows; ++k) {
+        const auto cycles = -static_cast<double>(k) / broad.fft_rows;
+        spectra[k] = static_cast<std::complex<float>>(2. * rotation(cycles * first_peak) +
+                                                      .5 * rotation(cycles * last_peak));
+    }
+    const auto run = [&](bool pressure) {
+        auto owner = backend.make_coarse(750., .0003);
+        owner->plan_segmented(families);
+        owner->begin_fir_projection(64, 1, 64, {});
+        for (const auto& shape : families) {
+            std::vector<double> fixed(shape.arrivals, -1.), smooth(shape.arrivals, -1.);
+            r::CoarseBulkWork work{};
+            const auto before = backend.status_receipt();
+            const auto used = owner->segmented_scores(shape, spectra, column, .5, fixed, smooth, work, {});
+            const bool candidate = sm120 && shape == broad;
+            const auto after = backend.status_receipt();
+            check(used == (candidate && !pressure) &&
+                  after.cuda_segmented_native_fallbacks - before.cuda_segmented_native_fallbacks ==
+                      static_cast<unsigned>(candidate && pressure),
+                  "automatic CUDA segmented route or admission fallback differs");
+            const auto transforms = used ? 2 * shape.radius + 1 : 0;
+            check(work.forward_ffts == static_cast<unsigned>(used) && work.inverse_ffts == transforms &&
+                  work.score_rows == transforms * shape.arrivals && after.score_rows == before.score_rows &&
+                  after.cuda_segmented_sessions - before.cuda_segmented_sessions == static_cast<unsigned>(used) &&
+                  after.cuda_segmented_forward_ffts - before.cuda_segmented_forward_ffts == static_cast<unsigned>(used) &&
+                  after.cuda_segmented_inverse_ffts - before.cuda_segmented_inverse_ffts == transforms &&
+                  after.cuda_segmented_score_rows - before.cuda_segmented_score_rows == work.score_rows,
+                  "automatic segmented accounting did not cover the complete eligible frequency/arrival surface");
+            for (std::size_t lag = 0; lag < shape.arrivals; ++lag) {
+                if (!used) {
+                    check(fixed[lag] == -1. && smooth[lag] == -1., "declined automatic segmented route published ranks");
+                    continue;
+                }
+                const double expected = lag == first_peak ? 4. : lag == last_peak ? .25 : 0.;
+                near(fixed[lag], expected, 3e-5, "automatic segmented unlinked impulse rank differs");
+                near(smooth[lag], 2 * expected, 3e-5, "automatic segmented linked impulse rank differs");
+            }
+            if (used) {
+                for (const auto& ranks : {std::cref(fixed), std::cref(smooth)}) {
+                    const auto peaks = r::select_coarse_arrivals(ranks.get(), 2);
+                    check(peaks.count == 2 && std::min(peaks.indices[0], peaks.indices[1]) == first_peak &&
+                          std::max(peaks.indices[0], peaks.indices[1]) == last_peak,
+                          "automatic segmented fixture changed the public arrival frontier");
+                }
+            }
+        }
+        // The pressured optional lease stays live. An ordinary minimum-sized
+        // peer on the same device must still enter and do real FIR work.
+        if (pressure) {
+            const auto occupied = backend.status_receipt().reserved_bytes;
+            constexpr auto fft_rows = 64u, output_rows = 64u;
+            const auto peer_minimum = (17 * fft_rows + 3 * output_rows) * sizeof(std::complex<float>);
+            check(initial.workspace_limit_bytes - occupied >= peer_minimum,
+                  "optional segmented lease denied a previously admissible FIR peer");
+            auto peer = backend.make_coarse(750., .0003);
+            peer->begin_fir_projection(fft_rows, 1, output_rows, {});
+            r::CoarseBulkWork fir_work;
+            const std::array<double, 1> taps{1.};
+            const auto filter = peer->prepare_filter(taps, fft_rows, fir_work, {});
+            const auto result = peer->project_fir(*filter, {1, 1, 0, 1, 0, 1},
+                [](std::size_t, std::span<Complex> out) { out.front() = {2., -1.}; }, fir_work, {});
+            check(result.size() == 1 && fir_work.fir_output_contributions == 1,
+                  "ordinary CUDA FIR peer lost work during segmented fallback");
+            near(result.front(), {2., -1.}, 1e-5, "ordinary CUDA FIR peer changed its output");
+        }
+    };
+    if (!sm120 || free >= 512 * mib) run(false);
+    else std::cout << "Skipped automatic segmented positive fixture with less than 512 MiB available\n";
+    if (free >= 16 * mib) {
+        // Reserve an accounting lease only. The remaining 8 MiB admit two
+        // ordinary FIR peers, but cannot hold the >50 MiB tracked state.
+        auto held = backend.make_coarse(750., .0003);
+        held->begin_fir_projection(1, 1, (free - 8 * mib) / (3 * sizeof(std::complex<float>)), {});
+        run(true);
+    } else std::cout << "Skipped automatic segmented lease-contention fixture with less than 16 MiB available\n";
+    const auto after = backend.status_receipt();
+    check(after.reserved_bytes == initial.reserved_bytes && !after.device_admission_waiters &&
+          after.peak_reserved_bytes <= initial.workspace_limit_bytes,
+          "automatic segmented admission leaked a lease or exceeded the shared arena");
+}
+
 void automatic_cuda_backend() {
     const auto backend = v::make_automatic_cuda_receiver_backend();
     for (const auto rows : {750u, 1024u})
@@ -2452,6 +2778,7 @@ void automatic_cuda_backend() {
     if (wake_failure) std::rethrow_exception(wake_failure);
     check(backend->status_receipt().reserved_bytes == before.reserved_bytes, "CUDA phase lease was not released");
 
+    automatic_segmented_lease(*backend);
     automatic_cuda_matrix(backend);
     coarse(*backend);
     full_slot(backend);
@@ -2475,6 +2802,7 @@ int main(int argc, char** argv) {
     try {
         bool cuda = false, matrix_only = false, matrix_benchmark = false;
         bool peaks_only = false, peak_benchmark = false, component_describe = false, automatic_cuda = false;
+        bool segmented_only = false, automatic_segmented_only = false;
         std::optional<v::TensorCoarseMath> matrix_math;
         std::optional<unsigned> matrix_benchmark_case;
         std::optional<std::size_t> matrix_benchmark_workspace_mib;
@@ -2486,6 +2814,8 @@ int main(int argc, char** argv) {
             else if (option == "--matrix-only") matrix_only = true;
             else if (option == "--matrix-benchmark") matrix_benchmark = true;
             else if (option == "--peaks-only") peaks_only = true;
+            else if (option == "--segmented-only") segmented_only = true;
+            else if (option == "--segmented-auto-only") automatic_segmented_only = true;
             else if (option == "--peak-benchmark") peak_benchmark = true;
             else if (option == "--matrix-benchmark-case") {
                 check(++i < argc && !matrix_benchmark_case, "--matrix-benchmark-case requires one 0|1 value");
@@ -2510,11 +2840,13 @@ int main(int argc, char** argv) {
                 else if (name == "int8") matrix_math = v::TensorCoarseMath::int8;
                 else check(false, "--matrix-math requires fp16|int8");
             }
-            else check(false, "usage: test_triad_tensor [--cuda] [--cuda-automatic|--component-describe|--matrix-only|--matrix-benchmark|--peaks-only|--peak-benchmark] [--matrix-math fp16|int8] [--matrix-benchmark-case 0|1] [--matrix-benchmark-workspace-mib N]");
+            else check(false, "usage: test_triad_tensor [--cuda] [--cuda-automatic|--component-describe|--matrix-only|--matrix-benchmark|--peaks-only|--segmented-only|--segmented-auto-only|--peak-benchmark] [--matrix-math fp16|int8] [--matrix-benchmark-case 0|1] [--matrix-benchmark-workspace-mib N]");
         }
-        check(cuda || (!matrix_only && !matrix_benchmark && !peaks_only && !peak_benchmark && !automatic_cuda),
+        check(cuda || (!matrix_only && !matrix_benchmark && !peaks_only && !segmented_only && !automatic_segmented_only &&
+                       !peak_benchmark && !automatic_cuda),
               "CUDA-specific checks require --cuda");
-        check(static_cast<unsigned>(matrix_only) + matrix_benchmark + peaks_only + peak_benchmark + component_describe +
+        check(static_cast<unsigned>(matrix_only) + matrix_benchmark + peaks_only + segmented_only + automatic_segmented_only +
+                  peak_benchmark + component_describe +
                   automatic_cuda <= 1,
               "select at most one focused check or benchmark");
         check(!(matrix_only && matrix_benchmark), "select either --matrix-only or --matrix-benchmark");
@@ -2523,6 +2855,13 @@ int main(int argc, char** argv) {
               "benchmark case/workspace selectors require --matrix-benchmark");
         if (automatic_cuda) {
             automatic_cuda_backend();
+            return 0;
+        }
+        if (automatic_segmented_only) {
+            const auto backend = v::make_automatic_cuda_receiver_backend();
+            automatic_segmented_lease(*backend);
+            std::cout << "Robust automatic CUDA segmented admission and FIR peer checks passed on "
+                      << backend->status_receipt().device_name << '\n';
             return 0;
         }
         if (component_describe) {
@@ -2536,6 +2875,12 @@ int main(int argc, char** argv) {
             return 0;
         }
 #if DATAPUMP_TRIAD_TENSOR_CUDA
+        if (segmented_only) {
+            cuda_segmented_timing_oracle();
+            pinned_segmented_frequency_tiles(true);
+            std::cout << "Robust CUDA segmented timing and bounded frequency-tile oracles passed\n";
+            return 0;
+        }
         if (peak_benchmark) {
             cuda_peak_benchmark();
             return 0;
@@ -2557,6 +2902,8 @@ int main(int argc, char** argv) {
                 return 0;
             }
             if (!matrix_only) {
+                cuda_segmented_timing_oracle();
+                pinned_segmented_frequency_tiles(false);
                 cuda_arrival_peak_oracle();
                 cuda_mapping_rounding_holdouts();
                 cuda_mapping_pointwise();
