@@ -1148,12 +1148,60 @@ coefficient for positive, negative and zero Doppler at two worker allocations.
 All 45 local triad tests passed.
 
 The four-worker automatic route processed the matched five-slot input
-`4a3603c8…0b69` in 40.365 s before the change and 26.716 s after it. Both
-recovered `001`, scored the two quiet slots, and kept the EOF-only control
-incomplete. Both credited 23,706,540 coarse rows, 365,526 fine statistics
-and 68,635,980 resident FP4 modes including the EOF control. Resident upload
-volume decreased from 526.43 MB to 410.10 MB. The timing covers receiver
-service, with simulator generation and the EOF control separately measured.
+`4a3603c8…0b69`. Both builds recovered `001`, scored two quiet slots, and
+kept the EOF-only control incomplete. Both credited 23,706,540 coarse rows,
+365,526 fine statistics, 68,736,528 total projected values and 68,635,980
+resident FP4 modes, including the EOF control. They used 2,905 GPU
+submissions with 2,898 pairs and seven singles, plus six native terminal
+blocks. Resident uploads fell from 526,425,024 to 410,099,056 bytes. Both
+read back 64,254,960 bytes of resident statistics.
+
+#### Five-slot timing and measurement scopes
+
+The values are elapsed seconds on the same device. The probe emits
+`phases[].name`, `wall_seconds` and `scope`. See
+[`simulate`, `frontend`, `replay` and `stream_run`](../tools/triad-receiver-probe.cpp).
+
+| Probe phase | Reference | Candidate | Clock and coverage |
+| --- | ---: | ---: | --- |
+| `profile_preparation` | 0.1025 | 0.0930 | Native profile setup before the replay. |
+| `simulator` | 15.5633 | 11.2167 | Synthetic source, channel and noise generation for this capture, including its bounded spool write. |
+| `capture_spool_write` | 0.0654 | 0.0545 | Subset of simulator wall time. |
+| `audio_frontend` | 0.3636 | 0.3534 | Separate real-PCM frontend diagnostic, including its setup and projection. Excludes spool replay verification and the pre-projection PCM construction. The measured receiver consumes the native IQ replay. |
+| `receiver_service` | 40.3645 | 26.7160 | Complete native five-slot IQ replay wall time, including bounded spool reads and verification and receiver construction and drain. |
+| `controller_service` | 0.1533 | 0.1433 | Overlapping controller wall interval after subtracting its measured condition-variable waits and spool I/O from replay wall time. |
+| `eof_control` | 8.4666 | 5.6013 | Separate one-DATA-slot replay. It leaves the message incomplete and its work contributes to the aggregate backend receipt. |
+
+The active replay's slot timers below are elapsed spans for each slot owner.
+Owners overlap. Summing the coarse spans gives 50.118 s and 40.168 s,
+while the fine spans total 6.104 s and 4.343 s. Use the `receiver_service`
+row for stream latency and throughput. The per-slot spans show where
+within-owner attention is most useful.
+
+| Slot | Outcome | Reference coarse / fine (s) | Candidate coarse / fine (s) |
+| ---: | --- | ---: | ---: |
+| 0 | DATA `0` | 7.983 / 0.988 | 5.428 / 0.724 |
+| 1 | DATA `0` | 8.013 / 0.973 | 6.967 / 0.719 |
+| 2 | DATA `1` | 7.917 / 0.979 | 10.290 / 0.713 |
+| 3 | Quiet | 10.427 / 1.589 | 7.030 / 1.096 |
+| 4 | Quiet | 15.778 / 1.575 | 10.453 / 1.090 |
+
+The single-slot candidate starts with about 59–90% of elapsed receiver
+time in coarse service for these fixtures. Fine time includes CPU work, the
+resident OpenCL path where selected, waits, and the native terminal block.
+The phase timers and GPU counters below have nested scopes.
+
+| Scope | Measured evidence and limits |
+| --- | --- |
+| Single-slot resident OpenCL | Severe and quiet kept 405 submissions, 404 pairs, 552 tile uploads, 10,251,648 readback bytes, and 16,811,776 peak device lease bytes. Severe had 376 map dispatches and 1,043 blocking writes. Quiet had 386 and 1,008. Stable reported 276 tile uploads, 376 map dispatches and 920 blocking writes. These count work and staging, and contain no per-kernel elapsed intervals. |
+| Vulkan command timing | The explicit resident W24 trials reported 22 timed submissions and about 3.14–3.17 ms summed command intervals. The two W24 native-fine controls also reported 22, with 84.80 ms severe and 83.70 ms quiet. The automatic message recorded 78 and 27.61–27.63 ms across both replays. These bracket timed Vulkan command buffers on the device clock after query availability checks, excluding OpenCL and host setup. The route-dependent difference is unresolved. Use coarse wall time and separately qualified subphase timings to attribute the receiver bottleneck. |
+| OpenCL event timing | The instrumented candidate hit its work deadline before any physical-GPU event timing receipt. Host source/cache, blocking transfers, device mapping, scaling and packing, the matrix, statistics, readback and device idle gaps remain unsplit in this comparison. |
+
+The Vulkan backend's own `wall_seconds` sums host spans from before the
+submit lock through fence completion. Command recording and other setup
+have separate scopes. That host sum and the device query intervals can
+overlap across owners. `vulkan_timed_submissions` counts available command
+intervals, and each command buffer may contain multiple dispatches.
 
 Fresh 24-worker native controls on the candidate build took 0.591 s fine
 and 2.279 s total for severe, and 0.564 s fine and 2.168 s total for quiet.
@@ -1161,12 +1209,13 @@ Those times support the existing automatic native preference at that width.
 Intermediate allocations, sustained service and reception on other hardware
 remain outside this campaign.
 
-The separate instrumented build reached the pod work deadline before it
-returned a device timing receipt. The completed stock-path comparisons
-establish receiver throughput. Keep the compact technical receipts in
+The bounded stock-path comparisons establish receiver throughput for their
+retained fixtures. Keep the compact technical receipts in
 `local-evidence/blackwell-shared-mapping-20261119/` until a newer matched
-profile supersedes this geometry.
-[Implementation and profiling](triad-gpu-optimization.md#shared-bit-mapping-and-coarse-phase-reuse).
+profile supersedes this geometry. The tracked timings, fixture commands and
+acceptance receipts are the handoff baseline.
+[Blackwell continuation guide](triad-gpu-optimization.md#continue-blackwell-fp4-work)
+· [Reproduction](triad-gpu-optimization.md#reproduce-the-matched-blackwell-runs).
 
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 

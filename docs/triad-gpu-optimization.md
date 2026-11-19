@@ -21,8 +21,9 @@ qualification for its waveform, shapes and complete work.
 The canonical native backend now contains optional FP16 and INT8
 post-channelization lag-DFT paths with reusable coefficients and bounded
 workspace/arrival batching. Bounded GPU fixtures and two large bulk shapes pass;
-complete-receiver qualification remains separate. The new FP4 candidate was
-removed after failing the then-frozen noise-peak gate, preserving its findings.
+complete-receiver qualification remains separate. The historical FP4 coarse
+lag-matrix candidate was removed after failing the then-frozen noise-peak gate.
+The resident fine projection described below remains in the native receiver.
 That historical diagnostic failure alone is not a universal precision veto:
 current qualification compares complete cost, physical reception, false alarms
 and measured sensitivity loss with the user's proportional tradeoff in the
@@ -32,6 +33,134 @@ arithmetic growth does not disappear when its storage is tiled. The qualified
 Radeon direct route has a separately bounded envelope. Promote a different
 default only with applicable complete-work and backlog evidence; an easy-case
 efficiency result is insufficient.
+
+## Continue Blackwell FP4 work
+
+Start with the [latest same-device baseline](validation.md#blackwell-shared-bit-mapping-and-coarse-phase-reuse--19-november-2026),
+the [five-slot timing breakdown](validation.md#five-slot-timing-and-measurement-scopes),
+and the [exact reproduction](#reproduce-the-matched-blackwell-runs). The
+tracked record carries the fixture identities, setup and work counts needed
+to continue from a fresh checkout. The timings distinguish native stage
+spans, complete service, and historical device-only matrix measurements.
+
+Improve complete receiver service on challenging work. Preserve every public
+hypothesis, the configured calendar and keyed ordinals, bounded workspace,
+physical quiet-slot completion, and the full automatic `W = 2*H` software
+worker budget. Treat the four-worker and 24-worker values below as explicit
+benchmark allocations. An eligible fine owner can temporarily have fewer
+lanes than the full receiver. The current automatic Vulkan/OpenCL route
+selects resident FP4 for the qualified geometry with at most four fine-owner
+lanes. Native fine won the fresh 24-worker severe and quiet comparisons.
+The crossover between those allocations remains open. Compare at full
+admitted budget when qualifying wider automatic dispatch.
+[Precision policy](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling)
+· [Worker allocation](development.md#receiver-cpu-allocation).
+
+### Receiver path and timing landmarks
+
+| Work | Where it runs and where to inspect |
+| --- | --- |
+| Source, channel and receiver service | The [native probe](../tools/triad-receiver-probe.cpp) generates the input and replays it through the [stream receiver](../src/triad_stream_receiver.cpp). Application scheduling, ordered commitments, codec and physical completion remain native. Inspect `score_slot_coarse` and `score_slot_fine` in [the receiver](../src/triad_receiver.cpp) and `stream_run` in the probe for timing boundaries. |
+| Coarse search | [Coarse preparation](../src/triad_receiver_coarse.cpp) has native observation channelization, keyed template bank, exact cubic warp and reused Doppler phase. `Projection::apply` performs native overlap-add FFT convolution on the filtered Vulkan route. [Vulkan](../src/triad_vulkan_backend.cpp) transforms the bank and rotated observations, forms correlation products, does inverse FFT and quadratic scoring, then compacts the exact peak frontier before readback. The matched broad geometry has 78 workspaces, 15 frequencies and 3,377 arrivals, with two rays per template. |
+| Fine source and ownership | `FineSession` in [fine processing](../src/triad_receiver_fine.cpp) prepares receiver observations and advances tracking and likelihood state. [MappedBasis](../src/triad_receiver_basis.cpp) produces and pins immutable keyed source tiles and exports the native mappings. It groups compatible ready blocks without advancing later state early. Candidate sets larger than one GPU submission retain every candidate. |
+| OpenCL resident work | [Host projection and staging](../src/triad_opencl_nvfp4_projection.cpp) owns the queue, tile cache, descriptor flush, uploads and readback. [Device kernels](../src/triad_opencl_nvfp4_kernels.cu) render the paired maps and determine their scale. The FP4 path packs templates and coefficients and runs block-scaled E2M1 Tensor Core projection with FP32 accumulation. The [resident FFT](../src/triad_opencl_fine_fft.cuh) uses FP32 arithmetic and gathers the same bins. Both compute FP64 sufficient statistics on the device. The receiver reads those statistics and applies native state updates. |
+| Fallback and receipts | [Vulkan routing](../src/triad_vulkan_backend.cpp) defines public geometry, shared device admission and native terminal, Helper-taper or workspace fallback. [Bulk work](../src/triad_receiver_bulk.hpp) defines what the counters cover. The distinct native CUDA path lives in [the CUDA backend](../src/triad_tensor_backend.cpp) and supports direct cuFFT and NVFP4 controls. Its results qualify that backend and runtime. |
+
+The latest resident gain shortened the work around the matrix. Use the
+[prior 576-lane matrix-only and large cuBLASLt controls](#same-card-resident-and-staged-controls)
+for scale. The latter reached 1.309 PFLOP/s in a large dense synthetic
+multiplication, compared with a roughly 2 PFLOP/s dense hardware reference.
+The severe slot's 404 paired submissions and one single submission issue
+137.424 GFLOP at `N=96` and `K=3072` padded. Applying the old already-packed
+9.22 µs paired and 8.93 µs single event medians to that schedule gives about
+3.7 ms of matrix time as an illustrative fixed-shape estimate. The latest
+severe fine span is about one second. Issued-equivalent throughput over
+fine-stage wall time, active matrix throughput, and Tensor Core duty are
+separate measures. The new mapper removed 107,928 descriptors per severe or
+quiet slot, saving 18,995,328 bytes while the blocking-write counts and tile
+miss counts stayed the same. The matched improvement combines mapping,
+host-side changes and coarse phase reuse.
+
+### First profiling experiment
+
+1. Start with a single W24 severe `admission` fixture and its exact
+   resident-FP4 work receipt. Capture an uninstrumented timing before
+   enabling profiling. Build and verify the instrumented probe before a
+   paid timing window where practical. The previous scratch profile
+   compiled and passed simulated event handling, then ran out of its
+   pod work window before obtaining GPU events. The current production
+   queue uses flags zero and its enqueues omit event handles.
+2. In an experiment-only build of `OpenClNvfp4Projection`, enable
+   `CL_QUEUE_PROFILING_ENABLE` on the existing in-order queue. Request tagged
+   events for buffer fill, tile uploads, descriptor uploads, direct columns,
+   observation upload, each map flush, peak scaling, input pack, the FP4
+   product or FFT, sufficient statistics and statistics readback. Record
+   bin upload and basis packing as cold setup. Read and release bounded
+   event records after the existing blocking checkpoints. Preserve
+   cancellation and host-buffer lifetimes. Count expected, timed and
+   missing events and retain per-stage counts, bytes and completed mode
+   counts. Treat `START` to `END` as a command interval. Track gaps between
+   commands on the same device clock and collect `QUEUED` and `SUBMIT`
+   where available. Use actual documented hardware counters for Tensor
+   pipe activity where accessible under the same runtime restrictions.
+   Earlier CUDA hardware-counter requests returned `ERR_NVGPUCTRPERM`.
+   The latest OpenCL attempt ended at the work deadline before collection.
+   [OpenCL event profiling](https://registry.khronos.org/OpenCL/specs/unified/refpages/man/html/clGetEventProfilingInfo.html).
+3. Collect monotonic host spans for source callback work, tile fill/cache
+   lookup and pinning, descriptor assembly, memory copies, enqueue, blocking
+   upload/read calls, result unpack and remaining native tracking. A source
+   callback can contain staging and a blocking cache flush. Record exclusive
+   spans or an explicit nesting and overlap relation. Keep host and device
+   clocks separate unless calibrated and preserve an uninstrumented result
+   as the performance control.
+4. Split the larger coarse span before proposing a replacement. Measure
+   `filter_setup`, `mapped_fidelity`, `template_bank`, `observation`,
+   `lag_setup`, `bulk_prepare`, `search` and `selection`. The probe's
+   `acquire` and `coarse_json` expose these in diagnostic commands. The
+   diagnostic Helper schedule and public coarse geometry can differ from
+   `admission` or `message`. Verify coverage before transferring timings,
+   or expose a bounded `CoarseProgress` receipt on the matched production
+   probe. Keep overlapping bank, observation and Helper spans separate,
+   and treat repeated search counters as cumulative. Compare host command
+   recording, submit/fence wall, available Vulkan query pairs and FFT or
+   shader setup. Investigate the route-dependent timestamp difference in
+   the [timing record](validation.md#five-slot-timing-and-measurement-scopes)
+   before assigning more of coarse wall time to a particular stage.
+   [Vulkan timestamp semantics](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdWriteTimestamp.html).
+
+### Choose the next optimization from attribution
+
+1. If source work or blocking submissions dominate fine time, overlap
+   bounded preparation for an already-ready extent with current device
+   work. Compare grouped staging or reusable asynchronous upload storage.
+   Retain queued storage through driver completion, charge its full
+   ownership lifetime, and keep direct/eviction paths and cancellation
+   covered. Use source-cache misses and host wait measurements to decide
+   which overhead to remove.
+2. If the FP4 product consumes a material share, compare a more useful
+   batch shape or matrix layout against the same resident FFT. Preserve
+   tracking dependencies and the complete-owner budget when grouping
+   ready work. Report issued padded arithmetic, useful work, packing,
+   workspace and complete elapsed time. A larger resident-only control
+   establishes what the card can sustain for its own geometry.
+3. For coarse-dominated service, test reduced native warp or channelizer
+   work and a device-resident FIR/crop on the same coarse prior before
+   replacing the FFT. An exploratory Tensor Core coarse formulation can
+   share one observation lag matrix by placing the trial-frequency
+   rotation on the template. The resulting common arrival phase cancels
+   in the two-ray quadratic score. Its additional dense work, preparation
+   and noise-ranking effects need a bounded comparison. Earlier FP4 coarse
+   work changed a unique noise peak, so include an acquisition and quiet
+   holdout before adopting a different arithmetic route.
+
+Use the [abbreviated test policy](robust-current.md#testing-computationally-intensive-robust-changes).
+After an attribution look, predeclare the smallest useful matched comparison.
+Repeat in reverse order when a timing difference is uncertain. For a routing
+or arithmetic change, include the severe and quiet cases, native and
+applicable GPU controls, and the complete stable message through two quiet
+slots. Preserve the severe wrong-bit receipt as an unresolved reception
+case. For broader performance or precision claims, use independent holdouts
+and backlog, sensitivity and workspace checks within the same contracts.
 
 ## What to measure separately
 
@@ -203,14 +332,14 @@ At the observed input rate the same bound is about 2.69 TFLOP/s. A packed
 FP4 input plus scales and peaks would shrink the upload about 6.9×. Host
 quantization and a still-limited link would remain part of that design. To
 feed 2 PFLOP/s at this batch's arithmetic count through a 63 GB/s link,
-each direction could move only about 5.4 kB per batch. Even the current
-108 kB projection readback would cap fully overlapped throughput near
-99 TFLOP/s by itself. A high-use projection pipeline needs reuse over many
-batches and fewer results crossing to the host, as well as input residency.
+each direction could move only about 5.4 kB per batch. The staged 108 kB
+projection readback would cap fully overlapped throughput near 99 TFLOP/s
+by itself. The [later resident route](#resident-mapping-and-paired-fine-statistics)
+reduces the returned data to sufficient statistics.
 [PCI-SIG encoded link rate](https://pcisig.com/sites/default/files/files/PCIe_Specification_Webinar_Rev%206_FINAL_0.pdf).
 
 The 809 matrix-event medians add to only 7.08 ms. Even eliminating all of
-that estimated time from the current schedule would save about 0.47% of fine
+that estimated time from the staged schedule would save about 0.47% of fine
 time and 0.11% of slot time. Coarse processing accounts for 5.210 s or 77.6%
 of the slot. Eliminating the entire fine stage would give at most 1.29× at
 that measured coarse cost. Different receiver pipelines need their own
@@ -221,24 +350,23 @@ dataflow alternative. It leases immutable source tiles, sends approximately
 312 bytes of affine and phase descriptors per column in the current layout,
 and renders the mapped columns on the device. For 288 columns, the descriptors
 alone are under 90 kB per batch, about 38× below the expanded upload before
-source-tile misses. Bringing the same bounded mapping contract to the
-socket-filtered backend would address host interpolation as well as the link.
-Compare direct FFT and tensor projection on that resident input. Existing
-CUDA tests already favored direct cuFFT with retained-bin gather over a
-pack-inclusive cuBLASLt FP4 path at the matched small widths.
+source-tile misses. That bounded mapping contract became the basis for the
+socket-filtered resident backend. On the native CUDA route, direct cuFFT
+with retained-bin gather beat the pack-inclusive cuBLASLt FP4 path at the
+matched small widths.
 [Mapping interface](../src/triad_receiver_bulk.hpp) ·
 [Fused device mapping](../src/triad_tensor_backend.cpp) ·
 [Matched FFT comparison](validation.md#blackwell-nvfp4-fine-projection--19-november-2026).
 
 Two equal-geometry blocks already available in a fine `Pair` can share a
-576-lane launch while preserving chronological state updates. The tested
-slot could then submit 405 instead of 809 batches. This doubles the launch
-grid and approximately doubles projection workspace from 6.70/7.34 MiB to
-13.40/14.51 MiB host/device per owner under the current accounting. Each
-full pair would upload 6.92 MB of expanded templates. Using the component
-medians, combining the 404 full pairs alone would save roughly 12 ms of
-isolated projection-call time over the slot. Mapping, state updates and
-cross-stage contention were outside that estimate. Broader aggregation must quote all
+576-lane launch while preserving chronological state updates. The staged
+sizing exercise projected 405 instead of 809 batches. Its hypothetical
+paired staged design would have increased projection workspace from
+6.70/7.34 MiB to 13.40/14.51 MiB host/device per owner, with 6.92 MB of
+expanded templates uploaded per full pair. The isolated projection-call
+saving estimated from the component medians was roughly 12 ms for
+404 pairs. The later measurement instead uses paired resident work.
+Broader aggregation must quote all
 immutable inputs, descriptors, owned outputs and retained states. Reuse the
 existing receiver lanes for independent per-state correlations and Gram
 work before considering lower precision in those statistics. Preserve full
@@ -336,16 +464,265 @@ reached the pod deadline before collecting device events, so actual active
 matrix throughput and Tensor Core duty on the updated receiver remain
 unmeasured.
 
-The next attribution priority is the time spent producing keyed tiles,
-submitting blocking writes and waiting between the resident kernels. The
-coarse phase remains larger than fine service in the matched slots. A
-future coarse Tensor Core comparison can reuse one observation lag matrix
-by moving the trial-frequency rotation to the template. The common
-arrival-dependent phase cancels in the two-ray quadratic score. That
-formulation adds substantial dense work and still needs an acquisition and
-noise-ranking holdout. The existing FFT route already keeps its spectra and
-peak compaction on the device.
-[Measured receiver service](validation.md#blackwell-shared-bit-mapping-and-coarse-phase-reuse--19-november-2026).
+[Measured receiver service](validation.md#blackwell-shared-bit-mapping-and-coarse-phase-reuse--19-november-2026)
+· [Next profiling experiment](#first-profiling-experiment).
+
+### Reproduce the matched Blackwell runs
+
+Start with the [Blackwell continuation guide](#continue-blackwell-fp4-work)
+and the [five-slot timing definitions](validation.md#five-slot-timing-and-measurement-scopes).
+The reference is `e76fc90e45f79779c676f0ed3b1643eb590b95dc`. The candidate
+is `95b661e9c866d42b1445abdc3f49f3d87acaf827`. Their probe source manifest
+SHA-256 values are
+`46d3b972166013737aaf9f70f0134a3f5677378b291df148b47010a36dfb824d` and
+`d8dd714cf29cd65753f82771cf3e3516425b4b9b89c1159062d35d32bfb52c7a`,
+respectively. Both used build-options SHA-256
+`6e9e5bcbce13bbc3bae3379606abeccff5d07814c832d214bde544f5aedd8c10`.
+The build digest can change with the toolchain. Record it, the source manifest
+and the probe binary hash for each new build. The source manifest binds the
+native inputs even when the exported tree has no Git metadata.
+[Probe identity generation](../cmake/TriadBench.cmake).
+
+Use one budgeted full RTX PRO 6000 Blackwell Server Edition with a verified SSH
+host key. The measured device reported 97,887 MiB, compute capability 12.0,
+driver 595.112.07 and MIG disabled. Verify the runtime and effective CPU
+allocation before timing. Keep the API key and private SSH identity local.
+The native probe supplies its own deterministic synthetic fixture key.
+Deploy the clean reference with the lab's `--mode gpu --profile simulation`
+procedure and confirm `PUMP_LAB_MODE=vulkan` for this comparison. Stock
+deployment prepares the signed Ubuntu OpenCL loader, a private NVIDIA EGL
+Vulkan manifest and a private NVIDIA OpenCL vendor directory. Treat a
+CUDA-selected stock worker as a separate route. Run `nvidia-smi -L` and
+`nvidia-smi --query-gpu=name,memory.total,compute_cap,driver_version,mig.mode.current --format=csv,noheader,nounits`
+outside the receiver boundary. Retain the technical device and toolkit
+information without provider identifiers. The latest matched campaign
+retained the build digest and worker counts. Detailed CPU model, effective
+affinity and quota, and expanded compiler/toolkit versions are absent from
+its compact receipts. Record those fields on the next run alongside the
+probe's `allocation` and `identity` objects.
+[GPU selection and authorization](triad-performance.md#gpu-selection-for-accelerated-development),
+[lab deployment and SSH](../_zLab/README.md),
+[stock driver preparation](../_zLab/prepare_vulkan.sh).
+
+From the local checkout, set `ssh_host`, `ssh_port`, `ssh_user`,
+`known_hosts` and `ssh_identity` to the independently verified direct SSH
+settings. Export both committed sources into disposable directories and
+deploy the reference. Use the same verified SSH procedure to transfer
+`candidate.tar.gz` and `candidate.sha256` into a fresh private Pod directory.
+Verify with `sha256sum -c candidate.sha256` there before extracting. Keep
+both probe binaries in separate build trees for the alternating comparisons.
+
+```bash
+set -euo pipefail
+umask 077
+stage=$(mktemp -d)
+mkdir "$stage/reference" "$stage/candidate"
+snapshot_paths=(CMakeLists.txt CMakePresets.json LICENSE build.sh cmake src include tools tests third_party _zLab)
+git archive e76fc90e45f79779c676f0ed3b1643eb590b95dc "${snapshot_paths[@]}" | tar -x -C "$stage/reference"
+git archive 95b661e9c866d42b1445abdc3f49f3d87acaf827 "${snapshot_paths[@]}" | tar -x -C "$stage/candidate"
+python3 -B "$stage/reference/_zLab/deploy.py" --host "$ssh_host" --port "$ssh_port" \
+  --user "$ssh_user" --known-hosts "$known_hosts" --identity "$ssh_identity" \
+  --mode gpu --profile simulation
+python3 -B "$stage/candidate/_zLab/bundle.py" --output "$stage/candidate.tar.gz"
+(cd "$stage" && sha256sum candidate.tar.gz > candidate.sha256)
+```
+
+On the Pod, build both native targets in the reference's existing deployment
+and recreate the stock Release configuration in the candidate tree, using
+the same compiler, toolkit and cache. For example, with the stock
+Ninja/Vulkan profile and Ubuntu amd64 loader, set `candidate` to the
+absolute candidate source directory and run:
+
+```bash
+set -euo pipefail
+umask 077
+lab=/workspace/pump-lab
+nvcc=$(sed -n 's/^DATAPUMP_TRIAD_OPENCL_NVCC:FILEPATH=//p' "$lab/build/lab/CMakeCache.txt")
+test -x "$nvcc"
+"$nvcc" --version
+cxx=$(sed -n 's/^CMAKE_CXX_COMPILER:[^=]*=//p' "$lab/build/lab/CMakeCache.txt")
+test -x "$cxx"
+jobs=$(python3 "$lab/tools/build_capacity.py" --runpod vulkan)
+cmake --build "$lab/build/lab" --parallel "$jobs" \
+  --target triad_receiver_probe test_triad_opencl_nvfp4
+cmake -S "$candidate" -B "$candidate/build/lab" -G Ninja \
+  "-DCMAKE_CXX_COMPILER=$cxx" -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_TESTING=OFF -DDATAPUMP_BUILD_GUI=OFF \
+  -DDATAPUMP_BUILD_CLI=ON -DDATAPUMP_BUILD_WEB_WORKER=ON -DDATAPUMP_PORTABLE=OFF \
+  -DDATAPUMP_COMPILER_CACHE=ON -DDATAPUMP_TRIAD_TENSOR=OFF \
+  -DDATAPUMP_TRIAD_VULKAN=ON -DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON \
+  -DDATAPUMP_TRIAD_OPENCL_NVFP4=ON "-DDATAPUMP_TRIAD_OPENCL_NVCC:FILEPATH=$nvcc" \
+  -DDATAPUMP_TRIAD_OPENCL_LOADER_PATH=/usr/lib/x86_64-linux-gnu/libOpenCL.so.1
+cmake --build "$candidate/build/lab" --parallel "$jobs" \
+  --target triad_receiver_probe test_triad_opencl_nvfp4
+sha256sum "$lab/build/lab/triad_receiver_probe" "$candidate/build/lab/triad_receiver_probe"
+```
+
+Use the stock driver's validated environment and inherited no-socket filter
+for both binaries. The probe is a developer executable. This temporary
+launcher applies the same descriptor and filter functions as the production
+worker before executing the probe, with anonymous pipes supplied by Python.
+Python only launches the compiled test. The `AF_UNIX` attempt must fail with
+`EPERM`, and the marker must reach the captured stderr. Check the OpenCL
+component and initial Vulkan probe separately. A plain SSH shell can select
+the default GLX-based ICD and fail Vulkan initialization. Keep the private
+manifests and socket filter active in diagnosis.
+[Worker boundary](../src/host/worker.cpp),
+[stock relay environment](../_zLab/worker_relay.py).
+
+```bash
+scratch=$(mktemp -d)
+cat > "$scratch/filter.cpp" <<'CPP'
+#include "datapump/host/sandbox.hpp"
+#include <array>
+#include <cerrno>
+#include <cstdio>
+#include <sys/socket.h>
+#include <unistd.h>
+
+int main(int argc, char** argv) {
+    if (argc < 2) return 125;
+    datapump::host::restrict_descriptors(std::array{0, 1, 2});
+    datapump::host::verify_anonymous_pipe(0, true);
+    datapump::host::verify_anonymous_pipe(1, false);
+    datapump::host::install_no_socket_boundary();
+    if (!datapump::host::no_socket_boundary_active() ||
+        socket(AF_UNIX, SOCK_STREAM, 0) != -1 || errno != EPERM) return 125;
+    std::fputs("DATAPUMP_NO_SOCKET_VERIFIED\n", stderr);
+    execv(argv[1], argv + 1);
+    return 125;
+}
+CPP
+c++ -O2 -std=c++20 -I"$lab/include" "$scratch/filter.cpp" \
+  "$lab/src/host/sandbox.cpp" -o "$scratch/filter"
+
+filtered() {
+  python3 - "$lab" "$scratch/filter" "$@" <<'PY'
+import subprocess
+import sys
+
+lab, launcher, *command = sys.argv[1:]
+sys.path.insert(0, lab + "/_zLab")
+from worker_relay import DEPLOYMENTS, gpu_environment
+
+environment = gpu_environment(DEPLOYMENTS[False], False)
+if not environment or not environment.get("OPENCL_VENDOR_PATH"):
+    raise SystemExit("The private Vulkan and OpenCL manifests are required")
+result = subprocess.run([launcher, *command], env=environment, input=b"",
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+sys.stdout.buffer.write(result.stdout)
+sys.stderr.buffer.write(result.stderr)
+if b"DATAPUMP_NO_SOCKET_VERIFIED" not in result.stderr:
+    raise SystemExit("Missing no-socket boundary receipt")
+raise SystemExit(result.returncode)
+PY
+}
+
+ref="$lab/build/lab/triad_receiver_probe"
+new="$candidate/build/lab/triad_receiver_probe"
+filtered "$lab/build/lab/test_triad_opencl_nvfp4"
+filtered "$candidate/build/lab/test_triad_opencl_nvfp4"
+filtered "$new" describe --backend vulkan --require-accelerator on
+```
+
+Both component executions must report verified paired and single fine
+statistics for NVFP4 and FFT. The separate probe must initialize Vulkan
+under the filter. Record the route and executed work again from each
+measured fixture.
+
+Run the same seed and public search on both source versions. Severe uses
+the full selected channel effects. Quiet uses noise alone with the same
+declared search. Stable sets realized severity to zero and preserves the
+declared search. `message` generates the native alarm fixture with raw
+observations `001` followed by two quiet slots. The explicit `--bit 0` is
+the wanted bit for `admission`. Four software workers qualify the existing
+automatic fine route and 24 reproduce the wider production-path comparison.
+Keep the normally available `W=2*H` receiver allocation for capacity
+evaluation.
+
+```bash
+fixture=(
+  --case hf --encrypt on --data-power-w 0.001995262314968879
+  --path-loss-db 90 --noise-dbm-hz -164 --timing-policy broad
+  --base-oscillator gpsdo-xo --shift-oscillator gpsdo-xo
+  --spread-preset hf-worst --selective-perturbation each-65 --margin 3
+  --fhss off --burst-wait-tiles 0 --rate 3.6 --rf-hz 30000000
+  --added-symbols 1 --added-interleave off --target-cn0 32 --seed 950101
+  --helper off --bit 0 --require-accelerator on
+)
+slot() {
+  local binary=$1 workers=$2 fine=$3 deadline=$4
+  shift 4
+  filtered "$binary" admission "${fixture[@]}" --backend vulkan \
+    --vulkan-fine-projection "$fine" --workers "$workers" \
+    --max-samples 1215321 --deadline-ms "$deadline" "$@"
+}
+stream() {
+  filtered "$1" message "${fixture[@]}" --backend gpu --workers 4 \
+    --channel-severity 0 --slots 5 --max-samples 6255321 \
+    --max-spool-bytes 106340457 --deadline-ms 85000
+}
+
+slot "$ref" 24 resident-nvfp4 45000 > "$scratch/ref-severe.json" 2> "$scratch/ref-severe.stderr"
+slot "$new" 24 resident-nvfp4 45000 > "$scratch/new-severe.json" 2> "$scratch/new-severe.stderr"
+slot "$new" 24 resident-nvfp4 45000 --stratum noise > "$scratch/new-quiet.json" 2> "$scratch/new-quiet.stderr"
+slot "$ref" 24 resident-nvfp4 45000 --stratum noise > "$scratch/ref-quiet.json" 2> "$scratch/ref-quiet.stderr"
+slot "$ref" 4 resident-nvfp4 45000 --channel-severity 0 > "$scratch/ref-stable.json" 2> "$scratch/ref-stable.stderr"
+slot "$new" 4 resident-nvfp4 45000 --channel-severity 0 > "$scratch/new-stable.json" 2> "$scratch/new-stable.stderr"
+slot "$new" 24 resident-nvfp4 45000 > "$scratch/new-severe-2.json" 2> "$scratch/new-severe-2.stderr"
+slot "$ref" 24 resident-nvfp4 45000 > "$scratch/ref-severe-2.json" 2> "$scratch/ref-severe-2.stderr"
+slot "$ref" 24 resident-nvfp4 45000 --stratum noise > "$scratch/ref-quiet-2.json" 2> "$scratch/ref-quiet-2.stderr"
+slot "$new" 24 resident-nvfp4 45000 --stratum noise > "$scratch/new-quiet-2.json" 2> "$scratch/new-quiet-2.stderr"
+stream "$ref" > "$scratch/ref-message.json" 2> "$scratch/ref-message.stderr"
+stream "$new" > "$scratch/new-message.json" 2> "$scratch/new-message.stderr"
+slot "$new" 24 native 32000 > "$scratch/new-native-severe.json" 2> "$scratch/new-native-severe.stderr"
+slot "$new" 24 native 32000 --stratum noise > "$scratch/new-native-quiet.json" 2> "$scratch/new-native-quiet.stderr"
+```
+
+For an additional arithmetic contrast use
+`slot "$new" 24 resident-fft 45000 --stratum noise`, compared against the
+candidate resident FP4 quiet case. Keep the simulator input and each worker
+allocation fixed through the comparison. Verify the executed backend for the
+automatic stream.
+
+| Fixture | Generated samples | Input SHA-256 |
+| --- | ---: | --- |
+| Severe | 1,215,321 | `b4d8fa5a6f4e8639871b11632abd6b80e9d101f3e73f3c21ffec050d44b08bf8` |
+| Quiet | 1,215,321 | `2b9ca9df77bfc0bf6e42548790fd9aeffebd464609ac5db6e78ef79adc7a28c8` |
+| Stable | 1,215,321 | `eaa4ae2af712def71715c59da4cbca75e881229de1e9b7f6b28be703063b7625` |
+| Five-slot message | 6,255,321 | `4a3603c8698c8a1810b9e47c3e53269bebced25259668816bc61430501cc0b69` |
+
+Require exit zero, `status=complete`, `observation.input_sha256`,
+`observation.samples` and matching public work. Treat a changed input hash on
+another platform as a separate stratum until reconciled. Require
+`result.complete_public_slot` for `admission`. In `identity.backend_receipt`,
+the matched explicit resident FP4 slots credited 3,951,090 coarse rows,
+58,320 fine statistics, 10,967,040 projected values and 10,950,624 resident
+FP4 modes. They used 405 GPU batches, comprising 404 paired batches and
+one single. One additional terminal block ran natively.
+The complete stream with the separate EOF control credited 23,706,540 coarse
+rows, 365,526 fine statistics, 68,736,528 projected values and 68,635,980
+resident FP4 modes. The 2,905 GPU batches comprised 2,898 pairs and seven
+single batches. Six additional terminal blocks ran natively. Require
+`complete_receiver_service`, `message_and_physical_quiet_verified` and
+`eof_control_verified` on the message, with an expected-source match and
+two trailing scored quiet slots.
+The EOF-only control remains incomplete. Single-slot decisions must match
+across all six admission policies. Current and Guarded recover stable bit 0.
+Current admits the known severe wrong bit 1 and the five stronger policies
+erase it. Every policy reports quiet for the quiet input.
+Compare numerical evidence and quiet energy within the matched FP4 revision
+pairs. The native controls retain the admitted coarse rows and decisions
+with zero resident modes and a native fine session, while the resident FFT
+control must credit FFT modes. The two different arithmetic routes can
+produce different numerical evidence. Use the [native receipt
+validator](../tools/triad_native.py) and the [recorded timing
+scopes](validation.md#five-slot-timing-and-measurement-scopes).
+
+Preserve the bounded workload and receipt gates in future comparisons.
+Collect compact technical results, then remove temporary captures, launchers
+and source snapshots when their purpose ends. Terminate only the owned
+benchmark pod and verify removal through the provider inventory.
 
 ## Which arithmetic ran in a remote simulation?
 

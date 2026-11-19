@@ -28,6 +28,11 @@ to the native code. The
 and [GPU operation counters](triad-gpu-optimization.md#which-arithmetic-ran-in-a-remote-simulation)
 cover the measured compute paths.
 
+For Blackwell FP4 performance work, start with the
+[continuation guide](triad-gpu-optimization.md#continue-blackwell-fp4-work).
+It links the exact filtered RunPod reproduction, the per-phase and per-slot
+receiver timings, and the next bounded profiling experiment.
+
 **Automatic CPU/GPU choices must prioritize challenging-case receiver capacity
 and prevent input backlog.** Start with the
 [automatic-mode contract](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling)

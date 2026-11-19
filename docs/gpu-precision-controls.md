@@ -78,6 +78,9 @@ fixtures. Wider owner allocations currently use native fine projection.
 The crossover between the measured allocations remains open.
 `--vulkan-fine-projection nvfp4` explicitly requests the earlier staged
 projection and checks for executed work.
+For further FP4 work, use the
+[Blackwell continuation guide](triad-gpu-optimization.md#continue-blackwell-fp4-work)
+for the matched production timings, reproduction, and next profiling scope.
 
 The developer probe can also select `--vulkan-fine-projection resident-nvfp4`
 or `resident-fft` for the same isolated geometry. Both retain mapped DATA
