@@ -1119,6 +1119,55 @@ in `local-evidence/blackwell-resident-fine-20261119/` until a newer matched
 receiver comparison supersedes these workloads.
 [Scope and utilization analysis](triad-gpu-optimization.md#resident-mapping-and-paired-fine-statistics).
 
+### Blackwell shared bit mapping and coarse phase reuse — 19 November 2026
+
+One socket-filtered RunPod worker compared the reference source
+`e76fc90e` (manifest `46d3b972…824d`) with the shared bit mapper, bounded
+host tile pinning and exact coarse phase reuse (manifest `d8dd714c…c7a`).
+The device was a full RTX PRO 6000 Blackwell Server Edition with 97,887 MiB
+reported and driver 595.112.07. The severe and quiet pairs ran in both
+orderings. Stable is a single matched look. The samples and public search
+were identical, with 3,951,090 Vulkan coarse rows and 10,950,624 resident
+FP4 modes per slot. Every slot matched all six admission-policy outcomes,
+operational bit evidence and quiet energy. The severe wrong bit remains.
+
+| 3.6 Hz fixture | Fine seconds, reference → candidate | Coarse seconds | Complete slot receiver seconds |
+| --- | ---: | ---: | ---: |
+| Severe, 24 software workers | 1.439–1.450 → 0.972–1.003 | 2.065–2.492 → 1.453–1.928 | 3.522–3.938 → 2.429–2.935 |
+| Quiet, 24 software workers | 1.504–1.523 → 1.007–1.035 | 2.075–2.093 → 1.482–1.491 | 3.602–3.608 → 2.502–2.522 |
+| Stable, 4 software workers | 0.940 → 0.650 | 8.300 → 5.880 | 9.245 → 6.536 |
+
+The paired descriptors removed about 19 MB of uploads per slot. The stable
+input used 74.76 MB before the change and 55.77 MB after it. Severe and quiet
+used 110.95 MB and 91.96 MB. Device workspace, source tile counts and readback
+bytes matched. The standalone OpenCL tests passed both projection methods,
+including independent paired columns across tile boundaries. Offline mapper
+emulation matched 25,500 C64 samples bit for bit against the independent
+map. Six native bank comparisons matched every prepared sample and precision
+coefficient for positive, negative and zero Doppler at two worker allocations.
+All 45 local triad tests passed.
+
+The four-worker automatic route processed the matched five-slot input
+`4a3603c8…0b69` in 40.365 s before the change and 26.716 s after it. Both
+recovered `001`, scored the two quiet slots, and kept the EOF-only control
+incomplete. Both credited 23,706,540 coarse rows, 365,526 fine statistics
+and 68,635,980 resident FP4 modes including the EOF control. Resident upload
+volume decreased from 526.43 MB to 410.10 MB. The timing covers receiver
+service, with simulator generation and the EOF control separately measured.
+
+Fresh 24-worker native controls on the candidate build took 0.591 s fine
+and 2.279 s total for severe, and 0.564 s fine and 2.168 s total for quiet.
+Those times support the existing automatic native preference at that width.
+Intermediate allocations, sustained service and reception on other hardware
+remain outside this campaign.
+
+The separate instrumented build reached the pod work deadline before it
+returned a device timing receipt. The completed stock-path comparisons
+establish receiver throughput. Keep the compact technical receipts in
+`local-evidence/blackwell-shared-mapping-20261119/` until a newer matched
+profile supersedes this geometry.
+[Implementation and profiling](triad-gpu-optimization.md#shared-bit-mapping-and-coarse-phase-reuse).
+
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 
 The [HF operating results](indexes/robust.md#low-power-hf-alarm-results)

@@ -5,6 +5,7 @@
 #include <cuda_runtime.h>
 #include <math_constants.h>
 
+#include <cstddef>
 #include <cstdint>
 
 #include "triad_opencl_fine_fft.cuh"
@@ -22,6 +23,7 @@ constexpr float maximum_scale = 448.f;
 constexpr float normalized_max = 6.f * maximum_scale;
 constexpr unsigned source_tile_samples = 8192;
 constexpr unsigned maximum_source_tiles = 32;
+constexpr unsigned unpaired_output = 0xffffu;
 constexpr unsigned candidate_lanes = 4;
 constexpr unsigned bit_statistics = 5;
 constexpr unsigned candidate_statistics = 2 * bit_statistics + 1;
@@ -29,22 +31,54 @@ constexpr unsigned candidate_statistics = 2 * bit_statistics + 1;
 struct DeviceMapping {
     double fraction, scale, phase, phase_step;
     std::int64_t origin;
-    std::uint32_t output, tile_count;
+    std::uint16_t output, second_output;
+    std::uint32_t tile_count;
     std::uint32_t tiles[maximum_source_tiles];
 };
 static_assert(sizeof(DeviceMapping) == 176 && alignof(DeviceMapping) == 8);
+static_assert(offsetof(DeviceMapping, second_output) == 42 && offsetof(DeviceMapping, tiles) == 48);
 
-__device__ const double2* source_tile(const double2* samples, const DeviceMapping& mapping, unsigned tile) {
-    return samples + static_cast<std::uint64_t>(mapping.tiles[tile]) * source_tile_samples;
+__device__ const double2* source_tile(const double2* samples, const std::uint32_t* tiles, unsigned tile) {
+    return samples + static_cast<std::uint64_t>(tiles[tile]) * source_tile_samples;
 }
 
-__device__ double2 source_neighbor(const double2* samples, const DeviceMapping& mapping, std::int64_t index) {
-    if (index < 0 || index >= static_cast<std::int64_t>(mapping.tile_count) * source_tile_samples) return {};
-    return source_tile(samples, mapping, index / source_tile_samples)[index % source_tile_samples];
+__device__ double2 source_neighbor(const double2* samples, const std::uint32_t* tiles,
+                                   std::int64_t index, std::int64_t extent) {
+    if (index < 0 || index >= extent) return {};
+    return source_tile(samples, tiles, index / source_tile_samples)[index % source_tile_samples];
 }
 
 __device__ double cubic(double a, double b, double c, double d, double w0, double w1, double w2, double w3) {
     return __dadd_rn(__dadd_rn(__dadd_rn(__dmul_rn(w0, a), __dmul_rn(w1, b)), __dmul_rn(w2, c)), __dmul_rn(w3, d));
+}
+
+__device__ void render_lane_row(const double2* samples, const std::uint32_t* tiles,
+                                std::int64_t left, std::int64_t extent, const double4 weights,
+                                double sine, double cosine, float2* lane, unsigned row, unsigned rows) {
+    double2 a, b, c, d;
+    const auto local = static_cast<unsigned>(left) % source_tile_samples;
+    if (left >= 0 && local + 3 < source_tile_samples) {
+        const auto* tile = source_tile(samples, tiles, left / source_tile_samples) + local;
+        a = tile[0];
+        b = tile[1];
+        c = tile[2];
+        d = tile[3];
+    } else {
+        a = source_neighbor(samples, tiles, left, extent);
+        b = source_neighbor(samples, tiles, left + 1, extent);
+        c = source_neighbor(samples, tiles, left + 2, extent);
+        d = source_neighbor(samples, tiles, left + 3, extent);
+    }
+    const auto real = cubic(a.x, b.x, c.x, d.x, weights.x, weights.y, weights.z, weights.w);
+    const auto imag = cubic(a.y, b.y, c.y, d.y, weights.x, weights.y, weights.z, weights.w);
+    const auto rotated_real = __dsub_rn(__dmul_rn(real, cosine), __dmul_rn(imag, sine));
+    const auto rotated_imag = __dadd_rn(__dmul_rn(real, sine), __dmul_rn(imag, cosine));
+    const auto narrowed = make_float2(rotated_real, rotated_imag);
+    lane[row] = narrowed;
+    // The native bulk path checks the original C128 template for nonzero
+    // support. Record that witness only when narrowing would erase it.
+    if (narrowed.x == 0 && narrowed.y == 0 && (rotated_real != 0 || rotated_imag != 0))
+        atomicOr(reinterpret_cast<unsigned*>(&lane[rows].y), __float_as_uint(1.f));
 }
 
 __device__ void pack_block(float value, std::uint32_t* packed, std::uint8_t* scales, unsigned index) {
@@ -88,14 +122,17 @@ __device__ const std::uint32_t* scale_row(const std::uint8_t* scales, unsigned r
 
 extern "C" __global__ void resident_fine_map(const double2* samples, const DeviceMapping* descriptors,
     float2* mapped, std::uint32_t rows, std::uint32_t mappings) {
+    using datapump::triad::v3::receiver_detail::opencl_fine_fft::fine_rows;
+    if (rows != fine_rows) return;
     const auto index = blockIdx.x * blockDim.x + threadIdx.x;
-    const auto descriptor = index / rows;
+    const auto descriptor = index / fine_rows;
     if (descriptor >= mappings) return;
-    const auto row = index % rows;
+    const auto row = index % fine_rows;
     const auto& mapping = descriptors[descriptor];
     const auto extent = static_cast<std::int64_t>(mapping.tile_count) * source_tile_samples;
-    auto* lane = mapped + static_cast<std::uint64_t>(mapping.output) * (rows + 1);
-    auto& output = lane[row];
+    const auto lane = [&](unsigned output) { return mapped + static_cast<std::uint64_t>(output) * (fine_rows + 1); };
+    auto* first = lane(mapping.output);
+    const auto second = mapping.second_output;
 
     // Use the same separate FP64 operations as the canonical native mapper.
     // A fused affine calculation could select a different cubic stencil.
@@ -104,44 +141,22 @@ extern "C" __global__ void resident_fine_map(const double2* samples, const Devic
     const auto integral = floor(relative);
     const auto left = mapping.origin + static_cast<std::int64_t>(integral) - 1;
     if (left < -3 || left >= extent || !extent) {
-        output = {};
+        first[row] = {};
+        if (second != unpaired_output) lane(second)[row] = {};
         return;
     }
 
-    double2 a, b, c, d;
-    const auto local = static_cast<unsigned>(left) % source_tile_samples;
-    if (left >= 0 && local + 3 < source_tile_samples) {
-        const auto* tile = source_tile(samples, mapping, left / source_tile_samples) + local;
-        a = tile[0];
-        b = tile[1];
-        c = tile[2];
-        d = tile[3];
-    } else {
-        a = source_neighbor(samples, mapping, left);
-        b = source_neighbor(samples, mapping, left + 1);
-        c = source_neighbor(samples, mapping, left + 2);
-        d = source_neighbor(samples, mapping, left + 3);
-    }
-
     const auto t = relative - integral;
-    const auto w0 = -t * (t - 1) * (t - 2) / 6;
-    const auto w1 = (t + 1) * (t - 1) * (t - 2) / 2;
-    const auto w2 = -(t + 1) * t * (t - 2) / 2;
-    const auto w3 = (t + 1) * t * (t - 1) / 6;
-    const auto real = cubic(a.x, b.x, c.x, d.x, w0, w1, w2, w3);
-    const auto imag = cubic(a.y, b.y, c.y, d.y, w0, w1, w2, w3);
+    const auto weights = make_double4(-t * (t - 1) * (t - 2) / 6, (t + 1) * (t - 1) * (t - 2) / 2,
+                                      -(t + 1) * t * (t - 2) / 2, (t + 1) * t * (t - 1) / 6);
     constexpr double tau = 6.2831853071795864769;
     const auto phase = __dadd_rn(__dmul_rn(mapping.phase_step, offset), mapping.phase);
     double sine, cosine;
     sincos(tau * (phase - floor(phase)), &sine, &cosine);
-    const auto rotated_real = __dsub_rn(__dmul_rn(real, cosine), __dmul_rn(imag, sine));
-    const auto rotated_imag = __dadd_rn(__dmul_rn(real, sine), __dmul_rn(imag, cosine));
-    const auto narrowed = make_float2(rotated_real, rotated_imag);
-    output = narrowed;
-    // The native bulk path checks the original C128 template for nonzero
-    // support. Record that witness only when narrowing would erase it.
-    if (narrowed.x == 0 && narrowed.y == 0 && (rotated_real != 0 || rotated_imag != 0))
-        atomicOr(reinterpret_cast<unsigned*>(&lane[rows].y), __float_as_uint(1.f));
+    render_lane_row(samples, mapping.tiles, left, extent, weights, sine, cosine, first, row, rows);
+    if (second != unpaired_output)
+        render_lane_row(samples, mapping.tiles + mapping.tile_count, left, extent, weights,
+                        sine, cosine, lane(second), row, rows);
 }
 
 extern "C" __global__ void resident_fine_peaks(float2* mapped, std::uint32_t rows, std::uint32_t lanes) {

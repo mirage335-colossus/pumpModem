@@ -1301,7 +1301,7 @@ struct FineSession::Impl {
     std::unique_ptr<FineBulk> bulk;
     FineBulkWork bulk_work;
     std::vector<MappedBasisRow> bulk_rows;
-    std::vector<double> bulk_offsets;
+    ConsecutiveBasisOffsets bulk_offsets;
     std::vector<std::size_t> bulk_progress;
     std::array<std::vector<FineBulkStatistics>, 2> bulk_statistics;
     std::vector<std::complex<float>> rendered_templates, projected_templates;
@@ -1431,8 +1431,7 @@ struct FineSession::Impl {
             const auto bulk_states = (adaptive_enabled() ? 2 : 1) * maximum_proposals;
             bulk_rows.reserve(bulk_states);
             bulk_progress.reserve(bulk_states);
-            bulk_offsets.resize(mapped_rows);
-            std::iota(bulk_offsets.begin(), bulk_offsets.end(), 0.);
+            bulk_offsets = ConsecutiveBasisOffsets(mapped_rows);
             for (auto& item : bulk_statistics) item.reserve(bulk_states);
         } else if (config.bulk_backend) {
             config.bulk_backend->record_native_fine(quote.native_fallback_reason);
@@ -1690,7 +1689,7 @@ struct FineSession::Impl {
                     if (candidate >= states || candidate != next_candidate[i] || first || take != rows)
                         throw Error("Robust resident fine backend requested an invalid public block");
                     basis->visit_pair(bulk_rows[candidate], taps(), pair.blocks[i].first,
-                                      std::span(bulk_offsets).first(rows), sink, stop);
+                                      bulk_offsets, rows, sink, stop);
                     ++next_candidate[i];
                 }, bulk_statistics[i]};
             projected_values += static_cast<std::uint64_t>(states) * 2 * tap_count *
@@ -1754,7 +1753,7 @@ struct FineSession::Impl {
                             !take || take > bulk_offsets.size())
                             throw Error("Robust bulk backend requested a map outside its public block");
                         basis->visit_pair(bulk_rows[candidate], taps(), block.first + first,
-                                          std::span(bulk_offsets).first(take), sink, leaf_stop);
+                                          bulk_offsets, take, sink, leaf_stop);
                         bulk_progress[candidate] += take;
                         ++bulk_calls[candidate < nominal.size() ? 0 : 1];
                     }, output, leaf_stop);

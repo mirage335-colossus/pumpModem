@@ -145,10 +145,14 @@ void check_resident_projection(const OpenClNvfp4Device& device) {
     using Tile = std::array<Reference, tile_size>;
     const auto first_tile = std::make_shared<Tile>();
     const auto second_tile = std::make_shared<Tile>();
+    const auto other_first_tile = std::make_shared<Tile>();
+    const auto other_second_tile = std::make_shared<Tile>();
     const auto phasor = [](double cycles) { return std::polar(1., 2 * std::numbers::pi * cycles); };
     for (std::int64_t i = 0; i != 2 * tile_size; ++i) {
         auto& tile = i < tile_size ? *first_tile : *second_tile;
+        auto& other = i < tile_size ? *other_first_tile : *other_second_tile;
         tile[i % tile_size] = .17 * phasor(7. * i / rows) + .08 * phasor(-11. * i / rows);
+        other[i % tile_size] = .13 * phasor(19. * i / rows + .08) + .06 * phasor(-5. * i / rows);
     }
     std::array<double, rows> offsets;
     std::iota(offsets.begin(), offsets.end(), 0.);
@@ -158,6 +162,7 @@ void check_resident_projection(const OpenClNvfp4Device& device) {
     std::array<std::array<FineBulkStatistics, candidates>, blocks_count> output;
     std::array<FineResidentBlock, blocks_count> blocks;
     std::vector<Sample> mapped(lanes * (rows + 1));
+    bool separate_mappings = false;
     for (std::size_t b = 0; b != blocks_count; ++b) {
         for (std::size_t m = 0; m != modes; ++m)
             observations[b][m] = (.08 + .006 * (m % 7)) * phasor(.07 * m + .19 * b);
@@ -166,11 +171,18 @@ void check_resident_projection(const OpenClNvfp4Device& device) {
                 require(candidate < candidates && first == 0 && count == rows,
                         "Resident projection changed the candidate row extent");
                 if (candidate == candidates - 1) return;
-                const std::array<BulkMappedColumn, 2> mappings{{
-                    {.375, 1.002, .05 * candidate, .0007, -2, 0, {{first_tile, *first_tile}}},
-                    {.53125, .997, -.12 * b, -.0009, tile_size - 613, 1,
-                        {{first_tile, *first_tile}, {second_tile, *second_tile}}}
+                // Columns 0 and 2 share the stencil across a source tile
+                // boundary, with different source samples for the two bits.
+                // Column 1 exercises a different map and the clipped start.
+                const auto phase = .05 * candidate - .12 * b;
+                std::array<BulkMappedColumn, 3> mappings{{
+                    {.375, 1.002, .05 * candidate, .0007, -2, 1, {{first_tile, *first_tile}}},
+                    {.53125, .997, phase, -.0009, tile_size - 613, 0,
+                        {{first_tile, *first_tile}, {second_tile, *second_tile}}},
+                    {.53125, .997, phase, -.0009, tile_size - 613, 2,
+                        {{other_first_tile, *other_first_tile}, {other_second_tile, *other_second_tile}}}
                 }};
+                if (separate_mappings) std::swap(mappings[0], mappings[1]);
                 std::array<Reference, rows> direct;
                 for (std::size_t i = 0; i != rows; ++i)
                     direct[i] = .12 * phasor(-7. * i / rows + .04 * candidate + .23 * b);
@@ -278,13 +290,33 @@ void check_resident_projection(const OpenClNvfp4Device& device) {
         const auto resident = device.make_projection(rows, bins, lanes, limit, method);
         OpenClResidentWork paired;
         require(resident && resident->project_resident(blocks, candidates, paired), "Paired resident projection failed");
-        require(paired.uploaded_tiles == 2 && paired.tile_hits > 0 && paired.mapped_columns == 8 &&
+        require(paired.uploaded_tiles == 4 && paired.tile_hits > 0 && paired.mapped_columns == 12 &&
                     paired.direct_columns == 4 && paired.upload_bytes > 0 && paired.download_bytes > 0,
                 "Paired resident projection did not use cached tiles and mapped/direct lanes");
         require(paired.setup_upload_bytes == modes * sizeof(std::int64_t) &&
                     paired.observation_upload_bytes == blocks_count * modes * sizeof(Reference),
                 "Paired resident projection transfer receipt omitted basis setup or observation bytes");
         for (std::size_t b = 0; b != blocks_count; ++b) check_block(b);
+
+        OpenClResidentWork shared, separate;
+        require(resident->project_resident(blocks, candidates, shared), "Warm shared mapper failed");
+        const auto shared_statistics = output;
+        separate_mappings = true;
+        require(resident->project_resident(blocks, candidates, separate), "Warm single-column mapper failed");
+        separate_mappings = false;
+        require(shared.uploaded_tiles == 0 && separate.uploaded_tiles == 0 &&
+                    shared.mapped_columns == separate.mapped_columns &&
+                    shared.upload_bytes < separate.upload_bytes && shared.download_bytes == separate.download_bytes,
+                "Paired mapper did not reduce descriptor bytes while preserving work");
+        for (std::size_t b = 0; b != blocks_count; ++b) {
+            for (std::size_t c = 0; c != candidates; ++c) {
+                const auto& expected = shared_statistics[b][c];
+                const auto& actual = output[b][c];
+                require(expected.correlations == actual.correlations && expected.gram == actual.gram &&
+                            expected.nonzero_basis == actual.nonzero_basis,
+                        "Sharing the mapped stencil changed the computed receiver statistics");
+            }
+        }
 
         const auto previous = observations[1];
         const auto variance = blocks[1].shape.variance;
@@ -331,14 +363,18 @@ void check_resident_projection(const OpenClNvfp4Device& device) {
 
         const Reference tiny{1e-100, -1e-100};
         const auto tiny_tile = std::make_shared<Tile>();
+        const auto zero_tile = std::make_shared<Tile>();
         tiny_tile->fill(tiny);
         std::array<Reference, rows> tiny_direct;
         tiny_direct.fill(tiny);
         auto underflow = blocks.front();
         underflow.source = [&](std::size_t c, std::size_t, std::size_t, const BulkMappedSink& sink) {
             if (c == 0) {
-                const std::array<BulkMappedColumn, 1> column{{{0., 1., 0., 0., 2, 0, {{tiny_tile, *tiny_tile}}}}};
-                sink(offsets, column, {});
+                const std::array<BulkMappedColumn, 2> columns{{
+                    {0., 1., 0., 0., 2, 0, {{zero_tile, *zero_tile}}},
+                    {0., 1., 0., 0., 2, 2, {{tiny_tile, *tiny_tile}}}
+                }};
+                sink(offsets, columns, {});
             } else if (c == 1) {
                 const std::array<BulkDirectColumn, 1> column{{{0, tiny_direct, "test-native-direct"}}};
                 sink(offsets, {}, column);

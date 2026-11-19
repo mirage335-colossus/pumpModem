@@ -9,6 +9,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <numbers>
+#include <numeric>
 #include <tuple>
 
 namespace datapump::triad::v3::receiver_detail {
@@ -232,7 +233,7 @@ struct MappedBasis::Impl {
     // Pins a render group's tiles in bit-major order. One cache lock serves
     // every tile already present; a missing tile takes the filling path.
     void pin(unsigned first_bit, unsigned bits, unsigned epoch, std::uint64_t low, std::size_t count,
-             std::vector<std::shared_ptr<const Tile>>& pins, std::stop_token stop) {
+             std::span<std::shared_ptr<const Tile>> pins, std::stop_token stop) {
         const auto total = bits*count;
         const auto address = [&](std::size_t item) {
             return Key{first_bit+static_cast<unsigned>(item/count), epoch, low+item%count};
@@ -243,12 +244,12 @@ struct MappedBasis::Impl {
                 for (; next != total; ++next) {
                     auto found = find_locked(address(next));
                     if (!found) break;
-                    pins.push_back(std::move(found));
+                    pins[next] = std::move(found);
                 }
             }
             if (next == total) break;
             const auto [bit, source, index] = address(next);
-            pins.push_back(tile(bit, source, index, stop));
+            pins[next] = tile(bit, source, index, stop);
             ++next;
         }
     }
@@ -357,7 +358,8 @@ struct MappedBasis::Impl {
     }
 
     unsigned validate_request(const MappedBasisRow& row, std::span<const Tap> taps,
-                              std::uint64_t first, std::span<const double> offsets) const {
+                              std::uint64_t first, std::span<const double> offsets,
+                              bool consecutive = false) const {
         require(!offsets.empty() && offsets.size() <= maximum_rows && !taps.empty() && taps.size() <= maximum_taps &&
                 offsets.size() <= maximum_samples, "mapped basis output extent mismatch");
         require(std::isfinite(row.arrival_seconds) && std::isfinite(row.frequency_hz) &&
@@ -365,23 +367,22 @@ struct MappedBasis::Impl {
         const auto epoch = source_index(row.epoch_offset_seconds);
         // The receiver's own blocks use consecutive rows. Their bounds follow
         // from the extent, with no per-row extended-precision proof.
-        bool consecutive = true;
-        for (std::size_t i = 0; i != offsets.size(); ++i) consecutive &= offsets[i] == static_cast<double>(i);
+        if (!consecutive) {
+            consecutive = true;
+            for (std::size_t i = 0; i != offsets.size(); ++i) consecutive &= offsets[i] == static_cast<double>(i);
+        }
         if (consecutive) {
             require(offsets.size()-1 <= UINT64_MAX-first, "mapped basis offset outside bounded coordinates");
-            for (const auto& tap : taps)
-                require(std::isfinite(tap.delay_seconds) && tap.delay_seconds >= 0 && std::isfinite(tap.doppler_hz),
-                        "invalid mapped basis channel tap");
-            return epoch;
-        }
-        long double previous = -1;
-        for (const auto offset : offsets) {
-            require(std::isfinite(offset) && offset >= 0 && offset <= 1048576 &&
-                    static_cast<long double>(offset) <= static_cast<long double>(UINT64_MAX-first),
-                    "mapped basis offset outside bounded coordinates");
-            const auto index = static_cast<long double>(first)+offset;
-            require(index > previous, "mapped basis coordinates are not strictly increasing");
-            previous = index;
+        } else {
+            long double previous = -1;
+            for (const auto offset : offsets) {
+                require(std::isfinite(offset) && offset >= 0 && offset <= 1048576 &&
+                        static_cast<long double>(offset) <= static_cast<long double>(UINT64_MAX-first),
+                        "mapped basis offset outside bounded coordinates");
+                const auto index = static_cast<long double>(first)+offset;
+                require(index > previous, "mapped basis coordinates are not strictly increasing");
+                previous = index;
+            }
         }
         for (const auto& tap : taps)
             require(std::isfinite(tap.delay_seconds) && tap.delay_seconds >= 0 && std::isfinite(tap.doppler_hz),
@@ -425,8 +426,8 @@ struct MappedBasis::Impl {
             // pin bound. Usual blocks render both hypotheses with one map.
             const unsigned group = map.count <= maximum_pins/2 ? 2 : 1;
             for (unsigned begin = 0; begin != 2; begin += group) {
-                std::vector<std::shared_ptr<const Tile>> pins;
-                pins.reserve(group*map.count);
+                std::array<std::shared_ptr<const Tile>, maximum_pins> storage;
+                const auto pins = std::span(storage).first(group*map.count);
                 pin(begin, group, epoch, map.low_tile, map.count, pins, stop);
                 std::array<std::vector<const double*>, 2> tables;
                 std::array<TriadMappedRow, 2> rows;
@@ -474,10 +475,11 @@ struct MappedBasis::Impl {
     }
 
     void visit(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
-               std::span<const double> offsets, const BulkMappedSink& sink, std::stop_token stop) {
+               std::span<const double> offsets, const BulkMappedSink& sink, std::stop_token stop,
+               bool consecutive) {
         cancelled(stop);
         require(static_cast<bool>(sink), "mapped basis requires a synchronous mapping sink");
-        const auto epoch = validate_request(row, taps, first, offsets);
+        const auto epoch = validate_request(row, taps, first, offsets, consecutive);
         calls.fetch_add(1, std::memory_order_relaxed);
         {
             std::lock_guard lock(mutex);
@@ -521,6 +523,8 @@ struct MappedBasis::Impl {
             const unsigned group = map.count <= maximum_pins/2 ? 2 : 1;
             for (unsigned begin = 0; begin != 2; begin += group) {
                 std::array<BulkMappedColumn, 2> columns;
+                std::array<std::shared_ptr<const Tile>, maximum_pins> pins;
+                pin(begin, group, epoch, map.low_tile, map.count, std::span(pins).first(group*map.count), stop);
                 for (unsigned b = 0; b != group; ++b) {
                     auto& column = columns[b];
                     column.fraction = map.fraction;
@@ -532,8 +536,9 @@ struct MappedBasis::Impl {
                     column.output_column = (begin+b)*taps.size()+tap;
                     column.tiles.reserve(map.count);
                     for (std::size_t i = 0; i != map.count; ++i) {
-                        auto data = tile(begin+b, epoch, map.low_tile+i, stop);
-                        column.tiles.push_back({data, std::span<const Complex>(*data)});
+                        auto& data = pins[b*map.count+i];
+                        const std::span<const Complex> samples(*data);
+                        column.tiles.push_back({std::move(data), samples});
                     }
                 }
                 cancelled(stop);
@@ -546,6 +551,10 @@ struct MappedBasis::Impl {
         }
     }
 };
+
+ConsecutiveBasisOffsets::ConsecutiveBasisOffsets(std::size_t rows) : offsets_(rows) {
+    std::iota(offsets_.begin(), offsets_.end(), 0.);
+}
 
 MappedBasis::MappedBasis(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                          std::size_t rows, unsigned workers)
@@ -588,10 +597,23 @@ void MappedBasis::prepare_pair(const MappedBasisRow& row, std::span<const Tap> t
 void MappedBasis::visit_pair(const MappedBasisRow& row, std::span<const Tap> taps,
                              std::uint64_t first, std::span<const double> offsets,
                              const BulkMappedSink& sink, std::stop_token stop) {
+    visit_pair_impl(row, taps, first, offsets, sink, stop, false);
+}
+
+void MappedBasis::visit_pair(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
+                             const ConsecutiveBasisOffsets& offsets, std::size_t rows,
+                             const BulkMappedSink& sink, std::stop_token stop) {
+    require(rows <= offsets.size(), "mapped basis offsets exceed the consecutive row extent");
+    visit_pair_impl(row, taps, first, std::span(offsets.offsets_).first(rows), sink, stop, true);
+}
+
+void MappedBasis::visit_pair_impl(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
+                                  std::span<const double> offsets, const BulkMappedSink& sink,
+                                  std::stop_token stop, bool consecutive) {
     const auto before = impl_->active.fetch_add(1);
     struct Release { std::atomic<unsigned>& active; ~Release() { active.fetch_sub(1); } } release{impl_->active};
     require(before < impl_->workers, "mapped basis concurrency exceeds admitted worker share");
-    impl_->visit(row, taps, first, offsets, sink, stop);
+    impl_->visit(row, taps, first, offsets, sink, stop, consecutive);
 }
 
 MappedBasisReport MappedBasis::report() const {

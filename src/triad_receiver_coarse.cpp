@@ -848,15 +848,25 @@ RayGeometry ray_geometry(const Plan& plan, const Layout& layout, const ReceiverC
 
 std::vector<Complex> exact_column(const Layout& layout, const Projection& projection,
                                   std::span<const Complex> raw, const RayGeometry& ray,
-                                  CoarseOperationCounts& work, std::stop_token stop) {
-    return projection.apply(layout.raw_rows, 0, layout.kernel_rows,
-        [&](std::size_t first, std::span<Complex> values) {
-            for (std::size_t i = 0; i < values.size(); ++i) {
-                const auto index = first + i;
-                values[i] = cubic(raw, ray.first_position + index * ray.scale) *
-                            rotation(ray.first_cycles + index * ray.cycle_step);
-            }
-        }, work, stop);
+                                  CoarseOperationCounts& work, std::stop_token stop,
+                                  std::span<const Complex> phases) {
+    const auto render = [&](const auto& phase) {
+        return projection.apply(layout.raw_rows, 0, layout.kernel_rows,
+            [&](std::size_t first, std::span<Complex> values) {
+                for (std::size_t i = 0; i < values.size(); ++i) {
+                    const auto index = first + i;
+                    values[i] = cubic(raw, ray.first_position + index * ray.scale) * phase(index);
+                }
+            }, work, stop);
+    };
+    if (!phases.empty()) return render([&](auto index) { return phases[index]; });
+    if (ray.cycle_step == 0) {
+        // The index is always nonnegative, so multiplying the zero step
+        // cannot change its sign. Keep the canonical complex multiply.
+        const auto phase = rotation(ray.first_cycles + ray.cycle_step);
+        return render([&](auto) { return phase; });
+    }
+    return render([&](auto index) { return rotation(ray.first_cycles + index * ray.cycle_step); });
 }
 
 std::vector<Complex> integer_source(const Plan& plan, const Layout& layout, PatternSource& source,
@@ -1131,12 +1141,14 @@ double quadratic(const Hermitian& inv, Complex a, Complex b) {
 Columns make_columns(const Plan& plan, const Layout& layout, const ReceiverConfig& config,
                      const Projection& projection, const MappedProjection* mapped,
                      PatternSource& source, std::size_t source_first, std::span<const Complex> integer,
-                     double clock, CoarseOperationCounts& work, std::stop_token stop) {
+                     double clock, CoarseOperationCounts& work, std::stop_token stop,
+                     std::span<const Complex> echo_phases = {}) {
     Columns out;
     for (std::size_t ray = 0; ray < plan.ray_count; ++ray) {
         const auto g = ray_geometry(plan, layout, config, clock, ray);
         out[ray] = mapped ? mapped_column(plan, layout, source, source_first, *mapped, g, work, stop) :
-                            exact_column(layout, projection, integer, g, work, stop);
+                            exact_column(layout, projection, integer, g, work, stop,
+                                         ray ? echo_phases : std::span<const Complex>{});
         note(work.projected_columns, 1);
     }
     return out;
@@ -1277,13 +1289,15 @@ public:
     BankJobs(const Plan& plan, const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
              const Projection& projection, const MappedProjection* mapped,
              const native_fft::DoublePlan* spectrum_fft, const native_fft::FloatPlan* float_spectrum_fft,
-             bool packed, unsigned workers, DifferentialSearch* varying, bool retain_gain_columns)
+             bool packed, unsigned workers, DifferentialSearch* varying, bool retain_gain_columns,
+             std::span<const Complex> echo_phases)
         : plan_(plan), config_(config), slot_(slot), key_(key), projection_(projection), mapped_(mapped),
           spectrum_fft_(spectrum_fft), float_spectrum_fft_(float_spectrum_fft), packed_(packed),
           group_(std::min<std::size_t>(lanes, std::max(1U, workers))),
           gain_columns_(retain_gain_columns ? gain_timing_workspaces(plan) :
                         std::array<std::size_t, 2>{SIZE_MAX, SIZE_MAX}),
-          sources_(lanes), bank_(plan.workspaces()), work_(plan.workspaces()), varying_(varying) {
+          sources_(lanes), bank_(plan.workspaces()), work_(plan.workspaces()), varying_(varying),
+          echo_phases_(echo_phases) {
         for (auto& shared : sources_) shared.pending = plan.clock_count;
     }
 
@@ -1317,7 +1331,7 @@ public:
         }
         if (!mapped_)
             columns = make_columns(plan_, plan_.layout, config_, projection_, nullptr, *shared.source, 0,
-                                   shared.integer, plan_.clocks[clock], counts, stop);
+                                   shared.integer, plan_.clocks[clock], counts, stop, echo_phases_);
         const auto workspace = plan_.workspace_index(lane, clock);
         if (varying_) score_varying(workspace, columns, stop);
         auto& destination = bank_[workspace];
@@ -1362,6 +1376,7 @@ private:
     std::vector<Workspace> bank_;
     std::vector<CoarseOperationCounts> work_;
     DifferentialSearch* varying_;
+    std::span<const Complex> echo_phases_;
 };
 
 struct Peak {
@@ -2285,7 +2300,7 @@ constexpr double matched_direct_terms = 26. * 1750 * 1794;
 constexpr double matched_chirp_workers = 24.;
 
 struct WorkspaceQuote {
-    std::size_t total = 0, bulk_host = 0;
+    std::size_t total = 0, bulk_host = 0, echo_phase_rows = 0;
     std::optional<CoarseFrequencyPlan> frequency;
     std::string_view frequency_fallback, lag_fallback;
     bool native_only = false, exact_chirp = false, exact_multi_lag_admitted = false;
@@ -2498,7 +2513,15 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
     const auto base = add(add(mul(frequency_count, sizeof(double)), 128 * 1024),
                           mul(interior_peak_bound(layout.lag_count), sizeof(std::uint32_t)));
     const auto float_twiddles = fused_float ? storage(layout.nfft, complex_bytes) : 0;
-    auto bank = storage(mul(mul(plan.workspaces(), plan.ray_count), layout.nfft), spectrum_bytes);
+    const auto bank_columns = mul(plan.workspaces(), plan.ray_count);
+    auto bank = storage(mul(bank_columns, layout.nfft), spectrum_bytes);
+    // A bulk owner finishes the time-domain bank before transforming it.
+    // While it renders native exact columns, their unused FFT padding in
+    // this existing lease can hold one shared echo phasor per raw sample.
+    // Only prepare() borrows this allowance and releases it before upload.
+    if (!phases && config.bulk_backend && config.spread_doppler_hz != 0 &&
+        layout.raw_rows <= mul(bank_columns, layout.nfft - layout.kernel_rows))
+        quote.echo_phase_rows = layout.raw_rows;
     bank = add(bank, mul(plan.workspaces(), sizeof(Workspace)));
     const auto source = add(plan.source_geometry.source_workspace_bytes, PatternSource::render_bank_scratch_bytes);
     const auto raw_columns = storage(mul(plan.ray_count, layout.kernel_rows));
@@ -3729,7 +3752,7 @@ struct CoarseSession::Impl {
             if (fused_float) float_fft = std::make_unique<native_fft::FloatPlan>(layout.nfft, stop);
             prepare(key, iq, projection, mapped ? &*mapped : nullptr,
                     !bulk && !lag && !split_bank && !fused_float && !route_open ? fft.get() : nullptr, workers, stop,
-                    overlapped ? assistance : nullptr, plan_search);
+                    overlapped ? assistance : nullptr, plan_search, workspace.echo_phase_rows);
         }
         if (route_open) {
             lag = work.route == CoarseRoute::lag_groups;
@@ -3815,8 +3838,27 @@ struct CoarseSession::Impl {
     void prepare(const Crypto& key, std::span<const Complex> iq, const Projection& projection,
                  const MappedProjection* mapped, const native_fft::DoublePlan* spectrum_fft,
                  unsigned workers, std::stop_token stop, const FrequencyAssistance* acquisition,
-                 const std::function<void(std::span<const FrequencyInterval>)>& plan_search) {
+                 const std::function<void(std::span<const FrequencyInterval>)>& plan_search,
+                 std::size_t echo_phase_rows) {
         const auto& layout = geometry.layout;
+        std::vector<Complex> echo_phases;
+        double echo_setup_seconds = 0;
+        if (echo_phase_rows && bulk && !bulk->supports_fir()) {
+            const auto started = PhaseClock::now();
+            echo_phases.resize(echo_phase_rows);
+            // Only the interpolation coordinates depend on the clock and
+            // keyed template. Evaluate each original absolute phase once.
+            const auto echo = ray_geometry(geometry, layout, config, 0., 1);
+            parallel(ceil_div(echo_phases.size(), chunk_samples), workers, stop, executor, slot.index,
+                     [&](unsigned, std::size_t chunk, std::stop_token job_stop) {
+                check_stop(job_stop);
+                const auto first = chunk * chunk_samples;
+                const auto last = first + std::min(chunk_samples, echo_phases.size() - first);
+                for (auto i = first; i < last; ++i)
+                    echo_phases[i] = rotation(echo.first_cycles + i * echo.cycle_step);
+            });
+            echo_setup_seconds = elapsed(started);
+        }
         const auto origin = PhaseClock::now();
         PhaseSpan varying_span(origin);
         std::optional<DifferentialSearch> differential;
@@ -3832,7 +3874,7 @@ struct CoarseSession::Impl {
         const bool retain_gain_columns = midpoint_geometry && midpoint_geometry->gain.block_rows;
         BankJobs bank_jobs(geometry, config, slot, key, projection, mapped, spectrum_fft,
                            float_fft.get(), q15_products, workers, differential ? &*differential : nullptr,
-                           retain_gain_columns);
+                           retain_gain_columns, echo_phases);
         // The device context still serializes output and batch admission.
         // Let the observation share the existing lanes with host source
         // preparation without expanding the device FIR lane bound.
@@ -3891,7 +3933,7 @@ struct CoarseSession::Impl {
         }
         if (acquisitions) plan_search(acquired);
         bank = bank_jobs.finish(receipt.template_bank.operations);
-        receipt.template_bank.wall_seconds = bank_span.seconds();
+        receipt.template_bank.wall_seconds = echo_setup_seconds + bank_span.seconds();
         receipt.observation.wall_seconds = observation_span.seconds();
         if (midpoint_geometry) {
             rank_gain_timing(geometry, config, slot, *midpoint_geometry, bank, observation,

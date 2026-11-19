@@ -4,6 +4,7 @@
 #include "triad_receiver_bulk.hpp"
 
 #include <memory>
+#include <vector>
 
 namespace datapump::triad::v3::receiver_detail {
 
@@ -27,6 +28,18 @@ struct MappedBasisReport {
     double dense_sample_rate_hz = 0;
     double oversampling_ratio = 0, interpolation_amplitude_proxy = 0;
     std::string fallback_reason;
+};
+
+// A reusable immutable [0, rows) sequence for the receiver's block calendar.
+// Arbitrary caller-provided offsets still use the checked span API below.
+class ConsecutiveBasisOffsets {
+public:
+    explicit ConsecutiveBasisOffsets(std::size_t rows = 0);
+    std::size_t size() const noexcept { return offsets_.size(); }
+
+private:
+    std::vector<double> offsets_;
+    friend class MappedBasis;
 };
 
 // A slot's shared bounded cache of unwarped keyed DATA. The caller owns the
@@ -68,9 +81,13 @@ public:
     void visit_pair(const MappedBasisRow&, std::span<const Tap>,
                     std::uint64_t first_window_sample, std::span<const double> offsets,
                     const BulkMappedSink&, std::stop_token = {});
+    void visit_pair(const MappedBasisRow&, std::span<const Tap>, std::uint64_t first_window_sample,
+                    const ConsecutiveBasisOffsets&, std::size_t rows, const BulkMappedSink&, std::stop_token = {});
     MappedBasisReport report() const;
 
 private:
+    void visit_pair_impl(const MappedBasisRow&, std::span<const Tap>, std::uint64_t,
+                         std::span<const double>, const BulkMappedSink&, std::stop_token, bool consecutive);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

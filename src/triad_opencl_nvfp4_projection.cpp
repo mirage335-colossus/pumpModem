@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <bitset>
 #include <cmath>
 #include <cstdint>
@@ -35,6 +36,8 @@ constexpr std::size_t resident_columns = 4, resident_maximum_candidates = 72, re
 constexpr std::size_t resident_cache_slots = 64, resident_tile_rows = 8192, resident_maximum_tile_pins = 32;
 constexpr std::size_t resident_stat_values = 11;
 constexpr std::size_t resident_tile_bytes = resident_tile_rows * sizeof(Complex);
+constexpr auto unpaired_output = std::numeric_limits<std::uint16_t>::max();
+static_assert(resident_columns * resident_maximum_candidates * resident_maximum_blocks < unpaired_output);
 static_assert(sizeof(std::complex<float>) == 2 * sizeof(float));
 static_assert(sizeof(Complex) == 2 * sizeof(double));
 static_assert(sizeof(cl_int) == sizeof(std::int32_t));
@@ -43,11 +46,22 @@ static_assert(sizeof(cl_long) == sizeof(std::int64_t));
 struct DeviceMapping {
     double fraction, scale, phase, phase_step;
     std::int64_t origin;
-    std::uint32_t output, tile_count;
+    std::uint16_t output, second_output;
+    std::uint32_t tile_count;
     std::uint32_t tiles[resident_maximum_tile_pins]{};
 };
 static_assert(sizeof(DeviceMapping) == 176 && alignof(DeviceMapping) == 8);
-static_assert(offsetof(DeviceMapping, origin) == 32 && offsetof(DeviceMapping, tiles) == 48);
+static_assert(offsetof(DeviceMapping, origin) == 32 && offsetof(DeviceMapping, second_output) == 42 &&
+              offsetof(DeviceMapping, tiles) == 48);
+
+bool same_mapping(const DeviceMapping& a, const DeviceMapping& b) {
+    const auto same = [](double x, double y) {
+        return std::bit_cast<std::uint64_t>(x) == std::bit_cast<std::uint64_t>(y);
+    };
+    return a.origin == b.origin && a.tile_count == b.tile_count &&
+           same(a.fraction, b.fraction) && same(a.scale, b.scale) &&
+           same(a.phase, b.phase) && same(a.phase_step, b.phase_step);
+}
 
 class OpenClError : public Error {
 public:
@@ -521,7 +535,8 @@ struct OpenClNvfp4Projection::Impl {
         scratch.protected_slots.reset();
     }
 
-    void stage_mapping(const BulkMappedColumn& column, std::size_t lane, OpenClResidentWork& work) {
+    void stage_mapping(const BulkMappedColumn& column, std::size_t lane, bool same_tap_as_previous,
+                       OpenClResidentWork& work) {
         auto& scratch = *resident;
         std::array<std::size_t, resident_maximum_tile_pins> addresses;
         std::bitset<resident_cache_slots> hits;
@@ -535,7 +550,8 @@ struct OpenClNvfp4Projection::Impl {
         if ((scratch.protected_slots | hits).count() + misses > resident_cache_slots) flush_mappings(work);
         scratch.protected_slots |= hits;
         DeviceMapping descriptor{column.fraction, column.scale, column.phase, column.phase_step,
-                                 column.origin, kernel_extent(lane), kernel_extent(column.tiles.size())};
+                                 column.origin, static_cast<std::uint16_t>(lane), unpaired_output,
+                                 kernel_extent(column.tiles.size())};
         for (std::size_t i = 0; i < column.tiles.size(); ++i) {
             const auto& tile = column.tiles[i];
             auto address = addresses[i];
@@ -552,8 +568,20 @@ struct OpenClNvfp4Projection::Impl {
             scratch.protected_slots.set(address);
             descriptor.tiles[i] = kernel_extent(address);
         }
-        scratch.descriptors.push_back(descriptor);
         ++work.mapped_columns;
+        if (same_tap_as_previous && !scratch.descriptors.empty() &&
+            descriptor.tile_count <= resident_maximum_tile_pins / 2) {
+            auto& previous = scratch.descriptors.back();
+            if (previous.second_output == unpaired_output && same_mapping(previous, descriptor)) {
+                // The two lane outputs have independent tile leases. They
+                // can share the stencil only when both leases survive this
+                // dispatch. A cache flush above starts a new descriptor list.
+                std::copy_n(descriptor.tiles, descriptor.tile_count, previous.tiles + previous.tile_count);
+                previous.second_output = descriptor.output;
+                return;
+            }
+        }
+        scratch.descriptors.push_back(descriptor);
     }
 
     void stage_columns(std::size_t first_lane, std::span<const double> offsets, const double*& canonical_offsets,
@@ -577,6 +605,7 @@ struct OpenClNvfp4Projection::Impl {
             return lane;
         };
 
+        auto previous_column = resident_columns;
         for (const auto& column : mapped) {
             const auto last_row = static_cast<double>(shape.rows - 1);
             const auto relative_last = column.scale * last_row + column.fraction;
@@ -591,7 +620,10 @@ struct OpenClNvfp4Projection::Impl {
                 !std::ranges::all_of(column.tiles, [](const auto& tile) {
                     return tile.owner && tile.samples.size() == resident_tile_rows;
                 })) throw Error("Robust OpenCL resident fine source supplied an invalid native tile descriptor");
-            stage_mapping(column, checked_lane(column.output_column), work);
+            const auto taps = resident_columns / 2;
+            const auto same_tap = previous_column < taps && column.output_column == previous_column + taps;
+            stage_mapping(column, checked_lane(column.output_column), same_tap, work);
+            previous_column = column.output_column;
         }
         for (const auto& column : direct) {
             if (column.samples.size() != shape.rows) throw Error("Robust OpenCL resident fine direct lane extent changed");

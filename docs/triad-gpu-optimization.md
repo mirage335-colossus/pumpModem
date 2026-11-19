@@ -305,6 +305,48 @@ launch geometry, intermediate device work and host synchronization.
 Coarse search still took 4.84 s of this 5.37 s slot, so speeding up the fine
 matrix alone has little leverage on complete service.
 
+## Shared bit mapping and coarse phase reuse
+
+The native source emits both bit alternatives with the same affine map and
+phase for a tap. The resident OpenCL mapper now sends one 176-byte descriptor
+for that pair when both tile lists fit and belong to the same cache flush.
+One device thread computes the coordinate, cubic weights and phase for both
+bits. Each bit keeps its own signal tiles, output and underflow indicator.
+The single-column route covers unmatched columns and cache boundaries.
+The host reuses its immutable consecutive row offsets and pins each tile
+group under a shared cache lookup. Arbitrary caller-provided offsets retain
+their validation.
+
+The Vulkan coarse path also reuses exact Doppler rotations across keyed and
+clock template alternatives. Each cached phase uses the original extended
+precision formula at the original row index. The temporary immutable table
+fits within the admitted padded-bank allowance and is released before device
+bank upload. Constant-phase columns compute their shared phase once. Both
+changes reduce work around the existing GPU projections while preserving
+the configured calendar and public search grid.
+
+On a same-device Blackwell comparison, the 24-worker resident severe slot
+spent 0.972–1.003 s in fine service, down from 1.439–1.450 s. Its roughly
+137.4 GFLOP of issued FP4 products correspond to about 0.14 TFLOP/s across
+the fine stage, up from about 0.095 TFLOP/s. This elapsed-work estimate
+includes preparation and the rest of the fine pipeline. The matrix shape
+and kernel are the same as the earlier 36.9 TFLOP/s matrix-only event
+control for a 576-lane projection. The follow-up event-profile build
+reached the pod deadline before collecting device events, so actual active
+matrix throughput and Tensor Core duty on the updated receiver remain
+unmeasured.
+
+The next attribution priority is the time spent producing keyed tiles,
+submitting blocking writes and waiting between the resident kernels. The
+coarse phase remains larger than fine service in the matched slots. A
+future coarse Tensor Core comparison can reuse one observation lag matrix
+by moving the trial-frequency rotation to the template. The common
+arrival-dependent phase cancels in the two-ray quadratic score. That
+formulation adds substantial dense work and still needs an acquisition and
+noise-ranking holdout. The existing FFT route already keeps its spectra and
+peak compaction on the device.
+[Measured receiver service](validation.md#blackwell-shared-bit-mapping-and-coarse-phase-reuse--19-november-2026).
+
 ## Which arithmetic ran in a remote simulation?
 
 The RunPod build uses the same compiled receiver as the desktop GUI.
