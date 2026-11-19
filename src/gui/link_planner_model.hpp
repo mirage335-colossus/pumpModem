@@ -29,6 +29,7 @@ struct Model {
     bool automatic_mode=true;
     double received_dbm=0;
     double actual_cn0_db_hz=0;
+    std::optional<double> budget_target_db_hz;
     std::string receiver_status;
     std::string error;
     std::optional<double> stronger_fit_target,weaker_fit_target;

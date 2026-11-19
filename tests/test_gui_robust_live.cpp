@@ -1332,12 +1332,14 @@ void raw_bit_session_transmission_and_ordinal() {
 
     const auto initial_ordinal = simulated.calendar->initial_ordinal;
     const std::array raw_messages{
-        std::pair<std::uint8_t, std::uint64_t>{1, initial_ordinal},
-        std::pair<std::uint8_t, std::uint64_t>{0, initial_ordinal + 3}
+        std::pair<std::vector<std::uint8_t>, std::uint64_t>{{1}, initial_ordinal},
+        std::pair<std::vector<std::uint8_t>, std::uint64_t>{{0}, initial_ordinal + 3},
+        std::pair<std::vector<std::uint8_t>, std::uint64_t>{{0, 1, 0}, initial_ordinal + 6}
     };
-    for (const auto& [bit, expected_ordinal] : raw_messages) {
-        const std::array<std::uint8_t, 1> raw_bit{bit};
-        session.transmit_bits(raw_bit);
+    for (const auto& [raw_bits, expected_ordinal] : raw_messages) {
+        session.transmit_bits(raw_bits);
+        std::string expected_bits;
+        for (const auto bit : raw_bits) expected_bits.push_back(bit ? '1' : '0');
         std::vector<live::SignalUpdate> signals;
         std::size_t received_messages = 0;
         bool stopped_replay = false;
@@ -1346,10 +1348,10 @@ void raw_bit_session_transmission_and_ordinal() {
             received_messages += out.received.size();
             check(out.error.empty() && out.receiver_error.empty(),
                   "Raw-bit Robust simulation failed: " + out.error + "; " + out.receiver_error);
-            check(out.pattern_steps.size() <= 3,
-                  "One raw bit scheduled more than one DATA bit and its two quiet windows");
-            if (!bit && out.simulation_replay && !stopped_replay) {
-                check(out.transmitting && out.pattern_steps.size() == 3,
+            check(out.pattern_steps.size() <= raw_bits.size() + 2,
+                  "Raw-bit Robust scheduled more DATA and quiet windows than its input requires");
+            if (expected_bits == "0" && out.simulation_replay && !stopped_replay) {
+                check(out.transmitting && out.pattern_steps.size() == raw_bits.size() + 2,
                       "Raw-bit replay began before physical receive processing finished");
                 session.cancel_transmit();
                 stopped_replay = true;
@@ -1360,24 +1362,24 @@ void raw_bit_session_transmission_and_ordinal() {
         const auto record = std::find_if(signals.rbegin(), signals.rend(), [](const auto& signal) {
             return signal.complete && signal.robust_reception;
         });
-        check(record != signals.rend() && record->binary && record->raw_bits == (bit ? "1" : "0") &&
+        check(record != signals.rend() && record->binary && record->simulation_raw_input &&
+              record->raw_bits == expected_bits &&
               !record->validated && received_messages == 0 && completed.received.empty(),
               "Raw bit was text-coded, decoded as a message, or lost from the native signal record");
-        const auto shown = bit ? std::string("1") : std::string("0");
         check(record->simulation_input_result == live::SimulationInputResult::match &&
-              completed.status.find("sent " + shown + " · received " + shown + " · match") != std::string::npos,
+              completed.status.find("sent " + expected_bits + " · received " + expected_bits + " · match") != std::string::npos,
               "Raw simulation did not report the actual match for its own transmission");
-        check(completed.pattern_steps.size() == 3,
-              "Single raw bit did not finish from one DATA slot and two physical quiet slots");
-        if (!bit)
+        check(completed.pattern_steps.size() == raw_bits.size() + 2,
+              "Raw-bit simulation did not finish from its DATA slots and two physical quiet slots");
+        if (expected_bits == "0")
             check(stopped_replay && !completed.simulation_replay && completed.status.find("replay stopped") != std::string::npos,
                   "Stopping a replay did not keep its completed receive state");
         for (std::size_t i = 0; i < completed.pattern_steps.size(); ++i) {
             const auto& row = completed.pattern_steps[i];
             check(row.index == i && row.ordinal == expected_ordinal + i && row.evidence_complete &&
-                  row.decision == (i == 0 ? live::PatternDecision::data : live::PatternDecision::quiet),
+                  row.decision == (i < raw_bits.size() ? live::PatternDecision::data : live::PatternDecision::quiet),
                   "Raw-bit transmission changed its addressed ordinal or physical completion sequence");
-            if (!i) check(row.bit == bit, "Native raw-bit reception changed the transmitted bit");
+            if (i < raw_bits.size()) check(row.bit == raw_bits[i], "Native raw-bit reception changed the transmitted bit");
             else check(!row.bit, "Scored quiet window was reported as DATA");
         }
     }
@@ -1444,15 +1446,27 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
     std::optional<std::chrono::steady_clock::time_point> replay_began;
     std::uint64_t replay_first = 0, last_revision = 0, last_frame = 0;
     unsigned replay_frames = 0;
+    bool processing_plot_seen = false, replay_pattern_seen = false;
+    std::uint64_t replay_pattern_elapsed_ms = 0;
     auto completed = wait(session, [&](auto& out) {
         for (auto& event : out.received) received.push_back(std::move(event));
         signal_events.insert(signal_events.end(), out.signals.begin(), out.signals.end());
         check(out.error.empty() && out.receiver_error.empty(), "Native simulation failed: " + out.error + "; " + out.receiver_error);
         check(out.pattern_steps.size() <= 5, "Native simulation exceeded five public scoring windows");
+        if (out.transmitting && !out.simulation_replay && out.spectrum_revision > 0 &&
+            !out.spectrum_db.empty() && !out.waveform.empty() && !out.constellation.empty())
+            processing_plot_seen = true;
         if (out.simulation_replay && out.spectrum_revision != last_revision) {
             check(out.transmitting && received.size() == 1 && out.pattern_steps.size() == 5 &&
                   out.pattern_steps.back().decision == live::PatternDecision::quiet,
                   "Simulation began replay before delivering the full result and physical quiet receipts");
+            check(out.simulation_pattern_replay_active &&
+                  out.simulation_pattern_replay_visible_steps <= out.pattern_steps.size() &&
+                  out.simulation_pattern_replay_elapsed_ms >= replay_pattern_elapsed_ms &&
+                  out.simulation_pattern_replay_elapsed_ms <= 3000,
+                  "Simulation pattern evidence did not follow its bounded replay cursor");
+            replay_pattern_seen = true;
+            replay_pattern_elapsed_ms = out.simulation_pattern_replay_elapsed_ms;
             if (!replay_began) {
                 replay_began = std::chrono::steady_clock::now();
                 replay_first = out.spectrum_start_sample;
@@ -1469,6 +1483,8 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
     }, "Native complete simulation exceeded its wall-time budget", 90s);
     check(replay_began && std::chrono::steady_clock::now() - *replay_began >= 2500ms &&
           replay_frames > 1 && replay_frames <= 60 && !completed.simulation_replay &&
+          processing_plot_seen && replay_pattern_seen && !completed.simulation_pattern_replay_active &&
+          completed.simulation_pattern_replay_visible_steps == completed.pattern_steps.size() &&
           completed.spectrum_start_sample >= replay_first &&
           completed.spectrum_start_sample - replay_first < 3 * simulated.transfer.modem.sample_rate &&
           completed.spectrum_revision >= last_revision,
@@ -1512,8 +1528,17 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
               "Native message completion did not come from two physical quiet decisions");
         check(row.wrong_key_admission=="current" && !row.wrong_key_rejected,
               "saved browser filter changed native acquisition or decoding");
-        if (i < 3) check(row.bit == received[0].raw_bits[i], "Pattern DATA evidence disagrees with decoded bits");
-        else check(row.quiet_modes > 0 && !row.bit, "Quiet completion lacks scored noise modes");
+        if (i < 3) {
+            check(row.bit == received[0].raw_bits[i], "Pattern DATA evidence disagrees with decoded bits");
+            check(row.browser_admission && row.browser_admission->front(),
+                  "Pattern DATA row omitted its reversible browser-admission ratings");
+            for (std::size_t policy = 1; policy < row.browser_admission->size(); ++policy)
+                check(!(*row.browser_admission)[policy] || (*row.browser_admission)[policy - 1],
+                      "Nested browser-admission ratings were not monotone");
+        } else {
+            check(row.quiet_modes > 0 && !row.bit, "Quiet completion lacks scored noise modes");
+            check(!row.browser_admission, "Quiet slot was presented as a browser-admission candidate");
+        }
     }
     check(!completed.waveform.empty() && completed.waveform.size() <= 1024 && completed.waveform_sample_rate == 1500 &&
           !completed.spectrum_db.empty() && completed.spectrum_db.size() == completed.spectrum_complex.size() &&
@@ -1544,6 +1569,11 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
             return out.simulation_replay;
         }, "Requested replay did not immediately produce activity", 2s);
         check(repeated.transmitting && !repeated.simulation_replay_available && repeated.replay_waterfall &&
+              repeated.simulation_pattern_replay_active &&
+              repeated.simulation_pattern_replay_steps &&
+              repeated.simulation_pattern_replay_steps->size() == completed.pattern_steps.size() &&
+              repeated.simulation_pattern_replay_steps->front().ordinal == completed.pattern_steps.front().ordinal &&
+              repeated.simulation_pattern_replay_visible_steps <= repeated.simulation_pattern_replay_steps->size() &&
               repeated.replay_waterfall->gain_db == original.gain_db &&
               repeated.replay_waterfall->search_band_hz == original.search_band_hz &&
               repeated.waveform_sample_rate == completed.waveform_sample_rate &&

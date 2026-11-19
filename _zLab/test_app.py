@@ -736,7 +736,7 @@ class Tests(unittest.TestCase):
         controller.key.set('test-key')
         controller.cloud.set('SECURE')
         controller.compute.set('')
-        controller.background = lambda work, done: done(work(Catalog()))
+        controller.background = lambda work, done, _failed=None: done(work(Catalog()))
         controller.catalog()
         self.assertEqual(len(controller.choices), 1)
         self.assertEqual(controller.compute.value, controller.dropdown['values'][0])

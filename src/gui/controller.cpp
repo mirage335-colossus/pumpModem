@@ -216,8 +216,8 @@ std::string gpu_search_diagnostics(const live::Snapshot& snapshot) {
         }
     } else {
         text = snapshot.gpu_score_rows
-            ? "GPU search + native tracking · " + std::to_string(snapshot.gpu_score_rows) + " rows"
-            : std::string("GPU ready + native tracking");
+            ? "Vulkan GPU search + CPU tracking · " + std::to_string(snapshot.gpu_score_rows) + " rows"
+            : "Vulkan ready · CPU tracking";
         if (snapshot.gpu_host_scored_rows)
             text += " · native precision scoring " + std::to_string(snapshot.gpu_host_scored_rows) + " rows";
         if (snapshot.gpu_vulkan_shared_workspace_limit_bytes) {
@@ -1148,6 +1148,9 @@ struct Controller::Impl {
     }
     void controls() {
         for(auto& field:fields)field.enabled=!closing;
+        const auto budget_target=link_inputs_valid()?link_plan()->budget_target_db_hz:std::nullopt;
+        f(UiField::snr).display_text=budget_target?planner_number(*budget_target):std::string{};
+        f(UiField::planner_target).display_text=f(UiField::snr).display_text;
         const bool busy=snapshot.transmitting;
         for(const auto id:{UiField::device,UiField::exclusive,UiField::mono,UiField::live_duplex,
             UiField::simulation,UiField::link_power,UiField::link_loss,UiField::link_noise,
@@ -1335,6 +1338,9 @@ struct Controller::Impl {
         const bool state_changed=value.status!=snapshot.status||value.error!=snapshot.error||
             value.receiver_error!=snapshot.receiver_error||value.transmitting!=snapshot.transmitting||
             value.simulation_replay_available!=snapshot.simulation_replay_available||
+            value.simulation_pattern_replay_steps!=snapshot.simulation_pattern_replay_steps||
+            value.simulation_pattern_replay_active!=snapshot.simulation_pattern_replay_active||
+            value.simulation_pattern_replay_visible_steps!=snapshot.simulation_pattern_replay_visible_steps||
             value.running!=snapshot.running||value.bit_seconds!=snapshot.bit_seconds||
             value.gpu_device!=snapshot.gpu_device||value.gpu_score_rows!=snapshot.gpu_score_rows||
             value.gpu_backend!=snapshot.gpu_backend||value.gpu_precision!=snapshot.gpu_precision||
@@ -1412,8 +1418,13 @@ struct Controller::Impl {
             text<<"Slot "<<step.index<<" · epoch "<<step.epoch<<" / ordinal "<<step.ordinal<<" · "
                 <<(step.decision==live::PatternDecision::data?"DATA":step.decision==live::PatternDecision::quiet?"QUIET":"AMBIGUOUS");
             if(step.bit)text<<" "<<unsigned(*step.bit);
-            text<<" · Browser filter "<<admission_filter_label(admission_policy())
-                <<" / acquired "<<step.wrong_key_admission
+            const auto policy=admission_policy();
+            text<<" · Browser filter "<<admission_filter_label(policy);
+            if(step.decision==live::PatternDecision::data && policy!=WrongKeyAdmission::current) {
+                const auto browser_pass=pattern_browser_pass(step,policy);
+                text<<(browser_pass?(*browser_pass?" · DATA passes":" · DATA rejected"):" · DATA unrated");
+            }
+            text<<" / acquired "<<step.wrong_key_admission
                 <<" · required log gap "<<step.wrong_key_required_log_separation;
             if(step.wrong_key_rejected)text<<" · admission withheld (evidence below selected margin)";
             if(!step.evidence_complete) {

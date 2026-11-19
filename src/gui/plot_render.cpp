@@ -192,6 +192,7 @@ PlotSnapshot PlotSnapshot::pattern_evidence(std::vector<PatternEvidencePoint> po
            !point.operational_log_e || !std::isfinite(*point.operational_log_e) ||
            !point.operational_threshold || !std::isfinite(*point.operational_threshold)) {
             point.bit_log_e.reset();point.operational_log_e.reset();point.operational_threshold.reset();
+            point.browser_admitted.reset();
         }
         if(!point.quiet_energy || !std::isfinite(*point.quiet_energy) || *point.quiet_energy<0 ||
            !point.quiet_threshold || !std::isfinite(*point.quiet_threshold) || *point.quiet_threshold<=0) {
@@ -462,6 +463,8 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
             const auto top_stop=std::max(0,height*3/4-2);
             const auto quiet_top=std::min(height-1,top_stop+3);
             const auto quiet_stop=height-1;
+            const auto browser_pass_y=height>4?std::min(height-1,top_stop+1):height/2;
+            const auto browser_reject_y=height>4?std::min(height-1,top_stop+2):height/2;
             const auto evidence_y=[&](double value) {
                 const auto fraction=std::clamp((static_cast<long double>(value)/evidence_scale-scaled_lower)/
                                                (scaled_upper-scaled_lower),0.L,1.L);
@@ -475,6 +478,11 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
             const auto position=[&](const PatternEvidencePoint& point) {
                 return span?static_cast<int>((static_cast<long double>(point.slot-data.points.front().slot)*(width-1))/span):width-1;
             };
+            std::vector<unsigned char> browser_pass(width),browser_reject(width);
+            for(const auto& point:data.points)if(point.browser_admitted) {
+                auto& marker=*point.browser_admitted?browser_pass:browser_reject;
+                marker[static_cast<std::size_t>(position(point))]=1;
+            }
             const auto add=[&](std::size_t series,int x,int y) {
                 if(x<0 || x>=width || y<0 || y>=height)return;
                 auto& column=traces[series][static_cast<std::size_t>(x)];
@@ -522,6 +530,10 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
                 if(hits(1,x,y))return theme::comparison_rgb(color);
                 if(hits(3,x,y) && x%6<3)return color?theme::caution_tint:gray(theme::muted);
                 if(hits(4,x,y))return color?theme::positive_tint:gray(theme::accent);
+                if(browser_pass[x] && static_cast<int>(y)==browser_pass_y)
+                    return color?theme::positive_tint:gray(255);
+                if(browser_reject[x] && static_cast<int>(y)==browser_reject_y)
+                    return color?theme::negative_tint:gray(255);
                 if((have_evidence && static_cast<int>(y)==evidence_y(0)) ||
                    (have_quiet && static_cast<int>(y)==quiet_y(1)))return reference(x,y);
                 return gray(0);
@@ -637,6 +649,14 @@ std::string PlotSnapshot::caption(unsigned width) const {
         } else if constexpr (std::is_same_v<Type, PatternEvidence>) {
             if(data.points.empty())return "No scored public slots yet";
             const auto& latest=data.points.back();
+            std::size_t browser_admitted=0,browser_rejected=0;
+            for(const auto& point:data.points)if(point.browser_admitted) {
+                if(*point.browser_admitted)++browser_admitted;
+                else ++browser_rejected;
+            }
+            if(browser_admitted || browser_rejected)
+                out << "Browser filter markers: " << browser_admitted << " pass, "
+                    << browser_rejected << " rejected (green/red).\n";
             out << "Slots " << data.points.front().slot << ".." << latest.slot << ": ";
             if(latest.operational_log_e)out << std::setprecision(5) << "log E " << *latest.operational_log_e
                 << " / threshold " << *latest.operational_threshold;

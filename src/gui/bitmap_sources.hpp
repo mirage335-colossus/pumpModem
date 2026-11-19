@@ -4,11 +4,13 @@
 #include <map>
 
 namespace datapump::gui {
-inline std::vector<plots::PatternEvidencePoint> pattern_evidence_points(std::span<const live::PatternStep> steps) {
+inline std::vector<plots::PatternEvidencePoint> pattern_evidence_points(std::span<const live::PatternStep> steps,
+    WrongKeyAdmission policy=WrongKeyAdmission::current) {
     if(steps.size()>plots::pattern_evidence_capacity)steps=steps.last(plots::pattern_evidence_capacity);
     std::vector<plots::PatternEvidencePoint> points;points.reserve(steps.size());
     for(const auto& step:steps) {
         plots::PatternEvidencePoint point;point.slot=step.index;
+        point.browser_admitted=pattern_browser_pass(step,policy);
         if(step.evidence_complete && std::isfinite(step.operational_bit_evidence[0]) &&
            std::isfinite(step.operational_bit_evidence[1]) &&
            std::isfinite(step.operational_log_e) && std::isfinite(step.operational_threshold)) {
@@ -61,7 +63,19 @@ public:
             constellation_source_ = snapshot.constellation_source;
             constellation_dropped_ = snapshot.constellation_dropped;
         }
-        auto evidence=pattern_evidence_points(snapshot.pattern_steps);
+        const auto& evidence_steps=snapshot.simulation_pattern_replay_steps
+            ? *snapshot.simulation_pattern_replay_steps : snapshot.pattern_steps;
+        std::span<const live::PatternStep> pattern_steps(evidence_steps);
+        pattern_replay_caption_.clear();
+        if(snapshot.simulation_pattern_replay_active && !pattern_steps.empty()) {
+            const auto total=pattern_steps.size();
+            pattern_steps=pattern_steps.first(std::min(total,snapshot.simulation_pattern_replay_visible_steps));
+            pattern_replay_caption_="Replay · "+std::to_string(pattern_steps.size())+"/"+std::to_string(total)+" slots";
+            if(!pattern_steps.empty())
+                pattern_replay_caption_+=" · +"+std::to_string(pattern_steps.back().epoch-pattern_steps.front().epoch)+" s modeled";
+        }
+        const auto policy=triad::v3::parse_wrong_key_admission(controller.field(ui::Field::wrong_key_admission).selected);
+        auto evidence=pattern_evidence_points(pattern_steps,policy);
         if(!frames_.contains(ui::Bitmap::pattern_scores) || evidence!=pattern_evidence_) {
             pattern_evidence_=std::move(evidence);
             const auto frame=plots::PlotSnapshot::pattern_evidence(pattern_evidence_);
@@ -115,6 +129,8 @@ public:
         auto result = get(id).caption(width);
         if(id==ui::Bitmap::waveform || id==ui::Bitmap::waterfall || id==ui::Bitmap::waterfall_detail || id==ui::Bitmap::waterfall_helper_detail)
             result+=environment_monitor_?" / input monitor":simulation_?" / simulated stream":" / modem stream";
+        if((id==ui::Bitmap::pattern_scores || id==ui::Bitmap::pattern_evidence) && !pattern_replay_caption_.empty())
+            result=pattern_replay_caption_+" · "+result;
         if (id == ui::Bitmap::constellation && constellation_dropped_)
             result += " / " + std::to_string(constellation_dropped_) + " omitted";
         return result;
@@ -143,7 +159,7 @@ private:
     std::optional<std::pair<double,double>> helper_band_;
     std::optional<std::uint64_t> spectrum_revision_;
     std::vector<plots::PatternEvidencePoint> pattern_evidence_;
-    std::string qr_text_, brightness_, qr_error_;
+    std::string pattern_replay_caption_, qr_text_, brightness_, qr_error_;
     std::shared_ptr<const Inspection> inspected_;
     std::uint64_t constellation_dropped_ = 0;
     double zoom_ = 0;

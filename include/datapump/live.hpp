@@ -63,6 +63,7 @@ struct SignalUpdate {
     StreamFecStats fec_stats;
     std::string raw_bits;
     std::uint64_t revision=0;
+    bool simulation_raw_input=false;
     std::vector<std::uint64_t> superseded_ids;
     transfer::RecoveryProgress recovery_progress;
     bool helper_carrier=false;
@@ -86,6 +87,9 @@ struct PatternStep {
     double quiet_energy=0, quiet_threshold=0, operational_log_e=0, operational_threshold=0;
     double operational_bit_log_separation=0, operational_minimum_bit_log_separation=0;
     std::string wrong_key_admission="current";
+    // Browser-only admission views rated from the untouched baseline score.
+    // This is per-slot display evidence and never changes the detector result.
+    std::optional<std::array<bool,triad::v3::wrong_key_admission_count>> browser_admission;
     double wrong_key_required_log_separation=0;
     bool wrong_key_rejected=false;
     double helper_seconds=0, coarse_seconds=0, fine_seconds=0;
@@ -153,6 +157,12 @@ struct Snapshot {
     bool gpu_native_lag_preference_supported=false;
     bool running=false,transmitting=false,simulation=false,simulation_replay=false;
     bool simulation_replay_available=false;
+    // The last successful simulation owns this bounded evidence, even when
+    // editing settings resets the current receiver's `pattern_steps`.
+    std::shared_ptr<const std::vector<PatternStep>> simulation_pattern_replay_steps;
+    bool simulation_pattern_replay_active=false;
+    std::size_t simulation_pattern_replay_visible_steps=0;
+    std::uint64_t simulation_pattern_replay_elapsed_ms=0;
     bool force_transmit_available=false;
 };
 // The application thread submits settings and commands. Device and DSP work

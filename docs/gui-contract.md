@@ -134,14 +134,14 @@ Display timing never controls receiver decisions or completion.
 | Rate, Carrier, Shift | Rate is the native inner rate. Carrier accepts a custom absolute frequency or a computed preset. Bare numbers are Hz. The baseband frequency is Carrier minus Shift. Configuration edits preserve a valid baseband frequency, including custom values, and translate it back to an absolute Carrier. Runtime FHSS hops keep the same baseband plan. |
 | Additional Symbols, Spreading | Off uses one lane; Interleave with `N×` selects `N` native added-symbol lanes. Nominal occupied DATA bandwidth is `0.625 × Rate × N`. |
 | Symbol burst, Random extra | Shared whole-bit calendar waits; see [burst scheduling](symbol-burst.md). |
-| Wrong Key Admission | Reversible Robust history/browser filter. Unfiltered shows the baseline; stronger choices hide completed records when fewer than half their admitted DATA bits pass, and show the pass count. Original decoded content is retained. The dB labels are approximate HF reference visibility losses. Strong wanted signals can also be hidden; higher SNR may not restore visibility. No wrong-key-per-day rate, fixed dB cost or authentication is implied. |
+| Wrong Key Admission | Reversible Robust history/browser filter. Unfiltered shows the baseline; stronger choices hide completed records when fewer than half their admitted DATA bits pass. Pattern evidence marks the selected filter's pass/reject results for rated slots. The original likelihoods, decisions and decoded content are retained. The dB labels are approximate HF reference visibility losses. Strong wanted signals can also be hidden. |
 | FHSS | Canonical envelope and illustrative frequency schedule; no external radio retuning. |
-| Target SNR dB/1Hz | One shared C/N0 target, default 32 dB-Hz, for provisional duration planning and live reference DATA amplitude relative to declared input noise; separate from actual simulated C/N0. |
+| Target SNR dB/1Hz | One shared C/N0 target, default 32 dB-Hz, for provisional duration planning and live reference DATA amplitude relative to declared input noise. The adjacent Budget target is a starting value from the nominal DATA link budget, rounded down to a whole dB-Hz within the supported range before fades. It leaves the selected target in place. |
 | Live input noise dBFS/Hz | Local receiver noise-model reference, separate from link-budget noise in dBm/Hz. At fixed Target SNR, changing it scales receiver variance and reference DATA amplitude together; correlated or impulsive noise is not qualified by mean power alone. See the [calibration scope](robust-current.md#configured-calendar-reception). |
 | Error correction | Configured Off, RS20 or RS60 native short/long text profiles. Raw bits bypass text coding and FEC exactly. |
 | Search arithmetic | Default selects qualified automatic routing; FP32 minimum selects FP32 products/FFT with higher-precision guards; FP64 force selects its native CPU reference policy. Sensitive stages retain higher precision. |
 | GPU | Optional native CUDA or Vulkan DATA processing, shared by live reception and simulation; the compiled selector prefers usable CUDA, then a compatible physical Vulkan device. GPU remains off by default. |
-| Simulation | The native emitted waveform runs through the continuous sampled channel and complete receiver without real-time pacing. After finite processing, a three-second excerpt of signal activity replays at its original rate. Live audio follows the device clock. |
+| Simulation | The native emitted waveform runs through the continuous sampled channel and complete receiver without real-time pacing. It previews sampled waveform, waterfall and I/Q while processing. A three-second excerpt of signal activity replays at its original rate after finite processing. Live audio follows the device clock. |
 | Audio device, channel routing, Live/duplex, TX volume, Exclusive | Existing native device service, selected channel layout, capture/playback policy and output gain. |
 | Waterfall, Waveform, Receiver input I/Q | Bounded actual session observations; receiver I/Q is not a substitute TX trace. |
 | Pattern evidence, Pattern steps | Native public-slot classifications, scores, completeness, resource and stage diagnostics. |
@@ -157,8 +157,11 @@ appear in the setup charts. Blank traces indicate unavailable observations.
 
 **Replay sim** beside **Clear waterfall** displays the previous completed
 simulation's retained activity again at its original frequency and scale.
-It leaves the decoded reception and public calendar in place. **Cancel TX**
-can stop the replay. Pattern evidence remains visible when clicked.
+Retained Pattern evidence advances in public-slot order across the replay.
+The caption shows slots revealed and their modeled elapsed time. Replay leaves
+decoded reception and the public calendar in place. **Cancel TX** can stop it.
+Explicit raw simulations display the received bits even when the same bits
+also form a short-codec character.
 
 Carrier presets use the native occupied DATA bandwidth, including spreading,
 pulse shaping and gating, plus the declared oscillator and channel allowances.

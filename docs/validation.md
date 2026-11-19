@@ -498,6 +498,183 @@ Browser retain the actual score and received content, including bits
 available for copying. The local reference is separate from native
 scoring and the two-quiet-slot completion rule.
 
+### Complete low-rate raw-bit replay — 19 November 2026
+
+An exact-bit diagnostic using the production native stream receiver extended
+the strong-signal fixture to `010`. It held the calendar, 6 kHz sample rate,
+seed 950101, 160.4 s DATA duration and +77 dB-Hz nominal input fixed. On
+configured native source `f15e6fe72e3214a4e…`, Current scored `111` followed
+by two quiet slots and returned a complete three-bit reception without
+erasures. The five windows used 6,255,321 samples and 24 software workers.
+Scoring took 53.31 s. Evaluating Guarded on the same evidence rejected all
+three DATA decisions. In the GUI, Guarded hides this result row while Pattern
+evidence now marks each rejection alongside the retained native likelihoods.
+Audio error Default and explicit 70 ms resolve to the same arrival allowance.
+Two fresh simulations need the same seed, calendar and ordinal for comparison.
+
+Two native contrasts used the original severe zero's identical
+`b4d8fa5a…8bf8` capture. The baseline nominees used pattern epochs −1 and
+−6 and gave wrong-bit evidence 320.03 million nats. A diagnostic using an
+evaluator-selected public atom at the actual arrival and oscillator offset
+correctly preferred zero at 313.82 million nats. Adding that particular
+atom alone would still lose to the baseline wrong fit. A separate variant
+extended the fixed-affine projection to include the declared atmospheric
+and selective allowances and spectral skirts. Its wrong decision persisted
+at 321.55 million nats. This experiment leaves the original receiver route
+in place. The raw-stream receipt joins the prior failure receipts under
+`local-evidence/runpod-strong-bit-2026-11-19/` until superseded.
+
+Two private affine contrasts on that same single-zero capture used a
+zero-relative-Doppler second tap at 0.444 s or 0.889 s from the public
+selective model. Both preferred zero on the eight ordinary coarse candidates.
+The 0.889 s contrast preferred the wrong bit when tested at the evaluator's
+known timing. A candidate implementation retained the original family and
+mixed it equally with the 0.444 s family. On the identical five-slot `010`
+capture it decoded `001` with both quiet slots. This repaired the first
+zero and changed the previously correct middle bit to zero. Guarded still
+rejected all three DATA slots. Receiver service took 73.46 s in this run,
+compared with 53.31 s on the earlier baseline. The candidate was removed.
+The larger broad varying-coarse plan quoted 2.60 GB and about 98 billion
+segmented inverse FFT output rows on the single-slot case. That plan was
+inspected without executing its large segmented search.
+
+A separate private proposal used the existing differential coarse search
+with the public atmospheric allowance and without segmented timing. It fit
+16 signal-derived coordinates on its own 500 Hz projected grid using the
+native affine scorer. Each branch kept its full public prior, and the ordinary
+and broad log e-values received equal fixed weight. On the same verified
+`7f453535…901c4` stream the native controller committed
+`0,1,0,QUIET,QUIET` and reported physical completion without erasures.
+The original bit evidence was retained. Guarded still rejected all three DATA
+decisions. Receiver service was 128.00 s at 24 shared executor workers and
+6.41 GB peak application reservation, versus 53.31 s on the original route.
+A fresh Helper-off active window, bit `1`, seed 950102 and ordinal 7000047,
+also preferred the wrong bit in the original scorer. The fixed mixture
+preferred the correct bit with a 45.61-million-nat gap. Extra coarse and fine
+work took 6.74 s and 8.72 s in this single-window check. The measured 2.40×
+complete service cost and these limited cases leave the proposal unqualified
+for automatic operation. The retained receipts and exact input settings
+are in `local-evidence/runpod-strong-bit-2026-11-19/`. Remove them when an
+independent receiver qualification supersedes these checks.
+
+At 100 W requested Helper power, the plan accepts the full 100 W and the
+Target 32 profile extends slot stride from 210 to 240 s. With Target −6 it
+uses 481.2 s DATA and 570 s slot stride. Physical DATA C/N0 remains 77 dB-Hz
+through these planning changes.
+
+The same proposal preserved native `0,QUIET,QUIET` at 100 W Helper and
+Target 32 on seed 950103, ordinal 7000057, with a blank Helper callsign.
+At Target −6, one independently seeded complete DATA window falsified
+preservation. For seed 950104 and ordinal 7000067, the original scorer
+correctly decoded `0` on the verified `11f3bb66…d3911e` input. The
+mixture decoded `1`, with an 87.58-million-nat wrong-bit advantage.
+This 3,410,122-sample observation met the full-prior transfer, valid-input,
+noise calibration and workspace checks. The 2.37 GB expanded slot quote
+ran in 79.28 s versus 29.55 s for the original slot. This test covers the
+active window. The broader proposal is unsuitable for Helper-enabled
+reception on this evidence.
+
+A corresponding Helper-off test used the same seed, ordinal, C/N0 and
+481.2 s DATA duration. Removing Helper also changed the first public window
+from 3,410,122 to 3,140,121 retained samples and moved its keyed pattern
+epoch. The ordinary scorer returned `1`, and the mixture returned the
+correct `0` on the same Helper-off observation. The mixture's gap was
+37.65 million nats. This is one Helper-off DATA observation and does not
+isolate the cause of the Helper-on result.
+
+The Helper-off production-path candidate skipped the alternative on a
+slot already scored physically quiet. An exact native replay of
+`7f453535…901c4` dispatched three broad searches with 16 fine
+coordinates each. It committed `010` and two scored quiet slots without
+erasures. Service took 96.78 s (1,061.84 process CPU seconds) with the shared
+24-worker budget and a 6.41 GB peak application reservation. The original
+stream took 53.31 s. The candidate preserved the admitted ready group and
+a full-width next-window refill. With only the ordinary workspace lease,
+the optional route reported that it could not be admitted. Its reserved
+half prior contributed no evidence. The deterministic threshold-edge
+check verified erasure without a flipped bit or a new physical quiet slot.
+
+Dry quotes showed no additional route with Helper enabled, selective
+modulation off, or the 36 Hz fast-cadence contrast. In an independent
+foreign-key input trial at +14 dB-Hz, the original and mixed scores both
+returned ambiguous. Wanted points at +9 and +18 dB-Hz also remained
+ambiguous, below the admission threshold. These checks do not establish
+near-threshold sensitivity, a false-acceptance rate or sustained receiver
+capacity. Remove the scoped receipts once later qualification supersedes them.
+
+### RunPod startup, build stages, and simulation presentation — 19 November 2026
+
+The live catalog selected an available full RTX PRO 6000 Blackwell Server
+Edition pair from the saved key before any Tk interaction. The nested X11
+regression also verified that an old pod record can be reconciled after the
+compute selection appears.
+
+The first new one-device test returned RUNNING without a direct SSH
+endpoint and was deleted. A second test verified two Blackwell Server Edition
+devices using pinned SSH. The stock image had GNU 13.3 and Unix Makefiles
+without Ninja or ccache. Deployment reported 81 jobs against 81.6 cgroup
+cores and 351.1 GiB RAM. The build took 50.61 s with 256.49 child CPU seconds
+(5.07 core equivalents on average). Configure took 9.91 s. The build time
+includes linking and excludes setup and dependency installation. Those
+figures describe one build on the old generator.
+
+That device test used the later-withdrawn selective-affine candidate. Both
+complete 3.6 Hz `010` episodes executed 19,755,450 Vulkan search rows, with
+two quiet slots apiece. The selected device allocated a peak Vulkan lease
+of 2,031 MiB without Helper and 4,244 MiB with 100 W Helper. CPU fine work
+per slot took longer than coarse search in both runs. The raw results were
+`110` without Helper and `001` at 100 W. The new presentation showed the
+actual bits and updated spectrum, waveform, I/Q and Pattern evidence during
+simulation. Manual replay advanced the retained Pattern evidence. The exact
+pod was deleted and absence was confirmed individually and in both inventories.
+
+A third fresh pod used the signed Ubuntu Ninja package with GNU 13.3 and
+the same full two-device model and resource quota. Configure took 7.50 s.
+The 81-job build compiled and linked in 20.60 s, spending 299.93 child CPU
+seconds. The Ninja log recorded 154 objects, 81 simultaneous object jobs
+at peak and 14.89 on average. The longest object was
+`triad_vulkan_backend.cpp` at 19.90 s. Link took 0.37 s. The worker's setup
+and self-check took about 39 s after preparation started. These are
+individual cold builds on two equivalent allocations.
+
+With the production scorer on driver 595.112.07, the third pod ran the
+same +77 dB-Hz link with 100 W Helper and Target −6. Raw `0` came back as
+`1` with two scored quiet slots and an unfiltered 1/1 DATA decision in
+30.57 s. This reproduces the reported mismatch on the longer 481.2 s
+DATA window. The worker executed 30,028,284 Vulkan search rows on GPU 0
+and used CPU tracking. Its peak workspace lease was 4,312 MiB. GPU 1
+remained outside this session's receiver. The two quiet slots each
+spent more time in CPU fine tracking than in GPU coarse search. During
+transmission the native relay delivered 158 spectrum, 162 waveform,
+162 I/Q and four Pattern evidence revisions. Manual replay advanced
+Pattern evidence by four revisions. Pod deletion was verified against
+both inventories.
+
+A subsequent 5090 test reached SSH and failed to connect to the Ubuntu
+archive while downloading signed package indices. The pod was deleted
+and verified absent. Deployment now bounds the initial index attempt
+and can retry with the signed Ubuntu security archive. The package test
+exercises the primary, failover and both-unavailable paths.
+
+The last receiver comparison ran the Helper-off candidate on one full
+RTX PRO 6000 Blackwell Server Edition. Driver 595.112.07 used Vulkan for
+44,451,810 search rows, with native CPU tracking and a peak Vulkan lease
+of 4,064 MiB. The pod supplied 13.6 cgroup cores and the receiver used
+26 software workers. Its fresh Ninja build took 15.12 s with 13 jobs.
+A fresh GUI-generated 3.6 Hz, Target 32, +77 dB-Hz
+`010` input finished after two scored quiet slots in 34.86 s. All three
+active slots used the broader evidence and the receiver still returned
+`110`. The third bit corrected an original affine preference for `1`;
+the first wrong decision persisted. This independent failure disqualified
+the candidate for production. The native scorer change was removed and
+the pod was verified absent from both inventories.
+
+The final standalone X11 suite passed 184 tests with the native worker
+and local loopback. The eight focused Robust, clock, bitmap and GUI
+policy checks passed on the final source. A concurrent native GUI suite
+run reported one timed audio-capture backlog overrun. That case passed
+on its own in 7.29 s and again in the final sequential run.
+
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 
 The [HF operating results](indexes/robust.md#low-power-hf-alarm-results)

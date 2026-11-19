@@ -76,6 +76,8 @@ Server Edition x2 first, followed by the same GPU x1 and desktop RTX 5090
 x3, x2, then x1. Other supported single-GPU models
 and Secure Cloud CPU types with 32 vCPUs and at least 128 GB of RAM are also
 available. The hourly compute list price covers the entire selected allocation.
+With a saved key, startup selects the available compute before handling older
+pod records.
 The arrow to the right of the dropdown refreshes stock and prices. Refresh
 keeps a manual selection while it is available. If that selection disappears,
 choose another option. Multi-GPU options require stock for the exact count.
@@ -165,7 +167,9 @@ compatible CUDA and LibTorch prerequisites and a passing probe it builds the
 CUDA worker. If CUDA is unavailable there, it builds the native Vulkan worker
 and configures a private NVIDIA EGL driver manifest for headless operation.
 On the supported Ubuntu 24.04 amd64 image the deployer installs missing
-Vulkan build dependencies from signed Ubuntu packages. The standalone CLI
+Vulkan build dependencies from signed Ubuntu packages. If the main archive
+cannot supply its indices, deployment tries the signed Ubuntu security archive.
+The standalone CLI
 defaults to `--mode cpu`. Use `--mode gpu` for automatic GPU selection or
 `--mode cuda` to require a CUDA build.
 GPU sessions enforce `--require-gpu`. Check the receiver's backend, scored

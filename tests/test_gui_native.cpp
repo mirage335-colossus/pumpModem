@@ -58,6 +58,14 @@ void shared_robust_target() {
     check(target!=declarations.end());
     check(app.field(gui::ui::Field::snr).text=="32"&&app.field(gui::ui::Field::planner_target).text=="32");
     check(std::string_view(target->label)=="Target SNR (dB-Hz)");
+    check(app.control(*target).label=="Target SNR (dB-Hz) · Budget target 47");
+    app.edit(gui::ui::Field::link_loss,"90 dB");
+    check(app.control(*target).label=="Target SNR (dB-Hz) · Budget target 77");
+    app.edit(gui::ui::Field::link_loss,"");
+    check(app.control(*target).label==target->label);
+    app.edit(gui::ui::Field::link_loss,"90.25 dB");
+    check(app.control(*target).label=="Target SNR (dB-Hz) · Budget target 76");
+    check(app.field(gui::ui::Field::snr).text=="32");
     app.edit(gui::ui::Field::snr,"40");
     const auto first_command=app.field(gui::ui::Field::planner_command).text;
     check(app.field(gui::ui::Field::planner_target).text=="40"&&first_command.find("--target-snr 40")!=std::string::npos);
@@ -118,17 +126,17 @@ void shared_gpu_toggle() {
 void gpu_route_diagnostics() {
     live::Snapshot snapshot;
     snapshot.gpu_device="fixture GPU";
-    check(gui::gpu_search_diagnostics(snapshot)=="GPU ready + native tracking · fixture GPU");
+    check(gui::gpu_search_diagnostics(snapshot)=="Vulkan ready · CPU tracking · fixture GPU");
     // Selection may be reported before any completed CPU or GPU scoring.
     snapshot.gpu_native_coarse_lag_sessions=1;
     check(gui::gpu_search_diagnostics(snapshot)==
-          "GPU ready + native tracking · native lag search selected · fixture GPU");
+          "Vulkan ready · CPU tracking · native lag search selected · fixture GPU");
     snapshot.gpu_score_rows=42;
     check(gui::gpu_search_diagnostics(snapshot)==
-          "GPU search + native tracking · 42 rows · native lag search selected · fixture GPU");
+          "Vulkan GPU search + CPU tracking · 42 rows · native lag search selected · fixture GPU");
     snapshot.gpu_native_coarse_lag_sessions=0;
     check(gui::gpu_search_diagnostics(snapshot)==
-          "GPU search + native tracking · 42 rows · fixture GPU");
+          "Vulkan GPU search + CPU tracking · 42 rows · fixture GPU");
 
     snapshot.gpu_backend="cuda:0";
     snapshot.gpu_statistics_blocks=7;
@@ -166,7 +174,7 @@ void gpu_route_diagnostics() {
     snapshot.gpu_native_coarse_workspace_sessions=3;
     snapshot.gpu_selection_reason="automatic Vulkan";
     check(gui::gpu_search_diagnostics(snapshot)==
-          "GPU search + native tracking · 42 rows · Vulkan workspace leases 64/1024 MiB (peak 512, owner 384, waiting 2) · "
+          "Vulkan GPU search + CPU tracking · 42 rows · Vulkan workspace leases 64/1024 MiB (peak 512, owner 384, waiting 2) · "
           "native coarse workspace fallback 3 (native-vulkan-workspace) · automatic Vulkan · fixture GPU");
 }
 void text_and_raw_draft_boundaries() {
@@ -546,17 +554,24 @@ void admission_browser_controller() {
     auto& inbox=const_cast<gui::Inbox&>(controller.inbox());
     auto& snapshot=const_cast<live::Snapshot&>(controller.snapshot());
     triad::v3::WrongKeyAdmissionEvidence evidence;
-    evidence.available=true;evidence.data_bits=1;evidence.passing_bits={1,0,0,0,0,0};
-    gui::SignalLine raw;raw.id=42;raw.frequency_hz=1500;raw.text="1";raw.raw_bits="1";
-    raw.binary=true;raw.complete=true;raw.received_bits=1;raw.robust_reception=true;raw.wrong_key_evidence=evidence;
+    evidence.available=true;evidence.data_bits=3;evidence.passing_bits={3,0,0,0,0,0};
+    gui::SignalLine raw;raw.id=42;raw.frequency_hz=1500;raw.text="110";raw.raw_bits="110";
+    raw.binary=true;raw.complete=true;raw.received_bits=3;raw.robust_reception=true;raw.wrong_key_evidence=evidence;
+    raw.simulation_input_result=live::SimulationInputResult::mismatch;
     signals.update(raw);
     auto file=content(9,4);file.message.kind=MessageKind::file;file.message.filename="keep.bin";
     inbox.put(file,gui::Inbox::ReceptionIdentity{43,1,evidence,true});
     snapshot.bit_seconds=123;snapshot.slot_stride_seconds=125;snapshot.transmitting=true;
+    live::PatternStep step;
+    step.decision=live::PatternDecision::data;step.bit=1;step.evidence_complete=true;
+    step.browser_admission=std::array{true,false,false,false,false,false};
+    snapshot.pattern_steps.push_back(step);
     controller.select(F::wrong_key_admission,"strict");
     check(controller.snapshot().bit_seconds==123&&controller.snapshot().slot_stride_seconds==125&&controller.snapshot().transmitting);
     check(controller.field(F::wrong_key_admission).enabled&&controller.settings().wrong_key_admission=="strict");
     check(controller.field(F::signals).records.empty()&&controller.field(F::files).records.empty());
+    check(controller.field(F::profile_reference).records.front().cells.front().text.find("DATA rejected")!=std::string::npos);
+    check(controller.snapshot().pattern_steps.front().bit==1);
     check(controller.field(F::status).text.find("1 signals / 1 files hidden")!=std::string::npos);
     check(controller.field(F::planner_command).text.find("--wrong-key-admission strict")!=std::string::npos);
     // Even a stale adapter selection cannot act on a now-hidden record.
@@ -571,10 +586,11 @@ void admission_browser_controller() {
           controller.field(F::planner_command).text.find("--wrong-key-admission current")!=std::string::npos);
     controller.select(F::signals,"42");
     check(controller.enabled(C::copy_signal)&&controller.enabled(C::copy_raw_signal)&&controller.enabled(C::save_file));
-    check(signals.copy_bits(0)=="1"&&inbox.items()[0].message.data==file.message.data);
+    check(signals.copy_bits(0)=="110"&&signals.copy_raw_bits(0)=="110"&&inbox.items()[0].message.data==file.message.data);
+    check(controller.field(F::profile_reference).records.front().cells.front().text.find("DATA rejected")==std::string::npos);
     check(controller.snapshot().bit_seconds==123);
     for(std::uint64_t id=100;id<240;++id) {
-        auto row=raw;row.id=id;row.wrong_key_evidence.passing_bits.fill(1);signals.update(row);
+        auto row=raw;row.id=id;row.wrong_key_evidence.passing_bits.fill(3);signals.update(row);
         auto item=content(static_cast<std::uint8_t>(id),1);item.message.kind=MessageKind::file;
         inbox.put(std::move(item));
     }

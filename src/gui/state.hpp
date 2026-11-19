@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace datapump::live { struct Snapshot; enum class SimulationInputResult : std::uint8_t; }
+namespace datapump::live { struct PatternStep; struct Snapshot; enum class SimulationInputResult : std::uint8_t; }
 namespace datapump::gui {
 // Each returned byte is one exact bit, in entry order. Whitespace separates
 // groups but never pads, truncates or removes leading zero bits.
@@ -124,8 +124,10 @@ struct SignalLine {
     triad::v3::WrongKeyAdmissionEvidence wrong_key_evidence;
     bool robust_reception = false;
     live::SimulationInputResult simulation_input_result{};
+    bool simulation_raw_input = false;
 };
 using WrongKeyAdmission = triad::v3::WrongKeyAdmission;
+std::optional<bool> pattern_browser_pass(const live::PatternStep&, WrongKeyAdmission);
 std::string admission_filter_label(WrongKeyAdmission);
 bool admission_visible(const triad::v3::WrongKeyAdmissionEvidence&, WrongKeyAdmission);
 std::string admission_label(const triad::v3::WrongKeyAdmissionEvidence&, WrongKeyAdmission);

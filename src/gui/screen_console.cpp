@@ -66,6 +66,8 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Total loss between transmitter and receiver, in dB, including antenna gains and feed-line losses. Choose a preset or enter a nonnegative value. Received power equals transmit power minus this loss.";
     if(slot==Slot::link_noise)
         control.help="Simulated receiver noise power in one hertz, in dBm/Hz. Received power minus this density gives simulated C/N0. Live input uses the separate declared audio noise density in Robust setup.";
+    if(slot==Slot::snr||control.field==Field::planner_target)
+        control.help="Target sets the planned DATA duration. Budget target rounds the nominal DATA C/N0 down to a whole dB-Hz within the supported range. It is a starting point from the link budget before propagation effects. Helper power is separate from DATA power.";
     if(slot==Slot::simulation_oscillator)
         control.help="Illustrative ADC/DAC oscillator model for sampled channel effects and public receiver bounds. It does not discipline or control physical hardware.";
     if(control.field==Field::rf_oscillator)control.help="Oscillator model for the radio shift and its public receiver bounds. Baseband clock uses a shared reference; selecting it does not control hardware.";

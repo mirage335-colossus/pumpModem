@@ -118,7 +118,8 @@ class Driver:
             self.update()
 
     def control(self, label):
-        return next((item for item in self.snapshot['controls'] if item.get('label') == label), None)
+        return next((item for item in self.snapshot['controls']
+                     if item.get('label', '').split(' · Budget target ', 1)[0] == label), None)
 
     def event(self, kind, target, value=''):
         sequence = int(self.snapshot['ack']) + 1

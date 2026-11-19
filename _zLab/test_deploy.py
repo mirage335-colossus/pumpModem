@@ -111,6 +111,17 @@ class DeployTests(unittest.TestCase):
         read_progress(b'PUMP_LAB_STAGE=compile\nPUMP_LAB_STAGE=configure\nPUMP_LAB_STAGE=check')
         self.assertEqual(statuses, [deploy._STAGE_MESSAGES[b'upload'], deploy._STAGE_MESSAGES[b'configure']])
 
+        statuses.clear()
+        read_progress = deploy._stage_reader(statuses.append)
+        read_progress(b'PUMP_LAB_BUILD_JOBS=')
+        read_progress(b'16\nPUMP_LAB_STAGE=com')
+        read_progress(b'pile\n')
+        self.assertEqual(statuses, [deploy._STAGE_MESSAGES[b'compile'] + ' (16 parallel jobs)'])
+        statuses.clear()
+        read_progress = deploy._stage_reader(statuses.append)
+        read_progress(b'PUMP_LAB_BUILD_JOBS=99999\nPUMP_LAB_STAGE=compile\n')
+        self.assertEqual(statuses, [deploy._STAGE_MESSAGES[b'compile']])
+
     def test_progress_is_delivered_before_remote_build_finishes(self):
         destination = self.root / 'managed'
         script = deploy.REMOTE_DEPLOY.replace("directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'",
@@ -188,9 +199,11 @@ echo PUMP_LAB_MODE=cpu
     def test_remote_cpu_and_cuda_branches_execute_correct_flags(self):
         # Exercise the actual POSIX script with fake CMake and fake Torch. This
         # checks branching/arguments, not CUDA availability or a real build.
-        for mode, profile in itertools.product(('cpu', 'cuda', 'gpu'), ('simulation', 'live')):
-            with self.subTest(mode=mode, profile=profile):
-                home = self.root / (mode + '-' + profile)
+        for mode, profile, generator_case in itertools.product(
+                ('cpu', 'cuda', 'gpu'), ('simulation', 'live'),
+                ('ninja', 'make', 'existing-make')):
+            with self.subTest(mode=mode, profile=profile, generator=generator_case):
+                home = self.root / (mode + '-' + profile + '-' + generator_case)
                 home.mkdir(mode=0o700)
                 archive = home / 'source.tar.gz'
                 sizing = (b"import sys\nassert sys.argv[1] == '--runpod'\n"
@@ -208,6 +221,25 @@ echo PUMP_LAB_MODE=cpu
                 cmake = bin_dir / 'cmake'
                 cmake.write_text('''#!/bin/sh
 printf '%s\\n' "$*" >> "$CMAKE_LOG"
+if [ "$1" = -S ]; then
+  mkdir -p build/lab
+  generator="Unix Makefiles"
+  previous=$(sed -n 's/^CMAKE_GENERATOR:INTERNAL=//p' build/lab/CMakeCache.txt 2>/dev/null | sed -n '1p')
+  [ -z "$previous" ] || generator=$previous
+  while [ "$#" -gt 0 ]; do
+    if [ "$1" = -G ]; then
+      shift
+      generator=$1
+    fi
+    shift
+  done
+  printf 'CMAKE_GENERATOR:INTERNAL=%s\\nCMAKE_CXX_COMPILER:FILEPATH=/usr/bin/c++\\n' "$generator" > build/lab/CMakeCache.txt
+  if [ "$FAKE_GENERATOR" = make ]; then
+    printf 'Compiler: \\nC++ launcher: \\n' > build/lab/build-info.txt
+  else
+    printf 'Compiler: GNU 14.2.0\\nC++ launcher: /usr/bin/ccache\\n' > build/lab/build-info.txt
+  fi
+fi
 if [ "$1" = --build ]; then
   mkdir -p build/lab
   for arg do worker=$arg; done
@@ -216,6 +248,8 @@ if [ "$1" = --build ]; then
 fi
 ''')
                 cmake.chmod(0o755)
+                (bin_dir / 'ninja').write_text('#!/bin/sh\\nexit 0\\n')
+                (bin_dir / 'ninja').chmod(0o755)
                 torch = home / 'torch'
                 torch.mkdir()
                 (torch / '__init__.py').write_text('''__version__ = "fake"
@@ -237,11 +271,27 @@ def compiled_with_cxx11_abi(): return True
 ''')
                 (torch / 'utils.py').write_text('cmake_prefix_path = "/fake/torch"\n')
                 log = home / 'cmake.log'
-                for name in ('sh', 'tar', 'gzip', 'sha256sum', 'chmod', 'mkdir', 'dirname', 'readlink', 'timeout'):
+                for name in ('sh', 'tar', 'gzip', 'sha256sum', 'chmod', 'mkdir', 'dirname', 'readlink', 'timeout', 'sed', 'echo'):
                     (bin_dir / name).symlink_to(shutil.which(name))
                 (bin_dir / 'python3').symlink_to(sys.executable)
+                # A retry's prior CMake cache survives extraction. Seed it
+                # immediately after the mocked source unpack, matching that
+                # remote lifecycle rather than creating it before upload.
+                tar = bin_dir / 'tar'
+                tar.unlink()
+                tar.write_text('''#!/bin/sh
+/bin/tar "$@"
+if [ "${FAKE_GENERATOR:-}" = existing-make ]; then
+  mkdir -p build/lab
+  printf 'CMAKE_GENERATOR:INTERNAL=Unix Makefiles\\n' > build/lab/CMakeCache.txt
+fi
+''')
+                tar.chmod(0o755)
+                if generator_case == 'make':
+                    (bin_dir / 'ninja').unlink()
                 env = {**os.environ, 'PATH': str(bin_dir),
-                       'PYTHONPATH': str(home), 'CMAKE_LOG': str(log)}
+                       'PYTHONPATH': str(home), 'CMAKE_LOG': str(log),
+                       'FAKE_GENERATOR': generator_case}
                 toolkit = home / 'toolkit'
                 nvcc = toolkit / 'bin' / 'nvcc'
                 for key in ('CUDACXX', 'CUDA_HOME', 'CUDA_PATH', 'CUDAToolkit_ROOT'):
@@ -288,16 +338,37 @@ def compiled_with_cxx11_abi(): return True
                 expected_stages = ['upload', 'unpack', 'environment']
                 if vulkan:
                     expected_stages.append('dependencies')
-                expected_stages.extend(('configure', 'compile', 'check'))
+                expected_stages.extend(('configure', 'build-plan', 'compile', 'check'))
                 self.assertEqual([line.partition('=')[2] for line in output.splitlines()
                                   if line.startswith('PUMP_LAB_STAGE=')], expected_stages)
                 flags = log.read_text()
                 backend = 'vulkan' if vulkan else 'cuda' if mode == 'gpu' else mode
                 jobs = {'cpu': 16, 'vulkan': 12, 'cuda': 8}[backend]
+                selected_generator = 'Unix Makefiles' if generator_case != 'ninja' else 'Ninja'
+                self.assertIn(f'-G {selected_generator}', flags)
                 self.assertIn(f'--build build/lab --parallel {jobs} --target ', flags)
+                self.assertIn('-DDATAPUMP_COMPILER_CACHE=ON', flags)
                 self.assertIn(f'PUMP_LAB_BUILD_JOBS={jobs}\n', output)
+                self.assertIn(f'PUMP_LAB_BUILD_GENERATOR={selected_generator}', output)
+                self.assertIn('PUMP_LAB_CXX_COMPILER=/usr/bin/c++', output)
+                if generator_case == 'make':
+                    self.assertIn('PUMP_LAB_CXX_COMPILER_ID=unknown', output)
+                    self.assertIn('PUMP_LAB_CXX_COMPILER_VERSION=unknown', output)
+                    self.assertIn('PUMP_LAB_COMPILER_CACHE=unavailable-or-disabled', output)
+                else:
+                    self.assertIn('PUMP_LAB_CXX_COMPILER_ID=GNU', output)
+                    self.assertIn('PUMP_LAB_CXX_COMPILER_VERSION=14.2.0', output)
+                    self.assertIn('PUMP_LAB_COMPILER_CACHE=ccache', output)
+                for stage in ('configure', 'compile'):
+                    metric = next(line for line in output.splitlines()
+                                  if line.startswith(f'PUMP_LAB_MEASURE={stage} '))
+                    self.assertRegex(metric, r'wall_seconds=[0-9.]+ child_user_cpu_seconds=[0-9.]+ '
+                                     r'child_system_cpu_seconds=[0-9.]+ child_peak_rss_bytes=[0-9]+')
                 receipt = json.loads((home / '.worker-receipt.json').read_text())
                 self.assertIn(f'PUMP_LAB_BUILD_JOBS={jobs}', receipt['text'].splitlines())
+                self.assertIn(f'PUMP_LAB_BUILD_GENERATOR={selected_generator}', receipt['text'].splitlines())
+                self.assertTrue(any(line.startswith('PUMP_LAB_MEASURE=configure ')
+                                    for line in receipt['text'].splitlines()))
                 self.assertIn('PUMP_LAB_MODE=' + backend, output)
                 self.assertIn('PUMP_LAB_PROFILE=' + profile, output)
                 self.assertIn('PUMP_LAB_RECEIPT_SCOPE=deployment SSH process; worker execution not established', output)
@@ -393,7 +464,7 @@ def compiled_with_cxx11_abi(): return True
         bin_dir = self.root / 'bin'
         bin_dir.mkdir()
         for command, body in (
-            ('dpkg', 'echo amd64\n'),
+            ('dpkg', 'printf \'%s\\n\' "${LAB_TEST_ARCH:-amd64}"\n'),
             ('dpkg-query', 'exit 1\n'),
             ('apt-get', r'''
 set -eu
@@ -407,7 +478,10 @@ done
 printf '%s\n' "$*"
 cat "$source"
 case "$LAB_TEST_APT_SCENARIO:$1" in
-    fallback*:--simulate|update-fails:update) exit 100 ;;
+    fallback*:--simulate|ninja-fallback:--simulate|update-fails:update) exit 100 ;;
+esac
+case "$LAB_TEST_APT_SCENARIO:$1:$(cat "$source")" in
+    mirror-fallback:update:*https://archive.ubuntu.com/ubuntu*) exit 100 ;;
 esac
 if [ "$1" = update ]; then
     if [ -e "$lists/test-updated" ]; then
@@ -421,6 +495,9 @@ fi
             helper = bin_dir / command
             helper.write_text('#!/bin/sh\n' + body)
             helper.chmod(0o755)
+        for command in ('sh', 'mktemp', 'chmod', 'mkdir', 'rm', 'cat', 'touch', 'timeout'):
+            (bin_dir / command).symlink_to(shutil.which(command))
+        (bin_dir / 'python3').symlink_to(sys.executable)
         script = (Path(deploy.__file__).parent / 'prepare_vulkan.sh').read_text()
         script = script.replace('/etc/os-release', shlex.quote(str(os_release)))
         script = script.replace("Path('/etc/vulkan/icd.d/nvidia_icd.json')", f'Path({str(icd)!r})')
@@ -429,7 +506,10 @@ fi
         fast_sources = [signed_source + suite for suite in
                         ('noble main', 'noble-updates main universe', 'noble-security main universe')]
         full_sources = [*fast_sources, signed_source + 'noble universe']
+        security_sources = [line.replace('archive.ubuntu.com', 'security.ubuntu.com') for line in fast_sources]
+        mirror_retry = 'PUMP_LAB_STAGE=dependency-mirror'
         packages = 'libvulkan-dev glslang-dev glslang-tools spirv-tools'
+        packages_with_ninja = packages + ' ninja-build'
         update = 'update --error-on=any'
         simulate = f'--simulate install --no-install-recommends --no-remove {packages}'
         install = f'install --no-install-recommends --no-remove -y {packages}'
@@ -437,17 +517,40 @@ fi
             ('fast', 0, [update, *fast_sources, simulate, *fast_sources, install, *fast_sources]),
             ('fallback', 0, [update, *fast_sources, simulate, *fast_sources, update, *full_sources,
                              'Reusing downloaded lists', install, *full_sources]),
-            ('update-fails', 100, [update, *fast_sources]),
+            ('update-fails', 100, [update, *fast_sources, mirror_retry, update, *security_sources]),
+            ('mirror-fallback', 0, [update, *fast_sources, mirror_retry, update, *security_sources,
+                                    simulate, *security_sources, install, *security_sources]),
             ('fallback-update-fails', 100, [update, *fast_sources, simulate, *fast_sources,
                                            update, *full_sources]),
+            ('ninja-fallback', 0, [update, *fast_sources,
+                                   f'--simulate install --no-install-recommends --no-remove {packages_with_ninja}',
+                                   *fast_sources, update, *full_sources, 'Reusing downloaded lists',
+                                   f'install --no-install-recommends --no-remove -y {packages_with_ninja}',
+                                   *full_sources]),
         ):
             with self.subTest(scenario=scenario):
+                ninja = bin_dir / 'ninja'
+                if scenario == 'ninja-fallback':
+                    ninja.unlink(missing_ok=True)
+                else:
+                    ninja.write_text('#!/bin/sh\nexit 0\n')
+                    ninja.chmod(0o755)
                 run = subprocess.run(['sh', '-s'], input=script, text=True, cwd=self.root,
-                                     env={**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}',
+                                     env={**os.environ, 'PATH': str(bin_dir),
                                           'LAB_TEST_APT_SCENARIO': scenario},
                                      capture_output=True, timeout=5)
                 self.assertEqual(run.returncode, exit_code, run.stderr)
                 self.assertEqual(run.stdout.splitlines(), expected)
+
+        # The package resolver is intentionally limited to Ubuntu Noble amd64.
+        for codename, architecture in (('focal', 'amd64'), ('noble', 'arm64')):
+            os_release.write_text(f'ID=ubuntu\nVERSION_CODENAME={codename}\n')
+            run = subprocess.run(['sh', '-s'], input=script, text=True, cwd=self.root,
+                                 env={**os.environ, 'PATH': str(bin_dir), 'LAB_TEST_ARCH': architecture,
+                                      'LAB_TEST_APT_SCENARIO': 'unsupported-image'},
+                                 capture_output=True, timeout=5)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual(run.stdout, '')
 
     def test_remote_wrapper_reuses_and_resumes_only_matching_deployments(self):
         destination = self.root / 'managed'
@@ -481,6 +584,18 @@ sha256sum build/lab/datapump-worker | cut -d ' ' -f 1
         second = invoke()
         self.assertEqual(second.returncode, 0, second.stdout)
         self.assertIn(b'fresh resources', second.stdout)
+        self.assertEqual((destination / 'attempts').read_text(), 'build\n')
+
+        # A precisely identified prior builder may migrate only the same
+        # source/mode/profile request so an interrupted retry can reuse its
+        # existing CMake cache and selected generator.
+        deployment = destination / '.deployment.json'
+        current_request = json.loads(deployment.read_text())
+        deployment.write_text(json.dumps({**current_request,
+                                          'builder': '7c4ac0b50ceca91390fc881c428d3838310dac6c247dd561f2ec12163c901cd5'}))
+        migrated = invoke()
+        self.assertEqual(migrated.returncode, 0, migrated.stdout)
+        self.assertEqual(json.loads(deployment.read_text()), current_request)
         self.assertEqual((destination / 'attempts').read_text(), 'build\n')
 
         self.assertNotEqual(invoke(mode='gpu').returncode, 0)

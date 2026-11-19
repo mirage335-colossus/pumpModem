@@ -1,4 +1,5 @@
 #include "link_planner_model.hpp"
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <sstream>
@@ -12,6 +13,8 @@ Model build(const Inputs& inputs,std::stop_token) {
        std::isfinite(inputs.noise_density_dbm_hz)) {
         result.received_dbm=inputs.tx_dbm-inputs.path_loss_db;
         result.actual_cn0_db_hz=result.received_dbm-inputs.noise_density_dbm_hz;
+        if(result.actual_cn0_db_hz>=-200)
+            result.budget_target_db_hz=std::floor(std::min(200.,result.actual_cn0_db_hz));
     } else result.error="Link budget inputs must be finite.";
     return result;
 }

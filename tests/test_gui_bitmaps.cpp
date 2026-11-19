@@ -254,6 +254,25 @@ void pattern_evidence() {
     check(complete.caption().find("threshold applies only to aggregate")!=std::string::npos &&
           complete.caption().find("adaptive lanes are diagnostic only")!=std::string::npos,
           "pattern caption implies a per-bit admission or adaptive decision");
+    auto admitted_points=points,rejected_points=points;
+    admitted_points[0].browser_admitted=true;rejected_points[0].browser_admitted=false;
+    const auto admitted_plot=PlotSnapshot::pattern_evidence(admitted_points);
+    const auto rejected_plot=PlotSnapshot::pattern_evidence(rejected_points);
+    const auto admitted_pixels=render(admitted_plot,full_bitmap_request(71,53,false,true));
+    const auto rejected_pixels=render(rejected_plot,full_bitmap_request(71,53,false,true));
+    check(admitted_points[0].bit_log_e==points[0].bit_log_e && rejected_points[0].bit_log_e==points[0].bit_log_e &&
+          admitted_pixels.pixels()!=rejected_pixels.pixels(),
+          "browser admission changed likelihoods or failed to draw a separate result marker");
+    check(admitted_pixels.pixels()[(38*71+70)*3]==theme::positive_tint.red &&
+          rejected_pixels.pixels()[(39*71+70)*3]==theme::negative_tint.red &&
+          admitted_plot.caption().find("1 pass, 0 rejected")!=std::string::npos &&
+          rejected_plot.caption().find("0 pass, 1 rejected")!=std::string::npos,
+          "pattern browser result marker lacks a distinct visible legend and count");
+    auto rated=admitted_points;auto rejected_again=rejected_points;
+    rated.push_back(rejected_again.front());rated.back().slot=11;
+    const auto mixed=PlotSnapshot::pattern_evidence(rated);
+    check(mixed.caption().find("1 pass, 1 rejected")!=std::string::npos,
+          "pattern caption did not count both browser filter outcomes");
     step.evidence_complete=false;
     const auto incomplete=pattern_evidence_points(std::span(&step,1));
     check(!incomplete[0].bit_log_e && !incomplete[0].quiet_energy,
@@ -264,6 +283,11 @@ void pattern_evidence() {
     check(PlotSnapshot::pattern_evidence({}).caption()=="No scored public slots yet" &&
           PlotSnapshot::pattern_evidence(incomplete).caption().find("incomplete")!=std::string::npos,
           "empty/incomplete evidence has no honest status");
+    auto unrated=points;unrated[0].browser_admitted=true;
+    unrated[0].bit_log_e.reset();unrated[0].operational_log_e.reset();unrated[0].operational_threshold.reset();
+    const auto no_unrated_marker=PlotSnapshot::pattern_evidence(unrated);
+    check(no_unrated_marker.caption().find("Browser filter markers")==std::string::npos,
+          "an incomplete slot retained a browser admission result");
 
     step.evidence_complete=true;
     step.operational_bit_evidence[0]=std::numeric_limits<double>::quiet_NaN();
@@ -278,7 +302,7 @@ void pattern_evidence() {
     check(render(PlotSnapshot::pattern_evidence(unsafe),full_bitmap_request(71,53)).pixels()==blank.pixels(),
           "plot factory accepted invalid independent caller evidence");
 
-    auto gap=points;gap.push_back(points.front());gap.back().slot=12;
+    auto gap=admitted_points;gap.push_back(rejected_points.front());gap.back().slot=12;
     const auto gap_source=PlotSnapshot::pattern_evidence(gap);
     const auto gap_image=render(gap_source,full_bitmap_request(71,53),false);
     for(unsigned y=0;y<53;++y)

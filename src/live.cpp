@@ -214,6 +214,17 @@ public:
             waveform[i] = pcm_[(at_ + i) % plot_size];
         return plot_frame(end >= plot_size ? end - plot_size : 0, rate_, std::move(waveform), iq, fft_);
     }
+    std::optional<PlotFrame> update_simulation(std::uint64_t first, std::span<const Complex> iq, double if_hz) {
+        const auto now = Clock::now();
+        if (iq.size() < plot_size || now < next_) return {};
+        next_ = now + std::chrono::milliseconds(45);
+        first += iq.size() - plot_size;
+        iq = iq.last(plot_size);
+        std::vector<float> waveform(plot_size);
+        for (std::size_t i = 0; i < waveform.size(); ++i)
+            waveform[i] = real_pcm(iq[i], first + i, if_hz, rate_);
+        return plot_frame(first, rate_, std::move(waveform), iq, fft_);
+    }
 private:
     std::uint32_t rate_;
     modem::detail::search_fft::DoublePlan fft_;
@@ -256,7 +267,16 @@ struct SimulationReplay {
             static_cast<std::uint64_t>(simulation_replay_duration.count()) * rate + plot_size - 1));
     }
 
-    std::size_t working_bytes() const { return limit * sizeof(Complex); }
+    std::size_t working_bytes() const {
+        auto bytes = limit * sizeof(Complex);
+        if (pattern_steps) {
+            bytes += sizeof(*pattern_steps) + pattern_steps->capacity() * sizeof(PatternStep);
+            for (const auto& step : *pattern_steps)
+                bytes += step.wrong_key_admission.capacity() + step.helper_status.capacity() +
+                    step.varying_status.capacity() + step.drift_status.capacity() + step.reason.capacity();
+        }
+        return bytes;
+    }
     void allocate() { input = std::make_unique_for_overwrite<Complex[]>(limit); }
     std::span<const Complex> samples() const { return {input.get(), filled}; }
 
@@ -274,6 +294,7 @@ struct SimulationReplay {
     double data_if_hz;
     std::uint64_t source_first, first;
     double source_per_input_sample;
+    std::shared_ptr<const std::vector<PatternStep>> pattern_steps;
 private:
     std::size_t limit;
     std::size_t filled = 0;
@@ -282,6 +303,8 @@ private:
 
 PatternStep pattern_step(const StreamSlotReceipt& receipt) {
     const auto& s = receipt.score;
+    WrongKeyAdmissionEvidence admission_evidence;
+    accumulate_wrong_key_admission(admission_evidence, s);
     PatternStep row;
     row.index = s.index;
     row.epoch = receipt.pattern_epoch;
@@ -301,6 +324,12 @@ PatternStep pattern_step(const StreamSlotReceipt& receipt) {
     row.operational_bit_log_separation = s.operational_bit_log_separation;
     row.operational_minimum_bit_log_separation = s.operational_minimum_bit_log_separation;
     row.wrong_key_admission = wrong_key_admission_name(s.wrong_key_admission);
+    if (admission_evidence.available && admission_evidence.data_bits == 1) {
+        std::array<bool,wrong_key_admission_count> passing{};
+        for (std::size_t i = 0; i < passing.size(); ++i)
+            passing[i] = admission_evidence.passing_bits[i] == 1;
+        row.browser_admission = passing;
+    }
     row.wrong_key_required_log_separation = s.wrong_key_required_log_separation;
     row.wrong_key_rejected = s.wrong_key_rejected;
     row.helper_seconds = s.helper_seconds;
@@ -453,9 +482,10 @@ struct Session::Impl {
     }
 
     void set_plot(std::uint64_t owner, std::stop_token stop, PlotFrame frame, bool receiver_input,
-                  std::uint64_t segment, const SimulationReplay* replay = nullptr) {
+                  std::uint64_t segment, const SimulationReplay* replay = nullptr,
+                  bool replaying = false) {
         publish(owner, stop, [&](Snapshot& out) {
-            if (replay && !out.simulation_replay) {
+            if (replaying && !out.simulation_replay) {
                 out.simulation_replay = true;
                 out.status = "Robust simulation processed · replaying 3 seconds";
             }
@@ -597,6 +627,7 @@ struct Session::Impl {
                 // Raw presentation requires an exact physical bit sequence.
                 if (message.raw_bits_complete())
                     for (const auto bit : message.received_bits) signal.raw_bits.push_back(bit ? '1' : '0');
+                signal.simulation_raw_input = comparison && comparison->raw;
                 if (comparison && event.first_public_slot == 0) {
                     // Compare only after the native receiver has completed a
                     // real episode. The local draft never affects scoring.
@@ -605,8 +636,9 @@ struct Session::Impl {
                         const auto& data = message.decoded_content->message.data;
                         comparison->observe(signal, {reinterpret_cast<const char*>(data.data()), data.size()});
                     } else comparison->observe(signal, {});
-                }
-                if (message.decoded_content) {
+                } else if (signal.simulation_raw_input)
+                    signal.simulation_input_result = SimulationInputResult::incomplete;
+                if (message.decoded_content && !signal.simulation_raw_input) {
                     transfer::Received received;
                     received.content = std::move(*message.decoded_content);
                     signal.reception_id = message_id(received.content.message, signal.id);
@@ -959,11 +991,10 @@ struct Session::Impl {
         const auto source_stop = source.geometry.source_samples;
         StreamingChannel channel(source, config);
         std::optional<SimulationReplay> replay;
-        std::optional<PlotMeter> noise_meter;
+        PlotMeter simulation_meter(rate);
         std::unique_ptr<CompleteStreamReceiver> receiver;
         auto tx_slot = calendar.transmit_slot(0);
-        if (noise) noise_meter.emplace(rate);
-        else {
+        if (!noise) {
             // In a message preview, include DATA even when a long Helper
             // lead precedes it. Helper-only previews begin at Helper onset.
             const auto activity = send.mode == EmissionMode::HelperOnly ? tx_slot.helper_begin : tx_slot.pattern_begin;
@@ -984,7 +1015,6 @@ struct Session::Impl {
         std::stop_callback interrupt(stop, [&] { if (receiver) receiver->request_cancel(); });
         std::array<Complex, audio_chunk> iq{};
         std::array<std::uint8_t, audio_chunk> valid{};
-        std::array<float, audio_chunk> pcm{};
         const auto segment = noise ? new_plot_segment() : 0;
         ReceiveDisplay display;
         std::size_t generated_bits = 0;
@@ -998,14 +1028,11 @@ struct Session::Impl {
                 if (!count) break;
                 const auto samples = std::span(iq).first(count);
                 if (replay) replay->record(first, samples);
-                else {
-                    for (std::size_t i = 0; i < count; ++i)
-                        pcm[i] = real_pcm(samples[i], first + i, prepared.receiver.data_if_hz, rate);
-                    if (auto frame = noise_meter->update(first, std::span(pcm).first(count), samples)) {
-                        if (emission.report().generated_samples)
-                            trace_hop(prepared, emission.report().generated_samples - 1, true, owner, stop);
-                        set_plot(owner, stop, std::move(*frame), true, segment);
-                    }
+                if (auto frame = simulation_meter.update_simulation(first, samples, prepared.receiver.data_if_hz)) {
+                    if (emission.report().generated_samples)
+                        trace_hop(prepared, emission.report().generated_samples - 1, noise, owner, stop);
+                    set_plot(owner, stop, std::move(*frame), true, segment,
+                             replay ? &*replay : nullptr);
                 }
                 if (receiver) accept(*receiver, display, s, first, samples, std::span(valid).first(count),
                                      owner, stop, comparison);
@@ -1063,6 +1090,13 @@ struct Session::Impl {
         const modem::detail::search_fft::DoublePlan fft(plot_size);
         const auto started = Clock::now();
         constexpr auto frames = simulation_replay_duration / simulation_replay_period;
+        const auto pattern_step_count = replay.pattern_steps ? replay.pattern_steps->size() : 0;
+        publish(owner, stop, [&](Snapshot& out) {
+            out.simulation_pattern_replay_steps = replay.pattern_steps;
+            out.simulation_pattern_replay_active = pattern_step_count != 0;
+            out.simulation_pattern_replay_visible_steps = 0;
+            out.simulation_pattern_replay_elapsed_ms = 0;
+        });
         for (std::chrono::milliseconds::rep tick = 0; tick < frames; ++tick) {
             wait_until(started + tick * simulation_replay_period);
             if (stop.stop_requested()) return;
@@ -1082,7 +1116,15 @@ struct Session::Impl {
                     static_cast<std::uint64_t>(static_cast<long double>(offset) * replay.source_per_input_sample);
                 trace_hop(*prepared, source_sample, false, owner, stop);
             }
-            set_plot(owner, stop, plot_frame(first, rate, std::move(waveform), samples, fft), true, segment, &replay);
+            const auto elapsed = static_cast<std::uint64_t>(tick * simulation_replay_period.count());
+            const auto visible_steps = pattern_step_count * static_cast<std::size_t>(tick + 1) /
+                static_cast<std::size_t>(frames);
+            publish(owner, stop, [&](Snapshot& out) {
+                out.simulation_pattern_replay_visible_steps = visible_steps;
+                out.simulation_pattern_replay_elapsed_ms = elapsed;
+            });
+            set_plot(owner, stop, plot_frame(first, rate, std::move(waveform), samples, fft),
+                     true, segment, &replay, true);
         }
         wait_until(started + simulation_replay_duration);
     }
@@ -1549,6 +1591,7 @@ struct Session::Impl {
                                 if (replay && replay->samples().size() >= plot_size) {
                                     {
                                         std::lock_guard lock(mutex);
+                                        replay->pattern_steps = std::make_shared<const std::vector<PatternStep>>(current.pattern_steps);
                                         retained_replay = std::move(replay);
                                     }
                                     replay_simulation(*retained_replay, owner, transmission, active.get());
@@ -1561,6 +1604,11 @@ struct Session::Impl {
                     publish(owner, stop, [&](Snapshot& out) {
                         out.transmitting = false;
                         out.simulation_replay = false;
+                        out.simulation_pattern_replay_active = false;
+                        out.simulation_pattern_replay_visible_steps = out.simulation_pattern_replay_steps
+                            ? out.simulation_pattern_replay_steps->size() : 0;
+                        out.simulation_pattern_replay_elapsed_ms =
+                            static_cast<std::uint64_t>(simulation_replay_duration.count()) * 1000;
                         if (replay_only) replay_requested = false;
                         else {
                             out.transmit_trace.active = false;
@@ -1663,6 +1711,10 @@ struct Session::Impl {
             "Preparing Robust transmission";
         if (settings.simulation) {
             current.pattern_steps.clear();
+            current.simulation_pattern_replay_steps.reset();
+            current.simulation_pattern_replay_active = false;
+            current.simulation_pattern_replay_visible_steps = 0;
+            current.simulation_pattern_replay_elapsed_ms = 0;
             current.spectrum_revision = 0;
         } else if (!settings.full_duplex) current.constellation.clear();
         auto& trace = current.transmit_trace;
@@ -1926,6 +1978,7 @@ void Session::stop() {
         ++p.generation;
         p.current.running = p.current.transmitting = false;
         p.current.simulation_replay = false;
+        p.current.simulation_pattern_replay_active = false;
         p.current.status = "Stopping Robust session";
         p.request.reset();
         p.replay_requested = false;

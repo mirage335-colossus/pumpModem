@@ -900,12 +900,15 @@ def deploy_selected(pod, record, known_hosts, identity, secret='', deploy_func=N
                             'PUMP_LAB_RECEIPT_SCOPE=', 'PUMP_LAB_GPU_SCOPE=',
                             'PUMP_LAB_GPU_VISIBLE_MEMORY_BYTES=', 'PUMP_LAB_GPU_VISIBLE_UUID=',
                             'PUMP_LAB_GPU_PARTITION_STATUS=', 'PUMP_LAB_GPU_INVENTORY=',
-                            'PUMP_LAB_BUILD_JOBS=')):
+                            'PUMP_LAB_BUILD_JOBS=', 'PUMP_LAB_BUILD_GENERATOR=', 'PUMP_LAB_MEASURE=',
+                            'PUMP_LAB_CXX_COMPILER=', 'PUMP_LAB_CXX_COMPILER_ID=',
+                            'PUMP_LAB_CXX_COMPILER_VERSION=', 'PUMP_LAB_COMPILER_CACHE=')):
             clean = ''.join(ch if 32 <= ord(ch) < 127 else '?' for ch in line[:250])
             if secret:
                 clean = clean.replace(secret, '[redacted]')
-            lines.append(clean)
-    return '\n'.join(lines[:20]) or 'Build succeeded; structured device and binary receipt was unavailable.'
+            if clean not in lines:
+                lines.append(clean)
+    return '\n'.join(lines[:28]) or 'Build succeeded; structured device and binary receipt was unavailable.'
 
 
 def device_query(argv, _input, timeout):
@@ -1138,7 +1141,7 @@ class App:
 
     def initialize_saved_session(self):
         if self.records or self.ending_names:
-            self.poll_owned(reconcile=True, after=self.startup_catalog)
+            self.startup_catalog(after=lambda: self.poll_owned(reconcile=True))
         else:
             self.startup_catalog()
 
@@ -1234,13 +1237,13 @@ class App:
 
         self.catalog_after = self.root.after(delay, run) if delay else self.root.after_idle(run)
 
-    def startup_catalog(self):
+    def startup_catalog(self, after=None):
         if self.exit_after is not None:
             return
         if self.busy:
-            self.schedule_catalog(self.startup_catalog, delay=100)
+            self.schedule_catalog(lambda: self.startup_catalog(after), delay=100)
         elif self.key.get().strip():
-            self.catalog()
+            self.catalog(after=after)
 
     def save_key(self):
         key = self.key.get().strip()
@@ -1446,14 +1449,20 @@ class App:
     def compute_selected(self, _event=None):
         self.preferred_compute = self.selected_compute()
 
-    def catalog(self):
+    def catalog(self, after=None):
         if self.exit_after is not None:
             return
         cloud = self.cloud.get()
         key = self.key.get().strip()
+
+        def retry():
+            self.startup_catalog(after=after)
+
         def done(result):
+            if self.exit_after is not None:
+                return
             if self.cloud.get() != cloud or self.key.get().strip() != key:
-                self.schedule_catalog(self.startup_catalog)
+                self.schedule_catalog(retry)
                 return
             self.catalog_key = key
             previous = self.preferred_compute
@@ -1475,7 +1484,14 @@ class App:
                 self.status.set('The selected option is no longer in the catalog. Choose a compute option.')
             else:
                 self.status.set('Choose compute, then start the simulation.')
-        self.background(lambda c: load_catalog(c, cloud), done)
+            if after:
+                after()
+
+        def failed(_error):
+            if after and self.exit_after is None:
+                after()
+
+        self.background(lambda c: load_catalog(c, cloud), done, failed)
 
     def create(self, settings):
         if self.exit_after is not None or self.window_closed.is_set():

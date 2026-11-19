@@ -1,6 +1,7 @@
 #pragma once
 #include "ui_contract.hpp"
 #include "state.hpp"
+#include "datapump/live.hpp"
 #include "datapump/received_text.hpp"
 #include <algorithm>
 #include <cmath>
@@ -48,6 +49,8 @@ inline std::vector<ui::Record> signal_records(const Signals& signals, bool shell
         if(!recovery.empty())detail+=(detail.empty()?"":"; ")+recovery;
         if(signal.robust_reception&&!signal.helper_carrier)
             detail+=(detail.empty()?"":"; ")+admission_label(signal.wrong_key_evidence,policy);
+        if(signal.validated && signal.simulation_input_result==live::SimulationInputResult::mismatch && !signal.raw_bits.empty())
+            detail+=" · Received bits "+signal.raw_bits.substr(0,48)+(signal.raw_bits.size()>48?"…":"");
         if(!detail.empty()) {
             row.cells.back().y=5;
             row.cells.push_back({detail,194,34,-10,15,11,tone,false});

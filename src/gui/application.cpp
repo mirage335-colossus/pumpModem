@@ -397,11 +397,10 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
         }
     }
     if(declaration.kind==ui::Kind::text&&!state.display_text.empty()) {
-        const auto effective=(state.display_text.size()>6?"":"using ")+state.display_text+" dB-Hz";
         if(declaration.field==ui::Field::doppler)view.label="Doppler · "+state.display_text;
         else if(declaration.field==ui::Field::helper_power)view.label="Helper Carrier Power · "+state.display_text;
-        else if(declaration.field==ui::Field::snr)view.label="Target · "+effective;
-        else if(declaration.field==ui::Field::planner_target)view.label="Target · "+effective;
+        else if(declaration.field==ui::Field::snr||declaration.field==ui::Field::planner_target)
+            view.label+=" · Budget target "+state.display_text;
     }
     if(declaration.kind==ui::Kind::action) {
         const auto current=command_label(declaration.command);

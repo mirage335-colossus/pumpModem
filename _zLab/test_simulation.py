@@ -72,7 +72,7 @@ class SimulationTest(unittest.TestCase):
                 update()
 
         def control(label):
-            return next(item for item in snapshot["controls"] if item["label"] == label)
+            return next(item for item in snapshot["controls"] if item["label"].split(" · Budget target ", 1)[0] == label)
 
         def event(kind, target, value):
             sequence = int(snapshot["ack"]) + 1
@@ -95,11 +95,22 @@ class SimulationTest(unittest.TestCase):
                 event(1, control(label)["id"], value)
             for label, value in (("Baseband Osc", "gpsdo-ocxo"), ("Shift Osc", "gpsdo-ocxo")):
                 event(2, control(label)["id"], value)
+            self.assertIn("Budget target 80", control("Target SNR (dB-Hz)")["label"])
             message = next(item for item in snapshot["controls"]
                            if item["kind"] == "text" and item.get("byteLimit") == 4 * 1024 * 1024)
             event(1, message["id"], "e")
             wait(lambda: control("Transmit")["enabled"])
             event(4, control("Transmit")["id"], "")
+            def replaying():
+                return any("· replaying 3 seconds" in item.get("text", "") for item in snapshot["controls"])
+
+            def preview_visible():
+                return "dB relative to modeled noise" in control("Spectrum").get("caption", "")
+
+            wait(lambda: preview_visible() or replaying() or not control("Cancel TX")["enabled"])
+            self.assertTrue(preview_visible(), "simulated samples never reached the waterfall")
+            self.assertFalse(replaying(), "the first waterfall update should precede playback")
+            self.assertTrue(control("Cancel TX")["enabled"], "the preview should arrive during simulation")
             wait(lambda: bool(control("Pattern steps").get("records")) or not control("Cancel TX")["enabled"])
             wait(lambda: not control("Cancel TX")["enabled"])
             steps = control("Pattern steps").get("records", [])
@@ -116,12 +127,17 @@ class SimulationTest(unittest.TestCase):
                 self.assertEqual(control(label)["kind"], "bitmap", label)
             self.assertFalse(control("Pattern evidence")["click"],
                              "Pattern evidence should survive an ordinary click")
+            event(2, control("Wrong Key Admission")["id"], "guarded")
+            wait(lambda: "Browser filter markers:" in control("Pattern evidence")["caption"])
+            event(2, control("Wrong Key Admission")["id"], "current")
+            wait(lambda: "Browser filter markers:" not in control("Pattern evidence")["caption"])
             self.assertTrue(control("Replay sim")["enabled"])
             event(4, control("Clear waterfall")["id"], "")
             event(4, control("Replay sim")["id"], "")
             self.assertFalse(control("Replay sim")["enabled"])
-            wait(lambda: any("· replaying 3 seconds" in item.get("text", "")
-                             for item in snapshot["controls"]))
+            wait(lambda: "Replay · 1/5 slots" in control("Pattern evidence")["caption"] or
+                 control("Replay sim")["enabled"])
+            self.assertIn("Replay · 1/5 slots", control("Pattern evidence")["caption"])
             self.assertEqual(control("Pattern steps")["records"], steps)
             self.assertEqual(control("Signals")["records"], signals)
             wait(lambda: control("Replay sim")["enabled"])

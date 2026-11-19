@@ -19,6 +19,9 @@ struct PatternEvidencePoint {
     std::optional<std::array<double,2>> bit_log_e;
     std::optional<double> operational_log_e, operational_threshold;
     std::optional<double> quiet_energy, quiet_threshold;
+    // Browser visibility result under the selected Wrong Key Admission
+    // policy. This presentation marker never modifies the score data above.
+    std::optional<bool> browser_admitted;
     bool operator==(const PatternEvidencePoint&) const = default;
 };
 inline constexpr std::size_t pattern_evidence_capacity=64;

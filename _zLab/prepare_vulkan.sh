@@ -5,6 +5,9 @@ set -eu
 if [ -r /etc/os-release ]; then . /etc/os-release; fi
 if [ "${ID-}:${VERSION_CODENAME-}" = ubuntu:noble ] && [ "$(dpkg --print-architecture)" = amd64 ]; then
     packages="libvulkan-dev glslang-dev glslang-tools spirv-tools"
+    if ! command -v ninja >/dev/null 2>&1; then
+        packages="$packages ninja-build"
+    fi
     missing=
     for package in $packages; do
         if [ "$(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null || true)" != installed ]; then
@@ -15,19 +18,28 @@ if [ "${ID-}:${VERSION_CODENAME-}" = ubuntu:noble ] && [ "$(dpkg --print-archite
         sources=$(mktemp -d)
         trap 'rm -rf "$sources"' EXIT
         chmod 755 "$sources"
-        mkdir "$sources/lists"
+        mkdir -m 755 "$sources/lists"
+        mirror=https://archive.ubuntu.com/ubuntu
         apt_source() {
-            printf 'deb [arch=amd64 target=Packages signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://archive.ubuntu.com/ubuntu %s %s\n' "$1" "$2"
+            printf 'deb [arch=amd64 target=Packages signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] %s %s %s\n' "$mirror" "$1" "$2"
         }
-        {
-            apt_source noble main
-            apt_source noble-updates 'main universe'
-            apt_source noble-security 'main universe'
-        } > "$sources/ubuntu.list"
+        write_sources() {
+            {
+                apt_source noble main
+                apt_source noble-updates 'main universe'
+                apt_source noble-security 'main universe'
+            } > "$sources/ubuntu.list"
+        }
         set -- -o "Dir::Etc::sourcelist=$sources/ubuntu.list" -o Dir::Etc::sourceparts=- \
-            -o "Dir::State::lists=$sources/lists" -o Acquire::Retries=1 -o Acquire::https::Timeout=15 \
+            -o "Dir::State::lists=$sources/lists" -o Acquire::Retries=0 -o Acquire::https::Timeout=15 \
             -o Acquire::Languages=none -o Acquire::IndexTargets::deb::DEP-11::DefaultEnabled=false
-        apt-get "$@" update --error-on=any
+        write_sources
+        if ! timeout -k 5 45 apt-get "$@" update --error-on=any; then
+            echo 'PUMP_LAB_STAGE=dependency-mirror'
+            mirror=https://security.ubuntu.com/ubuntu
+            write_sources
+            timeout -k 5 60 apt-get "$@" update --error-on=any
+        fi
         # The amd64 shader tools are published in the updates and security
         # pockets. Avoid the large base Universe index when APT can already
         # resolve the full requested install using those signed package lists.

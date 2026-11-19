@@ -293,8 +293,11 @@ CPU and memory detection with its own build budget. It can use all visible
 logical CPUs within the container's quota. It budgets 1.5 GiB per native
 CPU or Vulkan job, or 3 GiB per CUDA job, after setting aside the larger
 of 1 GiB or 10% of available memory for the linker and other processes.
-Inconclusive resource detection falls back to a serial build. The
-deployment receipt records the selected job count.
+Inconclusive resource detection falls back to a serial build. A fresh
+worker build uses Ninja when installed and Unix Makefiles otherwise.
+Retries keep their existing generator. Setup shows the job count while
+compiling. The deployment receipt includes configure and build wall time,
+child CPU time, largest child RSS, and the detected compiler and launcher.
 
 For direct CMake or maintenance recipe invocations, pass the selector explicitly:
 

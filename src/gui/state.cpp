@@ -120,6 +120,10 @@ bool admission_visible(const triad::v3::WrongKeyAdmissionEvidence& evidence, Wro
     // Missing/invalid local evidence is unrated, never invented rejection.
     return !passed || *passed>=evidence.data_bits-*passed;
 }
+std::optional<bool> pattern_browser_pass(const live::PatternStep& step, WrongKeyAdmission policy) {
+    if(!step.browser_admission || policy==WrongKeyAdmission::current)return {};
+    return (*step.browser_admission)[static_cast<std::size_t>(policy)];
+}
 std::string admission_filter_label(WrongKeyAdmission policy) {
     switch(policy) {
     case WrongKeyAdmission::current:return "Unfiltered";
@@ -255,7 +259,8 @@ bool physical_complete_bits(const SignalLine& line) {
 bool complete_bits(const SignalLine& line) {return !recovery_pending(line) && physical_complete_bits(line);}
 }
 bool signal_byte_aligned(const SignalLine& line) {
-    return !recovery_pending(line) && line.binary && line.complete && line.received_bits && line.received_bits%8==0;
+    return !line.simulation_raw_input && !recovery_pending(line) && line.binary && line.complete &&
+        line.received_bits && line.received_bits%8==0;
 }
 std::string signal_display_text(const SignalLine& line, bool shellcode) {
     if(const auto bytes=signal_byte_prefix(line)) return received_text(*bytes,shellcode);
@@ -434,6 +439,7 @@ void apply_receptions(Inbox& inbox, Signals& signals, live::Snapshot& snapshot) 
         line.helper_carrier=signal.helper_carrier;
         line.wrong_key_evidence=signal.wrong_key_evidence;line.robust_reception=signal.robust_reception;
         line.simulation_input_result=signal.simulation_input_result;
+        line.simulation_raw_input=signal.simulation_raw_input;
         line.raw_bits=signal.raw_bits;line.missing_symbols=signal.missing_symbols;
         line.fec_stats=signal.fec_stats;line.revision=signal.revision;line.recovery_progress=signal.recovery_progress;
         if(!signals.update(std::move(line)))continue;

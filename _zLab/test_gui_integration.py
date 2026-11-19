@@ -699,6 +699,28 @@ class TkControllerIntegration(unittest.TestCase):
         finally:
             other.destroy()
 
+    def test_saved_key_loads_and_selects_compute_before_reconciling_old_records(self):
+        self.set_entry(self.controller.key, 'saved-fixture-key')
+        self.assertTrue(self.controller.save_key())
+        self.controller.state.write([{'name': 'stale-fixture', 'status': 'RUNNING',
+                                      'deadline': time.time() + 3600}])
+        other = tk.Toplevel(self.root)
+        other.withdraw()
+        try:
+            restarted = lab.App(other, repository_directory=self.tmp.name)
+            reconciliation = []
+            with patch.object(restarted, 'poll_owned', side_effect=lambda **kwargs: reconciliation.append(kwargs)):
+                self.execute(lambda: None,
+                             lambda: bool(restarted.choices) and bool(restarted.compute.get()) and not restarted.busy)
+            self.assertEqual(restarted.compute.get(), 'GPU: ' + self.provider.gpus[-1]['id'] +
+                             ' · stock high · $1.25/hr')
+            self.assertEqual(len(reconciliation), 1)
+            self.assertTrue(reconciliation[0]['reconcile'])
+            self.assertFalse(restarted.busy)
+            self.assertEqual(restarted.key.get(), 'saved-fixture-key')
+        finally:
+            other.destroy()
+
     def test_start_simulation_creates_deploys_and_opens_with_generated_trust(self):
         self.load_catalog()
         def create(payload):

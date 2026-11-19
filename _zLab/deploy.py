@@ -41,7 +41,9 @@ _STAGE_MESSAGES = {
     b'unpack': 'Verifying and unpacking the RunPod source bundle…',
     b'environment': 'Checking the RunPod build environment…',
     b'dependencies': 'Preparing Vulkan dependencies on RunPod…',
+    b'dependency-mirror': 'Trying the Ubuntu security mirror for build dependencies…',
     b'configure': 'Configuring the native worker on RunPod…',
+    b'build-plan': 'Selecting parallel workers for the native build…',
     b'compile': 'Compiling the native worker on RunPod…',
     b'check': 'Checking the built worker on RunPod…',
     b'reuse': 'Checking the existing worker on RunPod…',
@@ -63,7 +65,7 @@ printf '%s  %s\n' "$1" source.tar.gz | sha256sum -c -
 tar --extract --gzip --file source.tar.gz --no-same-owner --no-same-permissions
 set -- -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DDATAPUMP_BUILD_GUI=OFF \
   -DDATAPUMP_BUILD_CLI=ON -DDATAPUMP_BUILD_WEB_WORKER=ON -DDATAPUMP_PORTABLE=OFF \
-  -DDATAPUMP_COMPILER_CACHE=OFF -DDATAPUMP_TRIAD_VULKAN=OFF
+  -DDATAPUMP_COMPILER_CACHE=ON -DDATAPUMP_TRIAD_VULKAN=OFF
 if [ "$mode" != cpu ]; then
   # A noninteractive SSH shell can omit the image's CUDA bin directory.
   # Use one toolkit for nvcc, Torch's FindCUDA and CMake's CUDA language.
@@ -119,11 +121,62 @@ if [ "$profile" = live ]; then
   set -- "$@" "-DCMAKE_PROJECT_DataPump_INCLUDE=$directory/_zLab/audio/inject.cmake"
   worker=datapump-lab-worker
 fi
-cmake -S . -B build/lab "$@"
+if [ -f build/lab/CMakeCache.txt ]; then
+  generator=$(sed -n 's/^CMAKE_GENERATOR:INTERNAL=//p' build/lab/CMakeCache.txt | sed -n '1p')
+  case "$generator" in
+    "Unix Makefiles"|Ninja) ;;
+    *) echo "Existing worker build uses an unsupported or unreadable CMake generator." >&2; exit 1 ;;
+  esac
+elif command -v ninja >/dev/null 2>&1; then
+  generator=Ninja
+else
+  generator="Unix Makefiles"
+fi
+set -- "$@" -G "$generator"
+measure_stage() {
+  stage=$1
+  shift
+  python3 - "$stage" "$@" <<'PUMP_LAB_MEASURE_EOF'
+import resource, subprocess, sys, time
+stage, *command = sys.argv[1:]
+start = time.monotonic()
+result = subprocess.run(command, check=False)
+usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+rss = int(usage.ru_maxrss * 1024)
+print('PUMP_LAB_MEASURE=' + stage +
+      ' wall_seconds={:.3f} child_user_cpu_seconds={:.3f} child_system_cpu_seconds={:.3f} child_peak_rss_bytes={}'.format(
+          time.monotonic() - start, usage.ru_utime, usage.ru_stime, rss), flush=True)
+raise SystemExit(result.returncode)
+PUMP_LAB_MEASURE_EOF
+}
+measure_stage configure cmake -S . -B build/lab "$@"
+cache_value() {
+  sed -n "s/^$1:[^=]*=//p" build/lab/CMakeCache.txt | sed -n '1p'
+}
+build_info_value() {
+  sed -n "s/^$1: *//p" build/lab/build-info.txt 2>/dev/null | sed -n '1p'
+}
+compiler_summary=$(build_info_value Compiler)
+compiler_id=${compiler_summary%% *}
+compiler_version=${compiler_summary#* }
+[ -n "$compiler_id" ] || compiler_id=unknown
+[ -n "$compiler_summary" ] || compiler_version=unknown
+printf 'PUMP_LAB_CXX_COMPILER=%s\n' "$(cache_value CMAKE_CXX_COMPILER)"
+printf 'PUMP_LAB_CXX_COMPILER_ID=%s\n' "$compiler_id"
+printf 'PUMP_LAB_CXX_COMPILER_VERSION=%s\n' "$compiler_version"
+compiler_launcher=$(build_info_value 'C++ launcher')
+case "$compiler_launcher" in
+  *ccache*) printf 'PUMP_LAB_COMPILER_CACHE=ccache\n' ;;
+  '') printf 'PUMP_LAB_COMPILER_CACHE=unavailable-or-disabled\n' ;;
+  *) printf 'PUMP_LAB_COMPILER_CACHE=other:%s\n' "$compiler_launcher" ;;
+esac
 build_jobs=$(python3 -B tools/build_capacity.py --runpod "$mode")
-cmake --build build/lab --parallel "$build_jobs" --target "$worker"
-"build/lab/$worker" --self-check
+case "$build_jobs" in ''|*[!0-9]*) echo "Invalid native build parallel job count." >&2; exit 1 ;; esac
+printf 'PUMP_LAB_BUILD_GENERATOR=%s\n' "$generator"
 printf 'PUMP_LAB_BUILD_JOBS=%s\n' "$build_jobs"
+printf 'PUMP_LAB_STAGE=build-plan\n'
+measure_stage compile cmake --build build/lab --parallel "$build_jobs" --target "$worker"
+"build/lab/$worker" --self-check
 printf 'PUMP_LAB_PROFILE=%s\n' "$profile"
 printf 'PUMP_LAB_MODE=%s\n' "$mode"
 if [ "$mode" = cuda ]; then
@@ -378,8 +431,13 @@ else:
         previous = read_json('.deployment.json')
     except FileNotFoundError:
         raise SystemExit('Existing deployment directory is unmanaged. Use a fresh pod for automatic deployment.')
-    if previous != request:
+    legacy_builder = '7c4ac0b50ceca91390fc881c428d3838310dac6c247dd561f2ec12163c901cd5'
+    legacy_request = (previous.get('source') == digest and previous.get('mode') == mode and
+                      previous.get('profile') == profile and previous.get('builder') == legacy_builder)
+    if previous != request and not legacy_request:
         raise SystemExit('Existing deployment uses different source or build settings. Use a fresh pod.')
+    if legacy_request:
+        write_json('.deployment.json', request)
 
 print('PUMP_LAB_STAGE=upload', flush=True)
 fd, temporary = tempfile.mkstemp(prefix='.upload-', dir='.')
@@ -423,17 +481,32 @@ for stage, command in (
     ('unpack', 'tar --extract --gzip '),
     ('environment', 'if [ "$mode" != cpu ]; then\n'),
     ('dependencies', '  timeout -k 10 480 sh _zLab/prepare_vulkan.sh\n'),
-    ('configure', 'cmake -S . -B build/lab '),
-    ('compile', 'cmake --build build/lab '),
+    ('configure', 'measure_stage configure cmake -S . -B build/lab '),
+    ('compile', 'measure_stage compile cmake --build build/lab '),
     ('check', '"build/lab/$worker" --self-check\n'),
 ):
     reported_build = reported_build.replace(command, 'echo PUMP_LAB_STAGE=' + stage + '\n' + command, 1)
+prefixes = (b'PUMP_LAB_BUILD_JOBS=', b'PUMP_LAB_BUILD_GENERATOR=',
+            b'PUMP_LAB_MEASURE=configure ', b'PUMP_LAB_MEASURE=compile ',
+            b'PUMP_LAB_PROFILE=', b'PUMP_LAB_MODE=', b'PUMP_LAB_DEVICE=', b'PUMP_LAB_TORCH=',
+            b'PUMP_LAB_CUDA=', b'PUMP_LAB_WORKER_SHA256=', b'PUMP_LAB_CXX_COMPILER=',
+            b'PUMP_LAB_CXX_COMPILER_ID=', b'PUMP_LAB_CXX_COMPILER_VERSION=',
+            b'PUMP_LAB_COMPILER_CACHE=')
+summary_lines = {}
+receipt_line_limit = 1024
+pending = b''
+oversized = False
+def record(line):
+    if len(line) > receipt_line_limit or not line.startswith(prefixes):
+        return
+    prefix = next(prefix for prefix in prefixes if line.startswith(prefix))
+    summary_lines[prefix] = line.decode('utf-8', 'replace')
+
 with tempfile.TemporaryFile() as script:
     script.write(reported_build.encode())
     script.seek(0)
     child = subprocess.Popen(['sh', '-s', '--', digest, mode, profile], stdin=script,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, pass_fds=(lock,))
-tail = b''
 while True:
     # read() fills its buffer before returning and can hold the first stage
     # of a quiet compiler or package manager for minutes.
@@ -441,12 +514,22 @@ while True:
     if not chunk: break
     sys.stdout.buffer.write(chunk)
     sys.stdout.buffer.flush()
-    tail = (tail + chunk)[-16384:]
+    parts = chunk.split(b'\n')
+    for part in parts[:-1]:
+        if not oversized:
+            record(pending + part)
+        pending, oversized = b'', False
+    if not oversized and len(pending) + len(parts[-1]) <= receipt_line_limit:
+        pending += parts[-1]
+    else:
+        pending, oversized = b'', True
 if child.wait(): raise SystemExit('Remote build failed. Retry to resume the same deployment.')
-lines = tail.decode('utf-8', 'replace').splitlines()
-prefixes = ('PUMP_LAB_BUILD_JOBS=', 'PUMP_LAB_PROFILE=', 'PUMP_LAB_MODE=', 'PUMP_LAB_DEVICE=', 'PUMP_LAB_TORCH=',
-            'PUMP_LAB_CUDA=', 'PUMP_LAB_WORKER_SHA256=')
-text = '\n'.join(line for line in lines if line.startswith(prefixes))
+if not oversized:
+    record(pending)
+lines = summary_lines.values()
+text = '\n'.join(lines)
+for receipt_line in lines:
+    print(receipt_line, flush=True)
 backend = next((line.partition('=')[2] for line in lines if line.startswith('PUMP_LAB_MODE=')), None)
 if backend not in ('cpu', 'cuda', 'vulkan') or not worker.is_file():
     raise SystemExit('Build did not return a complete deployment receipt')
@@ -513,19 +596,28 @@ def _stage_reader(callback):
     oversized = False
     reported = set()
     prefix = b'PUMP_LAB_STAGE='
+    jobs_prefix = b'PUMP_LAB_BUILD_JOBS='
+    build_jobs = None
     limit = len(prefix) + max(map(len, _STAGE_MESSAGES)) + 1
 
     def read(chunk):
-        nonlocal pending, oversized
+        nonlocal pending, oversized, build_jobs
         lines = chunk.split(b'\n')
         for line in lines[:-1]:
             if not oversized and len(pending) + len(line) <= limit:
                 stage = (pending + line).removesuffix(b'\r')
-                if stage.startswith(prefix):
+                if stage.startswith(jobs_prefix):
+                    value = stage[len(jobs_prefix):]
+                    if value.isdigit() and 1 <= len(value) <= 3 and int(value) <= 512:
+                        build_jobs = int(value)
+                elif stage.startswith(prefix):
                     code = stage[len(prefix):]
                     if code in _STAGE_MESSAGES and code not in reported:
                         reported.add(code)
-                        callback(_STAGE_MESSAGES[code])
+                        message = _STAGE_MESSAGES[code]
+                        if code == b'compile' and build_jobs is not None:
+                            message += f' ({build_jobs} parallel jobs)'
+                        callback(message)
             pending, oversized = b'', False
         trailing = lines[-1]
         if not oversized and len(pending) + len(trailing) <= limit:
