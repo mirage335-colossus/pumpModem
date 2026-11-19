@@ -177,6 +177,46 @@ std::vector<C128> read(const at::Tensor& result) {
 Complex as_complex(C64 value) { return {value.real(), value.imag()}; }
 Complex as_complex(C128 value) { return {value.real(), value.imag()}; }
 
+void check_retained_projection(c10::cuda::CUDAStream stream) {
+    constexpr std::size_t rows = 1500, lanes = 6;
+    constexpr std::array<std::int64_t, 6> bins{0, 1, 23, 1477, 1498, 1499};
+    constexpr double tau = 6.2831853071795864769;
+    std::vector<C64> input(rows * lanes);
+    for (std::size_t lane = 0; lane + 1 < lanes; ++lane)
+        input[lane * rows + 31 + lane * 77] = {float(lane + 1), -0.25f * float(lane)};
+    auto plan = r::CudaSegmentedFftPlan::make(rows, lanes, stream.stream());
+    check(plan && plan->data_bytes() == input.size() * sizeof(C64), "FP32 rejected the 1500-row projection");
+    check(!r::CudaHalfFftPlan::make(rows, lanes, stream.stream()), "FP16 accepted non-power-of-two rows");
+    auto full = upload(input, lanes, rows);
+    const auto options = full.options();
+    auto device_bins = at::empty({dim(bins.size())}, options.dtype(at::kLong));
+    auto retained = at::empty({dim(lanes), dim(bins.size())}, options);
+    auto scratch = at::empty({dim(plan->workspace_bytes())}, options.dtype(at::kByte));
+    DrainOnExit drain{stream.stream()};
+    C10_CUDA_CHECK(cudaMemcpyAsync(device_bins.data_ptr(), bins.data(), sizeof(bins), cudaMemcpyHostToDevice,
+                                  stream.stream()));
+    check(r::cuda_fft_retained_modes(full.const_data_ptr<C64>(), device_bins.const_data_ptr<std::int64_t>(),
+              full.data_ptr<C64>(), rows, bins.size(), lanes, stream.stream()) == cudaErrorInvalidValue,
+          "retained projection allowed overlapping input and output");
+    plan->enqueue(full.data_ptr(), scratch.data_ptr(), plan->workspace_bytes(), false);
+    C10_CUDA_CHECK(r::cuda_fft_retained_modes(full.const_data_ptr<C64>(), device_bins.const_data_ptr<std::int64_t>(),
+        retained.data_ptr<C64>(), rows, bins.size(), lanes, stream.stream()));
+    stream.synchronize();
+    drain.pending = false;
+    const auto host = retained.to(at::kCPU);
+    const auto* actual = host.const_data_ptr<C64>();
+    for (std::size_t lane = 0; lane < lanes; ++lane) {
+        const auto sample = 31 + lane * 77;
+        for (std::size_t mode = 0; mode < bins.size(); ++mode) {
+            const auto phase_index = sample * std::size_t(bins[mode]) % rows;
+            const auto expected = as_complex(input[lane * rows + sample]) *
+                std::polar(1. / std::sqrt(double(rows)), -tau * double(phase_index) / double(rows));
+            const auto observed = as_complex(actual[lane * bins.size() + mode]);
+            check(std::abs(observed - expected) < 1e-6, "retained projection changed bin, lane or unitary scale");
+        }
+    }
+}
+
 void check_impulses(c10::cuda::CUDAStream stream) {
     Fixture fixture({4096, 2, 3, 2}, 2001, 27);
     for (std::size_t row = 0; row + 1 < fixture.bank_rows(); ++row)
@@ -598,6 +638,7 @@ int main() {
         C10_CUDA_CHECK(cudaGetDeviceProperties(&properties, 0));
         std::cout << std::setprecision(9) << "CUDA device=" << properties.name << " SM=" << properties.major << '.'
             << properties.minor << " cuFFT=" << version << " transform=CUDA_C_16F" << '\n';
+        check_retained_projection(stream);
         check_impulses(stream);
         check_coherent_extremes(stream);
         check_long_sparse(stream);

@@ -3,6 +3,7 @@
 #include "triad_receiver_executor.hpp"
 #include "triad_receiver_basis.hpp"
 #include "triad_gaussian_kernel.hpp"
+#include "triad_nvfp4_staging.hpp"
 #include "search_fft.hpp"
 #include "datapump/execution.hpp"
 
@@ -809,11 +810,8 @@ struct WorkerScratch {
     }
 };
 
-void sufficient_statistics(MappedBasis& basis, const MappedBasisRow& row, std::span<const Tap> taps,
-                           const ObservationBlock& block, double variance, WorkerScratch& scratch,
-                           std::span<Complex> correlations, std::span<Complex> gram,
-                           bool& nonzero_basis, std::stop_token stop,
-                           std::span<FineFloatComplex> float_scratch = {}) {
+std::span<Complex> render_templates(MappedBasis& basis, const MappedBasisRow& row, std::span<const Tap> taps,
+                                   const ObservationBlock& block, WorkerScratch& scratch, std::stop_token stop) {
     const auto rows = block.projection->rows();
     const auto columns = 2 * taps.size();
     auto raw = std::span(scratch.raw).first(rows * columns);
@@ -828,32 +826,48 @@ void sufficient_statistics(MappedBasis& basis, const MappedBasisRow& row, std::s
                             raw.begin() + static_cast<std::ptrdiff_t>(column * rows + first));
         }
     }
-    for (std::size_t column = 0; column < columns; ++column) {
-        auto values = raw.subspan(column * rows, rows);
-        // Required for a complete receipt even on slots that contain only noise.
-        if (!nonzero_basis) nonzero_basis = finite_energy(values) > 0;
-        block.projection->apply(values, scratch.fft, stop, float_scratch);
-        remove_line(values, block.line);
-    }
-    const auto tap_count = taps.size();
+    return raw;
+}
+
+template<typename Precision>
+void projected_statistics(std::span<const std::complex<Precision>> raw, std::size_t stride, std::size_t tap_count,
+                          const ObservationBlock& block, double variance,
+                          std::span<Complex> correlations, std::span<Complex> gram) {
     for (std::size_t hypothesis = 1; hypothesis <= 2; ++hypothesis) {
         const auto offset = (hypothesis - 1) * tap_count;
         for (std::size_t tap = 0; tap < tap_count; ++tap) {
-            auto a = raw.subspan((offset + tap) * rows, block.projected.size());
+            auto a = raw.subspan((offset + tap) * stride, block.projected.size());
             Complex correlation{};
-            for (std::size_t i = 0; i < a.size(); ++i) correlation += std::conj(a[i]) * block.projected[i];
+            for (std::size_t i = 0; i < a.size(); ++i) correlation += std::conj(Complex(a[i])) * block.projected[i];
             correlations[hypothesis * tap_count + tap] = correlation / variance;
             const auto start = hypothesis * tap_count * tap_count;
             for (std::size_t other = tap; other < tap_count; ++other) {
-                auto b = raw.subspan((offset + other) * rows, block.projected.size());
+                auto b = raw.subspan((offset + other) * stride, block.projected.size());
                 Complex product{};
-                for (std::size_t i = 0; i < a.size(); ++i) product += std::conj(a[i]) * b[i];
+                for (std::size_t i = 0; i < a.size(); ++i) product += std::conj(Complex(a[i])) * Complex(b[i]);
                 product /= variance;
                 gram[start + tap * tap_count + other] = product;
                 gram[start + other * tap_count + tap] = std::conj(product);
             }
         }
     }
+}
+
+void sufficient_statistics(MappedBasis& basis, const MappedBasisRow& row, std::span<const Tap> taps,
+                           const ObservationBlock& block, double variance, WorkerScratch& scratch,
+                           std::span<Complex> correlations, std::span<Complex> gram,
+                           bool& nonzero_basis, std::stop_token stop,
+                           std::span<FineFloatComplex> float_scratch = {}) {
+    const auto rows = block.projection->rows();
+    const auto raw = render_templates(basis, row, taps, block, scratch, stop);
+    for (std::size_t column = 0; column < 2 * taps.size(); ++column) {
+        auto values = raw.subspan(column * rows, rows);
+        // Required for a complete receipt even on slots that contain only noise.
+        if (!nonzero_basis) nonzero_basis = finite_energy(values) > 0;
+        block.projection->apply(values, scratch.fft, stop, float_scratch);
+        remove_line(values, block.line);
+    }
+    projected_statistics(std::span<const Complex>(raw), rows, taps.size(), block, variance, correlations, gram);
 }
 
 MappedBasisRow mapped_row(const ReceiverConfig& config, const ReceiverSlotPlan& plan,
@@ -1100,6 +1114,7 @@ FineWorkspaceQuote workspace_for_plan(const ReceiverConfig& config, const Receiv
     const auto lengths = calendar.lengths();
     const auto max_rows = *std::max_element(lengths.begin(), lengths.end());
     std::size_t bytes = 64 * 1024, fft_rows = 0, float_rows = 0, max_modes = 0;
+    bool isolated_varying_data = false;
     const auto add = [&](std::size_t count, std::size_t element) {
         bytes = checked_add(bytes, checked_multiply(count, element));
     };
@@ -1107,6 +1122,8 @@ FineWorkspaceQuote workspace_for_plan(const ReceiverConfig& config, const Receiv
         if (!rows) continue;
         const auto modes = visit_projection_modes(rows, validated, stop, [](std::size_t) {});
         max_modes = std::max(max_modes, modes);
+        isolated_varying_data |= rows == 1500 && modes == 47 && config.sample_rate_hz == 6000 &&
+                                 config.time_varying_channel && !config.helper_enabled;
         if (validated.taper(rows, modes)) add(checked_multiply(rows, modes), sizeof(double));
         if (validated.use_float(rows, modes)) {
             add(1, FloatProjection::workspace_bytes());
@@ -1138,7 +1155,8 @@ FineWorkspaceQuote workspace_for_plan(const ReceiverConfig& config, const Receiv
     const auto mapped_rows = std::min(max_rows, maximum_basis_rows);
     const auto taps = config.spread_delay_seconds || config.spread_doppler_hz ? 2U : 1U;
     const auto fallback = config.bulk_backend ? config.bulk_backend->fine_fallback_reason(
-        {max_rows, max_modes, taps, workers, std::string_view(modem::detail::search_fft::kernel_name()) == "avx2"})
+        {max_rows, max_modes, taps, workers, std::string_view(modem::detail::search_fft::kernel_name()) == "avx2",
+         isolated_varying_data})
         : std::string_view{};
     if (config.bulk_backend && fallback.empty()) {
         bytes = checked_add(bytes, config.bulk_backend->fine_host_bytes(max_rows, taps));
@@ -1146,11 +1164,13 @@ FineWorkspaceQuote workspace_for_plan(const ReceiverConfig& config, const Receiv
         add(2 * bulk_states, sizeof(FineBulkStatistics));
         add(bulk_states, sizeof(MappedBasisRow) + sizeof(std::size_t));
         add(mapped_rows, sizeof(double));
-        add(active, sizeof(WorkerScratch));
-    } else {
+        if (!config.bulk_backend->fine_maps_on_host()) add(active, sizeof(WorkerScratch));
+    }
+    if (!config.bulk_backend || !fallback.empty() || config.bulk_backend->fine_maps_on_host()) {
         add(active, checked_add(checked_multiply(fft_rows + 4 * max_rows +
             (max_rows > mapped_rows ? 4 * mapped_rows : 0), sizeof(Complex)),
             checked_multiply(mapped_rows, sizeof(double))));
+        if (config.bulk_backend && fallback.empty()) add(active, sizeof(WorkerScratch));
     }
     bytes = checked_add(bytes, config.bulk_backend ? config.bulk_backend->persistent_host_workspace() : 0);
     return {checked_add(bytes, MappedBasis::workspace_bytes(config, plan, mapped_rows, active)), fallback};
@@ -1254,6 +1274,13 @@ struct FineSession::Impl {
         long double anchor = 0;
     };
 
+    struct TemplateWave {
+        const ObservationBlock* block = nullptr;
+        std::span<FineBulkStatistics> statistics;
+        std::span<std::complex<float>> mapped;
+        std::size_t first_state = 0, first_leaf = 0;
+    };
+
     ReceiverConfig config;
     FineObservation observation;
     ReceiverSlotPlan plan;
@@ -1277,6 +1304,8 @@ struct FineSession::Impl {
     std::vector<double> bulk_offsets;
     std::vector<std::size_t> bulk_progress;
     std::array<std::vector<FineBulkStatistics>, 2> bulk_statistics;
+    std::vector<std::complex<float>> rendered_templates, projected_templates;
+    TemplateWave template_wave;
     std::vector<WorkerScratch> scratch;
     // A standalone session owns its lanes. A stream shares its receiver pool.
     std::unique_ptr<ReceiverExecutor> owned_executor;
@@ -1409,8 +1438,13 @@ struct FineSession::Impl {
             config.bulk_backend->record_native_fine(quote.native_fallback_reason);
         }
         scratch.reserve(stage_workers);
+        const auto host_capacity = bulk ? bulk->host_projection_capacity() : 0;
+        if (host_capacity) {
+            rendered_templates.resize(checked_multiply(host_capacity, 1500 + bulk->host_projection_stages_peaks()));
+            projected_templates.resize(checked_multiply(host_capacity, 47));
+        }
         for (unsigned worker = 0; worker < stage_workers; ++worker)
-            scratch.emplace_back(bulk ? 0 : max_rows, bulk ? 0 : fft_rows);
+            scratch.emplace_back(!bulk || host_capacity ? max_rows : 0, !bulk || host_capacity ? fft_rows : 0);
         for (auto& pair : ring)
             for (auto& block : pair.blocks) block.projected.reserve(max_rows);
         extents.reserve(maximum_dispatches(calendar));
@@ -1612,7 +1646,9 @@ struct FineSession::Impl {
     }
 
     // Device statistics for both lanes of one dispatch, on the owner.
-    std::array<std::uint64_t, 2> bulk_statistics_for(const Pair& pair, std::stop_token leaf_stop) {
+    std::array<std::uint64_t, 2> bulk_statistics_for(const Pair& pair, ReceiverExecutor::Stage& stage,
+                                                     std::size_t& posted) {
+        const auto leaf_stop = stage.stop_token();
         check_cancelled(leaf_stop);
         std::array<std::uint64_t, 2> bulk_calls{};
         if (!pair.observed_rows) return bulk_calls;
@@ -1641,33 +1677,108 @@ struct FineSession::Impl {
                 output.assign(states, unset);
                 bulk_progress.assign(states, 0);
                 const FineBulkBlock shape{rows, tap_count, block.projection->indices(),
-                                          block.projected, config.noise_variance};
-                bulk->statistics(shape, states, [&](std::size_t candidate, std::size_t first,
-                        std::size_t take, const BulkMappedSink& sink) {
-                    if (candidate >= states || first != bulk_progress[candidate] || first > rows || take > rows - first ||
-                        !take || take > bulk_offsets.size())
-                        throw Error("Robust bulk backend requested a map outside its public block");
-                    basis->visit_pair(bulk_rows[candidate], taps(), block.first + first,
-                                      std::span(bulk_offsets).first(take), sink, leaf_stop);
-                    bulk_progress[candidate] += take;
-                    ++bulk_calls[candidate < nominal.size() ? 0 : 1];
-                }, output, leaf_stop);
-                check_cancelled(leaf_stop);
-                if (!std::all_of(bulk_progress.begin(), bulk_progress.end(), [&](auto extent) { return extent == rows; }))
-                    throw Error("Robust bulk backend did not process its complete public block");
-                const auto completed = bulk->completed_work();
+                                          block.projected, config.noise_variance,
+                                          config.sample_rate_hz == 6000 && config.time_varying_channel &&
+                                              !config.helper_enabled};
                 const auto expected_values = static_cast<std::uint64_t>(states) * 2 * tap_count *
                     shape.projection_indices.size();
+                if (const auto capacity = bulk->host_projection_capacity()) {
+                    host_mapped_statistics(shape, block, output, stage, posted, capacity);
+                    bulk_calls[0] += nominal.size() * (1 + (rows - 1) / maximum_basis_rows);
+                    bulk_calls[1] += adaptive.size() * (1 + (rows - 1) / maximum_basis_rows);
+                    check_bulk_statistics(output, tap_count);
+                    bulk->complete_host_statistics(states, expected_values);
+                } else {
+                    bulk->statistics(shape, states, [&](std::size_t candidate, std::size_t first,
+                            std::size_t take, const BulkMappedSink& sink) {
+                        if (candidate >= states || first != bulk_progress[candidate] || first > rows || take > rows - first ||
+                            !take || take > bulk_offsets.size())
+                            throw Error("Robust bulk backend requested a map outside its public block");
+                        basis->visit_pair(bulk_rows[candidate], taps(), block.first + first,
+                                          std::span(bulk_offsets).first(take), sink, leaf_stop);
+                        bulk_progress[candidate] += take;
+                        ++bulk_calls[candidate < nominal.size() ? 0 : 1];
+                    }, output, leaf_stop);
+                    if (!std::all_of(bulk_progress.begin(), bulk_progress.end(), [&](auto extent) { return extent == rows; }))
+                        throw Error("Robust bulk backend did not process its complete public block");
+                }
+                check_cancelled(leaf_stop);
+                const auto completed = bulk->completed_work();
                 if (!completed.executed || completed.statistics_blocks < bulk_work.statistics_blocks ||
                     completed.statistics_blocks - bulk_work.statistics_blocks != states ||
                     completed.projected_values < bulk_work.projected_values ||
                     completed.projected_values - bulk_work.projected_values != expected_values)
                     throw Error("Robust bulk backend did not execute its complete public statistics work");
-                check_bulk_statistics(output, tap_count);
+                if (!bulk->host_projection_capacity()) check_bulk_statistics(output, tap_count);
                 bulk_work = completed;
             }
         });
         return bulk_calls;
+    }
+
+    void host_mapped_statistics(const FineBulkBlock& shape, const ObservationBlock& block,
+                                std::span<FineBulkStatistics> output, ReceiverExecutor::Stage& stage,
+                                std::size_t& posted, std::size_t capacity) {
+        const auto stop = stage.stop_token();
+        const bool device = block.line.empty() && bulk->begin_host_projection(shape, stop);
+        const auto columns = 2 * shape.taps;
+        const auto modes = shape.projection_indices.size();
+        const auto input_stride = shape.rows + bulk->host_projection_stages_peaks();
+        const auto batch = device ? capacity / columns : output.size();
+        if (!batch) throw Error("Robust device template batch cannot fit one candidate");
+        for (std::size_t first = 0; first < output.size(); first += batch) {
+            const auto width = std::min(batch, output.size() - first);
+            const auto statistics = output.subspan(first, width);
+            std::span<std::complex<float>> mapped;
+            if (device) {
+                const auto samples = width * columns * input_stride;
+                mapped = bulk->host_projection_staging(samples);
+                if (mapped.empty()) mapped = std::span(rendered_templates).first(samples);
+                if (mapped.size() != samples) throw Error("Robust device template staging returned an invalid extent");
+            }
+            template_wave = {&block, statistics, mapped, first, posted};
+            stage.post(width);
+            stage.wait_urgent();
+            posted += width;
+            template_wave = {};
+            if (!device) continue;
+            const auto projection = std::span(projected_templates).first(width * columns * modes);
+            bulk->project_host_templates(mapped, projection, stop);
+            for (std::size_t index = 0; index < width; ++index) {
+                const auto value = projection.subspan(index * columns * modes, columns * modes);
+                projected_statistics(std::span<const std::complex<float>>(value), modes, tap_count, block,
+                    config.noise_variance, statistics[index].correlations, statistics[index].gram);
+            }
+        }
+    }
+
+    void map_template_leaf(unsigned lane, std::size_t index, std::stop_token stop) {
+        const auto& block = *template_wave.block;
+        const auto& row = bulk_rows[template_wave.first_state + index];
+        auto& result = template_wave.statistics[index];
+        result = {};
+        if (!template_wave.mapped.empty()) {
+            const auto raw = render_templates(*basis, row, taps(), block, scratch[lane], stop);
+            result.nonzero_basis = std::ranges::any_of(raw, [](Complex value) { return value != Complex{}; });
+            if (bulk->host_projection_stages_peaks()) {
+                const auto rows = block.projection->rows();
+                const auto stride = rows + 1;
+                const auto columns = 2 * tap_count;
+                auto samples = template_wave.mapped.subspan(index * columns * stride, columns * stride);
+                for (std::size_t column = 0; column < columns; ++column) {
+                    const auto source = raw.subspan(column * rows, rows);
+                    stage_nvfp4_lane(source, samples.subspan(column * stride, stride));
+                }
+            } else {
+                auto samples = template_wave.mapped.subspan(index * raw.size(), raw.size());
+                std::ranges::transform(raw, samples.begin(), [](Complex value) { return std::complex<float>(value); });
+            }
+        } else {
+            const auto float_rows = observation_float_scratch.size();
+            sufficient_statistics(*basis, row, taps(), block, config.noise_variance, scratch[lane],
+                result.correlations, result.gram, result.nonzero_basis, stop,
+                std::span(worker_float_scratch).subspan(lane * float_rows, float_rows));
+        }
     }
 
     SlowGainState* slow_gain_for(std::size_t index) {
@@ -1724,6 +1835,10 @@ struct FineSession::Impl {
     // observed while this dispatch's adaptive states, whose pruning and
     // prediction follow, are scored.
     void urgent(unsigned lane, std::size_t leaf, std::stop_token leaf_stop) {
+        if (template_wave.block) {
+            map_template_leaf(lane, leaf - template_wave.first_leaf, leaf_stop);
+            return;
+        }
         auto index = leaf - wave.first_leaf;
         if (wave.ahead) {
             if (!index) {
@@ -1848,7 +1963,8 @@ struct FineSession::Impl {
             std::array<std::uint64_t, 2> bulk_calls{};
             if (bulk) {
                 try {
-                    bulk_calls = bulk_statistics_for(pair, stage.stop_token());
+                    bulk_calls = bulk_statistics_for(pair, stage, posted);
+                    wave.first_leaf = posted;
                 } catch (...) {
                     // A backend may report cancellation after the ahead leaf
                     // failed. Preserve that original stage failure; the stage

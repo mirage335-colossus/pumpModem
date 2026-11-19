@@ -12,7 +12,7 @@ file(GLOB_RECURSE _triad_probe_sources CONFIGURE_DEPENDS RELATIVE "${PROJECT_SOU
   "third_party/vkfft/vkFFT/*.h")
 list(APPEND _triad_probe_sources
   CMakeLists.txt third_party/xz/UPSTREAM.sha256 third_party/vkfft/UPSTREAM.sha256
-  tools/triad-receiver-probe.cpp)
+  tools/triad-receiver-probe.cpp tools/triad_opencl_embed_ptx.py)
 list(REMOVE_DUPLICATES _triad_probe_sources)
 list(SORT _triad_probe_sources)
 set(_triad_probe_manifest "")
@@ -29,9 +29,16 @@ if(DATAPUMP_TRIAD_VULKAN)
   string(APPEND _triad_probe_build_identity
     "/Vulkan-${Vulkan_VERSION}/glslang-${glslang_VERSION}/${DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE}")
 endif()
-if(CMAKE_CUDA_COMPILER_LOADED AND DATAPUMP_TRIAD_TENSOR)
+if(CMAKE_CUDA_COMPILER_LOADED AND (DATAPUMP_TRIAD_TENSOR OR TARGET datapump_triad_nvfp4))
   string(APPEND _triad_probe_build_identity
     "/${CMAKE_CUDA_COMPILER_ID}/${CMAKE_CUDA_COMPILER_VERSION}/${CMAKE_CUDA_ARCHITECTURES}/${CMAKE_CUDA_FLAGS}/${CMAKE_CUDA_FLAGS_DEBUG}/${CMAKE_CUDA_FLAGS_RELEASE}/${CMAKE_CUDA_FLAGS_RELWITHDEBINFO}/${CMAKE_CUDA_FLAGS_MINSIZEREL}")
+endif()
+if(TARGET datapump_triad_nvfp4)
+  string(APPEND _triad_probe_build_identity "/NVFP4-${DATAPUMP_TRIAD_NVFP4_SM}-${CUDAToolkit_VERSION}")
+endif()
+if(TARGET datapump_triad_opencl_nvfp4_ptx)
+  string(APPEND _triad_probe_build_identity
+    "/OpenCL-NVFP4-sm120a-${_triad_opencl_nvcc_version}/${DATAPUMP_TRIAD_OPENCL_LOADER_PATH}")
 endif()
 string(SHA256 _triad_probe_build_sha "${_triad_probe_build_identity}")
 if(NOT DEFINED _source_commit)

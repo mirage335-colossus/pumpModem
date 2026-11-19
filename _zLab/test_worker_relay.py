@@ -60,6 +60,21 @@ class RelayTests(unittest.TestCase):
                 self.assertEqual(env["VK_DRIVER_FILES"], str(manifest))
                 self.assertIsNone(worker_relay.gpu_environment(binary, True))
                 self.assertIsNone(worker_relay.gpu_environment(root / "other-worker", False))
+                vendors = binary.parent / "nvidia-opencl-vendors"
+                vendors.mkdir(mode=0o700)
+                vendor = vendors / "nvidia.icd"
+                vendor.write_text("libnvidia-opencl.so.1\n")
+                vendor.chmod(0o600)
+                with mock.patch.dict(os.environ, {"OCL_ICD_FILENAMES": "extra.so", "OPENCL_LAYERS": "layer.so"}):
+                    env = worker_relay.gpu_environment(binary, False)
+                self.assertEqual(env["OCL_ICD_VENDORS"], str(vendors))
+                self.assertEqual(env["OPENCL_VENDOR_PATH"], str(vendors))
+                self.assertNotIn("OCL_ICD_FILENAMES", env)
+                self.assertNotIn("OPENCL_LAYERS", env)
+                vendor.write_text("wrong-driver.so\n")
+                with self.assertRaisesRegex(worker_relay.RelayError, "Invalid deployment OpenCL vendor manifest"):
+                    worker_relay.gpu_environment(binary, False)
+                vendor.write_text("libnvidia-opencl.so.1\n")
                 manifest.write_text(good.replace("libEGL_nvidia.so.0", "/tmp/extra.so"))
                 with self.assertRaisesRegex(worker_relay.RelayError, "Invalid deployment Vulkan manifest"):
                     worker_relay.gpu_environment(binary, False)

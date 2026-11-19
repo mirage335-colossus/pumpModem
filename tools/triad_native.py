@@ -134,6 +134,8 @@ def runtime_identity(receipt):
         if "requested_vulkan_precision" in identity:
             runtime["requested_vulkan_precision"] = identity["requested_vulkan_precision"]
             del runtime["bulk"]["precision"]
+        if "requested_vulkan_fine_projection" in identity:
+            runtime["requested_vulkan_fine_projection"] = identity["requested_vulkan_fine_projection"]
     else:
         runtime["bulk"] = {name: bulk.get(name) for name in (
             "device", "device_name", "library_version", "cuda_runtime_version", "cuda_driver_version",
@@ -329,6 +331,22 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                           "mixed_fp16_fp32_fft_storage_fp32_compute" if single and half else
                           "fp16_fft_storage_fp32_fft_and_products" if half else
                           "fp32_fft_fp64_coordinates_and_scores_native_fir_and_fine")
+                fine_request = identity.get("requested_vulkan_fine_projection", "automatic")
+                batches = positive_int(bulk.get("opencl_nvfp4_fine_batches", 0), "OpenCL NVFP4 batches", allow_zero=True)
+                pinned = positive_int(bulk.get("opencl_nvfp4_pinned_batches", 0), "OpenCL NVFP4 pinned batches",
+                                      allow_zero=True)
+                modes = positive_int(bulk.get("opencl_nvfp4_fine_modes", 0), "OpenCL NVFP4 modes", allow_zero=True)
+                native_blocks = positive_int(bulk.get("opencl_nvfp4_native_blocks", 0),
+                                             "OpenCL projection native blocks", allow_zero=True)
+                if (fine_request not in ("automatic", "native", "nvfp4") or bool(batches) != bool(modes)
+                        or modes < batches or pinned > batches
+                        or (modes and (bulk["vulkan_vendor_id"] != 0x10de or fine_request == "native"))
+                        or (command not in ("describe", "plan", "codec") and fine_request == "nvfp4" and not modes)):
+                    raise ProbeError("Vulkan receipt does not identify actual OpenCL NVFP4 work")
+                if modes:
+                    actual = actual.removesuffix("_and_fine") + "_opencl_nvfp4_fine_projection"
+                    if native_blocks or bulk.get("native_fine_sessions", 0):
+                        actual += "_mixed_native_fine"
                 if total and bulk["precision"] != actual and not (
                         host_scored == total and
                         bulk["precision"] == actual + "_fixed_phase_host_fp64_scoring"):
@@ -467,6 +485,14 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                             and stream_work.get("verified_input_sha256") == stream["verified_input_sha256"])
             regression_units = receipt["result"].get("units")
             regression_phases = [phase for phase in receipt["phases"] if phase.get("name") == "native_slot"]
+            admission_route = (command == "admission" and len(regression_phases) == 1
+                               and receipt["result"].get("complete_public_slot") is True
+                               and receipt["result"].get("one_native_score_for_all_policies") is True
+                               and regression_phases[0]["work"].get("complete") is True
+                               and regression_phases[0]["work"].get("coarse_fft_precision") == "bulk"
+                               and all(type(regression_phases[0]["work"].get(key)) is int
+                                       and regression_phases[0]["work"][key] > 0 for key in (
+                                           "coarse_workspaces", "coarse_frequency_points", "coarse_arrival_points")))
             regression_route = (command == "regression"
                                 and receipt["result"].get("work_complete") is True
                                 and receipt["result"].get("evaluator_expected_decision_observed") is True
@@ -487,6 +513,8 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                 route_proof = stream_route
             elif command == "regression":
                 route_proof = regression_route
+            elif command == "admission":
+                route_proof = admission_route
             else:
                 route_proof = frequency_route
             host_scored = positive_int(accelerator.get("vulkan_host_scored_rows", 0),

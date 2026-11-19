@@ -22,9 +22,10 @@ constexpr int input_energy_bound_exponent = 12;
 constexpr std::size_t maximum_rows = std::size_t{1} << 30;
 static_assert(sizeof(__half2) == 4);
 
-bool valid_shape(std::size_t rows, std::size_t batch) noexcept {
-    return rows >= 2 && rows <= maximum_rows && !(rows & (rows - 1)) && batch && batch <= element_limit / rows &&
-           rows * batch <= std::numeric_limits<std::size_t>::max() / sizeof(__half2);
+bool valid_shape(std::size_t rows, std::size_t batch, bool half = true) noexcept {
+    return rows >= 2 && rows <= maximum_rows && (!half || !(rows & (rows - 1))) && batch &&
+           batch <= element_limit / rows && rows * batch <= std::numeric_limits<std::size_t>::max() /
+               (half ? sizeof(__half2) : sizeof(cufftComplex));
 }
 
 std::size_t product_batch(CudaHalfFftProductShape shape) noexcept {
@@ -292,6 +293,21 @@ __global__ void restore_arrivals(const __half2* inverse, const std::int32_t* ban
     correlations[row * arrivals + lag] = {value.x * restore, value.y * restore};
 }
 
+__global__ void gather_retained_modes(const c10::complex<float>* full, const std::int64_t* bins,
+    c10::complex<float>* output, std::uint32_t rows, std::uint32_t modes, std::uint32_t elements, float scale) {
+    const auto index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= elements) return;
+    const auto lane = index / modes;
+    const auto bin = bins[index % modes];
+    if (bin < 0 || bin >= rows) {
+        const auto invalid = ::nanf("");
+        output[index] = {invalid, invalid};
+        return;
+    }
+    const auto value = full[lane * rows + static_cast<std::uint32_t>(bin)];
+    output[index] = {value.real() * scale, value.imag() * scale};
+}
+
 } // namespace
 
 template<CudaFftPrecision precision>
@@ -328,8 +344,7 @@ std::unique_ptr<CudaFftPlan<precision>> CudaFftPlan<precision>::make(
     constexpr bool half = precision == CudaFftPrecision::fp16;
     constexpr auto element_bytes = half ? sizeof(__half2) : sizeof(cufftComplex);
     constexpr auto data_type = half ? CUDA_C_16F : CUDA_C_32F;
-    if (!valid_shape(rows, batch) || rows * batch > std::numeric_limits<std::size_t>::max() / element_bytes)
-        return nullptr;
+    if (!valid_shape(rows, batch, half)) return nullptr;
     int device = 0;
     check_cuda(cudaGetDevice(&device), "device query");
     if constexpr (half) {
@@ -371,6 +386,28 @@ void CudaFftPlan<precision>::enqueue(void* data, void* workspace, std::size_t by
 
 template class CudaFftPlan<CudaFftPrecision::fp16>;
 template class CudaFftPlan<CudaFftPrecision::fp32>;
+
+cudaError_t cuda_fft_retained_modes(const c10::complex<float>* full, const std::int64_t* device_bins,
+    c10::complex<float>* output, std::size_t rows, std::size_t modes, std::size_t batch, cudaStream_t stream) noexcept {
+    static_assert(sizeof(c10::complex<float>) == sizeof(cufftComplex));
+    if (!valid_shape(rows, batch, false) || !modes || modes > rows ||
+        !aligned(full, alignof(c10::complex<float>)) || !aligned(output, alignof(c10::complex<float>)) ||
+        !aligned(device_bins, alignof(std::int64_t)))
+        return cudaErrorInvalidValue;
+    const auto elements = modes * batch;
+    const auto full_bytes = rows * batch * sizeof(*full);
+    const auto index_bytes = modes * sizeof(*device_bins);
+    const auto output_bytes = elements * sizeof(*output);
+    if (overlaps(full, full_bytes, output, output_bytes) || overlaps(full, full_bytes, device_bins, index_bytes) ||
+        overlaps(device_bins, index_bytes, output, output_bytes))
+        return cudaErrorInvalidValue;
+    const auto scale = static_cast<float>(1. / std::sqrt(static_cast<double>(rows)));
+    const auto blocks = (elements - 1) / threads + 1;
+    gather_retained_modes<<<static_cast<unsigned>(blocks), threads, 0, stream>>>(full, device_bins, output,
+        static_cast<std::uint32_t>(rows), static_cast<std::uint32_t>(modes),
+        static_cast<std::uint32_t>(elements), scale);
+    return cudaGetLastError();
+}
 
 std::size_t cuda_half_fft_pack_workspace_bytes(std::size_t rows, std::size_t valid, std::size_t batch) noexcept {
     if (rows <= parallel_pack_rows || !valid || valid > rows || !valid_shape(rows, batch)) return 0;

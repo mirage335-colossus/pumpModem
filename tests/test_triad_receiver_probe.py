@@ -124,6 +124,29 @@ def main(executable):
         assert strict_plan["configuration"][name] == plan["configuration"][name]
     run("plan", "--wrong-key-admission", "invalid", code=1,
         parse_error="Wrong Key Admission expects current, guarded, strict, very-strict, extreme or maximum")
+
+    # Keep Rate and both oscillators fixed while the public search grows.
+    # Clock-limited arithmetic uses the projected rate, and each score
+    # covers all rays for one frequency, arrival and workspace.
+    low_rate_options = ("--case", "hf", "--rate", "3.6", "--timing-policy", "broad", "--encrypt", "on",
+                        "--base-oscillator", "gpsdo-xo", "--shift-oscillator", "gpsdo-xo",
+                        "--rf-hz", "30000000", "--margin", "3", "--helper", "off",
+                        "--data-power-w", "0.001995262314968879", "--path-loss-db", "90",
+                        "--noise-dbm-hz", "-164", "--added-symbols", "1", "--added-interleave", "off")
+    for spread, selective, target, doppler, projection, frequencies, arrivals, rays, score_rows in (
+        ("none", "off", "32", "0", 3, 15, 43, 1, 50_310),
+        ("hf-worst", "each-65", "32", "0", 500, 15, 7_036, 2, 8_232_120),
+        ("none", "off", "-6", "1.5", 8, 6_132, 113, 1, 54_047_448),
+    ):
+        config = run("plan", *low_rate_options, "--spread-preset", spread, "--selective-perturbation", selective,
+                     "--target-cn0", target, "--doppler-hz", doppler)["configuration"]
+        prior = config["coarse_full_prior"]
+        assert 0 < 2 * config["clock_bound_ppm"] <= .001
+        assert prior["projected_sample_rate_hz"] == projection
+        assert prior["frequency_points"] == frequencies and prior["arrival_points"] == arrivals
+        assert prior["workspaces"] == 78 and prior["rays"] == rays
+        assert prior["frequency_points"] * prior["arrival_points"] * prior["workspaces"] == score_rows
+
     contrast_options = ("--spread-preset", "hf-worst", "--selective-perturbation", "each-65",
                         "--data-if", "497", "--target-cn0", "16", "--cn0", "16", "--seconds", "8")
     full_stress = run("plan", *contrast_options, "--signal-gain-db", "0")["configuration"]

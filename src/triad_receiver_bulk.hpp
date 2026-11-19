@@ -92,6 +92,12 @@ struct BulkReceipt {
     std::uint64_t mapped_columns = 0, mapped_values = 0, uploaded_tiles = 0, tile_hits = 0;
     // CUDA mapped work credited after the batch's blocking statistics readback.
     std::uint64_t cuda_fused_mapped_launches = 0, cuda_fused_mapped_values = 0;
+    // Fine template modes consumed by the receiver after synchronized NVFP4 work.
+    std::uint64_t cuda_nvfp4_fine_batches = 0, cuda_nvfp4_fine_modes = 0;
+    std::uint64_t cuda_nvfp4_fine_workspace_fallbacks = 0, cuda_nvfp4_fine_algorithm_fallbacks = 0;
+    std::uint64_t cuda_cufft_fine_modes = 0;
+    std::uint64_t opencl_nvfp4_fine_batches = 0, opencl_nvfp4_fine_modes = 0;
+    std::uint64_t opencl_nvfp4_pinned_batches = 0, opencl_nvfp4_native_blocks = 0;
     // CUDA Gram elements credited after the same readback.
     std::uint64_t cuda_direct_gram_values = 0, cuda_bmm_gram_values = 0;
     // Post-channelization matrix work, credited only after synchronization.
@@ -149,12 +155,15 @@ struct FineBulkBlock {
     std::span<const std::size_t> projection_indices;
     std::span<const Complex> projected_y;
     double variance = 0;
+    // Automatic NVFP4 is qualified only after DATA isolation in this setup.
+    bool isolated_varying_data = false;
 };
 
 struct FineBulkGeometry {
     std::size_t maximum_block_rows = 0, maximum_projection_modes = 0, taps = 0;
     unsigned workers = 0;
     bool native_avx2 = false;
+    bool isolated_varying_data = false;
 };
 
 struct FineBulkStatistics {
@@ -178,6 +187,20 @@ public:
     virtual FineBulkWork completed_work() const {
         const auto result = receipt();
         return {result.statistics_blocks, result.projected_values, result.executed};
+    }
+    // A projection-only device can use the same native mapper and scheduler.
+    // Input/output are [template][row/bin], with both bits and all taps.
+    virtual std::size_t host_projection_capacity() const noexcept { return 0; }
+    // The backend may append one exact C64 magnitude scale to each lane.
+    virtual bool host_projection_stages_peaks() const noexcept { return false; }
+    virtual bool begin_host_projection(const FineBulkBlock&, std::stop_token) { return false; }
+    // Optional owner-held host storage. The urgent mapping leaves finish
+    // before submission, and projection consumes the span before it returns.
+    virtual std::span<std::complex<float>> host_projection_staging(std::size_t) noexcept { return {}; }
+    virtual void project_host_templates(std::span<const std::complex<float>>,
+        std::span<std::complex<float>>, std::stop_token) { throw Error("No host-mapped projection for this backend"); }
+    virtual void complete_host_statistics(std::size_t, std::size_t) {
+        throw Error("No host-mapped statistics for this backend");
     }
 };
 
@@ -312,6 +335,7 @@ public:
     virtual std::string_view fine_fallback_reason(const FineBulkGeometry&) const noexcept {
         return supports_fine() ? std::string_view{} : "native-fine-backend";
     }
+    virtual bool fine_maps_on_host() const noexcept { return false; }
     virtual bool permits_native_exact_chirp_z() const noexcept { return false; }
     virtual bool supports_exact_device_chirp_z() const noexcept { return false; }
     // Bound a computational tile before preflight/construction; every public

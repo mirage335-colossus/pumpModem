@@ -169,9 +169,22 @@ and configures a private NVIDIA EGL driver manifest for headless operation.
 On the supported Ubuntu 24.04 amd64 image the deployer installs missing
 Vulkan build dependencies from signed Ubuntu packages. If the main archive
 cannot supply its indices, deployment tries the signed Ubuntu security archive.
+When NVCC is present, the deployer also supplies OpenCL C headers and the signed
+Ubuntu ICD loader if needed. A compatible build embeds the offline Blackwell
+NVFP4 program and opens the system loader by absolute path to avoid a conflicting
+CUDA toolkit loader. The worker uses a deployment-private NVIDIA ICD and checks
+the selected accelerator before any FP4 work.
 The standalone CLI
 defaults to `--mode cpu`. Use `--mode gpu` for automatic GPU selection or
-`--mode cuda` to require a CUDA build.
+`--mode cuda` to require CUDA. A required CUDA build ends at the discovery
+check if the expected device cannot initialize.
+The CUDA build can use the Blackwell NVFP4 fine projection when its driver
+initializes in that environment. The tested stock RTX PRO 6000 worker uses
+Vulkan for broad coarse search and OpenCL for qualified NVFP4 template
+projection when a fine owner has at most four admitted software lanes. Wider
+owners use the measured faster native projection. CUDA discovery and Vulkan's
+CUDA import extensions fail with the socket filter active on that driver. See the
+[matched runtime checks](../docs/validation.md#blackwell-nvfp4-fine-projection--19-november-2026).
 GPU sessions enforce `--require-gpu`. Check the receiver's backend, scored
 rows and stage counters to see where GPU work ran. Reopening a managed deployment
 checks the source, build settings and worker hash before reuse. An interrupted

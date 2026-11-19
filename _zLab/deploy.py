@@ -83,11 +83,10 @@ if [ "$mode" != cpu ]; then
     cuda_root=$(dirname "$cuda_bin")
     export CUDACXX="$nvcc" PATH="$cuda_bin:$PATH"
   elif [ "$mode" = cuda ]; then
-      echo "CUDA build requires nvcc. Set CUDACXX or CUDA_HOME to the installed toolkit." >&2
-      exit 1
+    echo "CUDA build requires nvcc. Set CUDACXX or CUDA_HOME to the installed toolkit." >&2
+    exit 78
   fi
-fi
-if [ "$mode" = gpu ]; then
+  requested_mode=$mode
   mode=vulkan
   if [ -x "$nvcc" ] && python3 -c 'import torch; assert torch.cuda.is_available() and torch.compiled_with_cxx11_abi()'; then
     mkdir -p build/lab
@@ -98,9 +97,17 @@ if [ "$mode" = gpu ]; then
     elif [ "$?" -ne 2 ]; then
       echo "CUDA worker discovery failed unexpectedly." >&2
       exit 1
+    elif [ "$requested_mode" = cuda ]; then
+      echo "CUDA device discovery failed inside the worker's no-socket boundary. Use --mode gpu for a new deployment to allow Vulkan." >&2
+      exit 78
     fi
+  elif [ "$requested_mode" = cuda ]; then
+    echo "CUDA build requires C++11 ABI LibTorch and a visible CUDA device." >&2
+    exit 78
   fi
-  printf 'Selected GPU backend: %s\n' "$mode"
+  if [ "$requested_mode" = gpu ]; then
+    printf 'Selected GPU backend: %s\n' "$mode"
+  fi
 fi
 if [ "$mode" = cuda ]; then
   python3 -c 'import torch; assert torch.cuda.is_available() and torch.compiled_with_cxx11_abi(); print(torch.__version__, torch.version.cuda, torch.cuda.get_device_name())'
@@ -113,6 +120,11 @@ if [ "$mode" = cuda ]; then
 elif [ "$mode" = vulkan ]; then
   timeout -k 10 480 sh _zLab/prepare_vulkan.sh
   set -- "$@" -DDATAPUMP_TRIAD_TENSOR=OFF -DDATAPUMP_TRIAD_VULKAN=ON -DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON
+  opencl_loader=/usr/lib/x86_64-linux-gnu/libOpenCL.so.1
+  if [ ! -r "$opencl_loader" ] || [ "$(dpkg-query -W -f='${db:Status-Status}' ocl-icd-libopencl1:amd64 2>/dev/null || true)" != installed ]; then
+    opencl_loader=
+  fi
+  set -- "$@" "-DDATAPUMP_TRIAD_OPENCL_LOADER_PATH=$opencl_loader"
 else
   set -- "$@" -DDATAPUMP_TRIAD_TENSOR=OFF
 fi
@@ -523,7 +535,9 @@ while True:
         pending += parts[-1]
     else:
         pending, oversized = b'', True
-if child.wait(): raise SystemExit('Remote build failed. Retry to resume the same deployment.')
+build_status = child.wait()
+if build_status == 78 and mode == 'cuda': raise SystemExit('CUDA worker prerequisites were not met.')
+if build_status: raise SystemExit('Remote build failed. Retry to resume the same deployment.')
 if not oversized:
     record(pending)
 lines = summary_lines.values()

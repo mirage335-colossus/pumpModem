@@ -8,6 +8,11 @@ if [ "${ID-}:${VERSION_CODENAME-}" = ubuntu:noble ] && [ "$(dpkg --print-archite
     if ! command -v ninja >/dev/null 2>&1; then
         packages="$packages ninja-build"
     fi
+    if command -v nvcc >/dev/null 2>&1; then
+        # The toolkit may provide a conflicting loader at this soname. Use
+        # the signed Ubuntu ICD loader for managed deployments.
+        packages="$packages opencl-c-headers ocl-icd-libopencl1:amd64"
+    fi
     missing=
     for package in $packages; do
         if [ "$(dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null || true)" != installed ]; then
@@ -72,20 +77,30 @@ if (driver['library_path'] not in ('libGLX_nvidia.so.0', 'libEGL_nvidia.so.0')
         or not isinstance(version, str) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version)):
     raise SystemExit('Unsupported NVIDIA Vulkan ICD manifest')
 manifest = {'file_format_version': '1.0.0', 'ICD': {'library_path': 'libEGL_nvidia.so.0', 'api_version': version}}
-target = Path('build/lab/nvidia-headless-icd.json')
-data = json.dumps(manifest).encode('utf-8')
-with tempfile.NamedTemporaryFile(dir=target.parent, prefix='.icd-') as out:
-    out.write(data)
-    out.flush()
-    os.fsync(out.fileno())
-    try:
-        os.link(out.name, target, follow_symlinks=False)
-    except FileExistsError:
-        # A matching private manifest may be left by an interrupted build.
-        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        with os.fdopen(fd, 'rb') as existing:
-            info = os.fstat(existing.fileno())
-            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077
-                    or existing.read(len(data) + 1) != data):
-                raise SystemExit('Existing NVIDIA Vulkan manifest does not match this deployment')
+
+def private_manifest(target, data, driver_name):
+    with tempfile.NamedTemporaryFile(dir=target.parent, prefix='.icd-') as out:
+        out.write(data)
+        out.flush()
+        os.fsync(out.fileno())
+        try:
+            os.link(out.name, target, follow_symlinks=False)
+        except FileExistsError:
+            # A matching private manifest may be left by an interrupted build.
+            fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(fd, 'rb') as existing:
+                info = os.fstat(existing.fileno())
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077
+                        or existing.read(len(data) + 1) != data):
+                    raise SystemExit(f'Existing NVIDIA {driver_name} manifest does not match this deployment')
+
+
+build = Path('build/lab')
+private_manifest(build / 'nvidia-headless-icd.json', json.dumps(manifest).encode('utf-8'), 'Vulkan')
+vendors = build / 'nvidia-opencl-vendors'
+vendors.mkdir(mode=0o700, exist_ok=True)
+info = vendors.lstat()
+if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+    raise SystemExit('Unsafe deployment OpenCL vendor directory')
+private_manifest(vendors / 'nvidia.icd', b'libnvidia-opencl.so.1\n', 'OpenCL')
 PY

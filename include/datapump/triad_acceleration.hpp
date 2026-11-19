@@ -30,6 +30,9 @@ struct TensorReceiverOptions {
     TensorCoarseMath coarse_math = TensorCoarseMath::fft;
     // Explicit probe qualification of the changing-channel FP32 FFT scorer.
     bool segmented_timing = false;
+    // Explicit probe mode for qualifying the CUDA fine template projection.
+    bool qualify_nvfp4_projection = false;
+    bool qualify_cufft_projection = false;
 };
 
 // Defined by the optional compiled backend target. A request for CUDA
@@ -48,6 +51,7 @@ public:
 };
 
 enum class VulkanCoarsePrecision { automatic, fp32, fp16_storage, direct_fp32, direct_fp16_storage, direct_fp16 };
+enum class VulkanFineProjection { automatic, native, opencl_nvfp4 };
 
 struct VulkanReceiverOptions {
     unsigned device_index = 0;
@@ -62,10 +66,11 @@ struct VulkanReceiverOptions {
     // Exercise the portable phase/scoring route even on a device with shader
     // FP64. Otherwise selected automatically when FP64/INT64 is unavailable.
     bool force_host_scoring = false;
+    VulkanFineProjection fine_projection = VulkanFineProjection::automatic;
 };
 
-// Optional native Vulkan broad-frequency search. Channelization, fine state,
-// lag-group search and the compact tight-clock FP64 class remain native CPU.
+// Optional Vulkan broad-frequency search and Blackwell OpenCL fine projection.
+// Channelization, fine state, lag groups and compact tight-clock FP64 stay native.
 // A requested device must be a physical GPU; software Vulkan is rejected.
 std::shared_ptr<receiver_detail::ReceiverBulkBackend>
 make_vulkan_receiver_backend(const VulkanReceiverOptions&);

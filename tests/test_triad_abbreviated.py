@@ -601,6 +601,23 @@ class AbbreviatedTests(unittest.TestCase):
             with self.assertRaises(ProbeError):
                 validate_receipt(wrong, command="message", backend="vulkan", returncode=0)
 
+    def test_vulkan_opencl_fine_receipt_reports_executed_and_native_work(self):
+        receipt = message_receipt()
+        receipt["identity"].update(backend="vulkan", configured_vulkan_backend=True, require_accelerator=True,
+                                   requested_vulkan_precision="automatic", requested_vulkan_fine_projection="automatic",
+                                   backend_receipt=vulkan_bulk_receipt())
+        receipt["identity"]["backend_receipt"].update(
+            vulkan_vendor_id=0x10de, opencl_nvfp4_fine_batches=2, opencl_nvfp4_fine_modes=282,
+            opencl_nvfp4_pinned_batches=2, opencl_nvfp4_native_blocks=1,
+            precision="fp32_fft_fp64_coordinates_and_scores_native_fir_opencl_nvfp4_fine_projection_mixed_native_fine")
+        validate_receipt(receipt, command="message", backend="vulkan", returncode=0)
+        for patch in ({"opencl_nvfp4_fine_modes": 0}, {"opencl_nvfp4_pinned_batches": 3},
+                      {"opencl_nvfp4_native_blocks": 0}, {"vulkan_vendor_id": 0x1002}):
+            wrong = copy.deepcopy(receipt)
+            wrong["identity"]["backend_receipt"].update(patch)
+            with self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="message", backend="vulkan", returncode=0)
+
     def test_vulkan_regression_receipt_uses_native_slot_work_shape(self):
         receipt = device_receipt()
         receipt["command"] = "regression"

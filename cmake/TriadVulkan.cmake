@@ -53,6 +53,7 @@ target_include_directories(datapump_triad_vulkan SYSTEM PRIVATE
   "${_triad_vkfft_root}/vkFFT" "${DATAPUMP_GLSLANG_C_INCLUDE_DIR}")
 target_compile_features(datapump_triad_vulkan PUBLIC cxx_std_20)
 target_compile_definitions(datapump_triad_vulkan PRIVATE VKFFT_BACKEND=0)
+include(cmake/TriadOpenClNvfp4.cmake)
 target_link_libraries(datapump_triad_vulkan PRIVATE Vulkan::Vulkan
   glslang::glslang glslang::SPIRV glslang::glslang-default-resource-limits)
 target_link_libraries(datapump_triad_receiver PRIVATE datapump_triad_vulkan)

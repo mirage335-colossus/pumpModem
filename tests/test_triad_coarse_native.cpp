@@ -727,16 +727,28 @@ private:
     std::size_t workspaces_ = 0, arrivals_ = 0, calls_ = 0;
 };
 
+enum class CoarseFallback { none, precision, workspace };
+
 class IncompleteCoarseBackend final : public r::ReceiverBulkBackend {
 public:
-    explicit IncompleteCoarseBackend(BulkFault fault, bool require_native_coarse = false)
-        : fault_(fault), require_native_coarse_(require_native_coarse) {}
+    explicit IncompleteCoarseBackend(BulkFault fault, CoarseFallback fallback = CoarseFallback::none)
+        : fault_(fault), fallback_(fallback) {}
 
     std::unique_ptr<r::FineBulk> make_fine(double, double) override { return {}; }
-    std::string_view coarse_fallback_reason(double, double, r::CoarseRoute) const noexcept override {
-        return require_native_coarse_ ? "fixture-native-precision" : "";
+    std::string_view coarse_fallback_reason(double, double, r::CoarseRoute route) const noexcept override {
+        if (fallback_ == CoarseFallback::precision) return "fixture-native-precision";
+        if (fallback_ == CoarseFallback::workspace && route == r::CoarseRoute::lag_groups)
+            return "fixture-native-lag";
+        return {};
+    }
+    std::optional<r::CoarseFrequencyPlan> frequency_plan(const r::CoarseBulkGeometry&, std::size_t,
+                                                        std::size_t) const override {
+        if (fallback_ != CoarseFallback::workspace) return {};
+        ++workspace_quote_count;
+        return r::CoarseFrequencyPlan{.native_fallback_reason = "fixture-native-workspace"};
     }
     std::unique_ptr<r::CoarseBulk> make_coarse(double, double) override {
+        check(fallback_ == CoarseFallback::none, "a fallback tried to open a device execution session");
         return std::make_unique<IncompleteCoarseTile>(fault_);
     }
     std::size_t fine_host_bytes(std::size_t, std::size_t) const override { return 0; }
@@ -745,28 +757,44 @@ public:
     }
     r::BulkReceipt receipt() const override { return {}; }
 
+    mutable unsigned workspace_quote_count = 0;
+
 private:
     BulkFault fault_;
-    bool require_native_coarse_;
+    CoarseFallback fallback_;
 };
 
-void native_precision_fallback_retains_exact_chirp_z(const datapump::Crypto& crypto) {
+void native_coarse_fallback_retains_exact_chirp_z(const datapump::Crypto& crypto) {
     auto f = capture(crypto, false, 0, 0);
     f.config.helper_enabled = false;
     f.config.frequency_bound_hz = 2;
     f.slot.arrival_lower_seconds = f.slot.arrival_upper_seconds = f.arrival;
     const std::array<r::FrequencyInterval, 1> prior{{{-2, 2}}};
     constexpr unsigned workers = 3;
-    auto cpu = r::coarse_work_plan(f.config, f.slot, prior, workers);
-    f.config.bulk_backend = std::make_shared<IncompleteCoarseBackend>(BulkFault::missing_workspace, true);
-    const auto fallback = r::score_coarse(f.config, f.slot, crypto, f.iq, prior, workers,
-        r::coarse_workspace(f.config, f.slot, workers), {});
-    check(fallback.work.plan.route == cpu.route && cpu.route == r::CoarseRoute::lag_groups &&
-          fallback.work.plan.precision_reason == "exact-one-arrival-chirp-z" &&
-          fallback.work.native_fallback_reason == "fixture-native-precision" && !fallback.work.bulk &&
-          fallback.work.search.operations.score_rows == cpu.frequency_points * cpu.workspaces,
-          "a required native fallback must retain the exact native search and all public scores");
-    check_winner(f, fallback);
+    const auto cpu = r::coarse_work_plan(f.config, f.slot, prior, workers);
+    for (const auto cause : {CoarseFallback::precision, CoarseFallback::workspace}) {
+        const auto backend = std::make_shared<IncompleteCoarseBackend>(BulkFault::missing_workspace, cause);
+        f.config.bulk_backend = backend;
+        const auto quote = r::coarse_workspace(f.config, f.slot, workers);
+        const auto fallback = r::score_coarse(f.config, f.slot, crypto, f.iq, prior, workers, quote, {});
+        const auto reason = cause == CoarseFallback::workspace ? "fixture-native-workspace" : "fixture-native-precision";
+        check(fallback.work.plan.route == cpu.route && cpu.route == r::CoarseRoute::lag_groups &&
+              fallback.work.plan.precision_reason == "exact-one-arrival-chirp-z" &&
+              fallback.work.native_fallback_reason == reason && !fallback.work.bulk &&
+              fallback.work.search.operations.score_rows == cpu.frequency_points * cpu.workspaces,
+              "a required native fallback must retain the exact native search and all public scores");
+        check_winner(f, fallback);
+        check(backend->workspace_quote_count == (cause == CoarseFallback::workspace ? 2U : 0U),
+              "workspace preflight and execution must each quote the full prior once");
+        if (cause == CoarseFallback::workspace) {
+            f.config.native_coarse_precision = v::NativeCoarsePrecision::fp64;
+            const auto forced = r::coarse_work_plan(f.config, f.slot, prior, workers);
+            check(forced.route == r::CoarseRoute::frequency_tiles && forced.bulk_frequency_admission &&
+                  forced.bulk_frequency_admission->native_fallback_reason == reason &&
+                  backend->workspace_quote_count == 3,
+                  "workspace fallback changed an explicit arithmetic policy or requeried device admission");
+        }
+    }
 }
 
 void incomplete_bulk_cannot_publish(const datapump::Crypto& crypto) {
@@ -1438,7 +1466,7 @@ int main(int argc, char** argv) try {
     exact_bulk_frontiers(crypto);
     slow_mapped(crypto);
     exact_single_arrival_chirp_z(crypto);
-    native_precision_fallback_retains_exact_chirp_z(crypto);
+    native_coarse_fallback_retains_exact_chirp_z(crypto);
     exact_multi_arrival_chirp_z(crypto);
     exact_large_frequency_group(crypto, false);
     exact_large_frequency_group(crypto, true);

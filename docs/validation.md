@@ -833,6 +833,25 @@ slots resolved that failure. The rebuilt live, fine and worker relay checks
 passed. Sensitivity at the admission boundary and the correct-bit model under
 the severe channel remain open.
 
+A bounded known-channel check on source manifest `9ce61152…be86`
+reproduced both archived noisy inputs `b4d8fa5a…8bf8` and `c700c757…d2f6`.
+The 1,215,321 valid samples for each bit had identical seeded channel
+traces and matched added noise within `4.97e-16` in absolute amplitude.
+With exact timing and the exact noiseless waveform through that channel
+for each hypothesis, the correct bits led by `1.657881e10` and `1.657840e10`
+log-likelihood units. This conditional result establishes that the received
+samples retained substantial bit information. The production scores still
+expose a blind acquisition and channel-model problem on this fixture. At
+0.6 fine cells/s the two-cell minimum excludes both short varying families.
+The remaining affine model has two fixed paths. In the simulation the
+common phase rotates the moving two-ray sum before the selective operator
+adds delays of roughly 0.444 and 0.889 s. De-rotating the current sample
+would still leave different phase histories on the delayed components.
+The evaluator kept exact path state and timing private. The result measures
+conditional bit separation on one complete valid slot.
+Keep the [compact receipt](../local-evidence/runpod-strong-bit-2026-11-19/known-channel-genie.json)
+until a matched ordinary receiver qualification supersedes it.
+
 At 27.20 provider CPU-time cores, the worker admitted
 54 software workers. The two captured Ninja compile stages took 15.07 s
 with 27 jobs and 14.64 s with 13 jobs, excluding dependency setup. All
@@ -848,6 +867,177 @@ checks also passed. Compact matched
 reception receipts remain in `local-evidence/wrong-key-clean-20261119/` for
 future projection qualification. Remove them when a newer matched qualification
 supersedes these inputs and results.
+
+### Blackwell NVFP4 fine projection — 19 November 2026
+
+The native CUDA receiver ran the mapped DATA-template DFT using cuBLASLt
+block-scaled E2M1 with UE4M3 scales and FP32 accumulation on full RTX PRO 6000
+Blackwell Server Edition devices, with driver 595.112.07 and cuBLASLt 12.8.4.
+A direct numerical check used 1,500 rows, 47 bins and 33 lanes, plus a
+223-row, 67-bin, 129-lane holdout. It compared against a unitary direct DFT,
+including zero input, partial tiles, wide amplitude scales, and invalid inputs.
+The maximum lane RMS errors were 16.75% and 18.39%. These bounds characterize
+the component fixtures. The receiver statistic and bit outcomes were checked
+separately using identical received input for each pair.
+
+| 3.6 Hz capture | SHA-256 prefix | CUDA FFT → NVFP4 fine time | Slot time | Decisions |
+| --- | --- | ---: | ---: | --- |
+| HF Worst and Each 65% | `b4d8fa5a` | 2.921 → 2.546 s | 9.871 → 9.606 s | Current retains original wrong bit `1`. Stronger settings erase it. |
+| Stable channel with the same declared search | `eaa4ae2a` | 2.379 → 2.074 s | 9.161 → 9.067 s | Current and Guarded recover `0`. Stronger settings erase it. |
+| Physical quiet | `2b9ca9df` | 2.429 → 2.533 s | 9.173 → 9.470 s | All six remain quiet. |
+| Independent +14 dB-Hz foreign signal | `d307bd41` | 2.082 → 2.068 s | 8.832 → 9.057 s | All six remain ambiguous. |
+
+Each pair retained 1,215,321 input samples, 3,951,090 scored coarse rows,
+58,320 fine statistic updates and 10,967,040 projected values. Automatic
+CUDA on the severe input, before the direct FFT integration, executed 7,281
+NVFP4 batches and consumed 10,950,624 NVFP4 projections. The fine stage took
+2.532 s and the slot 9.443 s. The shorter tails used FFT. These single-slot
+comparisons give mixed complete-slot speed evidence. They cover neither
+sensitivity near the threshold nor sustained stream service. The severe
+wrong bit remains an independent blind channel-model failure.
+
+A separate device-event comparison used the 1,500-row, 47-mode geometry
+with 16 to 256 template columns. Warm NVFP4 including packing and extraction
+took 29.6–30.2 µs. Direct cuFFT and a fused unitary retained-mode gather took
+6.9–8.2 µs. This resolved the direction for speeding up the tested shape.
+On the rebuilt receiver, the matched severe slot took 9.811 s with the legacy
+ATen FFT, 9.494 s with NVFP4 and 9.166 s with direct cuFFT. Fine times were
+2.836, 2.568 and 2.321 s. Automatic CUDA used direct cuFFT for 10,950,624
+modes and the legacy FFT for 16,416 remaining modes. It preserved the same
+complete public work and decisions. Direct cuFFT also kept the matched
+stable +77 dB-Hz, quiet and +26 dB-Hz wanted decisions. The complete-slot
+measurements on this device support the automatic cuFFT preference for
+this geometry.
+
+Additional plan checks held Rate at 3.6 Hz and exercised 50,310, 8,232,120
+and 54,047,448 public hypotheses. An automatic device workspace rejection
+retains the admitted native exact chirp-Z cost comparison. Explicit precision
+overrides keep their original selection. The focused regression verifies the
+fallback reason, complete scoring and winner with a simulated device quote.
+
+The stock socket-free NVIDIA ICD advertised both CUDA import extensions.
+With the worker filter active, device creation returned
+`VK_ERROR_INITIALIZATION_FAILED` for both, including a scalar binary control.
+The same isolated launches outside the filter each produced all 128 exact
+FP4 witness results. The worker filter stayed in place. Ordinary Vulkan
+cooperative matrices ran successfully under it, with exact FP8 E4M3-to-FP32
+and FP16-to-FP32 matrix outputs. That checks executed arithmetic at the
+component level. Khronos's
+[FP4 microscaling extension](https://docs.vulkan.org/refpages/latest/refpages/source/VK_EXT_shader_ocp_microscaling_types.html)
+defines conversion and storage operations. Its FP4 format support does not
+supply a direct FP4 matrix operation.
+
+The NVIDIA OpenCL driver accepted the built-in offline SM120a program with
+`clCreateProgramWithBinary` under the same production descriptor and socket
+filter. The RTX PRO 6000 executed `mma.sync` on block-scaled E2M1 coefficients
+and templates with FP32 accumulation. The toolkit loader in the stock image
+returned `CL_PLATFORM_NOT_FOUND_KHR` with every tested otherwise valid manifest.
+The signed Ubuntu Noble ICD loader discovered the same driver and passed both
+numerical fixtures with the production manifest. The deployment pins that
+loader by absolute path. The worker matches OpenCL to the selected Vulkan
+device UUID and charges the GPU buffers against the same workspace ceiling.
+
+At 24 receiver workers, the original 256-column implementation matched each
+CUDA capture's input hash, complete coarse search and admission decisions for
+the severe, stable and quiet cases. Each executed 3,951,090 Vulkan coarse
+rows and 10,950,624 OpenCL FP4 modes. Native to OpenCL fine times were
+0.771 → 1.252 s severe, 0.751 → 0.971 s stable and 0.791 → 1.287 s quiet.
+Paired complete slot times were mixed. The host produces about 2.8 GB of
+unpacked complex templates per slot before transfer, quantization and
+synchronous readback. The timings include this staging and establish a
+limit of the measured route.
+
+Packing one entire 288-lane candidate block halved the command batches from
+1,618 to 809 with the same 10,950,624 retained modes. The stock worker built
+with the pinned Ubuntu library needed no loader override for these checks.
+With four admitted software workers, two stable-slot comparisons placed
+native fine processing at 2.026–2.155 s and OpenCL FP4 at 1.438–1.470 s.
+Complete slots took 7.039–7.285 s and 6.233–6.295 s respectively. With 24
+workers, the severe fixture took 0.448–0.460 s fine on the CPU and
+1.100–1.240 s with OpenCL. With 24 workers, the quiet fixture took 0.459 s
+fine on the CPU and 1.118 s with OpenCL. The automatic crossover is scoped
+to this qualified geometry and does not change the global software budget.
+
+The revised host staging carries the exact rounded C64 peak with each lane.
+It removes the full input reduction and a separate GPU kernel dispatch. A
+filtered 288-lane component profile includes 3.46 MB of upload per dispatch.
+The upload occupied 309–343 µs, packing 14–19 µs, NVFP4 matrix projection
+10–12 µs and readback 2–3 µs on the device timeline. The blocking calls took
+587–905 µs end to end. This fixture identifies a larger opportunity in
+template residency, transfer and host/device overlap than in further reducing
+the scaling arithmetic. At 809 blocks, even the fastest observed isolated
+blocking time accounts for about 0.475 s. Timings exclude candidate rendering
+and likelihood, so these results do not establish the throughput of an
+overlapped or device-resident implementation.
+
+The final AVX2 fused cast and peak implementation matched the portable path
+on 448 bitwise checks, including subnormals, signed zero and nonfinite values.
+The final filtered OpenCL component passed tested lane gains from 2⁻⁵⁶ to 2⁶⁴.
+At four workers on the final RunPod build, the matched stable slot took
+2.906 s fine on the CPU and 2.000 s in automatic FP4. Complete slots took
+9.575 s and 8.467 s. Both retained 3,951,090 Vulkan coarse rows, and automatic
+mode used 10,950,624 FP4 modes. At 24 workers the automatic route kept Vulkan
+coarse search and selected native fine processing for the severe capture.
+The independently forced OpenCL route kept the same decision and full score
+geometry. The mixed arithmetic receipt records the one shorter native block.
+
+A separate filtered 288-lane test repeated 24 warm projections per transfer
+variant, using two inputs and bitwise matching output. The two pageable
+blocking medians were 367 and 411 µs. Direct fill into a persistent
+driver-owned pinned allocation took 187 µs, with about 77 µs in GPU upload.
+Pageable nonblocking upload took 340 µs. Copying into the pin took 364 µs,
+and per-dispatch map, copy and unmap took 404 µs. This supports filling the
+mapped allocation directly and reusing it across the slot. The host workers
+fill disjoint lanes and the final read finishes before reuse. Allocation or
+mapping failure retains the checked pageable path. Both alternatives are
+charged to the applicable host and device limits.
+On the final build's pod, a repeat put blocking direct fill at 120 µs,
+nonblocking direct fill at 135 µs and the two blocking pageable controls
+at 139 and 143 µs. Output remained bitwise identical. The default keeps
+the faster blocking write at this boundary.
+
+The production pinned build repeated the stable slot with the same input and
+all 3,951,090 Vulkan coarse rows. At four fine workers, the native comparison
+took 2.097 s fine and 8.123 s for the slot. Automatic NVFP4 took 1.502 s fine
+and 6.715 s for the slot. The receipt identifies all 809 directly filled
+pinned submissions and all 10,950,624 NVFP4 modes. The explicit numerical
+check verified identical output on pageable and pinned buffers under the
+worker filter, including reuse after cancellation.
+
+The pinned build also completed the four-worker five-slot message. It
+decoded `e` from `001` and two scored quiet slots, with the EOF-only control
+still incomplete. It used 5,803 pinned FP4 submissions, 68,635,980 FP4 modes
+and 23,706,540 GPU coarse rows in 33.570 s. The pinned build's 24-worker
+severe comparison retained the same decisions. Automatic native fine
+took 0.780 s and the forced pinned FP4 path took 2.799 s for that fixture.
+In the eight-worker stable comparisons, each ordering favored a different
+route in fine time and in complete slot time. At 12 workers, native fine
+took 0.779 s and FP4 fine took 1.815 s on the stable slot. This leaves the
+automatic qualification at four fine workers.
+
+The earlier staged implementation completed the stable configured-calendar
+stream with 24 software workers while OpenCL FP4 was explicitly exercised.
+It used 23,706,540 Vulkan coarse rows and 68,635,980 OpenCL FP4 modes in
+14.534 s. The 24-worker message comparison covers a different allocation from
+the final four-worker automatic run. These examples demonstrate complete
+message reception on the stable fixture. Sustained service and the severe
+channel's bit decision remain unqualified.
+
+The loader-pinned stock worker also attached through the managed RunPod relay
+and Firefox. It displayed **Default (fastest)** with no page errors and
+**End simulation** closed the bridge. This browser smoke covered session
+management. The filtered native message is the separate DSP confirmation.
+
+The final 45-check native triad run passed 42 checks under concurrency.
+Two receiver tests timed out and a bounded probe did not complete coarse
+preparation. All three passed in an isolated run, along with the final host
+staging scheduler check. All 184 standalone checks passed with isolated X11
+and the native relay. The GUI group passed 30 checks. Two invocations that
+coincided with a relink passed when rerun with the finished binary. Owned
+test pods and queued requests were verified absent.
+
+Keep the compact matched receipts in `local-evidence/blackwell-nvfp4-20261119/`
+until newer qualified receiver measurements supersede this geometry and loader.
 
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 

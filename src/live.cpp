@@ -1491,6 +1491,9 @@ struct Session::Impl {
                 current.gpu_statistics_blocks = 0;
                 current.gpu_cuda_fp16_calls = 0;
                 current.gpu_cuda_int8_calls = 0;
+                current.gpu_cuda_nvfp4_fine_modes = 0;
+                current.gpu_cuda_cufft_fine_modes = 0;
+                current.gpu_opencl_nvfp4_fine_modes = 0;
                 current.gpu_cuda_half_fft_score_rows = 0;
                 current.gpu_cuda_half_fft_fallback_summary.clear();
                 current.gpu_native_lag_preference_supported = false;
@@ -2043,6 +2046,9 @@ Snapshot Session::snapshot() {
             p.current.gpu_statistics_blocks = receipt.statistics_blocks;
             p.current.gpu_cuda_fp16_calls = receipt.cuda_matrix_fp16_calls;
             p.current.gpu_cuda_int8_calls = receipt.cuda_matrix_int8_calls;
+            p.current.gpu_cuda_nvfp4_fine_modes = receipt.cuda_nvfp4_fine_modes;
+            p.current.gpu_cuda_cufft_fine_modes = receipt.cuda_cufft_fine_modes;
+            p.current.gpu_opencl_nvfp4_fine_modes = receipt.opencl_nvfp4_fine_modes;
             p.current.gpu_cuda_half_fft_score_rows = receipt.cuda_half_fft_score_rows;
             p.current.gpu_cuda_half_fft_fallback_summary.clear();
             for (std::size_t i = 0; i < receipt.half_fft_fallback_counts.size(); ++i) {

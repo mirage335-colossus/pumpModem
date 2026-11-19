@@ -161,6 +161,12 @@ void gpu_route_diagnostics() {
     snapshot.gpu_cuda_fp16_calls=0;
     snapshot.gpu_cuda_int8_calls=0;
     snapshot.gpu_statistics_blocks=0;
+    snapshot.gpu_cuda_nvfp4_fine_modes=101;
+    snapshot.gpu_cuda_cufft_fine_modes=202;
+    check(gui::gpu_search_diagnostics(snapshot)==
+          "GPU search · 42 rows · NVFP4 fine projection 101 modes · cuFFT fine projection 202 modes · automatic CUDA · fixture GPU");
+    snapshot.gpu_cuda_nvfp4_fine_modes=0;
+    snapshot.gpu_cuda_cufft_fine_modes=0;
     snapshot.gpu_cuda_native_fine_sessions=3;
     snapshot.gpu_cuda_native_fine_fallback_reason="small-chronological-blocks";
     check(gui::gpu_search_diagnostics(snapshot)==
@@ -189,6 +195,11 @@ void gpu_route_diagnostics() {
     check(gui::gpu_search_diagnostics(snapshot)==
           "Vulkan GPU search + CPU tracking · 42 rows · Vulkan workspace leases 64/1024 MiB (peak 512, owner 384, waiting 2) · "
           "native coarse workspace fallback 3 (native-vulkan-workspace) · automatic Vulkan · fixture GPU");
+    snapshot.gpu_opencl_nvfp4_fine_modes=303;
+    check(gui::gpu_search_diagnostics(snapshot)==
+          "Vulkan GPU search · 42 rows · OpenCL NVFP4 fine projection 303 modes · Vulkan workspace leases 64/1024 MiB "
+          "(peak 512, owner 384, waiting 2) · native coarse workspace fallback 3 (native-vulkan-workspace) · "
+          "automatic Vulkan · fixture GPU");
 }
 void text_and_raw_draft_boundaries() {
     using F=gui::ui::Field;using C=gui::ui::Command;

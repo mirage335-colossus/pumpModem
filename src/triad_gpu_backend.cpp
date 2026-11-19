@@ -13,6 +13,7 @@ public:
     SelectedGpu(std::shared_ptr<receiver_detail::ReceiverBulkBackend> backend, std::string reason)
         : backend_(std::move(backend)), reason_(std::move(reason)) {}
     bool supports_fine() const noexcept override { return backend_->supports_fine(); }
+    bool fine_maps_on_host() const noexcept override { return backend_->fine_maps_on_host(); }
     std::string_view fine_fallback_reason(const receiver_detail::FineBulkGeometry& geometry) const noexcept override {
         return backend_->fine_fallback_reason(geometry);
     }
@@ -83,8 +84,11 @@ std::shared_ptr<receiver_detail::ReceiverBulkBackend> make_gpu_receiver_backend(
         vulkan.coarse_precision = options.fp32_minimum ? VulkanCoarsePrecision::fp32 : VulkanCoarsePrecision::automatic;
         vulkan.prefer_native_exact_chirp_z = !options.fp32_minimum;
         auto backend = make_automatic_vulkan_receiver_backend(vulkan);
+        const auto selected = backend->fine_maps_on_host()
+            ? "automatic Vulkan receiver with OpenCL NVFP4 available"
+            : "automatic Vulkan receiver: GPU search with native fine processing";
         return std::make_shared<SelectedGpu>(std::move(backend),
-            unavailable.empty() ? "automatic Vulkan receiver: GPU search with native fine processing" :
+            unavailable.empty() ? selected :
                 "automatic Vulkan receiver; CUDA unavailable: " + unavailable);
     } catch (const VulkanBackendUnavailable& error) {
         if (!unavailable.empty()) unavailable += "; ";

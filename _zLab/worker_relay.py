@@ -202,7 +202,26 @@ def gpu_environment(worker, live):
                 raise ValueError()
         except (KeyError, TypeError, ValueError, RecursionError):
             raise RelayError("Invalid deployment Vulkan manifest") from None
-    return dict(os.environ, VK_DRIVER_FILES=str(manifest), VK_ICD_FILENAMES=str(manifest))
+    environment = dict(os.environ, VK_DRIVER_FILES=str(manifest), VK_ICD_FILENAMES=str(manifest))
+    vendors = deployed.parent / "nvidia-opencl-vendors"
+    try:
+        info = vendors.lstat()
+    except FileNotFoundError:
+        return environment  # Existing Vulkan deployments can lack this optional manifest.
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+        raise RelayError("Unsafe deployment OpenCL vendor directory")
+    if set(vendors.glob("*.icd")) != {vendors / "nvidia.icd"}:
+        raise RelayError("Unexpected deployment OpenCL vendor manifest")
+    fd = os.open(vendors / "nvidia.icd", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as source:
+        entry = os.fstat(fd)
+        expected = b"libnvidia-opencl.so.1\n"
+        if (not stat.S_ISREG(entry.st_mode) or entry.st_uid != os.geteuid() or entry.st_mode & 0o077
+                or source.read(len(expected) + 1) != expected):
+            raise RelayError("Invalid deployment OpenCL vendor manifest")
+    for variable in ("OCL_ICD_FILENAMES", "OPENCL_LAYERS", "OPENCL_LAYER_PATH"):
+        environment.pop(variable, None)
+    return dict(environment, OPENCL_VENDOR_PATH=str(vendors), OCL_ICD_VENDORS=str(vendors))
 
 
 def relay(worker, stop_requested=lambda: False, require_gpu=False, file_channel=False, live=False):

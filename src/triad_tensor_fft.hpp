@@ -55,6 +55,13 @@ using CudaSegmentedFftPlan = CudaFftPlan<CudaFftPrecision::fp32>;
 extern template class CudaFftPlan<CudaFftPrecision::fp16>;
 extern template class CudaFftPlan<CudaFftPrecision::fp32>;
 
+// Extract the retained bins of an unnormalized forward FP32 transform and
+// apply the unitary 1/sqrt(rows) scale. Full [batch, rows], device bin indices
+// [modes] and output [batch, modes] are contiguous disjoint device buffers.
+// A bin outside [0, rows) emits NaN for that mode. No allocation or sync.
+cudaError_t cuda_fft_retained_modes(const c10::complex<float>* full, const std::int64_t* device_bins,
+    c10::complex<float>* output, std::size_t rows, std::size_t modes, std::size_t batch, cudaStream_t) noexcept;
+
 struct CudaHalfFftProductShape {
     std::size_t rows, workspaces, frequencies, taps;
 };

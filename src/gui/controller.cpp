@@ -205,6 +205,10 @@ std::string gpu_search_diagnostics(const live::Snapshot& snapshot) {
             text += " · FP16 matrix " + std::to_string(snapshot.gpu_cuda_fp16_calls) + " calls";
         if (snapshot.gpu_cuda_int8_calls)
             text += " · INT8 matrix " + std::to_string(snapshot.gpu_cuda_int8_calls) + " calls";
+        if (snapshot.gpu_cuda_nvfp4_fine_modes)
+            text += " · NVFP4 fine projection " + std::to_string(snapshot.gpu_cuda_nvfp4_fine_modes) + " modes";
+        if (snapshot.gpu_cuda_cufft_fine_modes)
+            text += " · cuFFT fine projection " + std::to_string(snapshot.gpu_cuda_cufft_fine_modes) + " modes";
         if (snapshot.gpu_cuda_half_fft_score_rows)
             text += " · FP16 FFT " + std::to_string(snapshot.gpu_cuda_half_fft_score_rows) + " score rows";
         if (!snapshot.gpu_cuda_half_fft_fallback_summary.empty())
@@ -215,9 +219,15 @@ std::string gpu_search_diagnostics(const live::Snapshot& snapshot) {
                 text += " (" + snapshot.gpu_cuda_native_fine_fallback_reason + ")";
         }
     } else {
-        text = snapshot.gpu_score_rows
-            ? "Vulkan GPU search + CPU tracking · " + std::to_string(snapshot.gpu_score_rows) + " rows"
-            : "Vulkan ready · CPU tracking";
+        if (snapshot.gpu_opencl_nvfp4_fine_modes) {
+            if (snapshot.gpu_score_rows)
+                text = "Vulkan GPU search · " + std::to_string(snapshot.gpu_score_rows) + " rows · ";
+            text += "OpenCL NVFP4 fine projection " + std::to_string(snapshot.gpu_opencl_nvfp4_fine_modes) + " modes";
+        } else {
+            text = snapshot.gpu_score_rows
+                ? "Vulkan GPU search + CPU tracking · " + std::to_string(snapshot.gpu_score_rows) + " rows"
+                : "Vulkan ready · CPU tracking";
+        }
         if (snapshot.gpu_fp32_score_rows)
             text += " · FP32 " + std::to_string(snapshot.gpu_fp32_score_rows) + " rows";
         if (snapshot.gpu_fp16_storage_score_rows)
@@ -1370,6 +1380,9 @@ struct Controller::Impl {
             value.gpu_statistics_blocks!=snapshot.gpu_statistics_blocks||
             value.gpu_cuda_fp16_calls!=snapshot.gpu_cuda_fp16_calls||
             value.gpu_cuda_int8_calls!=snapshot.gpu_cuda_int8_calls||
+            value.gpu_cuda_nvfp4_fine_modes!=snapshot.gpu_cuda_nvfp4_fine_modes||
+            value.gpu_cuda_cufft_fine_modes!=snapshot.gpu_cuda_cufft_fine_modes||
+            value.gpu_opencl_nvfp4_fine_modes!=snapshot.gpu_opencl_nvfp4_fine_modes||
             value.gpu_cuda_native_fine_sessions!=snapshot.gpu_cuda_native_fine_sessions||
             value.gpu_cuda_native_fine_fallback_reason!=snapshot.gpu_cuda_native_fine_fallback_reason||
             value.gpu_cuda_half_fft_score_rows!=snapshot.gpu_cuda_half_fft_score_rows||

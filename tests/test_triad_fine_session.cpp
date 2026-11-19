@@ -1918,6 +1918,170 @@ void incomplete_bulk_cannot_publish_quiet(FineLanes lanes) {
               "failed bulk work cannot provide scored quiet");
     }
 }
+
+struct HostProjectionWitness {
+    std::vector<std::size_t> batch_lanes;
+    std::size_t device_blocks = 0, native_blocks = 0, completed_blocks = 0;
+    bool fail_second_batch = false;
+};
+
+class HostProjectionBulk final : public FineBulk {
+public:
+    static constexpr std::size_t capacity = 8;
+
+    explicit HostProjectionBulk(std::shared_ptr<HostProjectionWitness> witness)
+        : witness_(std::move(witness)) {}
+
+    void statistics(const FineBulkBlock&, std::size_t, const FineMappingSource&,
+                    std::span<FineBulkStatistics>, std::stop_token) override {
+        throw Error("host projector must use the native template scheduler");
+    }
+
+    std::size_t host_projection_capacity() const noexcept override { return capacity; }
+    bool host_projection_stages_peaks() const noexcept override { return true; }
+
+    bool begin_host_projection(const FineBulkBlock& block, std::stop_token) override {
+        rows_ = block.rows;
+        bins_ = block.projection_indices;
+        if (rows_ == 60) {
+            staging_.resize(capacity * (rows_ + 1));
+            ++witness_->device_blocks;
+            return true;
+        }
+        ++witness_->native_blocks;
+        return false;
+    }
+
+    std::span<std::complex<float>> host_projection_staging(std::size_t samples) noexcept override {
+        return std::span(staging_).first(samples);
+    }
+
+    void project_host_templates(std::span<const std::complex<float>> input,
+                                std::span<std::complex<float>> output, std::stop_token) override {
+        const auto stride = rows_ + 1;
+        const auto lanes = input.size() / stride;
+        check(lanes && lanes <= capacity && input.size() == lanes * stride &&
+              output.size() == lanes * bins_.size(), "each host batch must contain complete templates and projections");
+        check(input.data() == staging_.data(), "template workers must fill the owner-held staging directly");
+        for (std::size_t lane = 0; lane < lanes; ++lane) {
+            float peak = 0;
+            for (const auto value : input.subspan(lane * stride, rows_))
+                peak = std::max({peak, std::abs(value.real()), std::abs(value.imag())});
+            check(input[lane * stride + rows_] == std::complex<float>(peak, 0),
+                  "template staging must include the actual magnitude peak");
+        }
+        witness_->batch_lanes.push_back(lanes);
+        if (witness_->fail_second_batch && witness_->batch_lanes.size() == 2)
+            throw Error("injected host projection failure");
+        const auto normalizer = 1 / std::sqrt(static_cast<double>(rows_));
+        for (std::size_t bin = 0; bin < bins_.size(); ++bin) {
+            const auto step = std::polar(1., -2 * std::numbers::pi * bins_[bin] / rows_);
+            for (std::size_t lane = 0; lane < lanes; ++lane) {
+                Complex sum{}, phase = 1;
+                for (const auto value : input.subspan(lane * stride, rows_)) {
+                    sum += Complex(value) * phase;
+                    phase *= step;
+                }
+                output[lane * bins_.size() + bin] = std::complex<float>(sum * normalizer);
+            }
+        }
+    }
+
+    void complete_host_statistics(std::size_t candidates, std::size_t projected) override {
+        ++witness_->completed_blocks;
+        work_.executed = true;
+        work_.statistics_blocks += candidates;
+        work_.projected_values += projected;
+    }
+
+    BulkReceipt receipt() const override { return work_; }
+
+private:
+    std::shared_ptr<HostProjectionWitness> witness_;
+    std::vector<std::complex<float>> staging_;
+    std::span<const std::size_t> bins_;
+    std::size_t rows_ = 0;
+    BulkReceipt work_;
+};
+
+class HostProjectionBackend final : public ReceiverBulkBackend {
+public:
+    explicit HostProjectionBackend(std::shared_ptr<HostProjectionWitness> witness)
+        : witness_(std::move(witness)) {}
+
+    bool fine_maps_on_host() const noexcept override { return true; }
+    std::unique_ptr<FineBulk> make_fine(double, double) override {
+        return std::make_unique<HostProjectionBulk>(witness_);
+    }
+    std::unique_ptr<CoarseBulk> make_coarse(double, double) override { return {}; }
+    std::size_t fine_host_bytes(std::size_t, std::size_t) const override {
+        return HostProjectionBulk::capacity * (1500 + 47) * sizeof(std::complex<float>);
+    }
+    std::size_t coarse_host_bytes(std::size_t, std::size_t, std::size_t) const override { return 0; }
+    BulkReceipt receipt() const override { return {}; }
+
+private:
+    std::shared_ptr<HostProjectionWitness> witness_;
+};
+
+void host_mapped_projection_scheduler() {
+    const Fixture f(240, 60);
+    const FineObservation extent{f.slot.first_sample, f.iq.size(), FineRunKind::operational, true};
+    constexpr unsigned workers = 3;
+    auto config = f.config;
+    config.spread_delay_seconds = .021;
+    FineSession native(config, f.slot, f.key, extent, f.iq, {}, f.coordinates, 100, 0, workers,
+                       fine_workspace(config, f.slot, extent, workers));
+    native.advance_to(extent.rows);
+    ReceiverSlotScore expected;
+    native.finish(expected);
+    const auto expected_work = native.progress();
+
+    const auto witness = std::make_shared<HostProjectionWitness>();
+    config.bulk_backend = std::make_shared<HostProjectionBackend>(witness);
+    FineSession mixed(config, f.slot, f.key, extent, f.iq, {}, f.coordinates, 100, 0, workers,
+                      fine_workspace(config, f.slot, extent, workers));
+    mixed.advance_to(f.fs);
+    mixed.advance_to(extent.rows);
+    ReceiverSlotScore actual;
+    mixed.finish(actual);
+    const auto work = mixed.progress();
+    check(witness->device_blocks > 1 && witness->native_blocks == 1 &&
+          witness->completed_blocks == work.blocks && witness->batch_lanes.size() == 2 * witness->device_blocks,
+          "host projector must score regular dispatches and the enlarged native terminal block once");
+    for (std::size_t i = 0; i < witness->batch_lanes.size(); i += 2)
+        check(witness->batch_lanes[i] == 8 && witness->batch_lanes[i + 1] == 4,
+              "three two-tap candidates must use one full batch and one partial batch");
+    check(actual.complete && expected.complete && actual.consumed_samples == extent.rows &&
+          actual.quiet_modes == expected.quiet_modes && actual.quiet_energy == expected.quiet_energy &&
+          actual.zero_h0_verified && actual.basis_rows == expected.basis_rows &&
+          work.initial_affine.retained_states == expected_work.initial_affine.retained_states &&
+          work.initial_affine.projection_modes == expected_work.initial_affine.projection_modes,
+          "host scheduling must preserve physical completion, quiet statistics, and all public work");
+    check(work.bulk && work.bulk->executed &&
+          work.bulk->statistics_blocks == work.blocks * work.initial_affine.initial_states &&
+          work.bulk->projected_values == expected_work.initial_affine.projection_modes,
+          "one owner must credit every completed device and native projection exactly once");
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        const auto score = expected.bit_evidence[bit];
+        check(std::abs(actual.bit_evidence[bit] - score) <= 1e-5 * std::max(1., std::abs(score)),
+              "the bounded float host tensors must preserve the native reference likelihood");
+    }
+
+    const auto failure = std::make_shared<HostProjectionWitness>();
+    failure->fail_second_batch = true;
+    config.bulk_backend = std::make_shared<HostProjectionBackend>(failure);
+    FineSession failed(config, f.slot, f.key, extent, f.iq, {}, f.coordinates, 100, 0, workers,
+                       fine_workspace(config, f.slot, extent, workers));
+    rejects_with([&] { failed.advance_to(extent.rows); }, "injected host projection failure",
+                 "failure in a partial batch must retain the initiating error");
+    check(failure->batch_lanes.size() == 2 && !failure->completed_blocks,
+          "the first successful device batch cannot credit a partially scored block");
+    rejects([&] { (void)failed.progress(); }, "partial host projection must not publish progress");
+    ReceiverSlotScore incomplete;
+    rejects([&] { failed.finish(incomplete); }, "partial host projection must not finish a slot");
+    check(!incomplete.complete, "host projection failure must not credit physical completion");
+}
 } // namespace
 
 int main() {
@@ -1950,6 +2114,7 @@ int main() {
         added_epoch_track_keeps_prior_mass_and_work();
         incomplete_bulk_cannot_publish_quiet(FineLanes::fixed_affine);
         incomplete_bulk_cannot_publish_quiet(FineLanes::fixed_and_adaptive);
+        host_mapped_projection_scheduler();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

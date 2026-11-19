@@ -224,6 +224,7 @@ add_library(datapump_triad_receiver STATIC
 target_include_directories(datapump_triad_receiver PUBLIC include PRIVATE src third_party/xz/src/liblzma/api)
 target_link_libraries(datapump_triad_receiver PUBLIC datapump_triad PRIVATE liblzma)
 include(cmake/TriadTensor.cmake)
+include(cmake/TriadNvfp4.cmake)
 include(cmake/TriadVulkan.cmake)
 add_library(datapump_robust_session STATIC src/live.cpp src/robust_profile.cpp
   src/robust_audio_frontend.cpp)

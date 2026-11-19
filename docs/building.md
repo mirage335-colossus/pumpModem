@@ -709,6 +709,28 @@ compatible NVIDIA driver; the packaged application carries toolkit runtime
 dependencies required by the build. CUDA is optional and the default build
 does not require Torch or Python.
 
+`DATAPUMP_TRIAD_NVFP4=AUTO` compiles the native NVFP4 projection alongside an
+enabled CUDA receiver when NVCC 12.8 and cuBLASLt 12.8.4 or newer are available.
+NVIDIA added block-scaled FP4 matrix multiplication for SM120 in CUDA 12.8
+Update 1. The projection target uses device code for the RTX 5090 and RTX PRO
+6000 Blackwell. Set `DATAPUMP_TRIAD_NVFP4=ON` to require this target, including
+in a native build without LibTorch, or `OFF` to omit it. Runtime projection
+selection uses the actual device, receiver workspace and arithmetic policy.
+An explicit `ON` build with testing enabled registers `triad_nvfp4_projection`.
+Run it on an SM120 device to check the block scales, partial tiles and complex
+mode outputs against a direct DFT.
+[NVIDIA cuBLAS release notes](https://docs.nvidia.com/cuda/archive/12.9.2/cuda-toolkit-release-notes/index.html#cublas-release-12-8-update-1).
+
+Linux Vulkan builds can compile the separate OpenCL NVFP4 projection with
+`DATAPUMP_TRIAD_OPENCL_NVFP4=AUTO`, the default. The build needs NVCC 12.8 or
+newer, the OpenCL C headers and Python 3. Its NVCC invocation produces only
+the built-in `sm_120a` module. The optional path discovers the public OpenCL
+loader and a matching NVIDIA device at runtime, and shares the Vulkan device
+budget. CUDA host libraries are unnecessary for this route. Set the option to `ON` to require
+the offline compilation prerequisites or to `OFF` to omit the path.
+With testing enabled, `ON` registers `triad_opencl_nvfp4` for execution on a
+supported Blackwell GPU under the worker's socket filter.
+
 Select Robust Modem and use the **GPU** checkbox immediately left of Developer.
 It defaults off and persists as `--gpu yes|no`; builds with neither CUDA nor
 Vulkan keep the control disabled with an explanation. Requested GPU

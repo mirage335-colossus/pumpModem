@@ -199,11 +199,13 @@ echo PUMP_LAB_MODE=cpu
     def test_remote_cpu_and_cuda_branches_execute_correct_flags(self):
         # Exercise the actual POSIX script with fake CMake and fake Torch. This
         # checks branching/arguments, not CUDA availability or a real build.
-        for mode, profile, generator_case in itertools.product(
-                ('cpu', 'cuda', 'gpu'), ('simulation', 'live'),
-                ('ninja', 'make', 'existing-make')):
-            with self.subTest(mode=mode, profile=profile, generator=generator_case):
-                home = self.root / (mode + '-' + profile + '-' + generator_case)
+        cases = itertools.product(('cpu', 'cuda', 'gpu'), ('simulation', 'live'),
+                                  ('ninja', 'make', 'existing-make'))
+        for requested, profile, generator_case in (*cases, ('cuda-unavailable', 'simulation', 'ninja')):
+            cuda_unavailable = requested == 'cuda-unavailable'
+            mode = 'cuda' if cuda_unavailable else requested
+            with self.subTest(mode=requested, profile=profile, generator=generator_case):
+                home = self.root / (requested + '-' + profile + '-' + generator_case)
                 home.mkdir(mode=0o700)
                 archive = home / 'source.tar.gz'
                 sizing = (b"import sys\nassert sys.argv[1] == '--runpod'\n"
@@ -302,7 +304,7 @@ fi
                     if profile == 'live':
                         env['CUDACXX'] = str(nvcc)
                 vulkan = mode == 'gpu' and profile == 'simulation'
-                if mode == 'gpu':
+                if mode != 'cpu':
                     # Stand in for the compiled CUDA probe. Its discovery result
                     # decides the branch; building the worker is still simulated.
                     compiler = bin_dir / 'c++'
@@ -310,7 +312,7 @@ fi
                                         "printf '#!/bin/sh\\nexit %d\\n' \"$PROBE_STATUS\" > \"$output\"\n"
                                         'chmod +x "$output"\n')
                     compiler.chmod(0o755)
-                    env['PROBE_STATUS'] = '2' if vulkan else '0'
+                    env['PROBE_STATUS'] = '2' if vulkan or cuda_unavailable else '0'
                 if vulkan:
                     source = home / 'nvidia_icd.json'
                     source.write_text(json.dumps({'ICD': {'library_path': 'libGLX_nvidia.so.0',
@@ -320,9 +322,20 @@ fi
                     prepare = prepare.replace('/etc/vulkan/icd.d/nvidia_icd.json', str(source))
                     (home / '_zLab').mkdir()
                     (home / '_zLab/prepare_vulkan.sh').write_text(prepare)
+                    loader = home / 'libOpenCL.so.1'
+                    if generator_case != 'existing-make':
+                        loader.touch()
+                    dpkg_query = bin_dir / 'dpkg-query'
+                    dpkg_query.write_text('''#!/bin/sh
+for arg do package=$arg; done
+[ "$package" = ocl-icd-libopencl1:amd64 ] && [ "$FAKE_GENERATOR" != make ] && printf installed
+''')
+                    dpkg_query.chmod(0o755)
                 script = deploy.REMOTE_BUILD.replace('cd "$directory"', 'directory=' + shlex.quote(str(home)) + '\ncd "$directory"', 1)
                 # Model the image layout in the test's private directory.
                 script = script.replace('/usr/local/cuda/bin/nvcc', shlex.quote(str(nvcc)))
+                if vulkan:
+                    script = script.replace('/usr/lib/x86_64-linux-gnu/libOpenCL.so.1', shlex.quote(str(loader)))
                 (home / '.deployment.json').write_text(json.dumps(
                     {'source': digest, 'mode': mode, 'profile': profile,
                      'builder': hashlib.sha256(script.encode()).hexdigest()}))
@@ -334,6 +347,13 @@ fi
                 run = subprocess.run([sys.executable, '-c', code, digest, mode, profile, str(len(data))],
                                      input=data, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, timeout=20)
                 output = run.stdout.decode()
+                if cuda_unavailable:
+                    self.assertNotEqual(run.returncode, 0, output)
+                    self.assertIn("CUDA device discovery failed inside the worker's no-socket boundary", output)
+                    self.assertNotIn('PUMP_LAB_STAGE=configure', output)
+                    self.assertFalse(log.exists())
+                    self.assertFalse((home / '.worker-receipt.json').exists())
+                    continue
                 self.assertEqual(run.returncode, 0, output)
                 expected_stages = ['upload', 'unpack', 'environment']
                 if vulkan:
@@ -404,10 +424,16 @@ fi
                     self.assertIn('-DDATAPUMP_TRIAD_VULKAN=ON', flags)
                     self.assertIn('-DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON', flags)
                     self.assertIn('-DDATAPUMP_TRIAD_TENSOR=OFF', flags)
+                    expected_loader = str(loader) if generator_case == 'ninja' else ''
+                    self.assertIn('-DDATAPUMP_TRIAD_OPENCL_LOADER_PATH=' + expected_loader + ' ', flags)
                     manifest = home / 'build/lab/nvidia-headless-icd.json'
                     self.assertEqual(manifest.stat().st_mode & 0o777, 0o600)
                     self.assertEqual(json.loads(manifest.read_text())['ICD'],
                                      {'library_path': 'libEGL_nvidia.so.0', 'api_version': '1.4.312'})
+                    vendors = manifest.parent / 'nvidia-opencl-vendors'
+                    self.assertEqual(vendors.stat().st_mode & 0o777, 0o700)
+                    self.assertEqual((vendors / 'nvidia.icd').read_text(), 'libnvidia-opencl.so.1\n')
+                    self.assertEqual((vendors / 'nvidia.icd').stat().st_mode & 0o777, 0o600)
                     original = manifest.read_bytes()
                     resumed = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
                                              capture_output=True, timeout=5)
@@ -465,7 +491,9 @@ fi
         bin_dir.mkdir()
         for command, body in (
             ('dpkg', 'printf \'%s\\n\' "${LAB_TEST_ARCH:-amd64}"\n'),
-            ('dpkg-query', 'exit 1\n'),
+            ('dpkg-query', '''for arg do package=$arg; done
+[ "$package" = ocl-icd-libopencl1:amd64 ] && [ "$LAB_TEST_APT_SCENARIO" = opencl-present ] && printf installed
+'''),
             ('apt-get', r'''
 set -eu
 while [ "$1" = -o ]; do
@@ -510,6 +538,7 @@ fi
         mirror_retry = 'PUMP_LAB_STAGE=dependency-mirror'
         packages = 'libvulkan-dev glslang-dev glslang-tools spirv-tools'
         packages_with_ninja = packages + ' ninja-build'
+        packages_with_opencl = packages + ' opencl-c-headers'
         update = 'update --error-on=any'
         simulate = f'--simulate install --no-install-recommends --no-remove {packages}'
         install = f'install --no-install-recommends --no-remove -y {packages}'
@@ -527,6 +556,15 @@ fi
                                    *fast_sources, update, *full_sources, 'Reusing downloaded lists',
                                    f'install --no-install-recommends --no-remove -y {packages_with_ninja}',
                                    *full_sources]),
+            ('opencl-present', 0, [update, *fast_sources,
+                                   f'--simulate install --no-install-recommends --no-remove {packages_with_opencl}',
+                                   *fast_sources, f'install --no-install-recommends --no-remove -y {packages_with_opencl}',
+                                   *fast_sources]),
+            ('opencl-missing', 0, [update, *fast_sources,
+                                   f'--simulate install --no-install-recommends --no-remove {packages_with_opencl} ocl-icd-libopencl1:amd64',
+                                   *fast_sources,
+                                   f'install --no-install-recommends --no-remove -y {packages_with_opencl} ocl-icd-libopencl1:amd64',
+                                   *fast_sources]),
         ):
             with self.subTest(scenario=scenario):
                 ninja = bin_dir / 'ninja'
@@ -535,6 +573,12 @@ fi
                 else:
                     ninja.write_text('#!/bin/sh\nexit 0\n')
                     ninja.chmod(0o755)
+                nvcc = bin_dir / 'nvcc'
+                if scenario.startswith('opencl-'):
+                    nvcc.write_text('#!/bin/sh\nexit 0\n')
+                    nvcc.chmod(0o755)
+                else:
+                    nvcc.unlink(missing_ok=True)
                 run = subprocess.run(['sh', '-s'], input=script, text=True, cwd=self.root,
                                      env={**os.environ, 'PATH': str(bin_dir),
                                           'LAB_TEST_APT_SCENARIO': scenario},

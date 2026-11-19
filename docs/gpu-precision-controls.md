@@ -53,6 +53,41 @@ bin indices alone cannot describe the tapered modes. Preserve the native
 projection and its noise normalization in the stage routing until the backend
 can reproduce them.
 
+The SM120 CUDA fine backend can project mapped DATA templates with an NVFP4
+Tensor Core product and FP32 accumulation. It stores the unitary DFT basis in
+block-scaled E2M1, reuses the packed basis across blocks, and leaves the
+observation projection, Gram products and likelihood at their existing
+precisions. For the measured 1,500-row, 47-mode, two-tap DATA geometry at
+6 kHz with Helper Off and a full candidate batch, automatic CUDA prefers the
+faster native cuFFT plan with a fused normalized retained-bin gather. NVFP4
+is available in that geometry when direct cuFFT cannot use its plan and
+workspace. Each path admits additional scratch without shrinking the ordinary
+FFT batch. Explicit CUDA probes can compare `--tensor-fine-projection nvfp4`
+and `--tensor-fine-projection cufft`. GUI counters credit modes after the
+statistics have been read back. See the
+[Blackwell qualification](validation.md#blackwell-nvfp4-fine-projection--19-november-2026).
+
+On the filtered RunPod worker, Vulkan and OpenCL use the same NVIDIA device and
+workspace ceiling. Native fine projection is faster with a full host worker
+allocation on the measured broad 3.6 Hz case. Automatic OpenCL NVFP4 is eligible
+for the qualified isolated 1,500-row, 47-mode, two-tap blocks when the admitted
+fine owner has at most four software lanes. This leaves the complete receiver
+worker budget unchanged. Wider owner allocation retains the faster native
+projection in that geometry. `--vulkan-fine-projection nvfp4` forces the
+projection in a supported developer-probe run and checks for executed work.
+
+Choose scales after Helper/DATA isolation. For time-series signal samples,
+consider a scale estimated from recent representative intervals, with a
+measured response to gain changes and a recorded out-of-range fallback. For
+mapped DATA templates, the worker already materializes every sample, so it
+computes the exact C64 peak in the same pass as the cast and stages it in the
+same transfer. This removes a separate full device read and reduction without
+estimating a template's scale from receiver I/Q. The normal preparation leaves
+write directly into a reusable mapped host allocation where the driver provides
+one. The pageable fallback and retained allocation are both included in the
+workspace quote. Profile overlap under the full worker budget and include any
+extra buffers in admission.
+
 Apply these rules to automatic selection and new optimization work:
 
 - Prefer algorithms and structures with the strongest supported challenging-case
@@ -445,12 +480,12 @@ worth testing; it does not establish accumulation accuracy or conditioning.
 | `fp16` | Per-chunk row/column normalization, FP16 products with FP32 accumulation, and FP64 complex reconstruction and outer accumulation. |
 | `int8` | Symmetric `[-127,127]` operands, independently initialized INT32 partials, and FP64 rescaling/reconstruction. At most 512 complex samples become 1,024 real products per partial: `1024*127² = 16,516,096 < 2²⁴`, so the integer sum cannot overflow. This bound does not remove input quantization error. |
 
-The new FP4 candidate was removed after failing its frozen numerical gates.
+The earlier coarse FP4 candidate was removed after failing its frozen numerical gates.
 Single-product E2M1/block-16 arithmetic produced `0.050318` normalized score
 error against a 1% limit. Four-product high/residual reconstruction and a later
 16× residual-scale repair still changed the unique noise peak. Favorable active
 bulk timings did not resolve that failure or demonstrate an advantage over
-qualified INT8. There is no current FP4 selector. This scoped result does not
+qualified INT8. There is no coarse FP4 selector. This scoped result does not
 invalidate the successful historical NVFP4 implementation or rule out a future
 native design. Preserve that experiment's failed gates and lack of demonstrated
 complete-cost benefit; a new candidate must be evaluated under the

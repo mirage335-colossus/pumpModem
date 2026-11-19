@@ -42,7 +42,9 @@ class TriadGpuBundleTests(unittest.TestCase):
             "tools/diagnostic_iq_noise_options.hpp": "#pragma once\n",
             "tests/test_triad_tensor.cpp": "int main() {}\n",
             "tests/test_triad_tensor_fft.cpp": '#include "triad_tensor_fft.hpp"\nint main() {}\n',
+            "tests/test_triad_nvfp4_projection.cpp": '#include "triad_nvfp4_projection.hpp"\nint main() {}\n',
             "tests/test_triad_vulkan.cpp": "int main() {}\n",
+            "tests/test_triad_opencl_nvfp4.cpp": "int main() {}\n",
             "tests/test_gui_robust_live.cpp": "#include \"datapump/live.hpp\"\nint main() {}\n",
             "src/triad_tensor_fft.hpp": "#pragma once\n",
             "tests/test_triad_gpu_workload.py": "VALUE = 4\n",
@@ -162,7 +164,9 @@ class TriadGpuBundleTests(unittest.TestCase):
         self.assertIn("tools/triad_fixture_key.hpp", names)
         self.assertIn("tests/test_triad_tensor.cpp", names)
         self.assertIn("tests/test_triad_tensor_fft.cpp", names)
+        self.assertIn("tests/test_triad_nvfp4_projection.cpp", names)
         self.assertIn("tests/test_triad_vulkan.cpp", names)
+        self.assertIn("tests/test_triad_opencl_nvfp4.cpp", names)
         self.assertIn("tests/test_gui_robust_live.cpp", names)
         self.assertIn("cmake/TriadTensor.cmake", names)
         self.assertIn("cmake/TriadVulkan.cmake", names)
@@ -188,7 +192,7 @@ class TriadGpuBundleTests(unittest.TestCase):
         bundle.create_bundle(MODULE.parents[1], out)
         pending = ["tools/triad-receiver-probe.cpp", "tools/triad-helper-export.cpp",
                    "tools/triad-audio-stream.cpp", "tests/test_triad_tensor.cpp",
-                   "tests/test_triad_tensor_fft.cpp",
+                   "tests/test_triad_tensor_fft.cpp", "tests/test_triad_nvfp4_projection.cpp",
                    "tests/test_triad_vulkan.cpp", "tests/test_gui_robust_live.cpp"]
         seen = set()
         with tarfile.open(out, "r:gz") as tar:

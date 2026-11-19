@@ -3,6 +3,10 @@
 #include "triad_receiver_bulk.hpp"
 #include "triad_tensor_mapping.hpp"
 
+#if DATAPUMP_HAVE_TRIAD_NVFP4
+#include "triad_nvfp4_projection.hpp"
+#endif
+
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <c10/core/InferenceMode.h>
@@ -172,6 +176,11 @@ void add_work(BulkReceipt& to, const BulkReceipt& from) noexcept {
     TRIAD_COUNT(mapped_values);
     TRIAD_COUNT(cuda_fused_mapped_launches);
     TRIAD_COUNT(cuda_fused_mapped_values);
+    TRIAD_COUNT(cuda_nvfp4_fine_batches);
+    TRIAD_COUNT(cuda_nvfp4_fine_modes);
+    TRIAD_COUNT(cuda_nvfp4_fine_workspace_fallbacks);
+    TRIAD_COUNT(cuda_nvfp4_fine_algorithm_fallbacks);
+    TRIAD_COUNT(cuda_cufft_fine_modes);
     TRIAD_COUNT(cuda_direct_gram_values);
     TRIAD_COUNT(cuda_bmm_gram_values);
     TRIAD_COUNT(cuda_matrix_fp16_calls);
@@ -2222,8 +2231,11 @@ private:
 class TensorFine final : public FineBulk {
 public:
     TensorFine(std::shared_ptr<Arena> arena, std::shared_ptr<BulkReceipt> backend_work,
-               bool precise, TensorCoarseMath coarse_math, bool leased)
-        : device_(std::move(arena), std::move(backend_work), precise, leased), coarse_math_(coarse_math) {}
+               bool precise, TensorCoarseMath coarse_math, bool leased, bool allow_nvfp4, bool qualify_nvfp4,
+               bool allow_cufft, bool qualify_cufft)
+        : device_(std::move(arena), std::move(backend_work), precise, leased), coarse_math_(coarse_math),
+          allow_nvfp4_(allow_nvfp4), qualify_nvfp4_(qualify_nvfp4),
+          allow_cufft_(allow_cufft), qualify_cufft_(qualify_cufft) {}
 
     void statistics(const FineBulkBlock& block, std::size_t candidate_count, const FineMappingSource& source,
                     std::span<FineBulkStatistics> result, std::stop_token stop) override {
@@ -2251,6 +2263,24 @@ public:
         const auto map_bytes = mul(std::min(mapping_rows, block.rows), 224);
         const auto result_values = fine_result_values(block.taps);
         const auto result_bytes = mul(result_values + 1, sizeof(Complex)); // Packed payload and converted witness.
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        const auto capacity = mul(columns, std::min(maximum_batch, candidate_count));
+        const bool qualified = block.isolated_varying_data && block.rows == 1500 && mode_count == 47 &&
+                               block.taps == 2 && candidate_count >= maximum_batch;
+        const bool use_cufft = !dc && (qualify_cufft_ || (allow_cufft_ && qualified));
+        if (use_cufft) prepare_cufft(block.rows, mode_count, capacity);
+        const auto cufft_reservation = use_cufft && cufft_ ? cufft_->bytes() : 0;
+#else
+        constexpr std::size_t cufft_reservation = 0;
+#endif
+#if DATAPUMP_HAVE_TRIAD_NVFP4
+        // The measured Blackwell geometry consumed every projected mode.
+        // Avoid packing short tails and unqualified shapes in automatic mode.
+        const bool use_nvfp4 = !dc && (qualify_nvfp4_ || (allow_nvfp4_ && qualified));
+        const auto fp4_reservation = use_nvfp4 ? Nvfp4Batch::bytes(block.rows, mode_count, capacity) : 0;
+#else
+        constexpr std::size_t fp4_reservation = 0;
+#endif
         // Charge the materialized conjugate and the tap-by-tap complex128
         // product. This short contiguous sum needs no global partial buffer.
         const auto direct_gram_bytes = direct_gram ? mul(mode_count, (block.taps + 1) * sizeof(Complex)) : 0;
@@ -2272,6 +2302,12 @@ public:
                 // Drop optional residents before waiting for a larger lease.
                 bins_.reset();
                 for (auto& offsets : offsets_) offsets.reset();
+#if DATAPUMP_HAVE_TRIAD_NVFP4
+                nvfp4_.reset();
+#endif
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+                if (cufft_) cufft_->release_buffers();
+#endif
                 tile_storage_ = at::Tensor{};
                 slots_.clear();
                 cache_charge_ = {};
@@ -2282,7 +2318,9 @@ public:
                 const auto preferred = add(add(shared_bytes, gram_bytes),
                     add(add(desired_candidates, mul(preferred_cache_slots(), tile_samples * device_.item_bytes)),
                         descriptor_bytes));
-                device_.workspace->begin(add(shared_minimum, upload_bound), preferred, stop);
+                const auto optional = std::max(cufft_reservation, fp4_reservation);
+                device_.workspace->begin(add(shared_minimum, upload_bound), add(preferred, optional),
+                                          stop, preferred);
             }
         }
         Charge shared(device_.workspace, shared_bytes);
@@ -2299,6 +2337,21 @@ public:
         at::Tensor bins;
         if (!dc) bins = projection_bins(block, op.work);
         const auto y = device_.upload(block.projected_y, at::kComplexDouble, at::kComplexDouble, op.work);
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        const auto fft_batch_bytes = mul(std::min(maximum_batch, candidate_count), per_candidate);
+        const bool owned_fft = use_cufft && admit_cufft(fft_batch_bytes);
+        if (!owned_fft && cufft_) cufft_->release_buffers();
+#endif
+#if DATAPUMP_HAVE_TRIAD_NVFP4
+        Nvfp4Batch* nvfp4 = nullptr;
+        if (use_nvfp4 && !owned_fft) {
+            require(cuda && !device_.precise, "NVFP4 fine projection requires the FP32 CUDA statistics path");
+            nvfp4 = nvfp4_batch(block, bins, capacity, fp4_reservation, fft_batch_bytes);
+            if (!nvfp4) count(op.work.cuda_nvfp4_fine_workspace_fallbacks, 1);
+        } else if (nvfp4_ && device_.workspace->leased() && !device_.workspace->fits(fft_batch_bytes)) {
+            nvfp4_.reset();
+        }
+#endif
         for (std::size_t first = 0; first < candidate_count;) {
             cancelled(stop);
             const auto [width, batch_charge] = admit(std::min(maximum_batch, candidate_count - first), per_candidate);
@@ -2407,8 +2460,34 @@ public:
             }
 
             const auto raw_nonzero = at::any(raw.ne(0).reshape({dim(width), -1}), -1);
-            auto projected = dc ? raw.sum(-1, true, at::kComplexDouble) / std::sqrt(static_cast<double>(block.rows)) :
-                device_.fft(raw, block.rows, false, op.work, nullptr, true).index_select(-1, bins);
+            at::Tensor projected;
+            bool used_nvfp4 = false, used_cufft = false;
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+            if (owned_fft && lanes == capacity) {
+                auto& fft = *cufft_;
+                const auto work_bytes = fft.plan->workspace_bytes();
+                fft.plan->enqueue(raw.mutable_data_ptr(), work_bytes ? fft.scratch.mutable_data_ptr() : nullptr,
+                                  work_bytes, false);
+                projected = fft.output;
+                C10_CUDA_CHECK(cuda_fft_retained_modes(raw.const_data_ptr<c10::complex<float>>(),
+                    bins.const_data_ptr<std::int64_t>(), projected.mutable_data_ptr<c10::complex<float>>(),
+                    block.rows, mode_count, lanes, device_.cuda_stream()));
+                record_fft(lanes, block.rows, false, op.work, nullptr);
+                used_cufft = true;
+            }
+#endif
+#if DATAPUMP_HAVE_TRIAD_NVFP4
+            if (nvfp4 && (qualify_nvfp4_ || width == maximum_batch)) {
+                projected = nvfp4->output.narrow(0, 0, dim(lanes));
+                used_nvfp4 = nvfp4->plan.project(raw.const_data_ptr(), projected.mutable_data_ptr(), lanes,
+                    nvfp4->scratch.mutable_data_ptr(), nvfp4->scratch.nbytes(), device_.cuda_stream());
+                require(used_nvfp4 || !qualify_nvfp4_, "No cuBLASLt NVFP4 algorithm supports the fine projection shape");
+                if (!used_nvfp4) count(op.work.cuda_nvfp4_fine_algorithm_fallbacks, 1);
+            }
+#endif
+            if (!used_nvfp4 && !used_cufft)
+                projected = dc ? raw.sum(-1, true, at::kComplexDouble) / std::sqrt(static_cast<double>(block.rows)) :
+                    device_.fft(raw, block.rows, false, op.work, nullptr, true).index_select(-1, bins);
             if (dc) count(op.work.dc_reduction_values, mul(lanes, block.rows));
             projected = projected.reshape({dim(2 * width), dim(block.taps), dim(mode_count)});
             const auto precise = projected.to(at::kComplexDouble);
@@ -2440,6 +2519,11 @@ public:
             }
             count(op.work.statistics_blocks, width);
             count(op.work.projected_values, mul(lanes, mode_count));
+            if (used_nvfp4) {
+                count(op.work.cuda_nvfp4_fine_batches, 1);
+                count(op.work.cuda_nvfp4_fine_modes, mul(lanes, mode_count));
+            }
+            if (used_cufft) count(op.work.cuda_cufft_fine_modes, mul(lanes, mode_count));
             count(op.work.cuda_fused_mapped_launches, fused.launches);
             count(op.work.cuda_fused_mapped_values, fused.values);
             if (cuda) count(direct_gram ? op.work.cuda_direct_gram_values : op.work.cuda_bmm_gram_values,
@@ -2460,6 +2544,103 @@ public:
     FineBulkWork completed_work() const override { return device_.fine_work(); }
 
 private:
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+    struct FineFft {
+        std::size_t rows, modes, capacity;
+        std::unique_ptr<CudaSegmentedFftPlan> plan;
+        Charge charge;
+        at::Tensor scratch, output;
+
+        std::size_t bytes() const {
+            return plan ? add(plan->workspace_bytes(), mul(mul(capacity, modes), sizeof(float) * 2)) : 0;
+        }
+
+        void release_buffers() {
+            output = at::Tensor{};
+            scratch = at::Tensor{};
+            charge = {};
+        }
+    };
+
+    void prepare_cufft(std::size_t rows, std::size_t modes, std::size_t capacity) {
+        if (cufft_ && cufft_->rows == rows && cufft_->modes == modes && cufft_->capacity == capacity) return;
+        cufft_.reset();
+        require(device_.arena->device.is_cuda() && !device_.precise, "Fine cuFFT requires the FP32 CUDA statistics path");
+        auto next = std::make_unique<FineFft>(FineFft{rows, modes, capacity, {}, {}, {}, {}});
+        try {
+            next->plan = CudaSegmentedFftPlan::make(rows, capacity, device_.cuda_stream());
+        } catch (const CudaFftAllocationError&) {
+            if (qualify_cufft_) throw;
+        }
+        require(next->plan || !qualify_cufft_, "cuFFT cannot plan the requested fine projection shape");
+        cufft_ = std::move(next);
+    }
+
+    bool admit_cufft(std::size_t batch_bytes) {
+        if (!cufft_ || !cufft_->plan) return false;
+        auto& fft = *cufft_;
+        if (fft.output.defined() && (qualify_cufft_ || device_.workspace->fits(batch_bytes))) return true;
+        fft.release_buffers();
+        if (!qualify_cufft_ && !device_.workspace->fits(add(fft.bytes(), batch_bytes))) return false;
+        try {
+            Charge charge(device_.workspace, fft.bytes());
+            auto scratch = at::empty({dim(fft.plan->workspace_bytes())}, device_.options.dtype(at::kByte));
+            auto output = at::empty({dim(fft.capacity), dim(fft.modes)}, device_.complex_options);
+            fft.charge = std::move(charge);
+            fft.scratch = std::move(scratch);
+            fft.output = std::move(output);
+        } catch (const ReceiverWorkspaceError&) {
+            if (qualify_cufft_) throw;
+        } catch (const c10::OutOfMemoryError&) {
+            if (qualify_cufft_) throw;
+        }
+        return fft.output.defined();
+    }
+#endif
+#if DATAPUMP_HAVE_TRIAD_NVFP4
+    struct Nvfp4Batch {
+        Charge charge;
+        std::size_t rows, capacity;
+        std::vector<std::size_t> bins;
+        CudaNvfp4Projection plan;
+        at::Tensor coefficients, scratch, output;
+
+        static std::size_t bytes(std::size_t rows, std::size_t modes, std::size_t capacity) {
+            return add(add(CudaNvfp4Projection::coefficient_bytes(rows, modes),
+                           CudaNvfp4Projection::scratch_bytes(rows, modes, capacity)),
+                       mul(mul(capacity, modes), sizeof(float) * 2));
+        }
+
+        Nvfp4Batch(const std::shared_ptr<TensorWorkspace>& workspace, const at::TensorOptions& options,
+                   const FineBulkBlock& block, std::size_t capacity)
+            : charge(workspace, bytes(block.rows, block.projection_indices.size(), capacity)),
+              rows(block.rows), capacity(capacity), bins(block.projection_indices.begin(), block.projection_indices.end()),
+              plan(rows, bins.size(), capacity), coefficients(at::empty({dim(CudaNvfp4Projection::coefficient_bytes(
+                  rows, bins.size()))}, options.dtype(at::kByte))),
+              scratch(at::empty({dim(CudaNvfp4Projection::scratch_bytes(rows, bins.size(), capacity))}, options.dtype(at::kByte))),
+              output(at::empty({dim(capacity), dim(bins.size())}, options.dtype(at::kComplexFloat))) {}
+    };
+
+    Nvfp4Batch* nvfp4_batch(const FineBulkBlock& block, const at::Tensor& bins, std::size_t capacity,
+                              std::size_t projection_bytes, std::size_t fft_batch_bytes) {
+        if (nvfp4_ && (nvfp4_->rows != block.rows || nvfp4_->capacity != capacity ||
+                      !std::ranges::equal(nvfp4_->bins, block.projection_indices))) nvfp4_.reset();
+        if (nvfp4_ && (qualify_nvfp4_ || device_.workspace->fits(fft_batch_bytes))) return nvfp4_.get();
+        nvfp4_.reset();
+        if (!qualify_nvfp4_ && !device_.workspace->fits(add(projection_bytes, fft_batch_bytes))) return nullptr;
+        try {
+            auto batch = std::make_unique<Nvfp4Batch>(device_.workspace, device_.options, block, capacity);
+            batch->plan.prepare(bins.const_data_ptr<std::int64_t>(), batch->coefficients.mutable_data_ptr(),
+                                batch->coefficients.nbytes(), device_.cuda_stream());
+            nvfp4_ = std::move(batch);
+        } catch (const ReceiverWorkspaceError&) {
+            if (qualify_nvfp4_) throw;
+        } catch (const c10::OutOfMemoryError&) {
+            if (qualify_nvfp4_) throw;
+        }
+        return nvfp4_.get();
+    }
+#endif
     struct FusedMappingWork {
         std::uint64_t launches = 0, values = 0;
     };
@@ -2705,6 +2886,10 @@ private:
 
     TensorContext device_;
     TensorCoarseMath coarse_math_;
+    [[maybe_unused]] const bool allow_nvfp4_;
+    [[maybe_unused]] const bool qualify_nvfp4_;
+    [[maybe_unused]] const bool allow_cufft_;
+    [[maybe_unused]] const bool qualify_cufft_;
     Charge cache_charge_;
     std::size_t cache_slots_ = 0;
     at::Tensor tile_storage_;
@@ -2713,8 +2898,12 @@ private:
     std::unique_ptr<DescriptorCache<std::size_t>> bins_;
     std::array<std::unique_ptr<DescriptorCache<double>>, 2> offsets_;
     std::uint64_t offset_age_ = 0;
+#if DATAPUMP_HAVE_TRIAD_NVFP4
+    std::unique_ptr<Nvfp4Batch> nvfp4_;
+#endif
 #if DATAPUMP_TRIAD_TENSOR_CUDA
     std::unique_ptr<CudaComplexMatrix> gram_;
+    std::unique_ptr<FineFft> cufft_;
 #endif
 };
 
@@ -2722,10 +2911,32 @@ class TensorBackend final : public ReceiverBulkBackend {
 public:
     explicit TensorBackend(const TensorReceiverOptions& options, bool automatic = false)
         : arena_(arena_for(options, automatic)), precision_(options.precision),
-          coarse_math_(options.coarse_math), automatic_(automatic), segmented_(options.segmented_timing) {
+          coarse_math_(options.coarse_math), automatic_(automatic), segmented_(options.segmented_timing),
+          qualify_nvfp4_(options.qualify_nvfp4_projection), qualify_cufft_(options.qualify_cufft_projection) {
         (void)coarse_math_name(coarse_math_);
         require(precision_ != TensorPrecision::fp32_minimum || !requests_matrix(coarse_math_),
                 "Robust FP32 minimum conflicts with requested reduced-precision coarse contractions");
+        require(!qualify_nvfp4_ || !qualify_cufft_, "Select one explicit fine projection for qualification");
+        if (qualify_nvfp4_) {
+#if DATAPUMP_HAVE_TRIAD_NVFP4
+            if (options.device != TensorDevice::cuda || precision_ != TensorPrecision::automatic ||
+                !CudaNvfp4Projection::device_supported(static_cast<int>(options.device_index)))
+                throw TensorBackendUnavailable("NVFP4 fine projection requires a supported Blackwell CUDA device");
+#else
+            throw TensorBackendUnavailable("This CUDA build has no NVFP4 fine projection");
+#endif
+        }
+#if DATAPUMP_HAVE_TRIAD_NVFP4
+        allow_nvfp4_ = automatic_ && precision_ == TensorPrecision::automatic &&
+            CudaNvfp4Projection::device_supported(static_cast<int>(options.device_index));
+#endif
+#if DATAPUMP_TRIAD_TENSOR_CUDA
+        allow_cufft_ = automatic_ && arena_->total.cuda_compute_major == 12 && arena_->total.cuda_compute_minor == 0;
+        if (qualify_cufft_ && (options.device != TensorDevice::cuda || precision_ == TensorPrecision::fp64))
+            throw TensorBackendUnavailable("Fine cuFFT qualification requires FP32 CUDA");
+#else
+        if (qualify_cufft_) throw TensorBackendUnavailable("This build has no CUDA fine projection");
+#endif
     }
 
     bool supports_exact_device_chirp_z() const noexcept override { return automatic_; }
@@ -2749,7 +2960,10 @@ public:
     }
 
     std::unique_ptr<FineBulk> make_fine(double rate, double clock_span) override {
-        return std::make_unique<TensorFine>(arena_, work_, precise(rate, clock_span), coarse_math_, automatic_);
+        const auto fp64 = precise(rate, clock_span);
+        return std::make_unique<TensorFine>(arena_, work_, fp64, coarse_math_, automatic_,
+                                            allow_nvfp4_ && !fp64, qualify_nvfp4_,
+                                            allow_cufft_ && !fp64, qualify_cufft_);
     }
 
     std::unique_ptr<CoarseBulk> make_coarse(double rate, double clock_span) override {
@@ -2828,7 +3042,8 @@ private:
     std::shared_ptr<Arena> arena_;
     TensorPrecision precision_;
     TensorCoarseMath coarse_math_;
-    bool automatic_, segmented_;
+    bool automatic_, segmented_, qualify_nvfp4_, qualify_cufft_;
+    bool allow_nvfp4_ = false, allow_cufft_ = false;
     std::shared_ptr<BulkReceipt> work_ = std::make_shared<BulkReceipt>();
 };
 
