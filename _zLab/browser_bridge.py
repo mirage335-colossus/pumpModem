@@ -248,7 +248,7 @@ class SimulationWorker(_preview.Worker):
             self.ready = True
 
     def attach_browser(self, attached):
-        """A reloaded presentation starts with a complete current snapshot."""
+        """Start a presentation with the worker's complete current snapshot."""
         with self.state, self.output.condition:
             self.browser_attached = attached
             self.output.items.clear()
@@ -522,6 +522,8 @@ class Server(_preview.PreviewServer):
         self.live = live
         self.managed = managed
         self.prepared_at = None
+        self.ready_timeout = None
+        self.resetting = False
         self.browser_client = self.browser_session = self.detached_at = None
         self.active_requests = 0
         self.outcome = None
@@ -544,32 +546,65 @@ class Server(_preview.PreviewServer):
     def prepare(self, timeout):
         self.start_worker().wait_ready(timeout)
         with self.owner_lock:
+            self.ready_timeout = timeout
             self.prepared_at = time.monotonic()
+
+    def _check_running(self):
+        if self.outcome or self.stopping.is_set():
+            raise _preview.PreviewError(self.outcome[1] if self.outcome else 'Simulation ended.', 410)
+
+    def _attach_worker(self, client):
+        self.browser_client = client
+        self.browser_session = secrets.token_urlsafe(24)
+        self.detached_at = None
+        self.worker.touched = time.monotonic()
+        self.worker.attach_browser(True)
+        return self.browser_session
 
     def attach(self, client):
         if not _CLIENT_ID.fullmatch(client):
             raise _preview.PreviewError('Invalid browser session identifier.', 400)
         with self.request_idle:
             def check_available():
-                if self.outcome or self.worker is None or self.stopping.is_set():
-                    raise _preview.PreviewError(self.outcome[1] if self.outcome else 'Simulation ended.', 410)
-                if self.prepared_at is None:
-                    raise _preview.PreviewError('The worker is still starting.', 425)
+                self._check_running()
                 if self.browser_client is not None and not secrets.compare_digest(self.browser_client, client):
                     raise _preview.PreviewError('The simulation is open in another browser tab.', 409)
+                if self.prepared_at is None or self.resetting:
+                    raise _preview.PreviewError('The worker is still starting.', 425)
 
             check_available()
-            # The old page can have one outstanding /output long poll. Give it
-            # time to release the old lease before handing its queue to reload.
-            if not self.request_idle.wait_for(lambda: not self.active_requests, timeout=2):
-                raise _preview.PreviewError('Waiting for the previous page to disconnect.', 425)
-            check_available()
-            self.browser_client = client
-            self.browser_session = secrets.token_urlsafe(24)
-            self.detached_at = None
-            self.worker.touched = time.monotonic()
-            self.worker.attach_browser(True)
-            return self.browser_session
+            if self.browser_client is None or self.live:
+                # Live reattachment shares the existing worker's output queue
+                # with the previous page's last outstanding request.
+                if not self.request_idle.wait_for(lambda: not self.active_requests, timeout=2):
+                    raise _preview.PreviewError('Waiting for the previous page to disconnect.', 425)
+                check_available()
+                return self._attach_worker(client)
+
+            # Fence the old page before releasing the lock. Already admitted
+            # requests still reference the old worker, including long polls
+            # and file imports which its close will wake or cancel.
+            self.resetting = True
+            self.browser_session = None
+            previous = self.worker
+        try:
+            previous.close()
+            with self.owner_lock:
+                self._check_running()
+                self.worker = SimulationWorker(self.command, self.files, self.live, self.managed)
+                worker = self.worker
+            worker.wait_ready(self.ready_timeout)
+            with self.owner_lock:
+                self._check_running()
+                return self._attach_worker(client)
+        except (OSError, RuntimeError, _preview.PreviewError) as error:
+            with self.owner_lock:
+                self._check_running()
+                self.outcome = ('failed', 'The simulation could not reset to defaults.')
+            raise _preview.PreviewError(self.outcome[1], 500) from error
+        finally:
+            with self.owner_lock:
+                self.resetting = False
 
     def _matches_browser(self, session):
         return (self.browser_session is not None and isinstance(session, str)
@@ -631,7 +666,7 @@ class Server(_preview.PreviewServer):
         while not self.stopping.wait(.25):
             with self.owner_lock:
                 worker = self.worker
-                if not worker or self.prepared_at is None:
+                if not worker or self.prepared_at is None or self.resetting:
                     continue
                 now = time.monotonic()
                 if not self.outcome:

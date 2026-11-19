@@ -172,11 +172,13 @@ export async function boot(document,environment=window,frontend=createHostedFron
         await view.ready;
         if(stopped)return;
         let result;
-        for(let retry=0;!stopped;retry++){
+        const attachDeadline=performance.now()+45000;
+        while(!stopped){
             try{result=await (await request('/start',empty)).json();break;}
             catch(error){
-                if(!managed||error.status!==425||retry>=20)throw error;
-                await pause(250);
+                if(!managed||error.status!==425||performance.now()>=attachDeadline)throw error;
+                report('Preparing the simulation…');
+                await pause(500);
             }
         }
         if(!result)return;

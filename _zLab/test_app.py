@@ -362,6 +362,88 @@ class Tests(unittest.TestCase):
             self.assertEqual(records[0]['status'], Ownership.NOT_VISIBLE)
             self.assertEqual(client.deleted, [])
 
+    def test_pruning_removes_confirmed_history_but_keeps_recoverable_jobs(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = State(Path(td)/'jobs.json')
+            old = {'name': 'old', 'id': 'p1', 'status': Ownership.TERMINATED}
+            recent = {'name': 'recent', 'id': 'p2', 'status': Ownership.TERMINATED}
+            hidden = {'name': 'hidden', 'id': 'p3', 'status': Ownership.NOT_VISIBLE}
+            active = {'name': 'active', 'id': 'p4', 'status': 'RUNNING'}
+            pending = {'name': 'pending', 'status': 'create pending'}
+            state.write([old, recent, hidden, active, pending])
+            owner = Ownership(state, None)
+            with patch('host_identity.forget_host_key') as retire:
+                self.assertEqual(owner.prune_terminated(keep_name='recent'), [])
+                self.assertEqual(state.read(), [recent, hidden, active, pending])
+                retire.assert_called_once_with('p1', state.path.parent)
+                retire.side_effect = OSError('injected retire failure')
+                self.assertTrue(owner.prune_terminated())
+                self.assertEqual(state.read(), [recent, hidden, active, pending])
+
+    def test_retiring_explicit_absent_history_checks_exact_current_and_provider_identity(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = State(Path(td)/'jobs.json')
+            old = {'name': 'old', 'id': 'p1', 'status': Ownership.NOT_VISIBLE}
+            active = {'name': 'active', 'id': 'p2', 'status': 'RUNNING'}
+            state.write([old, active])
+            client = Fake()
+            client.pods = [active]
+            owner = Ownership(state, client)
+            with patch('host_identity.forget_host_key') as retire:
+                with self.assertRaisesRegex(ValueError, 'record changed'):
+                    owner.forget_absent(dict(old, id='other'))
+                client.queued = [{'id': 'q1', 'name': 'old', 'status': 'QUEUED'}]
+                with self.assertRaisesRegex(ValueError, 'still lists'):
+                    owner.forget_absent(old)
+                client.queued.clear()
+                client.pods.append(dict(old, status='RUNNING'))
+                with self.assertRaisesRegex(ValueError, 'still lists'):
+                    owner.forget_absent(old)
+                self.assertEqual(state.read(), [old, active])
+                retire.assert_not_called()
+                client.pods.pop()
+                owner.forget_absent(old)
+                self.assertEqual(state.read(), [active])
+                retire.assert_called_once_with('p1', state.path.parent)
+            self.assertEqual(client.deleted, [])
+
+    def test_end_marker_survives_an_independent_stale_ownership_write(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = State(Path(td)/'jobs.json')
+            record = {'name': 'first job', 'status': 'create pending'}
+            state.write([record])
+            stale = state.read()
+            state.queue_end('first job')
+            state.queue_end('another job')
+            stale[0]['id'] = 'p1'
+            state.write(stale)
+            resumed = State(state.path)
+            self.assertEqual(resumed.queued_ends(), {'first job', 'another job'})
+            resumed.consume_end('first job')
+            self.assertEqual(state.queued_ends(), {'another job'})
+            self.assertEqual(state.read(), [dict(record, id='p1')])
+
+    def test_end_queued_during_create_preparation_skips_provider_create(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = State(Path(td)/'jobs.json')
+            name = Ownership.new_pod_name()
+            client = Fake()
+            owner = Ownership(state, client)
+            publish = state.write
+
+            def end_after_intent(records):
+                publish(records)
+                if records:
+                    state.queue_end(name)
+
+            with patch.object(state, 'write', side_effect=end_after_intent):
+                self.assertIsNone(owner.create({'gpu': {'id': 'g1'}}, 'image',
+                                               time.time()+60, name=name))
+            self.assertEqual(state.read(), [])
+            self.assertEqual(state.queued_ends(), {name})
+            self.assertFalse(hasattr(client, 'payload'))
+            self.assertFalse(any(path.name.startswith('identity-') for path in Path(td).iterdir()))
+
     def test_create_requires_future_deadline_before_provider_call(self):
         with tempfile.TemporaryDirectory() as td:
             state = State(Path(td)/'jobs.json')

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import types
 import unittest
 from unittest.mock import patch
@@ -101,6 +102,64 @@ class DeployTests(unittest.TestCase):
         with self.assertRaises(subprocess.TimeoutExpired):
             deploy._bounded_process([sys.executable, '-c', 'import time; time.sleep(5)'], None, .1)
 
+    def test_progress_allowlist_rejects_partial_and_arbitrary_output(self):
+        statuses = []
+        read_progress = deploy._stage_reader(statuses.append)
+        read_progress(b'PUMP_LAB_STAGE=up')
+        read_progress(b'load\r\nPUMP_LAB_STAGE=upload\nPUMP_LAB_STAGE=private value\n')
+        read_progress(b'x' * 1024)
+        read_progress(b'PUMP_LAB_STAGE=compile\nPUMP_LAB_STAGE=configure\nPUMP_LAB_STAGE=check')
+        self.assertEqual(statuses, [deploy._STAGE_MESSAGES[b'upload'], deploy._STAGE_MESSAGES[b'configure']])
+
+    def test_progress_is_delivered_before_remote_build_finishes(self):
+        destination = self.root / 'managed'
+        script = deploy.REMOTE_DEPLOY.replace("directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'",
+                                             'directory = ' + repr(str(destination)))
+        build = '''set -eu
+echo PUMP_LAB_STAGE=compile
+python3 -c "import time; from pathlib import Path; gate=Path('ready'); exec('while not gate.exists(): time.sleep(.01)')"
+mkdir -p build/lab
+printf '#!/bin/sh\nexit 0\n' > build/lab/datapump-worker
+chmod +x build/lab/datapump-worker
+echo PUMP_LAB_MODE=cpu
+'''
+        code = 'BUILD = ' + repr(build) + "\nRESOURCES = ''\n" + script
+        data = b'archive'
+        digest = hashlib.sha256(data).hexdigest()
+        stages = []
+
+        def progress(message):
+            stages.append(message)
+            if message == deploy._STAGE_MESSAGES[b'compile']:
+                (destination / 'ready').touch()
+
+        status, tail = deploy._bounded_process(
+            [sys.executable, '-c', code, digest, 'cpu', 'simulation', str(len(data))],
+            data, 4, on_progress=progress)
+        self.assertEqual(status, 0, tail)
+        self.assertEqual(stages, [deploy._STAGE_MESSAGES[b'upload'], deploy._STAGE_MESSAGES[b'compile']])
+
+    def test_deployment_cancelled_before_ssh_and_during_remote_build(self):
+        cancelled = threading.Event()
+        cancelled.set()
+        with patch.object(deploy.bundle, 'create_bundle') as bundle:
+            with self.assertRaisesRegex(deploy.DeployError, 'cancelled before starting SSH'):
+                deploy.deploy('pod.example.com', 'root', 22, self.known, runner=self.runner,
+                              cancelled=cancelled)
+        bundle.assert_not_called()
+        self.assertEqual(self.calls, [])
+        cancelled.clear()
+
+        def cancel_on_compile(message):
+            self.assertEqual(message, deploy._STAGE_MESSAGES[b'compile'])
+            cancelled.set()
+
+        with self.assertRaises(deploy.DeployError) as stopped:
+            deploy._bounded_process([sys.executable, '-u', '-c',
+                                    "import time; print('PUMP_LAB_STAGE=compile'); time.sleep(10)"],
+                                    None, 3, on_progress=cancel_on_compile, cancelled=cancelled)
+        self.assertTrue(stopped.exception.uncertain)
+
     def test_timeout_and_disconnect_are_uncertain(self):
         def timeout(*args, **kwargs):
             raise subprocess.TimeoutExpired(args[0], 1)
@@ -132,7 +191,7 @@ class DeployTests(unittest.TestCase):
         for mode, profile in itertools.product(('cpu', 'cuda', 'gpu'), ('simulation', 'live')):
             with self.subTest(mode=mode, profile=profile):
                 home = self.root / (mode + '-' + profile)
-                home.mkdir()
+                home.mkdir(mode=0o700)
                 archive = home / 'source.tar.gz'
                 with tarfile.open(archive, 'w:gz') as tar:
                     info = tarfile.TarInfo('source-file')
@@ -209,36 +268,51 @@ def compiled_with_cxx11_abi(): return True
                 script = deploy.REMOTE_BUILD.replace('cd "$directory"', 'directory=' + shlex.quote(str(home)) + '\ncd "$directory"', 1)
                 # Model the image layout in the test's private directory.
                 script = script.replace('/usr/local/cuda/bin/nvcc', shlex.quote(str(nvcc)))
-                result = subprocess.run(['sh', '-s', '--', digest, mode, profile], input=script, text=True,
-                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, timeout=20)
-                self.assertEqual(result.returncode, 0, result.stdout)
+                (home / '.deployment.json').write_text(json.dumps(
+                    {'source': digest, 'mode': mode, 'profile': profile,
+                     'builder': hashlib.sha256(script.encode()).hexdigest()}))
+                wrapper = deploy.REMOTE_DEPLOY.replace(
+                    "directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'",
+                    'directory = ' + repr(str(home)))
+                code = 'BUILD = ' + repr(script) + '\nRESOURCES = ' + repr(deploy.RESOURCE_RECEIPT) + '\n' + wrapper
+                data = archive.read_bytes()
+                run = subprocess.run([sys.executable, '-c', code, digest, mode, profile, str(len(data))],
+                                     input=data, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, timeout=20)
+                output = run.stdout.decode()
+                self.assertEqual(run.returncode, 0, output)
+                expected_stages = ['upload', 'unpack', 'environment']
+                if vulkan:
+                    expected_stages.append('dependencies')
+                expected_stages.extend(('configure', 'compile', 'check'))
+                self.assertEqual([line.partition('=')[2] for line in output.splitlines()
+                                  if line.startswith('PUMP_LAB_STAGE=')], expected_stages)
                 flags = log.read_text()
                 backend = 'vulkan' if vulkan else 'cuda' if mode == 'gpu' else mode
-                self.assertIn('PUMP_LAB_MODE=' + backend, result.stdout)
-                self.assertIn('PUMP_LAB_PROFILE=' + profile, result.stdout)
-                self.assertIn('PUMP_LAB_RECEIPT_SCOPE=deployment SSH process; worker execution not established', result.stdout)
-                self.assertIn('PUMP_LAB_CPU_MODEL=', result.stdout)
-                self.assertIn('PUMP_LAB_CPU_MODEL_SCOPE=first reported processor', result.stdout)
-                self.assertRegex(result.stdout, r'PUMP_LAB_KERNEL_MEMORY_TOTAL_BYTES=(?:[0-9]+|unavailable)')
-                self.assertIn('PUMP_LAB_CGROUP_SCOPE=visible ancestors only; hidden limits may be tighter', result.stdout)
-                self.assertRegex(result.stdout, r'PUMP_LAB_CPU_AFFINITY_LOGICAL=(?:[0-9]+|unavailable)')
-                self.assertRegex(result.stdout, r'PUMP_LAB_CGROUP_MEMORY_LIMIT_BYTES=(?:[0-9]+|unavailable|unlimited)')
-                self.assertRegex(result.stdout, r'PUMP_LAB_CGROUP_CPU_QUOTA_CORES=(?:[0-9/]+|unavailable|unlimited)')
+                self.assertIn('PUMP_LAB_MODE=' + backend, output)
+                self.assertIn('PUMP_LAB_PROFILE=' + profile, output)
+                self.assertIn('PUMP_LAB_RECEIPT_SCOPE=deployment SSH process; worker execution not established', output)
+                self.assertIn('PUMP_LAB_CPU_MODEL=', output)
+                self.assertIn('PUMP_LAB_CPU_MODEL_SCOPE=first reported processor', output)
+                self.assertRegex(output, r'PUMP_LAB_KERNEL_MEMORY_TOTAL_BYTES=(?:[0-9]+|unavailable)')
+                self.assertIn('PUMP_LAB_CGROUP_SCOPE=visible ancestors only; hidden limits may be tighter', output)
+                self.assertRegex(output, r'PUMP_LAB_CPU_AFFINITY_LOGICAL=(?:[0-9]+|unavailable)')
+                self.assertRegex(output, r'PUMP_LAB_CGROUP_MEMORY_LIMIT_BYTES=(?:[0-9]+|unavailable|unlimited)')
+                self.assertRegex(output, r'PUMP_LAB_CGROUP_CPU_QUOTA_CORES=(?:[0-9/]+|unavailable|unlimited)')
                 if profile == 'live':
                     self.assertIn('-DCMAKE_PROJECT_DataPump_INCLUDE=' + str(home) + '/_zLab/audio/inject.cmake', flags)
                     self.assertIn('--target datapump-lab-worker', flags)
                 else:
                     self.assertNotIn('CMAKE_PROJECT_DataPump_INCLUDE', flags)
                     self.assertIn('--target datapump-worker', flags)
-                self.assertRegex(result.stdout, r'PUMP_LAB_WORKER_SHA256=[0-9a-f]{64}')
+                self.assertRegex(output, r'PUMP_LAB_WORKER_SHA256=[0-9a-f]{64}')
                 if backend == 'cuda':
-                    self.assertIn('PUMP_LAB_DEVICE=fake GPU', result.stdout)
-                    self.assertIn('PUMP_LAB_GPU_VISIBLE_MEMORY_BYTES=12345678', result.stdout)
-                    self.assertIn('PUMP_LAB_GPU_VISIBLE_UUID=MIG-fake-uuid', result.stdout)
-                    self.assertIn('PUMP_LAB_GPU_PARTITION_STATUS=MIG indicated by UUID', result.stdout)
-                    self.assertIn('PUMP_LAB_GPU_INVENTORY=', result.stdout)
-                    self.assertIn('PUMP_LAB_TORCH=fake', result.stdout)
-                    self.assertIn('PUMP_LAB_CUDA=fake', result.stdout)
+                    self.assertIn('PUMP_LAB_DEVICE=fake GPU', output)
+                    self.assertIn('PUMP_LAB_GPU_VISIBLE_MEMORY_BYTES=12345678', output)
+                    self.assertIn('PUMP_LAB_GPU_VISIBLE_UUID=MIG-fake-uuid', output)
+                    self.assertIn('PUMP_LAB_GPU_PARTITION_STATUS=MIG indicated by UUID', output)
+                    self.assertIn('PUMP_LAB_GPU_INVENTORY=', output)
+                    self.assertIn('PUMP_LAB_TORCH=fake', output)
+                    self.assertIn('PUMP_LAB_CUDA=fake', output)
                     self.assertIn('-DDATAPUMP_TRIAD_TENSOR=ON', flags)
                     self.assertIn('-DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON', flags)
                     self.assertIn('-DCMAKE_CUDA_ARCHITECTURES=120', flags)
@@ -253,10 +327,23 @@ def compiled_with_cxx11_abi(): return True
                     self.assertEqual(manifest.stat().st_mode & 0o777, 0o600)
                     self.assertEqual(json.loads(manifest.read_text())['ICD'],
                                      {'library_path': 'libEGL_nvidia.so.0', 'api_version': '1.4.312'})
+                    original = manifest.read_bytes()
+                    resumed = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
+                                             capture_output=True, timeout=5)
+                    self.assertEqual(resumed.returncode, 0, resumed.stderr)
+                    self.assertEqual(manifest.read_bytes(), original)
+                    source.write_text(json.dumps({'ICD': {'library_path': 'libGLX_nvidia.so.0',
+                                                            'api_version': '1.4.313'}}))
+                    incompatible = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
+                                                  capture_output=True, timeout=5)
+                    self.assertNotEqual(incompatible.returncode, 0)
+                    self.assertIn(b'manifest does not match', incompatible.stderr)
+                    self.assertEqual(manifest.read_bytes(), original)
+                    self.assertEqual(list(manifest.parent.glob('.icd-*')), [])
                 else:
-                    self.assertIn('PUMP_LAB_DEVICE=CPU (processor not identified)', result.stdout)
-                    self.assertIn('PUMP_LAB_GPU_SCOPE=not requested', result.stdout)
-                    self.assertIn('PUMP_LAB_TORCH=not requested', result.stdout)
+                    self.assertIn('PUMP_LAB_DEVICE=CPU (processor not identified)', output)
+                    self.assertIn('PUMP_LAB_GPU_SCOPE=not requested', output)
+                    self.assertIn('PUMP_LAB_TORCH=not requested', output)
                     self.assertIn('-DDATAPUMP_TRIAD_TENSOR=OFF', flags)
                     self.assertNotIn('REQUIRE_CUDA', flags)
 
@@ -286,6 +373,71 @@ def compiled_with_cxx11_abi(): return True
         for directory in (group, group / 'parent', child):
             (directory / 'memory.max').write_text('max')
         self.assertEqual(namespace['cgroup_limit'](proc, 'memory'), 'unlimited')
+
+    def test_vulkan_packages_use_signed_indices_with_base_universe_as_fallback(self):
+        os_release = self.root / 'os-release'
+        os_release.write_text('ID=ubuntu\nVERSION_CODENAME=noble\n')
+        icd = self.root / 'nvidia_icd.json'
+        icd.write_text(json.dumps({'ICD': {'library_path': 'libGLX_nvidia.so.0',
+                                          'api_version': '1.4.312'}}))
+        bin_dir = self.root / 'bin'
+        bin_dir.mkdir()
+        for command, body in (
+            ('dpkg', 'echo amd64\n'),
+            ('dpkg-query', 'exit 1\n'),
+            ('apt-get', r'''
+set -eu
+while [ "$1" = -o ]; do
+    case "$2" in
+        Dir::Etc::sourcelist=*) source=${2#*=} ;;
+        Dir::State::lists=*) lists=${2#*=} ;;
+    esac
+    shift 2
+done
+printf '%s\n' "$*"
+cat "$source"
+case "$LAB_TEST_APT_SCENARIO:$1" in
+    fallback*:--simulate|update-fails:update) exit 100 ;;
+esac
+if [ "$1" = update ]; then
+    if [ -e "$lists/test-updated" ]; then
+        if [ "$LAB_TEST_APT_SCENARIO" = fallback-update-fails ]; then exit 100; fi
+        echo 'Reusing downloaded lists'
+    fi
+    touch "$lists/test-updated"
+fi
+'''),
+        ):
+            helper = bin_dir / command
+            helper.write_text('#!/bin/sh\n' + body)
+            helper.chmod(0o755)
+        script = (Path(deploy.__file__).parent / 'prepare_vulkan.sh').read_text()
+        script = script.replace('/etc/os-release', shlex.quote(str(os_release)))
+        script = script.replace("Path('/etc/vulkan/icd.d/nvidia_icd.json')", f'Path({str(icd)!r})')
+        signed_source = ('deb [arch=amd64 target=Packages signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] '
+                         'https://archive.ubuntu.com/ubuntu ')
+        fast_sources = [signed_source + suite for suite in
+                        ('noble main', 'noble-updates main universe', 'noble-security main universe')]
+        full_sources = [*fast_sources, signed_source + 'noble universe']
+        packages = 'libvulkan-dev glslang-dev glslang-tools spirv-tools'
+        update = 'update --error-on=any'
+        simulate = f'--simulate install --no-install-recommends --no-remove {packages}'
+        install = f'install --no-install-recommends --no-remove -y {packages}'
+        for scenario, exit_code, expected in (
+            ('fast', 0, [update, *fast_sources, simulate, *fast_sources, install, *fast_sources]),
+            ('fallback', 0, [update, *fast_sources, simulate, *fast_sources, update, *full_sources,
+                             'Reusing downloaded lists', install, *full_sources]),
+            ('update-fails', 100, [update, *fast_sources]),
+            ('fallback-update-fails', 100, [update, *fast_sources, simulate, *fast_sources,
+                                           update, *full_sources]),
+        ):
+            with self.subTest(scenario=scenario):
+                run = subprocess.run(['sh', '-s'], input=script, text=True, cwd=self.root,
+                                     env={**os.environ, 'PATH': f'{bin_dir}:{os.environ["PATH"]}',
+                                          'LAB_TEST_APT_SCENARIO': scenario},
+                                     capture_output=True, timeout=5)
+                self.assertEqual(run.returncode, exit_code, run.stderr)
+                self.assertEqual(run.stdout.splitlines(), expected)
 
     def test_remote_wrapper_reuses_and_resumes_only_matching_deployments(self):
         destination = self.root / 'managed'

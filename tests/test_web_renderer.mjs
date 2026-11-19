@@ -135,6 +135,12 @@ const layoutSnapshot={...snapshot,layout:{width:1030,height:968,page:{x:16,y:100
 layoutRenderer.apply(layoutSnapshot);
 const editor=layoutRenderer.views.get('1'),documentEditor=layoutRenderer.views.get('4').input,tab=layoutRenderer.tabs.children[0],choiceOption=layoutRenderer.views.get('2').input.children[0],canvas=layoutRenderer.views.get('3').input;
 assert.equal(editor.node.style.left,'16px');assert.equal(editor.input.style.width,'777px');assert.equal(editor.label.style.top,'-16px');assert.equal(layoutRenderer.background.style.width,'1030px');assert.equal(layoutRenderer.document.style.top,'100px');
+assert.equal(editor.presets.attributes['aria-label'],'Generic extension presets');
+for(let selection=0;selection<2;++selection) {
+    editor.presets.value='one';editor.presets.dispatch('change');
+    assert.equal(layoutEvents.at(-1).kind,eventKinds.preset);assert.equal(layoutEvents.at(-1).value,'one');
+    assert.equal(editor.presets.value,'','The same preset must remain selectable after a custom edit');
+}
 documentEditor.focus();documentEditor.dispatch('compositionstart');documentEditor.value='継続';
 const documentParent=documentEditor.parentNode.parentNode,created=layoutDoc.created,detachments=documentEditor.parentNode.detachments||0;
 for(let poll=0;poll<25;poll++)layoutRenderer.apply(layoutSnapshot);

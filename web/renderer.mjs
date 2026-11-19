@@ -256,8 +256,13 @@ export class Renderer {
                     event.preventDefault();commit();this.controlEvent(view,'submit',d.id,{ctrl:event.ctrlKey,shift:event.shiftKey});
                 }
             });
-            view.presets=element(this.doc,'select');view.presets.setAttribute('aria-label','Text presets');view.node.append(view.presets);
-            view.presets.addEventListener('change',()=>{if(view.presets.selectedIndex>0)this.controlEvent(view,'preset',view.data.id,{value:view.presets.value});});
+            view.presets=element(this.doc,'select');view.presets.className='dp-text-presets';
+            view.presets.setAttribute('aria-label',c.label?c.label+' presets':'Text presets');view.node.append(view.presets);
+            view.presets.addEventListener('change',()=>{
+                const value=view.presets.value;
+                view.presets.value='';
+                if(value)this.controlEvent(view,'preset',view.data.id,{value});
+            });
         } else if(c.kind==='choice')input('select').addEventListener('change',()=>this.controlEvent(view,'select',view.data.id,{value:view.input.value}));
         else if(c.kind==='menu')input('select').addEventListener('change',()=>{
             const d=view.data,option=d.options.find(item=>item.id===view.input.value);

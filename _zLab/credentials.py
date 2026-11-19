@@ -137,39 +137,43 @@ class ApiKeyStore:
             os.close(directory)
 
 
-class RepositoryApiKeyStore(ApiKeyStore):
-    """Store the key beside the lab source and import the previous location once."""
-
+class _CheckoutApiKeyStore(ApiKeyStore):
     _key_name = 'runpod-api-key'
     _unsafe_directory_mode = 0o002
 
+
+class RepositoryApiKeyStore(_CheckoutApiKeyStore):
+    """Store the key at the checkout root and import keys from older versions."""
+
     def __init__(self, legacy_directory, *, repository_directory=None):
         super().__init__(repository_directory if repository_directory is not None
-                         else Path(__file__).resolve().parent)
-        self._legacy = ApiKeyStore(legacy_directory)
+                         else Path(__file__).resolve().parents[1])
+        self._legacy = (_CheckoutApiKeyStore(self.path.parent / '_zLab'),
+                        ApiKeyStore(legacy_directory))
 
     def load(self):
         key = super().load()
-        try:
-            legacy_key = self._legacy.load()
-        except (OSError, ValueError):
-            if key:
-                return key
-            raise
-        if not legacy_key:
-            return key
-        if not key:
+        for store in self._legacy:
             try:
-                self._write(legacy_key, replace=False)
-            except FileExistsError:
-                pass
-            key = super().load()
-        if key == legacy_key and self._legacy.load() == legacy_key:
-            self._legacy.clear()
+                legacy_key = store.load()
+            except (OSError, ValueError):
+                if key:
+                    continue
+                raise
+            if not legacy_key:
+                continue
+            if not key:
+                try:
+                    self._write(legacy_key, replace=False)
+                except FileExistsError:
+                    pass
+                key = super().load()
+            if key == legacy_key and store.load() == legacy_key:
+                store.clear()
         return key
 
     def clear(self):
-        # An explicit clear also retires the old copy, so it cannot be imported
-        # again on restart. Clear the legacy location first.
-        self._legacy.clear()
+        # Explicit clearing removes sources of automatic migration first.
+        for store in self._legacy:
+            store.clear()
         super().clear()

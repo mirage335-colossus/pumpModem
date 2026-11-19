@@ -36,6 +36,16 @@ ROOT = Path(__file__).resolve().parent.parent
 REMOTE_DIR = '/workspace/pump-lab'
 LIVE_REMOTE_DIR = '/workspace/pump-lab-live'
 DEFAULT_TIMEOUT = 3600
+_STAGE_MESSAGES = {
+    b'upload': 'Uploading the source bundle to RunPod…',
+    b'unpack': 'Verifying and unpacking the RunPod source bundle…',
+    b'environment': 'Checking the RunPod build environment…',
+    b'dependencies': 'Preparing Vulkan dependencies on RunPod…',
+    b'configure': 'Configuring the native worker on RunPod…',
+    b'compile': 'Compiling the native worker on RunPod…',
+    b'check': 'Checking the built worker on RunPod…',
+    b'reuse': 'Checking the existing worker on RunPod…',
+}
 
 # All text interpreted by the remote shell is fixed here or constructed from a
 # locally computed SHA-256 digest. Provider data and user paths never enter it.
@@ -369,6 +379,7 @@ else:
     if previous != request:
         raise SystemExit('Existing deployment uses different source or build settings. Use a fresh pod.')
 
+print('PUMP_LAB_STAGE=upload', flush=True)
 fd, temporary = tempfile.mkstemp(prefix='.upload-', dir='.')
 try:
     checksum = hashlib.sha256()
@@ -396,20 +407,35 @@ except FileNotFoundError:
 if (receipt and receipt.get('request') == request and worker.is_file()
         and not worker.is_symlink()
         and hashlib.sha256(worker.read_bytes()).hexdigest() == receipt.get('worker_sha256')):
+    print('PUMP_LAB_STAGE=reuse', flush=True)
     subprocess.run([str(worker), '--self-check'], check=True)
     print(receipt['text'], flush=True)
     environment = dict(os.environ, PUMP_LAB_RECEIPT_MODE=receipt['backend'])
     subprocess.run([sys.executable, '-c', RESOURCES], env=environment, check=True)
     raise SystemExit(0)
 
+# Keep the builder identity bound to its commands. These fixed writes only
+# report progress and need not invalidate a matching checked binary.
+reported_build = BUILD
+for stage, command in (
+    ('unpack', 'tar --extract --gzip '),
+    ('environment', 'if [ "$mode" != cpu ]; then\n'),
+    ('dependencies', '  timeout -k 10 480 sh _zLab/prepare_vulkan.sh\n'),
+    ('configure', 'cmake -S . -B build/lab '),
+    ('compile', 'cmake --build build/lab '),
+    ('check', '"build/lab/$worker" --self-check\n'),
+):
+    reported_build = reported_build.replace(command, 'echo PUMP_LAB_STAGE=' + stage + '\n' + command, 1)
 with tempfile.TemporaryFile() as script:
-    script.write(BUILD.encode())
+    script.write(reported_build.encode())
     script.seek(0)
     child = subprocess.Popen(['sh', '-s', '--', digest, mode, profile], stdin=script,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, pass_fds=(lock,))
 tail = b''
 while True:
-    chunk = child.stdout.read(4096)
+    # read() fills its buffer before returning and can hold the first stage
+    # of a quiet compiler or package manager for minutes.
+    chunk = child.stdout.read1(4096)
     if not chunk: break
     sys.stdout.buffer.write(chunk)
     sys.stdout.buffer.flush()
@@ -479,14 +505,46 @@ def _connection(host, user, port, known_hosts, identity):
     return host, user, options
 
 
-def _bounded_process(argv, input_data, timeout):
+def _stage_reader(callback):
+    """Recognize short, complete and allowlisted progress lines."""
+    pending = b''
+    oversized = False
+    reported = set()
+    prefix = b'PUMP_LAB_STAGE='
+    limit = len(prefix) + max(map(len, _STAGE_MESSAGES)) + 1
+
+    def read(chunk):
+        nonlocal pending, oversized
+        lines = chunk.split(b'\n')
+        for line in lines[:-1]:
+            if not oversized and len(pending) + len(line) <= limit:
+                stage = (pending + line).removesuffix(b'\r')
+                if stage.startswith(prefix):
+                    code = stage[len(prefix):]
+                    if code in _STAGE_MESSAGES and code not in reported:
+                        reported.add(code)
+                        callback(_STAGE_MESSAGES[code])
+            pending, oversized = b'', False
+        trailing = lines[-1]
+        if not oversized and len(pending) + len(trailing) <= limit:
+            pending += trailing
+        else:
+            pending, oversized = b'', True
+
+    return read
+
+
+def _bounded_process(argv, input_data, timeout, *, on_progress=None, cancelled=None):
     """Drain a child without retaining more than 4 KiB of untrusted output."""
+    if cancelled is not None and cancelled.is_set():
+        raise DeployError('Deployment cancelled before starting SSH.')
     child = subprocess.Popen(argv, stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
     tail = bytearray()
     pending = memoryview(input_data or b'')
     deadline = time.monotonic() + timeout
     output_eof = False
+    read_progress = _stage_reader(on_progress) if on_progress is not None else None
     try:
         with selectors.DefaultSelector() as selector:
             os.set_blocking(child.stdout.fileno(), False)
@@ -498,6 +556,8 @@ def _bounded_process(argv, input_data, timeout):
                 else:
                     child.stdin.close()
             while True:
+                if cancelled is not None and cancelled.is_set():
+                    raise DeployError('Deployment cancelled. The pod may still be running.', uncertain=True)
                 left = deadline - time.monotonic()
                 if left <= 0:
                     raise subprocess.TimeoutExpired(argv, timeout)
@@ -514,6 +574,8 @@ def _bounded_process(argv, input_data, timeout):
                         except BlockingIOError:
                             continue
                         if chunk:
+                            if read_progress is not None:
+                                read_progress(chunk)
                             tail.extend(chunk)
                             if len(tail) > 4096:
                                 del tail[:-4096]
@@ -545,10 +607,10 @@ def _bounded_process(argv, input_data, timeout):
         child.stdout.close()
 
 
-def _run(argv, *, stage, timeout, runner, input_data=None):
+def _run(argv, *, stage, timeout, runner, input_data=None, on_progress=None, cancelled=None):
     try:
         if runner is None:
-            code, raw_tail = _bounded_process(argv, input_data, timeout)
+            code, raw_tail = _bounded_process(argv, input_data, timeout, on_progress=on_progress, cancelled=cancelled)
         else:
             # Injected runners are only used by local tests.
             with tempfile.TemporaryFile() as output:
@@ -569,11 +631,14 @@ def _run(argv, *, stage, timeout, runner, input_data=None):
 
 
 def deploy(host, user, port, known_hosts, *, mode='cpu', profile='simulation', identity=None,
-           timeout=DEFAULT_TIMEOUT, runner=None, on_output=None):
+           timeout=DEFAULT_TIMEOUT, runner=None, on_output=None, on_progress=None, cancelled=None):
     """Bundle, upload and build; return the expected remote worker path.
 
     ``runner`` is injectable for tests. Network commands are executed only by an
     explicit call; this function does not manage or terminate the paid pod.
+    ``on_progress`` receives only fixed stage descriptions. Setting the
+    optional ``cancelled`` event stops the local SSH process, and the controller
+    still owns termination of the pod.
     """
     host, user, options = _connection(host, user, port, known_hosts, identity)
     if mode not in ('cpu', 'cuda', 'gpu'):
@@ -585,6 +650,8 @@ def deploy(host, user, port, known_hosts, *, mode='cpu', profile='simulation', i
     deadline = time.monotonic() + timeout
 
     def remaining():
+        if cancelled is not None and cancelled.is_set():
+            raise DeployError('Deployment cancelled before starting SSH.')
         seconds = deadline - time.monotonic()
         if seconds <= 0:
             raise DeployError('Deployment deadline reached; inspect the pod before retrying.')
@@ -592,6 +659,10 @@ def deploy(host, user, port, known_hosts, *, mode='cpu', profile='simulation', i
 
     directory = LIVE_REMOTE_DIR if profile == 'live' else REMOTE_DIR
     ssh = ['ssh', '-F', '/dev/null', '-T', '-p', str(port), '-l', user, *options, host]
+    if cancelled is not None and cancelled.is_set():
+        raise DeployError('Deployment cancelled before starting SSH.')
+    if on_progress is not None:
+        on_progress('Preparing the source bundle…')
     with tempfile.TemporaryDirectory(prefix='datapump-lab-') as staging:
         archive = Path(staging) / 'source.tar.gz'
         bundle.create_bundle(ROOT, archive)
@@ -601,8 +672,11 @@ def deploy(host, user, port, known_hosts, *, mode='cpu', profile='simulation', i
         # and locally computed digest/length. The archive travels over stdin.
         script = 'BUILD = ' + repr(REMOTE_BUILD) + '\nRESOURCES = ' + repr(RESOURCE_RECEIPT) + '\n' + REMOTE_DEPLOY
         command = f'python3 -c {shlex.quote(script)} {digest} {mode} {profile} {len(payload)}'
+        if on_progress is not None:
+            on_progress('Connecting to RunPod for worker setup…')
         output = _run(ssh + [command], stage='Deploying the remote worker',
-                      timeout=remaining(), runner=runner, input_data=payload)
+                      timeout=remaining(), runner=runner, input_data=payload,
+                      on_progress=on_progress, cancelled=cancelled)
         if on_output is not None:
             on_output(output)
     worker = 'datapump-lab-worker' if profile == 'live' else 'datapump-worker'

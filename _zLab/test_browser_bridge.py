@@ -758,20 +758,28 @@ class ManagedBrowserTests(unittest.TestCase):
             with self.subTest(message=message), self.assertRaisesRegex(browser_bridge._preview.PreviewError, message):
                 self.start_bridge(script, ready_timeout=.5)
 
-    def test_same_tab_reload_received_current_snapshot_and_stale_lease_rejected(self):
-        self.start_bridge()
+    def test_same_tab_reload_restores_defaults_and_rejects_stale_lease(self):
+        script = READY_PEER.replace(
+            "sys.stdout.buffer.write(frame(103,struct.pack('<I',0)))",
+            "sys.stdout.buffer.write(frame(101,b'{\"version\":1,\"generation\":\"1\","
+            "\"ack\":\"1\",\"controls\":[{\"kind\":\"text\",\"text\":\"changed value\"}]}'))",
+        )
+        self.start_bridge(script)
         worker = self.bridge.server.worker
         self.assertEqual(self.bridge.status(), ('waiting', ''))
         original = self.attach()
         first_snapshot = self.request('/output', None, original)
         self.assertIn(b'Robust simulation ready', first_snapshot)
+        self.request('/input', frame(1, b'12345678'), original)
+        self.assertIn(b'changed value', self.request('/output', None, original))
         with self.assertRaises(urllib.error.HTTPError) as sibling:
             self.request('/start', client='b' * 64)
         self.assertEqual(sibling.exception.code, 409)
         self.request('/detach', session=original)
         refreshed = self.attach()
         self.assertNotEqual(original, refreshed)
-        self.assertIs(worker, self.bridge.server.worker)
+        self.assertIsNot(worker, self.bridge.server.worker)
+        self.assertIsNotNone(worker.process.returncode)
         self.assertEqual(first_snapshot, self.request('/output', None, refreshed))
         # A late pagehide from the old page must not detach its replacement.
         self.request('/detach', session=original)
@@ -783,6 +791,59 @@ class ManagedBrowserTests(unittest.TestCase):
         self.assertEqual(self.bridge.status(), ('active', ''))
         self.request('/stop', session=refreshed)
         self.assertEqual(self.bridge.status()[0], 'ended')
+
+    def test_reload_starts_a_fresh_worker_without_a_detach_signal(self):
+        self.start_bridge()
+        original = self.attach()
+        worker = self.bridge.server.worker
+        refreshed = self.attach()
+        self.assertIsNot(worker, self.bridge.server.worker)
+        self.assertNotEqual(original, refreshed)
+        self.assertIn(b'Robust simulation ready', self.request('/output', None, refreshed))
+
+    def test_worker_reset_preserves_the_pod_session_past_the_close_grace(self):
+        self.start_bridge()
+        original = self.attach()
+        worker = self.bridge.server.worker
+        close = worker.close
+        closing = threading.Event()
+        release = threading.Event()
+        responses = []
+
+        def wait_to_close():
+            closing.set()
+            if not release.wait(3):
+                raise RuntimeError('Reset test did not release worker shutdown')
+            close()
+
+        def reload():
+            try:
+                responses.append(self.attach())
+            except Exception as error:
+                responses.append(error)
+
+        with mock.patch.object(worker, 'close', side_effect=wait_to_close), \
+             mock.patch.object(browser_bridge, '_RECONNECT_GRACE', .1):
+            self.request('/detach', session=original)
+            replacement = threading.Thread(target=reload, daemon=True)
+            replacement.start()
+            try:
+                self.assertTrue(closing.wait(2))
+                # Maintenance has a .25 s interval, so let it see the expired
+                # close grace while the old worker is still shutting down.
+                time.sleep(.4)
+                with self.assertRaises(urllib.error.HTTPError) as sibling:
+                    self.request('/start', client='b' * 64)
+                self.assertEqual(sibling.exception.code, 409)
+                self.assertEqual(self.bridge.status()[0], 'waiting')
+            finally:
+                release.set()
+                replacement.join(timeout=5)
+        self.assertFalse(replacement.is_alive())
+        self.assertEqual(len(responses), 1)
+        self.assertIsInstance(responses[0], str)
+        self.assertNotEqual(responses[0], original)
+        self.assertEqual(self.bridge.status()[0], 'active')
 
     def test_close_grace_and_network_loss(self):
         with mock.patch.object(browser_bridge, '_RECONNECT_GRACE', .1):

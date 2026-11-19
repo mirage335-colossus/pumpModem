@@ -40,25 +40,30 @@ python3 _zLab/app.py
 ```
 
 Enter the RunPod API key in the masked field. The lab saves it in
-`_zLab/runpod-api-key`, an ignored file in the checkout with owner-only
-permissions (`0600`). It loads the key and catalog at startup and migrates
-the old state-directory key if needed.
+`runpod-api-key` at the repository root. The file is gitignored, has
+owner-only permissions (`0600`), and contains a single token. The lab loads
+the key and catalog at startup and migrates previous lab key files.
 
 Select compute and click **Start simulation**. After one billing confirmation,
 the lab creates the pod, waits for SSH, deploys and checks the native worker,
-then opens the shared simulation in the browser. Selecting an existing owned
-pod lets you continue its setup. **Advanced** contains optional settings.
+then opens the shared simulation in the browser. Setup status shows the current
+stage and elapsed time. Selecting an existing owned pod lets you continue its
+setup. **Advanced** contains optional settings.
 
-Use **End simulation** or close the simulation browser tab to end the session
-and terminate its pod. The lab allows time for the browser to reconnect
-after a reload. Watch the pod row change to **Terminating** and then
-**Terminated** when RunPod confirms deletion. Keep the lab open until the
-row confirms termination. If termination fails, select the affected pod and
-retry with **End simulation**.
+Use **End simulation** during setup or while the simulation is open. Closing
+the simulation browser tab also ends its pod. Reloading starts a fresh
+simulation with default settings on the same pod. Watch the selected row
+change to **Terminating** and the status confirm termination. If termination
+fails, select the affected pod and retry with **End simulation**.
 
-If an older pod is absent from the current account and the lab has no saved
-deletion confirmation, the row shows **No longer visible**. The lab keeps
-the ownership record and resumes termination if the pod reappears. Closing
+In the simulation, choose a **Carrier** preset or enter a frequency with
+units, such as `1850 Hz`. Presets are calculated for the current **Shift**.
+The receiver uses Carrier minus Shift as its audio frequency.
+
+The pod list shows active and pending work. The lab removes confirmed
+closed rows. When a pod is absent from the current account and its deletion
+is unconfirmed, the lab keeps the underlying ownership record and resumes
+termination if the exact pod reappears. Closing
 the lab waits briefly for cleanup. If a pod or connection is still pending,
 the window offers to close while keeping the saved cleanup record.
 
@@ -101,7 +106,7 @@ The controller records its owned pod and queue requests under
 The controller reconciles requests after a lost response or restart. Each
 creation requires a deadline. While open, the lab checks for expiration and
 requests termination or queue cancellation. RunPod confirms termination
-before the row changes to **Terminated**. Pending requests are saved locally
+before the lab removes the row. Pending requests are saved locally
 so the controller can check them again after a restart.
 
 The simulation action expects the lab relay at
@@ -112,8 +117,8 @@ New pods receive a unique host key generated locally before creation through
 the authenticated RunPod request. The lab also creates a client identity for
 that pod and installs its public key. It checks the offered host key against
 the saved fingerprint and uses strict SSH verification. Leave the optional
-SSH fields blank for this automatic setup. The lab keeps the terminal status in
-the pod list and removes its managed SSH credentials after verified termination.
+SSH fields blank for this automatic setup. The lab removes its managed SSH
+credentials after verified termination.
 
 For older pods, the lab reuses an existing verified host pin or obtains the
 fingerprint from the authenticated startup log.

@@ -113,4 +113,21 @@ function labHarness() {
     assert.equal(detach.options.headers['X-Preview-Session'],'late-session');
     assert.deepEqual(h.beacons,[]);
 }
+{
+    const h=labHarness();
+    const fetch=h.environment.fetch;
+    let attempts=0, progress;
+    h.environment.setTimeout=callback=>setTimeout(callback,0);
+    h.environment.fetch=async(path,options)=>{
+        if(path==='/start'&&++attempts<=2)
+            return {ok:false,status:425,text:async()=>'The worker is still starting.'};
+        if(path==='/start')progress=h.document.querySelector('#status').textContent;
+        return fetch(path,options);
+    };
+    const running=boot(h.document,h.environment,h.frontend);
+    h.ready.resolve();await h.seenStart.promise;h.events.pagehide();
+    h.start.resolve(response({session:'reset-session'}));await running;
+    assert.equal(attempts,3);
+    assert.equal(progress,'Preparing the simulation…');
+}
 console.log('Lab attach errors and authenticated page detachment passed');

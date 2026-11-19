@@ -156,6 +156,27 @@ with tempfile.TemporaryDirectory(prefix="datapump-file-contract-") as directory:
         assert any(tab["label"] == "Robust setup" for tab in snapshot["tabs"]), "configured-calendar setup missing"
         message = next(item for item in snapshot["controls"]
                        if item["kind"] == "text" and item.get("byteLimit") == 4 * 1024 * 1024)
+        event(1, message["id"], "Carrier check")
+        carrier = control("Carrier")
+        assert carrier["kind"] == "text" and carrier["geometry"]["hasSuggestions"]
+        assert any(option["id"] == "1.5 kHz" and option["enabled"] for option in carrier["options"])
+        event(5, carrier["id"], "1.5 kHz")
+        assert control("Carrier")["text"] == "1.5 kHz"
+        wait_for(lambda: control("Transmit")["enabled"])
+        event(1, carrier["id"], "1850 Hz")
+        assert control("Carrier")["text"] == "1850 Hz"
+        wait_for(lambda: control("Transmit")["enabled"])
+        event(1, control("Shift")["id"], "100 kHz")
+        assert not control("Transmit")["enabled"]
+        assert any("Carrier minus Shift must be" in item.get("text", "") for item in snapshot["controls"])
+        assert any(option["id"] == "101.8 kHz" for option in control("Carrier")["options"])
+        event(5, carrier["id"], "101.8 kHz")
+        assert control("Carrier")["text"] == "101.8 kHz"
+        wait_for(lambda: control("Transmit")["enabled"])
+        assert not any("Carrier minus Shift must be" in item.get("text", "") for item in snapshot["controls"])
+        event(1, control("Shift")["id"], "0 Hz")
+        event(5, carrier["id"], "1.725 kHz")
+        wait_for(lambda: any(item.get("text") == "Robust simulation ready" for item in snapshot["controls"]))
         binary = next(item for item in snapshot["controls"]
                       if item["kind"] == "text" and item.get("help", "").startswith("Edit the first 16 message bytes"))
         event(1, binary["id"], "00000000")

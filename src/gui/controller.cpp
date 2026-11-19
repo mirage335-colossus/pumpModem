@@ -539,6 +539,23 @@ struct Controller::Impl {
     bool developer_mode=false;
     std::vector<double> fhss_list;
     std::string fhss_list_error;
+    std::string carrier_preset_shift;
+
+    void refresh_carrier_presets() {
+        const auto& shift_text=f(UiField::rf_shift).text;
+        if(shift_text==carrier_preset_shift)return;
+        carrier_preset_shift=shift_text;
+        auto& presets=f(UiField::carrier).options;
+        presets.clear();
+        const auto shift=frequency_input::parse(shift_text);
+        if(!shift||*shift<0||*shift>1e15)return;
+        for(const auto audio_hz:{1500.,1625.,1725.,1800.}) {
+            const auto carrier=exact_frequency_text(*shift+audio_hz);
+            auto label=carrier;
+            if(*shift>0)label+=" ("+frequency_text(audio_hz)+" audio)";
+            presets.push_back({carrier,std::move(label)});
+        }
+    }
 
     void configure(bool=false,bool=false,std::optional<UiField> =std::nullopt,
                    const launch_command::Patch* load=nullptr,bool simulation_off=true,
@@ -619,10 +636,17 @@ struct Controller::Impl {
         settings.gpu=f(UiField::gpu).checked;
         settings.tx_dbm=planner_inputs.tx_dbm;settings.path_loss_db=planner_inputs.path_loss_db;
         settings.noise_dbm_hz=planner_inputs.noise_density_dbm_hz;settings.target_cn0_db_hz=planner_inputs.target_db_hz;
-        settings.transfer.modem.bandwidth_hz=frequency(f(UiField::bandwidth).text,"Rate");
-        settings.transfer.modem.carrier_hz=frequency(f(UiField::carrier).text,"Carrier")-frequency(f(UiField::rf_shift).text,"Shift");
-        settings.doppler_shift_hz=tuning::doppler_carrier_hz(frequency(f(UiField::carrier).text,"Carrier"),
-            tuning::parse_doppler(f(UiField::doppler).text))-frequency(f(UiField::carrier).text,"Carrier");
+        auto& modem=settings.transfer.modem;
+        modem.bandwidth_hz=frequency(f(UiField::bandwidth).text,"Rate");
+        const auto carrier=frequency(f(UiField::carrier).text,"Carrier");
+        const auto shift=frequency(f(UiField::rf_shift).text,"Shift");
+        modem.carrier_hz=carrier-shift;
+        const auto nyquist=modem.sample_rate/2.;
+        if(!(modem.carrier_hz>0&&modem.carrier_hz<nyquist))
+            throw Error("Carrier minus Shift must be greater than 0 Hz and below "+frequency_text(nyquist)+
+                ". Choose a Carrier preset for the current Shift or edit the frequencies with units.");
+        settings.doppler_shift_hz=tuning::doppler_carrier_hz(carrier,
+            tuning::parse_doppler(f(UiField::doppler).text))-carrier;
         settings.spread_preset=f(UiField::spread_preset).selected;
         settings.selective_perturbation=f(UiField::selective_perturbation).selected;
         settings.added_interleave=f(UiField::dsss_version).selected=="interleave";
@@ -639,7 +663,7 @@ struct Controller::Impl {
             std::optional<double>{number(noise,"Live noise density")};
         settings.transfer.modem.oscillator_search.emplace();
         auto& oscillator=*settings.transfer.modem.oscillator_search;
-        oscillator.rf_shift_hz=frequency(f(UiField::rf_shift).text,"Shift");
+        oscillator.rf_shift_hz=shift;
         oscillator.margin=level(f(UiField::search_margin).text,"x","Search margin");
         if(oscillator.margin<1)throw Error("Search margin must be at least one");
         oscillator.lf=tuning::oscillator_model(tuning::parse_oscillator_preset(f(UiField::simulation_oscillator).selected));
@@ -1038,6 +1062,7 @@ struct Controller::Impl {
         }
     }
     void controls() {
+        refresh_carrier_presets();
         for(auto& field:fields)field.enabled=!closing;
         const bool busy=snapshot.transmitting;
         for(const auto id:{UiField::device,UiField::exclusive,UiField::mono,UiField::live_duplex,
@@ -1704,7 +1729,9 @@ void Controller::edit(UiField field,std::string text) {
         }
         else p.dirty();
     } catch(const std::exception& e) {
-        p.notice(e.what(),10);
+        // Frequency drafts are validated on each keystroke. A corrected pair
+        // clears the range error as soon as the next snapshot is published.
+        p.notice(e.what(),field==UiField::carrier||field==UiField::rf_shift?0:10);
     }
     p.controls();
 }

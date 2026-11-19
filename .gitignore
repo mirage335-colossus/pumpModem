@@ -17,6 +17,8 @@ __pycache__/
 # Locally copied application binary; build outputs belong under build/.
 /datapump-gui
 
-# The standalone RunPod Lab key and its private atomic-write staging files.
+# The standalone RunPod Lab key, its staging files and the migration source.
+/runpod-api-key
+/.runpod-api-key-*
 /_zLab/runpod-api-key
 /_zLab/.runpod-api-key-*

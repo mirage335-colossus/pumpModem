@@ -315,6 +315,58 @@ ownership check then repaired the actual row under the controller lock. The
 verification sent no cloud mutations. The final standalone suite passed
 162 tests, including 26 isolated Tk cases.
 
+### RunPod setup, Carrier presets and reset — 19 November 2026
+
+The old End action returned while another provider operation was in progress.
+The lab now saves End under the exact request name even during creation.
+The setup thread stops opening new sessions after End. The isolated Tk tests
+exercise late create acceptance, cancellation during deployment and exact
+provider removal. Confirmed closed rows and their SSH files are pruned.
+Unconfirmed invisible requests remain recoverable outside the active list.
+
+The root `runpod-api-key` file replaces the earlier lab-directory file. The
+current key migrated with mode `0600` and authenticated to RunPod. Git ignores
+the file, and the actual native source bundle excluded it. The two old local
+rows were removed after fresh individual HTTP 404 checks and empty pod and
+queue inventories.
+
+The earlier browser could retain an invalid Carrier notice after correcting
+the Carrier and Shift pair. The current native controller offers four
+editable Carrier presets relative to Shift and clears the error when the
+pair is valid. A local Firefox walkthrough changed the preset and typed
+`1850 Hz`, decoded `e`, then verified reload restored the Carrier, Shift,
+Rate, draft and result defaults. Reload restarts the native simulation
+worker on the existing pod and rejects requests from the old browser page.
+
+Start now shows the setup stage and elapsed time. An actual RunPod test
+identified Ubuntu package-index downloads as the slowest part reached on
+that pod. End was invoked in the standalone window during this stage.
+The lab terminated the exact test pod before any simulation page opened.
+The individual lookup returned 404 and the pod and queue lists were empty.
+
+A second cold start used the stock RunPod image on one full RTX PRO 6000
+Blackwell Server Edition. Setup took about nine minutes. Package-index and
+dependency installation took 7:26 of that, including a 19.3 MB Ubuntu
+`noble/universe` index on this host. In Firefox, the test selected a Carrier
+preset, entered `1850 Hz`, and decoded `e` with 780 Vulkan search rows and two
+scored quiet slots. Reload reset the settings, draft and results on the same
+pod. The browser reported no script errors. End in the standalone window
+showed **Terminating**, removed the row, and left the pod and queue inventories
+empty. An individual lookup returned HTTP 404. Each test used one pod and no
+persistent volume. These simulations do not qualify physical Live/Duplex.
+
+Vulkan setup now tries five signed amd64 indexes and fetches the base Universe
+index only if APT needs it to resolve the install. With the verified Ubuntu
+Base 24.04.5 amd64 package status and the current signed indexes, APT resolved
+all four packages and their dependencies without the base Universe index or
+any removals. Shell tests cover the narrower path, full fallback, and a
+failed update on either path. The revised cold-start time on RunPod remains
+unmeasured.
+
+The final standalone suite passed 177 tests, including 29 isolated Tk
+cases. The named native GUI suite passed 32 tests. The focused native GUI
+policy, worker and renderer tests and shared preview-client checks passed.
+
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 
 The [HF operating results](indexes/robust.md#low-power-hf-alarm-results)

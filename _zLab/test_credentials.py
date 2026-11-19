@@ -94,11 +94,17 @@ class RepositoryApiKeyStoreTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         self.legacy = ApiKeyStore(root / 'state')
-        repository_directory = root / '_zLab'
+        repository_directory = root / 'checkout'
         repository_directory.mkdir()
         repository_directory.chmod(0o775)
         self.store = RepositoryApiKeyStore(self.legacy.path.parent,
                                            repository_directory=repository_directory)
+        self.previous_path = repository_directory / '_zLab' / 'runpod-api-key'
+
+    def create_previous_key(self, key):
+        self.previous_path.parent.mkdir()
+        self.previous_path.write_text(key + '\n')
+        self.previous_path.chmod(0o600)
 
     def test_migrate_to_gitignored_file_in_group_writable_checkout(self):
         self.legacy.save('existing-token')
@@ -110,13 +116,32 @@ class RepositoryApiKeyStoreTests(unittest.TestCase):
         self.assertEqual(self.store.load(), 'existing-token')
         self.assertEqual(list(self.store.path.parent.iterdir()), [self.store.path])
 
+    def test_migrates_from_lab_subdirectory_and_retires_duplicate_state_copy(self):
+        self.create_previous_key('previous-lab-token')
+        self.legacy.save('previous-lab-token')
+        self.assertEqual(self.store.load(), 'previous-lab-token')
+        self.assertEqual(self.store.path.read_text(), 'previous-lab-token\n')
+        self.assertEqual(self.store.path.stat().st_mode & 0o777, 0o600)
+        self.assertFalse(self.previous_path.exists())
+        self.assertFalse(self.legacy.path.exists())
+
+    def test_migration_prefers_previous_lab_key_and_preserves_different_state_copy(self):
+        self.create_previous_key('previous-lab-token')
+        self.legacy.save('older-state-token')
+        self.assertEqual(self.store.load(), 'previous-lab-token')
+        self.assertFalse(self.previous_path.exists())
+        self.assertEqual(self.legacy.load(), 'older-state-token')
+
     def test_repository_value_wins_and_explicit_clear_cannot_restore_old_key(self):
+        self.create_previous_key('previous-lab-token')
         self.legacy.save('old-token')
         self.store.save('repository-token')
         self.assertEqual(self.store.load(), 'repository-token')
+        self.assertEqual(self.previous_path.read_text(), 'previous-lab-token\n')
         self.assertEqual(self.legacy.load(), 'old-token')
         self.store.clear()
         self.assertFalse(self.store.path.exists())
+        self.assertFalse(self.previous_path.exists())
         self.assertFalse(self.legacy.path.exists())
         self.assertEqual(self.store.load(), '')
 

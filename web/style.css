@@ -37,7 +37,7 @@ body.dp-page { margin:0; height:100dvh; display:flex; flex-direction:column; ove
 .dp-document-control { display:flex; flex-direction:column; min-height:0; }
 .dp-document-control>input,.dp-document-control>select,.dp-document-control>textarea { width:100%; flex:1 1 0; }
 .dp-document-control>label { flex:0 0 16px; }
-.dp-document-control>select[aria-label="Text presets"] { width:23px; position:absolute; right:0; bottom:0; height:27px; }
+.dp-document-control>select.dp-text-presets { width:23px; position:absolute; right:0; bottom:0; height:27px; }
 .dp-fill-1 { background:Canvas; }.dp-fill-2 { background:color-mix(in srgb,CanvasText 5%,Canvas); }.dp-fill-3 { background:color-mix(in srgb,Highlight 8%,Canvas); }
 .dp-overlay { position:absolute; top:0; left:0; z-index:10; background:Canvas; color:CanvasText; }
 .dp-service { position:fixed; z-index:20; inset:max(1rem,12vh) max(1rem,8vw); overflow:auto; padding:1rem; border:2px solid GrayText; border-radius:.4rem; background:Canvas; color:CanvasText; box-shadow:0 0 0 1rem #0007; }
