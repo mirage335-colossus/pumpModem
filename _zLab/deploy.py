@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Deploy a lab worker over authenticated direct SSH to an unused pod directory.
+"""Deploy a lab worker over authenticated direct SSH to a managed pod directory.
 
 The SSH server host key must already be verified in ``known_hosts``. This helper
-never performs trust-on-first-use or starts a pod. It creates an exclusive fresh
+never performs trust-on-first-use or starts a pod. It creates a private
 profile-specific directory (``/workspace/pump-lab`` for simulation or
-``/workspace/pump-lab-live`` for live); it will not overwrite an existing deployment.
+``/workspace/pump-lab-live`` for live), reuses a verified matching worker, and
+resumes interrupted builds from the same source. Unknown directories and
+different deployment requests are rejected.
 Only an allowlisted native source bundle is uploaded. A timeout ends the local
 SSH client but does not prove that the remote build has stopped. Pod lifecycle
 and cleanup remain the caller's responsibility. CUDA builds require compatible
@@ -22,6 +24,7 @@ import os
 from pathlib import Path
 import re
 import selectors
+import shlex
 import subprocess
 import time
 import sys
@@ -301,6 +304,129 @@ if __name__ == '__main__':
 REMOTE_BUILD += "\nPUMP_LAB_RECEIPT_MODE=\"$mode\" python3 - <<'PUMP_LAB_RESOURCE_EOF'\n" + RESOURCE_RECEIPT + "\nPUMP_LAB_RESOURCE_EOF\n"
 
 
+# One SSH process owns the lock from archive upload through build completion.
+# A disconnected attempt can therefore finish safely while a retry waits for
+# that lock to be released. Receipts are published only after a successful build.
+REMOTE_DEPLOY = r'''import fcntl, hashlib, json, os, re, stat, subprocess, sys, tempfile
+from pathlib import Path
+
+digest, mode, profile, size_text = sys.argv[1:]
+if not re.fullmatch('[a-f0-9]{64}', digest) or mode not in ('cpu','cuda','gpu') or profile not in ('simulation','live'):
+    raise SystemExit('Invalid deployment request')
+size = int(size_text)
+if not 0 < size <= 256 * 1024 * 1024:
+    raise SystemExit('Source archive exceeded the deployment limit')
+directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'
+os.umask(0o077)
+created = False
+try:
+    os.mkdir(directory, 0o700)
+    created = True
+except FileExistsError:
+    pass
+directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+info = os.fstat(directory_fd)
+if info.st_uid != os.getuid() or info.st_mode & 0o077:
+    raise SystemExit('Deployment directory must be private and owned by this user')
+os.fchdir(directory_fd)
+lock = os.open('.deploy.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+try:
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    raise SystemExit('Deployment is already running on this pod. Retry after it finishes.')
+
+def read_json(name):
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 16384:
+            raise SystemExit('Invalid managed deployment record')
+        return json.loads(os.read(fd, 16385))
+    finally:
+        os.close(fd)
+
+def write_json(name, value):
+    fd, temporary = tempfile.mkstemp(prefix='.receipt-', dir='.')
+    try:
+        with os.fdopen(fd, 'w') as out:
+            json.dump(value, out)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(temporary, name)
+        os.fsync(directory_fd)
+    finally:
+        if os.path.exists(temporary): os.unlink(temporary)
+
+request = {'source':digest, 'mode':mode, 'profile':profile,
+           'builder':hashlib.sha256(BUILD.encode()).hexdigest()}
+if created:
+    write_json('.deployment.json', request)
+else:
+    try:
+        previous = read_json('.deployment.json')
+    except FileNotFoundError:
+        raise SystemExit('Existing deployment directory is unmanaged. Use a fresh pod for automatic deployment.')
+    if previous != request:
+        raise SystemExit('Existing deployment uses different source or build settings. Use a fresh pod.')
+
+fd, temporary = tempfile.mkstemp(prefix='.upload-', dir='.')
+try:
+    checksum = hashlib.sha256()
+    remaining = size
+    with os.fdopen(fd, 'wb') as out:
+        while remaining:
+            chunk = sys.stdin.buffer.read(min(1024 * 1024, remaining))
+            if not chunk: raise SystemExit('Source upload ended early. Retry deployment.')
+            out.write(chunk)
+            checksum.update(chunk)
+            remaining -= len(chunk)
+        if sys.stdin.buffer.read(1) or checksum.hexdigest() != digest:
+            raise SystemExit('Source archive checksum mismatch')
+        out.flush()
+        os.fsync(out.fileno())
+    os.replace(temporary, 'source.tar.gz')
+finally:
+    if os.path.exists(temporary): os.unlink(temporary)
+
+worker = Path('build/lab/datapump-lab-worker' if profile == 'live' else 'build/lab/datapump-worker')
+try:
+    receipt = read_json('.worker-receipt.json')
+except FileNotFoundError:
+    receipt = None
+if (receipt and receipt.get('request') == request and worker.is_file()
+        and not worker.is_symlink()
+        and hashlib.sha256(worker.read_bytes()).hexdigest() == receipt.get('worker_sha256')):
+    subprocess.run([str(worker), '--self-check'], check=True)
+    print(receipt['text'], flush=True)
+    environment = dict(os.environ, PUMP_LAB_RECEIPT_MODE=receipt['backend'])
+    subprocess.run([sys.executable, '-c', RESOURCES], env=environment, check=True)
+    raise SystemExit(0)
+
+with tempfile.TemporaryFile() as script:
+    script.write(BUILD.encode())
+    script.seek(0)
+    child = subprocess.Popen(['sh', '-s', '--', digest, mode, profile], stdin=script,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, pass_fds=(lock,))
+tail = b''
+while True:
+    chunk = child.stdout.read(4096)
+    if not chunk: break
+    sys.stdout.buffer.write(chunk)
+    sys.stdout.buffer.flush()
+    tail = (tail + chunk)[-16384:]
+if child.wait(): raise SystemExit('Remote build failed. Retry to resume the same deployment.')
+lines = tail.decode('utf-8', 'replace').splitlines()
+prefixes = ('PUMP_LAB_PROFILE=', 'PUMP_LAB_MODE=', 'PUMP_LAB_DEVICE=', 'PUMP_LAB_TORCH=',
+            'PUMP_LAB_CUDA=', 'PUMP_LAB_WORKER_SHA256=')
+text = '\n'.join(line for line in lines if line.startswith(prefixes))
+backend = next((line.partition('=')[2] for line in lines if line.startswith('PUMP_LAB_MODE=')), None)
+if backend not in ('cpu', 'cuda', 'vulkan') or not worker.is_file():
+    raise SystemExit('Build did not return a complete deployment receipt')
+write_json('.worker-receipt.json', {'request':request, 'text':text, 'backend':backend,
+                                  'worker_sha256':hashlib.sha256(worker.read_bytes()).hexdigest()})
+'''
+
+
 class DeployError(RuntimeError):
     """Deployment failed; ``uncertain`` means remote work may still be active."""
 
@@ -376,7 +502,7 @@ def _bounded_process(argv, input_data, timeout):
                 if left <= 0:
                     raise subprocess.TimeoutExpired(argv, timeout)
                 if child.poll() is not None and output_eof:
-                    if pending:
+                    if pending and child.returncode == 0:
                         raise DeployError('Remote input closed before the build script was sent; remote state is uncertain.',
                                           uncertain=True)
                     break
@@ -400,9 +526,12 @@ def _bounded_process(argv, input_data, timeout):
                             pending = pending[count:]
                         except BlockingIOError:
                             continue
-                        except BrokenPipeError as exc:
-                            raise DeployError('Remote input closed before the build script was sent; remote state is uncertain.',
-                                              uncertain=True) from exc
+                        except BrokenPipeError:
+                            # A rejected resume can exit before consuming the
+                            # archive. Drain its bounded explanation and status.
+                            selector.unregister(child.stdin)
+                            child.stdin.close()
+                            continue
                         if not pending:
                             selector.unregister(child.stdin)
                             child.stdin.close()
@@ -463,20 +592,17 @@ def deploy(host, user, port, known_hosts, *, mode='cpu', profile='simulation', i
 
     directory = LIVE_REMOTE_DIR if profile == 'live' else REMOTE_DIR
     ssh = ['ssh', '-F', '/dev/null', '-T', '-p', str(port), '-l', user, *options, host]
-    scp = ['scp', '-F', '/dev/null', '-P', str(port), *options]
     with tempfile.TemporaryDirectory(prefix='datapump-lab-') as staging:
         archive = Path(staging) / 'source.tar.gz'
         bundle.create_bundle(ROOT, archive)
-        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-        _run(ssh + ['mkdir', '-m', '700', '--', directory], stage='Creating the deployment directory',
-             timeout=remaining(), runner=runner)
-        _run(scp + [str(archive), f'{user}@{host}:{directory}/source.tar.gz'],
-             stage='Uploading the source bundle', timeout=remaining(), runner=runner)
-        # Values appended to the shell command are validated choices and hex
-        # digest, never a provider-supplied string.
-        command = f'sh -s -- {digest} {mode} {profile}'
-        output = _run(ssh + [command], stage='Verifying and building the remote worker',
-                      timeout=remaining(), runner=runner, input_data=REMOTE_BUILD.encode('utf-8'))
+        payload = archive.read_bytes()
+        digest = hashlib.sha256(payload).hexdigest()
+        # The command contains only our fixed wrapper, checked mode/profile,
+        # and locally computed digest/length. The archive travels over stdin.
+        script = 'BUILD = ' + repr(REMOTE_BUILD) + '\nRESOURCES = ' + repr(RESOURCE_RECEIPT) + '\n' + REMOTE_DEPLOY
+        command = f'python3 -c {shlex.quote(script)} {digest} {mode} {profile} {len(payload)}'
+        output = _run(ssh + [command], stage='Deploying the remote worker',
+                      timeout=remaining(), runner=runner, input_data=payload)
         if on_output is not None:
             on_output(output)
     worker = 'datapump-lab-worker' if profile == 'live' else 'datapump-worker'

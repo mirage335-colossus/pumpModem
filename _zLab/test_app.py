@@ -28,6 +28,16 @@ class Fake:
 
 
 class Tests(unittest.TestCase):
+    def test_failed_initial_ownership_save_removes_bootstrap_without_request(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = State(Path(td) / 'jobs.json')
+            client = Mock()
+            with patch.object(state, 'write', side_effect=OSError('disk full')):
+                with self.assertRaisesRegex(OSError, 'disk full'):
+                    Ownership(state, client).create({'gpu': {'id': 'RTX 5090', 'count': 1}}, 'image', time.time() + 60)
+            client.create_pod.assert_not_called()
+            self.assertEqual(list(Path(td).iterdir()), [])
+
     def test_owned_pod_connection_details_use_exact_individual_response(self):
         record = {'id': 'p1', 'name': 'owned'}
         detail = {'id': 'p1', 'name': 'owned', 'ssh': {'direct': {'host': 'pod.example'}}}
@@ -448,6 +458,16 @@ class Tests(unittest.TestCase):
         choices = options([{'id': model, 'availability': 'LOW'} for model in models], [])
         self.assertEqual([value['gpu']['id'] for _, value in choices],
                          [models[2], models[1], models[0]])
+
+    def test_catalog_hides_unavailable_gpu_and_cpu_but_keeps_unknown_stock(self):
+        gpus = [{'id': 'RTX 5090', 'availability': 'NONE'},
+                {'id': 'RTX 4090', 'availability': 'HIGH', 'secure': False},
+                {'id': 'RTX PRO 6000 Blackwell Server Edition'}]
+        cpus = [{'id': 'cpu', 'availability': 'NONE', 'vcpu': {'min': 2, 'max': 32}, 'ramGbPerVcpu': 4}]
+        choices = options(gpus, cpus)
+        self.assertEqual(len(choices), 1)
+        self.assertEqual(choices[0][1]['gpu']['id'], gpus[2]['id'])
+        self.assertIn('stock unknown', choices[0][0])
 
     def test_quote_requires_exact_current_sku_and_tier(self):
         client = Mock()

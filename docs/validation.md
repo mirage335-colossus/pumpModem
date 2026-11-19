@@ -232,6 +232,48 @@ opening and reading its Linux process status file. The corrected check
 accepts either kernel indication that the process disappeared and still
 fails if it stays alive.
 
+### Automated RunPod setup — 19 November 2026
+
+The standalone controller now reloads a private local API-key file and loads
+the catalog on startup, including after pending deadline checks. The compute
+dropdown excludes unavailable stock. Its primary Start simulation action
+creates or continues an owned pod, waits for SSH, deploys the native worker
+and opens the shared simulation GUI.
+
+New pods install a unique locally generated SSH host key through the
+authenticated creation request. The saved fingerprint authenticates the direct
+endpoint. A separate per-pod client identity allows access without editing
+account SSH settings. The startup shell removes the host-key variable before
+the official image exports its environment. The GUI limits displayed pod
+details to fields that exclude the bootstrap secrets.
+
+Deployment retries bind the private directory to the source digest, build
+script, profile and requested backend. A completed matching worker must pass
+its checksum and self-check before reuse. An interrupted matching build can
+resume. A remote lock prevents overlapping builds. A small-pipe fixture found
+a deadlock in synchronous script delivery before output draining. Passing
+the script as a private temporary file resolved it, with a bounded regression
+covering 4 KiB pipes and 64 KiB of early output.
+
+All 147 standalone tests passed with the isolated X display and short native
+simulation enabled. The tests cover key persistence and clearing, hidden stock,
+automatic setup with log access denied, same-pod retry and startup deadline
+checks. The default-size window remains covered.
+
+The real Tk primary action loaded the saved key, created one full NVIDIA RTX
+PRO 6000 Blackwell Server Edition with 97,887 MiB visible and driver
+595.112.07, verified its generated host key and deployed the worker. The test
+made log and remote-command endpoint calls fail immediately if attempted.
+The native worker decoded `e` through the HTTP GUI bridge and SSH relay with
+780 Vulkan search rows, consecutive DATA 0, 0, 1 and two scored QUIET slots.
+Worker SHA-256 was
+`ed25eff954c3636ba9eb97aba35fb6fcd44246810536d822712255874282b2d9`.
+Closing the session and invoking Start simulation again reused the same
+verified worker and reached a ready native session. There was one creation
+request and one billing confirmation across both opens. The test allocation
+was deleted and its absence verified. This covers the new simulation setup
+workflow. Physical remote Live/Duplex retains its separate qualification work.
+
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 
 The [HF operating results](indexes/robust.md#low-power-hf-alarm-results)

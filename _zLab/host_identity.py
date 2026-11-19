@@ -1,8 +1,9 @@
-"""Verify an owned RunPod's direct SSH endpoint using its authenticated container log.
+"""Verify an owned RunPod's direct SSH endpoint against its expected host key.
 
+New lab pods receive a locally generated key through the authenticated create
+request. Older pods use their authenticated container log or a supplied pin.
 RunPod's official container-template/start.sh lists each /etc/ssh/*.pub with
-ssh-keygen -lf after starting sshd. Callers must obtain the lines directly
-from the selected pod's authenticated provider log, before deploying any code.
+ssh-keygen -lf after starting sshd.
 """
 from __future__ import annotations
 
@@ -98,7 +99,7 @@ def _checked_entry(host, port, fingerprint):
     key = _public_key(entries.pop(), endpoint)
     actual = base64.b64encode(hashlib.sha256(key).digest()).rstrip(b'=').decode('ascii')
     if 'SHA256:' + actual != fingerprint:
-        raise ValueError('SSH host key mismatch with the authenticated RunPod startup log')
+        raise ValueError('SSH host key mismatch with the expected key for this pod')
     return _entry(endpoint, key)
 
 

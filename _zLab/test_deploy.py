@@ -39,18 +39,18 @@ class DeployTests(unittest.TestCase):
             result = deploy.deploy('pod.example.com', 'root', 2244, self.known,
                                    mode='cuda', runner=self.runner)
         self.assertEqual(result, '/workspace/pump-lab/build/lab/datapump-worker')
-        self.assertEqual(len(self.calls), 3)
-        mkdir, scp, build = (item[0] for item in self.calls)
-        for command in (mkdir, scp, build):
-            self.assertIn('StrictHostKeyChecking=yes', command)
-            self.assertIn('UserKnownHostsFile=' + str(self.known), command)
-            self.assertIn('BatchMode=yes', command)
-            self.assertEqual(command[1:3], ['-F', '/dev/null'])
-        self.assertEqual(mkdir[-5:], ['mkdir', '-m', '700', '--', deploy.REMOTE_DIR])
-        self.assertEqual(scp[-1], 'root@pod.example.com:/workspace/pump-lab/source.tar.gz')
+        self.assertEqual(len(self.calls), 1)
+        command = self.calls[0][0]
+        self.assertIn('StrictHostKeyChecking=yes', command)
+        self.assertIn('UserKnownHostsFile=' + str(self.known), command)
+        self.assertIn('BatchMode=yes', command)
+        self.assertEqual(command[1:3], ['-F', '/dev/null'])
         digest = hashlib.sha256(b'test archive').hexdigest()
-        self.assertEqual(build[-1], f'sh -s -- {digest} cuda simulation')
-        self.assertEqual(self.calls[-1][1]['input'], deploy.REMOTE_BUILD.encode())
+        remote = shlex.split(command[-1])
+        self.assertEqual(remote[:2], ['python3', '-c'])
+        self.assertEqual(remote[-4:], [digest, 'cuda', 'simulation', '12'])
+        self.assertIn(deploy.REMOTE_DEPLOY, remote[2])
+        self.assertEqual(self.calls[0][1]['input'], b'test archive')
 
     def test_live_profile_command_and_path(self):
         with patch.object(deploy.bundle, 'create_bundle', side_effect=self.bundle):
@@ -58,9 +58,7 @@ class DeployTests(unittest.TestCase):
                                    mode='cuda', profile='live', runner=self.runner)
         self.assertEqual(result, '/workspace/pump-lab-live/build/lab/datapump-lab-worker')
         digest = hashlib.sha256(b'test archive').hexdigest()
-        self.assertEqual(self.calls[-1][0][-1], f'sh -s -- {digest} cuda live')
-        self.assertEqual(self.calls[0][0][-1], '/workspace/pump-lab-live')
-        self.assertEqual(self.calls[1][0][-1], 'root@pod.example.com:/workspace/pump-lab-live/source.tar.gz')
+        self.assertEqual(shlex.split(self.calls[-1][0][-1])[-4:], [digest, 'cuda', 'live', '12'])
 
     def test_invalid_connection_and_mode_never_execute(self):
         for host in ('-oProxyCommand=evil', 'bad;touch', 'a/b', 'bad:22', 'foo\nbar'):
@@ -96,6 +94,10 @@ class DeployTests(unittest.TestCase):
         with self.assertRaises(deploy.DeployError) as broken:
             deploy._bounded_process([sys.executable, '-c', 'pass'], b'z' * 2000000, 10)
         self.assertTrue(broken.exception.uncertain)
+        code, tail = deploy._bounded_process([sys.executable, '-c',
+            "import sys; print('Deployment is already running'); sys.exit(1)"], b'z' * 2000000, 10)
+        self.assertEqual(code, 1)
+        self.assertIn(b'Deployment is already running', tail)
         with self.assertRaises(subprocess.TimeoutExpired):
             deploy._bounded_process([sys.executable, '-c', 'import time; time.sleep(5)'], None, .1)
 
@@ -113,16 +115,16 @@ class DeployTests(unittest.TestCase):
 
     def test_deployment_stages_share_one_deadline(self):
         with patch.object(deploy.bundle, 'create_bundle', side_effect=self.bundle), \
-             patch.object(deploy.time, 'monotonic', side_effect=[100, 101, 103, 109]):
+             patch.object(deploy.time, 'monotonic', side_effect=[100, 101]):
             deploy.deploy('pod.example.com', 'root', 22, self.known, runner=self.runner, timeout=10)
-        self.assertEqual([call[1]['timeout'] for call in self.calls], [9, 7, 1])
+        self.assertEqual([call[1]['timeout'] for call in self.calls], [9])
 
         self.calls.clear()
         with patch.object(deploy.bundle, 'create_bundle', side_effect=self.bundle), \
-             patch.object(deploy.time, 'monotonic', side_effect=[100, 102, 110]), \
+             patch.object(deploy.time, 'monotonic', side_effect=[100, 110]), \
              self.assertRaisesRegex(deploy.DeployError, 'deadline'):
             deploy.deploy('pod.example.com', 'root', 22, self.known, runner=self.runner, timeout=10)
-        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(self.calls), 0)
 
     def test_remote_cpu_and_cuda_branches_execute_correct_flags(self):
         # Exercise the actual POSIX script with fake CMake and fake Torch. This
@@ -284,6 +286,101 @@ def compiled_with_cxx11_abi(): return True
         for directory in (group, group / 'parent', child):
             (directory / 'memory.max').write_text('max')
         self.assertEqual(namespace['cgroup_limit'](proc, 'memory'), 'unlimited')
+
+    def test_remote_wrapper_reuses_and_resumes_only_matching_deployments(self):
+        destination = self.root / 'managed'
+        script = deploy.REMOTE_DEPLOY.replace("directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'",
+                                             'directory = ' + repr(str(destination)))
+        build = '''set -eu
+echo build >> attempts
+test ! -f fail-build
+mkdir -p build/lab
+printf '#!/bin/sh\nexit 0\n' > build/lab/datapump-worker
+chmod +x build/lab/datapump-worker
+echo PUMP_LAB_PROFILE=simulation
+echo PUMP_LAB_MODE=cpu
+echo PUMP_LAB_DEVICE=CPU
+echo PUMP_LAB_TORCH=not-requested
+echo PUMP_LAB_CUDA=not-requested
+printf 'PUMP_LAB_WORKER_SHA256='
+sha256sum build/lab/datapump-worker | cut -d ' ' -f 1
+'''
+        code = 'BUILD = ' + repr(build) + '\nRESOURCES = ' + repr("print('fresh resources')") + '\n' + script
+        data = b'bounded archive'
+        digest = hashlib.sha256(data).hexdigest()
+
+        def invoke(payload=data, checksum=digest, mode='cpu'):
+            return subprocess.run([sys.executable, '-c', code, checksum, mode, 'simulation', str(len(data))],
+                                  input=payload, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10)
+
+        first = invoke()
+        self.assertEqual(first.returncode, 0, first.stdout)
+        self.assertEqual((destination / 'attempts').read_text(), 'build\n')
+        second = invoke()
+        self.assertEqual(second.returncode, 0, second.stdout)
+        self.assertIn(b'fresh resources', second.stdout)
+        self.assertEqual((destination / 'attempts').read_text(), 'build\n')
+
+        self.assertNotEqual(invoke(mode='gpu').returncode, 0)
+        self.assertNotEqual(invoke(checksum='0' * 64).returncode, 0)
+        self.assertEqual((destination / 'attempts').read_text(), 'build\n')
+
+        # A missing receipt represents interruption after extraction/build.
+        (destination / '.worker-receipt.json').unlink()
+        (destination / 'fail-build').touch()
+        failed = invoke()
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertFalse((destination / '.worker-receipt.json').exists())
+        (destination / 'fail-build').unlink()
+        resumed = invoke()
+        self.assertEqual(resumed.returncode, 0, resumed.stdout)
+        self.assertEqual((destination / 'attempts').read_text(), 'build\nbuild\nbuild\n')
+
+        # Truncated retries preserve the validated archive and completed worker.
+        self.assertNotEqual(invoke(payload=b'partial').returncode, 0)
+        self.assertEqual((destination / 'source.tar.gz').read_bytes(), data)
+        self.assertEqual(list(destination.glob('.upload-*')), [])
+        (destination / '.deployment.json').unlink()
+        self.assertNotEqual(invoke().returncode, 0)
+        self.assertEqual((destination / 'attempts').read_text(), 'build\nbuild\nbuild\n')
+
+    def test_remote_wrapper_keeps_running_build_locked(self):
+        import fcntl
+        destination = self.root / 'managed'
+        destination.mkdir(mode=0o700)
+        script = deploy.REMOTE_DEPLOY.replace("directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'",
+                                             'directory = ' + repr(str(destination)))
+        code = "BUILD = ''\nRESOURCES = ''\n" + script
+        with (destination / '.deploy.lock').open('w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = subprocess.run([sys.executable, '-c', code, '0' * 64, 'cpu', 'simulation', '1'],
+                                    input=b'x', stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b'already running', result.stdout)
+        self.assertFalse((destination / 'source.tar.gz').exists())
+
+    def test_remote_wrapper_drains_output_before_large_script_is_consumed(self):
+        destination = self.root / 'managed'
+        script = deploy.REMOTE_DEPLOY.replace("directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'",
+                                             'directory = ' + repr(str(destination)))
+        # Force small stdout pipes, and emit more than their capacity before
+        # the shell consumes the rest of its script. A synchronous stdin pipe
+        # write would deadlock against this early output.
+        script = script.replace('pass_fds=(lock,)', 'pass_fds=(lock,), pipesize=4096')
+        build = "python3 -c 'print(\"x\" * 65536)'\n" + '# padding\n' * 2000 + '''
+mkdir -p build/lab
+printf '#!/bin/sh\nexit 0\n' > build/lab/datapump-worker
+chmod +x build/lab/datapump-worker
+echo PUMP_LAB_MODE=cpu
+'''
+        code = 'BUILD = ' + repr(build) + "\nRESOURCES = ''\n" + script
+        data = b'archive'
+        digest = hashlib.sha256(data).hexdigest()
+        result = subprocess.run([sys.executable, '-c', code, digest, 'cpu', 'simulation', str(len(data))],
+                                input=data, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stdout[-1000:])
+        self.assertIn(b'PUMP_LAB_MODE=cpu', result.stdout)
+        self.assertTrue((destination / '.worker-receipt.json').is_file())
 
     def test_gpu_receipt_fallbacks_and_no_full_device_claim(self):
         namespace = {'__name__': 'receipt_test'}

@@ -206,10 +206,10 @@ class TkControllerIntegration(unittest.TestCase):
 
     def test_default_window_displays_full_compute_quotes_and_wrapped_errors(self):
         self.provider.gpus = [
-            {'id': 'NVIDIA GeForce RTX 5090', 'availability': 'NONE', 'price': {'secure': 1.32}},
+            {'id': 'NVIDIA GeForce RTX 5090', 'availability': 'LOW', 'price': {'secure': 1.32}},
             {'id': 'NVIDIA RTX PRO 6000 Blackwell Server Edition', 'availability': 'HIGH',
              'price': {'secure': 2.09}},
-            {'id': 'NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition', 'availability': 'NONE',
+            {'id': 'NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition', 'availability': 'LOW',
              'price': {'secure': 2.09}},
         ]
         self.load_catalog()
@@ -249,7 +249,8 @@ class TkControllerIntegration(unittest.TestCase):
         self.assertEqual(self.provider.gpu_tiers, ['SECURE', 'SECURE'])
         self.assertEqual(self.controller.state.read(), [])
         self.load_catalog()
-        self.assertIn('RTX 5090 · stock none', self.controller.compute.get())
+        self.assertEqual(self.controller.compute.get(), '')
+        self.assertFalse(any('stock none' in label for label in self.controller.dropdown['values']))
         self.assertTrue(any('RTX 4090' in label for label in self.controller.dropdown['values']))
         self.provider.gpus.pop()
         self.load_catalog()
@@ -464,9 +465,92 @@ class TkControllerIntegration(unittest.TestCase):
             restarted = lab.App(other)
             self.assertEqual(restarted.records[0]['queue_id'], 'q-test')
             self.assertIn('fixture-job', restarted.list.get(0))
-            self.assertEqual(restarted.key.get(), '')
+            self.assertEqual(restarted.key.get(), 'dummy-session-key')
+            self.execute(lambda: None, lambda: bool(restarted.choices) and not restarted.busy)
         finally:
             other.destroy()
+
+    def test_saved_key_loads_catalog_and_clear_removes_file(self):
+        self.set_entry(self.controller.key, 'saved-fixture-key')
+        self.assertTrue(self.controller.save_key())
+        path = self.controller.key_store.path
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        other = tk.Toplevel(self.root)
+        other.withdraw()
+        try:
+            restarted = lab.App(other)
+            self.assertEqual(restarted.key.get(), 'saved-fixture-key')
+            self.execute(lambda: None, lambda: bool(restarted.choices) and not restarted.busy)
+            self.assertIn('RTX 4090', restarted.compute.get())
+            restarted.clear_key()
+            self.assertEqual(restarted.key.get(), '')
+            self.assertFalse(path.exists())
+            self.root.update_idletasks()
+        finally:
+            other.destroy()
+
+    def test_start_simulation_creates_deploys_and_opens_with_generated_trust(self):
+        self.load_catalog()
+        def create(payload):
+            self.provider.created.append(payload)
+            pod = {'id': 'auto-pod', 'name': payload['name'], 'status': 'RUNNING',
+                   'gpu': payload['gpu'], 'cloud': payload['cloud'],
+                   'ssh': {'direct': {'host': 'pod.example', 'port': 2222, 'username': 'root'}}}
+            self.provider.pods = [pod]
+            return 201, pod
+        pin = Path(self.tmp.name) / 'known_hosts'
+        pin.write_text('fixture')
+        bridge = types.SimpleNamespace(url='http://127.0.0.1:1/#fixture', close=lambda: None)
+        with patch.object(self.provider, 'create_pod', side_effect=create), \
+             patch.object(messagebox, 'askyesno', return_value=True) as confirm, \
+             patch('host_identity.existing_host_key', return_value=None), \
+             patch('host_identity.verify_host_key', return_value=pin) as verify, \
+             patch.object(self.provider, 'get_pod_ssh_fingerprint', create=True,
+                          side_effect=RunPodError('logs denied', status=403)) as logs, \
+             patch.object(lab, 'deploy_selected', return_value='PUMP_LAB_MODE=vulkan') as deploy, \
+             patch('browser_bridge.start', return_value=bridge) as start, \
+             patch.object(lab.webbrowser, 'open') as browser:
+            self.execute(self.button('Start simulation').invoke,
+                         lambda: self.controller.bridge is bridge and not self.controller.setting_up)
+            self.button('Start simulation').invoke()
+        confirm.assert_called_once()
+        self.assertEqual(len(self.provider.created), 1)
+        record = self.controller.state.read()[0]
+        self.assertEqual(record['deployments']['simulation'], 'PUMP_LAB_MODE=vulkan')
+        self.assertTrue(record['ssh_fingerprint'].startswith('SHA256:'))
+        self.assertIn('PUMP_LAB_HOST_KEY_B64', self.provider.created[0]['env'])
+        verify.assert_called_once_with('auto-pod', 'pod.example', 2222,
+                                       record['ssh_fingerprint'], self.controller.state.path.parent)
+        self.assertEqual(deploy.call_args.args[3], record['ssh_identity'])
+        self.assertIn(record['ssh_identity'], start.call_args.args[0])
+        logs.assert_not_called()
+        self.assertEqual(browser.call_count, 2)
+        browser.assert_called_with(bridge.url)
+
+    def test_setup_failure_can_retry_same_owned_pod(self):
+        self.load_catalog()
+        record = {'id': 'retry-pod', 'name': 'owned-retry', 'deadline': time.time() + 120,
+                  'cloud': 'SECURE', 'compute_kind': 'gpu', 'compute_id': 'NVIDIA GeForce RTX 4090'}
+        self.controller.state.write([record])
+        self.controller.select_record(record)
+        pod = dict(record, status='RUNNING', gpu={'id': record['compute_id'], 'count': 1},
+                   ssh={'direct': {'host': 'pod.example', 'port': 2222, 'username': 'root'}})
+        self.provider.pods = [pod]
+        pin = Path(self.tmp.name) / 'known_hosts'
+        pin.write_text('fixture')
+        bridge = types.SimpleNamespace(url='http://127.0.0.1:1/#fixture', close=lambda: None)
+        with patch('host_identity.existing_host_key', return_value=pin), \
+             patch.object(lab, 'deploy_selected', side_effect=[ValueError('interrupted build'), 'receipt']) as deploy, \
+             patch('browser_bridge.start', return_value=bridge), \
+             patch.object(lab.webbrowser, 'open'), patch.object(messagebox, 'askyesno') as confirm:
+            self.execute(self.button('Start simulation').invoke,
+                         lambda: not self.controller.setting_up and 'Setup stopped' in self.controller.status.get())
+            self.assertIn('interrupted build', self.controller.status.get())
+            self.execute(self.button('Start simulation').invoke,
+                         lambda: self.controller.bridge is bridge and not self.controller.setting_up)
+        self.assertEqual(deploy.call_count, 2)
+        confirm.assert_not_called()
+        self.assertFalse(self.provider.created)
 
     def test_console_fingerprint_cleared_when_its_selected_pod_changes(self):
         self.root.deiconify()

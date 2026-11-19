@@ -105,7 +105,7 @@ def options(gpus, cpus, cloud='SECURE'):
     for kind, catalog in (('gpu', gpus), ('cpu', cpus)):
         for item in catalog:
             offer = catalog_offer(item, kind, cloud)
-            if offer:
+            if offer and offer[2] != 'NONE':
                 offers.append(offer)
 
     def priority(offer):
@@ -222,17 +222,26 @@ class Ownership:
             if type(vcpu) is not int or vcpu != 32:
                 raise ValueError('CPU choice must request 32 vCPUs')
             record.update(requested_vcpu=vcpu, minimum_memory_gb=128)
+        from bootstrap import prepare_bootstrap, forget_bootstrap
+        bootstrap_record, bootstrap_payload = prepare_bootstrap(self.state.path.parent, name, image)
+        record.update(bootstrap_record)
         records.append(record)
-        self.state.write(records)
+        try:
+            self.state.write(records)
+        except (OSError, ValueError):
+            forget_bootstrap(record, self.state.path.parent)
+            raise
         try:
             status, result = self.client.create_pod({
                 'name': name, 'image': image, 'disk': 50, 'startSsh': True,
                 'ports': ['22/tcp'], kind: compute[kind], 'cloud': cloud,
+                **bootstrap_payload,
             })
         except RunPodError as exc:
             if not exc.uncertain and exc.status and 400 <= exc.status < 500:
                 records.remove(record)
                 self.state.write(records)
+                forget_bootstrap(record, self.state.path.parent)
             raise
         if status == 202 or 'podId' in result or str(result.get('status', '')).upper() == 'QUEUED':
             record['queue_id'] = result.get('id')
@@ -379,12 +388,13 @@ def owned_pod_connection(client, record, known_hosts, state_dir):
         return pod, str(path)
     path = existing_host_key(pod_id, host, port, state_dir)
     if path is None:
-        try:
-            fingerprint = client.get_pod_ssh_fingerprint(pod_id)
-        except RunPodError as error:
-            raise ValueError(f'{error}. In the RunPod console, open this pod’s Logs → Container. '
-                             'Copy the SHA256 fingerprint printed for /etc/ssh/ssh_host_ed25519_key.pub '
-                             'into the SSH trust field.') from None
+        fingerprint = record.get('ssh_fingerprint')
+        if not fingerprint:
+            try:
+                fingerprint = client.get_pod_ssh_fingerprint(pod_id)
+            except RunPodError as error:
+                raise ValueError(f'{error}. This older pod needs its existing SSH fingerprint. '
+                                 'New pods created by this version configure SSH automatically.') from None
         path = verify_host_key(pod_id, host, port, fingerprint, state_dir)
     return pod, str(path)
 
@@ -581,6 +591,8 @@ class App:
         self.closing_bridge = False
         self.deploying = False
         self.enumerating = False
+        self.setting_up = False
+        self.setup_after = None
         self.devices = {}
         root.protocol('WM_DELETE_WINDOW', self.close)
         root.title('Robust RunPod Lab — provisioning')
@@ -607,9 +619,14 @@ class App:
         self.capture_frames = tk.StringVar()
         self.playback_prebuffer = tk.StringVar()
         self.status = tk.StringVar(value='Enter a RunPod API key and load the catalog. No pod is created automatically.')
-        ttk.Label(box, text='RunPod API key (session only)').grid(row=0, column=0, sticky='w')
-        ttk.Entry(box, textvariable=self.key, show='•', width=60).grid(row=0, column=1, sticky='ew')
-        ttk.Button(box, text='Load catalog', command=self.catalog).grid(row=0, column=2)
+        ttk.Label(box, text='RunPod API key (saved)').grid(row=0, column=0, sticky='w')
+        key_entry = ttk.Entry(box, textvariable=self.key, show='•', width=60)
+        key_entry.grid(row=0, column=1, sticky='ew')
+        key_entry.bind('<FocusOut>', lambda _: self.save_key())
+        key_actions = ttk.Frame(box)
+        key_actions.grid(row=0, column=2)
+        ttk.Button(key_actions, text='Load catalog', command=self.catalog).pack(side='left')
+        ttk.Button(key_actions, text='Clear key', command=self.clear_key).pack(side='left')
         ttk.Label(box, text='Compute').grid(row=1, column=0, sticky='w')
         self.dropdown = ttk.Combobox(box, textvariable=self.compute, state='readonly')
         self.dropdown.grid(row=1, column=1, columnspan=2, sticky='ew')
@@ -624,8 +641,11 @@ class App:
                      width=12, state='readonly').pack(side='left')
         self.cloud.trace_add('write', self.tier_changed)
         ttk.Label(box, text='Automatic termination requires this app to remain open with the API key entered. Billing can continue if it is closed.').grid(row=9, column=0, columnspan=3, sticky='w', pady=8)
-        ttk.Button(box, text='Create billable pod', command=self.create).grid(row=4, column=0, sticky='w')
-        ttk.Button(box, text='Reconcile owned pods', command=self.reconcile).grid(row=4, column=1, sticky='w')
+        ttk.Button(box, text='Start simulation', command=self.start_simulation).grid(row=4, column=0, sticky='w')
+        pod_actions = ttk.Frame(box)
+        pod_actions.grid(row=4, column=1, sticky='w')
+        ttk.Button(pod_actions, text='Create billable pod', command=self.create).pack(side='left')
+        ttk.Button(pod_actions, text='Reconcile owned pods', command=self.reconcile).pack(side='left')
         ttk.Button(box, text='Terminate selected pod', command=self.terminate).grid(row=4, column=2)
         self.list = tk.Listbox(box, height=8, exportselection=False,
                                background='#171b22', foreground='#f0f2f5',
@@ -645,7 +665,7 @@ class App:
         ttk.Button(box, text='Open selected worker', command=self.open_simulation).grid(row=7, column=0, sticky='w')
         ttk.Button(box, text='Forget verified closed record', command=self.forget).grid(row=7, column=1, sticky='w')
         ttk.Button(box, text='Deploy worker to selected pod', command=self.deploy_worker).grid(row=7, column=2, sticky='w')
-        ttk.Label(box, text='Deploy the worker before opening a session. For SSH trust, leave blank for automatic verification, paste this pod’s Ed25519 SHA256 fingerprint from RunPod Logs → Container, or enter a verified known_hosts file.', wraplength=760).grid(row=8, column=0, columnspan=3, sticky='w', pady=8)
+        ttk.Label(box, text='Start simulation creates a pod, configures SSH, deploys the worker and opens the simulation. Select an owned pod to continue using it. The controls below support manual setup and older pods.', wraplength=760).grid(row=8, column=0, columnspan=3, sticky='w', pady=8)
         ttk.Label(box, text='SSH trust (optional)').grid(row=10, column=0, sticky='w')
         ttk.Entry(box, textvariable=self.known_hosts).grid(row=10, column=1, sticky='ew')
         ttk.Label(box, text='SSH identity (optional)').grid(row=11, column=0, sticky='w')
@@ -664,6 +684,36 @@ class App:
         self.refresh()
         self.key.trace_add('write', lambda *_: self.root.after_idle(self.enforce_deadlines))
         self.root.after(15000, self.deadline_tick)
+        from credentials import ApiKeyStore
+        self.key_store = ApiKeyStore(self.state.path.parent)
+        try:
+            self.key.set(self.key_store.load())
+        except (OSError, ValueError):
+            self.status.set('Could not read the saved API key. Check ' + str(self.key_store.path))
+        if self.key.get():
+            self.root.after_idle(self.startup_catalog)
+
+    def startup_catalog(self):
+        if self.busy:
+            self.root.after(100, self.startup_catalog)
+        elif self.key.get().strip():
+            self.catalog()
+
+    def save_key(self):
+        try:
+            self.key_store.save(self.key.get().strip())
+            return True
+        except (OSError, ValueError):
+            self.status.set('Could not save the API key. Check ' + str(self.key_store.path))
+            return False
+
+    def clear_key(self):
+        if self.setting_up or self.busy or self.deploying:
+            self.status.set('Wait for setup or the current request before clearing the API key.')
+            return
+        self.key.set('')
+        if self.save_key():
+            self.status.set('Saved API key removed.')
 
     def copy_status(self, _event=None):
         """Copy exactly the visible status text, never other form fields."""
@@ -724,12 +774,14 @@ class App:
                 self.list.see(index)
         self.clear_stale_fingerprint()
 
-    def background(self, fn, done):
+    def background(self, fn, done, failed=None):
         if self.busy:
             return
         key = self.key.get().strip()
         if not key:
             self.status.set('Enter an API key first.')
+            return
+        if not self.save_key():
             return
         self.busy = True
         self.status.set('Contacting RunPod…')
@@ -745,6 +797,8 @@ class App:
             self.busy = False
             if error:
                 self.status.set(error)
+                if failed:
+                    failed(error)
             else:
                 done(result)
             if self.create_interrupted and not self.busy:
@@ -792,7 +846,10 @@ class App:
                 self.status.set('Catalog loaded. Stock and compute price are checked again before creation.')
         self.background(lambda c: load_catalog(c, cloud), done)
 
-    def create(self):
+    def create(self, after_create=None):
+        if self.setting_up or self.deploying:
+            self.status.set('Wait for the current setup to finish.')
+            return
         selected = self.selected_compute()
         image = self.image.get().strip()
         if not selected or not image:
@@ -836,17 +893,167 @@ class App:
                 self.status.set('The pod settings changed. Review the selection and click Create again.')
                 return
             deadline = time.time() + minutes * 60
-            self.background(lambda c: Ownership(self.state, c).create(selected, image, deadline),
-                            lambda _: self.status.set('Create submitted. Reconcile for status; charges may continue.'))
+            def created(result):
+                self.refresh()
+                record = next((r for r in self.records if r.get('id') == result.get('id')
+                               and r.get('name') == result.get('name')), None)
+                if record and after_create:
+                    self.select_record(record)
+                    after_create(record)
+                else:
+                    self.status.set('Create submitted. Reconcile for status; charges may continue.')
+            self.background(lambda c: Ownership(self.state, c).create(selected, image, deadline), created)
         self.background(lambda c: creation_quote(c, selected), confirm)
 
     def reconcile(self):
         self.background(lambda c: Ownership(self.state, c).reconcile(),
                         lambda _: self.status.set('Ownership status refreshed; verify unresolved or queued pods in the RunPod console.'))
 
+    def select_record(self, record):
+        self.refresh()
+        self.list.selection_clear(0, 'end')
+        for index, item in enumerate(self.records):
+            if item.get('name') == record.get('name'):
+                self.list.selection_set(index)
+                self.list.activate(index)
+                self.list.see(index)
+                break
+
+    def session_settings(self):
+        profile = self.profile.get()
+        if profile not in ('simulation', 'live'):
+            raise ValueError('Choose a worker profile.')
+        files = file_root(self.files.get())
+        audio = (self.audio_binary.get(), self.devices.get(self.audio_device.get(), self.audio_device.get()),
+                 self.capture_bytes.get(), self.playback_bytes.get(), self.capture_frames.get(),
+                 self.playback_prebuffer.get(), self.local_utc_uncertainty.get(),
+                 self.max_clock_offset.get(), self.remote_clock_drift_ppm.get())
+        if profile == 'live':
+            live_command(['ssh'], *audio)
+        return profile, files, audio
+
+    def start_simulation(self):
+        if self.setting_up or self.busy or self.deploying or self.closing_bridge:
+            self.status.set('Wait for the current setup or provider request to finish.')
+            return
+        if self.bridge:
+            webbrowser.open(self.bridge.url)
+            return
+        try:
+            settings = self.session_settings()
+        except (OSError, ValueError) as error:
+            self.status.set(str(error))
+            return
+        selected = self.list.curselection()
+        if selected:
+            record = dict(self.records[selected[0]])
+            if not record.get('id'):
+                self.status.set('Reconcile the selected pending request before starting its session.')
+                return
+            self.prepare_worker(record, settings)
+        else:
+            self.create(after_create=lambda record: self.prepare_worker(record, settings))
+
+    def prepare_worker(self, record, settings):
+        deadline = record.get('deadline')
+        if type(deadline) not in (int, float) or not math.isfinite(deadline) or deadline <= time.time():
+            self.status.set('The pod deadline is missing or expired. Review the owned pod before continuing.')
+            return
+        if not self.key.get().strip() or not self.save_key():
+            self.status.set('Enter an API key to continue setup.')
+            return
+        self.setting_up = True
+        key = self.key.get().strip()
+        known_hosts = self.known_hosts.get()
+        identity = self.identity.get().strip() or record.get('ssh_identity') or None
+        ready_until = min(deadline, time.time() + 600)
+        profile, files, audio = settings
+
+        def failed(message):
+            self.setting_up = False
+            self.status.set('Setup stopped. ' + message + ' The pod remains owned. Use Start simulation to retry or terminate it.')
+
+        def connect(client):
+            pod = owned_pod_details(client, record)
+            if pod.get('status') in ('ERROR', 'EXITED', 'TERMINATED', 'FAILED', 'STOPPED'):
+                raise ValueError('The selected pod is ' + pod['status'] + '.')
+            if pod.get('status') != 'RUNNING' or not (pod.get('ssh') or {}).get('direct'):
+                return None
+            simulation_gpu(record, pod)
+            try:
+                return owned_pod_connection(client, record, known_hosts, self.state.path.parent)
+            except ValueError as error:
+                if str(error).startswith(('Could not read a bounded SSH host key', 'Direct SSH is not ready')):
+                    return None
+                raise
+
+        def check_ready():
+            self.setup_after = None
+            if self.key.get().strip() != key:
+                failed('The API key changed during setup.')
+                return
+            if time.time() >= ready_until:
+                failed('Timed out waiting for the pod and its authenticated SSH endpoint.')
+                self.enforce_deadlines()
+                return
+            if self.busy:
+                self.setup_after = self.root.after(250, check_ready)
+                return
+            self.background(connect, connected, failed)
+
+        def connected(connection):
+            if connection is None:
+                self.status.set('Waiting for RunPod startup and SSH. The pod deadline remains active.')
+                self.setup_after = self.root.after(2000, check_ready)
+                return
+            pod, pin = connection
+            self.deploying = True
+            self.status.set('Deploying the native worker. The pod deadline remains active.')
+            def work():
+                try:
+                    receipt = deploy_selected(pod, record, pin, identity, key, profile=profile)
+                    error = None
+                except Exception as exc:
+                    receipt, error = '', str(exc).replace(key, '[redacted]')[:4096]
+                self.root.after(0, lambda: deployed(receipt, error, pod, pin))
+            threading.Thread(target=work, daemon=True).start()
+
+        def deployed(receipt, error, pod, pin):
+            if self.busy:
+                self.root.after(100, lambda: deployed(receipt, error, pod, pin))
+                return
+            self.deploying = False
+            if error:
+                failed(error)
+                return
+            if time.time() >= deadline:
+                failed('The pod deadline expired during deployment.')
+                self.enforce_deadlines()
+                return
+            try:
+                records = self.state.read()
+                current = next(r for r in records if r.get('id') == record.get('id') and r.get('name') == record.get('name'))
+                current.setdefault('deployments', {})[profile] = receipt
+                self.state.write(records)
+                self.deployment_receipt.set(receipt)
+                command = ssh_command(pod, pin, identity, simulation_gpu(record, pod), files is not None, live=profile == 'live')
+                if profile == 'live':
+                    command = live_command(command, *audio)
+                from browser_bridge import start
+                self.bridge = start(command, files=files, live=True) if profile == 'live' else start(command, files=files) if files else start(command)
+                webbrowser.open(self.bridge.url)
+                self.setting_up = False
+                self.status.set('Simulation opened.' if profile == 'simulation' else 'Experimental Live/Duplex session opened.')
+            except Exception as exc:
+                failed(str(exc).replace(key, '[redacted]')[:4096])
+
+        check_ready()
+
     def close(self):
-        if self.busy or self.deploying or self.enumerating or self.closing_bridge:
+        if self.busy or self.deploying or self.enumerating or self.closing_bridge or self.setting_up:
             self.status.set('Wait for the current provider request or bounded deployment to finish before closing.')
+            return
+        if not self.save_key():
             return
         if self.bridge:
             self.bridge.close()
@@ -884,7 +1091,7 @@ class App:
         threading.Thread(target=work, daemon=True).start()
 
     def forget(self):
-        if self.busy:
+        if self.busy or getattr(self, 'setting_up', False) or getattr(self, 'deploying', False):
             self.status.set('Wait for the current provider request to finish before removing a record.')
             return
         idx = self.list.curselection()
@@ -909,6 +1116,8 @@ class App:
             if pod_id and not any(r.get('id') == pod_id for r in records):
                 from host_identity import forget_host_key
                 forget_host_key(pod_id, self.state.path.parent)
+            from bootstrap import forget_bootstrap
+            forget_bootstrap(record, self.state.path.parent)
             self.state.write(records)
         except (OSError, ValueError):
             self.status.set('Could not finish removing the local record and its SSH pin. Check the lab state directory.')
@@ -917,6 +1126,9 @@ class App:
         self.status.set('Local record removed. Provider resources were not changed.')
 
     def deploy_worker(self):
+        if getattr(self, 'setting_up', False):
+            self.status.set('Automatic setup is already in progress.')
+            return
         if self.clear_stale_fingerprint():
             return
         idx = self.list.curselection()
@@ -930,7 +1142,8 @@ class App:
         if not isinstance(record.get('deadline'), (int, float)) or record['deadline'] <= time.time():
             self.status.set('Pod deadline is missing or expired; deployment is unavailable.')
             return
-        known_hosts, identity = self.known_hosts.get(), self.identity.get().strip() or None
+        known_hosts = self.known_hosts.get()
+        identity = self.identity.get().strip() or record.get('ssh_identity') or None
         profile = self.profile.get()
         secret = self.key.get().strip()
         def launch(connection):
@@ -999,6 +1212,9 @@ class App:
         ttk.Button(window, text='Close', command=window.destroy).grid(row=end+1, column=1, sticky='e')
 
     def open_simulation(self):
+        if getattr(self, 'setting_up', False):
+            self.status.set('Automatic setup will open the session when the worker is ready.')
+            return
         if self.clear_stale_fingerprint():
             return
         if self.closing_bridge:
@@ -1012,7 +1228,7 @@ class App:
             self.status.set('A worker session is already open; use Close worker session before opening another.')
             return
         record = dict(self.records[idx[0]])
-        known_hosts, identity, files = self.known_hosts.get(), self.identity.get(), self.files.get()
+        known_hosts, identity, files = self.known_hosts.get(), self.identity.get().strip() or record.get('ssh_identity'), self.files.get()
         profile = self.profile.get()
         settings = (self.audio_binary.get(), self.devices.get(self.audio_device.get(), self.audio_device.get()), self.capture_bytes.get(), self.playback_bytes.get(), self.capture_frames.get(), self.playback_prebuffer.get(), self.local_utc_uncertainty.get(), self.max_clock_offset.get(), self.remote_clock_drift_ppm.get())
         def done(connection):
@@ -1039,7 +1255,8 @@ class App:
         record = dict(self.records[idx[0]])
         def show(pod):
             # Show provider fields as text; never execute a returned command.
-            messagebox.showinfo('RunPod details', json.dumps(pod, indent=2))
+            fields = ('id', 'name', 'status', 'cloud', 'image', 'gpu', 'cpu', 'cost', 'ssh', 'ports', 'createdAt')
+            messagebox.showinfo('RunPod details', json.dumps({key: pod[key] for key in fields if key in pod}, indent=2))
             self.status.set('Pod details loaded.')
         self.background(lambda c: owned_pod_details(c, record), show)
 

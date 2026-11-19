@@ -40,12 +40,24 @@ interpreter. Then launch the controller:
 python3 _zLab/app.py
 ```
 
-Enter a RunPod API key in the masked field, select the cloud tier and click
-**Load catalog**. The key stays in memory for the session. Secure Cloud is the
-default. The dropdown shows RunPod's current stock and hourly compute list
+Enter a RunPod API key once in the masked field. The lab saves it as plain text
+in `${XDG_STATE_HOME:-$HOME/.local/state}/pumpModem/runpod-lab/api-key`,
+with owner-only file permissions (`0600`) in a private directory. It loads
+the saved key and catalog automatically on subsequent launches. Editing the
+field replaces the saved key when focus leaves the field or an action uses
+it. **Clear key** removes the saved file.
+
+Select compute and click **Start simulation**. After one billing confirmation,
+the lab creates the pod, waits for SSH, deploys the native worker and opens the
+shared simulation GUI. Select an existing owned pod to continue its setup or
+reopen its session. **Create billable pod**, **Deploy worker to selected pod**
+and **Open selected worker** remain available for individual steps.
+
+Secure Cloud is the default. The dropdown shows current stock and compute list
 price for one RTX PRO 6000, RTX 5090 or RTX 4090, or a Secure Cloud CPU with
 32 vCPUs and at least 128 GB of RAM. CPU prices cover all 32 vCPUs. Refresh
-the catalog to see changes in stock or price.
+the catalog to see changes in stock or price. Options with **none** stock are
+hidden. If the selected option disappears on refresh, choose another option.
 
 **Create billable pod** checks the selected hardware and tier again. If stock
 is **none**, the app stops before confirmation. Otherwise, review the fresh
@@ -53,8 +65,9 @@ stock, price, image and deadline in the confirmation dialog. Stock can change
 before RunPod places the request. A recognized capacity rejection prompts a
 catalog refresh. Billing and field-validation rejections report the provider's
 reason when recognized. The final rate can include storage. For full SSH,
-the image must start an SSH server and accept the account public key on a
-directly reachable port. The GPU and CPU catalogs load independently.
+the image must support the official RunPod `/start.sh` startup script and a
+directly reachable SSH port. The default image supplies this startup.
+The GPU and CPU catalogs load independently.
 [GPU catalog](https://docs.runpod.io/api-reference-v2/catalog/list-gpu-types)
 and [CPU catalog](https://docs.runpod.io/api-reference-v2/catalog/list-cpu-types).
 
@@ -75,8 +88,8 @@ GPU inspection or deployment. The cause of that denial remains unknown. The
 GUI uses SSH for both deployment and simulation.
 
 The controller records its owned pod and queue requests under
-`${XDG_STATE_HOME:-$HOME/.local/state}/pumpModem/runpod-lab/` without the API
-key. After a lost response or restart, use **Reconcile owned pods** and inspect
+`${XDG_STATE_HOME:-$HOME/.local/state}/pumpModem/runpod-lab/jobs.json`.
+The API key has its own file. After a lost response or restart, use **Reconcile owned pods** and inspect
 RunPod before attempting another creation. Cancel queued requests or terminate
 pods explicitly, then confirm their status with RunPod before using **Forget
 verified closed record**. A successful deletion request alone is not proof
@@ -84,23 +97,25 @@ that billing stopped. Each creation requires a deadline; while the controller
 is open and the key is entered, it checks for expiration and requests
 termination or queue cancellation. This request is not confirmed automatically.
 No local deadline check can protect a pod while the application is closed or
-cannot contact the provider. Re-enter the API key after a restart, reconcile
-and verify the provider's status.
+cannot contact the provider. The saved key allows deadline checks to resume
+when the controller restarts.
 
 The simulation action expects the lab relay at
 `/workspace/pump-lab/_zLab/worker_relay.py` and the native worker at
 `/workspace/pump-lab/build/lab/datapump-worker` on the selected running pod.
-Select the `simulation` worker profile and click **Deploy worker to selected
-pod**. Leave **SSH trust (optional)** blank to use the default image's
-startup log. On first connection, the controller fetches the selected pod by
-ID, checks its name and reads its container log with `pods:read`. It compares
-the logged Ed25519 fingerprint with the public key offered by the pod's direct
-SSH host and port. A match creates a private `known_hosts` file for this pod.
-Later sessions reuse the saved key and require strict SSH host verification.
-**Forget verified closed record** also removes that pod's managed key file.
+Select the `simulation` worker profile and click **Start simulation**.
+New pods receive a unique host key generated locally before creation through
+the authenticated RunPod request. The lab also creates a client identity for
+that pod and installs its public key. It checks the offered host key against
+the saved fingerprint and uses strict SSH verification. Leave the optional
+SSH fields blank for this automatic setup. **Forget verified closed record**
+removes the pod's managed host pin and client identity.
+
+For older pods, the lab reuses an existing verified host pin or obtains the
+fingerprint from the authenticated startup log.
 [RunPod pod logs API](https://docs.runpod.io/api-reference-v2/pods/stream-pod-logs)
 
-If the log is incomplete, wait for SSH startup and retry. If the API denies
+For an older pod whose log is incomplete, wait for SSH startup and retry. If the API denies
 log access, select the same pod in the RunPod console, open **Logs → Container**
 and find the entry for `/etc/ssh/ssh_host_ed25519_key.pub`. Paste its
 `SHA256:…` fingerprint into **SSH trust (optional)** after selecting that pod
@@ -137,9 +152,11 @@ Vulkan build dependencies from signed Ubuntu packages. The standalone CLI
 defaults to `--mode cpu`. Use `--mode gpu` for automatic GPU selection or
 `--mode cuda` to require a CUDA build.
 GPU sessions enforce `--require-gpu`. Check the receiver's backend, scored
-rows and stage counters to see where GPU work ran. The helper refuses an existing
-profile-specific directory rather than overwriting it. A timeout or lost
-SSH connection may leave remote work or files; inspect the pod before retrying.
+rows and stage counters to see where GPU work ran. Reopening a managed deployment
+checks the source, build settings and worker hash before reuse. An interrupted
+matching build can resume. A different source or an unmanaged directory requires
+a fresh pod. A timeout or lost SSH connection may leave remote work active.
+The remote deployment lock prevents two attempts from building concurrently.
 The helper does not stop the pod. The source archive remains on the pod for deployment
 verification; remove it after the build is verified and it is no longer needed
 for diagnosis, or terminate the pod when the job ends.
@@ -396,13 +413,14 @@ account records from source uploads. Cache large compatible dependencies on a
 network volume when that saves meaningful transfer/build time. Record who owns
 that volume and when it can be released.
 
-The GUI provides a masked, editable RunPod API-key field with session-only
-storage. The API key authorizes pod management. SSH
+The GUI provides a masked, editable RunPod API-key field with private local
+file storage. The API key authorizes pod management. SSH
 authenticates the job connection, and the modem key selects the on-air waveform.
 Keep them separate. The pod executing an encrypted test needs the selected
 test's inputs and modem key material. Use an explicit lab key or test fixture
-and show what will be sent. Keep the API token and SSH private key local and
-out of command lines, logs, presets and archives.
+and show what will be sent. The API token and client SSH private key stay local.
+The unique server host key travels only in the authenticated creation request
+and is removed from the container startup environment before ordinary startup.
 
 The current REST API uses bearer authorization at `https://api.runpod.io/v2`.
 The catalog and pod calls use the `catalog:read`, `pods:read` and `pods:write`
