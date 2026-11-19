@@ -21,6 +21,24 @@ from runpod import RunPodClient, RunPodError
 
 IMAGE = 'runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404'
 GPU_MODELS = ('RTX PRO 6000', 'RTX 5090', 'RTX 4090')
+RTX_PRO_6000 = 'NVIDIA RTX PRO 6000 Blackwell Server Edition'
+RTX_5090 = 'NVIDIA GeForce RTX 5090'
+PREFERRED_GPUS = {
+    (RTX_PRO_6000, 2): 0,
+    (RTX_PRO_6000, 1): 1,
+    (RTX_5090, 3): 2,
+    (RTX_5090, 2): 3,
+    (RTX_5090, 1): 4,
+}
+REFRESH_ARROW = """
+#define refresh_width 16
+#define refresh_height 13
+static unsigned char refresh_bits[] = {
+  0x00, 0x00, 0xe0, 0x07, 0x38, 0xdc, 0x0c, 0xf0, 0x06, 0xf0,
+  0x06, 0xfe, 0x06, 0xe0, 0x06, 0x00, 0x06, 0x00, 0x06, 0x30,
+  0x0c, 0x18, 0xf8, 0x0f, 0xe0, 0x03
+};
+"""
 
 
 def configure_dark_theme(root):
@@ -45,6 +63,7 @@ def configure_dark_theme(root):
     style.configure('TLabel', background=background, foreground=foreground)
     style.configure('Hint.TLabel', background=background, foreground=muted)
     style.configure('TButton', background=surface, foreground=foreground, padding=(7, 4))
+    style.configure('Refresh.TButton', padding=(5, 3))
     style.map('TButton', background=[('disabled', background), ('pressed', selection),
                                     ('active', '#414c5b')],
               foreground=[('disabled', muted)])
@@ -63,7 +82,36 @@ def configure_dark_theme(root):
     root.option_add('*TCombobox*Listbox.selectForeground', foreground)
 
 
-def catalog_offer(item, kind, cloud):
+def compute_refresh_button(parent, command):
+    icon = tk.BitmapImage(master=parent, data=REFRESH_ARROW,
+                          foreground=ttk.Style(parent).lookup('TButton', 'foreground'))
+    button = ttk.Button(parent, name='refresh_compute', text='Refresh compute', image=icon,
+                        compound='image', style='Refresh.TButton', command=command)
+    button.icon = icon
+    hint = tk.Toplevel(button)
+    hint.withdraw()
+    hint.overrideredirect(True)
+    ttk.Label(hint, text=button.cget('text'), padding=(6, 3)).pack()
+
+    def show_hint(_event):
+        x, y = button.winfo_rootx(), button.winfo_rooty() + button.winfo_height()
+        hint.geometry(f'{x - hint.winfo_reqwidth() + button.winfo_width():+d}{y + 3:+d}')
+        hint.deiconify()
+
+    for event in ('<Enter>', '<FocusIn>'):
+        button.bind(event, show_hint)
+    for event in ('<Leave>', '<FocusOut>', '<ButtonPress>'):
+        button.bind(event, lambda _event: hint.withdraw())
+    return button
+
+
+def gpu_count_ceiling(item, cloud):
+    limits = item.get('maxCount')
+    limit = limits.get(cloud.lower()) if isinstance(limits, dict) else None
+    return limit if type(limit) is int and limit >= 0 else None
+
+
+def catalog_offer(item, kind, cloud, count=1):
     """Return the GUI label, create payload and stock for one supported SKU."""
     if not isinstance(item, dict) or not isinstance(item.get('id'), str) or not item['id']:
         return None
@@ -76,11 +124,17 @@ def catalog_offer(item, kind, cloud):
     if kind == 'gpu':
         if not any(model in identity.upper() for model in GPU_MODELS):
             return None
-        if item.get(cloud.lower()) is False:
+        if count != 1 and (identity, count) not in PREFERRED_GPUS:
+            return None
+        maximum = gpu_count_ceiling(item, cloud)
+        if item.get(cloud.lower()) is False or (maximum is not None and count > maximum):
             stock = 'NONE'
-        compute = {'gpu': {'id': identity, 'count': 1}, 'cloud': cloud}
+        compute = {'gpu': {'id': identity, 'count': count}, 'cloud': cloud}
         label = f'GPU: {identity}'
-        price = prices.get(cloud.lower())
+        if count > 1:
+            label += f' x{count}'
+        per_gpu = prices.get(cloud.lower())
+        price = per_gpu * count if type(per_gpu) in (int, float) else None
     else:
         if cloud != 'SECURE':
             return None
@@ -103,19 +157,24 @@ def catalog_offer(item, kind, cloud):
     return label, compute, stock
 
 
-def options(gpus, cpus, cloud='SECURE'):
+def options(gpus, cpus, cloud='SECURE', *, multi_gpu=None):
     offers = []
-    for kind, catalog in (('gpu', gpus), ('cpu', cpus)):
-        for item in catalog:
-            offer = catalog_offer(item, kind, cloud)
-            if offer and offer[2] != 'NONE':
+    for count, rows in ((1, gpus), *(multi_gpu or {}).items()):
+        for item in rows:
+            offer = catalog_offer(item, 'gpu', cloud, count)
+            if offer and offer[2] != 'NONE' and (count == 1 or offer[2] != 'UNKNOWN'):
                 offers.append(offer)
+    offers.extend(offer for item in cpus if (offer := catalog_offer(item, 'cpu', cloud))
+                  and offer[2] != 'NONE')
 
     def priority(offer):
         _, compute, stock = offer
-        gpu = compute.get('gpu', {}).get('id', '').upper()
-        model_rank = next((i for i, model in enumerate(GPU_MODELS) if model in gpu), len(GPU_MODELS))
-        return stock == 'NONE', stock == 'UNKNOWN', not gpu, 'MIG' in gpu.split(), model_rank, 'MAX-Q' in gpu
+        gpu = compute.get('gpu', {})
+        identity = gpu.get('id', '')
+        preference = PREFERRED_GPUS.get((identity, gpu.get('count')), len(PREFERRED_GPUS))
+        model = identity.upper()
+        model_rank = next((i for i, name in enumerate(GPU_MODELS) if name in model), len(GPU_MODELS))
+        return stock == 'UNKNOWN', preference, not gpu, 'MIG' in model.split(), model_rank, 'MAX-Q' in model
 
     return [(label, compute) for label, compute, _ in sorted(offers, key=priority)]
 
@@ -124,14 +183,17 @@ def creation_quote(client, compute):
     """Recheck the exact selected SKU and tier before confirming a paid request."""
     cloud = compute['cloud']
     kind = 'gpu' if 'gpu' in compute else 'cpu'
-    items = client.list_gpus(cloud) if kind == 'gpu' else client.list_cpus()
+    count = compute['gpu']['count'] if kind == 'gpu' else 1
+    items = client.list_gpus(cloud, count=count) if kind == 'gpu' else client.list_cpus()
     matches = [item for item in items if isinstance(item, dict) and item.get('id') == compute[kind]['id']]
-    offer = catalog_offer(matches[0], kind, cloud) if len(matches) == 1 else None
+    offer = catalog_offer(matches[0], kind, cloud, count) if len(matches) == 1 else None
     if not offer or offer[1] != compute:
         raise ValueError('This compute option is no longer listed for the selected tier. Reload the catalog.')
     label, _, stock = offer
     if stock == 'NONE':
         raise ValueError(f'{label} on {cloud.title()} Cloud. Reload the catalog for another placement.')
+    if count > 1 and stock == 'UNKNOWN':
+        raise ValueError(f'RunPod could not confirm stock for {label}. Reload the catalog and try again.')
     return label
 
 
@@ -142,15 +204,12 @@ def load_catalog(client, cloud='SECURE'):
     sanitizes its errors, a provider or injected transport can expose a key or
     other request data. Map status codes to fixed, actionable messages.
     """
-    catalogs, failures = {}, []
-    fetches = [('GPU', lambda: client.list_gpus(cloud))]
-    if cloud == 'SECURE':
-        fetches.append(('CPU', client.list_cpus))
-    for kind, fetch in fetches:
+    failures = []
+
+    def fetch_catalog(kind, fetch):
         try:
-            catalogs[kind] = fetch()
+            return fetch()
         except RunPodError as error:
-            catalogs[kind] = []
             if error.status == 403:
                 detail = 'access denied (HTTP 403); check catalog:read and account permissions'
             elif error.status == 401:
@@ -162,7 +221,21 @@ def load_catalog(client, cloud='SECURE'):
             else:
                 detail = 'request failed; check the connection and try again'
             failures.append(f'{kind} catalog {detail}')
-    return options(catalogs['GPU'], catalogs.get('CPU', []), cloud), failures
+            return []
+
+    gpus = fetch_catalog('GPU', lambda: client.list_gpus(cloud))
+    cpus = fetch_catalog('CPU', client.list_cpus) if cloud == 'SECURE' else []
+    multi_gpu = {}
+    for count in (2, 3):
+        # The hardware ceiling can skip impossible queries. Only availability
+        # for the exact count establishes whether those GPUs are free.
+        if any(isinstance(item, dict) and isinstance(item.get('id'), str)
+               and (item['id'], count) in PREFERRED_GPUS
+               and item.get(cloud.lower()) is not False
+               and ((ceiling := gpu_count_ceiling(item, cloud)) is None or ceiling >= count)
+               for item in gpus):
+            multi_gpu[count] = fetch_catalog(f'GPU x{count}', lambda: client.list_gpus(cloud, count=count))
+    return options(gpus, cpus, cloud, multi_gpu=multi_gpu), failures
 
 
 class State:
@@ -312,18 +385,25 @@ class Ownership:
         if deadline is None or not isinstance(deadline, (int, float)) or deadline <= time.time():
             raise ValueError('A future job deadline is required')
         kind = 'gpu' if 'gpu' in compute else 'cpu' if 'cpu' in compute else None
-        if not kind or not isinstance(compute[kind].get('id'), str):
+        choice = compute.get(kind)
+        if not kind or not isinstance(choice, dict) or not isinstance(choice.get('id'), str):
             raise ValueError('Select a valid catalog compute type')
         cloud = compute.get('cloud', 'SECURE')
         if cloud not in ('SECURE', 'COMMUNITY') or (kind == 'cpu' and cloud != 'SECURE'):
             raise ValueError('Invalid cloud tier for the selected compute')
         record = {'name': name, 'status': 'create pending', 'deadline': deadline, 'cloud': cloud,
-                  'compute_kind': kind, 'compute_id': compute[kind]['id']}
+                  'compute_kind': kind, 'compute_id': choice['id']}
         if kind == 'cpu':
-            vcpu = compute[kind].get('vcpuCount')
+            vcpu = choice.get('vcpuCount')
             if type(vcpu) is not int or vcpu != 32:
                 raise ValueError('CPU choice must request 32 vCPUs')
             record.update(requested_vcpu=vcpu, minimum_memory_gb=128)
+        else:
+            count = choice.get('count', 1)
+            if type(count) is not int or count < 1:
+                raise ValueError('GPU choice must request a positive GPU count')
+            record['requested_gpu_count'] = count
+            choice = dict(choice, count=count)
         from bootstrap import prepare_bootstrap, forget_bootstrap
         bootstrap_record, bootstrap_payload = prepare_bootstrap(self.state.path.parent, name, image)
         record.update(bootstrap_record)
@@ -341,7 +421,7 @@ class Ownership:
         try:
             status, result = self.client.create_pod({
                 'name': name, 'image': image, 'disk': 50, 'startSsh': True,
-                'ports': ['22/tcp'], kind: compute[kind], 'cloud': cloud,
+                'ports': ['22/tcp'], kind: choice, 'cloud': cloud,
                 **bootstrap_payload,
             })
         except RunPodError as exc:
@@ -736,9 +816,11 @@ def simulation_gpu(record, pod):
         raise ValueError('RunPod did not confirm the requested cloud tier. Check the selected pod details.')
     kind, expected = record.get('compute_kind'), record.get('compute_id')
     if kind == 'gpu':
-        actual = pod.get('gpu') or {}
-        if actual.get('id') != expected or type(actual.get('count')) is not int or actual['count'] != 1:
-            raise ValueError('RunPod did not report exactly one GPU of the requested catalog type')
+        actual, count = pod.get('gpu'), record.get('requested_gpu_count', 1)
+        if (not isinstance(actual, dict) or actual.get('id') != expected or
+                type(count) is not int or count < 1 or
+                type(actual.get('count')) is not int or actual['count'] != count):
+            raise ValueError('RunPod did not report the requested GPU type and count')
         return True
     if kind == 'cpu':
         actual = pod.get('cpu') or {}
@@ -817,12 +899,13 @@ def deploy_selected(pod, record, known_hosts, identity, secret='', deploy_func=N
                             'PUMP_LAB_CGROUP_SCOPE=', 'PUMP_LAB_KERNEL_MEMORY_TOTAL_BYTES=',
                             'PUMP_LAB_RECEIPT_SCOPE=', 'PUMP_LAB_GPU_SCOPE=',
                             'PUMP_LAB_GPU_VISIBLE_MEMORY_BYTES=', 'PUMP_LAB_GPU_VISIBLE_UUID=',
-                            'PUMP_LAB_GPU_PARTITION_STATUS=', 'PUMP_LAB_GPU_INVENTORY=')):
+                            'PUMP_LAB_GPU_PARTITION_STATUS=', 'PUMP_LAB_GPU_INVENTORY=',
+                            'PUMP_LAB_BUILD_JOBS=')):
             clean = ''.join(ch if 32 <= ord(ch) < 127 else '?' for ch in line[:250])
             if secret:
                 clean = clean.replace(secret, '[redacted]')
             lines.append(clean)
-    return '\n'.join(lines[:19]) or 'Build succeeded; structured device and binary receipt was unavailable.'
+    return '\n'.join(lines[:20]) or 'Build succeeded; structured device and binary receipt was unavailable.'
 
 
 def device_query(argv, _input, timeout):
@@ -922,6 +1005,7 @@ class App:
         self.busy = False
         self.create_interrupted = False
         self.preferred_compute = None
+        self.catalog_after = None
         self.bridge = None
         self.bridge_close_failed = False
         self.browser_attached = False
@@ -981,8 +1065,13 @@ class App:
         self.key_entry.bind('<Return>', self.key_edited)
         ttk.Label(box, text='Saved in runpod-api-key at the repository root.').grid(row=1, column=1, sticky='w')
         ttk.Label(box, text='Compute').grid(row=2, column=0, sticky='w', padx=(0, 12), pady=(8, 0))
-        self.dropdown = ttk.Combobox(box, textvariable=self.compute, state='readonly')
-        self.dropdown.grid(row=2, column=1, sticky='ew', pady=(8, 0))
+        compute_box = ttk.Frame(box)
+        compute_box.grid(row=2, column=1, sticky='ew', pady=(8, 0))
+        self.refresh_compute = compute_refresh_button(compute_box, self.catalog)
+        self.refresh_compute.pack(side='right', padx=(4, 0))
+        self.dropdown = ttk.Combobox(compute_box, textvariable=self.compute, state='readonly')
+        self.dropdown.pack(side='left', fill='x', expand=True)
+        self.dropdown.bind('<<ComboboxSelected>>', self.compute_selected)
         actions = ttk.Frame(box)
         actions.grid(row=3, column=0, columnspan=2, sticky='ew', pady=12)
         ttk.Button(actions, text='Start simulation', command=self.start_simulation).pack(side='left')
@@ -1024,7 +1113,6 @@ class App:
         self.cloud.trace_add('write', self.tier_changed)
         advanced_actions = ttk.Frame(panel)
         advanced_actions.grid(row=6, column=0, columnspan=2, sticky='w', pady=(6, 0))
-        ttk.Button(advanced_actions, text='Refresh compute', command=self.catalog).pack(side='left')
         ttk.Button(advanced_actions, text='Clear key', command=self.clear_key).pack(side='left', padx=4)
         ttk.Button(advanced_actions, text='Configure live audio limits', command=self.audio_settings).pack(side='left')
         ttk.Button(advanced_actions, text='Deployment receipt', command=self.show_receipt).pack(side='left', padx=4)
@@ -1046,7 +1134,7 @@ class App:
         except (OSError, ValueError):
             self.status.set('Could not read the saved API key. Check ' + str(self.key_store.path))
         if self.key.get():
-            self.root.after_idle(self.initialize_saved_session)
+            self.schedule_catalog(self.initialize_saved_session)
 
     def initialize_saved_session(self):
         if self.records or self.ending_names:
@@ -1066,7 +1154,7 @@ class App:
     def window_destroyed(self, event):
         if event.widget is self.root:
             self.window_closed.set()
-            for attribute in ('close_after', 'lifecycle_after', 'setup_after'):
+            for attribute in ('close_after', 'lifecycle_after', 'setup_after', 'catalog_after'):
                 scheduled = getattr(self, attribute)
                 if scheduled is not None:
                     self.root.after_cancel(scheduled)
@@ -1136,11 +1224,21 @@ class App:
             if not self.key.get().strip():
                 self.status.set('Enter your RunPod API key to load available compute.')
 
+    def schedule_catalog(self, callback, delay=0):
+        if self.catalog_after is not None or self.exit_after is not None:
+            return
+
+        def run():
+            self.catalog_after = None
+            callback()
+
+        self.catalog_after = self.root.after(delay, run) if delay else self.root.after_idle(run)
+
     def startup_catalog(self):
         if self.exit_after is not None:
             return
         if self.busy:
-            self.root.after(100, self.startup_catalog)
+            self.schedule_catalog(self.startup_catalog, delay=100)
         elif self.key.get().strip():
             self.catalog()
 
@@ -1283,6 +1381,9 @@ class App:
             if r.get('name') in ending:
                 status = Ownership.TERMINATING
             compute = r.get('compute_id') or r.get('name')
+            count = r.get('requested_gpu_count')
+            if type(count) is int and count > 1:
+                compute = f'{compute} x{count}'
             identity = r.get('id') or r.get('queue_id') or 'ID pending'
             self.list.insert('end', f'{status}  |  {compute}  |  {identity}  |  deadline {when}')
             if name is not None and r.get('name') == name:
@@ -1332,16 +1433,18 @@ class App:
         return True
 
     def tier_changed(self, *_):
-        self.preferred_compute = self.selected_compute() or self.preferred_compute
         self.choices = []
         self.compute.set('')
         self.dropdown['values'] = []
         if self.key.get().strip():
-            self.root.after_idle(self.startup_catalog)
+            self.schedule_catalog(self.startup_catalog)
 
     def selected_compute(self):
         selected = self.compute.get()
         return next((value for label, value in self.choices if label == selected), None)
+
+    def compute_selected(self, _event=None):
+        self.preferred_compute = self.selected_compute()
 
     def catalog(self):
         if self.exit_after is not None:
@@ -1350,12 +1453,11 @@ class App:
         key = self.key.get().strip()
         def done(result):
             if self.cloud.get() != cloud or self.key.get().strip() != key:
-                self.root.after_idle(self.startup_catalog)
+                self.schedule_catalog(self.startup_catalog)
                 return
             self.catalog_key = key
-            previous = self.selected_compute() or self.preferred_compute
+            previous = self.preferred_compute
             if previous:
-                self.preferred_compute = previous
                 previous = dict(previous, cloud=cloud)
             choices, failures = result
             self.choices = choices
@@ -1416,6 +1518,9 @@ class App:
                       f'Create one pod with a {minutes}-minute deadline? '
                       'Automatic termination works only while this app is open with the API key entered. '
                       'Charges can continue after it closes.')
+            count = selected.get('gpu', {}).get('count', 1)
+            if count > 1:
+                prompt += f'\n\nThis pod allocates {count} GPUs. The receiver currently uses one GPU per session.'
             if selected['cloud'] == 'COMMUNITY':
                 prompt += ('\n\nThe worker needs direct SSH via a public IP. '
                            'The Community Cloud stock estimate does not verify public IP availability.')

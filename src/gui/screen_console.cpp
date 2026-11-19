@@ -25,7 +25,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     case Slot::message:case Slot::binary:case Slot::paste_previous:case Slot::attach_file:
     case Slot::use_text:case Slot::copy_signal:case Slot::paste_signal:case Slot::save_file:
         control.purpose=ControlPurpose::content;break;
-    case Slot::qr_brightness:case Slot::clear_waterfall:case Slot::zoom_in:case Slot::zoom_out:
+    case Slot::qr_brightness:case Slot::clear_waterfall:case Slot::replay_simulation:case Slot::zoom_in:case Slot::zoom_out:
     case Slot::reset_zoom:case Slot::transmit_scope_format:case Slot::wrong_key_admission:
         control.purpose=ControlPurpose::presentation;break;
     default:break;
@@ -189,11 +189,12 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.double_click=Command::reset_zoom;control.help="Wheel zooms the time span. Double-click resets zoom.";
     }
     if(slot==Slot::pattern_scores) {
-        control.click=Command::clear_pattern_scores;
         control.footer_height=64;
-        control.help="Actual fixed-affine DATA evidence retains the original public-grid prior mass; it is not a probability. Only aggregate evidence uses the operational threshold. Adaptive and combined lanes are diagnostic. The lower strip shows quiet energy/threshold, clipped to 0–2. Click clears the displayed evidence history.";
+        control.help="Actual fixed-affine DATA evidence retains the original public-grid prior mass. Only aggregate evidence uses the operational threshold. Adaptive and combined lanes are diagnostic. The lower strip shows quiet energy/threshold, clipped to 0–2.";
     }
-    if(slot==Slot::copy_signal||slot==Slot::clear_waterfall||slot==Slot::zoom_in||slot==Slot::zoom_out||slot==Slot::reset_zoom)control.font_size=11;
+    if(slot==Slot::replay_simulation)control.help="Replay the retained three-second activity excerpt from the previous simulation at its original frequency and scale. The decoded reception stays in Signals.";
+    if(slot==Slot::copy_signal||slot==Slot::clear_waterfall||slot==Slot::replay_simulation||
+       slot==Slot::zoom_in||slot==Slot::zoom_out||slot==Slot::reset_zoom)control.font_size=11;
     return control;
 }
 }
@@ -253,6 +254,11 @@ const std::vector<Control>& console_screen() {
         placed({Kind::text,Field::live_noise_dbfs_hz,Command::none,Bitmap::none,Page::robust_setup,2,"Live input noise (dBFS/Hz)",2,false,64}, Slot::none),
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,3,"Live reception uses a declared local noise model. Simulation uses the sampled channel noise."}, Slot::none),
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,4,"Unknown transmission starts are not acquired. Message completion requires two scored quiet slots."}, Slot::none),
+        {.kind=Kind::bitmap,.bitmap=Bitmap::cpu_utilization,.page=Page::robust_setup,.row=5,.label="CPU utilization",.unslotted_height=86},
+        {.kind=Kind::bitmap,.bitmap=Bitmap::ram_usage,.page=Page::robust_setup,.row=5,.label="RAM usage",.unslotted_height=86},
+        {.kind=Kind::bitmap,.bitmap=Bitmap::gpu_utilization,.page=Page::robust_setup,.row=7,.label="GPU utilization",.unslotted_height=86},
+        {.kind=Kind::bitmap,.bitmap=Bitmap::vram_usage,.page=Page::robust_setup,.row=7,.label="VRAM usage",.unslotted_height=86},
+        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,9,"Compute host · last 60 seconds · each lane spans 0–100% · GPUs listed top to bottom"}, Slot::none),
         placed({Kind::action,Field::count,Command::open_keyfile,Bitmap::none,Page::console,2,"Open keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::generate_keyfile,Bitmap::none,Page::console,2,"Generate keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::load_amateur,Bitmap::none,Page::console,2,"WARNING - Load Amateur"}, Slot::key_actions, Menu::keyfile),
@@ -305,6 +311,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::pattern_scores,Page::console,12,"Pattern evidence"}, Slot::pattern_scores),
         placed({Kind::list,Field::profile_reference,Command::none,Bitmap::none,Page::console,12,"Pattern steps"}, Slot::profile_reference),
         placed({Kind::action,Field::count,Command::clear_waterfall,Bitmap::none,Page::console,13,"Clear waterfall"}, Slot::clear_waterfall),
+        placed({Kind::action,Field::count,Command::replay_simulation,Bitmap::none,Page::console,13,"Replay sim"}, Slot::replay_simulation),
         placed({Kind::action,Field::count,Command::zoom_in,Bitmap::none,Page::console,13,"Zoom in"}, Slot::zoom_in),
         placed({Kind::action,Field::count,Command::zoom_out,Bitmap::none,Page::console,13,"Zoom out"}, Slot::zoom_out),
         placed({Kind::action,Field::count,Command::reset_zoom,Bitmap::none,Page::console,13,"Reset zoom"}, Slot::reset_zoom),

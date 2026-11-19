@@ -17,10 +17,13 @@ accuracy, 400 ms region and 2564 ms offset give an arrival interval centered on
 2564 ms with radius 202 ms before audio/provider uncertainty. These are declared
 assumptions, not a measured GPS bound or calculated lunar ephemeris.
 
-Audio error describes causal lag `[0,A]` per station, not `+/-A`. The default
-is 70 ms; supported durations range from zero through 60 seconds. It does not
-change underrun-prevention buffer size. Entering a smaller allowance cannot
-improve device evidence. Zero is a strict requested bound that ordinary device
+Audio error describes a causal lag from zero through the selected allowance at
+each station. The GUI starts at **Default**, and launch settings preserve that
+choice. Its effective device allowance is 70 ms when timing needs an allowance.
+Ordinary non-hopping Robust with Clock sync at **Default** retains its broad
+arrival search. Explicit durations can range from zero through 60 seconds.
+Entering a smaller allowance changes neither buffer size nor device evidence.
+Zero is a strict requested bound that ordinary device
 timestamps generally cannot certify. See `include/datapump/clock_sync.hpp` for
 shared duration validation, interval arithmetic and arrival mapping.
 

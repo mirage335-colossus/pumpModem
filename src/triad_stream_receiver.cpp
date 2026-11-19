@@ -1,6 +1,7 @@
 #include "datapump/triad_stream_receiver.hpp"
 
 #include "datapump/execution.hpp"
+#include "datapump/execution_resources.hpp"
 #include "triad_receiver_executor.hpp"
 #include "triad_receiver_bulk.hpp"
 #include "triad_stream_backend.hpp"
@@ -10,17 +11,9 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
-#include <ctime>
 #include <deque>
 #include <limits>
 #include <utility>
-
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
 
 namespace datapump::triad::v3 {
 namespace {
@@ -149,18 +142,7 @@ struct Job {
 } // namespace
 
 std::optional<double> detail::stream_process_cpu_seconds() {
-#ifdef _WIN32
-    FILETIME created{}, exited{}, kernel{}, user{};
-    if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) return {};
-    const auto ticks = [](FILETIME t) {
-        return (static_cast<std::uint64_t>(t.dwHighDateTime) << 32) | t.dwLowDateTime;
-    };
-    return (static_cast<double>(ticks(kernel)) + static_cast<double>(ticks(user))) * 1e-7;
-#else
-    const auto clock = std::clock();
-    if (clock == static_cast<std::clock_t>(-1)) return {};
-    return static_cast<double>(clock) / CLOCKS_PER_SEC;
-#endif
+    return execution::process_cpu_seconds();
 }
 
 ReceiverSlotPlan make_receiver_slot_plan(const PublicProfile& profile, const ReceiverConfig& config,

@@ -288,6 +288,14 @@ job if Python is unavailable. macOS memory availability is an estimate from
 `vm_stat`; Windows uses the built-in system memory API. No oversubscription is
 assumed from idle time or compiler-cache hits.
 
+The dedicated [RunPod worker deployer](../_zLab/deploy.py) uses the same
+CPU and memory detection with its own build budget. It can use all visible
+logical CPUs within the container's quota. It budgets 1.5 GiB per native
+CPU or Vulkan job, or 3 GiB per CUDA job, after setting aside the larger
+of 1 GiB or 10% of available memory for the linker and other processes.
+Inconclusive resource detection falls back to a serial build. The
+deployment receipt records the selected job count.
+
 For direct CMake or maintenance recipe invocations, pass the selector explicitly:
 
 ```sh

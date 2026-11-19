@@ -193,10 +193,15 @@ echo PUMP_LAB_MODE=cpu
                 home = self.root / (mode + '-' + profile)
                 home.mkdir(mode=0o700)
                 archive = home / 'source.tar.gz'
+                sizing = (b"import sys\nassert sys.argv[1] == '--runpod'\n"
+                          b"print({'cpu': 16, 'vulkan': 12, 'cuda': 8}[sys.argv[2]])\n")
                 with tarfile.open(archive, 'w:gz') as tar:
                     info = tarfile.TarInfo('source-file')
                     info.size = 1
                     tar.addfile(info, io.BytesIO(b'x'))
+                    info = tarfile.TarInfo('tools/build_capacity.py')
+                    info.size = len(sizing)
+                    tar.addfile(info, io.BytesIO(sizing))
                 digest = hashlib.sha256(archive.read_bytes()).hexdigest()
                 bin_dir = home / 'bin'
                 bin_dir.mkdir()
@@ -288,6 +293,11 @@ def compiled_with_cxx11_abi(): return True
                                   if line.startswith('PUMP_LAB_STAGE=')], expected_stages)
                 flags = log.read_text()
                 backend = 'vulkan' if vulkan else 'cuda' if mode == 'gpu' else mode
+                jobs = {'cpu': 16, 'vulkan': 12, 'cuda': 8}[backend]
+                self.assertIn(f'--build build/lab --parallel {jobs} --target ', flags)
+                self.assertIn(f'PUMP_LAB_BUILD_JOBS={jobs}\n', output)
+                receipt = json.loads((home / '.worker-receipt.json').read_text())
+                self.assertIn(f'PUMP_LAB_BUILD_JOBS={jobs}', receipt['text'].splitlines())
                 self.assertIn('PUMP_LAB_MODE=' + backend, output)
                 self.assertIn('PUMP_LAB_PROFILE=' + profile, output)
                 self.assertIn('PUMP_LAB_RECEIPT_SCOPE=deployment SSH process; worker execution not established', output)

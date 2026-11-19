@@ -222,10 +222,26 @@ private:
     Clock::time_point next_{};
 };
 
+double simulation_plot_noise_reference(const Settings& settings, std::uint32_t rate) {
+    // Real projection preserves complex noise variance. The Hann transform
+    // normalized by 2/N assigns white noise an effective bandwidth of 1.5 bins.
+    const auto noise_bandwidth = 1.5 * rate / plot_size;
+    return settings.tx_dbm - settings.path_loss_db - settings.noise_dbm_hz -
+        10 * std::log10(noise_bandwidth);
+}
+
 struct SimulationReplay {
-    SimulationReplay(const triad::SimulationConfig& effects, std::uint32_t rate,
+    SimulationReplay(const Profile& profile, const Settings& settings, const triad::SimulationConfig& effects,
                      std::uint64_t source_sample, std::uint64_t input_total)
-        : source_first(source_sample) {
+        : rate(settings.transfer.modem.sample_rate), data_if_hz(profile.receiver.data_if_hz),
+          source_first(source_sample) {
+        // Keep the same modeled mean Hann-bin noise reference as for the
+        // original plot, even if the operator edits the link before replaying.
+        waterfall.gain_db = simulation_plot_noise_reference(settings, rate);
+        waterfall.search_band_hz = {profile.minimum_data_hz, profile.maximum_data_hz};
+        if (profile.receiver.helper_enabled)
+            waterfall.helper_band_hz = std::pair{helper::low_pilot_frequency_hz - 100,
+                profile.receiver.helper.frequency_hz + 100};
         const auto tx_scale = 1 + effects.tx.audio_ppm * 1e-6;
         const auto rx_scale = 1 + effects.rx.audio_ppm * 1e-6;
         source_per_input_sample = tx_scale / rx_scale;
@@ -253,6 +269,9 @@ struct SimulationReplay {
         filled += count;
     }
 
+    Snapshot::ReplayWaterfall waterfall;
+    std::uint32_t rate;
+    double data_if_hz;
     std::uint64_t source_first, first;
     double source_per_input_sample;
 private:
@@ -348,6 +367,36 @@ struct ReceiveDisplay {
     WrongKeyAdmissionEvidence wrong_key_evidence;
 };
 
+struct SimulationComparison {
+    std::string sent;
+    bool raw = false;
+    std::optional<bool> match;
+    std::string received;
+
+    std::string describe(std::string_view value) const {
+        if (raw) {
+            if (value.size() <= 16) return std::string(value);
+            return std::string(value.substr(0, 16)) + "… (" + std::to_string(value.size()) + " bits)";
+        }
+        if (value == "0" || value == "1") return "'" + std::string(value) + "'";
+        return std::to_string(value.size()) + (value.size() == 1 ? " text byte" : " text bytes");
+    }
+
+    void observe(SignalUpdate& signal, std::string_view value) {
+        match = value == sent;
+        signal.simulation_input_result = value.empty() ? SimulationInputResult::incomplete :
+            *match ? SimulationInputResult::match : SimulationInputResult::mismatch;
+        received = value.empty() ? std::string{} : describe(value);
+    }
+
+    std::string summary() const {
+        auto result = "sent " + describe(sent);
+        if (!match) return result + " · no complete reception from the first DATA slot";
+        if (received.empty()) return result + (raw ? " · incomplete received bits" : " · no decoded text");
+        return result + " · received " + received + (*match ? " · match" : " · mismatch");
+    }
+};
+
 } // namespace
 
 struct Session::Impl {
@@ -361,6 +410,8 @@ struct Session::Impl {
     std::vector<transfer::Received> received_events;
     std::shared_ptr<const Profile> profile;
     std::optional<TxRequest> request;
+    std::optional<SimulationReplay> retained_replay;
+    bool replay_requested = false;
     std::uint64_t generation = 0, next_id = 1, spectrum_revision = 0;
     std::uint64_t plot_segment = 0;
     std::uint64_t next_simulation_ordinal = 0, last_simulation_epoch = 0;
@@ -402,12 +453,14 @@ struct Session::Impl {
     }
 
     void set_plot(std::uint64_t owner, std::stop_token stop, PlotFrame frame, bool receiver_input,
-                  std::uint64_t segment, bool replay = false) {
+                  std::uint64_t segment, const SimulationReplay* replay = nullptr) {
         publish(owner, stop, [&](Snapshot& out) {
             if (replay && !out.simulation_replay) {
                 out.simulation_replay = true;
                 out.status = "Robust simulation processed · replaying 3 seconds";
             }
+            if (replay) out.replay_waterfall = replay->waterfall;
+            else out.replay_waterfall.reset();
             out.waveform = std::move(frame.waveform);
             out.waveform_sample_rate = frame.rate;
             out.spectrum_db = std::move(frame.db);
@@ -496,7 +549,7 @@ struct Session::Impl {
     }
 
     void deliver(CompleteStreamReceiver& receiver, ReceiveDisplay& display, const Settings& s,
-                 std::uint64_t owner, std::stop_token stop) {
+                 std::uint64_t owner, std::stop_token stop, SimulationComparison* comparison = nullptr) {
         auto slots = receiver.drain_recent_slots();
         if (receiver.report().pending_messages) {
             std::unique_lock lock(mutex);
@@ -544,6 +597,15 @@ struct Session::Impl {
                 // Raw presentation requires an exact physical bit sequence.
                 if (message.raw_bits_complete())
                     for (const auto bit : message.received_bits) signal.raw_bits.push_back(bit ? '1' : '0');
+                if (comparison && event.first_public_slot == 0) {
+                    // Compare only after the native receiver has completed a
+                    // real episode. The local draft never affects scoring.
+                    if (comparison->raw) comparison->observe(signal, signal.raw_bits);
+                    else if (message.decoded_content) {
+                        const auto& data = message.decoded_content->message.data;
+                        comparison->observe(signal, {reinterpret_cast<const char*>(data.data()), data.size()});
+                    } else comparison->observe(signal, {});
+                }
                 if (message.decoded_content) {
                     transfer::Received received;
                     received.content = std::move(*message.decoded_content);
@@ -614,7 +676,7 @@ struct Session::Impl {
 
     void accept(CompleteStreamReceiver& receiver, ReceiveDisplay& display, const Settings& s,
                 std::uint64_t first, std::span<const Complex> samples, std::span<const std::uint8_t> validity,
-                std::uint64_t owner, std::stop_token stop) {
+                std::uint64_t owner, std::stop_token stop, SimulationComparison* comparison = nullptr) {
         while (!stop.stop_requested()) {
             receiver_ok(receiver.report());
             if (receiver.push(first, samples, validity) == StreamPushResult::accepted) break;
@@ -625,12 +687,12 @@ struct Session::Impl {
             // retrying this unchanged chunk.
             const auto rejected = receiver.report();
             receiver_ok(rejected);
-            deliver(receiver, display, s, owner, stop);
+            deliver(receiver, display, s, owner, stop, comparison);
             auto after = receiver.report();
             if (!rejected.output_backpressured) {
                 after = receiver.wait_for_slot_completion();
                 receiver_ok(after);
-                deliver(receiver, display, s, owner, stop);
+                deliver(receiver, display, s, owner, stop, comparison);
                 after = receiver.report();
             }
             const bool output_drained = rejected.output_backpressured && !after.output_backpressured;
@@ -641,16 +703,16 @@ struct Session::Impl {
         }
         cancelled(stop);
         receiver_ok(receiver.resume(false));
-        deliver(receiver, display, s, owner, stop);
+        deliver(receiver, display, s, owner, stop, comparison);
     }
 
     void finish_input(CompleteStreamReceiver& receiver, ReceiveDisplay& display, const Settings& s,
-                      std::uint64_t owner, std::stop_token stop) {
+                      std::uint64_t owner, std::stop_token stop, SimulationComparison* comparison = nullptr) {
         for (;;) {
             cancelled(stop);
             const auto progress = receiver.finish_input();
             receiver_ok(progress);
-            deliver(receiver, display, s, owner, stop);
+            deliver(receiver, display, s, owner, stop, comparison);
             if (progress.state != StreamReceiverState::receiving) return;
             if (!progress.output_backpressured)
                 throw Error("Robust receiver did not drain its complete public windows");
@@ -880,7 +942,7 @@ struct Session::Impl {
     }
 
     std::optional<SimulationReplay> simulate(const Profile& prepared, const Settings& s,
-                  const TxRequest& send, std::uint64_t owner, std::stop_token stop) {
+                  const TxRequest& send, std::uint64_t owner, std::stop_token stop, SimulationComparison* comparison) {
         const auto rate = s.transfer.modem.sample_rate;
         const auto& calendar = prepared.waveform;
         const auto noise = send.mode == EmissionMode::Noise;
@@ -905,14 +967,16 @@ struct Session::Impl {
             // In a message preview, include DATA even when a long Helper
             // lead precedes it. Helper-only previews begin at Helper onset.
             const auto activity = send.mode == EmissionMode::HelperOnly ? tx_slot.helper_begin : tx_slot.pattern_begin;
-            replay.emplace(config.effects, rate, calendar.calendar().distance(calendar.origin(), activity),
+            replay.emplace(prepared, s, config.effects, calendar.calendar().distance(calendar.origin(), activity),
                 channel.total_samples());
             // Channel working bytes include the waveform source but exclude
             // the prepared text shared by its lazy interval reader and the
-            // bounded presentation slice retained beside the receiver.
+            // new presentation slice and retained excerpt beside the receiver.
+            const auto display_workspace = checked_workspace(replay->working_bytes(),
+                retained_replay ? retained_replay->working_bytes() : 0);
             const auto options = stream_options(s, checked_workspace(channel.report().working_bytes,
                 checked_workspace(retained_request_workspace(send),
-                    checked_workspace(replay->working_bytes(), 2 * 1024 * 1024U))));
+                    checked_workspace(display_workspace, 2 * 1024 * 1024U))));
             receiver = std::make_unique<CompleteStreamReceiver>(calendar, prepared.receiver,
                 prepared.key, options, message_profile(s));
             replay->allocate();
@@ -943,7 +1007,8 @@ struct Session::Impl {
                         set_plot(owner, stop, std::move(*frame), true, segment);
                     }
                 }
-                if (receiver) accept(*receiver, display, s, first, samples, std::span(valid).first(count), owner, stop);
+                if (receiver) accept(*receiver, display, s, first, samples, std::span(valid).first(count),
+                                     owner, stop, comparison);
                 if (send.mode == EmissionMode::Message) {
                     const auto generated = emission.report().generated_samples;
                     const auto previous_bits = generated_bits;
@@ -973,7 +1038,7 @@ struct Session::Impl {
             }
             cancelled(stop);
             if (receiver) {
-                finish_input(*receiver, display, s, owner, stop);
+                finish_input(*receiver, display, s, owner, stop, comparison);
                 invalidate_pending(display, s, owner);
             }
         } catch (...) {
@@ -984,11 +1049,11 @@ struct Session::Impl {
         return replay;
     }
 
-    void replay_simulation(const Profile& prepared, const SimulationReplay& replay,
-                           std::uint64_t owner, std::stop_token stop) {
+    void replay_simulation(const SimulationReplay& replay, std::uint64_t owner,
+                           std::stop_token stop, const Profile* prepared = nullptr) {
         const auto input = replay.samples();
         if (input.size() < plot_size || stop.stop_requested()) return;
-        const auto rate = prepared.waveform.config().format.sample_rate;
+        const auto rate = replay.rate;
         const auto last = input.size() - plot_size;
         const auto segment = new_plot_segment();
         const auto wait_until = [&](Clock::time_point time) {
@@ -1011,11 +1076,13 @@ struct Session::Impl {
             const auto samples = input.subspan(offset, plot_size);
             std::vector<float> waveform(plot_size);
             for (std::size_t i = 0; i < plot_size; ++i)
-                waveform[i] = real_pcm(samples[i], first + i, prepared.receiver.data_if_hz, rate);
-            const auto source_sample = replay.source_first +
-                static_cast<std::uint64_t>(static_cast<long double>(offset) * replay.source_per_input_sample);
-            trace_hop(prepared, source_sample, false, owner, stop);
-            set_plot(owner, stop, plot_frame(first, rate, std::move(waveform), samples, fft), true, segment, true);
+                waveform[i] = real_pcm(samples[i], first + i, replay.data_if_hz, rate);
+            if (prepared) {
+                const auto source_sample = replay.source_first +
+                    static_cast<std::uint64_t>(static_cast<long double>(offset) * replay.source_per_input_sample);
+                trace_hop(*prepared, source_sample, false, owner, stop);
+            }
+            set_plot(owner, stop, plot_frame(first, rate, std::move(waveform), samples, fft), true, segment, &replay);
         }
         wait_until(started + simulation_replay_duration);
     }
@@ -1303,6 +1370,7 @@ struct Session::Impl {
                 current.transmit_unavailable = preparing;
                 current.gpu_device.clear();
                 current.gpu_backend.clear();
+                current.gpu_device_uuid.reset();
                 current.gpu_selection_reason.clear();
                 current.gpu_score_rows = 0;
                 current.gpu_precision.clear();
@@ -1406,20 +1474,15 @@ struct Session::Impl {
                     profile = active;
                     current.gpu_device = gpu_device;
                     current.gpu_backend = gpu_backend_name;
+                    current.gpu_device_uuid = gpu_initial_receipt.device_uuid;
                     current.gpu_selection_reason = gpu_selection_reason;
                     current.gpu_native_lag_preference_supported = native_lag_preference;
                     current.bit_seconds = calendar.geometry().bit_seconds;
                     current.slot_stride_seconds = static_cast<double>(calendar.calendar().distance(
                         initial.helper_begin, following.helper_begin)) / calendar.effective_sample_rate();
                     current.search_band_hz = std::pair{active->minimum_data_hz, active->maximum_data_hz};
-                    if (s.simulation) {
-                        // Real projection preserves the complex noise variance.
-                        // The Hann transform normalized by 2/N assigns white
-                        // noise an effective bandwidth of 1.5 bins per FFT bin.
-                        const auto noise_bandwidth = 1.5 * s.transfer.modem.sample_rate / plot_size;
-                        current.simulation_spectrum_gain_db = s.tx_dbm - s.path_loss_db - s.noise_dbm_hz -
-                            10 * std::log10(noise_bandwidth);
-                    }
+                    if (s.simulation)
+                        current.simulation_spectrum_gain_db = simulation_plot_noise_reference(s, s.transfer.modem.sample_rate);
                     if (active->receiver.helper_enabled)
                         current.helper_band_hz = std::pair{helper::low_pilot_frequency_hz - 100,
                             active->receiver.helper.frequency_hz + 100};
@@ -1438,12 +1501,17 @@ struct Session::Impl {
                     TxRequest send;
                     std::stop_token transmission;
                     Settings transmit_settings = s;
+                    bool replay_only;
                     {
                         std::unique_lock lock(mutex);
-                        changed.wait(lock, stop, [&] { return request.has_value() || stopping || owner != generation; });
+                        changed.wait(lock, stop, [&] { return request.has_value() || replay_requested ||
+                            stopping || owner != generation; });
                         if (stop.stop_requested() || stopping || owner != generation) break;
-                        send = std::move(*request);
-                        request.reset();
+                        replay_only = replay_requested;
+                        if (!replay_only) {
+                            send = std::move(*request);
+                            request.reset();
+                        }
                         transmission = tx_stop.get_token();
                         // Volume and routing can be changed for the next
                         // transmission without restarting the receive calendar.
@@ -1452,38 +1520,65 @@ struct Session::Impl {
                     }
                     std::stop_callback cancel_on_reconfigure(stop, [source = tx_stop]() mutable { source.request_stop(); });
                     bool capture_paused = false;
-                    bool simulation_computed = false;
+                    bool simulation_computed = replay_only;
                     std::string failure;
+                    std::optional<SimulationComparison> comparison;
                     try {
                         cancelled(transmission);
-                        if (!s.simulation && s.full_duplex && s.live_noise_dbfs_hz)
-                            (void)live_transmit_reservation_checked(transmit_settings, *active);
-                        if (!s.simulation && !s.full_duplex) {
-                            close_capture();
-                            capture_paused = true;
+                        if (replay_only) {
+                            replay_simulation(*retained_replay, owner, transmission);
+                        } else {
+                            if (!s.simulation && s.full_duplex && s.live_noise_dbfs_hz)
+                                (void)live_transmit_reservation_checked(transmit_settings, *active);
+                            if (!s.simulation && !s.full_duplex) {
+                                close_capture();
+                                capture_paused = true;
+                            }
+                            if (s.simulation && send.mode == EmissionMode::Message &&
+                                (send.raw || send.input.size() <= transfer::short_message_bytes)) {
+                                comparison.emplace();
+                                comparison->raw = send.raw;
+                                for (const auto byte : send.input)
+                                    comparison->sent.push_back(send.raw ? (byte ? '1' : '0') : static_cast<char>(byte));
+                            }
+                            prepare_send(send, transmit_settings, owner, transmission);
+                            if (s.simulation) {
+                                auto replay = simulate(*active, transmit_settings, send, owner, transmission,
+                                                       comparison ? &*comparison : nullptr);
+                                simulation_computed = replay.has_value();
+                                if (replay && replay->samples().size() >= plot_size) {
+                                    {
+                                        std::lock_guard lock(mutex);
+                                        retained_replay = std::move(replay);
+                                    }
+                                    replay_simulation(*retained_replay, owner, transmission, active.get());
+                                }
+                            } else play_live(*active, transmit_settings, send, owner, transmission);
                         }
-                        prepare_send(send, transmit_settings, owner, transmission);
-                        if (s.simulation) {
-                            auto replay = simulate(*active, transmit_settings, send, owner, transmission);
-                            simulation_computed = replay.has_value();
-                            if (replay) replay_simulation(*active, *replay, owner, transmission);
-                        } else play_live(*active, transmit_settings, send, owner, transmission);
                     } catch (const std::exception& error) {
                         if (!transmission.stop_requested()) failure = error.what();
                     }
                     publish(owner, stop, [&](Snapshot& out) {
                         out.transmitting = false;
                         out.simulation_replay = false;
-                        out.transmit_trace.active = false;
-                        ++out.transmit_trace.revision;
+                        if (replay_only) replay_requested = false;
+                        else {
+                            out.transmit_trace.active = false;
+                            ++out.transmit_trace.revision;
+                        }
                         out.error = failure;
                         out.status = transmission.stop_requested() ? (simulation_computed ?
                             "Robust simulation input processed · replay stopped" : "Robust transmission cancelled") :
                             !failure.empty() ? failure :
+                            replay_only ? "Robust simulation replay complete" :
                             s.simulation ? "Robust simulation input processed" : "Robust transmission sent";
+                        if (comparison && simulation_computed && failure.empty()) {
+                            out.status = "Robust simulation · " + comparison->summary();
+                            if (transmission.stop_requested()) out.status += " · replay stopped";
+                        }
                     });
                     if (stop.stop_requested()) break;
-                    if (s.simulation) {
+                    if (s.simulation && !replay_only) {
                         const auto& calendar = active->waveform;
                         // A new simulation is a new local source experiment.
                         // Retain a monotonically increasing address between
@@ -1497,6 +1592,7 @@ struct Session::Impl {
                 }
             } catch (const std::exception& error) {
                 publish(owner, stop, [&](Snapshot& out) {
+                    replay_requested = false;
                     out.running = false;
                     out.transmitting = false;
                     out.simulation_replay = false;
@@ -1523,10 +1619,16 @@ struct Session::Impl {
         {
             std::lock_guard lock(mutex);
             resources_owned = false;
+            retained_replay.reset();
             stopped = true;
             profile.reset();
         }
         changed.notify_all();
+    }
+
+    bool can_replay() const {
+        return settings.simulation && started && !suspended && !stopping &&
+            !current.transmitting && profile && retained_replay.has_value();
     }
 
     void enqueue(EmissionMode mode, std::span<const std::uint8_t> input = {}, bool force = false, bool raw = false) {
@@ -1620,8 +1722,12 @@ void Session::configure(const Settings& value) {
         if (p.stopping) throw Error("Robust session is closing");
         if (p.current.transmitting) throw Error("Wait for the Robust transmission to finish before changing its settings");
         p.settings = value;
+        if (!value.simulation || (value.receiver_memory_limit && p.retained_replay &&
+            p.retained_replay->working_bytes() >= *value.receiver_memory_limit)) p.retained_replay.reset();
+        auto replay_waterfall = value.simulation ? p.current.replay_waterfall : std::nullopt;
         p.profile.reset();
         p.current = {};
+        p.current.replay_waterfall = std::move(replay_waterfall);
         p.received_events.clear();
         p.signal_events.clear();
         p.current.simulation = value.simulation;
@@ -1728,6 +1834,18 @@ void Session::transmit_bits(std::span<const std::uint8_t> bits, bool force) {
 void Session::transmit_noise() { impl_->enqueue(EmissionMode::Noise); }
 void Session::transmit_helper() { impl_->enqueue(EmissionMode::HelperOnly); }
 
+void Session::replay_simulation() {
+    auto& p = *impl_;
+    std::lock_guard lock(p.mutex);
+    if (!p.can_replay()) throw Error("No completed Robust simulation is available for replay");
+    p.replay_requested = true;
+    p.tx_stop = std::stop_source{};
+    p.current.transmitting = true;
+    p.current.error.clear();
+    p.current.status = "Replaying the previous Robust simulation";
+    p.changed.notify_all();
+}
+
 void Session::cancel_transmit() {
     auto& p = *impl_;
     std::stop_source stop;
@@ -1735,7 +1853,7 @@ void Session::cancel_transmit() {
         std::lock_guard lock(p.mutex);
         if (!p.current.transmitting) return;
         stop = p.tx_stop;
-        p.current.status = p.current.simulation_replay ? "Stopping Robust simulation replay" :
+        p.current.status = p.current.simulation_replay || p.replay_requested ? "Stopping Robust simulation replay" :
             "Stopping Robust transmission";
     }
     stop.request_stop();
@@ -1789,6 +1907,7 @@ Snapshot Session::snapshot() {
             }
         }
         result = p.current;
+        result.simulation_replay_available = p.can_replay();
         result.signals.swap(p.signal_events);
         result.received.swap(p.received_events);
         p.lock_status(result);
@@ -1809,6 +1928,7 @@ void Session::stop() {
         p.current.simulation_replay = false;
         p.current.status = "Stopping Robust session";
         p.request.reset();
+        p.replay_requested = false;
         generation = p.generation_stop;
         transmission = p.tx_stop;
     }

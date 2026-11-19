@@ -29,7 +29,7 @@
 namespace datapump::gui {
 using Clock=std::chrono::steady_clock;
 struct Application::Impl {
-    explicit Impl(const Launch& launch):controller({launch.simulation||launch.smoke,launch.smoke,launch.settings,launch.require_gpu,launch.finite_duplex}),
+    explicit Impl(const Launch& launch):controller({launch.simulation||launch.smoke,launch.smoke,launch.settings,launch.require_gpu,launch.finite_duplex,launch.simulation_only}),
         fast_controller([this] {
             if(legacy_controller.active())return false;
             // The first attempt can initiate asynchronous device closure.
@@ -47,6 +47,7 @@ struct Application::Impl {
     bool audio_suspended=false;
     std::size_t device_count=0;
     BitmapSources bitmaps;
+    ResourceMonitor resources;
     Clock::time_point next=Clock::now(),next_presentation=next,started=next,completed=next;
     std::unique_ptr<Smoke> smoke;
     bool started_session=false,passed=false;
@@ -110,13 +111,13 @@ Application::Application(Launch options):launch(std::move(options)),impl_(std::m
     impl_->shellcode_mode.visible=launch.smoke;
     impl_->fast_mode.options={{"fast","Fast Modem"},{"robust","Robust Modem"},{"legacy","Legacy Modem"}};
     // Explicit Robust simulation/settings/page launches keep their requested work.
-    impl_->fast_mode.selected=launch.require_gpu||launch.finite_duplex||launch.simulation||launch.smoke||launch.settings||launch.page!=ui::Page::console?"robust":"fast";
-    if(launch.require_gpu||launch.finite_duplex)impl_->fast_mode.enabled=false;
+    impl_->fast_mode.selected=launch.require_gpu||launch.finite_duplex||launch.simulation_only||launch.simulation||launch.smoke||launch.settings||launch.page!=ui::Page::console?"robust":"fast";
+    if(launch.require_gpu||launch.finite_duplex||launch.simulation_only)impl_->fast_mode.enabled=false;
     select_page(launch.page);
 }
 Application::~Application()=default;
 WindowSizing initial_window_sizing(const Launch& options) {
-    const bool fast=!(options.require_gpu||options.finite_duplex||options.simulation||options.smoke||options.settings||options.page!=ui::Page::console);
+    const bool fast=!(options.require_gpu||options.finite_duplex||options.simulation_only||options.simulation||options.smoke||options.settings||options.page!=ui::Page::console);
     return fast?WindowSizing{ui::default_width,ui::fast_default_height,ui::min_width,ui::fast_min_height}:WindowSizing{};
 }
 WindowSizing Application::window_sizing() const {
@@ -134,6 +135,7 @@ void Application::start() {
     impl_->next=impl_->next_presentation=impl_->started=Clock::now();
     if(launch.smoke)impl_->smoke=std::make_unique<Smoke>();
     impl_->controller.start(impl_->regular_selected());
+    if(impl_->regular_selected())impl_->resources.start();
     impl_->audio_suspended=!impl_->regular_selected();
     impl_->bitmaps.update(impl_->controller);
     if(impl_->fast_selected()&&!launch.simulation&&!launch.smoke)impl_->fast_controller.set_selected(true);
@@ -142,6 +144,7 @@ bool Application::tick() {
     const auto now=Clock::now();
     if(now>=impl_->next) {
         impl_->next=now+std::chrono::milliseconds(40);
+        if(impl_->started_session&&impl_->regular_selected()&&!closing())impl_->resources.start();
         impl_->controller.poll();
         const auto& devices=impl_->controller.audio_devices();
         if(impl_->device_count!=devices.size()) {
@@ -171,7 +174,7 @@ bool Application::tick() {
 }
 bool Application::finished() const { return impl_->controller.ready_to_close()&&impl_->fast_controller.ready_to_close()&&impl_->legacy_controller.ready_to_close(); }
 int Application::result() const { return launch.smoke&&!impl_->passed?1:0; }
-void Application::close() { dismiss_overlay();impl_->controller.close();impl_->fast_controller.close();impl_->legacy_controller.close();impl_->service_routes.clear();impl_->service_completion_routes.clear(); }
+void Application::close() { dismiss_overlay();impl_->resources.stop();impl_->controller.close();impl_->fast_controller.close();impl_->legacy_controller.close();impl_->service_routes.clear();impl_->service_completion_routes.clear(); }
 bool Application::closing() const { return impl_->controller.closing(); }
 void Application::edit(ui::Field field,std::string text) {
     if(closing()||field==ui::Field::count||!this->field(field).visible)return;
@@ -196,7 +199,7 @@ void Application::preset(const ui::Control& declaration,const std::string& id) {
 void Application::select(ui::Field field,std::string id) {
     if(closing()||field==ui::Field::count||!this->field(field).visible)return;
     if(field==ui::Field::fast_mode) {
-        if(launch.require_gpu||launch.finite_duplex)return; // Other modem modes do not implement these policies.
+        if(launch.require_gpu||launch.finite_duplex||launch.simulation_only)return; // Other modem modes do not implement these policies.
         if((id!="robust"&&id!="fast"&&id!="legacy")||impl_->fast_mode.selected==id)return;
         dismiss_overlay();++impl_->mode_generation;
         if(impl_->regular_selected()) {
@@ -547,6 +550,29 @@ void Application::activate_record(const ui::Control& control,const std::string& 
     if(field(control.field).selected==id&&enabled(control.activate_record))activate(control.activate_record);
 }
 BitmapPresentation Application::bitmap(const ui::Control& control,unsigned width) const {
+    const auto metric=[&]() -> std::optional<ResourceMetric> {
+        switch(control.bitmap) {
+        case ui::Bitmap::cpu_utilization:return ResourceMetric::cpu;
+        case ui::Bitmap::ram_usage:return ResourceMetric::ram;
+        case ui::Bitmap::gpu_utilization:return ResourceMetric::gpu;
+        case ui::Bitmap::vram_usage:return ResourceMetric::vram;
+        default:return {};
+        }
+    }();
+    if(metric) {
+        const auto history=impl_->resources.history();
+        const auto plot=plots::PlotSnapshot::resource_history(*metric,history,impl_->controller.snapshot().gpu_device_uuid);
+        BitmapPresentation view;
+        view.source=plot;
+        view.title=control.label;
+#ifdef DATAPUMP_EXECUTION_FIBERS
+        view.caption="Compute-host telemetry unavailable in browser-only execution";
+#else
+        view.caption=plot.caption(width);
+#endif
+        if(history)view.revision=history->revision;
+        return view;
+    }
     if(control.scope==ui::ScreenScope::legacy) {
         BitmapPresentation view;view.source=impl_->legacy_controller.bitmap();view.revision=impl_->legacy_controller.bitmap_revision();
         view.title=impl_->legacy_controller.bitmap_title();view.caption=impl_->legacy_controller.bitmap_caption();return view;

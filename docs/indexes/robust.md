@@ -156,6 +156,13 @@ The offline comparison measures recovery from the available samples. Live
 delivery latency and severe-channel superiority remain unmeasured.
 [Matched alarm comparison and limits](../validation.md#stable-alarm-comparison-at-matched-energy-and-deadline).
 
+At 3.6 Hz without spreading, a separate strong-signal simulation with HF
+Worst and Each 65% decoded a transmitted zero as one at +77 dB-Hz. FP64
+coarse search gave the same decision. The receiver recovered zero with
+selective modulation Off at the same seed and duration. The combined
+profile's reliability remains unqualified.
+[Strong-signal probe geometry and limits](../validation.md#strong-signal-raw-bit-simulation-at-36-hz--19-november-2026).
+
 ## Choose techniques by the situation
 
 | Situation | Supported starting choice | What the evidence says and when to revisit |

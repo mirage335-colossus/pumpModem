@@ -223,7 +223,7 @@ std::string gpu_search_diagnostics(const live::Snapshot& snapshot) {
         if (snapshot.gpu_vulkan_shared_workspace_limit_bytes) {
             constexpr std::size_t mib = 1024U * 1024U;
             const auto mibs = [=](std::size_t bytes) { return bytes / mib + (bytes % mib != 0); };
-            text += " · workspace " + std::to_string(mibs(snapshot.gpu_vulkan_leased_bytes)) + "/" +
+            text += " · Vulkan workspace leases " + std::to_string(mibs(snapshot.gpu_vulkan_leased_bytes)) + "/" +
                 std::to_string(mibs(snapshot.gpu_vulkan_shared_workspace_limit_bytes)) + " MiB";
             text += " (peak " + std::to_string(mibs(snapshot.gpu_vulkan_peak_leased_bytes)) +
                 ", owner " + std::to_string(mibs(snapshot.gpu_vulkan_peak_owner_lease_bytes)) +
@@ -340,7 +340,7 @@ struct Controller::Impl {
         for(const auto id:{UiField::snr,UiField::planner_target})
             for(const auto* s:{"140","120","100","80","60","55","40","32","20","6","-6","-10","-16","-20","-23","-26","-30","-60"}) f(id).options.push_back({s,s});
         f(UiField::simulation).options={{"no","No"},{"yes","Yes"}};
-        f(UiField::simulation).selected=options.simulation||options.smoke?"yes":"no";
+        f(UiField::simulation).selected=options.simulation||options.smoke||options.simulation_only?"yes":"no";
         // The sampled native smoke retains its established strong test link.
         // Ordinary planning and simulation start from the shared 120 dB loss.
         if(options.smoke)planner_inputs.path_loss_db=60;
@@ -613,7 +613,8 @@ struct Controller::Impl {
         if(load) {
             const auto text=[&](UiField id,const auto& value){if(value)f(id).text=planner_number(*value);};
             const auto choice=[&](UiField id,const auto& value){if(value)f(id).selected=*value;};
-            text(UiField::bandwidth,load->rate_hz);text(UiField::carrier,load->carrier_hz);
+            if(load->rate_hz)f(UiField::bandwidth).text=exact_frequency_text(*load->rate_hz);
+            text(UiField::carrier,load->carrier_hz);
             text(UiField::rf_shift,load->rf_shift_hz);text(UiField::search_margin,load->search_margin);
             text(UiField::receiver_cpu_budget,load->receiver_cpu_budget);
             choice(UiField::simulation_oscillator,load->oscillator);
@@ -645,7 +646,8 @@ struct Controller::Impl {
                 planner_target_valid=true;
             }
             if(load->clock_sync)clock_fields(clock_sync::parse(*load->clock_sync));
-            if(load->audio_timing_error_seconds)f(UiField::audio_error).text=clock_sync::duration_text(*load->audio_timing_error_seconds);
+            if(load->audio_timing_default)f(UiField::audio_error).text="Default";
+            else if(load->audio_timing_error_seconds)f(UiField::audio_error).text=clock_sync::duration_text(*load->audio_timing_error_seconds);
             if(load->calendar_epoch)f(UiField::calendar_epoch).text=*load->calendar_epoch?std::to_string(*load->calendar_epoch):"none";
             if(load->calendar_ordinal)f(UiField::calendar_ordinal).text=std::to_string(*load->calendar_ordinal);
             if(load->clear_live_noise)f(UiField::live_noise_dbfs_hz).text="unspecified";
@@ -657,13 +659,16 @@ struct Controller::Impl {
             if(load->fhss_list){fhss_list=fhss::parse_list(*load->fhss_list);f(UiField::fhss_list).text=fhss::list_text(fhss_list,'\n');}
             if(load->tx_key=="none")f(UiField::key).selected="none";
             if(load->key_name){const auto id="key:"+*load->key_name;if(std::none_of(keys.begin(),keys.end(),[&](const auto& k){return k.name==*load->key_name;}))throw Error("Unknown key name");f(UiField::key).selected=id;}
-            if(simulation_off)f(UiField::simulation).selected="no";
+            if(simulation_off&&!options.simulation_only)f(UiField::simulation).selected="no";
             sync_link_fields();
         }
         // Enforce the embedding policy after every loaded patch, including
         // saved settings that previously selected CPU execution.
         if(options.require_gpu)f(UiField::gpu).checked=true;
-        if(options.finite_duplex) {
+        if(options.simulation_only) {
+            f(UiField::simulation).selected="yes";
+            f(UiField::live_duplex).checked=false;
+        } else if(options.finite_duplex) {
             f(UiField::simulation).selected="no";
             f(UiField::live_duplex).checked=true;
         }
@@ -736,6 +741,8 @@ struct Controller::Impl {
                 carrier_presets.push_back({absolute,std::move(label)});
             if (!preset_baseband && carrier.text==absolute) preset_baseband=baseband;
         }
+        if (band.helper_enabled && carrier_presets.empty())
+            carrier_presets.push_back({"unavailable","No compatible Carrier preset",false});
         if (edit_carrier || (load && load->carrier_hz)) {
             const auto absolute=frequency(carrier.text,"Carrier");
             modem.carrier_hz=preset_baseband.value_or(absolute-shift);
@@ -745,6 +752,10 @@ struct Controller::Impl {
         } else if (recommendations.preferred) {
             modem.carrier_hz=*recommendations.preferred;
         } else {
+            if (band.helper_enabled)
+                throw Error("No Carrier preset fits the "+frequency_text(band.sample_rate)+
+                            " sampled band at this Helper power and Rate. Try lowering Helper Carrier Power, "
+                            "the Helper Carrier Ratio Limit, or Rate.");
             throw Error("No Carrier recommendation fits the current Rate, Shift, Helper and sampled band. "
                         "Adjust the settings or enter a valid custom Carrier.");
         }
@@ -818,6 +829,7 @@ struct Controller::Impl {
         values.clear_live_noise=!settings.live_noise_dbfs_hz;
         values.fec=f(UiField::fec).selected;
         values.clock_sync=clock_sync::format(settings.transfer.clock_sync);
+        values.audio_timing_default=clock_sync::is_default(f(UiField::audio_error).text);
         values.audio_timing_error_seconds=settings.transfer.audio_timing_error_seconds;
         values.dsss_factor=static_cast<unsigned>(number(f(UiField::dsss_factor).selected,"DSSS factor"));
         if(f(UiField::dsss_version).selected!="legacy")values.dsss_mode=f(UiField::dsss_version).selected;
@@ -1097,6 +1109,7 @@ struct Controller::Impl {
         case Command::transmit_helper: return started&&active_requested&&!busy&&!key_loading&&!key_failed&&settings_valid&&
             link_inputs_valid()&&planner_target_valid&&settings.helper.power_w>0&&!snapshot.transmit_unavailable;
         case Command::cancel: return busy||snapshot.simulation_replay;
+        case Command::replay_simulation: return snapshot.simulation_replay_available;
         case Command::open_keyfile: case Command::generate_keyfile:
         case Command::load_amateur: case Command::unload_keys: return !busy&&!key_loading;
         case Command::show_key_folder: return !busy&&!key_loading&&!key_path.empty();
@@ -1148,7 +1161,7 @@ struct Controller::Impl {
             UiField::search_arithmetic,UiField::receiver_strategy,UiField::receiver_cpu_budget})
             f(id).enabled=!closing&&!busy;
         f(UiField::gpu).enabled=!closing&&!busy&&!options.require_gpu&&live::gpu_receiver_available();
-        if(options.finite_duplex) {
+        if(options.finite_duplex||options.simulation_only) {
             f(UiField::simulation).enabled=false;
             f(UiField::live_duplex).enabled=false;
         }
@@ -1321,6 +1334,7 @@ struct Controller::Impl {
                 value.pattern_steps.back().index!=snapshot.pattern_steps.back().index);
         const bool state_changed=value.status!=snapshot.status||value.error!=snapshot.error||
             value.receiver_error!=snapshot.receiver_error||value.transmitting!=snapshot.transmitting||
+            value.simulation_replay_available!=snapshot.simulation_replay_available||
             value.running!=snapshot.running||value.bit_seconds!=snapshot.bit_seconds||
             value.gpu_device!=snapshot.gpu_device||value.gpu_score_rows!=snapshot.gpu_score_rows||
             value.gpu_backend!=snapshot.gpu_backend||value.gpu_precision!=snapshot.gpu_precision||
@@ -1532,9 +1546,11 @@ struct Controller::Impl {
             composer_received=previous_received;composer=*previous_message; repeatable_prefix=previous_repeatable_prefix; pending_repeatable_removal=false; f(UiField::repeatable).checked=false;
             seeded_message.clear(); sync_composer(); ++f(UiField::message).text_cursor_end_revision; dirty(); break;
         case Command::cancel:
+            if(snapshot.simulation_replay)notice("Stopping simulation replay.");
+            else notice("Cancelling transmission; cancellation does not complete reception.");
             session.cancel_transmit();
             accept_snapshot(session.snapshot());
-            notice("Cancelling transmission; cancellation does not complete reception.");break;
+            break;
         case Command::clear_received: session.clear_received();inbox.clear();signals.clear();refresh_files();refresh_signals();notice("Received content cleared; public calendar remains unchanged.");break;
         case Command::attach_file:
             ++attachment_revision; pending_file.reset(); file_loading=false;
@@ -1611,7 +1627,7 @@ struct Controller::Impl {
         case Command::zoom_out: zoom=std::min(256.,zoom*2); plot_update.update_plots=true; break;
         case Command::reset_zoom: zoom=1; plot_update.update_plots=true; break;
         case Command::clear_waterfall: plot_update.clear_waterfall=true; break;
-        case Command::clear_pattern_scores: plot_update.clear_pattern_scores_through=snapshot.pattern_steps.empty()?0:snapshot.pattern_steps.back().index; break;
+        case Command::replay_simulation: session.replay_simulation();accept_snapshot(session.snapshot());break;
         case Command::pattern_first: pattern_first=0;refresh_pattern_steps();break;
         case Command::pattern_previous: pattern_first=pattern_first>page_size?pattern_first-page_size:0;refresh_pattern_steps();break;
         case Command::pattern_next: pattern_first=std::min(last_pattern_page(),pattern_first+page_size);refresh_pattern_steps();break;
@@ -1768,8 +1784,6 @@ void Controller::edit(UiField field,std::string text) {
                 if(field==UiField::clock_offset)policy->offset_seconds=duration;
                 clock_sync::validate(*policy);
             }
-            if(policy && clock_sync::is_default(audio))
-                audio=clock_sync::duration_text(clock_sync::default_audio_error_seconds);
             p.clock_fields(policy);
             p.f(UiField::audio_error).text=audio;
             try {p.configure();}
@@ -1940,8 +1954,16 @@ std::chrono::steady_clock::time_point Controller::presentation_time() const {
     return Clock::now();
 }
 const live::Settings& Controller::settings() const { return impl_->settings; }
-std::optional<std::pair<double,double>> Controller::spectrum_search_band() const { return impl_->settings_valid?impl_->snapshot.search_band_hz:std::nullopt; }
-std::optional<std::pair<double,double>> Controller::spectrum_helper_band() const {return impl_->settings_valid?impl_->snapshot.helper_band_hz:std::nullopt;}
+std::optional<std::pair<double,double>> Controller::spectrum_search_band() const {
+    const auto& view=impl_->snapshot;
+    if(view.replay_waterfall)return view.replay_waterfall->search_band_hz;
+    return impl_->settings_valid?view.search_band_hz:std::nullopt;
+}
+std::optional<std::pair<double,double>> Controller::spectrum_helper_band() const {
+    const auto& view=impl_->snapshot;
+    if(view.replay_waterfall)return view.replay_waterfall->helper_band_hz;
+    return impl_->settings_valid?view.helper_band_hz:std::nullopt;
+}
 const std::vector<audio::Device>& Controller::audio_devices() const {return impl_->audio_devices;}
 const Inbox& Controller::inbox() const { return impl_->inbox; }
 const Signals& Controller::signals() const { return impl_->signals; }

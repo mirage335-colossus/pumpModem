@@ -9,7 +9,7 @@ namespace datapump::host {
 class Runtime {
 public:
     explicit Runtime(std::filesystem::path workspace,bool simulation=false,bool require_gpu=false,
-                     bool finite_duplex=false);
+                     bool finite_duplex=false,bool simulation_only=false);
     ~Runtime();
     void accept(const protocol::Frame&,bool file_authority=false);
     void tick();

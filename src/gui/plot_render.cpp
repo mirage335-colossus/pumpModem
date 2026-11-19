@@ -15,6 +15,11 @@ struct SpectrumDetail { std::shared_ptr<const SpectrumHistory> history; std::opt
 struct Qr { std::optional<QrCode> code; QrBrightness brightness; };
 struct Codeword { std::size_t data, parity; };
 struct PatternEvidence { std::vector<PatternEvidencePoint> points; };
+struct ResourceChart {
+    ResourceMetric metric;
+    std::shared_ptr<const ResourceHistory> history;
+    std::optional<std::array<std::uint8_t,16>> active_gpu;
+};
 using Rgb = theme::Rgb;
 Rgb gray(unsigned char value) { return {value, value, value}; }
 Rgb phase_color(double degrees) {
@@ -73,9 +78,62 @@ double constellation_scale(const Constellation& data) {
     return scale;
 }
 
+bool device_metric(ResourceMetric metric) { return metric==ResourceMetric::gpu || metric==ResourceMetric::vram; }
+
+const GpuUsage* gpu_usage(const ResourceSample& sample, unsigned index) {
+    const auto found=std::find_if(sample.gpus.begin(),sample.gpus.end(),[index](const auto& gpu){return gpu.index==index;});
+    return found==sample.gpus.end()?nullptr:&*found;
+}
+
+std::optional<double> resource_percent(ResourceMetric metric, const ResourceSample& sample, unsigned index) {
+    if(metric==ResourceMetric::cpu) return sample.cpu_busy_percent;
+    const auto* gpu=device_metric(metric)?gpu_usage(sample,index):nullptr;
+    if(metric==ResourceMetric::gpu) {
+        if(gpu && gpu->busy_percent) return *gpu->busy_percent;
+        return {};
+    }
+    const auto memory=metric==ResourceMetric::ram?sample.ram:gpu?gpu->vram:std::nullopt;
+    if(memory && memory->capacity_bytes) return (100.*memory->used_bytes)/memory->capacity_bytes;
+    return {};
+}
+
+void memory_caption(std::ostringstream& out, const execution::MemoryUsage& memory) {
+    constexpr double gib=1024.*1024*1024;
+    out<<std::fixed<<std::setprecision(1)<<memory.used_bytes/gib<<"/"<<memory.capacity_bytes/gib<<" GiB";
+}
+
+std::string resource_caption(const ResourceChart& chart) {
+    if(!chart.history || chart.history->samples.empty()) return "Awaiting compute-host samples";
+    const auto& latest=chart.history->samples.back();
+    std::ostringstream out;
+    if(chart.metric==ResourceMetric::cpu) {
+        if(!latest.cpu_busy_percent || !latest.cpu_capacity) return "CPU utilization unavailable";
+        out<<std::fixed<<std::setprecision(1)<<*latest.cpu_busy_percent<<"% · worker process / "<<
+            std::setprecision(2)<<*latest.cpu_capacity<<" allocated cores";
+    } else if(chart.metric==ResourceMetric::ram) {
+        if(!latest.ram) return "RAM usage unavailable";
+        memory_caption(out,*latest.ram);
+        out<<(latest.ram->limited_group?" · container allocation":" · system RAM");
+    } else {
+        if(latest.gpus.empty()) return "NVIDIA device telemetry unavailable";
+        bool first=true;
+        for(const auto& gpu:latest.gpus) {
+            if(!first) out<<" · ";
+            first=false;
+            out<<"GPU "<<gpu.index;
+            if(chart.active_gpu && gpu.uuid==chart.active_gpu) out<<" (receiver)";
+            out<<" ";
+            if(chart.metric==ResourceMetric::gpu && gpu.busy_percent) out<<*gpu.busy_percent<<"%";
+            else if(chart.metric==ResourceMetric::vram && gpu.vram) memory_caption(out,*gpu.vram);
+            else out<<"unavailable";
+        }
+    }
+    return out.str();
+}
+
 }
 struct PlotSnapshot::Data {
-    std::variant<std::monostate, Waveform, Constellation, Waterfall, SpectrumDetail, Qr, Codeword, PatternEvidence> value;
+    std::variant<std::monostate, Waveform, Constellation, Waterfall, SpectrumDetail, Qr, Codeword, PatternEvidence, ResourceChart> value;
     template<class Value> explicit Data(Value value_) : value(std::move(value_)) {}
 };
 PlotSnapshot::PlotSnapshot() : data_(std::make_shared<Data>(std::monostate{})) {}
@@ -141,6 +199,11 @@ PlotSnapshot PlotSnapshot::pattern_evidence(std::vector<PatternEvidencePoint> po
         }
     }
     return PlotSnapshot(std::make_shared<Data>(PatternEvidence{std::move(points)}));
+}
+
+PlotSnapshot PlotSnapshot::resource_history(ResourceMetric metric, std::shared_ptr<const ResourceHistory> history,
+        std::optional<std::array<std::uint8_t,16>> active_gpu) {
+    return PlotSnapshot(std::make_shared<Data>(ResourceChart{metric,std::move(history),active_gpu}));
 }
 
 void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, bool color_enabled) const {
@@ -463,6 +526,59 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
                    (have_quiet && static_cast<int>(y)==quiet_y(1)))return reference(x,y);
                 return gray(0);
             });
+        } else if constexpr (std::is_same_v<Type, ResourceChart>) {
+            if(!data.history || data.history->samples.empty()) {
+                rows(request,sink,false,[](unsigned,unsigned){return gray(0);});return;
+            }
+            const auto& samples=data.history->samples;
+            const auto& devices=samples.back().gpus;
+            const bool gpu=device_metric(data.metric);
+            const auto count=gpu?std::min(devices.size(),static_cast<std::size_t>(height)):1;
+            // Separate equal-height lanes map top to bottom to the caption's
+            // GPU order. Samples stay on a fixed one-minute horizontal scale.
+            using Span=std::pair<int,int>;
+            std::vector<std::vector<Span>> traces(count,std::vector<Span>(request.width,{height,-1}));
+            for(std::size_t lane=0;lane<count;++lane) {
+                const int top=static_cast<int>(lane*height/count);
+                const int span=static_cast<int>((lane+1)*height/count)-top-1;
+                const auto index=gpu?devices[lane].index:0;
+                auto& trace=traces[lane];
+                const auto add=[&](int x,int y) {
+                    trace[x].first=std::min(trace[x].first,y);
+                    trace[x].second=std::max(trace[x].second,y);
+                };
+                std::optional<std::pair<int,int>> previous;
+                const auto shown=std::min(samples.size(),resource_sample_limit);
+                for(std::size_t i=0;i<shown;++i) {
+                    const auto value=resource_percent(data.metric,samples[samples.size()-shown+i],index);
+                    if(!value || !std::isfinite(*value)) {previous.reset();continue;}
+                    const auto x=static_cast<int>((resource_sample_limit-shown+i)*static_cast<std::uint64_t>(width-1)/
+                        (resource_sample_limit-1));
+                    const auto y=top+static_cast<int>((1-std::clamp(*value/100.,0.,1.))*span);
+                    if(previous) {
+                        const auto [from,start]=*previous;
+                        const auto distance=x-from;
+                        if(distance) for(int step=0;step<distance;++step) {
+                            const auto first=start+(y-start)*static_cast<double>(step)/distance;
+                            const auto next=start+(y-start)*static_cast<double>(step+1)/distance;
+                            add(from+step,static_cast<int>(first));
+                            add(from+step,static_cast<int>(next));
+                        }
+                    }
+                    add(x,y);previous=std::pair{x,y};
+                }
+            }
+            rows(request,sink,color,[&](unsigned x,unsigned y) {
+                for(std::size_t lane=0;lane<count;++lane) {
+                    const auto [first,last]=traces[lane][x];
+                    if(static_cast<int>(y)>=first && static_cast<int>(y)<=last)
+                        return theme::data_rgb(color,theme::accent);
+                    if(lane && y==lane*request.height/count) return reference(x,y);
+                    const auto midpoint=(2*lane+1)*request.height/(2*count);
+                    if(y==midpoint && x%6<3) return reference(x,y);
+                }
+                return gray(0);
+            });
         } else if constexpr (std::is_same_v<Type, Codeword>) {
             const auto total = static_cast<long double>(data.data) + data.parity;
             const auto split = total ? static_cast<unsigned>(request.width * (static_cast<long double>(data.data) / total)) : request.width;
@@ -529,7 +645,8 @@ std::string PlotSnapshot::caption(unsigned width) const {
             out << "\n";
             if(latest.quiet_energy)out << "Quiet energy " << *latest.quiet_energy << " / " << *latest.quiet_threshold << "; ";
             out << "bottom ratio 0..2 (clipped). Conditional model; adaptive lanes are diagnostic only.";
-        } else if constexpr (std::is_same_v<Type, Codeword>) out << data.data << " data / " << data.parity << " parity bytes";
+        } else if constexpr (std::is_same_v<Type, ResourceChart>) return resource_caption(data);
+        else if constexpr (std::is_same_v<Type, Codeword>) out << data.data << " data / " << data.parity << " parity bytes";
         return out.str();
     }, data_->value);
 }

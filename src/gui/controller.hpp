@@ -23,6 +23,7 @@ public:
         bool require_gpu = false;
         // Optional embedding policy for a single finite physical-audio episode.
         bool finite_duplex = false;
+        bool simulation_only = false;
     };
     Controller();
     explicit Controller(Options options);

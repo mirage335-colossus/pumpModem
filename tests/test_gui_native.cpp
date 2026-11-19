@@ -3,8 +3,10 @@
 #include "../src/gui/application.hpp"
 #include "../src/gui/controller.hpp"
 #include "../src/gui/transmit_scope.hpp"
+#include "datapump/compression.hpp"
 #include "datapump/live.hpp"
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <source_location>
@@ -164,13 +166,23 @@ void gpu_route_diagnostics() {
     snapshot.gpu_native_coarse_workspace_sessions=3;
     snapshot.gpu_selection_reason="automatic Vulkan";
     check(gui::gpu_search_diagnostics(snapshot)==
-          "GPU search + native tracking · 42 rows · workspace 64/1024 MiB (peak 512, owner 384, waiting 2) · "
+          "GPU search + native tracking · 42 rows · Vulkan workspace leases 64/1024 MiB (peak 512, owner 384, waiting 2) · "
           "native coarse workspace fallback 3 (native-vulkan-workspace) · automatic Vulkan · fixture GPU");
 }
 void text_and_raw_draft_boundaries() {
     using F=gui::ui::Field;using C=gui::ui::Command;
     gui::Application app({.simulation=true});
     app.select(F::fast_mode,"robust");
+    std::string prior_digits;
+    for(const char digit:{'0','1'}) {
+        app.edit(F::message,std::string(1,digit));
+        const auto bits=app.field(F::short_bits).text;
+        Bytes wire;
+        for(const auto bit:bits)wire.push_back(static_cast<std::uint8_t>(bit-'0'));
+        check(!bits.empty()&&bits!=prior_digits&&app.field(F::message).text==std::string(1,digit)&&
+              compression::decode_short_bits(wire)==Bytes{static_cast<std::uint8_t>(digit)});
+        prior_digits=bits;
+    }
     // The developer prefix uses the long text path; unsupported attachments
     // cannot replace the draft or trigger a native service.
     app.edit(F::message,std::string(236,'x'));
@@ -291,6 +303,23 @@ void retained_raw_bits() {
     check(signals.copy_raw_bits(0)=="01110100" && signals.copy_text(0)=="t" && !signals.copy_bits(0));
     binary.text="010";binary.received_bits=3;signals.update(binary);
     check(signals.copy_raw_bits(0)=="010" && signals.copy_bits(0)=="010" && !signals.copy_text(0));
+    live::Snapshot simulation;
+    live::SignalUpdate mismatch;
+    mismatch.id=42;mismatch.binary=true;mismatch.complete=true;mismatch.robust_reception=true;
+    mismatch.text="1";mismatch.raw_bits="1";mismatch.received_bits=1;
+    mismatch.simulation_input_result=live::SimulationInputResult::mismatch;
+    simulation.signals.push_back(std::move(mismatch));
+    gui::Inbox inbox;
+    signals.clear();gui::apply_receptions(inbox,signals,simulation);
+    check(gui::signal_status_label(signals.lines()[0])=="sim mismatch" &&
+          gui::signal_display_text(signals.lines()[0])=="1" &&
+          signals.copy_raw_bits(0)=="1" && signals.copy_bits(0)=="1");
+    live::SignalUpdate incomplete;
+    incomplete.id=43;incomplete.binary=true;incomplete.complete=true;incomplete.robust_reception=true;
+    incomplete.simulation_input_result=live::SimulationInputResult::incomplete;
+    simulation.signals={std::move(incomplete)};
+    gui::apply_receptions(inbox,signals,simulation);
+    check(gui::signal_status_label(signals.lines()[1])=="sim incomplete" && !signals.copy_raw_bits(1));
     binary.complete=false;unavailable(binary);
     binary.complete=true;binary.expected_bits=4;unavailable(binary);
     binary.expected_bits=0;binary.text="01";unavailable(binary);
@@ -471,6 +500,43 @@ void finite_duplex_policy() {
     app.select(F::fast_mode,"legacy");
     check(app.field(F::fast_mode).selected=="robust");
 }
+void simulation_launch_defaults() {
+    using F=gui::ui::Field;
+    using C=gui::ui::Command;
+    gui::Controller simulation({.simulation_only=true});
+    check(simulation.settings().simulation && !simulation.field(F::simulation).enabled &&
+          simulation.field(F::audio_error).text=="Default");
+    simulation.edit(F::clock_accuracy,"1ms");
+    check(simulation.field(F::audio_error).text=="Default");
+    simulation.select(F::simulation,"no");
+    simulation.edit(F::planner_command,
+        "datapump-gui --tx-dbm 3 --helper-power 0 --helper-ratio-limit 90 --helper-callsign= "
+        "--path-loss-db 90 --noise-dbm-hz -164 --oscillator gpsdo-xo --rf-oscillator gpsdo-xo "
+        "--spread-preset hf-worst --selective-perturbation each-65 --shift 3e+07 --search-margin 3 "
+        "--reference independent --target-snr 32 --rate 3.6000000000000001 --carrier 3.0001725e+07 "
+        "--doppler 0c --calendar-epoch 1793850000 --clock-sync default --audio-error 70ms "
+        "--dsss-mode off --dsss-factor 10 --dsss-version interleave --live-duplex yes --keyset amateur");
+    simulation.activate(C::planner_load_command);
+    check(simulation.settings().simulation && !simulation.settings().full_duplex &&
+          simulation.settings().calendar && !simulation.settings().transfer.clock_sync);
+    check(simulation.field(F::bandwidth).text=="3.6 Hz" && simulation.settings().transfer.modem.bandwidth_hz==3.6);
+    check(simulation.field(F::audio_error).text=="70ms" &&
+          simulation.field(F::planner_command).text.find("--audio-error 70ms")!=std::string::npos);
+    simulation.edit(F::audio_error,"Default");
+    check(simulation.field(F::planner_command).text.find("--audio-error default")!=std::string::npos);
+    simulation.edit(F::helper_power,"4 W");
+    check(std::abs(simulation.settings().helper.power_w-4)<1e-12 &&
+          std::any_of(simulation.field(F::carrier).options.begin(),simulation.field(F::carrier).options.end(),
+                      [](const auto& option){return option.enabled;}));
+    simulation.edit(F::helper_power,"15 kW");
+    check(!simulation.field(F::carrier).options.empty() &&
+          !simulation.field(F::carrier).options.front().enabled &&
+          simulation.field(F::status).text.find("6 kHz sampled band")!=std::string::npos);
+    simulation.edit(F::helper_power,"1 W");
+    check(simulation.settings().helper.power_w==1 &&
+          std::any_of(simulation.field(F::carrier).options.begin(),simulation.field(F::carrier).options.end(),
+                      [](const auto& option){return option.enabled;}));
+}
 void admission_browser_controller() {
     using F=gui::ui::Field;using C=gui::ui::Command;
     gui::Controller controller({.simulation=true});
@@ -544,6 +610,7 @@ int main() {
         admission_browser_controller();
         required_gpu_policy();
         finite_duplex_policy();
+        simulation_launch_defaults();
         check(gui::parse_binary_bits("0")==Bytes({0}));
         check(gui::parse_binary_bits("000101")==Bytes({0,0,0,1,0,1}));
         check(gui::parse_binary_bits("\t00 01\r\n0\f1\v")==Bytes({0,0,0,1,0,1}));

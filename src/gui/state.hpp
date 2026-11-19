@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace datapump::live { struct Snapshot; }
+namespace datapump::live { struct Snapshot; enum class SimulationInputResult : std::uint8_t; }
 namespace datapump::gui {
 // Each returned byte is one exact bit, in entry order. Whitespace separates
 // groups but never pads, truncates or removes leading zero bits.
@@ -73,7 +73,6 @@ struct PlotUpdate {
     bool update_plots = false;
     bool append_waterfall = false;
     bool clear_waterfall = false;
-    std::optional<std::uint64_t> clear_pattern_scores_through;
 };
 // Each chronological replay frame is displayed once. Repeated UI polls do not
 // append duplicate spectrum rows, and a new replay starts a fresh waterfall.
@@ -124,6 +123,7 @@ struct SignalLine {
     bool helper_carrier = false;
     triad::v3::WrongKeyAdmissionEvidence wrong_key_evidence;
     bool robust_reception = false;
+    live::SimulationInputResult simulation_input_result{};
 };
 using WrongKeyAdmission = triad::v3::WrongKeyAdmission;
 std::string admission_filter_label(WrongKeyAdmission);

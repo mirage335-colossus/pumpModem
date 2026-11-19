@@ -103,10 +103,13 @@ class RunPodTests(unittest.TestCase):
                           {"Authorization": "Bearer secret-key", "Accept": "application/json"},
                           None, 7))
         self.assertTrue(fake.calls[1][1].endswith("/cpus?include=AVAILABILITY&product=POD&vcpuCount=32"))
-        self.assertEqual(client.list_gpus("COMMUNITY"), [])
-        self.assertTrue(fake.calls[2][1].endswith("cloud=COMMUNITY"))
+        self.assertEqual(client.list_gpus("COMMUNITY", count=3), [])
+        self.assertTrue(fake.calls[2][1].endswith("count=3&cloud=COMMUNITY"))
         with self.assertRaises(ValueError):
             client.list_gpus("invalid")
+        for count in (0, -1, 2.0, True):
+            with self.subTest(count=count), self.assertRaises(ValueError):
+                client.list_gpus(count=count)
         self.assertNotIn("secret-key", fake.calls[0][1])
         self.assertNotIn("secret-key", repr(client))
 

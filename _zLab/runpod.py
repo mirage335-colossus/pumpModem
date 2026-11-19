@@ -241,11 +241,13 @@ class RunPodClient:
             raise ValueError("invalid queued request ID")
         return "/queued-pods/" + urllib.parse.quote(queue_id, safe="")
 
-    def list_gpus(self, cloud="SECURE"):
+    def list_gpus(self, cloud="SECURE", *, count=1):
         if cloud not in ("SECURE", "COMMUNITY"):
             raise ValueError("Choose Secure or Community Cloud")
+        if type(count) is not int or count < 1:
+            raise ValueError("GPU count must be a positive integer")
         return self._catalog("gpus", {"include": "AVAILABILITY", "product": "POD",
-                                      "count": 1, "cloud": cloud})
+                                      "count": count, "cloud": cloud})
 
     def list_cpus(self):
         return self._catalog("cpus", {"include": "AVAILABILITY", "product": "POD",

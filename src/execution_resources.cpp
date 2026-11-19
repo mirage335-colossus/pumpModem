@@ -7,6 +7,7 @@
 #include <bit>
 #include <cerrno>
 #include <charconv>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -88,20 +89,27 @@ bool includes(std::string_view list, std::string_view word) {
 struct LinuxCapacity {
     unsigned cpus;
     std::optional<std::uint64_t> available;
+    double cpu_capacity;
+    std::optional<MemoryUsage> usage;
 };
 
-LinuxCapacity linux_capacity(unsigned cpus, bool automatic_memory) {
-    LinuxCapacity result{cpus, std::nullopt};
+LinuxCapacity linux_capacity(unsigned cpus, bool automatic_memory, bool diagnostics = false) {
+    LinuxCapacity result{cpus, std::nullopt, static_cast<double>(cpus), std::nullopt};
     if (automatic_memory) {
+        std::uint64_t total = 0;
         std::ifstream meminfo("/proc/meminfo");
         for (std::string line; std::getline(meminfo, line);) {
-            if (!line.starts_with("MemAvailable:")) continue;
+            const bool available = line.starts_with("MemAvailable:");
+            if (!available && !(diagnostics && line.starts_with("MemTotal:"))) continue;
             std::uint64_t kib = 0;
-            std::istringstream entry(line.substr(13));
-            if (entry >> kib && kib <= std::numeric_limits<std::uint64_t>::max()/1024)
-                result.available = kib*1024;
-            break;
+            std::istringstream entry(line.substr(line.find(':') + 1));
+            if (!(entry >> kib) || kib > std::numeric_limits<std::uint64_t>::max()/1024) continue;
+            if (available) result.available = kib*1024;
+            else total = kib*1024;
+            if (result.available && (!diagnostics || total)) break;
         }
+        if (diagnostics && total && result.available)
+            result.usage = MemoryUsage{total-std::min(total,*result.available),total};
     }
 
     std::ifstream memberships("/proc/self/cgroup"), mounts("/proc/self/mountinfo");
@@ -115,7 +123,7 @@ LinuxCapacity linux_capacity(unsigned cpus, bool automatic_memory) {
         groups.push_back({line.substr(first+1, second-first-1), line.substr(second+1)});
     }
 
-    bool visible = false;
+    bool visible = false, unreadable_usage = false;
     for (std::string line; std::getline(mounts, line);) {
         const auto separator = line.find(" - ");
         if (separator == line.npos) continue;
@@ -157,23 +165,36 @@ LinuxCapacity linux_capacity(unsigned cpus, bool automatic_memory) {
                     if (!amount.empty() && amount!="max" && amount!="-1") {
                         const auto divisor = positive_or_zero(period);
                         if (!divisor) throw Error("Invalid Execution cgroup CPU period");
-                        const auto limit = std::max<std::uint64_t>(1, positive_or_zero(amount)/divisor);
+                        const auto quota = positive_or_zero(amount);
+                        const auto limit = std::max<std::uint64_t>(1, quota/divisor);
                         result.cpus = static_cast<unsigned>(std::min<std::uint64_t>(result.cpus, limit));
+                        if (quota) result.cpu_capacity = std::min(result.cpu_capacity,
+                            static_cast<double>(quota)/static_cast<double>(divisor));
                     }
                 }
-                if (memory && result.available) {
-                    const auto apply = [&](const char* name, const char* current) {
+                if (memory && (result.available || diagnostics)) {
+                    const auto apply = [&](const char* name, const char* current, bool hard_cap) {
+                        if (diagnostics && !hard_cap) return;
                         const auto text = read_limit(directory/name);
                         if (text.empty() || text=="max" || text=="-1") return;
                         const auto limit = positive_or_zero(text);
                         if (limit >= (std::uint64_t{1}<<60)) return;
+                        if (diagnostics && result.usage && limit>=result.usage->capacity_bytes) return;
                         const auto used = positive_or_zero(read_limit(directory/current));
-                        *result.available = std::min(*result.available, used>=limit ? 0 : limit-used);
+                        if (!diagnostics && result.available)
+                            *result.available = std::min(*result.available, used>=limit ? 0 : limit-used);
+                        if (diagnostics && limit)
+                            result.usage = MemoryUsage{used,limit,true};
                     };
-                    if (v2) {
-                        apply("memory.high", "memory.current");
-                        apply("memory.max", "memory.current");
-                    } else apply("memory.limit_in_bytes", "memory.usage_in_bytes");
+                    try {
+                        if (v2) {
+                            apply("memory.high", "memory.current", false);
+                            apply("memory.max", "memory.current", true);
+                        } else apply("memory.limit_in_bytes", "memory.usage_in_bytes", true);
+                    } catch (const Error&) {
+                        if (!diagnostics) throw;
+                        unreadable_usage = true;
+                    }
                 }
                 if (directory==mount) break;
                 directory = directory.parent_path();
@@ -181,6 +202,7 @@ LinuxCapacity linux_capacity(unsigned cpus, bool automatic_memory) {
         }
     }
     if (!visible && !groups.empty()) throw Error("Execution cgroup resource limits are not visible");
+    if (unreadable_usage) result.usage.reset();
     return result;
 }
 
@@ -251,6 +273,50 @@ HostResources host_resources(bool include_memory) {
     }
 #endif
     return {cpus, available};
+}
+
+ResourceUsage resource_usage() {
+#if defined(__linux__) && !defined(DATAPUMP_EXECUTION_FIBERS)
+    const auto capacity = linux_capacity(affinity_threads(std::max(1U,concurrency())),true,true);
+    return {capacity.cpu_capacity,capacity.usage};
+#elif defined(_WIN32)
+    ResourceUsage sample;
+    sample.cpu_capacity = host_resources(false).hardware_threads;
+    MEMORYSTATUSEX physical{};
+    physical.dwLength = sizeof(physical);
+    if (GlobalMemoryStatusEx(&physical) && physical.ullTotalPhys)
+        sample.ram = MemoryUsage{physical.ullTotalPhys-physical.ullAvailPhys,physical.ullTotalPhys};
+    return sample;
+#elif defined(__APPLE__) && !defined(DATAPUMP_EXECUTION_FIBERS)
+    const auto resources = host_resources();
+    ResourceUsage sample{static_cast<double>(resources.hardware_threads),std::nullopt};
+    const auto host = mach_host_self();
+    host_basic_info_data_t info{};
+    mach_msg_type_number_t count = HOST_BASIC_INFO_COUNT;
+    if (resources.available_memory_bytes &&
+        host_info(host, HOST_BASIC_INFO, reinterpret_cast<host_info_t>(&info), &count)==KERN_SUCCESS &&
+        info.max_mem)
+        sample.ram = MemoryUsage{info.max_mem-std::min<std::uint64_t>(info.max_mem,*resources.available_memory_bytes),info.max_mem};
+    mach_port_deallocate(mach_task_self(), host);
+    return sample;
+#else
+    return {};
+#endif
+}
+
+std::optional<double> process_cpu_seconds() {
+#ifdef _WIN32
+    FILETIME created{}, exited{}, kernel{}, user{};
+    if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) return {};
+    const auto ticks = [](FILETIME time) {
+        return (std::uint64_t{time.dwHighDateTime} << 32) | time.dwLowDateTime;
+    };
+    return (static_cast<double>(ticks(kernel)) + static_cast<double>(ticks(user))) * 1e-7;
+#else
+    const auto time = std::clock();
+    if (time == static_cast<std::clock_t>(-1)) return {};
+    return static_cast<double>(time) / CLOCKS_PER_SEC;
+#endif
 }
 
 std::size_t process_footprint_bytes() {

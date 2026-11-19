@@ -134,9 +134,12 @@ void parsing_and_formatting() {
     rejects([&]{launch_command::format(unsupported);},"programmatic export silently enabled unimplemented 4-bit arithmetic");
     for(const auto* value:{"default","Default","70ms","50ms"}) {
         const auto p=launch_command::parse(std::string("--clock-sync GPS_1ms-1ms_region-0ms_offset --audio-error ")+value);
+        const bool uses_default=datapump::clock_sync::is_default(value);
         check(p.audio_timing_error_seconds==(std::string_view(value)=="50ms"?.05:.07)&&p.clock_sync=="GPS_1ms-1ms_region-0ms_offset"&&
+            p.audio_timing_default==uses_default&&
+            (launch_command::format(p).find("--audio-error default")!=std::string::npos)==uses_default&&
             launch_command::parse(launch_command::format(p))==p,
-            "Audio Default must resolve70ms and explicit50ms must remain50ms without losing explicit clock policy or saved round trip");
+            "Default and explicit Audio allowances must round trip without changing clock policy");
     }
     const auto clock=launch_command::parse("--clock-sync GPS_0.1ms-400ms_region-2564ms_offset --audio-error 30ms --dsss-factor 1000 --fhss fake-0.4s-200 --live-duplex yes");
     check(clock.fhss=="fake-fcc"&&launch_command::format(clock).find("--fhss fake-fcc")!=std::string::npos,

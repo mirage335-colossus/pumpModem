@@ -34,7 +34,7 @@ enum class Command {
     generate_keyfile, show_key_folder, acknowledge_key_failure, save_file,
     copy_signal, paste_signal, zoom_in, zoom_out, reset_zoom, clear_waterfall,
     pattern_first, pattern_previous, pattern_next, pattern_last, toggle_qr_expanded, dismiss_overlay,
-    transmit_short_bits, copy_raw_signal, paste_raw_signal, clear_pattern_scores,
+    transmit_short_bits, copy_raw_signal, paste_raw_signal,
     resume_recovery, cancel_recovery,
     planner_target, planner_load_command, planner_stronger, planner_weaker, planner_example_short, planner_example_lpi,
     planner_fast, planner_day, planner_clock, planner_toggle_details, planner_toggle_draft,
@@ -44,12 +44,13 @@ enum class Command {
     fast_open_key, fast_generate_key, fast_choose_file, fast_transmit, fast_listen, fast_cancel, fast_save, fast_use_text, fast_clear_received, fast_copy_signal, fast_paste_signal, fast_toggle_qr_expanded,
     legacy_transmit,
     planner_example_spread, planner_example_weak, planner_example_sub9, planner_example_eme, fhss_apply,
-    toggle_waterfall_expanded, toggle_helper_waterfall_expanded, load_amateur, unload_keys
+    toggle_waterfall_expanded, toggle_helper_waterfall_expanded, load_amateur, unload_keys, replay_simulation
 };
 enum class Bitmap {
     none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,
     pattern_evidence, payload_alphabet, reference_alphabet, fast_waveform, fast_waterfall, fast_constellation, fast_qr,
-    legacy_waterfall, waterfall_detail, waterfall_helper_detail
+    legacy_waterfall, waterfall_detail, waterfall_helper_detail,
+    cpu_utilization, ram_usage, gpu_utilization, vram_usage
 };
 enum class ScreenScope { regular, fast, legacy, shared };
 enum class Kind { label, action, toggle, choice, text, list, bitmap };
@@ -133,6 +134,7 @@ struct Control {
     bool read_only = false; // Selectable/scrollable native text without editing.
     ControlPurpose purpose = ControlPurpose::auxiliary;
     Command right_click = Command::none;
+    int unslotted_height = 28;
 };
 const std::vector<Control>& console_screen();
 struct PageDefinition {

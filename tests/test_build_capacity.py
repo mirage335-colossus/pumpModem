@@ -24,6 +24,20 @@ class BuildCapacity(unittest.TestCase):
                                  (4096 * MIB, 4), (None, 2)]:
             self.assertEqual(capacity.select_jobs(64, memory), expected)
 
+    def test_dedicated_runpod_uses_all_cores_with_a_backend_memory_budget(self):
+        gib = 1024 * MIB
+        cases = (
+            ('cpu', 32, 128 * gib, 32),
+            ('vulkan', 32, 8 * gib, 4),
+            ('cuda', 32, 8 * gib, 2),
+            ('cuda', 48, 48 * gib, 14),
+            ('cpu', 32, 0, 1),
+            ('vulkan', 32, None, 1),
+        )
+        for backend, cpus, memory, expected in cases:
+            with self.subTest(backend=backend, cpus=cpus, memory=memory):
+                self.assertEqual(capacity.select_jobs(cpus, memory, runpod_backend=backend), expected)
+
     def test_affinity_limits_visible_host(self):
         with patch.object(capacity.sys, 'platform', 'linux'), \
              patch.object(capacity.os, 'cpu_count', return_value=64), \
@@ -73,6 +87,15 @@ class BuildCapacity(unittest.TestCase):
              patch.object(capacity, 'available_memory', return_value=16 * 1024 * MIB), \
              patch.object(capacity, 'linux_limits', return_value=(cpus, memory)):
             self.assertEqual(capacity.default_jobs(), 2)
+            self.assertEqual(capacity.default_jobs(runpod_backend='vulkan'), 1)
+        (mount / 'memory.high').write_text('max')
+        (mount / 'memory.max').write_text('max')
+        cpus, memory = capacity.linux_limits(proc)
+        with patch.object(capacity.sys, 'platform', 'linux'), \
+             patch.object(capacity, 'usable_cpus', return_value=64), \
+             patch.object(capacity, 'available_memory', return_value=16 * 1024 * MIB), \
+             patch.object(capacity, 'linux_limits', return_value=(cpus, memory)):
+            self.assertEqual(capacity.default_jobs(runpod_backend='vulkan'), 3)
 
     def test_v1_exhausted_parent_and_unlimited_child(self):
         proc, mount = self.fixture('v1')

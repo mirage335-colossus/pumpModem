@@ -29,9 +29,11 @@ class FakeProvider:
     def __init__(self):
         self.gpus = [{'id': 'NVIDIA GeForce RTX 4090', 'availability': 'HIGH',
                       'price': {'secure': 1.25, 'community': 0.75}}]
+        self.multi_gpu = {}
         self.cpus = [{'id': 'test-cpu', 'vcpu': {'min': 2, 'max': 32}, 'ramGbPerVcpu': 4}]
         self.calls = []
         self.gpu_tiers = []
+        self.gpu_counts = []
         self.pods = []
         self.queued = []
         self.created = []
@@ -39,12 +41,14 @@ class FakeProvider:
         self.deleted = []
         self.create_error = None
 
-    def list_gpus(self, cloud):
+    def list_gpus(self, cloud, *, count=1):
         self.calls.append('gpus')
         self.gpu_tiers.append(cloud)
-        if isinstance(self.gpus, Exception):
-            raise self.gpus
-        return self.gpus
+        self.gpu_counts.append(count)
+        rows = self.gpus if count == 1 else self.multi_gpu.get(count, [])
+        if isinstance(rows, Exception):
+            raise rows
+        return rows
 
     def list_cpus(self):
         self.calls.append('cpus')
@@ -374,9 +378,12 @@ class TkControllerIntegration(unittest.TestCase):
         self.assertEqual(
             {widget.cget('text') for widget in self.descendants()
              if isinstance(widget, ttk.Button) and widget.winfo_ismapped()},
-            {'Start simulation', 'End simulation', 'Advanced'},
+            {'Start simulation', 'End simulation', 'Advanced', 'Refresh compute'},
         )
         combo = self.controller.dropdown
+        refresh = self.button('Refresh compute')
+        self.assertEqual(str(refresh.cget('compound')), 'image')
+        self.assertGreaterEqual(refresh.winfo_rootx(), combo.winfo_rootx() + combo.winfo_width())
         font_used = font.Font(self.root, font=combo['font'])
         for label in combo['values']:
             with self.subTest(label=label):
@@ -396,9 +403,10 @@ class TkControllerIntegration(unittest.TestCase):
     def test_create_rechecks_stock_without_substituting_or_requesting_a_pod(self):
         self.provider.gpus.append({'id': 'RTX PRO 6000 Blackwell Max-Q', 'availability': 'NONE'})
         self.provider.gpus.append({'id': 'NVIDIA GeForce RTX 5090', 'availability': 'HIGH',
-                                   'price': {'secure': 1.32}})
+                                   'price': {'secure': 1.32}, 'maxCount': {'secure': 1}})
         self.load_catalog()
         self.assertIn('RTX 5090 · stock high', self.controller.compute.get())
+        self.controller.compute_selected()
         self.provider.gpus[-1]['availability'] = 'NONE'
         with patch.object(messagebox, 'askyesno') as ask:
             self.execute(self.button('Start simulation').invoke, lambda: not self.controller.busy)
@@ -418,11 +426,13 @@ class TkControllerIntegration(unittest.TestCase):
         self.assertIn('Choose a compute option', self.controller.status.get())
 
     def test_explicit_tier_change_refresh_and_paid_confirmation(self):
-        self.provider.gpus.append({'id': 'NVIDIA GeForce RTX 5090', 'availability': 'HIGH'})
+        self.provider.gpus.append({'id': 'NVIDIA GeForce RTX 5090', 'availability': 'HIGH',
+                                   'maxCount': {'secure': 1, 'community': 1}})
         self.load_catalog()
         self.assertEqual(self.controller.cloud.get(), 'SECURE')
         chosen = next(label for label in self.controller.dropdown['values'] if 'RTX 4090' in label)
         self.controller.dropdown.set(chosen)
+        self.controller.compute_selected()
         self.entry_for(self.controller.cloud).set('COMMUNITY')
         self.assertFalse(self.controller.choices)
         self.assertFalse(self.controller.compute.get())
@@ -449,6 +459,34 @@ class TkControllerIntegration(unittest.TestCase):
         self.assertEqual(self.provider.created[0]['gpu'], {'id': 'NVIDIA GeForce RTX 4090', 'count': 1})
         self.assertEqual(self.provider.created[0]['cloud'], 'COMMUNITY')
         self.assertEqual(self.controller.state.read()[0]['cloud'], 'COMMUNITY')
+
+    def test_refresh_updates_default_until_user_selects_and_creates_exact_count(self):
+        pro = {'id': lab.RTX_PRO_6000, 'availability': 'HIGH', 'price': {'secure': 2.09},
+               'maxCount': {'secure': 2}}
+        self.provider.gpus.append(pro)
+        self.load_catalog()
+        self.assertIn('Server Edition · stock high', self.controller.compute.get())
+        self.provider.multi_gpu[2] = [dict(pro, availability='LOW')]
+        self.load_catalog()
+        self.assertIn('Server Edition x2 · stock low · $4.18/hr', self.controller.compute.get())
+        self.root.deiconify()
+        self.root.update()
+        self.controller.dropdown.set(next(label for label in self.controller.dropdown['values']
+                                          if 'RTX 4090' in label))
+        self.controller.dropdown.event_generate('<<ComboboxSelected>>')
+        self.provider.gpus[0]['price']['secure'] = .99
+        self.load_catalog()
+        self.assertIn('RTX 4090 · stock high · $0.99/hr', self.controller.compute.get())
+        self.controller.dropdown.set(next(label for label in self.controller.dropdown['values'] if 'x2' in label))
+        self.controller.dropdown.event_generate('<<ComboboxSelected>>')
+        with patch.object(messagebox, 'askyesno', return_value=True) as ask:
+            self.execute(self.button('Start simulation').invoke,
+                         lambda: not self.controller.busy and self.controller.setting_up)
+        self.assertIn('x2 · stock low · $4.18/hr', ask.call_args.args[1])
+        self.assertIn('receiver currently uses one GPU per session', ask.call_args.args[1])
+        self.assertEqual(self.provider.gpu_counts[-1], 2)
+        self.assertEqual(self.provider.created[0]['gpu'], {'id': pro['id'], 'count': 2})
+        self.assertEqual(self.controller.state.read()[0]['requested_gpu_count'], 2)
 
     def test_deadline_during_paid_confirmation_preserves_expiry_and_reports_unsent_create(self):
         self.load_catalog()
@@ -547,7 +585,8 @@ class TkControllerIntegration(unittest.TestCase):
             requests.append((method, path))
             if (method, path) == ('GET', '/v2/catalog/gpus'):
                 return 200, json.dumps({'gpus': [{'id': 'NVIDIA GeForce RTX 5090', 'availability': 'LOW',
-                                                'price': {'secure': 1.32}}]}).encode()
+                                                'price': {'secure': 1.32},
+                                                'maxCount': {'secure': 1}}]}).encode()
             if (method, path) == ('GET', '/v2/catalog/cpus'):
                 return 200, b'{"cpus":[]}'
             if (method, path) == ('POST', '/v2/pods'):
@@ -630,6 +669,16 @@ class TkControllerIntegration(unittest.TestCase):
             self.assertEqual(self.provider.cancelled, ['q-test'])
         finally:
             other.destroy()
+
+    def test_closing_cancels_a_pending_catalog_refresh(self):
+        self.controller.key.set('dummy-session-key')
+        self.controller.tier_changed()
+        scheduled = self.controller.catalog_after
+        self.assertIsNotNone(scheduled)
+        self.controller.close()
+        self.assertTrue(self.controller.window_closed.is_set())
+        self.assertNotIn(scheduled, self.root.tk.call('after', 'info'))
+        self.assertEqual(self.provider.calls, [])
 
     def test_saved_key_loads_catalog_and_clear_removes_file(self):
         self.set_entry(self.controller.key, 'saved-fixture-key')

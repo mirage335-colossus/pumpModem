@@ -408,6 +408,96 @@ by itself it passed both 48 and 44.1 kHz in 224.01 seconds. The final
 carrier grid adjustment was rebuilt and verified in the inherited-pipe
 web worker and native GUI policy tests.
 
+### RunPod compute and simulation diagnostics — 19 November 2026
+
+The authenticated catalog reported stock for two full RTX PRO 6000 Blackwell
+Server GPUs, and the startup ordering selected that offer. A bounded run with
+the stock image verified two distinct full-device UUIDs through pinned SSH.
+The deployer selected 81 parallel jobs from the 81.6-core quota and 351.1 GiB
+container allocation. The native worker linked and started with Vulkan. This is
+one observed build and device configuration.
+
+The managed browser bridge delivered sampled CPU and RAM charts and live
+NVIDIA utilization and VRAM charts for both devices. The receiver used GPU 0.
+One chart sample showed 2% and 0% GPU utilization and 0.7 and 0.6 GiB of
+95.6 GiB VRAM in use, respectively. The test decoded `e` with 780 Vulkan
+search rows, three DATA decisions and both quiet slots. RunPod returned an
+individual HTTP 404 after deletion and empty pod and queue inventories.
+
+In local Firefox, clicking Pattern evidence left the painted plot unchanged.
+After clearing the waterfall, manual replay restored the signal pixels in
+2.937 seconds and kept the same decoded result. The actual lab relay test
+restored Audio error **Default** after reloading and after starting a new
+local server. Settings loading preserves Simulation in the lab and preserves
+an explicit 70 ms audio allowance. The recorded native settings display
+`3.6 Hz` for the loaded Rate. On that configuration the Helper tests
+accepted 4 W, explained why 15 kW had no preset at 6 kHz, and recovered the
+editable suggestions at 1 W.
+
+All 183 standalone tests, 32 desktop GUI tests, and 12 web checks passed.
+The standalone suite used a private X11 display and loopback listeners for
+the Tk and native relay cases. It checked exact-count stock with an omitted
+catalog ceiling and closing the window with a pending refresh. The web
+timing-only Fast audio stress case retains its previous validation.
+
+### Strong-signal raw-bit simulation at 3.6 Hz — 19 November 2026
+
+The native CPU probe reproduced the report that both transmitted bit values can
+appear as 1. The checkout was `e0e48f33`. The probe reports configure-time
+commit `d3482db2` and source manifest `063c4a4065f7404d…`. It used +3 dBm DATA, 90 dB path loss,
+−164 dBm/Hz noise (+77 dB-Hz actual), Target 32 dB-Hz, 3.6 Hz without
+spreading, 30 MHz Shift, 1725 Hz IF, two GPSDO-XO models, margin 3,
+HF Worst and Each 65%, with Helper and FHSS disabled. The configured
+calendar used anchor 1793850000, pattern epoch 1793850013 and ordinal
+7000037. One full 1,215,321-sample active public slot was evaluated per
+condition, at seed 950101 and on 24 native software workers. Each used the
+Current decision and AVX2 FP32 coarse FFTs.
+
+| Channel | Sent bit | Received bit | Both bit log-evidences | Native scoring |
+| --- | ---: | ---: | --- | ---: |
+| Selected HF Worst and Each 65% | 0 | 1 | 2.9223e8, 3.2003e8 | 13.57 s |
+| Same selected channel | 1 | 1 | 3.3601e8, 3.5392e8 | 13.53 s |
+| Channel-severity-zero control | 0 | 0 | 8.0347e9, 6.8015e9 | 13.37 s |
+
+All used the fixed-affine model. With 0.6 fine chips/s, two cells require
+3.33 s, outside the 0.25 s and 1 s short-block families. The drift
+extension also exceeded the preserved owner lease. The severity-zero
+control retained the same receiver, timing, noise and bit while removing
+the selected changing-channel effects from the signal. These three
+observations establish a channel-dependent native polarity error for this
+configuration and seed, with complete-message reliability and GPU parity
+unqualified.
+
+Follow-up probes on source manifest `23737d863d468c99…` held the seed,
+RF settings, and 160.4 s duration fixed. The combined profile again
+decoded zero as one with explicit FP64 coarse FFTs (11.90 s native
+scoring). Leaving HF Worst enabled and turning selective modulation Off
+decoded zero correctly with FP32 (11.44 s). Leaving Each 65% enabled and
+turning spread off timed out at the 90 s probe limit without a decision.
+That preset change lowered the actual modulation rate from 9 Hz to 0.01 Hz
+and shortened the window by 126 samples through the channel tail. The
+controlled comparisons cover GUI presets.
+
+A one-off diagnostic with native source manifest `f15e6fe72e3214a4e…`
+then kept the receiver declarations fixed and set only the injected
+slow and fast modulation depths to zero after profile preparation. The
+streaming filter was absent, while the receiver still expected Each 65%
+and its 90 Hz allowance. The 21 ms/90 Hz spread, common wander with
+one-second knots, seed, calendar, and 1,215,321-sample window were preserved.
+The FP32 probe decoded zero correctly in 10.40 s, with the same fixed-affine
+bit evidence as preset Off. This isolates a contribution from the injected
+modulation at this seed. Recovery with modulation enabled remains unresolved.
+The three original slot receipts are in ignored
+`local-evidence/runpod-strong-bit-2026-11-19/` for exact replay comparison.
+Remove them when a later qualification supersedes this failure record.
+
+Finite raw-bit and short-text simulations compare the public native
+reception with their local input after physical completion. They report
+match, mismatch, or incomplete reception. Pattern Steps and the Signal
+Browser retain the actual score and received content, including bits
+available for copying. The local reference is separate from native
+scoring and the two-quiet-slot completion rule.
+
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 
 The [HF operating results](indexes/robust.md#low-power-hf-alarm-results)

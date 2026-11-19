@@ -315,7 +315,9 @@ void supported_sizes() {
               contains(signals,layout[Slot::recovery_actions])&&
               layout[Slot::paste_signal].x+layout[Slot::paste_signal].w<layout[Slot::recovery_actions].x&&
               layout[Slot::copy_signal].x+layout[Slot::copy_signal].w<layout[Slot::paste_signal].x &&
-              contains(waterfall, layout[Slot::clear_waterfall]), "list or plot footer escapes its block");
+              contains(waterfall, layout[Slot::clear_waterfall]) && contains(waterfall,layout[Slot::replay_simulation]) &&
+              layout[Slot::clear_waterfall].x+layout[Slot::clear_waterfall].w<layout[Slot::replay_simulation].x,
+              "list or plot footer escapes its block or overlaps");
         for (const auto slot : {Slot::zoom_in, Slot::zoom_out, Slot::reset_zoom})
             check(contains(waveform, layout[slot]), "waveform action escapes its block");
         const auto page=layout[Slot::page];

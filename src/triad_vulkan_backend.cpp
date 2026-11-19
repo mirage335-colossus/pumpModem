@@ -237,8 +237,10 @@ struct Shared {
         VkPhysicalDeviceSubgroupProperties subgroup{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
         VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
         VkPhysicalDeviceMaintenance3Properties allocation{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES};
+        VkPhysicalDeviceIDProperties identity{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
         subgroup.pNext = &driver;
         driver.pNext = &allocation;
+        allocation.pNext = &identity;
         VkPhysicalDeviceShaderIntegerDotProductProperties dot{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_PROPERTIES};
         VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
         props.pNext = &subgroup;
@@ -335,6 +337,8 @@ struct Shared {
         vkGetDeviceQueue(device, family, 0, &queue);
         total.device = "vulkan:" + std::to_string(options.device_index);
         total.device_name = properties.deviceName;
+        total.device_uuid.emplace();
+        std::copy_n(identity.deviceUUID,total.device_uuid->size(),total.device_uuid->begin());
         total.library_version = "VkFFT " + std::to_string(VkFFTGetVersion()) + "; glslang " +
             std::to_string(GLSLANG_VERSION_MAJOR) + "." + std::to_string(GLSLANG_VERSION_MINOR) + "." +
             std::to_string(GLSLANG_VERSION_PATCH) + GLSLANG_VERSION_FLAVOR;

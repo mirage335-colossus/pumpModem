@@ -48,6 +48,7 @@ void validate_settings(const Settings&);
 // Compile-time capability only. Device initialization stays on the session
 // manager, so GUI availability checks never open a GPU or block on a driver.
 bool gpu_receiver_available() noexcept;
+enum class SimulationInputResult : std::uint8_t { none, match, mismatch, incomplete };
 struct SignalUpdate {
     std::uint64_t id=0;
     double frequency_hz=0;
@@ -67,6 +68,8 @@ struct SignalUpdate {
     bool helper_carrier=false;
     bool robust_reception=false;
     triad::v3::WrongKeyAdmissionEvidence wrong_key_evidence;
+    // Comparison against local input for a finite raw-bit or short-text simulation.
+    SimulationInputResult simulation_input_result=SimulationInputResult::none;
 };
 enum class ConstellationSource {input,transmitted,received};
 enum class PatternDecision { ambiguous, data, quiet };
@@ -94,6 +97,11 @@ struct PatternStep {
     std::string helper_status, varying_status, drift_status, reason;
 };
 struct Snapshot {
+    struct ReplayWaterfall {
+        double gain_db=0;
+        std::pair<double,double> search_band_hz;
+        std::optional<std::pair<double,double>> helper_band_hz;
+    };
     std::vector<float> waveform;
     std::uint32_t waveform_sample_rate=0;
     bool environment_monitor=false;
@@ -104,6 +112,8 @@ struct Snapshot {
     double spectrum_bin_hz=0;
     // Convert the simulated spectrum from unit-DATA power to modeled FFT-bin SNR.
     std::optional<double> simulation_spectrum_gain_db;
+    // Original band and power calibration of the currently displayed replay.
+    std::optional<ReplayWaterfall> replay_waterfall;
     std::vector<std::complex<double>> constellation;
     std::uint64_t constellation_dropped=0;
     ConstellationSource constellation_source=ConstellationSource::input;
@@ -118,6 +128,7 @@ struct Snapshot {
     std::string status,error,receiver_error;
     std::string gpu_device,gpu_precision;
     std::string gpu_backend,gpu_selection_reason;
+    std::optional<std::array<std::uint8_t,16>> gpu_device_uuid;
     std::uint64_t gpu_score_rows=0;
     // Bounded cumulative executed-work diagnostics for this settings generation.
     std::uint64_t gpu_fp32_score_rows=0,gpu_fp16_storage_score_rows=0,gpu_packed_fp16_score_rows=0;
@@ -141,6 +152,7 @@ struct Snapshot {
     std::string gpu_cuda_half_fft_fallback_summary;
     bool gpu_native_lag_preference_supported=false;
     bool running=false,transmitting=false,simulation=false,simulation_replay=false;
+    bool simulation_replay_available=false;
     bool force_transmit_available=false;
 };
 // The application thread submits settings and commands. Device and DSP work
@@ -164,6 +176,7 @@ public:
     void transmit_bits(std::span<const std::uint8_t>,bool force=false);
     void transmit_noise();
     void transmit_helper();
+    void replay_simulation();
     void cancel_transmit();
     bool resume_recovery(std::uint64_t);
     void cancel_recovery(std::uint64_t);

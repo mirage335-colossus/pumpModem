@@ -73,7 +73,7 @@ class RelayTests(unittest.TestCase):
         self.worker = Path(self.tmp.name) / "fake_worker"
         self.worker.write_text('''#!/usr/bin/env python3
 import os, stat, struct, sys
-expected = ([] if os.environ.get("EXPECT_LIVE") else ["--simulation"]) + (["--require-gpu"] if os.environ.get("EXPECT_GPU") else [])
+expected = ([] if os.environ.get("EXPECT_LIVE") else ["--simulation-only"]) + (["--require-gpu"] if os.environ.get("EXPECT_GPU") else [])
 if os.environ.get("EXPECT_FILES"):
     expected += ["--file-events-fd", sys.argv[-1]]
     assert stat.S_ISFIFO(os.fstat(int(sys.argv[-1])).st_mode)

@@ -1,6 +1,7 @@
 #pragma once
 #include "bitmap.hpp"
 #include "plot_data.hpp"
+#include "resource_monitor.hpp"
 #include "datapump/qr.hpp"
 #include <memory>
 #include <optional>
@@ -28,6 +29,8 @@ public:
     // Top: fixed-affine bit alternatives and operational aggregate/threshold.
     // Bottom: separately scored quiet energy relative to its noise threshold.
     static PlotSnapshot pattern_evidence(std::vector<PatternEvidencePoint> points);
+    static PlotSnapshot resource_history(ResourceMetric metric, std::shared_ptr<const ResourceHistory> history,
+        std::optional<std::array<std::uint8_t,16>> active_gpu = {});
     // color_enabled is user preference, independently gated by target support.
     void paint(const BitmapRequest& request, const BitmapSink& sink, bool color_enabled = true) const;
     // Erase application-specific factories and data at the backend boundary.

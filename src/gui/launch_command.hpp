@@ -28,6 +28,7 @@ struct Patch {
     // never serialize key material. Omitted keyset preserves the current bank.
     std::optional<std::string> keyfile,keyset,key_name,tx_key;
     std::optional<double> audio_timing_error_seconds;
+    bool audio_timing_default=false; // Retain the Default choice alongside its effective allowance.
     // Zero epoch clears the configured calendar. Ordinal is independent of
     // message boundaries; both peers must use the same initial address.
     std::optional<std::uint64_t> calendar_epoch,calendar_ordinal;

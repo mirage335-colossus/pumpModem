@@ -32,6 +32,7 @@ inline constexpr std::array<std::string_view, 11> bulk_half_fft_fallback_reasons
 
 struct BulkReceipt {
     std::string device, device_name, library_version, precision, requested_coarse_math;
+    std::optional<std::array<std::uint8_t,16>> device_uuid;
     std::string selection_reason;
     std::string native_fine_fallback_reason;
     std::string workspace_scope = "backend_shared";

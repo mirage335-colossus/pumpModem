@@ -1363,6 +1363,10 @@ void raw_bit_session_transmission_and_ordinal() {
         check(record != signals.rend() && record->binary && record->raw_bits == (bit ? "1" : "0") &&
               !record->validated && received_messages == 0 && completed.received.empty(),
               "Raw bit was text-coded, decoded as a message, or lost from the native signal record");
+        const auto shown = bit ? std::string("1") : std::string("0");
+        check(record->simulation_input_result == live::SimulationInputResult::match &&
+              completed.status.find("sent " + shown + " · received " + shown + " · match") != std::string::npos,
+              "Raw simulation did not report the actual match for its own transmission");
         check(completed.pattern_steps.size() == 3,
               "Single raw bit did not finish from one DATA slot and two physical quiet slots");
         if (!bit)
@@ -1493,6 +1497,8 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
         return signal.robust_reception && signal.complete && signal.validated;
     });
     check(final_signal!=signal_events.rend() && final_signal->raw_bits=="001" &&
+          final_signal->simulation_input_result==live::SimulationInputResult::match &&
+          completed.status.find("sent 1 text byte · received 1 text byte · match")!=std::string::npos &&
           final_signal->wrong_key_evidence.available && final_signal->wrong_key_evidence.data_bits==3 &&
           final_signal->wrong_key_evidence.passing_bits[0]==3,
           "native GUI completion lost baseline content or reversible filter evidence");
@@ -1519,6 +1525,38 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
     check(std::all_of(completed.waveform.begin(), completed.waveform.end(), [](float x) { return std::isfinite(x); }) &&
           std::all_of(completed.spectrum_db.begin(), completed.spectrum_db.end(), [](double x) { return std::isfinite(x); }),
           "Native plot output contains nonfinite samples");
+    if (!gpu && !dynamic_channel) {
+        check(completed.simulation_replay_available && completed.replay_waterfall,
+              "Completed simulation did not retain its calibrated activity");
+        const auto original = *completed.replay_waterfall;
+        simulated.transfer.modem.carrier_hz += 50;
+        simulated.path_loss_db += 10;
+        session.configure(simulated);
+        const auto adjusted = ready(session);
+        check(adjusted.simulation_replay_available && adjusted.search_band_hz != original.search_band_hz &&
+              adjusted.simulation_spectrum_gain_db != original.gain_db,
+              "A tuning change discarded the completed replay or did not change the active calibration");
+        session.replay_simulation();
+        const auto repeated = wait(session, [&](const auto& out) {
+            check(out.received.empty() && out.signals.empty() && out.pattern_steps.empty() &&
+                  out.transmit_trace.revision == adjusted.transmit_trace.revision,
+                  "Plot-only replay generated new transmission or receiver evidence");
+            return out.simulation_replay;
+        }, "Requested replay did not immediately produce activity", 2s);
+        check(repeated.transmitting && !repeated.simulation_replay_available && repeated.replay_waterfall &&
+              repeated.replay_waterfall->gain_db == original.gain_db &&
+              repeated.replay_waterfall->search_band_hz == original.search_band_hz &&
+              repeated.waveform_sample_rate == completed.waveform_sample_rate &&
+              repeated.spectrum_revision > completed.spectrum_revision &&
+              repeated.spectrum_start_sample <= completed.spectrum_start_sample,
+              "Requested replay lost the original calibrated sample interval");
+        session.cancel_transmit();
+        const auto stopped = wait(session, [](const auto& out) { return !out.transmitting; },
+                                   "Requested replay was not cancellable", 2s);
+        check(stopped.simulation_replay_available && !stopped.simulation_replay &&
+              stopped.status.find("replay stopped") != std::string::npos,
+              "Cancelling manual replay discarded the retained activity");
+    }
     check(fixture::capture_opens == captures && fixture::playback_opens == playbacks,
           "Simulation acquired a physical audio device");
     if (gpu) {

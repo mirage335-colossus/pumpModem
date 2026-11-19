@@ -84,6 +84,7 @@ class SimulationTest(unittest.TestCase):
         try:
             wait(lambda: snapshot is not None)
             wait(lambda: any(item.get("text") == "Robust simulation ready" for item in snapshot["controls"]))
+            self.assertFalse(control("Replay sim")["enabled"])
             # The canonical GUI resolves these exact normal control inputs.
             # Strong link, no Helper/FHSS/spreading or selected channel effects.
             for label, value in (("Transmit power", "100 mW"), ("Path loss", "114 dB"),
@@ -113,6 +114,19 @@ class SimulationTest(unittest.TestCase):
                             f"expected decoded message missing: {rendered!r}")
             for label in ("Spectrum", "Waveform", "Receiver input I/Q", "Pattern evidence"):
                 self.assertEqual(control(label)["kind"], "bitmap", label)
+            self.assertFalse(control("Pattern evidence")["click"],
+                             "Pattern evidence should survive an ordinary click")
+            self.assertTrue(control("Replay sim")["enabled"])
+            event(4, control("Clear waterfall")["id"], "")
+            event(4, control("Replay sim")["id"], "")
+            self.assertFalse(control("Replay sim")["enabled"])
+            wait(lambda: any("· replaying 3 seconds" in item.get("text", "")
+                             for item in snapshot["controls"]))
+            self.assertEqual(control("Pattern steps")["records"], steps)
+            self.assertEqual(control("Signals")["records"], signals)
+            wait(lambda: control("Replay sim")["enabled"])
+            self.assertEqual(control("Pattern steps")["records"], steps)
+            self.assertEqual(control("Signals")["records"], signals)
             spectrum = control("Spectrum")
             bitmap = spectrum["bitmap"]
             width, height = bitmap["width"], bitmap["height"]

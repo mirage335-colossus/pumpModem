@@ -112,7 +112,7 @@ inline ControlLayout control_layout(const Control& c,const FieldState& state,int
         };
         out.frame={page.x+8+allocate(before),
                    page.y+24+static_cast<int>(c.row)*56,
-                   std::max(0,allocate(c.stretch)-8),28};
+                   std::max(0,allocate(c.stretch)-8),c.unslotted_height};
     }
     out.frame.w=std::max(0,out.frame.w);out.frame.h=std::max(0,out.frame.h);
     return control_content_layout(c,state,out.frame);

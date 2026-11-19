@@ -801,6 +801,55 @@ class ManagedBrowserTests(unittest.TestCase):
         self.assertNotEqual(original, refreshed)
         self.assertIn(b'Robust simulation ready', self.request('/output', None, refreshed))
 
+    def test_simulation_relay_restores_native_audio_default_on_reload_and_new_server(self):
+        lab = Path(__file__).resolve().parent
+        binary = lab.parent / 'build/dev-cli-web/datapump-worker'
+        if not binary.is_file():
+            self.skipTest('native worker not built')
+        command = [sys.executable, str(lab / 'worker_relay.py'), str(binary)]
+
+        def start():
+            bridge = browser_bridge.start(command, managed=True)
+            self.addCleanup(bridge.close)
+            self.url = urlsplit(bridge.url)
+            return bridge
+
+        def field(snapshot, label):
+            return next(control for control in snapshot['controls'] if control.get('label') == label)
+
+        def wait(session, predicate):
+            deadline = time.monotonic() + 12
+            while time.monotonic() < deadline:
+                for kind, frame_bytes in browser_bridge._preview.frames(self.request('/output', None, session)):
+                    if kind == 101:
+                        snapshot = json.loads(frame_bytes[12:])
+                        if predicate(snapshot):
+                            return snapshot
+            self.fail('native simulation snapshot deadline')
+
+        def check_defaults(session):
+            snapshot = wait(session, lambda s: field(s, 'Audio error')['text'] == 'Default')
+            self.assertEqual(field(snapshot, 'Simulation')['selected'], 'yes')
+            self.assertFalse(field(snapshot, 'Simulation')['enabled'])
+            return snapshot
+
+        bridge = start()
+        session = self.attach()
+        snapshot = check_defaults(session)
+        seq = int(snapshot['ack']) + 1
+        payload = struct.pack('<IQQQIII', 1, int(snapshot['generation']), seq,
+                              int(field(snapshot, 'Audio error')['id']), 1, 0, 0)
+        payload += browser_bridge._preview.string('50ms') + browser_bridge._preview.string('')
+        self.request('/input', frame(2, payload), session)
+        wait(session, lambda s: int(s['ack']) >= seq and field(s, 'Audio error')['text'] == '50ms')
+
+        refreshed = self.attach()
+        self.assertNotEqual(refreshed, session)
+        check_defaults(refreshed)
+        bridge.close()
+        start()
+        check_defaults(self.attach())
+
     def test_worker_reset_preserves_the_pod_session_past_the_close_grace(self):
         self.start_bridge()
         original = self.attach()

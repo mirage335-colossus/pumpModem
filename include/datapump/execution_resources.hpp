@@ -18,6 +18,21 @@ struct HostResources {
 // the allocation. Unknown available memory remains absent.
 HostResources host_resources(bool include_memory = true);
 
+struct MemoryUsage {
+    std::uint64_t used_bytes, capacity_bytes;
+    bool limited_group = false;
+};
+
+struct ResourceUsage {
+    std::optional<double> cpu_capacity;
+    std::optional<MemoryUsage> ram;
+};
+
+// Diagnostic observations only. CPU capacity may include fractional quota.
+// RAM reflects the narrowest visible hard cap, or physical host RAM.
+ResourceUsage resource_usage();
+std::optional<double> process_cpu_seconds();
+
 // Current owned process memory and the native default stack plus its guard.
 // The footprint includes swapped heap pages where the OS exposes them.
 // Cooperative execution reports zero footprint and retains its conservative

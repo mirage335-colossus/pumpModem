@@ -221,7 +221,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         }
         else if(flag=="--audio-error") {
             result.audio_timing_error_seconds=clock_sync::parse_audio_error(value);
-            clock_sync::validate_audio_error(*result.audio_timing_error_seconds);
+            result.audio_timing_default=clock_sync::is_default(value);
         }
         else if(flag=="--dsss-mode") {
             if(value!="off"&&value!="interleave")invalid("--dsss-mode must be off or interleave.");
@@ -362,7 +362,8 @@ std::string format(const Patch& settings) {
     if(settings.fec)add("--fec",*settings.fec);
     if(settings.wrong_key_admission)add("--wrong-key-admission",*settings.wrong_key_admission);
     if(settings.clock_sync)add("--clock-sync",clock_sync::format(clock_sync::parse(*settings.clock_sync)));
-    if(settings.audio_timing_error_seconds)add("--audio-error",clock_sync::duration_text(*settings.audio_timing_error_seconds));
+    if(settings.audio_timing_default)add("--audio-error","default");
+    else if(settings.audio_timing_error_seconds)add("--audio-error",clock_sync::duration_text(*settings.audio_timing_error_seconds));
     if(settings.dsss_mode)add("--dsss-mode",*settings.dsss_mode);
     if(settings.dsss_factor)add("--dsss-factor",std::to_string(*settings.dsss_factor));
     if(settings.dsss_version)add("--dsss-version",std::string(tuning::outer_dsss_version_id(tuning::parse_outer_dsss_version(*settings.dsss_version))));

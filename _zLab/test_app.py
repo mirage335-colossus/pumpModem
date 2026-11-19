@@ -506,15 +506,21 @@ class Tests(unittest.TestCase):
                     deploy_selected(pod, dict(record, deadline=deadline), str(known), None, deploy_func=fake)
             self.assertEqual(len(calls), 3)
 
-    def test_one_gpu_allocation_required_on_each_tier(self):
+    def test_recorded_gpu_allocation_required_on_each_tier(self):
         for tier in ('SECURE', 'COMMUNITY'):
             record = {'compute_kind': 'gpu', 'compute_id': 'g1', 'cloud': tier}
             pod = {'gpu': {'id': 'g1', 'count': 1}, 'cloud': tier}
             self.assertTrue(simulation_gpu(record, pod))
             for count in (0, 2, True, 1.0, None):
                 pod['gpu']['count'] = count
-                with self.subTest(tier=tier, count=count), self.assertRaisesRegex(ValueError, 'one GPU'):
+                with self.subTest(tier=tier, count=count), self.assertRaisesRegex(ValueError, 'GPU type and count'):
                     simulation_gpu(record, pod)
+            record['requested_gpu_count'] = 2
+            pod['gpu']['count'] = 2
+            self.assertTrue(simulation_gpu(record, pod))
+            pod['gpu']['count'] = 1
+            with self.assertRaisesRegex(ValueError, 'GPU type and count'):
+                simulation_gpu(record, pod)
 
     def test_clock_bounds_are_explicit_positive_and_finite(self):
         self.assertEqual(clock_bounds('0.25', '2', '10'), (0.25, 2, 10))
@@ -581,6 +587,39 @@ class Tests(unittest.TestCase):
         self.assertEqual([value['gpu']['id'] for _, value in choices],
                          [models[2], models[1], models[0]])
 
+    def test_catalog_checks_each_count_and_ranks_full_gpus_by_preference(self):
+        client = Mock()
+        pro = {'id': app_module.RTX_PRO_6000, 'availability': 'LOW', 'price': {'secure': 2.09}}
+        geforce = {'id': app_module.RTX_5090, 'availability': 'HIGH', 'price': {'secure': 1.32}}
+        maxq = dict(pro, id=pro['id'].replace('Server Edition', 'Max-Q Workstation Edition'))
+        client.list_cpus.return_value = []
+        client.list_gpus.side_effect = [
+            [geforce, maxq, pro],
+            [dict(geforce, availability='LOW'), maxq, pro],
+            [dict(geforce, availability='MEDIUM'), pro],
+        ]
+        choices, warnings = app_module.load_catalog(client)
+        self.assertFalse(warnings)
+        label, value = choices[0]
+        self.assertEqual(value['gpu'], {'id': pro['id'], 'count': 2})
+        self.assertIn('x2 · stock low · $4.18/hr', label)
+        self.assertEqual([(value['gpu']['id'], value['gpu']['count']) for _, value in choices],
+                         [(pro['id'], 2), (pro['id'], 1), (geforce['id'], 3), (geforce['id'], 2),
+                          (geforce['id'], 1), (maxq['id'], 1)])
+        self.assertEqual([args.kwargs.get('count', 1) for args in client.list_gpus.call_args_list], [1, 2, 3])
+
+    def test_nocount_stock_and_partial_failure_leave_other_choices(self):
+        client = Mock()
+        geforce = {'id': app_module.RTX_5090, 'availability': 'HIGH', 'maxCount': {'secure': 8}}
+        client.list_gpus.side_effect = [[geforce], RunPodError('private', status=429),
+                                      [dict(geforce, availability='UNKNOWN')]]
+        client.list_cpus.return_value = []
+        choices, warnings = app_module.load_catalog(client)
+        self.assertEqual([value['gpu']['count'] for _, value in choices], [1])
+        self.assertEqual(len(warnings), 1)
+        self.assertIn('GPU x2 catalog rate limited', warnings[0])
+        self.assertNotIn('private', warnings[0])
+
     def test_catalog_hides_unavailable_gpu_and_cpu_but_keeps_unknown_stock(self):
         gpus = [{'id': 'RTX 5090', 'availability': 'NONE'},
                 {'id': 'RTX 4090', 'availability': 'HIGH', 'secure': False},
@@ -598,7 +637,7 @@ class Tests(unittest.TestCase):
                'price': {'secure': 1.32, 'community': 0.87}}
         client.list_gpus.return_value = [gpu]
         self.assertIn('stock high · $0.87/hr', app_module.creation_quote(client, select))
-        client.list_gpus.assert_called_once_with('COMMUNITY')
+        client.list_gpus.assert_called_once_with('COMMUNITY', count=1)
         for reason in ({'availability': 'NONE'}, {'community': False}):
             client.list_gpus.return_value = [dict(gpu, **reason)]
             with self.assertRaisesRegex(ValueError, 'stock none'):
@@ -610,6 +649,21 @@ class Tests(unittest.TestCase):
         client.list_gpus.return_value = [{'id': 'RTX 5090', 'availability': 'novel'}]
         self.assertIn('stock unknown · price unknown', app_module.creation_quote(client, select))
         client.list_cpus.assert_not_called()
+
+    def test_quote_checks_exact_multi_gpu_stock_and_total(self):
+        client = Mock()
+        gpu = {'id': app_module.RTX_5090, 'price': {'community': .85},
+               'maxCount': {'community': 4}}
+        select = {'gpu': {'id': gpu['id'], 'count': 3}, 'cloud': 'COMMUNITY'}
+        for stock in ('NONE', 'UNKNOWN', 'LOW'):
+            client.list_gpus.reset_mock()
+            client.list_gpus.return_value = [dict(gpu, availability=stock)]
+            if stock == 'LOW':
+                self.assertIn('x3 · stock low · $2.55/hr', app_module.creation_quote(client, select))
+            else:
+                with self.assertRaisesRegex(ValueError, 'Reload the catalog'):
+                    app_module.creation_quote(client, select)
+            client.list_gpus.assert_called_once_with('COMMUNITY', count=3)
 
     def test_32_vcpu_quote_and_memory_requirement(self):
         client = Mock()

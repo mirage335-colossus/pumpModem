@@ -208,7 +208,7 @@ def gpu_environment(worker, live):
 def relay(worker, stop_requested=lambda: False, require_gpu=False, file_channel=False, live=False):
     # Explicit pipes ensure the worker's no-socket/anonymous-pipe checks remain
     # meaningful even when this relay's own stdio is an SSH channel.
-    command = [worker] + ([] if live else ["--simulation"])
+    command = [worker] + ([] if live else ["--simulation-only"])
     environment = None
     if require_gpu:
         command.append("--require-gpu")

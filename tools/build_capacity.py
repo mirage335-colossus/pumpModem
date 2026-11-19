@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Select compile concurrency; stdout is a single positive job count.
 
-Reserve one usable logical CPU and some available RAM. This is an admission
-heuristic, not a per-process memory limit or a prediction of compiler RSS.
-Only callers with no explicit job count should use this policy.
+Local builds reserve one usable logical CPU. Dedicated RunPod worker builds
+can use the full visible CPU allocation and budget more memory for heavy
+compiler and linker tasks. Only callers with no explicit job count should
+use this advisory policy.
 """
+import argparse
 import ctypes
 import os
 from pathlib import Path
@@ -14,6 +16,9 @@ import sys
 
 MIB = 1024 * 1024
 MEMORY_PER_JOB = 768 * MIB
+RUNPOD_NATIVE_MEMORY_PER_JOB = 1536 * MIB
+RUNPOD_CUDA_MEMORY_PER_JOB = 3 * 1024 * MIB
+RUNPOD_LINK_RESERVE = 1024 * MIB
 
 
 def read_text(path):
@@ -172,16 +177,21 @@ def usable_cpus():
     return max(1, min(counts))
 
 
-def select_jobs(cpus, memory):
-    cpu_jobs = max(1, cpus - 1)
+def select_jobs(cpus, memory, *, runpod_backend=None):
+    cpu_jobs = max(1, cpus if runpod_backend else cpus - 1)
     if memory is None:
         # Unknown RAM must not become an unbounded fan-out on large hosts.
-        return min(cpu_jobs, 2)
+        return min(cpu_jobs, 1 if runpod_backend else 2)
+    per_job = MEMORY_PER_JOB
     reserve = max(256 * MIB, memory // 10)
-    return min(cpu_jobs, max(1, (memory - reserve) // MEMORY_PER_JOB))
+    if runpod_backend:
+        per_job = RUNPOD_CUDA_MEMORY_PER_JOB if runpod_backend == 'cuda' else RUNPOD_NATIVE_MEMORY_PER_JOB
+        # The worker link may run beside unrelated compilation jobs.
+        reserve = max(RUNPOD_LINK_RESERVE, memory // 10)
+    return min(cpu_jobs, max(1, (memory - reserve) // per_job))
 
 
-def default_jobs():
+def default_jobs(*, runpod_backend=None):
     try:
         cpus, memory = usable_cpus(), available_memory()
         if sys.platform.startswith('linux'):
@@ -189,7 +199,7 @@ def default_jobs():
             cpus = min([cpus, *quotas])
             if headrooms:
                 memory = min(headrooms + ([] if memory is None else [memory]))
-        return select_jobs(cpus, memory)
+        return select_jobs(cpus, memory, runpod_backend=runpod_backend)
     except Exception:
         # Advisory detection must never prevent a build on an unfamiliar OS.
         # Explicit --jobs/--build-jobs remain available for such environments.
@@ -197,4 +207,7 @@ def default_jobs():
 
 
 if __name__ == '__main__':
-    print(default_jobs())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--runpod', choices=('cpu', 'vulkan', 'cuda'), metavar='BACKEND',
+                        help='size the build for a dedicated RunPod worker')
+    print(default_jobs(runpod_backend=parser.parse_args().runpod))

@@ -263,6 +263,9 @@ std::string signal_display_text(const SignalLine& line, bool shellcode) {
 }
 std::string signal_status_label(const SignalLine& line) {
     if(line.helper_carrier)return line.complete?"helper received":"helper pending";
+    if(line.simulation_input_result==live::SimulationInputResult::incomplete)return "sim incomplete";
+    if(line.simulation_input_result==live::SimulationInputResult::mismatch)return "sim mismatch";
+    if(line.binary&&line.simulation_input_result==live::SimulationInputResult::match)return "sim match";
     using transfer::RecoveryState;
     if(line.recovery_progress.state==RecoveryState::recovered && !line.validated)return "source invalid";
     if(line.recovery_progress.state==RecoveryState::ready || line.recovery_progress.state==RecoveryState::running)return "recovering";
@@ -430,6 +433,7 @@ void apply_receptions(Inbox& inbox, Signals& signals, live::Snapshot& snapshot) 
             signal.received_bits,signal.expected_bits,signal.pattern_score};
         line.helper_carrier=signal.helper_carrier;
         line.wrong_key_evidence=signal.wrong_key_evidence;line.robust_reception=signal.robust_reception;
+        line.simulation_input_result=signal.simulation_input_result;
         line.raw_bits=signal.raw_bits;line.missing_symbols=signal.missing_symbols;
         line.fec_stats=signal.fec_stats;line.revision=signal.revision;line.recovery_progress=signal.recovery_progress;
         if(!signals.update(std::move(line)))continue;

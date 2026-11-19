@@ -128,7 +128,7 @@ Display timing never controls receiver decisions or completion.
 | Encryption | Off preserves unencrypted DATA; keyfile and AMATEUR select the effective key. AMATEUR is public key material, not confidentiality. |
 | Helper power, ratio limit, callsign | Requested Helper watts, native power allocation/ratio clamp and Helper metadata. Zero power disables Helper; these settings do not control radio hardware. |
 | Transmit power, path loss | DATA power and simulated link attenuation, separate from playback volume. |
-| Clock sync, region, offset, audio error | Public arrival bounds and sampled timing model; live capture also needs actual provider timestamps and uncertainty. |
+| Clock sync, region, offset, audio error | Public arrival bounds and sampled timing model. Audio error starts at **Default** and saved settings preserve that choice. Live capture also needs actual provider timestamps and uncertainty. |
 | Base/Shift oscillator, Margin | Always-active declared oscillator bounds and public receiver search multiplier; synthetic effects are injected only in Simulation and explicit loopback. |
 | Doppler/delay spread, selective amplitude | Declared receiver assumptions in every mode; synthetic effects are injected only in Simulation and explicit loopback. Off remains explicit. |
 | Rate, Carrier, Shift | Rate is the native inner rate. Carrier accepts a custom absolute frequency or a computed preset. Bare numbers are Hz. The baseband frequency is Carrier minus Shift. Configuration edits preserve a valid baseband frequency, including custom values, and translate it back to an absolute Carrier. Runtime FHSS hops keep the same baseband plan. |
@@ -145,6 +145,20 @@ Display timing never controls receiver decisions or completion.
 | Audio device, channel routing, Live/duplex, TX volume, Exclusive | Existing native device service, selected channel layout, capture/playback policy and output gain. |
 | Waterfall, Waveform, Receiver input I/Q | Bounded actual session observations; receiver I/Q is not a substitute TX trace. |
 | Pattern evidence, Pattern steps | Native public-slot classifications, scores, completeness, resource and stage diagnostics. |
+
+**Robust setup** samples the compute host twice per second and retains up to
+one minute for its CPU, RAM, GPU and VRAM charts. CPU is the worker process
+share of its effective CPU allocation. RAM shows usage against the visible
+container limit or physical system RAM. On Linux, the NVIDIA driver provides
+one GPU and VRAM lane per visible device, with the receiver's selected device marked
+when its UUID matches. The Vulkan workspace display reports temporary
+receiver leases and their peaks. Device-wide VRAM usage and GPU busy time
+appear in the setup charts. Blank traces indicate unavailable observations.
+
+**Replay sim** beside **Clear waterfall** displays the previous completed
+simulation's retained activity again at its original frequency and scale.
+It leaves the decoded reception and public calendar in place. **Cancel TX**
+can stop the replay. Pattern evidence remains visible when clicked.
 
 Carrier presets use the native occupied DATA bandwidth, including spreading,
 pulse shaping and gating, plus the declared oscillator and channel allowances.

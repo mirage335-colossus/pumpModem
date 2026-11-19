@@ -52,7 +52,11 @@ setup. **Advanced** contains optional settings.
 
 Use **End simulation** during setup or while the simulation is open. Closing
 the simulation browser tab also ends its pod. Reloading starts a fresh
-simulation with default settings on the same pod. Watch the selected row
+simulation with default settings on the same pod. Loading modem settings
+inside a simulation keeps that worker in Simulation. **Audio error** opens
+at **Default**, and a loaded explicit allowance retains its value.
+**Robust setup** shows compute-host CPU, RAM, GPU and VRAM history.
+Watch the selected row
 change to **Terminating** and the status confirm termination. If termination
 fails, select the affected pod and retry with **End simulation**.
 
@@ -67,13 +71,17 @@ termination if the exact pod reappears. Closing
 the lab waits briefly for cleanup. If a pod or connection is still pending,
 the window offers to close while keeping the saved cleanup record.
 
-Secure Cloud is the default. The dropdown shows current stock and compute list
-price for one RTX PRO 6000, RTX 5090 or RTX 4090, or a Secure Cloud CPU with
-32 vCPUs and at least 128 GB of RAM. CPU prices cover all 32 vCPUs. Refresh
-the catalog to see changes in stock or price. Options with **none** stock are
-hidden. If the selected option disappears on refresh, choose another option.
+Secure Cloud is the default. The startup catalog tries RTX PRO 6000 Blackwell
+Server Edition x2 first, followed by the same GPU x1 and desktop RTX 5090
+x3, x2, then x1. Other supported single-GPU models
+and Secure Cloud CPU types with 32 vCPUs and at least 128 GB of RAM are also
+available. The hourly compute list price covers the entire selected allocation.
+The arrow to the right of the dropdown refreshes stock and prices. Refresh
+keeps a manual selection while it is available. If that selection disappears,
+choose another option. Multi-GPU options require stock for the exact count.
+The receiver currently uses one GPU per session on a multi-GPU pod.
 
-**Start simulation** checks the selected hardware and tier again when creating a pod. If stock
+**Start simulation** checks the selected hardware, count and tier again when creating a pod. If stock
 is **none**, the app stops before confirmation. Otherwise, review the fresh
 stock, price, image and deadline in the confirmation dialog. Stock can change
 before RunPod places the request. A recognized capacity rejection prompts a
@@ -430,7 +438,7 @@ and is removed from the container startup environment before ordinary startup.
 The current REST API uses bearer authorization at `https://api.runpod.io/v2`.
 The catalog and pod calls use the `catalog:read`, `pods:read` and `pods:write`
 scopes. Resolve hardware in `/catalog/gpus` or `/catalog/cpus`. Use
-`POST /pods` with a template/image and either `gpu: {id, count: 1}` or
+`POST /pods` with a template/image and either `gpu: {id, count}` or
 `cpu: {id, vcpuCount: 32}`. For the CPU choice, select a type whose range
 includes 32 and whose RAM per vCPU yields 128 GB. For a GPU, distinguish
 catalog VRAM from host RAM placement. Poll the individual `GET /pods/{id}`

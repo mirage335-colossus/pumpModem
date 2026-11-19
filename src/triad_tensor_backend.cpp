@@ -305,6 +305,8 @@ struct Arena {
         total.cuda_fft_version = cuda_fft_library_version();
         total.device = "cuda:" + std::to_string(options.device_index);
         total.device_name = properties.name;
+        total.device_uuid.emplace();
+        std::copy_n(properties.uuid.bytes,total.device_uuid->size(),total.device_uuid->begin());
         total.cuda_compute_major = properties.major;
         total.cuda_compute_minor = properties.minor;
         total.cuda = true;
@@ -558,6 +560,7 @@ public:
         report = local;
         report.device = std::move(identity.device);
         report.device_name = std::move(identity.device_name);
+        report.device_uuid = identity.device_uuid;
         report.library_version = std::move(identity.library_version);
         report.cuda_runtime_version = identity.cuda_runtime_version;
         report.cuda_driver_version = identity.cuda_driver_version;

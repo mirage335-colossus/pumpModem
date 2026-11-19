@@ -137,8 +137,8 @@ inline void validate(const Policy& policy) {
     if(!std::isfinite(policy.half_window_seconds()))throw Error("Clock window overflow");
 }
 inline bool is_default(std::string_view text) {return text=="default"||text=="Default";}
-// CLI/parameter-list Default resolves the Audio allowance only. The GUI editor
-// reset action separately restores all four controls; numeric exports stay stable.
+// Resolve the effective Audio allowance. GUI settings retain the Default
+// choice separately so an export/import can distinguish it from explicit 70 ms.
 inline double parse_audio_error(std::string_view text) {
     try {
         const auto value=is_default(text)?default_audio_error_seconds:duration(text);

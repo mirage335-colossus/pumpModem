@@ -4,12 +4,10 @@
 #include <map>
 
 namespace datapump::gui {
-inline std::vector<plots::PatternEvidencePoint> pattern_evidence_points(std::span<const live::PatternStep> steps,
-        std::optional<std::uint64_t> cleared_through={}) {
+inline std::vector<plots::PatternEvidencePoint> pattern_evidence_points(std::span<const live::PatternStep> steps) {
     if(steps.size()>plots::pattern_evidence_capacity)steps=steps.last(plots::pattern_evidence_capacity);
     std::vector<plots::PatternEvidencePoint> points;points.reserve(steps.size());
     for(const auto& step:steps) {
-        if(cleared_through && step.index<=*cleared_through)continue;
         plots::PatternEvidencePoint point;point.slot=step.index;
         if(step.evidence_complete && std::isfinite(step.operational_bit_evidence[0]) &&
            std::isfinite(step.operational_bit_evidence[1]) &&
@@ -47,7 +45,8 @@ public:
         const bool append=update.append_waterfall && snapshot.spectrum_revision &&
             spectrum_revision_!=snapshot.spectrum_revision;
         if (append) history_.push(snapshot.spectrum_db, snapshot.spectrum_bin_hz,
-            snapshot.simulation_spectrum_gain_db,snapshot.spectrum_complex,
+            snapshot.replay_waterfall ? std::optional(snapshot.replay_waterfall->gain_db) : snapshot.simulation_spectrum_gain_db,
+            snapshot.spectrum_complex,
             snapshot.spectrum_start_sample,snapshot.spectrum_sample_count,
             snapshot.simulation_replay?0:snapshot.spectrum_segment);
         if(append)spectrum_revision_=snapshot.spectrum_revision;
@@ -62,18 +61,7 @@ public:
             constellation_source_ = snapshot.constellation_source;
             constellation_dropped_ = snapshot.constellation_dropped;
         }
-        if(snapshot.pattern_steps.empty()) {
-            pattern_cleared_through_.reset();pattern_latest_address_.reset();
-        } else {
-            const auto& latest=snapshot.pattern_steps.back();
-            const std::array<std::uint64_t,3> address{latest.index,latest.epoch,latest.ordinal};
-            if(pattern_latest_address_ && (address[0]<(*pattern_latest_address_)[0] ||
-                (address[0]==(*pattern_latest_address_)[0] && address!=*pattern_latest_address_)))
-                pattern_cleared_through_.reset();
-            pattern_latest_address_=address;
-            if(update.clear_pattern_scores_through)pattern_cleared_through_=update.clear_pattern_scores_through;
-        }
-        auto evidence=pattern_evidence_points(snapshot.pattern_steps,pattern_cleared_through_);
+        auto evidence=pattern_evidence_points(snapshot.pattern_steps);
         if(!frames_.contains(ui::Bitmap::pattern_scores) || evidence!=pattern_evidence_) {
             pattern_evidence_=std::move(evidence);
             const auto frame=plots::PlotSnapshot::pattern_evidence(pattern_evidence_);
@@ -155,8 +143,6 @@ private:
     std::optional<std::pair<double,double>> helper_band_;
     std::optional<std::uint64_t> spectrum_revision_;
     std::vector<plots::PatternEvidencePoint> pattern_evidence_;
-    std::optional<std::uint64_t> pattern_cleared_through_;
-    std::optional<std::array<std::uint64_t,3>> pattern_latest_address_;
     std::string qr_text_, brightness_, qr_error_;
     std::shared_ptr<const Inspection> inspected_;
     std::uint64_t constellation_dropped_ = 0;

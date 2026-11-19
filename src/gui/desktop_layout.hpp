@@ -21,7 +21,7 @@ enum class Slot {
     key, clock_accuracy, clock_region, clock_offset, audio_error, dsss_factor, dsss_version, fhss, tabs, page, message_label, paste_previous, force_transmit, binary_label, message,
     binary, qr_brightness, qr, attach_file, use_text, send_key, transmit, transmit_noise,
     cancel, airtime, transmit_scope_caption, transmit_scope_format, transmit_scope, profile_reference, signal_label, signals, copy_signal, paste_signal, recovery_actions, file_label, files,
-    save_file, waterfall_label, waterfall, clear_waterfall, waveform_label,
+    save_file, waterfall_label, waterfall, clear_waterfall, replay_simulation, waveform_label,
     waveform, zoom_in, zoom_out, reset_zoom, constellation_label,
     constellation, pattern_scores_label, pattern_scores,
     compression_explanation, short_bits_label, short_bits, short_bits_detail, compression_codes,
@@ -301,7 +301,8 @@ struct DesktopLayout {
         out[Slot::copy_signal] = {signals.x + 4, signals.y + signals.h - 22, 180, compact_action_height};
         out[Slot::paste_signal] = {signals.x + 190, signals.y + signals.h - 22, 180, compact_action_height};
         out[Slot::recovery_actions] = {signals.x + 376, signals.y + signals.h - 22, 150, compact_action_height};
-        out[Slot::clear_waterfall] = {waterfall.x + 4, waterfall.y + waterfall.h - 22, 128, compact_action_height};
+        out[Slot::clear_waterfall] = {waterfall.x + 4, waterfall.y + waterfall.h - 22, 112, compact_action_height};
+        out[Slot::replay_simulation] = {waterfall.x + 122, waterfall.y + waterfall.h - 22, 76, compact_action_height};
         out[Slot::zoom_in] = {waveform.x + 4, waveform.y + waveform.h - 22, 64, compact_action_height};
         out[Slot::zoom_out] = {waveform.x + 72, waveform.y + waveform.h - 22, 72, compact_action_height};
         out[Slot::reset_zoom] = {waveform.x + 148, waveform.y + waveform.h - 22, 88, compact_action_height};

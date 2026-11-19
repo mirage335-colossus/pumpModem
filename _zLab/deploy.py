@@ -120,8 +120,10 @@ if [ "$profile" = live ]; then
   worker=datapump-lab-worker
 fi
 cmake -S . -B build/lab "$@"
-cmake --build build/lab --parallel 4 --target "$worker"
+build_jobs=$(python3 -B tools/build_capacity.py --runpod "$mode")
+cmake --build build/lab --parallel "$build_jobs" --target "$worker"
 "build/lab/$worker" --self-check
+printf 'PUMP_LAB_BUILD_JOBS=%s\n' "$build_jobs"
 printf 'PUMP_LAB_PROFILE=%s\n' "$profile"
 printf 'PUMP_LAB_MODE=%s\n' "$mode"
 if [ "$mode" = cuda ]; then
@@ -442,7 +444,7 @@ while True:
     tail = (tail + chunk)[-16384:]
 if child.wait(): raise SystemExit('Remote build failed. Retry to resume the same deployment.')
 lines = tail.decode('utf-8', 'replace').splitlines()
-prefixes = ('PUMP_LAB_PROFILE=', 'PUMP_LAB_MODE=', 'PUMP_LAB_DEVICE=', 'PUMP_LAB_TORCH=',
+prefixes = ('PUMP_LAB_BUILD_JOBS=', 'PUMP_LAB_PROFILE=', 'PUMP_LAB_MODE=', 'PUMP_LAB_DEVICE=', 'PUMP_LAB_TORCH=',
             'PUMP_LAB_CUDA=', 'PUMP_LAB_WORKER_SHA256=')
 text = '\n'.join(line for line in lines if line.startswith(prefixes))
 backend = next((line.partition('=')[2] for line in lines if line.startswith('PUMP_LAB_MODE=')), None)

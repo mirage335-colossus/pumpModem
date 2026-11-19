@@ -32,6 +32,31 @@ BitmapImage render(const BitmapSource& source, BitmapRequest request, bool color
 unsigned char red(const BitmapImage& image, unsigned x, unsigned y) {
     return image.pixels()[(static_cast<std::size_t>(y) * image.width() + x) * 3];
 }
+void resource_charts() {
+    constexpr std::uint64_t gib = std::uint64_t{1} << 30;
+    const std::array<std::uint8_t,16> active{1};
+    auto history=std::make_shared<ResourceHistory>();
+    history->samples.push_back({25.,2.5,execution::MemoryUsage{2*gib,4*gib,true},
+        {{0,{},0,execution::MemoryUsage{16*gib,32*gib}},{1,active,80,execution::MemoryUsage{24*gib,32*gib}}}});
+    const auto request=full_bitmap_request(120,40);
+    const auto cpu=PlotSnapshot::resource_history(ResourceMetric::cpu,history);
+    check(cpu.caption().find("25.0%")!=std::string::npos && cpu.caption().find("2.50 allocated cores")!=std::string::npos,
+          "CPU chart lost its effective-capacity normalization");
+    const auto ram=PlotSnapshot::resource_history(ResourceMetric::ram,history);
+    check(ram.caption().find("2.0/4.0 GiB")!=std::string::npos &&
+          ram.caption().find("container allocation")!=std::string::npos,"RAM chart lost its allocation scope");
+    const auto gpu=PlotSnapshot::resource_history(ResourceMetric::gpu,history,active);
+    check(gpu.caption()=="GPU 0 0% · GPU 1 (receiver) 80%","GPU chart confused idle and selected devices");
+    const auto pixels=render(gpu,request,false);
+    check(red(pixels,119,19)==theme::accent && red(pixels,119,23)==theme::accent,
+          "GPU chart lost measured activity or zero in distinct device lanes");
+    const auto vram=PlotSnapshot::resource_history(ResourceMetric::vram,history,active);
+    check(vram.caption()=="GPU 0 16.0/32.0 GiB · GPU 1 (receiver) 24.0/32.0 GiB",
+          "VRAM chart lost driver used or total bytes");
+    check(PlotSnapshot::resource_history(ResourceMetric::gpu,std::make_shared<ResourceHistory>()).caption()
+          =="Awaiting compute-host samples","GPU chart fabricated an initial zero sample");
+}
+
 void transfer_contract() {
     std::array<unsigned char, 6> packed{0xa5, 0xff, 0x42, 0x5a, 0x7f, 0x24};
     BitmapImage image(14, 4, PixelFormat::gray8);
@@ -280,9 +305,6 @@ void pattern_evidence() {
     const auto bounded=pattern_evidence_points(history);
     check(bounded.size()==plots::pattern_evidence_capacity && bounded.front().slot==16 && bounded.back().slot==79,
           "pattern evidence lost bounded retention or original public slot indices");
-    const auto cleared=pattern_evidence_points(history,77);
-    check(cleared.size()==2 && cleared.front().slot==78 && cleared.back().slot==79 &&
-          pattern_evidence_points(history,79).empty(),"clear evidence did not hide exactly the retained past slots");
     rejected([&]{auto reversed=points;reversed.push_back(points.front());
         (void)PlotSnapshot::pattern_evidence(reversed);},"duplicate pattern indices were presented as chronological evidence");
 }
@@ -536,7 +558,7 @@ int main(int argc,char** argv) {
             waterfall_resize();simulated_waterfall_reference();detailed_waterfall_phase();
             std::cout<<"Focused waterfall display contracts passed\n";return 0;
         }
-        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); environmental_oscilloscope(); pattern_evidence(); waterfall_resize(); simulated_waterfall_reference(); detailed_waterfall_phase(); fitted_history(); qr_rendering();
+        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); environmental_oscilloscope(); pattern_evidence(); resource_charts(); waterfall_resize(); simulated_waterfall_reference(); detailed_waterfall_phase(); fitted_history(); qr_rendering();
         std::cout << "GUI bitmap contract and shared producer tests passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
