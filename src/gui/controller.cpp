@@ -218,6 +218,24 @@ std::string gpu_search_diagnostics(const live::Snapshot& snapshot) {
         text = snapshot.gpu_score_rows
             ? "Vulkan GPU search + CPU tracking · " + std::to_string(snapshot.gpu_score_rows) + " rows"
             : "Vulkan ready · CPU tracking";
+        if (snapshot.gpu_fp32_score_rows)
+            text += " · FP32 " + std::to_string(snapshot.gpu_fp32_score_rows) + " rows";
+        if (snapshot.gpu_fp16_storage_score_rows)
+            text += " · FP16 storage " + std::to_string(snapshot.gpu_fp16_storage_score_rows) + " rows";
+        if (snapshot.gpu_packed_fp16_score_rows)
+            text += " · packed FP16 " + std::to_string(snapshot.gpu_packed_fp16_score_rows) + " rows";
+        if (snapshot.gpu_vulkan_timed_submissions) {
+            std::ostringstream elapsed;
+            const auto seconds = snapshot.gpu_vulkan_device_command_seconds;
+            elapsed << std::fixed;
+            if (seconds < .001) elapsed << std::setprecision(1) << seconds * 1e6 << " µs";
+            else if (seconds < 1.) elapsed << std::setprecision(1) << seconds * 1e3 << " ms";
+            else elapsed << std::setprecision(3) << seconds << " s";
+            text += " · GPU commands " + elapsed.str() + " across " +
+                std::to_string(snapshot.gpu_vulkan_timed_submissions) + " submissions";
+        }
+        if (snapshot.gpu_native_coarse_precision_sessions)
+            text += " · native FP64 tight-clock search selected";
         if (snapshot.gpu_host_scored_rows)
             text += " · native precision scoring " + std::to_string(snapshot.gpu_host_scored_rows) + " rows";
         if (snapshot.gpu_vulkan_shared_workspace_limit_bytes) {
@@ -370,7 +388,7 @@ struct Controller::Impl {
         f(UiField::dsss_factor).selected="10";
         f(UiField::dsss_version).options={{"off","Off"},{"interleave","Interleave"}};
         f(UiField::dsss_version).selected="off";
-        f(UiField::search_arithmetic).options={{"default","Default — automatic"},
+        f(UiField::search_arithmetic).options={{"default","Default (fastest)"},
             {"fp32-min","FP32 minimum"},{"fp64-force","FP64 force"}};
         f(UiField::search_arithmetic).selected="default";
         for(const auto policy:triad::v3::wrong_key_admission_policies)
@@ -1335,6 +1353,11 @@ struct Controller::Impl {
         const bool pattern_changed=value.pattern_steps.size()!=snapshot.pattern_steps.size()||
             (!value.pattern_steps.empty()&&!snapshot.pattern_steps.empty()&&
                 value.pattern_steps.back().index!=snapshot.pattern_steps.back().index);
+        const bool progress_changed=value.simulation_progress.has_value()!=snapshot.simulation_progress.has_value()||
+            (value.simulation_progress&&snapshot.simulation_progress&&
+                (value.simulation_progress->input_samples!=snapshot.simulation_progress->input_samples||
+                 std::round(10*value.simulation_progress->elapsed_seconds)!=
+                    std::round(10*snapshot.simulation_progress->elapsed_seconds)));
         const bool state_changed=value.status!=snapshot.status||value.error!=snapshot.error||
             value.receiver_error!=snapshot.receiver_error||value.transmitting!=snapshot.transmitting||
             value.simulation_replay_available!=snapshot.simulation_replay_available||
@@ -1356,7 +1379,9 @@ struct Controller::Impl {
             value.gpu_vulkan_peak_leased_bytes!=snapshot.gpu_vulkan_peak_leased_bytes||
             value.gpu_vulkan_peak_owner_lease_bytes!=snapshot.gpu_vulkan_peak_owner_lease_bytes||
             value.gpu_vulkan_waiting_sessions!=snapshot.gpu_vulkan_waiting_sessions||
+            value.gpu_vulkan_timed_submissions!=snapshot.gpu_vulkan_timed_submissions||
             value.gpu_native_coarse_workspace_sessions!=snapshot.gpu_native_coarse_workspace_sessions||
+            value.gpu_native_coarse_precision_sessions!=snapshot.gpu_native_coarse_precision_sessions||
             value.gpu_host_scored_rows!=snapshot.gpu_host_scored_rows||
             value.gpu_selection_reason!=snapshot.gpu_selection_reason||
             value.gpu_native_coarse_lag_sessions!=snapshot.gpu_native_coarse_lag_sessions||
@@ -1396,6 +1421,16 @@ struct Controller::Impl {
             status=!snapshot.error.empty()?snapshot.error:
                 !settings_error.empty()?settings_error:!snapshot.receiver_error.empty()?snapshot.receiver_error:
                 snapshot.transmit_unavailable?*snapshot.transmit_unavailable:snapshot.status;
+            if(status==snapshot.status && snapshot.simulation_progress && snapshot.simulation_progress->sample_rate) {
+                const auto& progress=*snapshot.simulation_progress;
+                const auto rate=static_cast<double>(progress.sample_rate);
+                std::ostringstream timing;
+                timing << std::fixed << std::setprecision(1) << " · " << progress.elapsed_seconds
+                       << " s compute · " << progress.input_samples/rate;
+                if(!progress.complete) timing << '/' << progress.total_samples/rate;
+                timing << " s modeled RX";
+                status+=timing.str();
+            }
             if(!admission_filter_status.empty())status+=(status.empty()?"":" · ")+admission_filter_status;
         }
         f(UiField::transmit_scope).records=transmit_scope_records(snapshot.transmit_trace,
@@ -1407,7 +1442,7 @@ struct Controller::Impl {
             refresh_pattern_steps();
         }
         refresh_airtime();
-        if(reception_changed||spectrum_changed||pattern_changed||state_changed)++revision;
+        if(reception_changed||spectrum_changed||pattern_changed||state_changed||progress_changed)++revision;
     }
     void refresh_pattern_steps() {
         auto& records=f(UiField::profile_reference).records;records.clear();
@@ -1441,6 +1476,10 @@ struct Controller::Impl {
                 <<step.helper_seconds<<" / "<<step.coarse_seconds<<" / "<<step.fine_seconds
                 <<" s · "<<step.fine_candidates<<" candidates / "<<step.workers<<" workers"
                 <<" · affine diagnostic ["<<step.bit_evidence[0]<<", "<<step.bit_evidence[1]<<"]";
+            if(step.coarse_frequency_points)
+                text<<" · coarse grid "<<step.coarse_frequency_points<<" frequencies × "
+                    <<step.coarse_arrival_points<<" arrivals × "<<step.coarse_workspaces
+                    <<" workspaces at "<<step.coarse_projected_rate_hz<<" projected Hz";
             if(step.adaptive_diagnostics)
                 text<<" · adaptive diagnostic ["<<step.adaptive_bit_evidence[0]<<", "<<step.adaptive_bit_evidence[1]
                     <<"] · combined diagnostic ["<<step.combined_bit_evidence[0]<<", "<<step.combined_bit_evidence[1]<<"]";
@@ -1547,10 +1586,17 @@ struct Controller::Impl {
             else if(composer.raw_bits())session.transmit_bits(*composer.raw_bits(),force);
             else session.transmit(message(),force);
             previous_message=composer;previous_received=composer_received;previous_repeatable_prefix=repeatable_prefix;
-            accept_snapshot(session.snapshot());notice(force?"Transmission requested with the one-shot reuse override.":"Transmission requested.");
+            if(settings.simulation)notice_until={};
+            accept_snapshot(session.snapshot());
+            if(!settings.simulation)notice(force?"Transmission requested with the one-shot reuse override.":"Transmission requested.");
             break;
         }
-        case Command::transmit_helper:session.transmit_helper();accept_snapshot(session.snapshot());notice("Helper-only transmission requested.");break;
+        case Command::transmit_helper:
+            session.transmit_helper();
+            if(settings.simulation)notice_until={};
+            accept_snapshot(session.snapshot());
+            if(!settings.simulation)notice("Helper-only transmission requested.");
+            break;
         case Command::transmit_noise:session.transmit_noise();accept_snapshot(session.snapshot());notice("Temporary-key noise transmission requested.");break;
         case Command::paste_previous:
             if(composer_received&&!previous_received)reset_received_edit_history();

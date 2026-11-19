@@ -729,9 +729,13 @@ private:
 
 class IncompleteCoarseBackend final : public r::ReceiverBulkBackend {
 public:
-    explicit IncompleteCoarseBackend(BulkFault fault) : fault_(fault) {}
+    explicit IncompleteCoarseBackend(BulkFault fault, bool require_native_coarse = false)
+        : fault_(fault), require_native_coarse_(require_native_coarse) {}
 
     std::unique_ptr<r::FineBulk> make_fine(double, double) override { return {}; }
+    std::string_view coarse_fallback_reason(double, double, r::CoarseRoute) const noexcept override {
+        return require_native_coarse_ ? "fixture-native-precision" : "";
+    }
     std::unique_ptr<r::CoarseBulk> make_coarse(double, double) override {
         return std::make_unique<IncompleteCoarseTile>(fault_);
     }
@@ -743,7 +747,27 @@ public:
 
 private:
     BulkFault fault_;
+    bool require_native_coarse_;
 };
+
+void native_precision_fallback_retains_exact_chirp_z(const datapump::Crypto& crypto) {
+    auto f = capture(crypto, false, 0, 0);
+    f.config.helper_enabled = false;
+    f.config.frequency_bound_hz = 2;
+    f.slot.arrival_lower_seconds = f.slot.arrival_upper_seconds = f.arrival;
+    const std::array<r::FrequencyInterval, 1> prior{{{-2, 2}}};
+    constexpr unsigned workers = 3;
+    auto cpu = r::coarse_work_plan(f.config, f.slot, prior, workers);
+    f.config.bulk_backend = std::make_shared<IncompleteCoarseBackend>(BulkFault::missing_workspace, true);
+    const auto fallback = r::score_coarse(f.config, f.slot, crypto, f.iq, prior, workers,
+        r::coarse_workspace(f.config, f.slot, workers), {});
+    check(fallback.work.plan.route == cpu.route && cpu.route == r::CoarseRoute::lag_groups &&
+          fallback.work.plan.precision_reason == "exact-one-arrival-chirp-z" &&
+          fallback.work.native_fallback_reason == "fixture-native-precision" && !fallback.work.bulk &&
+          fallback.work.search.operations.score_rows == cpu.frequency_points * cpu.workspaces,
+          "a required native fallback must retain the exact native search and all public scores");
+    check_winner(f, fallback);
+}
 
 void incomplete_bulk_cannot_publish(const datapump::Crypto& crypto) {
     auto f = capture(crypto, false);
@@ -1414,6 +1438,7 @@ int main(int argc, char** argv) try {
     exact_bulk_frontiers(crypto);
     slow_mapped(crypto);
     exact_single_arrival_chirp_z(crypto);
+    native_precision_fallback_retains_exact_chirp_z(crypto);
     exact_multi_arrival_chirp_z(crypto);
     exact_large_frequency_group(crypto, false);
     exact_large_frequency_group(crypto, true);

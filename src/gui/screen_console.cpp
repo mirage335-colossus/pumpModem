@@ -163,7 +163,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(control.field==Field::planner_target) {control.document_only=true;control.help="Robust target shared with Console and native modeled-duration planning. Full receiver sensitivity and CPU forecasts remain unqualified.";}
     if(control.field==Field::search_arithmetic) {
         control.document_only=true;control.developer_only=true;control.purpose=ControlPurpose::setup;
-        control.help="Default can use Q15 CPU products with FP32 FFTs after channel isolation. FP32 minimum keeps CPU products in floating point. Conditioning and fine processing can require FP64. FP64 force applies to CPU search. The GPU has its own precision policy.";
+        control.help="Default (fastest) selects the fastest supported complete receiver path for the current CPU or GPU and workload. It can use lower precision after channel isolation. FP32 minimum and FP64 force select higher search precision. FP64 force applies to CPU search.";
     }
     if(control.field==Field::receiver_strategy||control.field==Field::receiver_cpu_budget) {
         control.document_only=true;control.developer_only=true;control.purpose=ControlPurpose::setup;
@@ -191,8 +191,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.double_click=Command::reset_zoom;control.help="Wheel zooms the time span. Double-click resets zoom.";
     }
     if(slot==Slot::pattern_scores) {
-        control.footer_height=64;
-        control.help="Actual fixed-affine DATA evidence retains the original public-grid prior mass. Only aggregate evidence uses the operational threshold. Adaptive and combined lanes are diagnostic. The lower strip shows quiet energy/threshold, clipped to 0–2.";
+        control.help="Operational log evidence uses a symmetric logarithmic display axis. Bit 0 and bit 1 share the axis with the white aggregate trace. The caption shows aggregate evidence and its dashed threshold, or browser passes and the number of rated slots. Green and red markers show passes and rejections. The lower strip shows quiet energy divided by its threshold, from 0 to 2. Pattern steps retain exact scores.";
     }
     if(slot==Slot::replay_simulation)control.help="Replay the retained three-second activity excerpt from the previous simulation at its original frequency and scale. The decoded reception stays in Signals.";
     if(slot==Slot::copy_signal||slot==Slot::clear_waterfall||slot==Slot::replay_simulation||

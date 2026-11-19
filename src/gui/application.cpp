@@ -560,7 +560,8 @@ BitmapPresentation Application::bitmap(const ui::Control& control,unsigned width
     }();
     if(metric) {
         const auto history=impl_->resources.history();
-        const auto plot=plots::PlotSnapshot::resource_history(*metric,history,impl_->controller.snapshot().gpu_device_uuid);
+        const auto& snapshot=impl_->controller.snapshot();
+        const auto plot=plots::PlotSnapshot::resource_history(*metric,history,snapshot.gpu_device_uuid,snapshot.receiver_workers);
         BitmapPresentation view;
         view.source=plot;
         view.title=control.label;

@@ -96,6 +96,8 @@ struct PatternStep {
     // Helper acquisition ran beside coarse preparation, inside coarse_seconds.
     bool helper_overlapped=false;
     std::size_t quiet_modes=0, fine_candidates=0;
+    std::size_t coarse_workspaces=0, coarse_frequency_points=0, coarse_arrival_points=0;
+    double coarse_projected_rate_hz=0;
     unsigned workers=0;
     bool evidence_complete=false;
     std::string helper_status, varying_status, drift_status, reason;
@@ -105,6 +107,12 @@ struct Snapshot {
         double gain_db=0;
         std::pair<double,double> search_band_hz;
         std::optional<std::pair<double,double>> helper_band_hz;
+    };
+    struct SimulationProgress {
+        std::uint64_t input_samples=0,total_samples=0;
+        std::uint32_t sample_rate=0;
+        double elapsed_seconds=0;
+        bool complete=false;
     };
     std::vector<float> waveform;
     std::uint32_t waveform_sample_rate=0;
@@ -118,6 +126,8 @@ struct Snapshot {
     std::optional<double> simulation_spectrum_gain_db;
     // Original band and power calibration of the currently displayed replay.
     std::optional<ReplayWaterfall> replay_waterfall;
+    // Native receiver input clock and processing wall time, excluding replay.
+    std::optional<SimulationProgress> simulation_progress;
     std::vector<std::complex<double>> constellation;
     std::uint64_t constellation_dropped=0;
     ConstellationSource constellation_source=ConstellationSource::input;
@@ -130,6 +140,7 @@ struct Snapshot {
     std::optional<std::string> transmit_unavailable;
     std::optional<std::string> noise_transmit_unavailable;
     std::string status,error,receiver_error;
+    unsigned receiver_workers=0; // Active receiver's software-worker ceiling.
     std::string gpu_device,gpu_precision;
     std::string gpu_backend,gpu_selection_reason;
     std::optional<std::array<std::uint8_t,16>> gpu_device_uuid;
@@ -148,6 +159,9 @@ struct Snapshot {
     std::size_t gpu_vulkan_shared_workspace_limit_bytes=0,gpu_vulkan_leased_bytes=0;
     std::size_t gpu_vulkan_peak_leased_bytes=0,gpu_vulkan_peak_owner_lease_bytes=0;
     std::uint64_t gpu_vulkan_waiting_sessions=0,gpu_native_coarse_workspace_sessions=0;
+    std::uint64_t gpu_native_coarse_precision_sessions=0;
+    std::uint64_t gpu_vulkan_timed_submissions=0;
+    double gpu_vulkan_device_command_seconds=0;
     std::uint64_t gpu_host_scored_rows=0,gpu_statistics_blocks=0;
     std::uint64_t gpu_cuda_fp16_calls=0,gpu_cuda_int8_calls=0;
     // CUDA half FFT counts cover public frequency/arrival score rows only.

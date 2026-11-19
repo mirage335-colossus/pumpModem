@@ -1445,20 +1445,51 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
     std::vector<live::SignalUpdate> signal_events;
     std::optional<std::chrono::steady_clock::time_point> replay_began;
     std::uint64_t replay_first = 0, last_revision = 0, last_frame = 0;
+    std::uint64_t last_input = 0, preview_revision = 0;
     unsigned replay_frames = 0;
     bool processing_plot_seen = false, replay_pattern_seen = false;
     std::uint64_t replay_pattern_elapsed_ms = 0;
+    const auto check_receiver_plot = [&](const live::Snapshot& out) {
+        check(out.simulation_progress && out.waveform.size() >= 1024 && out.waveform.size() <= 2048 &&
+              out.constellation.size() == 512 &&
+              out.constellation_source == live::ConstellationSource::input &&
+              out.spectrum_sample_count == 1024,
+              "Simulation did not retain the full bounded receiver waveform window");
+        const auto end = out.spectrum_start_sample + out.spectrum_sample_count;
+        check(end >= out.waveform.size() && end <= out.simulation_progress->input_samples,
+              "Simulation plotted samples outside the accepted receiver input");
+        const auto first = end - out.waveform.size();
+        for (std::size_t i = 0; i < out.constellation.size(); i += 7) {
+            const auto at = i * out.waveform.size() / out.constellation.size();
+            const auto expected = live::detail::real_pcm(out.constellation[i], first + at,
+                simulated.transfer.modem.carrier_hz, out.waveform_sample_rate);
+            check(std::abs(expected - out.waveform[at]) < 1e-6,
+                  "Simulated waveform used different samples from receiver input I/Q");
+        }
+    };
     auto completed = wait(session, [&](auto& out) {
         for (auto& event : out.received) received.push_back(std::move(event));
         signal_events.insert(signal_events.end(), out.signals.begin(), out.signals.end());
         check(out.error.empty() && out.receiver_error.empty(), "Native simulation failed: " + out.error + "; " + out.receiver_error);
         check(out.pattern_steps.size() <= 5, "Native simulation exceeded five public scoring windows");
+        if (out.simulation_progress) {
+            const auto& progress = *out.simulation_progress;
+            check(progress.input_samples >= last_input && progress.input_samples <= progress.total_samples &&
+                  progress.sample_rate == simulated.transfer.modem.sample_rate,
+                  "Accepted simulated input time jumped backward or past the declared extent");
+            last_input = progress.input_samples;
+        }
         if (out.transmitting && !out.simulation_replay && out.spectrum_revision > 0 &&
-            !out.spectrum_db.empty() && !out.waveform.empty() && !out.constellation.empty())
-            processing_plot_seen = true;
+            out.spectrum_revision != preview_revision) {
+            check_receiver_plot(out);
+            processing_plot_seen = processing_plot_seen || out.waveform.size() == 2048;
+            preview_revision = out.spectrum_revision;
+        }
         if (out.simulation_replay && out.spectrum_revision != last_revision) {
+            check_receiver_plot(out);
             check(out.transmitting && received.size() == 1 && out.pattern_steps.size() == 5 &&
-                  out.pattern_steps.back().decision == live::PatternDecision::quiet,
+                  out.pattern_steps.back().decision == live::PatternDecision::quiet &&
+                  out.simulation_progress->complete && out.receiver_workers == 0,
                   "Simulation began replay before delivering the full result and physical quiet receipts");
             check(out.simulation_pattern_replay_active &&
                   out.simulation_pattern_replay_visible_steps <= out.pattern_steps.size() &&
@@ -1540,13 +1571,22 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
             check(!row.browser_admission, "Quiet slot was presented as a browser-admission candidate");
         }
     }
-    check(!completed.waveform.empty() && completed.waveform.size() <= 1024 && completed.waveform_sample_rate == 1500 &&
+    check(completed.waveform.size() == 2048 && completed.waveform_sample_rate == 1500 &&
           !completed.spectrum_db.empty() && completed.spectrum_db.size() == completed.spectrum_complex.size() &&
           completed.spectrum_sample_count == 1024 && completed.spectrum_revision > 0 &&
           completed.spectrum_start_sample + completed.spectrum_sample_count < 600000 &&
           !completed.constellation.empty() && completed.constellation.size() <= 512 &&
           completed.constellation_source == live::ConstellationSource::input,
           "Native reception did not produce bounded waveform, waterfall, and input I/Q plots");
+    check(completed.simulation_progress && completed.simulation_progress->complete &&
+          completed.simulation_progress->input_samples == completed.simulation_progress->total_samples &&
+          completed.simulation_progress->elapsed_seconds > 0,
+          "Completed simulation lost its measured computation progress");
+    const auto& progress = *completed.simulation_progress;
+    const auto modeled_seconds = static_cast<double>(progress.total_samples) / progress.sample_rate;
+    check(progress.elapsed_seconds < modeled_seconds, "Finite simulation was paced against the modeled receiver clock");
+    std::cout << "Simulated RX " << modeled_seconds << " s of input in " << progress.elapsed_seconds
+              << " s, then replayed the three-second excerpt\n";
     check(std::all_of(completed.waveform.begin(), completed.waveform.end(), [](float x) { return std::isfinite(x); }) &&
           std::all_of(completed.spectrum_db.begin(), completed.spectrum_db.end(), [](double x) { return std::isfinite(x); }),
           "Native plot output contains nonfinite samples");
@@ -1770,6 +1810,10 @@ int main(int argc, char** argv) {
         }
         if (argc == 2 && std::string_view(argv[1]) == "--nonstationary") {
             complete_native_simulation(false, false, true);
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--simulation-rx-preview") {
+            complete_native_simulation();
             return 0;
         }
         if (argc == 3 && std::string_view(argv[1]) == "--fixed-receiver-link") {

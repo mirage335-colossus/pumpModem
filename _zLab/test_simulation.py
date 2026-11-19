@@ -111,6 +111,8 @@ class SimulationTest(unittest.TestCase):
             self.assertTrue(preview_visible(), "simulated samples never reached the waterfall")
             self.assertFalse(replaying(), "the first waterfall update should precede playback")
             self.assertTrue(control("Cancel TX")["enabled"], "the preview should arrive during simulation")
+            self.assertTrue(any("s compute" in item.get("text", "") and
+                                "s modeled RX" in item.get("text", "") for item in snapshot["controls"]))
             wait(lambda: bool(control("Pattern steps").get("records")) or not control("Cancel TX")["enabled"])
             wait(lambda: not control("Cancel TX")["enabled"])
             steps = control("Pattern steps").get("records", [])
@@ -125,12 +127,15 @@ class SimulationTest(unittest.TestCase):
                             f"expected decoded message missing: {rendered!r}")
             for label in ("Spectrum", "Waveform", "Receiver input I/Q", "Pattern evidence"):
                 self.assertEqual(control(label)["kind"], "bitmap", label)
-            self.assertFalse(control("Pattern evidence")["click"],
+            pattern = control("Pattern evidence")
+            self.assertFalse(pattern["click"],
                              "Pattern evidence should survive an ordinary click")
+            self.assertEqual(pattern["geometry"]["widget"]["h"], pattern["geometry"]["frame"]["h"] - 30)
+            self.assertNotIn("\n", pattern["caption"], "pattern caption exceeds the visible row")
             event(2, control("Wrong Key Admission")["id"], "guarded")
-            wait(lambda: "Browser filter markers:" in control("Pattern evidence")["caption"])
+            wait(lambda: "Browser filter markers" in control("Pattern evidence")["caption"])
             event(2, control("Wrong Key Admission")["id"], "current")
-            wait(lambda: "Browser filter markers:" not in control("Pattern evidence")["caption"])
+            wait(lambda: "Browser filter markers" not in control("Pattern evidence")["caption"])
             self.assertTrue(control("Replay sim")["enabled"])
             event(4, control("Clear waterfall")["id"], "")
             event(4, control("Replay sim")["id"], "")

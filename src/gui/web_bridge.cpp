@@ -260,7 +260,7 @@ struct Bridge::Impl {
         }
         out<<']';
         if(c.kind==ui::Kind::bitmap) {
-            const auto picture=app.bitmap(c,static_cast<unsigned>(std::clamp(width,1,640)));
+            const auto picture=app.bitmap(c,static_cast<unsigned>(std::clamp(layout.caption.w,1,640)));
             out<<",\"caption\":"<<json_string(picture.caption)<<",\"bitmap\":";
             this->picture(out,"control:"+std::to_string(id),picture.source,picture.revision,layout.widget.w,layout.widget.h);
             out<<",\"click\":"<<(c.click!=ui::Command::none?"true":"false")

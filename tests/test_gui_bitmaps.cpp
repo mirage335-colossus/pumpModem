@@ -1,6 +1,7 @@
 #include "../src/gui/plot_render.hpp"
 #include "../src/gui/theme.hpp"
 #include "../src/gui/bitmap_sources.hpp"
+#include "../src/gui/control_layout.hpp"
 #include "../src/gui/terminal_bitmap.hpp"
 #include <array>
 #include <iostream>
@@ -36,12 +37,17 @@ void resource_charts() {
     constexpr std::uint64_t gib = std::uint64_t{1} << 30;
     const std::array<std::uint8_t,16> active{1};
     auto history=std::make_shared<ResourceHistory>();
-    history->samples.push_back({25.,2.5,execution::MemoryUsage{2*gib,4*gib,true},
-        {{0,{},0,execution::MemoryUsage{16*gib,32*gib}},{1,active,80,execution::MemoryUsage{24*gib,32*gib}}}});
+    history->samples.push_back({25.,27.2,execution::MemoryUsage{2*gib,4*gib,true},
+        {{0,{},0,execution::MemoryUsage{16*gib,32*gib}},{1,active,80,execution::MemoryUsage{24*gib,32*gib}}},
+        32,27.2});
     const auto request=full_bitmap_request(120,40);
-    const auto cpu=PlotSnapshot::resource_history(ResourceMetric::cpu,history);
-    check(cpu.caption().find("25.0%")!=std::string::npos && cpu.caption().find("2.50 allocated cores")!=std::string::npos,
-          "CPU chart lost its effective-capacity normalization");
+    const auto cpu=PlotSnapshot::resource_history(ResourceMetric::cpu,history,{},54);
+    check(cpu.caption()=="25.0% of 27.20 quota cores · 32 affinity CPUs · 54 receiver workers max",
+          "CPU chart confused quota, affinity and software workers");
+    auto affinity_only=std::make_shared<ResourceHistory>();
+    affinity_only->samples.push_back({0.,4.,{},{},4,8.});
+    check(PlotSnapshot::resource_history(ResourceMetric::cpu,affinity_only).caption()=="0.0% of 4.00 effective cores",
+          "CPU chart reported a higher quota instead of the limiting affinity");
     const auto ram=PlotSnapshot::resource_history(ResourceMetric::ram,history);
     check(ram.caption().find("2.0/4.0 GiB")!=std::string::npos &&
           ram.caption().find("container allocation")!=std::string::npos,"RAM chart lost its allocation scope");
@@ -233,9 +239,28 @@ void environmental_oscilloscope() {
           "hardware waveform caption used the narrowband receiver clock");
     check(PlotSnapshot::oscilloscope(std::vector<float>(400,.5f),48000).caption(640).find("reconstructed")==std::string::npos,
           "partial oscilloscope envelope was labeled as reconstruction");
-
+    const auto simulated=PlotSnapshot::oscilloscope(std::vector<float>(1024,.5f),6000,1,true);
+    const auto measured=render(simulated,full_bitmap_request(321,101));
+    check(red(measured,0,7)==255 && red(measured,320,7)==255 &&
+          std::abs(std::stod(simulated.caption())-170.5)<.55 &&
+          simulated.caption().find("/ 1024 samples")!=std::string::npos,
+          "the simulated receiver waveform still reserves an unmeasured left half");
 }
 void pattern_evidence() {
+    const auto& controls=ui::console_screen();
+    const auto pattern=std::find_if(controls.begin(),controls.end(),[](const auto& c) {
+        return c.bitmap==ui::Bitmap::pattern_scores;
+    });
+    check(pattern!=controls.end(),"Pattern evidence declaration is missing");
+    for(const auto [width,height]:{std::pair{ui::min_width,ui::min_height},
+                                  std::pair{ui::default_width,ui::default_height},std::pair{1920,1200}})
+        for(const bool scope_visible:{false,true}) {
+            const auto layout=ui::control_layout(*pattern,{},width,height,controls,scope_visible);
+            check(layout.widget.h==layout.frame.h-30 && layout.widget.h>0 &&
+                  layout.widget.y+layout.widget.h<=layout.caption.y &&
+                  layout.caption.y+layout.caption.h==layout.frame.y+layout.frame.h,
+                  "Pattern evidence did not fill the plot slot alongside its single caption");
+        }
     live::PatternStep step;
     step.index=10;step.evidence_complete=true;
     // An evolving-channel branch reverses the affine diagnostic preference.
@@ -251,9 +276,8 @@ void pattern_evidence() {
           std::abs((*points[0].bit_log_e)[1]-std::log(3.))<1e-12,
           "pattern alternatives lost the original-grid correction or counted bit mixture twice");
     const auto complete=PlotSnapshot::pattern_evidence(points);
-    check(complete.caption().find("threshold applies only to aggregate")!=std::string::npos &&
-          complete.caption().find("adaptive lanes are diagnostic only")!=std::string::npos,
-          "pattern caption implies a per-bit admission or adaptive decision");
+    check(complete.caption()=="log E 0.693 / 3",
+          "pattern caption must fit the shared single-line bitmap caption");
     auto admitted_points=points,rejected_points=points;
     admitted_points[0].browser_admitted=true;rejected_points[0].browser_admitted=false;
     const auto admitted_plot=PlotSnapshot::pattern_evidence(admitted_points);
@@ -265,13 +289,13 @@ void pattern_evidence() {
           "browser admission changed likelihoods or failed to draw a separate result marker");
     check(admitted_pixels.pixels()[(38*71+70)*3]==theme::positive_tint.red &&
           rejected_pixels.pixels()[(39*71+70)*3]==theme::negative_tint.red &&
-          admitted_plot.caption().find("1 pass, 0 rejected")!=std::string::npos &&
-          rejected_plot.caption().find("0 pass, 1 rejected")!=std::string::npos,
+          admitted_plot.caption()=="Browser filter markers · 1/1" &&
+          rejected_plot.caption()=="Browser filter markers · 0/1",
           "pattern browser result marker lacks a distinct visible legend and count");
     auto rated=admitted_points;auto rejected_again=rejected_points;
     rated.push_back(rejected_again.front());rated.back().slot=11;
     const auto mixed=PlotSnapshot::pattern_evidence(rated);
-    check(mixed.caption().find("1 pass, 1 rejected")!=std::string::npos,
+    check(mixed.caption(185)=="Browser filter markers · 1/2",
           "pattern caption did not count both browser filter outcomes");
     step.evidence_complete=false;
     const auto incomplete=pattern_evidence_points(std::span(&step,1));
@@ -324,6 +348,18 @@ void pattern_evidence() {
     auto huge=points;huge[0].bit_log_e=std::array{-std::numeric_limits<double>::max(),std::numeric_limits<double>::max()};
     huge[0].quiet_energy=std::numeric_limits<double>::max();huge[0].quiet_threshold=std::numeric_limits<double>::denorm_min();
     (void)render(PlotSnapshot::pattern_evidence(huge),full_bitmap_request(71,53));
+    auto dynamic=points;
+    dynamic[0].bit_log_e=std::array{1e9,2e9};
+    dynamic[0].operational_log_e=2e9;
+    dynamic.push_back(points.front());
+    dynamic.back().slot++;
+    dynamic.back().bit_log_e=std::array{-55.,-50.};
+    dynamic.back().operational_log_e=-50.1;
+    const auto visible=render(PlotSnapshot::pattern_evidence(dynamic),full_bitmap_request(96,88,false,true));
+    bool visible_threshold=false;
+    for(unsigned y=2;y<58;++y)
+        visible_threshold|=red(visible,48,y)==theme::caution_tint.red;
+    check(visible_threshold,"strong evidence collapsed the admission threshold against the plot edge");
     std::vector<live::PatternStep> history(80);
     for(std::size_t i=0;i<history.size();++i)history[i].index=i;
     const auto bounded=pattern_evidence_points(history);
@@ -428,6 +464,19 @@ void detailed_waterfall_phase() {
           !std::isfinite(history.detail_rows().back().phase_degrees[0]) &&
           !std::isfinite(history.detail_rows().back().phase_degrees.back()),
           "line phase lost actual sample delta, wrapping or DC/Nyquist exclusion");
+    constexpr std::size_t receiver_fft=1024, receiver_bin=111;
+    constexpr std::uint64_t preview_stride=25*receiver_fft+17;
+    const std::vector<double> receiver_db(receiver_fft/2+1,-40.);
+    std::vector<std::complex<float>> receiver_first(receiver_db.size()),receiver_second(receiver_db.size());
+    receiver_first[receiver_bin]={1,0};
+    receiver_second[receiver_bin]=std::polar(1.f,static_cast<float>(
+        2*std::numbers::pi*receiver_bin*(preview_stride%receiver_fft)/receiver_fft+std::numbers::pi/6));
+    plots::SpectrumHistory preview;
+    preview.push(receiver_db,6000./receiver_fft,30.,receiver_first,start,receiver_fft,9);
+    preview.push(receiver_db,6000./receiver_fft,30.,receiver_second,start+preview_stride,receiver_fft,9);
+    check(preview.rows().size()==2 && preview.detail_rows().back().start_sample==start+preview_stride &&
+          std::abs(preview.detail_rows().back().phase_degrees[receiver_bin]-30)<.01,
+          "coalesced receiver previews fabricated quiet rows or lost their native FFT phase");
     auto frozen=std::make_shared<const plots::SpectrumHistory>(history);
     const auto source=PlotSnapshot::waterfall_detail(frozen,std::pair{k*bin_hz,(k+1)*bin_hz});
     // Two context bins per side yield six native bins, each occupying six

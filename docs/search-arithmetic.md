@@ -5,9 +5,11 @@ live reception and simulation. The policy preserves complete public frequency
 searches, the default `W=2*H` workers and conservative DSP admission. Arithmetic
 selection must prioritize the complete receiver's challenging-case computational
 ceiling and resistance to input backlog, preserving public search and physical
-completion. Default is the user's throughput-oriented option; the availability
-of higher-precision overrides does not justify unnecessary precision in automatic
-mode. Follow the [automatic-mode contract](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling),
+completion. **Default (fastest)** asks the receiver to use the fastest supported
+route for the hardware and workload. Apply this across the expensive stages,
+including Tensor Core operations where they improve complete service. The higher
+precision controls are available when the user wants to force higher search
+precision. Follow the [automatic-mode contract](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling),
 including proportional sensitivity/cost tradeoffs and investigation of unrealized
 hardware acceleration. The routes below describe current implementation and
 qualification, not a ceiling on further algorithm or arithmetic improvements.
@@ -16,7 +18,7 @@ See [current architecture](robust-current.md) and
 
 | Shared GUI / launch preference | Native CPU policy |
 | --- | --- |
-| Default / `--search-arithmetic default` | Automatic qualified Q15 spectral products or FP32 products, with FP64 exclusions. |
+| Default (fastest) / `--search-arithmetic default` | Automatic qualified Q15 spectral products or FP32 products, with FP64 exclusions. |
 | FP32 minimum / `--search-arithmetic fp32-min` | FP32 spectral products, with higher precision where required. |
 | FP64 force / `--search-arithmetic fp64-force` | Force the native CPU coarse FFT to FP64. |
 

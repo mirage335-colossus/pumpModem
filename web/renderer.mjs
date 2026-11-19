@@ -146,12 +146,14 @@ export class Renderer {
         used.add(c.id);
         let view=this.views.get(c.id);
         if(view&&(view.kind!==c.kind||view.history!==c.history||view.invalidate)) {
-            const focused=this.doc.activeElement===view.input;
-            const selection=focused?[view.input.selectionStart,view.input.selectionEnd]:null;
-            const scroll=view.input?.scrollTop??0;
-            view.node.remove();this.views.delete(c.id);view=null;
+            const input=view.kind===c.kind?view.input:null;
+            const focused=input&&this.doc.activeElement===input;
+            const selection=focused&&typeof input.selectionStart==='number'?
+                [input.selectionStart,input.selectionEnd]:null;
+            const restore=input?{focused,selection,scroll:input.scrollTop}:null;
+            view.node.remove();
             view=this.makeControl(c);this.views.set(c.id,view);
-            view.restore={focused,selection,scroll};
+            if(restore)view.restore=restore;
         }
         if(!view){view=this.makeControl(c);this.views.set(c.id,view);}
         view.data=c;view.history=c.history;view.invalidate=false;
@@ -228,7 +230,15 @@ export class Renderer {
             if(measure)view.listLayout={recordsKey,follow,before};
         }
         if(view.restore) {const state=view.restore;queueMicrotask(()=>{
-            if(!view.node.isConnected)return;if(state.focused){view.input.focus({preventScroll:true});if(state.selection)view.input.setSelectionRange(Math.min(state.selection[0],view.input.value.length),Math.min(state.selection[1],view.input.value.length));}view.input.scrollTop=state.scroll;
+            if(!view.node.isConnected)return;
+            if(state.focused) {
+                view.input.focus({preventScroll:true});
+                if(state.selection) {
+                    const length=view.input.value.length;
+                    view.input.setSelectionRange(Math.min(state.selection[0],length),Math.min(state.selection[1],length));
+                }
+            }
+            view.input.scrollTop=state.scroll;
         });delete view.restore;}
         return view.node;
     }

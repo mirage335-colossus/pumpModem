@@ -1098,6 +1098,8 @@ j::Json measurement_json(const Measured& row, bool gpu, unsigned look, bool warm
             {"submitted_work_seconds", a.wall_seconds - b.wall_seconds},
             {"fft_plan_seconds", a.vulkan_fft_plan_seconds - b.vulkan_fft_plan_seconds},
             {"shader_compile_seconds", a.vulkan_shader_compile_seconds - b.vulkan_shader_compile_seconds},
+            {"shader_spirv_compiles", a.vulkan_shader_spirv_compiles - b.vulkan_shader_spirv_compiles},
+            {"shader_spirv_cache_hits", a.vulkan_shader_spirv_cache_hits - b.vulkan_shader_spirv_cache_hits},
             {"fft_cache_hits", a.vulkan_fft_cache_hits - b.vulkan_fft_cache_hits},
             {"fft_cache_misses", a.vulkan_fft_cache_misses - b.vulkan_fft_cache_misses},
             {"host_cache_bytes", a.host_cache_bytes}, {"host_cache_limit_bytes", a.host_cache_limit_bytes},
@@ -1150,10 +1152,20 @@ void benchmark(const std::shared_ptr<r::ReceiverBulkBackend>& backend, std::stop
             if (reference) same_result(*reference, pair[index].result);
         }
         same_result(pair[0].result, pair[1].result);
-        if (look && backend) {
-            check(pair[1].after->vulkan_fft_cache_hits > pair[1].before->vulkan_fft_cache_hits &&
-                  pair[1].after->vulkan_fft_cache_misses == pair[1].before->vulkan_fft_cache_misses,
-                  "warm Vulkan comparison recompiled an already covered FFT geometry");
+        if (backend) {
+            const auto& before = *pair[1].before;
+            const auto& after = *pair[1].after;
+            if (look) {
+                check(after.vulkan_fft_cache_hits > before.vulkan_fft_cache_hits &&
+                      after.vulkan_fft_cache_misses == before.vulkan_fft_cache_misses,
+                      "warm Vulkan comparison recompiled an already covered FFT geometry");
+                check(after.vulkan_shader_spirv_cache_hits > before.vulkan_shader_spirv_cache_hits &&
+                      after.vulkan_shader_spirv_compiles == before.vulkan_shader_spirv_compiles,
+                      "warm Vulkan owner recompiled built-in shader SPIR-V");
+            } else {
+                check(after.vulkan_shader_spirv_compiles > before.vulkan_shader_spirv_compiles,
+                      "first Vulkan owner did not compile built-in shader SPIR-V");
+            }
         }
         if (!reference) reference = pair[0].result;
         if (cpu_precision) {

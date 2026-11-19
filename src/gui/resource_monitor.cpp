@@ -137,6 +137,8 @@ void ResourceMonitor::start() {
                         const auto usage = execution::resource_usage();
                         sample.cpu_capacity = usage.cpu_capacity;
                         sample.ram = usage.ram;
+                        sample.cpu_affinity_threads = usage.cpu_affinity_threads;
+                        sample.cpu_cgroup_quota = usage.cpu_cgroup_quota;
                     } catch (const Error&) {}
                     if (cpu && previous_cpu && *cpu>=*previous_cpu && sample.cpu_capacity &&
                         elapsed>=.1 && *sample.cpu_capacity>0)

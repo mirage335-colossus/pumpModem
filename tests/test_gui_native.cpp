@@ -137,6 +137,19 @@ void gpu_route_diagnostics() {
     snapshot.gpu_native_coarse_lag_sessions=0;
     check(gui::gpu_search_diagnostics(snapshot)==
           "Vulkan GPU search + CPU tracking · 42 rows · fixture GPU");
+    snapshot.gpu_fp32_score_rows=32;
+    snapshot.gpu_fp16_storage_score_rows=10;
+    snapshot.gpu_vulkan_timed_submissions=4;
+    snapshot.gpu_vulkan_device_command_seconds=.000058624;
+    check(gui::gpu_search_diagnostics(snapshot)==
+          "Vulkan GPU search + CPU tracking · 42 rows · FP32 32 rows · FP16 storage 10 rows · GPU commands 58.6 µs across 4 submissions · fixture GPU");
+    snapshot.gpu_native_coarse_precision_sessions=1;
+    check(gui::gpu_search_diagnostics(snapshot).find("native FP64 tight-clock search selected")!=std::string::npos);
+    snapshot.gpu_native_coarse_precision_sessions=0;
+    snapshot.gpu_fp32_score_rows=0;
+    snapshot.gpu_fp16_storage_score_rows=0;
+    snapshot.gpu_vulkan_timed_submissions=0;
+    snapshot.gpu_vulkan_device_command_seconds=0;
 
     snapshot.gpu_backend="cuda:0";
     snapshot.gpu_statistics_blocks=7;

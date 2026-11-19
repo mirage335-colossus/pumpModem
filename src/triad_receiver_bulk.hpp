@@ -71,6 +71,10 @@ struct BulkReceipt {
     double cuda_half_fft_plan_seconds = 0;
     std::array<std::uint64_t, bulk_half_fft_fallback_reasons.size()> half_fft_fallback_counts{};
     std::uint64_t vulkan_dispatches = 0, vulkan_arrival_peak_rows = 0, vulkan_arrival_peak_values = 0;
+    // Sum of completed command-buffer intervals on the device clock.
+    // Intervals may overlap across owners and do not measure GPU utilization.
+    std::uint64_t vulkan_timed_submissions = 0;
+    double vulkan_device_command_seconds = 0;
     std::uint64_t vulkan_host_scored_rows = 0;
     std::uint64_t vulkan_fp32_score_rows = 0, vulkan_fp16_storage_score_rows = 0;
     std::uint64_t vulkan_direct_dot_terms = 0;
@@ -82,6 +86,7 @@ struct BulkReceipt {
     std::size_t vulkan_peak_leased_bytes = 0, vulkan_peak_owner_lease_bytes = 0;
     std::uint64_t vulkan_waiting_sessions = 0, native_coarse_workspace_sessions = 0;
     std::uint64_t vulkan_fft_cache_hits = 0, vulkan_fft_cache_misses = 0;
+    std::uint64_t vulkan_shader_spirv_compiles = 0, vulkan_shader_spirv_cache_hits = 0;
     double vulkan_fft_plan_seconds = 0, vulkan_shader_compile_seconds = 0;
     std::uint64_t native_coarse_lag_sessions = 0, native_coarse_precision_sessions = 0, native_fine_sessions = 0;
     std::uint64_t mapped_columns = 0, mapped_values = 0, uploaded_tiles = 0, tile_hits = 0;

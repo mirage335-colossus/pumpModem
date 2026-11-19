@@ -143,6 +143,170 @@ void helper_terminal_geometry() {
        "a whole observation too short to resolve Helper exclusions must still fail");
 }
 
+void helper_dc_projection() {
+    // This clean, stationary 3.6-Hz DATA band occupies only the DC bin of a
+    // quarter-second block. The distant Helper is between DFT bins.
+    constexpr std::size_t fs = 6000, block_rows = fs / 4, blocks = 2;
+    constexpr double pilot_hz = 2400, carrier_hz = 1725;
+    ReceiverConfig config;
+    config.sample_rate_hz = fs;
+    config.data_if_hz = carrier_hz;
+    config.noise_variance = .05;
+    config.helper_enabled = true;
+    config.helper.low_frequency_hz = 550;
+    config.helper.auxiliary_frequency_hz = 950;
+    config.helper.frequency_hz = pilot_hz;
+    ReceiverSlotPlan slot;
+    slot.stop_sample = slot.quiet_stop_sample = 4 * fs;
+    slot.format.sample_rate = fs;
+    slot.format.inner_rate_hz = 3.6;
+    slot.format.added_symbols = 1;
+    slot.format.bit_seconds = 160.4;
+    slot.format.pulse_shape = PulseShape::TaperedRrc;
+    slot.format.epoch = 1793850073;
+    slot.format.symbol_ordinal = 7000037;
+    const FineObservation extent{2 * fs, blocks * block_rows, FineRunKind::probe};
+    const std::array<FineCoordinate, 1> coordinates{{{0, 0, 0, 0}}};
+    const auto key = Crypto::amateur();
+    const auto score = [&](const ReceiverConfig& receiver, const ReceiverSlotPlan& plan,
+                           FineObservation observation, std::span<const Complex> samples) {
+        const auto bytes = fine_workspace(receiver, plan, observation, 1);
+        FineSession session(receiver, plan, key, observation, samples, {}, coordinates, 3, 0, 1, bytes);
+        session.advance_to(samples.size());
+        return session.progress();
+    };
+    const auto observe = [&](const ReceiverConfig& receiver, std::span<const Complex> samples) {
+        const auto progress = score(receiver, slot, extent, samples);
+        check(progress.observed_projection_modes == blocks && progress.quiet_modes == blocks,
+              "the Helper taper must preserve the number of observed noise modes");
+        return progress.quiet_energy * receiver.noise_variance;
+    };
+
+    const double angle = 2 * std::numbers::pi * (pilot_hz - carrier_hz) / fs;
+    std::vector<Complex> samples(extent.rows);
+    for (std::size_t i = 0; i < samples.size(); ++i) samples[i] = std::polar(1., angle * i);
+    const double rectangular = blocks * std::pow(std::sin(block_rows * angle / 2) / std::sin(angle / 2), 2)
+                               / block_rows;
+    const double tapered = observe(config, samples);
+    check(tapered > 0 && tapered < 1e-4 * rectangular,
+          "the native tapered DATA projection must suppress the off-bin Helper");
+    auto gated = config;
+    gated.helper.pilot_dwell_gating = true;
+    check(std::abs(observe(gated, samples) / rectangular - 1) < 1e-9,
+          "gated Helper geometry must retain the rectangular observation");
+    check(fine_workspace(config, slot, extent, 1) - fine_workspace(gated, slot, extent, 1)
+              == block_rows * sizeof(double),
+          "workspace admission must include the one distinct tapered mode");
+
+    std::ranges::fill(samples, Complex{1, 0});
+    // The symmetric half-sample cosine edges of length R each contribute R/2
+    // to the sum and 3R/8 to the squared norm. Check this closed-form DC energy.
+    constexpr auto edge_rows = block_rows / 10;
+    constexpr auto weight_sum = block_rows - edge_rows;
+    constexpr auto weight_square_sum = block_rows - 1.25 * edge_rows;
+    constexpr auto dc_energy = blocks * weight_sum * weight_sum / weight_square_sum;
+    check(std::abs(observe(config, samples) / dc_energy - 1) < 1e-10,
+          "the tapered observation must use a unit-norm DC mode");
+
+    auto cell_slot = slot;
+    cell_slot.stop_sample = cell_slot.quiet_stop_sample = 40'000;
+    const auto cell_shape = fine_block_geometry(config, cell_slot);
+    check(cell_shape.block_rows == 10'000 && cell_shape.segment_rows == 20'000,
+          "sufficiently separated Helper and DATA must admit the whole-cell projection");
+    const FineObservation cell_extent{0, 40'000, FineRunKind::probe};
+    samples.resize(cell_extent.rows);
+    const double off_bin = 2 * std::numbers::pi * (pilot_hz - carrier_hz + .137) / fs;
+    for (std::size_t i = 0; i < samples.size(); ++i) samples[i] = std::polar(1., off_bin * i);
+    const auto cell_progress = score(config, cell_slot, cell_extent, samples);
+    check(cell_progress.quiet_modes >= 12 && cell_progress.quiet_energy * config.noise_variance < 1e-8,
+          "the tapered cell must retain multiple DATA modes and suppress an off-bin Helper");
+}
+
+void static_low_rate_projection() {
+    const Fixture f(240, 3.6, true, 160.4);
+    auto config = f.config;
+    config.clock_bound_ppm = 0;
+    config.noise_variance = .001;
+    const auto shape = fine_block_geometry(config, f.slot);
+    check(shape.block_rows == 400 && shape.segment_rows == 800,
+          "a static slow DATA cell must retain more than the quarter-second DC mode");
+    const auto ordinary = [&](ReceiverConfig value, ReceiverSlotPlan slot) {
+        const auto shape = fine_block_geometry(value, slot);
+        return shape.block_rows == 60 && shape.segment_rows == 120;
+    };
+    auto moving = config;
+    moving.time_varying_channel = true;
+    check(ordinary(moving, f.slot), "changing channels must retain their admitted short observation geometry");
+    auto helper = config;
+    helper.helper_enabled = true;
+    helper.helper.pilot_dwell_gating = true;
+    check(ordinary(helper, f.slot), "dwell-gated Helper must keep its separately qualified geometry");
+    auto short_quiet = f.slot;
+    short_quiet.quiet_stop_sample = short_quiet.quiet_first_sample + 1199;
+    check(ordinary(config, short_quiet), "an enlarged projection must fit the declared physical quiet aperture");
+
+    const auto run = [&](const Crypto& key, std::span<const Complex> input) {
+        const FineObservation extent{f.slot.first_sample, input.size(), FineRunKind::operational};
+        const auto bytes = fine_workspace(config, f.slot, extent, 1);
+        FineSession session(config, f.slot, key, extent, input, {}, f.coordinates, 100, 0, 1, bytes);
+        session.advance_to(shape.segment_rows - 1);
+        check(!session.progress().observation_complete && session.progress().processed_rows == 0,
+              "a partial enlarged segment cannot publish complete DATA or quiet evidence");
+        session.advance_to(input.size());
+        ReceiverSlotScore score;
+        session.finish(score);
+        classify_fine_slot(score, AdmissionGrid(0, 0, 0, 0, .01));
+        return score;
+    };
+    const auto wanted = run(f.key, f.iq);
+    check(wanted.complete && wanted.all_valid && wanted.zero_h0_verified && wanted.bit == 1,
+          "one-cell projection must recover a strong low-rate wanted waveform");
+    check(wrong_key_admission_passes(wanted, WrongKeyAdmission::maximum),
+          "strong low-rate DATA must retain its discriminating shape under the strongest browser filter");
+    const std::array<std::uint8_t, 64> serpent_root{17}, aes_root{37};
+    const auto foreign = run(Crypto::from_independent_roots(serpent_root, aes_root), f.iq);
+    check(!wrong_key_admission_passes(foreign, WrongKeyAdmission::guarded),
+          "preserving low-rate wanted evidence must not admit the independent receiver key");
+    const std::vector<Complex> zero(f.iq.size());
+    const auto quiet = run(f.key, zero);
+    check(quiet.complete && quiet.zero_h0_verified && quiet.noise_statistics_valid &&
+          quiet.decision == SlotDecision::quiet && !quiet.bit && quiet.quiet_energy == 0 &&
+          quiet.quiet_modes > 0 && quiet.quiet_threshold > 0,
+          "the longer observation must still score actual quiet modes for physical completion");
+}
+
+void fp32_projection_workspace_and_scores() {
+    const Fixture f(6000, 3.6, true, 160.4);
+    auto automatic = f.config;
+    automatic.spread_delay_seconds = .021;
+    automatic.spread_doppler_hz = 90;
+    automatic.time_varying_channel = true;
+    auto full_precision = automatic;
+    full_precision.native_coarse_precision = NativeCoarsePrecision::fp64;
+    const FineObservation extent{f.slot.first_sample + 8 * f.fs, 2 * f.fs, FineRunKind::probe, true};
+    const auto run = [&](const auto& config) {
+        const auto bytes = fine_workspace(config, f.slot, extent, 1);
+        FineSession session(config, f.slot, f.key, extent, f.samples(extent), {}, f.coordinates,
+                            500, 0, 1, bytes);
+        session.advance_to(extent.rows);
+        ReceiverSlotScore score;
+        session.finish(score);
+        return session.progress();
+    };
+    const auto fp32 = run(automatic), fp64 = run(full_precision);
+    const bool vector_cpu = std::string_view(datapump::modem::detail::search_fft::kernel_name()) == "avx2";
+    check(vector_cpu ? fp32.workspace_bytes > fp64.workspace_bytes : fp32.workspace_bytes == fp64.workspace_bytes,
+          "the selected projection and its worker scratch must be charged before allocation");
+    check(fp32.quiet_modes == 8 * 47 && fp32.quiet_modes == fp64.quiet_modes &&
+          std::abs(fp32.quiet_energy - fp64.quiet_energy) <= 1e-5 * std::max(1., fp64.quiet_energy),
+          "the FP32 projection must preserve the physical quiet aperture and normalization");
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        const auto score = fp64.initial_affine.bit_scores[bit];
+        check(std::isfinite(score) && std::abs(fp32.initial_affine.bit_scores[bit] - score) <=
+              1e-5 * std::max(1., std::abs(score)), "FP32 projection changed the bounded likelihood fixture");
+    }
+}
+
 struct ProjectionWitness {
     std::span<const Complex> input;
     std::size_t cursor = 0, quiet_stop = 0, quiet_modes = 0;
@@ -685,7 +849,10 @@ void slow_gain_coherence_is_bounded_and_normalized() {
     // This public geometry has one-second fine cells. Its declared .04 Hz
     // phase/frequency scale admits the slow gain alternatives. The phase
     // trajectory is deterministic and independent of the receiver model bank.
-    const Fixture f(240, 6, true);
+    Fixture f(240, 6, true);
+    // Compare gain laws on the same short projection geometry. A wider quiet
+    // aperture would admit the one-cell projection only for the Off control.
+    f.slot.quiet_stop_sample = f.slot.quiet_first_sample + 2 * f.fs;
     auto samples = f.iq;
     for (std::size_t i = 0; i < samples.size(); ++i) {
         const auto elapsed = static_cast<double>(i) / f.fs;
@@ -1756,6 +1923,9 @@ void incomplete_bulk_cannot_publish_quiet(FineLanes lanes) {
 int main() {
     try {
         helper_terminal_geometry();
+        helper_dc_projection();
+        static_low_rate_projection();
+        fp32_projection_workspace_and_scores();
         terminal_projection_boundaries();
         compiled_observation_overlap();
         production_equivalence();

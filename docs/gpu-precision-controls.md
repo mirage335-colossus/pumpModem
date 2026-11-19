@@ -15,14 +15,43 @@ open. Claims about a hardware ceiling or further Tensor Core gains need
 applicable bounds or measurements, with the proposed changes covered by their
 assumptions. See [future performance and utilization](triad-gpu-optimization.md#interpreting-future-performance-and-utilization).
 
-The [Default GUI/launch option](search-arithmetic.md) is the user's means of
-obtaining the best supported computational throughput without having to select
-the right arithmetic and computational structure for the available processor.
+The [Default (fastest) GUI/launch option](search-arithmetic.md) requests the
+fastest supported complete receiver for the available processor and workload.
+Apply this instruction stage by stage. In simulations without competing signals,
+profile quantization after Helper/DATA channel isolation and prioritize native
+Tensor Core execution for contractions with a substantial complete-service gain.
+On Blackwell, evaluate block-scaled NVFP4 alongside INT8, FP8, FP16 and efficient
+FFT algorithms. Include packing, transfers, accumulation and remaining work.
+For the RTX 5090 with FP32 accumulation, NVIDIA lists 1,676 dense TFLOP/s for
+FP4 Tensor operations and 209.5 for FP16, an eightfold peak difference. The
+effective sparse rates require supported structured sparsity. These figures
+motivate measuring the dominant receiver stages with large enough tiles to
+make use of the hardware.
+[NVIDIA Blackwell architecture white paper](https://images.nvidia.com/aem-dam/Solutions/geforce/blackwell/nvidia-rtx-blackwell-gpu-architecture.pdf#page=47).
+Select using the runtime GPU, driver, geometry and qualified receiver results.
 FP32-minimum and FP64-force overrides serve exceptional precision needs; their
 availability makes conservative precision an inappropriate automatic-mode goal.
 The intended quiet-spectrum use should rarely need those overrides, but that
 expectation is not a proof about FFT intermediate range, accumulation or
 conditioning. Do not impose FP64 on bulk work because one sensitive stage needs it.
+
+The socket-free Blackwell capability probe identified cooperative FP16, BF16,
+FP8 and INT8 matrix shapes. The matched severe-channel replay put about 70%
+of the measured fine worker intervals in template projection and about 0.3%
+in post-projection correlation and Gram products. Prioritize batched projection
+and efficient mapping for that shape. Evaluate matrix contractions independently
+where they are a substantial part of complete service. See the [runtime and
+stage measurements](validation.md#receive-previews-and-clean-low-rate-admission--19-november-2026).
+The native AVX2 fine path uses FP32 Bluestein projection for the measured
+6 kHz varying-channel, Helper-off spread geometry with 1,500 rows and 47
+retained modes. The mapped inputs, likelihood and state retain their native
+precision. The admitted workspace includes separate FP32 scratch and the
+FP64 plan for exceptional amplitudes. FP64 force selects the FP64 projection.
+A fine backend also needs to consume the actual
+orthonormal Helper taper wherever that projection applies. Its ordinary DFT
+bin indices alone cannot describe the tapered modes. Preserve the native
+projection and its noise normalization in the stage routing until the backend
+can reproduce them.
 
 Apply these rules to automatic selection and new optimization work:
 
@@ -204,8 +233,16 @@ policy. The native workload CLI exposes `--tensor-precision automatic|fp64` and
 requests native half-cuFFT where its restrictions are met. Automatic CUDA uses
 the qualified half-cuFFT route for guarded broad-search geometry and retains
 FP32 fallback; CPU and unsupported CUDA cases retain their applicable native
-route. FP64 coordinates and reductions are preserved. The compact tight-clock class (sample rate at
-most 10 Hz and positive clock span at most 0.001 ppm) selects FP64. Receipts
+route. FP64 coordinates and reductions are preserved. The tight-clock guard
+uses the projected DATA sample rate, at most 10 Hz, and a positive clock span
+at most 0.001 ppm. It applies to the projected search geometry, independently
+of the transmit Rate field. The projection includes estimated occupied signal
+bandwidth, frequency uncertainty, and the declared channel allowances. A
+slow waveform can still need a large public frequency or arrival grid. Keep
+both its route and capacity qualified on those workloads. CUDA can execute the
+guarded FP64 search on-device. If Vulkan requires CPU coarse search, the exact
+native chirp-Z route stays eligible according to its work and workspace quote.
+Receipts
 report the actual coarse and fine arithmetic, device/runtime and memory use.
 Fine Gaussian state retains the native higher-precision policy. No arithmetic
 is silently selected from the observed score or transmitted truth.

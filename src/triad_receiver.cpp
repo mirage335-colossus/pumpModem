@@ -621,6 +621,7 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     score.coarse_workspaces = coarse.workspaces;
     score.coarse_frequency_points = coarse.frequency_points;
     score.coarse_arrival_points = coarse.arrival_points;
+    score.coarse_projected_rate_hz = coarse.projected_sample_rate_hz;
     score.coarse_fft_precision = coarse.work.plan.fft_precision;
     score.coarse_precision_reason = coarse.work.plan.precision_reason;
     score.varying_status = workspace.varying.status;

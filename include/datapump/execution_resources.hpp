@@ -26,9 +26,12 @@ struct MemoryUsage {
 struct ResourceUsage {
     std::optional<double> cpu_capacity;
     std::optional<MemoryUsage> ram;
+    std::optional<unsigned> cpu_affinity_threads;
+    std::optional<double> cpu_cgroup_quota;
 };
 
 // Diagnostic observations only. CPU capacity may include fractional quota.
+// Linux also exposes the observed affinity count and narrowest finite quota.
 // RAM reflects the narrowest visible hard cap, or physical host RAM.
 ResourceUsage resource_usage();
 std::optional<double> process_cpu_seconds();

@@ -128,6 +128,7 @@ struct ReceiverSlotScore {
     double selected_prior_mass = 0;
     std::size_t quiet_modes = 0, workspace_peak_bytes = 0, fine_candidates = 0;
     std::size_t coarse_workspaces = 0, coarse_frequency_points = 0, coarse_arrival_points = 0;
+    double coarse_projected_rate_hz = 0;
     std::string coarse_fft_precision, coarse_precision_reason;
     std::size_t affine_blocks = 0, adaptive_blocks = 0, adaptive_peak_states = 0;
     std::uint64_t adaptive_transition_edges = 0, basis_rows = 0;

@@ -2284,11 +2284,20 @@ constexpr double matched_chirp_stages = (2 * 26 + 1) * 4096 * 12.;
 constexpr double matched_direct_terms = 26. * 1750 * 1794;
 constexpr double matched_chirp_workers = 24.;
 
+bool coarse_runs_only_on_cpu(const Plan& plan, const ReceiverConfig& config) {
+    if (!config.bulk_backend) return true;
+    const auto rate = static_cast<double>(plan.output_fs), clock = 2 * config.clock_bound_ppm;
+    return !config.bulk_backend->coarse_fallback_reason(rate, clock, CoarseRoute::frequency_tiles).empty() &&
+           !config.bulk_backend->coarse_fallback_reason(rate, clock, CoarseRoute::lag_groups).empty();
+}
+
 bool exact_chirp_z_profile(const Plan& plan, const ReceiverConfig& config) {
     if (plan.source_step != 1 || config.helper_enabled ||
         config.native_coarse_precision != NativeCoarsePrecision::automatic)
         return false;
-    if (!config.bulk_backend) return true;
+    // A backend that requires native precision for both routes still gets
+    // the complete native cost and workspace comparison.
+    if (coarse_runs_only_on_cpu(plan, config)) return true;
     if (plan.ray_count != 1 || plan.layout.lag_count != 1) return false;
     const auto rate = static_cast<double>(plan.output_fs), clock = 2 * config.clock_bound_ppm;
     if (config.bulk_backend->supports_exact_device_chirp_z())
@@ -2350,13 +2359,13 @@ double frequency_fft_work(const Plan& plan, std::size_t points) {
 
 bool prefer_exact_singleton(const Plan& plan, const ReceiverConfig& config) {
     return exact_single_arrival(plan) &&
-        (!config.bulk_backend || config.bulk_backend->supports_exact_device_chirp_z()) &&
+        (coarse_runs_only_on_cpu(plan, config) || config.bulk_backend->supports_exact_device_chirp_z()) &&
         4. * plan.workspaces() * plan.layout.kernel_rows <= frequency_fft_work(plan, 1);
 }
 
 bool exact_chirp_device_cost(const Plan& plan, const ReceiverConfig& config,
                              std::size_t frequencies, double stages, unsigned workers) {
-    return !config.bulk_backend || config.bulk_backend->supports_exact_device_chirp_z() ||
+    return coarse_runs_only_on_cpu(plan, config) || config.bulk_backend->supports_exact_device_chirp_z() ||
            enough_device_direct_work(plan, frequencies, stages, workers);
 }
 

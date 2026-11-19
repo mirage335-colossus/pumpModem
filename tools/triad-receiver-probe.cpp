@@ -814,6 +814,10 @@ Json bulk_json(const BulkReceipt& r) {
         {"vulkan_fft_cache_hits", r.vulkan_fft_cache_hits},
         {"vulkan_fft_cache_misses", r.vulkan_fft_cache_misses},
         {"vulkan_dispatches", r.vulkan_dispatches},
+        {"vulkan_timed_submissions", r.vulkan_timed_submissions},
+        {"vulkan_device_command_seconds", r.vulkan_device_command_seconds},
+        {"vulkan_shader_spirv_compiles", r.vulkan_shader_spirv_compiles},
+        {"vulkan_shader_spirv_cache_hits", r.vulkan_shader_spirv_cache_hits},
         {"vulkan_arrival_peak_rows", r.vulkan_arrival_peak_rows},
         {"vulkan_arrival_peak_values", r.vulkan_arrival_peak_values},
         {"vulkan_host_scored_rows", r.vulkan_host_scored_rows},
@@ -1257,6 +1261,7 @@ Json score_json(const ReceiverSlotScore& score) {
         {"drift_coherent_timing_fft_stages", score.drift_coherent_timing_fft_stages},
         {"coarse_workspaces", score.coarse_workspaces}, {"coarse_frequency_points", score.coarse_frequency_points},
         {"coarse_arrival_points", score.coarse_arrival_points},
+        {"coarse_projected_rate_hz", score.coarse_projected_rate_hz},
         {"coarse_fft_precision", score.coarse_fft_precision}, {"coarse_precision_reason", score.coarse_precision_reason},
         {"affine_blocks", score.affine_blocks},
         {"adaptive_blocks", score.adaptive_blocks}, {"helper_status", score.helper_status},
@@ -1492,7 +1497,7 @@ FineObservation fine_observation(const Options& o, const Profile& profile, const
                 FineRunKind::operational, true};
     const auto& geometry = profile.waveform.geometry();
     const auto rate = profile.waveform.config().format.sample_rate;
-    const auto blocks = fine_block_geometry(rate);
+    const auto blocks = fine_block_geometry(profile.receiver, slot);
     const auto available = slot.stop_sample - slot.first_sample;
     if (o.stratum == "terminal") {
         // Retain one complete segment and the actual public terminal
@@ -1529,7 +1534,7 @@ void fine_run(Json& report, const Options& o, const Profile& profile, const Rece
     Bytes erasures;
     if (o.stratum == "erasure") {
         erasures.assign(valid.begin(), valid.end());
-        const auto block_boundary = fine_block_geometry(config.sample_rate_hz).block_rows;
+        const auto block_boundary = fine_block_geometry(config, slot).block_rows;
         require(block_boundary && block_boundary < erasures.size(), "Erasure probe lacks two public blocks");
         erasures[block_boundary - 1] = erasures[block_boundary] = 0;
         valid = erasures;

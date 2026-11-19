@@ -168,15 +168,15 @@ public:
             for(auto k=first;k<last;++k)if(std::isfinite(bins[k]))
                 detail.db[i]=std::max(detail.db[i],static_cast<float>(bins[k]+simulation_gain_db.value_or(0)));
         }
-        const bool native=segment && sample_count==fft_samples && bins.size()==native_bins &&
-                          complex_bins.size()==native_bins;
-        if(native && previous_segment_==segment && previous_complex_.size()==native_bins && start_sample>previous_start_) {
-            const auto delta=(start_sample-previous_start_)%fft_samples;
-            for(std::size_t k=1;k+1<native_bins;++k) {
+        const bool native=segment && sample_count>=2 && sample_count<=fft_samples && sample_count%2==0 &&
+                          bins.size()==sample_count/2+1 && complex_bins.size()==bins.size();
+        if(native && previous_segment_==segment && previous_complex_.size()==bins.size() && start_sample>previous_start_) {
+            const auto delta=(start_sample-previous_start_)%sample_count;
+            for(std::size_t k=1;k+1<bins.size();++k) {
                 const auto a=std::complex<double>(complex_bins[k]),b=std::complex<double>(previous_complex_[k]);
                 if(!std::isfinite(a.real()) || !std::isfinite(a.imag()) ||
                    !std::isfinite(b.real()) || !std::isfinite(b.imag()) || std::norm(a)<1e-24 || std::norm(b)<1e-24)continue;
-                const auto angle=std::arg(a*std::conj(b))-2*std::numbers::pi*k*delta/fft_samples;
+                const auto angle=std::arg(a*std::conj(b))-2*std::numbers::pi*k*delta/sample_count;
                 detail.phase_degrees[k]=static_cast<float>(std::remainder(angle,2*std::numbers::pi)*180/std::numbers::pi);
             }
         }

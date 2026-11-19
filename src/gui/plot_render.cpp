@@ -8,7 +8,29 @@
 
 namespace datapump::gui::plots {
 namespace {
-struct Waveform { std::vector<float> samples; modem::Config config; double zoom; bool environment=false; };
+struct Waveform {
+    std::vector<float> samples;
+    modem::Config config;
+    double zoom;
+    bool environment=false, fit_capture=false;
+};
+struct WaveformView {
+    std::span<const float> samples;
+    std::size_t extent;
+    unsigned columns(unsigned width) const {
+        if (!width || samples.size() >= extent) return width;
+        return 1+static_cast<unsigned>(static_cast<std::uint64_t>(width-1)*(samples.size()-1)/(extent-1));
+    }
+};
+WaveformView waveform_view(const Waveform& data) {
+    if (!data.environment) {
+        const auto view=waveform_window(data.samples,data.config,data.zoom,waveform_kernel_radius);
+        return {view,view.size()};
+    }
+    const auto extent=oscilloscope_extent(data.config.sample_rate,data.zoom);
+    const auto view=std::span<const float>(data.samples).last(std::min(extent,data.samples.size()));
+    return {view,data.fit_capture?view.size():extent};
+}
 struct Constellation { std::vector<std::complex<double>> points; bool symbols; };
 struct Waterfall { std::shared_ptr<const SpectrumHistory> history; bool overview; };
 struct SpectrumDetail { std::shared_ptr<const SpectrumHistory> history; std::optional<std::pair<double,double>> band; std::string label; };
@@ -19,6 +41,7 @@ struct ResourceChart {
     ResourceMetric metric;
     std::shared_ptr<const ResourceHistory> history;
     std::optional<std::array<std::uint8_t,16>> active_gpu;
+    unsigned receiver_workers;
 };
 using Rgb = theme::Rgb;
 Rgb gray(unsigned char value) { return {value, value, value}; }
@@ -107,9 +130,17 @@ std::string resource_caption(const ResourceChart& chart) {
     const auto& latest=chart.history->samples.back();
     std::ostringstream out;
     if(chart.metric==ResourceMetric::cpu) {
-        if(!latest.cpu_busy_percent || !latest.cpu_capacity) return "CPU utilization unavailable";
-        out<<std::fixed<<std::setprecision(1)<<*latest.cpu_busy_percent<<"% · worker process / "<<
-            std::setprecision(2)<<*latest.cpu_capacity<<" allocated cores";
+        if(!latest.cpu_capacity) out<<"CPU utilization unavailable";
+        else {
+            out<<std::fixed;
+            if(latest.cpu_busy_percent) out<<std::setprecision(1)<<*latest.cpu_busy_percent<<"% of ";
+            const auto cores=*latest.cpu_capacity;
+            const bool quota_limited=latest.cpu_cgroup_quota && *latest.cpu_cgroup_quota==cores;
+            out<<std::setprecision(2)<<cores<<(quota_limited?" quota cores":" effective cores");
+            if(latest.cpu_affinity_threads && *latest.cpu_affinity_threads!=cores)
+                out<<" · "<<*latest.cpu_affinity_threads<<" affinity CPUs";
+        }
+        if(chart.receiver_workers) out<<" · "<<chart.receiver_workers<<" receiver workers max";
     } else if(chart.metric==ResourceMetric::ram) {
         if(!latest.ram) return "RAM usage unavailable";
         memory_caption(out,*latest.ram);
@@ -154,10 +185,10 @@ PlotSnapshot PlotSnapshot::waveform(std::vector<float> samples, modem::Config co
     if (!(zoom > 0) || !std::isfinite(zoom)) throw Error("invalid waveform zoom");
     return PlotSnapshot(std::make_shared<Data>(Waveform{std::move(samples), config, zoom}));
 }
-PlotSnapshot PlotSnapshot::oscilloscope(std::vector<float> samples,std::uint32_t rate,double zoom) {
+PlotSnapshot PlotSnapshot::oscilloscope(std::vector<float> samples,std::uint32_t rate,double zoom,bool fit_capture) {
     (void)oscilloscope_extent(rate,zoom);
     modem::Config config;config.sample_rate=rate;
-    return PlotSnapshot(std::make_shared<Data>(Waveform{std::move(samples),config,zoom,true}));
+    return PlotSnapshot(std::make_shared<Data>(Waveform{std::move(samples),config,zoom,true,fit_capture}));
 }
 PlotSnapshot PlotSnapshot::constellation(std::vector<std::complex<double>> points, bool symbols) {
     return PlotSnapshot(std::make_shared<Data>(Constellation{std::move(points), symbols}));
@@ -203,8 +234,8 @@ PlotSnapshot PlotSnapshot::pattern_evidence(std::vector<PatternEvidencePoint> po
 }
 
 PlotSnapshot PlotSnapshot::resource_history(ResourceMetric metric, std::shared_ptr<const ResourceHistory> history,
-        std::optional<std::array<std::uint8_t,16>> active_gpu) {
-    return PlotSnapshot(std::make_shared<Data>(ResourceChart{metric,std::move(history),active_gpu}));
+        std::optional<std::array<std::uint8_t,16>> active_gpu, unsigned receiver_workers) {
+    return PlotSnapshot(std::make_shared<Data>(ResourceChart{metric,std::move(history),active_gpu,receiver_workers}));
 }
 
 void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, bool color_enabled) const {
@@ -245,12 +276,10 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
                 }
             };
             if (!data.samples.empty()) {
-                const auto extent=data.environment?oscilloscope_extent(data.config.sample_rate,data.zoom):std::size_t{};
-                const auto view=data.environment?std::span<const float>(data.samples).last(std::min(extent,data.samples.size())):
-                    waveform_window(data.samples,data.config,data.zoom,waveform_kernel_radius);
-                // Missing capture time stays blank, with constant sample spacing.
-                const auto draw_width=data.environment?1+static_cast<unsigned>(
-                    static_cast<std::uint64_t>(request.width-1)*(view.size()-1)/(extent-1)):request.width;
+                const auto window=waveform_view(data);
+                const auto view=window.samples;
+                // Only live capture keeps unobserved time on its fixed axis.
+                const auto draw_width=window.columns(request.width);
                 const auto left=static_cast<int>(request.width-draw_width);
                 const auto first = static_cast<std::size_t>(view.data() - data.samples.data());
                 const auto trace = waveform_reconstruction(data.samples, first, view.size(), draw_width);
@@ -442,33 +471,36 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
             using Span=std::pair<int,int>;
             std::array<std::vector<Span>,5> traces;
             for(auto& trace:traces)trace.assign(request.width,{height,-1});
-            long double lower=0,upper=0;
+            // Strong signals can span many orders of magnitude in log E.
+            // Compress each measured value on the same monotone signed axis
+            // so quiet evidence and the operational threshold remain visible.
+            const auto evidence_coordinate=[](double value) {
+                return std::copysign(std::log1p(std::abs(value)),value);
+            };
+            double lower=0,upper=0;
             bool have_evidence=false,have_quiet=false;
             for(const auto& point:data.points) {
                 if(point.bit_log_e) {
                     for(const auto value:{(*point.bit_log_e)[0],(*point.bit_log_e)[1],
                                           *point.operational_log_e,*point.operational_threshold}) {
-                        lower=std::min(lower,static_cast<long double>(value));
-                        upper=std::max(upper,static_cast<long double>(value));
+                        const auto coord=evidence_coordinate(value);
+                        lower=std::min(lower,coord);
+                        upper=std::max(upper,coord);
                     }
                     have_evidence=true;
                 }
                 have_quiet|=point.quiet_energy.has_value();
             }
             if(!(upper>lower)) {lower=-1;upper=1;}
-            // Scaling first avoids overflow even where long double has the
-            // same range as double (notably the Windows native build).
-            const auto evidence_scale=std::max(std::abs(lower),std::abs(upper));
-            const auto scaled_lower=lower/evidence_scale,scaled_upper=upper/evidence_scale;
             const auto top_stop=std::max(0,height*3/4-2);
+            const auto inset=top_stop>4?1:0;
             const auto quiet_top=std::min(height-1,top_stop+3);
             const auto quiet_stop=height-1;
             const auto browser_pass_y=height>4?std::min(height-1,top_stop+1):height/2;
             const auto browser_reject_y=height>4?std::min(height-1,top_stop+2):height/2;
             const auto evidence_y=[&](double value) {
-                const auto fraction=std::clamp((static_cast<long double>(value)/evidence_scale-scaled_lower)/
-                                               (scaled_upper-scaled_lower),0.L,1.L);
-                return static_cast<int>(std::llround((1-fraction)*top_stop));
+                const auto fraction=std::clamp((evidence_coordinate(value)-lower)/(upper-lower),0.,1.);
+                return inset+static_cast<int>(std::llround((1-fraction)*(top_stop-2*inset)));
             };
             const auto quiet_y=[&](long double ratio) {
                 const auto fraction=std::clamp(ratio/2,0.L,1.L);
@@ -609,12 +641,10 @@ std::string PlotSnapshot::caption(unsigned width) const {
         std::ostringstream out;
         if constexpr (std::is_same_v<Type, Waveform>) {
             if (data.samples.empty()) return "No waveform samples";
-            const auto extent=data.environment?oscilloscope_extent(data.config.sample_rate,data.zoom):std::size_t{};
-            const auto view=data.environment?std::span<const float>(data.samples).last(std::min(extent,data.samples.size())):
-                waveform_window(data.samples,data.config,data.zoom,waveform_kernel_radius);
-            const auto seconds=static_cast<double>((data.environment?extent:view.size())-1)/data.config.sample_rate;
-            const auto draw_width=data.environment && width?1+static_cast<unsigned>(
-                static_cast<std::uint64_t>(width-1)*(view.size()-1)/(extent-1)):width;
+            const auto window=waveform_view(data);
+            const auto view=window.samples;
+            const auto seconds=static_cast<double>(window.extent-1)/data.config.sample_rate;
+            const auto draw_width=window.columns(width);
             const bool reconstructed = view.size() >= 2 && view.size() <= draw_width && view.size() <= 8193;
             out << std::setprecision(3) << seconds * (seconds < .001 ? 1e6 : 1000) << (seconds < .001 ? " us" : " ms")
                 << " / " << view.size() << " samples" << (reconstructed ? " / reconstructed" : "");
@@ -654,17 +684,14 @@ std::string PlotSnapshot::caption(unsigned width) const {
                 if(*point.browser_admitted)++browser_admitted;
                 else ++browser_rejected;
             }
-            if(browser_admitted || browser_rejected)
-                out << "Browser filter markers: " << browser_admitted << " pass, "
-                    << browser_rejected << " rejected (green/red).\n";
-            out << "Slots " << data.points.front().slot << ".." << latest.slot << ": ";
-            if(latest.operational_log_e)out << std::setprecision(5) << "log E " << *latest.operational_log_e
-                << " / threshold " << *latest.operational_threshold;
-            else out << "latest evidence incomplete";
-            out << "\nOperational bit 0 (data), 1 (comparison), aggregate (white); dashed threshold applies only to aggregate.";
-            out << "\n";
-            if(latest.quiet_energy)out << "Quiet energy " << *latest.quiet_energy << " / " << *latest.quiet_threshold << "; ";
-            out << "bottom ratio 0..2 (clipped). Conditional model; adaptive lanes are diagnostic only.";
+            const auto rated=browser_admitted+browser_rejected;
+            if(rated) {
+                out << "Browser filter markers · " << browser_admitted << "/" << rated;
+                return out.str();
+            }
+            if(latest.operational_log_e)out << std::setprecision(3) << "log E " << *latest.operational_log_e
+                << " / " << *latest.operational_threshold;
+            else out << "Latest evidence incomplete";
         } else if constexpr (std::is_same_v<Type, ResourceChart>) return resource_caption(data);
         else if constexpr (std::is_same_v<Type, Codeword>) out << data.data << " data / " << data.parity << " parity bytes";
         return out.str();

@@ -75,6 +75,24 @@ const replacement=renderer.views.get('1').input;assert.notEqual(input,replacemen
 const after=sent.length;input.value='stale unsafe';input.dispatch('compositionend');assert.equal(sent.length,after,'withdrawn editor callback restored old text');
 assert.equal(validText('\0',10),false);assert.equal(validText('é',1),false);assert.equal(validText('a\nb',10,false),false);
 assert.throws(()=>renderer.apply({...snapshot,version:2}));renderer.destroy();
+// A generation change recreates read-only status labels alongside real
+// inputs. Only an input can restore the old focus, selection or scroll.
+{
+    const r=new Renderer(doc.root,()=>{});
+    const status={id:'2',kind:'label',label:'Status',enabled:true,text:'Preparing'};
+    r.apply({...snapshot,controls:[control,status]});
+    const oldInput=r.views.get('1').input;
+    oldInput.focus();oldInput.setSelectionRange(2,5);oldInput.scrollTop=17;
+    r.apply({...snapshot,generation:'2',controls:[control,{...status,text:'Ready'}]});
+    await Promise.resolve();
+    const nextInput=r.views.get('1').input;
+    assert.notEqual(nextInput,oldInput);
+    assert.equal(doc.activeElement,nextInput);
+    assert.equal(nextInput.scrollTop,17);
+    assert.deepEqual([nextInput.selectionStart,nextInput.selectionEnd],[2,5]);
+    assert.equal(r.views.get('2').value.textContent,'Ready');
+    r.destroy();
+}
 // Large local editor representations still obey the shared per-field byte
 // limit; the generic renderer and frame encoder do not truncate them.
 {

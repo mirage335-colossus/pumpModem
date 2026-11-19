@@ -35,6 +35,7 @@ void pack_direct_gain_statistics(std::span<Complex, 12> correlations, std::span<
 namespace {
 constexpr std::size_t maximum_states = 64, maximum_proposals = 256;
 constexpr std::size_t maximum_segment_rows = 1'048'576, maximum_basis_rows = 16'384;
+constexpr std::size_t maximum_tapered_modes = 9;
 constexpr int maximum_rate_radius = 32;
 constexpr double acceleration_ppm_per_second = 10.;
 constexpr double infinity = std::numeric_limits<double>::infinity();
@@ -112,9 +113,10 @@ struct BlockCalendar {
     std::size_t rows, block_rows, segment_rows;
     std::size_t final_first, final_rows;
     BlockCalendar(const ReceiverConfig& config, const ReceiverSlotPlan& plan)
+        : BlockCalendar(plan, fine_block_geometry(config, plan)) {}
+    BlockCalendar(const ReceiverSlotPlan& plan, FineBlockGeometry geometry)
         : rows(static_cast<std::size_t>(plan.stop_sample - plan.first_sample)),
-          block_rows(round_rows(.25, config.sample_rate_hz)),
-          segment_rows(round_rows(.5, config.sample_rate_hz)) {
+          block_rows(geometry.block_rows), segment_rows(geometry.segment_rows) {
         if (!rows) throw Error("Robust receiver observation has no samples");
         final_rows = rows % segment_rows;
         if (!final_rows) final_rows = std::min(rows, segment_rows);
@@ -170,13 +172,29 @@ struct ProjectionBands {
     std::array<FrequencyInterval, 3> excluded{};
     bool use_exclusions;
     bool omit_overlapping_modes;
+    bool taper_native;
+    bool taper_cell;
+    bool float_projection;
     double sample_rate;
 
     enum class Policy { legacy, separable_varying };
 
+    static bool can_taper_helper(const ReceiverConfig& config) {
+        return config.helper_enabled && !config.time_varying_channel && !config.helper.pilot_dwell_gating &&
+            !config.physical_rf_retuning && (!config.bulk_backend || !config.bulk_backend->supports_fine());
+    }
+
     ProjectionBands(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
-                    Policy policy = Policy::legacy)
+                    Policy policy = Policy::legacy, bool cell_geometry = false)
         : use_exclusions(config.helper_enabled), omit_overlapping_modes(policy == Policy::separable_varying),
+          taper_native(policy == Policy::legacy && can_taper_helper(config)),
+          taper_cell(cell_geometry),
+          float_projection(policy == Policy::legacy && !config.helper_enabled && config.time_varying_channel &&
+                           (config.spread_delay_seconds || config.spread_doppler_hz) &&
+                           config.native_coarse_precision != NativeCoarsePrecision::fp64 &&
+                           (!config.bulk_backend || !config.bulk_backend->supports_fine()) &&
+                           config.sample_rate_hz == 6000 &&
+                           std::string_view(modem::detail::search_fft::kernel_name()) == "avx2"),
           sample_rate(config.sample_rate_hz) {
         const bool varying = policy != Policy::legacy;
         const double excursion = std::abs(config.spread_doppler_hz) +
@@ -213,6 +231,21 @@ struct ProjectionBands {
                     throw Error("Robust DATA projection overlaps a public Helper exclusion");
             }
         }
+    }
+
+    bool taper(std::size_t rows, std::size_t modes) const {
+        if (!taper_native || rows < 10 || modes > maximum_tapered_modes || modes % 2 == 0 ||
+            (modes > 1 && !taper_cell)) return false;
+        const auto edge_bandwidth = sample_rate / (rows / 10) + (modes / 2) * sample_rate / rows;
+        return std::ranges::none_of(excluded, [&](const auto& band) {
+            return band.lower_hz <= edge_bandwidth && band.upper_hz >= -edge_bandwidth;
+        });
+    }
+
+    // This complete projection shape has paired wanted, quiet, foreign-key
+    // and changing-channel measurements with matching admission decisions.
+    bool use_float(std::size_t rows, std::size_t modes) const {
+        return float_projection && rows == 1500 && modes == 47;
     }
 };
 
@@ -251,17 +284,80 @@ std::size_t visit_projection_modes(std::size_t rows, const ProjectionBands& band
     return modes;
 }
 
+using FineFloatComplex = std::complex<float>;
+
+class FloatProjection {
+public:
+    static constexpr std::size_t rows = 1500, scratch_rows = 4096;
+    explicit FloatProjection(std::stop_token stop) : fft_(scratch_rows, stop) {
+        std::size_t phase = 0;
+        for (std::size_t i = 0; i < rows; ++i) {
+            chirp_[i] = std::polar(1., -std::numbers::pi * static_cast<double>(phase) / rows);
+            kernel_[i] = std::conj(chirp_[i]);
+            if (i) kernel_[scratch_rows - i] = kernel_[i];
+            phase = (phase + 2 * i + 1) % (2 * rows);
+        }
+        modem::detail::search_fft::fft(kernel_, false, fft_, stop);
+    }
+
+    static constexpr std::size_t workspace_bytes() {
+        return sizeof(FloatProjection) + (scratch_rows - 1) * sizeof(FineFloatComplex);
+    }
+
+    bool apply(std::span<Complex> values, std::span<const std::size_t> indices, double normalization,
+               std::span<FineFloatComplex> scratch, std::stop_token stop) const {
+        if (values.size() != rows || scratch.size() < scratch_rows)
+            throw Error("Robust FP32 projection differs from its admitted workspace");
+        check_cancelled(stop);
+        scratch = scratch.first(scratch_rows);
+        // Bound all intermediate FFT products before narrowing. The full
+        // precision plan is available for exceptional input amplitudes.
+        constexpr double maximum = std::numeric_limits<float>::max() /
+            (8. * scratch_rows * scratch_rows * scratch_rows);
+        constexpr double minimum = 8. * scratch_rows * std::numeric_limits<float>::min();
+        double peak = 0;
+        for (std::size_t i = 0; i < rows; ++i) {
+            const auto magnitude = std::max(std::abs(values[i].real()), std::abs(values[i].imag()));
+            if (magnitude > maximum) return false;
+            peak = std::max(peak, magnitude);
+            scratch[i] = static_cast<FineFloatComplex>(values[i]) * chirp_[i];
+        }
+        if (peak > 0 && peak < minimum) return false;
+        std::ranges::fill(scratch.subspan(rows), FineFloatComplex{});
+        using namespace modem::detail::search_fft;
+        fft(scratch, false, fft_, stop);
+        multiply_spectra(scratch, scratch, kernel_, stop);
+        fft_prefix(scratch, true, fft_, rows, stop);
+        for (std::size_t i = 0; i < indices.size(); ++i) {
+            const auto index = indices[i];
+            values[i] = static_cast<Complex>(scratch[index] * chirp_[index]) * normalization;
+        }
+        return true;
+    }
+
+private:
+    modem::detail::search_fft::FloatPlan fft_;
+    std::array<FineFloatComplex, rows> chirp_{};
+    std::array<FineFloatComplex, scratch_rows> kernel_{};
+};
+
 class Projection {
 public:
     Projection(std::size_t rows, const ProjectionBands& bands, std::stop_token stop)
         : rows_(rows), normalization_(1 / std::sqrt(static_cast<double>(rows))) {
         indices_.reserve(rows);
         visit_projection_modes(rows, bands, stop, [&](std::size_t index) { indices_.push_back(index); });
-        if (indices_.size() != 1 || indices_.front() != 0) plan_.emplace(rows, stop);
+        if (bands.taper(rows, indices_.size())) {
+            prepare_taper(stop);
+        } else if (indices_.size() != 1 || indices_.front() != 0) {
+            plan_.emplace(rows, stop);
+            if (bands.use_float(rows, indices_.size())) float_plan_ = std::make_unique<FloatProjection>(stop);
+        }
     }
 
     std::size_t rows() const { return rows_; }
     std::size_t modes() const { return indices_.size(); }
+    std::size_t float_scratch_rows() const { return float_plan_ ? FloatProjection::scratch_rows : 0; }
     std::span<const std::size_t> indices() const { return indices_; }
 
     // In the original DFT order with unitary normalization. A caller
@@ -275,14 +371,16 @@ public:
     }
 
     // Destructive only on caller-private render scratch.
-    void apply(std::span<Complex> values, std::span<Complex> scratch, std::stop_token stop) const {
+    void apply(std::span<Complex> values, std::span<Complex> scratch, std::stop_token stop,
+               std::span<FineFloatComplex> float_scratch = {}) const {
+        if (float_plan_ && float_plan_->apply(values, indices_, normalization_, float_scratch, stop)) return;
+        if (!tapered_modes_.empty()) {
+            const auto projected = apply_taper(values, stop);
+            std::ranges::copy(std::span(projected).first(modes()), values.begin());
+            return;
+        }
         if (!plan_) {
-            Complex dc{};
-            for (std::size_t i = 0; i < values.size(); ++i) {
-                if (!(i % 4096)) check_cancelled(stop);
-                dc += values[i];
-            }
-            values[0] = dc * normalization_;
+            values[0] = sum_dc(values, stop) * normalization_;
             return;
         }
         plan_->transform(values, false, scratch, stop);
@@ -296,13 +394,19 @@ public:
     // for an inexpensive matched-product proposal, never an assumption of
     // independent time-domain noise.
     void retain_time(std::span<Complex> values, std::span<Complex> scratch, std::stop_token stop) const {
-        if (!plan_) {
-            Complex dc{};
-            for (std::size_t i = 0; i < values.size(); ++i) {
-                if (!(i % 4096)) check_cancelled(stop);
-                dc += values[i];
+        if (!tapered_modes_.empty()) {
+            const auto projected = apply_taper(values, stop);
+            std::ranges::fill(values, Complex{});
+            for (std::size_t mode = 0; mode < modes(); ++mode) {
+                check_cancelled(stop);
+                const auto weights = taper_row(mode);
+                for (std::size_t i = 0; i < rows_; ++i) values[i] += projected[mode] * weights[i];
             }
-            std::fill(values.begin(), values.end(), dc / static_cast<double>(rows_));
+            return;
+        }
+        if (!plan_) {
+            const auto dc = sum_dc(values, stop);
+            std::ranges::fill(values, dc / static_cast<double>(rows_));
             return;
         }
         plan_->transform(values, false, scratch, stop);
@@ -316,10 +420,74 @@ public:
     }
 
 private:
+    static Complex sum_dc(std::span<const Complex> values, std::stop_token stop) {
+        Complex dc{};
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            if (!(i % 4096)) check_cancelled(stop);
+            dc += values[i];
+        }
+        return dc;
+    }
+
+    std::span<const double> taper_row(std::size_t mode) const {
+        return std::span(tapered_modes_).subspan(mode * rows_, rows_);
+    }
+
+    void prepare_taper(std::stop_token stop) {
+        // Taper a real DC/cosine/sine basis for the same symmetric DFT bins.
+        // Orthogonalize the windowed modes so projected white noise remains
+        // independent with unit variance in each mode.
+        tapered_modes_.resize(checked_multiply(rows_, modes()));
+        const auto row = [&](std::size_t mode) {
+            return std::span(tapered_modes_).subspan(mode * rows_, rows_);
+        };
+        const auto window = row(0);
+        const auto edge_rows = rows_ / 10;
+        for (std::size_t i = 0; i < rows_; ++i) {
+            if (!(i % 4096)) check_cancelled(stop);
+            const auto distance = std::min(i, rows_ - 1 - i);
+            window[i] = distance >= edge_rows ? 1. :
+                .5 - .5 * std::cos(std::numbers::pi * (distance + .5) / edge_rows);
+        }
+        for (std::size_t mode = 0; mode < modes(); ++mode) {
+            check_cancelled(stop);
+            auto weights = row(mode);
+            if (mode) {
+                const auto harmonic = (mode + 1) / 2;
+                for (std::size_t i = 0; i < rows_; ++i) {
+                    const auto angle = tau * harmonic * (i - .5 * (rows_ - 1)) / rows_;
+                    weights[i] = window[i] * (mode % 2 ? std::cos(angle) : std::sin(angle));
+                }
+                for (std::size_t prior = 0; prior < mode; ++prior) {
+                    const auto basis = row(prior);
+                    const auto overlap = std::inner_product(weights.begin(), weights.end(), basis.begin(), 0.);
+                    for (std::size_t i = 0; i < rows_; ++i) weights[i] -= overlap * basis[i];
+                }
+            }
+            const auto norm = std::inner_product(weights.begin(), weights.end(), weights.begin(), 0.);
+            if (!(norm > 0) || !std::isfinite(norm)) throw Error("Robust Helper taper cannot resolve DATA modes");
+            const auto scale = 1 / std::sqrt(norm);
+            for (auto& weight : weights) weight *= scale;
+        }
+    }
+
+    std::array<Complex, maximum_tapered_modes> apply_taper(std::span<const Complex> values,
+                                                          std::stop_token stop) const {
+        std::array<Complex, maximum_tapered_modes> result{};
+        for (std::size_t mode = 0; mode < modes(); ++mode) {
+            check_cancelled(stop);
+            const auto weights = taper_row(mode);
+            for (std::size_t i = 0; i < rows_; ++i) result[mode] += values[i] * weights[i];
+        }
+        return result;
+    }
+
     std::size_t rows_;
     double normalization_;
     std::vector<std::size_t> indices_;
+    std::vector<double> tapered_modes_;
     std::optional<DftPlan> plan_;
+    std::unique_ptr<FloatProjection> float_plan_;
 };
 
 struct ChannelPosterior {
@@ -644,7 +812,8 @@ struct WorkerScratch {
 void sufficient_statistics(MappedBasis& basis, const MappedBasisRow& row, std::span<const Tap> taps,
                            const ObservationBlock& block, double variance, WorkerScratch& scratch,
                            std::span<Complex> correlations, std::span<Complex> gram,
-                           bool& nonzero_basis, std::stop_token stop) {
+                           bool& nonzero_basis, std::stop_token stop,
+                           std::span<FineFloatComplex> float_scratch = {}) {
     const auto rows = block.projection->rows();
     const auto columns = 2 * taps.size();
     auto raw = std::span(scratch.raw).first(rows * columns);
@@ -663,7 +832,7 @@ void sufficient_statistics(MappedBasis& basis, const MappedBasisRow& row, std::s
         auto values = raw.subspan(column * rows, rows);
         // Required for a complete receipt even on slots that contain only noise.
         if (!nonzero_basis) nonzero_basis = finite_energy(values) > 0;
-        block.projection->apply(values, scratch.fft, stop);
+        block.projection->apply(values, scratch.fft, stop, float_scratch);
         remove_line(values, block.line);
     }
     const auto tap_count = taps.size();
@@ -771,7 +940,7 @@ void advance_state(State& state, const MappedBasisRow& row, MappedBasis& basis,
                    double variance, WorkerScratch& scratch, StateBlockWork* work, std::stop_token stop,
                    double path_power = 1, SlowGainState* slow = nullptr,
                    const SlowGainTransitions& slow_transitions = no_slow_transitions,
-                   bool stationary_fading = false) {
+                   bool stationary_fading = false, std::span<FineFloatComplex> float_scratch = {}) {
     const auto tap_count = taps.size(), tap_square = tap_count * tap_count;
     std::array<Complex, 2 * 3 * 2> correlations{};
     std::array<Complex, 2 * 3 * 4> grams{};
@@ -791,7 +960,7 @@ void advance_state(State& state, const MappedBasisRow& row, MappedBasis& basis,
                 state.nonzero_basis |= bulk->nonzero_basis;
             } else {
                 sufficient_statistics(basis, row, taps, blocks[i], variance, scratch,
-                    correlation, gram, state.nonzero_basis, stop);
+                    correlation, gram, state.nonzero_basis, stop, float_scratch);
             }
             if (work) {
                 long double energy = 0;
@@ -926,16 +1095,23 @@ FineWorkspaceQuote workspace_for_plan(const ReceiverConfig& config, const Receiv
                                       std::stop_token stop = {}) {
     if (!workers) throw Error("fine observation requires a positive worker share");
     // Reject unsupported public support before leasing a slot.
-    const ProjectionBands validated(config, plan);
+    const ProjectionBands validated(config, plan, ProjectionBands::Policy::legacy,
+                                    calendar.block_rows > round_rows(.25, config.sample_rate_hz));
     const auto lengths = calendar.lengths();
     const auto max_rows = *std::max_element(lengths.begin(), lengths.end());
-    std::size_t bytes = 64 * 1024, fft_rows = 0, max_modes = 0;
+    std::size_t bytes = 64 * 1024, fft_rows = 0, float_rows = 0, max_modes = 0;
     const auto add = [&](std::size_t count, std::size_t element) {
         bytes = checked_add(bytes, checked_multiply(count, element));
     };
     for (const auto rows : lengths) {
         if (!rows) continue;
-        max_modes = std::max(max_modes, visit_projection_modes(rows, validated, stop, [](std::size_t) {}));
+        const auto modes = visit_projection_modes(rows, validated, stop, [](std::size_t) {});
+        max_modes = std::max(max_modes, modes);
+        if (validated.taper(rows, modes)) add(checked_multiply(rows, modes), sizeof(double));
+        if (validated.use_float(rows, modes)) {
+            add(1, FloatProjection::workspace_bytes());
+            float_rows = FloatProjection::scratch_rows;
+        }
         bytes = checked_add(bytes, DftPlan::workspace_bytes(rows));
         add(rows, sizeof(std::size_t));
         fft_rows = std::max(fft_rows, DftPlan::scratch_samples(rows));
@@ -958,6 +1134,7 @@ FineWorkspaceQuote workspace_for_plan(const ReceiverConfig& config, const Receiv
     if (observation.record_work)
         add((adaptive ? 3 : 2) * maximum_proposals, sizeof(StateBlockWork));
     const auto active = useful_fine_workers(workers);
+    add(checked_multiply(1 + active, float_rows), sizeof(FineFloatComplex));
     const auto mapped_rows = std::min(max_rows, maximum_basis_rows);
     const auto taps = config.spread_delay_seconds || config.spread_doppler_hz ? 2U : 1U;
     const auto fallback = config.bulk_backend ? config.bulk_backend->fine_fallback_reason(
@@ -1002,16 +1179,43 @@ void check_bulk_statistics(std::span<const FineBulkStatistics> output, std::size
 }
 } // namespace
 
-FineBlockGeometry fine_block_geometry(double sample_rate_hz) {
-    if (!std::isfinite(sample_rate_hz) || sample_rate_hz < 1)
+FineBlockGeometry fine_block_geometry(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
+    const auto fs = config.sample_rate_hz;
+    if (!std::isfinite(fs) || fs < 1)
         throw Error("Invalid Robust fine sample rate");
-    return {round_rows(.25, sample_rate_hz), round_rows(.5, sample_rate_hz)};
+    const FineBlockGeometry standard{round_rows(.25, fs), round_rows(.5, fs)};
+    if (config.time_varying_channel || (config.helper_enabled && !ProjectionBands::can_taper_helper(config)))
+        return standard;
+    const auto cells_per_second = geometry(slot.format).fine_chip_rate_hz;
+    const auto cell_rows = fs / cells_per_second;
+    if (!(cell_rows > standard.block_rows && cell_rows <= maximum_basis_rows)) return standard;
+    const auto block = round_rows(1 / cells_per_second, fs);
+    // Keep room for whole observed blocks in the fixed physical quiet aperture,
+    // including a possible merged tail. Probe crops reuse this public geometry.
+    if (slot.quiet_stop_sample <= slot.quiet_first_sample ||
+        slot.quiet_stop_sample - slot.quiet_first_sample < 3 * block) return standard;
+    const ProjectionBands bands(config, slot, ProjectionBands::Policy::legacy, true);
+    // A DC-only block collapses the two keyed shapes into scalar gains. A
+    // cell-length block adds modes that distinguish their within-cell phase.
+    if (bands.required.upper_hz >= fs / (2 * standard.block_rows) ||
+        bands.required.upper_hz < fs / (2 * block)) return standard;
+    const FineBlockGeometry cell{block, 2 * block};
+    if (config.helper_enabled) {
+        const BlockCalendar calendar(slot, cell);
+        for (const auto rows : calendar.lengths()) {
+            if (!rows) continue;
+            const auto harmonics = std::floor(bands.required.upper_hz * rows / fs + .5);
+            if (harmonics > maximum_tapered_modes / 2 ||
+                !bands.taper(rows, 2 * static_cast<std::size_t>(harmonics) + 1)) return standard;
+        }
+    }
+    return cell;
 }
 
 std::size_t fine_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                            FineObservation observation, unsigned workers) {
     const auto plan = observation_plan(config, slot, observation);
-    const BlockCalendar calendar(config, plan);
+    const BlockCalendar calendar(plan, fine_block_geometry(config, slot));
     return workspace_for_plan(config, plan, calendar, workers, observation).bytes;
 }
 
@@ -1065,6 +1269,7 @@ struct FineSession::Impl {
 
     std::vector<Projection> projections;
     std::vector<Complex> observation_scratch;
+    std::vector<FineFloatComplex> observation_float_scratch, worker_float_scratch;
     std::unique_ptr<MappedBasis> basis;
     std::unique_ptr<FineBulk> bulk;
     FineBulkWork bulk_work;
@@ -1118,7 +1323,8 @@ struct FineSession::Impl {
          unsigned allocation, std::size_t scratch_limit, std::stop_token cancellation,
          ReceiverExecutor* shared, AffineGainEvaluation evaluation)
         : config(input_config), observation(extent), plan(observation_plan(config, slot, observation)),
-          iq(samples), validity(valid), stop(cancellation), calendar(config, plan), grid(projected_rate, clock_gap),
+          iq(samples), validity(valid), stop(cancellation), calendar(plan, fine_block_geometry(config, slot)),
+          grid(projected_rate, clock_gap),
           paths{{{0, 0}, {config.spread_delay_seconds, config.spread_doppler_hz}}},
           tap_count(paths[1].delay_seconds || paths[1].doppler_hz ? 2 : 1), workers(allocation),
           stage_workers(useful_fine_workers(workers)),
@@ -1174,15 +1380,19 @@ struct FineSession::Impl {
 
         const auto lengths = calendar.lengths();
         projections.reserve(lengths.size());
-        const ProjectionBands bands(config, plan);
-        std::size_t fft_rows = 0, max_rows = 0;
+        const ProjectionBands bands(config, plan, ProjectionBands::Policy::legacy,
+                                    calendar.block_rows > round_rows(.25, config.sample_rate_hz));
+        std::size_t fft_rows = 0, float_rows = 0, max_rows = 0;
         for (const auto rows : lengths) {
             if (!rows) continue;
             projections.emplace_back(rows, bands, stop);
             fft_rows = std::max(fft_rows, DftPlan::scratch_samples(rows));
+            float_rows = std::max(float_rows, projections.back().float_scratch_rows());
             max_rows = std::max(max_rows, rows);
         }
         observation_scratch.resize(fft_rows);
+        observation_float_scratch.resize(float_rows);
+        worker_float_scratch.resize(checked_multiply(stage_workers, float_rows));
         const auto mapped_rows = std::min(max_rows, maximum_basis_rows);
         basis = std::make_unique<MappedBasis>(config, plan, key, mapped_rows, stage_workers);
         if (config.bulk_backend && quote.native_fallback_reason.empty()) {
@@ -1289,7 +1499,7 @@ struct FineSession::Impl {
         }
         const auto raw = iq.subspan(first, rows);
         block.projected.assign(raw.begin(), raw.end());
-        projection->apply(block.projected, observation_scratch, leaf_stop);
+        projection->apply(block.projected, observation_scratch, leaf_stop, observation_float_scratch);
         block.projected.resize(projection->modes());
         observed_modes += projection->modes();
         const auto quiet_first = plan.quiet_first_sample - plan.first_sample;
@@ -1479,9 +1689,11 @@ struct FineSession::Impl {
                 const std::array<const FineBulkStatistics*, 2>& prepared, unsigned lane,
                 StateBlockWork* work, std::stop_token leaf_stop, SlowGainState* slow = nullptr) {
         check_cancelled(leaf_stop);
+        const auto float_rows = observation_float_scratch.size();
+        const auto float_scratch = std::span(worker_float_scratch).subspan(lane * float_rows, float_rows);
         advance_state(state, row, *basis, taps(), pair.observations(), prepared, pair.transitions,
                       config.noise_variance, scratch[lane], work, leaf_stop, 1., slow, pair.slow_transitions,
-                      additional_gain.stationary_fading);
+                      additional_gain.stationary_fading, float_scratch);
     }
 
     // The tiles one keyed source must render for later dispatches. That

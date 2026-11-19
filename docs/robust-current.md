@@ -296,7 +296,18 @@ and [validation](validation.md#public-calendar-admission-investigation--17-novem
 
 With changing-channel controls Off, the fixed-affine lane supplies operational
 admission and the final bit. The older adaptive timing and combined lanes remain
-diagnostics. Selected atmospheric or selective perturbations add bounded,
+diagnostics. For a static channel whose quarter-second DATA
+projection retains only DC, the fine receiver can use a whole fine cell to
+preserve within-cell structure. It does so only within the mapped-basis row
+limit and when the physical quiet aperture spans at least three cells. The
+projection can distinguish keyed waveforms that fit almost equally well after
+collapse to one scalar per block. Workspace admission uses the selected
+calendar. With sufficiently separated, ungated Helper tones, the native
+projection tapers its edges to suppress leakage. Eligible whole-cell blocks
+use up to nine orthonormal tapered modes. The orthonormal projection preserves
+the noise degrees of freedom used to score physical quiet.
+
+Selected atmospheric or selective perturbations add bounded,
 properly weighted likelihood alternatives: shorter gain-coherence models, a
 chronological common-frequency mixture, medium-duration coherent Gaussian-gain
 models (independent and causal AR), and coherent linear-drift matching.

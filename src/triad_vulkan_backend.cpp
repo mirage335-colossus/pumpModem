@@ -38,6 +38,9 @@ constexpr std::size_t plan_cache_limit = 4;
 constexpr std::size_t serialized_cache_entries = 8;
 constexpr std::size_t serialized_cache_limit = 8 * mib;
 constexpr std::size_t serialized_cache_metadata_bound = 64 * 1024;
+constexpr std::size_t shader_cache_entries = 16;
+constexpr std::size_t shader_cache_limit = 128 * 1024;
+constexpr std::size_t shader_cache_metadata_bound = 8 * 1024;
 // Admit enough independent transforms to amortize submissions and feed the
 // compute units. Exact allocation checks halve this width when RAM is tighter.
 constexpr std::size_t maximum_batch = 64;
@@ -131,6 +134,52 @@ struct CachedFft {
     std::uint64_t age;
 };
 
+enum class ShaderKind { rotate, products, direct_dot, quadratic, peaks };
+using ShaderKey = std::tuple<ShaderKind, bool, bool, bool>;
+using Spirv = std::vector<unsigned int>;
+
+Spirv compile_spirv(const ShaderKey& key) {
+    const auto [kind, half_storage, packed_direct, fixed_phase] = key;
+    constexpr std::array<std::string_view, 5> sources{
+        vulkan_rotate_shader, vulkan_products_shader, vulkan_direct_dot_shader,
+        vulkan_quadratic_shader, vulkan_coarse_peaks_shader};
+    std::string code(sources[static_cast<std::size_t>(kind)]);
+    if (half_storage || fixed_phase) {
+        constexpr std::string_view version = "#version 450\n";
+        const auto start = code.find(version);
+        require(start != std::string::npos, "invalid Vulkan precision shader prelude");
+        std::string defines;
+        if (half_storage) defines = "#define HALF_STORAGE\n";
+        if (packed_direct) defines += "#define PACKED_DIRECT\n";
+        if (fixed_phase) defines += "#define FIXED_PHASE\n";
+        code.insert(start + version.size(), defines);
+    }
+    const auto messages = static_cast<glslang_messages_t>(GLSLANG_MSG_SPV_RULES_BIT | GLSLANG_MSG_VULKAN_RULES_BIT);
+    glslang_input_t input{};
+    input.language = GLSLANG_SOURCE_GLSL; input.stage = GLSLANG_STAGE_COMPUTE;
+    input.client = GLSLANG_CLIENT_VULKAN; input.client_version = GLSLANG_TARGET_VULKAN_1_2;
+    input.target_language = GLSLANG_TARGET_SPV; input.target_language_version = GLSLANG_TARGET_SPV_1_5;
+    input.code = code.c_str(); input.default_version = 450; input.default_profile = GLSLANG_NO_PROFILE;
+    input.messages = messages; input.resource = glslang_default_resource();
+    std::unique_ptr<glslang_shader_t, decltype(&glslang_shader_delete)> shader(
+        glslang_shader_create(&input), glslang_shader_delete);
+    require(shader != nullptr, "Robust Vulkan shader creation failed");
+    if (!glslang_shader_preprocess(shader.get(), &input) || !glslang_shader_parse(shader.get(), &input))
+        throw Error(std::string("Robust Vulkan shader compilation failed: ") + glslang_shader_get_info_log(shader.get()));
+    std::unique_ptr<glslang_program_t, decltype(&glslang_program_delete)> program(
+        glslang_program_create(), glslang_program_delete);
+    require(program != nullptr, "Robust Vulkan shader program creation failed");
+    glslang_program_add_shader(program.get(), shader.get());
+    if (!glslang_program_link(program.get(), messages))
+        throw Error(std::string("Robust Vulkan shader link failed: ") + glslang_program_get_info_log(program.get()));
+    glslang_program_SPIRV_generate(program.get(), GLSLANG_STAGE_COMPUTE);
+    const auto words = glslang_program_SPIRV_get_size(program.get());
+    require(words && words <= 1024 * 1024, "Robust Vulkan shader output exceeds its compiler bound");
+    Spirv spirv(words);
+    glslang_program_SPIRV_get(program.get(), spirv.data());
+    return spirv;
+}
+
 struct Shared {
     VulkanReceiverOptions options;
     const bool automatic_workspace;
@@ -155,6 +204,9 @@ struct Shared {
     std::map<FftKey, CachedFft> fft_cache;
     std::size_t fft_cache_bytes = 0;
     std::uint64_t fft_cache_age = 0;
+    std::mutex shader_cache_mutex;
+    std::map<ShaderKey, std::shared_ptr<const Spirv>> shader_cache;
+    std::size_t shader_cache_bytes = 0;
     BulkReceipt total;
 
     explicit Shared(const VulkanReceiverOptions& requested, bool automatic_device = false)
@@ -488,6 +540,24 @@ struct Shared {
         if (host_scoring) result.precision += host_score_suffix;
         return result;
     }
+    std::pair<std::shared_ptr<const Spirv>, bool> shader_spirv(const ShaderKey& key) {
+        std::lock_guard lock(shader_cache_mutex);
+        if (const auto found = shader_cache.find(key); found != shader_cache.end())
+            return {found->second, true};
+        const auto binary = std::make_shared<const Spirv>(compile_spirv(key));
+        const auto bytes = binary->capacity() * sizeof(Spirv::value_type);
+        // These built-in shader variants do not depend on owner or waveform
+        // geometry. Keep immutable binaries only, with no pinned eviction.
+        if (shader_cache.size() < shader_cache_entries && bytes <= shader_cache_limit - shader_cache_bytes) {
+            try {
+                shader_cache.emplace(key, binary);
+                shader_cache_bytes += bytes;
+            } catch (const std::bad_alloc&) {
+                // The private pipeline can still use the compiled binary.
+            }
+        }
+        return {binary, false};
+    }
     std::shared_ptr<const SerializedFft> cached_fft(const FftKey& key) {
         std::lock_guard lock(fft_cache_mutex);
         const auto found = fft_cache.find(key);
@@ -545,16 +615,19 @@ struct Shared {
         ADD_FIELD(upload_bytes); ADD_FIELD(download_bytes); ADD_FIELD(synchronizations);
         ADD_FIELD(fft_calls); ADD_FIELD(fft_rows); ADD_FIELD(score_rows);
         ADD_FIELD(vulkan_dispatches); ADD_FIELD(vulkan_arrival_peak_rows); ADD_FIELD(vulkan_arrival_peak_values);
+        ADD_FIELD(vulkan_timed_submissions);
         ADD_FIELD(vulkan_host_scored_rows);
         ADD_FIELD(vulkan_fp32_score_rows); ADD_FIELD(vulkan_fp16_storage_score_rows);
         ADD_FIELD(vulkan_direct_dot_terms); ADD_FIELD(vulkan_direct_fp32_score_rows); ADD_FIELD(vulkan_direct_fp16_score_rows);
         ADD_FIELD(vulkan_direct_fp16_storage_score_rows);
         ADD_FIELD(vulkan_fft_cache_hits); ADD_FIELD(vulkan_fft_cache_misses);
+        ADD_FIELD(vulkan_shader_spirv_compiles); ADD_FIELD(vulkan_shader_spirv_cache_hits);
 #undef ADD_FIELD
         total.executed |= delta.executed;
         total.wall_seconds += delta.wall_seconds;
         total.vulkan_fft_plan_seconds += delta.vulkan_fft_plan_seconds;
         total.vulkan_shader_compile_seconds += delta.vulkan_shader_compile_seconds;
+        total.vulkan_device_command_seconds += delta.vulkan_device_command_seconds;
         total.vulkan_direct_dot_seconds += delta.vulkan_direct_dot_seconds;
     }
 };
@@ -670,7 +743,7 @@ struct Pipeline {
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkDescriptorSet set = VK_NULL_HANDLE;
     std::uint32_t bindings = 0, push_bytes = 0;
-    Pipeline(Context&, std::string_view, std::uint32_t, std::uint32_t);
+    Pipeline(Context&, const Spirv&, std::uint32_t, std::uint32_t);
     ~Pipeline() {
         if (pipeline) vkDestroyPipeline(device, pipeline, nullptr);
         if (layout) vkDestroyPipelineLayout(device, layout, nullptr);
@@ -689,12 +762,16 @@ struct FftPlan {
 };
 
 struct Context {
+    enum TimingQuery : std::uint32_t {
+        command_start_query, command_end_query, dot_start_query, dot_end_query, timing_query_count
+    };
+
     std::shared_ptr<Shared> shared;
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandBuffer command = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
     VkDescriptorPool descriptors = VK_NULL_HANDLE;
-    VkQueryPool direct_timestamps = VK_NULL_HANDLE;
+    VkQueryPool timestamps = VK_NULL_HANDLE;
     std::size_t allocated = 0, peak_allocated = 0;
     std::size_t allocation_limit, lease = 0;
     bool active = false, half_storage = false, direct_dot = false, packed_direct = false, timed_direct = false;
@@ -719,6 +796,13 @@ struct Context {
             VkDescriptorPoolCreateInfo d{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
             d.maxSets = 4; d.poolSizeCount = 1; d.pPoolSizes = &size;
             check(vkCreateDescriptorPool(shared->device, &d, nullptr, &descriptors), "descriptor pool creation");
+            if (shared->timestamp_bits && shared->properties.limits.timestampPeriod > 0) {
+                VkQueryPoolCreateInfo q{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+                q.queryType = VK_QUERY_TYPE_TIMESTAMP; q.queryCount = timing_query_count;
+                VkQueryPool created = VK_NULL_HANDLE;
+                if (vkCreateQueryPool(shared->device, &q, nullptr, &created) == VK_SUCCESS)
+                    timestamps = created;
+            }
             std::lock_guard lock(shared->receipt_mutex);
             require(shared->total.vulkan_active_sessions < UINT64_MAX, "Robust Vulkan active-session count overflow");
             ++shared->total.vulkan_active_sessions;
@@ -728,8 +812,8 @@ struct Context {
     ~Context() { release(); }
     void release() noexcept {
         plans.clear(); peaks.reset(); quadratic.reset(); products.reset(); rotate.reset();
-        if (direct_timestamps) vkDestroyQueryPool(shared->device, direct_timestamps, nullptr);
-        direct_timestamps = VK_NULL_HANDLE;
+        if (timestamps) vkDestroyQueryPool(shared->device, timestamps, nullptr);
+        timestamps = VK_NULL_HANDLE;
         if (descriptors) vkDestroyDescriptorPool(shared->device, descriptors, nullptr);
         if (fence) vkDestroyFence(shared->device, fence, nullptr);
         if (pool) vkDestroyCommandPool(shared->device, pool, nullptr);
@@ -753,15 +837,18 @@ struct Context {
         ADD_FIELD(upload_bytes); ADD_FIELD(download_bytes); ADD_FIELD(synchronizations);
         ADD_FIELD(fft_calls); ADD_FIELD(fft_rows); ADD_FIELD(score_rows);
         ADD_FIELD(vulkan_dispatches); ADD_FIELD(vulkan_arrival_peak_rows); ADD_FIELD(vulkan_arrival_peak_values);
+        ADD_FIELD(vulkan_timed_submissions);
         ADD_FIELD(vulkan_host_scored_rows);
         ADD_FIELD(vulkan_fp32_score_rows); ADD_FIELD(vulkan_fp16_storage_score_rows);
         ADD_FIELD(vulkan_direct_dot_terms); ADD_FIELD(vulkan_direct_fp32_score_rows); ADD_FIELD(vulkan_direct_fp16_score_rows);
         ADD_FIELD(vulkan_direct_fp16_storage_score_rows);
         ADD_FIELD(vulkan_fft_cache_hits); ADD_FIELD(vulkan_fft_cache_misses);
+        ADD_FIELD(vulkan_shader_spirv_compiles); ADD_FIELD(vulkan_shader_spirv_cache_hits);
 #undef ADD_FIELD
         local.wall_seconds += delta.wall_seconds; local.executed |= delta.executed;
         local.vulkan_fft_plan_seconds += delta.vulkan_fft_plan_seconds;
         local.vulkan_shader_compile_seconds += delta.vulkan_shader_compile_seconds;
+        local.vulkan_device_command_seconds += delta.vulkan_device_command_seconds;
         local.vulkan_direct_dot_seconds += delta.vulkan_direct_dot_seconds;
         shared->accumulate(delta);
     }
@@ -771,11 +858,13 @@ struct Context {
         COPY_FIELD(upload_bytes); COPY_FIELD(download_bytes); COPY_FIELD(synchronizations);
         COPY_FIELD(fft_calls); COPY_FIELD(fft_rows); COPY_FIELD(score_rows);
         COPY_FIELD(vulkan_dispatches); COPY_FIELD(vulkan_arrival_peak_rows); COPY_FIELD(vulkan_arrival_peak_values);
+        COPY_FIELD(vulkan_timed_submissions); COPY_FIELD(vulkan_device_command_seconds);
         COPY_FIELD(vulkan_host_scored_rows);
         COPY_FIELD(vulkan_fp32_score_rows); COPY_FIELD(vulkan_fp16_storage_score_rows);
         COPY_FIELD(vulkan_direct_dot_terms); COPY_FIELD(vulkan_direct_fp32_score_rows); COPY_FIELD(vulkan_direct_fp16_score_rows);
         COPY_FIELD(vulkan_direct_fp16_storage_score_rows);
         COPY_FIELD(vulkan_fft_cache_hits); COPY_FIELD(vulkan_fft_cache_misses);
+        COPY_FIELD(vulkan_shader_spirv_compiles); COPY_FIELD(vulkan_shader_spirv_cache_hits);
         COPY_FIELD(vulkan_fft_plan_seconds); COPY_FIELD(vulkan_shader_compile_seconds);
         COPY_FIELD(vulkan_direct_dot_seconds);
         COPY_FIELD(wall_seconds); COPY_FIELD(executed);
@@ -802,19 +891,37 @@ struct Context {
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
     }
     void begin_dot_timing() {
-        if (!shared->timestamp_bits || !(shared->properties.limits.timestampPeriod > 0)) return;
-        if (!direct_timestamps) {
-            VkQueryPoolCreateInfo info{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
-            info.queryType = VK_QUERY_TYPE_TIMESTAMP; info.queryCount = 2;
-            if (vkCreateQueryPool(shared->device, &info, nullptr, &direct_timestamps) != VK_SUCCESS) return;
-        }
-        vkCmdResetQueryPool(command, direct_timestamps, 0, 2);
-        vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, direct_timestamps, 0);
+        if (!timestamps) return;
+        vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestamps, dot_start_query);
         timed_direct = true;
     }
     void end_dot_timing() {
         if (timed_direct)
-            vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, direct_timestamps, 1);
+            vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestamps, dot_end_query);
+    }
+    void account_timestamps(BulkReceipt& delta) const {
+        if (!timestamps) return;
+        struct QueryResult { std::uint64_t tick, available; };
+        std::array<QueryResult, timing_query_count> results{};
+        const auto queries = timed_direct ? std::uint32_t{timing_query_count} : std::uint32_t{2};
+        // The submission fence has already signaled. Read availability
+        // without a new wait, including if an inner timestamp is missing.
+        const auto status = vkGetQueryPoolResults(shared->device, timestamps, 0, queries,
+            sizeof(results), results.data(), sizeof(results[0]),
+            VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+        if (status != VK_SUCCESS && status != VK_NOT_READY) return;
+        const auto bits = shared->timestamp_bits;
+        const auto mask = bits >= 64 ? UINT64_MAX : (std::uint64_t{1} << bits) - 1;
+        const auto elapsed = [&](TimingQuery first, TimingQuery last) {
+            return ((results[last].tick - results[first].tick) & mask) *
+                static_cast<double>(shared->properties.limits.timestampPeriod) * 1e-9;
+        };
+        if (results[command_start_query].available && results[command_end_query].available) {
+            delta.vulkan_timed_submissions = 1;
+            delta.vulkan_device_command_seconds = elapsed(command_start_query, command_end_query);
+        }
+        if (timed_direct && results[dot_start_query].available && results[dot_end_query].available)
+            delta.vulkan_direct_dot_seconds = elapsed(dot_start_query, dot_end_query);
     }
     void drain_submission() {
         // An OOM/unknown wait error says nothing about pending GPU work. Keep
@@ -840,6 +947,10 @@ struct Context {
         VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         check(vkBeginCommandBuffer(command, &begin), "command begin");
+        if (timestamps) {
+            vkCmdResetQueryPool(command, timestamps, 0, timing_query_count);
+            vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestamps, command_start_query);
+        }
         barrier(VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_WRITE_BIT,
                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
         BulkReceipt delta;
@@ -847,6 +958,8 @@ struct Context {
         record(delta);
         barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
                 VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_READ_BIT);
+        if (timestamps)
+            vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestamps, command_end_query);
         check(vkEndCommandBuffer(command), "command end");
         VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         submit.commandBufferCount = 1; submit.pCommandBuffers = &command;
@@ -865,43 +978,24 @@ struct Context {
         check(waited, "fence wait");
         delta.synchronizations = 1; delta.executed = true;
         delta.wall_seconds = std::chrono::duration<double>(Clock::now() - began).count();
-        if (timed_direct) {
-            std::array<std::uint64_t, 2> ticks{};
-            if (vkGetQueryPoolResults(shared->device, direct_timestamps, 0, 2, sizeof(ticks), ticks.data(),
-                                      sizeof(ticks[0]), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
-                const auto bits = shared->timestamp_bits;
-                const auto mask = bits >= 64 ? UINT64_MAX : (std::uint64_t{1} << bits) - 1;
-                delta.vulkan_direct_dot_seconds = ((ticks[1] - ticks[0]) & mask) *
-                    static_cast<double>(shared->properties.limits.timestampPeriod) * 1e-9;
-            }
-        }
+        account_timestamps(delta);
         account(delta);
         // Cancellation never releases buffers still referenced by a submission.
         cancelled(stop);
     }
-    Pipeline& pipeline(std::unique_ptr<Pipeline>& slot, std::string_view source,
+    Pipeline& pipeline(std::unique_ptr<Pipeline>& slot, ShaderKind kind,
                        std::uint32_t bindings, std::uint32_t push_bytes, bool storage_shader = true,
                        bool fixed_phase = false) {
         if (!slot) {
             const auto began = Clock::now();
-            std::string defines;
-            if (half_storage && storage_shader) {
-                defines = "#define HALF_STORAGE\n";
-                if (packed_direct) defines += "#define PACKED_DIRECT\n";
-            }
-            if (fixed_phase) defines += "#define FIXED_PHASE\n";
-            std::string code;
-            if (!defines.empty()) {
-                constexpr std::string_view version = "#version 450\n";
-                const auto start = source.find(version);
-                require(start != std::string_view::npos, "invalid Vulkan precision shader prelude");
-                code.assign(source);
-                code.insert(start + version.size(), defines);
-                source = code;
-            }
-            slot = std::make_unique<Pipeline>(*this, source, bindings, push_bytes);
+            const bool half = half_storage && storage_shader && kind != ShaderKind::peaks;
+            const bool packed = half && packed_direct && kind == ShaderKind::direct_dot;
+            const auto [spirv, cache_hit] = shared->shader_spirv({kind, half, packed, fixed_phase});
+            slot = std::make_unique<Pipeline>(*this, *spirv, bindings, push_bytes);
             BulkReceipt compiled;
-            // Includes GLSL/SPIR-V compilation and native driver pipeline construction.
+            if (cache_hit) compiled.vulkan_shader_spirv_cache_hits = 1;
+            else compiled.vulkan_shader_spirv_compiles = 1;
+            // Includes any GLSL/SPIR-V compilation and private driver pipeline construction.
             compiled.vulkan_shader_compile_seconds = std::chrono::duration<double>(Clock::now() - began).count();
             account(compiled);
         }
@@ -1089,34 +1183,10 @@ Buffer::~Buffer() {
     owner->allocated -= charged; shared.uncharge(charged);
 }
 
-Pipeline::Pipeline(Context& context, std::string_view source, std::uint32_t inputs, std::uint32_t push)
+Pipeline::Pipeline(Context& context, const Spirv& spirv, std::uint32_t inputs, std::uint32_t push)
     : device(context.shared->device), bindings(inputs), push_bytes(push) {
     VkShaderModule module = VK_NULL_HANDLE;
-    glslang_shader_t* shader = nullptr;
-    glslang_program_t* program = nullptr;
     try {
-        std::string code(source);
-        const auto messages = static_cast<glslang_messages_t>(GLSLANG_MSG_SPV_RULES_BIT | GLSLANG_MSG_VULKAN_RULES_BIT);
-        glslang_input_t input{};
-        input.language = GLSLANG_SOURCE_GLSL; input.stage = GLSLANG_STAGE_COMPUTE;
-        input.client = GLSLANG_CLIENT_VULKAN; input.client_version = GLSLANG_TARGET_VULKAN_1_2;
-        input.target_language = GLSLANG_TARGET_SPV; input.target_language_version = GLSLANG_TARGET_SPV_1_5;
-        input.code = code.c_str(); input.default_version = 450; input.default_profile = GLSLANG_NO_PROFILE;
-        input.messages = messages; input.resource = glslang_default_resource();
-        shader = glslang_shader_create(&input);
-        require(shader != nullptr, "Robust Vulkan shader creation failed");
-        if (!glslang_shader_preprocess(shader, &input) || !glslang_shader_parse(shader, &input))
-            throw Error(std::string("Robust Vulkan shader compilation failed: ") + glslang_shader_get_info_log(shader));
-        program = glslang_program_create();
-        require(program != nullptr, "Robust Vulkan shader program creation failed");
-        glslang_program_add_shader(program, shader);
-        if (!glslang_program_link(program, messages))
-            throw Error(std::string("Robust Vulkan shader link failed: ") + glslang_program_get_info_log(program));
-        glslang_program_SPIRV_generate(program, GLSLANG_STAGE_COMPUTE);
-        const auto words = glslang_program_SPIRV_get_size(program);
-        require(words && words <= 1024 * 1024, "Robust Vulkan shader output exceeds its compiler bound");
-        std::vector<unsigned int> spirv(words);
-        glslang_program_SPIRV_get(program, spirv.data());
         VkShaderModuleCreateInfo shader_info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
         shader_info.codeSize = spirv.size() * sizeof(unsigned int); shader_info.pCode = spirv.data();
         check(vkCreateShaderModule(device, &shader_info, nullptr, &module), "shader module creation");
@@ -1142,15 +1212,12 @@ Pipeline::Pipeline(Context& context, std::string_view source, std::uint32_t inpu
         check(vkAllocateDescriptorSets(device, &allocation, &set), "descriptor set allocation");
     } catch (...) {
         if (module) vkDestroyShaderModule(device, module, nullptr);
-        if (program) glslang_program_delete(program);
-        if (shader) glslang_shader_delete(shader);
         if (pipeline) vkDestroyPipeline(device, pipeline, nullptr);
         if (layout) vkDestroyPipelineLayout(device, layout, nullptr);
         if (descriptors) vkDestroyDescriptorSetLayout(device, descriptors, nullptr);
         throw;
     }
     vkDestroyShaderModule(device, module, nullptr);
-    glslang_program_delete(program); glslang_shader_delete(shader);
 }
 
 // Normalized bank samples are below 128. Round their IEEE binary32 encoding
@@ -1509,7 +1576,7 @@ private:
             for (std::size_t f = 0; f < nf; ++f)
                 phases[f] = phase_step(frequencies[f], geometry_.projected_sample_rate_hz);
         } else std::memcpy(frequency.mapped, frequencies.data(), frequencies.size_bytes());
-        auto& rotate = context_.pipeline(context_.rotate, vulkan_rotate_shader, 3,
+        auto& rotate = context_.pipeline(context_.rotate, ShaderKind::rotate, 3,
                                         host_scoring ? sizeof(RotatePush) : sizeof(RotateFp64Push), true, host_scoring);
         const std::array<Buffer*, 3> rotate_buffers{observation_.get(), &frequency, &spectra};
         context_.bind(rotate, rotate_buffers);
@@ -1530,12 +1597,12 @@ private:
             credit_search_work(work, completed_work);
         }
         auto& product_pipeline = context_.pipeline(context_.products,
-            context_.direct_dot ? vulkan_direct_dot_shader : vulkan_products_shader, 3, sizeof(ProductPush));
+            context_.direct_dot ? ShaderKind::direct_dot : ShaderKind::products, 3, sizeof(ProductPush));
         Pipeline* quadratic = nullptr;
-        if (!host_scoring) quadratic = &context_.pipeline(context_.quadratic, vulkan_quadratic_shader, 3,
+        if (!host_scoring) quadratic = &context_.pipeline(context_.quadratic, ShaderKind::quadratic, 3,
                                                           sizeof(ScorePush), !context_.direct_dot);
         Pipeline* peak_pipeline = nullptr;
-        if (separation) peak_pipeline = &context_.pipeline(context_.peaks, vulkan_coarse_peaks_shader, 2, sizeof(PeakPush));
+        if (separation) peak_pipeline = &context_.pipeline(context_.peaks, ShaderKind::peaks, 2, sizeof(PeakPush));
         for (std::size_t first = 0; first < count_;) {
             cancelled(stop);
             const auto width = std::min(batch_width, count_ - first);
@@ -1712,7 +1779,8 @@ public:
     }
     std::size_t fine_host_bytes(std::size_t, std::size_t) const override { return 0; }
     std::size_t persistent_host_workspace() const noexcept override {
-        return serialized_cache_limit + serialized_cache_metadata_bound;
+        return serialized_cache_limit + serialized_cache_metadata_bound +
+               shader_cache_limit + shader_cache_metadata_bound;
     }
     std::size_t coarse_host_bytes(std::size_t maximum_fft_rows, std::size_t maximum_tile_frequencies,
                                  std::size_t arrivals) const override {
@@ -1743,7 +1811,7 @@ std::vector<CoarseBulkPeaks> vulkan_select_peak_rows(const VulkanReceiverOptions
     Context context(shared);
     Buffer input(context, scores.size_bytes()), output(context, mul(rows, sizeof(CoarseBulkPeaks)));
     std::memcpy(input.mapped, scores.data(), scores.size_bytes());
-    auto& pipeline = context.pipeline(context.peaks, vulkan_coarse_peaks_shader, 2, sizeof(PeakPush));
+    auto& pipeline = context.pipeline(context.peaks, ShaderKind::peaks, 2, sizeof(PeakPush));
     const std::array<Buffer*, 2> buffers{&input, &output}; context.bind(pipeline, buffers);
     const PeakPush push{narrow(arrivals), narrow(separation)};
     context.run({}, [&](BulkReceipt& delta) { context.dispatch(pipeline, push, rows, delta); });

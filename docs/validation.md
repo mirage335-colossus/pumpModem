@@ -675,6 +675,180 @@ policy checks passed on the final source. A concurrent native GUI suite
 run reported one timed audio-capture backlog overrun. That case passed
 on its own in 7.29 s and again in the final sequential run.
 
+### Receive previews and clean low-rate admission — 19 November 2026
+
+On base `d408fd3a` with these changes, a native bounded CPU fixture checked
+the accepted post-channel receive I/Q against the plotted real waveform at
+its actual sample phase. It processed 273.758 modeled seconds in 0.814 s,
+decoded `001`, and scored two quiet slots before natural-rate replay. The
+separate 120 Hz Firefox test used the real managed bridge and pipe worker
+with four logical CPUs and eight admitted receiver workers. Its first RX
+preview painted 0.165 s after Transmit. It processed 251.7 modeled seconds
+in 5.2 s, decoded `e`, and kept the full 2,048-sample waveform visible in
+preview and replay. Pattern evidence survived a click and viewport resize,
+and 3.147 s of manual replay revealed all five steps without changing the
+received message. The test exercised page switching and End simulation.
+The cases cover a narrow clean channel with Helper Off. Broad-search
+throughput and physical audio performance remain separate checks.
+
+At 3.6 Hz, +77 dB-Hz nominal DATA, Target 32, seed 960101, margin 3,
+GPSDO XO on both oscillators and static channel controls Off, the baseline
+used a single DC mode per quarter-second block. The correct `0` passed
+Unfiltered and failed every stronger policy. Its log-evidence gap was
+about 4,776, versus 743 million required by Guarded. On the same 1,215,195
+receive samples (SHA-256 `03af4301…c4f3c`), one-fine-cell blocks recovered
+about 4.066 billion of gap. All policies retained `0`. Changing only the
+receiver key gave about 116 million of gap against 227 million required by
+Guarded. Every stronger policy rejected it. The local one-slot probe spent
+40.87 s versus 34.06 s on the older short projection. The RunPod build
+reproduced the wanted result with native coarse and fine work in 3.08 s.
+Its strict Vulkan receipt correctly rejected the CPU-only slot as GPU
+qualification. The test covers one fixed observation and an independent
+wrong receiver key. False-acceptance rates and sensitivity remain unmeasured.
+For the newly eligible geometry, the 3.33 s fine segment exceeds the
+fixed 2 s nominal capacity checkpoint. Such checkpoints remain incomplete
+under the current capacity procedure, which must be satisfied before making
+a local throughput claim.
+
+On identical 6 kHz post-channel I/Q, eight native DC blocks with 100 W
+Helper and about 2 mW DATA lost 46.86 dB of measured Helper leakage after a
+unit-norm raised-cosine edge taper. The taper retained 94.32% of wanted
+projected energy. Residual Helper-only energy was about 139 noise-variance
+units versus eight expected for noise alone. The eight blocks had unchanged
+public extent and noise degrees of freedom. Helper Off and a dwell-gated
+control kept their rectangular projection result, and the 1,500-sample
+weight vector was charged to the native workspace. The first synchronized
+3.6 Hz, 100 W Helper run used a tapered rank-one projection. It recovered `0`
+in Unfiltered in 3.63 s, and every stronger policy erased it. The rectangular
+one-cell follow-up retained the wanted `0` and rejected the independent
+receiver key at every stronger tier on identical I/Q (`5df4d009…1665`).
+The production orthonormal tapered one-cell projection recovered `0` with
+all six settings from the same samples in 3.34 s on RunPod. Its log-evidence
+gap was 3.956 billion. On identical I/Q the same production projection with
+an independent receiver key yielded about 15.44 million of gap against
+238.02 million required by Guarded, and every stronger setting rejected it.
+A separately generated physical quiet slot in the
+same configuration remained quiet with all six settings, with 579.32 energy
+against 630.66 in 555 modes. These are synchronized one-slot controls.
+Full messages, broad timing in the Helper-on case, varying channels, gated
+pilots and Tensor fine processing remain outside this evidence.
+
+One full RTX PRO 6000 Blackwell Server Edition on driver 595.112.07 ran a
+same-input 36 Hz Vulkan pair with +77 dB-Hz DATA, Helper Off, Target 22 and
+an explicit 6 GiB per-owner device limit. Both runs recovered `0` from the
+202,393-sample slot (SHA-256 `72f47b82…a3f9`) and scored all 98,982 rows in
+four Vulkan submissions with native fine tracking. FP32 and FP16-storage
+took 0.434 and 0.425 s for the complete slots. Device command intervals
+totaled 59 and 56 µs. Coarse wall time was 0.390 and 0.383 s, and fine
+tracking took 0.044 and 0.042 s. The cold FP32 FFT setup and shader pipeline
+creation were 0.220 and 0.085 s. FP16 storage reduced peak allocated bytes
+from 8,287,008 to 6,050,592 with FP32 products and FFT arithmetic. These
+cold easy-slot results support actual device work and the stage split.
+Default storage-policy selection, Tensor Core dispatch and sustained speed
+require separate qualification. A subsequent same-process, four-look FP32 trial
+scored the same input with identical work identity and decision in every
+look, totaling 395,928 Vulkan rows. Four cold GLSL compilations and four
+cold FFT plan-cache misses were followed by 12 shader-binary hits and 12
+FFT cache hits. The cold slot took 0.426 s, and the warm slots took
+0.129–0.136 s. Both caches contributed to this warm/cold difference. The
+shader cache is bounded to 128 KiB of payload and 8 KiB of metadata per
+backend and it keeps descriptor sets and driver pipelines owner-local.
+
+A plan-only contrast held transmit Rate at 3.6 Hz, with both GPSDO XO
+oscillators, margin 3, Target 32, Helper Off and broad timing. The clean
+case projected to 3 Hz, 43 arrival points and 50,310 score rows. HF Worst
+and Each 65% projected to 500 Hz, 7,036 arrivals, two rays and 8,232,120
+score rows. Both used 78 workspaces and 15 frequencies, and the latter
+was eligible for GPU search because its projected rate was outside the
+tight-clock guard. Prior physical Blackwell results above demonstrate
+accelerated coarse work on impaired 3.6 Hz slots. Current Vulkan fine
+tracking still runs on the CPU. The native precision fallback now compares
+the exact native search routes using their full cost and workspace quotes.
+
+The matched precision comparison kept the public grid and input identical
+on the full PRO 6000. A private build bypassed only the Vulkan precision
+veto and ran actual FP32 frequency-tile work. The 3 Hz projected clean
+DATA and quiet slots used 50,310 rows each. They retained the same outcomes
+under all six settings, with CPU totals of 3.83 and 3.89 s against Vulkan
+3.64 and 3.66 s. With Target −6 and 1.5 Hz Doppler, the same 3.6 Hz Rate
+needed an 8 Hz projection and 6,132 × 113 × 78 hypotheses. Native exact
+FP64 chirp-Z took 8.69 s for the complete slot. The unguarded FP32 Vulkan
+trial on identical I/Q (`c76109b1…898d`) scored all 54,047,448 rows in
+577 submissions and took 21.01 s. Summed device command intervals were
+1.77 s. Both runs recovered `0` in Unfiltered and Guarded, and the stronger
+settings erased it. The measured geometry favors the exact native route.
+The private Vulkan experiment was discarded with the pod. These measurements
+cover the selected device, runtime, shape and samples. An automatic
+precision decision on other large narrow projections still needs matched
+qualification.
+
+A native capability probe used the same socket filter and headless Vulkan
+ICD as the standalone worker on a full PRO 6000 Blackwell Server Edition
+with driver 595.112.07. It created a logical device with cooperative-matrix,
+flexible matrix and cooperative-vector features enabled. The reported subgroup
+matrix shapes included FP16 with FP32 accumulation at 16×8×16 and 16×16×16,
+BF16 with FP32 accumulation at 16×16×16, FP8 E4M3 and E5M2 with FP32 accumulation
+at 16×16×32, and signed INT8 with INT32 accumulation at 16×8×32 and 16×16×32.
+The flexible variants included 32- to 256-invocation workgroups. The vector
+limit was 1,024 components. The reported extensions and operation tables
+contained no FP4 or microscaling operation. The image's glslang 15.1.0
+compiled a matching FP16 cooperative-matrix shader and SPIR-V validation
+passed. This verifies runtime queries, device enablement and shader tooling.
+Receiver packing, dispatch, numerical behavior and complete-service gains
+still need implementation and measurement. The post-isolation fine DATA
+correlations and Gram terms are the relevant contractions for evaluating
+these shapes. See [NVIDIA cooperative-matrix processing](https://developer.nvidia.com/blog/machine-learning-acceleration-vulkan-cooperative-matrices/)
+and [Khronos microscaling types](https://docs.vulkan.org/features/latest/features/proposals/VK_EXT_shader_ocp_microscaling_types.html).
+
+A private instrumentation replay used the severe HF Worst plus Each 65%
+capture `b4d8fa5a…8bf8` with its original 1,215,321 samples and 24 workers.
+It returned the original wrong bit `1` for `0`. Fine work took 4.52 s wall
+time with eight candidates, 810 blocks and 350,012,448 mapped basis rows.
+Summed worker intervals were 25.93 s for template mapping, 62.79 s for
+template projection, 0.25 s for conjugate and Gram products, and 1.06 s for
+Gaussian updates. These intervals overlap across workers. Projection took
+about 70% of their measured sum, and the small post-projection contractions
+took about 0.3%. This geometry favors batched template projection with
+efficient mapping and data movement for the next accelerator comparison.
+Offloading only the final conjugate and Gram products would address a small
+share of this workload.
+
+A projection-only FP32 trial reused the same severe input, native mapping,
+FP64 likelihood and state, and pruned Bluestein inverse. The fine stage
+took 2.87 s and the complete slot 8.47 s, compared with 4.52 and 10.13 s.
+The same wrong bit and admission dispositions persisted. Three paired local
+controls kept each pair's receive samples identical. The stable wanted
+control kept `0` in Unfiltered and Guarded, the noise control stayed quiet
+at every setting, and the independent +14 dB-Hz foreign-only control stayed
+ambiguous. Complete slots went from 9.96 to 8.25 s, 10.00 to 8.40 s, and
+10.25 to 8.44 s respectively. These four paired slots support the bounded
+AVX2 FP32 path for the 1,500-row, 47-mode no-Helper geometry. Its production
+implementation admits and owns the float buffers and retains the FP64 plan
+for amplitudes outside its safe range. Replaying the severe and stable inputs
+through the rebuilt production code took 2.99 s and 2.97 s in fine processing
+respectively and reproduced the trial's mismatched and correct bit decisions.
+An initial per-worker scratch layout exceeded the live test's workspace limit.
+Allocating the FP32 scratch at the scorer and charging it only for applicable
+slots resolved that failure. The rebuilt live, fine and worker relay checks
+passed. Sensitivity at the admission boundary and the correct-bit model under
+the severe channel remain open.
+
+At 27.20 provider CPU-time cores, the worker admitted
+54 software workers. The two captured Ninja compile stages took 15.07 s
+with 27 jobs and 14.64 s with 13 jobs, excluding dependency setup. All
+temporary test pods were verified absent from the pod and queue inventories.
+
+The first 45-check triad group passed 44 checks. The probe test ran during
+other local compilation and its bounded Helper contrast returned without
+coarse preparation. The unchanged test passed in isolation in 27.16 s on
+the rebuilt probe. Before integrating the AVX2 FP32 path, all 32 desktop GUI
+checks and all 184 standalone checks passed with Xvfb and the rebuilt native
+relay. The browser renderer regression and focused native coarse and fine
+checks also passed. Compact matched
+reception receipts remain in `local-evidence/wrong-key-clean-20261119/` for
+future projection qualification. Remove them when a newer matched qualification
+supersedes these inputs and results.
+
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 
 The [HF operating results](indexes/robust.md#low-power-hf-alarm-results)

@@ -133,7 +133,7 @@ struct FineBlockGeometry {
     // Nominal geometry before the complete public observation fixes its tail.
     std::size_t block_rows = 0, segment_rows = 0;
 };
-FineBlockGeometry fine_block_geometry(double sample_rate_hz);
+FineBlockGeometry fine_block_geometry(const ReceiverConfig&, const ReceiverSlotPlan&);
 std::size_t fine_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, FineObservation, unsigned workers);
 void score_fine(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                 std::span<const Complex> iq, std::span<const FineCoordinate>,

@@ -33,6 +33,8 @@ using Clock = std::chrono::steady_clock;
 using KeyTag = std::array<std::uint8_t, 32>;
 
 constexpr std::size_t audio_chunk = 4096, plot_size = 1024, history_size = 32;
+constexpr std::size_t simulation_waveform_size = 2048;
+constexpr auto simulation_preview_period = std::chrono::milliseconds(45);
 constexpr auto simulation_replay_duration = std::chrono::seconds(3);
 constexpr auto simulation_replay_period = std::chrono::milliseconds(50);
 // Binding can briefly hold two interval readers. Playback's native provider
@@ -176,11 +178,12 @@ PlotFrame plot_frame(std::uint64_t first, std::uint32_t rate, std::vector<float>
                      std::span<const Complex> iq, const modem::detail::search_fft::DoublePlan& fft) {
     PlotFrame result;
     result.rate = rate;
-    result.first = first;
+    result.first = first + waveform.size() - plot_size;
     result.waveform = std::move(waveform);
     std::array<Complex, plot_size> bins{};
+    const auto fft_input = std::span(result.waveform).last(plot_size);
     for (std::size_t i = 0; i < plot_size; ++i)
-        bins[i] = result.waveform[i] * (.5 - .5 * std::cos(2 * std::numbers::pi * static_cast<double>(i) / plot_size));
+        bins[i] = fft_input[i] * (.5 - .5 * std::cos(2 * std::numbers::pi * static_cast<double>(i) / plot_size));
     modem::detail::search_fft::fft(bins, false, fft);
     for (const auto value : std::span(bins).first(plot_size / 2 + 1)) {
         const auto normalized = value * (2. / plot_size);
@@ -193,6 +196,24 @@ PlotFrame plot_frame(std::uint64_t first, std::uint32_t rate, std::vector<float>
         result.iq.push_back(iq[i * iq.size() / take]);
     return result;
 }
+
+PlotFrame receiver_plot_frame(std::uint64_t first, std::uint32_t rate, double if_hz,
+                              std::span<const Complex> iq) {
+    static const modem::detail::search_fft::DoublePlan fft(plot_size);
+    std::vector<float> waveform(iq.size());
+    for (std::size_t i = 0; i < waveform.size(); ++i)
+        waveform[i] = real_pcm(iq[i], first + i, if_hz, rate);
+    return plot_frame(first, rate, std::move(waveform), iq, fft);
+}
+
+struct SimulationPreview {
+    std::uint64_t owner, segment, first;
+    std::uint32_t rate;
+    double if_hz;
+    std::stop_token stop;
+    std::optional<Snapshot::ReplayWaterfall> waterfall;
+    std::vector<Complex> input;
+};
 
 class PlotMeter {
 public:
@@ -213,17 +234,6 @@ public:
         for (std::size_t i = 0; i < plot_size; ++i)
             waveform[i] = pcm_[(at_ + i) % plot_size];
         return plot_frame(end >= plot_size ? end - plot_size : 0, rate_, std::move(waveform), iq, fft_);
-    }
-    std::optional<PlotFrame> update_simulation(std::uint64_t first, std::span<const Complex> iq, double if_hz) {
-        const auto now = Clock::now();
-        if (iq.size() < plot_size || now < next_) return {};
-        next_ = now + std::chrono::milliseconds(45);
-        first += iq.size() - plot_size;
-        iq = iq.last(plot_size);
-        std::vector<float> waveform(plot_size);
-        for (std::size_t i = 0; i < waveform.size(); ++i)
-            waveform[i] = real_pcm(iq[i], first + i, if_hz, rate_);
-        return plot_frame(first, rate_, std::move(waveform), iq, fft_);
     }
 private:
     std::uint32_t rate_;
@@ -262,9 +272,9 @@ struct SimulationReplay {
         const auto received = std::ceil((source_sample / static_cast<long double>(tx_scale) +
             lead * rate) * rx_scale);
         first = static_cast<std::uint64_t>(std::clamp(received, 0.L, static_cast<long double>(input_total)));
-        // The one FFT window of lookahead keeps the last replay frame usable.
+        // One waveform window of lookahead keeps the last replay frame usable.
         limit = static_cast<std::size_t>(std::min<std::uint64_t>(input_total - first,
-            static_cast<std::uint64_t>(simulation_replay_duration.count()) * rate + plot_size - 1));
+            static_cast<std::uint64_t>(simulation_replay_duration.count()) * rate + simulation_waveform_size - 1));
     }
 
     std::size_t working_bytes() const {
@@ -335,6 +345,10 @@ PatternStep pattern_step(const StreamSlotReceipt& receipt) {
     row.helper_seconds = s.helper_seconds;
     row.helper_overlapped = s.helper_overlapped;
     row.coarse_seconds = s.coarse_seconds;
+    row.coarse_workspaces = s.coarse_workspaces;
+    row.coarse_frequency_points = s.coarse_frequency_points;
+    row.coarse_arrival_points = s.coarse_arrival_points;
+    row.coarse_projected_rate_hz = s.coarse_projected_rate_hz;
     row.fine_seconds = s.fine_seconds;
     row.quiet_modes = s.noise_statistics_valid ? s.quiet_modes : 0;
     row.fine_candidates = s.fine_candidates;
@@ -440,6 +454,8 @@ struct Session::Impl {
     std::shared_ptr<const Profile> profile;
     std::optional<TxRequest> request;
     std::optional<SimulationReplay> retained_replay;
+    std::optional<SimulationPreview> simulation_preview;
+    std::optional<Clock::time_point> simulation_started;
     bool replay_requested = false;
     std::uint64_t generation = 0, next_id = 1, spectrum_revision = 0;
     std::uint64_t plot_segment = 0;
@@ -478,7 +494,26 @@ struct Session::Impl {
 
     std::uint64_t new_plot_segment() {
         std::lock_guard lock(mutex);
+        simulation_preview.reset();
         return ++plot_segment;
+    }
+
+    void commit_plot(Snapshot& out, PlotFrame frame, bool receiver_input, std::uint64_t segment,
+                     std::optional<Snapshot::ReplayWaterfall> waterfall) {
+        out.replay_waterfall = std::move(waterfall);
+        out.waveform = std::move(frame.waveform);
+        out.waveform_sample_rate = frame.rate;
+        out.spectrum_db = std::move(frame.db);
+        out.spectrum_complex = std::move(frame.spectrum);
+        out.spectrum_start_sample = frame.first;
+        out.spectrum_segment = segment;
+        out.spectrum_sample_count = plot_size;
+        out.spectrum_revision = ++spectrum_revision;
+        out.spectrum_bin_hz = static_cast<double>(frame.rate) / plot_size;
+        if (receiver_input) {
+            out.constellation = std::move(frame.iq);
+            out.constellation_source = ConstellationSource::input;
+        }
     }
 
     void set_plot(std::uint64_t owner, std::stop_token stop, PlotFrame frame, bool receiver_input,
@@ -489,21 +524,24 @@ struct Session::Impl {
                 out.simulation_replay = true;
                 out.status = "Robust simulation processed · replaying 3 seconds";
             }
-            if (replay) out.replay_waterfall = replay->waterfall;
-            else out.replay_waterfall.reset();
-            out.waveform = std::move(frame.waveform);
-            out.waveform_sample_rate = frame.rate;
-            out.spectrum_db = std::move(frame.db);
-            out.spectrum_complex = std::move(frame.spectrum);
-            out.spectrum_start_sample = frame.first;
-            out.spectrum_segment = segment;
-            out.spectrum_sample_count = plot_size;
-            out.spectrum_revision = ++spectrum_revision;
-            out.spectrum_bin_hz = static_cast<double>(frame.rate) / plot_size;
-            if (receiver_input) {
-                out.constellation = std::move(frame.iq);
-                out.constellation_source = ConstellationSource::input;
-            }
+            commit_plot(out, std::move(frame), receiver_input, segment,
+                        replay ? std::optional(replay->waterfall) : std::nullopt);
+        });
+    }
+
+    void preview_receiver_input(std::uint64_t owner, std::stop_token stop, std::uint64_t segment,
+                                std::uint64_t first, std::uint32_t rate, double if_hz,
+                                std::span<const Complex> samples, const SimulationReplay* replay) {
+        const auto size = std::min(simulation_waveform_size, samples.size());
+        const auto tail = samples.last(size);
+        SimulationPreview preview{owner, segment, first + samples.size() - size, rate, if_hz, stop,
+            replay ? std::optional(replay->waterfall) : std::nullopt, {}};
+        if (size >= plot_size) preview.input.assign(tail.begin(), tail.end());
+        publish(owner, stop, [&](Snapshot& out) {
+            if (out.simulation_progress) out.simulation_progress->input_samples = first + samples.size();
+            // The GUI can miss any count of preview frames. It takes only
+            // the freshest accepted input window and projects it itself.
+            if (!preview.input.empty()) simulation_preview = std::move(preview);
         });
     }
 
@@ -923,6 +961,7 @@ struct Session::Impl {
                     }
                     publish(owner, stop, [&](Snapshot& out) {
                         out.receiver_error.clear();
+                        out.receiver_workers = receiver->report().resources.workers;
                         if (!out.transmitting) out.status = stamp.quality == audio::TimingQuality::bounded
                             ? "Listening on the configured Robust calendar"
                             : "Listening on the configured Robust calendar with estimated audio dates";
@@ -975,6 +1014,7 @@ struct Session::Impl {
 
     std::optional<SimulationReplay> simulate(const Profile& prepared, const Settings& s,
                   const TxRequest& send, std::uint64_t owner, std::stop_token stop, SimulationComparison* comparison) {
+        const auto began = Clock::now();
         const auto rate = s.transfer.modem.sample_rate;
         const auto& calendar = prepared.waveform;
         const auto noise = send.mode == EmissionMode::Noise;
@@ -991,10 +1031,15 @@ struct Session::Impl {
         const auto source_stop = source.geometry.source_samples;
         StreamingChannel channel(source, config);
         std::optional<SimulationReplay> replay;
-        PlotMeter simulation_meter(rate);
         std::unique_ptr<CompleteStreamReceiver> receiver;
         auto tx_slot = calendar.transmit_slot(0);
+        const auto segment = new_plot_segment();
         if (!noise) {
+            publish(owner, stop, [&](Snapshot& out) {
+                simulation_started = began;
+                out.simulation_progress = Snapshot::SimulationProgress{0, channel.total_samples(), rate};
+                out.status = "Simulating receiver input";
+            });
             // In a message preview, include DATA even when a long Helper
             // lead precedes it. Helper-only previews begin at Helper onset.
             const auto activity = send.mode == EmissionMode::HelperOnly ? tx_slot.helper_begin : tx_slot.pattern_begin;
@@ -1011,14 +1056,15 @@ struct Session::Impl {
             receiver = std::make_unique<CompleteStreamReceiver>(calendar, prepared.receiver,
                 prepared.key, options, message_profile(s));
             replay->allocate();
+            publish(owner, stop, [&](Snapshot& out) { out.receiver_workers = receiver->report().resources.workers; });
         }
         std::stop_callback interrupt(stop, [&] { if (receiver) receiver->request_cancel(); });
         std::array<Complex, audio_chunk> iq{};
         std::array<std::uint8_t, audio_chunk> valid{};
-        const auto segment = noise ? new_plot_segment() : 0;
         ReceiveDisplay display;
         std::size_t generated_bits = 0;
-        const auto began = Clock::now();
+        const auto noise_started = Clock::now();
+        auto next_preview = noise_started;
         bool scoring_tail = false;
         try {
             while (!stop.stop_requested()) {
@@ -1027,15 +1073,17 @@ struct Session::Impl {
                 const auto count = channel.read(iq, valid);
                 if (!count) break;
                 const auto samples = std::span(iq).first(count);
-                if (replay) replay->record(first, samples);
-                if (auto frame = simulation_meter.update_simulation(first, samples, prepared.receiver.data_if_hz)) {
-                    if (emission.report().generated_samples)
-                        trace_hop(prepared, emission.report().generated_samples - 1, noise, owner, stop);
-                    set_plot(owner, stop, std::move(*frame), true, segment,
-                             replay ? &*replay : nullptr);
-                }
                 if (receiver) accept(*receiver, display, s, first, samples, std::span(valid).first(count),
                                      owner, stop, comparison);
+                if (replay) replay->record(first, samples);
+                const auto now = Clock::now();
+                if (now >= next_preview) {
+                    next_preview = now + simulation_preview_period;
+                    if (emission.report().generated_samples)
+                        trace_hop(prepared, emission.report().generated_samples - 1, noise, owner, stop);
+                    preview_receiver_input(owner, stop, segment, first, rate,
+                        prepared.receiver.data_if_hz, samples, replay ? &*replay : nullptr);
+                }
                 if (send.mode == EmissionMode::Message) {
                     const auto generated = emission.report().generated_samples;
                     const auto previous_bits = generated_bits;
@@ -1052,12 +1100,12 @@ struct Session::Impl {
                 }
                 if (!noise && !scoring_tail && emission.report().generated_samples >= source_stop) {
                     scoring_tail = true;
-                    publish(owner, stop, [](Snapshot& out) { out.status = "Scoring Robust reception after simulated transmission"; });
+                    publish(owner, stop, [](Snapshot& out) { out.status = "Simulating the receive tail and scoring reception"; });
                 }
                 if (noise) {
                     // An open-ended noise command is played at its physical rate
                     // so its source/calendar does not race ahead of the user.
-                    const auto due = began + std::chrono::duration_cast<Clock::duration>(
+                    const auto due = noise_started + std::chrono::duration_cast<Clock::duration>(
                         std::chrono::duration<double>(static_cast<double>(channel.position()) / rate));
                     while (!stop.stop_requested() && Clock::now() < due)
                         execution::sleep_until(std::min(due, Clock::now() + std::chrono::milliseconds(30)));
@@ -1065,8 +1113,19 @@ struct Session::Impl {
             }
             cancelled(stop);
             if (receiver) {
+                publish(owner, stop, [&](Snapshot& out) {
+                    out.simulation_progress->input_samples = channel.position();
+                    out.status = "Finishing simulated receiver scoring";
+                });
                 finish_input(*receiver, display, s, owner, stop, comparison);
                 invalidate_pending(display, s, owner);
+                publish(owner, stop, [&](Snapshot& out) {
+                    out.receiver_workers = 0;
+                    out.simulation_progress->complete = true;
+                    out.simulation_progress->elapsed_seconds =
+                        std::chrono::duration<double>(Clock::now() - began).count();
+                    simulation_started.reset();
+                });
             }
         } catch (...) {
             if (receiver) receiver->request_cancel();
@@ -1087,7 +1146,6 @@ struct Session::Impl {
             std::unique_lock lock(mutex);
             changed.wait_until(lock, stop, time, [] { return false; });
         };
-        const modem::detail::search_fft::DoublePlan fft(plot_size);
         const auto started = Clock::now();
         constexpr auto frames = simulation_replay_duration / simulation_replay_period;
         const auto pattern_step_count = replay.pattern_steps ? replay.pattern_steps->size() : 0;
@@ -1107,10 +1165,8 @@ struct Session::Impl {
             const auto offset = static_cast<std::size_t>((tick * simulation_replay_period).count()) * rate / 1000;
             if (offset > last) return;
             const auto first = replay.first + offset;
-            const auto samples = input.subspan(offset, plot_size);
-            std::vector<float> waveform(plot_size);
-            for (std::size_t i = 0; i < plot_size; ++i)
-                waveform[i] = real_pcm(samples[i], first + i, replay.data_if_hz, rate);
+            const auto count = std::min(simulation_waveform_size, input.size() - offset);
+            const auto samples = input.subspan(offset, count);
             if (prepared) {
                 const auto source_sample = replay.source_first +
                     static_cast<std::uint64_t>(static_cast<long double>(offset) * replay.source_per_input_sample);
@@ -1123,7 +1179,7 @@ struct Session::Impl {
                 out.simulation_pattern_replay_visible_steps = visible_steps;
                 out.simulation_pattern_replay_elapsed_ms = elapsed;
             });
-            set_plot(owner, stop, plot_frame(first, rate, std::move(waveform), samples, fft),
+            set_plot(owner, stop, receiver_plot_frame(first, rate, replay.data_if_hz, samples),
                      true, segment, &replay, true);
         }
         wait_until(started + simulation_replay_duration);
@@ -1427,7 +1483,10 @@ struct Session::Impl {
                 current.gpu_vulkan_peak_leased_bytes = 0;
                 current.gpu_vulkan_peak_owner_lease_bytes = 0;
                 current.gpu_vulkan_waiting_sessions = 0;
+                current.gpu_vulkan_timed_submissions = 0;
+                current.gpu_vulkan_device_command_seconds = 0;
                 current.gpu_native_coarse_workspace_sessions = 0;
+                current.gpu_native_coarse_precision_sessions = 0;
                 current.gpu_host_scored_rows = 0;
                 current.gpu_statistics_blocks = 0;
                 current.gpu_cuda_fp16_calls = 0;
@@ -1435,6 +1494,7 @@ struct Session::Impl {
                 current.gpu_cuda_half_fft_score_rows = 0;
                 current.gpu_cuda_half_fft_fallback_summary.clear();
                 current.gpu_native_lag_preference_supported = false;
+                current.receiver_workers = 0;
             }
             std::stop_callback shutdown(manager_stop, [source = generation_stop]() mutable { source.request_stop(); });
             std::shared_ptr<const Profile> active;
@@ -1470,6 +1530,7 @@ struct Session::Impl {
                             if (!out.transmitting) out.status = out.receiver_error;
                         });
                     }
+                    publish(owner, {}, [](Snapshot& out) { out.receiver_workers = 0; });
                     if (s.finite_duplex) {
                         {
                             std::lock_guard lock(mutex);
@@ -1604,6 +1665,14 @@ struct Session::Impl {
                     publish(owner, stop, [&](Snapshot& out) {
                         out.transmitting = false;
                         out.simulation_replay = false;
+                        if (s.simulation) {
+                            out.receiver_workers = 0;
+                            simulation_preview.reset();
+                            if (out.simulation_progress && simulation_started)
+                                out.simulation_progress->elapsed_seconds =
+                                    std::chrono::duration<double>(Clock::now() - *simulation_started).count();
+                            simulation_started.reset();
+                        }
                         out.simulation_pattern_replay_active = false;
                         out.simulation_pattern_replay_visible_steps = out.simulation_pattern_replay_steps
                             ? out.simulation_pattern_replay_steps->size() : 0;
@@ -1710,11 +1779,19 @@ struct Session::Impl {
             send.mode == EmissionMode::HelperOnly ? "Preparing Robust Helper-only transmission" :
             "Preparing Robust transmission";
         if (settings.simulation) {
+            simulation_preview.reset();
+            simulation_started.reset();
+            current.simulation_progress.reset();
             current.pattern_steps.clear();
             current.simulation_pattern_replay_steps.reset();
             current.simulation_pattern_replay_active = false;
             current.simulation_pattern_replay_visible_steps = 0;
             current.simulation_pattern_replay_elapsed_ms = 0;
+            current.waveform.clear();
+            current.waveform_sample_rate = 0;
+            current.spectrum_db.clear();
+            current.spectrum_complex.clear();
+            current.constellation.clear();
             current.spectrum_revision = 0;
         } else if (!settings.full_duplex) current.constellation.clear();
         auto& trace = current.transmit_trace;
@@ -1780,6 +1857,8 @@ void Session::configure(const Settings& value) {
         p.profile.reset();
         p.current = {};
         p.current.replay_waterfall = std::move(replay_waterfall);
+        p.simulation_preview.reset();
+        p.simulation_started.reset();
         p.received_events.clear();
         p.signal_events.clear();
         p.current.simulation = value.simulation;
@@ -1838,6 +1917,7 @@ bool Session::try_suspend_capture() {
             p.suspended = true;
             ++p.generation;
             p.current.running = false;
+            p.current.receiver_workers = 0;
             p.current.status = no_transmitter;
             p.current.transmit_unavailable = no_transmitter;
             p.current.force_transmit_available = false;
@@ -1918,6 +1998,20 @@ void Session::cancel_recovery(std::uint64_t) {}
 Snapshot Session::snapshot() {
     auto& p = *impl_;
     Snapshot result;
+    std::optional<SimulationPreview> preview;
+    {
+        std::lock_guard lock(p.mutex);
+        preview.swap(p.simulation_preview);
+    }
+    if (preview && !preview->stop.stop_requested()) {
+        auto frame = receiver_plot_frame(preview->first, preview->rate, preview->if_hz, preview->input);
+        p.publish(preview->owner, preview->stop, [&](Snapshot& out) {
+            if (p.plot_segment != preview->segment || !out.transmitting || out.simulation_replay ||
+                (out.spectrum_revision && out.spectrum_segment == preview->segment &&
+                    out.spectrum_start_sample >= frame.first)) return;
+            p.commit_plot(out, std::move(frame), true, preview->segment, std::move(preview->waterfall));
+        });
+    }
     {
         std::lock_guard lock(p.mutex);
         // The receipt lock only copies counters; it never calls the device or
@@ -1940,7 +2034,10 @@ Snapshot Session::snapshot() {
                 p.current.gpu_vulkan_peak_leased_bytes = receipt.vulkan_peak_leased_bytes;
                 p.current.gpu_vulkan_peak_owner_lease_bytes = receipt.vulkan_peak_owner_lease_bytes;
                 p.current.gpu_vulkan_waiting_sessions = receipt.vulkan_waiting_sessions;
+                p.current.gpu_vulkan_timed_submissions = receipt.vulkan_timed_submissions;
+                p.current.gpu_vulkan_device_command_seconds = receipt.vulkan_device_command_seconds;
                 p.current.gpu_native_coarse_workspace_sessions = receipt.native_coarse_workspace_sessions;
+                p.current.gpu_native_coarse_precision_sessions = receipt.native_coarse_precision_sessions;
             }
             p.current.gpu_host_scored_rows = receipt.vulkan_host_scored_rows;
             p.current.gpu_statistics_blocks = receipt.statistics_blocks;
@@ -1959,6 +2056,9 @@ Snapshot Session::snapshot() {
             }
         }
         result = p.current;
+        if (result.simulation_progress && p.simulation_started)
+            result.simulation_progress->elapsed_seconds =
+                std::chrono::duration<double>(Clock::now() - *p.simulation_started).count();
         result.simulation_replay_available = p.can_replay();
         result.signals.swap(p.signal_events);
         result.received.swap(p.received_events);
@@ -1977,6 +2077,9 @@ void Session::stop() {
         p.stopping = true;
         ++p.generation;
         p.current.running = p.current.transmitting = false;
+        p.current.receiver_workers = 0;
+        p.simulation_preview.reset();
+        p.simulation_started.reset();
         p.current.simulation_replay = false;
         p.current.simulation_pattern_replay_active = false;
         p.current.status = "Stopping Robust session";

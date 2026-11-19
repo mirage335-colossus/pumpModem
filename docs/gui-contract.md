@@ -139,21 +139,29 @@ Display timing never controls receiver decisions or completion.
 | Target SNR dB/1Hz | One shared C/N0 target, default 32 dB-Hz, for provisional duration planning and live reference DATA amplitude relative to declared input noise. The adjacent Budget target is a starting value from the nominal DATA link budget, rounded down to a whole dB-Hz within the supported range before fades. It leaves the selected target in place. |
 | Live input noise dBFS/Hz | Local receiver noise-model reference, separate from link-budget noise in dBm/Hz. At fixed Target SNR, changing it scales receiver variance and reference DATA amplitude together; correlated or impulsive noise is not qualified by mean power alone. See the [calibration scope](robust-current.md#configured-calendar-reception). |
 | Error correction | Configured Off, RS20 or RS60 native short/long text profiles. Raw bits bypass text coding and FEC exactly. |
-| Search arithmetic | Default selects qualified automatic routing; FP32 minimum selects FP32 products/FFT with higher-precision guards; FP64 force selects its native CPU reference policy. Sensitive stages retain higher precision. |
+| Search arithmetic | Default (fastest) selects the fastest supported complete receiver route for the hardware and workload. FP32 minimum selects FP32 products/FFT with higher-precision guards. FP64 force selects its native CPU reference policy. Sensitive stages retain higher precision. |
 | GPU | Optional native CUDA or Vulkan DATA processing, shared by live reception and simulation; the compiled selector prefers usable CUDA, then a compatible physical Vulkan device. GPU remains off by default. |
-| Simulation | The native emitted waveform runs through the continuous sampled channel and complete receiver without real-time pacing. It previews sampled waveform, waterfall and I/Q while processing. A three-second excerpt of signal activity replays at its original rate after finite processing. Live audio follows the device clock. |
+| Simulation | The native emitted waveform runs through the continuous sampled channel and complete receiver without real-time pacing. The console shows modeled receiver-input time and compute wall time. The waterfall, waveform and I/Q preview the newest accepted post-channel samples. A three-second excerpt of signal activity replays at its original rate after finite processing. Live audio follows the device clock. |
 | Audio device, channel routing, Live/duplex, TX volume, Exclusive | Existing native device service, selected channel layout, capture/playback policy and output gain. |
 | Waterfall, Waveform, Receiver input I/Q | Bounded actual session observations; receiver I/Q is not a substitute TX trace. |
 | Pattern evidence, Pattern steps | Native public-slot classifications, scores, completeness, resource and stage diagnostics. |
 
 **Robust setup** samples the compute host twice per second and retains up to
 one minute for its CPU, RAM, GPU and VRAM charts. CPU is the worker process
-share of its effective CPU allocation. RAM shows usage against the visible
-container limit or physical system RAM. On Linux, the NVIDIA driver provides
+share of its effective CPU-time capacity. On Linux the caption distinguishes
+a limiting cgroup quota from a wider CPU affinity mask. For example, a
+27.20-core quota permits 27.20 CPU seconds per wall second, even with 32 CPUs
+in the affinity mask. The active receiver's software worker ceiling appears
+separately. The default in this example is 54 workers for 27 whole effective
+CPUs. RAM shows usage against the visible container limit or physical system
+RAM. On Linux, the NVIDIA driver provides
 one GPU and VRAM lane per visible device, with the receiver's selected device marked
 when its UUID matches. The Vulkan workspace display reports temporary
-receiver leases and their peaks. Device-wide VRAM usage and GPU busy time
-appear in the setup charts. Blank traces indicate unavailable observations.
+receiver leases and their peaks. The Console reports actual Vulkan search
+arithmetic and the sum of completed device-command intervals when timestamps
+are available. Command intervals can overlap. Device-wide VRAM usage and GPU
+busy time appear in the setup charts. Blank traces indicate unavailable
+observations.
 
 **Replay sim** beside **Clear waterfall** displays the previous completed
 simulation's retained activity again at its original frequency and scale.
@@ -162,6 +170,13 @@ The caption shows slots revealed and their modeled elapsed time. Replay leaves
 decoded reception and the public calendar in place. **Cancel TX** can stop it.
 Explicit raw simulations display the received bits even when the same bits
 also form a short-codec character.
+
+While computing, the worker retains one latest receive window for the preview.
+Waterfall rows can skip modeled time when the receiver advances between screen
+updates. Adjacent rows retain their actual sample offsets. The preview adds no
+silence between them. The waveform fills its viewport with captured receiver
+samples. The Pattern evidence axis uses a signed logarithmic scale for log
+evidence and its threshold, with exact values in **Pattern steps**.
 
 Carrier presets use the native occupied DATA bandwidth, including spreading,
 pulse shaping and gating, plus the declared oscillator and channel allowances.

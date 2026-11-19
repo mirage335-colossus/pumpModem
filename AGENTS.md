@@ -21,9 +21,14 @@ not lower it. This applies to CPU and GPU algorithms, arithmetic, layouts,
 batching, preparation overlap and worker ownership, not just numeric types.
 
 The automatic option is the user's way to obtain the best supported throughput
-without selecting hardware-specific kernels. Higher-precision GUI overrides do
-not excuse conservative automatic defaults. Prefer suitable lower precision;
-retain higher precision where evidence shows a worthwhile reception, range,
+without selecting hardware-specific kernels. The GUI labels it **Default
+(fastest)**. Treat it as an instruction to seek the fastest qualified complete
+receiver on the GPU available at runtime. Prioritize substantial Tensor Core
+speedups on eligible heavy stages, including testing NVFP4 on Blackwell
+alongside other accelerated routes after Helper/DATA isolation. Keep complete
+service and correct public work as the acceptance criteria. Automatic defaults
+must pursue that throughput independently of manual overrides. Prefer suitable
+lower precision. Retain higher precision where evidence shows a worthwhile reception, range,
 conditioning or complete-service benefit, or no plausible computational benefit
 from reducing it. FP64 agreement at a universal tolerance, an arbitrary dB loss
 cutoff, or no gain on one easy fixture must not veto a candidate with a credible

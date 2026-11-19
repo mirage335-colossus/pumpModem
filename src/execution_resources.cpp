@@ -89,12 +89,12 @@ bool includes(std::string_view list, std::string_view word) {
 struct LinuxCapacity {
     unsigned cpus;
     std::optional<std::uint64_t> available;
-    double cpu_capacity;
+    std::optional<double> cpu_cgroup_quota;
     std::optional<MemoryUsage> usage;
 };
 
 LinuxCapacity linux_capacity(unsigned cpus, bool automatic_memory, bool diagnostics = false) {
-    LinuxCapacity result{cpus, std::nullopt, static_cast<double>(cpus), std::nullopt};
+    LinuxCapacity result{cpus, {}, {}, {}};
     if (automatic_memory) {
         std::uint64_t total = 0;
         std::ifstream meminfo("/proc/meminfo");
@@ -168,8 +168,10 @@ LinuxCapacity linux_capacity(unsigned cpus, bool automatic_memory, bool diagnost
                         const auto quota = positive_or_zero(amount);
                         const auto limit = std::max<std::uint64_t>(1, quota/divisor);
                         result.cpus = static_cast<unsigned>(std::min<std::uint64_t>(result.cpus, limit));
-                        if (quota) result.cpu_capacity = std::min(result.cpu_capacity,
-                            static_cast<double>(quota)/static_cast<double>(divisor));
+                        if (quota && diagnostics) {
+                            const auto cores = static_cast<double>(quota)/static_cast<double>(divisor);
+                            result.cpu_cgroup_quota = std::min(result.cpu_cgroup_quota.value_or(cores), cores);
+                        }
                     }
                 }
                 if (memory && (result.available || diagnostics)) {
@@ -206,7 +208,7 @@ LinuxCapacity linux_capacity(unsigned cpus, bool automatic_memory, bool diagnost
     return result;
 }
 
-unsigned affinity_threads(unsigned fallback) {
+std::optional<unsigned> affinity_threads() {
     // Linux may expose CPU IDs beyond a fixed cpu_set_t even if relatively few
     // CPUs are available. Grow until sched_getaffinity accepts the buffer.
     for (std::size_t count=CPU_SETSIZE; count<=1<<20; count*=2) {
@@ -221,7 +223,7 @@ unsigned affinity_threads(unsigned fallback) {
         if (!status && available>0) return static_cast<unsigned>(available);
         if (error!=EINVAL) break;
     }
-    return fallback;
+    return {};
 }
 #endif
 
@@ -231,7 +233,7 @@ HostResources host_resources(bool include_memory) {
     auto cpus = std::max(1U, concurrency());
     std::optional<std::uint64_t> available;
 #if defined(__linux__) && !defined(DATAPUMP_EXECUTION_FIBERS)
-    const auto capacity = linux_capacity(affinity_threads(cpus), include_memory);
+    const auto capacity = linux_capacity(affinity_threads().value_or(cpus), include_memory);
     cpus = capacity.cpus;
     available = capacity.available;
 #elif defined(_WIN32)
@@ -277,8 +279,12 @@ HostResources host_resources(bool include_memory) {
 
 ResourceUsage resource_usage() {
 #if defined(__linux__) && !defined(DATAPUMP_EXECUTION_FIBERS)
-    const auto capacity = linux_capacity(affinity_threads(std::max(1U,concurrency())),true,true);
-    return {capacity.cpu_capacity,capacity.usage};
+    const auto affinity = affinity_threads();
+    const auto available_threads = affinity.value_or(std::max(1U,concurrency()));
+    const auto capacity = linux_capacity(available_threads,true,true);
+    const auto cores = static_cast<double>(available_threads);
+    return {std::min(cores,capacity.cpu_cgroup_quota.value_or(cores)),capacity.usage,
+        affinity,capacity.cpu_cgroup_quota};
 #elif defined(_WIN32)
     ResourceUsage sample;
     sample.cpu_capacity = host_resources(false).hardware_threads;
@@ -289,7 +295,8 @@ ResourceUsage resource_usage() {
     return sample;
 #elif defined(__APPLE__) && !defined(DATAPUMP_EXECUTION_FIBERS)
     const auto resources = host_resources();
-    ResourceUsage sample{static_cast<double>(resources.hardware_threads),std::nullopt};
+    ResourceUsage sample;
+    sample.cpu_capacity = resources.hardware_threads;
     const auto host = mach_host_self();
     host_basic_info_data_t info{};
     mach_msg_type_number_t count = HOST_BASIC_INFO_COUNT;

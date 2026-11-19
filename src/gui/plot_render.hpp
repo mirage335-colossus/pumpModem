@@ -17,7 +17,10 @@ class PlotSnapshot {
 public:
     PlotSnapshot();
     static PlotSnapshot waveform(std::vector<float> samples, modem::Config config, double zoom = 1);
-    static PlotSnapshot oscilloscope(std::vector<float> samples, std::uint32_t sample_rate, double zoom = 1);
+    // Simulated previews fit the measured interval when it is shorter than
+    // the timebase. Live captures keep the timebase while filling the window.
+    static PlotSnapshot oscilloscope(std::vector<float> samples, std::uint32_t sample_rate, double zoom = 1,
+        bool fit_capture = false);
     static PlotSnapshot constellation(std::vector<std::complex<double>> points, bool symbols = false);
     static PlotSnapshot waterfall(SpectrumHistory history, bool overview = false);
     static PlotSnapshot waterfall_shared(std::shared_ptr<const SpectrumHistory> history, bool overview = false);
@@ -26,11 +29,12 @@ public:
         std::optional<std::pair<double,double>> searched_band_hz = {}, std::string band_label = "Search");
     static PlotSnapshot qr(std::optional<QrCode> code, QrBrightness brightness = QrBrightness::dark);
     static PlotSnapshot codeword(std::size_t data, std::size_t parity);
-    // Top: fixed-affine bit alternatives and operational aggregate/threshold.
+    // Top: the operational bit alternatives and aggregate/threshold on a
+    // common symmetric logarithmic display axis.
     // Bottom: separately scored quiet energy relative to its noise threshold.
     static PlotSnapshot pattern_evidence(std::vector<PatternEvidencePoint> points);
     static PlotSnapshot resource_history(ResourceMetric metric, std::shared_ptr<const ResourceHistory> history,
-        std::optional<std::array<std::uint8_t,16>> active_gpu = {});
+        std::optional<std::array<std::uint8_t,16>> active_gpu = {}, unsigned receiver_workers = 0);
     // color_enabled is user preference, independently gated by target support.
     void paint(const BitmapRequest& request, const BitmapSink& sink, bool color_enabled = true) const;
     // Erase application-specific factories and data at the backend boundary.

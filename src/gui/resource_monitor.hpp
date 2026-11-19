@@ -23,6 +23,8 @@ struct ResourceSample {
     std::optional<double> cpu_busy_percent, cpu_capacity;
     std::optional<execution::MemoryUsage> ram;
     std::vector<GpuUsage> gpus;
+    std::optional<unsigned> cpu_affinity_threads;
+    std::optional<double> cpu_cgroup_quota;
 };
 
 struct ResourceHistory {
