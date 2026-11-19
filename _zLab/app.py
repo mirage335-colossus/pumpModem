@@ -17,6 +17,7 @@ import time
 from runpod import RunPodClient, RunPodError
 
 IMAGE = 'runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404'
+GPU_MODELS = ('RTX PRO 6000', 'RTX 5090', 'RTX 4090')
 
 
 def configure_dark_theme(root):
@@ -59,27 +60,79 @@ def configure_dark_theme(root):
     root.option_add('*TCombobox*Listbox.selectForeground', foreground)
 
 
-def options(gpus, cpus):
-    """Resolve requested device names against the current provider catalog."""
-    choices = []
-    for keyword in ('RTX PRO 6000', 'RTX 5090', 'RTX 4090'):
-        for gpu in gpus:
-            identity = str(gpu.get('id', ''))
-            if keyword.lower() in identity.lower() and identity:
-                choices.append((f'GPU: {identity}', {'gpu': {'id': identity, 'count': 1}}))
-    for cpu in cpus:
+def catalog_offer(item, kind, cloud):
+    """Return the GUI label, create payload and stock for one supported SKU."""
+    if not isinstance(item, dict) or not isinstance(item.get('id'), str) or not item['id']:
+        return None
+    identity = item['id']
+    stock = item.get('availability')
+    if stock not in ('NONE', 'LOW', 'MEDIUM', 'HIGH'):
+        stock = 'UNKNOWN'
+    prices = item.get('price')
+    prices = prices if isinstance(prices, dict) else {}
+    if kind == 'gpu':
+        if not any(model in identity.upper() for model in GPU_MODELS):
+            return None
+        if item.get(cloud.lower()) is False:
+            stock = 'NONE'
+        compute = {'gpu': {'id': identity, 'count': 1}, 'cloud': cloud}
+        label = f'GPU: {identity}'
+        price = prices.get(cloud.lower())
+    else:
+        if cloud != 'SECURE':
+            return None
         try:
-            bounds = cpu['vcpu']
-            if bounds['min'] <= 32 <= bounds['max'] and cpu['ramGbPerVcpu'] * 32 >= 128:
-                identity = cpu['id']
-                choices.append((f'CPU: {identity}, 32 vCPU / {cpu["ramGbPerVcpu"] * 32:g} GB',
-                                {'cpu': {'id': identity, 'vcpuCount': 32}}))
-        except (KeyError, TypeError):
-            continue
-    return choices
+            bounds = item['vcpu']
+            memory = item['ramGbPerVcpu'] * 32
+            if not (bounds['min'] <= 32 <= bounds['max'] and math.isfinite(memory) and memory >= 128):
+                return None
+        except (KeyError, TypeError, OverflowError):
+            return None
+        compute = {'cpu': {'id': identity, 'vcpuCount': 32}, 'cloud': cloud}
+        label = f'CPU: {identity}, 32 vCPU / {memory:g} GB'
+        per_vcpu = prices.get('securePerVcpu')
+        price = per_vcpu * 32 if type(per_vcpu) in (int, float) else None
+    label += f' · stock {stock.lower()}'
+    if type(price) in (int, float) and math.isfinite(price) and price > 0:
+        label += f' · ${price:g}/hr'
+    else:
+        label += ' · price unknown'
+    return label, compute, stock
 
 
-def load_catalog(client):
+def options(gpus, cpus, cloud='SECURE'):
+    offers = []
+    for kind, catalog in (('gpu', gpus), ('cpu', cpus)):
+        for item in catalog:
+            offer = catalog_offer(item, kind, cloud)
+            if offer:
+                offers.append(offer)
+
+    def priority(offer):
+        _, compute, stock = offer
+        gpu = compute.get('gpu', {}).get('id', '').upper()
+        model_rank = next((i for i, model in enumerate(GPU_MODELS) if model in gpu), len(GPU_MODELS))
+        return stock == 'NONE', stock == 'UNKNOWN', not gpu, 'MIG' in gpu.split(), model_rank, 'MAX-Q' in gpu
+
+    return [(label, compute) for label, compute, _ in sorted(offers, key=priority)]
+
+
+def creation_quote(client, compute):
+    """Recheck the exact selected SKU and tier before confirming a paid request."""
+    cloud = compute['cloud']
+    kind = 'gpu' if 'gpu' in compute else 'cpu'
+    items = client.list_gpus(cloud) if kind == 'gpu' else client.list_cpus()
+    matches = [item for item in items if isinstance(item, dict) and item.get('id') == compute[kind]['id']]
+    offer = catalog_offer(matches[0], kind, cloud) if len(matches) == 1 else None
+    if not offer or offer[1] != compute:
+        raise ValueError('This compute option is no longer listed for the selected tier. Reload the catalog.')
+    label, _, stock = offer
+    if stock == 'NONE':
+        raise ValueError(f'{label} on {cloud.title()} Cloud. Reload the catalog for another placement.')
+    return label
+
+
+def load_catalog(client, cloud='SECURE'):
     """Load each independent catalog so one failure cannot hide the other.
 
     Do not include exception text in the GUI: even if the built-in client
@@ -87,7 +140,10 @@ def load_catalog(client):
     other request data. Map status codes to fixed, actionable messages.
     """
     catalogs, failures = {}, []
-    for kind, fetch in (('GPU', client.list_gpus), ('CPU', client.list_cpus)):
+    fetches = [('GPU', lambda: client.list_gpus(cloud))]
+    if cloud == 'SECURE':
+        fetches.append(('CPU', client.list_cpus))
+    for kind, fetch in fetches:
         try:
             catalogs[kind] = fetch()
         except RunPodError as error:
@@ -103,7 +159,7 @@ def load_catalog(client):
             else:
                 detail = 'request failed; check the connection and try again'
             failures.append(f'{kind} catalog {detail}')
-    return options(catalogs['GPU'], catalogs['CPU']), failures
+    return options(catalogs['GPU'], catalogs.get('CPU', []), cloud), failures
 
 
 class State:
@@ -156,7 +212,10 @@ class Ownership:
         kind = 'gpu' if 'gpu' in compute else 'cpu' if 'cpu' in compute else None
         if not kind or not isinstance(compute[kind].get('id'), str):
             raise ValueError('Select a valid catalog compute type')
-        record = {'name': name, 'status': 'create pending', 'deadline': deadline,
+        cloud = compute.get('cloud', 'SECURE')
+        if cloud not in ('SECURE', 'COMMUNITY') or (kind == 'cpu' and cloud != 'SECURE'):
+            raise ValueError('Invalid cloud tier for the selected compute')
+        record = {'name': name, 'status': 'create pending', 'deadline': deadline, 'cloud': cloud,
                   'compute_kind': kind, 'compute_id': compute[kind]['id']}
         if kind == 'cpu':
             vcpu = compute[kind].get('vcpuCount')
@@ -166,7 +225,10 @@ class Ownership:
         records.append(record)
         self.state.write(records)
         try:
-            status, result = self.client.create_pod({'name': name, 'image': image, 'disk': 50, 'startSsh': True, 'ports': ['22/tcp'], **compute})
+            status, result = self.client.create_pod({
+                'name': name, 'image': image, 'disk': 50, 'startSsh': True,
+                'ports': ['22/tcp'], kind: compute[kind], 'cloud': cloud,
+            })
         except RunPodError as exc:
             if not exc.uncertain and exc.status and 400 <= exc.status < 500:
                 records.remove(record)
@@ -328,11 +390,16 @@ def owned_pod_connection(client, record, known_hosts, state_dir):
 
 
 def simulation_gpu(record, pod):
+    # Older ownership records have no requested tier. Every new record
+    # records it, and GET /pods/{id} reports it for CPU and GPU pods.
+    if 'cloud' in record and (record['cloud'] not in ('SECURE', 'COMMUNITY')
+                              or pod.get('cloud') != record['cloud']):
+        raise ValueError('RunPod did not confirm the requested cloud tier. Check the selected pod details.')
     kind, expected = record.get('compute_kind'), record.get('compute_id')
     if kind == 'gpu':
         actual = pod.get('gpu') or {}
-        if actual.get('id') != expected or not isinstance(actual.get('count'), int) or actual['count'] < 1:
-            raise ValueError('Pod GPU identity/count does not match the requested catalog GPU')
+        if actual.get('id') != expected or type(actual.get('count')) is not int or actual['count'] != 1:
+            raise ValueError('RunPod did not report exactly one GPU of the requested catalog type')
         return True
     if kind == 'cpu':
         actual = pod.get('cpu') or {}
@@ -508,6 +575,8 @@ class App:
         self.root, self.state, self.choices = root, State(), []
         configure_dark_theme(root)
         self.busy = False
+        self.create_interrupted = False
+        self.preferred_compute = None
         self.bridge = None
         self.closing_bridge = False
         self.deploying = False
@@ -520,6 +589,7 @@ class App:
         box.pack(fill='both', expand=True)
         self.key = tk.StringVar()
         self.compute = tk.StringVar()
+        self.cloud = tk.StringVar(value='SECURE')
         self.image = tk.StringVar(value=IMAGE)
         self.deadline_minutes = tk.StringVar(value='60')
         self.known_hosts = tk.StringVar()
@@ -542,16 +612,21 @@ class App:
         ttk.Button(box, text='Load catalog', command=self.catalog).grid(row=0, column=2)
         ttk.Label(box, text='Compute').grid(row=1, column=0, sticky='w')
         self.dropdown = ttk.Combobox(box, textvariable=self.compute, state='readonly')
-        self.dropdown.grid(row=1, column=1, sticky='ew')
+        self.dropdown.grid(row=1, column=1, columnspan=2, sticky='ew')
         ttk.Label(box, text='Container image').grid(row=2, column=0, sticky='w')
         ttk.Entry(box, textvariable=self.image).grid(row=2, column=1, sticky='ew')
         ttk.Label(box, text='Deadline (minutes)').grid(row=3, column=0, sticky='w')
-        ttk.Entry(box, textvariable=self.deadline_minutes, width=10).grid(row=3, column=1, sticky='w')
+        placement = ttk.Frame(box)
+        placement.grid(row=3, column=1, sticky='ew')
+        ttk.Entry(placement, textvariable=self.deadline_minutes, width=10).pack(side='left')
+        ttk.Label(placement, text='Cloud tier').pack(side='left', padx=(16, 4))
+        ttk.Combobox(placement, textvariable=self.cloud, values=('SECURE', 'COMMUNITY'),
+                     width=12, state='readonly').pack(side='left')
+        self.cloud.trace_add('write', self.tier_changed)
         ttk.Label(box, text='Automatic termination requires this app to remain open with the API key entered. Billing can continue if it is closed.').grid(row=9, column=0, columnspan=3, sticky='w', pady=8)
         ttk.Button(box, text='Create billable pod', command=self.create).grid(row=4, column=0, sticky='w')
         ttk.Button(box, text='Reconcile owned pods', command=self.reconcile).grid(row=4, column=1, sticky='w')
         ttk.Button(box, text='Terminate selected pod', command=self.terminate).grid(row=4, column=2)
-        ttk.Button(box, text='Show selected pod details', command=self.details).grid(row=1, column=2)
         self.list = tk.Listbox(box, height=8, exportselection=False,
                                background='#171b22', foreground='#f0f2f5',
                                selectbackground='#365f91', selectforeground='#f0f2f5',
@@ -580,6 +655,7 @@ class App:
         ttk.Label(box, text='Selected files, including modem keys, are sent to the pod.', wraplength=760).grid(row=13, column=0, columnspan=3, sticky='w')
         ttk.Button(box, text='Show deployment receipt', command=lambda: messagebox.showinfo('Deployment receipt', self.deployment_receipt.get() or 'No receipt available.')).grid(row=14, column=0, sticky='w')
         ttk.Button(box, text='Close worker session', command=self.close_bridge).grid(row=14, column=1, sticky='w')
+        ttk.Button(box, text='Show selected pod details', command=self.details).grid(row=14, column=2)
         ttk.Label(box, text='Worker profile').grid(row=20, column=0, sticky='w')
         ttk.Combobox(box, textvariable=self.profile, values=('simulation', 'live'), state='readonly').grid(row=20, column=1, sticky='ew')
         ttk.Button(box, text='Configure live audio limits', command=self.audio_settings).grid(row=20, column=2)
@@ -671,43 +747,98 @@ class App:
                 self.status.set(error)
             else:
                 done(result)
+            if self.create_interrupted and not self.busy:
+                self.create_interrupted = False
+                self.status.set(self.status.get() + ' Pod creation was interrupted. Click Create again to review a fresh quote.')
             self.refresh()
         threading.Thread(target=work, daemon=True).start()
 
+    def tier_changed(self, *_):
+        self.preferred_compute = self.selected_compute() or self.preferred_compute
+        self.choices = []
+        self.compute.set('')
+        self.dropdown['values'] = []
+        self.status.set('Load the catalog for the selected cloud tier.')
+
+    def selected_compute(self):
+        selected = self.compute.get()
+        return next((value for label, value in self.choices if label == selected), None)
+
     def catalog(self):
+        cloud = self.cloud.get()
         def done(result):
+            if self.cloud.get() != cloud:
+                self.tier_changed()
+                return
+            previous = self.selected_compute() or self.preferred_compute
+            if previous:
+                self.preferred_compute = previous
+                previous = dict(previous, cloud=cloud)
             choices, failures = result
             self.choices = choices
             self.dropdown['values'] = [label for label, _ in choices]
-            self.compute.set(choices[0][0] if choices else '')
+            label = next((label for label, value in choices if value == previous), '')
+            if not previous and choices:
+                label = choices[0][0]
+            self.compute.set(label)
             if failures:
-                prefix = 'Catalog partially loaded. ' if len(failures) == 1 else 'Catalog unavailable. '
-                self.status.set(prefix + '; '.join(failures) +
-                                ('. Availability and actual hardware are not yet verified.' if choices else '.'))
+                prefix = 'Catalog partially loaded. ' if choices else 'Catalog unavailable. '
+                self.status.set(prefix + '; '.join(failures) + '.')
             elif not choices:
-                self.status.set('Catalog loaded, but no supported GPU or 32-vCPU/128-GB CPU choices were found.')
+                self.status.set('Catalog loaded, but no supported compute options were found for this tier.')
+            elif previous and not label:
+                self.status.set('The selected option is no longer in the catalog. Choose a compute option.')
             else:
-                self.status.set('Catalog loaded; availability and actual hardware are not yet verified.')
-        self.background(load_catalog, done)
+                self.status.set('Catalog loaded. Stock and compute price are checked again before creation.')
+        self.background(lambda c: load_catalog(c, cloud), done)
 
     def create(self):
-        selected = next((value for label, value in self.choices if label == self.compute.get()), None)
+        selected = self.selected_compute()
         image = self.image.get().strip()
         if not selected or not image:
             self.status.set('Choose catalog compute and enter an image.')
             return
+        deadline_text = self.deadline_minutes.get()
         try:
-            minutes = int(self.deadline_minutes.get())
+            minutes = int(deadline_text)
             if not 1 <= minutes <= 1440:
                 raise ValueError()
         except ValueError:
             self.status.set('Deadline must be 1–1440 minutes.')
             return
-        deadline = time.time() + minutes * 60
-        if not messagebox.askyesno('Billable RunPod', f'Create this pod with a {minutes}-minute deadline? Automatic termination works only while this app is open with the API key entered. Charges can continue after it closes.'):
-            return
-        self.background(lambda c: Ownership(self.state, c).create(selected, image, deadline),
-                        lambda _: self.status.set('Create submitted. Reconcile for status; charges may continue.'))
+        key = self.key.get().strip()
+        def settings_changed():
+            return (self.selected_compute() != selected or self.key.get().strip() != key
+                    or self.image.get().strip() != image or self.deadline_minutes.get() != deadline_text)
+        def confirm(quote):
+            if settings_changed():
+                self.status.set('The pod settings changed. Review the selection and click Create again.')
+                return
+            prompt = (f'{quote} on {selected["cloud"].title()} Cloud\n'
+                      'The hourly rate is the catalog compute list price. Storage may add to the charge.\n'
+                      f'Image: {image}\n'
+                      f'Create one pod with a {minutes}-minute deadline? '
+                      'Automatic termination works only while this app is open with the API key entered. '
+                      'Charges can continue after it closes.')
+            if selected['cloud'] == 'COMMUNITY':
+                prompt += ('\n\nThe worker needs direct SSH via a public IP. '
+                           'The Community Cloud stock estimate does not verify public IP availability.')
+            if not messagebox.askyesno('Billable RunPod', prompt):
+                self.status.set('Pod creation cancelled.')
+                return
+            # Tk services events while its modal confirmation is open. An
+            # expired pod still needs immediate attention during that time.
+            if self.busy:
+                self.create_interrupted = True
+                self.status.set('Another provider operation is running. Pod creation was interrupted.')
+                return
+            if settings_changed():
+                self.status.set('The pod settings changed. Review the selection and click Create again.')
+                return
+            deadline = time.time() + minutes * 60
+            self.background(lambda c: Ownership(self.state, c).create(selected, image, deadline),
+                            lambda _: self.status.set('Create submitted. Reconcile for status; charges may continue.'))
+        self.background(lambda c: creation_quote(c, selected), confirm)
 
     def reconcile(self):
         self.background(lambda c: Ownership(self.state, c).reconcile(),

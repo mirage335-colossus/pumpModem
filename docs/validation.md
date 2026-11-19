@@ -193,6 +193,45 @@ timeouts and package-index downloads received local unit coverage. The live
 test exercised the GUI protocol programmatically. Remote physical Live/Duplex,
 receiver capacity and sensitivity remain open.
 
+### RTX 5090 pod creation and simulation — 19 November 2026
+
+The authenticated, one-GPU pod catalog initially reported no RTX 5090 stock
+in either tier. When Secure Cloud changed to low stock, the Tk controller
+showed its billable confirmation there. Community Cloud still showed no
+stock and the same button stopped before confirmation. In an isolated X11
+test, a simulated provider returned two positive stock reads and rejected
+the real REST client's single create POST with HTTP 400 for capacity.
+The controller displayed the refresh guidance and
+removed the rejected request from its ownership records. The original
+screenshot preserved only the HTTP status, so its exact cause is unknown.
+
+A Secure Cloud request using the lab's ordinary creation and deployment
+functions placed one full NVIDIA GeForce RTX 5090 with 32,607 MiB visible.
+It used the selected `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`
+image and a console-verified SSH host key. The shared GUI protocol returned
+decoded `e` and consecutive DATA 0, 0, 1, QUIET, QUIET. The first test
+parser expected the GPU name at the end of the diagnostic and missed the
+trailing modeled-duration and calendar fields. Its GPU row count was lost.
+The original pod was deleted and its absence verified.
+
+The corrected checker matched the complete device field ahead of the timing
+suffix. A fresh stock check initially blocked the repeat. When stock returned,
+the same creation path placed a second full RTX 5090 with 32,607 MiB visible
+and NVIDIA driver 595.112.07. The default image built the native Vulkan worker
+with SHA-256 `ed25eff954c3636ba9eb97aba35fb6fcd44246810536d822712255874282b2d9`.
+The receiver reported 780 Vulkan coarse-search rows on that device and native
+fine processing. It decoded `e` with DATA 0, 0, 1 and two scored QUIET slots.
+Teardown was confirmed through the individual lookup and the pod and queue
+lists. This short fixture covers simulation through the real SSH GUI bridge.
+
+The standalone suite passed all 130 tests with the opt-in native simulation
+and an isolated X display, including 17 Tk tests. At the 920×680 default
+size the widened compute selector showed the full model, stock and price.
+A preceding suite run exposed a test race when a descendant exited between
+opening and reading its Linux process status file. The corrected check
+accepts either kernel indication that the process disappeared and still
+fails if it stays alive.
+
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 
 The [HF operating results](indexes/robust.md#low-power-hf-alarm-results)

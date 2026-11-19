@@ -12,22 +12,25 @@ import time
 import types
 import unittest
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 import app as lab
 from runpod import RunPodClient, RunPodError
 
 try:
     import tkinter as tk
-    from tkinter import messagebox, ttk
+    from tkinter import font, messagebox, ttk
 except ImportError:
     tk = ttk = messagebox = None
 
 
 class FakeProvider:
     def __init__(self):
-        self.gpus = [{'id': 'NVIDIA GeForce RTX 4090'}]
+        self.gpus = [{'id': 'NVIDIA GeForce RTX 4090', 'availability': 'HIGH',
+                      'price': {'secure': 1.25, 'community': 0.75}}]
         self.cpus = [{'id': 'test-cpu', 'vcpu': {'min': 2, 'max': 32}, 'ramGbPerVcpu': 4}]
         self.calls = []
+        self.gpu_tiers = []
         self.pods = []
         self.queued = []
         self.created = []
@@ -35,8 +38,9 @@ class FakeProvider:
         self.deleted = []
         self.create_error = None
 
-    def list_gpus(self):
+    def list_gpus(self, cloud):
         self.calls.append('gpus')
+        self.gpu_tiers.append(cloud)
         if isinstance(self.gpus, Exception):
             raise self.gpus
         return self.gpus
@@ -161,7 +165,7 @@ class TkControllerIntegration(unittest.TestCase):
     def load_catalog(self):
         self.set_entry(self.controller.key, 'dummy-session-key')
         self.execute(self.button('Load catalog').invoke,
-                     lambda: not self.controller.busy and 'Catalog' in self.controller.status.get())
+                     lambda: not self.controller.busy)
 
     def test_catalog_403_preserves_other_catalog_and_does_not_leak_key(self):
         self.provider.cpus = RunPodError('dummy-session-key hidden detail', status=403)
@@ -200,6 +204,131 @@ class TkControllerIntegration(unittest.TestCase):
         for foreground, background in pairs:
             self.assertGreaterEqual(contrast(foreground, background), 4.5, (foreground, background))
 
+    def test_default_window_displays_full_compute_quotes_and_wrapped_errors(self):
+        self.provider.gpus = [
+            {'id': 'NVIDIA GeForce RTX 5090', 'availability': 'NONE', 'price': {'secure': 1.32}},
+            {'id': 'NVIDIA RTX PRO 6000 Blackwell Server Edition', 'availability': 'HIGH',
+             'price': {'secure': 2.09}},
+            {'id': 'NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition', 'availability': 'NONE',
+             'price': {'secure': 2.09}},
+        ]
+        self.load_catalog()
+        self.root.deiconify()
+        self.root.update()
+        self.assertEqual((self.root.winfo_width(), self.root.winfo_height()), (920, 680))
+        combo = self.controller.dropdown
+        font_used = font.Font(self.root, font=combo['font'])
+        for label in combo['values']:
+            with self.subTest(label=label):
+                combo.set(label)
+                self.assertLessEqual(font_used.measure(label), combo.winfo_width() - 26)
+        self.provider.gpus = self.provider.cpus = RunPodError('dummy failure', status=403)
+        self.load_catalog()
+        status = self.controller.status_label
+        self.assertIn('GPU catalog', self.controller.status.get())
+        self.assertIn('CPU catalog', self.controller.status.get())
+        self.assertGreater(status.winfo_reqheight(), 2 * font_used.metrics('ascent'))
+        self.assertEqual(status.winfo_height(), status.winfo_reqheight())
+        bottom = self.root.winfo_rooty() + self.root.winfo_height()
+        for widget in (status, self.button('Show selected pod details'), self.button('Configure live audio limits')):
+            self.assertLessEqual(widget.winfo_rooty() + widget.winfo_height(), bottom)
+
+    def test_create_rechecks_stock_without_substituting_or_requesting_a_pod(self):
+        self.provider.gpus.append({'id': 'RTX PRO 6000 Blackwell Max-Q', 'availability': 'NONE'})
+        self.provider.gpus.append({'id': 'NVIDIA GeForce RTX 5090', 'availability': 'HIGH',
+                                   'price': {'secure': 1.32}})
+        self.load_catalog()
+        self.assertIn('RTX 5090 · stock high', self.controller.compute.get())
+        self.provider.gpus[-1]['availability'] = 'NONE'
+        with patch.object(messagebox, 'askyesno') as ask:
+            self.execute(self.button('Create billable pod').invoke, lambda: not self.controller.busy)
+            ask.assert_not_called()
+        self.assertIn('RTX 5090 · stock none', self.controller.status.get())
+        self.assertIn('Secure Cloud', self.controller.status.get())
+        self.assertEqual(self.provider.calls, ['gpus', 'cpus', 'gpus'])
+        self.assertEqual(self.provider.gpu_tiers, ['SECURE', 'SECURE'])
+        self.assertEqual(self.controller.state.read(), [])
+        self.load_catalog()
+        self.assertIn('RTX 5090 · stock none', self.controller.compute.get())
+        self.assertTrue(any('RTX 4090' in label for label in self.controller.dropdown['values']))
+        self.provider.gpus.pop()
+        self.load_catalog()
+        self.assertEqual(self.controller.compute.get(), '')
+        self.assertIn('Choose a compute option', self.controller.status.get())
+
+    def test_explicit_tier_change_refresh_and_paid_confirmation(self):
+        self.provider.gpus.append({'id': 'NVIDIA GeForce RTX 5090', 'availability': 'HIGH'})
+        self.load_catalog()
+        self.assertEqual(self.controller.cloud.get(), 'SECURE')
+        chosen = next(label for label in self.controller.dropdown['values'] if 'RTX 4090' in label)
+        self.controller.dropdown.set(chosen)
+        self.entry_for(self.controller.cloud).set('COMMUNITY')
+        self.assertFalse(self.controller.choices)
+        self.assertFalse(self.controller.compute.get())
+        self.button('Create billable pod').invoke()
+        self.assertEqual(self.provider.calls, ['gpus', 'cpus'])
+        self.load_catalog()
+        self.assertEqual(self.provider.calls, ['gpus', 'cpus', 'gpus'])
+        self.assertFalse(any('CPU:' in label for label in self.controller.dropdown['values']))
+        self.assertIn('RTX 4090', self.controller.compute.get())
+        self.provider.gpus[0].update(availability='MEDIUM', price={'community': 0.81})
+        self.load_catalog()
+        self.assertIn('RTX 4090 · stock medium · $0.81/hr', self.controller.compute.get())
+        self.provider.gpus[0]['price']['community'] = 0.84
+        with patch.object(messagebox, 'askyesno', return_value=True) as ask:
+            self.execute(self.button('Create billable pod').invoke,
+                         lambda: not self.controller.busy and 'Create submitted' in self.controller.status.get())
+        prompt = ask.call_args.args[1]
+        self.assertIn('RTX 4090 · stock medium · $0.84/hr on Community Cloud', prompt)
+        self.assertIn(lab.IMAGE, prompt)
+        self.assertIn('public IP', prompt)
+        self.assertIn('catalog compute list price', prompt)
+        self.assertEqual(self.provider.gpu_tiers, ['SECURE', 'COMMUNITY', 'COMMUNITY', 'COMMUNITY'])
+        self.assertEqual(len(self.provider.created), 1)
+        self.assertEqual(self.provider.created[0]['gpu'], {'id': 'NVIDIA GeForce RTX 4090', 'count': 1})
+        self.assertEqual(self.provider.created[0]['cloud'], 'COMMUNITY')
+        self.assertEqual(self.controller.state.read()[0]['cloud'], 'COMMUNITY')
+
+    def test_deadline_during_paid_confirmation_preserves_expiry_and_reports_unsent_create(self):
+        self.load_catalog()
+        def confirm(*_):
+            self.controller.state.write([{'id': 'expired-1', 'name': 'prior-fixture',
+                                          'deadline': time.time() - 1}])
+            self.controller.enforce_deadlines()
+            self.assertTrue(self.controller.busy)
+            return True
+        with patch.object(messagebox, 'askyesno', side_effect=confirm):
+            self.execute(self.button('Create billable pod').invoke, lambda: not self.controller.busy)
+        self.assertEqual(self.provider.deleted, ['expired-1'])
+        self.assertEqual(self.provider.created, [])
+        self.assertIn('Deadline check', self.controller.status.get())
+        self.assertIn('Pod creation was interrupted', self.controller.status.get())
+
+    def test_key_edit_during_paid_confirmation_cancels_create(self):
+        self.load_catalog()
+        def confirm(*_):
+            self.controller.key.set('dummy-replacement-key')
+            return True
+        with patch.object(messagebox, 'askyesno', side_effect=confirm):
+            self.execute(self.button('Create billable pod').invoke, lambda: not self.controller.busy)
+        self.assertEqual(self.provider.created, [])
+        self.assertIn('settings changed', self.controller.status.get())
+
+    def test_edit_during_preflight_cancels_paid_confirmation(self):
+        self.load_catalog()
+        callbacks = []
+        with patch.object(self.controller, 'background', side_effect=lambda fn, done: callbacks.append((fn, done))):
+            self.button('Create billable pod').invoke()
+            fetch, finish = callbacks.pop()
+            quote = fetch(self.provider)
+            self.set_entry(self.controller.image, 'different/image')
+            with patch.object(messagebox, 'askyesno') as ask:
+                finish(quote)
+                ask.assert_not_called()
+        self.assertIn('settings changed', self.controller.status.get())
+        self.assertFalse(callbacks)
+        self.assertEqual(self.controller.state.read(), [])
+
     @unittest.skipUnless(os.environ.get('LAB_ISOLATED_X11') == '1',
                          'set LAB_ISOLATED_X11=1 only inside a dedicated Xvfb display')
     def test_double_click_copies_visible_status(self):
@@ -232,9 +361,9 @@ class TkControllerIntegration(unittest.TestCase):
         def transport(method, url, headers, body, timeout):
             requests.append((method, url, body))
             self.assertEqual(headers.get('Authorization'), 'Bearer dummy-session-key')
-            if url.endswith('/catalog/gpus'):
+            if urlsplit(url).path.endswith('/catalog/gpus'):
                 return 403, b'{"detail":"untrusted dummy-session-key"}'
-            if url.endswith('/catalog/cpus'):
+            if urlsplit(url).path.endswith('/catalog/cpus'):
                 return 200, json.dumps({'cpus': self.provider.cpus}).encode()
             raise AssertionError('unexpected fake HTTP request')
         client = RunPodClient('dummy-session-key', transport=transport)
@@ -242,11 +371,43 @@ class TkControllerIntegration(unittest.TestCase):
         with patch.object(lab, 'RunPodClient', return_value=client):
             self.execute(self.button('Load catalog').invoke,
                          lambda: not self.controller.busy and 'Catalog' in self.controller.status.get())
-        self.assertEqual([row[1].rsplit('/', 1)[-1] for row in requests], ['gpus', 'cpus'])
+        self.assertEqual([urlsplit(row[1]).path.rsplit('/', 1)[-1] for row in requests], ['gpus', 'cpus'])
         self.assertIn('CPU:', self.controller.compute.get())
         self.assertIn('GPU catalog', self.controller.status.get())
         self.assertIn('403', self.controller.status.get())
         self.assertNotIn('dummy-session-key', self.controller.status.get())
+
+    def test_stock_positive_then_http_400_displays_placement_error_and_clears_intent(self):
+        requests = []
+        def transport(method, url, headers, body, timeout):
+            path = urlsplit(url).path
+            requests.append((method, path))
+            if (method, path) == ('GET', '/v2/catalog/gpus'):
+                return 200, json.dumps({'gpus': [{'id': 'NVIDIA GeForce RTX 5090', 'availability': 'LOW',
+                                                'price': {'secure': 1.32}}]}).encode()
+            if (method, path) == ('GET', '/v2/catalog/cpus'):
+                return 200, b'{"cpus":[]}'
+            if (method, path) == ('POST', '/v2/pods'):
+                payload = json.loads(body)
+                self.assertEqual(payload['gpu'], {'id': 'NVIDIA GeForce RTX 5090', 'count': 1})
+                self.assertEqual(payload['cloud'], 'SECURE')
+                return 400, b'{"status":400,"detail":"No available instances. private-provider-detail"}'
+            raise AssertionError('unexpected fake HTTP request')
+        client = RunPodClient('dummy-session-key', transport=transport)
+        with patch.object(lab, 'RunPodClient', return_value=client):
+            self.load_catalog()
+            with patch.object(messagebox, 'askyesno', return_value=True) as ask:
+                self.execute(self.button('Create billable pod').invoke, lambda: not self.controller.busy)
+        self.assertIn('stock low', ask.call_args.args[1])
+        self.assertEqual(requests, [('GET', '/v2/catalog/gpus'), ('GET', '/v2/catalog/cpus'),
+                                    ('GET', '/v2/catalog/gpus'), ('POST', '/v2/pods')])
+        status = self.controller.status.get()
+        self.assertIn('POST /v2/pods', status)
+        self.assertIn('HTTP 400', status)
+        self.assertIn('Reload the catalog', status)
+        self.assertNotIn('private-provider-detail', status)
+        self.assertNotIn('dummy-session-key', status)
+        self.assertEqual(self.controller.state.read(), [])
 
     def test_deadline_validation_cancel_create_and_queue_cancel(self):
         self.load_catalog()

@@ -22,6 +22,7 @@ import urllib.request
 API_ROOT = "https://api.runpod.io/v2"
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_POD_PAGES = 100
+_PROBLEM_BYTES = 8192
 _LOG_OPERATION = "GET /v2/pods/{id}/logs"
 _LOG_BYTES = 1024 * 1024
 _LOG_LINE_BYTES = 16 * 1024
@@ -58,11 +59,58 @@ def _http_transport(method, url, headers, body, timeout):
         with opener.open(request, timeout=timeout) as response:
             return response.status, response.read(MAX_RESPONSE_BYTES + 1)
     except urllib.error.HTTPError as error:
-        # Do not read or relay an untrusted service body containing secrets.
         try:
+            # RunPod describes placement and input rejections with a JSON
+            # problem document. Keep the status even if its optional body
+            # is truncated or stalls after the server rejected the request.
+            if method == "POST" and url == API_ROOT + "/pods" and error.code in (400, 422):
+                try:
+                    return error.code, error.read(_PROBLEM_BYTES + 1)
+                except (OSError, http.client.HTTPException):
+                    pass
             return error.code, b""
         finally:
             error.close()
+
+
+def _create_rejection(response, status):
+    """Translate known problems into local messages; never display provider strings."""
+    fallback = ("RunPod rejected the pod configuration. Check the compute selection "
+                "and container image in the RunPod console.")
+    if not response or len(response) > _PROBLEM_BYTES:
+        return fallback
+    try:
+        problem = json.loads(response)
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        return fallback
+    if not isinstance(problem, dict) or problem.get("status", status) != status:
+        return fallback
+
+    detail = problem.get("detail")
+    reason = detail.casefold() if isinstance(detail, str) else ""
+    if any(text in reason for text in ("no longer any instances available", "no instances available",
+                                       "no available instances", "no capacity", "out of stock")):
+        return ("RunPod has no available host matching this request. Reload the catalog "
+                "to check capacity before trying again.")
+    if any(text in reason for text in ("insufficient funds", "insufficient balance", "insufficient credits")):
+        return "RunPod reports insufficient credit. Check Billing in the RunPod console."
+
+    # API validation errors start with a JSON field path. Report only names
+    # from our own request schema, excluding any echoed invalid value/message.
+    errors = problem.get("errors")
+    if isinstance(errors, list):
+        known = {"gpu", "gpu.id", "gpu.count", "cpu", "cpu.id", "cpu.vcpuCount",
+                 "image", "name", "disk", "ports", "startSsh", "cloud", "dataCenterIds",
+                 "queue", "queue.expiresAt"}
+        fields = set()
+        for error in errors:
+            if isinstance(error, str):
+                path = error.partition(":")[0].strip().removeprefix("$.")
+                if path in known:
+                    fields.add(path)
+        if fields:
+            return "RunPod rejected these request fields: " + ", ".join(sorted(fields)) + "."
+    return fallback
 
 
 def _container_lines(stream):
@@ -155,7 +203,11 @@ class RunPodClient:
             raise failure("connection failed or timed out", uncertain=mutation) from None
         if not 200 <= status < 300:
             detail = f"request failed (HTTP {status})"
-            if status == 401:
+            if operation == "POST /v2/pods" and status in (400, 422):
+                detail += ". " + _create_rejection(response, status)
+            elif operation == "POST /v2/pods" and status == 402:
+                detail += ". Check the billing balance and limits in the RunPod console."
+            elif status == 401:
                 detail += "; check the API key and its account"
             elif status == 403:
                 detail += (f"; check the {scope} scope and account or team access" if scope
@@ -189,15 +241,19 @@ class RunPodClient:
             raise ValueError("invalid queued request ID")
         return "/queued-pods/" + urllib.parse.quote(queue_id, safe="")
 
-    def list_gpus(self):
-        return self._catalog("gpus")
+    def list_gpus(self, cloud="SECURE"):
+        if cloud not in ("SECURE", "COMMUNITY"):
+            raise ValueError("Choose Secure or Community Cloud")
+        return self._catalog("gpus", {"include": "AVAILABILITY", "product": "POD",
+                                      "count": 1, "cloud": cloud})
 
     def list_cpus(self):
-        return self._catalog("cpus")
+        return self._catalog("cpus", {"include": "AVAILABILITY", "product": "POD",
+                                      "vcpuCount": 32})
 
-    def _catalog(self, kind):
+    def _catalog(self, kind, query):
         operation = {"gpus": "GET /v2/catalog/gpus", "cpus": "GET /v2/catalog/cpus"}[kind]
-        result = self._request("GET", "/catalog/" + kind, operation=operation, scope="catalog:read")
+        result = self._request("GET", "/catalog/" + kind, query=query, operation=operation, scope="catalog:read")
         if not isinstance(result.get(kind), list):
             raise RunPodError(f"{operation}: response contained an invalid catalog",
                               operation=operation, required_scope="catalog:read")

@@ -173,7 +173,7 @@ while True: time.sleep(1)
             while time.monotonic() < deadline:
                 try:
                     state = Path(f'/proc/{descendants[0]}/stat').read_text().split(') ', 1)[1][0]
-                except FileNotFoundError:
+                except (FileNotFoundError, ProcessLookupError):
                     break
                 if state == 'Z':
                     break
@@ -437,7 +437,7 @@ os._exit(0)
             while time.monotonic() < deadline:
                 try:
                     state = Path(f'/proc/{descendant}/stat').read_text().split(') ', 1)[1][0]
-                except FileNotFoundError:
+                except (FileNotFoundError, ProcessLookupError):
                     break
                 if state == 'Z':
                     break

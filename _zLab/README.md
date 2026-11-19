@@ -3,10 +3,10 @@
 **Implementation status:** the developer tool integrates RunPod management,
 simulation and finite Live/Duplex controls with the native worker and local
 audio companion. The shared GUI runs through an SSH relay to a separately
-deployed worker. A short RunPod simulation decoded `e` on a full RTX PRO 6000
-Blackwell Server Edition using Vulkan for coarse search and the native CPU
-receiver for fine processing. Local tests exercised fake-device audio and one
-physical analog loopback.
+deployed worker. A short RunPod simulation decoded `e` on both a full RTX PRO
+6000 Blackwell Server Edition and a full GeForce RTX 5090. Both used Vulkan for
+coarse search and the native CPU receiver for fine processing. Local tests
+exercised fake-device audio and one physical analog loopback.
 **Finite Live/Duplex with physical audio is still experimental and not
 qualified.** The live profile uses the native audio and transport components;
 the simulation bridge rejects audio frames. A fake-device transport test has
@@ -40,13 +40,25 @@ interpreter. Then launch the controller:
 python3 _zLab/app.py
 ```
 
-Enter a RunPod API key in the masked field and load the catalog. The key is
-held for the session rather than written to the ownership records. The catalog
-matches RTX PRO 6000, RTX 5090 and RTX 4090 names and CPU types offering 32
-vCPUs and at least 128 GB, when present; a listed model is not proof of
-availability, actual allocation or GPU use. The image must support RunPod's
-SSH setup and an account public key. Creating a pod is a billable operation.
-The GPU and CPU catalogs load independently. The interface reports a catalog
+Enter a RunPod API key in the masked field, select the cloud tier and click
+**Load catalog**. The key stays in memory for the session. Secure Cloud is the
+default. The dropdown shows RunPod's current stock and hourly compute list
+price for one RTX PRO 6000, RTX 5090 or RTX 4090, or a Secure Cloud CPU with
+32 vCPUs and at least 128 GB of RAM. CPU prices cover all 32 vCPUs. Refresh
+the catalog to see changes in stock or price.
+
+**Create billable pod** checks the selected hardware and tier again. If stock
+is **none**, the app stops before confirmation. Otherwise, review the fresh
+stock, price, image and deadline in the confirmation dialog. Stock can change
+before RunPod places the request. A recognized capacity rejection prompts a
+catalog refresh. Billing and field-validation rejections report the provider's
+reason when recognized. The final rate can include storage. For full SSH,
+the image must start an SSH server and accept the account public key on a
+directly reachable port. The GPU and CPU catalogs load independently.
+[GPU catalog](https://docs.runpod.io/api-reference-v2/catalog/list-gpu-types)
+and [CPU catalog](https://docs.runpod.io/api-reference-v2/catalog/list-cpu-types).
+
+The interface reports a catalog
 HTTP 403 with a prompt to check `catalog:read` and account permissions rather
 than treating it as an empty catalog. During one read-only check, a key with
 pod read/write permissions but Catalog Read disabled received 403; a new key
@@ -146,7 +158,9 @@ simulation configuration. On a full RTX PRO 6000 Blackwell Server Edition,
 automatic deployment installed the missing build dependencies and selected
 Vulkan. The remote worker performed 780 GPU coarse-search rows and decoded
 `e` through the shared GUI protocol. The run used the selected pod's
-console-verified SSH key. [Validation record](../docs/validation.md#native-finite-duplex-and-runpod-lab--18-november-2026)
+console-verified SSH key. A Secure Cloud RTX 5090 with the default image also
+completed this fixture with 780 Vulkan search rows, DATA 0, 0, 1 and two
+scored QUIET slots. [RTX 5090 validation](../docs/validation.md#rtx-5090-pod-creation-and-simulation--19-november-2026)
 
 Use the explicit termination action at the end of
 the job and verify deletion in RunPod. Closing the browser or controller only
@@ -186,6 +200,7 @@ For local, non-billable component checks:
 
 ```sh
 python3 -m unittest discover -s _zLab -p 'test_runpod.py' -v
+LAB_ISOLATED_X11=1 xvfb-run -a python3 -m unittest discover -s _zLab -p 'test_gui_integration.py' -v
 python3 -m unittest discover -s _zLab -p 'test_host_identity.py' -v
 python3 -m unittest discover -s _zLab -p 'test_worker_relay.py' -v
 python3 -m unittest discover -s _zLab -p 'test_browser_bridge.py' -v
@@ -518,9 +533,9 @@ actual local device behavior separately from simulated or offline replay.
    integrated GUI/provider session. Compare returned samples, settings and
    decisions to a matched native reference. Reserve the long HF replay for a
    question a short fixture cannot answer.
-3. The bounded native GPU simulation covers one full Blackwell Server Edition.
-   Exercise the CPU choice as a CPU job. Keep the RTX 4090/5090 entries labelled
-   by the coverage actually achieved. [Accelerator checks](../docs/gpu-precision-controls.md)
+3. The bounded native GPU simulation covers one full Blackwell Server Edition
+   and a full RTX 5090. Exercise the CPU choice as a CPU job and run the same
+   fixture on an RTX 4090. [Accelerator checks](../docs/gpu-precision-controls.md)
    and [representative receiver hardware](../docs/triad-performance.md#representative-receiver-hardware).
 4. For Live/Duplex, the fake-device holdout and bounded transport backlog and
    EOF checks have passed within the scopes above. Still qualify local PCM and

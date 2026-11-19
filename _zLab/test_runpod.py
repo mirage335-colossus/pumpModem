@@ -94,14 +94,19 @@ class RunPodTests(unittest.TestCase):
 
     def test_catalog_and_authorization_header(self):
         fake = FakeTransport((200, {"gpus": [{"id": "RTX"}]}),
-                             (200, {"cpus": [{"id": "cpu"}]}))
+                             (200, {"cpus": [{"id": "cpu"}]}), (200, {"gpus": []}))
         client = RunPodClient("secret-key", timeout=7, transport=fake)
         self.assertEqual(client.list_gpus(), [{"id": "RTX"}])
         self.assertEqual(client.list_cpus(), [{"id": "cpu"}])
         self.assertEqual(fake.calls[0],
-                         ("GET", "https://api.runpod.io/v2/catalog/gpus",
+                         ("GET", "https://api.runpod.io/v2/catalog/gpus?include=AVAILABILITY&product=POD&count=1&cloud=SECURE",
                           {"Authorization": "Bearer secret-key", "Accept": "application/json"},
                           None, 7))
+        self.assertTrue(fake.calls[1][1].endswith("/cpus?include=AVAILABILITY&product=POD&vcpuCount=32"))
+        self.assertEqual(client.list_gpus("COMMUNITY"), [])
+        self.assertTrue(fake.calls[2][1].endswith("cloud=COMMUNITY"))
+        with self.assertRaises(ValueError):
+            client.list_gpus("invalid")
         self.assertNotIn("secret-key", fake.calls[0][1])
         self.assertNotIn("secret-key", repr(client))
 
@@ -161,6 +166,46 @@ class RunPodTests(unittest.TestCase):
             client.create_pod({})
         self.assertTrue(caught.exception.uncertain)
         self.assertNotIn("token-must-not-leak", str(caught.exception))
+
+    def test_create_rejection_explains_placement_or_field_without_echoing_details(self):
+        cases = [(400, {"detail": "There are no longer any instances available with the requested specifications."},
+                  "no available host"),
+                 (422, {"detail": "Request validation failed.", "errors":
+                  ["$.gpu.id: invalid value private-token", "$.image: rejected private-image",
+                   "$.private-path: bad"]}, "gpu.id, image"),
+                 (400, {"detail": "private-token"}, "Check the compute selection"),
+                 (400, b"private-token" * 900, "Check the compute selection"),
+                 (400, b"<html>private-token</html>", "Check the compute selection")]
+        for status, data, expected in cases:
+            with self.subTest(status=status, expected=expected):
+                stream = io.BytesIO(data if isinstance(data, bytes) else json.dumps(data).encode())
+                error = urllib.error.HTTPError("https://example.invalid", status, "private-reason", {}, stream)
+                with patch("runpod.urllib.request.build_opener") as opener:
+                    opener.return_value.open.side_effect = error
+                    with self.assertRaises(RunPodError) as caught:
+                        RunPodClient("private-token").create_pod({})
+                    opener.return_value.open.assert_called_once()
+                self.assertTrue(stream.closed)
+                self.assertEqual(caught.exception.status, status)
+                self.assertFalse(caught.exception.uncertain)
+                self.assertIn(expected, str(caught.exception))
+                self.assertNotIn("private", str(caught.exception))
+
+    def test_failure_reading_create_problem_preserves_definite_rejection(self):
+        class BrokenBody(io.BytesIO):
+            def read(self, size):
+                self.asserted_size = size
+                raise http.client.IncompleteRead(b"private")
+        stream = BrokenBody()
+        error = urllib.error.HTTPError("https://example.invalid", 400, "private", {}, stream)
+        with patch("runpod.urllib.request.build_opener") as opener:
+            opener.return_value.open.side_effect = error
+            with self.assertRaises(RunPodError) as caught:
+                RunPodClient("fake").create_pod({})
+        self.assertLessEqual(stream.asserted_size, 8193)
+        self.assertTrue(stream.closed)
+        self.assertEqual(caught.exception.status, 400)
+        self.assertFalse(caught.exception.uncertain)
 
     def test_failures_preserve_uncertainty_and_hide_response(self):
         fake = FakeTransport((401, b"secret-key was included by server"),

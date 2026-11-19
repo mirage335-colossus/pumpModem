@@ -343,7 +343,14 @@ class Tests(unittest.TestCase):
             def fake(*args, **kwargs):
                 calls.append((args, kwargs))
                 kwargs['on_output']('sensitive build log\nPUMP_LAB_MODE=cuda\nPUMP_LAB_DEVICE=secretTOKEN\nPUMP_LAB_WORKER_SHA256=abcd')
-            record = {'compute_kind':'gpu','compute_id':'g1','deadline':time.time()+60}
+            record = {'compute_kind':'gpu','compute_id':'g1','deadline':time.time()+60, 'cloud':'SECURE'}
+            for tier in (None, 'COMMUNITY'):
+                if tier:
+                    pod['cloud'] = tier
+                with self.subTest(tier=tier), self.assertRaisesRegex(ValueError, 'cloud tier'):
+                    deploy_selected(pod, record, str(known), None, deploy_func=fake)
+            self.assertEqual(calls, [])
+            pod['cloud'] = 'SECURE'
             receipt = deploy_selected(pod, record, str(known), None, 'secretTOKEN', fake)
             self.assertEqual(calls[0][1]['mode'], 'gpu')
             self.assertTrue(0 < calls[0][1]['timeout'] <= 60)
@@ -366,6 +373,16 @@ class Tests(unittest.TestCase):
                 with self.subTest(deadline=deadline), self.assertRaisesRegex(ValueError, 'deadline'):
                     deploy_selected(pod, dict(record, deadline=deadline), str(known), None, deploy_func=fake)
             self.assertEqual(len(calls), 3)
+
+    def test_one_gpu_allocation_required_on_each_tier(self):
+        for tier in ('SECURE', 'COMMUNITY'):
+            record = {'compute_kind': 'gpu', 'compute_id': 'g1', 'cloud': tier}
+            pod = {'gpu': {'id': 'g1', 'count': 1}, 'cloud': tier}
+            self.assertTrue(simulation_gpu(record, pod))
+            for count in (0, 2, True, 1.0, None):
+                pod['gpu']['count'] = count
+                with self.subTest(tier=tier, count=count), self.assertRaisesRegex(ValueError, 'one GPU'):
+                    simulation_gpu(record, pod)
 
     def test_clock_bounds_are_explicit_positive_and_finite(self):
         self.assertEqual(clock_bounds('0.25', '2', '10'), (0.25, 2, 10))
@@ -421,9 +438,48 @@ class Tests(unittest.TestCase):
         choices = options([{'id': 'NVIDIA GeForce RTX 4090'}, {'id':'RTX 5090'}],
                           [{'id': 'small', 'vcpu': {'min': 1, 'max': 32}, 'ramGbPerVcpu': 2},
                            {'id': 'large', 'vcpu': {'min': 2, 'max': 32}, 'ramGbPerVcpu': 4}])
-        self.assertEqual([i[1] for i in choices], [{'gpu':{'id':'RTX 5090','count':1}},
-                         {'gpu':{'id':'NVIDIA GeForce RTX 4090','count':1}},
-                         {'cpu':{'id':'large','vcpuCount':32}}])
+        self.assertEqual([i[1] for i in choices], [{'gpu':{'id':'RTX 5090','count':1}, 'cloud':'SECURE'},
+                         {'gpu':{'id':'NVIDIA GeForce RTX 4090','count':1}, 'cloud':'SECURE'},
+                         {'cpu':{'id':'large','vcpuCount':32}, 'cloud':'SECURE'}])
+
+    def test_catalog_defaults_to_available_full_gpus_before_partitions(self):
+        models = ['NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 1g.24gb',
+                  'NVIDIA GeForce RTX 5090', 'NVIDIA RTX PRO 6000 Blackwell Server Edition']
+        choices = options([{'id': model, 'availability': 'LOW'} for model in models], [])
+        self.assertEqual([value['gpu']['id'] for _, value in choices],
+                         [models[2], models[1], models[0]])
+
+    def test_quote_requires_exact_current_sku_and_tier(self):
+        client = Mock()
+        select = {'gpu': {'id': 'RTX 5090', 'count': 1}, 'cloud': 'COMMUNITY'}
+        gpu = {'id': 'RTX 5090', 'availability': 'HIGH',
+               'price': {'secure': 1.32, 'community': 0.87}}
+        client.list_gpus.return_value = [gpu]
+        self.assertIn('stock high · $0.87/hr', app_module.creation_quote(client, select))
+        client.list_gpus.assert_called_once_with('COMMUNITY')
+        for reason in ({'availability': 'NONE'}, {'community': False}):
+            client.list_gpus.return_value = [dict(gpu, **reason)]
+            with self.assertRaisesRegex(ValueError, 'stock none'):
+                app_module.creation_quote(client, select)
+        for rows in ([gpu, gpu], [dict(gpu, id='RTX 4090')], []):
+            client.list_gpus.return_value = rows
+            with self.assertRaisesRegex(ValueError, 'no longer listed'):
+                app_module.creation_quote(client, select)
+        client.list_gpus.return_value = [{'id': 'RTX 5090', 'availability': 'novel'}]
+        self.assertIn('stock unknown · price unknown', app_module.creation_quote(client, select))
+        client.list_cpus.assert_not_called()
+
+    def test_32_vcpu_quote_and_memory_requirement(self):
+        client = Mock()
+        cpu = {'id': 'general', 'vcpu': {'min': 2, 'max': 32}, 'ramGbPerVcpu': 4,
+               'price': {'securePerVcpu': 0.025}, 'availability': 'MEDIUM'}
+        select = {'cpu': {'id': 'general', 'vcpuCount': 32}, 'cloud': 'SECURE'}
+        client.list_cpus.return_value = [cpu]
+        self.assertIn('128 GB · stock medium · $0.8/hr', app_module.creation_quote(client, select))
+        client.list_cpus.return_value = [dict(cpu, ramGbPerVcpu=2)]
+        with self.assertRaisesRegex(ValueError, 'no longer listed'):
+            app_module.creation_quote(client, select)
+        client.list_gpus.assert_not_called()
 
     def test_catalog_partial_failures_keep_choices_and_hide_exception_text(self):
         class Catalog:
@@ -435,7 +491,7 @@ class Tests(unittest.TestCase):
                 if isinstance(value, Exception):
                     raise value
                 return value
-            def list_gpus(self): return self.fetch('gpu')
+            def list_gpus(self, cloud): return self.fetch('gpu')
             def list_cpus(self): return self.fetch('cpu')
         gpu = [{'id': 'NVIDIA GeForce RTX 4090'}]
         cpu = [{'id': 'cpu-128', 'vcpu': {'min': 2, 'max': 32}, 'ramGbPerVcpu': 4}]
@@ -456,7 +512,7 @@ class Tests(unittest.TestCase):
 
     def test_catalog_both_fail_or_are_empty(self):
         class Catalog:
-            def list_gpus(self): raise RunPodError('secret', status=401)
+            def list_gpus(self, cloud): raise RunPodError('secret', status=401)
             def list_cpus(self): raise RunPodError('secret', status=429)
         choices, warnings = app_module.load_catalog(Catalog())
         self.assertEqual(choices, [])
@@ -465,18 +521,22 @@ class Tests(unittest.TestCase):
         self.assertIn('HTTP 429', warnings[1])
         self.assertNotIn('secret', repr(warnings))
         class Empty:
-            def list_gpus(self): return []
+            def list_gpus(self, cloud): return []
             def list_cpus(self): return []
         self.assertEqual(app_module.load_catalog(Empty()), ([], []))
 
     def test_catalog_gui_shows_partial_failure_and_usable_choice(self):
         class Value:
+            def get(self): return self.value
             def set(self, value): self.value = value
         class Catalog:
-            def list_gpus(self): return [{'id':'RTX 5090'}]
+            def list_gpus(self, cloud): return [{'id':'RTX 5090'}]
             def list_cpus(self): raise RunPodError('sensitive detail', status=403)
         controller = App.__new__(App)
         controller.dropdown, controller.compute, controller.status = {}, Value(), Value()
+        controller.choices, controller.cloud, controller.preferred_compute = [], Value(), None
+        controller.cloud.set('SECURE')
+        controller.compute.set('')
         controller.background = lambda work, done: done(work(Catalog()))
         controller.catalog()
         self.assertEqual(len(controller.choices), 1)
