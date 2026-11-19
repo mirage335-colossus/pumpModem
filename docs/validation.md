@@ -103,6 +103,61 @@ capacity, communication probability or unknown-calendar acquisition. No cloud
 pod was started for this validation. Earlier source-bound evidence remains
 subject to its stated limits.
 
+## Local physical finite-duplex loopback — 19 November 2026
+
+On the Realtek ALC257 analog `plughw` route with the user-connected
+headphone-to-microphone loopback cable, preflight confirmed available ports and
+a physically correlated 997 Hz tone. One bounded CPU run used a crystal
+oscillator model, 5% transmit volume, 48 kHz hardware and 6 kHz logical
+audio. The strict native session/relay/local-companion harness exited zero and
+checked decoded `e` with contiguous DATA `0`, `0`, `1`, QUIET, QUIET and finite
+completion. The transport trace recorded physical playback drain at 257.092
+seconds and capture end at 378.623 seconds, with 2,220 playback PCM packets,
+187,381 capture packets and empty transport queues at the end. The run lasted
+about 380 seconds. The retained terminal output was truncated in the middle:
+the harness exit is evidence of its predicate, and visible output showed the
+bit decisions, but the full trace and raw audio were not retained.
+
+The worker and local native companion binary SHA-256 values were respectively
+`5b1945a37020040219b77a6622f42ef24a5156a245a397465d2f27865b723024` and
+`4cfa9fa2310dc13c710783135371886e9a4d3e031147c9e24ae5605f00565195`.
+The test used working-tree changes over baseline
+`e7c8b815ffe9cbcd7433ed56ef6a65848a83d5ae`; neither the baseline commit nor
+those binary hashes establish an independently hashed complete source tree.
+An instrumented Python transport copy printed numeric clock samples. The
+successful setup declared a 50 ms relative-clock bound and a provisional
+200 ms local UTC uncertainty; neither is a certified clock measurement.
+
+An earlier default/Pulse route reported a discontinuity after contradictory
+timing observations. Before a clock-message priority change, a 5 ms relative
+bound reported that pod/local clock difference exceeded its declared bound,
+and another 50 ms-bound run failed after 209.9 seconds. The successful run used
+the same 50 ms relative bound after that change, but prior per-probe round-trip
+times were not retained; the change's causal effect is unconfirmed. One later
+run was interrupted with exit 143, not a reception decision. This single
+physical-path pass does not qualify other devices, route reliability,
+sensitivity, receiver capacity, unknown-calendar acquisition, real network,
+RunPod or GPU work.
+
+Separately, a read-only RunPod check found HTTP 403 on a key with pod read/write
+permissions and Catalog Read disabled. A new key with catalog scope successfully
+read both GPU and CPU catalogs and listed zero pods and queued requests; no
+paid pod was created. Nine nested-X11 GUI checks covered masked key entry,
+clipboard, dark presentation and catalog error/partial-load behavior; the real
+Firefox dark view was also inspected. These results do not qualify a RunPod
+simulation or GPU backend.
+
+A subsequent RunPod lifecycle smoke with a user-created key granting Catalog
+Read and Pods Read/Write listed both catalogs, created two test pods and deleted
+both. Individual lookups returned HTTP 404 for each after deletion, and neither
+appeared in inventory. The first harness waited for SSH details in a pod-list
+response that omitted them; the corrected controller fetched individual details
+and confirmed RUNNING. The second attempt then received HTTP 403 from
+`POST /v2/pods/{id}/exec` before GPU identity inspection or worker deployment.
+The denial's cause is unconfirmed; these tests do not establish actual GPU work
+or a successful RunPod simulation. Pod identifiers and credentials are not
+retained in this record.
+
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 
 The [HF operating results](indexes/robust.md#low-power-hf-alarm-results)

@@ -32,6 +32,7 @@ _EXTRA_FILES = (
     "_zLab/audio/remote.cpp",
     "_zLab/audio/provider.cpp",
     "_zLab/audio/worker.cpp",
+    "_zLab/audio/worker_schedule.hpp",
     "_zLab/audio/local.hpp",
     "_zLab/audio/local.cpp",
     "_zLab/audio/local_native.cpp",

@@ -109,13 +109,23 @@ class Output:
         self.last_progress = time.monotonic()
         self.partial = False
 
-    def put(self, data, label=None):
+    def put(self, data, label=None, *, priority=False):
         if self.size + len(data) > QUEUE_LIMIT or len(self.items) >= QUEUE_ITEMS:
             raise TransportError('transport queue exceeded its bound')
         if not self.items:
             self.last_progress = time.monotonic()
-        self.items.append(memoryview(data))
-        self.labels.append(label)
+        if priority:
+            # Only the internally generated, single outstanding clock probe
+            # uses this path. A partly written frame must be completed before
+            # any other frame, and all ordinary frames retain their ordering.
+            # Sending a probe early does not erase queue/network delay from
+            # its conservative four-timestamp bound.
+            at = 1 if self.partial else 0
+            self.items.insert(at, memoryview(data))
+            self.labels.insert(at, label)
+        else:
+            self.items.append(memoryview(data))
+            self.labels.append(label)
         self.size += len(data)
 
     def write(self):
@@ -492,7 +502,7 @@ def run(remote_command, local_command, maximum, utc_uncertainty, remote_drift_pp
         def probe():
             request = gate.request()
             if request:
-                outputs['remote'].put(envelope(0, request))
+                outputs['remote'].put(envelope(0, request), priority=True)
 
         def audio_out(block, *, from_deferred=False):
             nonlocal gating, deferred_size

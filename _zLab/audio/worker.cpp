@@ -1,6 +1,7 @@
 // Standalone lab worker: shared native GUI and Session, with a lab-only audio
 // provider. Networking and the physical device remain in the lab host.
 #include "remote.hpp"
+#include "worker_schedule.hpp"
 #include "runtime.hpp"
 #include "datapump/host/sandbox.hpp"
 #include <array>
@@ -34,6 +35,7 @@ int run(int trusted,bool require_gpu){
     host::Runtime runtime(workspace.path,false,require_gpu,true);hp::Decoder in,files;
     std::deque<std::vector<std::byte>> audio;std::size_t audio_bytes=0,audio_at=0;
     bool main_open=true,files_open=trusted>=0,runtime_in_progress=false;
+    unsigned clock_burst=0;
     auto last_progress=std::chrono::steady_clock::now();std::array<std::byte,65536> buffer{};
     while(!runtime.finished() || !audio.empty()){
         runtime.tick();
@@ -51,7 +53,9 @@ int run(int trusted,bool require_gpu){
             audio_bytes+=charged;audio.push_back(std::move(bytes));
         }
         auto output=runtime.output();
-        const bool send_audio=!runtime_in_progress && !audio.empty();
+        const bool runtime_clock = !runtime_in_progress && lab::is_clock_reply(output);
+        const bool send_audio=lab::select_audio(!audio.empty(), audio_at!=0,
+                                                runtime_in_progress, runtime_clock, clock_burst);
         const bool writable=send_audio || !output.empty();
         if(!writable)last_progress=std::chrono::steady_clock::now();
         else if(std::chrono::steady_clock::now()-last_progress>std::chrono::seconds(3))throw Error("lab worker output pipe stalled");
@@ -65,8 +69,15 @@ int run(int trusted,bool require_gpu){
                 last_progress=std::chrono::steady_clock::now();
                 if(send_audio){audio_at+=n;if(audio_at==audio.front().size()){
                     audio_bytes-=audio.front().capacity()+sizeof(std::vector<std::byte>)+64;
-                    audio.pop_front();audio_at=0;}}
-                else{runtime.consume(static_cast<std::size_t>(n));runtime_in_progress=static_cast<std::size_t>(n)<output.size();}
+                    audio.pop_front();audio_at=0;clock_burst=0;}}
+                else{
+                    // Count the clock frame as soon as its first bytes are
+                    // written, even if it takes multiple writes to finish.
+                    if(runtime_clock && clock_burst<4)++clock_burst;
+                    runtime.consume(static_cast<std::size_t>(n));
+                    const bool complete=static_cast<std::size_t>(n)==output.size();
+                    runtime_in_progress=!complete;
+                }
             }else if(n<0 && errno!=EINTR && errno!=EAGAIN)throw Error("lab worker output write failed");
         }
         for(unsigned i:{0U,2U}){

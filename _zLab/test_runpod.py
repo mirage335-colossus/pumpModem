@@ -113,6 +113,54 @@ class RunPodTests(unittest.TestCase):
             self.assertEqual(caught.exception.uncertain, uncertain)
             self.assertNotIn("secret-key", str(caught.exception))
 
+    def test_forbidden_reports_fixed_operation_and_scope_without_data(self):
+        operations = [
+            (lambda c: c.list_gpus(), "GET /v2/catalog/gpus", "catalog:read"),
+            (lambda c: c.list_cpus(), "GET /v2/catalog/cpus", "catalog:read"),
+            (lambda c: c.list_pods(), "GET /v2/pods", "pods:read"),
+            (lambda c: c.list_queued(), "GET /v2/queued-pods", "pods:read"),
+            (lambda c: c.get_pod("private-pod-id"), "GET /v2/pods/{id}", "pods:read"),
+            (lambda c: c.get_queued("private-pod-id"), "GET /v2/queued-pods/{id}", None),
+            (lambda c: c.create_pod({"name": "private-name"}), "POST /v2/pods", "pods:write"),
+            (lambda c: c.delete_pod("private-pod-id"), "DELETE /v2/pods/{id}", "pods:write"),
+            (lambda c: c.cancel_queued("private-pod-id"), "DELETE /v2/queued-pods/{id}", None),
+        ]
+        for action, operation, scope in operations:
+            with self.subTest(operation=operation):
+                client = RunPodClient("secret-token", transport=FakeTransport((403, b"secret-token private-name")))
+                with self.assertRaises(RunPodError) as caught:
+                    action(client)
+                error = caught.exception
+                self.assertEqual((error.status, error.operation, error.required_scope), (403, operation, scope))
+                self.assertFalse(error.uncertain)
+                self.assertIn(operation, str(error))
+                if scope:
+                    self.assertIn(scope, str(error))
+                else:
+                    self.assertIn("API key permissions", str(error))
+                self.assertIn("account or team access", str(error))
+                for secret in ("secret-token", "private-name", "private-pod-id"):
+                    self.assertNotIn(secret, str(error))
+
+    def test_auth_rate_and_network_failures_are_distinct_and_safe(self):
+        responses = [(401, b"secret-token"), (403, b"secret-token"), (429, b"secret-token"),
+                     TimeoutError("secret-token"), http.client.IncompleteRead(b"secret-token")]
+        client = RunPodClient("secret-token", transport=FakeTransport(*responses))
+        for expected, status in [("check the API key", 401), ("catalog:read", 403),
+                                 ("rate limit", 429), ("connection failed", None)]:
+            with self.assertRaises(RunPodError) as caught:
+                client.list_gpus()
+            self.assertIn(expected, str(caught.exception))
+            self.assertEqual(caught.exception.status, status)
+            self.assertFalse(caught.exception.uncertain)
+            self.assertNotIn("secret-token", str(caught.exception))
+        with self.assertRaises(RunPodError) as caught:
+            client.delete_pod("private-pod-id")
+        self.assertTrue(caught.exception.uncertain)
+        self.assertIn("DELETE /v2/pods/{id}", str(caught.exception))
+        self.assertNotIn("secret-token", str(caught.exception))
+        self.assertNotIn("private-pod-id", str(caught.exception))
+
     def test_redirects_are_not_followed(self):
         self.assertIsNone(_NoRedirect().redirect_request(None, None, 302, "", {}, "https://elsewhere/"))
 

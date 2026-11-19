@@ -8,6 +8,7 @@ import sys
 import time
 import unittest
 import signal
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import transport
@@ -82,6 +83,17 @@ class ClockTests(unittest.TestCase):
             gate.response(struct.pack('<Qddd', nonce, stamp, 1000.1, 1009.9),
                           wall=1010., mono=10.)
 
+    def test_buffer_delay_is_not_mistaken_for_a_precise_clock_sample(self):
+        gate = transport.ClockGate(.05, .01, 10)
+        gate.request(wall=1000., mono=10.)
+        nonce, stamp = gate.pending[:2]
+        # Identical clocks, but the clock request spent 160 ms buffered before
+        # reaching the remote. Its interval is too wide to qualify the bound.
+        with self.assertRaisesRegex(transport.TransportError, 'exceeds'):
+            gate.response(struct.pack('<Qddd', nonce, stamp, 1000.16, 1000.16),
+                          wall=1000.16, mono=10.16)
+        self.assertIsNone(gate.last_ok)
+
     def test_bounded_queue_and_large_envelope(self):
         output = transport.Output(1)
         output.put(b'x' * transport.QUEUE_LIMIT)
@@ -96,6 +108,29 @@ class ClockTests(unittest.TestCase):
             small.put(b'x')
         with self.assertRaisesRegex(transport.TransportError, 'bound'):
             small.put(b'x')
+
+    def test_clock_priority_preserves_partial_frame_and_audio_order(self):
+        completed, sent = [], bytearray()
+        output = transport.Output(1, completed.append)
+        output.put(b'first', 'first')
+        output.put(b'second', 'second')
+        def write(_fd, data):
+            # Deliberately split every frame to exercise partial-write state.
+            part = bytes(data[:2])
+            sent.extend(part)
+            return len(part)
+        with mock.patch.object(transport.os, 'write', side_effect=write):
+            output.write()
+            output.put(b'clock', 'clock', priority=True)
+            while output.items:
+                output.write()
+        self.assertEqual(bytes(sent), b'firstclocksecond')
+        self.assertEqual(completed, ['first', 'clock', 'second'])
+        self.assertEqual(output.size, 0)
+        self.assertFalse(output.partial)
+        output.put(b'x' * transport.QUEUE_LIMIT)
+        with self.assertRaisesRegex(transport.TransportError, 'bound'):
+            output.put(b'clock', priority=True)
 
     def test_fatal_status_uses_supplied_output_descriptor(self):
         reader, writer = os.pipe()

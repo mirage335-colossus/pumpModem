@@ -1,10 +1,11 @@
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import app as app_module
-from app import App, options, Ownership, State, ssh_command, simulation_gpu, file_root, deploy_selected, clock_bounds, live_command, local_devices, device_query
+from app import App, options, Ownership, State, ssh_command, simulation_gpu, owned_pod_details, file_root, deploy_selected, clock_bounds, live_command, local_devices, device_query
 from runpod import RunPodError
 
 
@@ -27,6 +28,105 @@ class Fake:
 
 
 class Tests(unittest.TestCase):
+    def test_owned_pod_connection_details_use_exact_individual_response(self):
+        record = {'id': 'p1', 'name': 'owned'}
+        detail = {'id': 'p1', 'name': 'owned', 'ssh': {'direct': {'host': 'pod.example'}}}
+        class Client:
+            def __init__(self): self.detail, self.requests = detail, []
+            def list_pods(self): return [{'id': 'p1', 'name': 'owned', 'ssh': None}]
+            def get_pod(self, identity):
+                self.requests.append(identity)
+                return self.detail
+        client = Client()
+        self.assertIsNone(client.list_pods()[0]['ssh'])
+        self.assertIs(owned_pod_details(client, record), detail)
+        self.assertEqual(client.requests, ['p1'])
+        for bad in ({'id': 'other', 'name': 'owned'}, {'id': 'p1', 'name': 'other'}, None):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, 'do not match'):
+                client.detail = bad
+                owned_pod_details(client, record)
+        for incomplete in ({'name': 'owned'}, {'id': 'p1'}):
+            with self.subTest(incomplete=incomplete), self.assertRaisesRegex(ValueError, 'missing'):
+                owned_pod_details(client, incomplete)
+
+    def test_connection_actions_fetch_selected_individual_pod(self):
+        class Var:
+            def get(self): return ''
+            def set(self, _): pass
+        class List:
+            def curselection(self): return (0,)
+        class Client:
+            def __init__(self): self.requests = []
+            def get_pod(self, pod_id):
+                self.requests.append(pod_id)
+                return {'id': pod_id, 'name': 'owned', 'ssh': {'direct': {}}}
+        controller = App.__new__(App)
+        controller.list = List()
+        controller.records = [{'id': 'p1', 'name': 'owned', 'deadline': time.time() + 60}]
+        controller.deploying = controller.closing_bridge = False
+        controller.bridge = None
+        controller.devices = {}
+        for field in ('known_hosts', 'identity', 'profile', 'key', 'files', 'audio_binary',
+                      'audio_device', 'capture_bytes', 'playback_bytes', 'capture_frames',
+                      'playback_prebuffer', 'local_utc_uncertainty', 'max_clock_offset',
+                      'remote_clock_drift_ppm', 'status'):
+            setattr(controller, field, Var())
+        actions = []
+        controller.background = lambda request, done: actions.append((request, done))
+        controller.deploy_worker()
+        controller.open_simulation()
+        controller.details()
+        self.assertEqual(len(actions), 3)
+        client = Client()
+        for request, _ in actions:
+            self.assertEqual(request(client)['id'], 'p1')
+        self.assertEqual(client.requests, ['p1', 'p1', 'p1'])
+
+    def test_copy_status_copies_only_visible_message(self):
+        class Root:
+            def __init__(self): self.clipboard = 'old'
+            def clipboard_clear(self): self.clipboard = ''
+            def clipboard_append(self, value): self.clipboard += value
+        class Status:
+            def __init__(self, value): self.value = value
+            def get(self): return self.value
+            def set(self, value): self.value = value
+        controller = app_module.App.__new__(app_module.App)
+        controller.root, controller.status = Root(), Status('GPU catalog: HTTP 403\nCheck permissions.')
+        # Other form values must never be copied along with the status.
+        controller.key = Status('private-api-key')
+        controller.copy_status()
+        self.assertEqual(controller.root.clipboard, 'GPU catalog: HTTP 403\nCheck permissions.')
+        self.assertEqual(controller.status.value, controller.root.clipboard)
+        controller.status.value = ''
+        controller.copy_status()
+        self.assertEqual(controller.root.clipboard, 'GPU catalog: HTTP 403\nCheck permissions.')
+
+    def test_missing_tk_has_actionable_startup_message(self):
+        import builtins
+        original = builtins.__import__
+
+        for missing in ('tkinter', '_tkinter'):
+            def importing(name, *args, **kwargs):
+                if name == 'tkinter':
+                    raise ModuleNotFoundError(f'No module named {missing!r}', name=missing)
+                return original(name, *args, **kwargs)
+            with self.subTest(missing=missing), patch('builtins.__import__', side_effect=importing):
+                with self.assertRaisesRegex(SystemExit, 'sudo apt install python3-tk'):
+                    app_module.main()
+
+    def test_unrelated_import_failure_is_not_hidden(self):
+        import builtins
+        original = builtins.__import__
+
+        def importing(name, *args, **kwargs):
+            if name == 'tkinter':
+                raise ModuleNotFoundError('No module named dependency', name='dependency')
+            return original(name, *args, **kwargs)
+        with patch('builtins.__import__', side_effect=importing):
+            with self.assertRaisesRegex(ModuleNotFoundError, 'dependency'):
+                app_module.main()
+
     def test_ssh_command_validates_and_ignores_provider_command(self):
         with tempfile.TemporaryDirectory() as td:
             known = Path(td)/'known_hosts'
@@ -244,6 +344,137 @@ class Tests(unittest.TestCase):
         self.assertEqual([i[1] for i in choices], [{'gpu':{'id':'RTX 5090','count':1}},
                          {'gpu':{'id':'NVIDIA GeForce RTX 4090','count':1}},
                          {'cpu':{'id':'large','vcpuCount':32}}])
+
+    def test_catalog_partial_failures_keep_choices_and_hide_exception_text(self):
+        class Catalog:
+            def __init__(self, gpu, cpu):
+                self.gpu, self.cpu, self.calls = gpu, cpu, []
+            def fetch(self, name):
+                self.calls.append(name)
+                value = getattr(self, name)
+                if isinstance(value, Exception):
+                    raise value
+                return value
+            def list_gpus(self): return self.fetch('gpu')
+            def list_cpus(self): return self.fetch('cpu')
+        gpu = [{'id': 'NVIDIA GeForce RTX 4090'}]
+        cpu = [{'id': 'cpu-128', 'vcpu': {'min': 2, 'max': 32}, 'ramGbPerVcpu': 4}]
+        secret = 'token-that-must-not-be-displayed'
+        for failed_kind in ('GPU', 'CPU'):
+            with self.subTest(failed=failed_kind):
+                failure = RunPodError(secret, status=403)
+                client = Catalog(failure if failed_kind == 'GPU' else gpu,
+                                 failure if failed_kind == 'CPU' else cpu)
+                choices, warnings = app_module.load_catalog(client)
+                self.assertEqual(client.calls, ['gpu', 'cpu'])
+                self.assertEqual(len(choices), 1)
+                self.assertEqual(len(warnings), 1)
+                self.assertIn(failed_kind + ' catalog', warnings[0])
+                self.assertIn('HTTP 403', warnings[0])
+                self.assertIn('catalog:read', warnings[0])
+                self.assertNotIn(secret, repr((choices, warnings)))
+
+    def test_catalog_both_fail_or_are_empty(self):
+        class Catalog:
+            def list_gpus(self): raise RunPodError('secret', status=401)
+            def list_cpus(self): raise RunPodError('secret', status=429)
+        choices, warnings = app_module.load_catalog(Catalog())
+        self.assertEqual(choices, [])
+        self.assertEqual(len(warnings), 2)
+        self.assertIn('HTTP 401', warnings[0])
+        self.assertIn('HTTP 429', warnings[1])
+        self.assertNotIn('secret', repr(warnings))
+        class Empty:
+            def list_gpus(self): return []
+            def list_cpus(self): return []
+        self.assertEqual(app_module.load_catalog(Empty()), ([], []))
+
+    def test_catalog_gui_shows_partial_failure_and_usable_choice(self):
+        class Value:
+            def set(self, value): self.value = value
+        class Catalog:
+            def list_gpus(self): return [{'id':'RTX 5090'}]
+            def list_cpus(self): raise RunPodError('sensitive detail', status=403)
+        controller = App.__new__(App)
+        controller.dropdown, controller.compute, controller.status = {}, Value(), Value()
+        controller.background = lambda work, done: done(work(Catalog()))
+        controller.catalog()
+        self.assertEqual(len(controller.choices), 1)
+        self.assertEqual(controller.compute.value, controller.dropdown['values'][0])
+        self.assertIn('partially loaded', controller.status.value)
+        self.assertIn('CPU catalog', controller.status.value)
+        self.assertIn('catalog:read', controller.status.value)
+        self.assertNotIn('sensitive detail', controller.status.value)
+
+    def test_close_worker_session_allows_reopening_without_touching_pod(self):
+        class Status:
+            def set(self, value): self.value = value
+        class Root:
+            def after(self, _, callback): callback()
+        class Bridge:
+            closed = 0
+            def close(self): self.closed += 1
+        class ImmediateThread:
+            def __init__(self, target, daemon): self.target = target
+            def start(self): self.target()
+        controller = App.__new__(App)
+        controller.busy = controller.closing_bridge = False
+        controller.status, controller.root = Status(), Root()
+        bridge = controller.bridge = Bridge()
+        with patch.object(app_module.threading, 'Thread', ImmediateThread):
+            controller.close_bridge()
+        self.assertEqual(bridge.closed, 1)
+        self.assertIsNone(controller.bridge)
+        self.assertFalse(controller.closing_bridge)
+        self.assertIn('pod remains active', controller.status.value)
+
+    def test_refresh_preserves_selected_record_by_name_when_reordered(self):
+        class List:
+            def __init__(self): self.selected, self.rows = (1,), []
+            def curselection(self): return self.selected
+            def delete(self, *_): self.selected, self.rows = (), []
+            def insert(self, _, row): self.rows.append(row)
+            def selection_set(self, index): self.selected = (index,)
+            def activate(self, index): self.active = index
+            def see(self, index): self.visible = index
+        class Records:
+            def __init__(self, records): self.records = records
+            def read(self): return self.records
+        controller = App.__new__(App)
+        controller.list = List()
+        controller.records = [{'name':'first'}, {'name':'selected'}]
+        controller.state = Records([{'name':'selected'}, {'name':'first'}])
+        controller.refresh()
+        self.assertEqual(controller.list.curselection(), (0,))
+        self.assertEqual(controller.records[0]['name'], 'selected')
+        controller.state.records = [{'name':'first'}]
+        controller.refresh()
+        self.assertEqual(controller.list.curselection(), ())
+
+    def test_failed_or_busy_session_close_is_safe_and_retryable(self):
+        class Status:
+            def set(self, value): self.value = value
+        class Root:
+            def after(self, _, callback): callback()
+        class Bridge:
+            def close(self): raise OSError('sensitive detail')
+        class ImmediateThread:
+            def __init__(self, target, daemon): self.target = target
+            def start(self): self.target()
+        controller = App.__new__(App)
+        controller.busy, controller.closing_bridge = True, False
+        controller.status, controller.root = Status(), Root()
+        bridge = controller.bridge = Bridge()
+        controller.close_bridge()
+        self.assertIs(controller.bridge, bridge)
+        self.assertIn('Wait', controller.status.value)
+        controller.busy = False
+        with patch.object(app_module.threading, 'Thread', ImmediateThread):
+            controller.close_bridge()
+        self.assertIs(controller.bridge, bridge)
+        self.assertFalse(controller.closing_bridge)
+        self.assertIn('Could not close', controller.status.value)
+        self.assertNotIn('sensitive detail', controller.status.value)
 
     def test_create_and_delete(self):
         with tempfile.TemporaryDirectory() as td:

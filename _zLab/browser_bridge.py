@@ -16,6 +16,8 @@ import json
 import os
 from pathlib import Path
 import secrets
+import select
+import signal
 import struct
 import subprocess
 import threading
@@ -51,6 +53,8 @@ class SimulationWorker(_preview.Worker):
         self.live = live
         self.failed_at = None
         self.close_lock = threading.Lock()
+        self._close_complete = False
+        self._group_stopped = False
         self.closed, self.cancelled = threading.Event(), threading.Event()
         self.file_scope = _preview.HostFiles(files) if files else None
         self.file_fd = None
@@ -69,25 +73,68 @@ class SimulationWorker(_preview.Worker):
             os.set_blocking(self.process.stdin.fileno(), False)
             self.reader = threading.Thread(target=self.read_output, daemon=True)
             self.reader.start()
-        except BaseException:
+        except BaseException as setup_error:
             # Starting a child transfers ownership immediately, even if later
             # setup or thread creation fails. Never leave an SSH relay behind.
             self.closed.set()
+            cleanup_errors = []
             try:
                 self.process.stdin.close()
-            finally:
+            except Exception as error:
+                cleanup_errors.append(error)
+            can_signal_group = True
+            try:
+                # A reaped PID is no longer safe to use as a process-group ID.
+                self._wait_without_reaping(0)
+            except ChildProcessError as error:
+                cleanup_errors.append(error)
+                can_signal_group = False
+            if can_signal_group:
                 try:
-                    self.process.terminate()
+                    os.killpg(self.process.pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
+                except Exception:
+                    # Still attempt the unconditional group kill below.
+                    pass
+                try:
+                    self._wait_without_reaping(2)
+                except ChildProcessError as error:
+                    cleanup_errors.append(error)
+                    can_signal_group = False
+                except Exception as error:
+                    cleanup_errors.append(error)
+            group_stopped = False
+            for _ in range(2 if can_signal_group else 0):
+                try:
+                    # Retain the leader until all processes still in its group
+                    # have been signaled, even if it has already exited.
+                    os.killpg(self.process.pid, signal.SIGKILL)
+                    group_stopped = True
+                    break
+                except ProcessLookupError:
+                    group_stopped = True
+                    break
+                except OSError as error:
+                    cleanup_error = error
+            if group_stopped:
                 try:
                     self.process.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    self.process.kill()
-                    self.process.wait()
+                except Exception as error:
+                    cleanup_errors.append(error)
+            elif can_signal_group:
+                cleanup_errors.append(cleanup_error)
+            try:
                 self.process.stdout.close()
-                if self.file_scope:
+            except Exception as error:
+                cleanup_errors.append(error)
+            if self.file_scope:
+                try:
                     self.file_scope.close()
+                except Exception as error:
+                    cleanup_errors.append(error)
+            if cleanup_errors:
+                raise RuntimeError('Bridge startup cleanup was incomplete; the worker may need manual termination.') from setup_error
             raise
 
     def read_output(self):
@@ -171,7 +218,36 @@ class SimulationWorker(_preview.Worker):
             # The browser never supplies the envelope. Only the checked service
             # operation below can send channel 1; input() admits DPW1 UI only.
             data = struct.pack('<4sII', b'DPL1', 1 if trusted else 0, len(data)) + data
-        super().write(data, trusted=False)
+        with self.write_lock:
+            if self.closed.is_set() or self.process.stdin.closed:
+                raise _preview.PreviewError('Worker stopped', 410)
+            # Do not use Popen.poll(): reaping the leader here could release
+            # the process-group ID while a descendant still holds the pipes.
+            fd = self.process.stdin.fileno()
+            view, deadline = memoryview(data), time.monotonic() + 3
+            while view:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not select.select([], [fd], [], remaining)[1]:
+                    raise _preview.PreviewError('Worker input pipe stalled')
+                try:
+                    view = view[os.write(fd, view):]
+                except BlockingIOError:
+                    pass
+
+    def _wait_without_reaping(self, timeout):
+        """Reserve the leader's PID until the owned process group is stopped."""
+        if self.process.returncode is not None:
+            return True
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                if os.waitid(os.P_PID, self.process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT):
+                    return True
+            except InterruptedError:
+                continue
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(.02)
 
     def service(self, request):
         if request.get('kind') != 'open_file':
@@ -184,33 +260,97 @@ class SimulationWorker(_preview.Worker):
         # Give the live transport time to terminate and reap its own two child
         # process groups before force-killing it. Retain the first live error.
         with self.close_lock:
-            if self.closed.is_set():
+            if self._close_complete:
                 return
+            # `closed` rejects new work as soon as shutdown starts. It is not
+            # proof that the child and its resources have been reaped: a
+            # later close must be able to finish an interrupted cleanup.
             self.closed.set()
             self.cancelled.set()
-            self.output.close('Worker stopped')
-            with self.state:
-                if self.export:
-                    self.export.finish('Worker stopped')
-                self.state.notify_all()
-            with self.write_lock:
-                if not self.process.stdin.closed:
-                    self.process.stdin.close()
-            try:
-                self.process.wait(timeout=6 if self.live else 3)
-            except subprocess.TimeoutExpired:
-                self.process.terminate()
+            errors = []
+
+            def attempt(action):
                 try:
-                    self.process.wait(timeout=6 if self.live else 2)
-                except subprocess.TimeoutExpired:
-                    self.process.kill()
-                    self.process.wait()
-            self.reader.join(timeout=2)
-            self.process.stdout.close()
-            with self.event_lock:
-                if self.file_scope:
-                    self.file_scope.close()
-                    self.file_scope = None
+                    action()
+                except Exception as error:
+                    errors.append(error)
+
+            attempt(lambda: self.output.close('Worker stopped'))
+
+            def notify_state():
+                with self.state:
+                    if self.export:
+                        self.export.finish('Worker stopped')
+                    self.state.notify_all()
+            attempt(notify_state)
+
+            def close_input():
+                with self.write_lock:
+                    if not self.process.stdin.closed:
+                        self.process.stdin.close()
+            attempt(close_input)
+
+            # Wait for ordinary EOF cleanup without reaping the group leader.
+            # Its PID reserves the process-group identity, including when it
+            # exited before a descendant that still holds the output pipe.
+            can_signal_group = not self._group_stopped and self.process.returncode is None
+            try:
+                self._wait_without_reaping(6 if self.live else 3)
+            except ChildProcessError as error:
+                # Never signal a possibly reused PID if somebody else reaped it.
+                can_signal_group = False
+                errors.append(error)
+            except Exception as error:
+                errors.append(error)
+
+            if can_signal_group:
+                try:
+                    os.killpg(self.process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                except Exception as error:
+                    errors.append(error)
+                try:
+                    self._wait_without_reaping(2)
+                except ChildProcessError as error:
+                    errors.append(error)
+                    can_signal_group = False
+                except Exception as error:
+                    errors.append(error)
+                if can_signal_group:
+                    try:
+                        # Also stop descendants if the group leader exited first.
+                        os.killpg(self.process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        self._group_stopped = True
+                    except Exception as error:
+                        errors.append(error)
+                    else:
+                        self._group_stopped = True
+            # Never reap the group leader after a failed group signal. Its
+            # retained PID prevents a retry from signaling a reused group ID.
+            if self._group_stopped:
+                attempt(lambda: self.process.wait(timeout=2))
+            elif self.process.returncode is not None:
+                errors.append(RuntimeError('Worker leader was reaped before its process group stopped'))
+
+            attempt(lambda: self.reader.join(timeout=2))
+            if self.reader.is_alive():
+                errors.append(RuntimeError('Worker output reader did not stop'))
+            else:
+                attempt(self.process.stdout.close)
+
+            def close_files():
+                with self.event_lock:
+                    if self.file_scope:
+                        self.file_scope.close()
+                        self.file_scope = None
+            attempt(close_files)
+            if self.process.returncode is None:
+                errors.append(RuntimeError('Worker process did not stop'))
+            if errors:
+                raise errors[0]
+            self._close_complete = True
 
 
 class Handler(_preview.Handler):
@@ -229,17 +369,26 @@ class Handler(_preview.Handler):
                 return self.reply(data, 'application/json')
             except _preview.PreviewError as error:
                 return self.reply(str(error), status=error.status)
-        if self.path in ('/', '/tools/preview.mjs'):
+        if self.path in ('/', '/tools/preview.mjs', '/web/style.css'):
             try:
                 if not self.local():
                     raise _preview.PreviewError('Invalid origin or host', 403)
                 if self.path == '/':
                     data = (ROOT / 'tools' / 'preview.html').read_text()
+                    # Keep the lab shell's native controls and dialogs dark,
+                    # independently of the user's browser/OS preference.
+                    data = data.replace('</style>', ':root { color-scheme: dark; }\n</style>', 1)
                     data = data.replace('Native Data Pump worker', 'RunPod Robust live/duplex' if self.server.live else 'RunPod Robust simulation')
                     data = data.replace('Enable microphone and audio', 'Audio handled by local companion' if self.server.live else 'Live audio unavailable')
                     if self.server.live:
                         data = data.replace('<p id="status"', '<p id="lab-resources">Local audio resources: awaiting receipt</p><p id="status"')
                     return self.reply(data, 'text/html; charset=utf-8')
+                if self.path == '/web/style.css':
+                    # The shared renderer runs in a sandboxed iframe and is
+                    # passed this text. Override its light/dark preference for
+                    # the lab only; the shared Data Pump asset stays unchanged.
+                    data = (ROOT / 'web' / 'style.css').read_text()
+                    return self.reply(data + '\n:root { color-scheme: dark; }\n', 'text/css')
                 data = (ROOT / 'tools' / 'preview.mjs').read_text()
                 old = 'audio.disabled=false;audio.onclick=()=>view.enableAudio().catch(report);'
                 if old not in data:
@@ -286,26 +435,36 @@ class Server(_preview.PreviewServer):
             return self.worker
 
     def maintain(self):
-        if not self.live:
-            return super().maintain()
-        # Reap failed transport promptly, but retain only its sanitized error
-        # for a fixed lease that heartbeats and status requests cannot extend.
+        # Reap failed workers promptly. A failed live transport retains only
+        # its sanitized error for a fixed lease that heartbeats cannot extend.
+        # A transient close error keeps the same owner for the next sweep.
         while not self.stopping.wait(.5):
             with self.owner_lock:
                 worker = self.worker
                 if not worker:
                     continue
                 now = time.monotonic()
-                if worker.output.error and worker.failed_at is None:
+                if self.live and worker.output.error and worker.failed_at is None:
                     worker.failed_at = now
                     try:
-                        worker.process.terminate()
+                        if worker.process.returncode is None:
+                            os.killpg(worker.process.pid, signal.SIGTERM)
                     except ProcessLookupError:
                         pass
-                    worker.close()
-                deadline_start = worker.failed_at if worker.failed_at is not None else worker.touched
-                if time.monotonic() - deadline_start > _preview.LEASE:
-                    worker.close()
+                    except OSError:
+                        # close() still tries the other cleanup stages.
+                        pass
+                if self.live and worker.failed_at is not None:
+                    try:
+                        worker.close()
+                    except Exception:
+                        continue
+                deadline_start = worker.failed_at if self.live and worker.failed_at is not None else worker.touched
+                if (not self.live and worker.output.error) or time.monotonic() - deadline_start > _preview.LEASE:
+                    try:
+                        worker.close()
+                    except Exception:
+                        continue
                     self.worker = None
 
 
@@ -318,24 +477,41 @@ class Bridge:
         self.server = Server(list(command), port, files, live)
         self.url = self.server.origin + '/#' + self.server.token
         self._closed = False
+        self._close_lock = threading.Lock()
         self._server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self._maintenance = threading.Thread(target=self.server.maintain, daemon=True)
         self._server_thread.start()
         self._maintenance.start()
 
     def close(self):
-        if self._closed:
-            return
-        self._closed = True
-        self.server.stopping.set()
-        self.server.shutdown()
-        with self.server.owner_lock:
-            worker = self.server.worker
-        if worker:
-            self.server.stop_worker(worker.id)
-        self.server.server_close()
-        self._maintenance.join(timeout=3)
-        self._server_thread.join(timeout=3)
+        with self._close_lock:
+            if self._closed:
+                return
+            self.server.stopping.set()
+            errors = []
+
+            def attempt(action):
+                try:
+                    action()
+                except Exception as error:
+                    errors.append(error)
+
+            # Each stage is independently attempted, even if an earlier one
+            # fails. The worker stays registered until its close succeeds, so
+            # a caller can retry rather than orphaning an active process.
+            attempt(self.server.shutdown)
+            with self.server.owner_lock:
+                worker = self.server.worker
+            if worker:
+                attempt(lambda: self.server.stop_worker(worker.id))
+            attempt(self.server.server_close)
+            attempt(lambda: self._maintenance.join(timeout=3))
+            attempt(lambda: self._server_thread.join(timeout=3))
+            if self._maintenance.is_alive() or self._server_thread.is_alive():
+                errors.append(RuntimeError('Bridge threads did not stop'))
+            if errors:
+                raise errors[0]
+            self._closed = True
 
     def __enter__(self):
         return self

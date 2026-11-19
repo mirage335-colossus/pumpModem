@@ -28,10 +28,13 @@ class RunPodError(Exception):
     """
 
     def __init__(self, message: str, *, status: int | None = None,
-                 uncertain: bool = False):
+                 uncertain: bool = False, operation: str | None = None,
+                 required_scope: str | None = None):
         super().__init__(message)
         self.status = status
         self.uncertain = uncertain
+        self.operation = operation
+        self.required_scope = required_scope
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -71,7 +74,15 @@ class RunPodClient:
         self._timeout = timeout
         self._transport = transport or _http_transport
 
-    def _request(self, method, path, *, payload=None, query=None, return_status=False):
+    def _request(self, method, path, *, operation, scope, payload=None, query=None,
+                 return_status=False):
+        # These labels are fixed by the call sites, never supplied by the server
+        # or derived from opaque IDs, cursors, user input or credentials.
+        def failure(detail, *, status=None, uncertain=False):
+            return RunPodError(f"{operation}: {detail}", status=status,
+                               uncertain=uncertain, operation=operation,
+                               required_scope=scope)
+
         url = API_ROOT + path
         if query:
             url += "?" + urllib.parse.urlencode(query)
@@ -86,21 +97,29 @@ class RunPodClient:
         try:
             status, response = self._transport(method, url, headers, body, self._timeout)
         except (OSError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
-            raise RunPodError("RunPod connection failed or timed out", uncertain=mutation) from None
+            raise failure("connection failed or timed out", uncertain=mutation) from None
         if not 200 <= status < 300:
-            raise RunPodError(f"RunPod request failed (HTTP {status})", status=status,
-                              uncertain=mutation and (300 <= status < 400 or
-                                                      status == 408 or status >= 500))
+            detail = f"request failed (HTTP {status})"
+            if status == 401:
+                detail += "; check the API key and its account"
+            elif status == 403:
+                detail += (f"; check the {scope} scope and account or team access" if scope
+                           else "; check the API key permissions and account or team access")
+            elif status == 429:
+                detail += "; rate limit reached, wait before retrying"
+            raise failure(detail, status=status,
+                          uncertain=mutation and (300 <= status < 400 or
+                                                  status == 408 or status >= 500))
         if len(response) > MAX_RESPONSE_BYTES:
-            raise RunPodError("RunPod response exceeded the size limit", uncertain=mutation)
+            raise failure("response exceeded the size limit", uncertain=mutation)
         if not response and method == "DELETE":
             return None
         try:
             result = json.loads(response)
         except (ValueError, UnicodeDecodeError):
-            raise RunPodError("RunPod returned invalid JSON", uncertain=mutation) from None
+            raise failure("response contained invalid JSON", uncertain=mutation) from None
         if not isinstance(result, dict):
-            raise RunPodError("RunPod returned an unexpected response", uncertain=mutation)
+            raise failure("response was not a JSON object", uncertain=mutation)
         return (status, result) if return_status else result
 
     @staticmethod
@@ -122,9 +141,11 @@ class RunPodClient:
         return self._catalog("cpus")
 
     def _catalog(self, kind):
-        result = self._request("GET", "/catalog/" + kind)
+        operation = {"gpus": "GET /v2/catalog/gpus", "cpus": "GET /v2/catalog/cpus"}[kind]
+        result = self._request("GET", "/catalog/" + kind, operation=operation, scope="catalog:read")
         if not isinstance(result.get(kind), list):
-            raise RunPodError("RunPod returned an invalid catalog")
+            raise RunPodError(f"{operation}: response contained an invalid catalog",
+                              operation=operation, required_scope="catalog:read")
         return result[kind]
 
     def list_pods(self):
@@ -138,43 +159,50 @@ class RunPodClient:
         pods = []
         seen = set()
         cursor = None
+        operation = {"/pods": "GET /v2/pods", "/queued-pods": "GET /v2/queued-pods"}[path]
         for _ in range(MAX_POD_PAGES):
             query = {"limit": 100}
             if cursor:
                 query["cursor"] = cursor
-            result = self._request("GET", path, query=query)
+            result = self._request("GET", path, query=query, operation=operation, scope="pods:read")
             page = result.get(field)
             pagination = result.get("pagination")
             if not isinstance(page, list) or not isinstance(pagination, dict):
-                raise RunPodError("RunPod returned an invalid pod list")
+                raise RunPodError(f"{operation}: response contained an invalid pod list",
+                                  operation=operation, required_scope="pods:read")
             pods.extend(page)
             more = pagination.get("hasNextPage")
             if more is False:
                 return pods
             cursor = pagination.get("nextCursor")
             if more is not True or not isinstance(cursor, str) or not cursor or cursor in seen:
-                raise RunPodError("RunPod returned invalid pagination")
+                raise RunPodError(f"{operation}: response contained invalid pagination",
+                                  operation=operation, required_scope="pods:read")
             seen.add(cursor)
-        raise RunPodError("RunPod pod list exceeded the pagination limit")
+        raise RunPodError(f"{operation}: pod list exceeded the pagination limit",
+                          operation=operation, required_scope="pods:read")
 
     def get_pod(self, pod_id):
-        return self._request("GET", self._pod_path(pod_id))
+        return self._request("GET", self._pod_path(pod_id), operation="GET /v2/pods/{id}", scope="pods:read")
 
     def create_pod(self, payload):
         """Return (HTTP status, body): 201 is a pod; 202 is a queued request."""
         if not isinstance(payload, dict):
             raise ValueError("pod configuration must be an object")
-        status, body = self._request("POST", "/pods", payload=payload, return_status=True)
+        status, body = self._request("POST", "/pods", payload=payload, return_status=True,
+                                     operation="POST /v2/pods", scope="pods:write")
         if status not in (201, 202):
             raise RunPodError("RunPod returned an unexpected creation status", status=status,
-                              uncertain=True)
+                              uncertain=True, operation="POST /v2/pods", required_scope="pods:write")
         return status, body
 
     def delete_pod(self, pod_id):
-        self._request("DELETE", self._pod_path(pod_id))
+        self._request("DELETE", self._pod_path(pod_id), operation="DELETE /v2/pods/{id}", scope="pods:write")
 
     def get_queued(self, queue_id):
-        return self._request("GET", self._queued_path(queue_id))
+        # RunPod's current per-queued-request endpoint docs do not specify a
+        # scope, so do not assert that the list endpoint's scope also applies.
+        return self._request("GET", self._queued_path(queue_id), operation="GET /v2/queued-pods/{id}", scope=None)
 
     def cancel_queued(self, queue_id):
-        self._request("DELETE", self._queued_path(queue_id))
+        self._request("DELETE", self._queued_path(queue_id), operation="DELETE /v2/queued-pods/{id}", scope=None)

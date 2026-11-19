@@ -3,14 +3,14 @@
 **Implementation status:** the developer tool integrates RunPod management,
 simulation and finite Live/Duplex controls with the native worker and local
 audio companion. The shared GUI runs through an SSH relay to a separately
-deployed worker. Local tests exercise native simulation and fake-device audio,
-and the desktop window rendered under Xvfb; complete remote operation and
-actual GPU execution have not been qualified.
+deployed worker. Local tests exercise native simulation, fake-device audio and
+one physical analog loopback; complete remote operation and actual GPU
+execution have not been qualified.
 **Finite Live/Duplex with physical audio is still experimental and not
 qualified.** The live profile uses the native audio and transport components;
 the simulation bridge rejects audio frames. A fake-device transport test has
 covered capture stopping before a delayed drain, but delayed drain through the
-complete receiver, physical devices and remote transport remain unqualified.
+complete receiver, other physical routes and remote transport remain unqualified.
 A locally enforced deadline
 requests termination only while the controller is running with the API key
 entered; it cannot guarantee termination or stop billing after the window closes.
@@ -26,6 +26,15 @@ copying `_zLab/` alone does not produce an independently distributable package.
 On Linux, run the controller from this checkout with Python 3 and its Tk module,
 an available graphical display, a web browser and OpenSSH:
 
+On Debian or Ubuntu, install the Tk module for the system Python if needed:
+
+```sh
+sudo apt install python3-tk
+```
+
+For a custom Python interpreter, install the Tk support matching that
+interpreter. Then launch the controller:
+
 ```sh
 python3 _zLab/app.py
 ```
@@ -36,6 +45,22 @@ matches RTX PRO 6000, RTX 5090 and RTX 4090 names and CPU types offering 32
 vCPUs and at least 128 GB, when present; a listed model is not proof of
 availability, actual allocation or GPU use. The image must support RunPod's
 SSH setup and an account public key. Creating a pod is a billable operation.
+The GPU and CPU catalogs load independently. The interface reports a catalog
+HTTP 403 with a prompt to check `catalog:read` and account permissions rather
+than treating it as an empty catalog. During one read-only check, a key with
+pod read/write permissions but Catalog Read disabled received 403; a new key
+with the catalog scope successfully read both catalogs and listed zero pods
+and queued requests. No pod was created by that check.
+
+A subsequent live RunPod smoke used a user-created key with Catalog Read and
+Pods Read/Write. It created and deleted two test pods; individual lookups then
+returned HTTP 404 for both and the inventory showed neither. The first harness
+waited for SSH details in a list response that did not include them. After the
+controller was corrected to fetch the individual pod details, it observed a
+pod as RUNNING. The second smoke then received HTTP 403 from
+`POST /v2/pods/{id}/exec` before GPU identity inspection or worker deployment;
+the cause of that denial is unconfirmed. Neither test qualifies GPU execution
+or a remote simulation.
 
 The controller records its owned pod and queue requests under
 `${XDG_STATE_HOME:-$HOME/.local/state}/pumpModem/runpod-lab/` without the API
@@ -152,11 +177,13 @@ native-worker smoke check uses `build/dev-cli-web/datapump-worker` if available;
 build it as described below for that coverage. The fake provider and SSH tests
 do not contact RunPod or establish remote execution.
 
-The controller requires Python Tk. Its window rendered locally under Xvfb using
-temporary distribution Tk libraries; the ordinary Python environment used for
-development did not have Tk installed. That display check did not qualify a
-physical audio device or a RunPod session. The source bundle is distinct from
-the local controller and its browser assets.
+The controller requires Python Tk. Its dark-themed window rendered locally
+under Xvfb using temporary distribution Tk libraries; nine nested-X11 GUI tests
+covered masked key entry, status clipboard and catalog error/partial-load
+handling, and a real Firefox view was checked. The ordinary Python environment
+used for development did not have Tk installed. These GUI checks do not qualify
+a physical audio device or a RunPod session. The source bundle is distinct
+from the local controller and its browser assets.
 
 One local CPU test exercised the relay and native worker with a strong, simple
 link and draft `e`: it observed three DATA decisions, two scored QUIET slots,
@@ -229,6 +256,34 @@ pairs passed, followed by an independent two-test pass. An earlier timeout had
 a likely buffered test-harness read race; the revised fixture passed these
 repeats. This is transport-level evidence, not a complete-receiver or physical
 backlog-capacity result.
+
+One subsequent local physical test used the Realtek ALC257 analog `plughw`
+route and the user-connected headphone-to-microphone loopback cable. A
+preflight confirmed available ports and a physically correlated 997 Hz tone.
+With 5% transmit volume, the crystal oscillator model, 48 kHz hardware and
+6 kHz logical audio, one strict finite-duplex run decoded `e` with contiguous
+DATA `0`, `0`, `1`, QUIET, QUIET and finite completion. The roughly 380-second
+run recorded actual physical playback drain at 257.092 seconds and capture end
+at 378.623 seconds in the transport trace. It recorded 2,220 playback PCM
+packets, 187,381 capture packets and empty transport queues at the end. The
+relative-clock bound was 50 ms and the local UTC uncertainty was a provisional
+200 ms, not a certified clock measurement. The trace output's middle was
+truncated: the successful harness exit establishes its checked predicate, and
+the retained output showed the stated bit decisions; raw capture was not kept.
+The tested worker and native companion SHA-256 values were respectively
+`5b1945a37020040219b77a6622f42ef24a5156a245a397465d2f27865b723024` and
+`4cfa9fa2310dc13c710783135371886e9a4d3e031147c9e24ae5605f00565195`.
+
+An earlier default/Pulse route reported a discontinuity after contradictory
+timing observations. Before a clock-message priority change, an attempt with a
+5 ms relative bound reported that the pod/local clock difference exceeded its
+declared bound; another with a 50 ms bound failed after 209.9 seconds. The
+successful run used the same 50 ms relative bound and a 200 ms UTC bound after
+the priority change, but the earlier per-probe round trips were not retained,
+so its causal effect remains unconfirmed. One later run was interrupted with
+exit 143, which is not a success or a failed reception decision. These findings
+apply only to the tested local setup and do not establish physical-route
+reliability, sensitivity, receiver capacity, RunPod execution or GPU work.
 
 The remainder of this guide preserves the operating requirements, research
 findings and unfinished acceptance checks for the requested complete tool.

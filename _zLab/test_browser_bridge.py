@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 import json
+import os
 from pathlib import Path
+import signal
 import struct
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import urllib.error
@@ -135,6 +138,140 @@ class StartupCleanupTests(unittest.TestCase):
         self.assertTrue(children[0].stdin.closed)
         self.assertTrue(children[0].stdout.closed)
 
+    def test_setup_failure_stops_child_process_group(self):
+        script = r'''
+import os,signal,struct,sys,time
+pid=os.fork()
+if pid==0:
+    signal.signal(signal.SIGTERM,signal.SIG_IGN)
+    while True: time.sleep(1)
+sys.stdout.buffer.write(struct.pack('<I',pid)); sys.stdout.buffer.flush()
+while True: time.sleep(1)
+'''
+        real_popen = browser_bridge.subprocess.Popen
+        children, descendants = [], []
+
+        def capture(*args, **kwargs):
+            child = real_popen(*args, **kwargs)
+            children.append(child)
+            return child
+
+        def fail_after_fork(*_args):
+            ready = browser_bridge.select.select([children[0].stdout], [], [], 5)[0]
+            if not ready:
+                raise OSError('fork fixture did not start')
+            descendants.append(struct.unpack('<I', os.read(children[0].stdout.fileno(), 4))[0])
+            raise OSError('injected setup failure')
+
+        try:
+            with mock.patch.object(browser_bridge.subprocess, 'Popen', side_effect=capture), \
+                 mock.patch.object(browser_bridge.os, 'set_blocking', side_effect=fail_after_fork):
+                with self.assertRaisesRegex(OSError, 'injected setup failure'):
+                    browser_bridge.SimulationWorker([sys.executable, '-u', '-c', script])
+            self.assertIsNotNone(children[0].returncode)
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                try:
+                    state = Path(f'/proc/{descendants[0]}/stat').read_text().split(') ', 1)[1][0]
+                except FileNotFoundError:
+                    break
+                if state == 'Z':
+                    break
+                time.sleep(.02)
+            else:
+                self.fail('descendant survived failed setup')
+        finally:
+            for pid in descendants:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    def test_setup_term_failure_still_kills_and_reaps_child(self):
+        real_popen = browser_bridge.subprocess.Popen
+        real_killpg = os.killpg
+        children, signals = [], []
+
+        def capture(*args, **kwargs):
+            child = real_popen(*args, **kwargs)
+            children.append(child)
+            return child
+
+        def reject_term(pid, sig):
+            signals.append(sig)
+            if sig == signal.SIGTERM:
+                raise OSError('injected TERM failure')
+            return real_killpg(pid, sig)
+
+        with mock.patch.object(browser_bridge.subprocess, 'Popen', side_effect=capture), \
+             mock.patch.object(browser_bridge.os, 'set_blocking', side_effect=OSError('setup failed')), \
+             mock.patch.object(browser_bridge.os, 'killpg', side_effect=reject_term):
+            with self.assertRaisesRegex(OSError, 'setup failed'):
+                browser_bridge.SimulationWorker([sys.executable, '-u', '-c', PEER])
+        self.assertIn(signal.SIGTERM, signals)
+        self.assertIn(signal.SIGKILL, signals)
+        self.assertIsNotNone(children[0].returncode)
+
+    def test_setup_group_kill_failure_reports_incomplete_cleanup(self):
+        real_popen = browser_bridge.subprocess.Popen
+        real_killpg = os.killpg
+        children = []
+
+        def capture(*args, **kwargs):
+            child = real_popen(*args, **kwargs)
+            children.append(child)
+            return child
+
+        def reject_kill(pid, sig):
+            if sig == signal.SIGKILL:
+                raise OSError('injected KILL failure')
+            return real_killpg(pid, sig)
+
+        try:
+            with mock.patch.object(browser_bridge.subprocess, 'Popen', side_effect=capture), \
+                 mock.patch.object(browser_bridge.os, 'set_blocking', side_effect=OSError('setup failed')), \
+                 mock.patch.object(browser_bridge.os, 'killpg', side_effect=reject_kill):
+                with self.assertRaisesRegex(RuntimeError, 'cleanup was incomplete') as failure:
+                    browser_bridge.SimulationWorker([sys.executable, '-u', '-c', PEER])
+            self.assertIsInstance(failure.exception.__cause__, OSError)
+            self.assertIsNone(children[0].returncode)  # Group identity is retained.
+        finally:
+            if children:
+                try:
+                    real_killpg(children[0].pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                children[0].wait(timeout=2)
+
+    def test_setup_does_not_signal_reaped_group_after_wait_race(self):
+        real_popen, real_killpg = browser_bridge.subprocess.Popen, os.killpg
+        children, signals = [], []
+
+        def capture(*args, **kwargs):
+            child = real_popen(*args, **kwargs)
+            children.append(child)
+            return child
+
+        def record_signal(pid, sig):
+            signals.append(sig)
+            return real_killpg(pid, sig)
+
+        try:
+            with mock.patch.object(browser_bridge.subprocess, 'Popen', side_effect=capture), \
+                 mock.patch.object(browser_bridge.os, 'set_blocking', side_effect=OSError('setup failed')), \
+                 mock.patch.object(browser_bridge.os, 'waitid', side_effect=[None, ChildProcessError('reaped')]), \
+                 mock.patch.object(browser_bridge.os, 'killpg', side_effect=record_signal):
+                with self.assertRaisesRegex(RuntimeError, 'cleanup was incomplete'):
+                    browser_bridge.SimulationWorker([sys.executable, '-u', '-c', PEER])
+            self.assertEqual(signals, [signal.SIGTERM])
+        finally:
+            if children:
+                try:
+                    real_killpg(children[0].pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                children[0].wait(timeout=2)
+
 
 class FileImportTests(unittest.TestCase):
     def test_real_worker_import_is_scoped_and_authorized(self):
@@ -229,6 +366,200 @@ class BrowserBridgeTests(unittest.TestCase):
         self.assertEqual(struct.unpack_from('<I', self.request('/output'), 4)[0], 103)
         self.bridge.close()
         self.assertIsNotNone(worker.process.poll())
+
+    def test_lab_shell_and_shared_renderer_are_forced_dark(self):
+        # The browser host supplies this stylesheet to its sandboxed renderer.
+        # Only the lab response is changed; the maintained asset remains intact.
+        original = (Path(__file__).resolve().parent.parent / 'web/style.css').read_bytes()
+        shell = self.request('/')
+        stylesheet = self.request('/web/style.css')
+        self.assertIn(b':root { color-scheme: dark; }', shell)
+        self.assertEqual(stylesheet, original + b'\n:root { color-scheme: dark; }\n')
+        self.assertIn(b'color-scheme:light dark', original)
+        with self.assertRaises(urllib.error.HTTPError) as forbidden:
+            self.request('/web/style.css', Origin='https://evil.example')
+        self.assertEqual(forbidden.exception.code, 403)
+
+    def test_close_retries_failed_worker_cleanup(self):
+        worker = self.start_peer()
+        self.request('/output')
+        original_wait = worker.process.wait
+        calls = 0
+
+        def fail_once(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OSError('injected wait failure')
+            return original_wait(*args, **kwargs)
+
+        with mock.patch.object(worker.process, 'wait', side_effect=fail_once):
+            with self.assertRaisesRegex(OSError, 'injected wait failure'):
+                self.bridge.close()
+        # Even after an error, cleanup attempted to reap the actual child; the
+        # owner remains registered until a successful retry finishes cleanup.
+        self.assertTrue(worker._wait_without_reaping(2))
+        self.assertIs(self.bridge.server.worker, worker)
+        self.assertFalse(self.bridge._closed)
+        self.bridge.close()
+        self.assertIsNone(self.bridge.server.worker)
+        self.assertTrue(worker._close_complete)
+        self.assertTrue(self.bridge._closed)
+
+    def test_close_stops_descendant_when_leader_exited(self):
+        # The descendant inherits stdout and ignores TERM. The exited leader
+        # must remain unreaped until its process group has been stopped.
+        script = r'''
+import json,os,signal,struct,sys,time
+pid=os.fork()
+if pid==0:
+    signal.signal(signal.SIGTERM,signal.SIG_IGN)
+    while True: time.sleep(1)
+p=json.dumps({'generation':'1','ack':'0','descendant':pid}).encode()
+sys.stdout.buffer.write(b'DPW1'+struct.pack('<II',101,len(p))+p)
+sys.stdout.buffer.flush()
+os._exit(0)
+'''
+        self.bridge.close()
+        self.bridge = browser_bridge.start([sys.executable, '-u', '-c', script])
+        parts = urlsplit(self.bridge.url)
+        self.base, self.token = f'{parts.scheme}://{parts.netloc}', parts.fragment
+        worker = self.start_peer()
+        data = self.request('/output')
+        descendant = json.loads(data[12:])['descendant']
+        try:
+            self.assertTrue(worker._wait_without_reaping(3))
+            self.bridge.close()
+            self.assertIsNotNone(worker.process.returncode)
+            self.assertFalse(worker.reader.is_alive())
+            # An orphan can briefly remain a zombie until the host reaps it.
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                try:
+                    state = Path(f'/proc/{descendant}/stat').read_text().split(') ', 1)[1][0]
+                except FileNotFoundError:
+                    break
+                if state == 'Z':
+                    break
+                time.sleep(.02)
+            else:
+                self.fail('descendant remained alive after bridge close')
+        finally:
+            try:
+                os.kill(descendant, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+    def test_failed_group_signal_preserves_leader_until_retry(self):
+        worker = self.start_peer()
+        self.request('/output')
+        killpg = os.killpg
+        failed = False
+
+        def fail_once(pid, sig):
+            nonlocal failed
+            if sig == signal.SIGKILL and not failed:
+                failed = True
+                raise OSError('injected group signal failure')
+            return killpg(pid, sig)
+
+        with mock.patch.object(browser_bridge.os, 'killpg', side_effect=fail_once):
+            with self.assertRaisesRegex(OSError, 'injected group signal failure'):
+                self.bridge.close()
+        self.assertTrue(worker._wait_without_reaping(2))
+        self.assertIsNone(worker.process.returncode)
+        self.assertFalse(worker._group_stopped)
+        self.assertIs(self.bridge.server.worker, worker)
+        self.bridge.close()
+        self.assertTrue(worker._group_stopped)
+        self.assertIsNotNone(worker.process.returncode)
+
+    def test_close_does_not_signal_group_after_external_reap_race(self):
+        worker = self.start_peer()
+        self.request('/output')
+        real_killpg = os.killpg
+        signals = []
+
+        def record_signal(pid, sig):
+            signals.append(sig)
+            return real_killpg(pid, sig)
+
+        with mock.patch.object(worker, '_wait_without_reaping',
+                               side_effect=[True, ChildProcessError('reaped')]), \
+             mock.patch.object(browser_bridge.os, 'killpg', side_effect=record_signal):
+            with self.assertRaises(ChildProcessError):
+                self.bridge.close()
+        self.assertEqual(signals, [signal.SIGTERM])
+        self.assertIs(self.bridge.server.worker, worker)
+        # The injected race did not actually reap the child; retry can safely
+        # finish its group cleanup after the real waitid check.
+        self.bridge.close()
+        self.assertIsNotNone(worker.process.returncode)
+
+    def test_close_retries_shutdown_error_after_stopping_worker(self):
+        worker = self.start_peer()
+        self.request('/output')
+        shutdown = self.bridge.server.shutdown
+
+        def shutdown_then_fail():
+            shutdown()
+            raise OSError('injected shutdown failure')
+
+        with mock.patch.object(self.bridge.server, 'shutdown', side_effect=shutdown_then_fail):
+            with self.assertRaisesRegex(OSError, 'injected shutdown failure'):
+                self.bridge.close()
+        self.assertIsNotNone(worker.process.poll())
+        self.assertFalse(self.bridge._closed)
+        self.bridge.close()
+        self.assertTrue(self.bridge._closed)
+
+    def test_concurrent_close_calls_are_serialized(self):
+        worker = self.start_peer()
+        self.request('/output')
+        barrier = threading.Barrier(3)
+        failures = []
+
+        def close_bridge():
+            barrier.wait()
+            try:
+                self.bridge.close()
+            except Exception as error:
+                failures.append(error)
+
+        callers = [threading.Thread(target=close_bridge) for _ in range(2)]
+        for caller in callers:
+            caller.start()
+        barrier.wait()
+        for caller in callers:
+            caller.join(timeout=10)
+        self.assertFalse(any(caller.is_alive() for caller in callers))
+        self.assertEqual(failures, [])
+        self.assertIsNotNone(worker.process.poll())
+        self.assertTrue(self.bridge._closed)
+
+    def test_maintenance_retries_close_error(self):
+        worker = self.start_peer()
+        self.request('/output')
+        original_close = worker.close
+        calls = []
+
+        def fail_once():
+            calls.append(1)
+            if len(calls) == 1:
+                raise OSError('injected cleanup failure')
+            return original_close()
+
+        with mock.patch.object(worker, 'close', side_effect=fail_once):
+            worker.output.close('injected worker failure')
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline:
+                with self.bridge.server.owner_lock:
+                    if self.bridge.server.worker is None:
+                        break
+                time.sleep(.05)
+            self.assertGreaterEqual(len(calls), 2)
+            self.assertIsNone(self.bridge.server.worker)
+            self.assertIsNotNone(worker.process.poll())
 
     def test_authorization_and_disabled_audio(self):
         with self.assertRaises(urllib.error.HTTPError) as unauthorized:

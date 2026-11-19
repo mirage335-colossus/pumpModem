@@ -19,6 +19,46 @@ from runpod import RunPodClient, RunPodError
 IMAGE = 'runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404'
 
 
+def configure_dark_theme(root):
+    """Apply a readable dark palette to the lab's Tk and ttk controls."""
+    background, surface, field = '#20242c', '#303741', '#171b22'
+    foreground, muted = '#f0f2f5', '#bec6d1'
+    selection, border = '#365f91', '#697584'
+    root.configure(background=background)
+    root.tk_setPalette(background=background, foreground=foreground,
+                       activeBackground=surface, activeForeground=foreground,
+                       selectBackground=selection, selectForeground=foreground,
+                       disabledForeground=muted, insertBackground=foreground,
+                       highlightBackground=background, highlightColor=selection)
+    style = ttk.Style(root)
+    if 'clam' in style.theme_names():
+        style.theme_use('clam')
+    style.configure('.', background=background, foreground=foreground,
+                    fieldbackground=field, selectbackground=selection,
+                    selectforeground=foreground, insertcolor=foreground,
+                    bordercolor=border, darkcolor=background, lightcolor=surface)
+    style.configure('TFrame', background=background)
+    style.configure('TLabel', background=background, foreground=foreground)
+    style.configure('Hint.TLabel', background=background, foreground=muted)
+    style.configure('TButton', background=surface, foreground=foreground, padding=(7, 4))
+    style.map('TButton', background=[('disabled', background), ('pressed', selection),
+                                    ('active', '#414c5b')],
+              foreground=[('disabled', muted)])
+    style.configure('TEntry', fieldbackground=field, foreground=foreground,
+                    insertcolor=foreground)
+    style.map('TEntry', fieldbackground=[('disabled', surface)], foreground=[('disabled', muted)])
+    style.configure('TCombobox', fieldbackground=field, background=surface,
+                    foreground=foreground, arrowcolor=foreground, insertcolor=foreground)
+    style.map('TCombobox', fieldbackground=[('readonly', field), ('disabled', surface)],
+              foreground=[('readonly', foreground), ('disabled', muted)],
+              selectbackground=[('readonly', selection)], selectforeground=[('readonly', foreground)])
+    # The drop-down list is a Tk listbox, not a ttk widget.
+    root.option_add('*TCombobox*Listbox.background', field)
+    root.option_add('*TCombobox*Listbox.foreground', foreground)
+    root.option_add('*TCombobox*Listbox.selectBackground', selection)
+    root.option_add('*TCombobox*Listbox.selectForeground', foreground)
+
+
 def options(gpus, cpus):
     """Resolve requested device names against the current provider catalog."""
     choices = []
@@ -37,6 +77,33 @@ def options(gpus, cpus):
         except (KeyError, TypeError):
             continue
     return choices
+
+
+def load_catalog(client):
+    """Load each independent catalog so one failure cannot hide the other.
+
+    Do not include exception text in the GUI: even if the built-in client
+    sanitizes its errors, a provider or injected transport can expose a key or
+    other request data. Map status codes to fixed, actionable messages.
+    """
+    catalogs, failures = {}, []
+    for kind, fetch in (('GPU', client.list_gpus), ('CPU', client.list_cpus)):
+        try:
+            catalogs[kind] = fetch()
+        except RunPodError as error:
+            catalogs[kind] = []
+            if error.status == 403:
+                detail = 'access denied (HTTP 403); check catalog:read and account permissions'
+            elif error.status == 401:
+                detail = 'authentication rejected (HTTP 401); check the API key'
+            elif error.status == 429:
+                detail = 'rate limited (HTTP 429); try again later'
+            elif type(error.status) is int and 100 <= error.status <= 599:
+                detail = f'request failed (HTTP {error.status})'
+            else:
+                detail = 'request failed; check the connection and try again'
+            failures.append(f'{kind} catalog {detail}')
+    return options(catalogs['GPU'], catalogs['CPU']), failures
 
 
 class State:
@@ -218,6 +285,21 @@ class Ownership:
         return count, errors
 
 
+def owned_pod_details(client, record):
+    """Fetch connection details for the exact locally owned pod.
+
+    The list endpoint may omit SSH details, so connection flows must use the
+    individual pod endpoint and verify that its response matches the record.
+    """
+    pod_id, name = record.get('id'), record.get('name')
+    if not isinstance(pod_id, str) or not pod_id or not isinstance(name, str) or not name:
+        raise ValueError('The ownership record is missing a pod ID or name')
+    pod = client.get_pod(pod_id)
+    if not isinstance(pod, dict) or pod.get('id') != pod_id or pod.get('name') != name:
+        raise ValueError('RunPod pod details do not match the selected ownership record')
+    return pod
+
+
 def simulation_gpu(record, pod):
     kind, expected = record.get('compute_kind'), record.get('compute_id')
     if kind == 'gpu':
@@ -393,8 +475,10 @@ def live_command(remote, binary, device, capture_bytes, playback_bytes, capture_
 class App:
     def __init__(self, root):
         self.root, self.state, self.choices = root, State(), []
+        configure_dark_theme(root)
         self.busy = False
         self.bridge = None
+        self.closing_bridge = False
         self.deploying = False
         self.enumerating = False
         self.devices = {}
@@ -437,9 +521,18 @@ class App:
         ttk.Button(box, text='Reconcile owned pods', command=self.reconcile).grid(row=4, column=1, sticky='w')
         ttk.Button(box, text='Terminate selected pod', command=self.terminate).grid(row=4, column=2)
         ttk.Button(box, text='Show selected pod details', command=self.details).grid(row=1, column=2)
-        self.list = tk.Listbox(box, height=8, exportselection=False)
+        self.list = tk.Listbox(box, height=8, exportselection=False,
+                               background='#171b22', foreground='#f0f2f5',
+                               selectbackground='#365f91', selectforeground='#f0f2f5',
+                               highlightbackground='#697584', highlightcolor='#365f91')
         self.list.grid(row=5, column=0, columnspan=3, sticky='nsew', pady=8)
-        ttk.Label(box, textvariable=self.status, wraplength=760).grid(row=6, column=0, columnspan=3, sticky='w')
+        status_box = ttk.Frame(box)
+        status_box.grid(row=6, column=0, columnspan=3, sticky='ew')
+        self.status_label = ttk.Label(status_box, textvariable=self.status, wraplength=760)
+        self.status_label.pack(anchor='w')
+        self.status_label.bind('<Double-Button-1>', self.copy_status)
+        ttk.Label(status_box, text='Double-click the status message to copy it.',
+                  style='Hint.TLabel').pack(anchor='w')
         ttk.Button(box, text='Open selected worker', command=self.open_simulation).grid(row=7, column=0, sticky='w')
         ttk.Button(box, text='Forget verified closed record', command=self.forget).grid(row=7, column=1, sticky='w')
         ttk.Button(box, text='Deploy worker to selected pod', command=self.deploy_worker).grid(row=7, column=2, sticky='w')
@@ -452,6 +545,7 @@ class App:
         ttk.Entry(box, textvariable=self.files).grid(row=12, column=1, sticky='ew')
         ttk.Label(box, text='Selected files, including modem keys, are sent to the pod.', wraplength=760).grid(row=13, column=0, columnspan=3, sticky='w')
         ttk.Button(box, text='Show deployment receipt', command=lambda: messagebox.showinfo('Deployment receipt', self.deployment_receipt.get() or 'No receipt available.')).grid(row=14, column=0, sticky='w')
+        ttk.Button(box, text='Close worker session', command=self.close_bridge).grid(row=14, column=1, sticky='w')
         ttk.Label(box, text='Worker profile').grid(row=20, column=0, sticky='w')
         ttk.Combobox(box, textvariable=self.profile, values=('simulation', 'live'), state='readonly').grid(row=20, column=1, sticky='ew')
         ttk.Button(box, text='Configure live audio limits', command=self.audio_settings).grid(row=20, column=2)
@@ -460,6 +554,17 @@ class App:
         self.refresh()
         self.key.trace_add('write', lambda *_: self.root.after_idle(self.enforce_deadlines))
         self.root.after(15000, self.deadline_tick)
+
+    def copy_status(self, _event=None):
+        """Copy exactly the visible status text, never other form fields."""
+        message = self.status.get()
+        if not message:
+            return
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(message)
+        except tk.TclError:
+            self.status.set('Could not copy the status message to the clipboard.')
 
     def deadline_tick(self):
         self.enforce_deadlines()
@@ -478,12 +583,20 @@ class App:
                             ('; '.join(result[1]) if result[1] else 'Verify status in RunPod.')))
 
     def refresh(self):
+        selected = self.list.curselection()
+        previous = getattr(self, 'records', [])
+        name = (previous[selected[0]].get('name')
+                if selected and selected[0] < len(previous) else None)
         self.records = self.state.read()
         self.list.delete(0, 'end')
-        for r in self.records:
+        for index, r in enumerate(self.records):
             deadline = r.get('deadline')
             when = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(deadline)) if isinstance(deadline, (int, float)) else 'not set'
             self.list.insert('end', f"{r.get('name')} | {r.get('id') or 'ID unknown'} | {r.get('status')} | deadline {when}")
+            if name is not None and r.get('name') == name:
+                self.list.selection_set(index)
+                self.list.activate(index)
+                self.list.see(index)
 
     def background(self, fn, done):
         if self.busy:
@@ -513,11 +626,19 @@ class App:
 
     def catalog(self):
         def done(result):
-            self.choices = result
-            self.dropdown['values'] = [label for label, _ in result]
-            self.compute.set(result[0][0] if result else '')
-            self.status.set('Catalog loaded; availability and actual hardware are not yet verified.')
-        self.background(lambda c: options(c.list_gpus(), c.list_cpus()), done)
+            choices, failures = result
+            self.choices = choices
+            self.dropdown['values'] = [label for label, _ in choices]
+            self.compute.set(choices[0][0] if choices else '')
+            if failures:
+                prefix = 'Catalog partially loaded. ' if len(failures) == 1 else 'Catalog unavailable. '
+                self.status.set(prefix + '; '.join(failures) +
+                                ('. Availability and actual hardware are not yet verified.' if choices else '.'))
+            elif not choices:
+                self.status.set('Catalog loaded, but no supported GPU or 32-vCPU/128-GB CPU choices were found.')
+            else:
+                self.status.set('Catalog loaded; availability and actual hardware are not yet verified.')
+        self.background(load_catalog, done)
 
     def create(self):
         selected = next((value for label, value in self.choices if label == self.compute.get()), None)
@@ -543,12 +664,43 @@ class App:
                         lambda _: self.status.set('Ownership status refreshed; verify unresolved or queued pods in the RunPod console.'))
 
     def close(self):
-        if self.busy or self.deploying or self.enumerating:
+        if self.busy or self.deploying or self.enumerating or self.closing_bridge:
             self.status.set('Wait for the current provider request or bounded deployment to finish before closing.')
             return
         if self.bridge:
             self.bridge.close()
         self.root.destroy()
+
+    def close_bridge(self):
+        """Release the local bridge without affecting pod ownership or billing."""
+        if self.busy:
+            self.status.set('Wait for the current provider request before closing the worker session.')
+            return
+        if self.closing_bridge:
+            self.status.set('The worker session is already closing.')
+            return
+        bridge = self.bridge
+        if bridge is None:
+            self.status.set('No worker session is open. Pod resources were not changed.')
+            return
+        self.closing_bridge = True
+        self.status.set('Closing the worker session. The pod may continue to incur charges.')
+        def work():
+            try:
+                bridge.close()
+                error = False
+            except Exception:
+                error = True
+            self.root.after(0, lambda: finish(error))
+        def finish(error):
+            self.closing_bridge = False
+            if error:
+                self.status.set('Could not close the worker session. Retry or inspect the connection; pod charges may continue.')
+            else:
+                if self.bridge is bridge:
+                    self.bridge = None
+                self.status.set('Worker session closed. The pod remains active; terminate it when finished.')
+        threading.Thread(target=work, daemon=True).start()
 
     def forget(self):
         if self.busy:
@@ -603,10 +755,11 @@ class App:
                 self.deployment_receipt.set(receipt)
                 self.status.set(result)
             threading.Thread(target=work, daemon=True).start()
-        self.background(lambda c: c.get_pod(record['id']), launch)
+        self.background(lambda c: owned_pod_details(c, record), launch)
 
     def audio_settings(self):
         window = tk.Toplevel(self.root)
+        window.configure(background='#20242c')
         window.title('Experimental live audio limits')
         ttk.Label(window, text='Local companion executable').grid(row=0, column=0, sticky='w')
         ttk.Entry(window, textvariable=self.audio_binary, width=60).grid(row=0, column=1, sticky='ew')
@@ -649,15 +802,17 @@ class App:
         ttk.Button(window, text='Close', command=window.destroy).grid(row=end+1, column=1, sticky='e')
 
     def open_simulation(self):
+        if self.closing_bridge:
+            self.status.set('Wait for the worker session to finish closing.')
+            return
         idx = self.list.curselection()
         if not idx or not self.records[idx[0]].get('id'):
             self.status.set('Select an owned pod with a known ID.')
             return
         if self.bridge:
-            self.status.set('A simulation bridge is already open; close and reopen the controller to replace it.')
+            self.status.set('A worker session is already open; use Close worker session before opening another.')
             return
         record = dict(self.records[idx[0]])
-        pod_id = record['id']
         known_hosts, identity, files = self.known_hosts.get(), self.identity.get(), self.files.get()
         profile = self.profile.get()
         settings = (self.audio_binary.get(), self.devices.get(self.audio_device.get(), self.audio_device.get()), self.capture_bytes.get(), self.playback_bytes.get(), self.capture_frames.get(), self.playback_prebuffer.get(), self.local_utc_uncertainty.get(), self.max_clock_offset.get(), self.remote_clock_drift_ppm.get())
@@ -674,19 +829,19 @@ class App:
                 self.status.set('Live bridge opened. Local CPU fake-device holdout confirmed completion; physical audio and RunPod GPU remain unqualified.' if live else 'Simulation bridge opened. The remote worker must be deployed and its SSH host key preverified.')
             except Exception as exc:
                 self.status.set(str(exc))
-        self.background(lambda c: c.get_pod(pod_id), done)
+        self.background(lambda c: owned_pod_details(c, record), done)
 
     def details(self):
         idx = self.list.curselection()
         if not idx or not self.records[idx[0]].get('id'):
             self.status.set('Select an owned pod with a known ID.')
             return
-        pod_id = self.records[idx[0]]['id']
+        record = dict(self.records[idx[0]])
         def show(pod):
             # Show provider fields as text; never execute a returned command.
             messagebox.showinfo('RunPod details', json.dumps(pod, indent=2))
             self.status.set('Pod details loaded. SSH host identity must be verified separately.')
-        self.background(lambda c: c.get_pod(pod_id), show)
+        self.background(lambda c: owned_pod_details(c, record), show)
 
     def terminate(self):
         idx = self.list.curselection()
@@ -702,8 +857,17 @@ class App:
 def main():
     import fcntl
     global tk, ttk, messagebox
-    import tkinter as tk
-    from tkinter import ttk, messagebox
+    try:
+        import tkinter as tk
+        from tkinter import ttk, messagebox
+    except ModuleNotFoundError as error:
+        if error.name not in ('tkinter', '_tkinter'):
+            raise
+        raise SystemExit(
+            'RunPod Lab requires Python Tk. On Debian or Ubuntu, install it with '
+            '`sudo apt install python3-tk`, then run the app again. For a custom '
+            'Python interpreter, install its matching Tk support.'
+        ) from error
     state = State()
     state.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     lock = open(state.path.parent / 'gui.lock', 'a')

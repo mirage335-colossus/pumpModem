@@ -1,4 +1,6 @@
 #include "remote.hpp"
+#include "worker_schedule.hpp"
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -146,7 +148,29 @@ void test_wire(){
     m.pcm[0]=std::numeric_limits<float>::quiet_NaN();bool rejected=false;
     try{(void)aw::encode(m);}catch(const Error&){rejected=true;}require(rejected,"nonfinite PCM admitted");
 }
+void test_output_scheduling(){
+    const std::array<std::byte,12> clock{std::byte{'D'},std::byte{'P'},std::byte{'W'},std::byte{'1'},std::byte{108}};
+    require(is_clock_reply(clock),"clock reply not identified");
+    require(!is_clock_reply(std::span(clock).first(11)),"short frame identified as clock reply");
+    auto other=clock;other[4]=std::byte{107};require(!is_clock_reply(other),"other output identified as clock reply");
+    other=clock;other[5]=std::byte{1};require(!is_clock_reply(other),"invalid clock type identified");
+    // A frame already started always finishes before the other source.
+    require(select_audio(true,true,false,true,0),"partly written audio was interrupted");
+    require(!select_audio(true,false,true,false,0),"partly written runtime frame was interrupted");
+    require(!select_audio(true,false,false,true,0),"clock reply starved by queued audio");
+    require(select_audio(true,false,false,true,4),"clock traffic starved queued audio");
+    require(select_audio(true,false,false,false,0),"ordinary runtime output starved audio");
+    require(!select_audio(false,false,false,true,4),"missing audio selected");
+    // Saturate both sources for 1,000 decisions. Each run of clocks has an
+    // audio frame within four clock frames, while every clock makes progress.
+    unsigned clocks=0, samples=0, burst=0;
+    for(unsigned i=0;i<1000;++i){
+        if(select_audio(true,false,false,true,burst)){++samples;burst=0;}
+        else {++clocks;++burst;require(burst<=4,"clock fairness exceeded");}
+    }
+    require(clocks==800 && samples==200,"saturated output made unequal progress");
 }
-int main(){try{test_wire();test_capture();test_playback();test_backpressure();test_fragmented_capture_backpressure();test_scheduled_credit_stall();
+}
+int main(){try{test_wire();test_output_scheduling();test_capture();test_playback();test_backpressure();test_fragmented_capture_backpressure();test_scheduled_credit_stall();
 std::cout<<"Lab remote audio wire, capture, playback and duplex backpressure passed\n";return 0;}
 catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

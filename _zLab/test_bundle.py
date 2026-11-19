@@ -21,7 +21,7 @@ class BundleTest(unittest.TestCase):
                 names = {m.name for m in members}
                 self.assertIn('_zLab/worker_relay.py', names)
                 for name in ('inject.cmake', 'protocol.hpp', 'remote.hpp', 'remote.cpp',
-                             'provider.cpp', 'worker.cpp', 'local.hpp', 'local.cpp',
+                             'provider.cpp', 'worker.cpp', 'worker_schedule.hpp', 'local.hpp', 'local.cpp',
                              'local_native.cpp', 'local_main.cpp'):
                     self.assertIn('_zLab/audio/' + name, names)
                 self.assertNotIn('_zLab/audio/test_remote.cpp', names)
