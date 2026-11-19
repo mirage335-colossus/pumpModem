@@ -338,13 +338,73 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                 modes = positive_int(bulk.get("opencl_nvfp4_fine_modes", 0), "OpenCL NVFP4 modes", allow_zero=True)
                 native_blocks = positive_int(bulk.get("opencl_nvfp4_native_blocks", 0),
                                              "OpenCL projection native blocks", allow_zero=True)
-                if (fine_request not in ("automatic", "native", "nvfp4") or bool(batches) != bool(modes)
+                resident_batches = positive_int(bulk.get("opencl_resident_fine_batches", 0),
+                                                "OpenCL resident batches", allow_zero=True)
+                resident_pairs = positive_int(bulk.get("opencl_resident_fine_pairs", 0),
+                                               "OpenCL resident pairs", allow_zero=True)
+                resident_nvfp4 = positive_int(bulk.get("opencl_resident_nvfp4_modes", 0),
+                                               "OpenCL resident NVFP4 modes", allow_zero=True)
+                resident_fft = positive_int(bulk.get("opencl_resident_fft_modes", 0),
+                                             "OpenCL resident FFT modes", allow_zero=True)
+                resident_upload = positive_int(bulk.get("opencl_resident_upload_bytes", 0),
+                                                "OpenCL resident upload bytes", allow_zero=True)
+                resident_download = positive_int(bulk.get("opencl_resident_download_bytes", 0),
+                                                  "OpenCL resident download bytes", allow_zero=True)
+                resident_direct = positive_int(bulk.get("opencl_resident_direct_columns", 0),
+                                                "OpenCL resident direct columns", allow_zero=True)
+                resident_dispatches = positive_int(bulk.get("opencl_resident_dispatches", 0),
+                                                    "OpenCL resident dispatches", allow_zero=True)
+                resident_map_dispatches = positive_int(bulk.get("opencl_resident_mapping_dispatches", 0),
+                                                        "OpenCL resident mapping dispatches", allow_zero=True)
+                resident_writes = positive_int(bulk.get("opencl_resident_blocking_writes", 0),
+                                                "OpenCL resident blocking writes", allow_zero=True)
+                measured = command not in ("describe", "plan", "codec")
+                if (fine_request not in ("automatic", "native", "nvfp4", "resident-nvfp4", "resident-fft")
+                        or bool(batches) != bool(modes)
                         or modes < batches or pinned > batches
                         or (modes and (bulk["vulkan_vendor_id"] != 0x10de or fine_request == "native"))
-                        or (command not in ("describe", "plan", "codec") and fine_request == "nvfp4" and not modes)):
+                        or (measured and fine_request == "nvfp4" and not modes)):
                     raise ProbeError("Vulkan receipt does not identify actual OpenCL NVFP4 work")
-                if modes:
-                    actual = actual.removesuffix("_and_fine") + "_opencl_nvfp4_fine_projection"
+                resident_modes = resident_nvfp4 + resident_fft
+                automatic_resident = fine_request == "automatic" and backend == "gpu"
+                fp4_resident_only = resident_nvfp4 or fine_request == "resident-nvfp4"
+                if (resident_pairs > resident_batches
+                        or (fp4_resident_only and (resident_nvfp4 != modes or resident_batches != batches or pinned))
+                        or (resident_nvfp4 and not (automatic_resident or fine_request == "resident-nvfp4"))
+                        or (resident_fft and (bulk["vulkan_vendor_id"] != 0x10de or fine_request != "resident-fft"))
+                        or (fine_request == "resident-fft" and modes)
+                        or bool(resident_batches) != bool(resident_modes)
+                        or bool(resident_batches) != bool(resident_upload)
+                        or bool(resident_batches) != bool(resident_download)
+                        or bool(resident_batches) != bool(resident_dispatches)
+                        or bool(resident_batches) != bool(resident_writes)
+                        or resident_map_dispatches > resident_dispatches
+                        or (resident_direct and not resident_batches)
+                        or (measured and fine_request == "resident-nvfp4" and not resident_nvfp4)
+                        or (measured and fine_request == "resident-fft" and not resident_fft)):
+                    raise ProbeError("Vulkan receipt does not identify actual resident OpenCL fine work")
+                if resident_modes:
+                    # Four DATA template lanes and 47 retained modes per state.
+                    # Readback carries 11 complex double values per state.
+                    states, partial = divmod(resident_modes, 4 * 47)
+                    blocks = resident_batches + resident_pairs
+                    if (partial or not blocks <= states <= 72 * blocks
+                            or resident_direct > 4 * states or resident_download != 11 * 16 * states
+                            or resident_dispatches < resident_batches * (4 if resident_nvfp4 else 3)
+                            or resident_writes < resident_batches
+                            or states > positive_int(bulk.get("statistics_blocks"), "OpenCL statistics blocks")
+                            or resident_modes > positive_int(bulk.get("projected_values"), "OpenCL projected values")
+                            or resident_upload > positive_int(bulk.get("upload_bytes"), "backend uploaded bytes")
+                            or resident_download > positive_int(bulk.get("download_bytes"), "backend downloaded bytes")):
+                        raise ProbeError("Vulkan receipt does not cover the resident OpenCL fine batch")
+                if modes or resident_fft:
+                    actual = actual.removesuffix("_and_fine")
+                    if resident_nvfp4:
+                        actual += "_opencl_resident_nvfp4_fine"
+                    if resident_fft:
+                        actual += "_opencl_resident_fft_fine"
+                    if modes and not resident_nvfp4:
+                        actual += "_opencl_nvfp4_fine_projection"
                     if native_blocks or bulk.get("native_fine_sessions", 0):
                         actual += "_mixed_native_fine"
                 if total and bulk["precision"] != actual and not (

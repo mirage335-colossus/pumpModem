@@ -68,25 +68,39 @@ statistics have been read back. See the
 [Blackwell qualification](validation.md#blackwell-nvfp4-fine-projection--19-november-2026).
 
 On the filtered RunPod worker, Vulkan and OpenCL use the same NVIDIA device and
-workspace ceiling. Native fine projection is faster with a full host worker
-allocation on the measured broad 3.6 Hz case. Automatic OpenCL NVFP4 is eligible
-for the qualified isolated 1,500-row, 47-mode, two-tap blocks when the admitted
-fine owner has at most four software lanes. This leaves the complete receiver
-worker budget unchanged. Wider owner allocation retains the faster native
-projection in that geometry. `--vulkan-fine-projection nvfp4` forces the
-projection in a supported developer-probe run and checks for executed work.
+workspace ceiling. Automatic mode uses resident OpenCL NVFP4 for the qualified
+isolated 1,500-row, 47-mode, two-tap blocks when the admitted fine owner has
+at most four software lanes. It keeps the full receiver worker budget. The
+receiver uses native projection for nonmatching geometry or unavailable
+device workspace. At 24 workers, resident FP4 improved the stable slot's
+fine service but lost to native fine processing on the severe and quiet
+fixtures. Wider owner allocations currently use native fine projection.
+The crossover between the measured allocations remains open.
+`--vulkan-fine-projection nvfp4` explicitly requests the earlier staged
+projection and checks for executed work.
+
+The developer probe can also select `--vulkan-fine-projection resident-nvfp4`
+or `resident-fft` for the same isolated geometry. Both retain mapped DATA
+tiles and the intermediate projection on the device. They combine up to two
+already-prepared observation blocks while the native receiver still advances
+its state in public slot order. Resident NVFP4 uses per-template component
+peaks to scale the block-scaled E2M1 contraction. The FFT control computes a
+1,500-point FP32 transform and gathers the same 47 unitary modes. Both use
+FP64 correlation and Gram accumulation and return compact sufficient
+statistics to the receiver. Nonmatching blocks stay native. The probes
+require an execution receipt for the requested route.
+[Resident comparison](triad-gpu-optimization.md#resident-mapping-and-paired-fine-statistics).
 
 Choose scales after Helper/DATA isolation. For time-series signal samples,
 consider a scale estimated from recent representative intervals, with a
-measured response to gain changes and a recorded out-of-range fallback. For
-mapped DATA templates, the worker already materializes every sample, so it
-computes the exact C64 peak in the same pass as the cast and stages it in the
-same transfer. This removes a separate full device read and reduction without
-estimating a template's scale from receiver I/Q. The normal preparation leaves
-write directly into a reusable mapped host allocation where the driver provides
-one. The pageable fallback and retained allocation are both included in the
-workspace quote. Profile overlap under the full worker budget and include any
-extra buffers in admission.
+measured response to gain changes and a recorded out-of-range fallback.
+For mapped DATA templates, the scale follows the mapped waveform itself.
+The resident route reduces the C64 component peak on the device. The
+staged control measures that peak in the host cast pass and writes directly
+into a reusable mapped allocation where the driver provides one. The
+pageable fallback and retained allocation are included in the workspace
+quote. Profile overlap under the full worker budget and include any extra
+buffers in admission.
 
 Apply these rules to automatic selection and new optimization work:
 

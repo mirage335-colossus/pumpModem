@@ -1,6 +1,7 @@
 #include "triad_receiver_fine.hpp"
 #include "triad_receiver_executor.hpp"
 #include "triad_gaussian_kernel.hpp"
+#include "triad_mapped_kernel.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -1919,10 +1920,16 @@ void incomplete_bulk_cannot_publish_quiet(FineLanes lanes) {
     }
 }
 
+enum class ResidentAction {
+    unavailable, execute, wrong_order, missing_mapping, missing_statistics, missing_work, fail_second
+};
+
 struct HostProjectionWitness {
     std::vector<std::size_t> batch_lanes;
+    std::vector<std::size_t> resident_batch_blocks;
     std::size_t device_blocks = 0, native_blocks = 0, completed_blocks = 0;
     bool fail_second_batch = false;
+    ResidentAction resident = ResidentAction::unavailable;
 };
 
 class HostProjectionBulk final : public FineBulk {
@@ -1939,6 +1946,41 @@ public:
 
     std::size_t host_projection_capacity() const noexcept override { return capacity; }
     bool host_projection_stages_peaks() const noexcept override { return true; }
+
+    bool supports_resident_statistics(const FineBulkBlock& block) const noexcept override {
+        return witness_->resident != ResidentAction::unavailable && block.rows == 60;
+    }
+
+    bool resident_statistics(std::span<const FineResidentBlock> blocks, std::size_t candidates,
+                             std::stop_token) override {
+        const auto action = witness_->resident;
+        witness_->resident_batch_blocks.push_back(blocks.size());
+        std::size_t modes = 0;
+        for (std::size_t index = 0; index < blocks.size(); ++index) {
+            const auto& [block, source, output] = blocks[index];
+            check(supports_resident_statistics(block) && output.size() == candidates,
+                  "resident packets must contain compatible public blocks");
+            if (index == 1 && action == ResidentAction::fail_second)
+                throw Error("injected second resident block failure");
+            if (index == 1 && action == ResidentAction::wrong_order)
+                source(1, 0, block.rows, [](auto, auto, auto) {});
+            for (std::size_t candidate = 0; candidate < candidates; ++candidate) {
+                if (index == 1 && candidate + 1 == candidates && action == ResidentAction::missing_mapping) {
+                    output[candidate] = {};
+                    continue;
+                }
+                const auto statistics = mapped_statistics(block, source, candidate);
+                if (index == 0 || candidate + 1 != candidates || action != ResidentAction::missing_statistics)
+                    output[candidate] = statistics;
+            }
+            modes += candidates * 2 * block.taps * block.projection_indices.size();
+        }
+        witness_->completed_blocks += blocks.size();
+        work_.executed = true;
+        work_.statistics_blocks += (blocks.size() - (action == ResidentAction::missing_work)) * candidates;
+        work_.projected_values += modes;
+        return true;
+    }
 
     bool begin_host_projection(const FineBulkBlock& block, std::stop_token) override {
         rows_ = block.rows;
@@ -1973,18 +2015,7 @@ public:
         witness_->batch_lanes.push_back(lanes);
         if (witness_->fail_second_batch && witness_->batch_lanes.size() == 2)
             throw Error("injected host projection failure");
-        const auto normalizer = 1 / std::sqrt(static_cast<double>(rows_));
-        for (std::size_t bin = 0; bin < bins_.size(); ++bin) {
-            const auto step = std::polar(1., -2 * std::numbers::pi * bins_[bin] / rows_);
-            for (std::size_t lane = 0; lane < lanes; ++lane) {
-                Complex sum{}, phase = 1;
-                for (const auto value : input.subspan(lane * stride, rows_)) {
-                    sum += Complex(value) * phase;
-                    phase *= step;
-                }
-                output[lane * bins_.size() + bin] = std::complex<float>(sum * normalizer);
-            }
-        }
+        project(input, output, rows_, stride, lanes, bins_);
     }
 
     void complete_host_statistics(std::size_t candidates, std::size_t projected) override {
@@ -1997,6 +2028,64 @@ public:
     BulkReceipt receipt() const override { return work_; }
 
 private:
+    static void project(std::span<const std::complex<float>> input, std::span<std::complex<float>> output,
+                        std::size_t rows, std::size_t stride, std::size_t lanes,
+                        std::span<const std::size_t> bins) {
+        const auto normalizer = 1 / std::sqrt(static_cast<double>(rows));
+        for (std::size_t bin = 0; bin < bins.size(); ++bin) {
+            const auto step = std::polar(1., -2 * std::numbers::pi * bins[bin] / rows);
+            for (std::size_t lane = 0; lane < lanes; ++lane) {
+                Complex sum{}, phase = 1;
+                for (const auto value : input.subspan(lane * stride, rows)) {
+                    sum += Complex(value) * phase;
+                    phase *= step;
+                }
+                output[lane * bins.size() + bin] = std::complex<float>(sum * normalizer);
+            }
+        }
+    }
+
+    static FineBulkStatistics mapped_statistics(const FineBulkBlock& block, const FineMappingSource& source,
+                                                std::size_t candidate) {
+        const auto lanes = 2 * block.taps;
+        std::vector<Complex> rendered(lanes * block.rows);
+        source(candidate, 0, block.rows, [&](auto offsets, auto mapped, auto direct) {
+            for (const auto& column : mapped) {
+                std::vector<const double*> tiles;
+                for (const auto& tile : column.tiles)
+                    tiles.push_back(reinterpret_cast<const double*>(tile.samples.data()));
+                const TriadMappedRow map{column.fraction, column.scale, column.phase, column.phase_step,
+                    column.origin, tiles.size(), tiles.data(),
+                    reinterpret_cast<double*>(rendered.data() + column.output_column * block.rows)};
+                triad_render_mapped_v1(&map, 1, offsets.data(), offsets.size(), column.tiles.front().samples.size());
+            }
+            for (const auto& column : direct)
+                std::ranges::copy(column.samples, rendered.begin() + column.output_column * block.rows);
+        });
+        FineBulkStatistics output;
+        output.nonzero_basis = std::ranges::any_of(rendered, [](Complex value) { return value != Complex{}; });
+        const std::vector<std::complex<float>> samples(rendered.begin(), rendered.end());
+        const auto modes = block.projection_indices.size();
+        std::vector<std::complex<float>> projected(lanes * modes);
+        project(samples, projected, block.rows, block.rows, lanes, block.projection_indices);
+        for (std::size_t bit = 0; bit < 2; ++bit) {
+            for (std::size_t tap = 0; tap < block.taps; ++tap) {
+                const auto a = std::span(projected).subspan((bit * block.taps + tap) * modes, modes);
+                auto& corr = output.correlations[(bit + 1) * block.taps + tap];
+                for (std::size_t mode = 0; mode < modes; ++mode)
+                    corr += std::conj(Complex(a[mode])) * block.projected_y[mode];
+                corr /= block.variance;
+                for (std::size_t other = 0; other < block.taps; ++other) {
+                    const auto b = std::span(projected).subspan((bit * block.taps + other) * modes, modes);
+                    auto& gram = output.gram[((bit + 1) * block.taps + tap) * block.taps + other];
+                    for (std::size_t mode = 0; mode < modes; ++mode)
+                        gram += std::conj(Complex(a[mode])) * Complex(b[mode]);
+                    gram /= block.variance;
+                }
+            }
+        }
+        return output;
+    }
     std::shared_ptr<HostProjectionWitness> witness_;
     std::vector<std::complex<float>> staging_;
     std::span<const std::size_t> bins_;
@@ -2024,7 +2113,7 @@ private:
     std::shared_ptr<HostProjectionWitness> witness_;
 };
 
-void host_mapped_projection_scheduler() {
+void host_mapped_projection_scheduler(bool resident) {
     const Fixture f(240, 60);
     const FineObservation extent{f.slot.first_sample, f.iq.size(), FineRunKind::operational, true};
     constexpr unsigned workers = 3;
@@ -2038,6 +2127,7 @@ void host_mapped_projection_scheduler() {
     const auto expected_work = native.progress();
 
     const auto witness = std::make_shared<HostProjectionWitness>();
+    if (resident) witness->resident = ResidentAction::execute;
     config.bulk_backend = std::make_shared<HostProjectionBackend>(witness);
     FineSession mixed(config, f.slot, f.key, extent, f.iq, {}, f.coordinates, 100, 0, workers,
                       fine_workspace(config, f.slot, extent, workers));
@@ -2046,12 +2136,25 @@ void host_mapped_projection_scheduler() {
     ReceiverSlotScore actual;
     mixed.finish(actual);
     const auto work = mixed.progress();
-    check(witness->device_blocks > 1 && witness->native_blocks == 1 &&
-          witness->completed_blocks == work.blocks && witness->batch_lanes.size() == 2 * witness->device_blocks,
-          "host projector must score regular dispatches and the enlarged native terminal block once");
-    for (std::size_t i = 0; i < witness->batch_lanes.size(); i += 2)
-        check(witness->batch_lanes[i] == 8 && witness->batch_lanes[i + 1] == 4,
-              "three two-tap candidates must use one full batch and one partial batch");
+    check(witness->native_blocks == 1 && witness->completed_blocks == work.blocks,
+          "regular dispatches and the enlarged native terminal block must be scored once");
+    if (resident) {
+        const auto& batches = witness->resident_batch_blocks;
+        check(batches.size() > 1 && batches.back() == 1 &&
+              std::ranges::all_of(std::span(batches).first(batches.size() - 1),
+                  [](auto count) { return count == 2; }) &&
+              std::accumulate(batches.begin(), batches.end(), std::size_t{1}) == work.blocks &&
+              work.cache.prepared_calls == (work.blocks - 1) * work.initial_affine.initial_states &&
+              work.cache.prepared_mapped_columns > 0 &&
+              witness->batch_lanes.empty(),
+              "regular blocks must be paired and the final eligible block dispatched alone before the native tail");
+    } else {
+        check(witness->device_blocks > 1 && witness->batch_lanes.size() == 2 * witness->device_blocks,
+              "the host projector must process every regular public block");
+        for (std::size_t i = 0; i < witness->batch_lanes.size(); i += 2)
+            check(witness->batch_lanes[i] == 8 && witness->batch_lanes[i + 1] == 4,
+                  "three two-tap candidates must use one full batch and one partial batch");
+    }
     check(actual.complete && expected.complete && actual.consumed_samples == extent.rows &&
           actual.quiet_modes == expected.quiet_modes && actual.quiet_energy == expected.quiet_energy &&
           actual.zero_h0_verified && actual.basis_rows == expected.basis_rows &&
@@ -2065,9 +2168,10 @@ void host_mapped_projection_scheduler() {
     for (std::size_t bit = 0; bit < 2; ++bit) {
         const auto score = expected.bit_evidence[bit];
         check(std::abs(actual.bit_evidence[bit] - score) <= 1e-5 * std::max(1., std::abs(score)),
-              "the bounded float host tensors must preserve the native reference likelihood");
+              "the bounded float templates must preserve the native reference likelihood");
     }
 
+    if (resident) return;
     const auto failure = std::make_shared<HostProjectionWitness>();
     failure->fail_second_batch = true;
     config.bulk_backend = std::make_shared<HostProjectionBackend>(failure);
@@ -2081,6 +2185,35 @@ void host_mapped_projection_scheduler() {
     ReceiverSlotScore incomplete;
     rejects([&] { failed.finish(incomplete); }, "partial host projection must not finish a slot");
     check(!incomplete.complete, "host projection failure must not credit physical completion");
+}
+
+void incomplete_resident_pair_cannot_publish_quiet() {
+    const Fixture f(240, 60);
+    const FineObservation extent{f.slot.first_sample, f.iq.size(), FineRunKind::operational, true};
+    const std::vector<Complex> noise_free(extent.rows);
+    for (const auto [action, message] : std::array{
+        std::pair{ResidentAction::wrong_order, "requested an invalid public block"},
+        std::pair{ResidentAction::missing_mapping, "did not map its complete public block"},
+        std::pair{ResidentAction::missing_statistics, "finite complete sufficient statistics"},
+        std::pair{ResidentAction::missing_work, "did not execute its complete public statistics work"},
+        std::pair{ResidentAction::fail_second, "injected second resident block failure"}}) {
+        auto config = f.config;
+        config.spread_delay_seconds = .021;
+        auto witness = std::make_shared<HostProjectionWitness>();
+        witness->resident = action;
+        config.bulk_backend = std::make_shared<HostProjectionBackend>(witness);
+        FineSession session(config, f.slot, f.key, extent, noise_free, {}, f.coordinates,
+                            100, 0, 1, fine_workspace(config, f.slot, extent, 1));
+        rejects_with([&] { session.advance_to(f.fs / 2); }, message,
+                     "a partial resident pair must retain its initiating error");
+        check(witness->resident_batch_blocks == std::vector<std::size_t>{2} && witness->batch_lanes.empty(),
+              "a failed pair must never retry the partial work through host projection");
+        rejects([&] { (void)session.progress(); }, "a failed resident pair must not publish progress");
+        ReceiverSlotScore score;
+        rejects([&] { session.finish(score); }, "a failed resident pair must not finish a slot");
+        check(!score.complete && score.decision == SlotDecision::ambiguous,
+              "a failed resident pair must not provide scored quiet");
+    }
 }
 } // namespace
 
@@ -2114,7 +2247,9 @@ int main() {
         added_epoch_track_keeps_prior_mass_and_work();
         incomplete_bulk_cannot_publish_quiet(FineLanes::fixed_affine);
         incomplete_bulk_cannot_publish_quiet(FineLanes::fixed_and_adaptive);
-        host_mapped_projection_scheduler();
+        host_mapped_projection_scheduler(false);
+        host_mapped_projection_scheduler(true);
+        incomplete_resident_pair_cannot_publish_quiet();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

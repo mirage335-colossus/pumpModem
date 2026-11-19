@@ -2,6 +2,7 @@
 
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <stop_token>
@@ -14,6 +15,18 @@ struct OpenClNvfp4Workspace {
     std::size_t device_bytes = 0;
 };
 
+enum class OpenClFineMethod { staged, resident_fp4, resident_fft };
+
+struct FineResidentBlock;
+
+struct OpenClResidentWork {
+    std::uint64_t upload_bytes = 0, download_bytes = 0;
+    std::uint64_t uploaded_tiles = 0, tile_hits = 0;
+    std::uint64_t mapped_columns = 0, direct_columns = 0, dispatches = 0;
+    std::uint64_t blocking_writes = 0, mapping_dispatches = 0;
+    std::uint64_t setup_upload_bytes = 0, observation_upload_bytes = 0, setup_dispatches = 0;
+};
+
 class OpenClNvfp4Device;
 
 class OpenClNvfp4Projection {
@@ -24,7 +37,8 @@ public:
 
     // The caller accounts separately for the mapped and projected host spans.
     static OpenClNvfp4Workspace workspace(std::size_t rows, std::size_t modes,
-                                          std::size_t batch_capacity);
+                                          std::size_t batch_capacity,
+                                          OpenClFineMethod method = OpenClFineMethod::staged);
 
     // A reusable host slab for direct template mapping. Size counts complete
     // complex records including trailers. Empty means pageable input is used.
@@ -37,6 +51,12 @@ public:
     // A return of false publishes no results.
     bool project(std::span<const std::complex<float>> mapped,
                  std::span<std::complex<float>> projected, std::stop_token stop = {});
+
+    // One or two compatible blocks share mapping cache, projection and result download.
+    // A return of false indicates incompatible inputs before visiting sources.
+    // An execution error leaves both the supplied statistics and receipt untouched.
+    bool project_resident(std::span<const FineResidentBlock> blocks, std::size_t candidates,
+                          OpenClResidentWork& work, std::stop_token stop = {});
 
 private:
     struct Impl;
@@ -59,7 +79,7 @@ public:
 
     std::unique_ptr<OpenClNvfp4Projection> make_projection(
         std::size_t rows, std::span<const std::size_t> bins, std::size_t batch_capacity,
-        std::size_t workspace_limit) const;
+        std::size_t workspace_limit, OpenClFineMethod method = OpenClFineMethod::staged) const;
 
 private:
     struct Impl;

@@ -320,10 +320,12 @@ Options parse(int argc, char** argv) {
     }
     if (o.signal_gain_db || o.channel_severity) {
         const bool cpu_contrast = o.backend == "cpu" && one_of(o.command, {"admission", "message", "plan"});
+        const bool explicit_vulkan_fine = o.backend == "vulkan" && o.vulkan_fine_projection != "automatic";
         const bool gpu_control_command =
             (one_of(o.backend, {"cuda", "gpu"}) && one_of(o.command, {"admission", "plan"})) ||
-            (o.backend == "vulkan" && o.command == "admission" && o.vulkan_fine_projection != "automatic") ||
-            (o.backend == "gpu" && o.command == "message" && o.slots == 5 && !o.active_seconds);
+            (explicit_vulkan_fine && one_of(o.command, {"admission", "plan"})) ||
+            ((o.backend == "gpu" || explicit_vulkan_fine) && o.command == "message" &&
+             o.slots == 5 && !o.active_seconds);
         const bool gpu_stable_control = gpu_control_command &&
             o.channel_severity == 0. && !o.signal_gain_db && o.scenario == "hf" && o.spread == "hf-worst" && o.margin == 3;
         require((cpu_contrast || gpu_stable_control) && !o.helper && !o.interferer_cn0,
@@ -348,8 +350,9 @@ Options parse(int argc, char** argv) {
     require(o.backend != "vulkan" || o.tensor_coarse_math == "fft",
             "Vulkan coarse search uses the full FFT; tensor matrix arithmetic is unsupported");
     require(o.vulkan_fine_projection == "automatic" ||
-            (o.backend == "vulkan" && one_of(o.vulkan_fine_projection, {"native", "nvfp4"})),
-            "Fine OpenCL NVFP4 qualification requires explicit Vulkan");
+            (o.backend == "vulkan" && one_of(o.vulkan_fine_projection,
+                {"native", "nvfp4", "resident-nvfp4", "resident-fft"})),
+            "Fine projection qualification requires explicit Vulkan");
     require(o.backend != "gpu" || (!device_index_supplied && !device_memory_limit_supplied &&
             o.tensor_precision == "automatic" && o.tensor_coarse_math == "fft" &&
             o.vulkan_precision == "automatic"),
@@ -859,6 +862,16 @@ Json bulk_json(const BulkReceipt& r) {
         {"opencl_nvfp4_pinned_batches", r.opencl_nvfp4_pinned_batches},
         {"opencl_nvfp4_fine_modes", r.opencl_nvfp4_fine_modes},
         {"opencl_nvfp4_native_blocks", r.opencl_nvfp4_native_blocks},
+        {"opencl_resident_fine_batches", r.opencl_resident_fine_batches},
+        {"opencl_resident_fine_pairs", r.opencl_resident_fine_pairs},
+        {"opencl_resident_nvfp4_modes", r.opencl_resident_nvfp4_modes},
+        {"opencl_resident_fft_modes", r.opencl_resident_fft_modes},
+        {"opencl_resident_upload_bytes", r.opencl_resident_upload_bytes},
+        {"opencl_resident_download_bytes", r.opencl_resident_download_bytes},
+        {"opencl_resident_direct_columns", r.opencl_resident_direct_columns},
+        {"opencl_resident_dispatches", r.opencl_resident_dispatches},
+        {"opencl_resident_blocking_writes", r.opencl_resident_blocking_writes},
+        {"opencl_resident_mapping_dispatches", r.opencl_resident_mapping_dispatches},
         {"cuda_direct_gram_values", r.cuda_direct_gram_values},
         {"cuda_bmm_gram_values", r.cuda_bmm_gram_values},
         {"cuda_matrix_fp16_calls", r.cuda_matrix_fp16_calls},
@@ -912,6 +925,10 @@ std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
             VulkanReceiverOptions options{o.device_index,
                 o.device_memory_limit.value_or(256 * 1024 * 1024), precision};
             if (o.vulkan_fine_projection == "nvfp4") options.fine_projection = VulkanFineProjection::opencl_nvfp4;
+            else if (o.vulkan_fine_projection == "resident-nvfp4")
+                options.fine_projection = VulkanFineProjection::opencl_resident_nvfp4;
+            else if (o.vulkan_fine_projection == "resident-fft")
+                options.fine_projection = VulkanFineProjection::opencl_resident_fft;
             else if (o.vulkan_fine_projection == "native") options.fine_projection = VulkanFineProjection::native;
             return make_vulkan_receiver_backend(options);
         } catch (const VulkanBackendUnavailable& error) {
@@ -2366,7 +2383,7 @@ void help() {
         "  --tensor-coarse-math fft|fp16|int8|fp16-fft (fp16/int8 matrices; fp16-fft is explicit CUDA FFT)\n"
         "  --tensor-fine-projection fft|nvfp4|cufft (explicit CUDA qualification)\n"
         "  --vulkan-precision automatic|fp32|fp16-storage|direct-fp32|direct-fp16-storage|direct-fp16\n"
-        "  --vulkan-fine-projection automatic|native|nvfp4 (explicit OpenCL qualification)\n"
+        "  --vulkan-fine-projection automatic|native|nvfp4|resident-nvfp4|resident-fft (explicit Vulkan qualification)\n"
         "  --gpu-fp32-minimum on|off (automatic GPU arithmetic floor; GPU backend only)\n"
         "  --device-index N --device-memory-limit-bytes N\n"
         "  --case hf|eme and the normalized manual-case options from triad_cases.py\n"
@@ -2536,6 +2553,10 @@ void run(Json& report, const Options& o, std::stop_token stop) {
         const auto actual_backend = backend ? backend->receipt() : BulkReceipt{};
         if (o.vulkan_fine_projection == "nvfp4" && o.command != "codec" && !actual_backend.opencl_nvfp4_fine_modes)
             throw Incomplete("Requested OpenCL NVFP4 fine projection did not execute on this geometry");
+        if (o.command != "codec" &&
+            ((o.vulkan_fine_projection == "resident-nvfp4" && !actual_backend.opencl_resident_nvfp4_modes) ||
+             (o.vulkan_fine_projection == "resident-fft" && !actual_backend.opencl_resident_fft_modes)))
+            throw Incomplete("Requested resident OpenCL fine statistics did not execute on this geometry");
         if (o.backend == "cuda" && o.command != "codec") {
             const auto& actual = actual_backend;
             if (o.cuda_segmented_timing && o.require_accelerator &&

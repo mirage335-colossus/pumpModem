@@ -93,6 +93,218 @@ implementation changes them. Bounded experiments can support a practical
 choice and a stopping decision while the potential for further improvement
 remains open.
 
+## FP4 utilization headroom on RTX PRO 6000 Blackwell
+
+The staged socket-filtered SM120 receiver projects 288 complex DATA templates,
+1,500 samples each, onto 47 retained complex modes. It issues a dense real
+contraction of `288 × 96 × 3072` after splitting complex values and padding.
+Counting a multiply-add as two operations gives **169.87 million issued** and
+**162.43 million useful** floating-point operations per full submission. Only
+4.4% of issued arithmetic is padding. The same arithmetic executes in 216
+128-thread blocks. On 188 SMs, those 864 warps could occupy at most 9.6% of
+the 9,024 available resident warp slots at once. Offline SM120a assembly
+reported 40 registers per thread, 2 KiB of shared memory per block and zero
+spills. These bounds describe launch geometry and resources. Measuring Tensor
+pipe activity, instruction issue and cache traffic requires counters.
+[Kernel](../src/triad_opencl_nvfp4_kernels.cu) ·
+[Blackwell tuning guide](https://docs.nvidia.com/cuda/blackwell-tuning-guide/#occupancy).
+
+Use approximately **1.9–2.0 PFLOP/s dense** as the theoretical reference, with
+clock and edition stated. The Server Edition publishes 4 PFLOP/s of FP4 AI
+performance. NVIDIA's GB202 Workstation Edition architecture table separates
+about 2.02 PFLOP/s dense with FP32 accumulation from 4.03 PFLOP/s with
+structured sparsity. The receiver uses arbitrary dense templates. Report
+the large resident control separately from the rated peak.
+[Server specifications](https://www.nvidia.com/en-us/data-center/rtx-pro-6000-blackwell-server-edition/) ·
+[Blackwell architecture table](https://www.nvidia.com/content/dam/en-zz/Solutions/design-visualization/quadro-product-literature/pdf/NVIDIA-RTX-Blackwell-PRO-GPU-Architecture-v1_1.pdf#page=46).
+
+The [production stable-slot investigation](validation.md#blackwell-nvfp4-fine-projection--19-november-2026)
+recorded 809 pinned submissions at four admitted fine workers, 1.502 s of
+fine processing and 6.715 s of slot service. Its final component comparison
+gave a matrix-event median of 8.752 µs and a pinned-call median of 119.62 µs.
+Those are separate measurements. Combining them with the actual work counts
+yields the following scope estimates.
+
+| Interval | Issued-equivalent FP4 throughput | Fraction of 2 PFLOP/s |
+| --- | ---: | ---: |
+| Matrix kernel event on a full 288-lane batch | 19.4 TFLOP/s | 0.97% |
+| Pinned upload, packing, projection and readback | 1.42 TFLOP/s | 0.071% |
+| Fine service for the measured slot | 91.5 GFLOP/s | 0.0046% |
+| All receiver service for the measured slot | 20.5 GFLOP/s | 0.0010% |
+
+Useful throughput is 95.6% of the issued rates for that slot. These are
+arithmetic throughput estimates from operation counts and elapsed time. The
+higher-allocation default uses native fine processing on the tested geometry,
+with Vulkan processing millions of coarse rows. The four-worker wall difference
+includes 0.595 s of fine improvement and 0.812 s of variation in coarse processing.
+Only the phase measurements distinguish those effects.
+
+### Same-card resident and staged controls
+
+On 19 November 2026, source `ea0368c3d1ae31a0e4535373baf33233677e6f41`
+was measured on a full RTX PRO 6000 Blackwell Server Edition with 188 SMs,
+driver 595.112.07 and a reported maximum SM clock of 2,430 MHz. The OpenCL
+probe compiled the production SM120a source and ran with the worker socket
+filter. It used 7 warmups and 24 measured projections at each width, fixed
+synthetic complex inputs and retained DFT bins. The resident measurement
+reused the packed input, packed basis and output buffers. It timed the same
+projection kernel including its reconstruction epilogue. The staged call
+includes the blocking pinned upload, pack, projection and readback. Host
+template generation ran before timing. Worst relative RMS across the
+sampled DFT lanes was 0.1481. Results repeated bitwise and each larger batch
+reproduced its 288-lane prefix bitwise.
+
+| Lanes | Workgroups | Resident OpenCL event | Resident OpenCL | Staged OpenCL | Resident cuBLASLt graph |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 288 | 216 | 8.93 µs | 19.0 TFLOP/s | 1.16 TFLOP/s | 11.4 TFLOP/s |
+| 576 | 432 | 9.22 µs | 36.9 TFLOP/s | 1.28 TFLOP/s | 22.7 TFLOP/s |
+| 1,152 | 864 | 13.30 µs | 51.1 TFLOP/s | 1.52 TFLOP/s | 45.5 TFLOP/s |
+| 4,608 | 3,456 | 41.01 µs | 66.3 TFLOP/s | 2.03 TFLOP/s | 177.2 TFLOP/s |
+
+The staged medians at these widths were 146.88, 264.82, 446.93 and
+1,337.74 µs. The 288-lane staged matrix event was 8.98 µs. Across a 24-launch
+resident queue span, including gaps between launches, throughput ranged from
+15.4 TFLOP/s at 288 to 64.7 TFLOP/s at 4,608. The upload events yielded
+about 38.0 GB/s at 288 and 57.0 GB/s at 4,608. Widening by 16× gave 3.5×
+resident matrix throughput and 1.75× staged throughput. The 4,608-lane
+case exercises device capacity. Simultaneously ready receiver work at that
+width requires a separate scheduling measurement.
+
+The cuBLASLt control ran in a separate CUDA profiling process on the same
+card with resident signed NVFP4 operands, unit block scales, FP32 accumulation
+and FP32 output. It used library 12.8.4, selected among supported heuristics,
+reported medians of 11 event-timed graph replays, and checked five output
+elements against exact integer sums for each shape. Its output shape and
+operation count match the padded dimensions in the table. Control timings
+cover the matrix product and include the graph launch span. At 288 lanes,
+cuBLASLt took 14.93 µs and OpenCL took 8.93 µs including reconstruction.
+Widening the other output dimension to `1024 × 1152 × 3072` reached
+**458 TFLOP/s**. A large
+`8192 × 8192 × 4096` resident product reached **1.309 PFLOP/s**, about 65%
+of the rounded dense reference. That is about 69× the production-width
+OpenCL matrix rate and establishes an on-card scale reference. Current
+CUTLASS SM120 NVFP4 tile sizes also favor wider
+work. A 128×128 tile yields just three output tiles at 288×96 before split-K
+or grouping. [CUTLASS SM120 tile table](https://docs.nvidia.com/cutlass/latest/media/docs/cpp/blackwell_functionality.html#blackwell-sm120-gemms).
+
+The first benchmark launch stopped before measurement because SSH omitted
+the toolkit compiler from its search path. The second used the deployed
+build's compiler path and passed both controls. Both temporary pods were
+removed and verified absent. Keep the compact shape and timing records under
+`local-evidence/fp4-utilization-20261119/` until a newer matched measurement
+supersedes them.
+
+The staged path sends 3,458,304 bytes of mapped C64 input and scaling per
+full batch, totaling 2.798 GB for the measured slot. The pinned device upload
+event of 63.2 µs corresponds to 54.7 GB/s. Nominal PCIe 5.0 ×16 offers about
+63 GB/s before protocol overhead, which bounds this input format to roughly
+3.1 TFLOP/s of dense FP4 work even with perfect overlap and no other costs.
+At the observed input rate the same bound is about 2.69 TFLOP/s. A packed
+FP4 input plus scales and peaks would shrink the upload about 6.9×. Host
+quantization and a still-limited link would remain part of that design. To
+feed 2 PFLOP/s at this batch's arithmetic count through a 63 GB/s link,
+each direction could move only about 5.4 kB per batch. Even the current
+108 kB projection readback would cap fully overlapped throughput near
+99 TFLOP/s by itself. A high-use projection pipeline needs reuse over many
+batches and fewer results crossing to the host, as well as input residency.
+[PCI-SIG encoded link rate](https://pcisig.com/sites/default/files/files/PCIe_Specification_Webinar_Rev%206_FINAL_0.pdf).
+
+The 809 matrix-event medians add to only 7.08 ms. Even eliminating all of
+that estimated time from the current schedule would save about 0.47% of fine
+time and 0.11% of slot time. Coarse processing accounts for 5.210 s or 77.6%
+of the slot. Eliminating the entire fine stage would give at most 1.29× at
+that measured coarse cost. Different receiver pipelines need their own
+complete-service measurements.
+
+The native CUDA implementation already demonstrates the more consequential
+dataflow alternative. It leases immutable source tiles, sends approximately
+312 bytes of affine and phase descriptors per column in the current layout,
+and renders the mapped columns on the device. For 288 columns, the descriptors
+alone are under 90 kB per batch, about 38× below the expanded upload before
+source-tile misses. Bringing the same bounded mapping contract to the
+socket-filtered backend would address host interpolation as well as the link.
+Compare direct FFT and tensor projection on that resident input. Existing
+CUDA tests already favored direct cuFFT with retained-bin gather over a
+pack-inclusive cuBLASLt FP4 path at the matched small widths.
+[Mapping interface](../src/triad_receiver_bulk.hpp) ·
+[Fused device mapping](../src/triad_tensor_backend.cpp) ·
+[Matched FFT comparison](validation.md#blackwell-nvfp4-fine-projection--19-november-2026).
+
+Two equal-geometry blocks already available in a fine `Pair` can share a
+576-lane launch while preserving chronological state updates. The tested
+slot could then submit 405 instead of 809 batches. This doubles the launch
+grid and approximately doubles projection workspace from 6.70/7.34 MiB to
+13.40/14.51 MiB host/device per owner under the current accounting. Each
+full pair would upload 6.92 MB of expanded templates. Using the component
+medians, combining the 404 full pairs alone would save roughly 12 ms of
+isolated projection-call time over the slot. Mapping, state updates and
+cross-stage contention were outside that estimate. Broader aggregation must quote all
+immutable inputs, descriptors, owned outputs and retained states. Reuse the
+existing receiver lanes for independent per-state correlations and Gram
+work before considering lower precision in those statistics. Preserve full
+`W=2*H`, active and failed Helper acquisition, every public coordinate and
+scored quiet-slot completion.
+
+The [resilience study](../_ref/resilience-triple_Robust_Modem/Astra-6/report.md#native-integration-and-computational-constraints)
+supports these validation boundaries. It identifies source, projection,
+statistics and state as distinct native stages and emphasizes reuse with
+complete-service accounting. The
+[Fable review](../_ref/resilience-triple_Robust_Modem/Fable-5.2/robust-nonstationary-channel-research.md#66-not-evaluated-here-and-possibly-better)
+identifies GPU whole-grid innovation likelihoods as an open experiment.
+Use those channel studies to scope receiver fidelity and public work. The
+filtered timing experiment above supplies the FP4 throughput evidence.
+
+## Resident mapping and paired fine statistics
+
+The socket-filtered RunPod worker now has two explicit developer-probe routes
+for the same isolated DATA geometry. Both use the canonical native mapping
+source and a bounded per-owner device cache of 64 immutable waveform tiles.
+Normal columns send a 176-byte affine and phase descriptor. A tile miss sends
+128 KiB of source samples and a direct native mapping sends one C64 column.
+Mapped samples and projected modes stay on the device. A blocking read returns
+176 bytes per block and candidate, with sufficient statistics for both bits
+and the nonzero-basis marker. Observation modes and initial bin indices are
+included in the transfer receipt. Device buffers, reusable host staging and
+the source allocations retained by cache identities are included in admission.
+
+The receiver submits two compatible ready blocks at a time and still applies
+each block's updates in order. The 1,500-sample, 47-mode, two-tap geometry
+uses up to 576 template lanes in one paired submission. Larger candidate
+banks use consecutive submissions and publish completed work after the last
+one succeeds. Irregular terminal geometry and projections with the Helper
+taper use the native route. The two controls are
+`--vulkan-fine-projection resident-nvfp4` for E2M1 Tensor Core projection
+with FP32 accumulation, and `resident-fft` for an FP32 mixed-radix FFT and
+retained-bin gather. Both form correlation and Gram statistics in FP64.
+The resident receipts identify the method, paired and single submissions,
+mapped and direct columns, tile reuse, upload and readback bytes, and how
+often the host blocked for writes. The counts describe work and transfers,
+with no hardware Tensor Core activity fraction inferred from them.
+
+On the same full RTX PRO 6000 Blackwell Server, four software workers
+processed the stable 3.6 Hz input in 0.526 s of fine service with resident
+FP4, versus 1.483 s with staged FP4. The resident FFT took 0.542 s. Per slot,
+the resident methods sent 74.76 MB of fine-stage uploads and read back
+10.25 MB, versus 2.798 GB and 87.60 MB for staged FP4. Severe and quiet
+inputs sent 110.95 MB. The resident work reduced transfer by retaining
+intermediate results and shortened fine service even on the severe and quiet
+inputs. All three methods matched the six admission-policy dispositions.
+[Matched receiver checks](validation.md#blackwell-resident-fine-processing--19-november-2026).
+
+The 809 block-equivalents contain roughly 137.4 GFLOP of issued FP4
+contraction work. Dividing by 0.526 s gives 0.26 TFLOP/s across the entire
+resident fine stage, about 0.013% of the rounded 2 PFLOP/s dense reference.
+That elapsed-work ratio includes the mixer, template mapping, FFT-independent
+statistics, host bookkeeping and waits. The earlier matrix-only event
+control is about 36.9 TFLOP/s at 576 lanes. Actual Tensor Core duty for this
+complete run requires hardware counters. With 63 GB/s of ideal PCIe 5.0
+×16 payload throughput, the stable slot's observed upload bytes alone
+imply an optimistic bound near 116 TFLOP/s for this dataflow. The preceding
+staged estimate was about 3.1 TFLOP/s. The remaining rate gap includes small
+launch geometry, intermediate device work and host synchronization.
+Coarse search still took 4.84 s of this 5.37 s slot, so speeding up the fine
+matrix alone has little leverage on complete service.
+
 ## Which arithmetic ran in a remote simulation?
 
 The RunPod build uses the same compiled receiver as the desktop GUI.
@@ -121,6 +333,7 @@ leave that internal use unmeasured.
 | Affine frequency search | The guarded CUDA route uses [half cuFFT](../src/triad_tensor_fft.cu) for eligible transforms or the applicable ordinary FFT route. Read `cuda_half_fft_inverse_ffts` and `half_fft_fallback_counts`. A half-FFT count measures half transforms. |
 | Broad changing-channel timing search | `TensorCoarse::plan_segmented` chooses shapes for FP32 cuFFT. The [CUDA scoring kernels](../src/triad_tensor_peaks.cu) track candidate motion and rank lags on device. Check `cuda_segmented_sessions`, `cuda_segmented_inverse_ffts`, `cuda_segmented_score_rows` and `cuda_segmented_native_fallbacks`. |
 | Fine tracking and decisions | The CUDA `TensorFine` class accelerates eligible bulk basis mapping, Gram products and statistics. Check `mapped_values`, `statistics_blocks`, `cuda_direct_gram_values`, `cuda_bmm_gram_values` and `native_fine_sessions`. The native receiver owns chronological state, bit and quiet decisions, codec and completion. For simulator generation time, read the separate `simulator` phase. [Receiver interfaces](robust-current.md#native-interfaces-and-ownership). |
+| Filtered Blackwell fine projection | The [OpenCL route](../src/triad_opencl_nvfp4_projection.cpp) renders mapped tiles, projects DATA templates and returns sufficient statistics. `opencl_resident_nvfp4_modes` witnesses the Tensor Core projection and `opencl_resident_fft_modes` witnesses the alternate FFT. `opencl_resident_fine_pairs`, `opencl_resident_upload_bytes` and `opencl_resident_download_bytes` describe paired submissions and resident transfers. [Receiver timings and limits](validation.md#blackwell-resident-fine-processing--19-november-2026). |
 | Vulkan on integrated Radeon | The [Vulkan backend](../src/triad_vulkan_backend.cpp) runs supported frequency search via VkFFT or direct products. `vulkan_dispatches` and the per-route score-row counters identify actual work. The qualified Vega FP16 direct route uses packed vector arithmetic. VkFFT half storage still computes in FP32. Native CPU retains Helper, lag groups and fine processing. [Vulkan stage scope](gpu-precision-controls.md#vulkan-on-vega-integrated-graphics). |
 
 For example, the 2 mW, 72 Hz/5× severe Blackwell control (manifest

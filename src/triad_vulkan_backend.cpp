@@ -552,10 +552,13 @@ struct Shared {
                     ? (result.vulkan_fp32_score_rows ? "mixed_fp16_fp32_fft_storage_fp32_compute" : half_storage_arithmetic)
                     : fp32_arithmetic;
         }
-        if (result.opencl_nvfp4_fine_modes) {
+        if (result.opencl_nvfp4_fine_modes || result.opencl_resident_fft_modes) {
             constexpr std::string_view native_fine = "_and_fine";
             if (result.precision.ends_with(native_fine)) result.precision.resize(result.precision.size() - native_fine.size());
-            result.precision += "_opencl_nvfp4_fine_projection";
+            if (result.opencl_resident_nvfp4_modes) result.precision += "_opencl_resident_nvfp4_fine";
+            if (result.opencl_resident_fft_modes) result.precision += "_opencl_resident_fft_fine";
+            if (result.opencl_nvfp4_fine_modes && !result.opencl_resident_nvfp4_modes)
+                result.precision += "_opencl_nvfp4_fine_projection";
             if (result.opencl_nvfp4_native_blocks || result.native_fine_sessions) result.precision += "_mixed_native_fine";
         }
         if (host_scoring) result.precision += host_score_suffix;
@@ -1714,30 +1717,139 @@ private:
     bool started_ = false, prepared_ = false;
 };
 
+bool requires_opencl_fine(VulkanFineProjection choice) noexcept {
+    return choice == VulkanFineProjection::opencl_nvfp4 ||
+           choice == VulkanFineProjection::opencl_resident_nvfp4 ||
+           choice == VulkanFineProjection::opencl_resident_fft;
+}
+
 #ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
 // One full 72-state, two-symbol, two-path work block fits in a single lease and dispatch.
 constexpr std::size_t opencl_fine_lanes = 288;
+constexpr std::size_t opencl_resident_lanes = 2 * opencl_fine_lanes;
 constexpr std::size_t opencl_fine_rows = 1500, opencl_fine_modes = 47;
-// The matched candidate batches beat native projection at four CPU lanes.
-// More lanes narrowed native fine processing below the staged GPU work.
+// The matched resident batches beat native projection at four CPU lanes.
+// Wider automatic owners retain the current native qualification.
 constexpr unsigned opencl_fine_qualified_cpu_lanes = 4;
+
+OpenClFineMethod opencl_fine_method(VulkanFineProjection choice) noexcept {
+    if (choice == VulkanFineProjection::automatic || choice == VulkanFineProjection::opencl_resident_nvfp4)
+        return OpenClFineMethod::resident_fp4;
+    if (choice == VulkanFineProjection::opencl_resident_fft) return OpenClFineMethod::resident_fft;
+    return OpenClFineMethod::staged;
+}
+
+bool supports_opencl_block(const FineBulkBlock& block) noexcept {
+    return block.isolated_varying_data && block.rows == opencl_fine_rows &&
+           block.projection_indices.size() == opencl_fine_modes && block.taps == 2;
+}
 
 class OpenClFine final : public FineBulk {
 public:
-    OpenClFine(std::shared_ptr<Shared> shared, std::shared_ptr<OpenClNvfp4Device> device, bool required)
-        : shared_(std::move(shared)), device_(std::move(device)), required_(required) {}
+    OpenClFine(std::shared_ptr<Shared> shared, std::shared_ptr<OpenClNvfp4Device> device)
+        : shared_(std::move(shared)), device_(std::move(device)),
+          method_(opencl_fine_method(shared_->options.fine_projection)),
+          required_(shared_->options.fine_projection == VulkanFineProjection::opencl_nvfp4) {}
 
     ~OpenClFine() override {
         projection_.reset();
+        resident_projection_.reset();
         if (reserved_) shared_->release_lease(reserved_);
+        if (resident_reserved_) shared_->release_lease(resident_reserved_);
+    }
+
+    bool supports_resident_statistics(const FineBulkBlock& block) const noexcept override {
+        return method_ != OpenClFineMethod::staged && supports_opencl_block(block);
+    }
+    bool resident_statistics(std::span<const FineResidentBlock> blocks, std::size_t candidates,
+                             std::stop_token stop) override {
+        cancelled(stop);
+        if (blocks.empty() || blocks.size() > 2 || !candidates) return false;
+        const auto bins = blocks.front().shape.projection_indices;
+        for (const auto& block : blocks) {
+            if (!supports_resident_statistics(block.shape) || !std::ranges::equal(bins, block.shape.projection_indices) ||
+                !block.source || block.output.size() != candidates)
+                return false;
+        }
+        if (!begin_resident_projection(bins)) return false;
+        constexpr auto capacity = opencl_fine_lanes / 4;
+        const auto states = mul(blocks.size(), candidates);
+        const auto modes = mul(states, 4 * opencl_fine_modes);
+        const auto batches = (candidates - 1) / capacity + 1;
+        OpenClResidentWork total;
+        std::array<FineResidentBlock, 2> batch;
+        for (std::size_t first = 0; first < candidates;) {
+            cancelled(stop);
+            const auto width = std::min(capacity, candidates - first);
+            for (std::size_t index = 0; index < blocks.size(); ++index) {
+                const auto& block = blocks[index];
+                batch[index] = {block.shape,
+                    [source = &block.source, first](std::size_t candidate, std::size_t row,
+                                                   std::size_t rows, const BulkMappedSink& sink) {
+                        (*source)(first + candidate, row, rows, sink);
+                    }, block.output.subspan(first, width)};
+            }
+            OpenClResidentWork result;
+            if (!resident_projection_->project_resident(std::span(batch).first(blocks.size()), width, result, stop)) {
+                if (first) throw Error("OpenCL resident fine statistics declined a later candidate batch");
+                native_reason_ = "opencl-resident-mapping";
+                return false;
+            }
+            constexpr std::array counters{
+                &OpenClResidentWork::upload_bytes, &OpenClResidentWork::download_bytes,
+                &OpenClResidentWork::uploaded_tiles, &OpenClResidentWork::tile_hits,
+                &OpenClResidentWork::mapped_columns, &OpenClResidentWork::direct_columns,
+                &OpenClResidentWork::dispatches, &OpenClResidentWork::blocking_writes,
+                &OpenClResidentWork::mapping_dispatches};
+            for (const auto field : counters) count(total.*field, result.*field);
+            first += width;
+        }
+        count(work_.statistics_blocks, states);
+        count(work_.projected_values, modes);
+        work_.executed = true;
+        std::lock_guard lock(shared_->receipt_mutex);
+        auto& report = shared_->total;
+        report.executed = true;
+        count(report.statistics_blocks, states);
+        count(report.projected_values, modes);
+        count(report.synchronizations, batches);
+        count(report.opencl_resident_fine_batches, batches);
+        if (blocks.size() == 2) count(report.opencl_resident_fine_pairs, batches);
+        count(report.opencl_resident_upload_bytes, total.upload_bytes);
+        count(report.opencl_resident_download_bytes, total.download_bytes);
+        count(report.opencl_resident_direct_columns, total.direct_columns);
+        count(report.opencl_resident_dispatches, total.dispatches);
+        count(report.opencl_resident_blocking_writes, total.blocking_writes);
+        count(report.opencl_resident_mapping_dispatches, total.mapping_dispatches);
+        count(report.upload_bytes, total.upload_bytes);
+        count(report.download_bytes, total.download_bytes);
+        count(report.uploaded_tiles, total.uploaded_tiles);
+        count(report.tile_hits, total.tile_hits);
+        count(report.mapped_columns, total.mapped_columns);
+        count(report.mapped_values, total.mapped_columns * opencl_fine_rows);
+        count(report.direct_columns, total.direct_columns);
+        count(report.direct_values, total.direct_columns * opencl_fine_rows);
+        if (method_ == OpenClFineMethod::resident_fp4) {
+            count(report.opencl_resident_nvfp4_modes, modes);
+            count(report.opencl_nvfp4_fine_batches, batches);
+            count(report.opencl_nvfp4_fine_modes, modes);
+        } else {
+            count(report.opencl_resident_fft_modes, modes);
+        }
+        native_reason_ = {};
+        return true;
     }
 
     std::size_t host_projection_capacity() const noexcept override { return opencl_fine_lanes; }
     bool host_projection_stages_peaks() const noexcept override { return true; }
     bool begin_host_projection(const FineBulkBlock& block, std::stop_token stop) override {
         cancelled(stop);
-        if (!block.isolated_varying_data || block.rows != opencl_fine_rows ||
-            block.projection_indices.size() != opencl_fine_modes || block.taps != 2) {
+        if (method_ != OpenClFineMethod::staged) {
+            // Resident methods use the canonical native fallback.
+            if (native_reason_.empty()) native_reason_ = "native-fine-block-geometry";
+            return false;
+        }
+        if (!supports_opencl_block(block)) {
             native_reason_ = "native-fine-block-geometry";
             return false;
         }
@@ -1792,7 +1904,7 @@ public:
             report.executed = true;
         } else {
             count(report.opencl_nvfp4_native_blocks, 1);
-            if (report.native_fine_fallback_reason.empty() || native_reason_.starts_with("opencl-nvfp4-"))
+            if (report.native_fine_fallback_reason.empty() || native_reason_.starts_with("opencl-"))
                 report.native_fine_fallback_reason = native_reason_.empty() ? "native-fine-line-projection" : native_reason_;
         }
         native_reason_ = {};
@@ -1813,16 +1925,44 @@ public:
     FineBulkWork completed_work() const override { return work_; }
 
 private:
+    bool begin_resident_projection(std::span<const std::size_t> bins) {
+        if (resident_unavailable_) {
+            native_reason_ = "opencl-resident-allocation-limit";
+            return false;
+        }
+        if (resident_projection_ && std::ranges::equal(resident_bins_, bins)) return true;
+        resident_projection_.reset();
+        if (resident_reserved_) shared_->release_lease(std::exchange(resident_reserved_, 0));
+        const auto bytes = OpenClNvfp4Projection::workspace(opencl_fine_rows, opencl_fine_modes,
+                                                           opencl_resident_lanes, method_);
+        if (!shared_->try_fine_device_lease(bytes.device_bytes)) {
+            native_reason_ = "opencl-resident-workspace-limit";
+            return false;
+        }
+        resident_reserved_ = bytes.device_bytes;
+        resident_projection_ = device_->make_projection(opencl_fine_rows, bins, opencl_resident_lanes,
+                                                        resident_reserved_, method_);
+        if (!resident_projection_) {
+            shared_->release_lease(std::exchange(resident_reserved_, 0));
+            resident_unavailable_ = true;
+            native_reason_ = "opencl-resident-allocation-limit";
+            return false;
+        }
+        std::copy(bins.begin(), bins.end(), resident_bins_.begin());
+        return true;
+    }
+
     std::shared_ptr<Shared> shared_;
     std::shared_ptr<OpenClNvfp4Device> device_;
-    std::unique_ptr<OpenClNvfp4Projection> projection_;
-    std::array<std::size_t, opencl_fine_modes> bins_{};
+    std::unique_ptr<OpenClNvfp4Projection> projection_, resident_projection_;
+    std::array<std::size_t, opencl_fine_modes> bins_{}, resident_bins_{};
     FineBulkWork work_;
     std::string_view native_reason_;
     std::uint64_t pending_batches_ = 0, pending_pinned_batches_ = 0, pending_modes_ = 0;
     std::uint64_t pending_upload_ = 0, pending_download_ = 0;
-    std::size_t reserved_ = 0;
-    bool required_, unavailable_ = false;
+    std::size_t reserved_ = 0, resident_reserved_ = 0;
+    OpenClFineMethod method_;
+    bool required_, unavailable_ = false, resident_unavailable_ = false;
 };
 #endif
 
@@ -1830,7 +1970,7 @@ class VulkanBackend final : public ReceiverBulkBackend {
 public:
     explicit VulkanBackend(const VulkanReceiverOptions& options, bool automatic_device = false)
         : shared_(std::make_shared<Shared>(options, automatic_device)) {
-        const bool required = options.fine_projection == VulkanFineProjection::opencl_nvfp4;
+        const bool required = requires_opencl_fine(options.fine_projection);
 #ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
         const bool automatic = options.fine_projection == VulkanFineProjection::automatic && automatic_device &&
                                options.coarse_precision == VulkanCoarsePrecision::automatic;
@@ -1856,7 +1996,7 @@ public:
     std::string_view fine_fallback_reason(const FineBulkGeometry& geometry) const noexcept override {
 #ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
         if (opencl_ && geometry.isolated_varying_data && geometry.taps == 2) {
-            if (shared_->options.fine_projection == VulkanFineProjection::opencl_nvfp4 ||
+            if (requires_opencl_fine(shared_->options.fine_projection) ||
                 geometry.workers <= opencl_fine_qualified_cpu_lanes) return {};
             return "native-fine-throughput";
         }
@@ -1937,8 +2077,7 @@ public:
     }
     std::unique_ptr<FineBulk> make_fine(double, double) override {
 #ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
-        if (opencl_) return std::make_unique<OpenClFine>(shared_, opencl_,
-            shared_->options.fine_projection == VulkanFineProjection::opencl_nvfp4);
+        if (opencl_) return std::make_unique<OpenClFine>(shared_, opencl_);
 #endif
         throw Error("Vulkan fine work must select its explicit native CPU capability");
     }
@@ -1951,9 +2090,14 @@ public:
     }
     std::size_t fine_host_bytes(std::size_t, std::size_t) const override {
 #ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
-        if (opencl_) return add(mul(opencl_fine_lanes * (opencl_fine_rows + 1 + opencl_fine_modes),
-                                    sizeof(std::complex<float>)),
-            OpenClNvfp4Projection::workspace(opencl_fine_rows, opencl_fine_modes, opencl_fine_lanes).host_bytes);
+        if (opencl_) {
+            const auto method = opencl_fine_method(shared_->options.fine_projection);
+            const auto staging = mul(opencl_fine_lanes * (opencl_fine_rows + 1 + opencl_fine_modes),
+                                     sizeof(std::complex<float>));
+            const auto lanes = method == OpenClFineMethod::staged ? opencl_fine_lanes : opencl_resident_lanes;
+            const auto workspace = OpenClNvfp4Projection::workspace(opencl_fine_rows, opencl_fine_modes, lanes, method);
+            return add(staging, workspace.host_bytes);
+        }
 #endif
         return 0;
     }

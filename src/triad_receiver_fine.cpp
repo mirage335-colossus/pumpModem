@@ -1645,6 +1645,73 @@ struct FineSession::Impl {
         ++segments;
     }
 
+    FineBulkBlock bulk_shape(const ObservationBlock& block) const {
+        return {block.projection->rows(), tap_count, block.projection->indices(),
+                block.projected, config.noise_variance,
+                config.sample_rate_hz == 6000 && config.time_varying_channel && !config.helper_enabled};
+    }
+
+    void reset_bulk_statistics(std::size_t block, std::size_t states) {
+        // Distinguish unwritten required fields from legitimate DATA zeros.
+        constexpr auto missing = std::numeric_limits<double>::quiet_NaN();
+        FineBulkStatistics unset;
+        unset.correlations.fill({missing, missing});
+        unset.gram.fill({missing, missing});
+        bulk_statistics[block].assign(states, unset);
+    }
+
+    FineBulkWork confirmed_bulk_work(std::uint64_t expected_blocks, std::uint64_t expected_values) const {
+        const auto completed = bulk->completed_work();
+        if (!completed.executed || completed.statistics_blocks < bulk_work.statistics_blocks ||
+            completed.statistics_blocks - bulk_work.statistics_blocks != expected_blocks ||
+            completed.projected_values < bulk_work.projected_values ||
+            completed.projected_values - bulk_work.projected_values != expected_values)
+            throw Error("Robust bulk backend did not execute its complete public statistics work");
+        return completed;
+    }
+
+    std::array<bool, 2> resident_statistics_for(const Pair& pair, std::size_t states,
+        std::array<std::uint64_t, 2>& bulk_calls, std::stop_token stop) {
+        std::array<FineResidentBlock, 2> requests;
+        std::array<std::size_t, 2> indices{}, next_candidate{};
+        std::array<bool, 2> completed{};
+        std::size_t count = 0;
+        std::uint64_t projected_values = 0;
+        for (std::size_t i = 0; i < pair.extent->count; ++i) {
+            const auto& block = pair.blocks[i];
+            if (!block.observed || !block.line.empty()) continue;
+            const auto shape = bulk_shape(block);
+            if (shape.rows > bulk_offsets.size() || !bulk->supports_resident_statistics(shape)) continue;
+            reset_bulk_statistics(i, states);
+            indices[count] = i;
+            requests[count++] = {shape,
+                [&, i, rows = shape.rows](std::size_t candidate, std::size_t first,
+                    std::size_t take, const BulkMappedSink& sink) {
+                    if (candidate >= states || candidate != next_candidate[i] || first || take != rows)
+                        throw Error("Robust resident fine backend requested an invalid public block");
+                    basis->visit_pair(bulk_rows[candidate], taps(), pair.blocks[i].first,
+                                      std::span(bulk_offsets).first(rows), sink, stop);
+                    ++next_candidate[i];
+                }, bulk_statistics[i]};
+            projected_values += static_cast<std::uint64_t>(states) * 2 * tap_count *
+                shape.projection_indices.size();
+        }
+        if (!count || !bulk->resident_statistics(std::span(requests).first(count), states, stop))
+            return completed;
+        check_cancelled(stop);
+        const auto receipt = confirmed_bulk_work(static_cast<std::uint64_t>(states) * count, projected_values);
+        for (const auto i : std::span(indices).first(count)) {
+            if (next_candidate[i] != states)
+                throw Error("Robust resident fine backend did not map its complete public block");
+            check_bulk_statistics(bulk_statistics[i], tap_count);
+            completed[i] = true;
+        }
+        bulk_work = receipt;
+        bulk_calls[0] += count * nominal.size();
+        bulk_calls[1] += count * adaptive.size();
+        return completed;
+    }
+
     // Device statistics for both lanes of one dispatch, on the owner.
     std::array<std::uint64_t, 2> bulk_statistics_for(const Pair& pair, ReceiverExecutor::Stage& stage,
                                                      std::size_t& posted) {
@@ -1662,24 +1729,15 @@ struct FineSession::Impl {
             };
             append(nominal, true);
             append(adaptive, false);
+            const auto resident = resident_statistics_for(pair, states, bulk_calls, leaf_stop);
             for (std::size_t i = 0; i < pair.extent->count; ++i) {
                 check_cancelled(leaf_stop);
                 const auto& block = pair.blocks[i];
-                if (!block.observed) continue;
-                const auto rows = block.projection->rows();
+                if (!block.observed || resident[i]) continue;
+                const auto shape = bulk_shape(block);
+                const auto rows = shape.rows;
                 auto& output = bulk_statistics[i];
-                // Leave unwritten required fields distinguishable from
-                // legitimate all-zero statistics outside DATA support.
-                constexpr auto missing = std::numeric_limits<double>::quiet_NaN();
-                FineBulkStatistics unset;
-                unset.correlations.fill({missing, missing});
-                unset.gram.fill({missing, missing});
-                output.assign(states, unset);
-                bulk_progress.assign(states, 0);
-                const FineBulkBlock shape{rows, tap_count, block.projection->indices(),
-                                          block.projected, config.noise_variance,
-                                          config.sample_rate_hz == 6000 && config.time_varying_channel &&
-                                              !config.helper_enabled};
+                reset_bulk_statistics(i, states);
                 const auto expected_values = static_cast<std::uint64_t>(states) * 2 * tap_count *
                     shape.projection_indices.size();
                 if (const auto capacity = bulk->host_projection_capacity()) {
@@ -1689,6 +1747,7 @@ struct FineSession::Impl {
                     check_bulk_statistics(output, tap_count);
                     bulk->complete_host_statistics(states, expected_values);
                 } else {
+                    bulk_progress.assign(states, 0);
                     bulk->statistics(shape, states, [&](std::size_t candidate, std::size_t first,
                             std::size_t take, const BulkMappedSink& sink) {
                         if (candidate >= states || first != bulk_progress[candidate] || first > rows || take > rows - first ||
@@ -1703,14 +1762,9 @@ struct FineSession::Impl {
                         throw Error("Robust bulk backend did not process its complete public block");
                 }
                 check_cancelled(leaf_stop);
-                const auto completed = bulk->completed_work();
-                if (!completed.executed || completed.statistics_blocks < bulk_work.statistics_blocks ||
-                    completed.statistics_blocks - bulk_work.statistics_blocks != states ||
-                    completed.projected_values < bulk_work.projected_values ||
-                    completed.projected_values - bulk_work.projected_values != expected_values)
-                    throw Error("Robust bulk backend did not execute its complete public statistics work");
+                const auto receipt = confirmed_bulk_work(states, expected_values);
                 if (!bulk->host_projection_capacity()) check_bulk_statistics(output, tap_count);
-                bulk_work = completed;
+                bulk_work = receipt;
             }
         });
         return bulk_calls;

@@ -618,6 +618,42 @@ class AbbreviatedTests(unittest.TestCase):
             with self.assertRaises(ProbeError):
                 validate_receipt(wrong, command="message", backend="vulkan", returncode=0)
 
+    def test_vulkan_resident_fine_receipt_identifies_executed_method(self):
+        for backend, fine_request, method in (("vulkan", "resident-nvfp4", "nvfp4"),
+                                              ("vulkan", "resident-fft", "fft"),
+                                              ("gpu", "automatic", "nvfp4")):
+            automatic = backend == "gpu"
+            receipt = message_receipt()
+            receipt["identity"].update(backend=backend, configured_vulkan_backend=True,
+                                       require_accelerator=True, requested_vulkan_precision="automatic",
+                                       requested_vulkan_fine_projection=fine_request,
+                                       backend_receipt=vulkan_bulk_receipt(automatic=automatic))
+            bulk = receipt["identity"]["backend_receipt"]
+            if automatic:
+                receipt["identity"]["selected_accelerator_backend"] = "vulkan"
+                bulk["selection_reason"] = "automatic Vulkan fallback after CUDA unavailable"
+            fine_precision = f"opencl_resident_{method}_fine_mixed_native_fine"
+            bulk.update(vulkan_vendor_id=0x10de, opencl_resident_fine_batches=2, opencl_resident_fine_pairs=1,
+                        opencl_resident_upload_bytes=4096, opencl_resident_download_bytes=4 * 11 * 16,
+                        opencl_resident_direct_columns=14, opencl_nvfp4_native_blocks=1,
+                        opencl_resident_dispatches=14, opencl_resident_mapping_dispatches=4,
+                        opencl_resident_blocking_writes=8, statistics_blocks=5, projected_values=940,
+                        upload_bytes=8192, download_bytes=8192,
+                        precision="fp32_fft_fp64_coordinates_and_scores_native_fir_" + fine_precision)
+            mode_key = f"opencl_resident_{method}_modes"
+            bulk[mode_key] = 4 * 4 * 47
+            if method == "nvfp4":
+                bulk.update(opencl_nvfp4_fine_batches=2, opencl_nvfp4_fine_modes=bulk[mode_key])
+            validate_receipt(receipt, command="message", backend=backend, returncode=0)
+            for corrupt in ({mode_key: 0}, {"opencl_resident_fine_pairs": 3},
+                            {"opencl_resident_mapping_dispatches": 15}, {"opencl_nvfp4_pinned_batches": 1},
+                            {"opencl_resident_download_bytes": 705}, {"vulkan_vendor_id": 0x1002},
+                            {"statistics_blocks": 3}, {"opencl_resident_direct_columns": 17}):
+                wrong = copy.deepcopy(receipt)
+                wrong["identity"]["backend_receipt"].update(corrupt)
+                with self.assertRaises(ProbeError):
+                    validate_receipt(wrong, command="message", backend=backend, returncode=0)
+
     def test_vulkan_regression_receipt_uses_native_slot_work_shape(self):
         receipt = device_receipt()
         receipt["command"] = "regression"

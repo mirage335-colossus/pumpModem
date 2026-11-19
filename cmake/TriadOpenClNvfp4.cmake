@@ -52,7 +52,8 @@ add_custom_command(OUTPUT "${_triad_opencl_header}"
   COMMAND "${DATAPUMP_TRIAD_OPENCL_NVCC}" --ptx --std=c++17 -arch=sm_120a
     -o "${_triad_opencl_ptx}" "${_triad_opencl_source}"
   COMMAND "${Python3_EXECUTABLE}" "${_triad_opencl_embed}" "${_triad_opencl_ptx}" "${_triad_opencl_header}"
-  DEPENDS "${_triad_opencl_source}" "${_triad_opencl_embed}" "${DATAPUMP_TRIAD_OPENCL_NVCC}"
+  DEPENDS "${_triad_opencl_source}" "${PROJECT_SOURCE_DIR}/src/triad_opencl_fine_fft.cuh"
+    "${_triad_opencl_embed}" "${DATAPUMP_TRIAD_OPENCL_NVCC}"
   COMMENT "Compiling and embedding OpenCL NVFP4 projection PTX" VERBATIM)
 add_custom_target(datapump_triad_opencl_nvfp4_ptx DEPENDS "${_triad_opencl_header}")
 add_dependencies(datapump_triad_vulkan datapump_triad_opencl_nvfp4_ptx)

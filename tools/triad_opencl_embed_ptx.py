@@ -10,6 +10,10 @@ import sys
 # parameters. Reject ABI changes here rather than guessing which u64s are
 # buffers when the driver's OpenCL loader imports the PTX.
 SIGNATURES = {
+    "resident_fine_fft": (8, 8, 8, 0, 0, 0),
+    "resident_fine_map": (16, 8, 8, 0, 0),
+    "resident_fine_peaks": (8, 0, 0),
+    "resident_fine_stats": (8, 8, 16, 16, 0, 0, 0, 0),
     "nvfp4_pack_basis": (8, 4, 1, 0, 0, 0, 0),
     "nvfp4_pack_input": (8, 4, 1, 0, 0, 0, 0),
     "nvfp4_project": (4, 1, 4, 1, 8, 8, 0, 0, 0, 0),

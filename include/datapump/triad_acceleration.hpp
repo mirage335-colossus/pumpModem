@@ -51,7 +51,9 @@ public:
 };
 
 enum class VulkanCoarsePrecision { automatic, fp32, fp16_storage, direct_fp32, direct_fp16_storage, direct_fp16 };
-enum class VulkanFineProjection { automatic, native, opencl_nvfp4 };
+enum class VulkanFineProjection {
+    automatic, native, opencl_nvfp4, opencl_resident_nvfp4, opencl_resident_fft
+};
 
 struct VulkanReceiverOptions {
     unsigned device_index = 0;

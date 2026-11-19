@@ -98,6 +98,12 @@ struct BulkReceipt {
     std::uint64_t cuda_cufft_fine_modes = 0;
     std::uint64_t opencl_nvfp4_fine_batches = 0, opencl_nvfp4_fine_modes = 0;
     std::uint64_t opencl_nvfp4_pinned_batches = 0, opencl_nvfp4_native_blocks = 0;
+    std::uint64_t opencl_resident_fine_batches = 0, opencl_resident_fine_pairs = 0;
+    std::uint64_t opencl_resident_nvfp4_modes = 0, opencl_resident_fft_modes = 0;
+    std::uint64_t opencl_resident_upload_bytes = 0, opencl_resident_download_bytes = 0;
+    std::uint64_t opencl_resident_direct_columns = 0;
+    std::uint64_t opencl_resident_dispatches = 0, opencl_resident_blocking_writes = 0;
+    std::uint64_t opencl_resident_mapping_dispatches = 0;
     // CUDA Gram elements credited after the same readback.
     std::uint64_t cuda_direct_gram_values = 0, cuda_bmm_gram_values = 0;
     // Post-channelization matrix work, credited only after synchronization.
@@ -172,6 +178,12 @@ struct FineBulkStatistics {
     bool nonzero_basis = false;
 };
 
+struct FineResidentBlock {
+    FineBulkBlock shape;
+    FineMappingSource source;
+    std::span<FineBulkStatistics> output;
+};
+
 struct FineBulkWork {
     std::uint64_t statistics_blocks = 0, projected_values = 0;
     bool executed = false;
@@ -188,6 +200,13 @@ public:
         const auto result = receipt();
         return {result.statistics_blocks, result.projected_values, result.executed};
     }
+    virtual bool supports_resident_statistics(const FineBulkBlock&) const noexcept { return false; }
+    // One or two already prepared public blocks. Each source supplies a
+    // complete block per candidate, requested once in ascending candidate
+    // order on the owning thread. Decline before consuming sources or
+    // changing outputs/receipts; after starting, finish every block or throw.
+    virtual bool resident_statistics(std::span<const FineResidentBlock>, std::size_t,
+                                     std::stop_token) { return false; }
     // A projection-only device can use the same native mapper and scheduler.
     // Input/output are [template][row/bin], with both bits and all taps.
     virtual std::size_t host_projection_capacity() const noexcept { return 0; }

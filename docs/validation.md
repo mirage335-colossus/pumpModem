@@ -1039,6 +1039,86 @@ test pods and queued requests were verified absent.
 Keep the compact matched receipts in `local-evidence/blackwell-nvfp4-20261119/`
 until newer qualified receiver measurements supersede this geometry and loader.
 
+### Blackwell resident fine processing — 19 November 2026
+
+The stock RunPod build executed staged FP4, resident FP4 and resident FFT
+on a full RTX PRO 6000 Blackwell Server Edition, compute capability 12.0,
+97,887 MiB reported and driver 595.112.07. The inherited worker socket
+filter was active. The numerical component verified each resident
+projection against staged NVFP4 or an independent DFT, respectively. It
+covered pairing, tile boundaries and reuse, direct and absent columns,
+zero statistics, underflow presence and cancellation before publication.
+The earlier 33-lane and 129-lane staged components also passed.
+
+The explicit comparison used source bundle
+`f94cfdba6b7818d66f16c90a250155319f2e162426f65b6234e1e4485e8ec0ce`.
+Each matched 3.6 Hz slot used 1,215,321 samples, 3,951,090 Vulkan coarse rows,
+58,320 fine statistics updates and 10,967,040 projected values. The resident
+methods used 405 submissions, including 404 pairs, for 10,950,624 device
+modes. Staged FP4 took 809 pinned submissions for those modes. All three
+processed the same 16,416 terminal modes natively. Times below exclude
+synthetic capture generation and describe one run per cell.
+
+| Input with four workers | Staged FP4 fine / slot | Resident FP4 fine / slot | Resident FFT fine / slot | Current admission |
+| --- | ---: | ---: | ---: | --- |
+| Stable, `eaa4ae2a` | 1.483 / 7.161 s | 0.526 / 5.366 s | 0.542 / 5.433 s | Correct `0` |
+| Severe, `b4d8fa5a` | 1.806 / 6.908 s | 0.806 / 5.824 s | 0.853 / 6.134 s | Wrong `1` |
+| Quiet, `2b9ca9df` | 1.718 / 6.578 s | 0.895 / 6.025 s | 0.813 / 5.681 s | Quiet |
+
+Each slot matched across all six admission policies. The stable `0` also
+passed Guarded. Guarded and stronger settings erased the severe result, and
+all policies scored quiet on the quiet input. The severe wrong bit remains
+a channel-model failure across precision and dataflow changes.
+
+The same comparison recovered `001` as a complete message on the stable
+configured calendar and scored two quiet slots. Its EOF-only control stayed
+incomplete. Five-slot receiver service was 30.381 s staged, 28.548 s resident
+FP4 and 26.404 s resident FFT, with separate capture and EOF phases. All
+three processed 23,706,540 coarse rows, 365,526 fine statistics and
+68,736,528 fine projected values including the EOF control. In that first
+resident build, the last quiet slot's 81 candidates exceeded the 72-state
+device submission width. Its 837 regular blocks ran natively. As a result,
+the first resident methods credited 55,890,144 device modes, while the staged
+method credited 68,635,980. The comparison measures the receiver including
+that fallback. Coarse phase intervals varied across runs, so the two resident
+stream times do not isolate the projection algorithm.
+
+On the same GPU, the 24-worker stable slot took 0.779 s of native fine
+service, 1.428 s with staged FP4, 0.516 s with resident FP4 and 0.526 s with
+resident FFT. Complete slot times were 3.149, 3.586, 2.947 and 2.875 s.
+The resident comparison retained the same device mode counts and decision
+as the four-worker stable slot.
+
+The build with bounded candidate sub-batches used bundle
+`46d3b972166013737aaf9f70f0134a3f5677378b291df148b47010a36dfb824d`.
+Its four-worker automatic GPU route repeated the stable, severe and quiet
+inputs with the same decisions and work. In the complete message, the 81
+candidates ran as a group of 72 and a group of nine. The receiver completed
+`001` and two scored quiet slots, with the EOF-only control still
+incomplete. It used 2,905 resident FP4 submissions including 2,898 pairs
+for all 68,635,980 eligible device modes. Six terminal blocks stayed
+native. Total coarse rows, fine statistics and projected values matched the
+staged run. Five-slot receiver service took 26.098 s on this confirmation
+pod, with the final quiet slot's fine processing taking 0.919 s.
+
+The confirmation also compared native and resident FP4 fine service at
+24 workers. The severe input took 0.917 versus 1.020 s fine and 3.578 versus
+3.432 s for the entire slot. Its coarse timings varied from 2.656 to 2.407 s.
+The quiet input took 0.830 versus 1.043 s fine and 3.262 versus 3.466 s for
+the slot. Exact input hashes, public score work and admission outcomes
+were retained. The stable fixture still favors resident fine processing
+at that width. Its improvement did not carry across the severe and quiet
+fixtures, so the broader automatic route stayed native for fine processing.
+An automatic 24-worker stable check verified that route while retaining
+Vulkan coarse scoring. Intermediate widths and sustained full-worker
+streams are unqualified by these single looks.
+
+The socket-filtered component and five-slot tests ran on temporarily owned
+pods and their termination was verified. Keep the compact technical receipts
+in `local-evidence/blackwell-resident-fine-20261119/` until a newer matched
+receiver comparison supersedes these workloads.
+[Scope and utilization analysis](triad-gpu-optimization.md#resident-mapping-and-paired-fine-statistics).
+
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 
 The [HF operating results](indexes/robust.md#low-power-hf-alarm-results)
