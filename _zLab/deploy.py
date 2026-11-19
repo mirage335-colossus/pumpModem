@@ -39,7 +39,7 @@ DEFAULT_TIMEOUT = 3600
 REMOTE_BUILD = r'''set -eu
 mode=$2
 profile=$3
-case "$mode" in cpu|cuda) ;; *) exit 2 ;; esac
+case "$mode" in cpu|cuda|gpu) ;; *) exit 2 ;; esac
 case "$profile" in
   simulation) directory=/workspace/pump-lab ;;
   live) directory=/workspace/pump-lab-live ;;
@@ -51,13 +51,53 @@ tar --extract --gzip --file source.tar.gz --no-same-owner --no-same-permissions
 set -- -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DDATAPUMP_BUILD_GUI=OFF \
   -DDATAPUMP_BUILD_CLI=ON -DDATAPUMP_BUILD_WEB_WORKER=ON -DDATAPUMP_PORTABLE=OFF \
   -DDATAPUMP_COMPILER_CACHE=OFF -DDATAPUMP_TRIAD_VULKAN=OFF
+if [ "$mode" != cpu ]; then
+  # A noninteractive SSH shell can omit the image's CUDA bin directory.
+  # Use one toolkit for nvcc, Torch's FindCUDA and CMake's CUDA language.
+  cuda_root=${CUDAToolkit_ROOT:-${CUDA_HOME:-${CUDA_PATH:-}}}
+  if [ -n "${CUDACXX:-}" ]; then
+    nvcc=$(command -v "$CUDACXX" || true)
+  elif [ -n "$cuda_root" ]; then
+    nvcc="$cuda_root/bin/nvcc"
+  else
+    nvcc=$(command -v nvcc || printf '%s\n' /usr/local/cuda/bin/nvcc)
+  fi
+  if [ -f "$nvcc" ] && [ -x "$nvcc" ]; then
+    nvcc=$(readlink -f "$nvcc")
+    cuda_bin=$(dirname "$nvcc")
+    cuda_root=$(dirname "$cuda_bin")
+    export CUDACXX="$nvcc" PATH="$cuda_bin:$PATH"
+  elif [ "$mode" = cuda ]; then
+      echo "CUDA build requires nvcc. Set CUDACXX or CUDA_HOME to the installed toolkit." >&2
+      exit 1
+  fi
+fi
+if [ "$mode" = gpu ]; then
+  mode=vulkan
+  if [ -x "$nvcc" ] && python3 -c 'import torch; assert torch.cuda.is_available() and torch.compiled_with_cxx11_abi()'; then
+    mkdir -p build/lab
+    c++ -std=c++20 -Iinclude "-I$cuda_root/include" _zLab/probe_cuda_worker.cpp src/host/sandbox.cpp \
+      "-L$cuda_root/lib64" "-Wl,-rpath,$cuda_root/lib64" -lcudart -o build/lab/probe-cuda-worker
+    if timeout 30 build/lab/probe-cuda-worker; then
+      mode=cuda
+    elif [ "$?" -ne 2 ]; then
+      echo "CUDA worker discovery failed unexpectedly." >&2
+      exit 1
+    fi
+  fi
+  printf 'Selected GPU backend: %s\n' "$mode"
+fi
 if [ "$mode" = cuda ]; then
   python3 -c 'import torch; assert torch.cuda.is_available() and torch.compiled_with_cxx11_abi(); print(torch.__version__, torch.version.cuda, torch.cuda.get_device_name())'
   torch_prefix=$(python3 -c 'from torch.utils import cmake_prefix_path; print(cmake_prefix_path)')
   native_sm=$(python3 -c 'import torch; print("".join(map(str,torch.cuda.get_device_capability())))')
   export TORCH_CUDA_ARCH_LIST="$(python3 -c 'import torch; print(".".join(map(str,torch.cuda.get_device_capability())))')"
   set -- "$@" -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON \
+    "-DCMAKE_CUDA_COMPILER=$nvcc" "-DCUDAToolkit_ROOT=$cuda_root" "-DCUDA_TOOLKIT_ROOT_DIR=$cuda_root" \
     "-DCMAKE_PREFIX_PATH=$torch_prefix" "-DCMAKE_CUDA_ARCHITECTURES=$native_sm"
+elif [ "$mode" = vulkan ]; then
+  timeout -k 10 480 sh _zLab/prepare_vulkan.sh
+  set -- "$@" -DDATAPUMP_TRIAD_TENSOR=OFF -DDATAPUMP_TRIAD_VULKAN=ON -DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON
 else
   set -- "$@" -DDATAPUMP_TRIAD_TENSOR=OFF
 fi
@@ -73,6 +113,8 @@ printf 'PUMP_LAB_PROFILE=%s\n' "$profile"
 printf 'PUMP_LAB_MODE=%s\n' "$mode"
 if [ "$mode" = cuda ]; then
   python3 -c 'import torch; print("PUMP_LAB_DEVICE=" + str(torch.cuda.get_device_name())); print("PUMP_LAB_TORCH=" + str(torch.__version__)); print("PUMP_LAB_CUDA=" + str(torch.version.cuda))'
+elif [ "$mode" = vulkan ]; then
+  printf 'PUMP_LAB_DEVICE=NVIDIA headless Vulkan (execution pending)\nPUMP_LAB_TORCH=not requested\nPUMP_LAB_CUDA=not selected\n'
 else
   printf 'PUMP_LAB_DEVICE=CPU (processor not identified)\nPUMP_LAB_TORCH=not requested\nPUMP_LAB_CUDA=not requested\n'
 fi
@@ -205,21 +247,25 @@ def memory_total(proc_root):
 
 
 def gpu_receipts():
-    if os.environ.get('PUMP_LAB_RECEIPT_MODE') != 'cuda':
+    mode = os.environ.get('PUMP_LAB_RECEIPT_MODE')
+    if mode not in ('cuda', 'vulkan'):
         print('PUMP_LAB_GPU_SCOPE=not requested')
         return
-    print('PUMP_LAB_GPU_SCOPE=torch CUDA device 0; full-device allocation not established')
-    try:
-        import torch
-        props = torch.cuda.get_device_properties(0)
-        print('PUMP_LAB_GPU_VISIBLE_MEMORY_BYTES=' + str(int(props.total_memory)))
-        uuid = clean(getattr(props, 'uuid', 'unavailable'))
-        print('PUMP_LAB_GPU_VISIBLE_UUID=' + uuid)
-        print('PUMP_LAB_GPU_PARTITION_STATUS=' + ('MIG indicated by UUID' if uuid.startswith('MIG-') else 'unverified'))
-    except Exception:
-        print('PUMP_LAB_GPU_VISIBLE_MEMORY_BYTES=unavailable')
-        print('PUMP_LAB_GPU_VISIBLE_UUID=unavailable')
-        print('PUMP_LAB_GPU_PARTITION_STATUS=unverified')
+    if mode == 'cuda':
+        print('PUMP_LAB_GPU_SCOPE=torch CUDA device 0; full-device allocation not established')
+        try:
+            import torch
+            props = torch.cuda.get_device_properties(0)
+            print('PUMP_LAB_GPU_VISIBLE_MEMORY_BYTES=' + str(int(props.total_memory)))
+            uuid = clean(getattr(props, 'uuid', 'unavailable'))
+            print('PUMP_LAB_GPU_VISIBLE_UUID=' + uuid)
+            print('PUMP_LAB_GPU_PARTITION_STATUS=' + ('MIG indicated by UUID' if uuid.startswith('MIG-') else 'unverified'))
+        except Exception:
+            print('PUMP_LAB_GPU_VISIBLE_MEMORY_BYTES=unavailable')
+            print('PUMP_LAB_GPU_VISIBLE_UUID=unavailable')
+            print('PUMP_LAB_GPU_PARTITION_STATUS=unverified')
+    else:
+        print('PUMP_LAB_GPU_SCOPE=NVIDIA inventory during Vulkan build; verify device use in the worker')
     binary = shutil.which('nvidia-smi')
     try:
         if not binary:
@@ -401,12 +447,20 @@ def deploy(host, user, port, known_hosts, *, mode='cpu', profile='simulation', i
     explicit call; this function does not manage or terminate the paid pod.
     """
     host, user, options = _connection(host, user, port, known_hosts, identity)
-    if mode not in ('cpu', 'cuda'):
-        raise ValueError('Build mode must be cpu or cuda')
+    if mode not in ('cpu', 'cuda', 'gpu'):
+        raise ValueError('Build mode must be cpu, cuda or gpu')
     if profile not in ('simulation', 'live'):
         raise ValueError('Build profile must be simulation or live')
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError('Timeout must be finite and positive')
+    deadline = time.monotonic() + timeout
+
+    def remaining():
+        seconds = deadline - time.monotonic()
+        if seconds <= 0:
+            raise DeployError('Deployment deadline reached; inspect the pod before retrying.')
+        return seconds
+
     directory = LIVE_REMOTE_DIR if profile == 'live' else REMOTE_DIR
     ssh = ['ssh', '-F', '/dev/null', '-T', '-p', str(port), '-l', user, *options, host]
     scp = ['scp', '-F', '/dev/null', '-P', str(port), *options]
@@ -415,14 +469,14 @@ def deploy(host, user, port, known_hosts, *, mode='cpu', profile='simulation', i
         bundle.create_bundle(ROOT, archive)
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
         _run(ssh + ['mkdir', '-m', '700', '--', directory], stage='Creating the deployment directory',
-             timeout=timeout, runner=runner)
+             timeout=remaining(), runner=runner)
         _run(scp + [str(archive), f'{user}@{host}:{directory}/source.tar.gz'],
-             stage='Uploading the source bundle', timeout=timeout, runner=runner)
+             stage='Uploading the source bundle', timeout=remaining(), runner=runner)
         # Values appended to the shell command are validated choices and hex
         # digest, never a provider-supplied string.
         command = f'sh -s -- {digest} {mode} {profile}'
         output = _run(ssh + [command], stage='Verifying and building the remote worker',
-                      timeout=timeout, runner=runner, input_data=REMOTE_BUILD.encode('utf-8'))
+                      timeout=remaining(), runner=runner, input_data=REMOTE_BUILD.encode('utf-8'))
         if on_output is not None:
             on_output(output)
     worker = 'datapump-lab-worker' if profile == 'live' else 'datapump-worker'
@@ -436,10 +490,12 @@ def main(argv=None):
     parser.add_argument('--port', type=int, required=True)
     parser.add_argument('--known-hosts', required=True, help='file containing the independently verified SSH host key')
     parser.add_argument('--identity', help='optional local SSH private-key path')
-    parser.add_argument('--mode', choices=('cpu', 'cuda'), default='cpu')
+    parser.add_argument('--mode', choices=('cpu', 'cuda', 'gpu'), default='cpu',
+                        help='gpu selects a backend compatible with the native worker sandbox')
     parser.add_argument('--profile', choices=('simulation', 'live'), default='simulation',
                         help='worker profile; live audio is experimental and separately unqualified')
-    parser.add_argument('--timeout', type=float, default=DEFAULT_TIMEOUT, help='timeout in seconds per SSH/SCP command')
+    parser.add_argument('--timeout', type=float, default=DEFAULT_TIMEOUT,
+                        help='shared deployment time budget in seconds; each remote stage gets the remaining time')
     args = parser.parse_args(argv)
     try:
         path = deploy(args.host, args.user, args.port, args.known_hosts, mode=args.mode,

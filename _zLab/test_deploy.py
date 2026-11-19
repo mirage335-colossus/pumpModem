@@ -2,9 +2,11 @@ import contextlib
 import hashlib
 import io
 import itertools
+import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -109,10 +111,23 @@ class DeployTests(unittest.TestCase):
                               runner=lambda *a, **kw: types.SimpleNamespace(returncode=255))
             self.assertTrue(caught.exception.uncertain)
 
+    def test_deployment_stages_share_one_deadline(self):
+        with patch.object(deploy.bundle, 'create_bundle', side_effect=self.bundle), \
+             patch.object(deploy.time, 'monotonic', side_effect=[100, 101, 103, 109]):
+            deploy.deploy('pod.example.com', 'root', 22, self.known, runner=self.runner, timeout=10)
+        self.assertEqual([call[1]['timeout'] for call in self.calls], [9, 7, 1])
+
+        self.calls.clear()
+        with patch.object(deploy.bundle, 'create_bundle', side_effect=self.bundle), \
+             patch.object(deploy.time, 'monotonic', side_effect=[100, 102, 110]), \
+             self.assertRaisesRegex(deploy.DeployError, 'deadline'):
+            deploy.deploy('pod.example.com', 'root', 22, self.known, runner=self.runner, timeout=10)
+        self.assertEqual(len(self.calls), 1)
+
     def test_remote_cpu_and_cuda_branches_execute_correct_flags(self):
         # Exercise the actual POSIX script with fake CMake and fake Torch. This
         # checks branching/arguments, not CUDA availability or a real build.
-        for mode, profile in itertools.product(('cpu', 'cuda'), ('simulation', 'live')):
+        for mode, profile in itertools.product(('cpu', 'cuda', 'gpu'), ('simulation', 'live')):
             with self.subTest(mode=mode, profile=profile):
                 home = self.root / (mode + '-' + profile)
                 home.mkdir()
@@ -156,14 +171,48 @@ def compiled_with_cxx11_abi(): return True
 ''')
                 (torch / 'utils.py').write_text('cmake_prefix_path = "/fake/torch"\n')
                 log = home / 'cmake.log'
-                env = {**os.environ, 'PATH': f'{bin_dir}:' + os.environ['PATH'],
+                for name in ('sh', 'tar', 'gzip', 'sha256sum', 'chmod', 'mkdir', 'dirname', 'readlink', 'timeout'):
+                    (bin_dir / name).symlink_to(shutil.which(name))
+                (bin_dir / 'python3').symlink_to(sys.executable)
+                env = {**os.environ, 'PATH': str(bin_dir),
                        'PYTHONPATH': str(home), 'CMAKE_LOG': str(log)}
+                toolkit = home / 'toolkit'
+                nvcc = toolkit / 'bin' / 'nvcc'
+                for key in ('CUDACXX', 'CUDA_HOME', 'CUDA_PATH', 'CUDAToolkit_ROOT'):
+                    env.pop(key, None)
+                if mode != 'cpu':
+                    nvcc.parent.mkdir(parents=True)
+                    nvcc.touch(mode=0o755)
+                    if profile == 'live':
+                        env['CUDACXX'] = str(nvcc)
+                vulkan = mode == 'gpu' and profile == 'simulation'
+                if mode == 'gpu':
+                    # Stand in for the compiled CUDA probe. Its discovery result
+                    # decides the branch; building the worker is still simulated.
+                    compiler = bin_dir / 'c++'
+                    compiler.write_text("#!/bin/sh\nfor arg do output=$arg; done\n"
+                                        "printf '#!/bin/sh\\nexit %d\\n' \"$PROBE_STATUS\" > \"$output\"\n"
+                                        'chmod +x "$output"\n')
+                    compiler.chmod(0o755)
+                    env['PROBE_STATUS'] = '2' if vulkan else '0'
+                if vulkan:
+                    source = home / 'nvidia_icd.json'
+                    source.write_text(json.dumps({'ICD': {'library_path': 'libGLX_nvidia.so.0',
+                                                            'api_version': '1.4.312'}}))
+                    prepare = (Path(deploy.__file__).parent / 'prepare_vulkan.sh').read_text()
+                    prepare = prepare.replace('/etc/os-release', '/dev/null')
+                    prepare = prepare.replace('/etc/vulkan/icd.d/nvidia_icd.json', str(source))
+                    (home / '_zLab').mkdir()
+                    (home / '_zLab/prepare_vulkan.sh').write_text(prepare)
                 script = deploy.REMOTE_BUILD.replace('cd "$directory"', 'directory=' + shlex.quote(str(home)) + '\ncd "$directory"', 1)
+                # Model the image layout in the test's private directory.
+                script = script.replace('/usr/local/cuda/bin/nvcc', shlex.quote(str(nvcc)))
                 result = subprocess.run(['sh', '-s', '--', digest, mode, profile], input=script, text=True,
                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, timeout=20)
                 self.assertEqual(result.returncode, 0, result.stdout)
                 flags = log.read_text()
-                self.assertIn('PUMP_LAB_MODE=' + mode, result.stdout)
+                backend = 'vulkan' if vulkan else 'cuda' if mode == 'gpu' else mode
+                self.assertIn('PUMP_LAB_MODE=' + backend, result.stdout)
                 self.assertIn('PUMP_LAB_PROFILE=' + profile, result.stdout)
                 self.assertIn('PUMP_LAB_RECEIPT_SCOPE=deployment SSH process; worker execution not established', result.stdout)
                 self.assertIn('PUMP_LAB_CPU_MODEL=', result.stdout)
@@ -180,7 +229,7 @@ def compiled_with_cxx11_abi(): return True
                     self.assertNotIn('CMAKE_PROJECT_DataPump_INCLUDE', flags)
                     self.assertIn('--target datapump-worker', flags)
                 self.assertRegex(result.stdout, r'PUMP_LAB_WORKER_SHA256=[0-9a-f]{64}')
-                if mode == 'cuda':
+                if backend == 'cuda':
                     self.assertIn('PUMP_LAB_DEVICE=fake GPU', result.stdout)
                     self.assertIn('PUMP_LAB_GPU_VISIBLE_MEMORY_BYTES=12345678', result.stdout)
                     self.assertIn('PUMP_LAB_GPU_VISIBLE_UUID=MIG-fake-uuid', result.stdout)
@@ -191,6 +240,17 @@ def compiled_with_cxx11_abi(): return True
                     self.assertIn('-DDATAPUMP_TRIAD_TENSOR=ON', flags)
                     self.assertIn('-DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON', flags)
                     self.assertIn('-DCMAKE_CUDA_ARCHITECTURES=120', flags)
+                    self.assertIn('-DCMAKE_CUDA_COMPILER=' + str(nvcc), flags)
+                    self.assertIn('-DCUDA_TOOLKIT_ROOT_DIR=' + str(toolkit), flags)
+                    self.assertIn('-DCUDAToolkit_ROOT=' + str(toolkit), flags)
+                elif backend == 'vulkan':
+                    self.assertIn('-DDATAPUMP_TRIAD_VULKAN=ON', flags)
+                    self.assertIn('-DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON', flags)
+                    self.assertIn('-DDATAPUMP_TRIAD_TENSOR=OFF', flags)
+                    manifest = home / 'build/lab/nvidia-headless-icd.json'
+                    self.assertEqual(manifest.stat().st_mode & 0o777, 0o600)
+                    self.assertEqual(json.loads(manifest.read_text())['ICD'],
+                                     {'library_path': 'libEGL_nvidia.so.0', 'api_version': '1.4.312'})
                 else:
                     self.assertIn('PUMP_LAB_DEVICE=CPU (processor not identified)', result.stdout)
                     self.assertIn('PUMP_LAB_GPU_SCOPE=not requested', result.stdout)

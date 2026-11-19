@@ -20,6 +20,8 @@ class BundleTest(unittest.TestCase):
                 members = archive.getmembers()
                 names = {m.name for m in members}
                 self.assertIn('_zLab/worker_relay.py', names)
+                for name in ('_zLab/probe_cuda_worker.cpp', '_zLab/prepare_vulkan.sh'):
+                    self.assertEqual(archive.extractfile(name).read(), (root / name).read_bytes())
                 for name in ('inject.cmake', 'protocol.hpp', 'remote.hpp', 'remote.cpp',
                              'provider.cpp', 'worker.cpp', 'worker_schedule.hpp', 'local.hpp', 'local.cpp',
                              'local_native.cpp', 'local_main.cpp'):

@@ -21,9 +21,13 @@ explicitly escapes that group is outside this relay's process-control boundary.
 """
 
 import argparse
+import json
 import os
+from pathlib import Path
+import re
 import selectors
 import signal
+import stat
 import struct
 import subprocess
 import sys
@@ -33,6 +37,10 @@ MAX_PAYLOAD = 8 * 1024 * 1024
 HEADER_SIZE = 12
 CHUNK = 65536
 SHUTDOWN_SECONDS = 10
+DEPLOYMENTS = {
+    False: Path("/workspace/pump-lab/build/lab/datapump-worker"),
+    True: Path("/workspace/pump-lab-live/build/lab/datapump-lab-worker"),
+}
 
 
 class RelayError(Exception):
@@ -162,12 +170,49 @@ def _stop_group(child):
         child.wait()
 
 
+def gpu_environment(worker, live):
+    """Use the headless Vulkan driver selected by this private lab deployment."""
+    deployed = DEPLOYMENTS[live]
+    if os.fspath(worker) != str(deployed):
+        return None
+    manifest = deployed.parent / "nvidia-headless-icd.json"
+    try:
+        fd = os.open(manifest, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return None  # The CUDA build uses the default driver environment.
+    with os.fdopen(fd, "rb") as source:
+        entry = os.fstat(fd)
+        if (not stat.S_ISREG(entry.st_mode) or entry.st_uid != os.geteuid()
+                or entry.st_mode & 0o077 or not 0 < entry.st_size <= 1024):
+            raise RelayError("Unsafe deployment Vulkan manifest")
+        deployment = deployed.parents[2]  # deploy.py creates it with mode 0700.
+        for folder in (deployment, deployed.parents[1], deployed.parent):
+            info = folder.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+                    or (folder == deployment and info.st_mode & 0o077)):
+                raise RelayError("Unsafe deployment Vulkan directory")
+        try:
+            contents = json.loads(source.read(1025))
+            api_version = contents["ICD"]["api_version"]
+            format_version = contents["file_format_version"]
+            if (not re.fullmatch(r"1\.\d{1,3}\.\d{1,3}", api_version)
+                    or format_version not in ("1.0.0", "1.0.1")
+                    or contents != {"file_format_version": format_version, "ICD": {
+                        "library_path": "libEGL_nvidia.so.0", "api_version": api_version}}):
+                raise ValueError()
+        except (KeyError, TypeError, ValueError, RecursionError):
+            raise RelayError("Invalid deployment Vulkan manifest") from None
+    return dict(os.environ, VK_DRIVER_FILES=str(manifest), VK_ICD_FILENAMES=str(manifest))
+
+
 def relay(worker, stop_requested=lambda: False, require_gpu=False, file_channel=False, live=False):
     # Explicit pipes ensure the worker's no-socket/anonymous-pipe checks remain
     # meaningful even when this relay's own stdio is an SSH channel.
     command = [worker] + ([] if live else ["--simulation"])
+    environment = None
     if require_gpu:
         command.append("--require-gpu")
+        environment = gpu_environment(worker, live)
     file_read = file_write = None
     if file_channel:
         file_read, file_write = os.pipe()
@@ -176,7 +221,7 @@ def relay(worker, stop_requested=lambda: False, require_gpu=False, file_channel=
         child = subprocess.Popen(command, stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE, stderr=None, bufsize=0,
                                  pass_fds=(file_read,) if file_channel else (),
-                                 close_fds=True, start_new_session=True)
+                                 close_fds=True, start_new_session=True, env=environment)
     except BaseException:
         if file_write is not None:
             os.close(file_write)

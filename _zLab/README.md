@@ -3,9 +3,10 @@
 **Implementation status:** the developer tool integrates RunPod management,
 simulation and finite Live/Duplex controls with the native worker and local
 audio companion. The shared GUI runs through an SSH relay to a separately
-deployed worker. Local tests exercise native simulation, fake-device audio and
-one physical analog loopback; complete remote operation and actual GPU
-execution have not been qualified.
+deployed worker. A short RunPod simulation decoded `e` on a full RTX PRO 6000
+Blackwell Server Edition using Vulkan for coarse search and the native CPU
+receiver for fine processing. Local tests exercised fake-device audio and one
+physical analog loopback.
 **Finite Live/Duplex with physical audio is still experimental and not
 qualified.** The live profile uses the native audio and transport components;
 the simulation bridge rejects audio frames. A fake-device transport test has
@@ -56,11 +57,10 @@ A subsequent live RunPod smoke used a user-created key with Catalog Read and
 Pods Read/Write. It created and deleted two test pods; individual lookups then
 returned HTTP 404 for both and the inventory showed neither. The first harness
 waited for SSH details in a list response that did not include them. After the
-controller was corrected to fetch the individual pod details, it observed a
-pod as RUNNING. The second smoke then received HTTP 403 from
-`POST /v2/pods/{id}/exec` before GPU identity inspection or worker deployment;
-the cause of that denial is unconfirmed. Neither test qualifies GPU execution
-or a remote simulation.
+test harness fetched the individual pod details, it observed a pod as RUNNING.
+Its command preflight received HTTP 403 from `POST /v2/pods/{id}/exec` before
+GPU inspection or deployment. The cause of that denial remains unknown. The
+GUI uses SSH for both deployment and simulation.
 
 The controller records its owned pod and queue requests under
 `${XDG_STATE_HOME:-$HOME/.local/state}/pumpModem/runpod-lab/` without the API
@@ -78,14 +78,26 @@ and verify the provider's status.
 The simulation action expects the lab relay at
 `/workspace/pump-lab/_zLab/worker_relay.py` and the native worker at
 `/workspace/pump-lab/build/lab/datapump-worker` on the selected running pod.
-Select the `simulation` worker profile and use **Deploy worker to selected pod**
-before opening the worker, or deploy it with the command below. The direct SSH host key must already be
-verified and present in the local `known_hosts`; the launcher does not disable
-host-key checks. Provider connection details alone do not establish the host
-key's authenticity. The bridge suppresses SSH stderr, so authentication,
-host-key and remote-launch errors can appear as a generic worker exit; diagnose
-those separately with a trusted SSH connection. The shared GUI's remote draft
-and test modem key material are sent to the pod; use a designated lab key.
+Select the `simulation` worker profile and click **Deploy worker to selected
+pod**. Leave **SSH trust (optional)** blank to use the default image's
+startup log. On first connection, the controller fetches the selected pod by
+ID, checks its name and reads its container log with `pods:read`. It compares
+the logged Ed25519 fingerprint with the public key offered by the pod's direct
+SSH host and port. A match creates a private `known_hosts` file for this pod.
+Later sessions reuse the saved key and require strict SSH host verification.
+**Forget verified closed record** also removes that pod's managed key file.
+[RunPod pod logs API](https://docs.runpod.io/api-reference-v2/pods/stream-pod-logs)
+
+If the log is incomplete, wait for SSH startup and retry. If the API denies
+log access, select the same pod in the RunPod console, open **Logs → Container**
+and find the entry for `/etc/ssh/ssh_host_ed25519_key.pub`. Paste its
+`SHA256:…` fingerprint into **SSH trust (optional)** after selecting that pod
+in the lab. The controller checks the offered key against this fingerprint.
+Changing the selected pod clears the pasted fingerprint. You can also supply
+an independently verified `known_hosts` file for the exact endpoint. A key
+mismatch stops the connection. Verify the pod, current endpoint and current
+key independently before using a replacement file. The shared GUI sends the
+remote draft and test modem key material to the pod. Use a designated lab key.
 
 For an already running pod, [deploy.py](deploy.py) can upload an allowlisted
 source bundle and build the worker. It needs Python, CMake, a C++ toolchain,
@@ -103,33 +115,42 @@ python3 _zLab/deploy.py --host POD_HOST --port POD_PORT --user root \
   --known-hosts "$HOME/.ssh/known_hosts" --mode cpu
 ```
 
-Use `--mode cuda` only with the CUDA prerequisites; this build route and the
-worker's CUDA behavior have not been tested on a pod. The helper defaults to
-CPU, which does not use an NVIDIA GPU. A GPU pod requires a CUDA build: the
-controller requests the worker's `--require-gpu` policy, which keeps Robust
-selected and GPU enabled, and rejects a CPU-only worker. An initialized backend
-or matching device selection does not prove that the receiver performed GPU
-work; inspect the actual backend, score rows and stage counters. The helper refuses an existing
+For a GPU job, the GUI requests `--mode gpu`. The deployer checks whether
+CUDA can discover the device inside the worker's socket restrictions. With
+compatible CUDA and LibTorch prerequisites and a passing probe it builds the
+CUDA worker. If CUDA is unavailable there, it builds the native Vulkan worker
+and configures a private NVIDIA EGL driver manifest for headless operation.
+On the supported Ubuntu 24.04 amd64 image the deployer installs missing
+Vulkan build dependencies from signed Ubuntu packages. The standalone CLI
+defaults to `--mode cpu`. Use `--mode gpu` for automatic GPU selection or
+`--mode cuda` to require a CUDA build.
+GPU sessions enforce `--require-gpu`. Check the receiver's backend, scored
+rows and stage counters to see where GPU work ran. The helper refuses an existing
 profile-specific directory rather than overwriting it. A timeout or lost
 SSH connection may leave remote work or files; inspect the pod before retrying.
 The helper does not stop the pod. The source archive remains on the pod for deployment
 verification; remove it after the build is verified and it is no longer needed
 for diagnosis, or terminate the pod when the job ends.
 
-Before opening a simulation, enter the same verified known-hosts file and,
-if needed, the same private-key path in the controller's SSH fields. These
-fields are separate from the deployment helper's `--known-hosts` and
-`--identity` arguments. The two SSH invocations bypass SSH configuration and
+When using the command-line deployment helper, enter the same verified
+known-hosts file and, if needed, the same identity path in the GUI to open a
+simulation with those credentials. The SSH invocations bypass SSH configuration and
 proxies; supply a directly reachable endpoint and either an explicit identity
 or an SSH agent. Known-hosts and identity paths cannot contain whitespace,
 quotes, backslashes, `%` or `$`.
 
 After deployment, select the owned pod in the controller and open its
 simulation. This starts the shared GUI through the lab's loopback browser host
-and the pod's anonymous-pipe worker. It has not yet been verified end to end
-against RunPod or for all requested controls and views. Closing the browser or
-controller ends the connection, not the pod; use the explicit termination
-action and verify the provider's result.
+and the pod's anonymous-pipe worker. The short RunPod fixture covers one
+simulation configuration. On a full RTX PRO 6000 Blackwell Server Edition,
+automatic deployment installed the missing build dependencies and selected
+Vulkan. The remote worker performed 780 GPU coarse-search rows and decoded
+`e` through the shared GUI protocol. The run used the selected pod's
+console-verified SSH key. [Validation record](../docs/validation.md#native-finite-duplex-and-runpod-lab--18-november-2026)
+
+Use the explicit termination action at the end of
+the job and verify deletion in RunPod. Closing the browser or controller only
+closes the connection.
 
 The experimental `live` profile deploys a separate lab worker under
 `/workspace/pump-lab-live`; it can coexist with a simulation deployment. The
@@ -165,6 +186,7 @@ For local, non-billable component checks:
 
 ```sh
 python3 -m unittest discover -s _zLab -p 'test_runpod.py' -v
+python3 -m unittest discover -s _zLab -p 'test_host_identity.py' -v
 python3 -m unittest discover -s _zLab -p 'test_worker_relay.py' -v
 python3 -m unittest discover -s _zLab -p 'test_browser_bridge.py' -v
 python3 -m unittest discover -s _zLab -p 'test_app.py' -v
@@ -496,9 +518,8 @@ actual local device behavior separately from simulated or offline replay.
    integrated GUI/provider session. Compare returned samples, settings and
    decisions to a matched native reference. Reserve the long HF replay for a
    question a short fixture cannot answer.
-3. Use one admitted GPU pod for a bounded native smoke test. Retrieve the
-   hardware identity and evidence of executed GPU work, then verify teardown.
-   Test the CPU choice as a CPU job. Keep the RTX 4090/5090 entries labelled
+3. The bounded native GPU simulation covers one full Blackwell Server Edition.
+   Exercise the CPU choice as a CPU job. Keep the RTX 4090/5090 entries labelled
    by the coverage actually achieved. [Accelerator checks](../docs/gpu-precision-controls.md)
    and [representative receiver hardware](../docs/triad-performance.md#representative-receiver-hardware).
 4. For Live/Duplex, the fake-device holdout and bounded transport backlog and

@@ -10,6 +10,10 @@ from __future__ import annotations
 import json
 import http.client
 import math
+from pathlib import Path
+import re
+import subprocess
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,6 +22,10 @@ import urllib.request
 API_ROOT = "https://api.runpod.io/v2"
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_POD_PAGES = 100
+_LOG_OPERATION = "GET /v2/pods/{id}/logs"
+_LOG_BYTES = 1024 * 1024
+_LOG_LINE_BYTES = 16 * 1024
+_LOG_LINES = 5000
 
 
 class RunPodError(Exception):
@@ -55,6 +63,53 @@ def _http_transport(method, url, headers, body, timeout):
             return error.code, b""
         finally:
             error.close()
+
+
+def _container_lines(stream):
+    """Yield container lines from RunPod's id/data SSE records."""
+    size = 0
+    data = []
+    for _ in range(_LOG_LINES):
+        raw = stream.readline(_LOG_LINE_BYTES + 1)
+        if not raw:
+            return
+        size += len(raw)
+        if len(raw) > _LOG_LINE_BYTES or size > _LOG_BYTES:
+            raise ValueError("pod log limit exceeded")
+        if not raw.endswith(b"\n"):
+            raise ValueError("incomplete pod log line")
+        line = raw[:-1].removesuffix(b"\r")
+        if line.startswith(b"data:"):
+            data.append(line[5:].removeprefix(b" "))
+        elif not line and data:
+            event = json.loads(b"\n".join(data).decode("utf-8"))
+            data.clear()
+            if (not isinstance(event, dict) or event.get("source") != "container" or
+                    not isinstance(event.get("line"), str)):
+                raise ValueError("invalid container log event")
+            yield event["line"]
+    raise ValueError("pod log limit exceeded")
+
+
+def _log_probe(pod_id, key, timeout):
+    """Run inside the deadline-limited subprocess. Emit only a fixed result."""
+    from host_identity import startup_fingerprint
+
+    path = RunPodClient._pod_path(pod_id) + "/logs?source=container&tail=1000"
+    request = urllib.request.Request(API_ROOT + path, headers={
+        "Authorization": "Bearer " + key, "Accept": "text/event-stream"})
+    try:
+        with urllib.request.build_opener(_NoRedirect()).open(request, timeout=timeout) as response:
+            if response.status != 200 or response.headers.get_content_type() != "text/event-stream":
+                return "invalid"
+            return startup_fingerprint(_container_lines(response))
+    except urllib.error.HTTPError as error:
+        error.close()
+        return str(error.code)
+    except (OSError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
+        return "connection"
+    except (ValueError, RecursionError):
+        return "invalid"
 
 
 class RunPodClient:
@@ -185,6 +240,35 @@ class RunPodClient:
     def get_pod(self, pod_id):
         return self._request("GET", self._pod_path(pod_id), operation="GET /v2/pods/{id}", scope="pods:read")
 
+    def get_pod_ssh_fingerprint(self, pod_id):
+        """Read an owned pod's public Ed25519 fingerprint from its startup logs."""
+        self._pod_path(pod_id)
+        timeout = min(self._timeout, 60)
+        # An active SSE stream can stall inside DNS, a chunk header, or a partial
+        # line despite urllib's per-read timeout. Kill and reap the whole reader
+        # at the deadline. The key travels only over its anonymous stdin pipe.
+        request = json.dumps([pod_id, self._api_key, timeout]).encode("ascii")
+        try:
+            child = subprocess.run(
+                [sys.executable, "-E", "-s", str(Path(__file__).resolve()), "--read-ssh-fingerprint"],
+                input=request, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=timeout)
+            result = child.stdout.strip() if child.returncode == 0 else b"invalid"
+        except (OSError, subprocess.TimeoutExpired):
+            result = b"connection"
+        if re.fullmatch(rb"SHA256:[a-zA-Z0-9+/]{43}", result):
+            return result.decode("ascii")
+        status = int(result) if re.fullmatch(rb"[1-5][0-9]{2}", result) else None
+        if status == 403:
+            detail = "access denied (HTTP 403); check pods:read and account or team access"
+        elif status is not None:
+            detail = f"request failed (HTTP {status})"
+        elif result == b"connection":
+            detail = "connection failed or timed out before the startup fingerprint was verified"
+        else:
+            detail = "startup logs did not contain a verifiable Ed25519 host fingerprint"
+        raise RunPodError(f"{_LOG_OPERATION}: {detail}", operation=_LOG_OPERATION,
+                          required_scope="pods:read", status=status)
+
     def create_pod(self, payload):
         """Return (HTTP status, body): 201 is a pod; 202 is a queued request."""
         if not isinstance(payload, dict):
@@ -206,3 +290,7 @@ class RunPodClient:
 
     def cancel_queued(self, queue_id):
         self._request("DELETE", self._queued_path(queue_id), operation="DELETE /v2/queued-pods/{id}", scope=None)
+
+
+if __name__ == "__main__" and sys.argv[1:] == ["--read-ssh-fingerprint"]:
+    print(_log_probe(*json.load(sys.stdin)))

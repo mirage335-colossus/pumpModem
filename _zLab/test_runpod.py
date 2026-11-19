@@ -2,10 +2,16 @@
 
 import json
 import http.client
+import io
+import subprocess
+import sys
+import time
 import unittest
 import urllib.error
+from email.message import Message
+from unittest.mock import patch
 
-from runpod import MAX_RESPONSE_BYTES, RunPodClient, RunPodError, _NoRedirect
+from runpod import MAX_RESPONSE_BYTES, RunPodClient, RunPodError, _container_lines, _log_probe, _NoRedirect
 
 
 class FakeTransport:
@@ -23,6 +29,69 @@ class FakeTransport:
 
 
 class RunPodTests(unittest.TestCase):
+    def test_container_log_events_preserve_boundaries(self):
+        stream = io.BytesIO(b': keepalive\r\n\r\nid: 1\r\ndata: {"source":"container",\r\n'
+                            b'data: "line":"second"}\r\n\r\nid: 2\ndata: '
+                            b'{"source":"container","line":"third"}\n\n')
+        self.assertEqual(list(_container_lines(stream)), ["second", "third"])
+        for data in (b'data: {"source":"system","line":"wrong source"}\n\n',
+                     b'data: malformed\n\n', b'data: partial', b':' * 16385 + b'\n',
+                     b'\n' * 5001, (b':' * 16382 + b'\n') * 65):
+            with self.assertRaises(ValueError):
+                list(_container_lines(io.BytesIO(data)))
+
+    def test_stream_request_authenticates_exact_pod_and_reads_only_fingerprint(self):
+        fingerprint = "SHA256:" + "A" * 43
+        lines = ["Pod Started", "SSH host keys:", "Key: /etc/ssh/ssh_host_ed25519_key.pub",
+                 f"256 {fingerprint} root@machine (ED25519)", "Exporting environment variables...",
+                 "Start script(s) finished, Pod is ready to use."]
+        response = io.BytesIO(b"".join(
+            b"data: " + json.dumps({"source": "container", "line": line}).encode() + b"\n\n"
+            for line in lines))
+        response.status = 200
+        response.headers = Message()
+        response.headers["Content-Type"] = "text/event-stream; charset=utf-8"
+        with patch("runpod.urllib.request.build_opener") as opener:
+            opener.return_value.open.return_value = response
+            self.assertEqual(_log_probe("pod/a", "test-token", 5), fingerprint)
+            self.assertIsInstance(opener.call_args.args[0], _NoRedirect)
+            req = opener.return_value.open.call_args.args[0]
+            self.assertEqual(req.full_url, "https://api.runpod.io/v2/pods/pod%2Fa/logs?source=container&tail=1000")
+            self.assertEqual(req.get_header("Authorization"), "Bearer test-token")
+            self.assertEqual(req.get_header("Accept"), "text/event-stream")
+            self.assertTrue(response.closed)
+
+    def test_logs_redact_errors_and_do_not_follow_redirects(self):
+        client = RunPodClient("private-token")
+        for status in (302, 401, 403, 404, 429):
+            error = urllib.error.HTTPError("https://example.invalid", status, "private reason",
+                                           {}, io.BytesIO(b"private body"))
+            with patch("runpod.urllib.request.build_opener") as opener:
+                opener.return_value.open.side_effect = error
+                result = _log_probe("private-id", "private-token", 2)
+                self.assertEqual(result, str(status))
+                self.assertTrue(error.closed)
+            with patch("runpod.subprocess.run", return_value=subprocess.CompletedProcess(
+                    [], 0, stdout=result.encode())) as runner:
+                with self.assertRaises(RunPodError) as caught:
+                    client.get_pod_ssh_fingerprint("private-id")
+                self.assertNotIn("private", str(caught.exception))
+                self.assertNotIn("private", str(runner.call_args.args))
+                self.assertEqual(caught.exception.status, status)
+                self.assertEqual(caught.exception.required_scope, "pods:read")
+                if status == 403:
+                    self.assertIn("pods:read", str(caught.exception))
+
+    def test_log_reader_deadline_kills_stalled_child(self):
+        run = subprocess.run
+        def stall(_args, **kwargs):
+            return run([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
+        started = time.monotonic()
+        with patch("runpod.subprocess.run", side_effect=stall):
+            with self.assertRaisesRegex(RunPodError, "timed out"):
+                RunPodClient("private-token", timeout=0.1).get_pod_ssh_fingerprint("private-id")
+        self.assertLess(time.monotonic() - started, 3)
+
     def test_catalog_and_authorization_header(self):
         fake = FakeTransport((200, {"gpus": [{"id": "RTX"}]}),
                              (200, {"cpus": [{"id": "cpu"}]}))

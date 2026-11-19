@@ -6,6 +6,7 @@
 
 #include <vulkan/vulkan.h>
 #include <glslang_c_interface.h>
+#include <glslang/build_info.h>
 #include <glslang/Public/resource_limits_c.h>
 #include <vkFFT.h>
 
@@ -334,11 +335,9 @@ struct Shared {
         vkGetDeviceQueue(device, family, 0, &queue);
         total.device = "vulkan:" + std::to_string(options.device_index);
         total.device_name = properties.deviceName;
-        glslang_version_t compiler_version{};
-        glslang_get_version(&compiler_version);
         total.library_version = "VkFFT " + std::to_string(VkFFTGetVersion()) + "; glslang " +
-            std::to_string(compiler_version.major) + "." + std::to_string(compiler_version.minor) + "." +
-            std::to_string(compiler_version.patch);
+            std::to_string(GLSLANG_VERSION_MAJOR) + "." + std::to_string(GLSLANG_VERSION_MINOR) + "." +
+            std::to_string(GLSLANG_VERSION_PATCH) + GLSLANG_VERSION_FLAVOR;
         total.precision = requested == VulkanCoarsePrecision::automatic ? "vulkan_frequency_automatic_pending" :
             requested == VulkanCoarsePrecision::fp16_storage ? half_storage_arithmetic :
             requested == VulkanCoarsePrecision::direct_fp16 ? packed_direct_arithmetic :

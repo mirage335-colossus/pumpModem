@@ -307,16 +307,41 @@ class TkControllerIntegration(unittest.TestCase):
         finally:
             other.destroy()
 
+    def test_console_fingerprint_cleared_when_its_selected_pod_changes(self):
+        self.root.deiconify()
+        self.root.update()
+        self.controller.state.write([{'name': 'first', 'id': 'p1'}, {'name': 'second', 'id': 'p2'}])
+        self.controller.refresh()
+        self.controller.list.selection_set(0)
+        self.set_entry(self.controller.known_hosts, 'SHA256:' + 'A' * 43)
+        self.controller.refresh()
+        self.assertTrue(self.controller.known_hosts.get().startswith('SHA256:'))
+        self.provider.pods = [{'id': 'p1', 'name': 'first',
+                               'ssh': {'direct': {'host': 'pod.example', 'port': 2222}}}]
+        with patch.object(self.controller, 'background') as background, \
+             patch('host_identity.verify_host_key', return_value=Path(self.tmp.name) / 'pin') as verify:
+            self.button('Open selected worker').invoke()
+            lookup, _ = background.call_args.args
+            lookup(self.provider)
+            verify.assert_called_once_with('p1', 'pod.example', 2222, 'SHA256:' + 'A' * 43,
+                                           self.controller.state.path.parent)
+        self.controller.list.selection_clear(0, 'end')
+        self.controller.list.selection_set(1)
+        self.controller.list.event_generate('<<ListboxSelect>>')
+        self.root.update()
+        self.assertEqual(self.controller.known_hosts.get(), '')
+        self.assertIn('selected pod changed', self.controller.status.get())
+
     def test_deploy_button_uses_selected_pod_and_safe_profile(self):
         self.set_entry(self.controller.key, 'dummy-session-key')
         known = Path(self.tmp.name) / 'known_hosts'
         known.write_text('fixture')
-        self.set_entry(self.controller.known_hosts, str(known))
+        self.assertEqual(self.controller.known_hosts.get(), '')
         self.provider.pods = [{'id': 'pod-1', 'name': 'owned', 'status': 'RUNNING',
                                'gpu': {'id': 'NVIDIA GeForce RTX 4090', 'count': 1},
                                'ssh': {'direct': {'host': 'pod.example', 'username': 'root', 'port': 2222}}}]
         self.controller.state.write([{'name': 'owned', 'id': 'pod-1', 'status': 'RUNNING',
-                                      'deadline': time.time()+300, 'compute_kind': 'gpu',
+                                      'deadline': time.time()+1800, 'compute_kind': 'gpu',
                                       'compute_id': 'NVIDIA GeForce RTX 4090'}])
         self.controller.refresh()
         self.controller.list.selection_set(0)
@@ -324,16 +349,23 @@ class TkControllerIntegration(unittest.TestCase):
         calls = []
         def deploy(*args, **kwargs):
             calls.append((args, kwargs))
-            kwargs['on_output']('PUMP_LAB_MODE=cuda\nPUMP_LAB_WORKER_SHA256=fixture')
-        with patch('deploy.deploy', side_effect=deploy):
+            kwargs['on_output']('PUMP_LAB_MODE=vulkan\nPUMP_LAB_WORKER_SHA256=fixture')
+        with patch.object(self.provider, 'get_pod_ssh_fingerprint', create=True, return_value='test-fingerprint') as logs, \
+             patch('host_identity.existing_host_key', return_value=None), \
+             patch('host_identity.verify_host_key', return_value=known) as verify, \
+             patch('deploy.deploy', side_effect=deploy):
             self.execute(self.button('Deploy worker to selected pod').invoke,
                          lambda: not self.controller.busy and not self.controller.deploying
                          and 'Worker build finished' in self.controller.status.get())
+        logs.assert_called_once_with('pod-1')
+        verify.assert_called_once_with('pod-1', 'pod.example', 2222, 'test-fingerprint',
+                                       self.controller.state.path.parent)
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0][1]['mode'], 'cuda')
+        self.assertEqual(calls[0][0][3], str(known))
+        self.assertEqual(calls[0][1]['mode'], 'gpu')
         self.assertEqual(calls[0][1]['profile'], 'live')
-        self.assertEqual(calls[0][1]['timeout'], 300)
-        self.assertIn('PUMP_LAB_MODE=cuda', self.controller.deployment_receipt.get())
+        self.assertEqual(calls[0][1]['timeout'], 900)
+        self.assertIn('PUMP_LAB_MODE=vulkan', self.controller.deployment_receipt.get())
         self.assertNotIn('dummy-session-key', self.controller.deployment_receipt.get())
         self.assertEqual(self.provider.deleted, [])
 

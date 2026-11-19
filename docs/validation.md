@@ -151,12 +151,47 @@ A subsequent RunPod lifecycle smoke with a user-created key granting Catalog
 Read and Pods Read/Write listed both catalogs, created two test pods and deleted
 both. Individual lookups returned HTTP 404 for each after deletion, and neither
 appeared in inventory. The first harness waited for SSH details in a pod-list
-response that omitted them; the corrected controller fetched individual details
-and confirmed RUNNING. The second attempt then received HTTP 403 from
+response that omitted them. The corrected harness fetched individual details
+and confirmed RUNNING. Its command preflight received HTTP 403 from
 `POST /v2/pods/{id}/exec` before GPU identity inspection or worker deployment.
-The denial's cause is unconfirmed; these tests do not establish actual GPU work
-or a successful RunPod simulation. Pod identifiers and credentials are not
-retained in this record.
+The denial's cause remains unknown.
+
+The lab now verifies the selected pod's SSH host key using its container
+startup log. A local integration test combined simulated pod-detail and log
+endpoints with a real OpenSSH server and temporary keys. An incorrect log
+fingerprint stopped enrollment before a key file was written. A matching
+fingerprint allowed the GUI connection helper to enroll the key and OpenSSH
+to execute `true` with strict host checking. After the server restarted with a
+different key on the same port, OpenSSH refused the connection (exit 255).
+
+On a fresh RunPod GPU pod the read-only container-log endpoint also returned
+HTTP 403. The signed-in console displayed the Ed25519 host fingerprint under
+**Logs → Container**. The lab accepts this fingerprint for the selected pod
+and compares it to the SSH key offered at its current direct endpoint.
+
+The verified pod exposed one full RTX PRO 6000 Blackwell Server Edition
+with 97,887 MiB visible. With CUDA 12.8 and driver 595.112.07, device
+discovery reported one GPU outside the worker. Under the worker's existing
+socket restrictions, `cudaGetDeviceCount` returned error 304. A trace of
+successful discovery showed use of an abstract local UVM socket. The lab
+preserves the socket restriction and supports headless NVIDIA Vulkan.
+In a bounded remote simulation the native receiver reported 780 Vulkan
+coarse-search rows. Fine processing and tracking ran on the CPU.
+
+On 19 November 2026 a repeat on the same stock-template pod used the GUI's
+automatic deployment function, the verified pod details and the previously
+matched SSH host key. It started with a fresh deployment directory and four
+missing development packages. The deployer installed those packages from the
+signed Ubuntu 24.04 repositories, selected Vulkan and built worker SHA-256
+`ed25eff954c3636ba9eb97aba35fb6fcd44246810536d822712255874282b2d9`.
+The test sent the short `e` draft through the local HTTP GUI bridge and real
+SSH relay. The receiver again reported 780 Vulkan search rows and decoded
+`e` with indexed DATA decisions 0, 0, 1 followed by two scored QUIET slots.
+After termination the exact pod lookup returned HTTP 404 and both pod and
+queue inventories were empty. Subsequent adjustments to GUI and deployment
+timeouts and package-index downloads received local unit coverage. The live
+test exercised the GUI protocol programmatically. Remote physical Live/Duplex,
+receiver capacity and sensitivity remain open.
 
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 

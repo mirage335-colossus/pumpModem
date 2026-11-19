@@ -26,6 +26,8 @@ BundleError = _native.BundleError
 _LOCK = threading.Lock()
 _EXTRA_FILES = (
     "_zLab/worker_relay.py",
+    "_zLab/probe_cuda_worker.cpp",
+    "_zLab/prepare_vulkan.sh",
     "_zLab/audio/inject.cmake",
     "_zLab/audio/protocol.hpp",
     "_zLab/audio/remote.hpp",

@@ -1,7 +1,7 @@
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from pathlib import Path
 
 import app as app_module
@@ -59,8 +59,9 @@ class Tests(unittest.TestCase):
             def __init__(self): self.requests = []
             def get_pod(self, pod_id):
                 self.requests.append(pod_id)
-                return {'id': pod_id, 'name': 'owned', 'ssh': {'direct': {}}}
+                return {'id': pod_id, 'name': 'owned', 'ssh': {'direct': {'host': 'pod.example', 'port': 2222}}}
         controller = App.__new__(App)
+        controller.state = State(path='/private/state/jobs.json')
         controller.list = List()
         controller.records = [{'id': 'p1', 'name': 'owned', 'deadline': time.time() + 60}]
         controller.deploying = controller.closing_bridge = False
@@ -78,9 +79,54 @@ class Tests(unittest.TestCase):
         controller.details()
         self.assertEqual(len(actions), 3)
         client = Client()
-        for request, _ in actions:
-            self.assertEqual(request(client)['id'], 'p1')
+        with patch('host_identity.existing_host_key', return_value=Path('/private/state/pin')) as pin:
+            for request, _ in actions[:2]:
+                pod, known = request(client)
+                self.assertEqual(pod['id'], 'p1')
+                self.assertEqual(known, '/private/state/pin')
+                pin.assert_called_with('p1', 'pod.example', 2222, Path('/private/state'))
+        self.assertEqual(actions[2][0](client)['id'], 'p1')
         self.assertEqual(client.requests, ['p1', 'p1', 'p1'])
+
+    def test_owned_pod_enrollment_stops_on_mismatch_and_honors_explicit_file(self):
+        client = Mock()
+        record = {'id': 'pod-2', 'name': 'second'}
+        detail = {'id': 'pod-2', 'name': 'second', 'ssh': {'direct': {'host': 'fresh.example', 'port': 3322}}}
+        client.get_pod.return_value = detail
+        client.get_pod_ssh_fingerprint.return_value = 'expected-fingerprint'
+        state = Path('/private/state')
+        with patch('host_identity.existing_host_key', return_value=None) as pin, \
+             patch('host_identity.verify_host_key', side_effect=ValueError('fingerprint mismatch')) as verify:
+            self.assertEqual(app_module.owned_pod_connection(client, record, 'my_known_hosts', state),
+                             (detail, 'my_known_hosts'))
+            client.get_pod_ssh_fingerprint.assert_not_called()
+            pin.assert_not_called()
+            with self.assertRaisesRegex(ValueError, 'fingerprint mismatch'):
+                app_module.owned_pod_connection(client, record, '', state)
+            verify.assert_called_once_with('pod-2', 'fresh.example', 3322, 'expected-fingerprint', state)
+            client.get_pod_ssh_fingerprint.assert_called_once_with('pod-2')
+            client.get_pod.return_value = dict(detail, id='different-pod')
+            with self.assertRaisesRegex(ValueError, 'do not match'):
+                app_module.owned_pod_connection(client, record, '', state)
+            self.assertEqual(pin.call_count, 1)
+
+    def test_console_fingerprint_uses_same_verifier_even_with_prior_pin(self):
+        record = {'id': 'owned-id', 'name': 'lab'}
+        detail = dict(record, ssh={'direct': {'host': 'host.example', 'port': 13000}})
+        client = Mock()
+        client.get_pod.return_value = detail
+        fingerprint = 'SHA256:' + 'A' * 43
+        state = Path('/private/state')
+        with patch('host_identity.existing_host_key', return_value=state / 'old') as cached, \
+             patch('host_identity.verify_host_key', return_value=state / 'pin') as verify:
+            self.assertEqual(app_module.owned_pod_connection(client, record, fingerprint, state),
+                             (detail, str(state / 'pin')))
+            verify.assert_called_once_with('owned-id', 'host.example', 13000, fingerprint, state)
+            verify.side_effect = ValueError('different SSH host key already exists')
+            with self.assertRaisesRegex(ValueError, 'different SSH host key'):
+                app_module.owned_pod_connection(client, record, fingerprint, state)
+            cached.assert_not_called()
+            client.get_pod_ssh_fingerprint.assert_not_called()
 
     def test_copy_status_copies_only_visible_message(self):
         class Root:
@@ -170,6 +216,33 @@ class Tests(unittest.TestCase):
         # Missing list and state deliberately prove the guard runs before reading them.
         app.forget()
         self.assertIn('Wait', app.status.value)
+
+    def test_forget_removes_exact_pin_only_after_confirmation(self):
+        current = {'id': 'p1', 'name': 'job1'}
+        other = {'id': 'p2', 'name': 'job2'}
+        app = App.__new__(App)
+        app.busy = False
+        app.records = [current, other]
+        app.list = Mock()
+        app.list.curselection.return_value = (0,)
+        app.refresh, app.status = Mock(), Mock()
+        with tempfile.TemporaryDirectory() as td:
+            app.state = State(Path(td) / 'jobs.json')
+            app.state.write(app.records)
+            with patch.object(app_module, 'messagebox', create=True) as dialog, \
+                 patch('host_identity.forget_host_key') as forget:
+                dialog.askyesno.return_value = False
+                app.forget()
+                forget.assert_not_called()
+                self.assertEqual(app.state.read(), [current, other])
+                dialog.askyesno.return_value = True
+                forget.side_effect = OSError('unwritable')
+                app.forget()
+                self.assertEqual(app.state.read(), [current, other])
+                forget.reset_mock(side_effect=True)
+                app.forget()
+                forget.assert_called_once_with('p1', Path(td))
+                self.assertEqual(app.state.read(), [other])
 
     def test_deadline_terminates_pod_once_and_preserves_future_pod(self):
         with tempfile.TemporaryDirectory() as td:
@@ -272,19 +345,26 @@ class Tests(unittest.TestCase):
                 kwargs['on_output']('sensitive build log\nPUMP_LAB_MODE=cuda\nPUMP_LAB_DEVICE=secretTOKEN\nPUMP_LAB_WORKER_SHA256=abcd')
             record = {'compute_kind':'gpu','compute_id':'g1','deadline':time.time()+60}
             receipt = deploy_selected(pod, record, str(known), None, 'secretTOKEN', fake)
-            self.assertEqual(calls[0][1]['mode'], 'cuda')
+            self.assertEqual(calls[0][1]['mode'], 'gpu')
+            self.assertTrue(0 < calls[0][1]['timeout'] <= 60)
+            self.assertIn('PUMP_LAB_MODE=cuda', receipt)
             self.assertNotIn('sensitive build log', receipt)
             self.assertNotIn('secretTOKEN', receipt)
             self.assertIn('[redacted]', receipt)
             self.assertIn('PUMP_LAB_WORKER_SHA256=abcd', receipt)
             pod.pop('gpu'); pod['cpu'] = {'id':'c1', 'vcpuCount':32, 'memory':128}
-            record.update(compute_kind='cpu', compute_id='c1', requested_vcpu=32, minimum_memory_gb=128)
+            record.update(compute_kind='cpu', compute_id='c1', requested_vcpu=32, minimum_memory_gb=128,
+                          deadline=time.time()+1800)
             deploy_selected(pod, record, str(known), None, deploy_func=fake)
             self.assertEqual(calls[1][1]['mode'], 'cpu')
+            self.assertEqual(calls[1][1]['timeout'], 300)
             deploy_selected(pod, record, str(known), None, deploy_func=fake, profile='live')
             self.assertEqual(calls[-1][1]['profile'], 'live')
             with self.assertRaises(ValueError):
                 deploy_selected(pod, {'compute_kind':'gpu','compute_id':'g1','deadline':time.time()+60}, str(known), None, deploy_func=fake)
+            for deadline in (0, None, float('inf'), float('nan')):
+                with self.subTest(deadline=deadline), self.assertRaisesRegex(ValueError, 'deadline'):
+                    deploy_selected(pod, dict(record, deadline=deadline), str(known), None, deploy_func=fake)
             self.assertEqual(len(calls), 3)
 
     def test_clock_bounds_are_explicit_positive_and_finite(self):
@@ -443,6 +523,8 @@ class Tests(unittest.TestCase):
         controller = App.__new__(App)
         controller.list = List()
         controller.records = [{'name':'first'}, {'name':'selected'}]
+        controller.known_hosts = Mock()
+        controller.known_hosts.get.return_value = ''
         controller.state = Records([{'name':'selected'}, {'name':'first'}])
         controller.refresh()
         self.assertEqual(controller.list.curselection(), (0,))

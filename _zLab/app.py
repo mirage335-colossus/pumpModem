@@ -300,6 +300,33 @@ def owned_pod_details(client, record):
     return pod
 
 
+def owned_pod_connection(client, record, known_hosts, state_dir):
+    """Resolve the SSH trust file for this selection before opening a connection."""
+    pod = owned_pod_details(client, record)
+    fingerprint = known_hosts.strip()
+    if fingerprint and not fingerprint.startswith('SHA256:'):
+        return pod, known_hosts
+
+    from host_identity import existing_host_key, verify_host_key
+    direct = (pod.get('ssh') or {}).get('direct')
+    if not isinstance(direct, dict) or not direct.get('host') or not direct.get('port'):
+        raise ValueError('Direct SSH is not ready for this pod. Wait for startup and try again.')
+    pod_id, host, port = pod['id'], direct['host'], direct['port']
+    if fingerprint:
+        path = verify_host_key(pod_id, host, port, fingerprint, state_dir)
+        return pod, str(path)
+    path = existing_host_key(pod_id, host, port, state_dir)
+    if path is None:
+        try:
+            fingerprint = client.get_pod_ssh_fingerprint(pod_id)
+        except RunPodError as error:
+            raise ValueError(f'{error}. In the RunPod console, open this pod’s Logs → Container. '
+                             'Copy the SHA256 fingerprint printed for /etc/ssh/ssh_host_ed25519_key.pub '
+                             'into the SSH trust field.') from None
+        path = verify_host_key(pod_id, host, port, fingerprint, state_dir)
+    return pod, str(path)
+
+
 def simulation_gpu(record, pod):
     kind, expected = record.get('compute_kind'), record.get('compute_id')
     if kind == 'gpu':
@@ -359,13 +386,17 @@ def deploy_selected(pod, record, known_hosts, identity, secret='', deploy_func=N
     direct = (pod.get('ssh') or {}).get('direct') or {}
     host, user, port = direct.get('host'), direct.get('username'), direct.get('port')
     _connection(host, user, port, known_hosts, identity)
-    if not isinstance(record.get('deadline'), (int, float)) or record['deadline'] <= time.time():
+    deadline = record.get('deadline')
+    if type(deadline) not in (int, float) or not math.isfinite(deadline):
+        raise ValueError('A finite pod deadline is required for deployment')
+    remaining = deadline - time.time()
+    if remaining <= 0:
         raise ValueError('Pod deadline expired before deployment began')
     if profile not in ('simulation', 'live'):
         raise ValueError('Invalid deployment profile')
     output = []
     (deploy_func or deploy)(host, user, port, known_hosts, identity=identity,
-                            mode='cuda' if gpu else 'cpu', timeout=300, profile=profile,
+                            mode='gpu' if gpu else 'cpu', timeout=min(remaining, 900 if gpu else 300), profile=profile,
                             on_output=output.append)
     lines = []
     for line in '\n'.join(output).splitlines():
@@ -491,7 +522,7 @@ class App:
         self.compute = tk.StringVar()
         self.image = tk.StringVar(value=IMAGE)
         self.deadline_minutes = tk.StringVar(value='60')
-        self.known_hosts = tk.StringVar(value=str(Path.home() / '.ssh/known_hosts'))
+        self.known_hosts = tk.StringVar()
         self.identity = tk.StringVar()
         self.files = tk.StringVar()
         self.deployment_receipt = tk.StringVar()
@@ -526,6 +557,9 @@ class App:
                                selectbackground='#365f91', selectforeground='#f0f2f5',
                                highlightbackground='#697584', highlightcolor='#365f91')
         self.list.grid(row=5, column=0, columnspan=3, sticky='nsew', pady=8)
+        self.fingerprint_pod = None
+        self.known_hosts.trace_add('write', self.bind_fingerprint)
+        self.list.bind('<<ListboxSelect>>', self.clear_stale_fingerprint)
         status_box = ttk.Frame(box)
         status_box.grid(row=6, column=0, columnspan=3, sticky='ew')
         self.status_label = ttk.Label(status_box, textvariable=self.status, wraplength=760)
@@ -536,8 +570,8 @@ class App:
         ttk.Button(box, text='Open selected worker', command=self.open_simulation).grid(row=7, column=0, sticky='w')
         ttk.Button(box, text='Forget verified closed record', command=self.forget).grid(row=7, column=1, sticky='w')
         ttk.Button(box, text='Deploy worker to selected pod', command=self.deploy_worker).grid(row=7, column=2, sticky='w')
-        ttk.Label(box, text='Deploy the worker before simulation and verify the SSH host key independently. Live/Duplex: local CPU fake-device holdout decoded e and confirmed two consecutive quiet slots. Physical audio and RunPod GPU remain unqualified.', wraplength=760).grid(row=8, column=0, columnspan=3, sticky='w', pady=8)
-        ttk.Label(box, text='Verified SSH known_hosts').grid(row=10, column=0, sticky='w')
+        ttk.Label(box, text='Deploy the worker before opening a session. For SSH trust, leave blank for automatic verification, paste this pod’s Ed25519 SHA256 fingerprint from RunPod Logs → Container, or enter a verified known_hosts file.', wraplength=760).grid(row=8, column=0, columnspan=3, sticky='w', pady=8)
+        ttk.Label(box, text='SSH trust (optional)').grid(row=10, column=0, sticky='w')
         ttk.Entry(box, textvariable=self.known_hosts).grid(row=10, column=1, sticky='ew')
         ttk.Label(box, text='SSH identity (optional)').grid(row=11, column=0, sticky='w')
         ttk.Entry(box, textvariable=self.identity).grid(row=11, column=1, sticky='ew')
@@ -565,6 +599,21 @@ class App:
             self.root.clipboard_append(message)
         except tk.TclError:
             self.status.set('Could not copy the status message to the clipboard.')
+
+    def selected_pod_id(self):
+        selected = self.list.curselection()
+        return self.records[selected[0]].get('id') if selected else None
+
+    def bind_fingerprint(self, *_):
+        self.fingerprint_pod = (self.selected_pod_id()
+                                if self.known_hosts.get().strip().startswith('SHA256:') else None)
+
+    def clear_stale_fingerprint(self, _event=None):
+        if self.known_hosts.get().strip().startswith('SHA256:') and self.fingerprint_pod != self.selected_pod_id():
+            self.known_hosts.set('')
+            self.status.set('The selected pod changed. Its console fingerprint can be entered in the SSH trust field.')
+            return True
+        return False
 
     def deadline_tick(self):
         self.enforce_deadlines()
@@ -597,6 +646,7 @@ class App:
                 self.list.selection_set(index)
                 self.list.activate(index)
                 self.list.see(index)
+        self.clear_stale_fingerprint()
 
     def background(self, fn, done):
         if self.busy:
@@ -718,11 +768,26 @@ class App:
             self.status.set('Wait for the current provider request to finish before removing a record.')
             return
         records = self.state.read()
-        self.state.write([r for r in records if r.get('name') != record.get('name')])
+        if record not in records:
+            self.refresh()
+            self.status.set('The selected record changed. Review it again before removal.')
+            return
+        records.remove(record)
+        pod_id = record.get('id')
+        try:
+            if pod_id and not any(r.get('id') == pod_id for r in records):
+                from host_identity import forget_host_key
+                forget_host_key(pod_id, self.state.path.parent)
+            self.state.write(records)
+        except (OSError, ValueError):
+            self.status.set('Could not finish removing the local record and its SSH pin. Check the lab state directory.')
+            return
         self.refresh()
         self.status.set('Local record removed. Provider resources were not changed.')
 
     def deploy_worker(self):
+        if self.clear_stale_fingerprint():
+            return
         idx = self.list.curselection()
         if not idx or not self.records[idx[0]].get('id'):
             self.status.set('Select an owned pod with a known ID.')
@@ -737,13 +802,14 @@ class App:
         known_hosts, identity = self.known_hosts.get(), self.identity.get().strip() or None
         profile = self.profile.get()
         secret = self.key.get().strip()
-        def launch(pod):
+        def launch(connection):
+            pod, verified_hosts = connection
             self.deploying = True
             self.status.set('Deploying and building the native worker; the deadline remains active. Pod charges continue.')
             def work():
                 try:
-                    receipt = deploy_selected(pod, record, known_hosts, identity, secret, profile=profile)
-                    result = 'Worker build finished. GPU execution has not been qualified; pod charges continue.'
+                    receipt = deploy_selected(pod, record, verified_hosts, identity, secret, profile=profile)
+                    result = 'Worker build finished. Open the selected worker to start a session. Pod charges continue.'
                 except Exception as exc:
                     receipt = ''
                     message = str(exc).replace(secret, '[redacted]') if secret else str(exc)
@@ -755,7 +821,7 @@ class App:
                 self.deployment_receipt.set(receipt)
                 self.status.set(result)
             threading.Thread(target=work, daemon=True).start()
-        self.background(lambda c: owned_pod_details(c, record), launch)
+        self.background(lambda c: owned_pod_connection(c, record, known_hosts, self.state.path.parent), launch)
 
     def audio_settings(self):
         window = tk.Toplevel(self.root)
@@ -802,6 +868,8 @@ class App:
         ttk.Button(window, text='Close', command=window.destroy).grid(row=end+1, column=1, sticky='e')
 
     def open_simulation(self):
+        if self.clear_stale_fingerprint():
+            return
         if self.closing_bridge:
             self.status.set('Wait for the worker session to finish closing.')
             return
@@ -816,20 +884,21 @@ class App:
         known_hosts, identity, files = self.known_hosts.get(), self.identity.get(), self.files.get()
         profile = self.profile.get()
         settings = (self.audio_binary.get(), self.devices.get(self.audio_device.get(), self.audio_device.get()), self.capture_bytes.get(), self.playback_bytes.get(), self.capture_frames.get(), self.playback_prebuffer.get(), self.local_utc_uncertainty.get(), self.max_clock_offset.get(), self.remote_clock_drift_ppm.get())
-        def done(pod):
+        def done(connection):
+            pod, verified_hosts = connection
             try:
                 root = file_root(files)
                 live = profile == 'live'
-                command = ssh_command(pod, known_hosts, identity, simulation_gpu(record, pod), root is not None, live=live)
+                command = ssh_command(pod, verified_hosts, identity, simulation_gpu(record, pod), root is not None, live=live)
                 if live:
                     command = live_command(command, *settings)
                 from browser_bridge import start
                 self.bridge = start(command, files=root, live=True) if live else start(command, files=root) if root else start(command)
                 webbrowser.open(self.bridge.url)
-                self.status.set('Live bridge opened. Local CPU fake-device holdout confirmed completion; physical audio and RunPod GPU remain unqualified.' if live else 'Simulation bridge opened. The remote worker must be deployed and its SSH host key preverified.')
+                self.status.set('Experimental Live/Duplex session opened. Remote physical audio remains unqualified.' if live else 'Simulation bridge opened.')
             except Exception as exc:
                 self.status.set(str(exc))
-        self.background(lambda c: owned_pod_details(c, record), done)
+        self.background(lambda c: owned_pod_connection(c, record, known_hosts, self.state.path.parent), done)
 
     def details(self):
         idx = self.list.curselection()
@@ -840,7 +909,7 @@ class App:
         def show(pod):
             # Show provider fields as text; never execute a returned command.
             messagebox.showinfo('RunPod details', json.dumps(pod, indent=2))
-            self.status.set('Pod details loaded. SSH host identity must be verified separately.')
+            self.status.set('Pod details loaded.')
         self.background(lambda c: owned_pod_details(c, record), show)
 
     def terminate(self):

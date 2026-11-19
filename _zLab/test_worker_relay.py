@@ -44,6 +44,30 @@ def read_frame(pipe, timeout=15):
 
 
 class RelayTests(unittest.TestCase):
+    def test_headless_driver_only_for_verified_deployment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            binary = root / "build/lab/datapump-worker"
+            binary.parent.mkdir(parents=True)
+            manifest = binary.parent / "nvidia-headless-icd.json"
+            good = '{"file_format_version":"1.0.1","ICD":{"library_path":"libEGL_nvidia.so.0","api_version":"1.4.329"}}'
+            with mock.patch.dict(worker_relay.DEPLOYMENTS, {False: binary}):
+                self.assertIsNone(worker_relay.gpu_environment(binary, False))
+                manifest.write_text(good)
+                manifest.chmod(0o600)
+                env = worker_relay.gpu_environment(binary, False)
+                self.assertEqual(env["VK_ICD_FILENAMES"], str(manifest))
+                self.assertEqual(env["VK_DRIVER_FILES"], str(manifest))
+                self.assertIsNone(worker_relay.gpu_environment(binary, True))
+                self.assertIsNone(worker_relay.gpu_environment(root / "other-worker", False))
+                manifest.write_text(good.replace("libEGL_nvidia.so.0", "/tmp/extra.so"))
+                with self.assertRaisesRegex(worker_relay.RelayError, "Invalid deployment Vulkan manifest"):
+                    worker_relay.gpu_environment(binary, False)
+                manifest.write_text(good)
+                manifest.chmod(0o666)
+                with self.assertRaisesRegex(worker_relay.RelayError, "Unsafe deployment Vulkan manifest"):
+                    worker_relay.gpu_environment(binary, False)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.worker = Path(self.tmp.name) / "fake_worker"
