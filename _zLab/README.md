@@ -54,10 +54,16 @@ its pod. Reuse an active compatible pod across a bounded batch.
   different experiment.
 - Check the executed stage counters. Eligible matrix contractions can use FP16
   HMMA or INT8 IMMA. The long severe 100 mW success used **1,092,999,648 FP32
-  segmented inverse FFTs** and zero credited HMMA/IMMA calls. Moving eligible
-  segmented search from CPU to GPU accelerated two complete slots by 2.38× and
+  segmented inverse FFTs** and zero credited HMMA/IMMA calls through the
+  instrumented lag-matrix paths. Other library kernels' internal Tensor Core
+  use was unmeasured. Moving eligible segmented search from CPU to GPU
+  accelerated two complete slots by 2.38× and
   3.74×. The tested Tensor Core inverse took 1.87–4.01 times the FP32 cuFFT
-  time including packing and reordering. On CPU-only hosts, time one
+  time including packing and reordering on the tested batches. That prototype
+  demonstrates Tensor Core compatibility for those inverses. Other
+  factorizations, fused kernels, layouts and precision choices remain open
+  performance questions. Current CPU routing also leaves bulk numerical
+  suboperations available for investigation. On CPU-only hosts, time one
   representative capture and slot before distributing trials.
   [Source, dispatch conditions and counters](../docs/triad-gpu-optimization.md#which-arithmetic-ran-in-a-remote-simulation)
   and [measured CPU/GPU choices](../docs/triad-performance.md#choosing-compute-for-hf-sensitivity-trials).

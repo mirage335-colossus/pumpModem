@@ -394,7 +394,8 @@ and both missed the bit. The cloud receiver scored the slot in 53.079 s
 The cloud host had 27 effective logical CPUs and 54 software workers. These
 system times include different host processors and worker allocations. The
 CUDA receipt counted 6,810 FFTs and 9,054,474 score rows. Peak reserved GPU
-allocator memory was 800 MiB, with zero HMMA/IMMA matrix calls. On this initial
+allocator memory was 800 MiB, with zero credited HMMA/IMMA calls through the
+instrumented lag-matrix paths. On this initial
 build the segmented changing-channel search ran on the host. [Cloud trial](../local-evidence/hf-2mw-gpu-20261118/base72.json)
 and [device smoke test](../local-evidence/hf-2mw-gpu-20261118/smoke.json).
 
@@ -425,7 +426,8 @@ including 852.767 s of varying coarse work.
 
 An isolated C++/CUDA revision moved the eligible segmented inverse FFTs,
 frequency tracking and rank accumulation onto the device. It used FP32 cuFFT
-and recorded zero HMMA or IMMA calls. Tests on the same H=13, W=26 pod
+and recorded zero credited HMMA or IMMA calls through the instrumented
+lag-matrix paths. Tests on the same H=13, W=26 pod
 included a direct rank and peak-ordering check. The 72 Hz / 5× hopping control
 improved from 64.734 s to 27.251 s per scored slot, with the varying coarse
 phase improving from 48.427 s to 8.798 s. At 60 Hz / 1×, a 1,752 s bit
@@ -7859,9 +7861,10 @@ changed from 3.603 to 3.101 s (13.9% lower), and a fresh-seed comparison
 changed from 3.106 to 2.422 s (22.0% lower), with matched work/evidence. The CUDA
 receiver comparisons used explicit W=32 and a 16 GiB host limit on both NVIDIA devices.
 For the large FIR case, the host workspace quote rose by 1 MiB and GPU peak
-memory was unchanged. The measured receiver path used half cuFFT and zero
-HMMA/IMMA; separate Tensor Core component tests passed but do not qualify this
-path.
+memory was unchanged. The measured receiver path used half cuFFT and recorded
+zero credited HMMA/IMMA calls through the instrumented lag-matrix paths.
+Internal Tensor Core use in other library kernels was unmeasured. Separate
+Tensor Core component tests passed for their tested operations and geometry.
 
 On the RTX 4090 (Ada), the two-pair large-workload whole mean changed from
 6.021763 to 5.395978 s (10.39% lower); a fresh-seed comparison changed from
@@ -7872,7 +7875,8 @@ changed from 7.415118945 to 7.149399353 s (3.58% lower), with the same work over
 0.894183115 to 0.789065660 s (11.76% lower); that holdout's whole-stream time
 changed from 2.866356449 to 2.533790929 s. These bounded, mixed comparisons are
 inconclusive for general backlog service. Both NVIDIA receiver paths used half
-cuFFT with zero HMMA/IMMA. Five separate Ada component tests passed.
+cuFFT with zero credited HMMA/IMMA calls through the instrumented lag-matrix
+paths. Five separate Ada component tests passed.
 
 On Blackwell, backlog evidence is mixed. The original small-backlog two-pair
 mean was 5.7% slower on whole-stream time and 14.6% slower on the ready interval. A
@@ -9390,8 +9394,9 @@ templates; FP64 scoring and persistent state remain. Before batch commitment,
 a failed guard, plan or full-rectangle allocation admission selects the full
 FP32 FFT route. After batch commitment, arithmetic-flag or CUDA failures fail
 closed before publishing results; they do not retry with FP32 or retain an
-unquantized host bank. A post-dispatch OOM remains an explicit failure. This is
-cuFFT half arithmetic, not a Tensor Core FFT. Exact power-of-two energy scaling
+unquantized host bank. A post-dispatch OOM remains an explicit failure. The
+kernel evidence establishes cuFFT half arithmetic. Tensor Core use inside
+those library kernels remains unmeasured. Exact power-of-two energy scaling
 is a checked input/range guard; it does not prove cuFFT's internal rounding
 behavior.
 

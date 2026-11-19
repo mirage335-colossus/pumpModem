@@ -64,7 +64,21 @@ The RunPod build uses the same compiled receiver as the desktop GUI.
 `--backend gpu` asks the [shared GPU selector](../src/triad_gpu_backend.cpp)
 for automatic dispatch. Its choice of CUDA or Vulkan identifies the device.
 The following fields in a completed native probe's
-`identity.backend_receipt` identify the work that device performed.
+`identity.backend_receipt` identify the instrumented work that device performed.
+The table describes current routes and counter coverage. Tensor Core
+compatibility of further formulations remains a separate engineering question.
+An existing CPU or cuFFT route establishes where this implementation ran.
+An unimplemented route or a slower tested candidate leaves other formulations
+open. Scope any incompatibility claim to a demonstrated constraint on the
+device, data type, library, formulation or required numerical behavior.
+Keep the untested alternatives explicit.
+
+The HMMA/IMMA counters below cover the explicit coarse lag-matrix calls.
+Other library operations, including fine-stage Gram products, have separate
+instrumentation. Zero counts establish zero credited calls through those
+lag-matrix paths. Tensor Core use inside other library kernels requires
+operation-specific dispatch or instruction evidence. The current receipts
+leave that internal use unmeasured.
 
 | Receiver stage | Implementation and evidence to retain |
 | --- | --- |
@@ -80,8 +94,9 @@ affine half inverse FFTs. It erased the bit in 34.40 s of receiver work.
 The 100 mW, 36 Hz/10× severe GUI run at Target −21, seed 940601 (manifest
 `82bdd9f6…`), decoded bit 1 after 1,092,999,648 segmented inverse FFTs.
 Its affine half route declined the shape. Simulation took 288.22 s and
-receiver scoring took 2,052.09 s. Both receipts had zero HMMA and IMMA
-matrix calls. A utilization graph alone cannot identify any of these paths.
+receiver scoring took 2,052.09 s. Both receipts had zero credited HMMA and IMMA
+calls through the instrumented lag-matrix paths. A utilization graph alone
+cannot identify any of these paths.
 [2 mW automatic comparison](validation.md#blackwell-receiver-trials-at-2-mw)
 and [100 mW results and holdouts](validation.md#bounded-2-mw-hf-fhss-investigation--18-november-2026).
 
@@ -110,10 +125,13 @@ jq '.identity.backend_receipt | {device_name, executed, cuda_segmented_inverse_f
 For a new Tensor Core candidate, first verify the executed arithmetic on a
 representative full batch and its tail, including packing and output
 reordering. Then compare matched complete receiver slots on the same host.
-The [measured transform comparison](#hardware-and-library-dispatch) identifies
-packing and rearrangement as the cost to address. Testing a different device
-or a fused transform still needs that comparison. Bit sensitivity and
-single-stream message backlog each require their own measurements.
+The [measured transform comparison](#hardware-and-library-dispatch) includes
+packing and rearrangement costs. Fusion, alternative factorizations, batching,
+precision decompositions and device-specific kernels remain candidates.
+Fine tracking also contains bulk basis, Gram and statistics work that can be
+investigated while preserving ordered state dependencies. Assess each proposed
+formulation's numerical behavior, memory and complete receiver cost. Bit
+sensitivity and single-stream message backlog each require their own measurements.
 
 ## Hardware and library dispatch
 
@@ -147,8 +165,9 @@ published tcFFT study reports such an approach on V100/A100, but its reference
 implementation targets those older GPUs and is GPL-3.0; it is evidence that a
 factorized design can be useful (reported speedups were 1.29–3.24× on V100 and
 1.10–3.03× on A100), not a qualified Ada/Blackwell implementation or code to
-copy without resolving project licensing. An ordinary cuFFT half run must not
-be reported as a Tensor Core FFT.
+copy without resolving project licensing. Report half-cuFFT execution from
+its recorded arithmetic. A claim about Tensor Core execution within that
+library needs evidence for the particular kernel and runtime.
 
 For segmented timing on the full RTX PRO 6000 Blackwell Server Edition, a
 three-stage factored complex inverse used cuBLASLt FP16 HMMA with FP32
@@ -157,10 +176,12 @@ The 32,768-point batches of 128 and 95 took 138.21 and 102.37 µs. FP32 cuFFT
 took 18.40, 16.38, 38.88 and 30.69 µs respectively, with production
 normalization folded into lag scoring. The factored timing included packing,
 twiddles and reordering. All 384 strongest arrival lags matched, including
-the noise-only rows. Use cuFFT for these shapes. Revisit a fused Tensor Core
-factorization if it removes the global packing and rearrangement cost, using
-the actual full and tail batches again. The comparison was an operator test on
-SM120. Moving the complete segmented search onto the same GPU gave a 2.38×
+the noise-only rows. This demonstrates a working Tensor Core formulation of
+these inverses. FP32 cuFFT was faster for the tested implementations and
+batches on this SM120 device. The measurements leave the performance of other
+factorizations, fused layouts and batch shapes open. A follow-up should include
+the actual full and tail batches and all preparation costs. Moving the complete
+segmented search onto the same GPU gave a 2.38×
 and 3.74× full-slot improvement in two paired severe-channel receiver trials.
 [Operator measurements](../local-evidence/hf-2mw-gpu-20261118/canonical/tcfft.jsonl)
 and [matched receiver trials](validation.md#blackwell-receiver-trials-at-2-mw).

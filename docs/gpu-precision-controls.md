@@ -128,8 +128,11 @@ accuracy and complete-cost comparison. A dense DFT's quadratic work cannot be
 made equivalent to an FFT's `N log N` scaling merely by tiling or selecting INT8.
 The current `int8` option selects a bounded matrix contraction; unsupported or
 CUDA frequency-tiled work explicitly stays on FFT. Automatic CUDA now also has
-a guarded native half-precision cuFFT route; cuFFT half arithmetic is not a
-Tensor Core FFT. See [current CUDA qualification](validation.md#current-cuda-precision-and-tensor-dispatch)
+a guarded native half-precision cuFFT route. Its recorded half arithmetic
+establishes precision, while Tensor Core use inside the library remains
+unmeasured. Tensor Core FFT formulations have separate working examples and
+performance evidence in the [GPU guide](triad-gpu-optimization.md#hardware-and-library-dispatch).
+See [current CUDA qualification](validation.md#current-cuda-precision-and-tensor-dispatch)
 and [cuFFT's transform and precision documentation](https://docs.nvidia.com/cuda/cufft/).
 
 Prefer the algorithm with the qualified ceiling on the most challenging
@@ -225,8 +228,9 @@ workspace/allocation admission selects the full FP32 FFT route. After the
 reduced-precision batch is committed, arithmetic-flag or CUDA execution errors
 fail closed before publishing results; they do not silently retry as FP32 or
 retain an unquantized host bank. A post-dispatch OOM remains an explicit error.
-This is actual half arithmetic in cuFFT, not a Tensor Core FFT; instruction
-evidence and current whole-stream limits are recorded in
+The evidence verifies half arithmetic in cuFFT. Tensor Core use inside those
+library kernels remains unmeasured. Instruction evidence and current
+whole-stream limits are recorded in
 [validation](validation.md#current-cuda-precision-and-tensor-dispatch).
 The exact cuFFT restrictions and intermediate range still limit this route.
 The CUDA FP16/INT8 lag-matrix path remains distinct. Automatic INT8 is qualified

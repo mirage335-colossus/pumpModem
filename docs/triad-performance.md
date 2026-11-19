@@ -599,6 +599,9 @@ After eligible segmented search moved to the full RTX PRO 6000 Blackwell Server
 Edition, matched complete-slot tests improved 2.38× and 3.74×. The separately
 tested FP16 Tensor Core inverse, including its packing and reordering, took
 1.87–4.01 times the FP32 cuFFT time on the tested full and tail batches.
+It demonstrated a Tensor Core formulation of those inverses. Its measured
+disadvantage applies to that implementation, device and geometry. Further
+factorizations, fusion and batching remain candidates for qualification.
 Use stage timings and executed counters to choose the kernel for the actual
 geometry. [Matched receiver measurements](validation.md#blackwell-receiver-trials-at-2-mw)
 and [Tensor Core operator measurements](triad-gpu-optimization.md#hardware-and-library-dispatch).
