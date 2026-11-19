@@ -11,11 +11,14 @@ MAX_KEY_BYTES = 4096
 
 
 class ApiKeyStore:
+    _key_name = 'api-key'
+    _unsafe_directory_mode = 0o077
+
     def __init__(self, directory):
-        self.path = Path(directory).absolute() / 'api-key'
+        self.path = Path(directory).absolute() / self._key_name
 
     def _directory(self, create=False):
-        """Open the private directory without following a symlink component."""
+        """Open the key directory without following a symlink component."""
         directory = self.path.parent
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         fd = os.open(directory.anchor, flags)
@@ -32,8 +35,8 @@ class ApiKeyStore:
                 os.close(fd)
                 fd = next_fd
             info = os.fstat(fd)
-            if info.st_uid != os.getuid() or info.st_mode & 0o077:
-                raise ValueError('The API-key directory must be private and owned by this user')
+            if info.st_uid != os.getuid() or info.st_mode & self._unsafe_directory_mode:
+                raise ValueError('The API-key directory has unsafe ownership or permissions')
             return fd
         except BaseException:
             os.close(fd)
@@ -85,13 +88,17 @@ class ApiKeyStore:
         if not key:
             self.clear()
             return
+        self._write(key, replace=True)
+
+    def _write(self, key, *, replace):
         directory = self._directory(create=True)
-        temporary = '.api-key-' + secrets.token_hex(16)
+        temporary = f'.{self.path.name}-' + secrets.token_hex(16)
         try:
-            try:
-                os.close(self._open_key(directory))
-            except FileNotFoundError:
-                pass
+            if replace:
+                try:
+                    os.close(self._open_key(directory))
+                except FileNotFoundError:
+                    pass
             fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                          0o600, dir_fd=directory)
             try:
@@ -100,13 +107,17 @@ class ApiKeyStore:
                     target.write((key + '\n').encode('ascii'))
                     target.flush()
                     os.fsync(target.fileno())
-                os.replace(temporary, self.path.name, src_dir_fd=directory, dst_dir_fd=directory)
-                os.fsync(directory)
+                if replace:
+                    os.replace(temporary, self.path.name, src_dir_fd=directory, dst_dir_fd=directory)
+                else:
+                    os.link(temporary, self.path.name, src_dir_fd=directory, dst_dir_fd=directory,
+                            follow_symlinks=False)
             finally:
                 try:
                     os.unlink(temporary, dir_fd=directory)
                 except FileNotFoundError:
                     pass
+            os.fsync(directory)
         finally:
             os.close(directory)
 
@@ -124,3 +135,41 @@ class ApiKeyStore:
             os.fsync(directory)
         finally:
             os.close(directory)
+
+
+class RepositoryApiKeyStore(ApiKeyStore):
+    """Store the key beside the lab source and import the previous location once."""
+
+    _key_name = 'runpod-api-key'
+    _unsafe_directory_mode = 0o002
+
+    def __init__(self, legacy_directory, *, repository_directory=None):
+        super().__init__(repository_directory if repository_directory is not None
+                         else Path(__file__).resolve().parent)
+        self._legacy = ApiKeyStore(legacy_directory)
+
+    def load(self):
+        key = super().load()
+        try:
+            legacy_key = self._legacy.load()
+        except (OSError, ValueError):
+            if key:
+                return key
+            raise
+        if not legacy_key:
+            return key
+        if not key:
+            try:
+                self._write(legacy_key, replace=False)
+            except FileExistsError:
+                pass
+            key = super().load()
+        if key == legacy_key and self._legacy.load() == legacy_key:
+            self._legacy.clear()
+        return key
+
+    def clear(self):
+        # An explicit clear also retires the old copy, so it cannot be imported
+        # again on restart. Clear the legacy location first.
+        self._legacy.clear()
+        super().clear()

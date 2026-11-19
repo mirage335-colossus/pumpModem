@@ -12,9 +12,8 @@ qualified.** The live profile uses the native audio and transport components;
 the simulation bridge rejects audio frames. A fake-device transport test has
 covered capture stopping before a delayed drain, but delayed drain through the
 complete receiver, other physical routes and remote transport remain unqualified.
-A locally enforced deadline
-requests termination only while the controller is running with the API key
-entered; it cannot guarantee termination or stop billing after the window closes.
+A locally enforced deadline requests termination while the controller can
+contact RunPod. The controller resumes pending termination checks at startup.
 
 All RunPod API calls, SSH and credential handling belong to the separate lab
 tool. This work does not add networking to Data Pump's modem, GUI, CLI or
@@ -40,18 +39,28 @@ interpreter. Then launch the controller:
 python3 _zLab/app.py
 ```
 
-Enter a RunPod API key once in the masked field. The lab saves it as plain text
-in `${XDG_STATE_HOME:-$HOME/.local/state}/pumpModem/runpod-lab/api-key`,
-with owner-only file permissions (`0600`) in a private directory. It loads
-the saved key and catalog automatically on subsequent launches. Editing the
-field replaces the saved key when focus leaves the field or an action uses
-it. **Clear key** removes the saved file.
+Enter the RunPod API key in the masked field. The lab saves it in
+`_zLab/runpod-api-key`, an ignored file in the checkout with owner-only
+permissions (`0600`). It loads the key and catalog at startup and migrates
+the old state-directory key if needed.
 
 Select compute and click **Start simulation**. After one billing confirmation,
-the lab creates the pod, waits for SSH, deploys the native worker and opens the
-shared simulation GUI. Select an existing owned pod to continue its setup or
-reopen its session. **Create billable pod**, **Deploy worker to selected pod**
-and **Open selected worker** remain available for individual steps.
+the lab creates the pod, waits for SSH, deploys and checks the native worker,
+then opens the shared simulation in the browser. Selecting an existing owned
+pod lets you continue its setup. **Advanced** contains optional settings.
+
+Use **End simulation** or close the simulation browser tab to end the session
+and terminate its pod. The lab allows time for the browser to reconnect
+after a reload. Watch the pod row change to **Terminating** and then
+**Terminated** when RunPod confirms deletion. Keep the lab open until the
+row confirms termination. If termination fails, select the affected pod and
+retry with **End simulation**.
+
+If an older pod is absent from the current account and the lab has no saved
+deletion confirmation, the row shows **No longer visible**. The lab keeps
+the ownership record and resumes termination if the pod reappears. Closing
+the lab waits briefly for cleanup. If a pod or connection is still pending,
+the window offers to close while keeping the saved cleanup record.
 
 Secure Cloud is the default. The dropdown shows current stock and compute list
 price for one RTX PRO 6000, RTX 5090 or RTX 4090, or a Secure Cloud CPU with
@@ -59,7 +68,7 @@ price for one RTX PRO 6000, RTX 5090 or RTX 4090, or a Secure Cloud CPU with
 the catalog to see changes in stock or price. Options with **none** stock are
 hidden. If the selected option disappears on refresh, choose another option.
 
-**Create billable pod** checks the selected hardware and tier again. If stock
+**Start simulation** checks the selected hardware and tier again when creating a pod. If stock
 is **none**, the app stops before confirmation. Otherwise, review the fresh
 stock, price, image and deadline in the confirmation dialog. Stock can change
 before RunPod places the request. A recognized capacity rejection prompts a
@@ -89,16 +98,11 @@ GUI uses SSH for both deployment and simulation.
 
 The controller records its owned pod and queue requests under
 `${XDG_STATE_HOME:-$HOME/.local/state}/pumpModem/runpod-lab/jobs.json`.
-The API key has its own file. After a lost response or restart, use **Reconcile owned pods** and inspect
-RunPod before attempting another creation. Cancel queued requests or terminate
-pods explicitly, then confirm their status with RunPod before using **Forget
-verified closed record**. A successful deletion request alone is not proof
-that billing stopped. Each creation requires a deadline; while the controller
-is open and the key is entered, it checks for expiration and requests
-termination or queue cancellation. This request is not confirmed automatically.
-No local deadline check can protect a pod while the application is closed or
-cannot contact the provider. The saved key allows deadline checks to resume
-when the controller restarts.
+The controller reconciles requests after a lost response or restart. Each
+creation requires a deadline. While open, the lab checks for expiration and
+requests termination or queue cancellation. RunPod confirms termination
+before the row changes to **Terminated**. Pending requests are saved locally
+so the controller can check them again after a restart.
 
 The simulation action expects the lab relay at
 `/workspace/pump-lab/_zLab/worker_relay.py` and the native worker at
@@ -108,8 +112,8 @@ New pods receive a unique host key generated locally before creation through
 the authenticated RunPod request. The lab also creates a client identity for
 that pod and installs its public key. It checks the offered host key against
 the saved fingerprint and uses strict SSH verification. Leave the optional
-SSH fields blank for this automatic setup. **Forget verified closed record**
-removes the pod's managed host pin and client identity.
+SSH fields blank for this automatic setup. The lab keeps the terminal status in
+the pod list and removes its managed SSH credentials after verified termination.
 
 For older pods, the lab reuses an existing verified host pin or obtains the
 fingerprint from the authenticated startup log.
@@ -179,14 +183,10 @@ console-verified SSH key. A Secure Cloud RTX 5090 with the default image also
 completed this fixture with 780 Vulkan search rows, DATA 0, 0, 1 and two
 scored QUIET slots. [RTX 5090 validation](../docs/validation.md#rtx-5090-pod-creation-and-simulation--19-november-2026)
 
-Use the explicit termination action at the end of
-the job and verify deletion in RunPod. Closing the browser or controller only
-closes the connection.
-
 The experimental `live` profile deploys a separate lab worker under
 `/workspace/pump-lab-live`; it can coexist with a simulation deployment. The
 equivalent command-line deployment uses `--profile live` and an appropriate
-`--mode`. The controller's **Configure live audio limits** asks for a locally
+`--mode`. The lab's live audio settings under **Advanced** ask for a locally
 built native companion, a physical device, explicit capture and playback
 limits, and independently established clock uncertainty and drift bounds. Those
 values must cover the entire episode, including quiet slots and filter tails;

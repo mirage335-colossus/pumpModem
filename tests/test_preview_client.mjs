@@ -43,13 +43,13 @@ console.log('Preview batching, admission credits, frame boundaries, bounds and s
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 const response=value=>({ok:true,text:async()=>'',json:async()=>value,arrayBuffer:async()=>value});
 function harness() {
-    const elements=new Map(),events={},calls=[],beacons=[];
+    const elements=new Map(),events={},calls=[],beacons=[],requests=[];
     const document={querySelector:id=>{if(!elements.has(id))elements.set(id,{});return elements.get(id);}};
     const start=deferred(),output=deferred(),service=deferred(),ready=deferred(),seenStart=deferred(),seenService=deferred();
     const environment={location:{hash:'#token'},navigator:{sendBeacon:(path,body)=>beacons.push(JSON.parse(body)),clipboard:{writeText:async()=>{}}},
         addEventListener:(event,handler)=>events[event]=handler,
         fetch:async(path,options)=>{
-            calls.push(path);
+            calls.push(path);requests.push({path,options});
             if(path==='/start'){seenStart.resolve();return start.promise;}
             if(path==='/output')return output.promise;
             if(path==='/service'){seenService.resolve();return service.promise;}
@@ -57,7 +57,7 @@ function harness() {
         }};
     let options,controller;
     const frontend=value=>{options=value;return {ready:ready.promise,dispose(){},feed(){controller?.abort();}};};
-    return {document,environment,frontend,start,output,service,ready,seenStart,seenService,events,calls,beacons,
+    return {document,environment,frontend,start,output,service,ready,seenStart,seenService,events,calls,beacons,requests,
         get options(){return options;},set controller(value){controller=value;}};
 }
 {
@@ -86,3 +86,31 @@ function harness() {
     assert.equal(h.calls.includes('/cancel'),false,'successful native acknowledgment must not cancel export');
 }
 console.log('Preview startup close and acknowledged service withdrawal passed');
+
+function labHarness() {
+    const h=harness();
+    h.document.documentElement={hasAttribute:key=>key==='data-lab-managed'};
+    h.environment.sessionStorage={getItem:()=>null,setItem(){}};
+    h.environment.crypto={getRandomValues:bytes=>bytes.fill(1)};
+    return h;
+}
+{
+    const h=labHarness(),running=boot(h.document,h.environment,h.frontend);
+    h.ready.resolve();await h.seenStart.promise;
+    const resize=assert.rejects(h.options.send(packet),/Worker stopped/);
+    const reason='The simulation is open in another browser tab.';
+    h.start.resolve({ok:false,status:409,text:async()=>reason});
+    await running;await resize;
+    assert.equal(h.document.querySelector('#status').textContent,reason);
+    assert.equal(h.calls.includes('/input'),false,'renderer resize must not send input after attach refusal');
+}
+{
+    const h=labHarness(),running=boot(h.document,h.environment,h.frontend);
+    h.ready.resolve();await h.seenStart.promise;h.events.pagehide();
+    h.start.resolve(response({session:'late-session'}));await running;
+    const detach=h.requests.find(request=>request.path==='/detach');
+    assert.equal(detach.options.keepalive,true);
+    assert.equal(detach.options.headers['X-Preview-Session'],'late-session');
+    assert.deepEqual(h.beacons,[]);
+}
+console.log('Lab attach errors and authenticated page detachment passed');

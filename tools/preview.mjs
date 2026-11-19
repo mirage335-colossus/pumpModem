@@ -68,16 +68,30 @@ export function feedFrames(bytes,deliver) {
 export async function boot(document,environment=window,frontend=createHostedFrontend) {
     const token=environment.location.hash.slice(1),status=document.querySelector('#status');
     const audio=document.querySelector('#audio'),stop=document.querySelector('#stop');
+    const managed=document.documentElement?.hasAttribute('data-lab-managed');
+    let client='';
     let session='',view,stopped=false,heartbeat,files=null,snapshot=null;
     let startResolve;const started=new Promise(resolve=>startResolve=resolve);
     let serviceBarrier=Promise.resolve(),gatedBytes=0,gatedCount=0;
     const report=error=>{status.textContent=error?.message||String(error);};
-    const request=async(path,body,signal)=>{
+    const request=async(path,body,signal,keepalive=false)=>{
+        const headers={'X-Preview-Token':token,'X-Preview-Session':session};
+        if(managed)headers['X-Preview-Client']=client;
         const response=await environment.fetch(path,{method:body===undefined?'GET':'POST',
-            headers:{'X-Preview-Token':token,'X-Preview-Session':session},body,signal,cache:'no-store'});
-        if(!response.ok)throw new Error(await response.text());return response;
+            headers,body,signal,keepalive,cache:'no-store'});
+        if(!response.ok){
+            const error=new Error(await response.text());error.status=response.status;
+            throw error;
+        }
+        return response;
     };
-    const inputs=new InputBatcher(async bytes=>{await started;await request('/input',bytes);});
+    const pause=ms=>new Promise(resolve=>environment.setTimeout(resolve,ms));
+    const empty=new Uint8Array();
+    const inputs=new InputBatcher(async bytes=>{
+        await started;
+        if(stopped||!session)throw new Error('Worker stopped');
+        await request('/input',bytes);
+    });
     const send=bytes=>{
         const kind=new DataView(bytes.buffer,bytes.byteOffset,12).getUint32(4,true);
         // File service UI sequences cannot overtake an unfinished import. Audio
@@ -130,40 +144,87 @@ export async function boot(document,environment=window,frontend=createHostedFron
     };
     const close=()=>{
         if(stopped)return;stopped=true;clearInterval(heartbeat);inputs.close();
-        if(session)environment.navigator.sendBeacon('/close',JSON.stringify({token,session}));
+        if(session&&!managed)environment.navigator.sendBeacon('/close',JSON.stringify({token,session}));
         view?.dispose();audio.disabled=true;stop.disabled=true;
     };
-    environment.addEventListener('pagehide',close,{once:true});
+    environment.addEventListener('pagehide',()=>{
+        if(managed&&!stopped&&session)request('/detach',empty,undefined,true).catch(()=>{});
+        close();
+    },{once:true});
+    if(managed)environment.addEventListener('pageshow',event=>{
+        if(event.persisted)environment.location.reload();
+    });
     try {
         if(!token)throw new Error('Open the complete URL printed by preview.py, including its # token.');
+        if(managed){
+            const key='datapump-lab-tab',storage=environment.sessionStorage;
+            client=storage.getItem(key)||Array.from(environment.crypto.getRandomValues(new Uint8Array(32)),
+                byte=>byte.toString(16).padStart(2,'0')).join('');
+            storage.setItem(key,client);
+        }
         const sources=await Promise.all(['renderer.mjs','protocol.mjs','style.css','audio_worklet.js'].map(async name=>{
             const response=await environment.fetch('/web/'+name);if(!response.ok)throw new Error('Missing browser asset '+name);return response.text();
         }));
         if(stopped)return;
         view=frontend({container:document.querySelector('#root'),rendererSource:sources[0],protocolSource:sources[1],
             styleText:sources[2],workletSource:sources[3],send,handleService,
-            status:value=>report(value.reason||('Audio: '+value.state))});
+            status:value=>{if(!stopped)report(value.reason||('Audio: '+value.state));}});
         await view.ready;
         if(stopped)return;
-        const result=await (await request('/start',new Uint8Array())).json();
+        let result;
+        for(let retry=0;!stopped;retry++){
+            try{result=await (await request('/start',empty)).json();break;}
+            catch(error){
+                if(!managed||error.status!==425||retry>=20)throw error;
+                await pause(250);
+            }
+        }
+        if(!result)return;
         session=result.session;files=result.files;startResolve();
-        if(stopped){environment.navigator.sendBeacon('/close',JSON.stringify({token,session}));return;}
-        heartbeat=setInterval(()=>request('/heartbeat',new Uint8Array()).catch(error=>{report(error);close();}),4000);
+        if(stopped){
+            if(managed)request('/detach',empty,undefined,true).catch(()=>{});
+            else environment.navigator.sendBeacon('/close',JSON.stringify({token,session}));
+            return;
+        }
+        heartbeat=setInterval(()=>request('/heartbeat',empty).catch(error=>{
+            if(!managed||error.status===410){report(error);close();}
+        }),4000);
         audio.disabled=false;audio.onclick=()=>view.enableAudio().catch(report);
         stop.disabled=false;stop.onclick=async()=>{
-            try{await request('/stop',new Uint8Array());}catch(error){report(error);}
-            finally{close();report('Worker stopped. Reload to start a fresh worker.');}
+            try{
+                await request('/stop',empty);
+                close();
+                report(managed?'Simulation ended. The RunPod Lab is terminating the pod.':
+                    'Worker stopped. Reload to start a fresh worker.');
+            }catch(error){report(error);if(!managed)close();}
         };
-        report('Native worker connected'+(result.simulation?' (simulation).':'.')+(files?' Host files: '+files: ' Host file choices are disabled.'));
+        const connected=()=>report(managed?(result.simulation?'Simulation ready.':'Live/Duplex session open.'):
+            'Native worker connected'+(result.simulation?' (simulation).':'.')+(files?' Host files: '+files: ' Host file choices are disabled.'));
+        connected();
+        let reconnecting=false,failures=0;
         while(!stopped) {
-            const bytes=new Uint8Array(await (await request('/output')).arrayBuffer());
+            let bytes;
+            try{bytes=new Uint8Array(await (await request('/output')).arrayBuffer());}
+            catch(error){
+                if(!managed||!(error instanceof TypeError)||++failures>30)throw error;
+                if(!reconnecting&&!stopped){report('Reconnecting to the simulation…');reconnecting=true;}
+                await pause(1000);
+                continue;
+            }
+            if(reconnecting&&!stopped){reconnecting=false;failures=0;connected();}
             if(!stopped)feedFrames(bytes,frame=>{
                 if(new DataView(frame.buffer,frame.byteOffset,12).getUint32(4,true)===101)
                     snapshot=JSON.parse(new TextDecoder().decode(frame.subarray(12)));
                 view.feed(frame);
             });
         }
-    } catch(error) {if(!stopped){report(error);close();}}
+    } catch(error) {
+        if(!stopped){
+            if(managed&&client&&!(error.status>=400))
+                request('/browser-error',empty,undefined,true).catch(()=>{});
+            report(error);close();
+        }
+    }
     finally {startResolve();}
 }
 

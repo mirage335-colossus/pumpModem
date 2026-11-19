@@ -11,10 +11,12 @@ transport and companion; browser audio and file exports remain disabled.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import select
 import signal
@@ -29,6 +31,11 @@ _spec = importlib.util.spec_from_file_location('datapump_lab_preview', ROOT / 't
 _preview = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_preview)
 
+_BROWSER_START_TIMEOUT = 60
+_RECONNECT_GRACE = 8
+_BROWSER_LEASE = 90
+_CLIENT_ID = re.compile(r'[a-f0-9]{64}')
+
 
 class ErrorRetainingQueue(_preview.OutputQueue):
     def close(self, error):
@@ -42,13 +49,17 @@ class ErrorRetainingQueue(_preview.OutputQueue):
 
 
 class SimulationWorker(_preview.Worker):
-    def __init__(self, command, files=None, live=False):
+    def __init__(self, command, files=None, live=False, managed=False):
         self.id = secrets.token_urlsafe(24)
         self.touched = time.monotonic()
-        self.output = ErrorRetainingQueue() if live else _preview.OutputQueue()
+        self.output = ErrorRetainingQueue()
         self.write_lock, self.event_lock = threading.Lock(), threading.Lock()
         self.state = threading.Condition()
         self.snapshot, self.export, self.active_service = None, None, None
+        self.snapshot_frame = None
+        self.startup_error = None
+        self.ready = False
+        self.browser_attached = not managed
         self.resources = None
         self.live = live
         self.failed_at = None
@@ -188,11 +199,15 @@ class SimulationWorker(_preview.Worker):
                 payload = self.read_exact(size)
                 if self.closed.is_set():
                     continue
-                if kind == 101:
-                    with self.state:
+                with self.state:
+                    if kind == 101:
                         self.snapshot = json.loads(payload)
-                        self.state.notify_all()
-                self.output.put(header + payload)
+                        self.snapshot_frame = header + payload
+                    elif kind in (103, 104) and not self.ready:
+                        self.startup_error = 'The native worker could not initialize.'
+                    if self.browser_attached:
+                        self.output.put(header + payload)
+                    self.state.notify_all()
         except (OSError, ValueError, _preview.PreviewError) as error:
             self.output.close(str(error))
             with self.state:
@@ -200,6 +215,48 @@ class SimulationWorker(_preview.Worker):
             with self.write_lock:
                 if not self.process.stdin.closed:
                     self.process.stdin.close()
+
+    def wait_ready(self, timeout):
+        def is_ready():
+            if self.output.error or self.closed.is_set() or self.startup_error:
+                return True
+            snapshot = self.snapshot
+            if (not isinstance(snapshot, dict) or snapshot.get('version') != 1
+                    or not isinstance(snapshot.get('controls'), list)):
+                return False
+            # Live reception also needs browser settings (e.g., noise density).
+            # Its worker and companion initialization are acknowledged here;
+            # this is not a physical audio qualification.
+            if self.live:
+                return self.resources is not None
+            for control in snapshot['controls']:
+                if not isinstance(control, dict) or control.get('kind') != 'label':
+                    continue
+                value = control.get('text')
+                if isinstance(value, str) and value.startswith(('GPU reception unavailable', 'GPU reception is unavailable')):
+                    self.startup_error = 'GPU reception is unavailable on this pod.'
+                    return True
+                if value == 'Robust simulation ready':
+                    return True
+            return False
+
+        with self.state:
+            if not self.state.wait_for(is_ready, timeout=timeout):
+                raise _preview.PreviewError('Timed out waiting for the native worker to become ready.')
+            if self.startup_error or self.output.error or self.closed.is_set():
+                raise _preview.PreviewError(self.startup_error or self.output.error or 'The native worker stopped.')
+            self.ready = True
+
+    def attach_browser(self, attached):
+        """A reloaded presentation starts with a complete current snapshot."""
+        with self.state, self.output.condition:
+            self.browser_attached = attached
+            self.output.items.clear()
+            self.output.size = 0
+            if attached and self.snapshot_frame and not self.output.error:
+                self.output.items.append(self.snapshot_frame)
+                self.output.size = len(self.snapshot_frame)
+            self.output.condition.notify_all()
 
     def input(self, data):
         blocks = _preview.frames(data)
@@ -354,6 +411,43 @@ class SimulationWorker(_preview.Worker):
 
 
 class Handler(_preview.Handler):
+    def dispatch(self, method):
+        if not self.server.managed or (method == 'GET' and self.path.startswith('/web/')
+                                        and self.path[5:] in _preview.WEB_ASSETS):
+            return super().dispatch(method)
+        try:
+            if not self.authenticated():
+                raise _preview.PreviewError('Unauthorized', 403)
+            session = self.headers.get('X-Preview-Session', '')
+            client = self.headers.get('X-Preview-Client', '')
+            if method == 'POST' and self.path == '/start':
+                self.body(0)
+                session = self.server.attach(client)
+                files = self.server.options.files
+                return self.reply(json.dumps({'session': session, 'files': str(files) if files else None,
+                                              'simulation': not self.server.live}), 'application/json')
+            if method == 'POST' and self.path == '/browser-error':
+                self.body(0)
+                self.server.browser_error(client, session)
+                return self.reply()
+            if method == 'POST' and self.path == '/stop':
+                self.body(0)
+                self.server.end_browser(session)
+                return self.reply()
+            if method == 'POST' and self.path == '/detach':
+                self.body(0)
+                self.server.detach(session)
+                return self.reply()
+            with self.server.active_request(session):
+                return super().dispatch(method)
+        except (OSError, ValueError, TypeError, _preview.PreviewError) as error:
+            self.close_connection = True
+            try:
+                message = str(error) if isinstance(error, _preview.PreviewError) else 'Invalid browser request.'
+                return self.reply(message, status=getattr(error, 'status', 400))
+            except OSError:
+                pass
+
     def do_GET(self):
         # Use the existing, maintained UI, with the unavailable microphone
         # control visibly disabled rather than requesting device permission.
@@ -369,12 +463,19 @@ class Handler(_preview.Handler):
                 return self.reply(data, 'application/json')
             except _preview.PreviewError as error:
                 return self.reply(str(error), status=error.status)
+        if self.path == '/favicon.ico' and self.local():
+            return self.reply(status=204)
         if self.path in ('/', '/tools/preview.mjs', '/web/style.css'):
             try:
                 if not self.local():
                     raise _preview.PreviewError('Invalid origin or host', 403)
                 if self.path == '/':
                     data = (ROOT / 'tools' / 'preview.html').read_text()
+                    if self.server.managed:
+                        data = data.replace('<html lang="en">', '<html lang="en" data-lab-managed>')
+                        data = data.replace('<button id="audio" disabled>', '<button id="audio" hidden disabled>')
+                        label = 'End Live/Duplex' if self.server.live else 'End simulation'
+                        data = data.replace('Stop worker</button>', label + '</button>')
                     # Keep the lab shell's native controls and dialogs dark,
                     # independently of the user's browser/OS preference.
                     data = data.replace('</style>', ':root { color-scheme: dark; }\n</style>', 1)
@@ -415,15 +516,21 @@ class Handler(_preview.Handler):
 
 
 class Server(_preview.PreviewServer):
-    def __init__(self, command, port, files=None, live=False):
+    def __init__(self, command, port, files=None, live=False, managed=False):
         self.command = command
         self.files = files
         self.live = live
+        self.managed = managed
+        self.prepared_at = None
+        self.browser_client = self.browser_session = self.detached_at = None
+        self.active_requests = 0
+        self.outcome = None
         options = SimpleNamespace(mode='worker', simulation=not live, files=files)
         # PreviewServer fixes the bind address to IPv4 loopback and implements
         # request limits, origin/token checks and session lease enforcement.
         super().__init__(options, port)
         self.RequestHandlerClass = Handler
+        self.request_idle = threading.Condition(self.owner_lock)
 
     def start_worker(self):
         with self.owner_lock:
@@ -431,10 +538,126 @@ class Server(_preview.PreviewServer):
                 raise _preview.PreviewError('Bridge is stopping', 410)
             if self.worker is not None:
                 raise _preview.PreviewError('Another tab owns this worker', 409)
-            self.worker = SimulationWorker(self.command, self.files, self.live)
+            self.worker = SimulationWorker(self.command, self.files, self.live, self.managed)
             return self.worker
 
+    def prepare(self, timeout):
+        self.start_worker().wait_ready(timeout)
+        with self.owner_lock:
+            self.prepared_at = time.monotonic()
+
+    def attach(self, client):
+        if not _CLIENT_ID.fullmatch(client):
+            raise _preview.PreviewError('Invalid browser session identifier.', 400)
+        with self.request_idle:
+            def check_available():
+                if self.outcome or self.worker is None or self.stopping.is_set():
+                    raise _preview.PreviewError(self.outcome[1] if self.outcome else 'Simulation ended.', 410)
+                if self.prepared_at is None:
+                    raise _preview.PreviewError('The worker is still starting.', 425)
+                if self.browser_client is not None and not secrets.compare_digest(self.browser_client, client):
+                    raise _preview.PreviewError('The simulation is open in another browser tab.', 409)
+
+            check_available()
+            # The old page can have one outstanding /output long poll. Give it
+            # time to release the old lease before handing its queue to reload.
+            if not self.request_idle.wait_for(lambda: not self.active_requests, timeout=2):
+                raise _preview.PreviewError('Waiting for the previous page to disconnect.', 425)
+            check_available()
+            self.browser_client = client
+            self.browser_session = secrets.token_urlsafe(24)
+            self.detached_at = None
+            self.worker.touched = time.monotonic()
+            self.worker.attach_browser(True)
+            return self.browser_session
+
+    def _matches_browser(self, session):
+        return (self.browser_session is not None and isinstance(session, str)
+                and secrets.compare_digest(self.browser_session, session))
+
+    def detach(self, session):
+        with self.owner_lock:
+            if self._matches_browser(session) and not self.outcome and self.detached_at is None:
+                self.detached_at = time.monotonic()
+                self.worker.attach_browser(False)
+
+    def _browser_worker(self, session):
+        if self.outcome or self.worker is None:
+            raise _preview.PreviewError(self.outcome[1] if self.outcome else 'Simulation ended.', 410)
+        if not self._matches_browser(session) or self.detached_at is not None:
+            raise _preview.PreviewError('This page is disconnected from the simulation.', 410)
+        self.worker.touched = time.monotonic()
+        return self.worker
+
+    def owned(self, session):
+        if not self.managed:
+            return super().owned(session)
+        with self.owner_lock:
+            return self._browser_worker(session)
+
+    @contextmanager
+    def active_request(self, session):
+        with self.owner_lock:
+            self._browser_worker(session)
+            self.active_requests += 1
+        try:
+            yield
+        finally:
+            with self.request_idle:
+                self.active_requests -= 1
+                if not self.active_requests:
+                    self.request_idle.notify_all()
+
+    def end_browser(self, session):
+        with self.owner_lock:
+            self._browser_worker(session)
+            self.outcome = ('ended', 'Simulation ended.')
+
+    def browser_error(self, client, session):
+        with self.owner_lock:
+            if (not self.outcome and _CLIENT_ID.fullmatch(client)
+                    and (self.browser_client is None or self._matches_browser(session))):
+                self.outcome = ('failed', 'The browser could not load the simulation.')
+
+    def status(self):
+        with self.owner_lock:
+            if self.outcome:
+                return self.outcome
+            if self.browser_session:
+                return 'active', ''
+            return 'waiting', ''
+
+    def maintain_browser(self):
+        while not self.stopping.wait(.25):
+            with self.owner_lock:
+                worker = self.worker
+                if not worker or self.prepared_at is None:
+                    continue
+                now = time.monotonic()
+                if not self.outcome:
+                    if isinstance(worker.snapshot, dict) and worker.snapshot.get('closing') is True:
+                        self.outcome = ('ended', 'Simulation ended.')
+                    elif worker.output.error:
+                        error = worker.output.error if self.live else 'The native simulation worker disconnected.'
+                        self.outcome = ('failed', error)
+                    elif self.browser_session is None and now - self.prepared_at >= _BROWSER_START_TIMEOUT:
+                        self.outcome = ('failed', 'The browser did not open the simulation.')
+                    elif (self.detached_at is not None and now - self.detached_at >= _RECONNECT_GRACE
+                          or self.browser_session and now - worker.touched >= _BROWSER_LEASE):
+                        self.outcome = ('ended', 'The simulation page closed.')
+                reap = bool(self.outcome)
+            if reap:
+                try:
+                    worker.close()
+                except (OSError, RuntimeError):
+                    continue
+                with self.owner_lock:
+                    if self.worker is worker:
+                        self.worker = None
+
     def maintain(self):
+        if self.managed:
+            return self.maintain_browser()
         # Reap failed workers promptly. A failed live transport retains only
         # its sanitized error for a fixed lease that heartbeats cannot extend.
         # A transient close error keeps the same owner for the next sweep.
@@ -469,12 +692,12 @@ class Server(_preview.PreviewServer):
 
 
 class Bridge:
-    def __init__(self, command, port=0, files=None, live=False):
+    def __init__(self, command, port=0, files=None, live=False, *, managed=False, ready_timeout=30):
         if not isinstance(command, (list, tuple)) or not command or any(not isinstance(x, str) or not x for x in command):
             raise ValueError('command must be a nonempty argument list')
         if not isinstance(port, int) or not 0 <= port <= 65535:
             raise ValueError('invalid port')
-        self.server = Server(list(command), port, files, live)
+        self.server = Server(list(command), port, files, live, managed)
         self.url = self.server.origin + '/#' + self.server.token
         self._closed = False
         self._close_lock = threading.Lock()
@@ -482,6 +705,15 @@ class Bridge:
         self._maintenance = threading.Thread(target=self.server.maintain, daemon=True)
         self._server_thread.start()
         self._maintenance.start()
+        if managed:
+            try:
+                self.server.prepare(ready_timeout)
+            except BaseException:
+                self.close()
+                raise
+
+    def status(self):
+        return self.server.status()
 
     def close(self):
         with self._close_lock:
@@ -502,6 +734,9 @@ class Bridge:
             attempt(self.server.shutdown)
             with self.server.owner_lock:
                 worker = self.server.worker
+                if worker and self.server.managed and not self.server.outcome:
+                    self.server.outcome = ('ended', 'Simulation ended.')
+                    worker.output.close(self.server.outcome[1])
             if worker:
                 attempt(lambda: self.server.stop_worker(worker.id))
             attempt(self.server.server_close)
@@ -520,8 +755,8 @@ class Bridge:
         self.close()
 
 
-def start(command, port=0, files=None, live=False):
-    return Bridge(command, port, files, live)
+def start(command, port=0, files=None, live=False, *, managed=False, ready_timeout=30):
+    return Bridge(command, port, files, live, managed=managed, ready_timeout=ready_timeout)
 
 
 def main():

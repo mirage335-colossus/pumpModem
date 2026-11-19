@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -77,7 +78,17 @@ class FakeProvider:
 
     def get_pod(self, identifier):
         self.calls.append('get')
-        return next(p for p in self.pods if p['id'] == identifier)
+        for pod in self.pods:
+            if pod['id'] == identifier:
+                return pod
+        raise RunPodError('Pod not found', status=404)
+
+    def get_queued(self, identifier):
+        self.calls.append('get-queued')
+        for queued in self.queued:
+            if queued['id'] == identifier:
+                return queued
+        raise RunPodError('Queue not found', status=404)
 
 
 @unittest.skipIf(tk is None, 'Python Tk is not installed')
@@ -100,7 +111,7 @@ class TkControllerIntegration(unittest.TestCase):
         for item in self.patches:
             item.start()
             self.addCleanup(item.stop)
-        self.controller = lab.App(self.root)
+        self.controller = lab.App(self.root, repository_directory=self.tmp.name)
         self.root.update_idletasks()
         self.assertIn('RunPod Lab', self.root.title())
 
@@ -164,14 +175,158 @@ class TkControllerIntegration(unittest.TestCase):
 
     def load_catalog(self):
         self.set_entry(self.controller.key, 'dummy-session-key')
-        self.execute(self.button('Load catalog').invoke,
+        self.execute(self.button('Refresh compute').invoke,
                      lambda: not self.controller.busy)
+
+    def run_close(self, action=None):
+        errors = []
+
+        def callback_error(_kind, error, _traceback):
+            errors.append(error)
+            self.root.quit()
+
+        self.root.report_callback_exception = callback_error
+        self.root.after(0, action or (lambda: self.root.tk.call(self.root.protocol('WM_DELETE_WINDOW'))))
+        watchdog = self.root.after(2000, self.root.quit)
+        self.root.bind('<Destroy>', lambda event: self.root.after_cancel(watchdog)
+                       if event.widget is self.root else None, add='+')
+        self.root.mainloop()
+        if errors:
+            raise errors[0]
+        if not self.controller.window_closed.is_set():
+            self.root.after_cancel(watchdog)
+            self.fail('The lab window did not close.')
+
+    def test_close_reconciles_legacy_terminating_pod_that_runpod_cannot_see(self):
+        self.load_catalog()
+        row = {'id': 'gone-pod', 'name': 'owned-gone', 'status': lab.Ownership.TERMINATING,
+               'termination_started': time.time(), 'deadline': time.time() + 120}
+        self.controller.state.write([row])
+        self.controller.refresh()
+        with patch.object(messagebox, 'askyesno') as confirm:
+            self.run_close()
+        self.assertEqual(self.controller.state.read()[0]['status'], lab.Ownership.NOT_VISIBLE)
+        self.assertIn('get', self.provider.calls)
+        self.assertIn('pods', self.provider.calls)
+        self.assertIn('queued', self.provider.calls)
+        self.assertEqual(self.provider.deleted, [])
+        confirm.assert_not_called()
+
+    def test_close_deadline_does_not_reset_during_a_stalled_runpod_request(self):
+        self.load_catalog()
+        row = {'id': 'pending-pod', 'name': 'owned-pending', 'status': lab.Ownership.TERMINATING,
+               'termination_started': time.time(), 'deadline': time.time() + 120}
+        self.controller.state.write([row])
+        self.controller.refresh()
+        entered, unblock, returned = threading.Event(), threading.Event(), threading.Event()
+        observed = []
+
+        def stalled(_identifier):
+            entered.set()
+            unblock.wait(2)
+            raise RuntimeError('Injected provider stall')
+
+        def close_again(deadline):
+            observed.append((self.controller.busy, self.controller.exit_after == deadline))
+            self.controller.close()
+            observed.append((self.controller.busy, self.controller.exit_after == deadline))
+
+        def close():
+            self.controller.close()
+            deadline = self.controller.exit_after
+            self.root.after(80, lambda: close_again(deadline))
+
+        post = self.controller.post_to_window
+
+        def capture_post(callback):
+            try:
+                return post(callback)
+            finally:
+                returned.set()
+
+        try:
+            with patch.object(self.controller, '_CLOSE_GRACE', .25), \
+                 patch.object(self.provider, 'get_pod', side_effect=stalled), \
+                 patch.object(self.controller, 'post_to_window', side_effect=capture_post), \
+                 patch.object(messagebox, 'askyesno', return_value=True) as confirm:
+                self.run_close(close)
+                self.assertTrue(entered.is_set())
+                self.assertEqual(observed, [(True, True), (True, True)])
+                self.assertEqual(self.controller.state.read(), [row])
+                confirm.assert_called_once()
+                unblock.set()
+                self.assertTrue(returned.wait(1))
+        finally:
+            unblock.set()
+
+    def test_close_offers_to_exit_while_local_bridge_is_still_stopping(self):
+        entered, unblock, returned = threading.Event(), threading.Event(), threading.Event()
+
+        def close_bridge():
+            entered.set()
+            unblock.wait(2)
+
+        post = self.controller.post_to_window
+
+        def capture_post(callback):
+            try:
+                return post(callback)
+            finally:
+                returned.set()
+
+        self.controller.bridge = types.SimpleNamespace(close=close_bridge)
+        try:
+            with patch.object(self.controller, '_CLOSE_GRACE', .2), \
+                 patch.object(self.controller, 'post_to_window', side_effect=capture_post), \
+                 patch.object(messagebox, 'askyesno', return_value=True) as confirm:
+                self.run_close()
+                self.assertTrue(entered.is_set())
+                confirm.assert_called_once()
+                unblock.set()
+                self.assertTrue(returned.wait(1))
+        finally:
+            unblock.set()
+
+    def test_close_during_billing_confirmation_cannot_create_a_pod(self):
+        self.load_catalog()
+
+        def confirm(title, _message, **_options):
+            self.assertEqual(title, 'Billable RunPod')
+            self.controller.close()
+            return True
+
+        with patch.object(messagebox, 'askyesno', side_effect=confirm):
+            self.run_close(self.button('Start simulation').invoke)
+        self.assertEqual(self.provider.created, [])
+        self.assertEqual(self.controller.state.read(), [])
+
+    def test_keep_open_does_not_restore_an_interrupted_billing_confirmation(self):
+        self.load_catalog()
+        close_answered = tk.BooleanVar(self.root, value=False)
+
+        def confirm(title, _message, **_options):
+            if title == 'Close RunPod Lab?':
+                close_answered.set(True)
+                return False
+            self.assertEqual(title, 'Billable RunPod')
+            self.controller.close()
+            self.root.wait_variable(close_answered)
+            return True
+
+        with patch.object(messagebox, 'askyesno', side_effect=confirm), \
+             patch.object(self.controller, '_CLOSE_GRACE', .05):
+            self.execute(self.button('Start simulation').invoke,
+                         lambda: close_answered.get() and not self.controller.busy
+                         and not self.controller.confirming_create)
+        self.assertFalse(self.controller.window_closed.is_set())
+        self.assertIsNone(self.controller.exit_after)
+        self.assertEqual(self.provider.created, [])
 
     def test_catalog_403_preserves_other_catalog_and_does_not_leak_key(self):
         self.provider.cpus = RunPodError('dummy-session-key hidden detail', status=403)
         entry = self.set_entry(self.controller.key, 'dummy-session-key')
         self.assertTrue(entry.cget('show'))
-        self.execute(self.button('Load catalog').invoke,
+        self.execute(self.button('Refresh compute').invoke,
                      lambda: not self.controller.busy and 'Catalog' in self.controller.status.get())
         self.assertEqual(self.provider.calls, ['gpus', 'cpus'])
         self.assertIn('RTX 4090', self.controller.compute.get())
@@ -215,7 +370,12 @@ class TkControllerIntegration(unittest.TestCase):
         self.load_catalog()
         self.root.deiconify()
         self.root.update()
-        self.assertEqual((self.root.winfo_width(), self.root.winfo_height()), (920, 680))
+        self.assertEqual((self.root.winfo_width(), self.root.winfo_height()), (920, 420))
+        self.assertEqual(
+            {widget.cget('text') for widget in self.descendants()
+             if isinstance(widget, ttk.Button) and widget.winfo_ismapped()},
+            {'Start simulation', 'End simulation', 'Advanced'},
+        )
         combo = self.controller.dropdown
         font_used = font.Font(self.root, font=combo['font'])
         for label in combo['values']:
@@ -230,7 +390,7 @@ class TkControllerIntegration(unittest.TestCase):
         self.assertGreater(status.winfo_reqheight(), 2 * font_used.metrics('ascent'))
         self.assertEqual(status.winfo_height(), status.winfo_reqheight())
         bottom = self.root.winfo_rooty() + self.root.winfo_height()
-        for widget in (status, self.button('Show selected pod details'), self.button('Configure live audio limits')):
+        for widget in (status, self.button('Start simulation'), self.button('End simulation'), self.button('Advanced')):
             self.assertLessEqual(widget.winfo_rooty() + widget.winfo_height(), bottom)
 
     def test_create_rechecks_stock_without_substituting_or_requesting_a_pod(self):
@@ -241,7 +401,7 @@ class TkControllerIntegration(unittest.TestCase):
         self.assertIn('RTX 5090 · stock high', self.controller.compute.get())
         self.provider.gpus[-1]['availability'] = 'NONE'
         with patch.object(messagebox, 'askyesno') as ask:
-            self.execute(self.button('Create billable pod').invoke, lambda: not self.controller.busy)
+            self.execute(self.button('Start simulation').invoke, lambda: not self.controller.busy)
             ask.assert_not_called()
         self.assertIn('RTX 5090 · stock none', self.controller.status.get())
         self.assertIn('Secure Cloud', self.controller.status.get())
@@ -266,9 +426,9 @@ class TkControllerIntegration(unittest.TestCase):
         self.entry_for(self.controller.cloud).set('COMMUNITY')
         self.assertFalse(self.controller.choices)
         self.assertFalse(self.controller.compute.get())
-        self.button('Create billable pod').invoke()
+        self.button('Start simulation').invoke()
         self.assertEqual(self.provider.calls, ['gpus', 'cpus'])
-        self.load_catalog()
+        self.execute(lambda: None, lambda: not self.controller.busy and bool(self.controller.choices))
         self.assertEqual(self.provider.calls, ['gpus', 'cpus', 'gpus'])
         self.assertFalse(any('CPU:' in label for label in self.controller.dropdown['values']))
         self.assertIn('RTX 4090', self.controller.compute.get())
@@ -277,8 +437,8 @@ class TkControllerIntegration(unittest.TestCase):
         self.assertIn('RTX 4090 · stock medium · $0.81/hr', self.controller.compute.get())
         self.provider.gpus[0]['price']['community'] = 0.84
         with patch.object(messagebox, 'askyesno', return_value=True) as ask:
-            self.execute(self.button('Create billable pod').invoke,
-                         lambda: not self.controller.busy and 'Create submitted' in self.controller.status.get())
+            self.execute(self.button('Start simulation').invoke,
+                         lambda: not self.controller.busy and self.controller.setting_up)
         prompt = ask.call_args.args[1]
         self.assertIn('RTX 4090 · stock medium · $0.84/hr on Community Cloud', prompt)
         self.assertIn(lab.IMAGE, prompt)
@@ -295,15 +455,16 @@ class TkControllerIntegration(unittest.TestCase):
         def confirm(*_):
             self.controller.state.write([{'id': 'expired-1', 'name': 'prior-fixture',
                                           'deadline': time.time() - 1}])
+            self.provider.pods = [{'id': 'expired-1', 'name': 'prior-fixture', 'status': 'RUNNING'}]
             self.controller.enforce_deadlines()
             self.assertTrue(self.controller.busy)
             return True
         with patch.object(messagebox, 'askyesno', side_effect=confirm):
-            self.execute(self.button('Create billable pod').invoke, lambda: not self.controller.busy)
+            self.execute(self.button('Start simulation').invoke, lambda: not self.controller.busy)
         self.assertEqual(self.provider.deleted, ['expired-1'])
         self.assertEqual(self.provider.created, [])
-        self.assertIn('Deadline check', self.controller.status.get())
         self.assertIn('Pod creation was interrupted', self.controller.status.get())
+        self.assertIn('Terminating', self.controller.list.get(0))
 
     def test_key_edit_during_paid_confirmation_cancels_create(self):
         self.load_catalog()
@@ -311,7 +472,7 @@ class TkControllerIntegration(unittest.TestCase):
             self.controller.key.set('dummy-replacement-key')
             return True
         with patch.object(messagebox, 'askyesno', side_effect=confirm):
-            self.execute(self.button('Create billable pod').invoke, lambda: not self.controller.busy)
+            self.execute(self.button('Start simulation').invoke, lambda: not self.controller.busy)
         self.assertEqual(self.provider.created, [])
         self.assertIn('settings changed', self.controller.status.get())
 
@@ -319,7 +480,7 @@ class TkControllerIntegration(unittest.TestCase):
         self.load_catalog()
         callbacks = []
         with patch.object(self.controller, 'background', side_effect=lambda fn, done: callbacks.append((fn, done))):
-            self.button('Create billable pod').invoke()
+            self.button('Start simulation').invoke()
             fetch, finish = callbacks.pop()
             quote = fetch(self.provider)
             self.set_entry(self.controller.image, 'different/image')
@@ -370,7 +531,7 @@ class TkControllerIntegration(unittest.TestCase):
         client = RunPodClient('dummy-session-key', transport=transport)
         self.set_entry(self.controller.key, 'dummy-session-key')
         with patch.object(lab, 'RunPodClient', return_value=client):
-            self.execute(self.button('Load catalog').invoke,
+            self.execute(self.button('Refresh compute').invoke,
                          lambda: not self.controller.busy and 'Catalog' in self.controller.status.get())
         self.assertEqual([urlsplit(row[1]).path.rsplit('/', 1)[-1] for row in requests], ['gpus', 'cpus'])
         self.assertIn('CPU:', self.controller.compute.get())
@@ -398,7 +559,7 @@ class TkControllerIntegration(unittest.TestCase):
         with patch.object(lab, 'RunPodClient', return_value=client):
             self.load_catalog()
             with patch.object(messagebox, 'askyesno', return_value=True) as ask:
-                self.execute(self.button('Create billable pod').invoke, lambda: not self.controller.busy)
+                self.execute(self.button('Start simulation').invoke, lambda: not self.controller.busy)
         self.assertIn('stock low', ask.call_args.args[1])
         self.assertEqual(requests, [('GET', '/v2/catalog/gpus'), ('GET', '/v2/catalog/cpus'),
                                     ('GET', '/v2/catalog/gpus'), ('POST', '/v2/pods')])
@@ -412,7 +573,7 @@ class TkControllerIntegration(unittest.TestCase):
 
     def test_deadline_validation_cancel_create_and_queue_cancel(self):
         self.load_catalog()
-        create = self.button('Create billable pod')
+        create = self.button('Start simulation')
         self.set_entry(self.controller.deadline_minutes, '0')
         self.execute(create.invoke, lambda: 'Deadline must' in self.controller.status.get())
         self.assertNotIn('create', self.provider.calls)
@@ -421,7 +582,7 @@ class TkControllerIntegration(unittest.TestCase):
             self.execute(create.invoke, lambda: not self.controller.busy)
         self.assertNotIn('create', self.provider.calls)
         with patch.object(messagebox, 'askyesno', return_value=True):
-            self.execute(create.invoke, lambda: not self.controller.busy and 'Create submitted' in self.controller.status.get())
+            self.execute(create.invoke, lambda: not self.controller.busy and self.controller.setting_up)
         self.assertEqual(len(self.provider.created), 1)
         saved = self.controller.state.read()
         self.assertEqual(saved[0]['queue_id'], 'queue-1')
@@ -429,8 +590,8 @@ class TkControllerIntegration(unittest.TestCase):
         self.assertNotIn('dummy-session-key', self.controller.state.path.read_text())
         self.controller.list.selection_set(0)
         with patch.object(messagebox, 'askyesno', return_value=True):
-            self.execute(self.button('Terminate selected pod').invoke,
-                         lambda: not self.controller.busy and 'Termination requested' in self.controller.status.get())
+            self.execute(self.button('End simulation').invoke,
+                         lambda: not self.controller.busy and 'Terminating' in self.controller.status.get())
         self.assertEqual(self.provider.cancelled, ['queue-1'])
         self.assertEqual(self.provider.deleted, [])
 
@@ -440,7 +601,7 @@ class TkControllerIntegration(unittest.TestCase):
             'POST /v2/pods: request failed (HTTP 403); check the pods:write scope and account or team access',
             status=403, operation='POST /v2/pods', required_scope='pods:write')
         with patch.object(messagebox, 'askyesno', return_value=True):
-            self.execute(self.button('Create billable pod').invoke,
+            self.execute(self.button('Start simulation').invoke,
                          lambda: not self.controller.busy and '403' in self.controller.status.get())
         self.assertIn('pods:write', self.controller.status.get())
         self.assertEqual(self.controller.state.read(), [])
@@ -452,21 +613,20 @@ class TkControllerIntegration(unittest.TestCase):
         self.provider.queued = [{'name': 'fixture-job', 'id': 'q-test', 'status': 'QUEUED'}]
         self.controller.refresh()
         self.assertIn('fixture-job', self.controller.list.get(0))
-        # Key entry triggers the same idle deadline check used after a restart.
         self.set_entry(self.controller.key, 'dummy-session-key')
-        self.execute(lambda: None,
+        self.execute(self.controller.enforce_deadlines,
                      lambda: not self.controller.busy and self.provider.cancelled == ['q-test'])
-        self.assertIn('Deadline check', self.controller.status.get())
-        self.assertEqual(self.controller.state.read()[0]['deadline_action'], 'queue:q-test')
+        self.assertIn('Terminating', self.controller.list.get(0))
         # Reconstruct a fresh controller from only the isolated persisted state.
         other = tk.Toplevel(self.root)
         other.withdraw()
         try:
-            restarted = lab.App(other)
+            restarted = lab.App(other, repository_directory=self.tmp.name)
             self.assertEqual(restarted.records[0]['queue_id'], 'q-test')
             self.assertIn('fixture-job', restarted.list.get(0))
             self.assertEqual(restarted.key.get(), 'dummy-session-key')
             self.execute(lambda: None, lambda: bool(restarted.choices) and not restarted.busy)
+            self.assertEqual(self.provider.cancelled, ['q-test'])
         finally:
             other.destroy()
 
@@ -478,7 +638,7 @@ class TkControllerIntegration(unittest.TestCase):
         other = tk.Toplevel(self.root)
         other.withdraw()
         try:
-            restarted = lab.App(other)
+            restarted = lab.App(other, repository_directory=self.tmp.name)
             self.assertEqual(restarted.key.get(), 'saved-fixture-key')
             self.execute(lambda: None, lambda: bool(restarted.choices) and not restarted.busy)
             self.assertIn('RTX 4090', restarted.compute.get())
@@ -500,7 +660,11 @@ class TkControllerIntegration(unittest.TestCase):
             return 201, pod
         pin = Path(self.tmp.name) / 'known_hosts'
         pin.write_text('fixture')
-        bridge = types.SimpleNamespace(url='http://127.0.0.1:1/#fixture', close=lambda: None)
+        observed = {'state': 'active', 'closed': False}
+        def close_bridge():
+            observed['closed'] = True
+        bridge = types.SimpleNamespace(url='http://127.0.0.1:1/#fixture', close=close_bridge,
+                                       status=lambda: (observed['state'], ''))
         with patch.object(self.provider, 'create_pod', side_effect=create), \
              patch.object(messagebox, 'askyesno', return_value=True) as confirm, \
              patch('host_identity.existing_host_key', return_value=None), \
@@ -509,7 +673,7 @@ class TkControllerIntegration(unittest.TestCase):
                           side_effect=RunPodError('logs denied', status=403)) as logs, \
              patch.object(lab, 'deploy_selected', return_value='PUMP_LAB_MODE=vulkan') as deploy, \
              patch('browser_bridge.start', return_value=bridge) as start, \
-             patch.object(lab.webbrowser, 'open') as browser:
+             patch.object(lab.webbrowser, 'open', return_value=True) as browser:
             self.execute(self.button('Start simulation').invoke,
                          lambda: self.controller.bridge is bridge and not self.controller.setting_up)
             self.button('Start simulation').invoke()
@@ -524,8 +688,53 @@ class TkControllerIntegration(unittest.TestCase):
         self.assertEqual(deploy.call_args.args[3], record['ssh_identity'])
         self.assertIn(record['ssh_identity'], start.call_args.args[0])
         logs.assert_not_called()
-        self.assertEqual(browser.call_count, 2)
+        self.assertEqual(browser.call_count, 1)
         browser.assert_called_with(bridge.url)
+
+        # Closing the browser must end the attached pod, even if another row
+        # has been selected while the simulation was open.
+        other = {'id': 'other-pod', 'name': 'other-fixture', 'status': 'RUNNING',
+                 'deadline': time.time() + 120}
+        self.controller.state.write([record, other])
+        self.provider.pods.append(other)
+        self.controller.select_record(other)
+        self.controller.clear_key()
+        self.assertEqual(self.controller.key.get(), 'dummy-session-key')
+        observed['state'] = 'ended'
+        self.execute(lambda: None, lambda: not self.controller.busy and observed['closed']
+                     and self.provider.deleted == ['auto-pod'])
+        self.assertTrue(self.controller.list.get(0).startswith('Terminating'))
+        self.provider.pods.pop(0)
+        self.execute(self.controller.enforce_deadlines, lambda: not self.controller.busy
+                     and self.controller.list.get(0).startswith('Terminated'))
+        self.assertEqual(self.provider.pods, [other])
+        self.assertEqual(self.controller.list.curselection(), (1,))
+
+    def test_new_pod_is_terminated_when_native_worker_cannot_open(self):
+        self.load_catalog()
+        def create(payload):
+            pod = {'id': 'failed-pod', 'name': payload['name'], 'status': 'RUNNING',
+                   'gpu': payload['gpu'], 'cloud': payload['cloud'],
+                   'ssh': {'direct': {'host': 'pod.example', 'port': 2222, 'username': 'root'}}}
+            self.provider.pods = [pod]
+            return 201, pod
+        pin = Path(self.tmp.name) / 'known_hosts'
+        pin.write_text('fixture')
+        with patch.object(self.provider, 'create_pod', side_effect=create), \
+             patch.object(messagebox, 'askyesno', return_value=True), \
+             patch('host_identity.existing_host_key', return_value=pin), \
+             patch.object(lab, 'deploy_selected', return_value='PUMP_LAB_MODE=vulkan'), \
+             patch('browser_bridge.start', side_effect=RuntimeError('The native worker disconnected.')), \
+             patch.object(lab.webbrowser, 'open') as browser:
+            self.execute(self.button('Start simulation').invoke, lambda: not self.controller.busy
+                         and self.provider.deleted == ['failed-pod'])
+        browser.assert_not_called()
+        self.assertTrue(self.controller.list.get(0).startswith('Terminating'))
+        self.provider.pods = []
+        self.execute(self.controller.enforce_deadlines, lambda: not self.controller.busy
+                     and self.controller.list.get(0).startswith('Terminated'))
+        self.assertIn('The native worker disconnected.', self.controller.status.get())
+        self.assertIn('Pod terminated.', self.controller.status.get())
 
     def test_setup_failure_can_retry_same_owned_pod(self):
         self.load_catalog()
@@ -538,11 +747,11 @@ class TkControllerIntegration(unittest.TestCase):
         self.provider.pods = [pod]
         pin = Path(self.tmp.name) / 'known_hosts'
         pin.write_text('fixture')
-        bridge = types.SimpleNamespace(url='http://127.0.0.1:1/#fixture', close=lambda: None)
+        bridge = types.SimpleNamespace(url='http://127.0.0.1:1/#fixture', close=lambda: None, status=lambda: ('active', ''))
         with patch('host_identity.existing_host_key', return_value=pin), \
              patch.object(lab, 'deploy_selected', side_effect=[ValueError('interrupted build'), 'receipt']) as deploy, \
              patch('browser_bridge.start', return_value=bridge), \
-             patch.object(lab.webbrowser, 'open'), patch.object(messagebox, 'askyesno') as confirm:
+             patch.object(lab.webbrowser, 'open', return_value=True), patch.object(messagebox, 'askyesno') as confirm:
             self.execute(self.button('Start simulation').invoke,
                          lambda: not self.controller.setting_up and 'Setup stopped' in self.controller.status.get())
             self.assertIn('interrupted build', self.controller.status.get())
@@ -551,6 +760,25 @@ class TkControllerIntegration(unittest.TestCase):
         self.assertEqual(deploy.call_count, 2)
         confirm.assert_not_called()
         self.assertFalse(self.provider.created)
+
+    def test_dismiss_missing_request_rechecks_provider_before_clearing_local_record(self):
+        self.load_catalog()
+        record = {'name': 'uncertain-request', 'status': lab.Ownership.TERMINATION_FAILED}
+        self.controller.state.write([record])
+        self.controller.select_record(record)
+        self.provider.queued = [{'name': record['name'], 'id': 'late-queue'}]
+        dismiss = self.button('Dismiss missing request')
+        with patch.object(messagebox, 'askyesno', return_value=True) as confirm:
+            self.execute(dismiss.invoke, lambda: not self.controller.busy)
+            self.assertIn('RunPod still lists this request', self.controller.status.get())
+            self.assertEqual(self.controller.state.read(), [record])
+            self.provider.queued = []
+            self.execute(dismiss.invoke, lambda: not self.controller.busy)
+        self.assertEqual(confirm.call_count, 2)
+        self.assertEqual(self.controller.state.read(), [])
+        self.assertIn('Missing request dismissed', self.controller.status.get())
+        self.assertEqual(self.provider.deleted, [])
+        self.assertEqual(self.provider.cancelled, [])
 
     def test_console_fingerprint_cleared_when_its_selected_pod_changes(self):
         self.root.deiconify()
@@ -561,58 +789,12 @@ class TkControllerIntegration(unittest.TestCase):
         self.set_entry(self.controller.known_hosts, 'SHA256:' + 'A' * 43)
         self.controller.refresh()
         self.assertTrue(self.controller.known_hosts.get().startswith('SHA256:'))
-        self.provider.pods = [{'id': 'p1', 'name': 'first',
-                               'ssh': {'direct': {'host': 'pod.example', 'port': 2222}}}]
-        with patch.object(self.controller, 'background') as background, \
-             patch('host_identity.verify_host_key', return_value=Path(self.tmp.name) / 'pin') as verify:
-            self.button('Open selected worker').invoke()
-            lookup, _ = background.call_args.args
-            lookup(self.provider)
-            verify.assert_called_once_with('p1', 'pod.example', 2222, 'SHA256:' + 'A' * 43,
-                                           self.controller.state.path.parent)
         self.controller.list.selection_clear(0, 'end')
         self.controller.list.selection_set(1)
         self.controller.list.event_generate('<<ListboxSelect>>')
         self.root.update()
         self.assertEqual(self.controller.known_hosts.get(), '')
         self.assertIn('selected pod changed', self.controller.status.get())
-
-    def test_deploy_button_uses_selected_pod_and_safe_profile(self):
-        self.set_entry(self.controller.key, 'dummy-session-key')
-        known = Path(self.tmp.name) / 'known_hosts'
-        known.write_text('fixture')
-        self.assertEqual(self.controller.known_hosts.get(), '')
-        self.provider.pods = [{'id': 'pod-1', 'name': 'owned', 'status': 'RUNNING',
-                               'gpu': {'id': 'NVIDIA GeForce RTX 4090', 'count': 1},
-                               'ssh': {'direct': {'host': 'pod.example', 'username': 'root', 'port': 2222}}}]
-        self.controller.state.write([{'name': 'owned', 'id': 'pod-1', 'status': 'RUNNING',
-                                      'deadline': time.time()+1800, 'compute_kind': 'gpu',
-                                      'compute_id': 'NVIDIA GeForce RTX 4090'}])
-        self.controller.refresh()
-        self.controller.list.selection_set(0)
-        self.controller.profile.set('live')
-        calls = []
-        def deploy(*args, **kwargs):
-            calls.append((args, kwargs))
-            kwargs['on_output']('PUMP_LAB_MODE=vulkan\nPUMP_LAB_WORKER_SHA256=fixture')
-        with patch.object(self.provider, 'get_pod_ssh_fingerprint', create=True, return_value='test-fingerprint') as logs, \
-             patch('host_identity.existing_host_key', return_value=None), \
-             patch('host_identity.verify_host_key', return_value=known) as verify, \
-             patch('deploy.deploy', side_effect=deploy):
-            self.execute(self.button('Deploy worker to selected pod').invoke,
-                         lambda: not self.controller.busy and not self.controller.deploying
-                         and 'Worker build finished' in self.controller.status.get())
-        logs.assert_called_once_with('pod-1')
-        verify.assert_called_once_with('pod-1', 'pod.example', 2222, 'test-fingerprint',
-                                       self.controller.state.path.parent)
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0][0][3], str(known))
-        self.assertEqual(calls[0][1]['mode'], 'gpu')
-        self.assertEqual(calls[0][1]['profile'], 'live')
-        self.assertEqual(calls[0][1]['timeout'], 900)
-        self.assertIn('PUMP_LAB_MODE=vulkan', self.controller.deployment_receipt.get())
-        self.assertNotIn('dummy-session-key', self.controller.deployment_receipt.get())
-        self.assertEqual(self.provider.deleted, [])
 
     def test_live_settings_widget_and_safe_worker_launch(self):
         self.set_entry(self.controller.key, 'dummy-session-key')
@@ -667,12 +849,14 @@ class TkControllerIntegration(unittest.TestCase):
             url = 'http://127.0.0.1/fixture'
             closed = False
             def close(self): self.closed = True
+            def status(self): return 'active', ''
         def start(command, **kwargs):
             observed.update(command=command, kwargs=kwargs)
             return Bridge()
         browser = types.SimpleNamespace(start=start)
-        with patch.dict('sys.modules', {'browser_bridge': browser}), patch.object(lab.webbrowser, 'open', return_value=True):
-            self.execute(self.button('Open selected worker').invoke,
+        with patch.dict('sys.modules', {'browser_bridge': browser}), patch.object(lab.webbrowser, 'open', return_value=True), \
+             patch.object(lab, 'deploy_selected', return_value='PUMP_LAB_MODE=vulkan'):
+            self.execute(self.button('Start simulation').invoke,
                          lambda: not self.controller.busy and self.controller.bridge is not None)
         command = observed['command']
         self.assertTrue(observed['kwargs']['live'])
@@ -683,17 +867,19 @@ class TkControllerIntegration(unittest.TestCase):
         self.assertIn('--require-gpu', remote[-1])
         self.assertIn('--live', remote[-1])
         self.assertNotIn('dummy-session-key', repr(observed))
-        self.assertIn('unqualified', self.controller.status.get())
+        self.assertIn('Experimental Live/Duplex opened', self.controller.status.get())
+        self.assertTrue(observed['kwargs']['managed'])
         bridge = self.controller.bridge
-        self.execute(self.button('Close worker session').invoke,
-                     lambda: self.controller.bridge is None and not self.controller.closing_bridge)
+        self.execute(self.button('End simulation').invoke,
+                     lambda: self.controller.bridge is None and not self.controller.busy
+                     and self.provider.deleted == ['pod-1'])
         self.assertTrue(bridge.closed)
-        self.assertIn('pod remains active', self.controller.status.get())
-        self.assertEqual(self.provider.deleted, [])
-        # An ordinary close releases local resources and allows a fresh worker.
-        with patch.dict('sys.modules', {'browser_bridge': browser}), patch.object(lab.webbrowser, 'open', return_value=True):
-            self.execute(self.button('Open selected worker').invoke,
-                         lambda: not self.controller.busy and self.controller.bridge is not None)
+        self.assertIn('Terminating', self.controller.list.get(0))
+        self.provider.pods = []
+        self.execute(self.controller.enforce_deadlines,
+                     lambda: not self.controller.busy and self.controller.list.get(0).startswith('Terminated'))
+        self.assertIn('Pod terminated', self.controller.status.get())
+        self.assertEqual(self.provider.deleted, ['pod-1'])
 
 
 if __name__ == '__main__':

@@ -39,6 +39,12 @@ while True:
     sys.stdout.buffer.flush()
 '''
 
+READY_PEER = PEER.replace(
+    '{"generation":"1","ack":"0"}',
+    '{"version":1,"generation":"1","ack":"0","controls":'
+    '[{"kind":"label","text":"Robust simulation ready"}]}',
+)
+
 
 LIVE_PEER = r'''
 import json,struct,sys
@@ -716,6 +722,89 @@ os._exit(0)
             browser_bridge.start('ssh example')
         with self.assertRaises(ValueError):
             browser_bridge.start([])
+
+
+class ManagedBrowserTests(unittest.TestCase):
+    client = 'a' * 64
+
+    def start_bridge(self, script=READY_PEER, **kwargs):
+        bridge = browser_bridge.start([sys.executable, '-u', '-c', script],
+                                      managed=True, **kwargs)
+        self.addCleanup(bridge.close)
+        self.bridge = bridge
+        self.url = urlsplit(bridge.url)
+
+    def request(self, route, data=b'', session='', client=None, origin=None):
+        request = urllib.request.Request(
+            f'{self.url.scheme}://{self.url.netloc}{route}', data=data,
+            headers={'X-Preview-Token': self.url.fragment, 'X-Preview-Session': session,
+                     'X-Preview-Client': client or self.client,
+                     'Origin': origin or f'{self.url.scheme}://{self.url.netloc}'})
+        with urllib.request.urlopen(request, timeout=5) as reply:
+            return reply.read()
+
+    def attach(self):
+        return json.loads(self.request('/start'))['session']
+
+    def wait_status(self, expected):
+        deadline = time.monotonic() + 5
+        while self.bridge.status()[0] != expected and time.monotonic() < deadline:
+            time.sleep(.02)
+        self.assertEqual(self.bridge.status()[0], expected)
+
+    def test_early_exit_and_startup_timeout(self):
+        for script, message in (('raise SystemExit(255)', 'Native worker exited'),
+                                (PEER, 'Timed out waiting')):
+            with self.subTest(message=message), self.assertRaisesRegex(browser_bridge._preview.PreviewError, message):
+                self.start_bridge(script, ready_timeout=.5)
+
+    def test_same_tab_reload_received_current_snapshot_and_stale_lease_rejected(self):
+        self.start_bridge()
+        worker = self.bridge.server.worker
+        self.assertEqual(self.bridge.status(), ('waiting', ''))
+        original = self.attach()
+        first_snapshot = self.request('/output', None, original)
+        self.assertIn(b'Robust simulation ready', first_snapshot)
+        with self.assertRaises(urllib.error.HTTPError) as sibling:
+            self.request('/start', client='b' * 64)
+        self.assertEqual(sibling.exception.code, 409)
+        self.request('/detach', session=original)
+        refreshed = self.attach()
+        self.assertNotEqual(original, refreshed)
+        self.assertIs(worker, self.bridge.server.worker)
+        self.assertEqual(first_snapshot, self.request('/output', None, refreshed))
+        # A late pagehide from the old page must not detach its replacement.
+        self.request('/detach', session=original)
+        self.request('/browser-error', session=original)
+        self.request('/heartbeat', session=refreshed)
+        with self.assertRaises(urllib.error.HTTPError) as stale:
+            self.request('/input', frame(1, b'12345678'), original)
+        self.assertEqual(stale.exception.code, 410)
+        self.assertEqual(self.bridge.status(), ('active', ''))
+        self.request('/stop', session=refreshed)
+        self.assertEqual(self.bridge.status()[0], 'ended')
+
+    def test_close_grace_and_network_loss(self):
+        with mock.patch.object(browser_bridge, '_RECONNECT_GRACE', .1):
+            self.start_bridge()
+            session = self.attach()
+            with self.assertRaises(urllib.error.HTTPError) as forbidden:
+                self.request('/detach', session=session, origin='null')
+            self.assertEqual(forbidden.exception.code, 403)
+            self.request('/detach', session=session)
+            self.wait_status('ended')
+        with mock.patch.object(browser_bridge, '_BROWSER_LEASE', .1):
+            self.start_bridge()
+            self.attach()
+            self.wait_status('ended')
+
+    def test_worker_failure_is_distinct_from_browser_close(self):
+        self.start_bridge(READY_PEER.replace('while True:', 'raise SystemExit(255)\nwhile True:')
+                          .replace('import struct, sys', 'import struct, sys, time')
+                          .replace('raise SystemExit(255)', 'time.sleep(.4); raise SystemExit(255)'))
+        self.attach()
+        self.wait_status('failed')
+        self.assertIn('worker disconnected', self.bridge.status()[1])
 
 
 if __name__ == '__main__':

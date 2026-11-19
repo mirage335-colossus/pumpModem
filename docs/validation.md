@@ -274,6 +274,47 @@ request and one billing confirmation across both opens. The test allocation
 was deleted and its absence verified. This covers the new simulation setup
 workflow. Physical remote Live/Duplex retains its separate qualification work.
 
+### RunPod browser and termination lifecycle — 19 November 2026
+
+The baseline Firefox reload sent a close beacon with `Origin: null`. The
+local origin check rejected it with HTTP 403 and the reloaded page received
+HTTP 409 because the previous page still owned the worker. A separate
+startup reproduction returned HTTP 200 before a failed worker exited, then
+showed a generic disconnect. The lab now waits for native readiness and
+lets the owning tab reconnect to the same worker after a reload.
+
+A real Firefox run through the compact Tk controller created one full RTX
+PRO 6000 Blackwell Server Edition with 97,887 MiB visible and NVIDIA driver
+595.112.07. It rendered the simulation, reloaded with a fresh browser lease
+on the same worker and decoded `e` with 780 Vulkan coarse-search rows,
+DATA 0, 0, 1 and two QUIET slots. The fixture observed no browser errors.
+After the tab and isolated browser process closed, the controller changed
+the exact pod row to **Terminating** and then **Terminated**. RunPod returned
+HTTP 404 for that pod and the inventory showed its absence. A separate
+local Firefox test left the browser open after closing the tab and observed
+session end after about eight seconds.
+
+The existing API key migrated to the ignored checkout file
+`_zLab/runpod-api-key` with mode `0600`. The new file authenticated to RunPod,
+the old copy was removed and the native source bundle excluded the key.
+The standalone suite passed 154 tests, including 21 isolated Tk cases.
+The shared preview client and its host and native-worker tests also passed.
+
+A later close regression involved an older **Terminating** row with an exact
+pod ID and no saved delete receipt. RunPod returned HTTP 404 for that ID and
+listed no matching pod or queued request. The lab now preserves the record as
+**No longer visible** and resumes its saved termination intent if the exact pod
+returns. Repeating Close keeps the original six-second deadline. When provider
+or local cleanup exceeds that deadline, the app offers to close with the
+pending record saved.
+
+Using a temporary copy of the affected record and read-only RunPod requests,
+the prior window failed to close within ten seconds. The corrected window
+closed in 1.41 seconds, with no prompt or callback error. The lab's normal
+ownership check then repaired the actual row under the controller lock. The
+verification sent no cloud mutations. The final standalone suite passed
+162 tests, including 26 isolated Tk cases.
+
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 
 The [HF operating results](indexes/robust.md#low-power-hf-alarm-results)

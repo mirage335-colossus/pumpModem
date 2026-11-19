@@ -16,7 +16,22 @@ class Fake:
         self.payload = payload
         if self.error:
             raise self.error
-        return self.result(payload)
+        status, result = self.result(payload)
+        if status == 201:
+            self.pods.append(result)
+        elif status == 202:
+            self.queued = [dict(result, name=payload['name'])]
+        return status, result
+    @staticmethod
+    def _get(rows, identity):
+        for row in rows:
+            if row['id'] == identity:
+                return row
+        raise RunPodError('not found', status=404)
+    def get_pod(self, identity):
+        return self._get(self.pods, identity)
+    def get_queued(self, identity):
+        return self._get(self.list_queued(), identity)
     def list_pods(self):
         return self.pods
     def list_queued(self):
@@ -58,45 +73,6 @@ class Tests(unittest.TestCase):
         for incomplete in ({'name': 'owned'}, {'id': 'p1'}):
             with self.subTest(incomplete=incomplete), self.assertRaisesRegex(ValueError, 'missing'):
                 owned_pod_details(client, incomplete)
-
-    def test_connection_actions_fetch_selected_individual_pod(self):
-        class Var:
-            def get(self): return ''
-            def set(self, _): pass
-        class List:
-            def curselection(self): return (0,)
-        class Client:
-            def __init__(self): self.requests = []
-            def get_pod(self, pod_id):
-                self.requests.append(pod_id)
-                return {'id': pod_id, 'name': 'owned', 'ssh': {'direct': {'host': 'pod.example', 'port': 2222}}}
-        controller = App.__new__(App)
-        controller.state = State(path='/private/state/jobs.json')
-        controller.list = List()
-        controller.records = [{'id': 'p1', 'name': 'owned', 'deadline': time.time() + 60}]
-        controller.deploying = controller.closing_bridge = False
-        controller.bridge = None
-        controller.devices = {}
-        for field in ('known_hosts', 'identity', 'profile', 'key', 'files', 'audio_binary',
-                      'audio_device', 'capture_bytes', 'playback_bytes', 'capture_frames',
-                      'playback_prebuffer', 'local_utc_uncertainty', 'max_clock_offset',
-                      'remote_clock_drift_ppm', 'status'):
-            setattr(controller, field, Var())
-        actions = []
-        controller.background = lambda request, done: actions.append((request, done))
-        controller.deploy_worker()
-        controller.open_simulation()
-        controller.details()
-        self.assertEqual(len(actions), 3)
-        client = Client()
-        with patch('host_identity.existing_host_key', return_value=Path('/private/state/pin')) as pin:
-            for request, _ in actions[:2]:
-                pod, known = request(client)
-                self.assertEqual(pod['id'], 'p1')
-                self.assertEqual(known, '/private/state/pin')
-                pin.assert_called_with('p1', 'pod.example', 2222, Path('/private/state'))
-        self.assertEqual(actions[2][0](client)['id'], 'p1')
-        self.assertEqual(client.requests, ['p1', 'p1', 'p1'])
 
     def test_owned_pod_enrollment_stops_on_mismatch_and_honors_explicit_file(self):
         client = Mock()
@@ -217,42 +193,6 @@ class Tests(unittest.TestCase):
             bad.write_text('')
             with self.assertRaises(ValueError): ssh_command(pod, str(bad))
 
-    def test_forget_does_not_mutate_state_while_provider_call_is_active(self):
-        class Status:
-            def set(self, value): self.value = value
-        app = App.__new__(App)
-        app.busy = True
-        app.status = Status()
-        # Missing list and state deliberately prove the guard runs before reading them.
-        app.forget()
-        self.assertIn('Wait', app.status.value)
-
-    def test_forget_removes_exact_pin_only_after_confirmation(self):
-        current = {'id': 'p1', 'name': 'job1'}
-        other = {'id': 'p2', 'name': 'job2'}
-        app = App.__new__(App)
-        app.busy = False
-        app.records = [current, other]
-        app.list = Mock()
-        app.list.curselection.return_value = (0,)
-        app.refresh, app.status = Mock(), Mock()
-        with tempfile.TemporaryDirectory() as td:
-            app.state = State(Path(td) / 'jobs.json')
-            app.state.write(app.records)
-            with patch.object(app_module, 'messagebox', create=True) as dialog, \
-                 patch('host_identity.forget_host_key') as forget:
-                dialog.askyesno.return_value = False
-                app.forget()
-                forget.assert_not_called()
-                self.assertEqual(app.state.read(), [current, other])
-                dialog.askyesno.return_value = True
-                forget.side_effect = OSError('unwritable')
-                app.forget()
-                self.assertEqual(app.state.read(), [current, other])
-                forget.reset_mock(side_effect=True)
-                app.forget()
-                forget.assert_called_once_with('p1', Path(td))
-                self.assertEqual(app.state.read(), [other])
 
     def test_deadline_terminates_pod_once_and_preserves_future_pod(self):
         with tempfile.TemporaryDirectory() as td:
@@ -264,45 +204,163 @@ class Tests(unittest.TestCase):
                            {'name':'future','id':'p2','status':'RUNNING'}]
             owner = Ownership(state, client)
             self.assertEqual(owner.enforce_deadlines(now=150), (1, []))
-            count, warnings = owner.enforce_deadlines(now=150)
-            self.assertEqual(count, 0)
-            self.assertIn('provider status RUNNING', warnings[0])
+            self.assertEqual(state.read()[0]['status'], Ownership.TERMINATING)
+            self.assertEqual(owner.enforce_deadlines(now=151), (0, []))
             self.assertEqual(client.deleted, ['p1'])
-            self.assertEqual(state.read()[0]['deadline_action'], 'pod:p1')
+            client.pods.pop(0)
+            self.assertEqual(Ownership(state, client).enforce_deadlines(now=152), (0, []))
+            self.assertEqual(state.read()[0]['status'], Ownership.TERMINATED)
+            self.assertFalse(Ownership.needs_poll(state.read()[0], 15000))
+            self.assertEqual(state.read()[1], {'name':'future', 'id':'p2', 'deadline':200})
 
     def test_deadline_cancels_queue_then_terminates_if_queue_became_pod(self):
         with tempfile.TemporaryDirectory() as td:
             state = State(Path(td)/'jobs.json')
             state.write([{'name':'expired', 'deadline':100}])
             client = Fake()
-            client.queued = [{'name':'expired','id':'q1','status':'QUEUED'}]
+            queue = {'name':'expired','id':'q1','status':'QUEUED'}
+            client.queued = [queue]
             owner = Ownership(state, client)
             self.assertEqual(owner.enforce_deadlines(now=150), (1, []))
-            client.queued = []
+            queue.update(status='DEPLOYED', podId='p1')
+            # The queue can report deployment before its pod is visible.
+            self.assertEqual(owner.enforce_deadlines(now=160), (0, []))
+            self.assertEqual(state.read()[0]['status'], Ownership.TERMINATING)
+            self.assertEqual(state.read()[0]['id'], 'p1')
             client.pods = [{'name':'expired', 'id':'p1', 'status':'RUNNING'}]
-            self.assertEqual(owner.enforce_deadlines(now=151), (1, []))
+            self.assertEqual(owner.enforce_deadlines(now=161), (1, []))
             self.assertEqual(client.deleted, ['queue:q1', 'p1'])
+            client.pods.clear()
+            self.assertEqual(owner.enforce_deadlines(now=162), (0, []))
+            self.assertEqual(state.read()[0]['status'], Ownership.TERMINATED)
 
     def test_deadline_missing_pod_does_not_block_later_jobs(self):
-        class MissingFirst(Fake):
-            def delete_pod(self, pod_id):
-                self.deleted.append(pod_id)
-                if pod_id == 'p1':
-                    raise RunPodError('not found', status=404)
         with tempfile.TemporaryDirectory() as td:
             state = State(Path(td)/'jobs.json')
             state.write([{'name':'missing', 'id':'p1', 'deadline':100},
                          {'name':'running', 'id':'p2', 'deadline':100}])
-            client = MissingFirst()
+            client = Fake()
             client.pods = [{'name':'running','id':'p2','status':'RUNNING'}]
             owner = Ownership(state, client)
-            count, errors = owner.enforce_deadlines(now=150)
-            self.assertEqual(count, 1)
-            self.assertIn('HTTP 404', errors[0])
-            self.assertEqual(client.deleted, ['p1', 'p2'])
-            self.assertEqual(state.read()[0]['deadline_absent_pod'], 'p1')
-            owner.enforce_deadlines(now=151)
-            self.assertEqual(client.deleted, ['p1', 'p2'])
+            self.assertEqual(owner.enforce_deadlines(now=150), (1, []))
+            self.assertEqual(client.deleted, ['p2'])
+            self.assertEqual(state.read()[0]['status'], Ownership.NOT_VISIBLE)
+            client.pods.clear()
+            self.assertEqual(owner.enforce_deadlines(now=271), (0, []))
+            self.assertEqual(client.deleted, ['p2'])
+            self.assertEqual(state.read()[0]['status'], Ownership.NOT_VISIBLE)
+            self.assertEqual(state.read()[1]['status'], Ownership.TERMINATED)
+
+    def test_stale_termination_of_absent_pod_settles_and_resumes_on_reappearance(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = State(Path(td)/'jobs.json')
+            record = {'name': 'owned', 'id': 'p1', 'deadline': 100,
+                      'status': Ownership.TERMINATING, 'termination_started': 50,
+                      'ssh_identity': str(Path(td)/'private-key')}
+            state.write([record])
+            client = Fake()
+            owner = Ownership(state, client)
+            with patch('host_identity.forget_host_key') as forget_pin, \
+                    patch('bootstrap.forget_bootstrap') as forget_identity:
+                self.assertEqual(owner.enforce_deadlines(now=250), (0, []))
+                hidden = dict(record, status=Ownership.NOT_VISIBLE)
+                self.assertEqual(state.read(), [hidden])
+                self.assertFalse(Ownership.needs_poll(hidden, 300))
+                self.assertEqual(owner.reconcile(), [hidden])
+                forget_pin.assert_not_called()
+                forget_identity.assert_not_called()
+            self.assertEqual(client.deleted, [])
+            client.pods = [{'name': 'owned', 'id': 'p1', 'status': 'RUNNING'}]
+            recovered = owner.reconcile()[0]
+            self.assertEqual(recovered['status'], Ownership.TERMINATING)
+            self.assertEqual(owner.enforce_deadlines(), (1, []))
+            self.assertEqual(client.deleted, ['p1'])
+
+    def test_reconcile_already_failed_termination_of_absent_pod(self):
+        cases = (({}, Ownership.NOT_VISIBLE), ({'id': 'p1'}, Ownership.TERMINATED))
+        for receipt, expected in cases:
+            with self.subTest(receipt=receipt), tempfile.TemporaryDirectory() as td:
+                state = State(Path(td)/'jobs.json')
+                state.write([{'name': 'owned', 'id': 'p1', 'status': Ownership.TERMINATION_FAILED,
+                              'termination_error': 'Old error', 'termination_sent': receipt}])
+                client = Fake()
+                owner = Ownership(state, client)
+                recovered = owner.reconcile()[0]
+                self.assertEqual(recovered['status'], expected)
+                self.assertNotIn('termination_error', recovered)
+                self.assertEqual(client.deleted, [])
+                if expected == Ownership.NOT_VISIBLE:
+                    client.pods = [{'name': 'owned', 'id': 'p1', 'status': 'RUNNING'}]
+                    self.assertEqual(owner.reconcile()[0]['status'], Ownership.TERMINATING)
+                    self.assertEqual(owner.enforce_deadlines(), (1, []))
+                    self.assertEqual(client.deleted, ['p1'])
+
+    def test_termination_does_not_settle_when_provider_cannot_confirm_absence(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = State(Path(td)/'jobs.json')
+            state.write([{'name': 'owned', 'id': 'p1', 'status': Ownership.TERMINATING,
+                          'termination_started': 100}])
+            client = Fake()
+            client.pods = [{'name': 'owned', 'id': 'p1', 'status': 'RUNNING'}]
+            with patch.object(client, 'get_pod', side_effect=RunPodError('not found', status=404)):
+                self.assertEqual(Ownership(state, client).enforce_deadlines(now=110), (0, []))
+            self.assertEqual(state.read()[0]['status'], Ownership.TERMINATING)
+            client.pods.clear()
+            with patch.object(client, 'get_pod', side_effect=RunPodError('forbidden', status=403)):
+                self.assertEqual(Ownership(state, client).enforce_deadlines(now=115), (0, ['RunPod HTTP 403.']))
+            self.assertEqual(state.read()[0]['status'], Ownership.TERMINATION_FAILED)
+            self.assertEqual(client.deleted, [])
+
+    def test_termination_checks_exact_identity_and_keeps_failure_for_retry(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = State(Path(td)/'jobs.json')
+            record = {'name':'owned', 'id':'p1', 'deadline':time.time()+60}
+            state.write([record])
+            client = Fake()
+            client.pods = [{'name':'different', 'id':'p1', 'status':'RUNNING'}]
+            owner = Ownership(state, client)
+            with self.assertRaisesRegex(ValueError, 'selected pod changed'):
+                owner.request_termination(dict(record, id='p2'))
+            owner.request_termination(record)
+            self.assertEqual(state.read()[0]['status'], Ownership.TERMINATING)
+            self.assertEqual(client.deleted, [])
+            count, errors = owner.enforce_deadlines()
+            self.assertEqual(count, 0)
+            self.assertTrue(errors)
+            self.assertEqual(client.deleted, [])
+            self.assertEqual(state.read()[0]['status'], Ownership.TERMINATION_FAILED)
+            owner.reconcile()
+            self.assertEqual(state.read()[0]['status'], Ownership.TERMINATION_FAILED)
+            client.pods[0]['name'] = 'owned'
+            owner.request_termination(record)
+            self.assertEqual(owner.enforce_deadlines(), (1, []))
+            self.assertEqual(client.deleted, ['p1'])
+
+    def test_retry_confirms_late_deletion_without_losing_previous_receipt(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = State(Path(td)/'jobs.json')
+            client = Fake()
+            client.pods = [{'name':'owned', 'id':'p1', 'status':'RUNNING'}]
+            state.write(client.pods)
+            owner = Ownership(state, client)
+            started = owner.request_termination(state.read()[0])['termination_started']
+            self.assertEqual(owner.enforce_deadlines(now=started), (1, []))
+            owner.enforce_deadlines(now=started+121)
+            self.assertEqual(state.read()[0]['status'], Ownership.TERMINATION_FAILED)
+            client.pods.clear()
+            owner.request_termination(state.read()[0])
+            self.assertEqual(owner.enforce_deadlines(), (0, []))
+            self.assertEqual(state.read()[0]['status'], Ownership.TERMINATED)
+            self.assertEqual(client.deleted, ['p1'])
+
+    def test_missing_existing_pod_is_visible_as_unconfirmed(self):
+        with tempfile.TemporaryDirectory() as td:
+            state = State(Path(td)/'jobs.json')
+            state.write([{'name':'owned', 'id':'p1', 'status':'RUNNING'}])
+            client = Fake()
+            records = Ownership(state, client).reconcile()
+            self.assertEqual(records[0]['status'], Ownership.NOT_VISIBLE)
+            self.assertEqual(client.deleted, [])
 
     def test_create_requires_future_deadline_before_provider_call(self):
         with tempfile.TemporaryDirectory() as td:
@@ -311,24 +369,6 @@ class Tests(unittest.TestCase):
             with self.assertRaises(ValueError): Ownership(state, client).create({}, 'image', 1)
             self.assertFalse(hasattr(client, 'payload'))
             self.assertEqual(state.read(), [])
-
-    def test_forget_rechecks_busy_after_modal_callback(self):
-        from unittest.mock import patch
-        class Status:
-            def set(self, value): self.value = value
-        class List:
-            def curselection(self): return (0,)
-        controller = App.__new__(App)
-        controller.busy, controller.status, controller.list = False, Status(), List()
-        controller.records = [{'name':'one'}]
-        class MessageBox:
-            @staticmethod
-            def askyesno(*_):
-                controller.busy = True
-                return True
-        with patch.object(app_module, 'messagebox', MessageBox, create=True):
-            controller.forget()  # no state object: state access would fail
-        self.assertIn('Wait', controller.status.value)
 
     def test_remote_compute_must_match_recorded_catalog_choice(self):
         self.assertTrue(simulation_gpu({'compute_kind':'gpu','compute_id':'g1'},
@@ -555,6 +595,9 @@ class Tests(unittest.TestCase):
         controller = App.__new__(App)
         controller.dropdown, controller.compute, controller.status = {}, Value(), Value()
         controller.choices, controller.cloud, controller.preferred_compute = [], Value(), None
+        controller.key = Value()
+        controller.exit_after = None
+        controller.key.set('test-key')
         controller.cloud.set('SECURE')
         controller.compute.set('')
         controller.background = lambda work, done: done(work(Catalog()))
@@ -565,28 +608,6 @@ class Tests(unittest.TestCase):
         self.assertIn('CPU catalog', controller.status.value)
         self.assertIn('catalog:read', controller.status.value)
         self.assertNotIn('sensitive detail', controller.status.value)
-
-    def test_close_worker_session_allows_reopening_without_touching_pod(self):
-        class Status:
-            def set(self, value): self.value = value
-        class Root:
-            def after(self, _, callback): callback()
-        class Bridge:
-            closed = 0
-            def close(self): self.closed += 1
-        class ImmediateThread:
-            def __init__(self, target, daemon): self.target = target
-            def start(self): self.target()
-        controller = App.__new__(App)
-        controller.busy = controller.closing_bridge = False
-        controller.status, controller.root = Status(), Root()
-        bridge = controller.bridge = Bridge()
-        with patch.object(app_module.threading, 'Thread', ImmediateThread):
-            controller.close_bridge()
-        self.assertEqual(bridge.closed, 1)
-        self.assertIsNone(controller.bridge)
-        self.assertFalse(controller.closing_bridge)
-        self.assertIn('pod remains active', controller.status.value)
 
     def test_refresh_preserves_selected_record_by_name_when_reordered(self):
         class List:
@@ -602,6 +623,8 @@ class Tests(unittest.TestCase):
             def read(self): return self.records
         controller = App.__new__(App)
         controller.list = List()
+        controller.session_record = None
+        controller.key_entry = Mock()
         controller.records = [{'name':'first'}, {'name':'selected'}]
         controller.known_hosts = Mock()
         controller.known_hosts.get.return_value = ''
@@ -612,31 +635,6 @@ class Tests(unittest.TestCase):
         controller.state.records = [{'name':'first'}]
         controller.refresh()
         self.assertEqual(controller.list.curselection(), ())
-
-    def test_failed_or_busy_session_close_is_safe_and_retryable(self):
-        class Status:
-            def set(self, value): self.value = value
-        class Root:
-            def after(self, _, callback): callback()
-        class Bridge:
-            def close(self): raise OSError('sensitive detail')
-        class ImmediateThread:
-            def __init__(self, target, daemon): self.target = target
-            def start(self): self.target()
-        controller = App.__new__(App)
-        controller.busy, controller.closing_bridge = True, False
-        controller.status, controller.root = Status(), Root()
-        bridge = controller.bridge = Bridge()
-        controller.close_bridge()
-        self.assertIs(controller.bridge, bridge)
-        self.assertIn('Wait', controller.status.value)
-        controller.busy = False
-        with patch.object(app_module.threading, 'Thread', ImmediateThread):
-            controller.close_bridge()
-        self.assertIs(controller.bridge, bridge)
-        self.assertFalse(controller.closing_bridge)
-        self.assertIn('Could not close', controller.status.value)
-        self.assertNotIn('sensitive detail', controller.status.value)
 
     def test_create_and_delete(self):
         with tempfile.TemporaryDirectory() as td:
@@ -650,7 +648,18 @@ class Tests(unittest.TestCase):
             self.assertEqual(state.path.stat().st_mode & 0o777, 0o600)
             owner.delete(state.read()[0])
             self.assertEqual(client.deleted, ['pod1'])
-            self.assertIn('termination requested', state.read()[0]['status'])
+            self.assertEqual(state.read()[0]['status'], Ownership.TERMINATING)
+            identity = Path(state.read()[0]['ssh_identity'])
+            self.assertTrue(identity.exists())
+            # Pending provider deletion preserves the pin and the generated identity.
+            with patch('host_identity.forget_host_key') as forget:
+                owner.enforce_deadlines()
+                forget.assert_not_called()
+                client.pods.clear()
+                owner.enforce_deadlines()
+                forget.assert_called_once_with('pod1', Path(td))
+            self.assertFalse(identity.exists())
+            self.assertEqual(state.read()[0]['status'], Ownership.TERMINATED)
 
     def test_uncertain_create_reconciles_without_retry(self):
         with tempfile.TemporaryDirectory() as td:
@@ -674,6 +683,11 @@ class Tests(unittest.TestCase):
             owner.delete(state.read()[0])
             self.assertEqual(owner.client.deleted, ['queue:queue1'])
             with self.assertRaises(ValueError): owner.create({'cpu':{'id':'c1','vcpuCount':32}}, 'image', time.time()+60)
+            owner.client.queued[0]['status'] = 'CANCELLED'
+            owner.enforce_deadlines()
+            self.assertEqual(state.read()[0]['status'], Ownership.TERMINATED)
+            owner.create({'cpu':{'id':'c1','vcpuCount':32}}, 'image', time.time()+60)
+            self.assertEqual(len(state.read()), 2)
 
     def test_known_create_rejection_clears_pending(self):
         with tempfile.TemporaryDirectory() as td:

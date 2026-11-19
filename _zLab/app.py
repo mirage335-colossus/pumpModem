@@ -198,13 +198,20 @@ class State:
 
 
 class Ownership:
+    TERMINATING = 'Terminating'
+    TERMINATED = 'Terminated'
+    TERMINATION_FAILED = 'Termination failed'
+    NOT_VISIBLE = 'No longer visible'
+    _QUEUE_CLOSED = ('CANCELLED', 'FAILED', 'EXPIRED')
+    _TERMINATION_WAIT = 120
+
     def __init__(self, state, client):
         self.state, self.client = state, client
 
     def create(self, compute, image, deadline=None):
         records = self.state.read()
         # A missing id might be an accepted, queued or timed-out create.
-        if any(not r.get('id') for r in records):
+        if any(not r.get('id') and r.get('status') != self.TERMINATED for r in records):
             raise ValueError('An earlier create is unresolved. Reconcile it before creating another pod.')
         name = 'pump-lab-' + secrets.token_hex(12)
         if deadline is None or not isinstance(deadline, (int, float)) or deadline <= time.time():
@@ -254,105 +261,285 @@ class Ownership:
         self.state.write(records)
         return result
 
+    @staticmethod
+    def _find_owned(items, identity, name):
+        matches = [item for item in items if item.get('name') == name
+                   or (identity and item.get('id') == identity)]
+        if not matches:
+            return None
+        if (len(matches) != 1 or matches[0].get('name') != name
+                or not isinstance(matches[0].get('id'), str) or not matches[0]['id']
+                or (identity and matches[0]['id'] != identity)):
+            raise ValueError('RunPod inventory does not match the owned record.')
+        return matches[0]
+
+    def _identify(self, record, pods, queues):
+        name = record.get('name')
+        if not isinstance(name, str) or not name:
+            raise ValueError('The ownership record has no pod name.')
+        pod = self._find_owned(pods, record.get('id'), name)
+        queue = self._find_owned(queues, record.get('queue_id'), name)
+        if pod:
+            record['id'] = pod['id']
+        if queue:
+            record['queue_id'] = queue['id']
+        return pod, queue
+
     def reconcile(self):
         records = self.state.read()
-        pods = self.client.list_pods()
-        queued = self.client.list_queued()
+        if not records:
+            return records
+        pods, queues = self.client.list_pods(), self.client.list_queued()
         for record in records:
-            matches = [p for p in pods if p.get('name') == record.get('name')]
-            matching_queue = [p for p in queued if p.get('name') == record.get('name')]
-            if len(matches) == 1:
-                record['id'] = matches[0].get('id') or record.get('id')
-                if record.get('id') == record.get('deadline_absent_pod'):
-                    record.pop('deadline_absent_pod', None)
-                record['status'] = str(matches[0].get('status', matches[0].get('desiredStatus', 'unknown')))
-            elif len(matches) > 1:
-                record['status'] = 'multiple matches; inspect RunPod console'
-            elif len(matching_queue) == 1:
-                record['queue_id'] = matching_queue[0].get('id')
-                if (record.get('queue_id') == record.get('deadline_absent_queue')
-                        and str(matching_queue[0].get('status', '')).upper() == 'QUEUED'):
-                    record.pop('deadline_absent_queue', None)
-                record['status'] = 'queue status: ' + str(matching_queue[0].get('status', 'unknown')) + '; inspect RunPod console'
-            elif len(matching_queue) > 1:
-                record['status'] = 'multiple queued matches; inspect RunPod console'
-            else:
-                record['status'] = 'not in list; may be queued or deleted; inspect RunPod console'
+            if record.get('status') == self.TERMINATED:
+                continue
+            try:
+                pod, queue = self._identify(record, pods, queues)
+                if record.get('status') == self.NOT_VISIBLE:
+                    if not (pod or queue):
+                        continue
+                    if self._has_termination_intent(record):
+                        self._begin_termination(record, time.time())
+                        continue
+                if (record.get('status') == self.TERMINATION_FAILED and record.get('id')
+                        and not (record.get('queue_id') or pod or queue)):
+                    self._reconcile_failed_pod(record, records)
+                    continue
+                if self._has_termination_intent(record):
+                    continue
+                if pod:
+                    record['status'] = str(pod.get('status', pod.get('desiredStatus', 'unknown')))
+                elif queue:
+                    record['status'] = 'Queue: ' + str(queue.get('status', 'unknown'))
+                    if not record.get('id') and queue.get('status') in self._QUEUE_CLOSED:
+                        detail = self._get_owned(self.client.get_queued, record['queue_id'], record['name'])
+                        if detail and detail.get('status') in self._QUEUE_CLOSED and not detail.get('podId'):
+                            record['status'] = self.TERMINATED
+                            error = self._retire_ssh(record, records)
+                            if error:
+                                record['termination_error'] = error
+                elif record.get('id'):
+                    detail = self._get_owned(self.client.get_pod, record['id'], record['name'])
+                    # An absent ID might belong to a different authenticated account.
+                    record['status'] = str(detail.get('status', 'unknown')) if detail else self.NOT_VISIBLE
+                else:
+                    record['status'] = 'Waiting to confirm pod creation'
+            except ValueError:
+                if not self._has_termination_intent(record):
+                    record['status'] = 'RunPod identity mismatch'
         self.state.write(records)
         return records
 
-    def delete(self, record):
-        if record.get('queue_id') and not record.get('id'):
-            self.client.cancel_queued(record['queue_id'])
-            records = self.state.read()
-            for item in records:
-                if item.get('name') == record['name']:
-                    item['status'] = 'queue cancellation requested; verify in RunPod console'
-            self.state.write(records)
+    def _reconcile_failed_pod(self, record, records):
+        try:
+            if self._get_owned(self.client.get_pod, record['id'], record['name']):
+                return
+            pod, queue = self._identify(record, self.client.list_pods(), self.client.list_queued())
+        except (OSError, RunPodError):
+            # Keep the existing failure and continue checking other rows.
             return
-        if not record.get('id'):
-            raise ValueError('No confirmed pod or queue ID. Inspect RunPod before proceeding.')
-        self.client.delete_pod(record['id'])
-        # Keep ownership until absence is confirmed; delete may be asynchronous.
+        if pod or queue:
+            return
+        if self._pod_termination_confirmed(record):
+            self._mark_terminated(record)
+            error = self._retire_ssh(record, records)
+            if error:
+                record['termination_error'] = error
+        else:
+            self._mark_not_visible(record)
+
+    @classmethod
+    def _has_termination_intent(cls, record):
+        status = record.get('status')
+        return (status in (cls.TERMINATING, cls.TERMINATION_FAILED)
+                or (status == cls.NOT_VISIBLE and 'termination_started' in record)
+                or bool(record.get('deadline_action'))
+                or status in ('termination requested; verify in RunPod console',
+                              'queue cancellation requested; verify in RunPod console'))
+
+    @classmethod
+    def needs_poll(cls, record, now):
+        if record.get('status') in (cls.TERMINATED, cls.TERMINATION_FAILED, cls.NOT_VISIBLE):
+            return False
+        deadline = record.get('deadline')
+        return (cls._has_termination_intent(record)
+                or (type(deadline) in (int, float) and math.isfinite(deadline) and deadline <= now))
+
+    @classmethod
+    def _begin_termination(cls, record, now):
+        record['status'] = cls.TERMINATING
+        record['termination_started'] = now
+        record.pop('termination_error', None)
+
+    def request_termination(self, record):
+        """Persist the intent before any provider work, using the selected identity."""
         records = self.state.read()
-        for item in records:
-            if item.get('name') == record['name']:
-                item['status'] = 'termination requested; verify in RunPod console'
-        self.state.write(records)
+        matches = [item for item in records if item.get('name') == record.get('name')]
+        if (not record.get('name') or len(matches) != 1 or
+                any(matches[0].get(key) != record.get(key) for key in ('id', 'queue_id'))):
+            raise ValueError('The selected pod changed. Review the pod list and try again.')
+        current = matches[0]
+        if current.get('status') not in (self.TERMINATING, self.TERMINATED):
+            self._begin_termination(current, time.time())
+            self.state.write(records)
+        return current
+
+    def delete(self, record):
+        """Set the termination intent and advance it once."""
+        self.request_termination(record)
+        return self.enforce_deadlines()
+
+    @staticmethod
+    def _get_owned(get, identity, name):
+        try:
+            detail = get(identity)
+        except RunPodError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        if not isinstance(detail, dict) or detail.get('id') != identity or detail.get('name') != name:
+            raise ValueError('RunPod details do not match the owned resource.')
+        return detail
+
+    @staticmethod
+    def _submit_termination(record, field, delete):
+        identity = record[field]
+        sent = record.get('termination_sent')
+        if not isinstance(sent, dict):
+            sent = record['termination_sent'] = {}
+        request = {'id': identity, 'started': record['termination_started']}
+        if sent.get(field) == request:
+            return 0
+        try:
+            delete(identity)
+        except RunPodError as exc:
+            if exc.status != 404:
+                raise
+        sent[field] = request
+        return 1
+
+    def _advance_termination(self, record):
+        name = record['name']
+        if not (record.get('id') or record.get('queue_id')):
+            self._identify(record, self.client.list_pods(), self.client.list_queued())
+            if not (record.get('id') or record.get('queue_id')):
+                return 0
+
+        queue_id = record.get('queue_id')
+        queue = self._get_owned(self.client.get_queued, queue_id, name) if queue_id else None
+        if queue:
+            queue_status = queue.get('status')
+            if queue_status == 'QUEUED' and not queue.get('podId'):
+                return self._submit_termination(record, 'queue_id', self.client.cancel_queued)
+            if queue_status == 'DEPLOYED':
+                pod_id = queue.get('podId')
+                if (not isinstance(pod_id, str) or not pod_id
+                        or record.get('id') not in (None, pod_id)):
+                    raise ValueError('The queued request has a conflicting pod identity.')
+                record['id'] = pod_id
+            elif queue_status not in self._QUEUE_CLOSED or queue.get('podId'):
+                raise ValueError('RunPod returned an unconfirmed queue status.')
+
+        pod_id = record.get('id')
+        pod = self._get_owned(self.client.get_pod, pod_id, name) if pod_id else None
+        if pod:
+            return self._submit_termination(record, 'id', self.client.delete_pod)
+
+        # Check inventories after the individual lookups. A queued request may
+        # have produced a pod while its cancellation was in flight.
+        pod, queue_list = self._identify(record, self.client.list_pods(), self.client.list_queued())
+        if pod or queue_id != record.get('queue_id'):
+            return 0
+        if queue_list and (not queue or queue_list.get('status') != queue.get('status')
+                           or queue_list.get('podId') != queue.get('podId')):
+            return 0
+        if pod_id and not self._pod_termination_confirmed(record):
+            if not queue_id:
+                # The current account cannot see this pod. Keep ownership and
+                # SSH material because absence is not evidence of deletion.
+                self._mark_not_visible(record)
+            return 0
+        if queue_id and not queue:
+            # Cancellation can lose the race to deployment. Check the actual
+            # terminal queue status, even after a successful cancel response.
+            return 0
+        self._mark_terminated(record)
+        return 0
+
+    @staticmethod
+    def _pod_termination_confirmed(record):
+        pod_id = record['id']
+        sent = record.get('termination_sent')
+        receipt = sent.get('id') if isinstance(sent, dict) else None
+        return (receipt == pod_id or (isinstance(receipt, dict) and receipt.get('id') == pod_id)
+                or record.get('deadline_action') == f'pod:{pod_id}')
+
+    def _mark_not_visible(self, record):
+        # Older failed rows may only carry their termination intent in status.
+        record.setdefault('termination_started', time.time())
+        record['status'] = self.NOT_VISIBLE
+        record.pop('termination_error', None)
+
+    def _mark_terminated(self, record):
+        record['status'] = self.TERMINATED
+        record.pop('termination_error', None)
+        record.pop('termination_sent', None)
+        record.pop('deadline_action', None)
+
+    def _retire_ssh(self, record, records):
+        from bootstrap import forget_bootstrap
+        from host_identity import forget_host_key
+        pod_id = record.get('id')
+        try:
+            if pod_id and not any(item is not record and item.get('id') == pod_id
+                                  for item in records):
+                forget_host_key(pod_id, self.state.path.parent)
+            forget_bootstrap(record, self.state.path.parent)
+            record.pop('ssh_identity', None)
+        except (OSError, ValueError):
+            return 'Pod terminated. Could not remove its local SSH files.'
+        return None
 
     def enforce_deadlines(self, now=None):
-        """Reconcile and request termination independently for each expired job."""
+        """Advance each termination, keeping failures isolated to their own rows."""
         now = time.time() if now is None else now
         records = self.state.read()
-        if not any(isinstance(r.get('deadline'), (int, float)) and r['deadline'] <= now for r in records):
-            return 0, []
-        records = self.reconcile()
         count, errors = 0, []
         for record in records:
-            deadline = record.get('deadline')
-            if not isinstance(deadline, (int, float)) or deadline > now:
+            if not self.needs_poll(record, now):
                 continue
-            pod_id, queue_id = record.get('id'), record.get('queue_id')
-            if pod_id and pod_id != record.get('deadline_absent_pod'):
-                kind, identity = 'pod', pod_id
-            elif queue_id and queue_id != record.get('deadline_absent_queue'):
-                kind, identity = 'queue', queue_id
-            else:
-                errors.append(f"{record.get('name')}: no active provider ID confirmed; inspect RunPod")
-                continue
-            action = f'{kind}:{identity}'
-            if record.get('deadline_action') == action:
-                message = f"{record.get('name')}: termination requested; provider status {record.get('status', 'unknown')}; verify in RunPod"
-                errors.append(message)
-                latest = self.state.read()
-                for item in latest:
-                    if item.get('name') == record.get('name'):
-                        item['status'] = message
-                self.state.write(latest)
-                continue
+            if record.get('status') != self.TERMINATING:
+                self._begin_termination(record, now)
+                self.state.write(records)
+            started = record.get('termination_started')
+            if type(started) not in (int, float) or not math.isfinite(started):
+                started = record['termination_started'] = now
+            error = None
             try:
-                # Restrict queue cancellation to a queue ID even if an old pod ID remains.
-                selected = {'name': record['name'], 'id': identity} if kind == 'pod' else {'name': record['name'], 'queue_id': identity}
-                self.delete(selected)
-            except RunPodError as exc:
-                if exc.status == 404:
-                    latest = self.state.read()
-                    for item in latest:
-                        if item.get('name') == record.get('name'):
-                            item['deadline_absent_' + kind] = identity
-                            item['status'] = f'{kind} ID not found; verify the RunPod account and queued resources'
-                    self.state.write(latest)
-                errors.append(f"{record.get('name')}: {kind} termination failed (HTTP {exc.status or 'unknown'}); inspect RunPod")
-                continue
-            except (OSError, ValueError) as exc:
-                errors.append(f"{record.get('name')}: {kind} termination failed ({type(exc).__name__}); inspect RunPod")
-                continue
-            latest = self.state.read()
-            for item in latest:
-                if item.get('name') == record.get('name'):
-                    item['deadline_action'] = action
-            self.state.write(latest)
-            count += 1
+                count += self._advance_termination(record)
+            except (OSError, ValueError, RunPodError) as exc:
+                status = exc.status if isinstance(exc, RunPodError) else None
+                if type(status) is int:
+                    error = f'RunPod HTTP {status}.'
+                elif isinstance(exc, ValueError):
+                    error = str(exc)
+                else:
+                    error = 'RunPod could not confirm the request.'
+                if isinstance(exc, RunPodError) and (exc.uncertain or status in (None, 429)
+                                                    or (type(status) is int and status >= 500)):
+                    # Retry temporary failures after rechecking ownership.
+                    record['termination_error'] = error
+                    error = None
+            if record['status'] == self.TERMINATED:
+                error = self._retire_ssh(record, records)
+            elif record['status'] == self.TERMINATING and now - started >= self._TERMINATION_WAIT:
+                error = error or 'RunPod did not confirm termination. Check the account and try again.'
+            if error:
+                if record['status'] != self.TERMINATED:
+                    record['status'] = self.TERMINATION_FAILED
+                record['termination_error'] = error
+                errors.append(error)
+            self.state.write(records)
         return count, errors
 
 
@@ -581,13 +768,27 @@ def live_command(remote, binary, device, capture_bytes, playback_bytes, capture_
 
 
 class App:
-    def __init__(self, root):
+    _CLOSE_GRACE = 6
+
+    def __init__(self, root, *, repository_directory=None):
         self.root, self.state, self.choices = root, State(), []
         configure_dark_theme(root)
         self.busy = False
         self.create_interrupted = False
         self.preferred_compute = None
         self.bridge = None
+        self.bridge_close_failed = False
+        self.browser_attached = False
+        self.session_record = None
+        self.session_is_new = False
+        self.setup_cancelled = None
+        self.exit_after = None
+        self.close_after = None
+        self.close_attempted = set()
+        self.close_generation = 0
+        self.confirming_create = False
+        self.window_closed = threading.Event()
+        self.next_provider_poll = 0
         self.closing_bridge = False
         self.deploying = False
         self.enumerating = False
@@ -595,8 +796,9 @@ class App:
         self.setup_after = None
         self.devices = {}
         root.protocol('WM_DELETE_WINDOW', self.close)
-        root.title('Robust RunPod Lab — provisioning')
-        root.geometry('920x680')
+        root.title('Robust RunPod Lab')
+        root.geometry('920x420')
+        root.minsize(640, 320)
         box = ttk.Frame(root, padding=12)
         box.pack(fill='both', expand=True)
         self.key = tk.StringVar()
@@ -618,101 +820,197 @@ class App:
         self.playback_bytes = tk.StringVar()
         self.capture_frames = tk.StringVar()
         self.playback_prebuffer = tk.StringVar()
-        self.status = tk.StringVar(value='Enter a RunPod API key and load the catalog. No pod is created automatically.')
-        ttk.Label(box, text='RunPod API key (saved)').grid(row=0, column=0, sticky='w')
-        key_entry = ttk.Entry(box, textvariable=self.key, show='•', width=60)
-        key_entry.grid(row=0, column=1, sticky='ew')
-        key_entry.bind('<FocusOut>', lambda _: self.save_key())
-        key_actions = ttk.Frame(box)
-        key_actions.grid(row=0, column=2)
-        ttk.Button(key_actions, text='Load catalog', command=self.catalog).pack(side='left')
-        ttk.Button(key_actions, text='Clear key', command=self.clear_key).pack(side='left')
-        ttk.Label(box, text='Compute').grid(row=1, column=0, sticky='w')
+        self.status = tk.StringVar(value='Enter your RunPod API key to load available compute.')
+        ttk.Label(box, text='RunPod API key').grid(row=0, column=0, sticky='w', padx=(0, 12))
+        self.key_entry = ttk.Entry(box, textvariable=self.key, show='•')
+        self.key_entry.grid(row=0, column=1, sticky='ew')
+        self.key_entry.bind('<FocusOut>', self.key_edited)
+        self.key_entry.bind('<Return>', self.key_edited)
+        ttk.Label(box, text='Compute').grid(row=1, column=0, sticky='w', padx=(0, 12), pady=(8, 0))
         self.dropdown = ttk.Combobox(box, textvariable=self.compute, state='readonly')
-        self.dropdown.grid(row=1, column=1, columnspan=2, sticky='ew')
-        ttk.Label(box, text='Container image').grid(row=2, column=0, sticky='w')
-        ttk.Entry(box, textvariable=self.image).grid(row=2, column=1, sticky='ew')
-        ttk.Label(box, text='Deadline (minutes)').grid(row=3, column=0, sticky='w')
-        placement = ttk.Frame(box)
-        placement.grid(row=3, column=1, sticky='ew')
-        ttk.Entry(placement, textvariable=self.deadline_minutes, width=10).pack(side='left')
-        ttk.Label(placement, text='Cloud tier').pack(side='left', padx=(16, 4))
-        ttk.Combobox(placement, textvariable=self.cloud, values=('SECURE', 'COMMUNITY'),
-                     width=12, state='readonly').pack(side='left')
-        self.cloud.trace_add('write', self.tier_changed)
-        ttk.Label(box, text='Automatic termination requires this app to remain open with the API key entered. Billing can continue if it is closed.').grid(row=9, column=0, columnspan=3, sticky='w', pady=8)
-        ttk.Button(box, text='Start simulation', command=self.start_simulation).grid(row=4, column=0, sticky='w')
-        pod_actions = ttk.Frame(box)
-        pod_actions.grid(row=4, column=1, sticky='w')
-        ttk.Button(pod_actions, text='Create billable pod', command=self.create).pack(side='left')
-        ttk.Button(pod_actions, text='Reconcile owned pods', command=self.reconcile).pack(side='left')
-        ttk.Button(box, text='Terminate selected pod', command=self.terminate).grid(row=4, column=2)
-        self.list = tk.Listbox(box, height=8, exportselection=False,
+        self.dropdown.grid(row=1, column=1, sticky='ew', pady=(8, 0))
+        actions = ttk.Frame(box)
+        actions.grid(row=2, column=0, columnspan=2, sticky='ew', pady=12)
+        ttk.Button(actions, text='Start simulation', command=self.start_simulation).pack(side='left')
+        ttk.Button(actions, text='End simulation', command=self.end_simulation).pack(side='left', padx=8)
+        ttk.Button(actions, text='Advanced', command=self.toggle_advanced).pack(side='right')
+        ttk.Label(box, text='Pods').grid(row=3, column=0, sticky='w')
+        self.list = tk.Listbox(box, height=6, exportselection=False,
                                background='#171b22', foreground='#f0f2f5',
                                selectbackground='#365f91', selectforeground='#f0f2f5',
                                highlightbackground='#697584', highlightcolor='#365f91')
-        self.list.grid(row=5, column=0, columnspan=3, sticky='nsew', pady=8)
+        self.list.grid(row=4, column=0, columnspan=2, sticky='nsew', pady=(4, 8))
         self.fingerprint_pod = None
         self.known_hosts.trace_add('write', self.bind_fingerprint)
         self.list.bind('<<ListboxSelect>>', self.clear_stale_fingerprint)
         status_box = ttk.Frame(box)
-        status_box.grid(row=6, column=0, columnspan=3, sticky='ew')
+        status_box.grid(row=5, column=0, columnspan=2, sticky='ew')
         self.status_label = ttk.Label(status_box, textvariable=self.status, wraplength=760)
         self.status_label.pack(anchor='w')
         self.status_label.bind('<Double-Button-1>', self.copy_status)
-        ttk.Label(status_box, text='Double-click the status message to copy it.',
-                  style='Hint.TLabel').pack(anchor='w')
-        ttk.Button(box, text='Open selected worker', command=self.open_simulation).grid(row=7, column=0, sticky='w')
-        ttk.Button(box, text='Forget verified closed record', command=self.forget).grid(row=7, column=1, sticky='w')
-        ttk.Button(box, text='Deploy worker to selected pod', command=self.deploy_worker).grid(row=7, column=2, sticky='w')
-        ttk.Label(box, text='Start simulation creates a pod, configures SSH, deploys the worker and opens the simulation. Select an owned pod to continue using it. The controls below support manual setup and older pods.', wraplength=760).grid(row=8, column=0, columnspan=3, sticky='w', pady=8)
-        ttk.Label(box, text='SSH trust (optional)').grid(row=10, column=0, sticky='w')
-        ttk.Entry(box, textvariable=self.known_hosts).grid(row=10, column=1, sticky='ew')
-        ttk.Label(box, text='SSH identity (optional)').grid(row=11, column=0, sticky='w')
-        ttk.Entry(box, textvariable=self.identity).grid(row=11, column=1, sticky='ew')
-        ttk.Label(box, text='Local file root (optional)').grid(row=12, column=0, sticky='w')
-        ttk.Entry(box, textvariable=self.files).grid(row=12, column=1, sticky='ew')
-        ttk.Label(box, text='Selected files, including modem keys, are sent to the pod.', wraplength=760).grid(row=13, column=0, columnspan=3, sticky='w')
-        ttk.Button(box, text='Show deployment receipt', command=lambda: messagebox.showinfo('Deployment receipt', self.deployment_receipt.get() or 'No receipt available.')).grid(row=14, column=0, sticky='w')
-        ttk.Button(box, text='Close worker session', command=self.close_bridge).grid(row=14, column=1, sticky='w')
-        ttk.Button(box, text='Show selected pod details', command=self.details).grid(row=14, column=2)
-        ttk.Label(box, text='Worker profile').grid(row=20, column=0, sticky='w')
-        ttk.Combobox(box, textvariable=self.profile, values=('simulation', 'live'), state='readonly').grid(row=20, column=1, sticky='ew')
-        ttk.Button(box, text='Configure live audio limits', command=self.audio_settings).grid(row=20, column=2)
+        self.advanced = ttk.LabelFrame(box, text='Advanced', padding=10)
+        panel = self.advanced
+        panel.grid(row=6, column=0, columnspan=2, sticky='ew', pady=(10, 0))
+        panel.columnconfigure(1, weight=1)
+        for row, (label, field) in enumerate((
+            ('Container image', self.image), ('Deadline (minutes)', self.deadline_minutes),
+            ('SSH trust', self.known_hosts), ('SSH identity', self.identity),
+            ('Local file root', self.files),
+        )):
+            ttk.Label(panel, text=label).grid(row=row, column=0, sticky='w', padx=(0, 12))
+            ttk.Entry(panel, textvariable=field).grid(row=row, column=1, sticky='ew')
+        options_row = ttk.Frame(panel)
+        options_row.grid(row=5, column=0, columnspan=2, sticky='w', pady=6)
+        ttk.Label(options_row, text='Cloud tier').pack(side='left')
+        ttk.Combobox(options_row, textvariable=self.cloud, values=('SECURE', 'COMMUNITY'),
+                     width=12, state='readonly').pack(side='left', padx=(4, 12))
+        ttk.Label(options_row, text='Worker profile').pack(side='left')
+        ttk.Combobox(options_row, textvariable=self.profile, values=('simulation', 'live'),
+                     width=12, state='readonly').pack(side='left', padx=(4, 0))
+        self.cloud.trace_add('write', self.tier_changed)
+        ttk.Label(panel, text='Saved key file').grid(row=6, column=0, sticky='w')
+        ttk.Label(panel, text='_zLab/runpod-api-key').grid(row=6, column=1, sticky='w')
+        advanced_actions = ttk.Frame(panel)
+        advanced_actions.grid(row=7, column=0, columnspan=2, sticky='w', pady=(6, 0))
+        ttk.Button(advanced_actions, text='Refresh compute', command=self.catalog).pack(side='left')
+        ttk.Button(advanced_actions, text='Clear key', command=self.clear_key).pack(side='left', padx=4)
+        ttk.Button(advanced_actions, text='Configure live audio limits', command=self.audio_settings).pack(side='left')
+        ttk.Button(advanced_actions, text='Deployment receipt', command=self.show_receipt).pack(side='left', padx=4)
+        ttk.Button(advanced_actions, text='Dismiss missing request', command=self.dismiss_missing).pack(side='left')
+        self.advanced.grid_remove()
         box.columnconfigure(1, weight=1)
-        box.rowconfigure(5, weight=1)
+        box.rowconfigure(4, weight=1)
         self.refresh()
-        self.key.trace_add('write', lambda *_: self.root.after_idle(self.enforce_deadlines))
-        self.root.after(15000, self.deadline_tick)
-        from credentials import ApiKeyStore
-        self.key_store = ApiKeyStore(self.state.path.parent)
+        self.lifecycle_after = self.root.after(1000, self.lifecycle_tick)
+        self.root.bind('<Destroy>', self.window_destroyed, add='+')
+        from credentials import RepositoryApiKeyStore
+        location = {} if repository_directory is None else {'repository_directory': repository_directory}
+        self.key_store = RepositoryApiKeyStore(self.state.path.parent, **location)
+        self.catalog_key = None
+        self.saved_key = None
         try:
-            self.key.set(self.key_store.load())
+            self.saved_key = self.key_store.load()
+            self.key.set(self.saved_key)
         except (OSError, ValueError):
             self.status.set('Could not read the saved API key. Check ' + str(self.key_store.path))
         if self.key.get():
-            self.root.after_idle(self.startup_catalog)
+            self.root.after_idle(self.initialize_saved_session)
+
+    def initialize_saved_session(self):
+        if self.records:
+            self.poll_owned(reconcile=True, after=self.startup_catalog)
+        else:
+            self.startup_catalog()
+
+    def toggle_advanced(self):
+        if self.advanced.winfo_manager():
+            self.advanced.grid_remove()
+            self.root.geometry(f'{self.root.winfo_width()}x420')
+        else:
+            self.advanced.grid()
+            if self.root.winfo_height() < 590:
+                self.root.geometry(f'{self.root.winfo_width()}x590')
+
+    def window_destroyed(self, event):
+        if event.widget is self.root:
+            self.window_closed.set()
+            for attribute in ('close_after', 'lifecycle_after', 'setup_after'):
+                scheduled = getattr(self, attribute)
+                if scheduled is not None:
+                    self.root.after_cancel(scheduled)
+                    setattr(self, attribute, None)
+
+    def post_to_window(self, callback):
+        if self.window_closed.is_set():
+            return False
+        try:
+            self.root.after(0, callback)
+            return True
+        except (RuntimeError, tk.TclError):
+            return False
+
+    def show_receipt(self):
+        messagebox.showinfo('Deployment receipt', self.deployment_receipt.get() or 'No receipt available.')
+
+    def dismiss_missing(self):
+        if self.busy or self.session_record or self.deploying:
+            self.status.set('Wait for the current RunPod operation to finish.')
+            return
+        record = self.selected_record()
+        if (not record or record.get('status') != Ownership.TERMINATION_FAILED
+                or record.get('id') or record.get('queue_id')):
+            self.status.set('Select a failed request with no confirmed RunPod ID.')
+            return
+        key = self.key.get().strip()
+        if not messagebox.askyesno(
+            'Dismiss missing request',
+            f'In the RunPod account for this API key, check that no pod or queued request is named {record["name"]}. '
+            'Have you verified that this request is missing?',
+        ):
+            return
+        if self.busy or self.session_record or self.key.get().strip() != key:
+            self.status.set('The RunPod session changed. Review the request and try again.')
+            return
+
+        def verify(client):
+            name = record['name']
+            pods, queued = client.list_pods(), client.list_queued()
+            if any(row.get('name') == name for row in (*pods, *queued)):
+                raise ValueError('RunPod still lists this request. Use End simulation to retry cleanup.')
+
+        def discard(_result):
+            records = self.state.read()
+            if record not in records:
+                self.status.set('The selected request changed. Review the pod list.')
+                return
+            from bootstrap import forget_bootstrap
+            try:
+                forget_bootstrap(record, self.state.path.parent)
+                records.remove(record)
+                self.state.write(records)
+            except (OSError, ValueError):
+                self.status.set('Could not dismiss the request. Check the lab state directory.')
+                return
+            self.refresh()
+            self.status.set('Missing request dismissed.')
+
+        self.background(verify, discard)
+
+    def key_edited(self, _event=None):
+        if self.busy or (self.session_record and self.saved_key):
+            return
+        if self.save_key() and self.key.get().strip() != self.catalog_key:
+            self.tier_changed()
+            if not self.key.get().strip():
+                self.status.set('Enter your RunPod API key to load available compute.')
 
     def startup_catalog(self):
+        if self.exit_after is not None:
+            return
         if self.busy:
             self.root.after(100, self.startup_catalog)
         elif self.key.get().strip():
             self.catalog()
 
     def save_key(self):
+        key = self.key.get().strip()
         try:
-            self.key_store.save(self.key.get().strip())
+            if key != self.saved_key:
+                self.key_store.save(key)
+                self.saved_key = key
             return True
         except (OSError, ValueError):
             self.status.set('Could not save the API key. Check ' + str(self.key_store.path))
             return False
 
     def clear_key(self):
-        if self.setting_up or self.busy or self.deploying:
-            self.status.set('Wait for setup or the current request before clearing the API key.')
+        if self.session_record or self.busy or self.deploying or any(
+                Ownership._has_termination_intent(record) for record in self.records):
+            self.status.set('Wait for the simulation and pending termination before clearing the API key.')
             return
         self.key.set('')
         if self.save_key():
+            self.tier_changed()
             self.status.set('Saved API key removed.')
 
     def copy_status(self, _event=None):
@@ -741,21 +1039,58 @@ class App:
             return True
         return False
 
-    def deadline_tick(self):
-        self.enforce_deadlines()
-        self.root.after(15000, self.deadline_tick)
+    def lifecycle_tick(self):
+        record = self.active_record()
+        if (self.exit_after is None and record and self.bridge and not self.closing_bridge
+                and not self.bridge_close_failed and not self.busy):
+            state, detail = self.bridge.status()
+            if state == 'active':
+                self.browser_attached = True
+            elif state == 'ended' or (state == 'failed' and self.browser_attached):
+                self.request_end(record, notice=detail if state == 'failed' else '')
+            elif state == 'failed':
+                self.setup_failed(detail or 'The browser session failed.')
+        if time.monotonic() >= self.next_provider_poll:
+            self.enforce_deadlines()
+        self.finish_session_end()
+        self.lifecycle_after = self.root.after(1000, self.lifecycle_tick)
 
     def enforce_deadlines(self):
         if self.busy or not self.key.get().strip():
             return
         now = time.time()
-        if not any(isinstance(r.get('deadline'), (int, float)) and r['deadline'] <= now
-                   for r in self.state.read()):
-            return
-        self.background(lambda c: Ownership(self.state, c).enforce_deadlines(),
-                        lambda result: self.status.set(
-                            f'Deadline check: {result[0]} requests sent. ' +
-                            ('; '.join(result[1]) if result[1] else 'Verify status in RunPod.')))
+        records = self.state.read()
+        due = any(Ownership.needs_poll(record, now) for record in records)
+        unresolved = any(
+            (not record.get('id')
+             and record.get('status') not in (Ownership.TERMINATED, Ownership.TERMINATION_FAILED))
+            or (record.get('id') and record.get('status') in (Ownership.NOT_VISIBLE, Ownership.TERMINATION_FAILED))
+            for record in records
+        )
+        self.next_provider_poll = time.monotonic() + (2 if due else 15)
+        if due or (unresolved and not self.setting_up):
+            self.poll_owned(reconcile=unresolved and not due)
+
+    def poll_owned(self, *, reconcile=False, after=None):
+        def work(client):
+            owner = Ownership(self.state, client)
+            if reconcile:
+                owner.reconcile()
+            return owner.enforce_deadlines()
+
+        def done(result):
+            self.refresh()
+            if result[1]:
+                self.status.set(result[1][0])
+            self.finish_session_end()
+            if after:
+                after()
+
+        def failed(_message):
+            if after:
+                after()
+
+        self.background(work, done, failed, show_progress=False)
 
     def refresh(self):
         selected = self.list.curselection()
@@ -767,14 +1102,20 @@ class App:
         for index, r in enumerate(self.records):
             deadline = r.get('deadline')
             when = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(deadline)) if isinstance(deadline, (int, float)) else 'not set'
-            self.list.insert('end', f"{r.get('name')} | {r.get('id') or 'ID unknown'} | {r.get('status')} | deadline {when}")
+            status = r.get('status', 'Unknown')
+            compute = r.get('compute_id') or r.get('name')
+            identity = r.get('id') or r.get('queue_id') or 'ID pending'
+            self.list.insert('end', f'{status}  |  {compute}  |  {identity}  |  deadline {when}')
             if name is not None and r.get('name') == name:
                 self.list.selection_set(index)
                 self.list.activate(index)
                 self.list.see(index)
         self.clear_stale_fingerprint()
+        key_in_use = self.session_record or any(
+            record.get('status') == Ownership.TERMINATING for record in self.records)
+        self.key_entry.state(['disabled' if key_in_use and self.key.get().strip() else '!disabled'])
 
-    def background(self, fn, done, failed=None):
+    def background(self, fn, done, failed=None, *, show_progress=True):
         if self.busy:
             return
         key = self.key.get().strip()
@@ -784,17 +1125,21 @@ class App:
         if not self.save_key():
             return
         self.busy = True
-        self.status.set('Contacting RunPod…')
+        if show_progress:
+            self.status.set('Contacting RunPod…')
         def work():
+            error = None
             try:
                 result = fn(RunPodClient(key))
-                self.root.after(0, lambda: finish(result, None))
             except Exception as exc:
                 # Avoid exception text that could include user-entered secrets.
-                message = str(exc).replace(key, '[redacted]')
-                self.root.after(0, lambda: finish(None, message))
+                result, error = None, str(exc).replace(key, '[redacted]')
+            self.post_to_window(lambda: finish(result, error))
         def finish(result, error):
+            if self.window_closed.is_set():
+                return
             self.busy = False
+            self.refresh()
             if error:
                 self.status.set(error)
                 if failed:
@@ -803,8 +1148,7 @@ class App:
                 done(result)
             if self.create_interrupted and not self.busy:
                 self.create_interrupted = False
-                self.status.set(self.status.get() + ' Pod creation was interrupted. Click Create again to review a fresh quote.')
-            self.refresh()
+                self.status.set(self.status.get() + ' Pod creation was interrupted. Click Start simulation again to review a fresh quote.')
         threading.Thread(target=work, daemon=True).start()
 
     def tier_changed(self, *_):
@@ -812,18 +1156,23 @@ class App:
         self.choices = []
         self.compute.set('')
         self.dropdown['values'] = []
-        self.status.set('Load the catalog for the selected cloud tier.')
+        if self.key.get().strip():
+            self.root.after_idle(self.startup_catalog)
 
     def selected_compute(self):
         selected = self.compute.get()
         return next((value for label, value in self.choices if label == selected), None)
 
     def catalog(self):
+        if self.exit_after is not None:
+            return
         cloud = self.cloud.get()
+        key = self.key.get().strip()
         def done(result):
-            if self.cloud.get() != cloud:
-                self.tier_changed()
+            if self.cloud.get() != cloud or self.key.get().strip() != key:
+                self.root.after_idle(self.startup_catalog)
                 return
+            self.catalog_key = key
             previous = self.selected_compute() or self.preferred_compute
             if previous:
                 self.preferred_compute = previous
@@ -843,10 +1192,12 @@ class App:
             elif previous and not label:
                 self.status.set('The selected option is no longer in the catalog. Choose a compute option.')
             else:
-                self.status.set('Catalog loaded. Stock and compute price are checked again before creation.')
+                self.status.set('Choose compute, then start the simulation.')
         self.background(lambda c: load_catalog(c, cloud), done)
 
-    def create(self, after_create=None):
+    def create(self, settings):
+        if self.exit_after is not None or self.window_closed.is_set():
+            return
         if self.setting_up or self.deploying:
             self.status.set('Wait for the current setup to finish.')
             return
@@ -864,12 +1215,15 @@ class App:
             self.status.set('Deadline must be 1–1440 minutes.')
             return
         key = self.key.get().strip()
+        close_generation = self.close_generation
         def settings_changed():
             return (self.selected_compute() != selected or self.key.get().strip() != key
                     or self.image.get().strip() != image or self.deadline_minutes.get() != deadline_text)
         def confirm(quote):
+            if self.close_generation != close_generation or self.window_closed.is_set():
+                return
             if settings_changed():
-                self.status.set('The pod settings changed. Review the selection and click Create again.')
+                self.status.set('The pod settings changed. Review the selection and start again.')
                 return
             prompt = (f'{quote} on {selected["cloud"].title()} Cloud\n'
                       'The hourly rate is the catalog compute list price. Storage may add to the charge.\n'
@@ -880,7 +1234,18 @@ class App:
             if selected['cloud'] == 'COMMUNITY':
                 prompt += ('\n\nThe worker needs direct SSH via a public IP. '
                            'The Community Cloud stock estimate does not verify public IP availability.')
-            if not messagebox.askyesno('Billable RunPod', prompt):
+            self.confirming_create = True
+            try:
+                approved = messagebox.askyesno('Billable RunPod', prompt)
+            except tk.TclError:
+                if self.window_closed.is_set():
+                    return
+                raise
+            finally:
+                self.confirming_create = False
+            if self.close_generation != close_generation or self.window_closed.is_set():
+                return
+            if not approved:
                 self.status.set('Pod creation cancelled.')
                 return
             # Tk services events while its modal confirmation is open. An
@@ -890,24 +1255,28 @@ class App:
                 self.status.set('Another provider operation is running. Pod creation was interrupted.')
                 return
             if settings_changed():
-                self.status.set('The pod settings changed. Review the selection and click Create again.')
+                self.status.set('The pod settings changed. Review the selection and start again.')
                 return
             deadline = time.time() + minutes * 60
-            def created(result):
-                self.refresh()
-                record = next((r for r in self.records if r.get('id') == result.get('id')
-                               and r.get('name') == result.get('name')), None)
-                if record and after_create:
-                    self.select_record(record)
-                    after_create(record)
-                else:
-                    self.status.set('Create submitted. Reconcile for status; charges may continue.')
-            self.background(lambda c: Ownership(self.state, c).create(selected, image, deadline), created)
-        self.background(lambda c: creation_quote(c, selected), confirm)
+            names = {record.get('name') for record in self.state.read()}
 
-    def reconcile(self):
-        self.background(lambda c: Ownership(self.state, c).reconcile(),
-                        lambda _: self.status.set('Ownership status refreshed; verify unresolved or queued pods in the RunPod console.'))
+            def created(_result):
+                record = next((r for r in self.records if r.get('name') not in names), None)
+                if record:
+                    self.select_record(record)
+                    if self.exit_after is not None:
+                        self.session_record = record
+                        self.request_end(record)
+                    else:
+                        self.prepare_worker(record, settings, new=True)
+
+            def failed(_message):
+                # A timed-out POST can leave a real resource under the saved intent.
+                # Recover only that intent, never send another create.
+                created(None)
+
+            self.background(lambda c: Ownership(self.state, c).create(selected, image, deadline), created, failed)
+        self.background(lambda c: creation_quote(c, selected), confirm)
 
     def select_record(self, record):
         self.refresh()
@@ -932,56 +1301,83 @@ class App:
             live_command(['ssh'], *audio)
         return profile, files, audio
 
+    def selected_record(self):
+        selected = self.list.curselection()
+        return self.records[selected[0]] if selected else None
+
+    def active_record(self):
+        if self.session_record:
+            name = self.session_record['name']
+            return next((record for record in self.records if record.get('name') == name), None)
+        return None
+
     def start_simulation(self):
-        if self.setting_up or self.busy or self.deploying or self.closing_bridge:
-            self.status.set('Wait for the current setup or provider request to finish.')
+        if self.exit_after is not None:
             return
         if self.bridge:
-            webbrowser.open(self.bridge.url)
+            self.status.set('Choose End simulation to retry closing the previous connection.' if self.bridge_close_failed
+                            else 'The simulation is already open in your browser.')
+            return
+        if self.session_record or self.busy or self.setting_up or self.deploying or self.closing_bridge:
+            self.status.set('Wait for the current setup or termination to finish.')
             return
         try:
             settings = self.session_settings()
         except (OSError, ValueError) as error:
             self.status.set(str(error))
             return
-        selected = self.list.curselection()
-        if selected:
-            record = dict(self.records[selected[0]])
-            if not record.get('id'):
-                self.status.set('Reconcile the selected pending request before starting its session.')
+        record = self.selected_record()
+        if record and record.get('status') not in (Ownership.TERMINATED, Ownership.NOT_VISIBLE):
+            if Ownership._has_termination_intent(record) or Ownership.needs_poll(record, time.time()):
+                self.status.set('This pod is ending. Select another pod or wait for termination.')
                 return
             self.prepare_worker(record, settings)
+        elif self.key.get().strip() != self.catalog_key:
+            self.catalog()
         else:
-            self.create(after_create=lambda record: self.prepare_worker(record, settings))
+            self.create(settings)
 
-    def prepare_worker(self, record, settings):
+    def prepare_worker(self, record, settings, *, new=False):
         deadline = record.get('deadline')
         if type(deadline) not in (int, float) or not math.isfinite(deadline) or deadline <= time.time():
-            self.status.set('The pod deadline is missing or expired. Review the owned pod before continuing.')
+            self.status.set('The selected pod deadline is missing or expired.')
+            self.enforce_deadlines()
             return
-        if not self.key.get().strip() or not self.save_key():
-            self.status.set('Enter an API key to continue setup.')
-            return
-        self.setting_up = True
         key = self.key.get().strip()
+        if not key or not self.save_key():
+            self.status.set('Enter a RunPod API key to start the simulation.')
+            return
+        self.session_record = record
+        self.session_is_new = new
+        self.setting_up = True
+        cancelled = self.setup_cancelled = threading.Event()
+        self.refresh()
         known_hosts = self.known_hosts.get()
         identity = self.identity.get().strip() or record.get('ssh_identity') or None
         ready_until = min(deadline, time.time() + 600)
         profile, files, audio = settings
-
-        def failed(message):
-            self.setting_up = False
-            self.status.set('Setup stopped. ' + message + ' The pod remains owned. Use Start simulation to retry or terminate it.')
+        name = record['name']
 
         def connect(client):
-            pod = owned_pod_details(client, record)
+            current = self.active_record()
+            if not current or current.get('status') in (Ownership.TERMINATED, Ownership.TERMINATING,
+                                                        Ownership.TERMINATION_FAILED):
+                return None
+            if not current.get('id'):
+                records = Ownership(self.state, client).reconcile()
+                current = next((item for item in records if item.get('name') == name), None)
+                if not current or not current.get('id'):
+                    return None
+            if record.get('id') and current['id'] != record['id']:
+                raise ValueError('The selected pod identity changed.')
+            pod = owned_pod_details(client, current)
             if pod.get('status') in ('ERROR', 'EXITED', 'TERMINATED', 'FAILED', 'STOPPED'):
                 raise ValueError('The selected pod is ' + pod['status'] + '.')
             if pod.get('status') != 'RUNNING' or not (pod.get('ssh') or {}).get('direct'):
                 return None
-            simulation_gpu(record, pod)
+            simulation_gpu(current, pod)
             try:
-                return owned_pod_connection(client, record, known_hosts, self.state.path.parent)
+                return current, *owned_pod_connection(client, current, known_hosts, self.state.path.parent)
             except ValueError as error:
                 if str(error).startswith(('Could not read a bounded SSH host key', 'Direct SSH is not ready')):
                     return None
@@ -989,183 +1385,248 @@ class App:
 
         def check_ready():
             self.setup_after = None
+            if cancelled.is_set():
+                return
             if self.key.get().strip() != key:
-                failed('The API key changed during setup.')
+                self.setup_failed('The API key changed during setup.')
                 return
             if time.time() >= ready_until:
-                failed('Timed out waiting for the pod and its authenticated SSH endpoint.')
+                self.setup_failed('Timed out waiting for the pod and its authenticated SSH endpoint.')
                 self.enforce_deadlines()
                 return
             if self.busy:
                 self.setup_after = self.root.after(250, check_ready)
                 return
-            self.background(connect, connected, failed)
+            self.background(connect, connected, self.setup_failed, show_progress=False)
 
         def connected(connection):
+            if cancelled.is_set():
+                return
             if connection is None:
-                self.status.set('Waiting for RunPod startup and SSH. The pod deadline remains active.')
+                self.status.set('Waiting for the RunPod instance to start.')
                 self.setup_after = self.root.after(2000, check_ready)
                 return
-            pod, pin = connection
+            current, pod, pin = connection
+            self.session_record = current
             self.deploying = True
-            self.status.set('Deploying the native worker. The pod deadline remains active.')
+            self.status.set('Preparing the simulation on RunPod…')
+
             def work():
+                bridge = None
+                receipt = ''
+                error = ''
                 try:
-                    receipt = deploy_selected(pod, record, pin, identity, key, profile=profile)
-                    error = None
+                    receipt = deploy_selected(pod, current, pin, identity, key, profile=profile)
+                    if not cancelled.is_set():
+                        command = ssh_command(pod, pin, identity, simulation_gpu(current, pod),
+                                              files is not None, live=profile == 'live')
+                        if profile == 'live':
+                            command = live_command(command, *audio)
+                        from browser_bridge import start
+                        remaining = deadline - time.time()
+                        if remaining <= 0:
+                            raise ValueError('The pod deadline expired during setup.')
+                        bridge = start(command, files=files, live=profile == 'live', managed=True,
+                                       ready_timeout=min(30, remaining))
                 except Exception as exc:
-                    receipt, error = '', str(exc).replace(key, '[redacted]')[:4096]
-                self.root.after(0, lambda: deployed(receipt, error, pod, pin))
+                    error = str(exc).replace(key, '[redacted]')[:1000]
+                posted = self.post_to_window(lambda: deployed(current, receipt, bridge, error))
+                if not posted and bridge is not None:
+                    try:
+                        bridge.close()
+                    except Exception:
+                        pass
+
             threading.Thread(target=work, daemon=True).start()
 
-        def deployed(receipt, error, pod, pin):
-            if self.busy:
-                self.root.after(100, lambda: deployed(receipt, error, pod, pin))
+        def deployed(current, receipt, bridge, error):
+            if self.busy and not cancelled.is_set():
+                self.root.after(100, lambda: deployed(current, receipt, bridge, error))
                 return
             self.deploying = False
-            if error:
-                failed(error)
+            self.bridge = bridge
+            self.browser_attached = False
+            if cancelled.is_set():
+                self.release_bridge()
+                self.finish_session_end()
                 return
-            if time.time() >= deadline:
-                failed('The pod deadline expired during deployment.')
-                self.enforce_deadlines()
+            if error:
+                self.setup_failed(error)
                 return
             try:
                 records = self.state.read()
-                current = next(r for r in records if r.get('id') == record.get('id') and r.get('name') == record.get('name'))
-                current.setdefault('deployments', {})[profile] = receipt
+                row = next(item for item in records if item.get('id') == current['id'] and item.get('name') == name)
+                if Ownership._has_termination_intent(row) or time.time() >= deadline:
+                    raise ValueError('The pod deadline expired during setup.')
+                row.setdefault('deployments', {})[profile] = receipt
+                row['status'] = 'Running'
                 self.state.write(records)
                 self.deployment_receipt.set(receipt)
-                command = ssh_command(pod, pin, identity, simulation_gpu(record, pod), files is not None, live=profile == 'live')
-                if profile == 'live':
-                    command = live_command(command, *audio)
-                from browser_bridge import start
-                self.bridge = start(command, files=files, live=True) if profile == 'live' else start(command, files=files) if files else start(command)
-                webbrowser.open(self.bridge.url)
+                if not webbrowser.open(bridge.url):
+                    raise ValueError('Could not open the simulation in your browser.')
                 self.setting_up = False
-                self.status.set('Simulation opened.' if profile == 'simulation' else 'Experimental Live/Duplex session opened.')
+                self.status.set('Simulation opened. Closing the browser ends its pod.' if profile == 'simulation'
+                                else 'Experimental Live/Duplex opened. Closing the browser ends its pod.')
+                self.refresh()
             except Exception as exc:
-                failed(str(exc).replace(key, '[redacted]')[:4096])
+                self.setup_failed(str(exc).replace(key, '[redacted]')[:1000])
 
+        self.status.set('Waiting for the RunPod instance to start.')
         check_ready()
 
-    def close(self):
-        if self.busy or self.deploying or self.enumerating or self.closing_bridge or self.setting_up:
-            self.status.set('Wait for the current provider request or bounded deployment to finish before closing.')
-            return
-        if not self.save_key():
-            return
-        if self.bridge:
-            self.bridge.close()
-        self.root.destroy()
+    def cancel_setup(self):
+        self.setting_up = False
+        if self.setup_cancelled:
+            self.setup_cancelled.set()
+        if self.setup_after:
+            self.root.after_cancel(self.setup_after)
+            self.setup_after = None
 
-    def close_bridge(self):
-        """Release the local bridge without affecting pod ownership or billing."""
-        if self.busy:
-            self.status.set('Wait for the current provider request before closing the worker session.')
+    def setup_failed(self, message):
+        self.cancel_setup()
+        self.release_bridge()
+        if self.exit_after is not None:
             return
-        if self.closing_bridge:
-            self.status.set('The worker session is already closing.')
-            return
+        record = self.active_record()
+        if record and self.session_is_new:
+            self.request_end(record, notice=f'Setup stopped. {message}')
+        else:
+            self.session_record = None
+            self.status.set(f'Setup stopped. {message} Start again to retry the selected pod or end it.')
+            self.refresh()
+
+    def release_bridge(self):
         bridge = self.bridge
-        if bridge is None:
-            self.status.set('No worker session is open. Pod resources were not changed.')
+        if bridge is None or self.closing_bridge:
             return
         self.closing_bridge = True
-        self.status.set('Closing the worker session. The pod may continue to incur charges.')
+        self.bridge_close_failed = False
+
         def work():
-            try:
-                bridge.close()
-                error = False
-            except Exception:
-                error = True
-            self.root.after(0, lambda: finish(error))
-        def finish(error):
+            for attempt in range(2):
+                try:
+                    bridge.close()
+                    self.post_to_window(lambda: finished(False))
+                    return
+                except Exception:
+                    if attempt == 0:
+                        time.sleep(0.25)
+            self.post_to_window(lambda: finished(True))
+
+        def finished(failed):
             self.closing_bridge = False
-            if error:
-                self.status.set('Could not close the worker session. Retry or inspect the connection; pod charges may continue.')
-            else:
-                if self.bridge is bridge:
-                    self.bridge = None
-                self.status.set('Worker session closed. The pod remains active; terminate it when finished.')
+            self.bridge_close_failed = failed
+            if not failed:
+                self.bridge = None
+            self.finish_session_end()
+            if failed:
+                self.status.set(self.status.get() + ' Choose End simulation to retry closing the local connection.')
+
         threading.Thread(target=work, daemon=True).start()
 
-    def forget(self):
-        if self.busy or getattr(self, 'setting_up', False) or getattr(self, 'deploying', False):
-            self.status.set('Wait for the current provider request to finish before removing a record.')
-            return
-        idx = self.list.curselection()
-        if not idx:
-            self.status.set('Select an owned record first.')
-            return
-        record = self.records[idx[0]]
-        if not messagebox.askyesno('Forget ownership record', 'Have you verified in RunPod that this pod is terminated and no queued request remains? Forgetting a live resource can leave charges running.'):
-            return
-        # Modal dialogs run Tk's event loop; a deadline request may have begun.
+    def end_simulation(self):
         if self.busy:
-            self.status.set('Wait for the current provider request to finish before removing a record.')
+            self.status.set('Wait for the current RunPod request to finish.')
             return
-        records = self.state.read()
-        if record not in records:
-            self.refresh()
-            self.status.set('The selected record changed. Review it again before removal.')
+        active = self.active_record()
+        record = active or self.selected_record()
+        if not record or record.get('status') == Ownership.TERMINATED:
+            if self.bridge_close_failed:
+                self.release_bridge()
+                return
+            self.status.set('Select a pod to end its simulation.')
             return
-        records.remove(record)
-        pod_id = record.get('id')
-        try:
-            if pod_id and not any(r.get('id') == pod_id for r in records):
-                from host_identity import forget_host_key
-                forget_host_key(pod_id, self.state.path.parent)
-            from bootstrap import forget_bootstrap
-            forget_bootstrap(record, self.state.path.parent)
-            self.state.write(records)
-        except (OSError, ValueError):
-            self.status.set('Could not finish removing the local record and its SSH pin. Check the lab state directory.')
+        if not active and not messagebox.askyesno('End simulation', 'Terminate the selected pod and discard its storage?'):
             return
-        self.refresh()
-        self.status.set('Local record removed. Provider resources were not changed.')
+        self.request_end(record)
 
-    def deploy_worker(self):
-        if getattr(self, 'setting_up', False):
-            self.status.set('Automatic setup is already in progress.')
+    def request_end(self, record, *, notice=''):
+        if self.busy:
             return
-        if self.clear_stale_fingerprint():
+        if not self.key.get().strip() or not self.save_key():
+            self.status.set('Enter a RunPod API key to terminate the selected pod.')
             return
-        idx = self.list.curselection()
-        if not idx or not self.records[idx[0]].get('id'):
-            self.status.set('Select an owned pod with a known ID.')
+        try:
+            marked = Ownership(self.state, None).request_termination(record)
+        except (OSError, ValueError) as error:
+            self.status.set(str(error))
             return
-        if self.deploying:
-            self.status.set('A deployment is already in progress.')
+        self.cancel_setup()
+        self.session_record = marked
+        self.end_notice = notice
+        self.release_bridge()
+        self.status.set(' '.join(filter(None, (notice, 'Terminating the pod…'))))
+        self.refresh()
+        self.enforce_deadlines()
+
+    def finish_session_end(self):
+        record = self.active_record()
+        status = record.get('status') if record else None
+        settled = (Ownership.TERMINATED, Ownership.NOT_VISIBLE, Ownership.TERMINATION_FAILED)
+        if status == Ownership.TERMINATING or status in settled:
+            self.cancel_setup()
+            if not self.bridge_close_failed:
+                self.release_bridge()
+        if status in settled:
+            if self.closing_bridge or self.deploying or self.busy:
+                return
+            if self.exit_after is None:
+                self.session_record = None
+                self.refresh()
+            if status == Ownership.TERMINATION_FAILED:
+                error = record.get('termination_error', '')
+                self.status.set(f'Termination failed. {error} Select the pod and choose End simulation to retry.')
+            elif status == Ownership.NOT_VISIBLE:
+                self.status.set('The pod is no longer visible to this RunPod API key.')
+            else:
+                self.status.set(' '.join(filter(None, (getattr(self, 'end_notice', ''), 'Pod terminated.'))))
+
+    def close(self):
+        if self.exit_after is not None or self.window_closed.is_set():
             return
-        record = dict(self.records[idx[0]])
-        if not isinstance(record.get('deadline'), (int, float)) or record['deadline'] <= time.time():
-            self.status.set('Pod deadline is missing or expired; deployment is unavailable.')
+        self.close_generation += 1
+        self.exit_after = time.monotonic() + self._CLOSE_GRACE
+        self.close_attempted.clear()
+        self.cancel_setup()
+        if self.bridge:
+            self.release_bridge()
+        self.status.set('Closing RunPod Lab…')
+        self.next_provider_poll = 0
+        self.check_close()
+
+    def check_close(self):
+        self.close_after = None
+        record = self.active_record()
+        if not record or record.get('status') in (Ownership.TERMINATED, Ownership.NOT_VISIBLE):
+            record = next((item for item in self.records if item.get('status') == Ownership.TERMINATING), None)
+        if record:
+            self.session_record = record
+            status = record.get('status')
+            if status == Ownership.TERMINATING:
+                if time.monotonic() >= self.next_provider_poll:
+                    self.enforce_deadlines()
+            elif status != Ownership.TERMINATION_FAILED and not self.busy and record['name'] not in self.close_attempted:
+                self.close_attempted.add(record['name'])
+                self.request_end(record)
+        elif not (self.bridge or self.busy or self.deploying or self.enumerating or self.confirming_create):
+            if self.save_key():
+                self.root.destroy()
+                return
+
+        if time.monotonic() < self.exit_after:
+            self.close_after = self.root.after(100, self.check_close)
             return
-        known_hosts = self.known_hosts.get()
-        identity = self.identity.get().strip() or record.get('ssh_identity') or None
-        profile = self.profile.get()
-        secret = self.key.get().strip()
-        def launch(connection):
-            pod, verified_hosts = connection
-            self.deploying = True
-            self.status.set('Deploying and building the native worker; the deadline remains active. Pod charges continue.')
-            def work():
-                try:
-                    receipt = deploy_selected(pod, record, verified_hosts, identity, secret, profile=profile)
-                    result = 'Worker build finished. Open the selected worker to start a session. Pod charges continue.'
-                except Exception as exc:
-                    receipt = ''
-                    message = str(exc).replace(secret, '[redacted]') if secret else str(exc)
-                    message = ''.join(ch if ch in '\n\t' or 32 <= ord(ch) < 127 else '?' for ch in message[:4096])
-                    result = 'Deployment failed or was interrupted: ' + message + '. Pod charges may continue; inspect before retrying.'
-                self.root.after(0, lambda: finish(result, receipt))
-            def finish(result, receipt):
-                self.deploying = False
-                self.deployment_receipt.set(receipt)
-                self.status.set(result)
-            threading.Thread(target=work, daemon=True).start()
-        self.background(lambda c: owned_pod_connection(c, record, known_hosts, self.state.path.parent), launch)
+        if messagebox.askyesno(
+            'Close RunPod Lab?',
+            'A RunPod or local operation is still unresolved. Close the lab anyway? '
+            'Saved pod records will be checked again when you reopen the lab. '
+            'Check RunPod for any pod that may still be running.',
+            default=messagebox.NO, parent=self.root,
+        ):
+            self.root.destroy()
+            return
+        self.exit_after = None
+        self.finish_session_end()
 
     def audio_settings(self):
         window = tk.Toplevel(self.root)
@@ -1188,7 +1649,7 @@ class App:
                     error = None
                 except Exception as exc:
                     found, error = None, str(exc)
-                self.root.after(0, lambda: finish(found, error))
+                self.post_to_window(lambda: finish(found, error))
             def finish(found, error):
                 self.enumerating = False
                 if error:
@@ -1211,64 +1672,6 @@ class App:
         ttk.Label(window, text='Limits must cover the full episode, quiet slots and filter tails. Exhaustion fails capture. Native admission checks local headroom. Browser receipts describe audio allocations, not the whole process. Clock bounds must be independently established.', wraplength=650).grid(row=end, column=0, columnspan=3, sticky='w')
         ttk.Button(window, text='Close', command=window.destroy).grid(row=end+1, column=1, sticky='e')
 
-    def open_simulation(self):
-        if getattr(self, 'setting_up', False):
-            self.status.set('Automatic setup will open the session when the worker is ready.')
-            return
-        if self.clear_stale_fingerprint():
-            return
-        if self.closing_bridge:
-            self.status.set('Wait for the worker session to finish closing.')
-            return
-        idx = self.list.curselection()
-        if not idx or not self.records[idx[0]].get('id'):
-            self.status.set('Select an owned pod with a known ID.')
-            return
-        if self.bridge:
-            self.status.set('A worker session is already open; use Close worker session before opening another.')
-            return
-        record = dict(self.records[idx[0]])
-        known_hosts, identity, files = self.known_hosts.get(), self.identity.get().strip() or record.get('ssh_identity'), self.files.get()
-        profile = self.profile.get()
-        settings = (self.audio_binary.get(), self.devices.get(self.audio_device.get(), self.audio_device.get()), self.capture_bytes.get(), self.playback_bytes.get(), self.capture_frames.get(), self.playback_prebuffer.get(), self.local_utc_uncertainty.get(), self.max_clock_offset.get(), self.remote_clock_drift_ppm.get())
-        def done(connection):
-            pod, verified_hosts = connection
-            try:
-                root = file_root(files)
-                live = profile == 'live'
-                command = ssh_command(pod, verified_hosts, identity, simulation_gpu(record, pod), root is not None, live=live)
-                if live:
-                    command = live_command(command, *settings)
-                from browser_bridge import start
-                self.bridge = start(command, files=root, live=True) if live else start(command, files=root) if root else start(command)
-                webbrowser.open(self.bridge.url)
-                self.status.set('Experimental Live/Duplex session opened. Remote physical audio remains unqualified.' if live else 'Simulation bridge opened.')
-            except Exception as exc:
-                self.status.set(str(exc))
-        self.background(lambda c: owned_pod_connection(c, record, known_hosts, self.state.path.parent), done)
-
-    def details(self):
-        idx = self.list.curselection()
-        if not idx or not self.records[idx[0]].get('id'):
-            self.status.set('Select an owned pod with a known ID.')
-            return
-        record = dict(self.records[idx[0]])
-        def show(pod):
-            # Show provider fields as text; never execute a returned command.
-            fields = ('id', 'name', 'status', 'cloud', 'image', 'gpu', 'cpu', 'cost', 'ssh', 'ports', 'createdAt')
-            messagebox.showinfo('RunPod details', json.dumps({key: pod[key] for key in fields if key in pod}, indent=2))
-            self.status.set('Pod details loaded.')
-        self.background(lambda c: owned_pod_details(c, record), show)
-
-    def terminate(self):
-        idx = self.list.curselection()
-        if not idx:
-            self.status.set('Select an owned pod first.')
-            return
-        record = self.records[idx[0]]
-        if messagebox.askyesno('Terminate pod', f"Permanently terminate {record.get('name')}? Pod storage may be lost."):
-            self.background(lambda c: Ownership(self.state, c).delete(record),
-                            lambda _: self.status.set('Termination requested; verify the result in RunPod.'))
 
 
 def main():

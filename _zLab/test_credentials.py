@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from credentials import ApiKeyStore, MAX_KEY_BYTES
+from credentials import ApiKeyStore, MAX_KEY_BYTES, RepositoryApiKeyStore
 
 
 class ApiKeyStoreTests(unittest.TestCase):
@@ -86,6 +86,69 @@ class ApiKeyStoreTests(unittest.TestCase):
                 self.store.load()
         self.store.path.write_bytes(b'manually-edited-token\r\n')
         self.assertEqual(self.store.load(), 'manually-edited-token')
+
+
+class RepositoryApiKeyStoreTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        self.legacy = ApiKeyStore(root / 'state')
+        repository_directory = root / '_zLab'
+        repository_directory.mkdir()
+        repository_directory.chmod(0o775)
+        self.store = RepositoryApiKeyStore(self.legacy.path.parent,
+                                           repository_directory=repository_directory)
+
+    def test_migrate_to_gitignored_file_in_group_writable_checkout(self):
+        self.legacy.save('existing-token')
+        self.assertEqual(self.store.load(), 'existing-token')
+        self.assertEqual(self.store.path.name, 'runpod-api-key')
+        self.assertEqual(self.store.path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.store.path.parent.stat().st_mode & 0o777, 0o775)
+        self.assertFalse(self.legacy.path.exists())
+        self.assertEqual(self.store.load(), 'existing-token')
+        self.assertEqual(list(self.store.path.parent.iterdir()), [self.store.path])
+
+    def test_repository_value_wins_and_explicit_clear_cannot_restore_old_key(self):
+        self.legacy.save('old-token')
+        self.store.save('repository-token')
+        self.assertEqual(self.store.load(), 'repository-token')
+        self.assertEqual(self.legacy.load(), 'old-token')
+        self.store.clear()
+        self.assertFalse(self.store.path.exists())
+        self.assertFalse(self.legacy.path.exists())
+        self.assertEqual(self.store.load(), '')
+
+    def test_migration_write_failure_keeps_legacy_value(self):
+        self.legacy.save('old-token')
+        with patch('credentials.os.link', side_effect=OSError('injected write failure')):
+            with self.assertRaises(OSError):
+                self.store.load()
+        self.assertEqual(list(self.store.path.parent.iterdir()), [])
+        self.assertEqual(self.legacy.load(), 'old-token')
+        self.assertEqual(self.store.load(), 'old-token')
+
+    def test_migration_does_not_replace_key_created_concurrently(self):
+        self.legacy.save('old-token')
+        original_link = os.link
+
+        def competing_write(*args, **kwargs):
+            self.store.save('new-token')
+            return original_link(*args, **kwargs)
+
+        with patch('credentials.os.link', side_effect=competing_write):
+            self.assertEqual(self.store.load(), 'new-token')
+        self.assertEqual(self.legacy.load(), 'old-token')
+
+    def test_world_writable_repository_rejected(self):
+        self.legacy.save('old-token')
+        self.store.path.parent.chmod(0o777)
+        for operation in (self.store.load, lambda: self.store.save('replacement-token')):
+            with self.assertRaises(ValueError):
+                operation()
+        self.assertEqual(self.legacy.load(), 'old-token')
+        self.assertFalse(self.store.path.exists())
 
 
 if __name__ == '__main__':
