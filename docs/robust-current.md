@@ -624,6 +624,16 @@ Added Symbols and Interleave select native lanes and spreading. Invalid audio
 bandwidth or fixed Helper placement fails configuration explicitly. None/Off
 channel choices preserve an explicit unperturbed baseline.
 
+Carrier recommendations and the Link planner use the native three-carrier
+DATA width, including the RRC rolloff and the minimum public tile's certified
+gate allowance. The receiver and Helper placement use the same calculation
+for the selected transmission waveform. The planner also shows the DATA
+edges with the configured oscillator and channel allowances. A recommended
+audio carrier needs a lower edge of at least 375 Hz, or 1400 Hz with Helper.
+The half-rate preset is exempt from that recommendation floor and still has
+to fit the physical DATA and Helper bands. Preset values are baseband
+frequencies displayed as absolute Carrier after adding Shift.
+
 Target SNR is one shared C/N0 value, default 32 dB-Hz. It drives provisional
 native duration planning and, with the declared input-noise density, the live
 receiver's reference DATA amplitude. The simulated link's actual
@@ -661,10 +671,17 @@ whole-message endpoint authentication. See [protocol](protocol.md).
 
 Waveform, waterfall, receiver I/Q and pattern evidence/steps consume bounded
 session diagnostics. Receive evidence comes from actual received observations
-and complete native score records. Selected simulation parameters are not
-receiver estimates. Audio routing, duplex mode, TX volume and exclusive mode
-use the existing native audio interface; physical device behavior requires its
-own qualification.
+and complete native score records. Finite Robust simulations generate, pass and
+score the full native stream without a wall-clock sample delay. The presentation
+retains three seconds of actual channel I/Q from the first DATA pattern, or
+from the first Helper onset on a Helper-only transmission, plus one FFT window
+of lookahead. After the receiver drains all available physical windows, the
+app replays this excerpt at its normal sample cadence and retains the plots.
+It computes the display projection and FFT during replay. Stopping that replay
+preserves any already completed reception. Live audio and the open-ended noise
+display keep their real-time cadence. Audio routing, duplex mode, TX volume and
+exclusive mode use the existing native audio interface; physical device behavior
+requires its own qualification.
 
 ## Historical evidence and reference lifecycle
 

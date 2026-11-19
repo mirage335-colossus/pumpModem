@@ -40,12 +40,12 @@ public:
         };
         const auto update = controller.plot_update();
         const auto& snapshot = controller.snapshot();
-        const auto leaving_replay=replaying_ && !snapshot.simulation_replay;
+        const bool clear=update.clear_waterfall || (snapshot.simulation_replay && !replaying_);
         replaying_ = snapshot.simulation_replay;
         simulation_=snapshot.simulation;environment_monitor_=snapshot.environment_monitor;
-        if (update.clear_waterfall) {history_.clear();spectrum_revision_.reset();}
-        const bool append=update.append_waterfall && (leaving_replay || snapshot.simulation_replay || !snapshot.spectrum_revision ||
-            !spectrum_revision_ || *spectrum_revision_!=snapshot.spectrum_revision);
+        if (clear) {history_.clear();spectrum_revision_.reset();}
+        const bool append=update.append_waterfall && snapshot.spectrum_revision &&
+            spectrum_revision_!=snapshot.spectrum_revision;
         if (append) history_.push(snapshot.spectrum_db, snapshot.spectrum_bin_hz,
             snapshot.simulation_spectrum_gain_db,snapshot.spectrum_complex,
             snapshot.spectrum_start_sample,snapshot.spectrum_sample_count,
@@ -80,15 +80,15 @@ public:
             put(ui::Bitmap::pattern_scores,frame);put(ui::Bitmap::pattern_evidence,frame);
         }
         const auto band=controller.spectrum_search_band();
-        if (update.clear_waterfall || append) {
+        if (clear || append) {
             frozen_history_=std::make_shared<const plots::SpectrumHistory>(history_);
             put(ui::Bitmap::waterfall,plots::PlotSnapshot::waterfall_shared(frozen_history_));
         }
-        if(update.clear_waterfall || append || band!=searched_band_ || !frames_.contains(ui::Bitmap::waterfall_detail))
+        if(clear || append || band!=searched_band_ || !frames_.contains(ui::Bitmap::waterfall_detail))
             put(ui::Bitmap::waterfall_detail,plots::PlotSnapshot::waterfall_detail(frozen_history_,band));
         searched_band_=band;
         const auto helper_band=controller.spectrum_helper_band();
-        if((helper_band || helper_band_) && (update.clear_waterfall || append || helper_band!=helper_band_ || !frames_.contains(ui::Bitmap::waterfall_helper_detail)))
+        if((helper_band || helper_band_) && (clear || append || helper_band!=helper_band_ || !frames_.contains(ui::Bitmap::waterfall_helper_detail)))
             put(ui::Bitmap::waterfall_helper_detail,helper_band?
                 plots::PlotSnapshot::waterfall_detail(frozen_history_,helper_band,"Helper Carrier"):
                 plots::PlotSnapshot{});

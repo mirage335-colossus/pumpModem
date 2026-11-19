@@ -367,6 +367,47 @@ The final standalone suite passed 177 tests, including 29 isolated Tk
 cases. The named native GUI suite passed 32 tests. The focused native GUI
 policy, worker and renderer tests and shared preview-client checks passed.
 
+### Computed Robust carriers and simulation replay — 19 November 2026
+
+The previous browser worker produced 62 updated Spectrum bitmaps with valid
+frequency coordinates and completely black pixels for the short simulation.
+Absolute simulated link attenuation had been applied against a fixed
+display reference. The revised plot references the modeled mean Hann-bin
+noise and retains the activity frames after replay.
+
+Carrier recommendations use the native occupied and gated DATA band, the
+declared oscillator and channel allowances, and the Helper placement guard.
+The worker fixture covers the half-rate preset at 1 Hz, a custom carrier
+translated by Shift, Doppler and spreading exclusions, effective Helper
+power and a 5 Hz upward rounding case. The Link Planner uses the same
+band for its display. The native profile still validates the prepared
+waveform's actual band before processing.
+
+Finite replay records a bounded sample slice alongside full receiver
+processing. The slice uses actual post-channel samples and begins at the
+first DATA activity, or the first Helper activity for Helper-only sends.
+The receiver processes the entire input and both quiet slots before
+the three-second display replay. Replay cancellation leaves a completed
+reception available.
+
+Local Firefox used the real lab bridge and CPU worker. It displayed the
+1 Hz presets, preserved a custom 1840 Hz baseband carrier across a 100 kHz
+Shift and back, and decoded the test message `e`. The retained default
+waterfall showed 12,943 lit pixels out of 18,260. A controlled stronger
+link took 3.02 seconds in replay and had a palette peak of 208 in the
+occupied band versus 135 off-band. Both browser runs had no script errors.
+The separate lab-relay fixture also checked three DATA decisions, two
+scored quiet slots, the decoded message and retained waterfall contrast.
+
+The final native groups passed 44 Robust tests and 32 desktop GUI tests.
+The standalone suite passed 177 tests with its isolated X11 and native
+simulation cases enabled. All 12 web checks outside the separate Fast
+audio timing case passed. The Fast browser-audio check initially observed
+a 48 kHz capture overrun and a playback underrun in separate runs. When run
+by itself it passed both 48 and 44.1 kHz in 224.01 seconds. The final
+carrier grid adjustment was rebuilt and verified in the inherited-pipe
+web worker and native GUI policy tests.
+
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 
 The [HF operating results](indexes/robust.md#low-power-hf-alarm-results)

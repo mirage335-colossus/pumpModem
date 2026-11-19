@@ -496,9 +496,8 @@ std::string PlotSnapshot::caption(unsigned width) const {
             if (width >= 320) out << " / " << data.points.size() << (data.symbols ? " symbols" : " input points");
         } else if constexpr (std::is_same_v<Type, Waterfall>) {
             out << "0.." << data.history->max_hz() << " Hz / ";
-            if (data.history->simulation_reference()) out << std::fixed << std::setprecision(1);
             out << data.history->lower_db() << ".." << data.history->upper_db()
-                << (data.history->simulation_reference() ? " dB sim. ref." : " dBFS peak");
+                << (data.history->simulation_reference() ? " dB relative to modeled noise" : " dBFS peak");
         } else if constexpr (std::is_same_v<Type, SpectrumDetail>) {
             const auto [low,high]=detail_band(data);
             const auto count=data.history->detail_rows().empty()?0:data.history->detail_rows().back().db.size();
@@ -510,7 +509,7 @@ std::string PlotSnapshot::caption(unsigned width) const {
                 << (context?" + surrounding spectrum; ":"; ");
             out << low << ".." << high << " Hz shown / retained " << spacing << " Hz/bin; ";
             out << data.history->lower_db() << ".." << data.history->upper_db()
-                << (data.history->simulation_reference()?" dB sim. ref.\n":" dBFS peak\n");
+                << (data.history->simulation_reference()?" dB relative to modeled noise\n":" dBFS peak\n");
             out << (width<64?"left amplitude, right phase":"paired columns: amplitude left, phase right");
             out << "; wrapped phase -180..180 deg relative to bin rotation; phase brightness follows amplitude; black=unavailable/below display floor, noise phase arbitrary";
             if(!data.band)out << "; search band unavailable: full capture";

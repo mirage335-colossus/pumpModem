@@ -350,6 +350,17 @@ void waterfall_resize() {
     check(std::all_of(empty.pixels().begin(), empty.pixels().end(), [](auto value) { return value == 0; }),
           "empty enlarged waterfall must remain blank");
 }
+void simulated_waterfall_reference() {
+    plots::SpectrumHistory history;
+    history.push(std::array{-125.,-105.,-150.,-125.},10,125.);
+    const auto source=PlotSnapshot::waterfall(history);
+    const auto image=render(source,full_bitmap_request(4,2));
+    check(red(image,0,0)==0 && red(image,0,1)==38 && red(image,1,1)==165 &&
+          red(image,2,1)==0 && red(image,3,1)==38,
+          "Simulated waterfall failed to show dim noise and a brighter signal in a fixed 40 dB range");
+    check(source.caption().find("dB relative to modeled noise")!=std::string::npos,
+          "Simulated waterfall scale mislabeled its power reference");
+}
 void detailed_waterfall_phase() {
     constexpr std::size_t count=plots::SpectrumHistory::native_bins,k=777;
     constexpr std::uint64_t start=(std::uint64_t{1}<<60)+13,delta=137;
@@ -522,10 +533,10 @@ void qr_rendering() {
 int main(int argc,char** argv) {
     try {
         if(argc==2&&std::string_view(argv[1])=="--waterfall-only") {
-            waterfall_resize();detailed_waterfall_phase();
+            waterfall_resize();simulated_waterfall_reference();detailed_waterfall_phase();
             std::cout<<"Focused waterfall display contracts passed\n";return 0;
         }
-        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); environmental_oscilloscope(); pattern_evidence(); waterfall_resize(); detailed_waterfall_phase(); fitted_history(); qr_rendering();
+        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); environmental_oscilloscope(); pattern_evidence(); waterfall_resize(); simulated_waterfall_reference(); detailed_waterfall_phase(); fitted_history(); qr_rendering();
         std::cout << "GUI bitmap contract and shared producer tests passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

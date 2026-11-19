@@ -33,6 +33,8 @@ using Clock = std::chrono::steady_clock;
 using KeyTag = std::array<std::uint8_t, 32>;
 
 constexpr std::size_t audio_chunk = 4096, plot_size = 1024, history_size = 32;
+constexpr auto simulation_replay_duration = std::chrono::seconds(3);
+constexpr auto simulation_replay_period = std::chrono::milliseconds(50);
 // Binding can briefly hold two interval readers. Playback's native provider
 // allowance covers its converter, PCM blocks, and the dated PipeWire ring.
 constexpr std::size_t lazy_bit_workspace = 64 * 1024U;
@@ -170,6 +172,28 @@ struct PlotFrame {
     std::uint32_t rate = 0;
 };
 
+PlotFrame plot_frame(std::uint64_t first, std::uint32_t rate, std::vector<float> waveform,
+                     std::span<const Complex> iq, const modem::detail::search_fft::DoublePlan& fft) {
+    PlotFrame result;
+    result.rate = rate;
+    result.first = first;
+    result.waveform = std::move(waveform);
+    std::array<Complex, plot_size> bins{};
+    for (std::size_t i = 0; i < plot_size; ++i)
+        bins[i] = result.waveform[i] * (.5 - .5 * std::cos(2 * std::numbers::pi * static_cast<double>(i) / plot_size));
+    modem::detail::search_fft::fft(bins, false, fft);
+    for (const auto value : std::span(bins).first(plot_size / 2 + 1)) {
+        const auto normalized = value * (2. / plot_size);
+        result.spectrum.emplace_back(normalized);
+        result.db.push_back(10 * std::log10(std::max(1e-24, std::norm(normalized))));
+    }
+    const auto take = std::min<std::size_t>(512, iq.size());
+    result.iq.reserve(take);
+    for (std::size_t i = 0; i < take; ++i)
+        result.iq.push_back(iq[i * iq.size() / take]);
+    return result;
+}
+
 class PlotMeter {
 public:
     explicit PlotMeter(std::uint32_t rate) : rate_(rate), fft_(plot_size) {}
@@ -184,28 +208,11 @@ public:
         const auto now = Clock::now();
         if (fill_ < plot_size || now < next_) return {};
         next_ = now + std::chrono::milliseconds(45);
-        PlotFrame result;
-        result.rate = rate_;
         const auto end = first + pcm.size();
-        result.first = end >= plot_size ? end - plot_size : 0;
-        result.waveform.reserve(plot_size);
-        std::array<Complex, plot_size> bins{};
-        for (std::size_t i = 0; i < plot_size; ++i) {
-            const auto sample = pcm_[(at_ + i) % plot_size];
-            result.waveform.push_back(sample);
-            bins[i] = sample * (.5 - .5 * std::cos(2 * std::numbers::pi * static_cast<double>(i) / plot_size));
-        }
-        modem::detail::search_fft::fft(bins, false, fft_);
-        for (const auto value : std::span(bins).first(plot_size / 2 + 1)) {
-            const auto normalized = value * (2. / plot_size);
-            result.spectrum.emplace_back(normalized);
-            result.db.push_back(10 * std::log10(std::max(1e-24, std::norm(normalized))));
-        }
-        const auto take = std::min<std::size_t>(512, iq.size());
-        result.iq.reserve(take);
-        for (std::size_t i = 0; i < take; ++i)
-            result.iq.push_back(iq[i * iq.size() / take]);
-        return result;
+        std::vector<float> waveform(plot_size);
+        for (std::size_t i = 0; i < plot_size; ++i)
+            waveform[i] = pcm_[(at_ + i) % plot_size];
+        return plot_frame(end >= plot_size ? end - plot_size : 0, rate_, std::move(waveform), iq, fft_);
     }
 private:
     std::uint32_t rate_;
@@ -213,6 +220,45 @@ private:
     std::array<float, plot_size> pcm_{};
     std::size_t at_ = 0, fill_ = 0;
     Clock::time_point next_{};
+};
+
+struct SimulationReplay {
+    SimulationReplay(const triad::SimulationConfig& effects, std::uint32_t rate,
+                     std::uint64_t source_sample, std::uint64_t input_total)
+        : source_first(source_sample) {
+        const auto tx_scale = 1 + effects.tx.audio_ppm * 1e-6;
+        const auto rx_scale = 1 + effects.rx.audio_ppm * 1e-6;
+        source_per_input_sample = tx_scale / rx_scale;
+        // Invert the simulated direct-path sample coordinate for presentation
+        // only. No receiver acquisition or decision uses the known arrival.
+        const auto lead = static_cast<long double>(effects.capture_lead_seconds) + effects.timing_offset_seconds;
+        const auto received = std::ceil((source_sample / static_cast<long double>(tx_scale) +
+            lead * rate) * rx_scale);
+        first = static_cast<std::uint64_t>(std::clamp(received, 0.L, static_cast<long double>(input_total)));
+        // The one FFT window of lookahead keeps the last replay frame usable.
+        limit = static_cast<std::size_t>(std::min<std::uint64_t>(input_total - first,
+            static_cast<std::uint64_t>(simulation_replay_duration.count()) * rate + plot_size - 1));
+    }
+
+    std::size_t working_bytes() const { return limit * sizeof(Complex); }
+    void allocate() { input = std::make_unique_for_overwrite<Complex[]>(limit); }
+    std::span<const Complex> samples() const { return {input.get(), filled}; }
+
+    void record(std::uint64_t begin, std::span<const Complex> observed) {
+        const auto next = first + filled;
+        if (filled == limit || next < begin || next >= begin + observed.size()) return;
+        const auto offset = static_cast<std::size_t>(next - begin);
+        const auto count = std::min(observed.size() - offset, limit - filled);
+        std::copy_n(observed.data() + offset, count, input.get() + filled);
+        filled += count;
+    }
+
+    std::uint64_t source_first, first;
+    double source_per_input_sample;
+private:
+    std::size_t limit;
+    std::size_t filled = 0;
+    std::unique_ptr<Complex[]> input;
 };
 
 PatternStep pattern_step(const StreamSlotReceipt& receipt) {
@@ -356,8 +402,12 @@ struct Session::Impl {
     }
 
     void set_plot(std::uint64_t owner, std::stop_token stop, PlotFrame frame, bool receiver_input,
-                  std::uint64_t segment) {
+                  std::uint64_t segment, bool replay = false) {
         publish(owner, stop, [&](Snapshot& out) {
+            if (replay && !out.simulation_replay) {
+                out.simulation_replay = true;
+                out.status = "Robust simulation processed · replaying 3 seconds";
+            }
             out.waveform = std::move(frame.waveform);
             out.waveform_sample_rate = frame.rate;
             out.spectrum_db = std::move(frame.db);
@@ -829,8 +879,8 @@ struct Session::Impl {
                 std::max(selected.initial_ordinal, next_simulation_ordinal)};
     }
 
-    void simulate(const Profile& prepared, const Settings& s, const TxRequest& send,
-                  std::uint64_t owner, std::stop_token stop) {
+    std::optional<SimulationReplay> simulate(const Profile& prepared, const Settings& s,
+                  const TxRequest& send, std::uint64_t owner, std::stop_token stop) {
         const auto rate = s.transfer.modem.sample_rate;
         const auto& calendar = prepared.waveform;
         const auto noise = send.mode == EmissionMode::Noise;
@@ -846,23 +896,33 @@ struct Session::Impl {
         const auto source = emission.source();
         const auto source_stop = source.geometry.source_samples;
         StreamingChannel channel(source, config);
+        std::optional<SimulationReplay> replay;
+        std::optional<PlotMeter> noise_meter;
         std::unique_ptr<CompleteStreamReceiver> receiver;
-        if (!noise) {
+        auto tx_slot = calendar.transmit_slot(0);
+        if (noise) noise_meter.emplace(rate);
+        else {
+            // In a message preview, include DATA even when a long Helper
+            // lead precedes it. Helper-only previews begin at Helper onset.
+            const auto activity = send.mode == EmissionMode::HelperOnly ? tx_slot.helper_begin : tx_slot.pattern_begin;
+            replay.emplace(config.effects, rate, calendar.calendar().distance(calendar.origin(), activity),
+                channel.total_samples());
             // Channel working bytes include the waveform source but exclude
-            // the prepared text shared by its lazy interval reader.
+            // the prepared text shared by its lazy interval reader and the
+            // bounded presentation slice retained beside the receiver.
             const auto options = stream_options(s, checked_workspace(channel.report().working_bytes,
-                checked_workspace(retained_request_workspace(send), 2 * 1024 * 1024U)));
+                checked_workspace(retained_request_workspace(send),
+                    checked_workspace(replay->working_bytes(), 2 * 1024 * 1024U))));
             receiver = std::make_unique<CompleteStreamReceiver>(calendar, prepared.receiver,
                 prepared.key, options, message_profile(s));
+            replay->allocate();
         }
         std::stop_callback interrupt(stop, [&] { if (receiver) receiver->request_cancel(); });
         std::array<Complex, audio_chunk> iq{};
         std::array<std::uint8_t, audio_chunk> valid{};
         std::array<float, audio_chunk> pcm{};
-        PlotMeter meter(rate);
-        const auto segment = new_plot_segment();
+        const auto segment = noise ? new_plot_segment() : 0;
         ReceiveDisplay display;
-        auto tx_slot = calendar.transmit_slot(0);
         std::size_t generated_bits = 0;
         const auto began = Clock::now();
         bool scoring_tail = false;
@@ -873,27 +933,30 @@ struct Session::Impl {
                 const auto count = channel.read(iq, valid);
                 if (!count) break;
                 const auto samples = std::span(iq).first(count);
-                for (std::size_t i = 0; i < count; ++i)
-                    pcm[i] = real_pcm(samples[i], first + i, prepared.receiver.data_if_hz, rate);
-                if (auto frame = meter.update(first, std::span(pcm).first(count), samples)) {
-                    if (emission.report().generated_samples)
-                        trace_hop(prepared, emission.report().generated_samples - 1, noise, owner, stop);
-                    set_plot(owner, stop, std::move(*frame), true, segment);
+                if (replay) replay->record(first, samples);
+                else {
+                    for (std::size_t i = 0; i < count; ++i)
+                        pcm[i] = real_pcm(samples[i], first + i, prepared.receiver.data_if_hz, rate);
+                    if (auto frame = noise_meter->update(first, std::span(pcm).first(count), samples)) {
+                        if (emission.report().generated_samples)
+                            trace_hop(prepared, emission.report().generated_samples - 1, true, owner, stop);
+                        set_plot(owner, stop, std::move(*frame), true, segment);
+                    }
                 }
                 if (receiver) accept(*receiver, display, s, first, samples, std::span(valid).first(count), owner, stop);
                 if (send.mode == EmissionMode::Message) {
                     const auto generated = emission.report().generated_samples;
+                    const auto previous_bits = generated_bits;
                     while (generated_bits < wire_bits &&
                            generated >= calendar.calendar().distance(calendar.origin(), tx_slot.support_end)) {
                         ++generated_bits;
                         if (generated_bits < wire_bits) tx_slot = calendar.transmit_slot(generated_bits);
                     }
-                    publish(owner, stop, [&](Snapshot& out) {
-                        if (out.transmit_trace.generated_bits != generated_bits) {
+                    if (previous_bits != generated_bits)
+                        publish(owner, stop, [&](Snapshot& out) {
                             out.transmit_trace.generated_bits = generated_bits;
                             ++out.transmit_trace.revision;
-                        }
-                    });
+                        });
                 }
                 if (!noise && !scoring_tail && emission.report().generated_samples >= source_stop) {
                     scoring_tail = true;
@@ -918,6 +981,43 @@ struct Session::Impl {
             invalidate_pending(display, s, owner);
             throw;
         }
+        return replay;
+    }
+
+    void replay_simulation(const Profile& prepared, const SimulationReplay& replay,
+                           std::uint64_t owner, std::stop_token stop) {
+        const auto input = replay.samples();
+        if (input.size() < plot_size || stop.stop_requested()) return;
+        const auto rate = prepared.waveform.config().format.sample_rate;
+        const auto last = input.size() - plot_size;
+        const auto segment = new_plot_segment();
+        const auto wait_until = [&](Clock::time_point time) {
+            std::unique_lock lock(mutex);
+            changed.wait_until(lock, stop, time, [] { return false; });
+        };
+        const modem::detail::search_fft::DoublePlan fft(plot_size);
+        const auto started = Clock::now();
+        constexpr auto frames = simulation_replay_duration / simulation_replay_period;
+        for (std::chrono::milliseconds::rep tick = 0; tick < frames; ++tick) {
+            wait_until(started + tick * simulation_replay_period);
+            if (stop.stop_requested()) return;
+            // Slow presentation consumers can skip frames. Never build a
+            // backlog or let the replay delay the end of this session.
+            tick = std::max(tick, (Clock::now() - started) / simulation_replay_period);
+            if (tick >= frames) return;
+            const auto offset = static_cast<std::size_t>((tick * simulation_replay_period).count()) * rate / 1000;
+            if (offset > last) return;
+            const auto first = replay.first + offset;
+            const auto samples = input.subspan(offset, plot_size);
+            std::vector<float> waveform(plot_size);
+            for (std::size_t i = 0; i < plot_size; ++i)
+                waveform[i] = real_pcm(samples[i], first + i, prepared.receiver.data_if_hz, rate);
+            const auto source_sample = replay.source_first +
+                static_cast<std::uint64_t>(static_cast<long double>(offset) * replay.source_per_input_sample);
+            trace_hop(prepared, source_sample, false, owner, stop);
+            set_plot(owner, stop, plot_frame(first, rate, std::move(waveform), samples, fft), true, segment, true);
+        }
+        wait_until(started + simulation_replay_duration);
     }
 
     std::uint64_t earliest_tx_slot(const Profile& active, long double minimum_lead) const {
@@ -1312,7 +1412,14 @@ struct Session::Impl {
                     current.slot_stride_seconds = static_cast<double>(calendar.calendar().distance(
                         initial.helper_begin, following.helper_begin)) / calendar.effective_sample_rate();
                     current.search_band_hz = std::pair{active->minimum_data_hz, active->maximum_data_hz};
-                    if (s.simulation) current.simulation_spectrum_gain_db = s.tx_dbm - s.path_loss_db;
+                    if (s.simulation) {
+                        // Real projection preserves the complex noise variance.
+                        // The Hann transform normalized by 2/N assigns white
+                        // noise an effective bandwidth of 1.5 bins per FFT bin.
+                        const auto noise_bandwidth = 1.5 * s.transfer.modem.sample_rate / plot_size;
+                        current.simulation_spectrum_gain_db = s.tx_dbm - s.path_loss_db - s.noise_dbm_hz -
+                            10 * std::log10(noise_bandwidth);
+                    }
                     if (active->receiver.helper_enabled)
                         current.helper_band_hz = std::pair{helper::low_pilot_frequency_hz - 100,
                             active->receiver.helper.frequency_hz + 100};
@@ -1345,6 +1452,7 @@ struct Session::Impl {
                     }
                     std::stop_callback cancel_on_reconfigure(stop, [source = tx_stop]() mutable { source.request_stop(); });
                     bool capture_paused = false;
+                    bool simulation_computed = false;
                     std::string failure;
                     try {
                         cancelled(transmission);
@@ -1355,17 +1463,22 @@ struct Session::Impl {
                             capture_paused = true;
                         }
                         prepare_send(send, transmit_settings, owner, transmission);
-                        if (s.simulation) simulate(*active, transmit_settings, send, owner, transmission);
-                        else play_live(*active, transmit_settings, send, owner, transmission);
+                        if (s.simulation) {
+                            auto replay = simulate(*active, transmit_settings, send, owner, transmission);
+                            simulation_computed = replay.has_value();
+                            if (replay) replay_simulation(*active, *replay, owner, transmission);
+                        } else play_live(*active, transmit_settings, send, owner, transmission);
                     } catch (const std::exception& error) {
                         if (!transmission.stop_requested()) failure = error.what();
                     }
                     publish(owner, stop, [&](Snapshot& out) {
                         out.transmitting = false;
+                        out.simulation_replay = false;
                         out.transmit_trace.active = false;
                         ++out.transmit_trace.revision;
                         out.error = failure;
-                        out.status = transmission.stop_requested() ? "Robust transmission cancelled" :
+                        out.status = transmission.stop_requested() ? (simulation_computed ?
+                            "Robust simulation input processed · replay stopped" : "Robust transmission cancelled") :
                             !failure.empty() ? failure :
                             s.simulation ? "Robust simulation input processed" : "Robust transmission sent";
                     });
@@ -1386,6 +1499,7 @@ struct Session::Impl {
                 publish(owner, stop, [&](Snapshot& out) {
                     out.running = false;
                     out.transmitting = false;
+                    out.simulation_replay = false;
                     out.status = error.what();
                     out.receiver_error = error.what();
                     out.transmit_unavailable = error.what();
@@ -1621,7 +1735,8 @@ void Session::cancel_transmit() {
         std::lock_guard lock(p.mutex);
         if (!p.current.transmitting) return;
         stop = p.tx_stop;
-        p.current.status = "Stopping Robust transmission";
+        p.current.status = p.current.simulation_replay ? "Stopping Robust simulation replay" :
+            "Stopping Robust transmission";
     }
     stop.request_stop();
     p.changed.notify_all();
@@ -1691,6 +1806,7 @@ void Session::stop() {
         p.stopping = true;
         ++p.generation;
         p.current.running = p.current.transmitting = false;
+        p.current.simulation_replay = false;
         p.current.status = "Stopping Robust session";
         p.request.reset();
         generation = p.generation_stop;

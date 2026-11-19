@@ -1,4 +1,5 @@
 #pragma once
+#include "datapump/helper_carrier.hpp"
 #include "datapump/transfer.hpp"
 #include <functional>
 #include <memory>
@@ -18,6 +19,8 @@ struct Inputs {
     std::size_t wire_bits=1;
     bool empty_draft=false;
     unsigned dsp_workspace_percent=0;
+    std::optional<double> waveform_bandwidth_hz;
+    std::optional<helper::MonoPassband> data_passband;
 };
 struct Model {
     Inputs inputs;

@@ -152,7 +152,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::volume)control.help=transmit_volume_help;
     if(slot==Slot::exclusive)control.help=exclusive_audio_help;
     if(slot==Slot::bandwidth)control.help="Canonical inner pattern rate in Hz, from 0.001 Hz through 30 MHz. Added Symbols and shaping determine occupied bandwidth; unsupported audio profiles report a validation error.";
-    if(slot==Slot::carrier)control.help="Choose a Carrier preset for the current Shift or enter a physical frequency such as 1.8 kHz. Bare numbers are in Hz. Carrier minus Shift is the audio frequency. This does not retune hardware.";
+    if(slot==Slot::carrier)control.help="Enter an absolute frequency or choose a preset. The baseband frequency is Carrier minus Shift. Recommendations include half the inner Rate for suitable radio hardware and higher frequencies that leave room below the occupied DATA band. Valid custom baseband frequencies survive changes to Shift. Bare numbers are in Hz.";
     if(slot==Slot::snr)control.help="Locally agreed target C/N0 in dB-Hz for provisional duration planning and the expected live DATA level relative to the declared input noise floor. Both peers must use the same target; it does not change simulated actual signal/noise power or guarantee sensitivity.";
     if(control.field==Field::planner_command) {
         control.document_only=true;control.tab_navigation=true;control.font_size=11;control.submit=Command::none;control.submit_mode=Field::count;

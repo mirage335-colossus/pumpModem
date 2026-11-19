@@ -230,38 +230,39 @@ Plan plan(const Options& options,double carrier,double bandwidth,std::uint32_t r
     return plan(options,PlacementBand{carrier,bandwidth,0},rate,
         minimum_high_frequency_hz,data_amplitude_scale,reference);
 }
-Plan plan(const Options& options,const PlacementBand& band,std::uint32_t rate,
-          double minimum_high_frequency_hz,double data_amplitude_scale,const PowerReference* reference) {
-    validate(options);
-    if(options.power_w==0||effective_helper_power(options)==0)return {};
-    if(!std::isfinite(minimum_high_frequency_hz)||minimum_high_frequency_hz<0)
-        throw Error("invalid Helper Carrier minimum High frequency");
-    if(!std::isfinite(data_amplitude_scale)||data_amplitude_scale<=0||data_amplitude_scale>1)
-        throw Error("invalid Helper Carrier data amplitude reference");
-    const auto passband=mono_passband(band);
-    const auto carrier=band.carrier_hz;
-    const auto bandwidth=band.waveform_bandwidth_hz+band.gate_bandwidth_hz;
-    if(!rate||passband.upper_hz>=rate/2.)
-        throw Error("Helper Carrier requires a valid data passband at the output sample rate");
-    const bool folded=carrier-bandwidth/2<0;
-    const auto leakage_width=folded?passband.upper_hz-passband.lower_hz:bandwidth;
-    const auto effective=effective_helper_power(options);
-    const auto power_ratio=effective/options.data_power_w;
-    const auto helper_mean=mean_power(options,band.pilot_dwell_gating,reference);
-    const auto mean=helper_mean.total;
+PlacementGuard::PlacementGuard(const Options& options, bool pilot_dwell_gating, const PowerReference* reference)
+    : effective_power_(effective_helper_power(options)), pilot_dwell_gating_(pilot_dwell_gating) {
+    if(effective_power_==0)return;
+    power_ratio_=effective_power_/options.data_power_w;
+    const auto helper_mean=mean_power(options,pilot_dwell_gating,reference);
+    mean_=helper_mean.total;
     // Omitting auxiliary average energy is conservative and keeps placement
     // valid across clear/encrypted metadata changes. Gain uses the full mean.
-    const auto guard_mean=helper_mean.high_pilot+helper_mean.low_pilot;
+    guard_mean_=helper_mean.high_pilot+helper_mean.low_pilot;
     // The periodic leakage certificate averages transitions over 400ms. A
     // finite helper aperture shorter than that contains proportionately more
     // start/end transition energy. Its actual duration is independent of the
     // active Robust reference (which excludes helper-only lead/tail).
-    double finite_transition_factor=1;
     if(reference&&reference->helper_start_seconds&&reference->helper_end_seconds) {
         const auto duration=*reference->helper_end_seconds-*reference->helper_start_seconds;
         if(!std::isfinite(duration)||duration<=0)throw Error("invalid Helper Carrier finite power envelope");
-        finite_transition_factor=static_cast<double>(std::max(1.L,dwell/duration));
+        finite_transition_factor_=static_cast<double>(std::max(1.L,dwell/duration));
     }
+}
+
+double PlacementGuard::high_pilot_hz(const PlacementBand& band,std::uint32_t rate,
+                                      double minimum_high_frequency_hz) const {
+    if(effective_power_==0)return 0;
+    if(!std::isfinite(minimum_high_frequency_hz)||minimum_high_frequency_hz<0)
+        throw Error("invalid Helper Carrier minimum High frequency");
+    if(band.pilot_dwell_gating!=pilot_dwell_gating_)
+        throw Error("Helper Carrier placement requires matching dwell gating");
+    const auto passband=mono_passband(band);
+    const auto bandwidth=band.waveform_bandwidth_hz+band.gate_bandwidth_hz;
+    if(!rate||passband.upper_hz>=rate/2.)
+        throw Error("Helper Carrier requires a valid data passband at the output sample rate");
+    const bool folded=band.carrier_hz-bandwidth/2<0;
+    const auto leakage_width=folded?passband.upper_hz-passband.lower_hz:bandwidth;
     const auto low_distance=passband.lower_hz>auxiliary_frequency_hz?
         passband.lower_hz-auxiliary_frequency_hz:low_pilot_frequency_hz-passband.upper_hz;
     if(low_distance<450)
@@ -272,23 +273,33 @@ Plan plan(const Options& options,const PlacementBand& band,std::uint32_t rate,
         const auto aux=std::sqrt(auxiliary_power_fraction*leakage_bound(distance_to(auxiliary_frequency_hz),leakage_width,22));
         return low+aux;
     }();
-    if(low_leakage*low_leakage*power_ratio/guard_mean*finite_transition_factor>1e-3)
+    if(low_leakage*low_leakage*power_ratio_/guard_mean_*finite_transition_factor_>1e-3)
         throw Error("Helper Carrier fixed low tones require more data separation at this power ratio; raise the Robust carrier");
     auto frequency=std::max({2400.,minimum_high_frequency_hz,passband.upper_hz+450});
     const auto maximum_frequency=rate/2.-250;
     const auto leakage=[&] {
         const auto high=std::sqrt(pilot_power_fraction*leakage_bound(frequency-passband.upper_hz,leakage_width,0));
-        return (low_leakage+high)*(low_leakage+high)*power_ratio/guard_mean*finite_transition_factor;
+        return (low_leakage+high)*(low_leakage+high)*power_ratio_/guard_mean_*finite_transition_factor_;
     };
     while(frequency<=maximum_frequency&&leakage()>1e-3)frequency+=50;
     if(frequency>maximum_frequency)
         throw Error("Helper Carrier cannot fit its power-dependent leakage guard at this output sample rate");
+    return frequency;
+}
+
+Plan plan(const Options& options,const PlacementBand& band,std::uint32_t rate,
+          double minimum_high_frequency_hz,double data_amplitude_scale,const PowerReference* reference) {
+    const PlacementGuard guard(options,band.pilot_dwell_gating,reference);
+    if(guard.effective_power_==0)return {};
+    if(!std::isfinite(data_amplitude_scale)||data_amplitude_scale<=0||data_amplitude_scale>1)
+        throw Error("invalid Helper Carrier data amplitude reference");
+    const auto frequency=guard.high_pilot_hz(band,rate,minimum_high_frequency_hz);
     const bool actual_data=reference&&reference->data_mean_power;
-    const auto [relative_peak,data_gain]=gains_from_ratio(power_ratio,mean,
+    const auto [relative_peak,data_gain]=gains_from_ratio(guard.power_ratio_,guard.mean_,
         actual_data?*reference->data_mean_power:nominal_data_mean_power);
     // A measured source mean already contains its DSSS/backoff factor.
     const auto source_scale=actual_data?1.:data_amplitude_scale;
-    return {frequency,relative_peak*data_gain*source_scale,data_gain,effective,
+    return {frequency,relative_peak*data_gain*source_scale,data_gain,guard.effective_power_,
         auxiliary_frequency_hz,low_pilot_frequency_hz,band.pilot_dwell_gating};
 }
 std::uint32_t minimum_output_rate(const Options& options,double carrier,double bandwidth,

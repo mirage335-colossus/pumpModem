@@ -71,6 +71,20 @@ struct PowerReference {
     // Coordinates match Generator::mix. False excludes inactive Robust gaps.
     std::function<bool(long double)> active;
 };
+// The reusable geometry check for a fixed Helper power and gate reference.
+// Testing another DATA carrier does not repeat the reference calibration.
+class PlacementGuard {
+public:
+    PlacementGuard(const Options&, bool pilot_dwell_gating, const PowerReference* = nullptr);
+    double high_pilot_hz(const PlacementBand&, std::uint32_t output_rate,
+                         double minimum_high_frequency_hz = 0) const;
+private:
+    friend Plan plan(const Options&, const PlacementBand&, std::uint32_t,
+                     double, double, const PowerReference*);
+    double effective_power_ = 0, power_ratio_ = 0, mean_ = 0, guard_mean_ = 0;
+    double finite_transition_factor_ = 1;
+    bool pilot_dwell_gating_ = false;
+};
 inline constexpr unsigned power_reference_nodes=32768;
 // Stateless stratified quadrature avoids coherent undersampling of a high-rate
 // source while preserving the exact same accepted nodes for both components.

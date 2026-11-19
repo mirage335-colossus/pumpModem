@@ -102,6 +102,7 @@ struct Snapshot {
     std::uint64_t spectrum_start_sample=0,spectrum_segment=0,spectrum_revision=0;
     std::size_t spectrum_sample_count=0;
     double spectrum_bin_hz=0;
+    // Convert the simulated spectrum from unit-DATA power to modeled FFT-bin SNR.
     std::optional<double> simulation_spectrum_gain_db;
     std::vector<std::complex<double>> constellation;
     std::uint64_t constellation_dropped=0;

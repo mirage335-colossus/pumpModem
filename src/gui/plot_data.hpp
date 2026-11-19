@@ -140,14 +140,6 @@ public:
         simulation_reference_ = simulation_gain_db.has_value();
         max_hz_ = edge;
         bin_hz_ = bin_hz;
-        // At the fixed -164 dBm/Hz reference noise, a complete 2,048-sample
-        // Hann FFT at 6 kHz has mean noise near -45.7 dB sim. ref.; pooling
-        // four bins puts typical columns near -43.5 dB. Start at -50 dB so
-        // that floor is dark blue, with 40 dB of contrast for weak peaks.
-        // Noise power per FFT bin grows with sample rate. Use the full
-        // frequency extent: replay has already pooled bins and wider spacing.
-        // Cache this once per row rather than calculating logarithms per pixel.
-        if (simulation_reference_) simulation_lower_db_ = -50 + (max_hz_ > 0 ? 10 * std::log10(max_hz_ / 3000) : 0);
         const auto columns = std::min<std::size_t>(256, bins.size());
         std::vector<double> row(columns, -240.);
         for (std::size_t i = 0; i < columns; ++i) {
@@ -191,8 +183,10 @@ public:
         detail_rows_.push_back(std::move(detail));
     }
     double intensity(double db) const { return std::clamp((db - lower_db()) / (simulation_reference_ ? 40. : 100.), 0., 1.); }
-    double lower_db() const { return simulation_reference_ ? simulation_lower_db_ : upper_db_ - 100; }
-    double upper_db() const { return simulation_reference_ ? simulation_lower_db_ + 40 : upper_db_; }
+    // The simulation offset references measured power to mean modeled bin
+    // noise. Keep it dim while preserving a fixed 40 dB scale for signal peaks.
+    double lower_db() const { return simulation_reference_ ? -6 : upper_db_ - 100; }
+    double upper_db() const { return simulation_reference_ ? 34 : upper_db_; }
     double max_hz() const { return max_hz_; }
     double bin_hz() const { return bin_hz_; }
     bool simulation_reference() const { return simulation_reference_; }
@@ -204,7 +198,6 @@ private:
     std::vector<std::complex<float>> previous_complex_;
     std::uint64_t previous_start_=0,previous_segment_=0;
     double upper_db_ = 0, max_hz_ = 0, bin_hz_=0;
-    double simulation_lower_db_ = -50;
     bool simulation_reference_ = false;
 };
 }

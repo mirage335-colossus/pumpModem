@@ -12,6 +12,7 @@
 #include "binary_editor.hpp"
 #include "datapump/audio_entropy.hpp"
 #include "datapump/runtime.hpp"
+#include "datapump/robust_profile.hpp"
 #include "datapump/tuning.hpp"
 #include <array>
 #include <cctype>
@@ -135,6 +136,59 @@ std::string exact_frequency_text(double hz) {
     if(frequency(text,"Frequency")==hz)return text;
     exact.str({});exact.clear();exact<<std::setprecision(std::numeric_limits<double>::max_digits10)<<hz<<" Hz";
     return exact.str();
+}
+
+bool carrier_fits(const live::detail::CarrierBand& band, double baseband_hz) {
+    try {
+        band.validate(baseband_hz);
+        return true;
+    } catch (const Error&) {
+        return false;
+    }
+}
+
+struct CarrierRecommendations {
+    std::vector<double> frequencies;
+    std::optional<double> preferred;
+};
+
+CarrierRecommendations carrier_recommendations(const live::detail::CarrierBand& band,
+                                                double rate_hz, double shift_hz) {
+    CarrierRecommendations result;
+    const double floor_hz = band.helper_enabled ? 1400 : 375;
+    const auto representable = [shift_hz](double hz) { return shift_hz + hz > shift_hz; };
+    const auto recommended = [&](double hz) {
+        return representable(hz) && carrier_fits(band, hz) && band.data_passband(hz).lower_hz >= floor_hz;
+    };
+    const auto append = [&](double hz) {
+        if (std::find(result.frequencies.begin(), result.frequencies.end(), hz) == result.frequencies.end())
+            result.frequencies.push_back(hz);
+    };
+    const auto half_rate = rate_hz / 2;
+    if (representable(half_rate) && carrier_fits(band, half_rate)) append(half_rate);
+    if (recommended(1725)) {
+        result.preferred = 1725;
+    } else if (band.helper_enabled && recommended(1775)) {
+        result.preferred = 1775;
+    } else {
+        const auto minimum = std::max(1725., band.minimum_carrier_hz(floor_hz));
+        // Start one grid point at or below the bound and check the actual edge
+        // so a rounding error on an exact multiple of 5 cannot skip it. The
+        // upper band can exclude 1775 while leaving a lower point usable.
+        for (double hz = 5 * std::floor(minimum / 5); hz < band.sample_rate / 2.; hz += 5) {
+            if (band.data_passband(hz).upper_hz >= band.sample_rate / 2.) break;
+            if (recommended(hz)) {
+                result.preferred = hz;
+                break;
+            }
+        }
+    }
+    if (result.preferred) append(*result.preferred);
+    if (band.helper_enabled)
+        for (const double hz : {1525., 1575., 1775.})
+            if (recommended(hz)) append(hz);
+    if (!result.preferred && !result.frequencies.empty()) result.preferred = result.frequencies.front();
+    return result;
 }
 
 }
@@ -282,7 +336,6 @@ struct Controller::Impl {
         f(UiField::bandwidth).text="3.6 kHz";
         for(const auto* s:{"0.001 Hz","0.01 Hz","0.1 Hz","1 Hz","3.6 Hz","10 Hz","36 Hz","100 Hz","360 Hz","1.2 kHz","2.4 kHz","3.6 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
         f(UiField::doppler).text="0.000000c";
-        f(UiField::carrier).text="1.725 kHz";
         f(UiField::snr).text="32"; f(UiField::planner_target).text="32";
         for(const auto id:{UiField::snr,UiField::planner_target})
             for(const auto* s:{"140","120","100","80","60","55","40","32","20","6","-6","-10","-16","-20","-23","-26","-30","-60"}) f(id).options.push_back({s,s});
@@ -386,7 +439,7 @@ struct Controller::Impl {
         f(UiField::mode).text="Starting continuous reception";
         if(options.launch_settings&&(options.launch_settings->keyfile||options.launch_settings->keyset||options.launch_settings->fhss_list_file)) {
             configure();apply_launch(*options.launch_settings,false);
-        } else configure(false,false,std::nullopt,options.launch_settings?&*options.launch_settings:nullptr,false);
+        } else configure(false,options.launch_settings?&*options.launch_settings:nullptr,false);
         dirty(); controls();
         need_devices=!options.smoke;
     }
@@ -539,26 +592,9 @@ struct Controller::Impl {
     bool developer_mode=false;
     std::vector<double> fhss_list;
     std::string fhss_list_error;
-    std::string carrier_preset_shift;
+    std::optional<double> selected_baseband_hz;
 
-    void refresh_carrier_presets() {
-        const auto& shift_text=f(UiField::rf_shift).text;
-        if(shift_text==carrier_preset_shift)return;
-        carrier_preset_shift=shift_text;
-        auto& presets=f(UiField::carrier).options;
-        presets.clear();
-        const auto shift=frequency_input::parse(shift_text);
-        if(!shift||*shift<0||*shift>1e15)return;
-        for(const auto audio_hz:{1500.,1625.,1725.,1800.}) {
-            const auto carrier=exact_frequency_text(*shift+audio_hz);
-            auto label=carrier;
-            if(*shift>0)label+=" ("+frequency_text(audio_hz)+" audio)";
-            presets.push_back({carrier,std::move(label)});
-        }
-    }
-
-    void configure(bool=false,bool=false,std::optional<UiField> =std::nullopt,
-                   const launch_command::Patch* load=nullptr,bool simulation_off=true,
+    void configure(bool edit_carrier=false,const launch_command::Patch* load=nullptr,bool simulation_off=true,
                    const std::vector<KeyEntry>* loaded_keys=nullptr,
                    const std::filesystem::path* loaded_path=nullptr,
                    KeyOrigin loaded_origin=KeyOrigin::file) {
@@ -568,6 +604,7 @@ struct Controller::Impl {
         const auto previous_planner=planner_inputs;const auto previous_target_valid=planner_target_valid;
         const auto previous_workspace_percent=dsp_workspace_percent;
         const auto previous_valid=settings_valid;
+        std::vector<ui::Option> carrier_presets;
         try {
         if(loaded_keys) {
             keys=*loaded_keys;key_origin=loaded_origin;if(loaded_path)key_path=*loaded_path;
@@ -638,15 +675,8 @@ struct Controller::Impl {
         settings.noise_dbm_hz=planner_inputs.noise_density_dbm_hz;settings.target_cn0_db_hz=planner_inputs.target_db_hz;
         auto& modem=settings.transfer.modem;
         modem.bandwidth_hz=frequency(f(UiField::bandwidth).text,"Rate");
-        const auto carrier=frequency(f(UiField::carrier).text,"Carrier");
         const auto shift=frequency(f(UiField::rf_shift).text,"Shift");
-        modem.carrier_hz=carrier-shift;
-        const auto nyquist=modem.sample_rate/2.;
-        if(!(modem.carrier_hz>0&&modem.carrier_hz<nyquist))
-            throw Error("Carrier minus Shift must be greater than 0 Hz and below "+frequency_text(nyquist)+
-                ". Choose a Carrier preset for the current Shift or edit the frequencies with units.");
-        settings.doppler_shift_hz=tuning::doppler_carrier_hz(carrier,
-            tuning::parse_doppler(f(UiField::doppler).text))-carrier;
+        const auto doppler=tuning::parse_doppler(f(UiField::doppler).text);
         settings.spread_preset=f(UiField::spread_preset).selected;
         settings.selective_perturbation=f(UiField::selective_perturbation).selected;
         settings.added_interleave=f(UiField::dsss_version).selected=="interleave";
@@ -693,8 +723,44 @@ struct Controller::Impl {
         settings.helper.power_w=helper_power_w(f(UiField::helper_power).text);
         settings.helper.ratio_limit_db=number(f(UiField::helper_ratio_limit).selected,"Helper ratio");
         settings.helper.callsign=f(UiField::helper_callsign).text;validate_helper_callsign(settings.helper.callsign);
-        live::validate_settings(settings);settings_valid=true;settings_error.clear();
+
+        const auto band=live::detail::plan_carrier_band(settings,doppler.frequency_ratio);
+        const auto recommendations=carrier_recommendations(band,modem.bandwidth_hz,shift);
+        auto& carrier=f(UiField::carrier);
+        std::optional<double> preset_baseband;
+        for (const auto baseband : recommendations.frequencies) {
+            const auto absolute=exact_frequency_text(shift+baseband);
+            auto label=absolute;
+            if (shift>0) label+=" ("+frequency_text(baseband)+" baseband)";
+            if (std::none_of(carrier_presets.begin(),carrier_presets.end(),[&](const auto& p){return p.id==absolute;}))
+                carrier_presets.push_back({absolute,std::move(label)});
+            if (!preset_baseband && carrier.text==absolute) preset_baseband=baseband;
+        }
+        if (edit_carrier || (load && load->carrier_hz)) {
+            const auto absolute=frequency(carrier.text,"Carrier");
+            modem.carrier_hz=preset_baseband.value_or(absolute-shift);
+        } else if (selected_baseband_hz && shift+*selected_baseband_hz>shift &&
+                   carrier_fits(band,*selected_baseband_hz)) {
+            modem.carrier_hz=*selected_baseband_hz;
+        } else if (recommendations.preferred) {
+            modem.carrier_hz=*recommendations.preferred;
+        } else {
+            throw Error("No Carrier recommendation fits the current Rate, Shift, Helper and sampled band. "
+                        "Adjust the settings or enter a valid custom Carrier.");
+        }
+        band.validate(modem.carrier_hz);
+        const auto absolute=modem.carrier_hz+shift;
+        if (!edit_carrier && !(load && load->carrier_hz) && frequency_input::parse(carrier.text)!=absolute)
+            carrier.text=exact_frequency_text(absolute);
+        settings.doppler_shift_hz=absolute*(doppler.frequency_ratio-1);
+        const auto data_passband=band.data_passband(modem.carrier_hz);
+        live::validate_settings(settings);
         if(started)session.configure(settings);
+        carrier.options=std::move(carrier_presets);
+        selected_baseband_hz=modem.carrier_hz;
+        planner_inputs.data_passband=data_passband;
+        planner_inputs.waveform_bandwidth_hz=band.waveform_bandwidth_hz;
+        settings_valid=true;settings_error.clear();
         snapshot.bit_seconds.reset();snapshot.slot_stride_seconds.reset();
         if(started)accept_snapshot(session.snapshot());
         dirty();sync_launch_command();refresh_files();refresh_signals();
@@ -703,6 +769,12 @@ struct Controller::Impl {
             key_path=previous_key_path;fhss_list=previous_fhss_list;planner_inputs=previous_planner;
             planner_target_valid=previous_target_valid;dsp_workspace_percent=previous_workspace_percent;
             settings_valid=load?previous_valid:false;settings_error=error.what();
+            if(!load) {
+                f(UiField::carrier).options=std::move(carrier_presets);
+                planner_inputs.data_passband.reset();
+                planner_inputs.waveform_bandwidth_hz.reset();
+                planner_model.reset();
+            }
             throw;
         }
     }
@@ -1062,7 +1134,6 @@ struct Controller::Impl {
         }
     }
     void controls() {
-        refresh_carrier_presets();
         for(auto& field:fields)field.enabled=!closing;
         const bool busy=snapshot.transmitting;
         for(const auto id:{UiField::device,UiField::exclusive,UiField::mono,UiField::live_duplex,
@@ -1072,7 +1143,7 @@ struct Controller::Impl {
             UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::carrier,
             UiField::bandwidth,UiField::doppler,UiField::spread_preset,UiField::selective_perturbation,
             UiField::search_margin,UiField::dsss_factor,UiField::dsss_version,UiField::fhss,
-            UiField::symbol_burst,UiField::symbol_burst_random,UiField::helper_power,
+            UiField::symbol_burst,UiField::symbol_burst_random,UiField::helper_power,UiField::helper_ratio_limit,
             UiField::fec,UiField::dsp_workspace,UiField::snr,UiField::planner_target,
             UiField::search_arithmetic,UiField::receiver_strategy,UiField::receiver_cpu_budget})
             f(id).enabled=!closing&&!busy;
@@ -1220,7 +1291,7 @@ struct Controller::Impl {
         if(result.kind==PrepKind::keys&&!pending_key) {
             try {
                 launch_command::Patch patch=result.key_settings.value_or(launch_command::Patch{});
-                configure(false,false,std::nullopt,&patch,result.key_simulation_off,&result.keys,&result.path);
+                configure(false,&patch,result.key_simulation_off,&result.keys,&result.path);
                 key_failed=false;key_warning=std::move(result.key_warning);key_fields(f(UiField::key).selected);
                 if(started&&active_requested)session.resume_capture();
                 if(result.completion_id)service_completions.push_back({result.completion_id,{}});
@@ -1387,11 +1458,11 @@ struct Controller::Impl {
             std::vector<KeyEntry> next_keys;
             if(*values.keyset=="amateur")next_keys.push_back(amateur_key());
             const std::filesystem::path empty_path;
-            configure(false,false,std::nullopt,&values,simulation_off,&next_keys,&empty_path,
+            configure(false,&values,simulation_off,&next_keys,&empty_path,
                       *values.keyset=="amateur"?KeyOrigin::amateur:KeyOrigin::none);
             key_failed=false;key_warning.clear();key_fields(f(UiField::key).selected);sync_launch_command(true);notice(settings.simulation?"Settings loaded · Simulation Yes":"Settings loaded · Simulation No");
         } else {
-            configure(false,false,std::nullopt,&values,simulation_off);
+            configure(false,&values,simulation_off);
             sync_launch_command(true);notice(settings.simulation?"Settings loaded · Simulation Yes":"Settings loaded · Simulation No");
         }
         if(started&&active_requested&&!key_loading&&!key_failed)session.resume_capture();
@@ -1483,7 +1554,7 @@ struct Controller::Impl {
             launch_command::Patch patch;
             // Validate the complete replacement before committing the bank,
             // its origin, and the corresponding live receiver settings.
-            configure(false,false,std::nullopt,&patch,false,&next_keys,&empty_path,
+            configure(false,&patch,false,&next_keys,&empty_path,
                       load_public?KeyOrigin::amateur:KeyOrigin::none);
             key_failed=false;key_warning.clear();key_fields(f(UiField::key).selected);
             if(started&&active_requested)session.resume_capture();
@@ -1717,7 +1788,7 @@ void Controller::edit(UiField field,std::string text) {
         else if(field==UiField::short_bits)p.short_bits_changed();
         else if(field==UiField::binary) p.binary_changed();
         else if(field==UiField::bandwidth) p.configure();
-        else if(field==UiField::carrier) p.configure(false,true);
+        else if(field==UiField::carrier) p.configure(true);
         else if(field==UiField::device||field==UiField::rf_shift||field==UiField::doppler||field==UiField::search_margin||field==UiField::receiver_cpu_budget||
             field==UiField::calendar_epoch||field==UiField::calendar_ordinal||field==UiField::live_noise_dbfs_hz) p.configure();
         else if(field==UiField::callsign||field==UiField::grid) {

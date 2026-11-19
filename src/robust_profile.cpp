@@ -59,6 +59,66 @@ helper::Options helper_options(const Settings& s) {
     return options;
 }
 
+// Receiver and preview use the same minimum public waveform, including
+// finite pulse endpoints and the selected FHSS dwell gates. Its spectrum
+// depends on geometry, not the RF address, encryption, or calendar epoch.
+ShapingPlan minimum_shaping(const Settings& settings) {
+    struct Shape {
+        double rate;
+        unsigned added_symbols;
+        std::uint32_t sample_rate;
+        bool fhss;
+        bool operator==(const Shape&) const = default;
+    };
+    using Entry = std::pair<Shape, ShapingPlan>;
+    thread_local std::optional<Entry> last;
+    const auto& modem = settings.transfer.modem;
+    const Shape shape{modem.bandwidth_hz, settings.added_symbols, modem.sample_rate, settings.fhss_profile != "off"};
+    if (!last || last->first != shape) {
+        Format format;
+        format.inner_rate_hz = shape.rate;
+        format.added_symbols = shape.added_symbols;
+        format.sample_rate = shape.sample_rate;
+        format.bit_seconds = .001;
+        format.fhss = shape.fhss;
+        format.quiet_seconds = shape.fhss ? .055 : 0;
+        last = Entry{shape, plan_shaping(format)};
+    }
+    auto result = last->second;
+    result.format.added_interleave = settings.added_interleave;
+    result.format.encrypt = settings.transfer.key.has_value();
+    return result;
+}
+
+double gate_bandwidth(const ShapingPlan& shaping) {
+    return std::max(0., shaping.spectrum.placement_bandwidth_hz - shaping.geometry.occupied_bandwidth_hz);
+}
+
+double allowance_scale(const modem::OscillatorSearchConfig& osc) {
+    return 1e-6 / (1 - osc.lf.accuracy_ppm * .5e-6) * osc.margin;
+}
+
+double shift_accuracy(const modem::OscillatorSearchConfig& osc) {
+    return osc.reference == modem::OscillatorReference::shared_radio ? osc.lf.accuracy_ppm : osc.rf.accuracy_ppm;
+}
+
+double modulation_allowance(const std::array<double, 2>& selective, double spread_hz) {
+    return (selective[0] || selective[1]) ? (spread_hz > 0 ? spread_hz : .1) : 0;
+}
+
+helper::MonoPassband guarded_audio_band(helper::MonoPassband data_band, double high_helper_hz,
+                                     double allowance_hz, std::uint32_t sample_rate) {
+    if (high_helper_hz > 0) {
+        data_band.lower_hz = std::min(data_band.lower_hz, helper::low_pilot_frequency_hz - 100);
+        data_band.upper_hz = std::max(data_band.upper_hz, high_helper_hz + 100);
+    }
+    data_band.lower_hz -= allowance_hz;
+    data_band.upper_hz += allowance_hz;
+    check(data_band.lower_hz > 0 && data_band.upper_hz < sample_rate / 2.,
+          "Robust audio band including oscillator/channel allowance exceeds DC or Nyquist; adjust Rate, Spreading, Carrier, Shift, or Helper power");
+    return data_band;
+}
+
 // The canonical source bounds each coefficient vector's norm by sqrt(3).
 // Piecewise-linear pulse tables let us bound the sum of |pulse| by checking
 // the fractional table breakpoints. Envelope and phase cannot grow that sum.
@@ -196,6 +256,76 @@ void validate_settings(const Settings& s) {
 }
 
 namespace detail {
+CarrierBand plan_carrier_band(const Settings& settings, std::optional<double> doppler_ratio) {
+    const auto& modem = settings.transfer.modem;
+    auto geometry_options = modem;
+    // Recommendations must be available even if the old carrier is invalid.
+    geometry_options.carrier_hz = 0;
+    modem::validate(geometry_options);
+    check(modem.sample_rate <= 192000 && modem.sample_rate % 5 == 0,
+          "Robust audio rate must be a multiple of five up to 192 kHz");
+    const auto osc = modem.oscillator_search.value_or(modem::OscillatorSearchConfig{});
+    check(osc.sideband == modem::OscillatorSideband::upper,
+          "Robust supports only upper-sideband carrier translation");
+    check(in_range(osc.rf_shift_hz, 0, 1e15) && in_range(osc.margin, 1, 1000) &&
+          in_range(osc.lf.accuracy_ppm, 0, 100000) && in_range(osc.rf.accuracy_ppm, 0, 100000),
+          "Invalid Robust Shift, oscillator model, or search margin");
+    check(doppler_ratio ? std::isfinite(*doppler_ratio) && *doppler_ratio > 0 :
+          std::isfinite(settings.doppler_shift_hz), "Invalid Robust Doppler shift");
+
+    const auto minimum = minimum_shaping(settings);
+    CarrierBand result;
+    result.sample_rate = modem.sample_rate;
+    result.nominal_bandwidth_hz_ = minimum.geometry.occupied_bandwidth_hz;
+    result.waveform_bandwidth_hz = result.nominal_bandwidth_hz_ + gate_bandwidth(minimum);
+    result.pilot_dwell_gating_ = minimum.format.fhss;
+    const auto helper_options_for_band = helper_options(settings);
+    result.helper_enabled = helper::effective_helper_power(helper_options_for_band) > 0;
+    if(result.helper_enabled) {
+        auto format = minimum.format;
+        // On the odd phase, the pilot gates fall within the active DATA
+        // dwell, instead of inside its quiet time. Preview that stricter
+        // phase when the simulation can advance beyond its configured epoch.
+        const auto epoch = settings.calendar && !settings.simulation ?
+            settings.calendar->epoch : (format.epoch | 1U);
+        format.epoch = epoch;
+        const auto reference = public_helper_reference(format);
+        result.helper_guard_.emplace(helper_options_for_band, format.fhss, &reference);
+    }
+    const auto relative_doppler = doppler_ratio ? std::abs(*doppler_ratio - 1) : 0.;
+    const auto fixed_doppler = doppler_ratio ? relative_doppler * osc.rf_shift_hz :
+        std::abs(settings.doppler_shift_hz);
+    const auto spread_hz = tuning::parse_spread_preset(settings.spread_preset).doppler_hz * osc.margin;
+    const auto modulation_hz = modulation_allowance(selective_depths(settings.selective_perturbation), spread_hz);
+    const auto scale = allowance_scale(osc);
+    result.fixed_allowance_hz_ = osc.rf_shift_hz * shift_accuracy(osc) * scale +
+        fixed_doppler + std::abs(spread_hz) + spread_hz + modulation_hz;
+    result.proportional_allowance_ = osc.lf.accuracy_ppm * scale + relative_doppler;
+    return result;
+}
+
+helper::MonoPassband CarrierBand::data_passband(double carrier_hz) const {
+    const auto half = .5 * waveform_bandwidth_hz + fixed_allowance_hz_ + proportional_allowance_ * carrier_hz;
+    return {carrier_hz - half, carrier_hz + half};
+}
+
+double CarrierBand::minimum_carrier_hz(double lower_edge_hz) const {
+    if (proportional_allowance_ >= 1) return std::numeric_limits<double>::infinity();
+    return (lower_edge_hz + .5 * waveform_bandwidth_hz + fixed_allowance_hz_) / (1 - proportional_allowance_);
+}
+
+void CarrierBand::validate(double carrier_hz) const {
+    check(std::isfinite(carrier_hz) && carrier_hz > 0 && carrier_hz < sample_rate / 2.,
+          "Robust DATA audio frequency must be positive and below Nyquist");
+    check(carrier_hz >= nominal_bandwidth_hz_ / 2, "Robust shaped DATA band crosses DC; raise the Carrier");
+    const helper::PlacementBand placement{carrier_hz, nominal_bandwidth_hz_,
+        waveform_bandwidth_hz - nominal_bandwidth_hz_, pilot_dwell_gating_};
+    const auto data = helper::mono_passband(placement);
+    const auto high_helper_hz = helper_guard_ ? helper_guard_->high_pilot_hz(placement, sample_rate) : 0;
+    const auto allowance = fixed_allowance_hz_ + proportional_allowance_ * carrier_hz;
+    (void)guarded_audio_band(data, high_helper_hz, allowance, sample_rate);
+}
+
 Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token stop,
                         ProfilePreparationOptions options) {
     using namespace triad::v3;
@@ -211,24 +341,12 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     auto key = s.transfer.key.value_or(Crypto::amateur());
     auto helper = helper_options(s);
 
-    Format format;
-    format.inner_rate_hz = modem.bandwidth_hz;
-    format.added_symbols = s.added_symbols;
     check(osc.sideband == modem::OscillatorSideband::upper,
           "Robust supports only upper-sideband carrier translation");
-    format.configured_carrier_hz = modem.carrier_hz + osc.rf_shift_hz;
-    format.added_interleave = s.added_interleave;
-    format.sample_rate = fs;
-    format.bit_seconds = .001; // native minimum protected tile
-    format.fhss = s.fhss_profile != "off";
-    format.quiet_seconds = format.fhss ? .055 : 0;
-    format.encrypt = s.transfer.key.has_value();
-    format.epoch = calendar.epoch;
-    format.symbol_ordinal = calendar.initial_ordinal;
 
     const bool shifted = osc.rf_shift_hz > 0;
     const bool shared = shifted && osc.reference == modem::OscillatorReference::shared_radio;
-    const auto shift_ppm = shifted ? (shared ? osc.lf.accuracy_ppm : osc.rf.accuracy_ppm) : 0;
+    const auto shift_ppm = shifted ? shift_accuracy(osc) : 0;
     const auto denominator = 1 - osc.lf.accuracy_ppm * .5e-6;
     const auto base_diffusion = osc.lf.phase_noise_degrees_per_sqrt_second * std::numbers::pi / 180;
     const auto shift_diffusion = osc.rf.phase_noise_degrees_per_sqrt_second * std::numbers::pi / 180;
@@ -257,8 +375,7 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     rx.selective_fast_depth = fast_depth;
     // Explicit amplitude modulation with no ray spread still has a separate
     // synthetic rate. Off bypasses the stage even when ray Doppler is present.
-    rx.selective_modulation_rate_hz = (slow_depth || fast_depth)
-        ? (rx.spread_doppler_hz > 0 ? rx.spread_doppler_hz : .1) : 0;
+    rx.selective_modulation_rate_hz = modulation_allowance({slow_depth, fast_depth}, rx.spread_doppler_hz);
     rx.time_varying_channel = rx.spread_delay_seconds > 0 || rx.spread_doppler_hz != 0 ||
         rx.selective_modulation_rate_hz > 0 || s.doppler_shift_hz != 0;
     // A selected atmospheric spread must also allow the whole signal to move,
@@ -269,7 +386,10 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     rx.time_varying_common_doppler_hz = std::abs(s.doppler_shift_hz) + rx.time_varying_atmospheric_hz;
     rx.helper_enabled = helper::effective_helper_power(helper) > 0;
 
-    const auto minimum = plan_shaping(format);
+    auto minimum = minimum_shaping(s);
+    minimum.format.configured_carrier_hz = modem.carrier_hz + osc.rf_shift_hz;
+    minimum.format.epoch = calendar.epoch;
+    minimum.format.symbol_ordinal = calendar.initial_ordinal;
     if (stop.stop_requested()) throw Error("Robust preparation cancelled");
     DurationOptions duration;
     const auto bit_budget = (1 - duration.correct_probability) / (2 * duration.planning_bits);
@@ -293,7 +413,7 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     PublicProfileConfig configuration;
     configuration.format = shaping.format;
     configuration.data_if_hz = modem.carrier_hz;
-    configuration.gate_bandwidth_hz = std::max(0., shaping.spectrum.placement_bandwidth_hz - geometry.occupied_bandwidth_hz);
+    configuration.gate_bandwidth_hz = gate_bandwidth(shaping);
     configuration.helper = std::move(helper);
     configuration.helper_enabled = rx.helper_enabled;
     configuration.wait_bits = s.symbol_burst_wait;
@@ -314,18 +434,10 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     const auto power = data_power_reference(waveform.config().format, key, stop);
     const auto reference_gain = 1 / std::sqrt(power.mean_norm);
 
-    auto passband = helper::mono_passband(waveform.placement());
-    const auto data_passband = passband;
-    if (rx.helper_enabled) {
-        passband.lower_hz = std::min(passband.lower_hz, helper::low_pilot_frequency_hz - 100);
-        passband.upper_hz = std::max(passband.upper_hz, rx.helper.frequency_hz + 100);
-    }
+    const auto data_passband = helper::mono_passband(waveform.placement());
     const double skirts = rx.frequency_bound_hz + rx.time_varying_atmospheric_hz +
         rx.spread_doppler_hz + rx.selective_modulation_rate_hz;
-    const auto minimum_hz = passband.lower_hz - skirts;
-    const auto maximum_hz = passband.upper_hz + skirts;
-    check(minimum_hz > 0 && maximum_hz < fs / 2.,
-          "Robust audio band including oscillator/channel allowance exceeds DC or Nyquist; adjust Rate, Spreading, Carrier, Shift, or Helper power");
+    const auto passband = guarded_audio_band(data_passband, rx.helper.frequency_hz, skirts, fs);
 
     StreamChannelConfig channel;
     auto& effects = channel.effects;
@@ -386,7 +498,7 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
         rx.data_basis_gain = std::sqrt(std::pow(10., s.target_cn0_db_hz / 10) *
                                        rx.noise_variance / fs) * reference_gain;
     }
-    return {std::move(waveform), rx, std::move(channel), std::move(key), minimum_hz, maximum_hz,
+    return {std::move(waveform), rx, std::move(channel), std::move(key), passband.lower_hz, passband.upper_hz,
             data_passband.lower_hz - skirts, data_passband.upper_hz + skirts, maximum_unscaled_data, std::move(hops)};
 }
 

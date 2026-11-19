@@ -120,6 +120,10 @@ DataPowerReference bounded_tile_power(PatternSource& source, std::stop_token sto
 
 } // namespace
 
+helper::PowerReference public_helper_reference(const Format& format) {
+    return helper_reference(format, 42);
+}
+
 PublicProfile::PublicProfile(PublicProfileConfig config, std::optional<Crypto> calendar_key)
     : config_(std::move(config)), geometry_(v3::geometry(config_.format)), calendar_(burst_config(config_, geometry_), std::move(calendar_key)),
       placement_{config_.data_if_hz, geometry_.occupied_bandwidth_hz, config_.gate_bandwidth_hz, config_.format.fhss} {
@@ -158,7 +162,7 @@ PublicProfile::PublicProfile(PublicProfileConfig config, std::optional<Crypto> c
     if (config_.helper_enabled) {
         // Use the same public active reference window as the emitted source.
         // The placement guard is independent of its keyed auxiliary symbols.
-        const auto reference = helper_reference(config_.format, 42);
+        const auto reference = public_helper_reference(config_.format);
         helper_plan_ = helper::plan(config_.helper, placement_, config_.format.sample_rate, 0, 1, &reference);
     }
     maximum_slot_opportunities_per_day_ = bound_slot_opportunities_per_day();

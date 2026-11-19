@@ -4,6 +4,7 @@
 This is a functional one-message CPU stratum, not a GPU, capacity, or
 sensitivity qualification. Run with LAB_RUN_SIMULATION=1; it can take 90 s.
 """
+import base64
 import json
 import os
 from pathlib import Path
@@ -88,7 +89,7 @@ class SimulationTest(unittest.TestCase):
             for label, value in (("Transmit power", "100 mW"), ("Path loss", "114 dB"),
                                  ("Noise (dBm/Hz)", "-174 dBm/Hz"), ("Clock sync", "1ms"),
                                  ("Region", "1ms"), ("Offset", "0ms"), ("Audio error", "0ms"),
-                                 ("Margin", "1x"), ("Rate", "120 Hz"),
+                                 ("Margin", "1x"), ("Rate", "120 Hz"), ("Carrier", "1725 Hz"),
                                  ("Target SNR (dB-Hz)", "80")):
                 event(1, control(label)["id"], value)
             for label, value in (("Baseband Osc", "gpsdo-ocxo"), ("Shift Osc", "gpsdo-ocxo")):
@@ -112,6 +113,24 @@ class SimulationTest(unittest.TestCase):
                             f"expected decoded message missing: {rendered!r}")
             for label in ("Spectrum", "Waveform", "Receiver input I/Q", "Pattern evidence"):
                 self.assertEqual(control(label)["kind"], "bitmap", label)
+            spectrum = control("Spectrum")
+            bitmap = spectrum["bitmap"]
+            width, height = bitmap["width"], bitmap["height"]
+            if "rgbRuns" in bitmap:
+                runs = base64.b64decode(bitmap["rgbRuns"])
+                pixels = b"".join(runs[i+1:i+4] * (runs[i]+1) for i in range(0, len(runs), 4))
+            else:
+                pixels = base64.b64decode(bitmap["rgb"])
+            self.assertEqual(len(pixels), width * height * 3)
+
+            def peak(first_hz, last_hz):
+                first, last = (hz * width // 3000 * 3 for hz in (first_hz, last_hz))
+                return max(max(pixels[y*width*3+first:y*width*3+last]) for y in range(height))
+
+            occupied, noise = peak(1575, 1875), peak(300, 1000)
+            self.assertGreater(noise, 0, "The modeled noise floor was entirely black")
+            self.assertGreater(occupied, noise + 40, "The retained waterfall lost its occupied band")
+            self.assertIn("dB relative to modeled noise", spectrum["caption"])
         finally:
             proc.stdin.close()
             try:

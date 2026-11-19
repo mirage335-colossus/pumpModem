@@ -244,6 +244,72 @@ live::Settings settings(bool simulation) {
     return s;
 }
 
+void carrier_band_matches_profile() {
+    auto s = settings(true);
+    auto& modem = s.transfer.modem;
+    const auto rejects = [](const auto& operation) {
+        try { operation(); } catch (const Error&) { return true; }
+        return false;
+    };
+    const auto near = [](double left, double right) { return std::abs(left - right) < 1e-9; };
+    modem.bandwidth_hz = 1;
+    modem.oscillator_search.reset();
+    const auto low = live::detail::plan_carrier_band(s);
+    low.validate(.5);
+    check(near(low.waveform_bandwidth_hz, .625) && low.data_passband(.5).lower_hz > 0 &&
+          low.data_passband(.5).lower_hz < 375, "A physical half-rate carrier inherited the speaker floor");
+    check(rejects([&] { low.validate(.25); }) && rejects([&] { low.validate(2999.99); }),
+          "Carrier preview accepted shaped DATA across DC or Nyquist");
+
+    modem.bandwidth_hz = 120;
+    modem.carrier_hz = 1775;
+    modem.oscillator_search = modem::OscillatorSearchConfig{
+        .lf = {.1, 0}, .rf = {.01, 0}, .rf_shift_hz = 1e6, .margin = 1};
+    s.added_symbols = 10;
+    s.added_interleave = true;
+    s.fhss_profile = "fake-fcc";
+    s.spread_preset = "hf-worst";
+    s.selective_perturbation = "each-65";
+    s.helper.power_w = .004;
+    constexpr double doppler_ratio = 1.000001;
+    s.doppler_shift_hz = (modem.oscillator_search->rf_shift_hz + modem.carrier_hz) * (doppler_ratio - 1);
+    const auto band = live::detail::plan_carrier_band(s, doppler_ratio);
+    band.validate(modem.carrier_hz);
+    check(band.helper_enabled && rejects([&] { band.validate(1200); }),
+          "Enabled Helper preview did not enforce its fixed low-tone separation");
+    const auto edge = band.data_passband(modem.carrier_hz);
+    const auto native = live::detail::prepare_profile(s, *s.calendar, {});
+    const auto& placement = native.waveform.placement();
+    check(near(edge.lower_hz, native.minimum_data_hz) && near(edge.upper_hz, native.maximum_data_hz) &&
+          near(band.waveform_bandwidth_hz, placement.waveform_bandwidth_hz + placement.gate_bandwidth_hz),
+          "Carrier preview and native Helper placement disagree about shaped occupied DATA bandwidth");
+    check(near(band.data_passband(band.minimum_carrier_hz(1400)).lower_hz, 1400),
+          "Carrier planner could not solve its guarded lower edge");
+    s.simulation = false;
+    s.calendar->epoch = 1795081201;
+    s.helper.power_w = 19.2; // Ratio 192. The nominal-envelope guard formerly admitted this odd dwell phase.
+    check(rejects([&] { live::detail::plan_carrier_band(s).validate(modem.carrier_hz); }) &&
+          rejects([&] { (void)live::detail::prepare_profile(s, *s.calendar, {}); }),
+          "Carrier preview missed the actual odd-phase Helper leakage guard");
+    --s.calendar->epoch;
+    live::detail::plan_carrier_band(s).validate(modem.carrier_hz);
+    (void)live::detail::prepare_profile(s, *s.calendar, {});
+    s.simulation = true;
+    check(rejects([&] { live::detail::plan_carrier_band(s).validate(modem.carrier_hz); }),
+          "Simulation could advance to an odd epoch with a rejected Helper placement");
+
+    s.fhss_profile = "off";
+    s.helper.power_w = 0;
+    s.added_symbols = 1;
+    modem.bandwidth_hz = 100000;
+    check(rejects([&] { (void)live::detail::plan_carrier_band(s); }),
+          "Carrier preview ignored an unsupported waveform sample rate");
+    modem.sample_rate = 192000;
+    const auto gated = live::detail::plan_carrier_band(s);
+    check(near(gated.waveform_bandwidth_hz, 62600),
+          "Carrier preview dropped the canonical gate allowance when spectral certification could not narrow it");
+}
+
 void native_precision_profile_policy() {
     auto s = settings(true);
     const auto automatic = live::detail::prepare_profile(s, *s.calendar, {});
@@ -1274,6 +1340,7 @@ void raw_bit_session_transmission_and_ordinal() {
         session.transmit_bits(raw_bit);
         std::vector<live::SignalUpdate> signals;
         std::size_t received_messages = 0;
+        bool stopped_replay = false;
         const auto completed = wait(session, [&](auto& out) {
             signals.insert(signals.end(), out.signals.begin(), out.signals.end());
             received_messages += out.received.size();
@@ -1281,6 +1348,12 @@ void raw_bit_session_transmission_and_ordinal() {
                   "Raw-bit Robust simulation failed: " + out.error + "; " + out.receiver_error);
             check(out.pattern_steps.size() <= 3,
                   "One raw bit scheduled more than one DATA bit and its two quiet windows");
+            if (!bit && out.simulation_replay && !stopped_replay) {
+                check(out.transmitting && out.pattern_steps.size() == 3,
+                      "Raw-bit replay began before physical receive processing finished");
+                session.cancel_transmit();
+                stopped_replay = true;
+            }
             return !out.transmitting;
         }, "Single raw-bit Robust transmission did not finish", 90s);
 
@@ -1292,6 +1365,9 @@ void raw_bit_session_transmission_and_ordinal() {
               "Raw bit was text-coded, decoded as a message, or lost from the native signal record");
         check(completed.pattern_steps.size() == 3,
               "Single raw bit did not finish from one DATA slot and two physical quiet slots");
+        if (!bit)
+            check(stopped_replay && !completed.simulation_replay && completed.status.find("replay stopped") != std::string::npos,
+                  "Stopping a replay did not keep its completed receive state");
         for (std::size_t i = 0; i < completed.pattern_steps.size(); ++i) {
             const auto& row = completed.pattern_steps[i];
             check(row.index == i && row.ordinal == expected_ordinal + i && row.evidence_complete &&
@@ -1361,13 +1437,38 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
     session.transmit(Message{.data = {'e'}});
     std::vector<transfer::Received> received;
     std::vector<live::SignalUpdate> signal_events;
+    std::optional<std::chrono::steady_clock::time_point> replay_began;
+    std::uint64_t replay_first = 0, last_revision = 0, last_frame = 0;
+    unsigned replay_frames = 0;
     auto completed = wait(session, [&](auto& out) {
         for (auto& event : out.received) received.push_back(std::move(event));
         signal_events.insert(signal_events.end(), out.signals.begin(), out.signals.end());
         check(out.error.empty() && out.receiver_error.empty(), "Native simulation failed: " + out.error + "; " + out.receiver_error);
         check(out.pattern_steps.size() <= 5, "Native simulation exceeded five public scoring windows");
+        if (out.simulation_replay && out.spectrum_revision != last_revision) {
+            check(out.transmitting && received.size() == 1 && out.pattern_steps.size() == 5 &&
+                  out.pattern_steps.back().decision == live::PatternDecision::quiet,
+                  "Simulation began replay before delivering the full result and physical quiet receipts");
+            if (!replay_began) {
+                replay_began = std::chrono::steady_clock::now();
+                replay_first = out.spectrum_start_sample;
+            } else {
+                check(out.spectrum_start_sample > last_frame &&
+                      (out.spectrum_start_sample - last_frame) % 75 == 0,
+                      "Simulation replay did not follow a chronological 50 ms sample cadence");
+            }
+            last_frame = out.spectrum_start_sample;
+            last_revision = out.spectrum_revision;
+            ++replay_frames;
+        }
         return !out.transmitting;
     }, "Native complete simulation exceeded its wall-time budget", 90s);
+    check(replay_began && std::chrono::steady_clock::now() - *replay_began >= 2500ms &&
+          replay_frames > 1 && replay_frames <= 60 && !completed.simulation_replay &&
+          completed.spectrum_start_sample >= replay_first &&
+          completed.spectrum_start_sample - replay_first < 3 * simulated.transfer.modem.sample_rate &&
+          completed.spectrum_revision >= last_revision,
+          "Simulation did not finish and retain a bounded three-second activity replay");
     const bool decoded = received.size() == 1 && received[0].stream_complete && received[0].content_validated &&
         received[0].short_text_decoded && received[0].content.message.data == Bytes{'e'} &&
         received[0].raw_bits == Bytes({0, 0, 1}) && received[0].missing_symbols == 0;
@@ -1577,6 +1678,10 @@ void unavailable_gpu() {
 
 int main(int argc, char** argv) {
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "--carrier-band") {
+            carrier_band_matches_profile();
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--gpu") {
             check(live::gpu_receiver_available(), "Actual GPU session test requires a compiled GPU backend");
             complete_native_simulation(true);
@@ -1627,6 +1732,7 @@ int main(int argc, char** argv) {
             return 0;
         }
         check(argc == 1, "Unexpected Robust session test argument");
+        carrier_band_matches_profile();
         native_precision_profile_policy();
         configured_physical_carrier_context();
         if (!live::gpu_receiver_available()) unavailable_gpu();

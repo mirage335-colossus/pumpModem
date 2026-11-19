@@ -14,6 +14,9 @@ namespace datapump::triad::v3 {
 
 inline constexpr unsigned helper_lead_seconds = 38;
 
+// The nominal active Helper reference used for public placement.
+helper::PowerReference public_helper_reference(const Format&);
+
 struct SampleRange {
     std::uint64_t first = 0, stop = 0;
     std::uint64_t size() const { return stop - first; }

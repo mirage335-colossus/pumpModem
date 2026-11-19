@@ -159,22 +159,59 @@ with tempfile.TemporaryDirectory(prefix="datapump-file-contract-") as directory:
         event(1, message["id"], "Carrier check")
         carrier = control("Carrier")
         assert carrier["kind"] == "text" and carrier["geometry"]["hasSuggestions"]
-        assert any(option["id"] == "1.5 kHz" and option["enabled"] for option in carrier["options"])
-        event(5, carrier["id"], "1.5 kHz")
-        assert control("Carrier")["text"] == "1.5 kHz"
+
+        def carrier_presets():
+            return [option["id"] for option in control("Carrier")["options"] if option["enabled"]]
+
+        assert carrier["text"] == "1.725 kHz"
+        assert carrier_presets() == ["1.8 kHz", "1.725 kHz"]
+        event(5, carrier["id"], "1.8 kHz")
+        assert control("Carrier")["text"] == "1.8 kHz"
         wait_for(lambda: control("Transmit")["enabled"])
-        event(1, carrier["id"], "1850 Hz")
-        assert control("Carrier")["text"] == "1850 Hz"
+        event(1, carrier["id"], "1840 Hz")
+        assert control("Carrier")["text"] == "1840 Hz"
         wait_for(lambda: control("Transmit")["enabled"])
         event(1, control("Shift")["id"], "100 kHz")
-        assert not control("Transmit")["enabled"]
-        assert any("Carrier minus Shift must be" in item.get("text", "") for item in snapshot["controls"])
-        assert any(option["id"] == "101.8 kHz" for option in control("Carrier")["options"])
-        event(5, carrier["id"], "101.8 kHz")
-        assert control("Carrier")["text"] == "101.8 kHz"
+        assert control("Carrier")["text"] == "101.84 kHz"
+        assert carrier_presets() == ["101.8 kHz", "101.725 kHz"]
         wait_for(lambda: control("Transmit")["enabled"])
-        assert not any("Carrier minus Shift must be" in item.get("text", "") for item in snapshot["controls"])
         event(1, control("Shift")["id"], "0 Hz")
+        assert control("Carrier")["text"] == "1.84 kHz"
+        event(1, control("Rate")["id"], "1 Hz")
+        assert carrier_presets() == ["0.5 Hz", "1.725 kHz"]
+        assert control("Carrier")["text"] == "1.84 kHz"
+        event(5, carrier["id"], "0.5 Hz")
+        assert control("Carrier")["text"] == "0.5 Hz"
+        event(1, control("Doppler")["id"], "0.5c")
+        assert carrier_presets() == ["1.725 kHz"]
+        assert control("Carrier")["text"] == "1.725 kHz"
+        event(1, control("Doppler")["id"], "0c")
+        event(5, carrier["id"], "0.5 Hz")
+        event(1, control("Shift")["id"], "100 kHz")
+        assert carrier_presets() == ["101.725 kHz"], "oscillator guard admitted a sub-Hz carrier"
+        assert control("Carrier")["text"] == "101.725 kHz"
+        event(1, control("Shift")["id"], "0 Hz")
+        event(1, control("Rate")["id"], "100 Hz")
+        event(1, carrier["id"], "1100 Hz")
+        assert control("Carrier")["text"] == "1100 Hz"
+        event(1, control("Helper Carrier Power")["id"], "1 W")
+        assert carrier_presets() == ["50 Hz", "1.725 kHz", "1.525 kHz", "1.575 kHz", "1.775 kHz"]
+        assert control("Carrier")["text"] == "1.725 kHz", "preserved a carrier overlapping Helper tones"
+        event(1, control("Transmit power")["id"], "1 mW")
+        assert carrier_presets() == ["1.725 kHz", "1.525 kHz", "1.575 kHz", "1.775 kHz"], \
+            "ignored the increased Helper/DATA ratio at lower DATA power"
+        event(1, control("Transmit power")["id"], "100 mW")
+        event(1, control("Rate")["id"], "1.2 kHz")
+        assert carrier_presets() == ["1.78 kHz"], "did not round the guarded Helper edge upward"
+        assert control("Carrier")["text"] == "1.78 kHz"
+        event(1, control("Helper Carrier Power")["id"], "0")
+        assert carrier_presets() == ["600 Hz", "1.725 kHz"]
+        assert control("Carrier")["text"] == "1.78 kHz", "discarded a valid custom-equivalent carrier"
+        event(2, control("Added Symbols")["id"], "interleave")
+        assert carrier_presets() == ["1.725 kHz"], "suggested a half-rate carrier whose spread band crosses DC"
+        event(2, control("Added Symbols")["id"], "off")
+        assert carrier_presets() == ["180 Hz", "1.725 kHz"]
+        event(1, control("Rate")["id"], "3.6 kHz")
         event(5, carrier["id"], "1.725 kHz")
         wait_for(lambda: any(item.get("text") == "Robust simulation ready" for item in snapshot["controls"]))
         binary = next(item for item in snapshot["controls"]

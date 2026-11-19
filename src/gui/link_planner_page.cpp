@@ -61,6 +61,11 @@ ui::DocumentNode build(const planner::Model& model,float width,bool show_details
     paragraph(root,"The native session uses provisional duration planning. This page has no qualified receiver probability or processing forecasts.");
     if(model.error.empty())
         paragraph(root,"Received power: "+number(model.received_dbm)+" dBm · C/N0: "+number(model.actual_cn0_db_hz)+" dB-Hz. These are link-budget arithmetic only.");
+    if(model.inputs.waveform_bandwidth_hz&&model.inputs.data_passband) {
+        const auto& band=*model.inputs.data_passband;
+        paragraph(root,"DATA waveform width "+number(*model.inputs.waveform_bandwidth_hz)+" Hz · "
+            "Audio band with oscillator and channel allowance "+number(band.lower_hz)+" to "+number(band.upper_hz)+" Hz.");
+    }
     control(root,ui::Field::planner_target);
     buttons(root,{{"Stronger",Command::planner_stronger,false},{"Weaker",Command::planner_weaker,false}});
     buttons(root,{{"Spread-Spectrum DSSS FHSS Example",Command::planner_example_spread},
