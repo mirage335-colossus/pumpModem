@@ -19,6 +19,10 @@ public:
         bool simulation = false;
         bool smoke = false;
         std::optional<launch_command::Patch> launch_settings = std::nullopt;
+        // Optional embedding policy: all Robust configurations require GPU.
+        bool require_gpu = false;
+        // Optional embedding policy for a single finite physical-audio episode.
+        bool finite_duplex = false;
     };
     Controller();
     explicit Controller(Options options);

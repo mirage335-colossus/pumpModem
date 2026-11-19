@@ -29,7 +29,7 @@
 namespace datapump::gui {
 using Clock=std::chrono::steady_clock;
 struct Application::Impl {
-    explicit Impl(const Launch& launch):controller({launch.simulation||launch.smoke,launch.smoke,launch.settings}),
+    explicit Impl(const Launch& launch):controller({launch.simulation||launch.smoke,launch.smoke,launch.settings,launch.require_gpu,launch.finite_duplex}),
         fast_controller([this] {
             if(legacy_controller.active())return false;
             // The first attempt can initiate asynchronous device closure.
@@ -110,12 +110,13 @@ Application::Application(Launch options):launch(std::move(options)),impl_(std::m
     impl_->shellcode_mode.visible=launch.smoke;
     impl_->fast_mode.options={{"fast","Fast Modem"},{"robust","Robust Modem"},{"legacy","Legacy Modem"}};
     // Explicit Robust simulation/settings/page launches keep their requested work.
-    impl_->fast_mode.selected=launch.simulation||launch.smoke||launch.settings||launch.page!=ui::Page::console?"robust":"fast";
+    impl_->fast_mode.selected=launch.require_gpu||launch.finite_duplex||launch.simulation||launch.smoke||launch.settings||launch.page!=ui::Page::console?"robust":"fast";
+    if(launch.require_gpu||launch.finite_duplex)impl_->fast_mode.enabled=false;
     select_page(launch.page);
 }
 Application::~Application()=default;
 WindowSizing initial_window_sizing(const Launch& options) {
-    const bool fast=!(options.simulation||options.smoke||options.settings||options.page!=ui::Page::console);
+    const bool fast=!(options.require_gpu||options.finite_duplex||options.simulation||options.smoke||options.settings||options.page!=ui::Page::console);
     return fast?WindowSizing{ui::default_width,ui::fast_default_height,ui::min_width,ui::fast_min_height}:WindowSizing{};
 }
 WindowSizing Application::window_sizing() const {
@@ -195,6 +196,7 @@ void Application::preset(const ui::Control& declaration,const std::string& id) {
 void Application::select(ui::Field field,std::string id) {
     if(closing()||field==ui::Field::count||!this->field(field).visible)return;
     if(field==ui::Field::fast_mode) {
+        if(launch.require_gpu||launch.finite_duplex)return; // Other modem modes do not implement these policies.
         if((id!="robust"&&id!="fast"&&id!="legacy")||impl_->fast_mode.selected==id)return;
         dismiss_overlay();++impl_->mode_generation;
         if(impl_->regular_selected()) {

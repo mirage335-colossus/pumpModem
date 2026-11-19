@@ -45,6 +45,64 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Native finite-duplex and RunPod lab — 18 November 2026
+
+This checkpoint uses working-tree changes over baseline
+`d25df5e3bdd956c8f1eccba76b090a27bb37848d`; that commit alone does not identify
+the changed sources. The optional one-message finite-duplex seam, dated bounded
+capture provider and lab worker are integrated with the shared native session.
+They retain scored quiet completion and require a provider-accepted physical capture endpoint;
+see the [current architecture](robust-current.md#configured-calendar-reception)
+and [lab operation and detailed test record](../_zLab/README.md). The local
+`CCACHE_DISABLE=1 ./build.sh test gui` passed 32 of 32 tests in 191.18 seconds.
+The targeted `test_gui_robust_live` `--capture-backpressure`, `--buffered-live`
+and `--finite-duplex` checks passed, including accepted/refused endpoint,
+quiet-rearm invalidation, early EOF and cancellation cases. An earlier synthetic
+fixture raced its quiet state before scheduling; its targeted check passed
+after correction. `CCACHE_DISABLE=1 ./build.sh test triad` did not pass: 44 of
+45 tests passed, and `triad_receiver_probe` failed after 32.01 seconds with
+`StopIteration` while seeking a `coarse_prepare` phase in
+`tests/test_triad_receiver_probe.py:366`. An isolated serial rerun passed 1 of
+1 in 27.20 seconds (27.54 seconds independently observed). Parallel deadline
+contention is plausible but the original receipt was not printed, so the
+cause is unconfirmed. The isolated pass does not turn the original group into
+a pass.
+
+One strict real-time CPU fake-device holdout, without injected prehistory,
+decoded `e` through the native session, relay, transport and fake companion in
+380.327 seconds. Its checked slots were consecutive DATA `0`, `0`, `1`, QUIET,
+QUIET, followed by finite physical-completion drain status. The worker and fake
+companion binary SHA-256 values were respectively
+`ca77684a472a7281843762c9053de812db86192e212170a6ab654c861c9a9495` and
+`5d978283405ea816ec8d4e62a518b416d5221e4ba906957fcef73493313ad7b5`;
+these identify the tested binaries, not an independently hashed source tree.
+The test did not intentionally slow reception or qualify backlog drain. A
+separate bounded fake-device transport composition held capture credit until
+the physical-capture fixture stopped, then checked exact PCM, frame coordinates,
+absolute dates, timing quality and transport-added uncertainty while the GUI
+clock and heartbeat remained responsive. It also checked early EOF remains
+incomplete. Three repeated normal/EOF pairs passed 6 of 6, and an independent
+rerun passed 2 of 2 in 10.351 seconds. An earlier composition check timed out;
+a buffered `select`/read race in the test harness was a likely cause, and the
+revised harness passed these repeats. This composition does not exercise the
+complete native receiver or establish real-device or network backlog capacity.
+An earlier fake-device attempt failed because its zero audio-error assumption
+conflicted with nonzero timestamp uncertainty; another failed with missing frame
+type 229, with cause unconfirmed. A separate older worker's future-start
+30-second credit timeout had a targeted repair and follow-up check. The
+preceding successful fake-device run did not check consecutive quiet indices.
+
+The refreshed bundle's manifest SHA-256
+`559459ed07cdd3a4ba28a7b56beba01135e8f6af0bca272dde3cd9fbd0820275`
+identified a CPU Release archive that built the lab worker and local companion;
+the no-socket self-check passed and the companion enumerated software devices.
+An earlier unoptimized worker protocol run timed out on a large-message
+acknowledgement; its Release counterpart passed. These local checks do not
+qualify physical audio, network or RunPod operation, actual GPU work, receiver
+capacity, communication probability or unknown-calendar acquisition. No cloud
+pod was started for this validation. Earlier source-bound evidence remains
+subject to its stated limits.
+
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 
 The [HF operating results](indexes/robust.md#low-power-hf-alarm-results)

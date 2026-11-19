@@ -417,6 +417,60 @@ void reversible_admission_history() {
     check(recent.lines().size()==1&&small.items().empty());
     check(recent.retained_bytes()+small.retained_bytes()<=small.capacity());
 }
+void required_gpu_policy() {
+    using F=gui::ui::Field;
+    // A saved setting cannot override an embedding's requirement. When the
+    // compiled backend is unavailable, construction must fail rather than
+    // allow a CPU receiver to start.
+    gui::launch_command::Patch patch;patch.gpu=false;
+    if(!live::gpu_receiver_available()) {
+        bool rejected=false;
+        try {gui::Controller required({.simulation=true,.launch_settings=patch,.require_gpu=true});}
+        catch(const Error&) {rejected=true;}
+        check(rejected);
+        gui::Controller ordinary({.simulation=true,.launch_settings=patch});
+        check(!ordinary.settings().gpu);
+        return;
+    }
+    gui::Controller required({.simulation=true,.launch_settings=patch,.require_gpu=true});
+    check(required.settings().gpu&&required.field(F::gpu).checked&&!required.field(F::gpu).enabled);
+    required.toggle(F::gpu,false);
+    required.edit(F::link_power,"1 W");
+    check(required.settings().gpu&&required.field(F::gpu).checked&&!required.field(F::gpu).enabled);
+    auto command=required.field(F::planner_command).text;
+    const auto at=command.find("--gpu yes");check(at!=std::string::npos);
+    command.replace(at,9,"--gpu no");
+    required.edit(F::planner_command,command);
+    required.activate(gui::ui::Command::planner_load_command);
+    check(required.settings().gpu&&required.field(F::gpu).checked&&!required.field(F::gpu).enabled);
+    gui::Launch launch;launch.simulation=true;launch.require_gpu=true;
+    gui::Application application(launch);
+    application.select(F::fast_mode,"fast");
+    check(application.field(F::fast_mode).selected=="robust"&&!application.field(F::fast_mode).enabled);
+}
+void finite_duplex_policy() {
+    using F=gui::ui::Field;using C=gui::ui::Command;
+    gui::Controller ordinary({.simulation=true});
+    check(!ordinary.settings().finite_duplex);
+    gui::Controller finite({.finite_duplex=true});
+    check(finite.settings().finite_duplex&&!finite.settings().simulation&&finite.settings().full_duplex);
+    check(!finite.field(F::simulation).enabled&&!finite.field(F::live_duplex).enabled);
+    finite.select(F::simulation,"yes");finite.toggle(F::live_duplex,false);
+    check(finite.settings().finite_duplex&&!finite.settings().simulation&&finite.settings().full_duplex);
+    finite.edit(F::calendar_epoch,"1793850000");finite.edit(F::live_noise_dbfs_hz,"-92.25");
+    check(finite.settings().calendar&&finite.settings().live_noise_dbfs_hz);
+    auto command=finite.field(F::planner_command).text;
+    const auto at=command.find("--live-duplex yes");check(at!=std::string::npos);
+    command.replace(at,17,"--live-duplex no");
+    finite.edit(F::planner_command,command);finite.activate(C::planner_load_command);
+    check(finite.settings().finite_duplex&&!finite.settings().simulation&&finite.settings().full_duplex);
+    gui::Launch launch;launch.finite_duplex=true;
+    gui::Application app(launch);
+    app.select(F::fast_mode,"fast");
+    check(app.field(F::fast_mode).selected=="robust"&&!app.field(F::fast_mode).enabled);
+    app.select(F::fast_mode,"legacy");
+    check(app.field(F::fast_mode).selected=="robust");
+}
 void admission_browser_controller() {
     using F=gui::ui::Field;using C=gui::ui::Command;
     gui::Controller controller({.simulation=true});
@@ -488,6 +542,8 @@ int main() {
         received_text_boundary();
         reversible_admission_history();
         admission_browser_controller();
+        required_gpu_policy();
+        finite_duplex_policy();
         check(gui::parse_binary_bits("0")==Bytes({0}));
         check(gui::parse_binary_bits("000101")==Bytes({0,0,0,1,0,1}));
         check(gui::parse_binary_bits("\t00 01\r\n0\f1\v")==Bytes({0,0,0,1,0,1}));

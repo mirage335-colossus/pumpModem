@@ -246,6 +246,32 @@ browser row is marked rejected, including when recovery and a new episode occur
 between deliveries; it does not remain labelled as actively receiving. See the
 [persistent-reception audit](validation.md#persistent-reception-investigation--17-november-2026).
 
+The optional `finite_duplex` session setting is a one-message planning seam for
+a trusted, bounded audio provider, currently used by the experimental RunPod
+lab. It requires live full duplex, a configured public calendar and declared
+input noise density. Before exposing transmit samples, the receiver must commit
+two consecutive scored quiet slots and leave recovery. If later committed
+evidence revokes that quiet state while the provider is preparing or accepting
+the plan, transmission fails rather than using stale evidence.
+
+The locally prepared transmission determines an exclusive capture endpoint
+covering the observation of the second post-transmission quiet slot and the
+input filter halo. The provider must accept that exact logical-frame endpoint
+within its own explicit bounds before transmit scheduling. The endpoint limits
+local capture; it is not evidence of message completion. Receiver decisions
+still require two scored physical quiet slots after DATA, and early EOF,
+cancellation and missing samples cannot become quiet evidence. Received packet
+lengths do not select the endpoint or receiver geometry. The ordinary session
+keeps its existing behavior when finite duplex is off.
+
+A buffered provider may opt into blocking its PCM callback only if it owns and
+bounds its pending input, charges that workspace, preserves dated ordered
+samples and honors cancellation. The receiver keeps its bounded queue and
+applies backpressure to such a provider; a physical-device callback without
+this guarantee instead reports an overrun. The lab's remote audio integration
+and actual physical-device behavior remain unqualified; see its
+[implementation status](../_zLab/README.md).
+
 Unknown waveform epoch, ordinal and start-time acquisition remains outside this
 scope. A removed fresh-onset prototype admitted an active signal under a wrong
 ordinal-zero hypothesis: DATA-versus-noise evidence did not distinguish the

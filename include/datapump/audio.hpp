@@ -36,6 +36,20 @@ struct StreamFormat {
     // an interleaved hardware capture stream when known.
     std::uint32_t hardware_channels=0, logical_channels=1;
     std::optional<std::uint32_t> selected_capture_channel;
+    // Capture-only provider guarantee: the PCM callback may wait for receiver
+    // capacity without losing or replacing samples. The provider must own and
+    // bound pending input, include its memory in workspace_bytes, preserve
+    // sample dates and ordering, and honor cancellation. Physical-device
+    // providers leave this false: blocking their callback risks an input gap.
+    // Publish before the first PCM callback and keep fixed for that capture.
+    bool capture_callback_may_block=false;
+    // Optional finite-duplex provider contract. The consumer supplies an
+    // exclusive logical capture-frame endpoint derived from its locally
+    // configured transmit calendar and receive geometry. Return only after
+    // the physical capture owner has accepted that endpoint within its own
+    // byte/frame limit; throw on refusal, cancellation or a stale stream.
+    // The endpoint ends input, never establishes receiver completion.
+    std::function<void(std::uint64_t,std::stop_token)> capture_stop_at={};
 };
 using StreamFormatCallback = std::function<void(const StreamFormat&)>;
 enum class ChannelMode { left_mono, right_mono, stereo };
@@ -309,7 +323,9 @@ std::vector<float> record(double seconds,std::uint32_t rate,const std::string& d
                           std::size_t memory_limit,std::stop_token stop, StreamFormatCallback on_format, Options options);
 // A single open capture device supplies consecutive chunks of at most 50 ms.
 // Return false from the callback to finish normally; stop requests cancel with
-// Error, as for record/play. The callback must not perform slow decoding work.
+// Error, as for record/play. The callback must not perform slow decoding work;
+// only a provider that publishes capture_callback_may_block may wait for
+// bounded downstream capacity instead of reporting an overrun.
 using CaptureCallback = std::function<bool(std::span<const float>)>;
 void capture(std::uint32_t rate, const std::string& device,
              const CaptureCallback& on_chunk, std::stop_token stop = {}, StreamFormatCallback on_format = {});

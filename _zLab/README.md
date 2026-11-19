@@ -1,18 +1,237 @@
 # Standalone RunPod GUI for Robust modem simulations
 
-**Handoff for the next implementation chat, 18 November 2026.** Build an optional
-developer application in `_zLab/` that runs the canonical Robust receiver on a
-RunPod GPU or CPU. A local GUI should configure one simulation or one finite
-Live/Duplex transmission, show the received data and plots, and release the
-remote resources. FLTK is a suitable single backend. The user reserved
-implementation for the next chat. The existing runnable tools are the native
-receiver probe, the shared GUI and its Linux pipe worker.
+**Implementation status:** the developer tool integrates RunPod management,
+simulation and finite Live/Duplex controls with the native worker and local
+audio companion. The shared GUI runs through an SSH relay to a separately
+deployed worker. Local tests exercise native simulation and fake-device audio,
+and the desktop window rendered under Xvfb; complete remote operation and
+actual GPU execution have not been qualified.
+**Finite Live/Duplex with physical audio is still experimental and not
+qualified.** The live profile uses the native audio and transport components;
+the simulation bridge rejects audio frames. A fake-device transport test has
+covered capture stopping before a delayed drain, but delayed drain through the
+complete receiver, physical devices and remote transport remain unqualified.
+A locally enforced deadline
+requests termination only while the controller is running with the API key
+entered; it cannot guarantee termination or stop billing after the window closes.
 
-Keep the new application independently built and packaged. All RunPod API calls,
-SSH, transfers and credential handling belong to the lab tool. Data Pump must
-remain usable offline with its existing dependencies. Its modem, GUI, CLI and
-pipe worker must acquire no networking capability through this work. Source
-paths below were checked at revision `c2f0c172`.
+All RunPod API calls, SSH and credential handling belong to the separate lab
+tool. This work does not add networking to Data Pump's modem, GUI, CLI or
+socket-free pipe worker. The local lab currently runs from this source tree:
+it imports `tools/preview.py` and serves shared `tools/` and `web/` assets, so
+copying `_zLab/` alone does not produce an independently distributable package.
+
+## Local controller
+
+On Linux, run the controller from this checkout with Python 3 and its Tk module,
+an available graphical display, a web browser and OpenSSH:
+
+```sh
+python3 _zLab/app.py
+```
+
+Enter a RunPod API key in the masked field and load the catalog. The key is
+held for the session rather than written to the ownership records. The catalog
+matches RTX PRO 6000, RTX 5090 and RTX 4090 names and CPU types offering 32
+vCPUs and at least 128 GB, when present; a listed model is not proof of
+availability, actual allocation or GPU use. The image must support RunPod's
+SSH setup and an account public key. Creating a pod is a billable operation.
+
+The controller records its owned pod and queue requests under
+`${XDG_STATE_HOME:-$HOME/.local/state}/pumpModem/runpod-lab/` without the API
+key. After a lost response or restart, use **Reconcile owned pods** and inspect
+RunPod before attempting another creation. Cancel queued requests or terminate
+pods explicitly, then confirm their status with RunPod before using **Forget
+verified closed record**. A successful deletion request alone is not proof
+that billing stopped. Each creation requires a deadline; while the controller
+is open and the key is entered, it checks for expiration and requests
+termination or queue cancellation. This request is not confirmed automatically.
+No local deadline check can protect a pod while the application is closed or
+cannot contact the provider. Re-enter the API key after a restart, reconcile
+and verify the provider's status.
+
+The simulation action expects the lab relay at
+`/workspace/pump-lab/_zLab/worker_relay.py` and the native worker at
+`/workspace/pump-lab/build/lab/datapump-worker` on the selected running pod.
+Select the `simulation` worker profile and use **Deploy worker to selected pod**
+before opening the worker, or deploy it with the command below. The direct SSH host key must already be
+verified and present in the local `known_hosts`; the launcher does not disable
+host-key checks. Provider connection details alone do not establish the host
+key's authenticity. The bridge suppresses SSH stderr, so authentication,
+host-key and remote-launch errors can appear as a generic worker exit; diagnose
+those separately with a trusted SSH connection. The shared GUI's remote draft
+and test modem key material are sent to the pod; use a designated lab key.
+
+For an already running pod, [deploy.py](deploy.py) can upload an allowlisted
+source bundle and build the worker. It needs Python, CMake, a C++ toolchain,
+OpenSSL development headers and the relevant native build dependencies on the
+pod; CUDA additionally needs a compatible toolkit, driver and C++11-ABI
+CUDA-enabled LibTorch. The direct SSH port must be accessible and the account
+public key must be installed on the pod. Confirm the exact host key through an
+independent trusted channel before putting it in `known_hosts`; scanning a key
+over the connection alone does not authenticate it. With the verified host and
+port substituted below, and an SSH identity supplied explicitly or available
+through the SSH agent, the CPU build is requested by:
+
+```sh
+python3 _zLab/deploy.py --host POD_HOST --port POD_PORT --user root \
+  --known-hosts "$HOME/.ssh/known_hosts" --mode cpu
+```
+
+Use `--mode cuda` only with the CUDA prerequisites; this build route and the
+worker's CUDA behavior have not been tested on a pod. The helper defaults to
+CPU, which does not use an NVIDIA GPU. A GPU pod requires a CUDA build: the
+controller requests the worker's `--require-gpu` policy, which keeps Robust
+selected and GPU enabled, and rejects a CPU-only worker. An initialized backend
+or matching device selection does not prove that the receiver performed GPU
+work; inspect the actual backend, score rows and stage counters. The helper refuses an existing
+profile-specific directory rather than overwriting it. A timeout or lost
+SSH connection may leave remote work or files; inspect the pod before retrying.
+The helper does not stop the pod. The source archive remains on the pod for deployment
+verification; remove it after the build is verified and it is no longer needed
+for diagnosis, or terminate the pod when the job ends.
+
+Before opening a simulation, enter the same verified known-hosts file and,
+if needed, the same private-key path in the controller's SSH fields. These
+fields are separate from the deployment helper's `--known-hosts` and
+`--identity` arguments. The two SSH invocations bypass SSH configuration and
+proxies; supply a directly reachable endpoint and either an explicit identity
+or an SSH agent. Known-hosts and identity paths cannot contain whitespace,
+quotes, backslashes, `%` or `$`.
+
+After deployment, select the owned pod in the controller and open its
+simulation. This starts the shared GUI through the lab's loopback browser host
+and the pod's anonymous-pipe worker. It has not yet been verified end to end
+against RunPod or for all requested controls and views. Closing the browser or
+controller ends the connection, not the pod; use the explicit termination
+action and verify the provider's result.
+
+The experimental `live` profile deploys a separate lab worker under
+`/workspace/pump-lab-live`; it can coexist with a simulation deployment. The
+equivalent command-line deployment uses `--profile live` and an appropriate
+`--mode`. The controller's **Configure live audio limits** asks for a locally
+built native companion, a physical device, explicit capture and playback
+limits, and independently established clock uncertainty and drift bounds. Those
+values must cover the entire episode, including quiet slots and filter tails;
+an exhausted bound fails capture. These components and controls do not by
+themselves establish a qualified physical or remote live path.
+
+Build the local companion on Linux from the repository root, with CMake 3.21+,
+a C++20 toolchain, OpenSSL 3 development files and the project dependencies
+described in the [build guide](../docs/building.md). These commands configure a
+separate CPU Release build and compile only the companion target:
+
+```sh
+./build.sh configure --cli --web-worker --build-dir build/lab-local -- \
+  -DCMAKE_PROJECT_DataPump_INCLUDE="$PWD/_zLab/audio/inject.cmake" \
+  -DCMAKE_BUILD_TYPE=Release -DDATAPUMP_PORTABLE=OFF \
+  -DOPENSSL_USE_STATIC_LIBS=OFF
+cmake --build build/lab-local --target datapump-lab-audio --parallel 2
+```
+
+Enter the absolute path to `build/lab-local/datapump-lab-audio` in **Local
+companion executable**. Use **Refresh devices** in the controller, or run
+`build/lab-local/datapump-lab-audio --list-devices`, to enumerate local devices.
+Linux live audio requires the ALSA runtime `libasound.so.2` and a working
+device or audio server route. Enumeration does not prove the selected device's
+timestamp accuracy, duplex behavior or successful physical transmission.
+
+For local, non-billable component checks:
+
+```sh
+python3 -m unittest discover -s _zLab -p 'test_runpod.py' -v
+python3 -m unittest discover -s _zLab -p 'test_worker_relay.py' -v
+python3 -m unittest discover -s _zLab -p 'test_browser_bridge.py' -v
+python3 -m unittest discover -s _zLab -p 'test_app.py' -v
+python3 -m unittest discover -s _zLab -p 'test_bundle.py' -v
+python3 -m unittest discover -s _zLab -p 'test_deploy.py' -v
+```
+
+The browser bridge checks require permission to bind a loopback listener. The
+native-worker smoke check uses `build/dev-cli-web/datapump-worker` if available;
+build it as described below for that coverage. The fake provider and SSH tests
+do not contact RunPod or establish remote execution.
+
+The controller requires Python Tk. Its window rendered locally under Xvfb using
+temporary distribution Tk libraries; the ordinary Python environment used for
+development did not have Tk installed. That display check did not qualify a
+physical audio device or a RunPod session. The source bundle is distinct from
+the local controller and its browser assets.
+
+One local CPU test exercised the relay and native worker with a strong, simple
+link and draft `e`: it observed three DATA decisions, two scored QUIET slots,
+and the decoded message. Run this bounded, opt-in fixture with
+`LAB_RUN_SIMULATION=1 python3 -m unittest discover -s _zLab -p test_simulation.py -v`.
+It is a single functional case with a four-logical-thread affinity cap, not
+remote, GPU, sensitivity or capacity qualification. The provider, SSH and
+browser tests likewise do not establish actual RunPod hardware identity or
+GPU work.
+
+An earlier CPU build from the extracted worker bundle passed its no-socket
+self-check and the complete `tests/test_web_worker.py` suite in Release mode.
+An unoptimized build of that closure had timed out after 15 seconds while
+waiting for the large escaped-message acknowledgement; the Release result
+does not erase that failure. A later refreshed bundle, with manifest SHA-256
+`559459ed07cdd3a4ba28a7b56beba01135e8f6af0bca272dde3cd9fbd0820275`, built
+the CPU Release lab worker and audio companion. The worker self-check passed
+and the companion enumerated local software devices. This is not a source-tree
+hash, GPU execution result or physical-device qualification. The temporary
+build was removed; test-fixture changes after that build are separate. The
+current `CCACHE_DISABLE=1 ./build.sh test gui` run passed 32 of 32 tests in
+191.18 seconds; it does not qualify a physical device or a RunPod GPU.
+The triad group failed one of 45 tests: `triad_receiver_probe` did not find a
+`coarse_prepare` phase before its 32.01-second failure. A serial rerun passed;
+the cause of the original failure is unconfirmed. The
+[validation record](../docs/validation.md#native-finite-duplex-and-runpod-lab--18-november-2026)
+retains the original group failure and rerun separately.
+
+For the finite-audio boundary, the native GUI live test's
+`--capture-backpressure`, `--buffered-live` and `--finite-duplex` targeted
+checks passed locally. The first finite-duplex fixture had intermittently raced
+its synthetic source ahead of scheduling and reported changed quiet rearm;
+the targeted test passed after the fixture was corrected. The first integrated
+synthetic live run failed after 132 seconds because its zero audio-error
+assumption conflicted with nonzero timestamp uncertainty. A second attempt
+failed with missing frame type 229; the relay was a strong candidate, but
+suppressed child stderr left its cause unconfirmed. A separate older worker hit
+a 30-second playback-credit timeout before a future scheduled start; a targeted
+repair and a greater-than-30-second lead check followed.
+
+A later real-time, prehistory-free synthetic run passed in 424.725 seconds on
+CPU: the native session, relay, transport and fake device companion decoded
+`e`, with DATA decisions `001` and two scored QUIET rows after the last DATA
+row. The fixture did not check that their slot indices were adjacent, and the
+raw rows were not retained, so this observation does not establish consecutive
+quiet slots or independently verify physical completion. The worker and
+fake-companion SHA-256 values for that run were respectively
+`eecbba2d939e14edeb50d16b28571c4783d9f09294006519e0abed6a61d5fd80` and
+`5d978283405ea816ec8d4e62a518b416d5221e4ba906957fcef73493313ad7b5`. That run
+predates the repair of a false GUI "input ended" status.
+
+A subsequent stricter real-time fake-device CPU holdout passed in 380.327
+seconds without injected prehistory. It observed the native GUI decode `e`,
+consecutive DATA `0`, `0`, `1` decisions followed by consecutive QUIET,
+QUIET decisions, and the session's finite physical-completion drain status.
+The worker binary SHA-256 was
+`ca77684a472a7281843762c9053de812db86192e212170a6ab654c861c9a9495`; the
+fake-companion binary SHA-256 was
+`5d978283405ea816ec8d4e62a518b416d5221e4ba906957fcef73493313ad7b5`. These
+hashes identify those binaries, not an independent source-tree hash. The test
+did not intentionally slow the receiver or establish delayed backlog drain;
+the backpressure checks above are separate targeted tests. This one
+fake-loopback case does not qualify a physical device, the real network path,
+RunPod GPU execution or receiver capacity.
+
+A separate fake-device transport composition withheld capture credit until
+capture stopped and then verified the preserved samples and dates during
+drain, including early EOF and responsive GUI clock traffic. Three normal/EOF
+pairs passed, followed by an independent two-test pass. An earlier timeout had
+a likely buffered test-harness read race; the revised fixture passed these
+repeats. This is transport-level evidence, not a complete-receiver or physical
+backlog-capacity result.
+
+The remainder of this guide preserves the operating requirements, research
+findings and unfinished acceptance checks for the requested complete tool.
 
 ## Start from a known experiment
 
@@ -39,9 +258,9 @@ shorten a sweep of independent seeds, models or power levels. Each holds its
 own receiver and memory. An individual ordered stream uses the resources on
 its pod. Reuse an active compatible pod across a bounded batch.
 
-- Offer the full **RTX PRO 6000 Blackwell**, **RTX 5090**, **RTX 4090** and a
-  **32 vCPU / 128 GB RAM** CPU choice. Populate or validate the choices from
-  RunPod's current catalog. The full Blackwell Server Edition was the measured
+- The controller matches **RTX PRO 6000**, **RTX 5090**, **RTX 4090** and
+  **32 vCPU / at least 128 GB RAM** CPU types against RunPod's catalog. Verify
+  the exact GPU edition and full-device allocation. The full Blackwell Server Edition was the measured
   development device. Record what the pod actually exposes, including full
   device or partition, VRAM, host memory limit, effective CPU allocation and
   backend. A matching model name in the dropdown is only a request.
@@ -78,14 +297,15 @@ Follow the [RunPod deployment recipe](../docs/triad-performance.md#run-a-native-
 for selection, upload, native build, execution, retrieval and teardown. The
 campaign uploaded about 2 MB of allowlisted source and built on the pod. The
 [bundle builder](../tools/triad_gpu_bundle.py) packages the probe closure.
-A lab worker, launcher or extra GUI dependencies need their own verified
-build closure. Exclude local keys, payloads, recordings, build trees and
+The separate [lab bundle builder](bundle.py) adds the relay and the worker's
+native build closure; it is not the local GUI package. Exclude local keys,
+payloads, recordings, build trees and
 account records from source uploads. Cache large compatible dependencies on a
 network volume when that saves meaningful transfer/build time. Record who owns
 that volume and when it can be released.
 
-For the GUI, provide a masked, editable RunPod API-key field. Session-only
-storage is a suitable default. The API key authorizes pod management. SSH
+The GUI provides a masked, editable RunPod API-key field with session-only
+storage. The API key authorizes pod management. SSH
 authenticates the job connection, and the modem key selects the on-air waveform.
 Keep them separate. The pod executing an encrypted test needs the selected
 test's inputs and modem key material. Use an explicit lab key or test fixture
@@ -108,19 +328,20 @@ before `DELETE /pods/{id}`.
 [pod connection details](https://docs.runpod.io/api-reference-v2/pods/get-a-pod)
 and [SSH modes](https://docs.runpod.io/pods/configuration/use-ssh).
 
-Have the launcher persist its unique job name and returned pod ID in private
-user state. If creation times out, reconcile that name before retrying. After
-a crash, cancellation or transport loss, reopen the owned job, recover output
-when possible, and confirm termination. Enforce a job deadline and reconcile
-outstanding allocations on restart. The v2 creation schema does not supply an
-automatic termination deadline. Report any still-billable resource
+The controller persists a unique job name and returned pod or queue ID in
+private user state. If creation times out, reconcile that name before retrying.
+After a crash, cancellation or transport loss, reopen the owned job, recover
+output when possible, and confirm termination. The deadline is enforced only
+while the local controller runs with an API key, and automatic restart
+reconciliation remains unimplemented. The v2 creation schema does not supply
+an automatic termination deadline. Report any still-billable resource
 and separately owned cache volume. Read current spending authorization before
 launch. The previous campaign's private closeout is under
 `${XDG_STATE_HOME:-$HOME/.local/state}/pumpModem/runpod/2026-11-18-hf/` on the
 original host. It records how many instances ran, elapsed and summed compute
 time, estimated charges, peak concurrent rate and deletion confirmations.
 
-## What the local GUI must expose
+## Shared GUI controls and remaining requirements
 
 Bind controls to the production option IDs and validation. This includes
 editable numerical inputs and custom values as well as fixed dropdowns.
@@ -142,14 +363,13 @@ provider job settings separately typed. Send user-entered values as data.
 
 ## Reuse the native session and keep networking in the lab
 
-For the first simulation, the existing Linux `datapump-worker --simulation`
-already hosts the shared C++ application, settings, drafts and UI snapshots.
-A pod-side lab launcher can start it with local anonymous pipes and relay the
-framed events over authenticated SSH. The worker rejects a terminal, named FIFO
-or socket-backed stdio and enforces a no-socket sandbox. Keep that boundary
-when qualifying CUDA. If the driver cannot operate in that composition, use a
-lab-only native runner linked to the same modem and GPU libraries. Keep the
-standard worker policy intact. The native probe is the reference for physical
+For simulation, the existing Linux `datapump-worker --simulation` hosts the
+shared C++ application, settings, drafts and UI snapshots. The live profile
+uses a lab-only native worker linked to the same modem and GPU libraries, with
+its dated-audio provider. The lab relay starts each with local anonymous pipes
+and forwards framed events over SSH. The workers reject terminal, named FIFO
+or socket-backed stdio and enforce a no-socket sandbox. Preserve that boundary
+when qualifying CUDA. The native probe is the reference for physical
 outcomes and backend counters. Its fixed `message` fixture cannot replace
 arbitrary GUI drafts, audio capture or diagnostic views.
 [Worker build and tests](../docs/building.md#browser-application-and-pipe-worker),
@@ -191,9 +411,10 @@ Preserve local frame number, sample rate, UTC date and uncertainty, timing
 quality and discontinuities alongside each range of PCM. Network arrival time
 cannot date a sample. The current DPW1 capture frame contains stream position
 and PCM but lacks the provider UTC information required by Robust live RX.
-The native audio tool's `mapped-v1` also describes sample coordinates.
-Implement and verify the dated capture boundary in the lab adapter. Reject
-gaps or represent them as missing according to native receiver semantics.
+The lab's separate dated-audio boundary carries the required timing fields;
+its fake-device integration has been exercised, while physical timing and
+remote execution remain unqualified. Reject gaps or represent them as missing
+according to native receiver semantics.
 Use the existing native real-PCM projection, filter delay and validity
 tracking. An EOF, timeout or short capture must leave the result incomplete.
 [Native audio API](../include/datapump/audio.hpp), [dated live receiver](../src/live.cpp),
@@ -208,29 +429,31 @@ when plots refresh, spool in bounded chunks and surface overruns. Verify
 actual local device behavior separately from simulated or offline replay.
 [Audio timeline and flow control](../docs/web-protocol.md#audio-timeline).
 
-## First implementation and acceptance checks
+## Remaining acceptance checks
 
-1. Build the standalone GUI independently. Compare its resolved settings and
-   enabled choices with the production controller, including custom values and
-   partial-byte binary drafts. Build the ordinary Data Pump targets with the
-   lab absent. Check the link/package dependencies and the existing worker
-   no-socket tests.
-2. Exercise the local GUI and pod launcher against a local child plus a fake
-   provider. Run a short native simulation end to end. Inspect all six views,
-   cancel during setup and processing, simulate a lost create response and
-   recover a job after restart. Compare the returned samples/settings and
-   decisions to a matched native reference. Reserve the long HF replay for
-   a question a short fixture cannot answer.
+1. The local window, fake provider, native-worker simulation and component
+   boundaries have the scoped checks recorded above. Complete the comparison
+   of resolved settings and enabled choices with the production controller,
+   including custom values and partial-byte drafts. Verify independent packaging
+   and ordinary Data Pump targets with the lab absent.
+2. Beyond the short native `e` simulation already exercised, inspect all six
+   views, cancellation during setup and processing, and restart recovery in an
+   integrated GUI/provider session. Compare returned samples, settings and
+   decisions to a matched native reference. Reserve the long HF replay for a
+   question a short fixture cannot answer.
 3. Use one admitted GPU pod for a bounded native smoke test. Retrieve the
    hardware identity and evidence of executed GPU work, then verify teardown.
    Test the CPU choice as a CPU job. Keep the RTX 4090/5090 entries labelled
    by the coverage actually achieved. [Accelerator checks](../docs/gpu-precision-controls.md)
    and [representative receiver hardware](../docs/triad-performance.md#representative-receiver-hardware).
-4. For Live/Duplex, qualify local PCM and timestamps first, then capture real
-   playback on a loopback device or physical audio path and replay it through
-   the remote native receiver. Compare with local decoding of that *same*
-   capture. Test missing audio, delayed processing, early EOF and device
-   cancellation. Show both quiet slots in order before reporting delivery.
+4. For Live/Duplex, the fake-device holdout and bounded transport backlog and
+   EOF checks have passed within the scopes above. Still qualify local PCM and
+   timestamps on a real device, then capture real playback on a loopback device
+   or physical audio path and replay it through the remote native receiver.
+   Compare with local decoding of that *same* capture. Qualify missing audio,
+   deliberately delayed complete-receiver processing, early EOF and device
+   cancellation on the applicable physical and network path. Show both quiet
+   slots in order before reporting delivery.
    [Native session tests](../tests/test_gui_robust_live.cpp),
    [worker protocol tests](../tests/test_web_worker.py) and
    [host audio checks](../tests/test_host_audio.cpp).

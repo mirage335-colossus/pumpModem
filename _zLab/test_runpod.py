@@ -1,0 +1,129 @@
+"""Offline tests for the lab's provider API boundary."""
+
+import json
+import http.client
+import unittest
+import urllib.error
+
+from runpod import MAX_RESPONSE_BYTES, RunPodClient, RunPodError, _NoRedirect
+
+
+class FakeTransport:
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def __call__(self, method, url, headers, body, timeout):
+        self.calls.append((method, url, headers, body, timeout))
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        status, data = response
+        return status, data if isinstance(data, bytes) else json.dumps(data).encode()
+
+
+class RunPodTests(unittest.TestCase):
+    def test_catalog_and_authorization_header(self):
+        fake = FakeTransport((200, {"gpus": [{"id": "RTX"}]}),
+                             (200, {"cpus": [{"id": "cpu"}]}))
+        client = RunPodClient("secret-key", timeout=7, transport=fake)
+        self.assertEqual(client.list_gpus(), [{"id": "RTX"}])
+        self.assertEqual(client.list_cpus(), [{"id": "cpu"}])
+        self.assertEqual(fake.calls[0],
+                         ("GET", "https://api.runpod.io/v2/catalog/gpus",
+                          {"Authorization": "Bearer secret-key", "Accept": "application/json"},
+                          None, 7))
+        self.assertNotIn("secret-key", fake.calls[0][1])
+        self.assertNotIn("secret-key", repr(client))
+
+    def test_pagination_encodes_opaque_cursor(self):
+        fake = FakeTransport(
+            (200, {"pods": [{"id": "first"}], "pagination":
+                   {"hasNextPage": True, "nextCursor": "a& b/="}}),
+            (200, {"pods": [{"id": "second"}], "pagination":
+                   {"hasNextPage": False, "nextCursor": None}}))
+        client = RunPodClient("key", transport=fake)
+        self.assertEqual([p["id"] for p in client.list_pods()], ["first", "second"])
+        self.assertTrue(fake.calls[1][1].endswith("?limit=100&cursor=a%26+b%2F%3D"))
+
+    def test_repeated_cursor_is_error(self):
+        page = {"pods": [], "pagination": {"hasNextPage": True, "nextCursor": "same"}}
+        client = RunPodClient("key", transport=FakeTransport((200, page), (200, page)))
+        with self.assertRaises(RunPodError):
+            client.list_pods()
+
+    def test_pod_actions_encode_data_and_path(self):
+        fake = FakeTransport((201, {"id": "id"}), (200, {"id": "id"}), (204, b""))
+        client = RunPodClient("key", transport=fake)
+        config = {"name": "demo\nnot a shell command", "image": "image", "gpu": {"id": "a", "count": 1}}
+        self.assertEqual(client.create_pod(config), (201, {"id": "id"}))
+        self.assertEqual(json.loads(fake.calls[0][3]), config)
+        self.assertEqual(fake.calls[0][2]["Content-Type"], "application/json")
+        self.assertEqual(client.get_pod("id/../name?x"), {"id": "id"})
+        self.assertTrue(fake.calls[1][1].endswith("/pods/id%2F..%2Fname%3Fx"))
+        client.delete_pod("id")
+        self.assertEqual(fake.calls[2][0], "DELETE")
+        with self.assertRaises(ValueError):
+            client.get_pod("..")
+
+    def test_queued_request_is_distinct_from_pod(self):
+        fake = FakeTransport(
+            (202, {"id": "queue/1", "status": "QUEUED", "podId": None}),
+            (200, {"queuedPods": [{"id": "queue/1", "podId": "pod/1"}],
+                   "pagination": {"hasNextPage": False, "nextCursor": None}}),
+            (200, {"id": "queue/1", "status": "DEPLOYED", "podId": "pod/1"}),
+            (204, b""))
+        client = RunPodClient("key", transport=fake)
+        status, request = client.create_pod({"name": "job"})
+        self.assertEqual(status, 202)
+        self.assertIsNone(request["podId"])
+        self.assertEqual(client.list_queued()[0]["podId"], "pod/1")
+        self.assertEqual(client.get_queued(request["id"])["podId"], "pod/1")
+        client.cancel_queued(request["id"])
+        self.assertTrue(fake.calls[1][1].endswith("/queued-pods?limit=100"))
+        self.assertTrue(fake.calls[2][1].endswith("/queued-pods/queue%2F1"))
+        self.assertEqual(fake.calls[3][0], "DELETE")
+        self.assertTrue(fake.calls[3][1].endswith("/queued-pods/queue%2F1"))
+
+    def test_truncated_http_mutation_is_uncertain(self):
+        fake = FakeTransport(http.client.IncompleteRead(b"token-must-not-leak"))
+        client = RunPodClient("key", transport=fake)
+        with self.assertRaises(RunPodError) as caught:
+            client.create_pod({})
+        self.assertTrue(caught.exception.uncertain)
+        self.assertNotIn("token-must-not-leak", str(caught.exception))
+
+    def test_failures_preserve_uncertainty_and_hide_response(self):
+        fake = FakeTransport((401, b"secret-key was included by server"),
+                             (503, b"secret-key"),
+                             TimeoutError("secret-key"),
+                             (201, b"not json"),
+                             (200, b"x" * (MAX_RESPONSE_BYTES + 1)))
+        client = RunPodClient("secret-key", transport=fake)
+        for operation, status, uncertain in [
+            (client.list_gpus, 401, False),
+            (lambda: client.create_pod({}), 503, True),
+            (lambda: client.create_pod({}), None, True),
+            (lambda: client.create_pod({}), None, True),
+            (client.list_cpus, None, False),
+        ]:
+            with self.assertRaises(RunPodError) as caught:
+                operation()
+            self.assertEqual(caught.exception.status, status)
+            self.assertEqual(caught.exception.uncertain, uncertain)
+            self.assertNotIn("secret-key", str(caught.exception))
+
+    def test_redirects_are_not_followed(self):
+        self.assertIsNone(_NoRedirect().redirect_request(None, None, 302, "", {}, "https://elsewhere/"))
+
+    def test_credentials_and_timeout_validation(self):
+        for token in ("", "a b", "a\nb", "é"):
+            with self.assertRaises(ValueError):
+                RunPodClient(token)
+        for timeout in (0, -1, float("nan"), float("inf")):
+            with self.assertRaises(ValueError):
+                RunPodClient("key", timeout=timeout)
+
+
+if __name__ == "__main__":
+    unittest.main()

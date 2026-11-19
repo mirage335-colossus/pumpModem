@@ -19,6 +19,8 @@ struct Launch {
     ui::Page page=ui::Page::console;
     std::filesystem::path smoke_directory;
     std::optional<launch_command::Patch> settings;
+    bool require_gpu=false; // Embedding policy, independent of user settings.
+    bool finite_duplex=false; // Lab embedding: one physical-audio episode.
 };
 struct WindowSizing {
     int width=ui::default_width,height=ui::default_height;

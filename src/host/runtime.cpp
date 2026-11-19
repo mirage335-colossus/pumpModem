@@ -52,7 +52,7 @@ struct Runtime::Impl {
     std::string last_snapshot;
     int width=1000,height=760;
     bool force_snapshot=true,closed_sent=false;
-    explicit Impl(std::filesystem::path path,bool simulation):application([&]{gui::Launch launch;launch.simulation=simulation;return launch;}()),bridge(application),workspace(std::move(path)) {application.start();}
+    explicit Impl(std::filesystem::path path,bool simulation,bool require_gpu,bool finite_duplex):application([&]{gui::Launch launch;launch.simulation=simulation;launch.require_gpu=require_gpu;launch.finite_duplex=finite_duplex;return launch;}()),bridge(application),workspace(std::move(path)) {application.start();}
     void send(Type type,Writer body={}) {send_frame({type,std::move(body.bytes)});}
     void send_frame(Frame frame) {
         // Coalesce only complete unsent snapshots. Never remove an audio packet
@@ -120,7 +120,7 @@ struct Runtime::Impl {
         }
     }
 };
-Runtime::Runtime(std::filesystem::path workspace,bool simulation):impl_(std::make_unique<Impl>(std::move(workspace),simulation)){}
+Runtime::Runtime(std::filesystem::path workspace,bool simulation,bool require_gpu,bool finite_duplex):impl_(std::make_unique<Impl>(std::move(workspace),simulation,require_gpu,finite_duplex)){}
 Runtime::~Runtime(){audio_endpoint().close();impl_->application.close();}
 void Runtime::accept(const Frame& frame,bool file_authority) {
     auto& p=*impl_;Reader in(frame.payload);

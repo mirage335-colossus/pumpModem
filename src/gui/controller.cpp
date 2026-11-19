@@ -606,8 +606,16 @@ struct Controller::Impl {
             if(simulation_off)f(UiField::simulation).selected="no";
             sync_link_fields();
         }
+        // Enforce the embedding policy after every loaded patch, including
+        // saved settings that previously selected CPU execution.
+        if(options.require_gpu)f(UiField::gpu).checked=true;
+        if(options.finite_duplex) {
+            f(UiField::simulation).selected="no";
+            f(UiField::live_duplex).checked=true;
+        }
         settings.device=f(UiField::device).text;settings.simulation=f(UiField::simulation).selected=="yes";
         settings.full_duplex=f(UiField::live_duplex).checked;settings.exclusive=f(UiField::exclusive).checked;
+        settings.finite_duplex=options.finite_duplex;
         settings.gpu=f(UiField::gpu).checked;
         settings.tx_dbm=planner_inputs.tx_dbm;settings.path_loss_db=planner_inputs.path_loss_db;
         settings.noise_dbm_hz=planner_inputs.noise_density_dbm_hz;settings.target_cn0_db_hz=planner_inputs.target_db_hz;
@@ -1043,7 +1051,11 @@ struct Controller::Impl {
             UiField::fec,UiField::dsp_workspace,UiField::snr,UiField::planner_target,
             UiField::search_arithmetic,UiField::receiver_strategy,UiField::receiver_cpu_budget})
             f(id).enabled=!closing&&!busy;
-        f(UiField::gpu).enabled=!closing&&!busy&&live::gpu_receiver_available();
+        f(UiField::gpu).enabled=!closing&&!busy&&!options.require_gpu&&live::gpu_receiver_available();
+        if(options.finite_duplex) {
+            f(UiField::simulation).enabled=false;
+            f(UiField::live_duplex).enabled=false;
+        }
         for(const auto id:{UiField::callsign,UiField::grid})f(id).enabled=!closing;
         f(UiField::oscillator_reference).visible=false;f(UiField::oscillator_reference).enabled=false;
         f(UiField::message).enabled=f(UiField::binary).enabled=f(UiField::short_bits).enabled=!attachment&&!closing;

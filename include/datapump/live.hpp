@@ -19,6 +19,10 @@ struct Settings {
     transfer::Options transfer;
     std::string device="default";
     bool mono=true,simulation=false,full_duplex=false,exclusive=false;
+    // Trusted one-message device provider: wait for scored quiet rearm and
+    // publish a bounded physical capture endpoint before exposing TX samples.
+    // Ordinary device and simulation sessions retain their existing behavior.
+    bool finite_duplex=false;
     // Local processing choice; it does not change the on-air profile.
     bool gpu=false;
     // Reversible browser filter; the GUI receiver always preserves Current

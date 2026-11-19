@@ -8,7 +8,8 @@ namespace datapump::host {
 // Worker. file_authority is supplied by the embedding host, never a frame bit.
 class Runtime {
 public:
-    explicit Runtime(std::filesystem::path workspace,bool simulation=false);
+    explicit Runtime(std::filesystem::path workspace,bool simulation=false,bool require_gpu=false,
+                     bool finite_duplex=false);
     ~Runtime();
     void accept(const protocol::Frame&,bool file_authority=false);
     void tick();

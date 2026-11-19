@@ -6,6 +6,8 @@
 #include "datapump/robust_profile.hpp"
 #include "datapump/triad_acceleration.hpp"
 #include "datapump/triad_stream_receiver.hpp"
+#include "live_capture_queue.hpp"
+#include "live_finite_plan.hpp"
 #include "search_fft.hpp"
 #include "triad_receiver_bulk.hpp"
 
@@ -290,27 +292,8 @@ void receiver_ok(const StreamReceiverReport& report) {
         throw Error(report.reason.empty() ? "Robust receiver could not admit the configured public window" : report.reason);
 }
 
-struct CaptureChunk {
-    std::vector<float> pcm;
-    std::optional<audio::TimePrediction> timestamp;
-    std::uint64_t first = 0;
-};
-
-struct CaptureQueue {
-    execution::Mutex mutex;
-    execution::StopCondition changed;
-    std::deque<CaptureChunk> chunks;
-    std::optional<audio::TimePrediction> timestamp;
-    std::uint64_t next_sample = 0;
-    std::size_t queued_samples = 0, provider_bytes = 0;
-    bool done = false;
-    std::string error;
-    void fail(std::string text) {
-        std::lock_guard lock(mutex);
-        if (error.empty()) error = std::move(text);
-        changed.notify_all();
-    }
-};
+using detail::CaptureChunk;
+using detail::CaptureQueue;
 
 struct ReceiveDisplay {
     std::optional<std::uint64_t> pending_slot;
@@ -338,6 +321,18 @@ struct Session::Impl {
     bool started = false, suspended = false, stopping = false, stopped = false, resources_owned = false;
     std::map<KeyTag, long double> used_until;
     long double separated_after = 0;
+    // Accessed only under mutex; the receive owner publishes committed quiet
+    // receipts and the exact dated geometry to the transmit owner. This state
+    // belongs to one settings generation and one finite capture stream.
+    struct FiniteCapture {
+        std::optional<PublicProfile> waveform;
+        std::function<void(std::uint64_t,std::stop_token)> stop_at;
+        std::int64_t first = 0;
+        std::uint64_t halo = 0, last_quiet = 0, endpoint = 0;
+        unsigned quiet = 0;
+        bool ready = false, ended = false, claimed = false, planned = false;
+        bool cutoff_accepted = false, exact_input_drained = false, physical_complete = false;
+    } finite;
 
     ~Impl() {
         manager.request_stop();
@@ -464,6 +459,19 @@ struct Session::Impl {
         const auto report = receiver.report();
         if (slots.empty() && messages.empty()) return;
         publish(owner, stop, [&](Snapshot& out) {
+            if (s.finite_duplex && !finite.planned && !finite.ended) {
+                for (const auto& row : slots) {
+                    const bool quiet = QuietSlotMessageReceiver::classification(row.score) == SlotDecision::quiet;
+                    if (!quiet) finite.quiet = 0;
+                    else if (finite.quiet && finite.last_quiet != UINT64_MAX && row.score.index == finite.last_quiet + 1)
+                        finite.quiet = std::min(2U, finite.quiet + 1);
+                    else finite.quiet = 1;
+                    finite.last_quiet = row.score.index;
+                }
+                finite.ready = finite.quiet >= 2 && !report.recovering &&
+                    !report.episode_first_public_slot && !report.pending_messages &&
+                    report.state == StreamReceiverState::receiving;
+            }
             for (const auto& row : slots) {
                 if (out.pattern_steps.size() == history_size) out.pattern_steps.erase(out.pattern_steps.begin());
                 out.pattern_steps.push_back(pattern_step(row));
@@ -471,6 +479,8 @@ struct Session::Impl {
             for (auto& event : messages) {
                 auto& message = event.message;
                 if (!message.physical_complete) continue;
+                if (s.finite_duplex && finite.planned && finite.cutoff_accepted)
+                    finite.physical_complete = true;
                 const bool matched = display.pending_slot == event.first_public_slot;
                 SignalUpdate signal;
                 signal.id = matched ? display.pending_id : next_id++;
@@ -549,6 +559,7 @@ struct Session::Impl {
             signal.text = "Receiving Robust content";
             append_signal(std::move(signal));
         });
+        if (s.finite_duplex) changed.notify_all();
     }
 
     void accept(CompleteStreamReceiver& receiver, ReceiveDisplay& display, const Settings& s,
@@ -620,6 +631,7 @@ struct Session::Impl {
         PlotMeter meter(rate);
         const auto segment = new_plot_segment();
         CaptureQueue queue;
+        std::function<void(std::uint64_t,std::stop_token)> finite_stop_at;
         const auto queue_limit = static_cast<std::size_t>(rate) * 2;
         execution::Task capture([&](std::stop_token capture_stop) {
             try {
@@ -634,30 +646,18 @@ struct Session::Impl {
                 };
                 options.capture_discontinuity = [&] { queue.fail("Robust capture lost dated sample continuity"); };
                 audio::capture(rate, s.device, [&](std::span<const float> samples) {
-                    std::lock_guard lock(queue.mutex);
-                    if (!queue.error.empty() || stop.stop_requested()) return false;
-                    if (samples.size() > queue_limit - queue.queued_samples ||
-                        queue.chunks.size() >= 256) {
-                        queue.error = "Robust input backlog overrun; capture stopped with missing samples";
-                        queue.changed.notify_all();
-                        return false;
-                    }
-                    if (samples.size() > UINT64_MAX - queue.next_sample) {
-                        queue.error = "Robust capture sample coordinate overflow";
-                        queue.changed.notify_all();
-                        return false;
-                    }
-                    queue.chunks.push_back({{samples.begin(), samples.end()},
-                                           std::exchange(queue.timestamp, {}), queue.next_sample});
-                    queue.queued_samples += samples.size();
-                    queue.next_sample += samples.size();
-                    queue.changed.notify_all();
-                    return true;
+                    std::unique_lock lock(queue.mutex);
+                    return queue.push(lock, samples, queue_limit,
+                        std::min(audio_chunk, static_cast<std::size_t>(rate) / 20), stop, capture_stop);
                 }, capture_stop, [&](const audio::StreamFormat& format) {
                     if (format.usable_passband_hz < base.maximum_audio_hz)
                         throw Error("Robust receive band exceeds the selected device passband");
+                    if (s.finite_duplex && (!format.capture_callback_may_block || !format.capture_stop_at))
+                        throw Error("Finite Robust duplex requires a bounded, dated capture provider");
                     std::lock_guard lock(queue.mutex);
                     queue.provider_bytes = format.workspace_bytes;
+                    queue.capture_callback_may_block = format.capture_callback_may_block;
+                    finite_stop_at = format.capture_stop_at;
                 }, std::move(options));
             } catch (const std::exception& error) {
                 if (!capture_stop.stop_requested() && !stop.stop_requested()) queue.fail(error.what());
@@ -672,6 +672,7 @@ struct Session::Impl {
         std::optional<audio::TimePrediction> origin_stamp;
         std::int64_t capture_first = 0;
         std::uint64_t observation_first = 0;
+        std::uint64_t consumed_capture_frames = 0;
         std::unique_ptr<CompleteStreamReceiver> receiver;
         // The stop callback that refers to receiver is installed after its
         // construction and is destroyed before the receiver itself.
@@ -683,6 +684,7 @@ struct Session::Impl {
             while (!stop.stop_requested()) {
                 CaptureChunk chunk;
                 std::size_t provider_bytes = 0;
+                std::function<void(std::uint64_t,std::stop_token)> capture_endpoint;
                 {
                     std::unique_lock lock(queue.mutex);
                     queue.changed.wait_for(lock, stop, std::chrono::milliseconds(30),
@@ -690,10 +692,9 @@ struct Session::Impl {
                     if (stop.stop_requested()) break;
                     if (!queue.error.empty()) throw Error(queue.error);
                     if (!queue.chunks.empty()) {
-                        chunk = std::move(queue.chunks.front());
-                        queue.chunks.pop_front();
-                        queue.queued_samples -= chunk.pcm.size();
+                        chunk = queue.pop();
                         provider_bytes = queue.provider_bytes;
+                        if (s.finite_duplex && !origin_stamp) capture_endpoint = finite_stop_at;
                     } else if (queue.done) {
                         if (receiver) {
                             // Only already accepted complete windows can be
@@ -711,6 +712,10 @@ struct Session::Impl {
                     }
                     continue;
                 }
+                if (chunk.first != consumed_capture_frames ||
+                    chunk.pcm.size() > UINT64_MAX - consumed_capture_frames)
+                    throw Error("Robust capture frame sequence is invalid");
+                consumed_capture_frames += chunk.pcm.size();
                 if (!chunk.timestamp || chunk.timestamp->quality == audio::TimingQuality::unavailable)
                     throw Error("This audio device did not provide dated capture for the configured Robust calendar");
                 const auto& stamp = *chunk.timestamp;
@@ -759,6 +764,19 @@ struct Session::Impl {
                     receiver = std::make_unique<CompleteStreamReceiver>(adjusted.waveform, adjusted.receiver,
                         adjusted.key, options, message_profile(s));
                     interrupt.emplace(stop, [owned = receiver.get()] { owned->request_cancel(); });
+                    if (s.finite_duplex) {
+                        if (!capture_endpoint) throw Error("Finite Robust capture endpoint is unavailable");
+                        {
+                            std::lock_guard lock(mutex);
+                            if (owner != generation || stop.stop_requested() || stopping || finite.ended)
+                                throw Error("Finite Robust capture ended before planning");
+                            finite.waveform = adjusted.waveform;
+                            finite.first = capture_first;
+                            finite.halo = input.halo_samples();
+                            finite.stop_at = std::move(capture_endpoint);
+                        }
+                        changed.notify_all();
+                    }
                     publish(owner, stop, [&](Snapshot& out) {
                         out.receiver_error.clear();
                         if (!out.transmitting) out.status = stamp.quality == audio::TimingQuality::bounded
@@ -788,6 +806,12 @@ struct Session::Impl {
                 for (std::size_t at = skip; at < iq.size(); at += audio_chunk)
                     accept(*receiver, display, s, supplied + at - skip,
                         std::span(iq).subspan(at, std::min(audio_chunk, iq.size() - at)), {}, owner, stop);
+            }
+            if (s.finite_duplex && !stop.stop_requested()) {
+                std::lock_guard lock(mutex);
+                if (owner == generation)
+                    finite.exact_input_drained = finite.cutoff_accepted &&
+                        consumed_capture_frames == finite.endpoint;
             }
         } catch (...) {
             if (receiver) receiver->request_cancel();
@@ -941,6 +965,20 @@ struct Session::Impl {
                    std::uint64_t owner, std::stop_token stop) {
         if (!audio::utc_follow_supported())
             throw Error("The selected audio provider cannot schedule the configured Robust calendar");
+        if (s.finite_duplex) {
+            if (send.mode != EmissionMode::Message)
+                throw Error("Finite Robust duplex permits one message transmission only");
+            std::unique_lock lock(mutex);
+            changed.wait(lock, stop, [&] {
+                return owner != generation || stopping || suspended || finite.ended || finite.claimed ||
+                    (finite.ready && finite.waveform && finite.stop_at);
+            });
+            if (stop.stop_requested() || owner != generation || stopping || suspended)
+                throw Error("Finite Robust duplex cancelled before quiet rearm");
+            if (finite.ended || finite.claimed || !finite.ready || !finite.waveform || !finite.stop_at)
+                throw Error("Finite Robust capture ended or was already used before transmission");
+            finite.claimed = true;
+        }
         const auto rate = s.transfer.modem.sample_rate;
         const auto& calendar = active.waveform;
         const auto noise = send.mode == EmissionMode::Noise;
@@ -1023,6 +1061,13 @@ struct Session::Impl {
             first_slot = earliest_tx_slot(active, audio::minimum_lead_seconds() + 3);
             {
                 std::lock_guard lock(mutex);
+                if (s.finite_duplex) {
+                    if (finite.ended || !finite.claimed || !finite.ready)
+                        throw Error("Finite Robust quiet rearm was lost before TX planning");
+                    first_slot = std::max(first_slot, add_slot(finite.last_quiet, 1));
+                    if (first_slot > calendar.last_slot())
+                        throw Error("Finite Robust capture has no public TX slot after quiet rearm");
+                }
                 if (!send.force && overlap_locked(active, first_slot, send.mode))
                     throw Error("Robust transmit locked because this key has already used that address");
                 const auto first = calendar.transmit_slot(first_slot);
@@ -1034,6 +1079,32 @@ struct Session::Impl {
             last_slot = add_slot(first_slot, slots - 1);
             if (!noise && add_slot(last_slot, 2) > calendar.last_slot())
                 throw Error("The configured Robust calendar has no room for two quiet slots after this draft");
+            if (s.finite_duplex) {
+                std::function<void(std::uint64_t,std::stop_token)> stop_at;
+                std::uint64_t endpoint = 0;
+                {
+                    std::lock_guard lock(mutex);
+                    if (owner != generation || stopping || suspended || finite.ended ||
+                        !finite.claimed || !finite.waveform || !finite.stop_at)
+                        throw Error("Finite Robust capture ended before the TX plan was admitted");
+                    endpoint = detail::finite_capture_frames(*finite.waveform, last_slot, finite.first, finite.halo);
+                    if (!endpoint) throw Error("Finite Robust capture endpoint is already past");
+                    stop_at = finite.stop_at;
+                }
+                // The provider waits for the physical capture owner to accept
+                // this exact endpoint and its configured local resource bound.
+                // No private emission or playback schedule exists before ACK.
+                stop_at(endpoint, stop);
+                cancelled(stop);
+                {
+                    std::lock_guard lock(mutex);
+                    if (owner != generation || stopping || suspended || finite.ended ||
+                        !finite.ready || finite.last_quiet >= first_slot)
+                        throw Error("Finite Robust capture ended before TX scheduling");
+                    finite.endpoint = endpoint;
+                    finite.cutoff_accepted = true;
+                }
+            }
             next_reservation = first_slot;
             const auto first = calendar.transmit_slot(first_slot);
             source_first = calendar.calendar().distance(calendar.origin(), first.helper_begin);
@@ -1052,7 +1123,20 @@ struct Session::Impl {
             const auto start = utc_time(first.helper_begin, rate);
             if (start < utc_now() + audio::minimum_lead_seconds())
                 throw Error("Robust preparation missed the configured public start; retry on a later slot");
+            if (s.finite_duplex) {
+                std::lock_guard lock(mutex);
+                if (owner != generation || stopping || suspended || finite.ended ||
+                    !finite.ready || finite.last_quiet >= first_slot)
+                    throw Error("Finite Robust quiet rearm changed before TX scheduling");
+            }
             audio::schedule_output(static_cast<double>(start), stop);
+            if (s.finite_duplex) {
+                std::lock_guard lock(mutex);
+                if (owner != generation || stopping || suspended || finite.ended ||
+                    !finite.ready || finite.last_quiet >= first_slot)
+                    throw Error("Finite Robust quiet rearm changed while TX was scheduled");
+                finite.planned = true;
+            }
             publish(owner, stop, [&](Snapshot& out) {
                 out.status = "Robust audio scheduled for UTC second " + std::to_string(first.helper_begin.epoch);
             });
@@ -1151,18 +1235,41 @@ struct Session::Impl {
             execution::Task capture;
             auto start_capture = [&] {
                 if (s.simulation || !s.live_noise_dbfs_hz) return;
+                if (s.finite_duplex) {
+                    std::lock_guard lock(mutex);
+                    finite = {};
+                }
                 capture = execution::Task([&, active](std::stop_token capture_stop) {
                     try {
                         receive_live(*active, s, owner, capture_stop);
-                        publish(owner, capture_stop, [](Snapshot& out) {
-                            out.receiver_error = "Robust audio input ended.";
-                            if (!out.transmitting) out.status = out.receiver_error;
+                        publish(owner, capture_stop, [&](Snapshot& out) {
+                            if (s.finite_duplex && finite.exact_input_drained && finite.physical_complete) {
+                                out.receiver_error.clear();
+                                if (!out.transmitting) out.status = "Finite Robust capture drained after physical completion";
+                            } else {
+                                out.receiver_error = !s.finite_duplex ? "Robust audio input ended." :
+                                    finite.physical_complete ? "Finite Robust input ended before its planned capture endpoint." :
+                                    finite.exact_input_drained ? "Finite Robust capture ended without a physically complete message." :
+                                    "Finite Robust input ended before physical completion.";
+                                if (!out.transmitting) out.status = out.receiver_error;
+                            }
                         });
                     } catch (const std::exception& error) {
                         publish(owner, capture_stop, [&](Snapshot& out) {
                             out.receiver_error = error.what();
                             if (!out.transmitting) out.status = out.receiver_error;
                         });
+                    }
+                    if (s.finite_duplex) {
+                        {
+                            std::lock_guard lock(mutex);
+                            if (owner == generation) {
+                                finite.ended = true;
+                                finite.ready = false;
+                                finite.stop_at = {};
+                            }
+                        }
+                        changed.notify_all();
                     }
                 });
             };
@@ -1313,6 +1420,10 @@ struct Session::Impl {
         if (stopping || suspended || !started) throw Error(no_transmitter);
         if (current.transmitting || request) throw Error("A Robust transmission is already active");
         if (!profile) throw Error(current.transmit_unavailable.value_or(preparing));
+        if (settings.finite_duplex && (!settings.calendar || !settings.live_noise_dbfs_hz))
+            throw Error("Finite Robust duplex requires a calendar and input noise density");
+        if (settings.finite_duplex && mode != EmissionMode::Message)
+            throw Error("Finite Robust duplex permits one message transmission only");
         if (mode == EmissionMode::Message && !raw &&
             (input.empty() || input.size() > message_profile(settings).content_limit))
             throw Error("Robust text is empty or exceeds its local content quota");

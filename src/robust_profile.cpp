@@ -131,6 +131,8 @@ bool gpu_receiver_available() noexcept {
 }
 
 void validate_settings(const Settings& s) {
+    check(!s.finite_duplex || (!s.simulation && s.full_duplex),
+          "Finite Robust duplex requires live full duplex");
     (void)triad::v3::parse_wrong_key_admission(s.wrong_key_admission);
     check(!s.gpu || gpu_receiver_available(), "GPU reception is unavailable in this build (CUDA or Vulkan support required)");
     modem::validate(s.transfer.modem);

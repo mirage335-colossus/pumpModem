@@ -3,6 +3,8 @@
 #include "datapump/robust_profile.hpp"
 #include "datapump/triad_message_receiver.hpp"
 #include "datapump/triad_stream_receiver.hpp"
+#include "../src/live_capture_queue.hpp"
+#include "../src/live_finite_plan.hpp"
 
 #include <algorithm>
 #include <array>
@@ -10,6 +12,8 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <limits>
+#include <future>
 #include <mutex>
 #include <numbers>
 #include <random>
@@ -23,7 +27,14 @@ using namespace std::chrono_literals;
 namespace fixture {
 std::mutex mutex;
 std::atomic<unsigned> capture_opens{0}, capture_active{0}, playback_opens{0}, playback_active{0};
+std::atomic<unsigned> callback_started{0}, callback_finished{0};
 std::atomic<bool> capture_overlap{false}, hold_playback{false};
+std::atomic<bool> hold_capture{false}, reject_capture_endpoint{false};
+std::atomic<bool> hold_playback_format{false}, hold_endpoint_ack{false}, endpoint_started{false};
+std::atomic<bool> pause_released{true}, capture_paused{false};
+std::atomic<bool> loopback_ready{false};
+std::atomic<std::uint64_t> capture_position{0};
+std::atomic<std::uint64_t> capture_endpoint{0};
 std::string capture_device, playback_device;
 audio::Options capture_options, playback_options;
 audio::ChannelMode playback_channels = audio::ChannelMode::stereo;
@@ -31,9 +42,16 @@ std::size_t playback_samples = 0;
 bool scheduled = false;
 std::optional<long double> scheduled_epoch;
 std::vector<float> playback_prefix;
+std::vector<float> loopback_pcm;
+std::optional<long double> loopback_epoch;
 struct CaptureInput {
     std::vector<float> samples;
     long double first_utc = 0;
+    bool callback_may_block = false, repeat = false, burst = false, finite = false, loopback = false;
+    bool loopback_silence = false, short_after_cutoff = false;
+    std::optional<std::size_t> loopback_playback_limit;
+    std::size_t chunk_size = 128;
+    std::optional<std::size_t> pause_after;
 };
 std::shared_ptr<const CaptureInput> capture_input;
 }
@@ -55,11 +73,40 @@ void capture(std::uint32_t rate, const std::string& device, const CaptureCallbac
         input = fixture::capture_input;
     }
     ++fixture::capture_opens;
-    if (format) format({rate, rate, rate * .49, 4096});
+    if (format) {
+        StreamFormat actual{rate, rate, rate * .49, 4096};
+        actual.capture_callback_may_block = input && input->callback_may_block;
+        if (actual.capture_callback_may_block) actual.workspace_bytes += input->samples.size() * sizeof(float);
+        if (input && input->finite) actual.capture_stop_at = [input](std::uint64_t endpoint, std::stop_token stop) {
+            fixture::endpoint_started = true;
+            while (fixture::hold_endpoint_ack && !stop.stop_requested()) std::this_thread::sleep_for(2ms);
+            if (stop.stop_requested() || fixture::reject_capture_endpoint)
+                throw Error("Fixture refused finite capture endpoint");
+            if (input->loopback && (endpoint <= fixture::capture_position || endpoint > 600000))
+                throw Error("Fixture rejected late or oversized finite capture endpoint");
+            fixture::capture_endpoint = endpoint;
+        };
+        format(actual);
+    }
     if (input) {
         if (!options.capture_timing) throw Error("Native Robust did not request dated capture");
-        for (std::size_t at = 0; at < input->samples.size() && !stop.stop_requested();) {
-            const auto count = std::min<std::size_t>(128, input->samples.size() - at);
+        for (std::size_t at = 0; (input->repeat || at < input->samples.size()) && !stop.stop_requested();) {
+            while (fixture::hold_capture && !stop.stop_requested()) std::this_thread::sleep_for(2ms);
+            if (input->pause_after && at >= *input->pause_after && !fixture::pause_released) {
+                fixture::capture_paused = true;
+                while (!fixture::pause_released && !(input->loopback && fixture::loopback_ready) && !stop.stop_requested())
+                    std::this_thread::sleep_for(2ms);
+            }
+            if (stop.stop_requested()) break;
+            const auto endpoint = fixture::capture_endpoint.load();
+            const auto capture_end = endpoint - (endpoint && input->short_after_cutoff ? 1U : 0U);
+            if (input->loopback && endpoint && at >= capture_end) break;
+            const auto offset = input->repeat ? 0 : at;
+            auto count = std::min(input->chunk_size, input->samples.size() - offset);
+            if (input->pause_after && at < *input->pause_after)
+                count = std::min(count, *input->pause_after - at);
+            if (input->loopback && endpoint)
+                count = std::min<std::uint64_t>(count, capture_end - at);
             TimePrediction stamp;
             stamp.utc_seconds = input->first_utc + static_cast<long double>(at) / rate;
             stamp.uncertainty_seconds = 1e-7;
@@ -67,9 +114,28 @@ void capture(std::uint32_t rate, const std::string& device, const CaptureCallbac
             stamp.rate_uncertainty_fraction = 1e-12;
             stamp.quality = TimingQuality::bounded;
             options.capture_timing(stamp);
-            if (!consume(std::span(input->samples).subspan(at, count))) break;
+            ++fixture::callback_started;
+            std::vector<float> actual;
+            if (input->loopback) {
+                actual.assign(count, 0);
+                std::lock_guard lock(fixture::mutex);
+                if (fixture::loopback_epoch && !input->loopback_silence) {
+                    const auto first = std::llround((*fixture::loopback_epoch - input->first_utc) * rate);
+                    for (std::size_t i = 0; i < count; ++i) {
+                        const auto position = static_cast<std::int64_t>(at + i) - first;
+                        if (position >= 0 && static_cast<std::size_t>(position) < fixture::loopback_pcm.size() &&
+                            (!input->loopback_playback_limit ||
+                             static_cast<std::size_t>(position) < *input->loopback_playback_limit))
+                            actual[i] = fixture::loopback_pcm[static_cast<std::size_t>(position)];
+                    }
+                }
+            }
+            const auto accepted = input->loopback ? consume(actual) : consume(std::span(input->samples).subspan(offset, count));
+            ++fixture::callback_finished;
+            if (!accepted) break;
             at += count;
-            std::this_thread::sleep_for(2ms);
+            fixture::capture_position = at;
+            if (!input->repeat && !input->burst) std::this_thread::sleep_for(2ms);
         }
         return;
     }
@@ -87,8 +153,10 @@ void playback(std::uint32_t rate, const std::string& device, const PlaybackCallb
               std::stop_token stop, StreamFormatCallback format, ChannelMode channels, Options options) {
     ++fixture::playback_active;
     struct Close { ~Close() { --fixture::playback_active; } } close;
+    bool loopback = false;
     {
         std::lock_guard lock(fixture::mutex);
+        loopback = fixture::capture_input && fixture::capture_input->loopback;
         fixture::playback_device = device;
         fixture::playback_options = options;
         fixture::playback_channels = channels;
@@ -96,14 +164,19 @@ void playback(std::uint32_t rate, const std::string& device, const PlaybackCallb
         fixture::scheduled = false;
         fixture::scheduled_epoch.reset();
         fixture::playback_prefix.clear();
+        fixture::loopback_pcm.clear();
+        fixture::loopback_epoch.reset();
     }
     ++fixture::playback_opens;
+    while (fixture::hold_playback_format && !stop.stop_requested()) std::this_thread::sleep_for(2ms);
+    if (stop.stop_requested()) return;
     detail::UtcPlaybackScope timed(options.follow_system_clock);
     if (format) format({rate, rate, rate * .49, 4096});
     {
         std::lock_guard lock(fixture::mutex);
         fixture::scheduled = detail::utc_playback_epoch.has_value();
         fixture::scheduled_epoch = detail::utc_playback_epoch;
+        fixture::loopback_epoch = detail::utc_playback_epoch;
     }
     std::array<float, 4096> block{};
     while (!stop.stop_requested()) {
@@ -118,9 +191,11 @@ void playback(std::uint32_t rate, const std::string& device, const PlaybackCallb
             if (fixture::playback_prefix.empty())
                 fixture::playback_prefix.assign(block.begin(), block.begin() + static_cast<std::ptrdiff_t>(count));
             fixture::playback_samples += count;
+            if (loopback) fixture::loopback_pcm.insert(fixture::loopback_pcm.end(), block.begin(), block.begin() + static_cast<std::ptrdiff_t>(count));
         }
         while (fixture::hold_playback && !stop.stop_requested()) std::this_thread::sleep_for(2ms);
     }
+    if (loopback) fixture::loopback_ready = true;
 }
 
 void playback(std::uint32_t rate, const std::string& device, const PlaybackCallback& source,
@@ -256,6 +331,420 @@ live::Snapshot ready(live::Session& session) {
 void close(live::Session& session) {
     session.stop();
     wait(session, [&](const auto&) { return session.ready_to_close(); }, "Robust session did not release workers");
+}
+
+void capture_backpressure() {
+    // Lock handoff makes the test deterministic: after the producer signals
+    // while owning the queue lock, the main thread can acquire that lock only
+    // once the full-queue wait has released it.
+    for (const bool cancel : {false, true}) {
+        live::detail::CaptureQueue queue;
+        queue.capture_callback_may_block = true;
+        const std::array<float, 2> full{1, 2};
+        const std::array<float, 1> next{3};
+        {
+            std::unique_lock lock(queue.mutex);
+            check(queue.push(lock, full, 2, 2, {}, {}), "Could not fill bounded capture queue");
+        }
+        std::promise<void> entered;
+        auto entered_future = entered.get_future();
+        std::promise<bool> result;
+        auto result_future = result.get_future();
+        std::jthread producer([&](std::stop_token stop) {
+            std::unique_lock lock(queue.mutex);
+            entered.set_value();
+            result.set_value(queue.push(lock, next, 2, 2, {}, stop));
+        });
+        entered_future.wait();
+        {
+            std::unique_lock lock(queue.mutex);
+            check(result_future.wait_for(0s) == std::future_status::timeout,
+                  "Full buffered queue did not park its producer");
+            if (cancel) producer.request_stop();
+            else {
+                const auto removed = queue.pop();
+                check(removed.pcm == std::vector<float>({1, 2}), "Queue changed captured PCM");
+            }
+        }
+        producer.join();
+        check(result_future.get() == !cancel, "Blocked capture did not resume or cancel correctly");
+        std::unique_lock lock(queue.mutex);
+        if (!cancel) {
+            const auto resumed = queue.pop();
+            check(resumed.first == 2 && resumed.pcm == std::vector<float>({3}),
+                  "Resumed capture changed its sample coordinate or PCM");
+        }
+    }
+    // The fake provider offers a bounded, dated source as quickly as it can.
+    // Ordinary device capture must still report the same overrun; a provider
+    // that can retain samples may instead wait and must wake on cancellation.
+    auto run = [](bool may_block, bool oversized) {
+        auto s = settings(false);
+        s.transfer.modem.sample_rate = 1500;
+        s.transfer.modem.carrier_hz = 500;
+        s.live_noise_dbfs_hz = -100;
+        const auto count = s.transfer.modem.sample_rate / 20 + (oversized ? 1U : 0U);
+        auto input = std::make_shared<fixture::CaptureInput>();
+        input->samples.resize(count);
+        input->first_utc = static_cast<long double>(s.calendar->epoch) - 2;
+        input->callback_may_block = may_block;
+        input->repeat = true;
+        input->chunk_size = count;
+        fixture::callback_started = fixture::callback_finished = 0;
+        {
+            std::lock_guard lock(fixture::mutex);
+            fixture::capture_input = input;
+        }
+        live::Session session;
+        session.start(s);
+        if (!may_block || oversized) {
+            const auto out = wait(session, [=](const auto& snapshot) {
+                return snapshot.receiver_error.find(oversized ? "chunk exceeds" : "backlog overrun") != std::string::npos;
+            }, "Capture did not reject an unbufferable input", 20s);
+            check(out.received.empty(), "Capture overrun fabricated a completed reception");
+        } else {
+            wait(session, [](const auto&) { return fixture::capture_active == 1; },
+                 "Buffered capture did not start");
+            const auto deadline = std::chrono::steady_clock::now() + 20s;
+            while (std::chrono::steady_clock::now() < deadline && fixture::callback_finished < 100 &&
+                   fixture::capture_active)
+                std::this_thread::sleep_for(2ms);
+            const bool waited = fixture::callback_finished >= 100 && fixture::capture_active;
+            const auto snapshot = session.snapshot();
+            check(waited, "Buffered capture did not wait for receiver capacity: " + snapshot.status + "; " +
+                  snapshot.error + "; " + snapshot.receiver_error + "; callbacks " +
+                  std::to_string(fixture::callback_started.load()) + "/" +
+                  std::to_string(fixture::callback_finished.load()));
+            check(session.snapshot().receiver_error.empty(), "Buffered capture reported an overrun");
+        }
+        close(session);
+        check(fixture::callback_started == fixture::callback_finished && fixture::capture_active == 0,
+              "Capture cancellation left a callback blocked");
+        {
+            std::lock_guard lock(fixture::mutex);
+            fixture::capture_input.reset();
+        }
+    };
+    run(false, false);
+    run(true, false);
+    run(true, true);
+}
+
+void finite_duplex_plan() {
+    using live::detail::finite_capture_frames;
+    check(finite_capture_frames(100, 20, 7) == 87, "Finite capture endpoint lost filter halo");
+    check(finite_capture_frames(100, -20, 7) == 127, "Finite capture endpoint lost negative origin");
+    check(finite_capture_frames(100, 110, 7) == 0, "Finite capture endpoint failed to clamp past input");
+    check(finite_capture_frames(100, 105, 7) == 2, "Finite capture endpoint lost a partial halo");
+    check(finite_capture_frames(0, std::numeric_limits<std::int64_t>::min(), 0) == (UINT64_C(1) << 63),
+          "Finite capture endpoint mishandled the minimum signed coordinate");
+    bool overflow = false;
+    try { (void)finite_capture_frames(UINT64_MAX, -1, 1); } catch (const Error&) { overflow = true; }
+    check(overflow, "Finite capture endpoint wrapped its coordinate");
+
+    for (const bool reject : {false, true}) {
+        auto s = settings(false);
+        s.transfer.modem.sample_rate = 1500;
+        s.transfer.modem.carrier_hz = 500;
+        s.live_noise_dbfs_hz = -100;
+        s.full_duplex = true;
+        s.finite_duplex = true;
+        auto input = std::make_shared<fixture::CaptureInput>();
+        input->samples.resize(s.transfer.modem.sample_rate / 20);
+        input->first_utc = static_cast<long double>(s.calendar->epoch) - 2;
+        input->callback_may_block = input->finite = input->repeat = true;
+        input->chunk_size = input->samples.size();
+        const auto planning_profile = live::detail::prepare_profile(s, *s.calendar, {});
+        const live::detail::AudioInput planning_converter(s.transfer.modem.sample_rate,
+            planning_profile.receiver.data_if_hz, planning_profile.minimum_audio_hz, planning_profile.maximum_audio_hz);
+        const auto planning_adjusted = live::detail::with_capture_uncertainty(planning_profile,
+            1e-7 + 1. / s.transfer.modem.sample_rate,
+            2 * planning_profile.waveform.config().audio_pair_ppm * 1e-6, planning_converter.halo_samples());
+        input->pause_after = 2U * s.transfer.modem.sample_rate +
+            planning_adjusted.waveform.slot(1).observation.stop + 2 * planning_converter.halo_samples();
+        fixture::pause_released = false;
+        fixture::capture_paused = false;
+        fixture::hold_capture = true;
+        fixture::hold_playback = true;
+        fixture::capture_endpoint = 0;
+        fixture::reject_capture_endpoint = reject;
+        const auto opens = fixture::playback_opens.load();
+        {
+            std::lock_guard lock(fixture::mutex);
+            fixture::capture_input = input;
+        }
+        live::Session session;
+        session.start(s);
+        ready(session);
+        wait(session, [](const auto&) { return fixture::capture_active == 1; }, "Finite capture did not open");
+        session.transmit_bits(std::array<std::uint8_t,1>{1});
+        std::this_thread::sleep_for(80ms);
+        check(fixture::playback_opens == opens && !fixture::capture_endpoint,
+              "Finite TX opened playback before actual quiet rearm");
+        fixture::hold_capture = false;
+        if (reject) {
+            const auto failed = wait(session, [](const auto& snapshot) {
+                return !snapshot.transmitting && !snapshot.error.empty();
+            }, "Rejected finite endpoint did not stop TX", 30s);
+            check(failed.error.find("refused finite capture endpoint") != std::string::npos &&
+                  !fixture::capture_endpoint, "Finite endpoint refusal was hidden");
+            std::lock_guard lock(fixture::mutex);
+            check(!fixture::scheduled && fixture::playback_samples == 0,
+                  "Rejected finite endpoint exposed scheduled playback or samples");
+        } else {
+            wait(session, [](const auto&) { return fixture::capture_endpoint.load() != 0; },
+                 "Finite provider did not receive endpoint", 30s);
+            wait(session, [](const auto&) {
+                std::lock_guard lock(fixture::mutex);
+                return fixture::scheduled_epoch.has_value();
+            }, "Finite playback was not scheduled", 30s);
+            long double epoch;
+            {
+                std::lock_guard lock(fixture::mutex);
+                epoch = *fixture::scheduled_epoch;
+            }
+            const auto base = live::detail::prepare_profile(s, *s.calendar, {});
+            const auto rate = s.transfer.modem.sample_rate;
+            const live::detail::AudioInput converter(rate, base.receiver.data_if_hz,
+                                                     base.minimum_audio_hz, base.maximum_audio_hz);
+            const auto age = input->first_utc - base.waveform.origin().epoch;
+            const auto adjusted = live::detail::with_capture_uncertainty(base, 1e-7 + 1. / rate,
+                static_cast<double>(std::abs(age) * base.waveform.config().audio_pair_ppm * 1e-6L),
+                converter.halo_samples());
+            const auto capture_first = std::llround((age + adjusted.waveform.config().capture_lead_seconds) * rate);
+            const auto seconds = static_cast<std::uint64_t>(std::floor(epoch));
+            const auto phase = static_cast<std::uint32_t>(std::llround((epoch - seconds) * rate));
+            const auto first_slot = base.waveform.first_slot_not_before({seconds, phase});
+            const auto expected = finite_capture_frames(adjusted.waveform, first_slot, capture_first,
+                                                        converter.halo_samples());
+            check(fixture::capture_endpoint == expected,
+                  "Finite capture endpoint differs from actual adjusted receive geometry");
+            session.cancel_transmit();
+        }
+        fixture::hold_capture = fixture::hold_playback = false;
+        fixture::pause_released = true;
+        close(session);
+        fixture::reject_capture_endpoint = false;
+        {
+            std::lock_guard lock(fixture::mutex);
+            fixture::capture_input.reset();
+        }
+    }
+    // Cancellation before any capture data must not open playback or create
+    // a physical completion. EOF before rearm has the same no-transmit rule.
+    for (const bool cancel_before_input : {true, false}) {
+        auto s = settings(false);
+        s.transfer.modem.sample_rate = 1500;
+        s.transfer.modem.carrier_hz = 500;
+        s.live_noise_dbfs_hz = -100;
+        s.full_duplex = s.finite_duplex = true;
+        auto input = std::make_shared<fixture::CaptureInput>();
+        input->callback_may_block = input->finite = true;
+        input->first_utc = static_cast<long double>(s.calendar->epoch) - 2;
+        if (cancel_before_input) {
+            input->samples.resize(75);
+            input->repeat = true;
+            fixture::hold_capture = true;
+        }
+        const auto opens = fixture::playback_opens.load();
+        {
+            std::lock_guard lock(fixture::mutex);
+            fixture::capture_input = input;
+        }
+        live::Session session;
+        session.start(s);
+        ready(session);
+        if (!cancel_before_input)
+            wait(session, [](const auto& out) {
+                return out.receiver_error == "Finite Robust input ended before physical completion.";
+            },
+                 "Finite EOF was not reported");
+        session.transmit_bits(std::array<std::uint8_t,1>{1});
+        if (cancel_before_input) session.cancel_transmit();
+        const auto result = wait(session, [](const auto& out) { return !out.transmitting; },
+                                 "Finite wait did not stop");
+        check(fixture::playback_opens == opens && result.received.empty() && result.signals.empty(),
+              "Cancelled or truncated finite capture produced playback or completion");
+        if (!cancel_before_input)
+            check(result.error.find("capture ended") != std::string::npos,
+                  "Finite EOF did not report incomplete capture");
+        fixture::hold_capture = false;
+        close(session);
+        {
+            std::lock_guard lock(fixture::mutex);
+            fixture::capture_input.reset();
+        }
+    }
+
+    // While the physical provider is opening or acknowledging the cutoff,
+    // a new received DATA slot revokes the earlier quiet rearm. It must be
+    // observed before private TX PCM can be exposed.
+    for (const bool hold_ack : {false, true}) {
+        using namespace triad::v3;
+        auto s = settings(false);
+        s.transfer.modem.sample_rate = 1500;
+        s.transfer.modem.carrier_hz = 500;
+        s.transfer.audio_timing_error_seconds = 0;
+        s.live_noise_dbfs_hz = -100;
+        s.full_duplex = s.finite_duplex = true;
+        const auto profile = live::detail::prepare_profile(s, *s.calendar, {});
+        const auto rate = s.transfer.modem.sample_rate;
+        const live::detail::AudioInput converter(rate, profile.receiver.data_if_hz,
+                                                 profile.minimum_audio_hz, profile.maximum_audio_hz);
+        const auto adjusted = live::detail::with_capture_uncertainty(profile, 1e-7 + 1. / rate,
+            2 * profile.waveform.config().audio_pair_ppm * 1e-6, converter.halo_samples());
+        const auto prefix = 2U * rate;
+        auto input = std::make_shared<fixture::CaptureInput>();
+        input->first_utc = static_cast<long double>(s.calendar->epoch) - 2;
+        input->callback_may_block = input->finite = true;
+        input->chunk_size = rate / 20;
+        input->pause_after = prefix + adjusted.waveform.slot(1).observation.stop + 2 * converter.halo_samples();
+        const auto end = prefix + adjusted.waveform.slot(3).observation.stop + rate;
+        check(end < 400000 && *input->pause_after < end, "Finite interleaving fixture exceeds its budget: " +
+              std::to_string(*input->pause_after) + "/" + std::to_string(end));
+        input->samples.resize(end);
+        const auto density = std::pow(10., *s.live_noise_dbfs_hz / 10);
+        const auto gain = std::sqrt(density * std::pow(10., s.target_cn0_db_hz / 10));
+        std::mt19937_64 rng(0x66696e697465ULL);
+        std::normal_distribution<double> noise(0, std::sqrt(rate / 2. * density));
+        for (auto& value : input->samples) value = static_cast<float>(noise(rng));
+        const std::array<std::uint8_t, 1> bit{1};
+        Emission emission(profile.waveform, profile.key, {EmissionMode::Message, 3, bit});
+        std::array<Complex, 512> iq{};
+        std::size_t at = 0;
+        for (;;) {
+            const auto count = emission.read(iq);
+            if (!count) break;
+            check(prefix + at + count <= input->samples.size(), "Finite interference source exceeds its capture");
+            for (std::size_t i = 0; i < count; ++i) {
+                const auto rotation = std::polar(1., 2 * std::numbers::pi * s.transfer.modem.carrier_hz *
+                                                     static_cast<double>(at + i) / rate);
+                input->samples[prefix + at + i] += static_cast<float>(std::numbers::sqrt2 * gain *
+                                                                       (iq[i] * rotation).real());
+            }
+            at += count;
+        }
+        fixture::pause_released = false;
+        fixture::capture_paused = fixture::endpoint_started = false;
+        fixture::hold_playback_format = !hold_ack;
+        fixture::hold_endpoint_ack = hold_ack;
+        const auto opens = fixture::playback_opens.load();
+        {
+            std::lock_guard lock(fixture::mutex);
+            fixture::capture_input = input;
+        }
+        live::Session session;
+        session.start(s);
+        ready(session);
+        session.transmit_bits(bit);
+        wait(session, [&](const auto&) {
+            return fixture::capture_paused && (hold_ack ? fixture::endpoint_started.load() :
+                                                           fixture::playback_opens.load() > opens);
+        }, "Finite playback did not reach the intended barrier", 30s);
+        fixture::pause_released = true;
+        wait(session, [](const auto& out) {
+            return std::any_of(out.pattern_steps.begin(), out.pattern_steps.end(), [](const auto& row) {
+                return row.index == 3 && row.decision == live::PatternDecision::data;
+            });
+        }, "Finite interleaving DATA was not committed", 30s);
+        fixture::hold_playback_format = fixture::hold_endpoint_ack = false;
+        const auto failed = wait(session, [](const auto& out) { return !out.transmitting && !out.error.empty(); },
+                                 "Finite TX ignored the changed receiver state", 30s);
+        check(!failed.error.empty(), "Finite TX did not report the revoked quiet state");
+        {
+            std::lock_guard lock(fixture::mutex);
+            check(!fixture::scheduled && fixture::playback_samples == 0,
+                  "Finite TX exposed playback despite revoked quiet state");
+        }
+        close(session);
+        {
+            std::lock_guard lock(fixture::mutex);
+            fixture::capture_input.reset();
+        }
+    }
+}
+
+void finite_duplex_completion_case(bool silence, bool mute_later_tx, bool short_capture) {
+    auto s = settings(false);
+    s.transfer.modem.sample_rate = 1500;
+    s.transfer.modem.carrier_hz = 500;
+    s.transfer.audio_timing_error_seconds = 0;
+    s.live_noise_dbfs_hz = -100;
+    s.receiver_memory_limit = 1024U * 1024 * 1024;
+    s.full_duplex = s.finite_duplex = true;
+    const auto profile = live::detail::prepare_profile(s, *s.calendar, {});
+    const auto rate = s.transfer.modem.sample_rate;
+    const live::detail::AudioInput converter(rate, profile.receiver.data_if_hz,
+                                             profile.minimum_audio_hz, profile.maximum_audio_hz);
+    const auto adjusted = live::detail::with_capture_uncertainty(profile, 1e-7 + 1. / rate,
+        2 * profile.waveform.config().audio_pair_ppm * 1e-6, converter.halo_samples());
+    auto input = std::make_shared<fixture::CaptureInput>();
+    input->samples.resize(rate / 20);
+    input->chunk_size = input->samples.size();
+    input->repeat = input->callback_may_block = input->finite = input->loopback = true;
+    input->loopback_silence = silence;
+    input->short_after_cutoff = short_capture;
+    if (mute_later_tx) {
+        const auto first = profile.waveform.transmit_slot(0);
+        input->loopback_playback_limit = profile.waveform.calendar().distance(first.helper_begin, first.support_end);
+    }
+    input->first_utc = static_cast<long double>(s.calendar->epoch) - 2;
+    input->pause_after = 2U * rate + adjusted.waveform.slot(1).observation.stop + 2 * converter.halo_samples();
+    fixture::pause_released = false;
+    fixture::loopback_ready = false;
+    fixture::capture_endpoint = fixture::capture_position = 0;
+    {
+        std::lock_guard lock(fixture::mutex);
+        fixture::capture_input = input;
+    }
+    live::Session session;
+    session.start(s);
+    ready(session);
+    const std::array<std::uint8_t,2> bits{1,0};
+    session.transmit_bits(std::span(bits).first(mute_later_tx ? 2 : 1));
+    bool received = false;
+    const auto drained = wait(session, [&](const auto& out) {
+        for (const auto& signal : out.signals)
+            if (signal.complete && signal.robust_reception && signal.raw_bits == "1") received = true;
+        check(out.error.empty(), "Finite loopback TX failed: " + out.error);
+        return out.status == "Finite Robust capture drained after physical completion" ||
+               !out.receiver_error.empty();
+    }, "Finite loopback did not finish", 45s);
+    check(fixture::capture_endpoint > 0 && fixture::capture_position + (short_capture ? 1U : 0U) == fixture::capture_endpoint,
+          "Finite capture fixture did not stop at its intended frame: " +
+          std::to_string(fixture::capture_position.load()) + "/" + std::to_string(fixture::capture_endpoint.load()) +
+          " silence=" + std::to_string(silence) + " muted=" + std::to_string(mute_later_tx) +
+          " short=" + std::to_string(short_capture) + "; status=" + drained.status +
+          "; receiver=" + drained.receiver_error);
+    if (mute_later_tx) check(received, "Earlier physically completed message was not observed");
+    if (silence) check(!received, "Silent capture unexpectedly produced a completed message");
+    if (short_capture) {
+        check(drained.receiver_error == (received ? "Finite Robust input ended before its planned capture endpoint." :
+                                                    "Finite Robust input ended before physical completion."),
+              "Short finite capture was not reported distinctly");
+    } else
+    if (silence)
+        check(!received && drained.receiver_error == "Finite Robust capture ended without a physically complete message.",
+              "An exact finite endpoint fabricated receiver completion");
+    else
+        check(drained.receiver_error.empty() && received &&
+              drained.status == "Finite Robust capture drained after physical completion",
+              "Exact finite capture did not retain its physically scored completion: " + drained.receiver_error);
+    close(session);
+    fixture::pause_released = true;
+    {
+        std::lock_guard lock(fixture::mutex);
+        fixture::capture_input.reset();
+        fixture::loopback_pcm.clear();
+    }
+}
+
+void finite_duplex_completion() {
+    finite_duplex_completion_case(false, false, false);
+    finite_duplex_completion_case(true, false, false);
+    finite_duplex_completion_case(false, true, false);
+    finite_duplex_completion_case(false, true, true);
+    finite_duplex_completion_case(true, false, true);
 }
 
 void inactive_and_audio_ownership() {
@@ -636,7 +1125,7 @@ void late_affine_clock_support() {
           "Native DSP could not plan a public clock window with a negative arrival offset");
 }
 
-void dated_live_data_then_eof(std::optional<int> fixed_link_gain_db = {}) {
+void dated_live_data_then_eof(std::optional<int> fixed_link_gain_db = {}, bool buffered = false) {
     using namespace triad::v3;
     auto s = settings(false);
     s.transfer.modem.sample_rate = 1500;
@@ -670,6 +1159,9 @@ void dated_live_data_then_eof(std::optional<int> fixed_link_gain_db = {}) {
     auto input = std::make_shared<fixture::CaptureInput>();
     input->first_utc = static_cast<long double>(s.calendar->epoch) - 2;
     input->samples.resize(prefix + after_epoch);
+    input->callback_may_block = buffered;
+    input->burst = buffered;
+    if (buffered) input->chunk_size = rate / 20;
     std::mt19937_64 rng(0x726f6275737421ULL);
     std::normal_distribution<double> noise(0, std::sqrt(rate / 2. * noise_density));
     for (auto& sample : input->samples) sample = static_cast<float>(noise(rng));
@@ -1117,10 +1609,30 @@ int main(int argc, char** argv) {
             unavailable_gpu();
             return 0;
         }
+        if (argc == 2 && std::string_view(argv[1]) == "--capture-backpressure") {
+            capture_backpressure();
+            std::cout << "Native capture backpressure and cancellation passed\n";
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--buffered-live") {
+            dated_live_data_then_eof(0, true);
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--finite-duplex") {
+            finite_duplex_plan();
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--finite-completion") {
+            finite_duplex_completion();
+            return 0;
+        }
         check(argc == 1, "Unexpected Robust session test argument");
         native_precision_profile_policy();
         configured_physical_carrier_context();
         if (!live::gpu_receiver_available()) unavailable_gpu();
+        capture_backpressure();
+        finite_duplex_plan();
+        finite_duplex_completion();
         inactive_and_audio_ownership();
         live_transmit_and_cancel(false);
         live_transmit_and_cancel(true);
@@ -1136,6 +1648,7 @@ int main(int argc, char** argv) {
         complete_native_simulation();
         std::cout << "Native Robust simulation decoded e/001 with two physical quiet slots\n" << std::flush;
         dated_live_data_then_eof();
+        dated_live_data_then_eof(0, true);
         std::cout << "Native Robust Session lifecycle, audio options, and real e/001 completion passed\n";
         return 0;
     } catch (const std::exception& error) {

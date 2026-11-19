@@ -16,6 +16,17 @@ inheritance and one process per controlling session/principal. The worker checks
 FIFO identity, anonymous-pipe identity and access mode; socket-backed stdio and
 named pipes fail. An incomplete frame at EOF is an error.
 
+The optional `--require-gpu` embedding policy keeps the application in Robust
+mode and requires GPU receiver acceleration for its configurations; saved
+settings and GUI controls cannot switch that policy off. It is an explicit
+accelerator requirement, not a CUDA-specific selector: the supported backend
+depends on the build and actual device. A build or device without a usable GPU
+receiver reports the failure rather than treating CPU processing as the
+requested accelerator. A ready backend alone does not prove that a particular
+simulation performed GPU work; inspect its executed-work diagnostics. The
+separate [RunPod lab](../_zLab/README.md) uses a CUDA-only build for its GPU
+pods and has not yet qualified actual pod execution.
+
 The current worker installs a Linux seccomp filter with `no_new_privs` before
 application startup. It denies socket creation, connection, listening, all
 socket I/O/options, `socketcall`, x32 alternate syscall numbers, `io_uring`,
