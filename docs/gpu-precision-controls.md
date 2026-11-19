@@ -10,6 +10,10 @@ an easy case already well below that ceiling, conserving energy, or preserving
 unneeded numerical precision must not take priority over challenging reception.
 This is a design requirement, not a claim that current defaults sustain every
 configuration; current measured limits remain in [validation](validation.md).
+The objective also leaves the performance attainable by future implementations
+open. Claims about a hardware ceiling or further Tensor Core gains need
+applicable bounds or measurements, with the proposed changes covered by their
+assumptions. See [future performance and utilization](triad-gpu-optimization.md#interpreting-future-performance-and-utilization).
 
 The [Default GUI/launch option](search-arithmetic.md) is the user's means of
 obtaining the best supported computational throughput without having to select
@@ -49,9 +53,10 @@ Apply these rules to automatic selection and new optimization work:
   that the implementation does not realize, investigate native libraries/driver
   features, actual dispatch and generated/executed instructions, packing,
   conversions, layout, batching, occupancy, transfers and synchronization.
-  Correct implementation bottlenecks before declaring the arithmetic or hardware
-  ceiling reached. Half-width storage with FP32 computation is a memory
-  optimization, not evidence of packed FP16 arithmetic; an INT8 contraction is
+  Correct observed implementation bottlenecks and report remaining limits of
+  that implementation. Scope any arithmetic or hardware ceiling claim to an
+  applicable bound and its assumptions. Half-width storage with FP32 computation
+  is a memory optimization, not evidence of packed FP16 arithmetic; an INT8 contraction is
   not an INT8 FFT.
 - Compare complete affected-stage and receiver costs, including recurring
   preparation and downstream work; report workspace savings separately.

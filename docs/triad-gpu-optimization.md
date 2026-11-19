@@ -58,6 +58,41 @@ strict FP32, while joint FP8 quantization added misses in a 96-capture sample.
 These are useful counterexamples, not predictions for the current receiver,
 different hardware or different inputs.
 
+## Interpreting future performance and utilization
+
+The retained experiments establish outcomes for their recorded implementations,
+inputs, devices and runtimes. They leave the attainable performance and Tensor
+Core utilization of future implementations unresolved. A slower prototype can
+justify keeping the current route for the tested workload. Any claim that
+further improvement is impossible needs a bound whose assumptions cover the
+proposed algorithm and implementation changes. The comparisons here supply
+no such general bound.
+
+Fusion, alternative factorizations, batching, layouts, precision decompositions
+and preparation overlap are research candidates. For a proposed variant, state
+which measured cost or technical argument motivates it and what remains to be
+tested. Its achievable gain and practical feasibility depend on the resulting
+implementation. Historical successes support those specific results and reasons
+to investigate. Forecasts of new gains need their own assumptions and evidence.
+
+Report the named utilization metric and its measurement interval alongside
+useful work and elapsed time. Tensor Core activity, resident-warp occupancy,
+dispatch counts and complete-receiver throughput measure different properties.
+Higher occupancy can accompany unchanged or worse performance. Reducing work
+or data movement can improve elapsed time while reducing activity. Low
+utilization alone leaves both the cause and achievable improvement unresolved.
+The useful receiver outcome depends on required work, memory, sensitivity and
+completion.
+[NVIDIA profiling guidance](https://docs.nvidia.com/nsight-compute/ProfilingGuide/).
+
+A measured bottleneck describes the observed execution. Changes to algorithms,
+data movement, precision, reuse or overlap can move it. Arithmetic peaks and
+fixed-work speedup bounds remain conditional on their operation counts, bytes,
+dependencies and unaffected costs. Reassess those quantities when a proposed
+implementation changes them. Bounded experiments can support a practical
+choice and a stopping decision while the potential for further improvement
+remains open.
+
 ## Which arithmetic ran in a remote simulation?
 
 The RunPod build uses the same compiled receiver as the desktop GUI.

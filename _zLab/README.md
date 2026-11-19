@@ -68,6 +68,12 @@ its pod. Reuse an active compatible pod across a bounded batch.
   [Source, dispatch conditions and counters](../docs/triad-gpu-optimization.md#which-arithmetic-ran-in-a-remote-simulation)
   and [measured CPU/GPU choices](../docs/triad-performance.md#choosing-compute-for-hf-sensitivity-trials).
 
+Future Tensor Core speed and utilization remain research questions. Candidate
+techniques suggest experiments, with their feasibility and gains to be assessed
+for the proposed implementation. Keep measured results, conditional bounds
+and untested possibilities explicit when planning further work.
+[How to interpret future performance](../docs/triad-gpu-optimization.md#interpreting-future-performance-and-utilization).
+
 Follow the [RunPod deployment recipe](../docs/triad-performance.md#run-a-native-simulation-on-runpod)
 for selection, upload, native build, execution, retrieval and teardown. The
 campaign uploaded about 2 MB of allowlisted source and built on the pod. The

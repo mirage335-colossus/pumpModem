@@ -457,6 +457,10 @@ A more useful optimistic GPU time bound adds to `U` the larger of eligible
 operation count divided by arithmetic peak and unavoidable bytes divided by
 available bandwidth, plus necessary synchronization/setup. Use the measured
 phase boundaries and operation mix; do not infer a receiver speedup from FLOPS.
+Recompute these bounds when a candidate changes the algorithm, operation or
+byte counts, previously unaffected work, or overlap. A bottleneck in the
+measured implementation leaves the best attainable service under those changes
+unresolved. [Interpreting future performance and utilization](triad-gpu-optimization.md#interpreting-future-performance-and-utilization).
 
 For the earlier FP64 CPU three-look measurements, making only the recorded `search`
 stage free would bound complete coarse-phase speedup at **1.356× narrow** and
