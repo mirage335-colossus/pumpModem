@@ -133,7 +133,7 @@ GUI session relies on when it reports transmit progress after each read.
   which change once in 10,000 samples at 3.6 Hz.
 - **Rounding.** Floors, ceilings and integer conversions of `long double`
   coordinates use forms that return the standard values without switching
-  the x87 rounding mode. Those switches are the explanation found for the
+  the x87 rounding mode. Those switches are the likely explanation of the
   40% difference between binaries with equal simulator objects.
   [Mechanism and guidance](triad-performance.md#code-placement-and-x87-rounding-mode-switches).
 
@@ -173,8 +173,8 @@ small and large reads, and compare samples, masks and reports bit for bit.
 [`test_triad_v3_channel`](../tests/test_triad_v3_channel.cpp) keeps the parts
 that need no second build: workers against the lone reader, blocks against
 single rows, a source failure in the middle of a block, and the rounding
-forms against the standard ones. The validation record names the comparison
-program that the current code was checked with.
+forms against the standard ones. The validation record lists the configurations that the current
+code was compared on.
 
 ## Robust GUI changing-channel realization
 

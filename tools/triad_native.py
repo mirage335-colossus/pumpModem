@@ -383,8 +383,10 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                                                     "OpenCL resident dispatches", allow_zero=True)
                 resident_map_dispatches = positive_int(bulk.get("opencl_resident_mapping_dispatches", 0),
                                                         "OpenCL resident mapping dispatches", allow_zero=True)
+                # Blocking writes, and writes the host does not wait for.
                 resident_writes = positive_int(bulk.get("opencl_resident_blocking_writes", 0),
-                                                "OpenCL resident blocking writes", allow_zero=True)
+                                                "OpenCL resident blocking writes", allow_zero=True) + positive_int(
+                    bulk.get("opencl_resident_async_writes", 0), "OpenCL resident asynchronous writes", allow_zero=True)
                 # A batch holds a window of public blocks. Receipts from
                 # before windows held one block, or the two of a pair.
                 resident_blocks = positive_int(
@@ -394,8 +396,17 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                                               "OpenCL resident rendered tiles", allow_zero=True)
                 keyed_lanes = positive_int(bulk.get("opencl_resident_keyed_lanes", 0),
                                            "OpenCL resident keyed lanes", allow_zero=True)
+                # The most blocks one batch held, and the windows a refused
+                # device lease ran in smaller batches. Absent before windows.
+                window_blocks = positive_int(bulk.get("opencl_resident_window_blocks", 0),
+                                             "OpenCL resident window blocks", allow_zero=True)
+                reduced_windows = positive_int(bulk.get("opencl_resident_reduced_windows", 0),
+                                               "OpenCL resident reduced windows", allow_zero=True)
                 fine_tiles = identity.get("requested_opencl_fine_tiles", "device")
                 fine_window = identity.get("requested_opencl_fine_window", 0)
+                fine_stream = identity.get("requested_opencl_fine_stream", 4)
+                # Only a stated "on" times the resident fine session.
+                fine_profile = identity.get("requested_opencl_profile")
                 resident_seconds = [bulk.get(key, 0) for key in bulk if key.startswith("opencl_resident_")
                                     and key.endswith("_seconds")]
                 measured = command not in ("describe", "plan", "codec")
@@ -409,9 +420,17 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                 automatic_resident = fine_request == "automatic" and backend == "gpu"
                 fp4_resident_only = resident_nvfp4 or fine_request == "resident-nvfp4"
                 if (fine_tiles not in ("device", "native") or type(fine_window) is not int
-                        or not (fine_window == 0 or 2 <= fine_window <= 64)
+                        or not (fine_window == 0 or (2 <= fine_window <= 64 and fine_window % 2 == 0))
+                        or type(fine_stream) is not int or not 0 <= fine_stream <= 64
+                        or fine_profile not in (None, "on", "off", "default")
                         or any(isinstance(value, bool) or not isinstance(value, (int, float))
                                or not math.isfinite(value) or value < 0 for value in resident_seconds)
+                        or (fine_profile in ("off", "default") and any(resident_seconds))
+                        or ("opencl_resident_window_blocks" in bulk
+                            and (bool(window_blocks) != bool(resident_batches) or window_blocks > 64
+                                 or (fine_window and window_blocks > fine_window)
+                                 or resident_blocks > window_blocks * resident_batches))
+                        or reduced_windows > resident_batches
                         or resident_blocks < resident_batches + resident_pairs
                         or resident_blocks > 64 * resident_batches
                         or (fine_window and resident_blocks > fine_window * resident_batches)

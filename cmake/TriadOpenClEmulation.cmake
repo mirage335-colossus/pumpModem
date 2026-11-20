@@ -36,7 +36,8 @@ add_executable(test_triad_opencl_nvfp4_emulated EXCLUDE_FROM_ALL
 target_include_directories(test_triad_opencl_nvfp4_emulated PRIVATE tools)
 target_link_libraries(test_triad_opencl_nvfp4_emulated PRIVATE datapump_triad_opencl_emulated_host Threads::Threads)
 add_test(NAME triad_opencl_nvfp4_emulated COMMAND test_triad_opencl_nvfp4_emulated)
-set_tests_properties(triad_opencl_nvfp4_emulated PROPERTIES LABELS "triad" TIMEOUT 300)
+set_tests_properties(triad_opencl_nvfp4_emulated PROPERTIES LABELS "triad" TIMEOUT 300
+  ENVIRONMENT "DATAPUMP_TRIAD_EMULATION_DEFER=0")
 
 add_executable(test_triad_opencl_coarse_session_emulated EXCLUDE_FROM_ALL
   tests/test_triad_opencl_coarse_session.cpp src/host/sandbox.cpp)
@@ -44,7 +45,8 @@ target_include_directories(test_triad_opencl_coarse_session_emulated PRIVATE tes
 target_link_libraries(test_triad_opencl_coarse_session_emulated PRIVATE
   datapump_triad_opencl_emulated_host Threads::Threads)
 add_test(NAME triad_opencl_coarse_session_emulated COMMAND test_triad_opencl_coarse_session_emulated)
-set_tests_properties(triad_opencl_coarse_session_emulated PROPERTIES LABELS "triad" TIMEOUT 180)
+set_tests_properties(triad_opencl_coarse_session_emulated PROPERTIES LABELS "triad" TIMEOUT 180
+  ENVIRONMENT "DATAPUMP_TRIAD_EMULATION_DEFER=0")
 
 add_executable(test_triad_opencl_fine_session_emulated EXCLUDE_FROM_ALL
   tests/test_triad_opencl_fine_session.cpp src/host/sandbox.cpp)
@@ -52,4 +54,13 @@ target_include_directories(test_triad_opencl_fine_session_emulated PRIVATE tests
 target_link_libraries(test_triad_opencl_fine_session_emulated PRIVATE
   datapump_triad_opencl_emulated_host Threads::Threads)
 add_test(NAME triad_opencl_fine_session_emulated COMMAND test_triad_opencl_fine_session_emulated)
-set_tests_properties(triad_opencl_fine_session_emulated PROPERTIES LABELS "triad" TIMEOUT 300)
+set_tests_properties(triad_opencl_fine_session_emulated PROPERTIES LABELS "triad" TIMEOUT 300
+  ENVIRONMENT "DATAPUMP_TRIAD_EMULATION_DEFER=0")
+# The same session with every command that does not block deferred to the
+# next synchronization point, as late as an asynchronous device may run it.
+add_test(NAME triad_opencl_nvfp4_emulated_deferred COMMAND test_triad_opencl_nvfp4_emulated resident)
+set_tests_properties(triad_opencl_nvfp4_emulated_deferred PROPERTIES LABELS "triad" TIMEOUT 300
+  ENVIRONMENT "DATAPUMP_TRIAD_EMULATION_DEFER=1")
+add_test(NAME triad_opencl_fine_session_emulated_deferred COMMAND test_triad_opencl_fine_session_emulated)
+set_tests_properties(triad_opencl_fine_session_emulated_deferred PROPERTIES LABELS "triad" TIMEOUT 300
+  ENVIRONMENT "DATAPUMP_TRIAD_EMULATION_DEFER=1")

@@ -575,6 +575,109 @@ void check_resident_tiles(const OpenClNvfp4Device& device, const datapump::triad
     std::cout << ", worst statistic difference " << worst_statistic << '\n';
 }
 
+// One batch whose blocks address more dense tiles than the session caches.
+// The owner flushes under cache pressure, submits the mappings of every four
+// blocks, and waits for the queue when its render requests outgrow their
+// arena. The rendered route must still give the uploaded-tile statistics.
+void check_resident_pressure(const OpenClNvfp4Device& device) {
+    using namespace datapump::triad::v3;
+    constexpr std::size_t rows = 1500, modes = 47, taps = 2, candidates = 16, blocks = 16, tile = 8192;
+    constexpr std::size_t lanes_per_block = 2 * taps * candidates;
+    std::array<std::uint8_t, 32> seed{};
+    for (std::size_t i = 0; i != seed.size(); ++i) seed[i] = static_cast<std::uint8_t>(29 * i + 3);
+    const auto key = datapump::triad::fixture::key(seed);
+    ReceiverConfig config;
+    config.sample_rate_hz = 6000;
+    config.data_if_hz = 1725;
+    config.data_basis_gain = .83;
+    ReceiverSlotPlan slot;
+    slot.format.inner_rate_hz = 3.6;
+    slot.format.added_symbols = 1;
+    slot.format.added_interleave = false;
+    slot.format.sample_rate = 6000;
+    slot.format.bit_seconds = 160;
+    slot.format.pulse_shape = PulseShape::TaperedRrc;
+    MappedBasis basis(config, slot, key, rows, 1);
+    const auto* source = basis.tile_source();
+    require(source && source->dense_samples > 100 * tile, "Pressure check needs a long dense source");
+    const ConsecutiveBasisOffsets offsets(rows);
+    const std::array<Tap, taps> paths{{{0, 0}, {.0113, 7.5}}};
+    // Candidates of two keyed epochs, about nine tiles apart, so four blocks
+    // need more tiles than the cache holds.
+    std::array<MappedBasisRow, candidates> maps;
+    for (std::size_t c = 0; c != candidates; ++c)
+        maps[c] = {c % 2 ? 2 : 0, (c % 2 ? -.011 : .004) + 12. * static_cast<double>(c), c % 2 ? -.2 : .35,
+                   c % 2 ? -31.25 : 12.5};
+    // Blocks visit the source out of order, so each one needs new tiles.
+    std::array<std::uint64_t, blocks> firsts;
+    for (std::size_t b = 0; b != blocks; ++b) firsts[b] = (b * 37 % blocks) * (source->dense_samples / blocks) + 911;
+    std::array<std::size_t, modes> bins;
+    for (std::size_t m = 0; m != modes; ++m) bins[m] = (5 * m + 3) % rows;
+    std::mt19937 random(4417);
+    std::normal_distribution<double> noise(0, .1);
+    std::vector<std::array<Reference, modes>> observed(blocks);
+    for (auto& block : observed)
+        for (auto& value : block) value = {noise(random), noise(random)};
+    using Statistics = std::vector<std::array<FineBulkStatistics, candidates>>;
+    const auto requests = [&](bool rendered, Statistics& output) {
+        std::vector<FineResidentBlock> list;
+        for (std::size_t b = 0; b != blocks; ++b)
+            list.push_back({{rows, taps, bins, observed[b], .9, true},
+                [&, b, rendered](std::size_t candidate, std::size_t, std::size_t, const BulkMappedSink& sink) {
+                    if (rendered) basis.address_pair(maps[candidate], paths, firsts[b], offsets, rows, sink);
+                    else basis.visit_pair(maps[candidate], paths, firsts[b], offsets, rows, sink);
+                }, output[b], rendered ? source : nullptr});
+        return list;
+    };
+    const auto method = OpenClFineMethod::resident_fft;
+    const auto run = [&](bool rendered, Statistics& output, OpenClResidentWork& work, std::size_t slots = 64) {
+        auto options = rendered ? OpenClResidentOptions{blocks, source->cells, source->lanes}
+                                : OpenClResidentOptions{blocks};
+        options.cache_slots = slots;
+        const auto session = device.make_projection(rows, bins, blocks * lanes_per_block,
+            OpenClNvfp4Projection::workspace(rows, modes, blocks * lanes_per_block, method, options).device_bytes,
+            method, options);
+        const auto list = requests(rendered, output);
+        require(session && session->project_resident(list, candidates, work), "Pressure batch failed");
+    };
+    Statistics rendered(blocks), uploaded(blocks), crowded(blocks);
+    OpenClResidentWork work, native, small;
+    run(true, rendered, work);
+    run(false, uploaded, native);
+    // A quarter of the cache flushes so often that a flush falls between the
+    // two bit columns of a tap, whose descriptors would otherwise merge.
+    run(true, crowded, small, 16);
+    require(small.mapping_dispatches > 2 * work.mapping_dispatches &&
+            small.arena_synchronizations > work.arena_synchronizations,
+            "A smaller tile cache did not flush and synchronize more often");
+    // Streamed flushes alone give blocks / 4 mapping dispatches.
+    require(work.arena_synchronizations > 0 && work.mapping_dispatches > blocks / 4 + work.arena_synchronizations &&
+            work.rendered_tiles > 4 * 64 && work.rendered_tiles == native.uploaded_tiles &&
+            work.mapped_columns == native.mapped_columns,
+            "Pressure batch did not flush under pressure and synchronize its arenas");
+    double scale = 0, worst = 0;
+    for (const auto* route : {&rendered, &crowded})
+        for (std::size_t b = 0; b != blocks; ++b)
+            for (std::size_t c = 0; c != candidates; ++c) {
+                const auto& a = (*route)[b][c];
+                const auto& e = uploaded[b][c];
+                require(a.nonzero_basis == e.nonzero_basis, "Pressure batch changed the basis presence witness");
+                for (std::size_t i = 0; i != a.correlations.size(); ++i) {
+                    scale = std::max(scale, std::abs(e.correlations[i]));
+                    worst = std::max(worst, std::abs(a.correlations[i] - e.correlations[i]));
+                }
+                for (std::size_t i = 0; i != a.gram.size(); ++i) {
+                    scale = std::max(scale, std::abs(e.gram[i]));
+                    worst = std::max(worst, std::abs(a.gram[i] - e.gram[i]));
+                }
+            }
+    require(scale > 0 && worst / scale < 1e-6, "Pressure flushes changed the resident statistics");
+    std::cout << "OpenCL resident pressure: " << work.rendered_tiles << " rendered, " << work.mapping_dispatches
+              << " mapping dispatches, " << work.arena_synchronizations << " arena waits; with 16 slots "
+              << small.rendered_tiles << ", " << small.mapping_dispatches << " and " << small.arena_synchronizations
+              << ". Worst statistic difference " << worst / scale << '\n';
+}
+
 void check_resident_tiles(const OpenClNvfp4Device& device) {
     using namespace datapump::triad::v3;
     Format slow;
@@ -939,8 +1042,11 @@ void check_coarse_synthesis(const OpenClNvfp4Device& device) {
     check_coarse_synthesis(device, burst, 960, "burst");
 }
 
-int main() {
+// "resident" runs only the resident checks, as the deferred-execution
+// emulation does.
+int main(int argc, char** argv) {
     try {
+        const bool resident_only = argc > 1 && std::string_view(argv[1]) == "resident";
         constexpr std::array descriptors{0, 1, 2};
         datapump::host::restrict_descriptors(descriptors);
         datapump::host::install_no_socket_boundary();
@@ -953,10 +1059,14 @@ int main() {
         const std::array<std::byte, 16> any_uuid{};
         const auto device = OpenClNvfp4Device::open(any_uuid, ptx, &reason);
         if (!device) throw std::runtime_error(reason);
-        check_projection(*device, 1500, 47, 33);
-        check_projection(*device, 223, 67, 129);
+        if (!resident_only) {
+            check_projection(*device, 1500, 47, 33);
+            check_projection(*device, 223, 67, 129);
+        }
         check_resident_projection(*device);
         check_resident_tiles(*device);
+        check_resident_pressure(*device);
+        if (resident_only) return 0;
         check_coarse(*device);
         check_coarse_synthesis(*device);
         return 0;

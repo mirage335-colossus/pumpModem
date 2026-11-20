@@ -82,8 +82,8 @@ struct Options {
     bool cuda_segmented_timing = false;
     std::string vulkan_precision = "automatic", vulkan_fine_projection = "automatic";
     std::string opencl_coarse_templates = "device", opencl_fine_tiles = "device";
-    bool opencl_coarse_templates_supplied = false;
-    std::size_t opencl_fine_window = 0;
+    bool opencl_coarse_templates_supplied = false, opencl_fine_tiles_supplied = false;
+    std::size_t opencl_fine_window = 0, opencl_fine_stream = 4;
     std::optional<bool> opencl_profile;
     bool gpu_fp32_minimum = false;
     std::string native_coarse_precision = "automatic";
@@ -194,8 +194,11 @@ Options parse(int argc, char** argv) {
     o.opencl_coarse_templates_supplied = coarse_templates_supplied;
     const bool fine_tiles_supplied = values.contains("--opencl-fine-tiles");
     assign("--opencl-fine-tiles", o.opencl_fine_tiles);
+    o.opencl_fine_tiles_supplied = fine_tiles_supplied;
     const bool fine_window_supplied = values.contains("--opencl-fine-window");
     assign("--opencl-fine-window", o.opencl_fine_window);
+    const bool fine_stream_supplied = values.contains("--opencl-fine-stream");
+    assign("--opencl-fine-stream", o.opencl_fine_stream);
     if (const auto profile = take("--opencl-profile")) o.opencl_profile = toggle(*profile, "--opencl-profile");
     const bool gpu_fp32_minimum_supplied = values.contains("--gpu-fp32-minimum");
     assign("--gpu-fp32-minimum", o.gpu_fp32_minimum);
@@ -302,9 +305,13 @@ Options parse(int argc, char** argv) {
         one_of(o.vulkan_fine_projection, {"resident-nvfp4", "resident-fft"});
     require(one_of(o.opencl_fine_tiles, {"device", "native"}) && (!fine_tiles_supplied || resident_fine),
             "--opencl-fine-tiles expects device or native with an explicit Vulkan resident fine projection");
-    require(fine_window_supplied ? resident_fine && o.opencl_fine_window >= 2 && o.opencl_fine_window <= 64
+    // A window holds whole dispatches of two blocks.
+    require(fine_window_supplied ? resident_fine && o.opencl_fine_window >= 2 && o.opencl_fine_window <= 64 &&
+                                       o.opencl_fine_window % 2 == 0
                                  : o.opencl_fine_window == 0,
-            "--opencl-fine-window expects 2 to 64 blocks with an explicit Vulkan resident fine projection");
+            "--opencl-fine-window expects an even number of 2 to 64 blocks with an explicit Vulkan resident fine projection");
+    require(o.opencl_fine_stream <= 64 && (!fine_stream_supplied || resident_fine),
+            "--opencl-fine-stream expects 0 to 64 blocks with an explicit Vulkan resident fine projection");
     require(!o.opencl_profile || o.backend == "vulkan", "--opencl-profile is valid only with --backend vulkan");
     require(!gpu_fp32_minimum_supplied || o.backend == "gpu",
             "--gpu-fp32-minimum is valid only with --backend gpu");
@@ -894,10 +901,13 @@ Json bulk_json(const BulkReceipt& r) {
         {"opencl_resident_direct_columns", r.opencl_resident_direct_columns},
         {"opencl_resident_dispatches", r.opencl_resident_dispatches},
         {"opencl_resident_blocking_writes", r.opencl_resident_blocking_writes},
+        {"opencl_resident_async_writes", r.opencl_resident_async_writes},
         {"opencl_resident_mapping_dispatches", r.opencl_resident_mapping_dispatches},
         {"opencl_resident_fine_blocks", r.opencl_resident_fine_blocks},
         {"opencl_resident_rendered_tiles", r.opencl_resident_rendered_tiles},
         {"opencl_resident_keyed_lanes", r.opencl_resident_keyed_lanes},
+        {"opencl_resident_window_blocks", r.opencl_resident_window_blocks},
+        {"opencl_resident_reduced_windows", r.opencl_resident_reduced_windows},
         {"opencl_resident_host_source_seconds", r.opencl_resident_host_source_seconds},
         {"opencl_resident_host_staging_seconds", r.opencl_resident_host_staging_seconds},
         {"opencl_resident_host_transfer_seconds", r.opencl_resident_host_transfer_seconds},
@@ -979,11 +989,14 @@ std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
             VulkanReceiverOptions options{o.device_index,
                 o.device_memory_limit.value_or(256 * 1024 * 1024), precision};
             // The explicit dense route reports its device command intervals.
-            // A profiled resident fine session also times its host spans.
+            // The resident fine session is timed only on request: it reads
+            // the clock around every staged column.
             options.profile_opencl = o.opencl_profile.value_or(precision == VulkanCoarsePrecision::opencl_nvfp4);
+            options.profile_opencl_fine = o.opencl_profile.value_or(false);
             options.opencl_device_templates = o.opencl_coarse_templates == "device";
             options.opencl_fine_device_tiles = o.opencl_fine_tiles == "device";
             options.opencl_fine_window_blocks = o.opencl_fine_window;
+            options.opencl_fine_stream_blocks = o.opencl_fine_stream;
             if (o.vulkan_fine_projection == "nvfp4") options.fine_projection = VulkanFineProjection::opencl_nvfp4;
             else if (o.vulkan_fine_projection == "resident-nvfp4")
                 options.fine_projection = VulkanFineProjection::opencl_resident_nvfp4;
@@ -2470,9 +2483,13 @@ void help() {
         "  --opencl-coarse-templates device|native (explicit Vulkan nvfp4 coarse search; device where the\n"
         "    session offers synthesis unless native is stated, and a stated source must be the one executed)\n"
         "  --vulkan-fine-projection automatic|native|nvfp4|resident-nvfp4|resident-fft (explicit Vulkan qualification)\n"
-        "  --opencl-fine-tiles device|native --opencl-fine-window 2..64 (explicit resident fine projection;\n"
-        "    native tiles in two-block batches reproduce the route before device tiles and windows)\n"
-        "  --opencl-profile on|off (Vulkan: record OpenCL host spans and device command intervals)\n"
+        "  --opencl-fine-tiles device|native --opencl-fine-window 2..64, even (explicit resident fine projection;\n"
+        "    native tiles in two-block batches reproduce the route before device tiles and windows; a stated\n"
+        "    source or window must be the one executed)\n"
+        "  --opencl-fine-stream 0..64 (blocks whose mappings device tiles submit while the next are staged;\n"
+        "    default 4, 0 stages a whole batch first)\n"
+        "  --opencl-profile on|off (Vulkan: record OpenCL device command intervals, on by default for explicit\n"
+        "    nvfp4 coarse search; on also times the resident fine session's host spans and commands)\n"
         "  --gpu-fp32-minimum on|off (automatic GPU arithmetic floor; GPU backend only)\n"
         "  --device-index N --device-memory-limit-bytes N\n"
         "  --case hf|eme and the normalized manual-case options from triad_cases.py\n"
@@ -2538,6 +2555,9 @@ void run(Json& report, const Options& o, std::stop_token stop) {
     report["identity"]["requested_vulkan_fine_projection"] = o.vulkan_fine_projection;
     report["identity"]["requested_opencl_fine_tiles"] = o.opencl_fine_tiles;
     report["identity"]["requested_opencl_fine_window"] = o.opencl_fine_window;
+    report["identity"]["requested_opencl_fine_stream"] = o.opencl_fine_stream;
+    report["identity"]["requested_opencl_profile"] =
+        o.opencl_profile ? (*o.opencl_profile ? "on" : "off") : "default";
     report["identity"]["requested_tensor_precision"] = o.tensor_precision;
     report["identity"]["requested_tensor_coarse_math"] = o.tensor_coarse_math;
     report["identity"]["requested_tensor_fine_projection"] = o.tensor_fine_projection;
@@ -2648,6 +2668,14 @@ void run(Json& report, const Options& o, std::stop_token stop) {
             ((o.vulkan_fine_projection == "resident-nvfp4" && !actual_backend.opencl_resident_nvfp4_modes) ||
              (o.vulkan_fine_projection == "resident-fft" && !actual_backend.opencl_resident_fft_modes)))
             throw Incomplete("Requested resident OpenCL fine statistics did not execute on this geometry");
+        // A stated tile source and window are held to the route executed.
+        if (o.command != "codec" && actual_backend.opencl_resident_fine_batches) {
+            if (o.opencl_fine_tiles_supplied && o.opencl_fine_tiles == "device" &&
+                actual_backend.uploaded_tiles && !actual_backend.opencl_resident_rendered_tiles)
+                throw Incomplete("Requested device-rendered fine tiles did not execute: the session uploaded native tiles");
+            if (o.opencl_fine_window && actual_backend.opencl_resident_reduced_windows)
+                throw Incomplete("Requested OpenCL resident fine window did not execute: its device lease was refused");
+        }
         if (o.backend == "cuda" && o.command != "codec") {
             const auto& actual = actual_backend;
             if (o.cuda_segmented_timing && o.require_accelerator &&

@@ -740,7 +740,13 @@ as host code.
 device-class checks, complete coarse sessions and one complete fine
 session through a model of the warp instruction, with a stand-in for the
 OpenCL loader and guarded buffers. They check indexing, packing, operand
-layouts, bounds, receipts and the conditioning fallback without a device. A
+layouts, bounds, receipts and the conditioning fallback without a device.
+`triad_opencl_fine_session_emulated_deferred` and
+`triad_opencl_nvfp4_emulated_deferred` repeat the fine session and the
+resident checks with `DATAPUMP_TRIAD_EMULATION_DEFER=1`, which holds every
+command that does not block until the next synchronization point, as an
+asynchronous device may. They fail when the host changes a buffer that a
+queued write still reads. A
 host that has the toolkit builds the device test instead. They are not device
 arithmetic or timing evidence, and they do not show that NVCC compiles the
 kernels. [Kernel emulation](../tests/triad_kernel_emulation/) ·

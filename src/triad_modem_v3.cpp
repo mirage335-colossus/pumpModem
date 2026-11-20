@@ -278,7 +278,7 @@ struct PatternSource::Impl {
             if(position<protected_first||position>protected_last)return false;}
         else if(format.fhss){const long double guard=format.quiet_seconds+format.ramp_seconds+
             format.margin_seconds+8/geom.fine_chip_rate_hz;
-            const auto position=t-std::floor(t/format.dwell_seconds)*format.dwell_seconds;
+            const auto position=t-detail::floor_coordinate(t/format.dwell_seconds)*format.dwell_seconds;
             if(position<guard||position>format.dwell_seconds-guard)return false;}
         return true;
     }
@@ -327,8 +327,10 @@ struct PatternSource::Impl {
     }
     Chip chip(std::uint64_t fine){
         const long double center=(static_cast<long double>(fine)+center_offset())/geom.fine_chip_rate_hz;
+        // Runs for every chip a rendered point reads; the coordinate forms
+        // keep the x87 control word (triad_coordinate.hpp).
         const auto id=format.fhss_center_aligned?fine/tile_cells:
-            static_cast<std::uint64_t>(std::floor(center/geom.tile_seconds));
+            detail::unsigned_index(detail::floor_coordinate(center/geom.tile_seconds));
         if(!active_tile(id)||center>=geom.bit_seconds)return {};
         auto& slot=tiles[id%2];if(!slot||slot->id!=id){slot.reset();slot=make_tile(id);}
         require(fine>=slot->first&&fine-slot->first<slot->chips.size(),"triad v3 tile lookup mismatch");
@@ -440,12 +442,14 @@ void PatternSource::render_bank_impl(std::span<PatternSource* const> sources,
             const long double t=(sample-ref.halo)/ref.sample_rate;
             const auto envelope=ref.envelope(t);if(envelope==0)continue;
             const auto offset=ref.center_offset();
-            const auto first=std::max(0.L,std::ceil(t*g.fine_chip_rate_hz-(8+offset)));
+            // Once per rendered point: the coordinate forms return the
+            // standard values without switching the x87 rounding mode.
+            const auto first=std::max(0.L,detail::ceil_coordinate(t*g.fine_chip_rate_hz-(8+offset)));
             const auto last=std::min(static_cast<long double>(g.fine_cells)-1,
-                                    std::floor(t*g.fine_chip_rate_hz+(8-offset)));
+                                    detail::floor_coordinate(t*g.fine_chip_rate_hz+(8-offset)));
             if(last<first)continue;
-            point.first=static_cast<std::uint64_t>(first);
-            point.length=static_cast<unsigned>(last-first)+1;
+            point.first=detail::unsigned_index(first);
+            point.length=static_cast<unsigned>(detail::unsigned_index(last-first))+1;
             require(point.length<=point.weights.size(),"triad v3 pulse bank support overflow");
             minimum=std::min(minimum,point.first);maximum=std::max(maximum,point.first+point.length-1);
             for(unsigned j=0;j<point.length;++j){

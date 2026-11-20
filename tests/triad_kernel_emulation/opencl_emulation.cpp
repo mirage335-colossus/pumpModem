@@ -296,6 +296,53 @@ void complete(cl_command_queue queue, cl_event* event, cl_ulong began) {
     *event = queue->profiling ? new _cl_event{began, began, now()} : new _cl_event{0, 0, 0};
 }
 
+// With DATAPUMP_TRIAD_EMULATION_DEFER set to anything but 0, a command that
+// does not block waits, in order, until a synchronization point: a blocking
+// transfer or map, clFinish, clGetEventProfilingInfo or a release. Apart from
+// the last two, which also synchronize here, that is the latest schedule an
+// asynchronous device may choose, so a host buffer that a pending write still
+// reads, or a result used before its read, shows up. One device-wide queue
+// holds the commands of every queue and thread, so a synchronization on any
+// queue runs all of them in their enqueue order.
+bool deferred() {
+    static const bool value = [] {
+        const char* setting = std::getenv("DATAPUMP_TRIAD_EMULATION_DEFER");
+        return setting && *setting && std::string_view(setting) != "0";
+    }();
+    return value;
+}
+
+// Commands that wait for a synchronization point. Guarded by device_mutex.
+std::vector<std::function<void()>> pending;
+
+void drain() {
+    auto commands = std::move(pending);
+    pending.clear();
+    for (auto& command : commands) command();
+}
+
+// An event for a command that runs now or later. A profiling queue stamps it
+// when the command runs.
+_cl_event* pending_event(cl_event* event) {
+    if (!event) return nullptr;
+    *event = new _cl_event{0, 0, 0};
+    return *event;
+}
+
+void stamp(_cl_event* event, bool profiling, cl_ulong began) {
+    if (event && profiling) *event = {began, began, now()};
+}
+
+template<class Command>
+void submit(bool blocking, Command command) {
+    if (deferred() && !blocking) {
+        pending.emplace_back(std::move(command));
+        return;
+    }
+    drain();
+    command();
+}
+
 bool inside(cl_mem memory, std::size_t offset, std::size_t size) {
     return memory && offset <= memory->size && size <= memory->size - offset;
 }
@@ -404,7 +451,12 @@ DATAPUMP_EXPORT cl_command_queue clCreateCommandQueue(cl_context, cl_device_id, 
     return new _cl_command_queue{(properties & CL_QUEUE_PROFILING_ENABLE) != 0};
 }
 
-DATAPUMP_EXPORT cl_int clReleaseCommandQueue(cl_command_queue queue) { delete queue; return CL_SUCCESS; }
+DATAPUMP_EXPORT cl_int clReleaseCommandQueue(cl_command_queue queue) {
+    std::lock_guard lock(device_mutex);
+    drain();
+    delete queue;
+    return CL_SUCCESS;
+}
 
 DATAPUMP_EXPORT cl_kernel clCreateKernel(cl_program, const char* name, cl_int* status) {
     for (const auto& entry : registry()) {
@@ -445,6 +497,10 @@ DATAPUMP_EXPORT cl_mem clCreateBuffer(cl_context, cl_mem_flags, std::size_t size
 }
 
 DATAPUMP_EXPORT cl_int clReleaseMemObject(cl_mem memory) {
+    {
+        std::lock_guard lock(device_mutex);
+        drain();
+    }
     if (memory) munmap(memory->mapping, memory->mapped_bytes);
     delete memory;
     return CL_SUCCESS;
@@ -459,13 +515,16 @@ DATAPUMP_EXPORT cl_int clSetKernelArg(cl_kernel kernel, cl_uint index, std::size
     return CL_SUCCESS;
 }
 
-DATAPUMP_EXPORT cl_int clEnqueueWriteBuffer(cl_command_queue queue, cl_mem memory, cl_bool, std::size_t offset,
-        std::size_t size, const void* source, cl_uint, const cl_event*, cl_event* event) {
+DATAPUMP_EXPORT cl_int clEnqueueWriteBuffer(cl_command_queue queue, cl_mem memory, cl_bool blocking,
+        std::size_t offset, std::size_t size, const void* source, cl_uint, const cl_event*, cl_event* event) {
     if (!inside(memory, offset, size) || !source) return CL_INVALID_VALUE;
     std::lock_guard lock(device_mutex);
-    const auto began = now();
-    std::memcpy(memory->data + offset, source, size);
-    complete(queue, event, began);
+    // The host memory is read when the command runs, not when it is queued.
+    submit(blocking, [memory, offset, size, source, stamped = pending_event(event), profiling = queue->profiling] {
+        const auto began = now();
+        std::memcpy(memory->data + offset, source, size);
+        stamp(stamped, profiling, began);
+    });
     return CL_SUCCESS;
 }
 
@@ -473,9 +532,14 @@ DATAPUMP_EXPORT cl_int clEnqueueFillBuffer(cl_command_queue queue, cl_mem memory
         std::size_t pattern_size, std::size_t offset, std::size_t size, cl_uint, const cl_event*, cl_event* event) {
     if (!inside(memory, offset, size) || !pattern || !pattern_size || size % pattern_size) return CL_INVALID_VALUE;
     std::lock_guard lock(device_mutex);
-    const auto began = now();
-    for (std::size_t at = 0; at < size; at += pattern_size) std::memcpy(memory->data + offset + at, pattern, pattern_size);
-    complete(queue, event, began);
+    const auto* bytes = static_cast<const unsigned char*>(pattern);
+    submit(false, [memory, offset, size, value = std::vector<unsigned char>(bytes, bytes + pattern_size),
+                   stamped = pending_event(event), profiling = queue->profiling] {
+        const auto began = now();
+        for (std::size_t at = 0; at < size; at += value.size())
+            std::memcpy(memory->data + offset + at, value.data(), value.size());
+        stamp(stamped, profiling, began);
+    });
     return CL_SUCCESS;
 }
 
@@ -486,21 +550,26 @@ DATAPUMP_EXPORT cl_int clEnqueueNDRangeKernel(cl_command_queue queue, cl_kernel 
     for (const auto& argument : kernel->arguments)
         if (!argument.size) return CL_INVALID_KERNEL_DEFINITION;
     std::lock_guard lock(device_mutex);
-    const auto began = now();
-    const auto arguments = kernel->arguments;
-    const std::function<void()> invoke = [&] { kernel->entry->call(arguments); };
-    launch(invoke, *global, *local);
-    complete(queue, event, began);
+    // Arguments are captured when the kernel is queued, as clSetKernelArg requires.
+    submit(false, [entry = kernel->entry, arguments = kernel->arguments, global = *global, local = *local,
+                   stamped = pending_event(event), profiling = queue->profiling] {
+        const auto began = now();
+        const std::function<void()> invoke = [&] { entry->call(arguments); };
+        launch(invoke, global, local);
+        stamp(stamped, profiling, began);
+    });
     return CL_SUCCESS;
 }
 
-DATAPUMP_EXPORT cl_int clEnqueueReadBuffer(cl_command_queue queue, cl_mem memory, cl_bool, std::size_t offset,
-        std::size_t size, void* destination, cl_uint, const cl_event*, cl_event* event) {
+DATAPUMP_EXPORT cl_int clEnqueueReadBuffer(cl_command_queue queue, cl_mem memory, cl_bool blocking,
+        std::size_t offset, std::size_t size, void* destination, cl_uint, const cl_event*, cl_event* event) {
     if (!inside(memory, offset, size) || !destination) return CL_INVALID_VALUE;
     std::lock_guard lock(device_mutex);
-    const auto began = now();
-    std::memcpy(destination, memory->data + offset, size);
-    complete(queue, event, began);
+    submit(blocking, [memory, offset, size, destination, stamped = pending_event(event), profiling = queue->profiling] {
+        const auto began = now();
+        std::memcpy(destination, memory->data + offset, size);
+        stamp(stamped, profiling, began);
+    });
     return CL_SUCCESS;
 }
 
@@ -509,6 +578,11 @@ DATAPUMP_EXPORT void* clEnqueueMapBuffer(cl_command_queue queue, cl_mem memory, 
     if (!inside(memory, offset, size)) {
         if (status) *status = CL_INVALID_VALUE;
         return nullptr;
+    }
+    {
+        // The host reads or writes the mapped storage directly.
+        std::lock_guard lock(device_mutex);
+        drain();
     }
     complete(queue, event, now());
     if (status) *status = CL_SUCCESS;
@@ -521,10 +595,21 @@ DATAPUMP_EXPORT cl_int clEnqueueUnmapMemObject(cl_command_queue queue, cl_mem, v
     return CL_SUCCESS;
 }
 
-DATAPUMP_EXPORT cl_int clFinish(cl_command_queue) { return CL_SUCCESS; }
+DATAPUMP_EXPORT cl_int clFinish(cl_command_queue) {
+    std::lock_guard lock(device_mutex);
+    drain();
+    return CL_SUCCESS;
+}
+
+// Submits without waiting. A deferred command still waits for a synchronization point.
+DATAPUMP_EXPORT cl_int clFlush(cl_command_queue) { return CL_SUCCESS; }
 
 DATAPUMP_EXPORT cl_int clGetEventProfilingInfo(cl_event event, cl_profiling_info name, std::size_t size, void* value,
                                                std::size_t* size_out) {
+    {
+        std::lock_guard lock(device_mutex);
+        drain();
+    }
     if (!event || !event->end) return CL_PROFILING_INFO_NOT_AVAILABLE;
     cl_ulong result;
     switch (name) {
@@ -542,6 +627,14 @@ DATAPUMP_EXPORT cl_int clGetEventProfilingInfo(cl_event event, cl_profiling_info
     return CL_SUCCESS;
 }
 
-DATAPUMP_EXPORT cl_int clReleaseEvent(cl_event event) { delete event; return CL_SUCCESS; }
+DATAPUMP_EXPORT cl_int clReleaseEvent(cl_event event) {
+    {
+        // A pending command still stamps its event.
+        std::lock_guard lock(device_mutex);
+        drain();
+    }
+    delete event;
+    return CL_SUCCESS;
+}
 
 } // extern "C"

@@ -76,15 +76,23 @@ struct VulkanReceiverOptions {
     // Record OpenCL device command intervals in the receipt. Developer
     // probes use this to separate Tensor Core time from complete service.
     bool profile_opencl = false;
+    // Also time the resident fine session's host spans and commands. It reads
+    // the clock around every staged column, so timing runs leave it off.
+    bool profile_opencl_fine = false;
     // Let the OpenCL coarse search render its template bank from the keyed
     // coefficients. Off keeps native columns for a matched comparison.
     bool opencl_device_templates = true;
     // Let resident OpenCL fine batches render their dense source tiles from
     // the keyed coefficients. Off uploads native tiles, as a matched control.
     bool opencl_fine_device_tiles = true;
-    // Public blocks of one resident fine batch, from 2 to 64. Zero selects
-    // the default window. Two keeps one dispatch per batch.
+    // Public blocks of one resident fine batch, an even number from 2 to 64;
+    // an odd value runs one block fewer. Zero selects the default window.
+    // Two keeps one dispatch per batch.
     std::size_t opencl_fine_window_blocks = 0;
+    // With device tiles, submit the mappings of every this many blocks of a
+    // resident fine batch while staging the next ones, up to 64. Zero stages
+    // a whole batch before the device starts, as a matched control.
+    std::size_t opencl_fine_stream_blocks = 4;
 };
 
 // Optional Vulkan broad-frequency search and Blackwell OpenCL fine projection.

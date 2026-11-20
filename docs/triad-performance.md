@@ -539,8 +539,8 @@ completion. Regression/manual selectors cannot be mixed into component mode.
 
 Probe binaries with equal compile options and equal simulator objects ran the
 unchanged single-threaded simulator up to 40% apart on the Blackwell host.
-The x87 control word explains it. A baseline x86-64 build loads that word
-twice (`fldcw`), to set and restore the rounding mode, around every inline
+The x87 control word most likely explains it. A baseline x86-64 build loads
+that word twice (`fldcw`), to set and restore the rounding mode, around every inline
 `std::floor` or `std::ceil` of a `long double` and around every conversion of
 a `long double` to an integer. A core follows the control word cheaply for
 only a few such instructions at a time. A loop that rotates through more of
@@ -590,11 +590,13 @@ explanation directly.
 Code that runs once per sample now uses the forms in
 [`triad_coordinate.hpp`](../src/triad_coordinate.hpp). They return exactly
 the standard values without writing the control word. The changed channel
-executes 44 switches in a whole slot, all in its construction, and the
-pattern source about 400 for a slot's signal. On the 5650U the committed simulator took
+executes 44 switches in a whole slot, all in its construction. The pattern
+source executed 478 for the severe slot's signal, 388 of them in its chip
+lookup, which the [receiver change](validation.md#receiver-host-rounding-mode-switches--20-november-2026)
+also converts. On the 5650U the `c02b726e` simulator took
 4.62–5.06 s for the severe slot over five link layouts and the changed one
 2.69–2.72 s over seven. This processor did not reproduce a 40% difference:
-its committed code was slow in every layout tried.
+its `c02b726e` code was slow in every layout tried.
 [Simulator changes and their limits](channel-models.md#stream-evaluation-workers-and-capture-identity) ·
 [measurements](validation.md#simulator-throughput-and-capture-identity--20-november-2026).
 
@@ -603,17 +605,36 @@ its committed code was slow in every layout tried.
 - When two binaries built from the same objects differ in one stage, count
   `fldcw` in that stage's functions with `objdump -d` before looking for
   another cause. The count includes cold fallback paths.
-- Most receiver host code is unchanged. The basis object's tile-address map
-  now uses those forms. With the inline ones it took 0.023–0.024 s per slot
-  in one build and 0.036–0.044 s in another.
+- The receiver uses those forms once per rendered point, chip or
+  interpolated row: `PatternSource::render_bank_impl`,
+  `PatternSource::Impl::chip` and the coarse `cubic` interpolant. Its
+  basis object's tile-address map uses them once per candidate and tap.
+  With the inline forms that map took 0.023–0.024 s per slot in one build
+  and 0.036–0.044 s in another.
   [Record](triad-gpu-optimization.md#host-time-without-a-device).
-  `PatternSource::render_bank_impl` still performs eight switches for each
-  rendered point, and the coarse, basis and fine receiver objects contain 66,
-  20 and 14 switch instructions. One CPU-backend slot of the severe capture
-  executes 222 million switches in the pattern-source object alone. Their
-  cost in seconds is unmeasured. They are a candidate for the 5–21%
+  The source side uses them too: the Helper Carrier's mixing once per sample,
+  and its power reference and the FHSS data power reference once per node.
+  `Impl::chip` also serves the simulator's pattern source.
+- Sites that run once per tile, workspace column, plan or slot keep the
+  standard forms, such as the edge correction of a mapped coarse column.
+  One CPU-backend slot of the severe capture executed 222.5 million switches
+  in the pattern-source object and 700.4 million in the coarse object before
+  the change, and 13,450 and 354 after it. The objects contain at least as
+  many switch instructions as before, because every form keeps the standard
+  one as a cold fallback: count executed switches, not instructions. To count
+  them, compile the objects to assembly, add a counter increment that keeps
+  the flags and the red zone before each `fldcw`, and link those objects
+  ahead of the build tree's libraries.
+- On the 5650U the normally linked probes ran the slot equally fast before
+  and after the change; that link placed the old code well. Linked behind
+  padding that moved it by 1,536 and 3,072 bytes, the old coarse stage took
+  9% and 15% longer at 24 workers, and the changed one stayed within 2.2%.
+  The change removes a placement-dependent cost; it does not speed up a
+  well-placed slot here. It remains an untested candidate for the 5–21%
   difference of the Vulkan FFT coarse route between two binaries in the
-  [dense coarse record](validation.md#blackwell-dense-fp4-coarse-search--20-november-2026).
+  [dense coarse record](validation.md#blackwell-dense-fp4-coarse-search--20-november-2026);
+  a device run of this source would test it.
+  [Measurements](validation.md#receiver-host-rounding-mode-switches--20-november-2026).
 - The mechanism is inferred from behaviour on one Zen 3 processor. No vendor
   description of it was found, and the Zen 5 host is covered only by the
   receipts above.

@@ -14,6 +14,9 @@ public:
         : backend_(std::move(backend)), reason_(std::move(reason)) {}
     bool supports_fine() const noexcept override { return backend_->supports_fine(); }
     bool fine_maps_on_host() const noexcept override { return backend_->fine_maps_on_host(); }
+    std::size_t fine_resident_blocks(const receiver_detail::FineBulkGeometry& geometry) const noexcept override {
+        return backend_->fine_resident_blocks(geometry);
+    }
     std::string_view fine_fallback_reason(const receiver_detail::FineBulkGeometry& geometry) const noexcept override {
         return backend_->fine_fallback_reason(geometry);
     }

@@ -23,7 +23,11 @@ struct OpenClResidentWork {
     std::uint64_t upload_bytes = 0, download_bytes = 0;
     std::uint64_t uploaded_tiles = 0, tile_hits = 0;
     std::uint64_t mapped_columns = 0, direct_columns = 0, dispatches = 0;
-    std::uint64_t blocking_writes = 0, mapping_dispatches = 0;
+    // Writes the host waits for, and writes from staging that stays
+    // unchanged until the batch's blocking read.
+    std::uint64_t blocking_writes = 0, async_writes = 0, mapping_dispatches = 0;
+    // Waits for the whole queue before an arena is reused within a batch.
+    std::uint64_t arena_synchronizations = 0;
     std::uint64_t setup_upload_bytes = 0, observation_upload_bytes = 0, setup_dispatches = 0;
     // Dense tiles rendered on the device and the lanes keyed for them.
     std::uint64_t rendered_tiles = 0, keyed_lanes = 0;
@@ -48,6 +52,14 @@ struct OpenClResidentOptions {
     std::size_t tile_cells = 0, tile_lanes = 0;
     // Record host spans and device command intervals in the work.
     bool profile = false;
+    // With device-rendered tiles, submit the mappings of every this many
+    // blocks while staging the following ones. Zero stages a whole batch
+    // before the device starts.
+    std::size_t stream_blocks = 4;
+    // Tile cache slots the session uses, 16 to 64. Tests choose fewer to
+    // flush under cache pressure often; the request arena holds four times
+    // this many entries.
+    std::size_t cache_slots = 64;
 };
 
 class OpenClNvfp4Device;

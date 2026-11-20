@@ -1743,9 +1743,10 @@ OpenClFineOptions opencl_fine_options(const VulkanReceiverOptions& options) noex
         ? OpenClFineMethod::resident_fp4
         : choice == VulkanFineProjection::opencl_resident_fft ? OpenClFineMethod::resident_fft : OpenClFineMethod::staged;
     fine.required = choice == VulkanFineProjection::opencl_nvfp4;
-    fine.profile = options.profile_opencl;
+    fine.profile = options.profile_opencl_fine;
     fine.device_tiles = options.opencl_fine_device_tiles;
     if (options.opencl_fine_window_blocks) fine.window_blocks = options.opencl_fine_window_blocks;
+    fine.stream_blocks = options.opencl_fine_stream_blocks;
     return fine;
 }
 #endif

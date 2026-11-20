@@ -91,6 +91,7 @@ void* clEnqueueMapBuffer(cl_command_queue, cl_mem, cl_bool, cl_map_flags, std::s
                          cl_uint, const cl_event*, cl_event*, cl_int*);
 cl_int clEnqueueUnmapMemObject(cl_command_queue, cl_mem, void*, cl_uint, const cl_event*, cl_event*);
 cl_int clFinish(cl_command_queue);
+cl_int clFlush(cl_command_queue);
 cl_int clGetEventProfilingInfo(cl_event, cl_profiling_info, std::size_t, void*, std::size_t*);
 cl_int clReleaseEvent(cl_event);
 }

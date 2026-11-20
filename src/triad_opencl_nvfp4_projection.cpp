@@ -23,6 +23,9 @@ constexpr std::size_t resident_columns = 4, resident_maximum_candidates = 72, re
 // A descriptor names up to this many cache slots in one byte each. A block's
 // rows span far fewer dense tiles, also for the two columns of a shared map.
 constexpr std::size_t resident_cache_slots = 64, resident_tile_rows = 8192, resident_maximum_tile_pins = 16;
+// Render requests of a batch stay in an arena of four times the session's
+// cache slots until the queue has read them.
+constexpr std::size_t resident_request_arenas = 4;
 constexpr std::size_t resident_stat_values = 11;
 constexpr std::size_t resident_tile_bytes = resident_tile_rows * sizeof(Complex);
 // These mirror resident_fine_render_tiles in triad_opencl_nvfp4_kernels.cu.
@@ -110,7 +113,8 @@ struct Shape {
             const auto blocks = resident.blocks;
             if (rows != resident_rows || modes != resident_modes || !blocks || blocks > resident_maximum_blocks ||
                 batch > resident_columns * resident_maximum_candidates * blocks || batch % resident_columns ||
-                !resident.tile_cells != !resident.tile_lanes ||
+                !resident.tile_cells != !resident.tile_lanes || resident.stream_blocks > resident_maximum_blocks ||
+                resident.cache_slots < resident_maximum_tile_pins || resident.cache_slots > resident_cache_slots ||
                 resident.tile_lanes > std::numeric_limits<std::uint32_t>::max())
                 throw Error("Invalid Robust OpenCL resident fine projection shape");
             sizes[raw_tiles] = resident_cache_slots * resident_tile_bytes;
@@ -159,6 +163,8 @@ struct ResidentScratch {
     };
 
     std::array<TileSlot, resident_cache_slots> cache{};
+    // The slots in use: a test may choose fewer than the array holds.
+    std::size_t slots = resident_cache_slots;
     // Consecutive candidates address the same few tiles.
     std::array<std::uint8_t, 4> recent{};
     std::uint64_t clock = 0;
@@ -169,20 +175,23 @@ struct ResidentScratch {
     // One byte per lane of the batch: whether a column supplied it.
     std::vector<std::uint8_t> present;
     std::vector<Complex> observed, tile_upload, downloaded, chips;
+    // Arenas for the batch: a flush writes the slice after the flushed
+    // entries without waiting, so no entry changes until the queue has read it.
     std::vector<DeviceMapping> descriptors;
     std::vector<TileRequest> requests;
+    std::size_t flushed_descriptors = 0, flushed_requests = 0;
     std::vector<FineBulkStatistics> statistics;
     // The source whose parameters and keyed lanes are on the device.
     const FineTileSource* source = nullptr;
     std::vector<bool> keyed;
 
     ResidentScratch(const Shape& shape, std::span<const std::size_t> bins)
-        : present(shape.batch_capacity), observed(shape.sizes[observed_modes] / sizeof(Complex)),
+        : slots(shape.resident.cache_slots), present(shape.batch_capacity), observed(shape.sizes[observed_modes] / sizeof(Complex)),
           downloaded(shape.sizes[resident_statistics] / sizeof(Complex)), statistics(shape.resident_candidates()),
           keyed(shape.resident.tile_lanes) {
         std::ranges::copy(bins, coefficients.begin());
         descriptors.reserve(shape.batch_capacity);
-        requests.reserve(resident_cache_slots);
+        requests.reserve(resident_request_arenas * slots);
     }
 
     static std::size_t workspace(const Shape& shape) {
@@ -194,7 +203,8 @@ struct ResidentScratch {
         // one lane of keyed coefficients, and a caller may still supply
         // native leases to the same session.
         const auto tile_staging = add(add(retained_source, shape.sizes[raw_tiles]),
-            add(multiply(shape.resident.tile_cells, tile_chip_bytes), shape.sizes[tile_requests]));
+            add(multiply(shape.resident.tile_cells, tile_chip_bytes),
+                resident_request_arenas * resident_cache_slots * sizeof(TileRequest)));
         return add(add(sizeof(ResidentScratch) + shape.sizes[resident_statistics] + shape.sizes[mapping_descriptors] +
                            shape.sizes[observed_modes] + shape.sizes[lane_presence] +
                            shape.resident_candidates() * sizeof(FineBulkStatistics),
@@ -207,6 +217,7 @@ struct ResidentScratch {
         clock = 0;
         descriptors.clear();
         requests.clear();
+        flushed_descriptors = flushed_requests = 0;
         dirty_slots.reset();
         protected_slots.reset();
     }
@@ -232,7 +243,7 @@ struct ResidentScratch {
 
     std::size_t victim() const noexcept {
         auto selected = cache.size();
-        for (std::size_t slot = 0; slot < cache.size(); ++slot) {
+        for (std::size_t slot = 0; slot < slots; ++slot) {
             if (protected_slots[slot]) continue;
             if (cache[slot].empty()) return slot;
             if (selected == cache.size() || cache[slot].touched < cache[selected].touched) selected = slot;
@@ -367,6 +378,16 @@ struct OpenClNvfp4Projection::Impl {
             if (shape.resident.tile_cells) create_kernel(render_tiles, "resident_fine_render_tiles");
             if (!shape.uses_fp4()) create_kernel(project_fft, "resident_fine_fft");
             resident = std::make_unique<ResidentScratch>(shape, coefficients);
+            // A driver may allocate a buffer at its first use. Touch each
+            // one now, so a workspace that does not fit fails here, where the
+            // caller can still take a smaller session or the native route.
+            // Every byte touched is written again before it is read.
+            const std::uint8_t zero = 0;
+            for (const auto buffer : buffers)
+                if (buffer)
+                    check(owner->api.EnqueueFillBuffer(queue, buffer, &zero, 1, 0, 1, 0, nullptr, nullptr),
+                          "allocate projection buffer");
+            check(owner->api.Finish(queue), "allocate projection buffers");
         }
         std::vector<cl_long> indices(coefficients.size());
         for (std::size_t i = 0; i < coefficients.size(); ++i) {
@@ -426,6 +447,19 @@ struct OpenClNvfp4Projection::Impl {
         keep(event, Stage::transfer);
         work.upload_bytes += input.size_bytes();
         ++work.blocking_writes;
+    }
+
+    // A write the host does not wait for. Its source must stay unchanged
+    // until the batch's blocking read or a synchronizing flush.
+    template<class T>
+    void upload_async(Buffer buffer, std::size_t offset, std::span<const T> input, OpenClResidentWork& work) {
+        cl_event event = nullptr;
+        check(owner->api.EnqueueWriteBuffer(queue, buffers[buffer], CL_FALSE, offset, input.size_bytes(), input.data(),
+                                            0, nullptr, timed_event(event)), "upload resident fine data");
+        pending = true;
+        keep(event, Stage::transfer);
+        work.upload_bytes += input.size_bytes();
+        ++work.async_writes;
     }
 
     // Adds the completed batch's command intervals. The blocking statistics
@@ -489,9 +523,15 @@ struct OpenClNvfp4Projection::Impl {
         scratch.source = source;
     }
 
-    void flush_mappings(OpenClResidentWork& work) {
+    // Writes the staged tiles, render requests and descriptors. A flush
+    // writes everything before it dispatches: on the in-order queue a
+    // blocking write would otherwise wait for the kernels ahead of it. Host
+    // tiles are written blocking because a later slot may reuse their
+    // staging. Requests and descriptors go from their arenas without a wait,
+    // each slice to the start of its device buffer, which the in-order queue
+    // has read by then.
+    void upload_mappings(OpenClResidentWork& work) {
         auto& scratch = *resident;
-        if (scratch.descriptors.empty()) return;
         const auto tiles = std::span<const Complex>(scratch.tile_upload);
         for (std::size_t slot = scratch.dirty_slots.any() ? 0 : resident_cache_slots; slot < resident_cache_slots;) {
             if (!scratch.dirty_slots[slot]) {
@@ -504,28 +544,62 @@ struct OpenClNvfp4Projection::Impl {
                    tiles.subspan(first * resident_tile_rows, (slot - first) * resident_tile_rows), work);
             work.uploaded_tiles += slot - first;
         }
-        if (!scratch.requests.empty()) {
-            const auto requests = std::span<const TileRequest>(scratch.requests);
-            upload(tile_requests, 0, requests, work);
+        const auto requests = std::span<const TileRequest>(scratch.requests).subspan(scratch.flushed_requests);
+        if (!requests.empty()) upload_async(tile_requests, 0, requests, work);
+        upload_async(mapping_descriptors, 0,
+                     std::span<const DeviceMapping>(scratch.descriptors).subspan(scratch.flushed_descriptors), work);
+    }
+
+    // Renders the requested tiles and maps the staged descriptors.
+    void dispatch_mappings(OpenClResidentWork& work) {
+        auto& scratch = *resident;
+        if (scratch.requests.size() > scratch.flushed_requests) {
+            const auto requests = std::span<const TileRequest>(scratch.requests).subspan(scratch.flushed_requests);
             dispatch(render_tiles, align(requests.size() * resident_tile_rows, local_size), Stage::render,
                      buffers[tile_chips], buffers[tile_pulse], buffers[tile_source], buffers[tile_requests],
                      buffers[raw_tiles], kernel_extent(shape.resident.tile_cells), kernel_extent(requests.size()));
             ++work.dispatches;
             work.rendered_tiles += requests.size();
-            scratch.requests.clear();
+            scratch.flushed_requests = scratch.requests.size();
         }
-        const auto descriptors = std::span<const DeviceMapping>(scratch.descriptors);
-        upload(mapping_descriptors, 0, descriptors, work);
+        const auto descriptors = std::span<const DeviceMapping>(scratch.descriptors).subspan(scratch.flushed_descriptors);
         dispatch(map_resident, align(shape.rows * descriptors.size(), local_size), Stage::map,
                  buffers[raw_tiles], buffers[mapping_descriptors], buffers[mapped_input],
                  kernel_extent(shape.rows), kernel_extent(descriptors.size()));
         ++work.dispatches;
         ++work.mapping_dispatches;
-        scratch.descriptors.clear();
+        scratch.flushed_descriptors = scratch.descriptors.size();
         scratch.dirty_slots.reset();
         // The in-order queue has captured these cache slots. Later writes may
         // reuse them because the mapping kernel reads them first.
         scratch.protected_slots.reset();
+    }
+
+    void flush_mappings(OpenClResidentWork& work) {
+        if (resident->descriptors.size() == resident->flushed_descriptors) return;
+        upload_mappings(work);
+        dispatch_mappings(work);
+    }
+
+    // Submits the staged mappings, so the device maps them while the owner
+    // stages the following blocks.
+    void stream_mappings(OpenClResidentWork& work) {
+        flush_mappings(work);
+        check(owner->api.Flush(queue), "submit resident fine mappings");
+    }
+
+    // Empties the arenas once the queue has read every slice of them. It
+    // waits for the slice it submits too, so it is kept for the rare batch
+    // whose render requests outgrow the arena; a profiled run counts the
+    // wait as staging.
+    void synchronize_arenas(OpenClResidentWork& work) {
+        auto& scratch = *resident;
+        flush_mappings(work);
+        check(owner->api.Finish(queue), "synchronize resident fine mappings");
+        ++work.arena_synchronizations;
+        scratch.descriptors.clear();
+        scratch.requests.clear();
+        scratch.flushed_descriptors = scratch.flushed_requests = 0;
     }
 
     // Stages one column's descriptor. `find` returns a tile's cache slot or
@@ -543,7 +617,10 @@ struct OpenClNvfp4Projection::Impl {
             if (address == resident_cache_slots) ++misses;
             else hits.set(address);
         }
-        if ((scratch.protected_slots | hits).count() + misses > resident_cache_slots) flush_mappings(work);
+        if ((scratch.protected_slots | hits).count() + misses > scratch.slots) flush_mappings(work);
+        // Neither arena may grow while the queue can still read it.
+        if (scratch.requests.size() + misses > scratch.requests.capacity() ||
+            scratch.descriptors.size() == scratch.descriptors.capacity()) synchronize_arenas(work);
         scratch.protected_slots |= hits;
         DeviceMapping descriptor{column.fraction, column.scale, column.phase, column.phase_step,
                                  column.origin, static_cast<std::uint16_t>(lane), unpaired_output,
@@ -561,13 +638,14 @@ struct OpenClNvfp4Projection::Impl {
             descriptor.tiles[i] = static_cast<std::uint8_t>(address);
         }
         ++work.mapped_columns;
-        if (same_tap_as_previous && !scratch.descriptors.empty() &&
+        if (same_tap_as_previous && scratch.descriptors.size() > scratch.flushed_descriptors &&
             descriptor.tile_count <= resident_maximum_tile_pins / 2) {
             auto& previous = scratch.descriptors.back();
             if (previous.second_output == unpaired_output && same_mapping(previous, descriptor)) {
                 // The two lane outputs have independent tile leases. They
                 // can share the stencil only when both leases survive this
-                // dispatch. A cache flush above starts a new descriptor list.
+                // dispatch. A flush above starts a new descriptor slice, and
+                // a flushed descriptor is never changed.
                 std::copy_n(descriptor.tiles, descriptor.tile_count, previous.tiles + previous.tile_count);
                 previous.second_output = descriptor.output;
                 return;
@@ -748,13 +826,17 @@ struct OpenClNvfp4Projection::Impl {
         const auto* tiles = blocks.front().tiles;
         timing = profile;
         if (tiles != scratch.source) bind_source(tiles, work);
+        // The previous batch's blocking read finished every slice of the arenas.
+        scratch.descriptors.clear();
+        scratch.requests.clear();
+        scratch.flushed_descriptors = scratch.flushed_requests = 0;
         // Only the trailers need a known value before the columns arrive.
         dispatch(clear_lanes, align(lanes, local_size), Stage::map, buffers[mapped_input], rows, active_lanes);
         ++work.dispatches;
         const auto present = std::span(scratch.present).first(lanes);
         std::ranges::fill(present, std::uint8_t{0});
         const auto began = profile ? Clock::now() : Clock::time_point{};
-        double staging = 0;
+        double staging = 0, streaming = 0;
         for (std::size_t block = 0; block < blocks.size(); ++block) {
             const auto& input = blocks[block];
             const double* canonical_offsets = nullptr;
@@ -768,23 +850,39 @@ struct OpenClNvfp4Projection::Impl {
                     if (profile) staging += seconds_since(entered);
                 });
             }
+            // Rendered tiles need no host staging, so the device can map
+            // these blocks while the owner stages the following ones.
+            const auto stream = shape.resident.stream_blocks;
+            if (tiles && stream && block + 1 < blocks.size() && (block + 1) % stream == 0) {
+                const auto entered = profile ? Clock::now() : Clock::time_point{};
+                stream_mappings(work);
+                if (profile) streaming += seconds_since(entered);
+            }
         }
         const auto staged = profile ? Clock::now() : Clock::time_point{};
         if (profile) {
             work.host_staging_seconds += staging;
-            work.host_source_seconds += std::chrono::duration<double>(staged - began).count() - staging;
+            work.host_transfer_seconds += streaming;
+            work.host_source_seconds += std::chrono::duration<double>(staged - began).count() - staging - streaming;
         }
+        // The observations and lane presence stay unchanged until the
+        // statistics read below, so they go without a wait too.
         const auto observed = std::span<const Complex>(scratch.observed).first(blocks.size() * shape.modes);
-        upload(observed_modes, 0, observed, work);
+        upload_async(observed_modes, 0, observed, work);
         work.observation_upload_bytes = observed.size_bytes();
-        // Submit the final mapping and projection without a host wait between them.
-        flush_mappings(work);
-        if (std::ranges::find(present, std::uint8_t{0}) != present.end()) {
-            upload(lane_presence, 0, std::span<const std::uint8_t>(present), work);
+        // Write everything first, then submit the final mapping and the
+        // projection without a host wait between them. Absent lanes have no
+        // descriptor, so the two mapping kernels write disjoint lanes.
+        const bool absent = std::ranges::find(present, std::uint8_t{0}) != present.end();
+        const bool mapped = scratch.descriptors.size() > scratch.flushed_descriptors;
+        if (absent) upload_async(lane_presence, 0, std::span<const std::uint8_t>(present), work);
+        if (mapped) upload_mappings(work);
+        if (absent) {
             dispatch(absent_lanes, lanes * local_size, Stage::map, buffers[mapped_input], buffers[lane_presence],
                      rows, active_lanes);
             ++work.dispatches;
         }
+        if (mapped) dispatch_mappings(work);
         dispatch(measure_peaks, lanes * local_size, Stage::pack, buffers[mapped_input], rows, active_lanes);
         if (shape.uses_fp4()) {
             enqueue_fp4(lanes);

@@ -5,6 +5,7 @@
 #include "search_fft.hpp"
 #include "datapump/execution.hpp"
 #include "datapump/triad_shaping.hpp"
+#include "triad_coordinate.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -809,7 +810,8 @@ std::array<double, 4> cubic_weights(double u) {
 
 Complex cubic(std::span<const Complex> source, long double index) {
     if (index <= -2 || index >= static_cast<long double>(source.size()) + 1) return {};
-    const auto center = static_cast<std::int64_t>(std::floor(index));
+    // Once per interpolated row: keep the x87 control word.
+    const auto center = detail::floor_whole(index).index;
     const auto weights = cubic_weights(static_cast<double>(index - center));
     Complex out{};
     for (int i = 0; i < 4; ++i) {

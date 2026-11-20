@@ -45,6 +45,9 @@ class TriadGpuBundleTests(unittest.TestCase):
             "tests/test_triad_nvfp4_projection.cpp": '#include "triad_nvfp4_projection.hpp"\nint main() {}\n',
             "tests/test_triad_vulkan.cpp": "int main() {}\n",
             "tests/test_triad_opencl_nvfp4.cpp": "int main() {}\n",
+            "tests/test_triad_opencl_fine_session.cpp": '#include "triad_crypto_fixture.hpp"\nint main() {}\n',
+            "tests/triad_crypto_fixture.hpp": '#include "fixture_crypto.hpp"\n',
+            "tests/fixture_crypto.hpp": "#pragma once\n",
             "tests/test_gui_robust_live.cpp": "#include \"datapump/live.hpp\"\nint main() {}\n",
             "src/triad_tensor_fft.hpp": "#pragma once\n",
             "tests/test_triad_gpu_workload.py": "VALUE = 4\n",
@@ -167,6 +170,9 @@ class TriadGpuBundleTests(unittest.TestCase):
         self.assertIn("tests/test_triad_nvfp4_projection.cpp", names)
         self.assertIn("tests/test_triad_vulkan.cpp", names)
         self.assertIn("tests/test_triad_opencl_nvfp4.cpp", names)
+        self.assertIn("tests/test_triad_opencl_fine_session.cpp", names)
+        self.assertIn("tests/triad_crypto_fixture.hpp", names)
+        self.assertIn("tests/fixture_crypto.hpp", names)
         self.assertIn("tests/test_gui_robust_live.cpp", names)
         self.assertIn("cmake/TriadTensor.cmake", names)
         self.assertIn("cmake/TriadVulkan.cmake", names)

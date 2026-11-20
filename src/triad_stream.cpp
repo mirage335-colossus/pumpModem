@@ -1,6 +1,7 @@
 #include "datapump/triad_stream.hpp"
 
 #include "datapump/triad_transmission_keys.hpp"
+#include "triad_coordinate.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -99,7 +100,8 @@ DataPowerReference bounded_tile_power(PatternSource& source, std::stop_token sto
             const auto coordinate = active_tile * (i + fraction) / nodes_per_tile;
             long double within = coordinate;
             if (format.fhss) {
-                const auto dwell = std::floor(coordinate / active_dwell);
+                // Once per node: keep the x87 control word (triad_coordinate.hpp).
+                const auto dwell = detail::floor_coordinate(coordinate / active_dwell);
                 within = dwell * format.dwell_seconds + format.quiet_seconds + coordinate - dwell * active_dwell;
             }
             const auto seconds = tile * (static_cast<long double>(format.burst_wait_tiles) + 1) * geometry.tile_seconds + within;

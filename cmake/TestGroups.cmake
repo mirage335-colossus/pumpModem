@@ -41,6 +41,8 @@ set(_aliases
   "triad_vulkan_plan=test_triad_vulkan"
   "triad_vulkan_host_scoring=test_triad_vulkan"
   "triad_vulkan_workspace_admission=test_triad_vulkan"
+  "triad_opencl_fine_session_emulated_deferred=test_triad_opencl_fine_session_emulated"
+  "triad_opencl_nvfp4_emulated_deferred=test_triad_opencl_nvfp4_emulated"
   "triad_tensor_cuda_half_fft=test_triad_tensor_fft"
   "build_speculation_codegen=test_speculation"
   "web_worker=datapump-worker" "web_preview=datapump-worker"

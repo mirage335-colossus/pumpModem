@@ -24,6 +24,8 @@ public:
 // One resident batch holds this many public blocks unless a caller chooses.
 inline constexpr std::size_t opencl_fine_default_window_blocks = 16;
 inline constexpr std::size_t opencl_fine_maximum_window_blocks = 64;
+// With device tiles a batch submits the mappings of every this many blocks.
+inline constexpr std::size_t opencl_fine_default_stream_blocks = 4;
 
 struct OpenClFineOptions {
     OpenClFineMethod method = OpenClFineMethod::resident_fp4;
@@ -37,6 +39,9 @@ struct OpenClFineOptions {
     bool device_tiles = true;
     // Public blocks of one resident batch. Two keeps one dispatch a batch.
     std::size_t window_blocks = opencl_fine_default_window_blocks;
+    // With device tiles, submit the mappings of every this many blocks while
+    // staging the next ones. Zero stages a whole batch first.
+    std::size_t stream_blocks = opencl_fine_default_stream_blocks;
 };
 
 // Fine statistics of the isolated 1500-row, 47-mode, two-path DATA geometry

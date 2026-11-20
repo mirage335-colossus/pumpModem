@@ -1,5 +1,6 @@
 #include "datapump/helper_carrier.hpp"
 #include "datapump/types.hpp"
+#include "triad_coordinate.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -8,6 +9,9 @@
 
 namespace datapump::helper {
 namespace {
+// Floors and conversions once per sample or reference node keep the x87
+// control word (triad_coordinate.hpp).
+namespace coordinate=triad::v3::detail;
 constexpr double tau=2*std::numbers::pi;
 constexpr double nominal_data_mean_power=.153125;
 constexpr long double dwell=.4L,ramp=.004L,metadata_end=.392L,symbol_time=.020L;
@@ -55,7 +59,7 @@ std::complex<double> auxiliary_modulation(long double local,
     const auto begin=metadata_end-symbols.size()*symbol_time;
     if(!symbols.empty() && local>=begin) {
         const auto position=(local-begin)/symbol_time;
-        const auto index=static_cast<std::size_t>(std::floor(position));
+        const auto index=static_cast<std::size_t>(coordinate::unsigned_index(coordinate::floor_coordinate(position)));
         if(index<symbols.size()) {
             const auto previous=index?symbols[index-1]:std::complex<double>{1,0};
             result*=previous+(symbols[index]-previous)*auxiliary_smooth(position-index);
@@ -135,11 +139,11 @@ MeanPower mean_power(const Options& options,bool pilot_gating,const PowerReferen
         if(reference.active&&!reference.active(seconds))continue;
         auto local=std::fmod(static_cast<long double>(reference.epoch%2)+seconds,2.L);
         if(local<0)local+=2;
-        local-=std::floor(local/dwell)*dwell;
+        local-=coordinate::floor_coordinate(local/dwell)*dwell;
         if((options.timecode||!options.callsign.empty())&&local>=metadata_end-9*symbol_time) {
             const auto absolute_dwell=static_cast<long double>(reference.epoch)+seconds-local;
             if(absolute_dwell>=0&&absolute_dwell<4294967296.L) {
-                const auto ticks=static_cast<std::uint64_t>(std::round(absolute_dwell*65536));
+                const auto ticks=coordinate::unsigned_index(std::round(absolute_dwell*65536));
                 if(cached_time!=ticks) {
                     const auto packet=metadata_packet(ticks,options.callsign,reference.time_key?&*reference.time_key:nullptr);
                     count=packet.count;
@@ -368,7 +372,7 @@ std::complex<double> Generator::mix_analytic(std::complex<double> payload,long d
     auto local=std::fmod(static_cast<long double>(epoch_%2)+seconds,2.L);
     if(local<0)local+=2;
     const auto roundoff=calendar_roundoff(local);
-    local-=std::floor(local/dwell)*dwell;
+    local-=coordinate::floor_coordinate(local/dwell)*dwell;
     auto envelope=plan_.pilot_dwell_gating?smooth(std::min(local,dwell-local)/ramp):1.;
     // The auxiliary's periodic boundary gate has twice the pilot's support.
     // Explicit source start/end ramps still occupy4ms on both components.
@@ -394,7 +398,7 @@ std::complex<double> Generator::mix_analytic(std::complex<double> payload,long d
     if((options_.timecode||!options_.callsign.empty())&&local>=metadata_end-9*symbol_time) {
         const auto absolute_dwell=static_cast<long double>(epoch_)+seconds-local;
         if(absolute_dwell>=0 && absolute_dwell<4294967296.L) {
-            const auto ticks=static_cast<std::uint64_t>(std::round(absolute_dwell*65536));
+            const auto ticks=coordinate::unsigned_index(std::round(absolute_dwell*65536));
             if(ticks>=(std::uint64_t{1}<<48)) {symbol_count_=0;cached_time_.reset();}
             else if(cached_time_!=ticks) {
                 const auto packet=metadata_packet(ticks,options_.callsign,time_key_?&*time_key_:nullptr);

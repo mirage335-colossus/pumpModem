@@ -1478,6 +1478,7 @@ struct FineSession::Impl {
             // The preflight admitted this many resident blocks at most.
             const auto resident_blocks = std::min(quote.resident_blocks, bulk->resident_block_capacity());
             if (resident_blocks >= 4) window_dispatches = resident_blocks / 2;
+            bulk->admit_resident_blocks(window_dispatches ? 2 * window_dispatches : 2);
             // A window's states advance while the next one's statistics
             // arrive, so windows alternate between two halves.
             const auto block_slots = std::max<std::size_t>(2, 4 * window_dispatches);
@@ -1836,10 +1837,8 @@ struct FineSession::Impl {
     }
 
     // Device statistics of every block of a window of dispatches, on the
-    // owner, in one resident call. Blocks outside its geometry follow, each
-    // by the native route.
-    void window_statistics(std::size_t index, ReceiverExecutor::Stage& stage, std::size_t& posted) {
-        const auto leaf_stop = stage.stop_token();
+    // owner, in one resident call.
+    void window_statistics(std::size_t index, std::stop_token leaf_stop) {
         check_cancelled(leaf_stop);
         const auto [begin, end] = windows[index];
         const auto base = window_base(index), statistics = statistics_base(index), calls = calls_base(index);
@@ -1857,6 +1856,19 @@ struct FineSession::Impl {
                                            leaf_stop);
             }
             resident_statistics(states, projected_values, leaf_stop);
+        });
+    }
+
+    // The window's blocks outside the resident geometry, each by the native
+    // route. They run after the previous window's states have advanced, so
+    // their own leaves do not wait behind those states.
+    void window_fallbacks(std::size_t index, ReceiverExecutor::Stage& stage, std::size_t& posted) {
+        const auto leaf_stop = stage.stop_token();
+        check_cancelled(leaf_stop);
+        const auto [begin, end] = windows[index];
+        const auto base = window_base(index), statistics = statistics_base(index), calls = calls_base(index);
+        const auto states = nominal.size();
+        time(times.bulk_statistics_seconds, [&] {
             for (auto dispatch = begin; dispatch != end; ++dispatch) {
                 const auto local = dispatch - begin;
                 const auto& pair = ring[base + local];
@@ -2179,8 +2191,9 @@ struct FineSession::Impl {
     // Resident statistics for a window of dispatches at a time. The device
     // maps, projects and reduces every block of the window in one call while
     // a lane observes the next window and the lanes advance the states of
-    // the previous one. Each state advances through a window's dispatches in
-    // public order, and the owner then closes them in order.
+    // the previous one. Blocks outside the resident geometry follow once
+    // those states have advanced. Each state advances through a window's
+    // dispatches in public order, and the owner then closes them in order.
     void run_windows() {
         windows.clear();
         for (std::size_t begin = 0; begin < extents.size(); begin += window_dispatches)
@@ -2212,14 +2225,23 @@ struct FineSession::Impl {
                 open_segment(extents.front());
                 fixed_affine_rows();
             }
-            try {
-                window_statistics(index, stage, posted);
-            } catch (...) {
-                // As for a single dispatch: keep a leaf's original failure.
+            // As for a single dispatch: keep a leaf's original failure.
+            const auto keep_leaf_failure = [&] {
                 if (stage.stop_token().stop_requested()) stage.wait_urgent();
+            };
+            try {
+                window_statistics(index, stage.stop_token());
+            } catch (...) {
+                keep_leaf_failure();
                 throw;
             }
             if (index) finish(index - 1);
+            try {
+                window_fallbacks(index, stage, posted);
+            } catch (...) {
+                keep_leaf_failure();
+                throw;
+            }
             if (more) observed(index + 1);
             const auto [begin, end] = windows[index];
             window = {begin, end, window_base(index), statistics_base(index), posted, fixed, true};

@@ -660,13 +660,15 @@ class AbbreviatedTests(unittest.TestCase):
                                    requested_vulkan_precision="automatic",
                                    requested_vulkan_fine_projection="resident-nvfp4",
                                    requested_opencl_fine_tiles="device", requested_opencl_fine_window=16,
-                                   backend_receipt=vulkan_bulk_receipt())
+                                   requested_opencl_profile="on", backend_receipt=vulkan_bulk_receipt())
         bulk = receipt["identity"]["backend_receipt"]
         # Two batches hold a window of sixteen blocks and a last one of five,
         # with six states each, and one terminal block stays native.
         states = 21 * 6
         bulk.update(vulkan_vendor_id=0x10de, opencl_resident_fine_batches=2, opencl_resident_fine_pairs=0,
                     opencl_resident_fine_blocks=21, opencl_resident_rendered_tiles=12,
+                    opencl_resident_window_blocks=16, opencl_resident_reduced_windows=0,
+                    opencl_resident_async_writes=9,
                     opencl_resident_keyed_lanes=4, opencl_resident_upload_bytes=65536,
                     opencl_resident_download_bytes=states * 11 * 16, opencl_nvfp4_native_blocks=1,
                     opencl_resident_dispatches=16, opencl_resident_mapping_dispatches=2,
@@ -682,25 +684,42 @@ class AbbreviatedTests(unittest.TestCase):
                         {"opencl_resident_fine_blocks": 129}, {"opencl_resident_keyed_lanes": 0},
                         {"opencl_resident_keyed_lanes": 13}, {"opencl_resident_rendered_tiles": 0},
                         {"opencl_resident_host_source_seconds": -1},
-                        {"opencl_resident_device_span_seconds": float("nan")}):
+                        {"opencl_resident_device_span_seconds": float("nan")},
+                        {"opencl_resident_window_blocks": 0}, {"opencl_resident_window_blocks": 18},
+                        {"opencl_resident_window_blocks": 8}, {"opencl_resident_reduced_windows": 3},
+                        {"opencl_resident_async_writes": -1}):
             wrong = copy.deepcopy(receipt)
             wrong["identity"]["backend_receipt"].update(corrupt)
             with self.assertRaises(ProbeError):
                 validate_receipt(wrong, command="message", backend="vulkan", returncode=0)
         for identity in ({"requested_opencl_fine_tiles": "native"}, {"requested_opencl_fine_window": 2},
-                         {"requested_opencl_fine_window": 65}, {"requested_opencl_fine_tiles": "host"}):
+                         {"requested_opencl_fine_window": 65}, {"requested_opencl_fine_window": 15},
+                         {"requested_opencl_fine_tiles": "host"}, {"requested_opencl_profile": "default"},
+                         {"requested_opencl_profile": "off"}, {"requested_opencl_profile": "yes"},
+                         {"requested_opencl_fine_stream": 65}, {"requested_opencl_fine_stream": "4"}):
             wrong = copy.deepcopy(receipt)
             wrong["identity"].update(identity)
             with self.assertRaises(ProbeError):
                 validate_receipt(wrong, command="message", backend="vulkan", returncode=0)
         # The control route uploads native tiles in single-dispatch batches.
         control = copy.deepcopy(receipt)
-        control["identity"].update(requested_opencl_fine_tiles="native", requested_opencl_fine_window=2)
+        # Unprofiled, it reports no host or device seconds.
+        control["identity"].update(requested_opencl_fine_tiles="native", requested_opencl_fine_window=2,
+                                   requested_opencl_profile="default")
         control["identity"]["backend_receipt"].update(
             opencl_resident_fine_batches=11, opencl_resident_fine_pairs=10, opencl_nvfp4_fine_batches=11,
             opencl_resident_dispatches=66, opencl_resident_mapping_dispatches=11,
-            opencl_resident_blocking_writes=33, opencl_resident_rendered_tiles=0, opencl_resident_keyed_lanes=0)
+            opencl_resident_blocking_writes=33, opencl_resident_rendered_tiles=0, opencl_resident_keyed_lanes=0,
+            opencl_resident_window_blocks=2, opencl_resident_host_source_seconds=0,
+            opencl_resident_device_span_seconds=0)
         validate_receipt(control, command="message", backend="vulkan", returncode=0)
+        # A refused window lease leaves batches of a pair, which a receipt names.
+        reduced = copy.deepcopy(receipt)
+        reduced["identity"]["backend_receipt"].update(
+            opencl_resident_fine_batches=11, opencl_resident_fine_pairs=10, opencl_nvfp4_fine_batches=11,
+            opencl_resident_dispatches=66, opencl_resident_mapping_dispatches=11, opencl_resident_blocking_writes=33,
+            opencl_resident_window_blocks=2, opencl_resident_reduced_windows=2)
+        validate_receipt(reduced, command="message", backend="vulkan", returncode=0)
 
     def test_vulkan_dense_coarse_receipt_partitions_rows_and_bounds_leases(self):
         dense_only = dict(vulkan_vendor_id=0x10de, vulkan_fp32_score_rows=0, vulkan_dispatches=0,

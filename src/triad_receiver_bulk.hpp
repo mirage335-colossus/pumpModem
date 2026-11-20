@@ -103,11 +103,18 @@ struct BulkReceipt {
     std::uint64_t opencl_resident_upload_bytes = 0, opencl_resident_download_bytes = 0;
     std::uint64_t opencl_resident_direct_columns = 0;
     std::uint64_t opencl_resident_dispatches = 0, opencl_resident_blocking_writes = 0;
+    // Writes from staging that stays unchanged until the batch's statistics
+    // read, which the host does not wait for.
+    std::uint64_t opencl_resident_async_writes = 0;
     std::uint64_t opencl_resident_mapping_dispatches = 0;
     // Public blocks of all resident batches, dense source tiles rendered on
     // the device from keyed coefficients, and the keyed lanes uploaded.
     std::uint64_t opencl_resident_fine_blocks = 0, opencl_resident_rendered_tiles = 0;
     std::uint64_t opencl_resident_keyed_lanes = 0;
+    // The most public blocks one resident batch held, and the resident calls
+    // that ran in smaller batches than their session admitted because the
+    // device lease for the whole window was refused.
+    std::uint64_t opencl_resident_window_blocks = 0, opencl_resident_reduced_windows = 0;
     // Present for a profiled resident session. Host spans are elapsed on the
     // owning thread: the mapping source without its sink, the sink's staging,
     // transfers and enqueues, and the wait for the statistics. Device values
@@ -268,6 +275,10 @@ public:
     // of one dispatch lets a caller whose maps do not depend on earlier
     // statistics submit a window, and still apply the results in order.
     virtual std::size_t resident_block_capacity() const noexcept { return 2; }
+    // The most blocks the session will submit in one resident call, at most
+    // resident_block_capacity(), stated before its first resident call. A
+    // backend sizes its device workspace by it.
+    virtual void admit_resident_blocks(std::size_t) noexcept {}
     // True when resident calls render the dense tiles of this public source
     // themselves, from addressed columns. It must not start device work.
     virtual bool renders_source_tiles(const FineTileSource&) const noexcept { return false; }
@@ -470,6 +481,7 @@ public:
     virtual bool fine_maps_on_host() const noexcept { return false; }
     // The resident blocks one fine call of this public geometry may hold,
     // for the session's preflight. Two keeps the single-dispatch workspace.
+    // A backend that wraps another forwards this and every other query.
     virtual std::size_t fine_resident_blocks(const FineBulkGeometry&) const noexcept { return 2; }
     virtual bool permits_native_exact_chirp_z() const noexcept { return false; }
     virtual bool supports_exact_device_chirp_z() const noexcept { return false; }

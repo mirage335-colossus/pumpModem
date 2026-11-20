@@ -33,6 +33,12 @@ public:
     bool try_lease(std::size_t bytes) override {
         std::lock_guard lock(mutex_);
         if (bytes > limit - leased_) return false;
+        // A lease above this size is refused this many times, as when other
+        // owners hold the budget for a while.
+        if (bytes > refuse_above && refusals) {
+            --refusals;
+            return false;
+        }
         leased_ += bytes;
         peak = std::max(peak, leased_);
         return true;
@@ -54,7 +60,7 @@ public:
         return leased_;
     }
 
-    std::size_t limit, peak = 0;
+    std::size_t limit, peak = 0, refuse_above = 0, refusals = 0;
 
 private:
     mutable std::mutex mutex_;
@@ -147,12 +153,27 @@ struct Outcome {
     std::size_t peak_lease = 0;
 };
 
+// Work of another owner of the backend, which the session receipt leaves out.
+r::BulkReceipt foreign_work() {
+    r::BulkReceipt work;
+    work.upload_bytes = 1234567;
+    work.synchronizations = 89;
+    work.opencl_resident_fine_batches = 3;
+    work.opencl_resident_fine_blocks = 40;
+    work.opencl_resident_window_blocks = 16;
+    return work;
+}
+
 Outcome run(const Fixture& f, const datapump::Crypto& key, const std::shared_ptr<r::OpenClNvfp4Device>& device,
             const std::optional<r::OpenClFineOptions>& options, r::FineObservation extent,
-            std::size_t checkpoint = 0, std::size_t device_limit = std::size_t{1} << 30) {
+            std::size_t checkpoint = 0, std::size_t device_limit = std::size_t{1} << 30,
+            std::size_t refuse_above = 0, std::size_t refusals = 0, bool foreign = false) {
     constexpr unsigned workers = 3;
     auto config = f.config;
     const auto host = std::make_shared<Host>(device_limit);
+    host->refuse_above = refuse_above;
+    host->refusals = refusals;
+    if (foreign) host->account(foreign_work());
     if (options) config.bulk_backend = std::make_shared<Backend>(host, device, *options);
     Outcome outcome;
     {
@@ -166,6 +187,25 @@ Outcome run(const Fixture& f, const datapump::Crypto& key, const std::shared_ptr
     }
     check(host->leased() == 0, "a fine session kept its device lease");
     outcome.receipt = host->receipt();
+    if (foreign) {
+        // The session receipt is the session's own work, the backend's the total.
+        const auto expected = foreign_work();
+        const auto& own = *outcome.work.bulk;
+        check(own.upload_bytes + expected.upload_bytes == outcome.receipt.upload_bytes &&
+              own.synchronizations + expected.synchronizations == outcome.receipt.synchronizations &&
+              own.opencl_resident_fine_blocks + expected.opencl_resident_fine_blocks ==
+                  outcome.receipt.opencl_resident_fine_blocks &&
+              own.opencl_resident_window_blocks < expected.opencl_resident_window_blocks &&
+              outcome.receipt.opencl_resident_window_blocks == expected.opencl_resident_window_blocks,
+              "a fine session receipt included another owner's work");
+        auto own_total = outcome.receipt;
+        own_total.upload_bytes -= expected.upload_bytes;
+        own_total.synchronizations -= expected.synchronizations;
+        own_total.opencl_resident_fine_batches -= expected.opencl_resident_fine_batches;
+        own_total.opencl_resident_fine_blocks -= expected.opencl_resident_fine_blocks;
+        own_total.opencl_resident_window_blocks = own.opencl_resident_window_blocks;
+        outcome.receipt = own_total;
+    }
     outcome.peak_lease = host->peak;
     return outcome;
 }
@@ -207,16 +247,22 @@ void check_slot(const std::shared_ptr<r::OpenClNvfp4Device>& device, const datap
     options.device_tiles = true;
     const auto rendered = run(f, key, device, options, whole);
     options.window_blocks = 6;
-    const auto window = run(f, key, device, options, whole);
+    const auto window = run(f, key, device, options, whole, 0, std::size_t{1} << 30, 0, 0, true);
     options.window_blocks = r::opencl_fine_default_window_blocks;
     options.profile = true;
     const auto wide = run(f, key, device, options, whole);
     options.profile = false;
+    // Staging the whole window before the device starts is the control of
+    // the streamed mappings.
+    options.stream_blocks = 0;
+    const auto unstreamed = run(f, key, device, options, whole);
+    options.stream_blocks = r::opencl_fine_default_stream_blocks;
 
     for (const auto* route : {&uploaded, &rendered, &window, &wide}) {
         same_public_work(*route, native, "a resident route changed the public fine work or quiet statistics");
         const auto& receipt = route->receipt;
         check(route->score.complete && route->work.bulk && receipt.executed &&
+              receipt.opencl_resident_reduced_windows == 0 &&
               receipt.statistics_blocks == blocks * states &&
               receipt.projected_values == native.work.initial_affine.projection_modes &&
               receipt.opencl_resident_fine_blocks == resident_blocks && receipt.opencl_nvfp4_native_blocks == 1 &&
@@ -252,11 +298,31 @@ void check_slot(const std::shared_ptr<r::OpenClNvfp4Device>& device, const datap
     check(uploaded.receipt.opencl_resident_fine_batches == 5 && rendered.receipt.opencl_resident_fine_batches == 5 &&
           rendered.receipt.opencl_resident_fine_pairs == 4 && window.receipt.opencl_resident_fine_batches == 2 &&
           wide.receipt.opencl_resident_fine_batches == 1 &&
-          wide.receipt.opencl_resident_blocking_writes < window.receipt.opencl_resident_blocking_writes &&
-          window.receipt.opencl_resident_blocking_writes < uploaded.receipt.opencl_resident_blocking_writes &&
           wide.receipt.opencl_resident_dispatches < window.receipt.opencl_resident_dispatches &&
-          window.receipt.opencl_resident_dispatches < uploaded.receipt.opencl_resident_dispatches,
+          window.receipt.opencl_resident_dispatches < uploaded.receipt.opencl_resident_dispatches &&
+          uploaded.receipt.opencl_resident_window_blocks == 2 && rendered.receipt.opencl_resident_window_blocks == 2 &&
+          window.receipt.opencl_resident_window_blocks == 6 && wide.receipt.opencl_resident_window_blocks == 9,
           "resident windows did not reduce the device round trips");
+    // With device tiles only the session's setup blocks here: one write of
+    // the DFT, two of the source and one per keyed lane at its first use.
+    // Exact native columns, which this slot has none of, would block too. A
+    // window submits the mappings of every four blocks while the owner
+    // stages the next ones.
+    for (const auto* route : {&rendered, &window, &wide})
+        check(route->receipt.opencl_resident_blocking_writes == 3 + 4 && route->receipt.opencl_resident_async_writes > 0,
+              "a rendering route waited on a write beyond its setup");
+    check(rendered.receipt.opencl_resident_mapping_dispatches == 5 &&
+          window.receipt.opencl_resident_mapping_dispatches == 3 && wide.receipt.opencl_resident_mapping_dispatches == 3,
+          "a resident window did not submit its mappings every four blocks");
+    check(unstreamed.score.bit_evidence == wide.score.bit_evidence &&
+          unstreamed.receipt.opencl_resident_mapping_dispatches == 1 &&
+          unstreamed.receipt.opencl_resident_fine_batches == 1 &&
+          unstreamed.receipt.opencl_resident_upload_bytes == wide.receipt.opencl_resident_upload_bytes,
+          "streamed mappings changed a window's evidence or uploads");
+    // A window holds whole dispatches.
+    r::OpenClFineOptions odd = options;
+    odd.window_blocks = 7;
+    check(r::opencl_fine_resident_blocks(odd) == 6, "an odd resident window was not reduced to whole dispatches");
     check(wide.peak_lease > rendered.peak_lease && wide.peak_lease < (std::size_t{128} << 20),
           "a resident window did not lease its own bounded workspace");
     const auto& profile = wide.receipt;
@@ -279,8 +345,20 @@ void check_slot(const std::shared_ptr<r::OpenClNvfp4Device>& device, const datap
     const auto pair_bytes = rendered.peak_lease;
     const auto tight = run(f, key, device, options, whole, 3000 + 1500, pair_bytes);
     check(tight.score.bit_evidence == rendered.score.bit_evidence && tight.peak_lease == pair_bytes &&
-          tight.receipt.opencl_resident_fine_batches == 5 && tight.receipt.opencl_resident_fine_blocks == resident_blocks,
+          tight.receipt.opencl_resident_fine_batches == 5 && tight.receipt.opencl_resident_fine_blocks == resident_blocks &&
+          tight.receipt.opencl_resident_window_blocks == 2 && tight.receipt.opencl_resident_reduced_windows > 0,
           "a tight device lease did not fall back to single-dispatch batches");
+    // A window lease refused once runs that window in pairs, and the next
+    // window asks again and gets it while still holding the pair session.
+    options.window_blocks = 6;
+    const auto transient = run(f, key, device, options, whole, 0, std::size_t{1} << 30, pair_bytes, 1);
+    check(transient.score.bit_evidence == rendered.score.bit_evidence &&
+          transient.receipt.opencl_resident_reduced_windows == 1 &&
+          transient.receipt.opencl_resident_window_blocks == 3 &&
+          transient.receipt.opencl_resident_fine_blocks == resident_blocks &&
+          transient.peak_lease > window.peak_lease,
+          "a window lease refused once did not return for the next window");
+    options.window_blocks = r::opencl_fine_default_window_blocks;
     // With no lease at all, every block of every window takes the native route.
     const auto declined = run(f, key, device, options, whole, 0, 4096);
     same_public_work(declined, native, "a declined resident window changed the public fine work");
@@ -293,7 +371,9 @@ void check_slot(const std::shared_ptr<r::OpenClNvfp4Device>& device, const datap
     std::cout << "OpenCL fine session: " << blocks << " blocks, " << states << " states. Batches "
               << uploaded.receipt.opencl_resident_fine_batches << " -> " << wide.receipt.opencl_resident_fine_batches
               << ", blocking writes " << uploaded.receipt.opencl_resident_blocking_writes << " -> "
-              << wide.receipt.opencl_resident_blocking_writes << ", upload bytes "
+              << wide.receipt.opencl_resident_blocking_writes << " (setup), writes without a wait "
+              << uploaded.receipt.opencl_resident_async_writes << " -> " << wide.receipt.opencl_resident_async_writes
+              << ", upload bytes "
               << uploaded.receipt.opencl_resident_upload_bytes << " -> " << wide.receipt.opencl_resident_upload_bytes
               << ", device lease " << rendered.peak_lease << " -> " << wide.peak_lease
               << ". Evidence change from rendered tiles " << tile_difference << ", FP4 against native "
@@ -301,7 +381,8 @@ void check_slot(const std::shared_ptr<r::OpenClNvfp4Device>& device, const datap
 }
 
 // The adaptive lane's maps follow its pruning, so it keeps one dispatch a
-// batch. Its tiles are still addressed and rendered on the device.
+// batch, and leases no more than that. Its tiles are still addressed and
+// rendered on the device.
 void check_adaptive(const std::shared_ptr<r::OpenClNvfp4Device>& device, const datapump::Crypto& key) {
     const auto f = capture(key);
     r::FineObservation crop{f.slot.first_sample + 3000, 2 * 3000, r::FineRunKind::probe, true};
@@ -311,6 +392,10 @@ void check_adaptive(const std::shared_ptr<r::OpenClNvfp4Device>& device, const d
     const auto uploaded = run(f, key, device, options, crop);
     options.device_tiles = true;
     const auto rendered = run(f, key, device, options, crop);
+    options.window_blocks = 2;
+    const auto pairs = run(f, key, device, options, crop);
+    check(rendered.peak_lease == pairs.peak_lease && rendered.receipt.opencl_resident_window_blocks == 2,
+          "the adaptive lane leased a window it does not submit");
     check(uploaded.work.adaptive.gaussian_updates > 0 && rendered.work.blocks == 4 &&
           rendered.receipt.opencl_resident_fine_batches == 2 && rendered.receipt.opencl_resident_fine_pairs == 2 &&
           uploaded.receipt.opencl_resident_fine_batches == 2 && rendered.receipt.uploaded_tiles == 0 &&
