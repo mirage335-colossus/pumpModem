@@ -104,6 +104,17 @@ struct BulkReceipt {
     std::uint64_t opencl_resident_direct_columns = 0;
     std::uint64_t opencl_resident_dispatches = 0, opencl_resident_blocking_writes = 0;
     std::uint64_t opencl_resident_mapping_dispatches = 0;
+    // Dense FP4 coarse scores, credited after the frontier readback. Issued
+    // products include padding. Seconds are summed device command intervals
+    // of a profiled session, not wall time or utilization.
+    std::uint64_t opencl_coarse_score_rows = 0, opencl_coarse_rescored_peaks = 0;
+    std::uint64_t opencl_coarse_issued_products = 0, opencl_coarse_useful_products = 0;
+    std::uint64_t opencl_coarse_synthesized_columns = 0, opencl_coarse_uploaded_columns = 0;
+    std::uint64_t opencl_coarse_upload_bytes = 0, opencl_coarse_download_bytes = 0;
+    std::uint64_t opencl_coarse_dispatches = 0, opencl_coarse_blocking_transfers = 0;
+    std::uint64_t opencl_coarse_sessions = 0, opencl_coarse_frequency_fallbacks = 0;
+    double opencl_coarse_product_seconds = 0, opencl_coarse_packing_seconds = 0;
+    double opencl_coarse_selection_seconds = 0, opencl_coarse_synthesis_seconds = 0;
     // CUDA Gram elements credited after the same readback.
     std::uint64_t cuda_direct_gram_values = 0, cuda_bmm_gram_values = 0;
     // Post-channelization matrix work, credited only after synchronization.
@@ -301,10 +312,52 @@ using CoarseScoreSink = std::function<void(std::size_t first_workspace, std::siz
 using CoarsePeakSink = std::function<void(std::size_t first_workspace, std::size_t workspace_count,
     std::span<const CoarseBulkPeaks>)>;
 
+// One template column of a keyed lane. Raw row i samples the lane's source
+// at first_position + i * scale and rotates by first_cycles + i * cycle_step
+// turns, before the canonical decimating FIR.
+struct CoarseTemplateColumn {
+    double first_position = 0, scale = 1, first_cycles = 0, cycle_step = 0;
+    std::size_t lane = 0;
+};
+
+// The public description of the keyed DATA waveform and of the exact
+// template route, for a backend that renders the bank itself. Each lane is
+// rendered on source_rows integer receive samples and interpolated from
+// there. Coefficients are the only keyed input: no rendered sample crosses
+// the host boundary.
+struct CoarseTemplateSource {
+    double rate_ratio = 1, calendar_origin_sample = 0, source_samples = 0, sample_rate_hz = 0;
+    double fine_chip_rate_hz = 0, center_offset = 0, carrier_spacing_hz = 0;
+    double bit_seconds = 0, envelope_edge_seconds = 0;
+    // A zero period or dwell disables the burst or hop gate.
+    double burst_period_tiles = 0, tile_seconds = 0, tile_count = 0;
+    double dwell_seconds = 0, quiet_seconds = 0, ramp_seconds = 0;
+    std::size_t lanes = 0, cells = 0, source_rows = 0, raw_rows = 0, decimation = 0;
+    std::span<const std::complex<float>> chips; // [lane][cell][carrier]
+    std::span<const float> pulse;               // shaping table, 256 per chip over [0, 8]
+    std::span<const double> taps;
+    std::span<const CoarseTemplateColumn> columns; // [workspace][tap]
+};
+
+struct CoarseTemplateGram {
+    double a = 0, d = 0;
+    Complex b{};
+};
+
 class CoarseBulk {
 public:
     virtual ~CoarseBulk() = default;
     virtual std::string_view precision_reason() const noexcept { return {}; }
+    // True when this session can render, filter and retain the whole bank of
+    // this frequency-tile geometry. It must not start device work.
+    virtual bool supports_template_synthesis(const CoarseBulkGeometry&, std::size_t /*workspaces*/,
+        const CoarseTemplateSource&) const noexcept { return false; }
+    // Retains every template column and returns the FP64 Gram entries of
+    // each workspace. The following prepare() then receives empty column
+    // spans. False declines before any device state or work is retained,
+    // and the caller prepares its native columns instead.
+    virtual bool synthesize_templates(const CoarseBulkGeometry&, const CoarseTemplateSource&,
+        std::span<CoarseTemplateGram>, CoarseBulkWork&, std::stop_token) { return false; }
     // False keeps the canonical native FIR/channelizer before device upload.
     // It does not permit a fallback after any device operation has started.
     virtual bool supports_fir() const noexcept { return true; }

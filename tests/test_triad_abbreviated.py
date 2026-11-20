@@ -654,6 +654,79 @@ class AbbreviatedTests(unittest.TestCase):
                 with self.assertRaises(ProbeError):
                     validate_receipt(wrong, command="message", backend=backend, returncode=0)
 
+    def test_vulkan_dense_coarse_receipt_partitions_rows_and_bounds_leases(self):
+        dense_only = dict(vulkan_vendor_id=0x10de, vulkan_fp32_score_rows=0, vulkan_dispatches=0,
+                          vulkan_arrival_peak_rows=0, vulkan_arrival_peak_values=0, fft_calls=0,
+                          vulkan_peak_owner_bytes=0, allocator_peak_reserved_bytes=0,
+                          opencl_coarse_score_rows=8, opencl_coarse_issued_products=1100,
+                          opencl_coarse_useful_products=1000, opencl_coarse_rescored_peaks=4,
+                          opencl_coarse_synthesized_columns=4, opencl_coarse_dispatches=9,
+                          opencl_coarse_sessions=1, vulkan_peak_owner_lease_bytes=1 << 28,
+                          precision="nvfp4_dense_coarse_fp32_rescored_peaks_native_fir_and_fine")
+        for backend, requested in (("vulkan", "nvfp4"), ("gpu", "automatic")):
+            automatic = backend == "gpu"
+            receipt = device_receipt()
+            bulk = vulkan_bulk_receipt(automatic=automatic)
+            bulk.update(dense_only)
+            receipt["identity"].update(backend=backend, configured_vulkan_backend=True, backend_receipt=bulk,
+                                       requested_vulkan_precision=requested, require_accelerator=True)
+            if automatic:
+                receipt["identity"]["selected_accelerator_backend"] = "vulkan"
+                bulk["selection_reason"] = "automatic Vulkan receiver with OpenCL NVFP4 available"
+            receipt["phases"][0].update(name="coarse_tiles",
+                                        work={"route": "frequency_tiles", "native_fallback_reason": ""})
+            validate_receipt(receipt, command="continuation", backend=backend, returncode=0,
+                             expected_require_accelerator=True)
+            wrong_patches = [{"opencl_coarse_rescored_peaks": 0}, {"opencl_coarse_useful_products": 1200},
+                             {"opencl_coarse_score_rows": 9}, {"vulkan_peak_owner_lease_bytes": 0},
+                             {"vulkan_peak_owner_lease_bytes": (4 << 30) + 1}, {"opencl_coarse_dispatches": 0},
+                             {"vulkan_vendor_id": 0x1002}, {"opencl_coarse_score_rows": 4},
+                             {"opencl_coarse_synthesized_columns": 0}]
+            if automatic:
+                # Automatic selection never uploads host-prepared columns.
+                wrong_patches.append({"opencl_coarse_uploaded_columns": 4})
+                # A requested FP32 floor excludes the FP4 search.
+                floored = copy.deepcopy(receipt)
+                floored["identity"]["requested_gpu_fp32_minimum"] = True
+                with self.subTest(backend=backend, floor=True), self.assertRaises(ProbeError):
+                    validate_receipt(floored, command="continuation", backend=backend, returncode=0,
+                                     expected_require_accelerator=True)
+            for patch in wrong_patches:
+                wrong = copy.deepcopy(receipt)
+                wrong["identity"]["backend_receipt"].update(patch)
+                with self.subTest(backend=backend, patch=patch), self.assertRaises(ProbeError):
+                    validate_receipt(wrong, command="continuation", backend=backend, returncode=0,
+                                     expected_require_accelerator=True)
+            # A pinned backend carries dense rows only on an explicit request.
+            unrequested = copy.deepcopy(receipt)
+            unrequested["identity"]["requested_vulkan_precision"] = "automatic" if not automatic else "fp32"
+            with self.subTest(backend=backend, unrequested=True), self.assertRaises(ProbeError):
+                validate_receipt(unrequested, command="continuation", backend=backend, returncode=0,
+                                 expected_require_accelerator=True)
+
+        # Automatic sessions the dense search declined keep their FFT rows.
+        mixed = device_receipt()
+        bulk = vulkan_bulk_receipt(automatic=True)
+        bulk.update(vulkan_vendor_id=0x10de, score_rows=16, opencl_coarse_score_rows=8,
+                    opencl_coarse_issued_products=1100, opencl_coarse_useful_products=1000,
+                    opencl_coarse_rescored_peaks=4, opencl_coarse_synthesized_columns=4,
+                    opencl_coarse_dispatches=9, opencl_coarse_sessions=1, opencl_coarse_frequency_fallbacks=1,
+                    selection_reason="automatic Vulkan receiver with OpenCL NVFP4 available",
+                    precision="mixed_nvfp4_dense_and_fft_coarse_native_fir_and_fine")
+        mixed["identity"].update(backend="gpu", configured_vulkan_backend=True, backend_receipt=bulk,
+                                 requested_vulkan_precision="automatic", require_accelerator=True,
+                                 selected_accelerator_backend="vulkan")
+        mixed["phases"][0].update(name="coarse_tiles", work={"route": "frequency_tiles", "native_fallback_reason": ""})
+        validate_receipt(mixed, command="continuation", backend="gpu", returncode=0, expected_require_accelerator=True)
+        for patch in ({"vulkan_fp32_score_rows": 16}, {"vulkan_dispatches": 0}, {"vulkan_arrival_peak_rows": 0},
+                      {"vulkan_peak_owner_bytes": 0},
+                      {"precision": "nvfp4_dense_coarse_fp32_rescored_peaks_native_fir_and_fine"}):
+            wrong = copy.deepcopy(mixed)
+            wrong["identity"]["backend_receipt"].update(patch)
+            with self.subTest(mixed=patch), self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="continuation", backend="gpu", returncode=0,
+                                 expected_require_accelerator=True)
+
     def test_vulkan_regression_receipt_uses_native_slot_work_shape(self):
         receipt = device_receipt()
         receipt["command"] = "regression"

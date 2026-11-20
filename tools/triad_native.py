@@ -297,17 +297,42 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
             if "requested_vulkan_precision" in identity:
                 requested = identity["requested_vulkan_precision"]
                 if requested not in ("automatic", "fp32", "fp16-storage",
-                                     "direct-fp32", "direct-fp16-storage", "direct-fp16"):
+                                     "direct-fp32", "direct-fp16-storage", "direct-fp16", "nvfp4"):
                     raise ProbeError("Invalid Vulkan storage precision request")
                 total = positive_int(bulk.get("score_rows"), "Vulkan scored rows", allow_zero=True)
                 host_scored = positive_int(bulk.get("vulkan_host_scored_rows", 0),
                                            "Vulkan host-scored rows", allow_zero=True)
-                if host_scored not in (0, total):
-                    raise ProbeError("Vulkan host-scored rows must cover the complete selected route")
                 single = positive_int(bulk.get("vulkan_fp32_score_rows"), "Vulkan FP32 scored rows", allow_zero=True)
                 half = positive_int(bulk.get("vulkan_fp16_storage_score_rows"),
                                     "Vulkan FP16-storage scored rows", allow_zero=True)
-                if single + half != total or (requested in ("fp32", "direct-fp32") and half):
+                # Dense FP4 rows come from the OpenCL Tensor Core search of the
+                # same device: every row of an explicit request, or the
+                # sessions automatic selection admitted with device templates.
+                dense = positive_int(bulk.get("opencl_coarse_score_rows", 0), "OpenCL dense coarse rows",
+                                     allow_zero=True)
+                automatic_dense = (requested == "automatic" and backend == "gpu"
+                                   and identity.get("requested_gpu_fp32_minimum") is not True)
+                if host_scored not in (0, total - min(dense, total)):
+                    raise ProbeError("Vulkan host-scored rows must cover the complete selected route")
+                dense_issued = positive_int(bulk.get("opencl_coarse_issued_products", 0),
+                                            "OpenCL dense coarse issued products", allow_zero=True)
+                dense_useful = positive_int(bulk.get("opencl_coarse_useful_products", 0),
+                                            "OpenCL dense coarse useful products", allow_zero=True)
+                dense_rescored = positive_int(bulk.get("opencl_coarse_rescored_peaks", 0),
+                                              "OpenCL dense coarse rescored peaks", allow_zero=True)
+                dense_synthesized = positive_int(bulk.get("opencl_coarse_synthesized_columns", 0),
+                                                 "OpenCL dense coarse synthesized columns", allow_zero=True)
+                dense_uploaded = positive_int(bulk.get("opencl_coarse_uploaded_columns", 0),
+                                              "OpenCL dense coarse uploaded columns", allow_zero=True)
+                if (dense > total or (dense and not (requested == "nvfp4" or automatic_dense))
+                        or (dense and automatic_dense and dense_uploaded)
+                        or (dense and bulk["vulkan_vendor_id"] != 0x10de)
+                        or bool(dense) != bool(dense_useful) or dense_issued < dense_useful
+                        or bool(dense) != bool(dense_rescored)
+                        or (dense and not (dense_synthesized or dense_uploaded))
+                        or (requested == "nvfp4" and total != dense)):
+                    raise ProbeError("Vulkan receipt does not identify actual OpenCL dense coarse work")
+                if single + half + dense != total or (requested in ("fp32", "direct-fp32") and half):
                     raise ProbeError("Vulkan receipt does not partition actual work by storage precision")
                 direct_single = positive_int(bulk.get("vulkan_direct_fp32_score_rows", 0),
                                              "Vulkan FP32 direct rows", allow_zero=True)
@@ -324,7 +349,9 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                         or (requested in ("fp32", "fp16-storage") and direct_total)
                         or (requested == "direct-fp16-storage" and direct_packed)):
                     raise ProbeError("Vulkan receipt does not identify actual direct-dot arithmetic")
-                actual = ("fp32_direct_dot_fp64_scoring" if direct_single == total else
+                actual = ("nvfp4_dense_coarse_fp32_rescored_peaks_native_fir_and_fine" if dense and dense == total else
+                          "mixed_nvfp4_dense_and_fft_coarse_native_fir_and_fine" if dense else
+                          "fp32_direct_dot_fp64_scoring" if direct_single == total else
                           "fp16_storage_fp32_direct_dot_fp64_scoring" if direct_stored == total else
                           "packed_fp16_direct_dot_fp32_reduction_fp64_scoring" if direct_packed == total else
                           "mixed_vulkan_frequency_arithmetic" if direct_total else
@@ -500,8 +527,17 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
             cache_bytes = accelerator.get("host_cache_bytes")
             cache_entries = accelerator.get("host_cache_entries")
             expected_scope = "backend_shared" if backend == "gpu" else "per_coarse_session"
+            # Dense OpenCL sessions hold a quoted device lease and allocate
+            # nothing from the Vulkan allocator.
+            dense_rows = positive_int(accelerator.get("opencl_coarse_score_rows", 0),
+                                      "OpenCL dense coarse rows", allow_zero=True)
+            fft_rows = positive_int(accelerator.get("score_rows"), "Vulkan score rows", allow_zero=True) - dense_rows
+            owner_lease = accelerator.get("vulkan_peak_owner_lease_bytes", 0)
+            if (fft_rows < 0 or (dense_rows and (type(owner_lease) is not int
+                                                 or not 0 < owner_lease <= workspace_limit))):
+                raise ProbeError("Vulkan receipt does not bound its OpenCL dense coarse sessions")
             if (accelerator.get("workspace_scope") != expected_scope
-                    or type(owner_peak) is not int or not 0 < owner_peak <= workspace_limit
+                    or type(owner_peak) is not int or not (0 if fft_rows == 0 else 1) <= owner_peak <= workspace_limit
                     or type(active_sessions) is not int or active_sessions < 0
                     or type(aggregate_peak) is not int or aggregate_peak < owner_peak
                     or type(cache_limit) is not int or cache_limit <= 0
@@ -584,19 +620,22 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                                          "Vulkan arrival peak rows", allow_zero=True)
             frontier_values = positive_int(accelerator.get("vulkan_arrival_peak_values"),
                                            "Vulkan arrival peak values", allow_zero=True)
-            if (host_scored == score_rows and host_scored > 0
+            if (host_scored == fft_rows and host_scored > 0
                     and (frontier_rows or frontier_values)):
                 raise ProbeError("Host-scored Vulkan rows cannot claim a GPU arrival frontier")
-            if host_scored not in (0, score_rows):
+            if host_scored not in (0, fft_rows):
                 raise ProbeError("Vulkan host-scored rows must cover the complete selected route")
-            frontier_proof = (host_scored == score_rows and host_scored > 0
+            frontier_proof = (host_scored == fft_rows and host_scored > 0
                               or host_scored == 0 and frontier_rows > 0 and frontier_values > 0)
             work_counts = ("fft_calls", "vulkan_direct_dot_terms")
+            fft_proof = (frontier_proof and type(accelerator.get("vulkan_dispatches")) is int
+                         and accelerator["vulkan_dispatches"] > 0
+                         and any(type(accelerator.get(key)) is int and accelerator[key] > 0
+                                 for key in work_counts))
+            dense_proof = all(type(accelerator.get(key)) is int and accelerator[key] > 0 for key in (
+                "opencl_coarse_dispatches", "opencl_coarse_rescored_peaks", "opencl_coarse_sessions"))
             if (accelerator.get("vulkan") is not True or accelerator.get("executed") is not True
-                    or not all(type(accelerator.get(key)) is int and accelerator[key] > 0
-                               for key in ("vulkan_dispatches", "score_rows")) or not frontier_proof
-                    or not any(type(accelerator.get(key)) is int and accelerator[key] > 0
-                               for key in work_counts)
+                    or score_rows <= 0 or (fft_rows and not fft_proof) or (dense_rows and not dense_proof)
                     or not route_proof):
                 raise ProbeError("Complete Vulkan receipt does not prove GPU full-frequency scoring")
     return receipt

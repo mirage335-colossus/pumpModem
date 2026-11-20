@@ -15,8 +15,11 @@ operations inside the same receiver control path. The shared GUI GPU selector
 prefers a usable compiled CUDA receiver and then a compatible physical Vulkan
 receiver; it never reports native CPU execution as GPU work. CUDA covers coarse
 and eligible fine bulk stages, while Vulkan accelerates GPU search and retains
-native fine processing. Neither optional path places Python in the operating
-DSP chain.
+native fine processing. On an NVIDIA Blackwell device with the OpenCL module,
+the Vulkan receiver scores eligible searches with the
+[dense FP4 search](triad-gpu-optimization.md#dense-fp4-coarse-search-and-device-template-bank)
+and computes the qualified DATA statistics with resident FP4 projection.
+Neither optional path places Python in the operating DSP chain.
 
 New modem and intensive numerical work must follow the
 [native processing and integration contract](development.md#native-processing-and-integration).
@@ -162,13 +165,15 @@ Checked index, transform and workspace bounds govern grids beyond the former
 
 The optional [Vulkan backend](triad-performance.md#local-radeon-vulkan-processing)
 starts after native DATA channel isolation and accelerates GPU frequency-search
-work; fine processing remains native CPU work. On the specifically qualified
+work; without the Blackwell OpenCL module, fine processing remains native CPU
+work. On the specifically qualified
 local Radeon device/geometry, a scaled packed-FP16 direct correlation uses FP32
 accumulation and FP64 scoring. Other cases can use FP32 direct arithmetic,
 qualified FP16 FFT storage with FP32 arithmetic, an FP32 FFT or explicit native
 fallback. Actual precision and fallback reason are reported. Helper, native
-FIR, template generation, lag groups and the compact tight-clock FP64 class also
-remain native. Stage capability/routing is explicit. An APU's GPU allocations
+FIR, lag groups and the compact tight-clock FP64 class also remain native. So
+does template generation, except for the device template bank of the Blackwell
+dense search. Stage capability/routing is explicit. An APU's GPU allocations
 use shared host RAM; the bounded device workspace, staging and persistent
 VkFFT program cache are charged through their ownership lifetimes.
 
@@ -176,7 +181,8 @@ The shared GUI's **GPU** checkbox selects the generic native receiver factory
 for live reception and simulation. If compiled and usable, CUDA is preferred
 and executes GPU coarse/fine bulk work; otherwise the selector tries a
 compatible physical Vulkan backend, which executes GPU search and native fine
-processing. The CUDA automatic policy routes qualified small public fine blocks
+processing, or the Blackwell OpenCL FP4 search and fine statistics where that
+module is present. The CUDA automatic policy routes qualified small public fine blocks
 to native fine processing while coarse work remains on CUDA; the GUI reports the
 count and fallback reason separately from precision. Its scoped geometry and
 [bounded measurements](validation.md#nvidia-and-intel-gpu-toggle-integration)

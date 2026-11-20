@@ -731,6 +731,17 @@ the offline compilation prerequisites or to `OFF` to omit the path.
 With testing enabled, `ON` registers `triad_opencl_nvfp4` for execution on a
 supported Blackwell GPU under the worker's socket filter.
 
+A Linux GNU or Clang build with the Vulkan backend enabled, the option left
+at `AUTO`, no sanitizers and no such toolkit compiles the same kernel source
+as host code. `triad_opencl_nvfp4_emulated` and
+`triad_opencl_coarse_session_emulated` in the `triad` group then run the
+device-class checks and complete coarse sessions through a model of the warp
+instruction, with a stand-in for the OpenCL loader and guarded buffers. They
+check indexing, packing, operand layouts, bounds, receipts and the
+conditioning fallback without a device. A host that has the toolkit builds
+the device test instead. They are not device arithmetic or timing evidence. [Kernel emulation](../tests/triad_kernel_emulation/) ·
+[dense coarse search](triad-gpu-optimization.md#dense-fp4-coarse-search-and-device-template-bank).
+
 Select Robust Modem and use the **GPU** checkbox immediately left of Developer.
 It defaults off and persists as `--gpu yes|no`; builds with neither CUDA nor
 Vulkan keep the control disabled with an explanation. Requested GPU

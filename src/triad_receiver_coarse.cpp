@@ -4,6 +4,7 @@
 #include "triad_gaussian_kernel.hpp"
 #include "search_fft.hpp"
 #include "datapump/execution.hpp"
+#include "datapump/triad_shaping.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -1377,6 +1378,114 @@ private:
     std::vector<CoarseOperationCounts> work_;
     DifferentialSearch* varying_;
     std::span<const Complex> echo_phases_;
+};
+
+// The public description of the exact template bank for a backend that
+// renders it: every lane's waveform geometry and each workspace column's
+// clock and ray map. Only the keyed coefficients remain to be filled.
+struct TemplateSynthesis {
+    static constexpr std::size_t pulse_samples = 8 * 256 + 1;
+    static constexpr std::size_t maximum_cells = 100'000;
+
+    std::vector<std::complex<float>> chips;
+    std::vector<float> pulse;
+    std::vector<CoarseTemplateColumn> columns;
+    CoarseTemplateSource source;
+
+    // The exact route only. The coefficients and maps borrow the admitted
+    // storage of the native columns that they replace.
+    static bool covers(const Plan& plan) {
+        if (plan.source_step != 1 || plan.source_geometry.fine_cells > maximum_cells) return false;
+        const auto columns = mul(plan.workspaces(), plan.ray_count);
+        const auto keyed = mul(mul(lanes, static_cast<std::size_t>(plan.source_geometry.fine_cells)),
+                               3 * sizeof(std::complex<float>));
+        const auto description = add(mul(columns, sizeof(CoarseTemplateColumn) + sizeof(CoarseTemplateGram)),
+                                     pulse_samples * sizeof(float));
+        return add(keyed, description) <= mul(mul(columns, plan.layout.nfft), sizeof(Complex));
+    }
+
+    TemplateSynthesis(const Plan& plan, const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                      std::span<const double> taps) {
+        const auto& format = slot.format;
+        const auto& public_source = plan.source_geometry;
+        const auto& layout = plan.layout;
+        source.rate_ratio = plan.source_rate / plan.fs;
+        source.calendar_origin_sample = static_cast<double>(public_source.calendar_origin_sample);
+        source.source_samples = static_cast<double>(public_source.source_samples);
+        source.sample_rate_hz = plan.source_rate;
+        source.fine_chip_rate_hz = public_source.fine_chip_rate_hz;
+        source.center_offset = format.fhss_center_aligned ? 0. : .5;
+        source.carrier_spacing_hz = public_source.carrier_spacing_hz;
+        source.bit_seconds = public_source.bit_seconds;
+        source.envelope_edge_seconds = std::max(format.ramp_seconds, 8 / public_source.fine_chip_rate_hz);
+        if (format.burst_wait_tiles) {
+            source.burst_period_tiles = static_cast<double>(format.burst_wait_tiles) + 1;
+            source.tile_seconds = public_source.tile_seconds;
+            source.tile_count = static_cast<double>(public_source.tile_count);
+        }
+        if (format.fhss) {
+            source.dwell_seconds = format.dwell_seconds;
+            source.quiet_seconds = format.quiet_seconds;
+            source.ramp_seconds = format.ramp_seconds;
+        }
+        source.lanes = lanes;
+        source.cells = static_cast<std::size_t>(public_source.fine_cells);
+        source.source_rows = layout.source_rows;
+        source.raw_rows = layout.raw_rows;
+        source.decimation = plan.decimation;
+        chips.resize(mul(mul(source.lanes, source.cells), 3));
+        pulse.resize(pulse_samples);
+        for (std::size_t i = 0; i < pulse.size(); ++i)
+            pulse[i] = static_cast<float>(shaping_pulse(format.pulse_shape, static_cast<double>(i) / 256));
+        columns.reserve(mul(plan.workspaces(), plan.ray_count));
+        for (std::size_t workspace = 0; workspace < plan.workspaces(); ++workspace) {
+            const auto bit = workspace % 2, clock = workspace / 2 % plan.clock_count;
+            const auto epoch = workspace / (2 * plan.clock_count);
+            for (std::size_t ray = 0; ray < plan.ray_count; ++ray) {
+                const auto map = ray_geometry(plan, layout, config, plan.clocks[clock], ray);
+                columns.push_back({static_cast<double>(map.first_position), static_cast<double>(map.scale),
+                                   static_cast<double>(map.first_cycles), static_cast<double>(map.cycle_step),
+                                   epoch * 2 + bit});
+            }
+        }
+        source.chips = chips;
+        source.pulse = pulse;
+        source.taps = taps;
+        source.columns = columns;
+    }
+    TemplateSynthesis(const TemplateSynthesis&) = delete;
+    TemplateSynthesis& operator=(const TemplateSynthesis&) = delete;
+
+    // The description borrows the storage of the native columns it replaces.
+    // A backend that declines it returns that storage before they are built.
+    void release() {
+        source.chips = {};
+        source.pulse = {};
+        source.columns = {};
+        std::vector<std::complex<float>>().swap(chips);
+        std::vector<float>().swap(pulse);
+        std::vector<CoarseTemplateColumn>().swap(columns);
+    }
+
+    // One keyed source per epoch and bit, as the native bank uses.
+    void key_lanes(const ReceiverSlotPlan& slot, const Crypto& key, CoarseOperationCounts& work,
+                   std::stop_token stop) {
+        for (std::size_t lane = 0; lane < source.lanes; ++lane) {
+            check_stop(stop);
+            auto format = slot.format;
+            format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(format.epoch) +
+                                                      receiver_epoch_offsets[lane / 2]);
+            PatternSource keyed(format, key, static_cast<std::uint8_t>(lane % 2));
+            auto* destination = chips.data() + lane * source.cells * 3;
+            for (std::size_t cell = 0; cell < source.cells; ++cell) {
+                if ((cell & 4095U) == 0) check_stop(stop);
+                const auto chip = keyed.pattern_coefficient_at(cell);
+                for (std::size_t carrier = 0; carrier < 3; ++carrier)
+                    destination[cell * 3 + carrier] = static_cast<std::complex<float>>(chip[carrier]);
+            }
+            note(work.source_render_calls, 1);
+        }
+    }
 };
 
 struct Peak {
@@ -3615,6 +3724,7 @@ struct CoarseSession::Impl {
     std::unique_ptr<CoarseBulk> bulk;
     CoarseBulkCompletedWork bulk_completed;
     std::vector<Workspace> bank;
+    std::vector<CoarseTemplateGram> device_templates;
     std::vector<Complex> observation;
     std::vector<ZoomKernel> kernels;
     std::vector<Peak> peaks;
@@ -3750,9 +3860,19 @@ struct CoarseSession::Impl {
                 mapped.emplace(geometry, projection, fft.get(), receipt.filter_setup.operations, stop);
             receipt.filter_setup.wall_seconds += elapsed(setup);
             if (fused_float) float_fft = std::make_unique<native_fft::FloatPlan>(layout.nfft, stop);
+            // A backend may render the exact bank from its keyed coefficients
+            // when no native stage reads the time-domain columns.
+            std::optional<TemplateSynthesis> synthesis;
+            if (bulk && !lag && !route_open && !mapped && !geometry.varying_passband && !midpoint_geometry &&
+                TemplateSynthesis::covers(geometry)) {
+                synthesis.emplace(geometry, config, slot, projection.taps());
+                if (!bulk->supports_template_synthesis(bulk_geometry(1), geometry.workspaces(), synthesis->source))
+                    synthesis.reset();
+            }
             prepare(key, iq, projection, mapped ? &*mapped : nullptr,
                     !bulk && !lag && !split_bank && !fused_float && !route_open ? fft.get() : nullptr, workers, stop,
-                    overlapped ? assistance : nullptr, plan_search, workspace.echo_phase_rows);
+                    overlapped ? assistance : nullptr, plan_search, workspace.echo_phase_rows,
+                    synthesis ? &*synthesis : nullptr);
         }
         if (route_open) {
             lag = work.route == CoarseRoute::lag_groups;
@@ -3839,11 +3959,12 @@ struct CoarseSession::Impl {
                  const MappedProjection* mapped, const native_fft::DoublePlan* spectrum_fft,
                  unsigned workers, std::stop_token stop, const FrequencyAssistance* acquisition,
                  const std::function<void(std::span<const FrequencyInterval>)>& plan_search,
-                 std::size_t echo_phase_rows) {
+                 std::size_t echo_phase_rows, TemplateSynthesis* device_bank = nullptr) {
         const auto& layout = geometry.layout;
         std::vector<Complex> echo_phases;
         double echo_setup_seconds = 0;
-        if (echo_phase_rows && bulk && !bulk->supports_fir()) {
+        // A declined device bank computes its echo phases with each column.
+        if (echo_phase_rows && bulk && !bulk->supports_fir() && !device_bank) {
             const auto started = PhaseClock::now();
             echo_phases.resize(echo_phase_rows);
             // Only the interpolation coordinates depend on the clock and
@@ -3913,9 +4034,35 @@ struct CoarseSession::Impl {
                 stage.wait_urgent();
                 posted += count;
             };
-            stage.release(jobs);
+            // The device bank overlaps the observation filter. Native bank
+            // jobs start only if the backend declines before retaining it.
+            auto released = device_bank ? serial : jobs;
+            stage.release(released);
             const auto stage_stop = stage.stop_token();
             try {
+                if (device_bank) {
+                    std::vector<CoarseTemplateGram> grams(geometry.workspaces());
+                    CoarseBulkWork operations;
+                    bool retained = false;
+                    {
+                        const PhaseSpan::Scope scope(bank_span);
+                        device_bank->key_lanes(slot, key, receipt.template_bank.operations, stage_stop);
+                        retained = bulk->synthesize_templates(bulk_geometry(1), device_bank->source, grams,
+                                                              operations, stage_stop);
+                    }
+                    if (retained) {
+                        combine(receipt.template_bank.operations, operations);
+                        note(receipt.template_bank.operations.projected_columns, device_bank->columns.size());
+                        device_templates.assign(grams.begin(), grams.end());
+                    } else {
+                        require_coarse(operations == CoarseBulkWork{},
+                                       "declined device template synthesis reported partial work");
+                        device_bank->release();
+                        device_bank = nullptr;
+                        released = jobs;
+                        stage.release(released);
+                    }
+                }
                 if (acquisition && !acquisitions) plan_search(acquisition->acquire(wave, stage_stop));
                 if (fidelity) {
                     const auto started = PhaseClock::now();
@@ -3929,10 +4076,26 @@ struct CoarseSession::Impl {
                 if (stage_stop.stop_requested()) stage.wait_urgent();
                 throw;
             }
-            stage.wait_background(jobs);
+            stage.wait_background(released);
         }
         if (acquisitions) plan_search(acquired);
-        bank = bank_jobs.finish(receipt.template_bank.operations);
+        if (device_bank) {
+            // The device retains the columns. Selection needs only each
+            // workspace's inverse Gram, rank and conditioning.
+            bank.resize(geometry.workspaces());
+            for (std::size_t workspace = 0; workspace < bank.size(); ++workspace) {
+                const auto& entry = device_templates[workspace];
+                const Hermitian g{entry.a, entry.d, entry.b};
+                auto& destination = bank[workspace];
+                destination.inverse = invert(g, geometry.ray_count);
+                if (geometry.ray_count == 2) {
+                    const auto smallest = std::max(0., (g.a * g.d - std::norm(g.b)) / destination.inverse.largest);
+                    destination.eigenvalue_ratio = smallest / destination.inverse.largest;
+                }
+            }
+        } else {
+            bank = bank_jobs.finish(receipt.template_bank.operations);
+        }
         receipt.template_bank.wall_seconds = echo_setup_seconds + bank_span.seconds();
         receipt.observation.wall_seconds = observation_span.seconds();
         if (midpoint_geometry) {
@@ -3985,6 +4148,17 @@ struct CoarseSession::Impl {
         return completed;
     }
 
+    // The frequency-tile shape a compiled backend plans and prepares.
+    CoarseBulkGeometry bulk_geometry(double minimum_eigenvalue_ratio) const {
+        const auto& plan = receipt.plan;
+        const auto& admission = plan.bulk_frequency_admission;
+        return {plan.rays, plan.projected_template_rows, plan.correlation_fft_rows,
+                plan.arrival_points, plan.frequency_points, plan.projected_sample_rate_hz, variance,
+                admission ? admission->tile_width : plan.tile_width,
+                admission ? admission->workspace_batch : 0, admission ? admission->device_workspace_bytes : 0,
+                minimum_eigenvalue_ratio, plan.route == CoarseRoute::lag_groups ? plan.tile_width : 0};
+    }
+
     void prepare_bulk(std::stop_token stop) {
         const auto started = PhaseClock::now();
         const auto& plan = receipt.plan;
@@ -3999,13 +4173,7 @@ struct CoarseSession::Impl {
         for (const auto& kernel : kernels)
             zoom.push_back({kernel.group.first, kernel.group.count, kernel.input_phase, kernel.convolution});
         CoarseBulkWork operations;
-        const auto& admission = plan.bulk_frequency_admission;
-        bulk->prepare({plan.rays, plan.projected_template_rows, plan.correlation_fft_rows,
-                       plan.arrival_points, plan.frequency_points, plan.projected_sample_rate_hz, variance,
-                       admission ? admission->tile_width : plan.tile_width,
-                       admission ? admission->workspace_batch : 0, admission ? admission->device_workspace_bytes : 0,
-                       plan.minimum_eigenvalue_ratio, plan.route == CoarseRoute::lag_groups ? plan.tile_width : 0},
-                      observation, columns, zoom, operations, stop);
+        bulk->prepare(bulk_geometry(plan.minimum_eigenvalue_ratio), observation, columns, zoom, operations, stop);
         if (const auto reason = bulk->precision_reason(); !reason.empty())
             receipt.plan.precision_reason = reason;
         bulk_completed = bulk->completed_work();

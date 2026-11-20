@@ -228,9 +228,9 @@ def main(executable):
     # expensive receiver search.  The explicit local lease admits the capture
     # but need not admit full scoring; either a finished score or a reported
     # lease/deadline stop is acceptable for this waveform-generation check.
-    def reference_capture(*extra):
+    def reference_capture(*extra, memory_limit=83886080):
         proc = subprocess.run([str(executable), "admission", "--workers", "1", "--slot-owners", "1",
-                               "--deadline-ms", "12000", "--memory-limit-bytes", "83886080",
+                               "--deadline-ms", "12000", "--memory-limit-bytes", str(memory_limit),
                                *reference_args, *extra], check=False, capture_output=True, text=True, timeout=18)
         receipt = json.loads(proc.stdout)
         assert proc.returncode in (0, 2), receipt
@@ -248,10 +248,13 @@ def main(executable):
         planned = run("plan", *reference_args, *options, code=discovery.returncode)
         gaussian_plan = run("plan", *reference_args, *gaussian_options, code=discovery.returncode)
         if discovery.returncode == 0:
-            device = reference_capture(*options)
+            # A reachable device runtime is part of the process footprint
+            # that the lease charges before the canonical capture.
+            device_limit = 268435456
+            device = reference_capture(*options, memory_limit=device_limit)
             assert device["observation"]["input_sha256"] == stable["observation"]["input_sha256"]
             assert device["configuration"]["fixed_receiver_link_contrast"] == stable["configuration"]["fixed_receiver_link_contrast"]
-            gaussian_capture = reference_capture(*gaussian_options)
+            gaussian_capture = reference_capture(*gaussian_options, memory_limit=device_limit)
             assert gaussian_capture["observation"]["input_sha256"] == faded["observation"]["input_sha256"]
             assert gaussian_capture["configuration"]["channel_reference"] == faded["configuration"]["channel_reference"]
             for field in ("spread_doppler_hz", "spread_delay_seconds", "time_varying_common_doppler_hz",

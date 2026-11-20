@@ -294,7 +294,10 @@ report `workspace_scope=per_coarse_session`, where the configured limit applies
 to each owner. Use `vulkan_leased_bytes` and `vulkan_peak_leased_bytes` for
 aggregate lease accounting, `vulkan_peak_owner_lease_bytes` for the largest
 single owner lease, and `vulkan_active_sessions` for live owners. Do not compare
-a valid multi-owner aggregate directly to one owner's lease. Preserve the full native
+a valid multi-owner aggregate directly to one owner's lease. A dense OpenCL
+coarse session allocates nothing from the Vulkan allocator. It reports its
+quoted device bytes as an owner lease in both scopes, bounded by the shared
+budget or by the pinned per-session limit. Preserve the full native
 `W=2*H` worker budget for remaining work and compare against that budget, not a
 single-thread CPU reference.
 

@@ -28,6 +28,8 @@ struct OpenClResidentWork {
 };
 
 class OpenClNvfp4Device;
+class OpenClNvfp4Coarse;
+struct OpenClCoarseShape;
 
 class OpenClNvfp4Projection {
 public:
@@ -81,11 +83,17 @@ public:
         std::size_t rows, std::span<const std::size_t> bins, std::size_t batch_capacity,
         std::size_t workspace_limit, OpenClFineMethod method = OpenClFineMethod::staged) const;
 
+    // Empty when the device cannot hold the session within the limit. A
+    // profiled session records device command intervals in its work.
+    std::unique_ptr<OpenClNvfp4Coarse> make_coarse(const OpenClCoarseShape&, std::size_t workspace_limit,
+                                                   bool profile = false) const;
+
 private:
     struct Impl;
     explicit OpenClNvfp4Device(std::shared_ptr<Impl> impl);
     std::shared_ptr<Impl> impl_;
     friend class OpenClNvfp4Projection;
+    friend class OpenClNvfp4Coarse;
 };
 
 } // namespace datapump::triad::v3::receiver_detail

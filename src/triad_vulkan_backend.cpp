@@ -4,6 +4,7 @@
 #include "triad_vulkan_backend.hpp"
 #include "triad_vulkan_peaks.hpp"
 #ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
+#include "triad_opencl_coarse_bulk.hpp"
 #include "triad_opencl_nvfp4_projection.hpp"
 #include "triad_opencl_nvfp4_ptx.hpp"
 #endif
@@ -111,6 +112,8 @@ constexpr auto fp32_direct_arithmetic = "fp32_direct_dot_fp64_scoring";
 constexpr auto half_storage_direct_arithmetic = "fp16_storage_fp32_direct_dot_fp64_scoring";
 constexpr auto packed_direct_arithmetic = "packed_fp16_direct_dot_fp32_reduction_fp64_scoring";
 constexpr auto host_score_suffix = "_fixed_phase_host_fp64_scoring";
+constexpr auto dense_fp4_arithmetic = "nvfp4_dense_coarse_fp32_rescored_peaks_native_fir_and_fine";
+constexpr auto mixed_dense_fp4_arithmetic = "mixed_nvfp4_dense_and_fft_coarse_native_fir_and_fine";
 
 bool direct_request(VulkanCoarsePrecision precision) {
     return precision == VulkanCoarsePrecision::direct_fp32 ||
@@ -220,6 +223,7 @@ struct Shared {
         require(options.coarse_precision == VulkanCoarsePrecision::automatic ||
                 options.coarse_precision == VulkanCoarsePrecision::fp32 ||
                 options.coarse_precision == VulkanCoarsePrecision::fp16_storage ||
+                options.coarse_precision == VulkanCoarsePrecision::opencl_nvfp4 ||
                 direct_request(options.coarse_precision),
                 "invalid Robust Vulkan storage precision policy");
         try { initialize(automatic_device); } catch (...) { release(); throw; }
@@ -402,7 +406,8 @@ struct Shared {
             requested == VulkanCoarsePrecision::fp16_storage ? half_storage_arithmetic :
             requested == VulkanCoarsePrecision::direct_fp16 ? packed_direct_arithmetic :
             requested == VulkanCoarsePrecision::direct_fp16_storage ? half_storage_direct_arithmetic :
-            requested == VulkanCoarsePrecision::direct_fp32 ? fp32_direct_arithmetic : fp32_arithmetic;
+            requested == VulkanCoarsePrecision::direct_fp32 ? fp32_direct_arithmetic :
+            requested == VulkanCoarsePrecision::opencl_nvfp4 ? dense_fp4_arithmetic : fp32_arithmetic;
         total.requested_coarse_math = "fft";
         total.vulkan = true;
         total.vulkan_api_version = properties.apiVersion; total.vulkan_driver_version = properties.driverVersion;
@@ -542,7 +547,10 @@ struct Shared {
     BulkReceipt receipt() const {
         std::lock_guard lock(receipt_mutex);
         auto result = total;
-        if (result.score_rows) {
+        if (result.score_rows && result.opencl_coarse_score_rows) {
+            result.precision = result.opencl_coarse_score_rows == result.score_rows ? dense_fp4_arithmetic
+                                                                                    : mixed_dense_fp4_arithmetic;
+        } else if (result.score_rows) {
             if (result.vulkan_direct_fp32_score_rows == result.score_rows) result.precision = fp32_direct_arithmetic;
             else if (result.vulkan_direct_fp16_score_rows == result.score_rows) result.precision = packed_direct_arithmetic;
             else if (result.vulkan_direct_fp16_storage_score_rows == result.score_rows)
@@ -653,6 +661,9 @@ struct Shared {
         total.vulkan_shader_compile_seconds += delta.vulkan_shader_compile_seconds;
         total.vulkan_device_command_seconds += delta.vulkan_device_command_seconds;
         total.vulkan_direct_dot_seconds += delta.vulkan_direct_dot_seconds;
+#ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
+        add_opencl_coarse_work(total, delta);
+#endif
     }
 };
 
@@ -1728,9 +1739,6 @@ bool requires_opencl_fine(VulkanFineProjection choice) noexcept {
 constexpr std::size_t opencl_fine_lanes = 288;
 constexpr std::size_t opencl_resident_lanes = 2 * opencl_fine_lanes;
 constexpr std::size_t opencl_fine_rows = 1500, opencl_fine_modes = 47;
-// The matched resident batches beat native projection at four CPU lanes.
-// Wider automatic owners retain the current native qualification.
-constexpr unsigned opencl_fine_qualified_cpu_lanes = 4;
 
 OpenClFineMethod opencl_fine_method(VulkanFineProjection choice) noexcept {
     if (choice == VulkanFineProjection::automatic || choice == VulkanFineProjection::opencl_resident_nvfp4)
@@ -1966,39 +1974,90 @@ private:
 };
 #endif
 
+#ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
+// Automatic selection scores eligible frequency-tile sessions with the dense
+// FP4 search and its device template bank. Other geometry keeps its FFT
+// session, and an explicit request still reports geometry it cannot admit.
+constexpr bool opencl_coarse_automatic_qualified = true;
+
+// OpenCL coarse sessions lease the same shared device workspace and add to
+// the same receipt as the Vulkan sessions of this backend.
+class SharedCoarseHost final : public OpenClCoarseHost {
+public:
+    explicit SharedCoarseHost(std::shared_ptr<Shared> shared) : shared_(std::move(shared)) {}
+    // The automatic backend leases one shared device budget. An explicit
+    // request bounds each coarse session by itself, as its FFT sessions are.
+    std::size_t workspace_limit() const override {
+        return shared_->automatic_workspace ? shared_->total.vulkan_shared_workspace_limit_bytes
+                                            : shared_->options.workspace_bytes;
+    }
+    void acquire(std::size_t bytes, std::stop_token stop) override {
+        if (shared_->automatic_workspace) return shared_->acquire(bytes, stop);
+        if (!bytes || bytes > shared_->options.workspace_bytes)
+            throw ReceiverWorkspaceError("Robust OpenCL coarse geometry exceeds its device workspace");
+        cancelled(stop);
+        std::lock_guard lock(shared_->receipt_mutex);
+        auto& peak = shared_->total.vulkan_peak_owner_lease_bytes;
+        peak = std::max(peak, bytes);
+    }
+    void release(std::size_t bytes) noexcept override {
+        if (shared_->automatic_workspace) shared_->release_lease(bytes);
+    }
+    void account(const BulkReceipt& delta) override { shared_->accumulate(delta); }
+    BulkReceipt receipt() const override { return shared_->receipt(); }
+private:
+    std::shared_ptr<Shared> shared_;
+};
+#endif
+
 class VulkanBackend final : public ReceiverBulkBackend {
 public:
     explicit VulkanBackend(const VulkanReceiverOptions& options, bool automatic_device = false)
         : shared_(std::make_shared<Shared>(options, automatic_device)) {
-        const bool required = requires_opencl_fine(options.fine_projection);
+        const bool required_fine = requires_opencl_fine(options.fine_projection);
+        const bool required_coarse = options.coarse_precision == VulkanCoarsePrecision::opencl_nvfp4;
+        const bool required = required_fine || required_coarse;
 #ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
-        const bool automatic = options.fine_projection == VulkanFineProjection::automatic && automatic_device &&
-                               options.coarse_precision == VulkanCoarsePrecision::automatic;
-        if ((required || automatic) && shared_->total.vulkan_vendor_id == 0x10de && shared_->total.device_uuid) {
+        const bool automatic = automatic_device && options.coarse_precision == VulkanCoarsePrecision::automatic;
+        const bool automatic_fine = options.fine_projection == VulkanFineProjection::automatic && automatic;
+        const bool automatic_coarse = automatic && opencl_coarse_automatic_qualified;
+        if ((required || automatic_fine || automatic_coarse) && shared_->total.vulkan_vendor_id == 0x10de &&
+            shared_->total.device_uuid) {
             std::string reason;
             opencl_ = OpenClNvfp4Device::open(std::as_bytes(std::span(*shared_->total.device_uuid)),
                                              std::as_bytes(std::span(opencl_nvfp4_ptx)), &reason);
             if (required && !opencl_) throw VulkanBackendUnavailable(std::move(reason));
         }
         if (required && !opencl_) throw VulkanBackendUnavailable("OpenCL NVFP4 needs the selected NVIDIA Blackwell GPU");
+        // One device serves both stages. Each keeps its own selection.
+        opencl_fine_ = opencl_ && (required_fine || automatic_fine);
+        opencl_coarse_ = opencl_ && (required_coarse || automatic_coarse);
+        if (opencl_coarse_) coarse_host_ = std::make_shared<SharedCoarseHost>(shared_);
 #else
-        if (required) throw VulkanBackendUnavailable("This Vulkan build has no OpenCL NVFP4 projection");
+        if (required) throw VulkanBackendUnavailable("This Vulkan build has no OpenCL NVFP4 work");
 #endif
     }
     bool supports_fine() const noexcept override { return false; }
-    bool fine_maps_on_host() const noexcept override {
+    bool opencl_open() const noexcept {
 #ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
         return static_cast<bool>(opencl_);
 #else
         return false;
 #endif
     }
+    bool fine_maps_on_host() const noexcept override {
+#ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
+        return opencl_fine_;
+#else
+        return false;
+#endif
+    }
     std::string_view fine_fallback_reason(const FineBulkGeometry& geometry) const noexcept override {
 #ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
-        if (opencl_ && geometry.isolated_varying_data && geometry.taps == 2) {
-            if (requires_opencl_fine(shared_->options.fine_projection) ||
-                geometry.workers <= opencl_fine_qualified_cpu_lanes) return {};
-            return "native-fine-throughput";
+        if (opencl_fine_ && geometry.isolated_varying_data && geometry.taps == 2) {
+            // Resident batches keep the owner's host lanes free for the
+            // other public slots at every measured worker width.
+            return {};
         }
 #else
         (void)geometry;
@@ -2077,7 +2136,7 @@ public:
     }
     std::unique_ptr<FineBulk> make_fine(double, double) override {
 #ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
-        if (opencl_) return std::make_unique<OpenClFine>(shared_, opencl_);
+        if (opencl_fine_) return std::make_unique<OpenClFine>(shared_, opencl_);
 #endif
         throw Error("Vulkan fine work must select its explicit native CPU capability");
     }
@@ -2086,11 +2145,23 @@ public:
                 "invalid Robust Vulkan public precision geometry");
         require(coarse_fallback_reason(rate, clock, CoarseRoute::frequency_tiles).empty(),
                 "compact tight-clock Vulkan request must select native FP64 before preparation");
+#ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
+        if (opencl_coarse_) {
+            // An explicit request has no other route. Automatic selection
+            // keeps the FFT session for geometry the dense search declines,
+            // including banks whose columns a native stage must read.
+            const bool required = shared_->options.coarse_precision == VulkanCoarsePrecision::opencl_nvfp4;
+            const auto& options = shared_->options;
+            return make_opencl_coarse_bulk(coarse_host_, opencl_,
+                required ? nullptr : std::make_unique<VulkanCoarse>(shared_),
+                {required, options.profile_opencl, options.opencl_device_templates, required});
+        }
+#endif
         return std::make_unique<VulkanCoarse>(shared_);
     }
     std::size_t fine_host_bytes(std::size_t, std::size_t) const override {
 #ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
-        if (opencl_) {
+        if (opencl_fine_) {
             const auto method = opencl_fine_method(shared_->options.fine_projection);
             const auto staging = mul(opencl_fine_lanes * (opencl_fine_rows + 1 + opencl_fine_modes),
                                      sizeof(std::complex<float>));
@@ -2103,7 +2174,7 @@ public:
     }
     std::size_t persistent_host_workspace() const noexcept override {
         return serialized_cache_limit + serialized_cache_metadata_bound +
-               shader_cache_limit + shader_cache_metadata_bound + (fine_maps_on_host() ? 2 * mib : 0);
+               shader_cache_limit + shader_cache_metadata_bound + (opencl_open() ? 2 * mib : 0);
     }
     std::size_t coarse_host_bytes(std::size_t maximum_fft_rows, std::size_t maximum_tile_frequencies,
                                  std::size_t arrivals) const override {
@@ -2120,6 +2191,8 @@ private:
     std::shared_ptr<Shared> shared_;
 #ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
     std::shared_ptr<OpenClNvfp4Device> opencl_;
+    std::shared_ptr<SharedCoarseHost> coarse_host_;
+    bool opencl_fine_ = false, opencl_coarse_ = false;
 #endif
 };
 

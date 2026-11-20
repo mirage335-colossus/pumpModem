@@ -219,7 +219,9 @@ executed work. CUDA performs GPU coarse and bulk fine work when selected by its
 automatic route. Vulkan performs GPU
 frequency-grid search while Helper processing, FIR/template preparation,
 native lag/tight-clock routes, fine tracking and sensitive host scoring retain
-native CPU processing. The CUDA automatic policy also routes qualified small public
+native CPU processing. On an NVIDIA Blackwell device with the OpenCL module,
+eligible searches use the dense FP4 search with its device template bank and
+qualified fine statistics use resident FP4 projection instead. The CUDA automatic policy also routes qualified small public
 fine blocks through canonical native fine processing while retaining CUDA
 coarse work; its native-fine session count and fallback reason are shown
 separately from arithmetic precision. The supported geometry and bounded

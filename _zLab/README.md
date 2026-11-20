@@ -179,10 +179,10 @@ defaults to `--mode cpu`. Use `--mode gpu` for automatic GPU selection or
 `--mode cuda` to require CUDA. A required CUDA build ends at the discovery
 check if the expected device cannot initialize.
 The CUDA build can use the Blackwell NVFP4 fine projection when its driver
-initializes in that environment. The tested stock RTX PRO 6000 worker uses
-Vulkan for broad coarse search and OpenCL for qualified NVFP4 template
-projection when a fine owner has at most four admitted software lanes. Wider
-owners use the measured faster native projection. CUDA discovery and Vulkan's
+initializes in that environment. The tested stock RTX PRO 6000 worker scores
+eligible broad coarse searches with the OpenCL dense FP4 search and keeps
+Vulkan for the sessions that search declines. It uses OpenCL for qualified
+NVFP4 template projection at every worker allocation. CUDA discovery and Vulkan's
 CUDA import extensions fail with the socket filter active on that driver. See the
 [matched runtime checks](../docs/validation.md#blackwell-nvfp4-fine-projection--19-november-2026).
 GPU sessions enforce `--require-gpu`. Check the receiver's backend, scored

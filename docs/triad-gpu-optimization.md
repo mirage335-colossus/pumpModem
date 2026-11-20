@@ -23,6 +23,9 @@ post-channelization lag-DFT paths with reusable coefficients and bounded
 workspace/arrival batching. Bounded GPU fixtures and two large bulk shapes pass;
 complete-receiver qualification remains separate. The historical FP4 coarse
 lag-matrix candidate was removed after failing the then-frozen noise-peak gate.
+The Blackwell Vulkan/OpenCL receiver now scores its broad frequency search
+with a [dense FP4 search](#dense-fp4-coarse-search-and-device-template-bank)
+whose retained peaks are rescored from unquantized templates.
 The resident fine projection described below remains in the native receiver.
 That historical diagnostic failure alone is not a universal precision veto:
 current qualification compares complete cost, physical reception, false alarms
@@ -36,8 +39,9 @@ efficiency result is insufficient.
 
 ## Continue Blackwell FP4 work
 
-Start with the [latest same-device baseline](validation.md#blackwell-shared-bit-mapping-and-coarse-phase-reuse--19-november-2026),
-the [five-slot timing breakdown](validation.md#five-slot-timing-and-measurement-scopes),
+Start with the [latest same-device comparison](validation.md#blackwell-dense-fp4-coarse-search--20-november-2026),
+the earlier [fine-stage baseline](validation.md#blackwell-shared-bit-mapping-and-coarse-phase-reuse--19-november-2026)
+with its [five-slot timing breakdown](validation.md#five-slot-timing-and-measurement-scopes),
 and the [exact reproduction](#reproduce-the-matched-blackwell-runs). The
 tracked record carries the fixture identities, setup and work counts needed
 to continue from a fresh checkout. The timings distinguish native stage
@@ -49,10 +53,12 @@ physical quiet-slot completion, and the full automatic `W = 2*H` software
 worker budget. Treat the four-worker and 24-worker values below as explicit
 benchmark allocations. An eligible fine owner can temporarily have fewer
 lanes than the full receiver. The current automatic Vulkan/OpenCL route
-selects resident FP4 for the qualified geometry with at most four fine-owner
-lanes. Native fine won the fresh 24-worker severe and quiet comparisons.
-The crossover between those allocations remains open. Compare at full
-admitted budget when qualifying wider automatic dispatch.
+selects the [dense FP4 coarse search](#dense-fp4-coarse-search-and-device-template-bank)
+for eligible frequency-tile sessions and resident FP4 for the qualified fine
+geometry at every worker allocation. Start further work from its
+[ranked remaining costs](#remaining-costs-after-the-dense-search): fine
+processing is now most of a slot, and the simulator costs more than the
+receiver. The sections below it record the earlier fine-projection work.
 [Precision policy](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling)
 · [Worker allocation](development.md#receiver-cpu-allocation).
 
@@ -61,7 +67,7 @@ admitted budget when qualifying wider automatic dispatch.
 | Work | Where it runs and where to inspect |
 | --- | --- |
 | Source, channel and receiver service | The [native probe](../tools/triad-receiver-probe.cpp) generates the input and replays it through the [stream receiver](../src/triad_stream_receiver.cpp). Application scheduling, ordered commitments, codec and physical completion remain native. Inspect `score_slot_coarse` and `score_slot_fine` in [the receiver](../src/triad_receiver.cpp) and `stream_run` in the probe for timing boundaries. |
-| Coarse search | [Coarse preparation](../src/triad_receiver_coarse.cpp) has native observation channelization, keyed template bank, exact cubic warp and reused Doppler phase. `Projection::apply` performs native overlap-add FFT convolution on the filtered Vulkan route. [Vulkan](../src/triad_vulkan_backend.cpp) transforms the bank and rotated observations, forms correlation products, does inverse FFT and quadratic scoring, then compacts the exact peak frontier before readback. The matched broad geometry has 78 workspaces, 15 frequencies and 3,377 arrivals, with two rays per template. |
+| Coarse search | On Blackwell, an eligible session uploads keyed coefficients and the channelized observation, and the [dense FP4 search](../src/triad_opencl_nvfp4_coarse.cpp) renders the bank, scores every row and returns rescored arrival frontiers through [its adapter](../src/triad_opencl_coarse_bulk.cpp). Other sessions use the following route. [Coarse preparation](../src/triad_receiver_coarse.cpp) has native observation channelization, keyed template bank, exact cubic warp and reused Doppler phase. `Projection::apply` performs native overlap-add FFT convolution on the filtered Vulkan route. [Vulkan](../src/triad_vulkan_backend.cpp) transforms the bank and rotated observations, forms correlation products, does inverse FFT and quadratic scoring, then compacts the exact peak frontier before readback. The matched broad geometry has 78 workspaces, 15 frequencies and 3,377 arrivals, with two rays per template. |
 | Fine source and ownership | `FineSession` in [fine processing](../src/triad_receiver_fine.cpp) prepares receiver observations and advances tracking and likelihood state. [MappedBasis](../src/triad_receiver_basis.cpp) produces and pins immutable keyed source tiles and exports the native mappings. It groups compatible ready blocks without advancing later state early. Candidate sets larger than one GPU submission retain every candidate. |
 | OpenCL resident work | [Host projection and staging](../src/triad_opencl_nvfp4_projection.cpp) owns the queue, tile cache, descriptor flush, uploads and readback. [Device kernels](../src/triad_opencl_nvfp4_kernels.cu) render the paired maps and determine their scale. The FP4 path packs templates and coefficients and runs block-scaled E2M1 Tensor Core projection with FP32 accumulation. The [resident FFT](../src/triad_opencl_fine_fft.cuh) uses FP32 arithmetic and gathers the same bins. Both compute FP64 sufficient statistics on the device. The receiver reads those statistics and applies native state updates. |
 | Fallback and receipts | [Vulkan routing](../src/triad_vulkan_backend.cpp) defines public geometry, shared device admission and native terminal, Helper-taper or workspace fallback. [Bulk work](../src/triad_receiver_bulk.hpp) defines what the counters cover. The distinct native CUDA path lives in [the CUDA backend](../src/triad_tensor_backend.cpp) and supports direct cuFFT and NVFP4 controls. Its results qualify that backend and runtime. |
@@ -73,8 +79,9 @@ multiplication, compared with a roughly 2 PFLOP/s dense hardware reference.
 The severe slot's 404 paired submissions and one single submission issue
 137.424 GFLOP at `N=96` and `K=3072` padded. Applying the old already-packed
 9.22 µs paired and 8.93 µs single event medians to that schedule gives about
-3.7 ms of matrix time as an illustrative fixed-shape estimate. The latest
-severe fine span is about one second. Issued-equivalent throughput over
+3.7 ms of matrix time as an illustrative fixed-shape estimate. The severe
+fine span was about one second in that campaign and 0.54–0.69 s on the
+20 November host. Issued-equivalent throughput over
 fine-stage wall time, active matrix throughput, and Tensor Core duty are
 separate measures. The new mapper removed 107,928 descriptors per severe or
 quiet slot, saving 18,995,328 bytes while the blocking-write counts and tile
@@ -143,15 +150,14 @@ host-side changes and coarse phase reuse.
    ready work. Report issued padded arithmetic, useful work, packing,
    workspace and complete elapsed time. A larger resident-only control
    establishes what the card can sustain for its own geometry.
-3. For coarse-dominated service, test reduced native warp or channelizer
-   work and a device-resident FIR/crop on the same coarse prior before
-   replacing the FFT. An exploratory Tensor Core coarse formulation can
-   share one observation lag matrix by placing the trial-frequency
-   rotation on the template. The resulting common arrival phase cancels
-   in the two-ray quadratic score. Its additional dense work, preparation
-   and noise-ranking effects need a bounded comparison. Earlier FP4 coarse
-   work changed a unique noise peak, so include an acquisition and quiet
-   holdout before adopting a different arithmetic route.
+3. Coarse-dominated service on the exact frequency-tile route is addressed
+   by the [dense FP4 search](#dense-fp4-coarse-search-and-device-template-bank).
+   It rotates the observation per trial frequency and slides it by arrival,
+   which keeps one packed bank for every frequency. Sessions it declines
+   still prepare native columns for the Vulkan FFT. For those, test reduced
+   native warp or channelizer work, or extend device synthesis to their
+   geometry. Earlier FP4 coarse work changed a unique noise peak, so keep
+   the paired acquisition and quiet holdouts when its arithmetic changes.
 
 Use the [abbreviated test policy](robust-current.md#testing-computationally-intensive-robust-changes).
 After an attribution look, predeclare the smallest useful matched comparison.
@@ -262,9 +268,9 @@ yields the following scope estimates.
 | All receiver service for the measured slot | 20.5 GFLOP/s | 0.0010% |
 
 Useful throughput is 95.6% of the issued rates for that slot. These are
-arithmetic throughput estimates from operation counts and elapsed time. The
-higher-allocation default uses native fine processing on the tested geometry,
-with Vulkan processing millions of coarse rows. The four-worker wall difference
+arithmetic throughput estimates from operation counts and elapsed time. At
+that time the higher-allocation default used native fine processing on the
+tested geometry, with Vulkan processing millions of coarse rows. The four-worker wall difference
 includes 0.595 s of fine improvement and 0.812 s of variation in coarse processing.
 Only the phase measurements distinguish those effects.
 
@@ -635,8 +641,8 @@ the full selected channel effects. Quiet uses noise alone with the same
 declared search. Stable sets realized severity to zero and preserves the
 declared search. `message` generates the native alarm fixture with raw
 observations `001` followed by two quiet slots. The explicit `--bit 0` is
-the wanted bit for `admission`. Four software workers qualify the existing
-automatic fine route and 24 reproduce the wider production-path comparison.
+the wanted bit for `admission`. Four and 24 software workers are the two
+measured allocations of the automatic route.
 Keep the normally available `W=2*H` receiver allocation for capacity
 evaluation.
 
@@ -703,12 +709,17 @@ one single. One additional terminal block ran natively.
 The complete stream with the separate EOF control credited 23,706,540 coarse
 rows, 365,526 fine statistics, 68,736,528 projected values and 68,635,980
 resident FP4 modes. The 2,905 GPU batches comprised 2,898 pairs and seven
-single batches. Six additional terminal blocks ran natively. Require
+single batches. Six additional terminal blocks ran natively. With the dense
+coarse search the automatic stream credited the same coarse rows, 357,984
+fine statistics, 67,318,272 projected values and 67,219,776 resident FP4
+modes in 2,486 batches with 2,480 pairs. Require
 `complete_receiver_service`, `message_and_physical_quiet_verified` and
 `eof_control_verified` on the message, with an expected-source match and
 two trailing scored quiet slots.
 The EOF-only control remains incomplete. Single-slot decisions must match
-across all six admission policies. Current and Guarded recover stable bit 0.
+across all six admission policies on these matched inputs. The dense search
+met that. On twelve other severe seeds two inputs differed in one policy
+outcome each, so compare further seeds as paired evidence, not as identity. Current and Guarded recover stable bit 0.
 Current admits the known severe wrong bit 1 and the five stronger policies
 erase it. Every policy reports quiet for the quiet input.
 Compare numerical evidence and quiet energy within the matched FP4 revision
@@ -723,6 +734,182 @@ Preserve the bounded workload and receipt gates in future comparisons.
 Collect compact technical results, then remove temporary captures, launchers
 and source snapshots when their purpose ends. Terminate only the owned
 benchmark pod and verify removal through the provider inventory.
+
+## Dense FP4 coarse search and device template bank
+
+The matched broad search has 78 workspaces, 15 trial frequencies, 3,377
+arrivals and two rays over 44,971 projected rows: 3,951,090 score rows and
+1.42e12 real products per slot. The earlier route prepared 156 template
+columns on the host, uploaded 82 MB, and transformed them on the device.
+Host preparation was 59–90% of a slot. The dense search moves the whole
+stage to the device and makes the products a Tensor Core contraction.
+[Session](../src/triad_opencl_nvfp4_coarse.cpp) ·
+[kernels](../src/triad_opencl_nvfp4_kernels.cu) ·
+[receiver adapter](../src/triad_opencl_coarse_bulk.cpp) ·
+[measured service](validation.md#blackwell-dense-fp4-coarse-search--20-november-2026).
+
+**Formulation.** For one trial frequency the observation is rotated once and
+packed as E2M1 with its real and imaginary parts interleaved, so an arrival
+is one byte and the rows of one `m16n8k64` product are sixteen consecutive
+arrivals of the same packed stream. Block scales cover eight samples, so
+each frequency keeps eight packed variants and an arrival reads the one that
+matches it modulo eight. A template column is packed twice, as `[Re, Im]`
+and `[-Im, Re]`. The eight result columns are then the real and imaginary
+correlations of two workspaces and two rays. One block scores one frequency,
+one workspace pair and 512 arrivals. The FP32 quadratic score of every
+arrival is formed in the epilogue from each ray's partner lane. The exact
+arrival frontier of those scores is selected on the device, with the native
+separation rule. Each retained arrival is then rescored in FP32 with FP64
+accumulation from the unquantized resident bank, and only the 40-byte
+frontier of each workspace and frequency is read back. FP4 therefore decides
+which arrivals are kept. It never supplies a score the receiver uses.
+
+**Device template bank.** The exact route's bank is a function of the keyed
+chip coefficients, the pulse table and public geometry. The session uploads
+those, renders each lane's integer source raster, applies each column's cubic
+clock warp and echo rotation, runs the canonical decimating FIR and returns
+FP64 Gram entries. The columns match the native exact columns within 6.1e-7
+of each column's peak. Rendering the raster before the warp is necessary:
+evaluating the waveform directly at warped positions differed by 8.5e-4,
+because the native route interpolates a raster whose untapered pulse has
+small steps at its support edges. Synthesis covers the exact frequency-tile
+route with two rays. Lag-group, mapped, varying-passband and midpoint-gain
+sessions, fewer than 16 arrivals and leases that do not fit keep the Vulkan
+FFT session through the adapter's fallback.
+
+**Conditioning.** FP4 scores choose the arrivals that are rescored, and the
+quadratic form amplifies their error as a workspace's two rays approach
+collinearity. A session therefore leaves the dense route when any workspace's
+smaller Gram eigenvalue is below one sixteenth of the larger, the canonical
+reduced-precision guard. The device returns the Grams with the synthesized
+bank, so the check costs one synthesis before the session prepares native
+columns for the FFT route. An explicit request reports the bank instead. In
+emulation, with a planted arrival at an exact score near 60 in noise, the
+frontier kept it in 24 of 24 trials at a ratio of 0.27 and of 3.5e-3, in 22
+of 24 at 5.5e-4 and in 1 of 24 at 1.4e-4, and a complete session with a
+5 µs, 0.001 Hz spread lost a signal the FFT session found. The matched
+fixture's ratio is 0.999996. The guard and these trials were not run on a
+device, and a measured FP4 bound could be lower than 1/16.
+
+**Transfers.** With 24 workers a slot uploads 473,952 bytes and reads back
+49,920 in 13 blocking transfers, against 82,178,320 uploaded before. With
+four workers the plan scores the 15 frequencies as two tiles: 474,048 bytes
+and 22 transfers. Scoring host-prepared
+columns with the same FP4 products left the coarse stage at 1.6–1.8 s with 24
+workers and 4.3–4.6 s with four: bank preparation on the host was the cost,
+not the FFT.
+
+### FP4 product throughput
+
+Device event intervals on a full RTX PRO 6000 Blackwell Server Edition, with
+a multiply-add counted as two operations and the rounded 1.9–2.0 PFLOP/s
+dense reference:
+
+| Product kernel and shape | Issued throughput | Interval |
+| --- | ---: | ---: |
+| First layout, matched search | 426 TFLOP/s | 7.08 ms |
+| First layout, operands repeated to stay in L1 | 478 TFLOP/s | 6.30 ms |
+| First layout, scale loads and shifts hoisted | 699 TFLOP/s | 4.32 ms |
+| First layout, every load hoisted: products only | 1,728–1,759 TFLOP/s | 1.75 ms |
+| Ring layout, matched search | 1,215–1,223 TFLOP/s | 2.47–2.48 ms |
+| Ring layout, matched search inside the receiver, 24 workers | 1,138–1,155 TFLOP/s | 2.62–2.66 ms |
+| Ring layout, the same search as two frequency tiles, 4 workers | 936–953 TFLOP/s | 3.18–3.23 ms |
+| Ring layout, 16,384 arrivals | 1,253–1,256 TFLOP/s | 11.0 ms |
+| Ring layout, 390 workspaces | 1,287–1,290 TFLOP/s | 11.7 ms |
+| Ring layout, one frequency or 4,096 rows | 917–928 TFLOP/s | 0.22–0.30 ms |
+
+The standalone rows used 44,935 template rows. The receiver's bank has
+44,971, padded to 45,120. The three hoisted rows are diagnostics that compute
+wrong products. They
+show that the first layout was limited by its instruction mix and not by
+memory or by the product layout: ten 4-byte observation loads, three scale
+loads with shifts, and three bank loads fed four products per K=64 slice.
+A load cost about half a product's issue time. The ring layout removes most
+of them. A thread's fragments are alternate words of its stream, group `g`
+of a slice takes four of them from the `2g`-th on, and the next slice starts
+four later. Each thread slot has its own stream of those words. A ring of
+five quads holds a slice while one 16-byte load brings the quad the next
+slice adds. Ready scale vectors advance the same way in one 8-byte load,
+and one 16-byte bank record carries a slice's two operand words and its
+scales. Three loads now feed eight products. The arithmetic and its results
+are unchanged: the receiver's operational evidence was bit-identical on 18
+repeated inputs before and after. Useful work is 94% of issued for the matched search. The rest is
+the padded inner extent and the arrivals of the last block.
+
+The earlier fine projection's matrix-only control was 36.9 TFLOP/s and the
+large cuBLASLt multiplication 1.309 PFLOP/s. The dense search runs real
+receiver work at about 60% of the dense reference during its product
+interval, and about two thirds of what the same block issues with no loads.
+That interval is 2.7 ms of a slot. Over the complete automatic slot the same
+products average about 4–7 TFLOP/s. Raising that figure is a matter of the
+remaining host and round-trip costs below, not of the product kernel.
+
+### Remaining costs after the dense search
+
+In measured order for the matched fixtures:
+
+1. **Fine processing: 0.37–0.73 s of a 0.45–0.82 s automatic slot.** Each slot makes
+   405 resident submissions, renders source tiles on the owning host thread,
+   uploads 56–92 MB and blocks on every result. It is the same at 4 and 24
+   workers. The nominal fixed-affine mappings do not depend on earlier
+   statistics, and a dense source tile is the lane raster the coarse search
+   already renders on the device. Rendering tiles on the device and
+   submitting a slot window are the direct next steps.
+2. **The simulator: 2.5–6.2 s per simulated slot, on one thread.** A profile
+   of one simulated slot attributes about half of the simulator's time to
+   `StreamingChannel::process_one` itself and most of the rest to the bounded
+   spread, interpolation and source evaluation it calls.
+   It dominates a developer's simulation once the receiver takes under a
+   second. The same simulator objects ran about 40% apart in two binaries.
+   [Channel contracts](channel-models.md) apply to any change.
+3. **The device FIR: 52 of 63 ms of template synthesis.** It is one scalar
+   FP32 dot product per output row. Wider loads, shared taps or an
+   equivalent transform need the same column-fidelity check.
+4. **Separate processes sharing the device.** Twelve simultaneous trials
+   averaged 3.0 s per receiver slot against 0.45–0.81 s alone. Owners inside
+   one process overlap on the device without that cost: the five-slot
+   message took 1.05–1.17 s.
+5. **The arrival frontier.** Two arrivals per row are retained by FP4 score
+   before rescoring. On twelve severe seeds that changed one policy outcome
+   on each of two inputs, one of them to the wrong bit under the current
+   policy. Retaining more arrivals before the FP32 pass would cost little,
+   would bring the retained set close to that of exact scores, and may let
+   the conditioning guard relax. It needs device requalification.
+6. **The product kernel.** Three loads per slice remain. Two workspace pairs
+   per block would share the observation loads.
+
+Sessions the dense search declines, the automatic plan's use of the FFT
+route's memory quote, RTX 5090, wider priors and sustained backlog remain
+unmeasured.
+
+### Reproduce and extend the dense search
+
+Use the [matched procedure](#reproduce-the-matched-blackwell-runs) with the
+same fixture, launcher and stock worker environment.
+
+- `--backend gpu` runs automatic selection. Its receipt reports
+  `opencl_coarse_score_rows`, sessions, frequency fallbacks, rescored peaks
+  and transfer bytes, and a precision label naming the dense search.
+- `--backend vulkan --vulkan-precision nvfp4` requires the dense search,
+  reports device event intervals in `opencl_coarse_*_seconds` and fails with
+  a named reason when a session cannot be admitted.
+  It scores host-prepared columns where a session offers no synthesis, for
+  example with a varying passband. `--opencl-coarse-templates device|native`
+  states a template source, and the probe then requires it to be the one
+  executed. The matched runs gave every explicit route a 1 GiB per-session
+  limit with `--device-memory-limit-bytes`. The dense session leases 247 MiB
+  for this geometry at 24 workers and 226 MiB at four.
+- The link of the matched fixture is far above threshold. For paired
+  decisions near it, raise `--noise-dbm-hz` towards −82 on the stable
+  channel. `--signal-gain-db` is accepted on the CPU backend only, and the
+  probe rejects a repeated option.
+- A deployed worker refuses a second deployment of different source. Copy
+  changed files to the deployed tree, rebuild the two targets and record
+  source and binary hashes with the results.
+- Check kernel changes first with `triad_opencl_nvfp4_emulated` and
+  `triad_opencl_coarse_session_emulated`. They caught every layout error
+  before a device run. They cannot reach the Vulkan backend's device host:
+  the pinned backend's missing lease budget appeared only on the device.
 
 ## Which arithmetic ran in a remote simulation?
 
@@ -753,6 +940,7 @@ leave that internal use unmeasured.
 | Broad changing-channel timing search | `TensorCoarse::plan_segmented` chooses shapes for FP32 cuFFT. The [CUDA scoring kernels](../src/triad_tensor_peaks.cu) track candidate motion and rank lags on device. Check `cuda_segmented_sessions`, `cuda_segmented_inverse_ffts`, `cuda_segmented_score_rows` and `cuda_segmented_native_fallbacks`. |
 | Fine tracking and decisions | The CUDA `TensorFine` class accelerates eligible bulk basis mapping, Gram products and statistics. Check `mapped_values`, `statistics_blocks`, `cuda_direct_gram_values`, `cuda_bmm_gram_values` and `native_fine_sessions`. The native receiver owns chronological state, bit and quiet decisions, codec and completion. For simulator generation time, read the separate `simulator` phase. [Receiver interfaces](robust-current.md#native-interfaces-and-ownership). |
 | Filtered Blackwell fine projection | The [OpenCL route](../src/triad_opencl_nvfp4_projection.cpp) renders mapped tiles, projects DATA templates and returns sufficient statistics. `opencl_resident_nvfp4_modes` witnesses the Tensor Core projection and `opencl_resident_fft_modes` witnesses the alternate FFT. `opencl_resident_fine_pairs`, `opencl_resident_upload_bytes` and `opencl_resident_download_bytes` describe paired submissions and resident transfers. [Receiver timings and limits](validation.md#blackwell-resident-fine-processing--19-november-2026). |
+| Blackwell dense coarse search | The [OpenCL session](../src/triad_opencl_nvfp4_coarse.cpp) renders the template bank, scores every row with E2M1 Tensor Core products and rescores retained arrivals. `opencl_coarse_score_rows` witnesses the rows it scored, `opencl_coarse_rescored_peaks` the FP32 pass, `opencl_coarse_synthesized_columns` and `opencl_coarse_uploaded_columns` the template source, and `opencl_coarse_frequency_fallbacks` the sessions that kept the FFT route. `opencl_coarse_issued_products` and `opencl_coarse_useful_products` count real multiply-adds. Device intervals appear only on the explicit profiled route. [Receiver timings and limits](validation.md#blackwell-dense-fp4-coarse-search--20-november-2026). |
 | Vulkan on integrated Radeon | The [Vulkan backend](../src/triad_vulkan_backend.cpp) runs supported frequency search via VkFFT or direct products. `vulkan_dispatches` and the per-route score-row counters identify actual work. The qualified Vega FP16 direct route uses packed vector arithmetic. VkFFT half storage still computes in FP32. Native CPU retains Helper, lag groups and fine processing. [Vulkan stage scope](gpu-precision-controls.md#vulkan-on-vega-integrated-graphics). |
 
 For example, the 2 mW, 72 Hz/5× severe Blackwell control (manifest

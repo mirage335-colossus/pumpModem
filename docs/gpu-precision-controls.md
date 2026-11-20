@@ -68,16 +68,35 @@ statistics have been read back. See the
 [Blackwell qualification](validation.md#blackwell-nvfp4-fine-projection--19-november-2026).
 
 On the filtered RunPod worker, Vulkan and OpenCL use the same NVIDIA device and
-workspace ceiling. Automatic mode uses resident OpenCL NVFP4 for the qualified
-isolated 1,500-row, 47-mode, two-tap blocks when the admitted fine owner has
-at most four software lanes. It keeps the full receiver worker budget. The
-receiver uses native projection for nonmatching geometry or unavailable
-device workspace. At 24 workers, resident FP4 improved the stable slot's
-fine service but lost to native fine processing on the severe and quiet
-fixtures. Wider owner allocations currently use native fine projection.
-The crossover between the measured allocations remains open.
-`--vulkan-fine-projection nvfp4` explicitly requests the earlier staged
-projection and checks for executed work.
+workspace ceiling. Automatic mode scores each eligible frequency-tile search
+with the [dense FP4 coarse search](triad-gpu-optimization.md#dense-fp4-coarse-search-and-device-template-bank):
+E2M1 Tensor Core products choose the arrival frontier of every public
+workspace, frequency and arrival, and every retained arrival is rescored in
+FP32 with FP64 accumulation from the unquantized device template bank.
+Sessions outside its envelope keep the Vulkan FFT search: lag-group, mapped
+and varying-passband routes, searches with midpoint gain timing, fewer than
+16 arrivals, a single ray, a lease that does not fit, or a template bank
+whose smaller Gram eigenvalue is below one sixteenth of the larger. That
+conditioning guard is the canonical reduced-precision bound. In emulation the
+FP4 frontier kept a planted arrival down to a ratio near 3.5e-3 and lost it
+near 1e-4, so a measured FP4 bound could be lower. Automatic mode also
+uses resident OpenCL NVFP4 for the qualified isolated 1,500-row, 47-mode,
+two-tap blocks at every worker allocation. It keeps the full receiver worker
+budget. The receiver uses native projection for nonmatching geometry or
+unavailable device workspace. The earlier four-lane limit came from
+24-worker single slots on another host, where native fine processing was
+faster. On the 20 November host resident fine processing was faster on every
+four-worker slot and took about a third of the native-fine time for the
+five-slot message. Its 24-worker single-slot ordering reversed between hosts
+running the same source and was level on one build of that campaign. Other
+hosts and other worker allocations are unmeasured, and native fine
+processing merits reconsideration on CPU-rich hosts.
+`--vulkan-precision nvfp4` requires the dense search and reports geometry or
+conditioning it cannot admit. It scores host-prepared columns where a session
+offers no device synthesis, and `--opencl-coarse-templates device|native`
+states the template source that must then be the one executed. `--vulkan-fine-projection nvfp4` explicitly
+requests the earlier staged projection and checks for executed work.
+[Measured service and paired decisions](validation.md#blackwell-dense-fp4-coarse-search--20-november-2026).
 For further FP4 work, use the
 [Blackwell continuation guide](triad-gpu-optimization.md#continue-blackwell-fp4-work)
 for the matched production timings, reproduction, and next profiling scope.
@@ -502,9 +521,12 @@ Single-product E2M1/block-16 arithmetic produced `0.050318` normalized score
 error against a 1% limit. Four-product high/residual reconstruction and a later
 16× residual-scale repair still changed the unique noise peak. Favorable active
 bulk timings did not resolve that failure or demonstrate an advantage over
-qualified INT8. There is no coarse FP4 selector. This scoped result does not
-invalidate the successful historical NVFP4 implementation or rule out a future
-native design. Preserve that experiment's failed gates and lack of demonstrated
+qualified INT8. The CUDA matrix route has no coarse FP4 selector. The
+Vulkan/OpenCL [dense FP4 search](triad-gpu-optimization.md#dense-fp4-coarse-search-and-device-template-bank)
+is a different design: its FP4 scores only choose which arrivals are retained,
+and the scores the receiver uses are recomputed from unquantized templates.
+This scoped result does not invalidate the successful historical NVFP4
+implementation or rule out a future native design. Preserve that experiment's failed gates and lack of demonstrated
 complete-cost benefit; a new candidate must be evaluated under the
 [proportional sensitivity/capacity policy](#automatic-mode-prioritizes-computational-ceiling),
 not rejected solely by that historical score or peak-agreement cutoff.

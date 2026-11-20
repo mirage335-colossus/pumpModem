@@ -81,6 +81,8 @@ struct Options {
     std::string tensor_coarse_math = "fft", tensor_fine_projection = "fft";
     bool cuda_segmented_timing = false;
     std::string vulkan_precision = "automatic", vulkan_fine_projection = "automatic";
+    std::string opencl_coarse_templates = "device";
+    bool opencl_coarse_templates_supplied = false;
     bool gpu_fp32_minimum = false;
     std::string native_coarse_precision = "automatic";
     std::string wrong_key_admission = "current";
@@ -185,6 +187,9 @@ Options parse(int argc, char** argv) {
     assign("--cuda-segmented-timing", o.cuda_segmented_timing);
     assign("--vulkan-precision", o.vulkan_precision);
     assign("--vulkan-fine-projection", o.vulkan_fine_projection);
+    const bool coarse_templates_supplied = values.contains("--opencl-coarse-templates");
+    assign("--opencl-coarse-templates", o.opencl_coarse_templates);
+    o.opencl_coarse_templates_supplied = coarse_templates_supplied;
     const bool gpu_fp32_minimum_supplied = values.contains("--gpu-fp32-minimum");
     assign("--gpu-fp32-minimum", o.gpu_fp32_minimum);
     assign("--native-coarse-precision", o.native_coarse_precision);
@@ -280,9 +285,12 @@ Options parse(int argc, char** argv) {
     require(one_of(o.tensor_coarse_math, {"fft", "fp16", "int8", "fp16-fft"}),
             "Unknown tensor coarse arithmetic");
     require(one_of(o.vulkan_precision, {"automatic", "fp32", "fp16-storage", "direct-fp32",
-                                       "direct-fp16-storage", "direct-fp16"}) &&
+                                       "direct-fp16-storage", "direct-fp16", "nvfp4"}) &&
             (o.backend == "vulkan" || o.backend == "gpu" || o.vulkan_precision == "automatic"),
             "Invalid Vulkan precision policy or backend");
+    require(one_of(o.opencl_coarse_templates, {"device", "native"}) &&
+            (!coarse_templates_supplied || (o.backend == "vulkan" && o.vulkan_precision == "nvfp4")),
+            "--opencl-coarse-templates expects device or native with explicit Vulkan nvfp4 coarse search");
     require(!gpu_fp32_minimum_supplied || o.backend == "gpu",
             "--gpu-fp32-minimum is valid only with --backend gpu");
     require(one_of(o.native_coarse_precision, {"automatic", "fp32", "fp64", "q15"}),
@@ -872,6 +880,22 @@ Json bulk_json(const BulkReceipt& r) {
         {"opencl_resident_dispatches", r.opencl_resident_dispatches},
         {"opencl_resident_blocking_writes", r.opencl_resident_blocking_writes},
         {"opencl_resident_mapping_dispatches", r.opencl_resident_mapping_dispatches},
+        {"opencl_coarse_score_rows", r.opencl_coarse_score_rows},
+        {"opencl_coarse_rescored_peaks", r.opencl_coarse_rescored_peaks},
+        {"opencl_coarse_issued_products", r.opencl_coarse_issued_products},
+        {"opencl_coarse_useful_products", r.opencl_coarse_useful_products},
+        {"opencl_coarse_synthesized_columns", r.opencl_coarse_synthesized_columns},
+        {"opencl_coarse_uploaded_columns", r.opencl_coarse_uploaded_columns},
+        {"opencl_coarse_upload_bytes", r.opencl_coarse_upload_bytes},
+        {"opencl_coarse_download_bytes", r.opencl_coarse_download_bytes},
+        {"opencl_coarse_dispatches", r.opencl_coarse_dispatches},
+        {"opencl_coarse_blocking_transfers", r.opencl_coarse_blocking_transfers},
+        {"opencl_coarse_sessions", r.opencl_coarse_sessions},
+        {"opencl_coarse_frequency_fallbacks", r.opencl_coarse_frequency_fallbacks},
+        {"opencl_coarse_product_seconds", r.opencl_coarse_product_seconds},
+        {"opencl_coarse_packing_seconds", r.opencl_coarse_packing_seconds},
+        {"opencl_coarse_selection_seconds", r.opencl_coarse_selection_seconds},
+        {"opencl_coarse_synthesis_seconds", r.opencl_coarse_synthesis_seconds},
         {"cuda_direct_gram_values", r.cuda_direct_gram_values},
         {"cuda_bmm_gram_values", r.cuda_bmm_gram_values},
         {"cuda_matrix_fp16_calls", r.cuda_matrix_fp16_calls},
@@ -921,9 +945,13 @@ std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
                 o.vulkan_precision == "direct-fp32" ? VulkanCoarsePrecision::direct_fp32 :
                 o.vulkan_precision == "direct-fp16-storage" ? VulkanCoarsePrecision::direct_fp16_storage :
                 o.vulkan_precision == "direct-fp16" ? VulkanCoarsePrecision::direct_fp16 :
+                o.vulkan_precision == "nvfp4" ? VulkanCoarsePrecision::opencl_nvfp4 :
                 o.vulkan_precision == "fp32" ? VulkanCoarsePrecision::fp32 : VulkanCoarsePrecision::automatic;
             VulkanReceiverOptions options{o.device_index,
                 o.device_memory_limit.value_or(256 * 1024 * 1024), precision};
+            // The explicit dense route reports its device command intervals.
+            options.profile_opencl = precision == VulkanCoarsePrecision::opencl_nvfp4;
+            options.opencl_device_templates = o.opencl_coarse_templates == "device";
             if (o.vulkan_fine_projection == "nvfp4") options.fine_projection = VulkanFineProjection::opencl_nvfp4;
             else if (o.vulkan_fine_projection == "resident-nvfp4")
                 options.fine_projection = VulkanFineProjection::opencl_resident_nvfp4;
@@ -2382,7 +2410,9 @@ void help() {
         "  --native-coarse-precision automatic|fp32|fp64|q15 (Q15 spectral products require native AVX2)\n"
         "  --tensor-coarse-math fft|fp16|int8|fp16-fft (fp16/int8 matrices; fp16-fft is explicit CUDA FFT)\n"
         "  --tensor-fine-projection fft|nvfp4|cufft (explicit CUDA qualification)\n"
-        "  --vulkan-precision automatic|fp32|fp16-storage|direct-fp32|direct-fp16-storage|direct-fp16\n"
+        "  --vulkan-precision automatic|fp32|fp16-storage|direct-fp32|direct-fp16-storage|direct-fp16|nvfp4\n"
+        "  --opencl-coarse-templates device|native (explicit Vulkan nvfp4 coarse search; device where the\n"
+        "    session offers synthesis unless native is stated, and a stated source must be the one executed)\n"
         "  --vulkan-fine-projection automatic|native|nvfp4|resident-nvfp4|resident-fft (explicit Vulkan qualification)\n"
         "  --gpu-fp32-minimum on|off (automatic GPU arithmetic floor; GPU backend only)\n"
         "  --device-index N --device-memory-limit-bytes N\n"
@@ -2586,10 +2616,41 @@ void run(Json& report, const Options& o, std::stop_token stop) {
                 actual.allocator_peak_reserved_bytes > actual.workspace_limit_bytes)
                 throw Incomplete("Automatic CUDA allocator peak did not satisfy the declared device workspace");
         }
-        if ((o.backend == "vulkan" || (o.backend == "gpu" && actual_backend.vulkan)) &&
+        // Dense rows come from the OpenCL Tensor Core search of the same
+        // device: every row of an explicit request, or the sessions that
+        // automatic selection admitted.
+        const bool dense_requested = o.vulkan_precision == "nvfp4";
+        const auto dense_rows = actual_backend.opencl_coarse_score_rows;
+        if ((dense_requested || dense_rows) && o.command != "codec" && !o.work_only) {
+            // The search must have rescored its retained peaks. Automatic
+            // selection renders its templates. A required session also
+            // scores host-prepared columns where the receiver offers no
+            // synthesis, so only a stated template source is held to.
+            const auto& actual = actual_backend;
+            const auto synthesized = actual.opencl_coarse_synthesized_columns;
+            const auto uploaded = actual.opencl_coarse_uploaded_columns;
+            if (!actual.vulkan || !actual.executed || !dense_rows || dense_rows > actual.score_rows ||
+                (dense_requested && (dense_rows != actual.score_rows || actual.opencl_coarse_frequency_fallbacks)) ||
+                !actual.opencl_coarse_useful_products ||
+                actual.opencl_coarse_issued_products < actual.opencl_coarse_useful_products ||
+                !actual.opencl_coarse_rescored_peaks || !actual.opencl_coarse_sessions ||
+                !(synthesized || uploaded) || (!dense_requested && uploaded) ||
+                !actual.vulkan_peak_owner_lease_bytes ||
+                actual.vulkan_peak_owner_lease_bytes > actual.workspace_limit_bytes)
+                throw Incomplete(dense_requested
+                    ? "Requested OpenCL NVFP4 coarse search did not score this geometry on the device"
+                    : "Automatic OpenCL NVFP4 coarse search reported incomplete device work");
+            if (dense_requested && o.opencl_coarse_templates_supplied &&
+                (o.opencl_coarse_templates == "device" ? uploaded != 0 : synthesized != 0))
+                throw Incomplete("Requested OpenCL NVFP4 coarse template source differs from the one executed: "
+                                 "device templates need the exact frequency-tile route");
+        }
+        if ((o.backend == "vulkan" || (o.backend == "gpu" && actual_backend.vulkan)) && !dense_requested &&
             o.require_accelerator && o.command != "codec") {
             const auto& actual = actual_backend;
-            const auto host_scored = actual.vulkan_host_scored_rows == actual.score_rows &&
+            // The FFT sessions account for every row the dense search left.
+            const auto fft_rows = actual.score_rows - std::min(dense_rows, actual.score_rows);
+            const auto host_scored = actual.vulkan_host_scored_rows == fft_rows &&
                 actual.vulkan_host_scored_rows > 0 && actual.vulkan_arrival_peak_rows == 0 &&
                 actual.vulkan_arrival_peak_values == 0;
             const auto device_frontier = actual.vulkan_host_scored_rows == 0 &&
@@ -2604,12 +2665,13 @@ void run(Json& report, const Options& o, std::stop_token stop) {
                  actual.vulkan_leased_bytes <= actual.vulkan_peak_leased_bytes &&
                  actual.reserved_bytes <= actual.vulkan_leased_bytes &&
                  actual.allocator_peak_reserved_bytes <= actual.vulkan_peak_leased_bytes);
-            if (!actual.vulkan || !actual.executed || (!actual.fft_calls && !actual.vulkan_direct_dot_terms) ||
-                !actual.score_rows ||
-                !actual.vulkan_dispatches || !(host_scored || device_frontier) ||
+            const bool fft_executed = (actual.fft_calls || actual.vulkan_direct_dot_terms) &&
+                actual.vulkan_dispatches && (host_scored || device_frontier) && actual.vulkan_peak_owner_bytes;
+            if (!actual.vulkan || !actual.executed || !actual.score_rows || (dense_rows && !automatic) ||
+                (fft_rows && !fft_executed) ||
                 (actual.vulkan_host_scored_rows != 0 && !host_scored) ||
-                actual.vulkan_fp32_score_rows > actual.score_rows ||
-                actual.vulkan_fp16_storage_score_rows != actual.score_rows - actual.vulkan_fp32_score_rows ||
+                actual.vulkan_fp32_score_rows > fft_rows ||
+                actual.vulkan_fp16_storage_score_rows != fft_rows - actual.vulkan_fp32_score_rows ||
                 actual.vulkan_direct_fp32_score_rows > actual.vulkan_fp32_score_rows ||
                 actual.vulkan_direct_fp16_score_rows > actual.vulkan_fp16_storage_score_rows ||
                 actual.vulkan_direct_fp16_storage_score_rows >
@@ -2618,7 +2680,6 @@ void run(Json& report, const Options& o, std::stop_token stop) {
                     actual.vulkan_direct_fp16_score_rows + actual.vulkan_direct_fp16_storage_score_rows ||
                 actual.workspace_scope != (automatic ? "backend_shared" : "per_coarse_session") ||
                 !shared_workspace_bounded ||
-                !actual.vulkan_peak_owner_bytes ||
                 actual.vulkan_peak_owner_bytes > actual.workspace_limit_bytes ||
                 actual.allocator_peak_reserved_bytes < actual.vulkan_peak_owner_bytes)
                 throw Incomplete("Vulkan receiver work did not execute bounded full-frequency scoring");

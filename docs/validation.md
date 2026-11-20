@@ -1114,9 +1114,10 @@ Vulkan coarse scoring. Intermediate widths and sustained full-worker
 streams are unqualified by these single looks.
 
 The socket-filtered component and five-slot tests ran on temporarily owned
-pods and their termination was verified. Keep the compact technical receipts
-in `local-evidence/blackwell-resident-fine-20261119/` until a newer matched
-receiver comparison supersedes these workloads.
+pods and their termination was verified. The
+[20 November comparison](#blackwell-dense-fp4-coarse-search--20-november-2026)
+repeated these workloads on the same device class, so the compact receipts
+of this campaign were removed and the values above are its record.
 [Scope and utilization analysis](triad-gpu-optimization.md#resident-mapping-and-paired-fine-statistics).
 
 ### Blackwell shared bit mapping and coarse phase reuse — 19 November 2026
@@ -1210,12 +1211,192 @@ Intermediate allocations, sustained service and reception on other hardware
 remain outside this campaign.
 
 The bounded stock-path comparisons establish receiver throughput for their
-retained fixtures. Keep the compact technical receipts in
-`local-evidence/blackwell-shared-mapping-20261119/` until a newer matched
-profile supersedes this geometry. The tracked timings, fixture commands and
-acceptance receipts are the handoff baseline.
+retained fixtures. The [20 November comparison](#blackwell-dense-fp4-coarse-search--20-november-2026)
+measured the same geometry again with device event intervals for the coarse
+search, so the compact receipts of this campaign were removed. The tracked
+timings, fixture commands and acceptance receipts remain its record.
 [Blackwell continuation guide](triad-gpu-optimization.md#continue-blackwell-fp4-work)
 · [Reproduction](triad-gpu-optimization.md#reproduce-the-matched-blackwell-runs).
+
+### Blackwell dense FP4 coarse search — 20 November 2026
+
+One socket-filtered stock Vulkan/OpenCL worker compared reference source
+`9683eed1` with the [dense FP4 coarse search](triad-gpu-optimization.md#dense-fp4-coarse-search-and-device-template-bank),
+its device template bank and the widened automatic selection. The device was
+a full RTX PRO 6000 Blackwell Server Edition reporting 97,887 MiB, compute
+capability 12.0, driver 595.112.07 and MIG disabled. The host exposed an AMD
+EPYC 9355 with a 13.6-CPU quota. Both probes were Release builds with GNU
+13.3.0, NVCC 12.8.93 and identical build options. The reference probe was
+`6954ffd1…ed7b` and the candidate `7ec0e6e0…77e8`. The 24 and 4 software
+workers are explicit benchmark allocations.
+
+The inputs are the matched 3.6 Hz captures: severe `b4d8fa5a…`, quiet
+`2b9ca9df…`, stable `eaa4ae2a…` and the five-slot message `4a3603c8…`. Each
+slot scores 3,951,090 coarse rows, and the message with its EOF control
+23,706,540. Every run below scored all of them. The device component test
+passed on the GPU with FP4 scores agreeing with the FP64 reference at
+0.99767 normalized correlation, equal to the host emulation, and synthesized
+template columns within 6.1e-7 of the native exact columns relative to each
+column's peak.
+
+| Input, software workers | Reference automatic slot (s) | Candidate automatic slot (s) | Process CPU, reference / candidate (s) |
+| --- | ---: | ---: | ---: |
+| Severe, 24 | 2.373–2.434 | 0.640–0.781 | 28.2–28.8 / 1.26–1.45 |
+| Quiet, 24 | 2.283–2.450 | 0.668–0.817 | 26.8–28.2 / 1.33–1.44 |
+| Stable, 24 | 2.215 | 0.492 | 26.2 / 1.34 |
+| Severe, 4 | 4.208 | 0.639 | 14.1 / 0.85 |
+| Quiet, 4 | 4.288 | 0.808 | 14.3 / 1.03 |
+| Stable, 4 | 4.047 | 0.452 | 14.0 / 0.68 |
+
+Ranges are the two orderings. Stable and the four-worker rows are single
+looks. The reference automatic route used Vulkan FFT scoring, with native fine
+processing at 24 workers and resident FP4 at four. The candidate selected the
+dense search and resident FP4 at both widths. All six admission-policy
+outcomes matched on every input, including the unresolved severe wrong bit.
+
+| Input, workers | Reference: Vulkan FFT, native fine | Dense FP4, native fine | Dense FP4, resident FP4 fine |
+| --- | ---: | ---: | ---: |
+| Severe, 24 | 1.629–1.787 / 0.772–0.803 / 2.409–2.595 | 0.079–0.080 / 0.747–0.859 / 0.834–0.942 | 0.079–0.080 / 0.611–0.687 / 0.716–0.782 |
+| Quiet, 24 | 1.672–1.741 / 0.819–0.896 / 2.498–2.640 | 0.079–0.082 / 0.782–0.814 / 0.867–0.896 | 0.079 / 0.567–0.569 / 0.658–0.660 |
+| Stable, 24 | 1.723 / 0.780 / 2.509 | 0.080 / 0.761 / 0.846 | 0.079 / 0.367 / 0.463 |
+| Severe, 4 | 3.870 / 2.283 / 6.157 | 0.081 / 2.076 / 2.165 | 0.080 / 0.685 / 0.770 |
+| Quiet, 4 | 3.843 / 2.358 / 6.203 | 0.081 / 2.358 / 2.442 | 0.080 / 0.574 / 0.657 |
+| Stable, 4 | 3.975 / 2.076 / 6.053 | 0.080 / 2.099 / 2.181 | 0.080 / 0.428 / 0.510 |
+
+Cells are coarse / fine / complete slot seconds for the explicit routes, each
+with a 1 GiB per-session device limit. Resident fine processing was faster
+than native fine processing in every pair of this pass. The four-worker
+slots and the five-slot message below are the basis for selecting it at
+every worker allocation. The 24-worker single-slot ordering is not settled.
+The reference build, with the coarse search still on the host, already had
+resident fine processing ahead on this host: 0.537–0.549 s severe,
+0.591–0.611 s quiet and 0.389 s stable against 0.758–0.839, 0.729–0.794 and
+0.773 s native. The same source measured the opposite on the 19 November
+pod, and the first candidate build of this campaign had the two level on the
+severe slot, 0.744–0.762 s native against 0.777–0.779 s resident, with equal
+resident receipts.
+
+The five-slot stable message recovered its message, scored two quiet slots
+and kept the EOF-only control incomplete on both builds.
+
+| Automatic five-slot message | Reference | Candidate |
+| --- | ---: | ---: |
+| Receiver service, 24 workers (s) | 9.023–9.499 | 1.050–1.166 |
+| EOF control, 24 workers (s) | 2.227–2.305 | 0.455–0.522 |
+| Receiver process CPU, 24 workers (s) | 122.0–128.6 | 5.9–6.6 |
+| Receiver service, 4 workers (s) | 17.932 | 1.510 |
+| Receiver process CPU, 4 workers (s) | 68.8 | 3.7 |
+| Coarse uploads, both replays (bytes) | 493,069,920 | 2,843,712 |
+| Peak device lease, 24 workers (bytes) | 2,129,282,336 | 1,294,719,744 |
+
+An earlier candidate build with the same receiver code and native fine
+processing took 4.025 s for this message, against 1.287 s with resident FP4.
+The candidate message credited 357,984 fine statistics and 67,219,776
+resident FP4 modes in 2,486 submissions. The four-worker reference credited
+365,526, 68,635,980 and 2,905. The dense search keeps the two best arrivals
+of each workspace and frequency by FP4 score before rescoring them, so the
+retained noise peaks, and with them the candidate sets of some slots, can
+differ from those of exact scores. The public score work, decoded message
+and quiet-slot outcomes were equal.
+
+Device event intervals of one severe slot, from the explicit profiled route:
+
+| Coarse stage on the device | Interval |
+| --- | ---: |
+| Template synthesis: render, warp, FIR and Gram | 63.1 ms (7.1, 3.5 and 52.4 ms) |
+| Observation and bank packing | 0.39 ms |
+| FP4 products, 1.5136e12 issued and 1.4215e12 useful | 2.62–2.66 ms |
+| Arrival frontier and FP32 rescoring of 2,340 peaks | 4.7 ms |
+| Complete coarse stage on the receiver clock | 79–82 ms |
+
+The session uploaded 473,952 bytes and read back 49,920 in 13 blocking
+transfers and 46 dispatches, under a 258,943,744-byte lease. The reference
+uploaded 82,178,320 bytes per slot. The product interval corresponds to
+1.14–1.16 PFLOP/s issued and 1.07–1.09 PFLOP/s useful.
+[Kernel throughput and diagnostics](triad-gpu-optimization.md#fp4-product-throughput).
+
+Paired decisions used identical captured inputs on the reference and the
+explicit dense route with native fine processing. The first set raised the
+noise density of the stable link in 3 dB steps through the decision
+threshold with four seeds per step. The second used four other seeds of the
+severe and noise-only inputs.
+
+| Paired inputs | Pairs | All six policies equal | Operational evidence, dense / reference |
+| --- | ---: | ---: | --- |
+| Stable link, noise −88 to −76 dBm/Hz | 20 | 20 | 0.981–1.000 where DATA was admitted. Both decoded at −88, −85 and −82 dBm/Hz, and both reported quiet at −79 and −76. |
+| Severe, seeds 950102–950105 | 4 | 4 | 0.997–1.002. Seed 950105 has the wrong bit on both routes. |
+| Noise only, seeds 950102–950105 | 4 | 4 | Log evidence −46 to −51 on both routes, at most 0.12 apart. |
+| Earlier layout of the same arithmetic | 60 | 60 | Equal values on the repeated inputs. |
+
+The 88 pairs cover 67 distinct inputs, all with native fine processing. The
+largest evidence difference where DATA was admitted, 1.9% at the threshold,
+corresponds to about 0.06 dB on this link's evidence slope. These are small
+paired samples, not a measured error rate.
+
+The twelve-trial batches below are the paired set on the automatic route
+itself, with resident FP4 fine processing on both builds. Ten of their
+twelve severe inputs, seeds 950201–950212, matched on all six policies. On
+seed 950206 the current policy decoded bit 0 with the reference and the
+wrong bit 1 with the candidate. On seed 950211 the guarded policy was
+ambiguous with the reference and admitted the correct bit 0 with the
+candidate. Operational evidence was 0.974–1.019 of the reference. Under the
+current policy this severe input set has the wrong bit on five of twelve
+inputs with the reference and six with the candidate. Across both passes 82
+distinct inputs have an FFT run and a dense run, and these two are the only
+ones whose outcomes differ.
+
+Twelve simultaneous single-slot simulations with four software workers each
+finished in 24.6–25.6 s on the reference automatic route and 11.9–12.1 s on
+the candidate, 0.47–0.49 and 0.99–1.01 slots per second. This is simulation
+throughput for independent trials sharing one device, not receiver capacity.
+Each receiver slot averaged 3.0 s in that candidate batch against 0.45–0.81 s
+alone, so separate processes time-slicing one device lose most of the
+receiver gain. The single-threaded simulator took 4.9 s per trial.
+
+Limits and unresolved observations:
+
+- One device and one host. RTX 5090 and other CPUs are unmeasured. There is
+  no sustained backlog run, and the stable and four-worker timings are
+  single looks. Worker allocations other than 4 and 24 are unmeasured, and
+  native fine processing merits reconsideration on CPU-rich hosts.
+- Outcomes are not identical to the FFT search. The dense search retains two
+  arrivals per row by FP4 score, and two of twelve severe automatic-route
+  inputs changed one policy outcome each, one for the worse.
+- The conditioning guard was added after the device runs. A bank whose
+  smaller Gram eigenvalue is below one sixteenth of the larger keeps the FFT
+  route. In emulation a nearly collinear two-ray bank, ratio near 1e-4, lost
+  a planted arrival that the FFT session found. The matched fixture's ratio
+  is 0.999996, so the device measurements cover only a well-conditioned
+  bank, and neither the failure nor the guard has run on a device.
+- A wider frequency prior was not obtained. The probe's other reference
+  oscillator classes were invalid for this configuration or produced the
+  same public geometry.
+- The candidate's Vulkan FFT route, which automatic selection keeps for
+  sessions the dense search declines, measured 5–21% slower in coarse seconds
+  than the reference binary on the earlier builds. A control build that
+  restored the reference coarse-session source reproduced the candidate's
+  timing, and the unchanged single-threaded simulator differed by about 40%
+  in the opposite direction between the two binaries, with equal compile
+  options and equal simulator objects. The cause is unresolved. Compare
+  routes within one binary where possible.
+- No measured session was declined by the dense search, so its fallback to
+  the Vulkan FFT session did not run on the device. An emulated session
+  checks that delegation and its receipt.
+- Fine processing is now most of the slot. Its 405 resident submissions per
+  slot still render source tiles on the host and block on each result.
+- A simulated slot spends 2.5–6.2 s in the single-threaded simulator, more
+  than the receiver.
+
+All 47 local triad tests passed on the measured source, including the two
+emulated OpenCL tests. The committed source then adds the conditioning
+guard, the probe's check of a stated template source and small corrections
+found by review of the staged change. On it the two emulated tests, with
+the ill-conditioned cases, the native coarse and receiver tests, the probe
+test and the receipt validator tests pass from a clean export. The
+temporarily owned pod was terminated and verified absent. Keep the compact
+technical receipts in `local-evidence/blackwell-fp4-coarse-20261119/` until a
+newer matched receiver comparison supersedes these workloads or the dense
+search is requalified.
 
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 

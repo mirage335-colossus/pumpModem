@@ -50,7 +50,11 @@ public:
     using Error::Error;
 };
 
-enum class VulkanCoarsePrecision { automatic, fp32, fp16_storage, direct_fp32, direct_fp16_storage, direct_fp16 };
+// opencl_nvfp4 requires the dense FP4 Tensor Core frequency search of the
+// Blackwell OpenCL module and reports geometry it cannot admit.
+enum class VulkanCoarsePrecision {
+    automatic, fp32, fp16_storage, direct_fp32, direct_fp16_storage, direct_fp16, opencl_nvfp4
+};
 enum class VulkanFineProjection {
     automatic, native, opencl_nvfp4, opencl_resident_nvfp4, opencl_resident_fft
 };
@@ -69,6 +73,12 @@ struct VulkanReceiverOptions {
     // FP64. Otherwise selected automatically when FP64/INT64 is unavailable.
     bool force_host_scoring = false;
     VulkanFineProjection fine_projection = VulkanFineProjection::automatic;
+    // Record OpenCL device command intervals in the receipt. Developer
+    // probes use this to separate Tensor Core time from complete service.
+    bool profile_opencl = false;
+    // Let the OpenCL coarse search render its template bank from the keyed
+    // coefficients. Off keeps native columns for a matched comparison.
+    bool opencl_device_templates = true;
 };
 
 // Optional Vulkan broad-frequency search and Blackwell OpenCL fine projection.

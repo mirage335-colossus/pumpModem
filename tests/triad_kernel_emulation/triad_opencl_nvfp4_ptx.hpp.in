@@ -1,0 +1,10 @@
+#pragma once
+
+#include <cstddef>
+
+// The emulation loader ignores the program image. A device build embeds the
+// offline SM120 module under this name.
+namespace datapump::triad::v3::receiver_detail {
+inline constexpr unsigned char opencl_nvfp4_ptx[] = {0};
+inline constexpr std::size_t opencl_nvfp4_ptx_bytes = sizeof(opencl_nvfp4_ptx);
+} // namespace datapump::triad::v3::receiver_detail
