@@ -18,7 +18,8 @@ and eligible fine bulk stages, while Vulkan accelerates GPU search and retains
 native fine processing. On an NVIDIA Blackwell device with the OpenCL module,
 the Vulkan receiver scores eligible searches with the
 [dense FP4 search](triad-gpu-optimization.md#dense-fp4-coarse-search-and-device-template-bank)
-and computes the qualified DATA statistics with resident FP4 projection.
+and computes the qualified DATA statistics with resident FP4 projection, from
+[dense tiles it renders itself and a window of dispatches per call](triad-gpu-optimization.md#device-rendered-fine-tiles-and-resident-windows).
 Neither optional path places Python in the operating DSP chain.
 
 New modem and intensive numerical work must follow the

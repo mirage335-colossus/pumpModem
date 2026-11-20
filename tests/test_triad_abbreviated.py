@@ -654,6 +654,54 @@ class AbbreviatedTests(unittest.TestCase):
                 with self.assertRaises(ProbeError):
                     validate_receipt(wrong, command="message", backend=backend, returncode=0)
 
+    def test_vulkan_resident_fine_windows_and_rendered_tiles_are_consistent(self):
+        receipt = message_receipt()
+        receipt["identity"].update(backend="vulkan", configured_vulkan_backend=True, require_accelerator=True,
+                                   requested_vulkan_precision="automatic",
+                                   requested_vulkan_fine_projection="resident-nvfp4",
+                                   requested_opencl_fine_tiles="device", requested_opencl_fine_window=16,
+                                   backend_receipt=vulkan_bulk_receipt())
+        bulk = receipt["identity"]["backend_receipt"]
+        # Two batches hold a window of sixteen blocks and a last one of five,
+        # with six states each, and one terminal block stays native.
+        states = 21 * 6
+        bulk.update(vulkan_vendor_id=0x10de, opencl_resident_fine_batches=2, opencl_resident_fine_pairs=0,
+                    opencl_resident_fine_blocks=21, opencl_resident_rendered_tiles=12,
+                    opencl_resident_keyed_lanes=4, opencl_resident_upload_bytes=65536,
+                    opencl_resident_download_bytes=states * 11 * 16, opencl_nvfp4_native_blocks=1,
+                    opencl_resident_dispatches=16, opencl_resident_mapping_dispatches=2,
+                    opencl_resident_blocking_writes=11, statistics_blocks=states + 6,
+                    opencl_resident_nvfp4_modes=states * 4 * 47, opencl_nvfp4_fine_batches=2,
+                    opencl_nvfp4_fine_modes=states * 4 * 47, projected_values=states * 4 * 47 + 6 * 4 * 57,
+                    opencl_resident_host_source_seconds=.004, opencl_resident_device_span_seconds=.002,
+                    upload_bytes=131072, download_bytes=131072,
+                    precision="fp32_fft_fp64_coordinates_and_scores_native_fir_"
+                              "opencl_resident_nvfp4_fine_mixed_native_fine")
+        validate_receipt(receipt, command="message", backend="vulkan", returncode=0)
+        for corrupt in ({"opencl_resident_fine_blocks": 1}, {"opencl_resident_fine_blocks": 33},
+                        {"opencl_resident_fine_blocks": 129}, {"opencl_resident_keyed_lanes": 0},
+                        {"opencl_resident_keyed_lanes": 13}, {"opencl_resident_rendered_tiles": 0},
+                        {"opencl_resident_host_source_seconds": -1},
+                        {"opencl_resident_device_span_seconds": float("nan")}):
+            wrong = copy.deepcopy(receipt)
+            wrong["identity"]["backend_receipt"].update(corrupt)
+            with self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="message", backend="vulkan", returncode=0)
+        for identity in ({"requested_opencl_fine_tiles": "native"}, {"requested_opencl_fine_window": 2},
+                         {"requested_opencl_fine_window": 65}, {"requested_opencl_fine_tiles": "host"}):
+            wrong = copy.deepcopy(receipt)
+            wrong["identity"].update(identity)
+            with self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="message", backend="vulkan", returncode=0)
+        # The control route uploads native tiles in single-dispatch batches.
+        control = copy.deepcopy(receipt)
+        control["identity"].update(requested_opencl_fine_tiles="native", requested_opencl_fine_window=2)
+        control["identity"]["backend_receipt"].update(
+            opencl_resident_fine_batches=11, opencl_resident_fine_pairs=10, opencl_nvfp4_fine_batches=11,
+            opencl_resident_dispatches=66, opencl_resident_mapping_dispatches=11,
+            opencl_resident_blocking_writes=33, opencl_resident_rendered_tiles=0, opencl_resident_keyed_lanes=0)
+        validate_receipt(control, command="message", backend="vulkan", returncode=0)
+
     def test_vulkan_dense_coarse_receipt_partitions_rows_and_bounds_leases(self):
         dense_only = dict(vulkan_vendor_id=0x10de, vulkan_fp32_score_rows=0, vulkan_dispatches=0,
                           vulkan_arrival_peak_rows=0, vulkan_arrival_peak_values=0, fft_calls=0,

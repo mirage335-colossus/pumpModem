@@ -91,6 +91,13 @@ five-slot message. Its 24-worker single-slot ordering reversed between hosts
 running the same source and was level on one build of that campaign. Other
 hosts and other worker allocations are unmeasured, and native fine
 processing merits reconsideration on CPU-rich hosts.
+Resident batches now render their dense source tiles on the device and hold
+a window of 16 blocks. A device lease too small for the window keeps
+two-block batches. With no lease the blocks take the native route and the
+receipt names `opencl-resident-workspace-limit`. A source of more than
+32,768 cells, or one the basis must render exactly, keeps native tiles.
+This arrangement has passed the kernel emulation and host checks only. Its
+[device qualification is pending](validation.md#resident-fine-tiles-and-windows--20-november-2026).
 `--vulkan-precision nvfp4` requires the dense search and reports geometry or
 conditioning it cannot admit. It scores host-prepared columns where a session
 offers no device synthesis, and `--opencl-coarse-templates device|native`
@@ -103,15 +110,26 @@ for the matched production timings, reproduction, and next profiling scope.
 
 The developer probe can also select `--vulkan-fine-projection resident-nvfp4`
 or `resident-fft` for the same isolated geometry. Both retain mapped DATA
-tiles and the intermediate projection on the device. They combine up to two
-already-prepared observation blocks while the native receiver still advances
-its state in public slot order. Resident NVFP4 uses per-template component
+tiles and the intermediate projection on the device. They combine a window
+of already-prepared observation blocks while the native receiver still
+advances each state in public order. The fixed-affine maps of a window do
+not depend on its statistics. The adaptive diagnostic lane, whose maps do,
+keeps one dispatch per batch. The session renders each dense source tile in
+FP64 from the keyed coefficients, the pulse table and public geometry, in
+the native renderer's operation order. That is a change of where the tile
+is computed, with no reduction of precision: emulated tiles match native
+ones within 2.5e-12 of the tile peak, and the FP64 mapper and the C64 lanes
+are unchanged. `--opencl-fine-tiles native` uploads native tiles and
+`--opencl-fine-window 2` keeps one dispatch per batch. Together they are the
+control route. `--opencl-profile on` records host spans and device command
+intervals in the receipt. Resident NVFP4 uses per-template component
 peaks to scale the block-scaled E2M1 contraction. The FFT control computes a
 1,500-point FP32 transform and gathers the same 47 unitary modes. Both use
 FP64 correlation and Gram accumulation and return compact sufficient
 statistics to the receiver. Nonmatching blocks stay native. The probes
 require an execution receipt for the requested route.
-[Resident comparison](triad-gpu-optimization.md#resident-mapping-and-paired-fine-statistics).
+[Resident comparison](triad-gpu-optimization.md#resident-mapping-and-paired-fine-statistics) ·
+[device tiles and windows](triad-gpu-optimization.md#device-rendered-fine-tiles-and-resident-windows).
 
 Choose scales after Helper/DATA isolation. For time-series signal samples,
 consider a scale estimated from recent representative intervals, with a

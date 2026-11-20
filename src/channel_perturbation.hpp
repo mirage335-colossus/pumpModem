@@ -86,6 +86,30 @@ public:
             if(component)bytes+=sizeof(triad::v3::detail::FixedGaussianProcess);
         return bytes;
     }
+    // The random law's band excursions depend on physical time alone. An
+    // independent reader holds its own copy of the fixed-time processes, so
+    // a worker can evaluate any times ahead of the filter that consumes them.
+    using Excursions=std::array<double,3>;
+    class RandomExcursions {
+        std::array<std::array<std::unique_ptr<triad::v3::detail::FixedGaussianProcess>,2>,3> random_{};
+        std::array<double,2> depth_{};
+        friend class DispersiveSelectivePerturbation;
+    public:
+        Excursions operator()(long double physical_seconds) {
+            Excursions result{};
+            for(std::size_t band=0;band<3;++band)for(std::size_t component=0;component<2;++component)
+                if(random_[band][component])result[band]+=depth_[component]*
+                    random_[band][component]->bounded_value(physical_seconds);
+            return result;
+        }
+    };
+    RandomExcursions random_excursions() const {
+        RandomExcursions reader;reader.depth_=depth_;
+        for(std::size_t band=0;band<3;++band)for(std::size_t component=0;component<2;++component)
+            if(random_[band][component])reader.random_[band][component]=
+                std::make_unique<triad::v3::detail::FixedGaussianProcess>(*random_[band][component]);
+        return reader;
+    }
     DispersiveSelectivePerturbation(double sample_rate,double center_hz,double spacing,
                                    double doppler_hz,double slow,double fast,std::uint64_t seed,
                                    bool random_coefficients=false)
@@ -134,7 +158,24 @@ public:
         for(std::size_t component=0;component<2;++component)
             step_[component]=std::polar(1.,tau*rates_hz[component]/sample_rate);
     }
+    // The same values from this filter's own processes.
+    Excursions random_excursions_at(long double physical_seconds) {
+        Excursions result{};
+        for(std::size_t band=0;band<3;++band)for(std::size_t component=0;component<2;++component)
+            if(random_[band][component])result[band]+=depth_[component]*
+                random_[band][component]->bounded_value(physical_seconds);
+        return result;
+    }
     Complex process(Complex input,long double physical_seconds=std::numeric_limits<long double>::quiet_NaN()) {
+        if(!random_coefficients_)return filter(input,nullptr);
+        if(std::isnan(physical_seconds))physical_seconds=static_cast<long double>(count_)/sample_rate_;
+        const auto excursion=random_excursions_at(physical_seconds);
+        return filter(input,&excursion);
+    }
+    // The random law with excursions a reader evaluated for this sample's time.
+    Complex process(Complex input,const Excursions& excursion) {return filter(input,&excursion);}
+private:
+    Complex filter(Complex input,const Excursions* random) {
         history_[cursor_]=input;
         std::array<Complex,3> delayed{input,Complex{},Complex{}};
         for(std::size_t m=0;m<2;++m)for(std::size_t tap=0;tap<4;++tap) {
@@ -147,15 +188,9 @@ public:
         // The unity path is exact; depths zero never introduce a numerical
         // filter or latency. All added paths and their complex phase remain.
         Complex output=input;
-        if(random_coefficients_ && std::isnan(physical_seconds))
-            physical_seconds=static_cast<long double>(count_)/sample_rate_;
         for(std::size_t band=0;band<3;++band) {
-            double excursion=0;
-            if(random_coefficients_) {
-                for(std::size_t component=0;component<2;++component)
-                    if(random_[band][component]) excursion+=depth_[component]*
-                        random_[band][component]->bounded_value(physical_seconds);
-            } else excursion=depth_[0]*phase_[band][0].imag()+depth_[1]*phase_[band][1].imag();
+            const double excursion=random?(*random)[band]:
+                depth_[0]*phase_[band][0].imag()+depth_[1]*phase_[band][1].imag();
             Complex branch{};
             for(std::size_t m=0;m<3;++m)branch+=dft_[band][m]*delayed[m];
             output+=excursion*branch;

@@ -21,6 +21,11 @@ struct MappedBasisReport {
     std::uint64_t prepared_direct_columns = 0, prepared_empty_columns = 0;
     std::uint64_t cache_hits = 0, cache_misses = 0, evictions = 0;
     std::uint64_t native_preparation_calls = 0, native_preparation_samples = 0;
+    // Elapsed native tile rendering, summed over the lanes that rendered.
+    double native_preparation_seconds = 0;
+    // Columns whose tiles a rendering consumer received as public addresses,
+    // and the keyed lanes whose coefficients it requested.
+    std::uint64_t addressed_calls = 0, addressed_columns = 0, keyed_lanes = 0;
     std::uint64_t large_phase_fallback_rows = 0, staging_fallback_rows = 0;
     std::size_t cache_bytes = 0, peak_cache_bytes = 0, peak_pinned_tiles = 0;
     std::size_t tile_samples = 0, cache_limit_bytes = 0;
@@ -83,11 +88,21 @@ public:
                     const BulkMappedSink&, std::stop_token = {});
     void visit_pair(const MappedBasisRow&, std::span<const Tap>, std::uint64_t first_window_sample,
                     const ConsecutiveBasisOffsets&, std::size_t rows, const BulkMappedSink&, std::stop_token = {});
+    // The public description of this slot's dense source for a consumer
+    // that renders its tiles, or null when every column takes the exact
+    // native route. It stays valid for the lifetime of the basis.
+    const FineTileSource* tile_source();
+    // The same public maps as visit_pair, with each column's tile address in
+    // place of native leases: no tile is rendered, pinned or cached here.
+    // Exact native fallback columns are still supplied as samples.
+    void address_pair(const MappedBasisRow&, std::span<const Tap>, std::uint64_t first_window_sample,
+                      const ConsecutiveBasisOffsets&, std::size_t rows, const BulkMappedSink&, std::stop_token = {});
     MappedBasisReport report() const;
 
 private:
     void visit_pair_impl(const MappedBasisRow&, std::span<const Tap>, std::uint64_t,
-                         std::span<const double>, const BulkMappedSink&, std::stop_token, bool consecutive);
+                         std::span<const double>, const BulkMappedSink&, std::stop_token, bool consecutive,
+                         bool addressed = false);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

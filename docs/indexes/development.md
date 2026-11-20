@@ -16,6 +16,7 @@
 | [Validation ledger](../validation.md) | Current qualification, coverage limits and links to historical evidence. |
 | [Development contract](../development.md) | Compatibility and preservation tests required by implementation changes. |
 | [Simulation channel integration](../channel-models.md) | Required starting point for new Robust sampled simulations: Doppler/delay spread, additional frequency-selective amplitude modulation, implementation APIs and focused checks. |
+| [Stream evaluation and capture identity](../channel-models.md#stream-evaluation-workers-and-capture-identity) | Required before changing channel or pattern-source arithmetic, its speed or its workers: what keeps captures bit-identical, and proposals that would not. |
 | [Current Robust architecture](../robust-current.md) | Canonical native waveform/channel/Helper path, staged Python receiver limits, GUI availability and computationally minimal checks. |
 | [Contributor requirements](../../AGENTS.md) | Repository instructions and testing stages. |
 

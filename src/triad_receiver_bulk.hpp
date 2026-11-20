@@ -104,6 +104,21 @@ struct BulkReceipt {
     std::uint64_t opencl_resident_direct_columns = 0;
     std::uint64_t opencl_resident_dispatches = 0, opencl_resident_blocking_writes = 0;
     std::uint64_t opencl_resident_mapping_dispatches = 0;
+    // Public blocks of all resident batches, dense source tiles rendered on
+    // the device from keyed coefficients, and the keyed lanes uploaded.
+    std::uint64_t opencl_resident_fine_blocks = 0, opencl_resident_rendered_tiles = 0;
+    std::uint64_t opencl_resident_keyed_lanes = 0;
+    // Present for a profiled resident session. Host spans are elapsed on the
+    // owning thread: the mapping source without its sink, the sink's staging,
+    // transfers and enqueues, and the wait for the statistics. Device values
+    // sum command intervals on the device clock. None is utilization.
+    double opencl_resident_host_source_seconds = 0, opencl_resident_host_staging_seconds = 0;
+    double opencl_resident_host_transfer_seconds = 0, opencl_resident_host_wait_seconds = 0;
+    double opencl_resident_device_transfer_seconds = 0, opencl_resident_device_render_seconds = 0;
+    double opencl_resident_device_map_seconds = 0, opencl_resident_device_pack_seconds = 0;
+    double opencl_resident_device_product_seconds = 0, opencl_resident_device_statistics_seconds = 0;
+    // First command start to last command end of each batch, with idle gaps.
+    double opencl_resident_device_span_seconds = 0;
     // Dense FP4 coarse scores, credited after the frontier readback. Issued
     // products include padding. Seconds are summed device command intervals
     // of a profiled session, not wall time or utilization.
@@ -145,11 +160,44 @@ struct BulkMappedTile {
     std::span<const Complex> samples;
 };
 
+// Consecutive dense source tiles of one keyed lane. A lane is the receiver
+// epoch index times two plus the source bit. The address is public: it
+// follows from the candidate map and the calendar alone.
+struct BulkTileAddress {
+    std::uint64_t first = 0;
+    std::uint32_t lane = 0, count = 0;
+};
+
 struct BulkMappedColumn {
     double fraction = 0, scale = 1, phase = 0, phase_step = 0;
     std::int64_t origin = 0;
     std::size_t output_column = 0;
+    // Native immutable leases. Empty for a consumer that renders the
+    // addressed tiles itself from the slot's FineTileSource.
     std::vector<BulkMappedTile> tiles;
+    BulkTileAddress address;
+};
+
+// The public description of a slot's dense keyed DATA source, for a backend
+// that renders its tiles. Dense sample d of a lane is the keyed waveform at
+// source sample d * sample_step, scaled by gain, and exactly zero from
+// dense_samples on. The waveform fields follow CoarseTemplateSource. Keyed
+// coefficients are the only keyed input: no rendered sample crosses the
+// host boundary.
+struct FineTileSource {
+    double sample_step = 1, gain = 1;
+    double calendar_origin_sample = 0, source_samples = 0, sample_rate_hz = 0;
+    double fine_chip_rate_hz = 0, center_offset = 0, carrier_spacing_hz = 0;
+    double bit_seconds = 0, envelope_edge_seconds = 0;
+    // A zero period or dwell disables the burst or hop gate.
+    double burst_period_tiles = 0, tile_seconds = 0, tile_count = 0;
+    double dwell_seconds = 0, quiet_seconds = 0, ramp_seconds = 0;
+    std::uint64_t dense_samples = 0;
+    std::size_t tile_samples = 0, cells = 0, lanes = 0;
+    std::span<const double> pulse; // shaping table, 256 per chip over [0, 8]
+    // Fills one lane's [cell][carrier] coefficients on the calling thread.
+    // The owner keeps the source alive for the session that renders from it.
+    std::function<void(std::size_t lane, std::span<Complex> chips, std::stop_token)> key_lane;
 };
 
 struct BulkDirectColumn {
@@ -161,9 +209,10 @@ struct BulkDirectColumn {
 using BulkMappedSink = std::function<void(std::span<const double> offsets,
     std::span<const BulkMappedColumn>, std::span<const BulkDirectColumn>)>;
 
-// The callback supplies native immutable tiles with the original mapping.
-// It may call the sink repeatedly with disjoint columns. Each tile lease and
-// direct column remains valid until the synchronous sink returns.
+// The callback supplies native immutable tiles with the original mapping, or
+// only their public addresses when its block names a FineTileSource. It may
+// call the sink repeatedly with disjoint columns. Each tile lease and direct
+// column remains valid until the synchronous sink returns.
 using FineMappingSource = std::function<void(std::size_t candidate, std::size_t first_row,
     std::size_t row_count, const BulkMappedSink&)>;
 
@@ -193,6 +242,9 @@ struct FineResidentBlock {
     FineBulkBlock shape;
     FineMappingSource source;
     std::span<FineBulkStatistics> output;
+    // Set when the source addresses tiles of this description instead of
+    // leasing native samples. Every block of one call names the same one.
+    const FineTileSource* tiles = nullptr;
 };
 
 struct FineBulkWork {
@@ -212,10 +264,18 @@ public:
         return {result.statistics_blocks, result.projected_values, result.executed};
     }
     virtual bool supports_resident_statistics(const FineBulkBlock&) const noexcept { return false; }
-    // One or two already prepared public blocks. Each source supplies a
-    // complete block per candidate, requested once in ascending candidate
-    // order on the owning thread. Decline before consuming sources or
-    // changing outputs/receipts; after starting, finish every block or throw.
+    // The most public blocks one resident call accepts. More than the two
+    // of one dispatch lets a caller whose maps do not depend on earlier
+    // statistics submit a window, and still apply the results in order.
+    virtual std::size_t resident_block_capacity() const noexcept { return 2; }
+    // True when resident calls render the dense tiles of this public source
+    // themselves, from addressed columns. It must not start device work.
+    virtual bool renders_source_tiles(const FineTileSource&) const noexcept { return false; }
+    // Up to resident_block_capacity() already prepared public blocks, in
+    // order. Each source supplies a complete block per candidate, requested
+    // once in ascending candidate order on the owning thread. Decline before
+    // consuming sources or changing outputs/receipts; after starting, finish
+    // every block or throw.
     virtual bool resident_statistics(std::span<const FineResidentBlock>, std::size_t,
                                      std::stop_token) { return false; }
     // A projection-only device can use the same native mapper and scheduler.
@@ -408,6 +468,9 @@ public:
         return supports_fine() ? std::string_view{} : "native-fine-backend";
     }
     virtual bool fine_maps_on_host() const noexcept { return false; }
+    // The resident blocks one fine call of this public geometry may hold,
+    // for the session's preflight. Two keeps the single-dispatch workspace.
+    virtual std::size_t fine_resident_blocks(const FineBulkGeometry&) const noexcept { return 2; }
     virtual bool permits_native_exact_chirp_z() const noexcept { return false; }
     virtual bool supports_exact_device_chirp_z() const noexcept { return false; }
     // Bound a computational tile before preflight/construction; every public

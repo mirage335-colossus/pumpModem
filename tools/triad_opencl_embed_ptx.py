@@ -12,6 +12,9 @@ import sys
 SIGNATURES = {
     "resident_fine_fft": (8, 8, 8, 0, 0, 0),
     "resident_fine_map": (16, 8, 8, 0, 0),
+    "resident_fine_clear": (8, 0, 0),
+    "resident_fine_absent": (8, 1, 0, 0),
+    "resident_fine_render_tiles": (16, 8, 8, 8, 16, 0, 0),
     "resident_fine_peaks": (8, 0, 0),
     "resident_fine_stats": (8, 8, 16, 16, 0, 0, 0, 0),
     "nvfp4_pack_basis": (8, 4, 1, 0, 0, 0, 0),

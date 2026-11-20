@@ -251,6 +251,24 @@ struct SelectiveModelConfig {
     // TX offsets move through this fixed response; no hidden-truth recentering.
     double center_hz = 0;
 };
+// Optional workers for one channel's reads. A read prepares its rows in
+// blocks, and with lanes it hands run() the independent jobs of each block:
+// up to count jobs for the terms that depend on a row's index alone (the two
+// source interpolations and the fixed-time path and selective coefficients),
+// and one for each sequential state that never reads the signal (receiver
+// oscillator, thermal noise, the two bounded path trajectories, and the
+// source history of the read's next block). run() executes job(0) ...
+// job(jobs - 1), each once, on its caller and any idle workers, and returns
+// after the last has returned; an exception from run() fails that read.
+// Samples and reports are identical for every count, including none, and a
+// read consumes the emitted source exactly as far as its own rows need. Two
+// things differ from a lone reader. The source callback can run on a worker,
+// still one sample at a time and in order. A read that fails ends the
+// channel, because those states have already passed the failing row.
+struct StreamChannelLanes {
+    unsigned count = 0;
+    std::function<void(std::size_t jobs, const std::function<void(std::size_t)>& job)> run;
+};
 struct StreamChannelConfig {
     SimulationConfig effects{};
     // Optional cryptographic narrow complex-I/Q diagnostic noise injected
@@ -290,6 +308,8 @@ struct StreamChannelConfig {
     // is unused: a stream is never normalized using its future whole power.
     double complex_noise_variance = 1;
     std::size_t maximum_chunk_samples = 4096;
+    // Caller-owned workers for index-pure terms; empty keeps them on the reader.
+    StreamChannelLanes lanes{};
     // Independent roots for reproducible physical-path, thermal-noise, and
     // receiver/transmitter frontend streams. Unset roots inherit effects.seed.
     std::optional<std::uint64_t> oscillator_seed;

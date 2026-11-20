@@ -137,6 +137,14 @@ Current overlap, all on one admitted lane/scratch shape per owner:
   diagnostic mode. In that mode the fixed-affine leaves also overlap adaptive
   prediction, pruning and wave tails while the current dispatch scores. The
   diagnostic overlap does not describe ordinary production service.
+- With compiled resident fine statistics the fixed-affine maps of a whole
+  window of dispatches are known in advance. The owner submits the window as
+  one device call while a lane projects the next window's observations and
+  the lanes advance the states of the previous window. Each state advances
+  through a window's dispatches in public order as one urgent leaf, and the
+  owner then closes those dispatches in order. A native block inside the
+  next window posts its leaves behind the running state leaves. The adaptive
+  diagnostic lane keeps one dispatch per call.
 
 Keep these properties when changing a stage:
 
@@ -145,7 +153,10 @@ Keep these properties when changing a stage:
 - Overlap changes order and ownership, never arithmetic. Each job keeps its
   operands, sums are combined in a fixed order, and work receipts match the
   serial order. Preparation ahead of need may touch only what will be requested.
-- Bound lookahead by memory and charge it. Observation runs one dispatch ahead.
+- Bound lookahead by memory and charge it. Observation runs one dispatch
+  ahead. An admitted resident window holds three windows of observations
+  and two of statistics: the states of one window advance while the owner
+  submits the next and a lane projects the one after.
   Tile fills run about two tiles ahead, and stay on demand for a fine bank of
   more than 16 coordinates, whose fills ahead could displace live tiles.
 - Do not spread one memory-bound serial job across lanes without a measurement.

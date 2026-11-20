@@ -385,6 +385,19 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                                                         "OpenCL resident mapping dispatches", allow_zero=True)
                 resident_writes = positive_int(bulk.get("opencl_resident_blocking_writes", 0),
                                                 "OpenCL resident blocking writes", allow_zero=True)
+                # A batch holds a window of public blocks. Receipts from
+                # before windows held one block, or the two of a pair.
+                resident_blocks = positive_int(
+                    bulk.get("opencl_resident_fine_blocks", resident_batches + resident_pairs),
+                    "OpenCL resident blocks", allow_zero=True)
+                rendered_tiles = positive_int(bulk.get("opencl_resident_rendered_tiles", 0),
+                                              "OpenCL resident rendered tiles", allow_zero=True)
+                keyed_lanes = positive_int(bulk.get("opencl_resident_keyed_lanes", 0),
+                                           "OpenCL resident keyed lanes", allow_zero=True)
+                fine_tiles = identity.get("requested_opencl_fine_tiles", "device")
+                fine_window = identity.get("requested_opencl_fine_window", 0)
+                resident_seconds = [bulk.get(key, 0) for key in bulk if key.startswith("opencl_resident_")
+                                    and key.endswith("_seconds")]
                 measured = command not in ("describe", "plan", "codec")
                 if (fine_request not in ("automatic", "native", "nvfp4", "resident-nvfp4", "resident-fft")
                         or bool(batches) != bool(modes)
@@ -395,6 +408,16 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                 resident_modes = resident_nvfp4 + resident_fft
                 automatic_resident = fine_request == "automatic" and backend == "gpu"
                 fp4_resident_only = resident_nvfp4 or fine_request == "resident-nvfp4"
+                if (fine_tiles not in ("device", "native") or type(fine_window) is not int
+                        or not (fine_window == 0 or 2 <= fine_window <= 64)
+                        or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                               or not math.isfinite(value) or value < 0 for value in resident_seconds)
+                        or resident_blocks < resident_batches + resident_pairs
+                        or resident_blocks > 64 * resident_batches
+                        or (fine_window and resident_blocks > fine_window * resident_batches)
+                        or bool(rendered_tiles) != bool(keyed_lanes) or keyed_lanes > rendered_tiles
+                        or (rendered_tiles and (not resident_batches or fine_tiles == "native"))):
+                    raise ProbeError("Vulkan receipt does not identify its resident OpenCL fine batches and tiles")
                 if (resident_pairs > resident_batches
                         or (fp4_resident_only and (resident_nvfp4 != modes or resident_batches != batches or pinned))
                         or (resident_nvfp4 and not (automatic_resident or fine_request == "resident-nvfp4"))
@@ -414,7 +437,7 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                     # Four DATA template lanes and 47 retained modes per state.
                     # Readback carries 11 complex double values per state.
                     states, partial = divmod(resident_modes, 4 * 47)
-                    blocks = resident_batches + resident_pairs
+                    blocks = resident_blocks
                     if (partial or not blocks <= states <= 72 * blocks
                             or resident_direct > 4 * states or resident_download != 11 * 16 * states
                             or resident_dispatches < resident_batches * (4 if resident_nvfp4 else 3)

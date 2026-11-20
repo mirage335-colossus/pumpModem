@@ -1,11 +1,15 @@
 #include "datapump/triad_modem_v3.hpp"
 #include "../src/triad_random_process.hpp"
 #include <algorithm>
+#include <bit>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <numbers>
 #include <stdexcept>
+#include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -279,6 +283,141 @@ void effects_and_erasures(){
     check(a.report.selective_perturbation.has_value(),"selected modulation was silently omitted");
     check(a.samples!=capture(settings(),29).samples,"selected channel effect is an accidental bypass");
 }
+// Every job on its own thread, the last one first.
+void threads(std::size_t jobs,const std::function<void(std::size_t)>& job){
+    std::vector<std::thread> workers;
+    for(std::size_t i=jobs;i-->1;)workers.emplace_back([&job,i]{job(i);});
+    if(jobs)job(0);
+    for(auto& worker:workers)worker.join();
+}
+bool same_bits(const std::vector<v::Complex>& a,const std::vector<v::Complex>& b){
+    return a.size()==b.size()&&(a.empty()||!std::memcmp(a.data(),b.data(),a.size()*sizeof(v::Complex)));
+}
+void lanes_reproduce_the_lone_reader(){
+    // Fractional source coordinates, both fixed-time laws and every state
+    // that a block prepares ahead of the reader.
+    auto changing=settings();changing.effects.tx.audio_ppm=3;changing.effects.rx.audio_ppm=-2;
+    changing.effects.timing_offset_seconds=.0123;changing.effects.capture_lead_seconds=.05;
+    changing.effects.spread_delay_ms=21;changing.effects.spread_doppler_hz=9;
+    changing.path_evolution.bounded_spread_knot_seconds=.13;
+    changing.path_evolution.common_doppler_wander_hz=6;changing.path_evolution.common_doppler_knot_seconds=.15;
+    changing.effects.perturbation_slow_depth=.25;changing.effects.perturbation_fast_depth=.65;
+    changing.selective_model.modulation_rate_hz=2;
+    changing.selective_model.coefficient_law=v::SelectiveCoefficientLaw::GaussianErf;
+    changing.effects.noise_enabled=true;changing.complex_noise_variance=.003;
+    changing.effects.tx.phase_noise_rad_per_sqrt_second=.02;changing.effects.rx.phase_noise_rad_per_sqrt_second=.03;
+    auto diffuse=settings();diffuse.effects.rx.audio_ppm=40;
+    diffuse.effects.spread_delay_ms=21;diffuse.effects.spread_doppler_hz=2;
+    diffuse.path_evolution.random_doppler_width_hz=.5;
+    diffuse.path_evolution.delay_excursion_seconds=1e-6;diffuse.path_evolution.delay_knot_seconds=1;
+    for(const auto& base:{changing,diffuse,settings()}){
+        const auto alone=capture(base,4096);
+        check(same_bits(alone.samples,capture(base,1).samples),"a block prepared ahead differs from single rows");
+        for(const unsigned count:{2U,3U,32U}){
+            auto cfg=base;cfg.lanes={count,threads};
+            const auto shared=capture(cfg,4096);
+            check(same_bits(alone.samples,shared.samples)&&alone.valid==shared.valid,
+                  "lanes changed captured samples");
+            check(std::bit_cast<std::uint64_t>(alone.report.signal_energy)==
+                      std::bit_cast<std::uint64_t>(shared.report.signal_energy)&&
+                  std::bit_cast<std::uint64_t>(alone.report.observed_energy)==
+                      std::bit_cast<std::uint64_t>(shared.report.observed_energy)&&
+                  alone.report.bounded_spread.has_value()==shared.report.bounded_spread.has_value()&&
+                  (!alone.report.bounded_spread||
+                   (alone.report.bounded_spread->minimum_combined_physical_doppler_hz==
+                        shared.report.bounded_spread->minimum_combined_physical_doppler_hz&&
+                    alone.report.bounded_spread->maximum_echo_ratio==shared.report.bounded_spread->maximum_echo_ratio)),
+                  "lanes changed the channel report");
+        }
+    }
+    // A provider that leaves a job out, or fails, must fail the read.
+    auto cfg=changing;
+    cfg.lanes={3,[](std::size_t jobs,const std::function<void(std::size_t)>& job){for(std::size_t i=1;i<jobs;++i)job(i);}};
+    rejects([&]{capture(cfg,4096);});
+    cfg.lanes={3,[](std::size_t,const std::function<void(std::size_t)>&){throw std::runtime_error("no workers");}};
+    rejects([&]{capture(cfg,4096);});
+    cfg.lanes={3,{}};rejects([&]{v::StreamingChannel channel(source(),cfg);});
+}
+void source_failure_reaches_the_reader_in_order(){
+    // The emitted source fails once in the middle of a block. Rows before
+    // the first one that needs the sample are delivered and the failure is
+    // reported there. A lone reader can continue the same realization; with
+    // lanes other states have already passed that row and the channel ends.
+    auto base=settings();base.effects.rx.audio_ppm=25;base.effects.spread_delay_ms=21;base.effects.spread_doppler_hz=9;
+    base.effects.noise_enabled=true;base.complex_noise_variance=.003;
+    struct Outcome{std::vector<v::Complex> samples;std::size_t failed_at=0,failures=0;};
+    const auto run=[&](v::StreamChannelConfig cfg,std::size_t chunk,bool resume){
+        bool failed=false;auto emitted=source();
+        emitted.sample_at=[&failed](std::uint64_t n){
+            if(n==300&&!failed){failed=true;throw std::runtime_error("source paused");}
+            return sample(n);};
+        cfg.maximum_chunk_samples=chunk;v::StreamingChannel channel(std::move(emitted),cfg);
+        Outcome out;out.samples.assign(static_cast<std::size_t>(channel.total_samples()),v::Complex{7,7});
+        while(channel.position()<channel.total_samples()){
+            const auto first=static_cast<std::size_t>(channel.position());
+            const auto count=std::min(chunk,out.samples.size()-first);
+            try{channel.read(std::span(out.samples).subspan(first,count));}
+            catch(const std::runtime_error& error){
+                check(std::string(error.what())=="source paused","source failure was replaced");
+                if(!out.failures)out.failed_at=static_cast<std::size_t>(channel.position());
+                if(++out.failures>1||!resume)break;
+            }
+        }
+        return out;
+    };
+    const auto rows=run(base,1,true);
+    check(rows.failures==1&&rows.failed_at>200&&rows.failed_at<300,
+          "source failure was not reported once at the first row that needs the sample");
+    for(const std::size_t chunk:{std::size_t{97},std::size_t{4096}}){
+        const auto block=run(base,chunk,true);
+        check(block.failures==1&&block.failed_at==rows.failed_at&&same_bits(block.samples,rows.samples),
+              "a block reported a source failure at another row or resumed another realization");
+        auto cfg=base;cfg.lanes={4,threads};
+        const auto shared=run(cfg,chunk,false);
+        check(shared.failures==1&&shared.failed_at==rows.failed_at&&
+              std::equal(shared.samples.begin(),shared.samples.begin()+static_cast<std::ptrdiff_t>(rows.failed_at),
+                         rows.samples.begin(),[](v::Complex a,v::Complex b){return !std::memcmp(&a,&b,sizeof a);}),
+              "lanes reported a source failure at another row");
+        // The same channel reports that failure again instead of continuing.
+        if(chunk==4096)check(run(cfg,chunk,true).failures==2,"a channel with lanes continued after a failed read");
+    }
+}
+void coordinate_forms_match_the_standard_ones(){
+    namespace d=v::detail;
+    const auto same=[](long double a,long double b){return (a==b&&std::signbit(a)==std::signbit(b))||(std::isnan(a)&&std::isnan(b));};
+    std::vector<long double> values{0.L,-0.L,.5L,-.5L,1.L,-1.L,1.5L,-1.5L,2.5L,-2.5L,
+        std::numeric_limits<long double>::denorm_min(),-std::numeric_limits<long double>::denorm_min(),
+        0x1p51L,-0x1p51L,0x1p52L,-0x1p52L,0x1p62L,-0x1p62L,0x1p63L,0x1.8p63L,
+        std::numeric_limits<long double>::infinity(),-std::numeric_limits<long double>::infinity(),
+        std::numeric_limits<long double>::quiet_NaN()};
+    // Integers, their neighbours in long double and in double, and halves.
+    for(const long double whole:{0.L,1.L,2.L,7.L,1024.L,123456789.L,0x1p40L,0x1p50L,0x1p51L-1}){
+        for(const long double sign:{1.L,-1.L}){
+            const auto x=sign*whole;
+            values.insert(values.end(),{x,std::nextafter(x,2*x+1),std::nextafter(x,-2*x-1),x+.5L,x-.5L,
+                static_cast<long double>(std::nextafter(static_cast<double>(x),1e300)),
+                static_cast<long double>(std::nextafter(static_cast<double>(x),-1e300)),
+                x+0x1p-60L,x-0x1p-60L,x+.4999999999999999999L,x+.5000000000000000001L});
+        }
+    }
+    std::uint64_t state=0x243f6a8885a308d3ULL;
+    for(int i=0;i<200000;++i){
+        state=state*6364136223846793005ULL+1442695040888963407ULL;
+        values.push_back(static_cast<long double>(static_cast<std::int64_t>(state))*0x1p-12L*((i%5)?0x1p-20L:1.L));
+    }
+    for(const auto x:values){
+        check(same(d::floor_coordinate(x),std::floor(x)),"floor of a coordinate differs from std::floor");
+        check(same(d::ceil_coordinate(x),std::ceil(x)),"ceil of a coordinate differs from std::ceil");
+        if(!(std::abs(x)<0x1p63L))continue;
+        check(d::signed_index(x)==static_cast<std::int64_t>(x),"coordinate truncation differs from the standard conversion");
+        const auto whole=d::floor_whole(x);
+        check(same(whole.value,std::floor(x))&&whole.index==static_cast<std::int64_t>(std::floor(x)),
+              "coordinate floor and index disagree with the standard forms");
+        if(x>-1)check(d::unsigned_index(x)==static_cast<std::uint64_t>(x),
+                      "unsigned coordinate index differs from the standard conversion");
+    }
+    check(d::unsigned_index(0x1.8p63L)==static_cast<std::uint64_t>(0x1.8p63L),"large unsigned index differs");
+}
 void bounds(){
     auto cfg=settings();cfg.maximum_chunk_samples=0;rejects([&]{v::StreamingChannel channel(source(),cfg);});
     cfg=settings();cfg.effects.sample_rate=0;rejects([&]{v::StreamingChannel channel(source(),cfg);});
@@ -304,4 +443,4 @@ void bounds(){
     rejects([&]{v::StreamingChannel channel(source(),cfg);});
 }
 }
-int main(){try{exact_bypass();chunk_state_and_tails();bounded_spread_evolves_and_streams();bounded_spread_fixed_powers();combined_doppler_reports_simultaneous_physical_trajectory();bounded_spread_phase_integrates_frequency();common_doppler_wander_is_bounded_and_continuous();effects_and_erasures();bounds();std::cout<<"triad streaming channel invariants passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){try{exact_bypass();chunk_state_and_tails();bounded_spread_evolves_and_streams();bounded_spread_fixed_powers();combined_doppler_reports_simultaneous_physical_trajectory();bounded_spread_phase_integrates_frequency();common_doppler_wander_is_bounded_and_continuous();effects_and_erasures();lanes_reproduce_the_lone_reader();source_failure_reaches_the_reader_in_order();coordinate_forms_match_the_standard_ones();bounds();std::cout<<"triad streaming channel invariants passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

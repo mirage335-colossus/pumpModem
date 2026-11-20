@@ -81,8 +81,10 @@ struct Options {
     std::string tensor_coarse_math = "fft", tensor_fine_projection = "fft";
     bool cuda_segmented_timing = false;
     std::string vulkan_precision = "automatic", vulkan_fine_projection = "automatic";
-    std::string opencl_coarse_templates = "device";
+    std::string opencl_coarse_templates = "device", opencl_fine_tiles = "device";
     bool opencl_coarse_templates_supplied = false;
+    std::size_t opencl_fine_window = 0;
+    std::optional<bool> opencl_profile;
     bool gpu_fp32_minimum = false;
     std::string native_coarse_precision = "automatic";
     std::string wrong_key_admission = "current";
@@ -190,6 +192,11 @@ Options parse(int argc, char** argv) {
     const bool coarse_templates_supplied = values.contains("--opencl-coarse-templates");
     assign("--opencl-coarse-templates", o.opencl_coarse_templates);
     o.opencl_coarse_templates_supplied = coarse_templates_supplied;
+    const bool fine_tiles_supplied = values.contains("--opencl-fine-tiles");
+    assign("--opencl-fine-tiles", o.opencl_fine_tiles);
+    const bool fine_window_supplied = values.contains("--opencl-fine-window");
+    assign("--opencl-fine-window", o.opencl_fine_window);
+    if (const auto profile = take("--opencl-profile")) o.opencl_profile = toggle(*profile, "--opencl-profile");
     const bool gpu_fp32_minimum_supplied = values.contains("--gpu-fp32-minimum");
     assign("--gpu-fp32-minimum", o.gpu_fp32_minimum);
     assign("--native-coarse-precision", o.native_coarse_precision);
@@ -291,6 +298,14 @@ Options parse(int argc, char** argv) {
     require(one_of(o.opencl_coarse_templates, {"device", "native"}) &&
             (!coarse_templates_supplied || (o.backend == "vulkan" && o.vulkan_precision == "nvfp4")),
             "--opencl-coarse-templates expects device or native with explicit Vulkan nvfp4 coarse search");
+    const bool resident_fine = o.backend == "vulkan" &&
+        one_of(o.vulkan_fine_projection, {"resident-nvfp4", "resident-fft"});
+    require(one_of(o.opencl_fine_tiles, {"device", "native"}) && (!fine_tiles_supplied || resident_fine),
+            "--opencl-fine-tiles expects device or native with an explicit Vulkan resident fine projection");
+    require(fine_window_supplied ? resident_fine && o.opencl_fine_window >= 2 && o.opencl_fine_window <= 64
+                                 : o.opencl_fine_window == 0,
+            "--opencl-fine-window expects 2 to 64 blocks with an explicit Vulkan resident fine projection");
+    require(!o.opencl_profile || o.backend == "vulkan", "--opencl-profile is valid only with --backend vulkan");
     require(!gpu_fp32_minimum_supplied || o.backend == "gpu",
             "--gpu-fp32-minimum is valid only with --backend gpu");
     require(one_of(o.native_coarse_precision, {"automatic", "fp32", "fp64", "q15"}),
@@ -880,6 +895,20 @@ Json bulk_json(const BulkReceipt& r) {
         {"opencl_resident_dispatches", r.opencl_resident_dispatches},
         {"opencl_resident_blocking_writes", r.opencl_resident_blocking_writes},
         {"opencl_resident_mapping_dispatches", r.opencl_resident_mapping_dispatches},
+        {"opencl_resident_fine_blocks", r.opencl_resident_fine_blocks},
+        {"opencl_resident_rendered_tiles", r.opencl_resident_rendered_tiles},
+        {"opencl_resident_keyed_lanes", r.opencl_resident_keyed_lanes},
+        {"opencl_resident_host_source_seconds", r.opencl_resident_host_source_seconds},
+        {"opencl_resident_host_staging_seconds", r.opencl_resident_host_staging_seconds},
+        {"opencl_resident_host_transfer_seconds", r.opencl_resident_host_transfer_seconds},
+        {"opencl_resident_host_wait_seconds", r.opencl_resident_host_wait_seconds},
+        {"opencl_resident_device_transfer_seconds", r.opencl_resident_device_transfer_seconds},
+        {"opencl_resident_device_render_seconds", r.opencl_resident_device_render_seconds},
+        {"opencl_resident_device_map_seconds", r.opencl_resident_device_map_seconds},
+        {"opencl_resident_device_pack_seconds", r.opencl_resident_device_pack_seconds},
+        {"opencl_resident_device_product_seconds", r.opencl_resident_device_product_seconds},
+        {"opencl_resident_device_statistics_seconds", r.opencl_resident_device_statistics_seconds},
+        {"opencl_resident_device_span_seconds", r.opencl_resident_device_span_seconds},
         {"opencl_coarse_score_rows", r.opencl_coarse_score_rows},
         {"opencl_coarse_rescored_peaks", r.opencl_coarse_rescored_peaks},
         {"opencl_coarse_issued_products", r.opencl_coarse_issued_products},
@@ -950,8 +979,11 @@ std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
             VulkanReceiverOptions options{o.device_index,
                 o.device_memory_limit.value_or(256 * 1024 * 1024), precision};
             // The explicit dense route reports its device command intervals.
-            options.profile_opencl = precision == VulkanCoarsePrecision::opencl_nvfp4;
+            // A profiled resident fine session also times its host spans.
+            options.profile_opencl = o.opencl_profile.value_or(precision == VulkanCoarsePrecision::opencl_nvfp4);
             options.opencl_device_templates = o.opencl_coarse_templates == "device";
+            options.opencl_fine_device_tiles = o.opencl_fine_tiles == "device";
+            options.opencl_fine_window_blocks = o.opencl_fine_window;
             if (o.vulkan_fine_projection == "nvfp4") options.fine_projection = VulkanFineProjection::opencl_nvfp4;
             else if (o.vulkan_fine_projection == "resident-nvfp4")
                 options.fine_projection = VulkanFineProjection::opencl_resident_nvfp4;
@@ -1093,13 +1125,29 @@ Capture simulate(const Profile& profile, std::span<const EmissionOptions> episod
     };
     auto configuration = profile.channel;
     configuration.minimum_capture_samples = end;
+    // The receiver has not started. Its workers prepare each block of the
+    // channel beside this thread's sequential pass; the capture is the same
+    // for every allocation. Each helper's stack is charged like a receiver
+    // worker's, and a limit without room for one keeps this thread alone.
+    // The pool closes with this scope.
+    const auto stack = datapump::triad::v3::detail::stream_worker_stack_bytes();
+    const auto helpers = static_cast<unsigned>(std::min<std::size_t>(resources.workers ? resources.workers - 1 : 0,
+        stack ? (remaining - reserve - capture_bytes) / stack : 0));
+    ReceiverExecutor lanes(helpers + 1);
+    if (helpers)
+        configuration.lanes = {helpers + 1,
+            [&](std::size_t jobs, const std::function<void(std::size_t)>& job) {
+                lanes.parallel(0, jobs, helpers + 1, stop,
+                    [&job](unsigned, std::size_t index, std::stop_token) { job(index); });
+            }};
     StreamingChannel channel(std::move(composite), configuration);
     if (channel.total_samples() < end)
         throw Error("Native channel ended before the public observation");
     Capture capture;
     capture.first = first;
     capture.spool = std::move(spool);
-    capture.generation_reserved_bytes = resources.memory_limit_bytes - remaining + reserve + capture_bytes;
+    capture.generation_reserved_bytes = resources.memory_limit_bytes - remaining + reserve + capture_bytes +
+        helpers * stack;
     if (capture.spool) {
         // The caller removed this backing reservation before the preflight.
         capture.generation_reserved_bytes += capture.spool->resident_reservation_bytes();
@@ -1452,6 +1500,9 @@ Json fine_json(const FineProgress& p) {
             {"prepared_direct_columns", cache.prepared_direct_columns}, {"prepared_empty_columns", cache.prepared_empty_columns},
             {"cache_hits", cache.cache_hits}, {"cache_misses", cache.cache_misses}, {"evictions", cache.evictions},
             {"native_preparation_calls", cache.native_preparation_calls}, {"native_preparation_samples", cache.native_preparation_samples},
+            {"native_preparation_seconds", cache.native_preparation_seconds},
+            {"addressed_calls", cache.addressed_calls}, {"addressed_columns", cache.addressed_columns},
+            {"keyed_lanes", cache.keyed_lanes},
             {"large_phase_fallback_rows", cache.large_phase_fallback_rows}, {"staging_fallback_rows", cache.staging_fallback_rows},
             {"cache_bytes", cache.cache_bytes}, {"peak_cache_bytes", cache.peak_cache_bytes}, {"peak_pinned_tiles", cache.peak_pinned_tiles},
             {"tile_samples", cache.tile_samples}, {"cache_limit_bytes", cache.cache_limit_bytes}, {"dense_factor", cache.dense_factor},
@@ -1633,7 +1684,11 @@ void fine_run(Json& report, const Options& o, const Profile& profile, const Rece
         fine->advance_to(endpoint);
         const auto elapsed = timer.elapsed();
         const auto progress = fine->progress();
-        if (i == 0) prefix_fills = progress.cache.native_preparation_calls;
+        // A backend that renders the dense tiles fills them on the device.
+        const auto fills = [](const FineProgress& work) {
+            return work.cache.native_preparation_calls + (work.bulk ? work.bulk->opencl_resident_rendered_tiles : 0);
+        };
+        if (i == 0) prefix_fills = fills(progress);
         auto work = fine_json(progress);
         work["checkpoint_seconds"] = static_cast<double>(endpoint) / fs;
         work["stratum"] = o.stratum;
@@ -1662,7 +1717,8 @@ void fine_run(Json& report, const Options& o, const Profile& profile, const Rece
     final_work["stratum"] = o.stratum;
     final_work["input_sha256"] = digest;
     phase(report, "fine_finish", total_finish, 0, std::move(final_work));
-    const auto qualifying_cache_progress = final_progress.cache.native_preparation_calls > prefix_fills;
+    const auto qualifying_cache_progress = final_progress.cache.native_preparation_calls +
+        (final_progress.bulk ? final_progress.bulk->opencl_resident_rendered_tiles : 0) > prefix_fills;
     const bool cold_covered = final_progress.initial_affine.initial_states == 256 &&
         final_progress.initial_affine.peak_emission_states == 256 &&
         final_progress.segments == 2;
@@ -2414,6 +2470,9 @@ void help() {
         "  --opencl-coarse-templates device|native (explicit Vulkan nvfp4 coarse search; device where the\n"
         "    session offers synthesis unless native is stated, and a stated source must be the one executed)\n"
         "  --vulkan-fine-projection automatic|native|nvfp4|resident-nvfp4|resident-fft (explicit Vulkan qualification)\n"
+        "  --opencl-fine-tiles device|native --opencl-fine-window 2..64 (explicit resident fine projection;\n"
+        "    native tiles in two-block batches reproduce the route before device tiles and windows)\n"
+        "  --opencl-profile on|off (Vulkan: record OpenCL host spans and device command intervals)\n"
         "  --gpu-fp32-minimum on|off (automatic GPU arithmetic floor; GPU backend only)\n"
         "  --device-index N --device-memory-limit-bytes N\n"
         "  --case hf|eme and the normalized manual-case options from triad_cases.py\n"
@@ -2477,6 +2536,8 @@ void run(Json& report, const Options& o, std::stop_token stop) {
     report["identity"]["requested_gpu_fp32_minimum"] = o.gpu_fp32_minimum;
     report["identity"]["requested_vulkan_precision"] = o.vulkan_precision;
     report["identity"]["requested_vulkan_fine_projection"] = o.vulkan_fine_projection;
+    report["identity"]["requested_opencl_fine_tiles"] = o.opencl_fine_tiles;
+    report["identity"]["requested_opencl_fine_window"] = o.opencl_fine_window;
     report["identity"]["requested_tensor_precision"] = o.tensor_precision;
     report["identity"]["requested_tensor_coarse_math"] = o.tensor_coarse_math;
     report["identity"]["requested_tensor_fine_projection"] = o.tensor_fine_projection;

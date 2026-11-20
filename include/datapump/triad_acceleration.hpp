@@ -79,6 +79,12 @@ struct VulkanReceiverOptions {
     // Let the OpenCL coarse search render its template bank from the keyed
     // coefficients. Off keeps native columns for a matched comparison.
     bool opencl_device_templates = true;
+    // Let resident OpenCL fine batches render their dense source tiles from
+    // the keyed coefficients. Off uploads native tiles, as a matched control.
+    bool opencl_fine_device_tiles = true;
+    // Public blocks of one resident fine batch, from 2 to 64. Zero selects
+    // the default window. Two keeps one dispatch per batch.
+    std::size_t opencl_fine_window_blocks = 0;
 };
 
 // Optional Vulkan broad-frequency search and Blackwell OpenCL fine projection.

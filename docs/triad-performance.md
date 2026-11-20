@@ -535,6 +535,92 @@ utilization, complete receiver capacity or CPU forecast. Full receiver tests
 still cover Helper acquisition, broad fallback, fine processing and physical
 completion. Regression/manual selectors cannot be mixed into component mode.
 
+### Code placement and x87 rounding-mode switches
+
+Probe binaries with equal compile options and equal simulator objects ran the
+unchanged single-threaded simulator up to 40% apart on the Blackwell host.
+The x87 control word explains it. A baseline x86-64 build loads that word
+twice (`fldcw`), to set and restore the rounding mode, around every inline
+`std::floor` or `std::ceil` of a `long double` and around every conversion of
+a `long double` to an integer. A core follows the control word cheaply for
+only a few such instructions at a time. A loop that rotates through more of
+them pays a pipeline flush for most, and which ones pay depends on the
+addresses the linker gave them.
+
+On the Ryzen 5 PRO 5650U with GNU 14.2 at `-O2`, this is the time per call of
+one of `n` separate functions called in rotation, over two runs:
+
+| Each function performs | n = 1–4 (ns) | n = 12–32 (ns) |
+| --- | ---: | ---: |
+| x87 arithmetic only | 10–12 | 10–12 |
+| `floor` | 10–11 | 35–69 |
+| `floor` in half, integer truncation in the others | 11–20 | 58–76 |
+| `floor`, `ceil` and truncation in thirds | 11–12 | 53–92 |
+
+The step arrives at six or eight functions. The number of different rounding
+modes does not matter and the number of switch instructions does. One switch
+pair is free in a small loop and costs 25–80 ns in a large one.
+
+The simulator committed at `c02b726e` has about 450 switch instructions in its
+four objects. Counted by instrumenting its assembly, it executes 175 for each
+received sample of the severe capture: 118 in the channel and 60 for each
+source sample in the pattern source. Inside the probe, `BoundedRandomSpread::at` with its eight switches
+took 110–280 ns per call against 52 ns alone, each including its timer, and
+moved by more than a factor of two when unrelated instructions were added
+elsewhere in the object. Compiling that one object with `-msse3`, which converts with
+`fisttp` and leaves 80 of its 206 switches, brought the call to 61–91 ns and
+the slot down 13% with an identical capture.
+
+The Blackwell receipts fit the same cause. Simulator seconds of three
+binaries with equal simulator objects:
+
+| Capture | Reference probe | Earlier candidate builds | Final candidate |
+| --- | ---: | ---: | ---: |
+| Severe | 6.0–6.3 | 4.0–4.6 | 4.8–4.9 |
+| Quiet, pattern source idle | 3.7–3.9 | 3.3–3.5 | 4.0–4.2 |
+| Stable | 4.1–4.5 | 2.3–2.8 | 2.5–2.9 |
+
+Against the earlier candidate builds the reference probe lost 1.7–1.8 s on
+the two captures that evaluate the pattern source and 0.3 s on the quiet
+one. That is about 1.6 µs per source
+sample, in code that executed 60 switches per sample: 53 ns per pair, inside
+the range measured above. No run on that host has tested the
+explanation directly.
+
+Code that runs once per sample now uses the forms in
+[`triad_coordinate.hpp`](../src/triad_coordinate.hpp). They return exactly
+the standard values without writing the control word. The changed channel
+executes 44 switches in a whole slot, all in its construction, and the
+pattern source about 400 for a slot's signal. On the 5650U the committed simulator took
+4.62–5.06 s for the severe slot over five link layouts and the changed one
+2.69–2.72 s over seven. This processor did not reproduce a 40% difference:
+its committed code was slow in every layout tried.
+[Simulator changes and their limits](channel-models.md#stream-evaluation-workers-and-capture-identity) ·
+[measurements](validation.md#simulator-throughput-and-capture-identity--20-november-2026).
+
+- Use those forms for `long double` coordinates in any loop over samples or
+  search points. `double` rounding and conversion do not switch.
+- When two binaries built from the same objects differ in one stage, count
+  `fldcw` in that stage's functions with `objdump -d` before looking for
+  another cause. The count includes cold fallback paths.
+- Most receiver host code is unchanged. The basis object's tile-address map
+  now uses those forms. With the inline ones it took 0.023–0.024 s per slot
+  in one build and 0.036–0.044 s in another.
+  [Record](triad-gpu-optimization.md#host-time-without-a-device).
+  `PatternSource::render_bank_impl` still performs eight switches for each
+  rendered point, and the coarse, basis and fine receiver objects contain 66,
+  20 and 14 switch instructions. One CPU-backend slot of the severe capture
+  executes 222 million switches in the pattern-source object alone. Their
+  cost in seconds is unmeasured. They are a candidate for the 5–21%
+  difference of the Vulkan FFT coarse route between two binaries in the
+  [dense coarse record](validation.md#blackwell-dense-fp4-coarse-search--20-november-2026).
+- The mechanism is inferred from behaviour on one Zen 3 processor. No vendor
+  description of it was found, and the Zen 5 host is covered only by the
+  receipts above.
+- Building for SSE3 would remove the conversion switches without source
+  changes and leave those of `floor` and `ceil`. It raises the minimum
+  processor of every binary, which is a [packaging decision](building.md).
+
 ## Relative regression harness
 
 Run cheap native correctness checks before a declared timing comparison:

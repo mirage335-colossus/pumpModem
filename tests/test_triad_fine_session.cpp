@@ -1930,6 +1930,8 @@ struct HostProjectionWitness {
     std::size_t device_blocks = 0, native_blocks = 0, completed_blocks = 0;
     bool fail_second_batch = false;
     ResidentAction resident = ResidentAction::unavailable;
+    // Public blocks of one resident call. More than two selects windows.
+    std::size_t resident_capacity = 2;
 };
 
 class HostProjectionBulk final : public FineBulk {
@@ -1950,15 +1952,17 @@ public:
     bool supports_resident_statistics(const FineBulkBlock& block) const noexcept override {
         return witness_->resident != ResidentAction::unavailable && block.rows == 60;
     }
+    std::size_t resident_block_capacity() const noexcept override { return witness_->resident_capacity; }
 
     bool resident_statistics(std::span<const FineResidentBlock> blocks, std::size_t candidates,
                              std::stop_token) override {
         const auto action = witness_->resident;
         witness_->resident_batch_blocks.push_back(blocks.size());
         std::size_t modes = 0;
+        check(blocks.size() <= witness_->resident_capacity, "a resident call exceeded its public block capacity");
         for (std::size_t index = 0; index < blocks.size(); ++index) {
-            const auto& [block, source, output] = blocks[index];
-            check(supports_resident_statistics(block) && output.size() == candidates,
+            const auto& [block, source, output, tiles] = blocks[index];
+            check(supports_resident_statistics(block) && output.size() == candidates && !tiles,
                   "resident packets must contain compatible public blocks");
             if (index == 1 && action == ResidentAction::fail_second)
                 throw Error("injected second resident block failure");
@@ -2099,6 +2103,9 @@ public:
         : witness_(std::move(witness)) {}
 
     bool fine_maps_on_host() const noexcept override { return true; }
+    std::size_t fine_resident_blocks(const FineBulkGeometry&) const noexcept override {
+        return witness_->resident_capacity;
+    }
     std::unique_ptr<FineBulk> make_fine(double, double) override {
         return std::make_unique<HostProjectionBulk>(witness_);
     }
@@ -2215,6 +2222,115 @@ void incomplete_resident_pair_cannot_publish_quiet() {
               "a failed resident pair must not provide scored quiet");
     }
 }
+// A window of dispatches must leave exactly the state that single
+// dispatches leave: the same statistics reach each state in public order.
+void resident_windows_preserve_public_order() {
+    const Fixture f(240, 60);
+    const FineObservation extent{f.slot.first_sample, f.iq.size(), FineRunKind::operational, true};
+    constexpr unsigned workers = 3;
+    auto config = f.config;
+    config.spread_delay_seconds = .021;
+    struct Outcome {
+        ReceiverSlotScore score;
+        FineProgress work;
+        std::vector<std::size_t> batches;
+        std::size_t native_blocks;
+    };
+    const auto run = [&](std::size_t capacity, bool checkpoints, std::span<const std::uint8_t> valid) {
+        const auto witness = std::make_shared<HostProjectionWitness>();
+        witness->resident = ResidentAction::execute;
+        witness->resident_capacity = capacity;
+        auto routed = config;
+        routed.bulk_backend = std::make_shared<HostProjectionBackend>(witness);
+        FineSession session(routed, f.slot, f.key, extent, f.iq, valid, f.coordinates, 100, 0, workers,
+                            fine_workspace(routed, f.slot, extent, workers));
+        // The second checkpoint ends inside a window of every capacity.
+        if (checkpoints)
+            for (const auto rows : {std::size_t{f.fs}, std::size_t{5 * f.fs + 120}}) session.advance_to(rows);
+        session.advance_to(extent.rows);
+        Outcome outcome;
+        session.finish(outcome.score);
+        outcome.work = session.progress();
+        outcome.batches = witness->resident_batch_blocks;
+        outcome.native_blocks = witness->native_blocks;
+        check(witness->batch_lanes.empty(), "a resident window must not repeat its blocks through host projection");
+        return outcome;
+    };
+    // One erased block inside a window keeps its place without statistics.
+    std::vector<std::uint8_t> erased(extent.rows, 1);
+    erased[7 * 60 + 11] = 0;
+    for (const auto& valid : {std::span<const std::uint8_t>{}, std::span<const std::uint8_t>(erased)}) {
+        const auto single = run(2, false, valid);
+        const auto blocks = std::accumulate(single.batches.begin(), single.batches.end(), std::size_t{0});
+        check(blocks + single.native_blocks + single.work.erased_blocks == single.work.blocks &&
+              single.work.erased_blocks == (valid.empty() ? 0u : 1u),
+              "single dispatches must score every observed public block once");
+        for (const std::size_t capacity : {4, 6, 16, 64}) {
+            for (const bool checkpoints : {false, true}) {
+                const auto window = run(capacity, checkpoints, valid);
+                const auto& a = window.score;
+                const auto& b = single.score;
+                check(a.bit_evidence == b.bit_evidence && a.quiet_energy == b.quiet_energy &&
+                      a.quiet_modes == b.quiet_modes && a.quiet_threshold == b.quiet_threshold &&
+                      a.complete == b.complete && a.all_valid == b.all_valid && a.basis_rows == b.basis_rows &&
+                      a.consumed_samples == b.consumed_samples && a.affine_blocks == b.affine_blocks,
+                      "a resident window changed the fixed-affine evidence or completion");
+                const auto& lane = window.work.initial_affine;
+                const auto& expected = single.work.initial_affine;
+                check(lane.retained_states == expected.retained_states && lane.bit_scores == expected.bit_scores &&
+                      lane.basis_calls == expected.basis_calls && lane.basis_rows == expected.basis_rows &&
+                      lane.positive_basis_blocks == expected.positive_basis_blocks &&
+                      lane.projection_modes == expected.projection_modes &&
+                      lane.gaussian_updates == expected.gaussian_updates &&
+                      lane.projected_template_energy == expected.projected_template_energy &&
+                      window.work.blocks == single.work.blocks && window.work.segments == single.work.segments &&
+                      window.work.erased_blocks == single.work.erased_blocks &&
+                      window.work.slow_gain_bit_evidence == single.work.slow_gain_bit_evidence,
+                      "a resident window changed the public work receipt");
+                check(window.work.bulk && single.work.bulk &&
+                      window.work.bulk->statistics_blocks == single.work.bulk->statistics_blocks &&
+                      window.work.bulk->projected_values == single.work.bulk->projected_values &&
+                      window.work.cache.prepared_calls == single.work.cache.prepared_calls &&
+                      window.work.cache.prepared_mapped_columns == single.work.cache.prepared_mapped_columns &&
+                      window.native_blocks == single.native_blocks,
+                      "a resident window changed the mapped or native block count");
+                check(std::accumulate(window.batches.begin(), window.batches.end(), std::size_t{0}) == blocks &&
+                      std::ranges::all_of(window.batches, [&](auto count) { return count <= capacity; }) &&
+                      *std::ranges::max_element(window.batches) > 2 && window.batches.size() < single.batches.size(),
+                      "a resident window must gather more than one dispatch and score each block once");
+                if (!checkpoints && valid.empty())
+                    check(window.batches.front() == std::min(capacity, blocks),
+                          "an uninterrupted window must fill its public block capacity");
+            }
+        }
+    }
+
+    // A failure inside a window keeps its cause and publishes nothing.
+    const std::vector<Complex> noise_free(extent.rows);
+    for (const auto [action, message] : std::array{
+        std::pair{ResidentAction::wrong_order, "requested an invalid public block"},
+        std::pair{ResidentAction::missing_mapping, "did not map its complete public block"},
+        std::pair{ResidentAction::missing_statistics, "finite complete sufficient statistics"},
+        std::pair{ResidentAction::missing_work, "did not execute its complete public statistics work"},
+        std::pair{ResidentAction::fail_second, "injected second resident block failure"}}) {
+        const auto witness = std::make_shared<HostProjectionWitness>();
+        witness->resident = action;
+        witness->resident_capacity = 6;
+        auto routed = config;
+        routed.bulk_backend = std::make_shared<HostProjectionBackend>(witness);
+        FineSession session(routed, f.slot, f.key, extent, noise_free, {}, f.coordinates,
+                            100, 0, workers, fine_workspace(routed, f.slot, extent, workers));
+        rejects_with([&] { session.advance_to(3 * f.fs / 2); }, message,
+                     "a partial resident window must retain its initiating error");
+        check(witness->resident_batch_blocks == std::vector<std::size_t>{6} && witness->batch_lanes.empty(),
+              "a failed window must never retry its blocks through host projection");
+        rejects([&] { (void)session.progress(); }, "a failed resident window must not publish progress");
+        ReceiverSlotScore score;
+        rejects([&] { session.finish(score); }, "a failed resident window must not finish a slot");
+        check(!score.complete && score.decision == SlotDecision::ambiguous,
+              "a failed resident window must not provide scored quiet");
+    }
+}
 } // namespace
 
 int main() {
@@ -2250,6 +2366,7 @@ int main() {
         host_mapped_projection_scheduler(false);
         host_mapped_projection_scheduler(true);
         incomplete_resident_pair_cannot_publish_quiet();
+        resident_windows_preserve_public_order();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

@@ -1377,15 +1377,19 @@ Limits and unresolved observations:
   restored the reference coarse-session source reproduced the candidate's
   timing, and the unchanged single-threaded simulator differed by about 40%
   in the opposite direction between the two binaries, with equal compile
-  options and equal simulator objects. The cause is unresolved. Compare
-  routes within one binary where possible.
+  options and equal simulator objects. The simulator's difference follows
+  x87 rounding-mode switches, whose cost depends on where the linker places
+  them. The same cause is a candidate for the coarse difference and is
+  untested there. Compare routes within one binary where possible.
+  [Explanation](triad-performance.md#code-placement-and-x87-rounding-mode-switches).
 - No measured session was declined by the dense search, so its fallback to
   the Vulkan FFT session did not run on the device. An emulated session
   checks that delegation and its receipt.
 - Fine processing is now most of the slot. Its 405 resident submissions per
   slot still render source tiles on the host and block on each result.
 - A simulated slot spends 2.5–6.2 s in the single-threaded simulator, more
-  than the receiver.
+  than the receiver. A [later change](#simulator-throughput-and-capture-identity--20-november-2026)
+  shortens it without changing a capture. It has not run on this host.
 
 All 47 local triad tests passed on the measured source, including the two
 emulated OpenCL tests. The committed source then adds the conditioning
@@ -1397,6 +1401,147 @@ temporarily owned pod was terminated and verified absent. Keep the compact
 technical receipts in `local-evidence/blackwell-fp4-coarse-20261119/` until a
 newer matched receiver comparison supersedes these workloads or the dense
 search is requalified.
+
+### Resident fine tiles and windows — 20 November 2026
+
+No device has run this source. The records below are from the kernel
+emulation, native tests and host timers on the Ryzen 5 PRO 5650U
+development host. The source is uncommitted work on `c02b726e` and uses
+`src/triad_coordinate.hpp` from the uncommitted simulator work.
+[Design, counts and remaining costs](triad-gpu-optimization.md#device-rendered-fine-tiles-and-resident-windows).
+
+Resident fine batches now render their dense source tiles on the device and
+hold a window of 16 blocks. The states of one window advance while the
+owner submits the next, the mapping descriptor is 64 bytes, and the
+tile-address map no longer switches the x87 rounding mode.
+
+| Check | Outcome |
+| --- | --- |
+| `triad_opencl_nvfp4_emulated`: rendered against native tiles | Within 5.5e-14, 8.4e-13, 2.5e-12 and 1.4e-12 of the tile peak for continuous, resampled, hop-gated and burst waveforms. FP4 and FFT statistics equal those of the uploaded-tile session. |
+| `triad_opencl_fine_session_emulated`: a 10-block slot through the production session and adapter | Bit-identical fixed-affine evidence for uploaded tiles in single dispatches, rendered tiles, and windows of 6 and 16 blocks. FP4 evidence within 0.1% of native. A tight lease keeps two-block batches, no lease completes natively with its reason, and the adaptive lane keeps single dispatches. |
+| `triad_fine_session`: windows against single dispatches with a deterministic backend | Bit-identical evidence, quiet statistics and work receipts for windows of 4, 6, 16 and 64 blocks, with checkpoints inside a window and an erased block. Five injected failures keep their cause and publish nothing. ThreadSanitizer reports no race in this test. |
+| Uploads of the matched geometry before and after the address map changed its coordinate forms | Byte-identical for all seven routes of the stand-in harness, with one and two keyed epochs: every descriptor, tile request and native tile. |
+| Receipt validator and probe options | 46 abbreviated tests pass, with window and rendered-tile consistency cases. |
+| OpenCL branch of the Vulkan backend | Compiles against the emulation headers. No local build links or runs it. |
+| `triad` group on this source with the committed simulator | 48 of 48 passed. |
+| `./build.sh test triad` on the shared checkout, with the simulator work | 48 of 48 passed. |
+
+For the matched slot geometry a stand-in device whose kernels do nothing
+gives 51 batches instead of 405, 157–159 blocking writes instead of
+920–1,043, and 7.58 MB uploaded instead of 91.96 MB with two keyed epochs
+and 7.56 MB instead of 55.77 MB with one. Readback stays 10,251,648 bytes.
+The host side of the two-epoch slot fell from 0.66–0.68 s to 0.055–0.068 s
+at 4, 12 and 24 software workers, and that of the one-epoch slot from
+0.38–0.40 s to 0.056–0.066 s, as the best of five. Native tile rendering had
+been 0.56–0.57 s and 0.28–0.29 s of them.
+
+Limits and work not done:
+
+- NVCC has not compiled the three new kernels or the changed mapper, and no
+  device has executed them. Automatic selection uses the new arrangement, so
+  it is unqualified on a device until the two device tests and the matched
+  comparison run. Spending for a pod needs fresh approval.
+- Device intervals, complete slot seconds and policy outcomes on the matched
+  inputs are unmeasured. The emulated session is a 10-block slot. The
+  matched geometry ran only against the stand-in, with noise as its input.
+- The Vulkan backend's side of the adapter, with its lease budget, receipts
+  and the probe's three options, is compiled but neither linked nor run
+  locally. The previous campaign's missing lease budget appeared only on
+  the device.
+- The host figures are from one development host shared with other work.
+  Native rendering in the control took 0.56, 0.66 and 0.99 s in three
+  builds of the same renderer source, and only one build has timed the
+  final address map on a quiet host.
+- ThreadSanitizer covered the native session test after the scheduling
+  change, not the emulated session.
+
+Keep the harness, its timings, the upload fingerprints, the test outputs and
+the source hashes in `local-evidence/blackwell-fp4-fine-20261120/` until a
+device comparison of the same routes is recorded or the resident fine route
+changes again. The reference build for that comparison is `c02b726e`.
+
+### Simulator throughput and capture identity — 20 November 2026
+
+The working tree on `c02b726e` changes where and how often the native
+streaming channel and the pattern source evaluate their terms, and lends the
+probe's workers to the channel. No sample changes.
+[What changed and why it is exact](channel-models.md#stream-evaluation-workers-and-capture-identity).
+The host is the Ryzen 5 PRO 5650U with 12 logical CPUs, GNU 14.2.0 at `-O3`
+and glibc 2.41. The probes use the CPU backend from a separate CLI build
+tree. The probe of the committed simulator was built from this tree on
+19 November, before the change.
+
+Simulator phase of the matched 3.6 Hz captures, in seconds, with their
+unchanged input hashes:
+
+| Capture | Committed simulator | 1 worker | 4 workers | 12 workers | 24 workers |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Severe `b4d8fa5a…` | 4.96–5.01 | 2.71–2.73 | 1.27 | 1.04–1.05 | 1.08–1.11 |
+| Quiet `2b9ca9df…` | 3.89–4.02 | 1.30–1.32 | 0.60 | 0.54–0.55 | 0.58–0.60 |
+| Stable `eaa4ae2a…` | 3.21–3.22 | 2.04–2.35 | 0.90–0.91 | 0.85–0.86 | 0.88–0.89 |
+| Five-slot message `4a3603c8…` | 11.00–11.02 | 7.59–8.51 | 3.52–4.58 | 3.38–4.30 | 3.75–4.22 |
+
+Each cell is two rounds, alternated across the five columns. A run counted
+only if other processes used less than 2.5 CPUs while it ran. Every slot run
+had less than 0.7 beside it. The five-slot message had up to 1.2 in its
+first round, which is the lower figure of each cell, and 1.5–2.2 in its
+second. One-thread runs were pinned to one CPU. The committed simulator is
+single-threaded at every worker count.
+
+| Check | Outcome |
+| --- | --- |
+| Matched captures | The four hashes above at 1, 4, 12 and 24 workers. The severe one also under a 150 MB limit, which leaves room for five helper stacks. |
+| Committed simulator against the working tree, built with equal options | Bit-identical samples, validity masks and report fields in 780 comparisons: 12 pattern sources read forwards, backwards, at random fractional coordinates and by `render`; 35 named channel configurations at four read sizes; four pattern-source channels with hops, dropouts and missed dwells; 300 random configurations over every path law, both selective laws, the front end, gain control and oscillator spectra at two read sizes; and 12 runs whose source fails twice and resumes. |
+| Workers against the lone reader | The same 768 comparisons without the resumed runs, identical with 2, 3, 4, 16 and 32 workers. A failed read ends a channel that has workers. |
+| Sanitizers | ThreadSanitizer reports no race in 288 comparisons with three workers and 148 with four. AddressSanitizer and UBSan report nothing in 420 comparisons with a lone reader and 408 with four workers. Those builds at `-O1` produce the same digests as `-O3`. |
+| `test_triad_v3_channel` | Passes with workers against the lone reader, blocks against single rows, a source failure inside a block, and the rounding forms against `std::floor`, `std::ceil` and the integer conversions on 200,000 values. |
+| `triad` group | 44 of 44 passed with `./build.sh test triad --cli` in a separate build tree, and 48 of 48 with `./build.sh test triad` on the shared checkout in the resident fine record above. Both trees also held that uncommitted work. |
+| `fast` group, which shares the selective filter and the fixed-time process | 72 of 72 passed in the separate build tree. |
+
+The cryptographic diagnostic I/Q noise draws from the operating system and
+was not compared. `channel_workspace_bytes` of the matched slot is 291,393
+for a lone reader and 671,705 with 24 workers, against 278,809 before.
+
+Twelve probes of each simulator, with a padding object of 0 to 4,144 bytes
+linked ahead of the simulator code, compared link layouts on the severe slot
+with one worker. Counting runs beside less than 0.8 CPUs of other work, the
+committed simulator took 4.62–5.06 s over five layouts, a spread of 9.5%,
+and the changed one 2.69–2.72 s over seven, 1.0%. Admitting runs beside up
+to 1.3 CPUs gives 4.62–5.19 s over seven layouts and 2.69–2.72 s over eight.
+The remaining layouts had no clean run. On this processor the committed
+simulator is slow in every layout and varies by about a tenth. The 40% of the
+Blackwell host was not reproduced here.
+[Mechanism and its microbenchmark](triad-performance.md#code-placement-and-x87-rounding-mode-switches).
+
+One proposal that changes sample values was measured and not adopted. It
+takes the sixteen interpolation coefficients from one sine and one
+sine/cosine pair per coordinate. Coefficients move by at most 3.3e-16 and
+their sum by 1.1e-15 over four million coordinates, and the severe capture
+hashes to `4bb4aa22…`.
+
+| Capture, workers | Working tree (s) | With the proposal (s) |
+| --- | ---: | ---: |
+| Severe, 1 | 2.70–2.73 | 1.78–1.79 |
+| Severe, 12 | 1.05–1.06 | 0.89–0.90 |
+| Stable, 1 | 2.04–2.14 | 1.15–1.16 |
+
+Limits:
+
+- One host. The Blackwell host has not run this source, so its simulator
+  seconds and the explanation of its 40% difference rest on its earlier
+  receipts.
+- The timings are two rounds on a development machine that other sessions
+  were using. Stable with one worker varied by 15% between rounds.
+- The GUI simulation keeps a lone reader. Only the probe lends workers.
+- With many workers the slot is bounded by the source and transmit
+  oscillator of one thread and by the sequential pass. Twenty-four workers
+  were no faster than twelve on this six-core host.
+- The comparison program, its reference digests from `c02b726e`, the timing
+  rows, the control-word microbenchmark and the proposal are in
+  `local-evidence/simulator-exactness-20261120/`. Keep them until the change
+  is committed and the next change to the channel or pattern source has been
+  compared against it. The digests hold for this compiler and C library.
+  The padded-layout probes and the instrumented copies were not kept.
 
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 

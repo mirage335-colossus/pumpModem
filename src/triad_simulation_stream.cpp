@@ -2,6 +2,7 @@
 
 #include "channel_perturbation.hpp"
 #include "channel_spread.hpp"
+#include "triad_coordinate.hpp"
 #include "triad_gaussian_fading.hpp"
 #include "triad_random_process.hpp"
 #include "datapump/types.hpp"
@@ -19,6 +20,9 @@
 
 namespace datapump::triad::v3 {
 namespace {
+using detail::floor_coordinate;
+using detail::signed_index;
+using detail::unsigned_index;
 using modem::detail::DispersiveSelectivePerturbation;
 using modem::detail::SpreadRay;
 using Complex = std::complex<double>;
@@ -153,10 +157,10 @@ Complex convert(Complex value, const ConverterConfig& c, Rng& rng,
 }
 
 std::int64_t dwell_index(double t, double dwell) {
-    const long double q = std::floor(static_cast<long double>(t) / dwell);
+    const long double q = floor_coordinate(static_cast<long double>(t) / dwell);
     require(std::isfinite(q) && q > static_cast<long double>(INT64_MIN) &&
             q < static_cast<long double>(INT64_MAX), "stream channel dwell coordinate overflow");
-    return static_cast<std::int64_t>(q);
+    return signed_index(q);
 }
 
 std::size_t calendar_index(std::int64_t dwell, std::size_t count) {
@@ -196,20 +200,48 @@ bool dropout_at(const SimulationConfig& c, double t) {
         within < (c.dropout_start_ms + c.dropout_ms) * .001;
 }
 
+// One source coordinate through sixteen Blackman-windowed sinc taps. history
+// is a ring of generated samples, of which this coordinate's reader retains
+// [first, end). It reads the ring only, so rows can be evaluated in any order.
 Complex interpolate(const std::vector<Complex>& history, std::uint64_t first,
                     std::uint64_t end,
                     long double position) {
     if (!std::isfinite(position) || position < -8 || position >=
         static_cast<long double>(end) + 8) return {};
-    auto sample = [&](std::uint64_t index) {
-        return index >= first && index < end ? history[static_cast<std::size_t>(index % history.size())] : Complex{};
-    };
-    if (position == std::floor(position) && position >= 0) {
+    const auto size = history.size();
+    const auto center_ld = floor_coordinate(position);
+    if (position == center_ld && position >= 0) {
         if (position >= static_cast<long double>(UINT64_MAX)) return {};
-        const auto index = static_cast<std::uint64_t>(position);
-        return sample(index);
+        const auto index = unsigned_index(position);
+        return index >= first && index < end ? history[static_cast<std::size_t>(index % size)] : Complex{};
     }
-    const auto center_ld = std::floor(position);
+    // The retained sample under each of the taps center-7 ... center+8.
+    std::array<const Complex*, 16> retained{};
+    if (center_ld >= 7 && center_ld < 0x1p62L) {
+        const auto lowest = unsigned_index(center_ld) - 7;
+        const auto from = std::max(lowest, first), to = std::min(lowest + 16, end);
+        if (from < to) {
+            auto slot = static_cast<std::size_t>(from % size);
+            for (auto index = from; index < to; ++index) {
+                retained[static_cast<std::size_t>(index - lowest)] = &history[slot];
+                if (++slot == size) slot = 0;
+            }
+        }
+    } else {
+        for (int offset = -7; offset <= 8; ++offset) {
+            const auto tap = center_ld + offset;
+            if (!(tap >= 0 && tap < static_cast<long double>(UINT64_MAX))) continue;
+            const auto index = unsigned_index(tap);
+            if (index >= first && index < end)
+                retained[static_cast<std::size_t>(offset + 7)] = &history[static_cast<std::size_t>(index % size)];
+        }
+    }
+    // Silence under every tap sums to positive zero whatever the coefficients
+    // are, and their sum is within 1e-3 of one, so the quotient is that zero.
+    bool silent = true;
+    for (const auto* sample : retained)
+        if (sample && (sample->real() != 0 || sample->imag() != 0)) { silent = false; break; }
+    if (silent) return {};
     Complex value{};
     double norm = 0;
     for (int offset = -7; offset <= 8; ++offset) {
@@ -220,10 +252,10 @@ Complex interpolate(const std::vector<Complex>& history, std::uint64_t first,
         const double window = .42 - .5 * std::cos(tau * z) + .08 * std::cos(2 * tau * z);
         const double coefficient = (std::abs(d) < 1e-12 ? 1 :
             std::sin(std::numbers::pi * d) / (std::numbers::pi * d)) * window;
-        if (tap >= 0 && tap < static_cast<long double>(UINT64_MAX)) {
-            const auto index = static_cast<std::uint64_t>(tap);
-            value += coefficient * sample(index);
-        }
+        // A tap outside the retained range added a zero product, which never
+        // changes the sum: it starts at, and cancels to, positive zero.
+        if (const auto* sample = retained[static_cast<std::size_t>(offset + 7)])
+            value += coefficient * *sample;
         norm += coefficient;
     }
     return std::abs(norm) > 1e-12 ? value / norm : Complex{};
@@ -233,6 +265,9 @@ struct OscillatorState {
     double phase = 0, rw_frequency = 0;
     std::vector<double> flicker;
     std::vector<double> taus;
+    // Factors of one phase step that depend on its fixed sample interval.
+    double white_sigma = 0, random_walk_step = 0, wiener_step = 0, if_offset_hz = 0;
+    std::vector<double> flicker_decay, flicker_innovation;
 };
 
 void validate_spectrum(const OscillatorSpectrum& s) {
@@ -262,26 +297,40 @@ void initialize_spectrum(OscillatorState& state, const OscillatorSpectrum& s, Rn
     }
 }
 
-double oscillator_phase_step(OscillatorState& state, const Oscillator& base,
-                             const OscillatorSpectrum& spectrum, Rng& rng,
-                             double rf_hz, double nominal_if_hz,
-                             double audio_scale, double t, double dt) {
-    const double white_sigma = spectrum.white_fm_hz_sqrt_seconds / std::sqrt(dt);
-    const double white_frequency = white_sigma * rng.gaussian();
-    state.rw_frequency += spectrum.random_walk_fm_hz_per_sqrt_second *
-        std::sqrt(dt) * rng.gaussian();
-    double flicker_frequency = 0;
+// The products of a phase step whose operands never change for one oscillator.
+// Each keeps the operand order of the step it leaves.
+void prepare_phase_step(OscillatorState& state, const Oscillator& base,
+                        const OscillatorSpectrum& spectrum, double nominal_if_hz,
+                        double audio_scale, double dt) {
+    state.white_sigma = spectrum.white_fm_hz_sqrt_seconds / std::sqrt(dt);
+    state.random_walk_step = spectrum.random_walk_fm_hz_per_sqrt_second * std::sqrt(dt);
+    state.wiener_step = base.phase_noise_rad_per_sqrt_second * std::sqrt(dt);
+    state.if_offset_hz = nominal_if_hz * (audio_scale - 1);
+    state.flicker_decay.resize(state.flicker.size());
+    state.flicker_innovation.resize(state.flicker.size());
     for (std::size_t i = 0; i < state.flicker.size(); ++i) {
         const double alpha = std::exp(-dt / state.taus[i]);
-        state.flicker[i] = alpha * state.flicker[i] +
+        state.flicker_decay[i] = alpha;
+        state.flicker_innovation[i] =
             (spectrum.flicker_fm_rms_hz / std::sqrt(static_cast<double>(state.flicker.size()))) *
-            std::sqrt(1 - alpha * alpha) * rng.gaussian();
+            std::sqrt(1 - alpha * alpha);
+    }
+}
+
+double oscillator_phase_step(OscillatorState& state, const Oscillator& base, Rng& rng,
+                             double rf_hz, double t, double dt) {
+    const double white_frequency = state.white_sigma * rng.gaussian();
+    state.rw_frequency += state.random_walk_step * rng.gaussian();
+    double flicker_frequency = 0;
+    for (std::size_t i = 0; i < state.flicker.size(); ++i) {
+        state.flicker[i] = state.flicker_decay[i] * state.flicker[i] +
+            state.flicker_innovation[i] * rng.gaussian();
         flicker_frequency += state.flicker[i];
     }
     const double offset = rf_hz * (base.rf_ppm + base.rf_drift_ppm_per_second * t) * 1e-6 +
-        nominal_if_hz * (audio_scale - 1) + white_frequency + state.rw_frequency +
+        state.if_offset_hz + white_frequency + state.rw_frequency +
         flicker_frequency;
-    const double wiener = base.phase_noise_rad_per_sqrt_second * std::sqrt(dt) * rng.gaussian();
+    const double wiener = state.wiener_step * rng.gaussian();
     const double result = tau * offset * dt + wiener;
     require(std::isfinite(result), "oscillator phase increment is non-finite");
     return result;
@@ -394,9 +443,62 @@ struct StreamingChannel::Impl {
     SimulationConfig& effects;
     double tx_scale = 1, rx_scale = 1, dt_tx = 0, dt_rx = 0;
     long double hop_origin_seconds = 0;
-    std::uint64_t total = 0, cursor = 0, tx_next = 0, history_first = 0;
+    std::uint64_t total = 0, cursor = 0, tx_next = 0;
     std::uint64_t delay_samples = 0, tx_interpolation_tail = 0, tail_samples = 0;
+    // A ring of generated source samples. A received row reads the newest
+    // retained_history of those generated when its own turn comes; the ring
+    // also holds the samples of the block generated ahead of that row.
     std::vector<Complex> tx_history;
+    std::uint64_t retained_history = 0, block_lookahead = 0;
+    // Coordinates of a row that are the same for every row.
+    long double tx_clock = 0, rx_clock = 0, tx_per_rx = 0, direct_origin = 0;
+    long double fixed_delay_seconds = 0, fixed_delay_samples = 0;
+    Complex still_hop_rotation{1, 0}, fixed_delay_rotation{1, 0};
+    // One block of rows prepared ahead of the sequential pass. Each term
+    // depends on its row's index and the generated source history alone.
+    using Excursions = DispersiveSelectivePerturbation::Excursions;
+    struct Reader {
+        std::optional<DispersiveSelectivePerturbation::RandomExcursions> excursions;
+        std::unique_ptr<std::array<detail::FixedGaussianRay, 2>> rays;
+    };
+    // The first row of a job whose fixed-time values could not be evaluated.
+    // The sequential pass reports it where the unbatched reader met it.
+    struct Failure {
+        std::size_t row = SIZE_MAX;
+        bool in_path = false, ran = false;
+        std::exception_ptr error;
+    };
+    struct Block {
+        std::vector<Complex> direct, delayed;
+        std::vector<std::array<Complex, 2>> path_gain;
+        std::vector<Excursions> excursion;
+        std::uint64_t first = 0, source_begin = 0;
+        // The row whose source history could not be generated, and why.
+        std::size_t source_failure_row = SIZE_MAX;
+        std::exception_ptr source_failure;
+        Failure failure;
+    } block;
+    std::size_t block_rows = 0, lane_jobs = 1;
+    std::vector<Reader> readers;
+    std::vector<Failure> job_failures;
+    // With lanes, the sequential states that never read the signal advance a
+    // whole block ahead of the reader, each on a job of its own, and the next
+    // block's source history is generated beside the rows of this one.
+    enum Chain : std::size_t { ahead_chain, receive_chain, thermal_chain, echo_chain, common_chain, chain_count };
+    struct Chains {
+        std::vector<Complex> receive_rotation, thermal, echo_rotation, common_rotation;
+        std::vector<detail::BoundedRandomSpread::State> echo;
+        std::vector<double> common_doppler_hz;
+        std::array<Failure, chain_count> failures;
+    } chains;
+    bool chained = false;
+    // The source history that the unbatched reader had generated at the cursor.
+    std::uint64_t reader_source_end = 0;
+    // A source failure met while generating ahead. The reader reports it at
+    // the first row that needs the sample.
+    std::exception_ptr ahead_failure;
+    // A failed read ends a channel whose chains had already passed that row.
+    std::exception_ptr ended;
     std::unique_ptr<background_noise::Generator> transmit_diagnostic_iq_noise;
     OscillatorState tx_osc, rx_osc;
     Rng tx_rng, rx_rng, thermal_rng;
@@ -479,6 +581,16 @@ struct StreamingChannel::Impl {
                 "streaming sample interval is outside numeric range");
         hop_origin_seconds = static_cast<long double>(geometry.calendar_origin_sample) /
             effects.sample_rate;
+        tx_clock = static_cast<long double>(effects.sample_rate) * tx_scale;
+        rx_clock = static_cast<long double>(effects.sample_rate) * rx_scale;
+        tx_per_rx = static_cast<long double>(tx_scale) / rx_scale;
+        direct_origin = (static_cast<long double>(effects.capture_lead_seconds) + effects.timing_offset_seconds) *
+            effects.sample_rate * tx_scale;
+        require(config.lanes.count <= 1 || static_cast<bool>(config.lanes.run),
+                "streaming channel lanes need a function that runs their jobs");
+        // A block of 1024 rows gives sixteen jobs enough rows each; more
+        // would only add copies of the fixed-time processes.
+        lane_jobs = config.lanes.run ? std::clamp<std::size_t>(config.lanes.count, 1, 16) : 1;
 
         const long double maximum_delay_seconds = effects.spread_delay_ms * .001L +
             config.path_evolution.delay_excursion_seconds;
@@ -639,17 +751,43 @@ struct StreamingChannel::Impl {
                 config.path_evolution.delay_excursion_seconds,config.path_evolution.delay_knot_seconds,
                 root_seed(config.path_seed,effects.seed)^0x52414e4444454c41ULL);
 
-        const auto history_count = static_cast<std::size_t>(delay_samples + 64);
+        retained_history = delay_samples + 64;
         const auto prefix_count = effects.fhss ? effects.hop_offsets_hz.size() + 1 : 0;
         const auto spectrum_values = (config.tx_spectrum.flicker_fm_rms_hz > 0 ? config.tx_spectrum.flicker_bands : 0) +
             (config.rx_spectrum.flicker_fm_rms_hz > 0 ? config.rx_spectrum.flicker_bands : 0);
+        // The first job reads the channel's own fixed-time processes; every
+        // further job owns a copy of those the selected laws evaluate.
+        const bool reads_rays = config.path_evolution.random_doppler_width_hz > 0;
+        const bool reads_excursions = perturb_enabled && random_selective;
+        const auto size_block = [&](std::size_t jobs) {
+            lane_jobs = jobs;
+            // Each job needs enough rows to repay its hand-off, and a read
+            // of several blocks generates all but the first one's source
+            // history beside the rows of the block before it.
+            block_rows = std::min<std::size_t>(config.maximum_chunk_samples,
+                jobs > 1 ? std::min<std::size_t>(1024, 128 * jobs) : 128);
+            // The source advances tx_per_rx samples for each received row. A
+            // block that would outrun this allowance is shortened when prepared.
+            // Chains keep the next block's allowance beside the current one.
+            block_lookahead = 2 * block_rows + 16;
+            chained = jobs > 1;
+            const auto chain_row = !chained ? 0 : sizeof(Complex) + (effects.noise_enabled ? sizeof(Complex) : 0) +
+                (config.path_evolution.bounded_spread_knot_seconds > 0 ?
+                    sizeof(detail::BoundedRandomSpread::State) + sizeof(Complex) : 0) +
+                (config.path_evolution.common_doppler_wander_hz > 0 ? sizeof(double) + sizeof(Complex) : 0);
+            return (chained ? 2 : 1) * block_lookahead * sizeof(Complex) + block_rows * (2 * sizeof(Complex) + chain_row +
+                    (reads_rays ? sizeof(std::array<Complex, 2>) : 0) + (reads_excursions ? sizeof(Excursions) : 0)) +
+                jobs * sizeof(Failure) + (jobs - 1) * (sizeof(Reader) +
+                    (reads_rays ? 2 * sizeof(detail::FixedGaussianRay) : 0) +
+                    (reads_excursions ? DispersiveSelectivePerturbation::maximum_random_working_bytes() : 0));
+        };
         // All owned arrays are fixed-size; no deque growth or duration-sized
         // history is hidden from this pre-allocation bound. Fixed allowance
         // covers allocator metadata for the bounded number of allocations.
-        stats.working_bytes = sizeof(*this) + 4096 + history_count * sizeof(Complex) +
+        const auto fixed_bytes = sizeof(*this) + 4096 + static_cast<std::size_t>(retained_history) * sizeof(Complex) +
             effects.hop_offsets_hz.capacity() * sizeof(double) + prefix_count * sizeof(long double) +
             config.missed_receiver_dwell_indices.capacity() * sizeof(std::uint64_t) +
-            spectrum_values * 2 * sizeof(double) +
+            spectrum_values * 4 * sizeof(double) +
             (gaussian_path ? gaussian_path->working_bytes() : 0) +
             (random_path[0] ? 2*sizeof(detail::FixedGaussianRay) : 0) +
             (random_delay ? sizeof(detail::SmoothRandomDelay) : 0) +
@@ -664,14 +802,40 @@ struct StreamingChannel::Impl {
                 DispersiveSelectivePerturbation::memory_samples(effects.sample_rate * rx_scale,
                                                                selective_spacing)*sizeof(Complex) +
                 (random_selective ? DispersiveSelectivePerturbation::maximum_random_working_bytes() : 0) : 0);
-        require(stats.working_bytes <= kHistoryLimitBytes + 1024 * 1024,
+        // Lanes never decide whether a channel fits: one that only fits
+        // without their rows and process copies keeps its reader alone.
+        constexpr std::size_t workspace_limit = kHistoryLimitBytes + 1024 * 1024;
+        const auto source_bytes = explicit_source ? src.working_bytes : 0;
+        auto block_bytes = size_block(lane_jobs);
+        if (lane_jobs > 1 && (fixed_bytes > workspace_limit || block_bytes > workspace_limit - fixed_bytes ||
+                source_bytes > workspace_limit - fixed_bytes - block_bytes))
+            block_bytes = size_block(1);
+        stats.working_bytes = fixed_bytes + block_bytes;
+        require(stats.working_bytes <= workspace_limit,
                 "stream channel workspace exceeds its fixed bound");
         if (explicit_source) {
-            require(src.working_bytes <= kHistoryLimitBytes + 1024 * 1024 - stats.working_bytes,
+            require(src.working_bytes <= workspace_limit - stats.working_bytes,
                     "emitted source and channel workspace exceed the fixed bound");
             stats.working_bytes += src.working_bytes;
         }
-        tx_history.resize(history_count);
+        tx_history.resize(static_cast<std::size_t>(retained_history + (chained ? 2 : 1) * block_lookahead));
+        block.direct.resize(block_rows);
+        block.delayed.resize(block_rows);
+        if (reads_rays) block.path_gain.resize(block_rows);
+        if (reads_excursions) block.excursion.resize(block_rows);
+        job_failures.resize(lane_jobs);
+        if (chained) {
+            chains.receive_rotation.resize(block_rows);
+            if (effects.noise_enabled) chains.thermal.resize(block_rows);
+            if (config.path_evolution.bounded_spread_knot_seconds > 0) {
+                chains.echo.resize(block_rows);
+                chains.echo_rotation.resize(block_rows);
+            }
+            if (config.path_evolution.common_doppler_wander_hz > 0) {
+                chains.common_doppler_hz.resize(block_rows);
+                chains.common_rotation.resize(block_rows);
+            }
+        }
 
         if (spread_enabled && config.path_evolution.bounded_spread_knot_seconds == 0)
             spread = std::make_unique<SpreadRay>(
@@ -732,6 +896,28 @@ struct StreamingChannel::Impl {
         }
         initialize_spectrum(tx_osc, config.tx_spectrum, tx_spectrum_rng);
         initialize_spectrum(rx_osc, config.rx_spectrum, rx_spectrum_rng);
+        prepare_phase_step(tx_osc, effects.tx, config.tx_spectrum, effects.nominal_conversion_if_hz, tx_scale, dt_tx);
+        prepare_phase_step(rx_osc, effects.rx, config.rx_spectrum, effects.nominal_conversion_if_hz, rx_scale, dt_rx);
+        // Without retuning both rays keep the phase of equal hop calendars.
+        still_hop_rotation = std::polar(1.0, tau * std::remainder(static_cast<double>(0.L - 0.L), 1.0));
+        // The echo's carrier rotation follows its excess delay, which only
+        // the moving-delay law changes from row to row.
+        if (bounded_spread) {
+            fixed_delay_seconds = static_cast<long double>(bounded_spread->excess_delay_seconds());
+            fixed_delay_rotation = delay_rotation(fixed_delay_seconds);
+        } else {
+            // Keep legacy off-path multiplication ordering exactly unchanged.
+            fixed_delay_seconds = static_cast<long double>(effects.spread_delay_ms)*.001L;
+            fixed_delay_rotation = std::polar(1.0, -tau * std::remainder(effects.rf_hz *
+                effects.spread_delay_ms * .001, 1.0));
+        }
+        fixed_delay_samples = fixed_delay_seconds * tx_scale * effects.sample_rate;
+        for (std::size_t job = 1; job < lane_jobs; ++job) {
+            auto& reader = readers.emplace_back();
+            if (reads_rays) reader.rays = std::make_unique<std::array<detail::FixedGaussianRay, 2>>(
+                std::array{*random_path[0], *random_path[1]});
+            if (reads_excursions) reader.excursions.emplace(dispersive_perturbation->random_excursions());
+        }
         if (config.path_evolution.ray_coherence_seconds > 0) {
             path_gain_decay = std::exp(-dt_rx/config.path_evolution.ray_coherence_seconds);
             path_gain_innovation = std::sqrt(-std::expm1(-2*dt_rx/config.path_evolution.ray_coherence_seconds)*.5);
@@ -765,7 +951,7 @@ struct StreamingChannel::Impl {
         while (tx_next <= last) {
             const double t = static_cast<double>(tx_next) * dt_tx;
             const double calendar_time = static_cast<double>(static_cast<long double>(tx_next) /
-                (static_cast<long double>(effects.sample_rate) * tx_scale) - hop_origin_seconds);
+                tx_clock - hop_origin_seconds);
             const double hop = hop_at(effects, calendar_time);
             const auto current_dwell = dwell_index(calendar_time, effects.dwell_seconds);
             if (effects.fhss && current_dwell != previous_tx_dwell) {
@@ -774,8 +960,7 @@ struct StreamingChannel::Impl {
                 previous_tx_dwell = current_dwell;
             }
             const double rf = effects.rf_hz + hop;
-            tx_osc.phase += oscillator_phase_step(tx_osc, effects.tx, config.tx_spectrum,
-                tx_spectrum_rng, rf, effects.nominal_conversion_if_hz, tx_scale, t, dt_tx);
+            tx_osc.phase += oscillator_phase_step(tx_osc, effects.tx, tx_spectrum_rng, rf, t, dt_tx);
             // Keep the historical positive-RF arithmetic unchanged when this
             // supplemental emission-time slope is off.
             if (config.tx_frequency_drift_hz_per_second != 0)
@@ -819,70 +1004,285 @@ struct StreamingChannel::Impl {
             }
             tx_history[static_cast<std::size_t>(tx_next % tx_history.size())] = value;
             ++tx_next;
-            history_first = tx_next > tx_history.size() ? tx_next - tx_history.size() : 0;
         }
     }
 
-    Complex process_one(std::uint64_t n, bool& erased) {
-        const long double physical_time = static_cast<long double>(n) /
-            (static_cast<long double>(effects.sample_rate) * rx_scale) - effects.capture_lead_seconds;
-        const double t = static_cast<double>(physical_time);
-        const auto bounded_state = bounded_spread ?
-            std::optional<detail::BoundedRandomSpread::State>(bounded_spread->at(physical_time)) : std::nullopt;
-        const double excess_delay_seconds = bounded_state ? bounded_state->delay_seconds :
-            random_delay ? random_delay->value(physical_time) :
-            effects.spread_delay_ms*.001;
+    Complex delay_rotation(long double delay_seconds) const {
+        const auto cycles=std::remainder((static_cast<long double>(effects.rf_hz)+
+            effects.nominal_conversion_if_hz)*delay_seconds,1.L);
+        return std::polar(1.0,-tau*static_cast<double>(cycles));
+    }
+
+    struct Path {
+        long double delay_seconds = 0, direct = 0, delayed = 0;
+        // The last source sample that the row's two interpolations read.
+        std::uint64_t needed = 0;
+    };
+    // The echo delay and both source coordinates of the row received at
+    // physical_time. They depend on the row's index alone.
+    Path path_at(std::uint64_t n, long double physical_time) const {
+        Path path;
+        const bool moving = !bounded_spread && random_delay;
+        if (moving) path.delay_seconds = static_cast<long double>(random_delay->value(physical_time));
+        else path.delay_seconds = fixed_delay_seconds;
         // Preserve the exact integer lattice when the clocks/offset agree;
         // avoid a lossy double sample -> seconds -> sample round trip.
-        const long double direct_pos = static_cast<long double>(n) *
-            (static_cast<long double>(tx_scale) / rx_scale) -
-            (static_cast<long double>(effects.capture_lead_seconds) + effects.timing_offset_seconds) *
-                effects.sample_rate * tx_scale;
-        // Keep legacy off-path multiplication ordering exactly unchanged.
-        const long double delay_seconds = (random_delay || bounded_state) ? static_cast<long double>(excess_delay_seconds) :
-            static_cast<long double>(effects.spread_delay_ms)*.001L;
-        const long double delayed_pos = direct_pos - delay_seconds * tx_scale * effects.sample_rate;
+        path.direct = static_cast<long double>(n) * tx_per_rx - direct_origin;
+        path.delayed = path.direct - (moving ? path.delay_seconds * tx_scale * effects.sample_rate :
+                                               fixed_delay_samples);
         auto needed_last = [&](long double position) {
             require(std::isfinite(position), "stream channel source coordinate overflow");
             const auto last = geometry.source_samples - 1;
             if (position < 0) return std::uint64_t{0};
-            const auto needed = std::floor(position) + 8;
-            return needed >= static_cast<long double>(last) ? last : static_cast<std::uint64_t>(needed);
+            const auto needed = floor_coordinate(position) + 8;
+            return needed >= static_cast<long double>(last) ? last : unsigned_index(needed);
         };
-        const auto direct_last = needed_last(direct_pos);
-        const auto delayed_last = needed_last(delayed_pos);
-        generate_tx_until(std::max(direct_last, delayed_last));
-        Complex direct = interpolate(tx_history, history_first, tx_next, direct_pos);
-        Complex delayed = interpolate(tx_history, history_first, tx_next, delayed_pos);
+        const auto direct_last = needed_last(path.direct);
+        const auto delayed_last = needed_last(path.delayed);
+        path.needed = std::max(direct_last, delayed_last);
+        return path;
+    }
+    long double physical_time_at(std::uint64_t n) const {
+        return static_cast<long double>(n) / rx_clock - effects.capture_lead_seconds;
+    }
+    // Whether the generated source history already covers a row's needs.
+    bool source_ready(const Path& path) const {
+        return geometry.source_samples == 0 || path.needed < tx_next;
+    }
+
+    // The receiver oscillator's rotation of the next row.
+    Complex receive_rotation(double t, double rx_hop, std::int64_t rx_dwell) {
+        if (effects.fhss && rx_dwell != previous_rx_dwell) {
+            rx_osc.phase += keyed_phase(root_seed(config.oscillator_seed,effects.seed) ^ 0x5258484f50504841ULL,
+                                        rx_dwell, 0x5258504841534531ULL);
+            previous_rx_dwell = rx_dwell;
+        }
+        const double rf_error = (effects.rf_hz + rx_hop) *
+            (effects.rx.rf_ppm + effects.rx.rf_drift_ppm_per_second * t) * 1e-6 -
+            effects.static_doppler_hz;
+        rx_osc.phase += oscillator_phase_step(rx_osc, effects.rx, rx_spectrum_rng, 0, t, dt_rx) +
+            tau * rf_error * dt_rx;
+        rx_osc.phase = std::remainder(rx_osc.phase, tau);
+        const double white_pm = config.rx_spectrum.white_pm_rms_radians * rx_spectrum_rng.gaussian();
+        return std::polar(1.0, -rx_osc.phase - white_pm);
+    }
+    Complex thermal_noise() {
+        const double sigma = std::sqrt(config.complex_noise_variance * .5);
+        return Complex{sigma * thermal_rng.gaussian(), sigma * thermal_rng.gaussian()};
+    }
+
+    // One sequential state through rows [0, rows) of the block, or the source
+    // history of the block after it. Each touches its own state alone.
+    void run_chain(Chain chain, std::size_t rows, std::uint64_t ahead_needed) noexcept {
+        auto& failure = chains.failures[chain];
+        failure.ran = true;
+        std::size_t row = 0;
+        try {
+            if (chain == ahead_chain) {
+                generate_tx_until(ahead_needed);
+                return;
+            }
+            for (; row < rows; ++row) {
+                const auto physical_time = physical_time_at(block.first + row);
+                if (chain == receive_chain) {
+                    const double receive_calendar = static_cast<double>(physical_time +
+                        effects.retune_offset_seconds - hop_origin_seconds);
+                    const double rx_hop = effects.fhss ? hop_at(effects, receive_calendar) : 0;
+                    const auto rx_dwell = dwell_index(receive_calendar, effects.dwell_seconds);
+                    chains.receive_rotation[row] = receive_rotation(static_cast<double>(physical_time), rx_hop, rx_dwell);
+                } else if (chain == thermal_chain) {
+                    chains.thermal[row] = thermal_noise();
+                } else if (chain == echo_chain) {
+                    chains.echo[row] = bounded_spread->at(physical_time);
+                    chains.echo_rotation[row] = std::polar(1., chains.echo[row].phase_radians);
+                } else {
+                    const auto state = common_doppler_wander->at(physical_time);
+                    chains.common_doppler_hz[row] = state.doppler_hz;
+                    chains.common_rotation[row] = std::polar(1., state.phase_radians);
+                }
+            }
+        } catch (...) {
+            failure = {row, false, true, std::current_exception()};
+        }
+    }
+    void chain_reached(Chain chain, std::size_t row) const {
+        if (row == chains.failures[chain].row) std::rethrow_exception(chains.failures[chain].error);
+    }
+
+    // Rows [begin, end) of the block on one job. A row reads the history its
+    // reader retained when the unbatched reader reached it, then the
+    // fixed-time values of the selected laws at its physical time.
+    void prepare_rows(std::size_t job, std::size_t begin, std::size_t end) noexcept {
+        auto& failure = job_failures[job];
+        failure.ran = true;
+        auto* reader = job ? &readers[job - 1] : nullptr;
+        std::size_t row = begin;
+        bool in_path = false;
+        try {
+            for (; row < end; ++row) {
+                const auto n = block.first + row;
+                const auto physical_time = physical_time_at(n);
+                in_path = false;
+                // The sequential pass repeats this row's coordinates and
+                // reports their failure itself, before it reads the row.
+                Path path;
+                try { path = path_at(n, physical_time); } catch (...) { return; }
+                const auto stop = geometry.source_samples ? std::max(block.source_begin, path.needed + 1) : 0;
+                const auto first = stop > retained_history ? stop - retained_history : 0;
+                block.direct[row] = interpolate(tx_history, first, stop, path.direct);
+                block.delayed[row] = interpolate(tx_history, first, stop, path.delayed);
+                if (!block.path_gain.empty()) {
+                    in_path = true;
+                    auto& direct = reader ? (*reader->rays)[0] : *random_path[0];
+                    auto& delayed = reader ? (*reader->rays)[1] : *random_path[1];
+                    const auto direct_gain = direct.value(physical_time);
+                    block.path_gain[row] = {direct_gain, delayed.value(physical_time)};
+                    in_path = false;
+                }
+                if (!block.excursion.empty())
+                    block.excursion[row] = reader ? (*reader->excursions)(physical_time) :
+                        dispersive_perturbation->random_excursions_at(physical_time);
+            }
+        } catch (...) {
+            failure = {row, in_path, true, std::current_exception()};
+        }
+    }
+
+    // Generates the source history of the next rows and evaluates their
+    // index-pure terms. following is the size of the block this read holds
+    // after it. Returns the number of rows the block holds.
+    std::size_t prepare(std::size_t wanted, std::size_t following) {
+        block.first = cursor;
+        block.source_begin = reader_source_end;
+        block.source_failure_row = SIZE_MAX;
+        block.source_failure = nullptr;
+        block.failure = {};
+        // The last row needs the most source history. Shorten a block whose
+        // advance would overwrite samples that its first rows still read.
+        auto rows = wanted;
+        std::optional<Path> last;
+        for (;; rows = (rows + 1) / 2) {
+            try {
+                last = path_at(cursor + rows - 1, physical_time_at(cursor + rows - 1));
+            } catch (...) {
+                // A single row that cannot be placed reports that when the
+                // sequential pass reaches it; nothing is prepared for it.
+                if (rows == 1) {
+                    // Its echo state precedes its coordinates, as in a row
+                    // that the reader evaluates alone.
+                    for (auto& failure : chains.failures) failure = {};
+                    if (chained && bounded_spread) run_chain(echo_chain, 1, 0);
+                    return 1;
+                }
+                continue;
+            }
+            if (rows == 1 || last->needed < reader_source_end ||
+                last->needed - reader_source_end < block_lookahead) break;
+        }
+        auto ready = rows;
+        try {
+            if (!ahead_failure) generate_tx_until(last->needed);
+            else if (!source_ready(*last)) std::rethrow_exception(std::exchange(ahead_failure, nullptr));
+        } catch (...) {
+            // The reader met this failure at the first row that needs the
+            // sample. Earlier rows remain complete and are delivered first.
+            block.source_failure = std::current_exception();
+            for (ready = 0; ready < rows; ++ready) {
+                try {
+                    if (!source_ready(path_at(cursor + ready, physical_time_at(cursor + ready)))) break;
+                } catch (...) { break; }
+            }
+            if (ready < rows) block.source_failure_row = ready;
+            rows = std::min(rows, ready + 1);
+        }
+        reader_source_end = std::max(reader_source_end, std::min(last->needed + 1, tx_next));
+
+        // The jobs of this block: the sequential states that run ahead, then
+        // its rows. The longest come first so that they start first.
+        std::array<Chain, chain_count> sequence{};
+        std::size_t chain_jobs = 0;
+        std::uint64_t ahead_needed = 0;
+        for (auto& failure : chains.failures) failure = {};
+        if (chained) {
+            if (following && !block.source_failure && !ahead_failure) {
+                try {
+                    const auto n = cursor + rows + following - 1;
+                    ahead_needed = path_at(n, physical_time_at(n)).needed;
+                    if (ahead_needed >= tx_next && ahead_needed - reader_source_end < block_lookahead)
+                        sequence[chain_jobs++] = ahead_chain;
+                } catch (...) {}
+            }
+            sequence[chain_jobs++] = receive_chain;
+            if (bounded_spread) sequence[chain_jobs++] = echo_chain;
+            if (common_doppler_wander) sequence[chain_jobs++] = common_chain;
+            if (effects.noise_enabled) sequence[chain_jobs++] = thermal_chain;
+        }
+        const auto row_jobs = std::clamp<std::size_t>(ready / 64, 1, lane_jobs);
+        for (std::size_t job = 0; job < row_jobs; ++job) job_failures[job] = {};
+        const auto jobs = chain_jobs + row_jobs;
+        const auto run = [&](std::size_t job) {
+            if (job < chain_jobs) run_chain(sequence[job], rows, ahead_needed);
+            else if (job < jobs) prepare_rows(job - chain_jobs, ready * (job - chain_jobs) / row_jobs,
+                                              ready * (job - chain_jobs + 1) / row_jobs);
+        };
+        // A short block does not repay handing its jobs to other workers.
+        if (jobs == 1 || rows < 64) for (std::size_t job = 0; job < jobs; ++job) run(job);
+        else config.lanes.run(jobs, run);
+        for (std::size_t job = 0; job < chain_jobs; ++job)
+            require(chains.failures[sequence[job]].ran, "streaming channel lanes did not run every job");
+        for (std::size_t job = 0; job < row_jobs; ++job) {
+            require(job_failures[job].ran, "streaming channel lanes did not run every job");
+            if (job_failures[job].error && job_failures[job].row < block.failure.row)
+                block.failure = job_failures[job];
+        }
+        if (auto failure = std::exchange(chains.failures[ahead_chain].error, nullptr)) ahead_failure = failure;
+        return rows;
+    }
+
+    Complex process_one(std::uint64_t n, std::size_t row, bool& erased) {
+        const long double physical_time = physical_time_at(n);
+        const double t = static_cast<double>(physical_time);
+        if (chained && bounded_spread) chain_reached(echo_chain, row);
+        const auto bounded_state = !bounded_spread ? std::nullopt :
+            std::optional<detail::BoundedRandomSpread::State>(chained ? chains.echo[row] :
+                                                              bounded_spread->at(physical_time));
+        const long double delay_seconds = path_at(n, physical_time).delay_seconds;
+        if (row == block.source_failure_row) std::rethrow_exception(block.source_failure);
+        Complex direct = block.direct[row];
+        Complex delayed = block.delayed[row];
 
         // A shared public nominal origin fixes padding alignment without
         // recentering the receiver from simulated TX arrival/clock truth.
         const double receive_calendar = static_cast<double>(physical_time +
             effects.retune_offset_seconds - hop_origin_seconds);
-        const double direct_calendar = static_cast<double>(physical_time -
-            effects.timing_offset_seconds - hop_origin_seconds);
-        const double delayed_calendar = static_cast<double>(physical_time -
-            effects.timing_offset_seconds - delay_seconds - hop_origin_seconds);
-        const double rx_hop = hop_at(effects, receive_calendar);
-        const double direct_hop = hop_at(effects, direct_calendar);
-        const double delayed_hop = hop_at(effects, delayed_calendar);
-        const double limit = effects.occupied_bandwidth_hz * .5;
-        bool out_of_band = false;
-        if (std::abs(direct_hop - rx_hop) > limit) { direct = {}; out_of_band = true; }
-        if (std::abs(delayed_hop - rx_hop) > limit) { delayed = {}; out_of_band = true; }
-        if (out_of_band) ++stats.out_of_passband_samples;
-        const auto direct_phase = tau * std::remainder(static_cast<double>(
-            hop_cycles(effects, direct_calendar, hop_prefix) - hop_cycles(effects, receive_calendar, hop_prefix)), 1.0);
-        const auto delayed_phase = tau * std::remainder(static_cast<double>(
-            hop_cycles(effects, delayed_calendar, hop_prefix) - hop_cycles(effects, receive_calendar, hop_prefix)), 1.0);
-        direct *= std::polar(1.0, direct_phase);
-        delayed *= std::polar(1.0, delayed_phase);
-        if(random_delay || bounded_state) {
-            const auto cycles=std::remainder((static_cast<long double>(effects.rf_hz)+
-                effects.nominal_conversion_if_hz)*delay_seconds,1.L);
-            delayed*=std::polar(1.0,-tau*static_cast<double>(cycles));
-        } else delayed *= std::polar(1.0, -tau * std::remainder(effects.rf_hz *
-            effects.spread_delay_ms * .001, 1.0));
+        double rx_hop = 0;
+        if (effects.fhss) {
+            const double direct_calendar = static_cast<double>(physical_time -
+                effects.timing_offset_seconds - hop_origin_seconds);
+            const double delayed_calendar = static_cast<double>(physical_time -
+                effects.timing_offset_seconds - delay_seconds - hop_origin_seconds);
+            rx_hop = hop_at(effects, receive_calendar);
+            const double direct_hop = hop_at(effects, direct_calendar);
+            const double delayed_hop = hop_at(effects, delayed_calendar);
+            const double limit = effects.occupied_bandwidth_hz * .5;
+            bool out_of_band = false;
+            if (std::abs(direct_hop - rx_hop) > limit) { direct = {}; out_of_band = true; }
+            if (std::abs(delayed_hop - rx_hop) > limit) { delayed = {}; out_of_band = true; }
+            if (out_of_band) ++stats.out_of_passband_samples;
+            const auto receive_cycles = hop_cycles(effects, receive_calendar, hop_prefix);
+            const auto direct_phase = tau * std::remainder(static_cast<double>(
+                hop_cycles(effects, direct_calendar, hop_prefix) - receive_cycles), 1.0);
+            const auto delayed_phase = tau * std::remainder(static_cast<double>(
+                hop_cycles(effects, delayed_calendar, hop_prefix) - receive_cycles), 1.0);
+            direct *= std::polar(1.0, direct_phase);
+            delayed *= std::polar(1.0, delayed_phase);
+        } else {
+            // Every hop is zero: nothing leaves the passband and both rays
+            // take the rotation of two equal hop calendars.
+            direct *= still_hop_rotation;
+            delayed *= still_hop_rotation;
+        }
+        delayed *= !bounded_state && random_delay ? delay_rotation(delay_seconds) : fixed_delay_rotation;
         if (config.path_evolution.ray_coherence_seconds > 0) {
             direct *= direct_gain;
             delayed *= delayed_gain;
@@ -902,8 +1302,9 @@ struct StreamingChannel::Impl {
             delayed *= gains[1];
         }
         if(random_path[0]) {
-            direct*=random_path[0]->value(physical_time);
-            delayed*=random_path[1]->value(physical_time);
+            if (row == block.failure.row && block.failure.in_path) std::rethrow_exception(block.failure.error);
+            direct*=block.path_gain[row][0];
+            delayed*=block.path_gain[row][1];
         }
         Complex propagated;
         if (bounded_state) {
@@ -915,7 +1316,7 @@ struct StreamingChannel::Impl {
                 direct *= bounded_state->direct_gain;
                 delayed *= bounded_state->echo_gain;
             }
-            delayed *= std::polar(1., bounded_state->phase_radians);
+            delayed *= chained ? chains.echo_rotation[row] : std::polar(1., bounded_state->phase_radians);
             propagated = direct + delayed;
             auto& diagnostic = *stats.bounded_spread;
             if (!diagnostic.fixed_direct_power_fraction) {
@@ -934,15 +1335,21 @@ struct StreamingChannel::Impl {
         }
         double common_doppler_hz = 0;
         if (common_doppler_wander) {
-            const auto state = common_doppler_wander->at(physical_time);
-            common_doppler_hz = state.doppler_hz;
-            propagated *= std::polar(1., state.phase_radians);
+            if (chained) {
+                chain_reached(common_chain, row);
+                common_doppler_hz = chains.common_doppler_hz[row];
+                propagated *= chains.common_rotation[row];
+            } else {
+                const auto state = common_doppler_wander->at(physical_time);
+                common_doppler_hz = state.doppler_hz;
+                propagated *= std::polar(1., state.phase_radians);
+            }
             auto& diagnostic = *stats.common_doppler_wander;
             if (diagnostic.processed_rows == 0)
-                diagnostic.minimum_hz = diagnostic.maximum_hz = state.doppler_hz;
+                diagnostic.minimum_hz = diagnostic.maximum_hz = common_doppler_hz;
             else {
-                diagnostic.minimum_hz = std::min(diagnostic.minimum_hz,state.doppler_hz);
-                diagnostic.maximum_hz = std::max(diagnostic.maximum_hz,state.doppler_hz);
+                diagnostic.minimum_hz = std::min(diagnostic.minimum_hz,common_doppler_hz);
+                diagnostic.maximum_hz = std::max(diagnostic.maximum_hz,common_doppler_hz);
             }
             ++diagnostic.processed_rows;
         }
@@ -969,30 +1376,20 @@ struct StreamingChannel::Impl {
         if (dispersive_perturbation) {
             auto& diagnostic = *stats.selective_perturbation;
             diagnostic.pre_selective_energy_samples += std::norm(propagated);
-            propagated = dispersive_perturbation->process(propagated,physical_time);
+            if (block.excursion.empty()) propagated = dispersive_perturbation->process(propagated,physical_time);
+            else {
+                if (row == block.failure.row) std::rethrow_exception(block.failure.error);
+                propagated = dispersive_perturbation->process(propagated,block.excursion[row]);
+            }
             diagnostic.post_selective_energy_samples += std::norm(propagated);
             ++diagnostic.processed_rows;
         }
 
+        if (chained) chain_reached(receive_chain, row);
         const auto rx_dwell = dwell_index(receive_calendar, effects.dwell_seconds);
-        if (effects.fhss && rx_dwell != previous_rx_dwell) {
-            rx_osc.phase += keyed_phase(root_seed(config.oscillator_seed,effects.seed) ^ 0x5258484f50504841ULL,
-                                        rx_dwell, 0x5258504841534531ULL);
-            previous_rx_dwell = rx_dwell;
-        }
-        const double rf_error = (effects.rf_hz + rx_hop) *
-            (effects.rx.rf_ppm + effects.rx.rf_drift_ppm_per_second * t) * 1e-6 -
-            effects.static_doppler_hz;
-        rx_osc.phase += oscillator_phase_step(rx_osc, effects.rx, config.rx_spectrum,
-            rx_spectrum_rng, 0, effects.nominal_conversion_if_hz,
-            rx_scale, t, dt_rx) + tau * rf_error * dt_rx;
-        rx_osc.phase = std::remainder(rx_osc.phase, tau);
-        const double white_pm = config.rx_spectrum.white_pm_rms_radians * rx_spectrum_rng.gaussian();
-        propagated *= std::polar(1.0, -rx_osc.phase - white_pm);
+        propagated *= chained ? chains.receive_rotation[row] : receive_rotation(t, rx_hop, rx_dwell);
         stats.signal_energy += std::norm(propagated);
-        const double sigma = std::sqrt(config.complex_noise_variance * .5);
-        if (effects.noise_enabled)
-            propagated += Complex{sigma * thermal_rng.gaussian(), sigma * thermal_rng.gaussian()};
+        if (effects.noise_enabled) propagated += chained ? chains.thermal[row] : thermal_noise();
         const auto& front = config.frontend;
         if (front.tone_amplitude > 0) {
             const auto d = dwell_index(t, effects.dwell_seconds);
@@ -1035,11 +1432,10 @@ struct StreamingChannel::Impl {
         }
         // Preserve the established envelope-only experiment coordinates;
         // actual retuning uses windows measured from the RF dwell calendar.
-        const auto receiver_dwell = dwell_index(receive_calendar, effects.dwell_seconds);
-        const bool missed_dwell = receiver_dwell >= 0 &&
+        const bool missed_dwell = rx_dwell >= 0 &&
             std::binary_search(config.missed_receiver_dwell_indices.begin(),
                                config.missed_receiver_dwell_indices.end(),
-                               static_cast<std::uint64_t>(receiver_dwell));
+                               static_cast<std::uint64_t>(rx_dwell));
         erased = dropout_at(effects, effects.fhss ?
             static_cast<double>(physical_time - hop_origin_seconds) : t) || missed_dwell;
         if (erased) { propagated = {}; ++stats.erased_samples; }
@@ -1053,11 +1449,21 @@ struct StreamingChannel::Impl {
                 "stream channel validity size differs from output");
         require(output.size() <= config.maximum_chunk_samples,
                 "stream channel read exceeds its configured chunk bound");
+        if (ended) std::rethrow_exception(ended);
         const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(output.size(), total - cursor));
-        for (std::size_t i = 0; i < count; ++i) {
-            bool erased = false;
-            output[i] = process_one(cursor++, erased);
-            if (!validity.empty()) validity[i] = erased ? 0 : 1;
+        try {
+            for (std::size_t i = 0; i < count;) {
+                const auto wanted = std::min(block_rows, count - i);
+                const auto rows = prepare(wanted, std::min(block_rows, count - i - wanted));
+                for (std::size_t row = 0; row < rows; ++row, ++i) {
+                    bool erased = false;
+                    output[i] = process_one(cursor++, row, erased);
+                    if (!validity.empty()) validity[i] = erased ? 0 : 1;
+                }
+            }
+        } catch (...) {
+            if (chained) ended = std::current_exception();
+            throw;
         }
         if (!validity.empty()) std::fill(validity.begin() + static_cast<std::ptrdiff_t>(count), validity.end(), 0);
         return count;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "datapump/types.hpp"
+#include "triad_coordinate.hpp"
 
 #include <array>
 #include <cmath>
@@ -81,8 +82,7 @@ public:
         const auto coordinate = seconds * clock_ + origin_;
         if (!(std::isfinite(coordinate) && coordinate > INT64_MIN + 64.L && coordinate < INT64_MAX - 64.L))
             throw Error("fixed-time Gaussian process coordinate overflow");
-        const auto floor = std::floor(coordinate);
-        const auto index = static_cast<std::int64_t>(floor);
+        const auto [floor, index] = floor_whole(coordinate);
         const double u = static_cast<double>(coordinate - floor);
         // Catmull-Rom cardinal cubic, continuous first derivative at knots.
         const std::array<double, 4> w{-.5*u + u*u - .5*u*u*u,
@@ -140,8 +140,7 @@ public:
         const auto coordinate = seconds / interval_ + origin_;
         if (!(std::isfinite(coordinate) && coordinate > INT64_MIN + 2.L && coordinate < INT64_MAX - 2.L))
             throw Error("random delay coordinate overflow");
-        const auto floor = std::floor(coordinate);
-        const auto index = static_cast<std::int64_t>(floor);
+        const auto [floor, index] = floor_whole(coordinate);
         const double u = static_cast<double>(coordinate - floor);
         const double s = u*u*u*(10 + u*(-15 + 6*u));
         const double a = 2*random_process_uniform(seed_, index)-1;
@@ -156,28 +155,43 @@ public:
 // knots with zero first and second derivatives at each boundary. The echo
 // ratio and frequency stay inside their declared limits by construction.
 class BoundedRandomSpread {
-    std::uint64_t seed_;
+    // One curve through counter-keyed knots. A query inside the interval of
+    // the previous one reuses its two knot values, which depend on the knot
+    // index alone.
+    class Curve {
+        std::uint64_t seed_;
+        double origin_;
+        std::int64_t index_ = 0;
+        bool known_ = false;
+        double a_ = 0, b_ = 0;
+    public:
+        explicit Curve(std::uint64_t seed)
+            : seed_(seed), origin_(random_process_uniform(seed ^ 0x4b4e4f544f524947ULL, 0)) {}
+        // knots is physical seconds divided by the knot interval.
+        double operator()(long double knots) {
+            const long double coordinate = knots + origin_;
+            if (!(std::isfinite(coordinate) && coordinate > INT64_MIN + 2.L &&
+                  coordinate < INT64_MAX - 2.L))
+                throw Error("bounded spread physical-time coordinate overflow");
+            const auto [floor, index] = floor_whole(coordinate);
+            const double u = static_cast<double>(coordinate - floor);
+            const double s = u*u*u*(10 + u*(-15 + 6*u));
+            if (!known_ || index != index_) {
+                a_ = 2*random_process_uniform(seed_, index)-1;
+                b_ = 2*random_process_uniform(seed_, index+1)-1;
+                index_ = index;
+                known_ = true;
+            }
+            return a_+(b_-a_)*s;
+        }
+    };
     double maximum_delay_, doppler_bound_, interval_;
     long double initial_phase_;
     double delay_;
+    Curve ratio_, doppler_;
     long double previous_time_ = 0, phase_cycles_ = 0;
     double previous_doppler_ = 0;
     bool initialized_ = false;
-
-    static double curve(std::uint64_t seed, long double seconds, double interval) {
-        const long double coordinate = seconds / interval +
-            random_process_uniform(seed ^ 0x4b4e4f544f524947ULL, 0);
-        if (!(std::isfinite(coordinate) && coordinate > INT64_MIN + 2.L &&
-              coordinate < INT64_MAX - 2.L))
-            throw Error("bounded spread physical-time coordinate overflow");
-        const auto floor = std::floor(coordinate);
-        const auto index = static_cast<std::int64_t>(floor);
-        const double u = static_cast<double>(coordinate - floor);
-        const double s = u*u*u*(10 + u*(-15 + 6*u));
-        const double a = 2*random_process_uniform(seed, index)-1;
-        const double b = 2*random_process_uniform(seed, index+1)-1;
-        return a+(b-a)*s;
-    }
 public:
     struct State {
         double delay_seconds = 0, echo_ratio = 0, doppler_hz = 0;
@@ -186,10 +200,11 @@ public:
 
     BoundedRandomSpread(double maximum_delay, double doppler_bound,
                         double interval, std::uint64_t seed)
-        : seed_(seed), maximum_delay_(maximum_delay),
+        : maximum_delay_(maximum_delay),
           doppler_bound_(std::abs(doppler_bound)), interval_(interval),
           initial_phase_(random_process_uniform(seed ^ 0x5350524541445048ULL, 0)),
-          delay_(maximum_delay*random_process_uniform(seed ^ 0x5350524541445441ULL, 0)) {
+          delay_(maximum_delay*random_process_uniform(seed ^ 0x5350524541445441ULL, 0)),
+          ratio_(seed ^ 0x535052454144414dULL), doppler_(seed ^ 0x5350524541444651ULL) {
         if (!(std::isfinite(maximum_delay_) && maximum_delay_ >= 0 &&
               std::isfinite(doppler_bound_) && doppler_bound_ >= 0 &&
               std::isfinite(interval_) && interval_ > 0))
@@ -199,9 +214,9 @@ public:
     State at(long double seconds) {
         if (!std::isfinite(seconds) || (initialized_ && seconds < previous_time_))
             throw Error("bounded spread physical time must be finite and increasing");
-        const double ratio = .5*(curve(seed_ ^ 0x535052454144414dULL, seconds, interval_)+1);
-        const double doppler = doppler_bound_ *
-            curve(seed_ ^ 0x5350524541444651ULL, seconds, interval_);
+        const long double knots = seconds / interval_;
+        const double ratio = .5*(ratio_(knots)+1);
+        const double doppler = doppler_bound_ * doppler_(knots);
         if (initialized_) {
             phase_cycles_ = std::remainder(phase_cycles_ +
                 .5L*(previous_doppler_+doppler)*(seconds-previous_time_), 1.L);
@@ -212,8 +227,9 @@ public:
         const double normalization = 1/std::sqrt(1+ratio*ratio);
         const double echo_weight = ratio*normalization;
         const double direct_weight = normalization;
-        const double phase = std::remainder(static_cast<double>(initial_phase_+
-            std::remainder(phase_cycles_, 1.L)), 1.0)*2*std::numbers::pi;
+        // phase_cycles_ is zero or a remainder, so it is already reduced.
+        const double phase = std::remainder(static_cast<double>(initial_phase_+phase_cycles_), 1.0)*
+            2*std::numbers::pi;
         return {delay_, ratio, doppler, direct_weight, echo_weight, phase};
     }
     double excess_delay_seconds() const { return delay_; }

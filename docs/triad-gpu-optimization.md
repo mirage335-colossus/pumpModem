@@ -27,6 +27,8 @@ The Blackwell Vulkan/OpenCL receiver now scores its broad frequency search
 with a [dense FP4 search](#dense-fp4-coarse-search-and-device-template-bank)
 whose retained peaks are rescored from unquantized templates.
 The resident fine projection described below remains in the native receiver.
+Its batches now [render their dense source tiles on the device and hold a
+window of dispatches](#device-rendered-fine-tiles-and-resident-windows).
 That historical diagnostic failure alone is not a universal precision veto:
 current qualification compares complete cost, physical reception, false alarms
 and measured sensitivity loss with the user's proportional tradeoff in the
@@ -55,10 +57,13 @@ benchmark allocations. An eligible fine owner can temporarily have fewer
 lanes than the full receiver. The current automatic Vulkan/OpenCL route
 selects the [dense FP4 coarse search](#dense-fp4-coarse-search-and-device-template-bank)
 for eligible frequency-tile sessions and resident FP4 for the qualified fine
-geometry at every worker allocation. Start further work from its
-[ranked remaining costs](#remaining-costs-after-the-dense-search): fine
-processing is now most of a slot, and the simulator costs more than the
-receiver. The sections below it record the earlier fine-projection work.
+geometry at every worker allocation. Fine processing was most of a slot
+after the dense search. Its host tile rendering and per-dispatch round trips
+are removed by [device-rendered tiles and resident windows](#device-rendered-fine-tiles-and-resident-windows),
+which no device has measured yet. Start further work there, with its device
+attribution and [remaining fine costs](#remaining-fine-costs), then the
+[ranked costs after the dense search](#remaining-costs-after-the-dense-search).
+The sections below record the earlier fine-projection work.
 [Precision policy](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling)
 · [Worker allocation](development.md#receiver-cpu-allocation).
 
@@ -68,8 +73,8 @@ receiver. The sections below it record the earlier fine-projection work.
 | --- | --- |
 | Source, channel and receiver service | The [native probe](../tools/triad-receiver-probe.cpp) generates the input and replays it through the [stream receiver](../src/triad_stream_receiver.cpp). Application scheduling, ordered commitments, codec and physical completion remain native. Inspect `score_slot_coarse` and `score_slot_fine` in [the receiver](../src/triad_receiver.cpp) and `stream_run` in the probe for timing boundaries. |
 | Coarse search | On Blackwell, an eligible session uploads keyed coefficients and the channelized observation, and the [dense FP4 search](../src/triad_opencl_nvfp4_coarse.cpp) renders the bank, scores every row and returns rescored arrival frontiers through [its adapter](../src/triad_opencl_coarse_bulk.cpp). Other sessions use the following route. [Coarse preparation](../src/triad_receiver_coarse.cpp) has native observation channelization, keyed template bank, exact cubic warp and reused Doppler phase. `Projection::apply` performs native overlap-add FFT convolution on the filtered Vulkan route. [Vulkan](../src/triad_vulkan_backend.cpp) transforms the bank and rotated observations, forms correlation products, does inverse FFT and quadratic scoring, then compacts the exact peak frontier before readback. The matched broad geometry has 78 workspaces, 15 frequencies and 3,377 arrivals, with two rays per template. |
-| Fine source and ownership | `FineSession` in [fine processing](../src/triad_receiver_fine.cpp) prepares receiver observations and advances tracking and likelihood state. [MappedBasis](../src/triad_receiver_basis.cpp) produces and pins immutable keyed source tiles and exports the native mappings. It groups compatible ready blocks without advancing later state early. Candidate sets larger than one GPU submission retain every candidate. |
-| OpenCL resident work | [Host projection and staging](../src/triad_opencl_nvfp4_projection.cpp) owns the queue, tile cache, descriptor flush, uploads and readback. [Device kernels](../src/triad_opencl_nvfp4_kernels.cu) render the paired maps and determine their scale. The FP4 path packs templates and coefficients and runs block-scaled E2M1 Tensor Core projection with FP32 accumulation. The [resident FFT](../src/triad_opencl_fine_fft.cuh) uses FP32 arithmetic and gathers the same bins. Both compute FP64 sufficient statistics on the device. The receiver reads those statistics and applies native state updates. |
+| Fine source and ownership | `FineSession` in [fine processing](../src/triad_receiver_fine.cpp) prepares receiver observations and advances tracking and likelihood state. [MappedBasis](../src/triad_receiver_basis.cpp) exports the native mappings. For a backend that renders tiles it supplies each column's public tile address and the keyed coefficients of a lane; for every other consumer it produces and pins immutable keyed source tiles. The session submits a window of ready fixed-affine dispatches and advances each state through them in public order. Candidate sets larger than one GPU submission retain every candidate. |
+| OpenCL resident work | The [fine adapter](../src/triad_opencl_fine_bulk.cpp) leases the session and credits its receipt. [Host projection and staging](../src/triad_opencl_nvfp4_projection.cpp) owns the queue, tile cache, tile requests, descriptor flush, uploads and readback. [Device kernels](../src/triad_opencl_nvfp4_kernels.cu) render addressed dense tiles in FP64, render the paired maps and determine their scale. The FP4 path packs templates and coefficients and runs block-scaled E2M1 Tensor Core projection with FP32 accumulation. The [resident FFT](../src/triad_opencl_fine_fft.cuh) uses FP32 arithmetic and gathers the same bins. Both compute FP64 sufficient statistics on the device. The receiver reads those statistics and applies native state updates. |
 | Fallback and receipts | [Vulkan routing](../src/triad_vulkan_backend.cpp) defines public geometry, shared device admission and native terminal, Helper-taper or workspace fallback. [Bulk work](../src/triad_receiver_bulk.hpp) defines what the counters cover. The distinct native CUDA path lives in [the CUDA backend](../src/triad_tensor_backend.cpp) and supports direct cuFFT and NVFP4 controls. Its results qualify that backend and runtime. |
 
 The latest resident gain shortened the work around the matrix. Use the
@@ -848,20 +853,28 @@ remaining host and round-trip costs below, not of the product kernel.
 
 In measured order for the matched fixtures:
 
-1. **Fine processing: 0.37–0.73 s of a 0.45–0.82 s automatic slot.** Each slot makes
-   405 resident submissions, renders source tiles on the owning host thread,
-   uploads 56–92 MB and blocks on every result. It is the same at 4 and 24
-   workers. The nominal fixed-affine mappings do not depend on earlier
-   statistics, and a dense source tile is the lane raster the coarse search
-   already renders on the device. Rendering tiles on the device and
-   submitting a slot window are the direct next steps.
+1. **Fine processing: 0.37–0.73 s of a 0.45–0.82 s automatic slot.** Each slot made
+   405 resident submissions, rendered source tiles on the owning host thread,
+   uploaded 56–92 MB and blocked on every result. It was the same at 4 and 24
+   workers. [Device-rendered tiles and resident windows](#device-rendered-fine-tiles-and-resident-windows)
+   remove the host rendering and seven of every eight round trips. Their
+   device time is unmeasured.
 2. **The simulator: 2.5–6.2 s per simulated slot, on one thread.** A profile
    of one simulated slot attributes about half of the simulator's time to
    `StreamingChannel::process_one` itself and most of the rest to the bounded
    spread, interpolation and source evaluation it calls.
    It dominates a developer's simulation once the receiver takes under a
-   second. The same simulator objects ran about 40% apart in two binaries.
-   [Channel contracts](channel-models.md) apply to any change.
+   second. The same simulator objects ran about 40% apart in two binaries,
+   which x87 rounding-mode switches explain.
+   [Mechanism](triad-performance.md#code-placement-and-x87-rounding-mode-switches).
+   The simulator after `c02b726e` keeps every capture hash, removes those
+   switches from its sample loops and lends the probe's workers to the
+   channel. On the Ryzen 5 PRO 5650U the severe slot fell from 5.0 s to 2.7 s
+   on one thread and 1.0–1.1 s with twelve or more workers. It has not run on
+   the Blackwell host. With many workers the source and transmit oscillator
+   chain of one thread remains.
+   [Channel contracts and changes](channel-models.md#stream-evaluation-workers-and-capture-identity) ·
+   [measurements](validation.md#simulator-throughput-and-capture-identity--20-november-2026).
 3. **The device FIR: 52 of 63 ms of template synthesis.** It is one scalar
    FP32 dot product per output row. Wider loads, shared taps or an
    equivalent transform need the same column-fidelity check.
@@ -906,10 +919,204 @@ same fixture, launcher and stock worker environment.
 - A deployed worker refuses a second deployment of different source. Copy
   changed files to the deployed tree, rebuild the two targets and record
   source and binary hashes with the results.
-- Check kernel changes first with `triad_opencl_nvfp4_emulated` and
-  `triad_opencl_coarse_session_emulated`. They caught every layout error
+- Check kernel changes first with `triad_opencl_nvfp4_emulated`,
+  `triad_opencl_coarse_session_emulated` and
+  `triad_opencl_fine_session_emulated`. They caught every layout error
   before a device run. They cannot reach the Vulkan backend's device host:
   the pinned backend's missing lease budget appeared only on the device.
+  They also do not compile the kernels with NVCC. A new kernel entry needs
+  its row in the [PTX embedding table](../tools/triad_opencl_embed_ptx.py).
+
+## Device-rendered fine tiles and resident windows
+
+After the dense search the resident fine stage was most of a slot. Each of
+its 405 submissions held two blocks. The owning host thread rendered every
+dense source tile, uploaded it, and waited for each result. Two changes
+remove that host work. No device has run them: the results below are from
+the kernel emulation and from host timers, and the device split is the
+[first measurement to make](#measure-the-fine-stage-on-the-device).
+[Fine adapter](../src/triad_opencl_fine_bulk.cpp) ·
+[session](../src/triad_opencl_nvfp4_projection.cpp) ·
+[kernels](../src/triad_opencl_nvfp4_kernels.cu) ·
+[window scheduling](../src/triad_receiver_fine.cpp) ·
+[validation record](validation.md#resident-fine-tiles-and-windows--20-november-2026).
+
+**Tiles.** A dense fine tile is the keyed waveform of one epoch and bit on
+the basis's dense grid. A backend that renders tiles now receives each mapped
+column's public tile address in place of host samples, and `MappedBasis`
+neither renders, pins nor caches that tile. The session uploads the pulse
+table, the public waveform parameters and each addressed lane's keyed
+coefficients once. A tile that its cache lacks costs one 16-byte request.
+The kernel renders in FP64, in the operation order of the native renderer,
+and the unchanged FP64 mapper interpolates the result. Rendered tiles match
+native tiles within 5.5e-14 to 2.5e-12 of the tile peak for continuous,
+resampled, hop-gated and burst waveforms. Columns that take the exact native
+fallback are still uploaded as samples, and every other backend keeps native
+tiles. A source with more than 32,768 cells keeps native tiles.
+
+**Windows.** Ordinary fine scoring runs the fixed-affine lane, whose maps do
+not depend on earlier statistics. The session therefore submits a window of
+dispatches in one call: 16 blocks by default, 2 to 64 by option. A lane
+projects the next window's observations meanwhile. Each state then advances
+through the window's dispatches in public order as one leaf, while the owner
+already stages and submits the next window, and the owner closes the
+dispatches in order afterwards. Statistics, state updates and receipts equal
+those of single dispatches: a native test with a deterministic backend gives
+bit-identical evidence for windows of 4, 6, 16 and 64 blocks, with
+checkpoints inside a window and with an erased block. The adaptive
+diagnostic lane, whose maps follow its pruning, keeps one dispatch per call.
+A block outside the resident geometry, such as the enlarged terminal block,
+takes the native route in its place in the window. A lease too small for
+the window falls back to two-block batches, and no lease at all to native
+statistics with a named reason.
+
+**Smaller transfers.** The mapping descriptor fell from 176 to 64 bytes: a
+block's rows span at most a few tiles, so one byte names each cache slot.
+Clearing the batch buffer became a kernel that resets each lane's trailer,
+because mapped and uploaded lanes are written in full. Lanes that received
+no column are zeroed by a second kernel only when one exists.
+
+### Counts for the matched slot
+
+A slot of the [matched 3.6 Hz geometry](#reproduce-the-matched-blackwell-runs)
+has 810 blocks and 72 fixed-affine states: 809 resident blocks and one
+native terminal block. The same session code ran against a stand-in device
+whose kernels do nothing. Its single-dispatch control reproduces the counts
+of the device receipts: 405 batches, 552 or 276 tiles and 10,251,648
+readback bytes.
+
+| Per slot | Before, device receipts | Single dispatches, native tiles | Windows of 16, device tiles |
+| --- | ---: | ---: | ---: |
+| Resident batches and blocking reads | 405 | 405 | 51 |
+| Blocking writes | 920–1,043 | 951 | 157–159 |
+| Kernel dispatches | not recorded | 2,433 | 357 |
+| Upload bytes, two keyed epochs | 91.96 MB | 79,882,120 | 7,577,824 |
+| Upload bytes, one keyed epoch | 55.77 MB | 43,706,248 | 7,564,096 |
+| Dense tiles uploaded / rendered on the device | 552 or 276 / 0 | 552 or 276 / 0 | 0 / 552 or 276 |
+| Host tile renders | 276 or 138 | 276 or 138 | 0 |
+| Readback bytes | 10,251,648 | 10,251,648 | 10,251,648 |
+| Device lease per fine owner (bytes) | 16,811,776 | 16,748,032 | 74,236,416 |
+
+The middle column differs from the earlier binary only by the 64-byte
+descriptor. Windows of 32 and 64 blocks give 26 and 13 batches under leases
+of 139,778,816 and 270,863,616 bytes. The native terminal block still fills
+one tile per keyed epoch.
+
+### Host time without a device
+
+The stand-in bounds what the host contributes. It says nothing about device
+time, and its transfers are memory copies. On the Ryzen 5 PRO 5650U
+development host a slot took, as the best of five in one alternating run:
+
+| Keyed epochs, software workers | Single dispatches, native tiles (s) | Windows of 16, device tiles (s) |
+| --- | ---: | ---: |
+| Two, 4 | 0.680 | 0.068 |
+| Two, 12 | 0.662 | 0.055 |
+| Two, 24 | 0.675 | 0.059 |
+| One, 4 | 0.379 | 0.066 |
+| One, 12 | 0.381 | 0.056 |
+| One, 24 | 0.402 | 0.058 |
+
+Of the two-epoch control, native tile rendering was 0.56–0.57 s: 276
+renders of two 8,192-sample tiles at about 2 ms each. Two earlier builds
+with the same renderer source measured 0.78 and 1.12 s for this control at
+12 workers, with 0.66 and 0.99 s of rendering. The native renderer switches
+the x87 rounding mode eight times per point, and
+[that cost follows the link layout](triad-performance.md#code-placement-and-x87-rounding-mode-switches).
+Mapping and pinning took about 0.03 s, descriptor staging 0.02 s and the
+copies 0.01 s. The one-epoch control renders half as many tiles.
+
+With windows and device tiles the owner computes tile addresses in
+0.022–0.025 s and stages descriptors in 0.013–0.015 s. The states take
+0.11–0.19 s of processor time on the lanes beside that work. With 12 or 24
+software workers the owner then waits 0.002–0.004 s for them. With four,
+three lanes carry them and the owner waits about 0.02 s, which sets the
+slot time there. The observation projection takes 0.022–0.031 s on one
+lane. Windows of 32 blocks measured within 0.003 s of windows of 16.
+Before the state updates ran beside the next window, the same slots took
+0.08–0.09 s.
+
+The address map floors and converts long-double coordinates once per
+candidate and tap. With the compiler's inline forms, which switch the
+rounding mode, it took 0.023–0.024 s in one of those two builds and
+0.036–0.044 s in the other, and the windowed slot took 0.068–0.078 s at
+12 workers. It now uses the forms of
+[`triad_coordinate.hpp`](../src/triad_coordinate.hpp), which keep the
+control word. Every byte uploaded by every route above stayed identical.
+Only the build of the table has timed the new forms on a quiet host. A
+different host scales all of these values. The host share of the measured
+0.37–0.86 s on the pod was not split there.
+
+### Remaining fine costs
+
+In expected order, until a device run ranks them:
+
+1. **Device time.** Unmeasured for this route. A slot maps 175 million
+   samples in FP64 with one sine and cosine each, packs 716 million E2M1
+   elements and renders 2.3–4.5 million tile samples. The removed buffer
+   clears covered 2.8 GB per slot.
+2. **Owner-serial mapping and staging, about 0.04 s on the development
+   host.** Tile addresses of different candidates are independent and could
+   be computed on the lanes. The owner still waits for the device before it
+   stages the following window.
+3. **State updates.** They now run beside the next window's staging and
+   device work, and the owner waits little for them in the stand-in at 12
+   and 24 software workers. With four, three lanes carry them, which bounds
+   the slot near 0.07 s there.
+4. **The native terminal block.** One enlarged block per slot keeps the
+   native route: about 7 ms on the development host, with two tile renders.
+   The device kernels have one fixed block shape.
+5. **Descriptors: 6.9 MB of the 7.6 MB uploaded.** Each still carries its
+   affine map and phase in 40 bytes.
+
+### Measure the fine stage on the device
+
+Use the [matched procedure](#reproduce-the-matched-blackwell-runs). Build the
+reference from the source before this change and the candidate from this
+one, and run both device tests first:
+
+```bash
+cmake --build "$candidate/build/lab" --parallel "$jobs" \
+  --target triad_receiver_probe test_triad_opencl_nvfp4 test_triad_opencl_fine_session
+filtered "$candidate/build/lab/test_triad_opencl_nvfp4"
+filtered "$candidate/build/lab/test_triad_opencl_fine_session"
+```
+
+The first must report rendered tiles within 1e-10 of native tiles and
+statistics within 2e-3 of the uploaded-tile session for FP4 and 1e-6 for the
+FFT. The second runs a complete fine session through every route. Then
+compare routes inside the candidate binary:
+
+```bash
+route() {
+  local label=$1 command=$2 tiles=$3 window=$4 profile=$5
+  shift 5
+  filtered "$new" "$command" "${fixture[@]}" --backend vulkan --vulkan-precision nvfp4 \
+    --vulkan-fine-projection resident-nvfp4 --opencl-fine-tiles "$tiles" \
+    --opencl-fine-window "$window" --opencl-profile "$profile" --workers 24 \
+    --device-memory-limit-bytes 1073741824 --max-samples 1215321 --deadline-ms 45000 "$@" \
+    > "$scratch/$label.json" 2> "$scratch/$label.stderr"
+}
+route control admission native 2 off
+route windows admission device 16 off
+route windows-profiled slot device 16 on
+route control-profiled slot native 2 on
+```
+
+`--opencl-fine-tiles native --opencl-fine-window 2` is the control: uploaded
+tiles in single-dispatch batches. Time the routes with unprofiled
+`admission` runs, in both orders. The probe's `slot` command adds the fine
+session's own receipt in its `fine_work` phase, with per-state work timers.
+A profiled run adds `opencl_resident_host_*_seconds` for the mapping
+sources, staging, final transfers and the wait for statistics, and
+`opencl_resident_device_*_seconds` for transfer, tile rendering, mapping,
+packing, products and statistics, with the span from the first command to
+the last. Profiling reads the clock around every staged column. Require
+equal policy outcomes and compare `bit_evidence` between routes: the
+emulation gives identical evidence, and a device difference would come from
+its FP64 library. Repeat the automatic runs of the matched procedure against
+the reference binary, both orders for severe and quiet, the five-slot
+message and the paired threshold decisions.
 
 ## Which arithmetic ran in a remote simulation?
 

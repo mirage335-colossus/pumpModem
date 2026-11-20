@@ -4,6 +4,7 @@
 #include "triad_opencl_nvfp4_coarse.hpp"
 #include "triad_opencl_nvfp4_projection.hpp"
 #include "triad_opencl_nvfp4_ptx.hpp"
+#include "triad_receiver_basis.hpp"
 #include "triad_receiver_bulk.hpp"
 #include "triad_receiver_coarse.hpp"
 
@@ -13,11 +14,13 @@
 #include <complex>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <numbers>
 #include <numeric>
 #include <random>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -396,6 +399,208 @@ void check_resident_projection(const OpenClNvfp4Device& device) {
         std::cout << "OpenCL resident " << (fp4 ? "NVFP4" : "FFT") << " paired and single fine statistics verified\n";
     }
 }
+// A resident session that renders its dense source tiles from the keyed
+// coefficients must hold the native tiles, and give the statistics of the
+// session that uploads them.
+void check_resident_tiles(const OpenClNvfp4Device& device, const datapump::triad::v3::Format& format,
+                          double receive_rate, bool compare_statistics, const char* label) {
+    using namespace datapump::triad::v3;
+    constexpr std::size_t rows = 1500, modes = 47, taps = 2, candidates = 2, tile = 8192;
+    constexpr std::size_t lanes_per_block = 2 * taps * candidates;
+    std::array<std::uint8_t, 32> seed{};
+    for (std::size_t i = 0; i != seed.size(); ++i) seed[i] = static_cast<std::uint8_t>(41 * i + 9);
+    const auto key = datapump::triad::fixture::key(seed);
+    ReceiverConfig config;
+    config.sample_rate_hz = receive_rate;
+    config.data_if_hz = 1725;
+    config.data_basis_gain = .83;
+    ReceiverSlotPlan slot;
+    slot.format = format;
+    MappedBasis basis(config, slot, key, rows, 1);
+    const auto* source = basis.tile_source();
+    require(source && source->tile_samples == tile && source->cells == geometry(format).fine_cells &&
+            source->dense_samples > 3 * tile, "Mapped basis did not describe its dense tile source");
+    const ConsecutiveBasisOffsets offsets(rows);
+    const std::array<Tap, taps> paths{{{0, 0}, {.0113, 7.5}}};
+    // Two keyed epochs, with opposite clock offsets.
+    const std::array<MappedBasisRow, candidates> maps{{{0, .004, .35, 12.5}, {2, -.011, -.2, -31.25}}};
+    // The start of the dense source, a tile boundary, its interior, its
+    // partial last tile, and a block wholly past its support.
+    const auto dense = source->dense_samples;
+    const std::array<std::uint64_t, 6> firsts{0, tile - 700, dense / 3, dense / 2 + 311, dense - 900, dense + 5 * tile};
+    const auto blocks = firsts.size();
+    std::array<std::size_t, modes> bins;
+    for (std::size_t m = 0; m != modes; ++m) bins[m] = (rows - 23 + m) % rows;
+    std::mt19937 random(7719);
+    std::normal_distribution<double> noise(0, .1);
+    std::vector<std::array<Reference, modes>> observed(blocks);
+    for (auto& block : observed)
+        for (auto& value : block) value = {noise(random), noise(random)};
+
+    using Statistics = std::vector<std::array<FineBulkStatistics, candidates>>;
+    std::map<std::pair<std::uint32_t, std::uint64_t>, std::vector<Reference>> native_tiles;
+    const auto requests = [&](bool rendered, Statistics& output) {
+        std::vector<FineResidentBlock> list;
+        for (std::size_t b = 0; b != blocks; ++b) {
+            list.push_back({{rows, taps, bins, observed[b], .7 + .1 * b, true},
+                [&, b, rendered](std::size_t candidate, std::size_t first, std::size_t count, const BulkMappedSink& sink) {
+                    require(candidate < candidates && first == 0 && count == rows,
+                            "Resident tile check changed the candidate row extent");
+                    if (rendered) {
+                        basis.address_pair(maps[candidate], paths, firsts[b], offsets, rows, sink);
+                        return;
+                    }
+                    basis.visit_pair(maps[candidate], paths, firsts[b], offsets, rows,
+                        [&](std::span<const double> coordinates, std::span<const BulkMappedColumn> mapped,
+                            std::span<const BulkDirectColumn> direct) {
+                            for (const auto& column : mapped) {
+                                require(column.tiles.size() == column.address.count, "Native column lost its tile address");
+                                for (std::size_t i = 0; i != column.tiles.size(); ++i) {
+                                    const auto samples = column.tiles[i].samples;
+                                    native_tiles.try_emplace({column.address.lane, column.address.first + i},
+                                                             samples.begin(), samples.end());
+                                }
+                            }
+                            sink(coordinates, mapped, direct);
+                        });
+                }, output[b], rendered ? source : nullptr});
+        }
+        return list;
+    };
+
+    double worst_tile = 0, worst_statistic = 0;
+    for (const auto method : {OpenClFineMethod::resident_fp4, OpenClFineMethod::resident_fft}) {
+        const bool fp4 = method == OpenClFineMethod::resident_fp4;
+        if (!fp4 && !compare_statistics) continue;
+        const OpenClResidentOptions rendering{blocks, source->cells, source->lanes};
+        const auto limit = OpenClNvfp4Projection::workspace(rows, modes, blocks * lanes_per_block, method, rendering).device_bytes;
+        require(!device.make_projection(rows, bins, blocks * lanes_per_block, limit - 1, method, rendering),
+                "Tile-rendering session exceeded its quoted workspace");
+        const auto session = device.make_projection(rows, bins, blocks * lanes_per_block, limit, method, rendering);
+        require(static_cast<bool>(session), "Could not make the tile-rendering resident session");
+        Statistics rendered(blocks), uploaded(blocks), repeated(blocks);
+        OpenClResidentWork work;
+        {
+            const auto list = requests(true, rendered);
+            require(session->project_resident(list, candidates, work), "Tile-rendering resident batch failed");
+        }
+        require(work.rendered_tiles > 0 && work.uploaded_tiles == 0 && work.keyed_lanes == 4 &&
+                work.direct_columns == 0 && work.mapped_columns == (blocks - 1) * lanes_per_block,
+                "Tile-rendering batch uploaded samples or lost a mapped column");
+
+        const OpenClResidentOptions uploading{blocks};
+        const auto reference = device.make_projection(rows, bins, blocks * lanes_per_block,
+            OpenClNvfp4Projection::workspace(rows, modes, blocks * lanes_per_block, method, uploading).device_bytes,
+            method, uploading);
+        OpenClResidentWork native_work;
+        {
+            const auto list = requests(false, uploaded);
+            require(reference && reference->project_resident(list, candidates, native_work),
+                    "Uploaded-tile resident batch failed");
+        }
+        // The rendering session uploads keyed coefficients, the pulse, the
+        // public parameters and one request per tile in place of the tiles.
+        const auto keyed_bytes = work.keyed_lanes * source->cells * 3 * sizeof(Reference) +
+            source->pulse.size() * sizeof(double) + 18 * sizeof(double) + work.rendered_tiles * 16;
+        require(native_work.uploaded_tiles == work.rendered_tiles && native_work.rendered_tiles == 0 &&
+                native_work.mapped_columns == work.mapped_columns && native_work.tile_hits == work.tile_hits &&
+                native_work.upload_bytes - native_work.uploaded_tiles * tile * sizeof(Reference) ==
+                    work.upload_bytes - keyed_bytes &&
+                native_work.download_bytes == work.download_bytes,
+                "Tile rendering did not replace exactly the uploaded tiles");
+
+        // Every tile the batch rendered is still resident and equals the
+        // native rendering of the same address.
+        std::vector<Reference> resident(tile);
+        std::size_t compared = 0;
+        for (const auto& [address, native] : native_tiles) {
+            if (!session->read_source_tile(address.first, address.second, resident)) continue;
+            double peak = 0, error = 0;
+            for (std::size_t i = 0; i != tile; ++i) {
+                peak = std::max(peak, std::abs(native[i]));
+                error = std::max(error, std::abs(resident[i] - native[i]));
+            }
+            if (peak == 0) require(error == 0, "A rendered tile outside the source support is not zero");
+            else worst_tile = std::max(worst_tile, error / peak);
+            ++compared;
+        }
+        require(compared == work.rendered_tiles && compared == native_tiles.size(),
+                "A rendered tile left the cache before it could be compared");
+        require(worst_tile < 1e-10, "Device-rendered dense tiles differ from the native tiles");
+
+        double scale = 0;
+        std::size_t present = 0;
+        for (std::size_t b = 0; b != blocks; ++b) {
+            for (std::size_t c = 0; c != candidates; ++c) {
+                const auto& a = rendered[b][c];
+                const auto& e = uploaded[b][c];
+                // The source opens with a zero pulse halo and the last block lies past it.
+                require(a.nonzero_basis == e.nonzero_basis && (b + 1 != blocks || !a.nonzero_basis),
+                        "Tile rendering changed the basis presence witness");
+                present += a.nonzero_basis;
+                for (std::size_t i = 0; i != a.correlations.size(); ++i) {
+                    scale = std::max(scale, std::abs(e.correlations[i]));
+                    worst_statistic = std::max(worst_statistic, std::abs(a.correlations[i] - e.correlations[i]));
+                }
+                for (std::size_t i = 0; i != a.gram.size(); ++i) {
+                    scale = std::max(scale, std::abs(e.gram[i]));
+                    worst_statistic = std::max(worst_statistic, std::abs(a.gram[i] - e.gram[i]));
+                }
+            }
+        }
+        require(scale > 0 && present >= 2 * candidates, "Resident tile check produced no statistics");
+        worst_statistic /= scale;
+        // One changed E2M1 element of a 3,000-element lane moves a statistic
+        // by less than this. The FFT route has no such quantization.
+        require(worst_statistic < (fp4 ? 2e-3 : 1e-6), "Device-rendered tiles changed the resident statistics");
+
+        if (fp4) std::cout << "OpenCL resident tiles " << label << ": " << work.rendered_tiles << " rendered, "
+                           << work.upload_bytes << " bytes uploaded against " << native_work.upload_bytes
+                           << ". Worst tile error " << worst_tile;
+        native_tiles.clear();
+        if (!compare_statistics) continue;
+        // A second batch finds every tile resident and repeats its results.
+        OpenClResidentWork warm;
+        {
+            const auto list = requests(true, repeated);
+            require(session->project_resident(list, candidates, warm), "Warm tile-rendering batch failed");
+        }
+        require(warm.rendered_tiles == 0 && warm.keyed_lanes == 0 && warm.upload_bytes < work.upload_bytes,
+                "A warm batch rendered or keyed its dense source again");
+        for (std::size_t b = 0; b != blocks; ++b)
+            for (std::size_t c = 0; c != candidates; ++c)
+                require(repeated[b][c].correlations == rendered[b][c].correlations &&
+                        repeated[b][c].gram == rendered[b][c].gram, "Cached rendered tiles changed the statistics");
+    }
+    std::cout << ", worst statistic difference " << worst_statistic << '\n';
+}
+
+void check_resident_tiles(const OpenClNvfp4Device& device) {
+    using namespace datapump::triad::v3;
+    Format slow;
+    slow.inner_rate_hz = 3.6;
+    slow.added_symbols = 1;
+    slow.added_interleave = false;
+    slow.sample_rate = 6000;
+    slow.bit_seconds = 16;
+    slow.pulse_shape = PulseShape::TaperedRrc;
+    check_resident_tiles(device, slow, 6000, true, "continuous");
+    // A source rate below the receive rate puts dense samples between its integers.
+    auto resampled = slow;
+    resampled.inner_rate_hz = 36;
+    resampled.added_symbols = 4;
+    resampled.sample_rate = 2400;
+    check_resident_tiles(device, resampled, 6000, false, "resampled");
+    auto hopped = slow;
+    hopped.inner_rate_hz = 720;
+    hopped.sample_rate = 4800;
+    hopped.fhss = true;
+    check_resident_tiles(device, hopped, 4800, false, "gated");
+    auto burst = resampled;
+    burst.burst_wait_tiles = 1;
+    burst.bit_seconds = 2 * geometry(resampled).tile_seconds;
+    check_resident_tiles(device, burst, 6000, false, "burst");
+}
 } // namespace
 
 Reference turn(double cycles) {
@@ -751,6 +956,7 @@ int main() {
         check_projection(*device, 1500, 47, 33);
         check_projection(*device, 223, 67, 129);
         check_resident_projection(*device);
+        check_resident_tiles(*device);
         check_coarse(*device);
         check_coarse_synthesis(*device);
         return 0;

@@ -25,6 +25,29 @@ struct OpenClResidentWork {
     std::uint64_t mapped_columns = 0, direct_columns = 0, dispatches = 0;
     std::uint64_t blocking_writes = 0, mapping_dispatches = 0;
     std::uint64_t setup_upload_bytes = 0, observation_upload_bytes = 0, setup_dispatches = 0;
+    // Dense tiles rendered on the device and the lanes keyed for them.
+    std::uint64_t rendered_tiles = 0, keyed_lanes = 0;
+    // A profiled session only. Host spans are elapsed on the calling thread:
+    // the mapping sources without their sink, the sink's staging with any
+    // transfer it makes, the final uploads and enqueues, and the wait for the
+    // statistics. Device values sum command intervals on the device clock,
+    // and the span runs from the first command's start to the last one's end.
+    double host_source_seconds = 0, host_staging_seconds = 0, host_transfer_seconds = 0, host_wait_seconds = 0;
+    double device_transfer_seconds = 0, device_render_seconds = 0, device_map_seconds = 0;
+    double device_pack_seconds = 0, device_product_seconds = 0, device_statistics_seconds = 0;
+    double device_span_seconds = 0;
+};
+
+// Resident session geometry beyond the projection shape.
+struct OpenClResidentOptions {
+    // The most public blocks of one call. Lanes are blocks times candidates
+    // times the four columns of a candidate.
+    std::size_t blocks = 2;
+    // Keyed cells and lanes of a dense source whose tiles the session
+    // renders. Zero maps uploaded native tiles only.
+    std::size_t tile_cells = 0, tile_lanes = 0;
+    // Record host spans and device command intervals in the work.
+    bool profile = false;
 };
 
 class OpenClNvfp4Device;
@@ -40,7 +63,8 @@ public:
     // The caller accounts separately for the mapped and projected host spans.
     static OpenClNvfp4Workspace workspace(std::size_t rows, std::size_t modes,
                                           std::size_t batch_capacity,
-                                          OpenClFineMethod method = OpenClFineMethod::staged);
+                                          OpenClFineMethod method = OpenClFineMethod::staged,
+                                          const OpenClResidentOptions& = {});
 
     // A reusable host slab for direct template mapping. Size counts complete
     // complex records including trailers. Empty means pageable input is used.
@@ -54,11 +78,16 @@ public:
     bool project(std::span<const std::complex<float>> mapped,
                  std::span<std::complex<float>> projected, std::stop_token stop = {});
 
-    // One or two compatible blocks share mapping cache, projection and result download.
+    // Up to the session's block count of compatible blocks share mapping
+    // cache, projection and one result download. Blocks that name a tile
+    // source receive tile addresses, and the session renders those tiles.
     // A return of false indicates incompatible inputs before visiting sources.
     // An execution error leaves both the supplied statistics and receipt untouched.
     bool project_resident(std::span<const FineResidentBlock> blocks, std::size_t candidates,
                           OpenClResidentWork& work, std::stop_token stop = {});
+
+    // Validation access to a rendered dense tile that is still resident.
+    bool read_source_tile(std::uint32_t lane, std::uint64_t index, std::span<std::complex<double>> samples);
 
 private:
     struct Impl;
@@ -81,7 +110,8 @@ public:
 
     std::unique_ptr<OpenClNvfp4Projection> make_projection(
         std::size_t rows, std::span<const std::size_t> bins, std::size_t batch_capacity,
-        std::size_t workspace_limit, OpenClFineMethod method = OpenClFineMethod::staged) const;
+        std::size_t workspace_limit, OpenClFineMethod method = OpenClFineMethod::staged,
+        const OpenClResidentOptions& = {}) const;
 
     // Empty when the device cannot hold the session within the limit. A
     // profiled session records device command intervals in its work.

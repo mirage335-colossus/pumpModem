@@ -100,6 +100,82 @@ decay tails; do not truncate at the emitted source endpoint. Its report
 separates source length, complete output, tail, observation padding, erased
 samples, converter clipping, and model diagnostics.
 
+## Stream evaluation, workers and capture identity
+
+A capture is identified by the SHA-256 of its samples and validity mask, and
+validation records cite those hashes. The channel and the pattern source
+therefore keep every floating-point operation and its order. Reordering one
+sum, or replacing a library call by an identity, changes the low bits of the
+samples and makes every earlier capture a different input. The changes below
+left the arithmetic alone and changed where and how often it runs.
+[Measurements and checks](validation.md#simulator-throughput-and-capture-identity--20-november-2026).
+
+`StreamingChannel::read` prepares its rows in blocks of at most 128, or 1,024
+with workers. For each block it generates the source history that the last
+row needs, evaluates the terms that depend on a row's index alone, and then
+advances the sequential states row by row in the original order. A read still
+consumes the emitted source exactly as far as its own rows need, which the
+GUI session relies on when it reports transmit progress after each read.
+
+- **Independent rows.** The two sixteen-tap source interpolations and the
+  fixed-time ray and selective coefficients of a row read only its index and
+  the generated history, so rows can be evaluated in any order. The
+  interpolations were 31–48% of the simulator's time on the matched captures
+  and the selective coefficients 13% of the severe one.
+- **Silence.** An interpolation whose sixteen history samples are all zero
+  returns zero without evaluating its 48 sines and cosines. Every product is
+  a zero, the sum starts at and stays positive zero, and the coefficient sum
+  is within 1.3e-4 of one, so the quotient is that same zero.
+- **Repeated values.** Coordinates and rotations that are the same for every
+  row are computed once with their original operand order. A bounded curve
+  keeps its two knot values for the interval it is in, and the pattern source
+  keeps the coefficients of the sixteen or seventeen cells under its pulse,
+  which change once in 10,000 samples at 3.6 Hz.
+- **Rounding.** Floors, ceilings and integer conversions of `long double`
+  coordinates use forms that return the standard values without switching
+  the x87 rounding mode. Those switches are the explanation found for the
+  40% difference between binaries with equal simulator objects.
+  [Mechanism and guidance](triad-performance.md#code-placement-and-x87-rounding-mode-switches).
+
+`StreamChannelConfig::lanes` lends a channel the caller's workers. The rows
+of a block are split among up to sixteen jobs. One further job each advances
+the receiver oscillator, the thermal noise and the two bounded path
+trajectories through the block, and one generates the source history of the
+read's next block. None of those states reads the signal, so their values
+depend on the row alone. The reader then applies them in order with the
+selective filter, front end, gain control and report sums. Samples and
+reports are identical for every worker count. Two things differ from a lone
+reader: the source callback can run on a worker, still in order, and a read
+that fails ends the channel. The probe lends the receiver's executor, whose
+workers are idle while the capture is generated, and charges their stacks to
+its memory limit. The GUI simulation keeps a lone reader, because its
+receiver is using those workers.
+
+The Gaussian FIR path law, the Ornstein–Uhlenbeck ray gains, the sinusoidal
+selective law and the sampled front end remain on the reader. With many
+workers a slot is bounded by the source and transmit oscillator chain of one
+thread and by that sequential pass.
+
+Proposals that change sample values, measured and not adopted:
+
+| Proposal | What changes | Measured or estimated gain |
+| --- | --- | --- |
+| Interpolation coefficients from one sine and one sine/cosine pair per coordinate, with angle sums for the sixteen taps | Coefficients differ by at most 3.3e-16 and their sum by 1.1e-15, so every sample with signal changes in its last bits | Measured on the 5650U: the severe slot from 2.70–2.73 s to 1.78–1.79 s with one worker and from 1.05–1.06 s to 0.89–0.90 s with twelve; the stable slot from 2.04–2.14 s to 1.15–1.16 s with one worker |
+| Gaussian draws from a table method in place of the standard library's polar method | Every noise and oscillator draw, so each capture becomes another realization of the same laws | Estimated: ten draws per sample cost about 24 ns each. They are about a tenth of a lone reader's severe slot and most of the oscillator and noise jobs. Not implemented |
+| A tabulated polyphase interpolation kernel | Coefficients to the table's accuracy | Not measured. It removes the remaining interpolation arithmetic, which workers already absorb |
+
+Adopting any of them needs new capture hashes for every record that cites
+one, so it belongs with a change that already invalidates them.
+
+A change to this code is checked against the build before it, not against a
+description. Run both on every path law, with and without workers and with
+small and large reads, and compare samples, masks and reports bit for bit.
+[`test_triad_v3_channel`](../tests/test_triad_v3_channel.cpp) keeps the parts
+that need no second build: workers against the lone reader, blocks against
+single rows, a source failure in the middle of a block, and the rounding
+forms against the standard ones. The validation record names the comparison
+program that the current code was checked with.
+
 ## Robust GUI changing-channel realization
 
 The Robust GUI now treats the selected spread as support for a changing

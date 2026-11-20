@@ -1058,6 +1058,8 @@ namespace {
 constexpr std::size_t maximum_fill_coordinates = 16;
 
 constexpr std::size_t dispatch_extent_bytes = 12 * sizeof(std::size_t);
+// One dispatch's projected observation, without its mode storage.
+constexpr std::size_t dispatch_pair_bytes = 1024;
 
 // A segment holds at most three blocks, so at most two dispatches.
 std::size_t maximum_dispatches(const BlockCalendar& calendar) {
@@ -1102,6 +1104,8 @@ ReceiverSlotPlan observation_plan(const ReceiverConfig& config, const ReceiverSl
 struct FineWorkspaceQuote {
     std::size_t bytes;
     std::string_view native_fallback_reason;
+    // Public blocks of one resident call. More than two selects windows.
+    std::size_t resident_blocks = 2;
 };
 
 FineWorkspaceQuote workspace_for_plan(const ReceiverConfig& config, const ReceiverSlotPlan& plan,
@@ -1154,10 +1158,11 @@ FineWorkspaceQuote workspace_for_plan(const ReceiverConfig& config, const Receiv
     add(checked_multiply(1 + active, float_rows), sizeof(FineFloatComplex));
     const auto mapped_rows = std::min(max_rows, maximum_basis_rows);
     const auto taps = config.spread_delay_seconds || config.spread_doppler_hz ? 2U : 1U;
-    const auto fallback = config.bulk_backend ? config.bulk_backend->fine_fallback_reason(
-        {max_rows, max_modes, taps, workers, std::string_view(modem::detail::search_fft::kernel_name()) == "avx2",
-         isolated_varying_data})
+    const FineBulkGeometry bulk_geometry{max_rows, max_modes, taps, workers,
+        std::string_view(modem::detail::search_fft::kernel_name()) == "avx2", isolated_varying_data};
+    const auto fallback = config.bulk_backend ? config.bulk_backend->fine_fallback_reason(bulk_geometry)
         : std::string_view{};
+    std::size_t resident_blocks = 2;
     if (config.bulk_backend && fallback.empty()) {
         bytes = checked_add(bytes, config.bulk_backend->fine_host_bytes(max_rows, taps));
         const auto bulk_states = (adaptive ? 2 : 1) * maximum_proposals;
@@ -1165,6 +1170,22 @@ FineWorkspaceQuote workspace_for_plan(const ReceiverConfig& config, const Receiv
         add(bulk_states, sizeof(MappedBasisRow) + sizeof(std::size_t));
         add(mapped_rows, sizeof(double));
         if (!config.bulk_backend->fine_maps_on_host()) add(active, sizeof(WorkerScratch));
+        // The fixed-affine maps of a whole window are known in advance. The
+        // adaptive lane's follow its pruning and keep single dispatches.
+        if (!adaptive) resident_blocks = std::max<std::size_t>(2, config.bulk_backend->fine_resident_blocks(bulk_geometry));
+        if (resident_blocks >= 4) {
+            // Three windows of projected dispatches: the one whose states
+            // advance, the one on the device and the one observed ahead.
+            // Two windows of statistics, the requests of one, and each
+            // dispatch's receipts.
+            add(checked_multiply(3, resident_blocks) / 2, dispatch_pair_bytes);
+            add(checked_multiply(3 * resident_blocks - 4, max_rows), sizeof(Complex));
+            add(checked_multiply(2 * resident_blocks - 2, bulk_states), sizeof(FineBulkStatistics));
+            add(resident_blocks, sizeof(FineResidentBlock) + 128 + 8 * sizeof(std::size_t));
+            add(maximum_dispatches(calendar), 2 * sizeof(std::size_t));
+            if (observation.record_work)
+                add(checked_multiply(resident_blocks / 2, maximum_proposals), sizeof(StateBlockWork));
+        }
     }
     if (!config.bulk_backend || !fallback.empty() || config.bulk_backend->fine_maps_on_host()) {
         add(active, checked_add(checked_multiply(fft_rows + 4 * max_rows +
@@ -1173,7 +1194,8 @@ FineWorkspaceQuote workspace_for_plan(const ReceiverConfig& config, const Receiv
         if (config.bulk_backend && fallback.empty()) add(active, sizeof(WorkerScratch));
     }
     bytes = checked_add(bytes, config.bulk_backend ? config.bulk_backend->persistent_host_workspace() : 0);
-    return {checked_add(bytes, MappedBasis::workspace_bytes(config, plan, mapped_rows, active)), fallback};
+    return {checked_add(bytes, MappedBasis::workspace_bytes(config, plan, mapped_rows, active)), fallback,
+            resident_blocks};
 }
 
 void add_work(std::uint64_t& counter, std::uint64_t amount) {
@@ -1263,6 +1285,15 @@ struct FineSession::Impl {
         std::uint64_t observed_rows = 0, modes = 0, basis_calls = 0;
         std::span<const ObservationBlock> observations() const { return std::span(blocks).first(extent->count); }
     };
+    static_assert(sizeof(Pair) <= dispatch_pair_bytes);
+
+    // The dispatches whose fixed-affine statistics one resident call holds.
+    // Its states then advance through them in public order, as the urgent
+    // leaves [first_leaf, first_leaf + leaves).
+    struct Window {
+        std::size_t begin = 0, end = 0, base = 0, statistics = 0, first_leaf = 0, leaves = 0;
+        bool active = false;
+    };
 
     // What the running urgent leaves read. The owner changes it only
     // between waves, when none of them is running.
@@ -1303,7 +1334,18 @@ struct FineSession::Impl {
     std::vector<MappedBasisRow> bulk_rows;
     ConsecutiveBasisOffsets bulk_offsets;
     std::vector<std::size_t> bulk_progress;
-    std::array<std::vector<FineBulkStatistics>, 2> bulk_statistics;
+    // One entry per block of a dispatch, or of a window of dispatches.
+    std::vector<std::vector<FineBulkStatistics>> bulk_statistics;
+    // Set when the backend renders this slot's dense tiles itself.
+    const FineTileSource* tile_source = nullptr;
+    // Dispatches per resident window, or zero for single dispatches.
+    std::size_t window_dispatches = 0;
+    Window window;
+    std::vector<std::array<std::size_t, 2>> windows;
+    std::vector<FineResidentBlock> resident_requests;
+    std::vector<std::size_t> resident_slots, resident_progress;
+    std::vector<std::uint8_t> resident_done;
+    std::vector<std::uint64_t> window_calls;
     std::vector<std::complex<float>> rendered_templates, projected_templates;
     TemplateWave template_wave;
     std::vector<WorkerScratch> scratch;
@@ -1311,9 +1353,10 @@ struct FineSession::Impl {
     std::unique_ptr<ReceiverExecutor> owned_executor;
     ReceiverExecutor& executor;
     // Every dispatch of the current call, then the one being scored and the
-    // one observed ahead of it.
+    // one observed ahead of it. Resident windows hold three groups of
+    // dispatches: advancing its states, on the device, and observed ahead.
     std::vector<Extent> extents;
-    std::array<Pair, 2> ring;
+    std::vector<Pair> ring;
     Wave wave;
     std::size_t pair_serial = 0, call_serial = 0;
     // Background leaves per dispatch: every fixed-affine state, then one
@@ -1328,7 +1371,7 @@ struct FineSession::Impl {
     execution::Mutex chain_mutex;
     execution::Condition chain_advanced;
     std::vector<std::uint32_t> nominal_progress;
-    std::array<std::vector<StateBlockWork>, 2> nominal_state_work;
+    std::vector<std::vector<StateBlockWork>> nominal_state_work;
     std::vector<StateBlockWork> adaptive_state_work;
     std::vector<RankedIndex> ranking;
     std::vector<State> nominal, adaptive;
@@ -1432,7 +1475,22 @@ struct FineSession::Impl {
             bulk_rows.reserve(bulk_states);
             bulk_progress.reserve(bulk_states);
             bulk_offsets = ConsecutiveBasisOffsets(mapped_rows);
-            for (auto& item : bulk_statistics) item.reserve(bulk_states);
+            // The preflight admitted this many resident blocks at most.
+            const auto resident_blocks = std::min(quote.resident_blocks, bulk->resident_block_capacity());
+            if (resident_blocks >= 4) window_dispatches = resident_blocks / 2;
+            // A window's states advance while the next one's statistics
+            // arrive, so windows alternate between two halves.
+            const auto block_slots = std::max<std::size_t>(2, 4 * window_dispatches);
+            bulk_statistics.resize(block_slots);
+            for (auto& item : bulk_statistics) item.reserve(window_dispatches ? nominal.size() : bulk_states);
+            resident_progress.resize(block_slots);
+            resident_done.resize(block_slots);
+            resident_requests.reserve(block_slots);
+            resident_slots.reserve(block_slots);
+            window_calls.resize(std::max<std::size_t>(1, 2 * window_dispatches));
+            windows.reserve(maximum_dispatches(calendar));
+            if (const auto* source = basis->tile_source(); source && bulk->renders_source_tiles(*source))
+                tile_source = source;
         } else if (config.bulk_backend) {
             config.bulk_backend->record_native_fine(quote.native_fallback_reason);
         }
@@ -1444,6 +1502,7 @@ struct FineSession::Impl {
         }
         for (unsigned worker = 0; worker < stage_workers; ++worker)
             scratch.emplace_back(!bulk || host_capacity ? max_rows : 0, !bulk || host_capacity ? fft_rows : 0);
+        ring.resize(std::max<std::size_t>(2, 3 * window_dispatches));
         for (auto& pair : ring)
             for (auto& block : pair.blocks) block.projected.reserve(max_rows);
         extents.reserve(maximum_dispatches(calendar));
@@ -1457,6 +1516,7 @@ struct FineSession::Impl {
         nominal_progress.resize(nominal.size());
         if (adaptive_enabled()) ranking.reserve(2 * maximum_states * (2 * maximum_rate_radius + 1));
         if (observation.record_work) {
+            nominal_state_work.resize(std::max<std::size_t>(2, window_dispatches));
             for (auto& item : nominal_state_work) item.resize(nominal.size());
             if (adaptive_enabled()) adaptive_state_work.resize(maximum_proposals);
         }
@@ -1669,46 +1729,177 @@ struct FineSession::Impl {
         return completed;
     }
 
-    std::array<bool, 2> resident_statistics_for(const Pair& pair, std::size_t states,
-        std::array<std::uint64_t, 2>& bulk_calls, std::stop_token stop) {
-        std::array<FineResidentBlock, 2> requests;
-        std::array<std::size_t, 2> indices{}, next_candidate{};
-        std::array<bool, 2> completed{};
-        std::size_t count = 0;
-        std::uint64_t projected_values = 0;
-        for (std::size_t i = 0; i < pair.extent->count; ++i) {
-            const auto& block = pair.blocks[i];
-            if (!block.observed || !block.line.empty()) continue;
-            const auto shape = bulk_shape(block);
-            if (shape.rows > bulk_offsets.size() || !bulk->supports_resident_statistics(shape)) continue;
-            reset_bulk_statistics(i, states);
-            indices[count] = i;
-            requests[count++] = {shape,
-                [&, i, rows = shape.rows](std::size_t candidate, std::size_t first,
+    // The resident request of one prepared block, with its statistics in
+    // `slot`. The backend then asks for each candidate once, in order. A
+    // backend that renders this slot's tiles receives their addresses.
+    bool resident_request(const ObservationBlock& block, std::size_t slot, std::size_t states,
+                          std::uint64_t& projected_values, std::stop_token stop) {
+        if (!block.observed || !block.line.empty()) return false;
+        const auto shape = bulk_shape(block);
+        if (shape.rows > bulk_offsets.size() || !bulk->supports_resident_statistics(shape)) return false;
+        reset_bulk_statistics(slot, states);
+        resident_progress[slot] = 0;
+        resident_requests.push_back({shape,
+            [this, &block, slot, states, rows = shape.rows, stop](std::size_t candidate, std::size_t first,
                     std::size_t take, const BulkMappedSink& sink) {
-                    if (candidate >= states || candidate != next_candidate[i] || first || take != rows)
-                        throw Error("Robust resident fine backend requested an invalid public block");
-                    basis->visit_pair(bulk_rows[candidate], taps(), pair.blocks[i].first,
-                                      bulk_offsets, rows, sink, stop);
-                    ++next_candidate[i];
-                }, bulk_statistics[i]};
-            projected_values += static_cast<std::uint64_t>(states) * 2 * tap_count *
-                shape.projection_indices.size();
-        }
-        if (!count || !bulk->resident_statistics(std::span(requests).first(count), states, stop))
-            return completed;
+                if (candidate >= states || candidate != resident_progress[slot] || first || take != rows)
+                    throw Error("Robust resident fine backend requested an invalid public block");
+                if (tile_source)
+                    basis->address_pair(bulk_rows[candidate], taps(), block.first, bulk_offsets, rows, sink, stop);
+                else
+                    basis->visit_pair(bulk_rows[candidate], taps(), block.first, bulk_offsets, rows, sink, stop);
+                ++resident_progress[slot];
+            }, bulk_statistics[slot], tile_source});
+        resident_slots.push_back(slot);
+        projected_values += static_cast<std::uint64_t>(states) * 2 * tap_count * shape.projection_indices.size();
+        return true;
+    }
+
+    // Runs the gathered requests in one resident call and marks the slots
+    // whose statistics it supplied. A declined call marks none.
+    void resident_statistics(std::size_t states, std::uint64_t projected_values, std::stop_token stop) {
+        std::fill(resident_done.begin(), resident_done.end(), std::uint8_t{0});
+        const auto count = resident_requests.size();
+        const bool executed = count && bulk->resident_statistics(resident_requests, states, stop);
+        resident_requests.clear();
+        if (!executed) return;
         check_cancelled(stop);
         const auto receipt = confirmed_bulk_work(static_cast<std::uint64_t>(states) * count, projected_values);
-        for (const auto i : std::span(indices).first(count)) {
-            if (next_candidate[i] != states)
+        for (const auto slot : resident_slots) {
+            if (resident_progress[slot] != states)
                 throw Error("Robust resident fine backend did not map its complete public block");
-            check_bulk_statistics(bulk_statistics[i], tap_count);
-            completed[i] = true;
+            check_bulk_statistics(bulk_statistics[slot], tap_count);
+            resident_done[slot] = 1;
         }
         bulk_work = receipt;
+    }
+
+    std::array<bool, 2> resident_statistics_for(const Pair& pair, std::size_t states,
+        std::array<std::uint64_t, 2>& bulk_calls, std::stop_token stop) {
+        resident_requests.clear();
+        resident_slots.clear();
+        std::uint64_t projected_values = 0;
+        for (std::size_t i = 0; i < pair.extent->count; ++i)
+            (void)resident_request(pair.blocks[i], i, states, projected_values, stop);
+        resident_statistics(states, projected_values, stop);
+        const std::array<bool, 2> completed{resident_done[0] != 0, resident_done[1] != 0};
+        const auto count = static_cast<std::size_t>(completed[0]) + completed[1];
         bulk_calls[0] += count * nominal.size();
         bulk_calls[1] += count * adaptive.size();
         return completed;
+    }
+
+    // Statistics of one observed block that the resident route did not
+    // supply: the host projection or the backend's own mapped statistics.
+    void fallback_statistics(const ObservationBlock& block, std::size_t slot, std::size_t states,
+                             ReceiverExecutor::Stage& stage, std::size_t& posted,
+                             std::array<std::uint64_t, 2>& bulk_calls, std::stop_token leaf_stop) {
+        const auto shape = bulk_shape(block);
+        const auto rows = shape.rows;
+        auto& output = bulk_statistics[slot];
+        reset_bulk_statistics(slot, states);
+        const auto expected_values = static_cast<std::uint64_t>(states) * 2 * tap_count *
+            shape.projection_indices.size();
+        if (const auto capacity = bulk->host_projection_capacity()) {
+            host_mapped_statistics(shape, block, output, stage, posted, capacity);
+            bulk_calls[0] += nominal.size() * (1 + (rows - 1) / maximum_basis_rows);
+            bulk_calls[1] += adaptive.size() * (1 + (rows - 1) / maximum_basis_rows);
+            check_bulk_statistics(output, tap_count);
+            bulk->complete_host_statistics(states, expected_values);
+        } else {
+            bulk_progress.assign(states, 0);
+            bulk->statistics(shape, states, [&](std::size_t candidate, std::size_t first,
+                    std::size_t take, const BulkMappedSink& sink) {
+                if (candidate >= states || first != bulk_progress[candidate] || first > rows || take > rows - first ||
+                    !take || take > bulk_offsets.size())
+                    throw Error("Robust bulk backend requested a map outside its public block");
+                basis->visit_pair(bulk_rows[candidate], taps(), block.first + first,
+                                  bulk_offsets, take, sink, leaf_stop);
+                bulk_progress[candidate] += take;
+                ++bulk_calls[candidate < nominal.size() ? 0 : 1];
+            }, output, leaf_stop);
+            if (!std::all_of(bulk_progress.begin(), bulk_progress.end(), [&](auto extent) { return extent == rows; }))
+                throw Error("Robust bulk backend did not process its complete public block");
+        }
+        check_cancelled(leaf_stop);
+        const auto receipt = confirmed_bulk_work(states, expected_values);
+        if (!bulk->host_projection_capacity()) check_bulk_statistics(output, tap_count);
+        bulk_work = receipt;
+    }
+
+    // Every fixed-affine map of the slot, as each dispatch would build them.
+    void fixed_affine_rows() {
+        bulk_rows.clear();
+        for (const auto& state : nominal)
+            bulk_rows.push_back(mapped_row(config, plan, grid, coordinates[state.key.group], state.key,
+                                           first_anchor, true));
+    }
+
+    // Device statistics of every block of a window of dispatches, on the
+    // owner, in one resident call. Blocks outside its geometry follow, each
+    // by the native route.
+    void window_statistics(std::size_t index, ReceiverExecutor::Stage& stage, std::size_t& posted) {
+        const auto leaf_stop = stage.stop_token();
+        check_cancelled(leaf_stop);
+        const auto [begin, end] = windows[index];
+        const auto base = window_base(index), statistics = statistics_base(index), calls = calls_base(index);
+        const auto states = nominal.size();
+        time(times.bulk_statistics_seconds, [&] {
+            resident_requests.clear();
+            resident_slots.clear();
+            std::uint64_t projected_values = 0;
+            for (auto dispatch = begin; dispatch != end; ++dispatch) {
+                const auto local = dispatch - begin;
+                window_calls[calls + local] = 0;
+                const auto& pair = ring[base + local];
+                for (std::size_t i = 0; i < pair.extent->count; ++i)
+                    (void)resident_request(pair.blocks[i], statistics + 2 * local + i, states, projected_values,
+                                           leaf_stop);
+            }
+            resident_statistics(states, projected_values, leaf_stop);
+            for (auto dispatch = begin; dispatch != end; ++dispatch) {
+                const auto local = dispatch - begin;
+                const auto& pair = ring[base + local];
+                for (std::size_t i = 0; i < pair.extent->count; ++i) {
+                    check_cancelled(leaf_stop);
+                    const auto slot = statistics + 2 * local + i;
+                    if (!pair.blocks[i].observed) continue;
+                    if (resident_done[slot]) {
+                        window_calls[calls + local] += states;
+                        continue;
+                    }
+                    std::array<std::uint64_t, 2> native_calls{};
+                    fallback_statistics(pair.blocks[i], slot, states, stage, posted, native_calls, leaf_stop);
+                    window_calls[calls + local] += native_calls[0];
+                }
+            }
+        });
+    }
+
+    // The ring group, statistics half and call counters of a window.
+    std::size_t window_base(std::size_t index) const { return (index % 3) * window_dispatches; }
+    std::size_t statistics_base(std::size_t index) const { return (index % 2) * 2 * window_dispatches; }
+    std::size_t calls_base(std::size_t index) const { return (index % 2) * window_dispatches; }
+
+    // The owner's receipts and segment bookkeeping for a window whose states
+    // have advanced, one dispatch at a time in public order.
+    void close_window(std::size_t index, std::size_t nominal_models) {
+        const auto [begin, end] = windows[index];
+        const auto base = window_base(index), calls = calls_base(index);
+        const auto fixed = nominal.size();
+        for (auto dispatch = begin; dispatch != end; ++dispatch) {
+            const auto local = dispatch - begin;
+            const auto& pair = ring[base + local];
+            const auto& extent = *pair.extent;
+            // The first segment of a call opened before its statistics.
+            if ((index || local) && extent.opens_segment) open_segment(extent);
+            add_work(basis_rows, pair.observed_rows * 2 * tap_count * fixed);
+            if (observation.record_work)
+                charge(nominal_work, pair, fixed, window_calls[calls + local], nominal_state_work[local],
+                       nominal_models);
+            scored_blocks += extent.count;
+            if (extent.closes_segment) close_segment(extent);
+        }
     }
 
     // Device statistics for both lanes of one dispatch, on the owner.
@@ -1731,39 +1922,8 @@ struct FineSession::Impl {
             const auto resident = resident_statistics_for(pair, states, bulk_calls, leaf_stop);
             for (std::size_t i = 0; i < pair.extent->count; ++i) {
                 check_cancelled(leaf_stop);
-                const auto& block = pair.blocks[i];
-                if (!block.observed || resident[i]) continue;
-                const auto shape = bulk_shape(block);
-                const auto rows = shape.rows;
-                auto& output = bulk_statistics[i];
-                reset_bulk_statistics(i, states);
-                const auto expected_values = static_cast<std::uint64_t>(states) * 2 * tap_count *
-                    shape.projection_indices.size();
-                if (const auto capacity = bulk->host_projection_capacity()) {
-                    host_mapped_statistics(shape, block, output, stage, posted, capacity);
-                    bulk_calls[0] += nominal.size() * (1 + (rows - 1) / maximum_basis_rows);
-                    bulk_calls[1] += adaptive.size() * (1 + (rows - 1) / maximum_basis_rows);
-                    check_bulk_statistics(output, tap_count);
-                    bulk->complete_host_statistics(states, expected_values);
-                } else {
-                    bulk_progress.assign(states, 0);
-                    bulk->statistics(shape, states, [&](std::size_t candidate, std::size_t first,
-                            std::size_t take, const BulkMappedSink& sink) {
-                        if (candidate >= states || first != bulk_progress[candidate] || first > rows || take > rows - first ||
-                            !take || take > bulk_offsets.size())
-                            throw Error("Robust bulk backend requested a map outside its public block");
-                        basis->visit_pair(bulk_rows[candidate], taps(), block.first + first,
-                                          bulk_offsets, take, sink, leaf_stop);
-                        bulk_progress[candidate] += take;
-                        ++bulk_calls[candidate < nominal.size() ? 0 : 1];
-                    }, output, leaf_stop);
-                    if (!std::all_of(bulk_progress.begin(), bulk_progress.end(), [&](auto extent) { return extent == rows; }))
-                        throw Error("Robust bulk backend did not process its complete public block");
-                }
-                check_cancelled(leaf_stop);
-                const auto receipt = confirmed_bulk_work(states, expected_values);
-                if (!bulk->host_projection_capacity()) check_bulk_statistics(output, tap_count);
-                bulk_work = receipt;
+                if (!pair.blocks[i].observed || resident[i]) continue;
+                fallback_statistics(pair.blocks[i], i, states, stage, posted, bulk_calls, leaf_stop);
             }
         });
         return bulk_calls;
@@ -1888,6 +2048,12 @@ struct FineSession::Impl {
     // observed while this dispatch's adaptive states, whose pruning and
     // prediction follow, are scored.
     void urgent(unsigned lane, std::size_t leaf, std::stop_token leaf_stop) {
+        // A window's state leaves can still be running when the next
+        // window posts the native leaves of a block outside the device route.
+        if (window.active && leaf >= window.first_leaf && leaf - window.first_leaf < window.leaves) {
+            advance_window(lane, leaf - window.first_leaf, leaf_stop);
+            return;
+        }
         if (template_wave.block) {
             map_template_leaf(lane, leaf - template_wave.first_leaf, leaf_stop);
             return;
@@ -1919,10 +2085,39 @@ struct FineSession::Impl {
                pair, {}, lane, observation.record_work ? &adaptive_state_work[index] : nullptr, leaf_stop);
     }
 
+    // One fixed-affine state through every dispatch of the window, in public
+    // order. States are independent chains, so each leaf owns one of them.
+    void advance_window(unsigned lane, std::size_t index, std::stop_token leaf_stop) {
+        for (auto dispatch = window.begin; dispatch != window.end; ++dispatch) {
+            const auto local = dispatch - window.begin;
+            const auto& pair = ring[window.base + local];
+            std::array<const FineBulkStatistics*, 2> prepared{};
+            for (std::size_t i = 0; i < pair.extent->count; ++i)
+                if (pair.blocks[i].observed)
+                    prepared[i] = &bulk_statistics[window.statistics + 2 * local + i][index];
+            update(nominal[index], {}, pair, prepared, lane,
+                   observation.record_work ? &nominal_state_work[local][index] : nullptr, leaf_stop,
+                   slow_gain_for(index));
+        }
+    }
+
+    // Projects a window's dispatches in chronological order, into the ring
+    // group that the window three before it has released.
+    void observe_window(std::size_t index, std::stop_token leaf_stop) {
+        const auto [begin, end] = windows[index];
+        const auto base = window_base(index);
+        for (auto dispatch = begin; dispatch != end; ++dispatch)
+            observe(ring[base + dispatch - begin], extents[dispatch], leaf_stop);
+    }
+
     // Compiled work releases one independent observation. Native work is
     // dispatch-major: each fixed-affine state, then that dispatch's tile fills.
     // The native owner waits only for the states.
     void background(unsigned lane, std::size_t leaf, std::stop_token leaf_stop) {
+        if (window_dispatches) {
+            observe_window(leaf, leaf_stop);
+            return;
+        }
         if (bulk) {
             // Only one CPU observation is released beside the owner's device
             // call. Its address must not depend on wave, which the owner may
@@ -1981,10 +2176,68 @@ struct FineSession::Impl {
     // during its serial steps and at the end of each of its waves.
     // Compiled statistics stay serial on the owner while a CPU lane observes
     // the next dispatch in the same two-pair ring.
+    // Resident statistics for a window of dispatches at a time. The device
+    // maps, projects and reduces every block of the window in one call while
+    // a lane observes the next window and the lanes advance the states of
+    // the previous one. Each state advances through a window's dispatches in
+    // public order, and the owner then closes them in order.
+    void run_windows() {
+        windows.clear();
+        for (std::size_t begin = 0; begin < extents.size(); begin += window_dispatches)
+            windows.push_back({begin, std::min(extents.size(), begin + window_dispatches)});
+        const auto fixed = nominal.size();
+        const auto nominal_models = models + (slow_nominal.empty() ? 0 : slow_models);
+        ReceiverExecutor::Stage stage(executor, plan.index, stage_workers, stop,
+            [this](unsigned lane, std::size_t leaf, std::stop_token leaf_stop) { urgent(lane, leaf, leaf_stop); },
+            [this](unsigned lane, std::size_t leaf, std::stop_token leaf_stop) { background(lane, leaf, leaf_stop); });
+        std::size_t posted = 0;
+        // Waits for the states of a window and closes its dispatches.
+        const auto finish = [&](std::size_t index) {
+            time(times.dispatch_seconds, [&] { stage.wait_urgent(); });
+            window.active = false;
+            close_window(index, nominal_models);
+        };
+        // An observation is awaited while no state leaf is posted, so the
+        // owner goes on to its own staging instead of taking state leaves.
+        const auto observed = [&](std::size_t index) {
+            time(times.dispatch_seconds, [&] { stage.wait_background(index + 1, index); });
+        };
+        stage.release(1);
+        observed(0);
+        for (std::size_t index = 0; index < windows.size(); ++index) {
+            const bool more = index + 1 < windows.size();
+            // The window three before the next one has released its group.
+            if (more) stage.release(index + 2);
+            if (!index) {
+                open_segment(extents.front());
+                fixed_affine_rows();
+            }
+            try {
+                window_statistics(index, stage, posted);
+            } catch (...) {
+                // As for a single dispatch: keep a leaf's original failure.
+                if (stage.stop_token().stop_requested()) stage.wait_urgent();
+                throw;
+            }
+            if (index) finish(index - 1);
+            if (more) observed(index + 1);
+            const auto [begin, end] = windows[index];
+            window = {begin, end, window_base(index), statistics_base(index), posted, fixed, true};
+            time(times.dispatch_seconds, [&] { stage.post(fixed); });
+            posted += fixed;
+        }
+        finish(windows.size() - 1);
+        pair_serial += extents.size();
+        window = {};
+        nominal_nonzero |= std::any_of(nominal.begin(), nominal.end(),
+            [](const State& state) { return state.nonzero_basis; });
+    }
+
     void run() {
         extents.clear();
         for (Extent next; plan_pair(next, extents.empty() ? nullptr : &extents.back());) extents.push_back(next);
         if (extents.empty()) return;
+        if (window_dispatches) return run_windows();
         const auto serial = pair_serial;
         observe(ring[serial % ring.size()], extents.front(), stop);
         const bool overlap = !bulk;

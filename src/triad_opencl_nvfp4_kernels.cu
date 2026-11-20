@@ -22,27 +22,37 @@ constexpr unsigned full_warp = 0xffffffffu;
 constexpr float maximum_scale = 448.f;
 constexpr float normalized_max = 6.f * maximum_scale;
 constexpr unsigned source_tile_samples = 8192;
-constexpr unsigned maximum_source_tiles = 32;
+constexpr unsigned maximum_source_tiles = 16;
 constexpr unsigned unpaired_output = 0xffffu;
 constexpr unsigned candidate_lanes = 4;
 constexpr unsigned bit_statistics = 5;
 constexpr unsigned candidate_statistics = 2 * bit_statistics + 1;
 
+// One mapped column, or the two bit columns of one tap that share a map.
+// Tiles are cache slots: the first column's, then the second's.
 struct DeviceMapping {
     double fraction, scale, phase, phase_step;
     std::int64_t origin;
     std::uint16_t output, second_output;
     std::uint32_t tile_count;
-    std::uint32_t tiles[maximum_source_tiles];
+    std::uint8_t tiles[maximum_source_tiles];
 };
-static_assert(sizeof(DeviceMapping) == 176 && alignof(DeviceMapping) == 8);
+static_assert(sizeof(DeviceMapping) == 64 && alignof(DeviceMapping) == 8);
 static_assert(offsetof(DeviceMapping, second_output) == 42 && offsetof(DeviceMapping, tiles) == 48);
 
-__device__ const double2* source_tile(const double2* samples, const std::uint32_t* tiles, unsigned tile) {
+// One dense source tile to render: its first dense sample, its keyed lane
+// and the cache slot that receives it.
+struct TileRequest {
+    std::uint64_t first;
+    std::uint32_t lane, slot;
+};
+static_assert(sizeof(TileRequest) == 16 && alignof(TileRequest) == 8);
+
+__device__ const double2* source_tile(const double2* samples, const std::uint8_t* tiles, unsigned tile) {
     return samples + static_cast<std::uint64_t>(tiles[tile]) * source_tile_samples;
 }
 
-__device__ double2 source_neighbor(const double2* samples, const std::uint32_t* tiles,
+__device__ double2 source_neighbor(const double2* samples, const std::uint8_t* tiles,
                                    std::int64_t index, std::int64_t extent) {
     if (index < 0 || index >= extent) return {};
     return source_tile(samples, tiles, index / source_tile_samples)[index % source_tile_samples];
@@ -52,7 +62,7 @@ __device__ double cubic(double a, double b, double c, double d, double w0, doubl
     return __dadd_rn(__dadd_rn(__dadd_rn(__dmul_rn(w0, a), __dmul_rn(w1, b)), __dmul_rn(w2, c)), __dmul_rn(w3, d));
 }
 
-__device__ void render_lane_row(const double2* samples, const std::uint32_t* tiles,
+__device__ void render_lane_row(const double2* samples, const std::uint8_t* tiles,
                                 std::int64_t left, std::int64_t extent, const double4 weights,
                                 double sine, double cosine, float2* lane, unsigned row, unsigned rows) {
     double2 a, b, c, d;
@@ -174,6 +184,24 @@ extern "C" __global__ void resident_fine_map(const double2* samples, const Devic
     if (second != unpaired_output)
         render_lane_row(samples, mapping.tiles + mapping.tile_count, left, extent, weights,
                         sine, cosine, lane(second), row, rows);
+}
+
+// Resets each lane's trailer before a batch is mapped: the peak, and the
+// presence witness that the mapper or a direct upload sets.
+extern "C" __global__ void resident_fine_clear(float2* mapped, std::uint32_t rows, std::uint32_t lanes) {
+    const auto lane = blockIdx.x * blockDim.x + threadIdx.x;
+    if (lane < lanes) mapped[static_cast<std::uint64_t>(lane) * (rows + 1) + rows] = make_float2(0.f, 0.f);
+}
+
+// Zeroes the samples of every lane that received no column. Mapped and
+// uploaded lanes are written in full, so no other storage needs clearing.
+// One block owns one lane.
+extern "C" __global__ void resident_fine_absent(float2* mapped, const std::uint8_t* present, std::uint32_t rows,
+    std::uint32_t lanes) {
+    const auto lane = blockIdx.x;
+    if (lane >= lanes || present[lane]) return;
+    auto* samples = mapped + static_cast<std::uint64_t>(lane) * (rows + 1);
+    for (auto row = threadIdx.x; row < rows; row += threads) samples[row] = make_float2(0.f, 0.f);
 }
 
 extern "C" __global__ void resident_fine_peaks(float2* mapped, std::uint32_t rows, std::uint32_t lanes) {
@@ -499,6 +527,79 @@ extern "C" __global__ void coarse_render_lanes(const float2* chips, const float*
         }
     }
     raster[index] = value;
+}
+
+namespace {
+
+// The native tapered pulse: its table, and std::lerp between two entries.
+__device__ double pulse_value(const double* pulse, double chip_offset) {
+    const auto position = fabs(chip_offset) * pulse_resolution;
+    if (!(position <= pulse_samples)) return 0;
+    const auto index = static_cast<std::uint32_t>(position);
+    if (index == pulse_samples) return pulse[pulse_samples];
+    const auto a = pulse[index], b = pulse[index + 1];
+    const auto t = position - index;
+    if ((a <= 0 && b >= 0) || (a >= 0 && b <= 0)) return __dadd_rn(__dmul_rn(t, b), __dmul_rn(1 - t, a));
+    const auto x = __dadd_rn(a, __dmul_rn(t, __dsub_rn(b, a)));
+    return b > a ? (b > x ? x : b) : (b < x ? x : b);
+}
+
+} // namespace
+
+// Renders dense source tiles of the fine basis into their cache slots, in
+// FP64 and in the operation order of PatternSource::render_bank. Dense
+// sample d of a lane is the keyed waveform at source sample d * source[0],
+// scaled by source[16], and zero from dense sample source[17] on. The other
+// parameters follow coarse_render_lanes. Chips are [lane][cell][carrier].
+extern "C" __global__ void resident_fine_render_tiles(const double2* chips, const double* pulse,
+    const double* source, const TileRequest* requests, double2* tiles, std::uint32_t cells,
+    std::uint32_t request_count) {
+    const auto index = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const auto request_index = index / source_tile_samples;
+    if (request_index >= request_count) return;
+    const auto& request = requests[request_index];
+    const auto within = index % source_tile_samples;
+    const auto dense = static_cast<double>(request.first + within);
+    auto value = make_double2(0., 0.);
+    // Separate operations keep the chip support of every sample identical
+    // to the native renderer's. A fused product could move its edges.
+    const auto position = __dmul_rn(dense, source[0]);
+    if (dense < source[17] && position < source[2]) {
+        const auto t = __ddiv_rn(__dsub_rn(position, source[1]), source[3]);
+        const auto envelope = source_envelope(source, t);
+        const auto chip_time = __dmul_rn(t, source[4]);
+        const auto offset = source[5];
+        const auto first_real = fmax(0., ceil(__dsub_rn(chip_time, 8 + offset)));
+        const auto last_real = fmin(source[6] - 1, floor(__dadd_rn(chip_time, 8 - offset)));
+        if (envelope != 0 && last_real >= first_real) {
+            const auto first = static_cast<std::uint32_t>(first_real), last = static_cast<std::uint32_t>(last_real);
+            const auto* lane = chips + static_cast<std::uint64_t>(request.lane) * cells * 3;
+            double2 carriers[3] = {make_double2(0., 0.), make_double2(0., 0.), make_double2(0., 0.)};
+            for (auto fine = first; fine <= last; ++fine) {
+                const auto shape = pulse_value(pulse, __dsub_rn(chip_time, fine + offset));
+                const auto weight = __dmul_rn(__dmul_rn(carrier_gain, shape), envelope);
+                const auto* chip = lane + static_cast<std::uint64_t>(fine) * 3;
+                for (unsigned carrier = 0; carrier < 3; ++carrier) {
+                    carriers[carrier].x = __dadd_rn(carriers[carrier].x, __dmul_rn(chip[carrier].x, weight));
+                    carriers[carrier].y = __dadd_rn(carriers[carrier].y, __dmul_rn(chip[carrier].y, weight));
+                }
+            }
+            // The outer carriers rotate by -/+ one carrier spacing and the
+            // middle one by exactly one.
+            double sine, cosine;
+            sincos(tau64 * remainder(__dmul_rn(source[7], t), 1.), &sine, &cosine);
+            const double rotation[3][2] = {{cosine, -sine}, {1., 0.}, {cosine, sine}};
+            for (unsigned carrier = 0; carrier < 3; ++carrier) {
+                const auto real = rotation[carrier][0], imag = rotation[carrier][1];
+                value.x = __dadd_rn(value.x, __dsub_rn(__dmul_rn(carriers[carrier].x, real),
+                                                       __dmul_rn(carriers[carrier].y, imag)));
+                value.y = __dadd_rn(value.y, __dadd_rn(__dmul_rn(carriers[carrier].x, imag),
+                                                       __dmul_rn(carriers[carrier].y, real)));
+            }
+            value = make_double2(__dmul_rn(value.x, source[16]), __dmul_rn(value.y, source[16]));
+        }
+    }
+    tiles[static_cast<std::uint64_t>(request.slot) * source_tile_samples + within] = value;
 }
 
 // Warps resident lane renderings into raw template columns with the native

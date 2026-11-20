@@ -21,7 +21,8 @@ target_compile_options(datapump_triad_opencl_emulation PRIVATE
 # The production host sources, compiled against the declared OpenCL subset
 # and bound to the emulation library in place of the system loader.
 add_library(datapump_triad_opencl_emulated_host STATIC EXCLUDE_FROM_ALL
-  src/triad_opencl_nvfp4_projection.cpp src/triad_opencl_nvfp4_coarse.cpp src/triad_opencl_coarse_bulk.cpp)
+  src/triad_opencl_nvfp4_projection.cpp src/triad_opencl_nvfp4_coarse.cpp src/triad_opencl_coarse_bulk.cpp
+  src/triad_opencl_fine_bulk.cpp)
 add_dependencies(datapump_triad_opencl_emulated_host datapump_triad_opencl_emulation)
 target_include_directories(datapump_triad_opencl_emulated_host PUBLIC src include "${_triad_emulation_generated}")
 target_include_directories(datapump_triad_opencl_emulated_host SYSTEM PUBLIC "${_triad_emulation_dir}")
@@ -35,7 +36,7 @@ add_executable(test_triad_opencl_nvfp4_emulated EXCLUDE_FROM_ALL
 target_include_directories(test_triad_opencl_nvfp4_emulated PRIVATE tools)
 target_link_libraries(test_triad_opencl_nvfp4_emulated PRIVATE datapump_triad_opencl_emulated_host Threads::Threads)
 add_test(NAME triad_opencl_nvfp4_emulated COMMAND test_triad_opencl_nvfp4_emulated)
-set_tests_properties(triad_opencl_nvfp4_emulated PROPERTIES LABELS "triad" TIMEOUT 180)
+set_tests_properties(triad_opencl_nvfp4_emulated PROPERTIES LABELS "triad" TIMEOUT 300)
 
 add_executable(test_triad_opencl_coarse_session_emulated EXCLUDE_FROM_ALL
   tests/test_triad_opencl_coarse_session.cpp src/host/sandbox.cpp)
@@ -44,3 +45,11 @@ target_link_libraries(test_triad_opencl_coarse_session_emulated PRIVATE
   datapump_triad_opencl_emulated_host Threads::Threads)
 add_test(NAME triad_opencl_coarse_session_emulated COMMAND test_triad_opencl_coarse_session_emulated)
 set_tests_properties(triad_opencl_coarse_session_emulated PROPERTIES LABELS "triad" TIMEOUT 180)
+
+add_executable(test_triad_opencl_fine_session_emulated EXCLUDE_FROM_ALL
+  tests/test_triad_opencl_fine_session.cpp src/host/sandbox.cpp)
+target_include_directories(test_triad_opencl_fine_session_emulated PRIVATE tests)
+target_link_libraries(test_triad_opencl_fine_session_emulated PRIVATE
+  datapump_triad_opencl_emulated_host Threads::Threads)
+add_test(NAME triad_opencl_fine_session_emulated COMMAND test_triad_opencl_fine_session_emulated)
+set_tests_properties(triad_opencl_fine_session_emulated PROPERTIES LABELS "triad" TIMEOUT 300)

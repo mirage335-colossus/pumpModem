@@ -1,6 +1,7 @@
 #include "datapump/triad_modem_v3.hpp"
 #include "datapump/triad_pulse.hpp"
 #include "datapump/triad_shaping.hpp"
+#include "triad_coordinate.hpp"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -240,6 +241,10 @@ struct PatternSource::Impl {
     std::uint64_t carrier=0;
     std::uint64_t dwell_cells=0,tile_cells=0,protected_first=0,protected_last=0;
     std::array<std::optional<Tile>,2> tiles;
+    // A sample reads the same sixteen or seventeen cells as its neighbours
+    // inside one fine cell. This direct-mapped copy returns chip()'s values.
+    struct RecentChip {std::uint64_t fine=0;bool valid=false;Chip value{};};
+    std::array<RecentChip,32> recent;
     Impl(const Format& f,const Crypto& key,std::uint8_t source_bit):format(f),geom(v3::geometry(f)),master(key){
         require(source_bit<=1,"triad v3 source must be one binary bit");
         carrier=carrier_context(f);
@@ -329,6 +334,11 @@ struct PatternSource::Impl {
         require(fine>=slot->first&&fine-slot->first<slot->chips.size(),"triad v3 tile lookup mismatch");
         return slot->chips[static_cast<std::size_t>(fine-slot->first)];
     }
+    const Chip& recent_chip(std::uint64_t fine){
+        auto& entry=recent[fine%recent.size()];
+        if(!entry.valid||entry.fine!=fine){entry.value=chip(fine);entry.fine=fine;entry.valid=true;}
+        return entry.value;
+    }
     double envelope(long double t) const {
         return shaping_envelope(format,geom,t);
     }
@@ -350,12 +360,13 @@ std::array<Complex,3> PatternSource::carrier_samples_at(long double sample){
     const long double t=(sample-impl_->halo)/impl_->sample_rate;
     const auto envelope=impl_->envelope(t);if(envelope==0)return output;
     const auto offset=impl_->center_offset();
-    const auto first_real=std::max(0.L,std::ceil(t*g.fine_chip_rate_hz-(8+offset)));
-    const auto last_real=std::min(static_cast<long double>(g.fine_cells)-1,std::floor(t*g.fine_chip_rate_hz+(8-offset)));
+    const auto cell=t*g.fine_chip_rate_hz;
+    const auto first_real=std::max(0.L,detail::ceil_coordinate(cell-(8+offset)));
+    const auto last_real=std::min(static_cast<long double>(g.fine_cells)-1,detail::floor_coordinate(cell+(8-offset)));
     if(last_real<first_real)return output;
-    const auto first=static_cast<std::uint64_t>(first_real),last=static_cast<std::uint64_t>(last_real);
-    for(auto fine=first;fine<=last;++fine){const auto pulse=shaping_pulse(impl_->format.pulse_shape,static_cast<double>(t*g.fine_chip_rate_hz-(static_cast<long double>(fine)+offset)));
-        const auto chip=impl_->chip(fine);for(unsigned c=0;c<3;++c)output[c]+=chip[c]*(carrier_gain*pulse*envelope);}
+    const auto first=detail::unsigned_index(first_real),last=detail::unsigned_index(last_real);
+    for(auto fine=first;fine<=last;++fine){const auto pulse=shaping_pulse(impl_->format.pulse_shape,static_cast<double>(cell-(static_cast<long double>(fine)+offset)));
+        const auto& chip=impl_->recent_chip(fine);for(unsigned c=0;c<3;++c)output[c]+=chip[c]*(carrier_gain*pulse*envelope);}
     return output;
 }
 Complex PatternSource::sample_at(long double sample){

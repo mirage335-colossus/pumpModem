@@ -1,8 +1,11 @@
 #include "triad_receiver_basis.hpp"
+#include "triad_coordinate.hpp"
 #include "triad_mapped_kernel.hpp"
+#include "datapump/triad_shaping.hpp"
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -88,6 +91,13 @@ struct MappedBasis::Impl {
     std::atomic<std::uint64_t> calls{0}, interpolated_rows{0};
     std::atomic<std::size_t> peak_pinned_tiles{0};
     std::atomic<unsigned> active{0};
+    std::atomic<std::uint64_t> addressed_calls{0}, addressed_columns{0}, preparation_nanoseconds{0};
+    // Built on first request, for a consumer that renders the dense tiles.
+    struct TileDescription {
+        std::vector<double> pulse;
+        FineTileSource source;
+    };
+    std::unique_ptr<TileDescription> tile_description;
 
     Impl(const ReceiverConfig& value, const ReceiverSlotPlan& plan, const Crypto& selected_key,
          std::size_t rows, unsigned count)
@@ -126,6 +136,75 @@ struct MappedBasis::Impl {
         statistics.oversampling_ratio = config.sample_rate_hz*dense_factor/width;
         statistics.interpolation_amplitude_proxy = (3./128)*
             std::pow(std::numbers::pi/statistics.oversampling_ratio, 4);
+    }
+
+    // Source samples per dense sample.
+    long double dense_step() const {
+        return static_cast<long double>(source_rate)/(config.sample_rate_hz*dense_factor);
+    }
+
+    // One lane's keyed coefficients, as the native renderer reads them.
+    void key_lane(std::size_t lane, std::span<Complex> chips, std::stop_token stop) {
+        const auto cells = static_cast<std::size_t>(source_geometry.fine_cells);
+        require(lane < 2*owner_count && chips.size() == 3*cells, "mapped basis keyed lane extent mismatch");
+        const auto epoch = static_cast<unsigned>(lane/2);
+        {
+            std::lock_guard source_lock(sources[epoch].mutex);
+            cancelled(stop);
+            prepare_sources(epoch);
+            auto& source = *sources[epoch].bits[lane%2];
+            for (std::size_t cell = 0; cell != cells; ++cell) {
+                if (!(cell%4096)) cancelled(stop);
+                const auto chip = source.pattern_coefficient_at(cell);
+                std::copy(chip.begin(), chip.end(), chips.begin()+static_cast<std::ptrdiff_t>(3*cell));
+            }
+        }
+        std::lock_guard lock(mutex);
+        ++statistics.keyed_lanes;
+    }
+
+    const FineTileSource* describe() {
+        if (!statistics.fallback_reason.empty() || source_geometry.fine_cells > SIZE_MAX/(3*sizeof(Complex)))
+            return nullptr;
+        std::lock_guard lock(mutex);
+        if (tile_description) return &tile_description->source;
+        auto description = std::make_unique<TileDescription>();
+        constexpr std::size_t resolution = 256, span = 8;
+        description->pulse.resize(span*resolution+1);
+        for (std::size_t i = 0; i != description->pulse.size(); ++i)
+            description->pulse[i] = shaping_pulse(slot.format.pulse_shape, static_cast<double>(i)/resolution);
+        const auto& format = slot.format;
+        auto& source = description->source;
+        source.sample_step = static_cast<double>(dense_step());
+        source.gain = config.data_basis_gain;
+        source.calendar_origin_sample = static_cast<double>(source_geometry.calendar_origin_sample);
+        source.source_samples = static_cast<double>(source_geometry.source_samples);
+        source.sample_rate_hz = source_rate;
+        source.fine_chip_rate_hz = source_geometry.fine_chip_rate_hz;
+        source.center_offset = format.fhss_center_aligned ? 0. : .5;
+        source.carrier_spacing_hz = source_geometry.carrier_spacing_hz;
+        source.bit_seconds = source_geometry.bit_seconds;
+        source.envelope_edge_seconds = std::max(format.ramp_seconds, 8/source_geometry.fine_chip_rate_hz);
+        if (format.burst_wait_tiles) {
+            source.burst_period_tiles = static_cast<double>(format.burst_wait_tiles)+1;
+            source.tile_seconds = source_geometry.tile_seconds;
+            source.tile_count = static_cast<double>(source_geometry.tile_count);
+        }
+        if (format.fhss) {
+            source.dwell_seconds = format.dwell_seconds;
+            source.quiet_seconds = format.quiet_seconds;
+            source.ramp_seconds = format.ramp_seconds;
+        }
+        source.dense_samples = dense_samples;
+        source.tile_samples = tile_samples;
+        source.cells = static_cast<std::size_t>(source_geometry.fine_cells);
+        source.lanes = 2*owner_count;
+        source.pulse = description->pulse;
+        source.key_lane = [this](std::size_t lane, std::span<Complex> chips, std::stop_token stop) {
+            key_lane(lane, chips, stop);
+        };
+        tile_description = std::move(description);
+        return &tile_description->source;
     }
 
     unsigned source_index(std::int64_t epoch) const {
@@ -189,8 +268,9 @@ struct MappedBasis::Impl {
         require(begin < dense_samples, "mapped basis tile outside source support");
         const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(tile_samples, dense_samples-begin));
         std::array<PatternSource*, 2> bank{sources[epoch].bits[0].get(), sources[epoch].bits[1].get()};
+        const auto began = std::chrono::steady_clock::now();
         std::vector<Complex> rendered(2*count);
-        const long double step = static_cast<long double>(source_rate)/(config.sample_rate_hz*dense_factor);
+        const auto step = dense_step();
         PatternSource::render_bank(bank, static_cast<long double>(begin)*step, step, count, rendered);
         std::array<std::shared_ptr<Tile>, 2> values{std::make_shared<Tile>(), std::make_shared<Tile>()};
         for (unsigned b = 0; b != 2; ++b) {
@@ -201,6 +281,8 @@ struct MappedBasis::Impl {
                 (*values[b])[i] = value;
             }
         }
+        preparation_nanoseconds.fetch_add(static_cast<std::uint64_t>(std::chrono::duration_cast<
+            std::chrono::nanoseconds>(std::chrono::steady_clock::now()-began).count()), std::memory_order_relaxed);
         cancelled(stop);
         std::lock_guard lock(mutex);
         for (unsigned b = 0; b != 2; ++b) insert_locked({b, epoch, index}, values[b]);
@@ -316,7 +398,9 @@ struct MappedBasis::Impl {
         const auto wide_scale = static_cast<long double>(scale);
         const auto shift = static_cast<long double>(row.arrival_seconds+tap.delay_seconds)*config.sample_rate_hz;
         const auto dense_origin = ((static_cast<long double>(first)-shift)*wide_scale)*dense_factor;
-        map.origin = std::floor(dense_origin);
+        // One map per candidate and tap is the owner's main work on a route
+        // that renders tiles itself. These forms keep the x87 control word.
+        map.origin = detail::floor_coordinate(dense_origin);
         map.fraction = static_cast<double>(dense_origin-map.origin);
         map.scale = scale*dense_factor;
         const double relative_first = first_offset*map.scale+map.fraction;
@@ -342,8 +426,8 @@ struct MappedBasis::Impl {
             map.empty = true;
             return map;
         }
-        map.low_tile = static_cast<std::uint64_t>(std::max(0.L, lower))/tile_samples;
-        const auto high_tile = static_cast<std::uint64_t>(std::min(static_cast<long double>(dense_samples-1), upper))/tile_samples;
+        map.low_tile = detail::unsigned_index(std::max(0.L, lower))/tile_samples;
+        const auto high_tile = detail::unsigned_index(std::min(static_cast<long double>(dense_samples-1), upper))/tile_samples;
         const auto count = high_tile-map.low_tile+1;
         map.staging = count > maximum_pins;
         const auto origin = map.origin-static_cast<long double>(map.low_tile)*tile_samples;
@@ -436,7 +520,7 @@ struct MappedBasis::Impl {
                     for (std::size_t i = 0; i != map.count; ++i)
                         tables[b].push_back(reinterpret_cast<const double*>(pins[b*map.count+i]->data()));
                     rows[b] = {map.fraction, map.scale, map.phase, map.phase_step,
-                        static_cast<std::int64_t>(map.origin-static_cast<long double>(map.low_tile)*tile_samples),
+                        detail::signed_index(map.origin-static_cast<long double>(map.low_tile)*tile_samples),
                         map.count, tables[b].data(),
                         reinterpret_cast<double*>(output.data()+((begin+b)*taps.size()+t)*offsets.size())};
                 }
@@ -474,14 +558,17 @@ struct MappedBasis::Impl {
         }
     }
 
+    // An addressed visit supplies each mapped column's public tile address
+    // and leaves the native cache untouched.
     void visit(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
                std::span<const double> offsets, const BulkMappedSink& sink, std::stop_token stop,
-               bool consecutive) {
+               bool consecutive, bool addressed) {
         cancelled(stop);
         require(static_cast<bool>(sink), "mapped basis requires a synchronous mapping sink");
         const auto epoch = validate_request(row, taps, first, offsets, consecutive);
         calls.fetch_add(1, std::memory_order_relaxed);
-        {
+        if (addressed) addressed_calls.fetch_add(1, std::memory_order_relaxed);
+        else {
             std::lock_guard lock(mutex);
             ++statistics.prepared_calls;
         }
@@ -521,19 +608,32 @@ struct MappedBasis::Impl {
                 continue;
             }
             const unsigned group = map.count <= maximum_pins/2 ? 2 : 1;
+            const auto origin = detail::signed_index(
+                map.origin-static_cast<long double>(map.low_tile)*tile_samples);
             for (unsigned begin = 0; begin != 2; begin += group) {
                 std::array<BulkMappedColumn, 2> columns;
-                std::array<std::shared_ptr<const Tile>, maximum_pins> pins;
-                pin(begin, group, epoch, map.low_tile, map.count, std::span(pins).first(group*map.count), stop);
                 for (unsigned b = 0; b != group; ++b) {
                     auto& column = columns[b];
                     column.fraction = map.fraction;
                     column.scale = map.scale;
                     column.phase = map.phase;
                     column.phase_step = map.phase_step;
-                    column.origin = static_cast<std::int64_t>(
-                        map.origin-static_cast<long double>(map.low_tile)*tile_samples);
+                    column.origin = origin;
                     column.output_column = (begin+b)*taps.size()+tap;
+                    column.address = {map.low_tile, 2*epoch+begin+b, static_cast<std::uint32_t>(map.count)};
+                }
+                if (addressed) {
+                    // No tile is pinned: the consumer renders these addresses.
+                    cancelled(stop);
+                    sink(offsets, std::span<const BulkMappedColumn>(columns).first(group), {});
+                    cancelled(stop);
+                    addressed_columns.fetch_add(group, std::memory_order_relaxed);
+                    continue;
+                }
+                std::array<std::shared_ptr<const Tile>, maximum_pins> pins;
+                pin(begin, group, epoch, map.low_tile, map.count, std::span(pins).first(group*map.count), stop);
+                for (unsigned b = 0; b != group; ++b) {
+                    auto& column = columns[b];
                     column.tiles.reserve(map.count);
                     for (std::size_t i = 0; i != map.count; ++i) {
                         auto& data = pins[b*map.count+i];
@@ -607,13 +707,22 @@ void MappedBasis::visit_pair(const MappedBasisRow& row, std::span<const Tap> tap
     visit_pair_impl(row, taps, first, std::span(offsets.offsets_).first(rows), sink, stop, true);
 }
 
+const FineTileSource* MappedBasis::tile_source() { return impl_->describe(); }
+
+void MappedBasis::address_pair(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
+                               const ConsecutiveBasisOffsets& offsets, std::size_t rows,
+                               const BulkMappedSink& sink, std::stop_token stop) {
+    require(rows <= offsets.size(), "mapped basis offsets exceed the consecutive row extent");
+    visit_pair_impl(row, taps, first, std::span(offsets.offsets_).first(rows), sink, stop, true, true);
+}
+
 void MappedBasis::visit_pair_impl(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
                                   std::span<const double> offsets, const BulkMappedSink& sink,
-                                  std::stop_token stop, bool consecutive) {
+                                  std::stop_token stop, bool consecutive, bool addressed) {
     const auto before = impl_->active.fetch_add(1);
     struct Release { std::atomic<unsigned>& active; ~Release() { active.fetch_sub(1); } } release{impl_->active};
     require(before < impl_->workers, "mapped basis concurrency exceeds admitted worker share");
-    impl_->visit(row, taps, first, offsets, sink, stop, consecutive);
+    impl_->visit(row, taps, first, offsets, sink, stop, consecutive, addressed);
 }
 
 MappedBasisReport MappedBasis::report() const {
@@ -624,6 +733,9 @@ MappedBasisReport MappedBasis::report() const {
     result.calls = impl_->calls.load();
     result.interpolated_rows = impl_->interpolated_rows.load();
     result.peak_pinned_tiles = impl_->peak_pinned_tiles.load();
+    result.addressed_calls = impl_->addressed_calls.load();
+    result.addressed_columns = impl_->addressed_columns.load();
+    result.native_preparation_seconds = static_cast<double>(impl_->preparation_nanoseconds.load())*1e-9;
     return result;
 }
 

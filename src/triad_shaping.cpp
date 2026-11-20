@@ -1,6 +1,7 @@
 #include "datapump/triad_shaping.hpp"
 #include "datapump/triad_pulse.hpp"
 #include "search_fft.hpp"
+#include "triad_coordinate.hpp"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -26,7 +27,7 @@ void validate(const ShapingOptions& o) {
 }
 double gate(const Format& f,long double seconds) {
     if(!f.fhss)return 1;
-    const auto within=seconds-std::floor(seconds/f.dwell_seconds)*f.dwell_seconds;
+    const auto within=seconds-detail::floor_coordinate(seconds/f.dwell_seconds)*f.dwell_seconds;
     return smooth(static_cast<double>((std::min(within,f.dwell_seconds-within)-f.quiet_seconds)/f.ramp_seconds));
 }
 bool same_allocation(const Geometry& a,const Geometry& b) {
@@ -184,7 +185,7 @@ double shaping_envelope(const Format& f,const Geometry& g,long double t) {
     if(t<0||t>=g.bit_seconds)return 0;
     const long double edge=std::max(f.ramp_seconds,span/g.fine_chip_rate_hz);
     double result=smooth(static_cast<double>(t/edge))*smooth(static_cast<double>((g.bit_seconds-t)/edge));
-    if(f.burst_wait_tiles){const auto id=static_cast<std::uint64_t>(std::floor(t/g.tile_seconds));
+    if(f.burst_wait_tiles){const auto id=detail::unsigned_index(detail::floor_coordinate(t/g.tile_seconds));
         if(id%(f.burst_wait_tiles+1)!=0||id/(f.burst_wait_tiles+1)>=g.tile_count)return 0;
         const auto within=t-id*static_cast<long double>(g.tile_seconds);
         result*=smooth(static_cast<double>(within/edge))*smooth(static_cast<double>((g.tile_seconds-within)/edge));}
