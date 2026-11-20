@@ -6,6 +6,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -119,6 +120,35 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+// Optional random access to an emitted source, for a channel with lanes. The
+// channel generates the samples it needs next in ranges: plan() announces a
+// range, jobs evaluate disjoint parts of it on distinct readers at once, and
+// accept() then accounts the evaluated samples in order, exactly as calls of
+// sample_at would have. Samples, failures and reports equal those of
+// sample_at. A channel that uses readers never calls sample_at.
+class EmittedSourceReaders {
+public:
+    virtual ~EmittedSourceReaders() = default;
+    // The storage that open(readers, plan_samples) would hold.
+    virtual std::size_t reader_bytes(std::size_t readers, std::uint64_t plan_samples) const = 0;
+    // Once, before any plan: readers [0, readers) and ranges of at most
+    // plan_samples samples.
+    virtual void open(std::size_t readers, std::uint64_t plan_samples) = 0;
+    // On one thread: samples [first, first + count) are evaluated next. first
+    // is the sample that sample_at would generate next.
+    virtual void plan(std::uint64_t first, std::uint64_t count) = 0;
+    // A planned sample on one reader, concurrently with other readers. Each
+    // index is evaluated at most once per plan. Throws where sample_at would,
+    // except for the checks that accept() makes.
+    virtual Complex evaluate(std::size_t reader, std::uint64_t index) = 0;
+    // On one thread after evaluation: the first count planned samples are
+    // generated. failed means that evaluating the one after them threw; the
+    // checks sample_at makes before evaluating that one are then made too.
+    // Returns the samples accounted. When one of those checks fails, error
+    // holds what sample_at would have thrown and the count stops before it.
+    virtual std::uint64_t accept(std::uint64_t count, bool failed, std::exception_ptr& error) = 0;
+};
+
 // An already-composed finite transmitter in the nominal pre-TX-oscillator
 // complex frame. The channel propagates its entire sum, including delayed
 // echoes and selective-filter tails. It never separates carrier identities.
@@ -130,6 +160,9 @@ struct EmittedSource {
     double minimum_frequency_hz = 0, maximum_frequency_hz = 0;
     std::size_t working_bytes = 0; // Caller-owned source storage, for reporting.
     std::function<Complex(std::uint64_t)> sample_at;
+    // Optional; a channel with lanes evaluates ranges of samples through
+    // these readers. Captured objects must remain alive as for sample_at.
+    std::shared_ptr<EmittedSourceReaders> readers;
 };
 
 struct OscillatorSpectrum {
@@ -257,14 +290,19 @@ struct SelectiveModelConfig {
 // source interpolations and the fixed-time path and selective coefficients),
 // and one for each sequential state that never reads the signal (receiver
 // oscillator, thermal noise, the two bounded path trajectories, and the
-// source history of the read's next block). run() executes job(0) ...
-// job(jobs - 1), each once, on its caller and any idle workers, and returns
-// after the last has returned; an exception from run() fails that read.
-// Samples and reports are identical for every count, including none, and a
-// read consumes the emitted source exactly as far as its own rows need. Two
-// things differ from a lone reader. The source callback can run on a worker,
-// still one sample at a time and in order. A read that fails ends the
-// channel, because those states have already passed the failing row.
+// source history of the read's next block). When the source offers readers
+// and no DAC or diagnostic I/Q noise reads its values, the TX oscillator has
+// a job of its own, the readers evaluate the next block's source on several
+// jobs, and the sequential pass over a block runs as one more job beside
+// the preparation of the next block of the same read. run() executes
+// job(0) ... job(jobs - 1), each once, on its caller and any idle workers,
+// and returns after the last has returned; an exception from run() fails
+// that read. Samples and reports are identical for every count, including
+// none, and a read consumes the emitted source exactly as far as its own rows
+// need. Two things differ from a lone reader. The source callback, its
+// readers and the sequential pass can run on a worker, and the callback still
+// one sample at a time and in order. A read that fails ends the channel,
+// because those states have already passed the failing row.
 struct StreamChannelLanes {
     unsigned count = 0;
     std::function<void(std::size_t jobs, const std::function<void(std::size_t)>& job)> run;

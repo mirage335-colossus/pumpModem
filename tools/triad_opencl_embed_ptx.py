@@ -22,13 +22,16 @@ SIGNATURES = {
     "nvfp4_project": (4, 1, 4, 1, 8, 8, 0, 0, 0, 0),
     "coarse_render_lanes": (8, 4, 8, 8, 0, 0, 0, 0),
     "coarse_warp_columns": (8, 8, 8, 0, 0, 0, 0, 0),
+    "coarse_fir_tiles": (8, 4, 8, 0, 0, 0, 0, 0, 0),
     "coarse_fir_decimate": (8, 4, 8, 0, 0, 0, 0, 0, 0),
+    "coarse_warp_fir": (8, 8, 4, 8, 0, 0, 0, 0, 0, 0, 0, 0),
     "coarse_bank_gram": (8, 8, 0, 0, 0),
     "coarse_column_peaks": (8, 4, 0, 0),
     "coarse_pack_bank": (8, 4, 4, 0, 0, 0, 0),
     "coarse_pack_observation": (8, 8, 4, 4, 0, 0, 0),
     "coarse_fp4_scores": (16, 8, 16, 8, 4, 0, 0, 0, 0, 0),
     "coarse_select_peaks": (4, 8, 0, 0),
+    "coarse_rotate_observation": (8, 8, 8, 0, 0),
     "coarse_rescore_peaks": (8, 8, 8, 8, 8, 0, 0, 0, 0, 0),
 }
 

@@ -267,13 +267,16 @@ const std::vector<Entry>& registry() {
         describe("nvfp4_project", nvfp4_project),
         describe("coarse_render_lanes", coarse_render_lanes),
         describe("coarse_warp_columns", coarse_warp_columns),
+        describe("coarse_fir_tiles", coarse_fir_tiles),
         describe("coarse_fir_decimate", coarse_fir_decimate),
+        describe("coarse_warp_fir", coarse_warp_fir),
         describe("coarse_bank_gram", coarse_bank_gram),
         describe("coarse_column_peaks", coarse_column_peaks),
         describe("coarse_pack_bank", coarse_pack_bank),
         describe("coarse_pack_observation", coarse_pack_observation),
         describe("coarse_fp4_scores", coarse_fp4_scores),
         describe("coarse_select_peaks", coarse_select_peaks),
+        describe("coarse_rotate_observation", coarse_rotate_observation),
         describe("coarse_rescore_peaks", coarse_rescore_peaks),
     };
     return entries;

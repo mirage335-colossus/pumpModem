@@ -54,7 +54,7 @@ private:
     std::vector<Complex> chirp_, convolution_;
 };
 
-inline void check_cancelled(std::stop_token stop) {
+inline void check_cancelled(const std::stop_token& stop) {
     if (stop.stop_requested()) throw Error("Robust reception cancelled");
 }
 

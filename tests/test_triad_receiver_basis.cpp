@@ -1,13 +1,20 @@
 #include "triad_receiver_basis.hpp"
+#include "triad_coordinate.hpp"
 #include "triad_mapped_kernel.hpp"
 #include "triad_crypto_fixture.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
+#include <cstring>
 #include <future>
 #include <iostream>
+#include <limits>
 #include <numeric>
+#include <optional>
+#include <random>
 #include <stdexcept>
+#include <string>
 
 namespace v = datapump::triad::v3;
 namespace r = v::receiver_detail;
@@ -303,6 +310,282 @@ void prepared_views(const datapump::Crypto& crypto) {
     check(excessive.direct_columns == 2 && excessive.fallback_reason == "pinned-tile-limit",
           "unpreparable map did not report the canonical direct fallback");
 }
+// The value bits of a long double: the 80-bit x87 format leaves padding.
+bool same_bits(long double a, long double b) {
+    constexpr std::size_t bytes = std::numeric_limits<long double>::digits == 64 ? 10 : sizeof(long double);
+    unsigned char x[sizeof(long double)]{}, y[sizeof(long double)]{};
+    std::memcpy(x, &a, sizeof(a));
+    std::memcpy(y, &b, sizeof(b));
+    return std::memcmp(x, y, bytes) == 0;
+}
+
+// The remainder form of the map phases equals std::fmod(x, 1.L) bit for bit,
+// including signed zeros, subnormals, values beside the 2^51 limit, huge and
+// non-finite values, integers and their neighbours.
+void unit_remainders() {
+    using limits = std::numeric_limits<long double>;
+    std::vector<long double> values{0.L, limits::denorm_min(), limits::min(), limits::min()-limits::denorm_min(),
+        .5L, 1-limits::epsilon()/2, 1.L, 1+limits::epsilon(), 1.5L, limits::max(), limits::infinity(),
+        limits::quiet_NaN(), std::nextafter(0x1p51L, 0.L), 0x1p51L, std::nextafter(0x1p51L, 0x1p64L),
+        0x1p51L+.5L, 0x1p63L, 0x1p64L, 0x1p40L, std::nextafter(0x1p40L, 0.L)};
+    for (int k = 0; k <= 70; ++k) {
+        const auto power = std::ldexp(1.L, k);
+        values.insert(values.end(), {power, std::nextafter(power, 0.L), std::nextafter(power, limits::infinity()),
+                                     power+.5L, power-.25L});
+    }
+    std::mt19937_64 random(0x5eed);
+    for (std::size_t i = 0; i != 400000; ++i) {
+        // Any finite magnitude, subnormals included.
+        const auto mantissa = random() | (UINT64_C(1)<<63);
+        const auto exponent = static_cast<int>(random()%32900)-16450;
+        values.push_back(std::ldexp(static_cast<long double>(mantissa), exponent-63));
+        // Phase-sized values: products of a double and a long double time.
+        const auto scale = std::ldexp(1., static_cast<int>(random()%126)-70);
+        values.push_back(static_cast<long double>(std::uniform_real_distribution<double>(-1, 1)(random)*scale)*
+                         (static_cast<long double>(random()>>11)/0x1p40L));
+        // Integers below and beyond the limit, and their neighbours.
+        const auto integer = static_cast<long double>(static_cast<std::int64_t>(random()>>(random()%64)));
+        values.insert(values.end(), {integer, std::nextafter(integer, 0.L), std::nextafter(integer, 0x1p70L)});
+    }
+    std::size_t compared = 0;
+    for (const auto value : values) {
+        for (const auto x : {value, -value}) {
+            const auto expected = std::fmod(x, 1.L), actual = v::detail::unit_remainder(x);
+            if (!same_bits(actual, expected) && !(std::isnan(x) && std::isnan(actual) && std::isnan(expected)))
+                throw std::runtime_error("unit remainder differs from fmod at " + std::to_string(static_cast<double>(x)));
+            ++compared;
+        }
+    }
+    check(compared > 2000000, "unit remainder comparison lost its inputs");
+    check(std::signbit(v::detail::unit_remainder(-3.L)) && std::signbit(v::detail::unit_remainder(-0.L)) &&
+          !std::signbit(v::detail::unit_remainder(3.L)), "unit remainder lost the sign of a zero");
+}
+
+// One synchronous sink call as a consumer sees it, without tile leases.
+struct SinkCall {
+    const double* offsets = nullptr;
+    std::size_t rows = 0;
+    struct Mapped {
+        std::array<std::uint64_t, 4> bits{};
+        std::int64_t origin = 0;
+        std::size_t output = 0, tiles = 0;
+        r::BulkTileAddress address;
+        bool operator==(const Mapped& other) const {
+            return bits == other.bits && origin == other.origin && output == other.output &&
+                   address.first == other.address.first && address.lane == other.address.lane &&
+                   address.count == other.address.count;
+        }
+    };
+    struct Direct {
+        std::size_t output = 0;
+        std::string reason;
+        std::vector<std::uint64_t> bits;
+        bool operator==(const Direct&) const = default;
+    };
+    std::vector<Mapped> mapped;
+    std::vector<Direct> direct;
+    bool operator==(const SinkCall& other) const {
+        return offsets == other.offsets && rows == other.rows && mapped == other.mapped && direct == other.direct;
+    }
+};
+
+struct Visit {
+    std::vector<SinkCall> calls;
+    std::optional<std::string> error;
+};
+
+template<class Call> Visit record(Call call) {
+    Visit result;
+    const r::BulkMappedSink sink = [&](std::span<const double> offsets, std::span<const r::BulkMappedColumn> mapped,
+                                       std::span<const r::BulkDirectColumn> direct_columns) {
+        auto& entry = result.calls.emplace_back();
+        entry.offsets = offsets.data();
+        entry.rows = offsets.size();
+        for (const auto& column : mapped)
+            entry.mapped.push_back({{std::bit_cast<std::uint64_t>(column.fraction), std::bit_cast<std::uint64_t>(column.scale),
+                std::bit_cast<std::uint64_t>(column.phase), std::bit_cast<std::uint64_t>(column.phase_step)},
+                column.origin, column.output_column, column.tiles.size(), column.address});
+        for (const auto& column : direct_columns) {
+            auto& item = entry.direct.emplace_back();
+            item.output = column.output_column;
+            item.reason = column.reason;
+            for (const auto value : column.samples)
+                item.bits.insert(item.bits.end(), {std::bit_cast<std::uint64_t>(value.real()),
+                                                   std::bit_cast<std::uint64_t>(value.imag())});
+        }
+    };
+    try {
+        call(sink);
+    } catch (const datapump::Error& error) {
+        result.error = error.what();
+    }
+    return result;
+}
+
+// The owner's addressed maps, whose row and block terms are computed once,
+// equal the maps of the canonical per-tap form that a prepared visit
+// leases tiles for: every column field bit for bit, in the same sink calls,
+// with the same exact native fallback columns, failures and receipts.
+// Rows, taps and blocks are random, from realistic support to wide phases,
+// distant or invalid maps and coordinates beyond 2^48.
+void addressed_maps(const datapump::Crypto& crypto) {
+    const auto settings = config();
+    const auto plan = slot();
+    constexpr std::size_t maximum_rows = 64;
+    r::MappedBasis canonical(settings, plan, crypto, maximum_rows, 2), owner(settings, plan, crypto, maximum_rows, 2);
+    r::MappedBasis lone(settings, plan, crypto, maximum_rows, 2);
+    const auto* source = owner.tile_source();
+    check(source && source->dense_samples > 8192*8, "addressed map fixture lacks a dense tile source");
+    const auto dense = source->dense_samples;
+    const r::ConsecutiveBasisOffsets offsets(maximum_rows);
+    std::mt19937_64 random(0xadd7e55);
+    const auto uniform = [&](double low, double high) { return std::uniform_real_distribution<double>(low, high)(random); };
+    const auto magnitude = [&](double low, double high) {
+        return (random()%2 ? -1. : 1.)*std::pow(10., uniform(low, high));
+    };
+    std::size_t compared = 0, mapped = 0, empty = 0, direct = 0, failed = 0, shared = 0;
+    r::MappedBasis::Addresses addresses(owner);
+    for (std::size_t trial = 0; trial != 160; ++trial) {
+        // 0, 1: realistic maps; 2: wide and mostly distant maps; 3: wide
+        // maps placed on the source, with phases beyond the native bound.
+        const auto mix = trial%4;
+        std::vector<v::Tap> taps{{0, 0}};
+        if (random()%4) {
+            taps.push_back(mix >= 2 ? v::Tap{std::pow(10., uniform(-4, 2)), magnitude(-3, 6)}
+                                    : v::Tap{uniform(0, .05), uniform(-100, 100)});
+            if (!(random()%5)) taps[0] = {uniform(0, .01), uniform(-30, 30)};
+        }
+        std::vector<r::MappedBasisRow> rows(1+random()%12);
+        for (auto& row : rows) {
+            if (mix < 2) row = {std::array<std::int64_t, 3>{-1, 0, 2}[random()%3], uniform(-1, 5), uniform(-60, 60),
+                                uniform(-300, 300)};
+            else if (mix == 2) row = {static_cast<std::int64_t>(random()%13)-6, magnitude(-3, 5), magnitude(-3, 10),
+                                      random()%3 ? uniform(-1e5, 1e5) : (random()%2 ? -999999.5 : 9e5)};
+            else row = {static_cast<std::int64_t>(random()%3), std::pow(10., uniform(-3, 6)), magnitude(-3, 10),
+                        uniform(-1e3, 1e3)};
+            // Requests the canonical form rejects must fail alike.
+            if (!(random()%23)) row.clock_ppm = -1e6;
+            if (!(random()%29)) row.epoch_offset_seconds = 7;
+            if (!(random()%31)) row.arrival_seconds = std::numeric_limits<double>::quiet_NaN();
+        }
+        std::vector<std::uint64_t> firsts(1+random()%5);
+        for (auto& first : firsts) {
+            if (mix < 2) first = random()%(dense+4000);
+            else if (mix == 2) first = random()>>(random()%64);
+            else if (random()%4) {
+                // On the source for one of the rows, whatever its arrival.
+                const auto arrival = rows[random()%rows.size()].arrival_seconds*settings.sample_rate_hz;
+                first = std::isfinite(arrival) ? static_cast<std::uint64_t>(std::llround(arrival)) + random()%dense : 0;
+            } else {
+                first = std::array<std::uint64_t, 8>{0, 1, 8191, 8192, dense-1, dense, UINT64_C(1)<<48,
+                                                     (UINT64_C(1)<<48)+1}[random()%8];
+            }
+            first = std::min(first, UINT64_MAX-maximum_rows);
+        }
+        // A repeated block keeps its terms; returning to one recomputes them.
+        firsts.push_back(firsts.front());
+        const auto count = 1+random()%maximum_rows;
+        const auto before = canonical.report(), owner_before = owner.report();
+        addresses.open(rows, taps);
+        for (const auto first : firsts) {
+            for (std::size_t index = 0; index != rows.size(); ++index) {
+                const auto row = random()%5 ? index : random()%rows.size();
+                const auto expected = record([&](const r::BulkMappedSink& sink) {
+                    canonical.visit_pair(rows[row], taps, first, offsets, count, sink);
+                });
+                const auto actual = record([&](const r::BulkMappedSink& sink) {
+                    addresses.address(row, first, offsets, count, sink, {});
+                });
+                if (!(actual.calls == expected.calls && actual.error == expected.error))
+                    throw std::runtime_error("addressed map differs from the canonical map in trial " +
+                                             std::to_string(trial));
+                for (const auto& call : expected.calls) {
+                    for (const auto& column : call.mapped)
+                        check(column.tiles == column.address.count, "canonical map lost its tile leases");
+                    mapped += call.mapped.size();
+                    direct += call.direct.size();
+                }
+                failed += expected.error.has_value();
+                empty += !expected.error && expected.calls.empty();
+                ++compared;
+                if (!(compared%7)) {
+                    // The single-call form is the same path.
+                    const auto single = record([&](const r::BulkMappedSink& sink) {
+                        lone.address_pair(rows[row], taps, first, offsets, count, sink);
+                    });
+                    check(single.calls == expected.calls && single.error == expected.error,
+                          "single addressed call differs from the canonical map");
+                    ++shared;
+                }
+            }
+        }
+        addresses.close();
+        // Receipts of the owner's calls are credited once, on close.
+        const auto after = canonical.report(), owner_after = owner.report();
+        check(owner_after.addressed_calls-owner_before.addressed_calls == after.prepared_calls-before.prepared_calls &&
+              owner_after.calls-owner_before.calls == after.calls-before.calls &&
+              owner_after.addressed_columns-owner_before.addressed_columns ==
+                  after.prepared_mapped_columns-before.prepared_mapped_columns &&
+              owner_after.prepared_empty_columns-owner_before.prepared_empty_columns ==
+                  after.prepared_empty_columns-before.prepared_empty_columns &&
+              owner_after.prepared_direct_columns-owner_before.prepared_direct_columns ==
+                  after.prepared_direct_columns-before.prepared_direct_columns &&
+              owner_after.direct_rows-owner_before.direct_rows == after.direct_rows-before.direct_rows &&
+              owner_after.large_phase_fallback_rows-owner_before.large_phase_fallback_rows ==
+                  after.large_phase_fallback_rows-before.large_phase_fallback_rows &&
+              owner_after.staging_fallback_rows-owner_before.staging_fallback_rows ==
+                  after.staging_fallback_rows-before.staging_fallback_rows &&
+              !owner_after.cache_misses && !owner_after.native_preparation_calls,
+              "addressed receipts differ from the canonical maps");
+    }
+    check(compared > 2000 && mapped > 1000 && empty > 100 && direct > 20 && failed > 20 && shared > 300,
+          "addressed map comparison missed a class of maps");
+    std::cout << "addressed maps equal canonical maps: " << compared << " calls, " << mapped << " mapped and "
+              << direct << " native columns, " << empty << " empty calls, " << failed << " rejected\n";
+
+    // An open owner holds one admitted call: a basis admitting one worker
+    // refuses another call until it closes, also after a failed request.
+    r::MappedBasis single(settings, plan, crypto, maximum_rows, 1);
+    r::MappedBasis::Addresses held(single);
+    const std::array<r::MappedBasisRow, 1> row{{{0, .5, 3, 20}}};
+    const std::array<v::Tap, 1> one_tap{{{0, 0}}};
+    std::vector<v::Complex> output(2*16);
+    const auto rendered_offsets = positions(16);
+    held.open(row, one_tap);
+    rejects([&] {
+        held.address(0, 6000, offsets, 16, [](auto, auto, auto) { throw datapump::Error("injected sink failure"); }, {});
+    });
+    rejects([&] { single.render_pair(row[0], one_tap, 6000, rendered_offsets, output); });
+    rejects([&] { held.address(1, 6000, offsets, 16, [](auto, auto, auto) {}, {}); });
+    held.close();
+    check(single.report().addressed_calls == 1 && single.report().calls == 1,
+          "a failed addressed call was not credited on close");
+    single.render_pair(row[0], one_tap, 6000, rendered_offsets, output);
+
+    // A basis without a dense source supplies every column natively, with
+    // its reason, on both routes.
+    auto unsupported = slot();
+    unsupported.format.pulse_shape = v::PulseShape::Rrc;
+    r::MappedBasis native(settings, unsupported, crypto, maximum_rows, 1), addressed(settings, unsupported, crypto,
+                                                                                     maximum_rows, 1);
+    const std::array<v::Tap, 2> two_taps{{{0, 0}, {.007, -.4}}};
+    for (const auto first : {UINT64_C(0), UINT64_C(25000)}) {
+        const auto expected = record([&](const r::BulkMappedSink& sink) {
+            native.visit_pair(row[0], two_taps, first, offsets, 24, sink);
+        });
+        const auto actual = record([&](const r::BulkMappedSink& sink) {
+            addressed.address_pair(row[0], two_taps, first, offsets, 24, sink);
+        });
+        check(actual.calls == expected.calls && !actual.error && actual.calls.size() == 2 &&
+              actual.calls[0].direct.size() == 2 && actual.calls[0].direct[0].reason == "unsupported-or-abrupt-pulse",
+              "addressed map lost the native fallback of an unsupported source");
+    }
+    check(addressed.report().prepared_direct_columns == native.report().prepared_direct_columns &&
+          addressed.report().direct_rows == native.report().direct_rows &&
+          addressed.report().addressed_calls == native.report().prepared_calls,
+          "addressed native fallback receipts differ");
+}
+
 } // namespace
 
 int main() {
@@ -313,6 +596,8 @@ int main() {
         dense_and_gated(crypto);
         fallback_and_validation(crypto);
         prepared_views(crypto);
+        unit_remainders();
+        addressed_maps(crypto);
         std::cout << "native mapped receiver basis passed\n";
         return 0;
     } catch (const std::exception& error) {

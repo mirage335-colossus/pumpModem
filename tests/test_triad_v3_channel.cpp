@@ -1,6 +1,9 @@
 #include "datapump/triad_modem_v3.hpp"
+#include "datapump/triad_stream.hpp"
+#include "datapump/crypto.hpp"
 #include "../src/triad_random_process.hpp"
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cmath>
 #include <cstring>
@@ -293,6 +296,11 @@ void threads(std::size_t jobs,const std::function<void(std::size_t)>& job){
 bool same_bits(const std::vector<v::Complex>& a,const std::vector<v::Complex>& b){
     return a.size()==b.size()&&(a.empty()||!std::memcmp(a.data(),b.data(),a.size()*sizeof(v::Complex)));
 }
+v::EmittedSource source_with_failure(std::uint64_t at){
+    auto result=source();
+    result.sample_at=[at](std::uint64_t n){if(n==at)throw std::runtime_error("source paused");return sample(n);};
+    return result;
+}
 void lanes_reproduce_the_lone_reader(){
     // Fractional source coordinates, both fixed-time laws and every state
     // that a block prepares ahead of the reader.
@@ -382,6 +390,124 @@ void source_failure_reaches_the_reader_in_order(){
         if(chunk==4096)check(run(cfg,chunk,true).failures==2,"a channel with lanes continued after a failed read");
     }
 }
+// The tone through readers, as the probe's sources offer them. A sample that
+// fails, or an accounting check that fails, behaves as the same failure of
+// sample_at: the reader reports it at the first row that needs the sample.
+struct ToneReaders final:v::EmittedSourceReaders{
+    std::uint64_t accounted=0,planned=0,fail_at=UINT64_MAX,check_at=UINT64_MAX;
+    std::atomic<std::uint64_t> evaluated{0};
+    std::size_t reader_bytes(std::size_t readers,std::uint64_t plan)const override{return readers*8+plan;}
+    void open(std::size_t,std::uint64_t)override{}
+    void plan(std::uint64_t first,std::uint64_t count)override{
+        check(first==accounted,"readers planned out of order");planned=count;}
+    v::Complex evaluate(std::size_t,std::uint64_t n)override{
+        ++evaluated;
+        if(n==fail_at)throw std::runtime_error("source paused");
+        return sample(n);}
+    std::uint64_t accept(std::uint64_t count,bool failed,std::exception_ptr& error)override{
+        check(count+failed<=planned,"readers accepted an unplanned sample");
+        for(std::uint64_t i=0;i<count+failed;++i)if(accounted+i==check_at){
+            error=std::make_exception_ptr(std::runtime_error("source paused"));accounted+=i;return i;}
+        accounted+=count;return count;}
+};
+v::EmittedSource read_source(std::shared_ptr<ToneReaders> readers,std::uint64_t fail_at=UINT64_MAX){
+    auto result=source();result.readers=readers;
+    result.sample_at=[fail_at](std::uint64_t n){if(n==fail_at)throw std::runtime_error("source paused");return sample(n);};
+    return result;
+}
+void readers_reproduce_the_lone_reader(){
+    auto base=settings();base.effects.tx.audio_ppm=3;base.effects.rx.audio_ppm=-2;
+    base.effects.spread_delay_ms=21;base.effects.spread_doppler_hz=9;base.effects.noise_enabled=true;
+    base.complex_noise_variance=.003;base.effects.tx.phase_noise_rad_per_sqrt_second=.02;
+    base.tx_spectrum.white_pm_rms_radians=.01;base.path_evolution.bounded_spread_knot_seconds=.13;
+    base.path_evolution.common_doppler_wander_hz=6;base.path_evolution.common_doppler_knot_seconds=.15;
+    base.effects.perturbation_fast_depth=.65;base.selective_model.modulation_rate_hz=2;
+    base.selective_model.coefficient_law=v::SelectiveCoefficientLaw::GaussianErf;
+    auto moving=settings();moving.effects.spread_delay_ms=21;moving.effects.spread_doppler_hz=2;
+    moving.path_evolution.delay_excursion_seconds=1e-6;moving.path_evolution.delay_knot_seconds=1;
+    for(const auto& cfg:{base,moving,settings()}){
+        const auto alone=capture(cfg,4096);
+        for(const unsigned count:{2U,3U,32U})for(const std::size_t chunk:{std::size_t{97},std::size_t{4096}}){
+            auto shared=cfg;shared.lanes={count,threads};
+            auto readers=std::make_shared<ToneReaders>();
+            const auto out=capture(shared,chunk,read_source(readers));
+            check(same_bits(alone.samples,out.samples)&&alone.valid==out.valid&&
+                  std::bit_cast<std::uint64_t>(alone.report.signal_energy)==std::bit_cast<std::uint64_t>(out.report.signal_energy)&&
+                  std::bit_cast<std::uint64_t>(alone.report.observed_energy)==std::bit_cast<std::uint64_t>(out.report.observed_energy),
+                  "source readers changed captured samples or energies");
+            check(readers->evaluated==source_samples&&readers->accounted==source_samples,
+                  "a channel with lanes did not read its source through the readers exactly once");
+        }
+    }
+    // A failed evaluation, or a failed accounting check, inside a range that
+    // readers evaluate is reported at the row where the lone reader meets it.
+    auto noisy=settings();noisy.effects.rx.audio_ppm=25;noisy.effects.spread_delay_ms=21;noisy.effects.spread_doppler_hz=9;
+    noisy.effects.noise_enabled=true;noisy.complex_noise_variance=.003;
+    for(const bool evaluation:{true,false}){
+        noisy.maximum_chunk_samples=4096;
+        v::StreamingChannel alone(source_with_failure(300),noisy);
+        std::vector<v::Complex> expected(static_cast<std::size_t>(alone.total_samples()));
+        try{alone.read(std::span(expected).first(4096));check(false,"source failure was lost");}catch(const std::runtime_error&){}
+        const auto failed_at=alone.position();
+        auto shared=noisy;shared.lanes={4,threads};
+        auto readers=std::make_shared<ToneReaders>();
+        if(evaluation)readers->fail_at=300;else readers->check_at=300;
+        v::StreamingChannel channel(read_source(readers,300),shared);
+        std::vector<v::Complex> got(expected.size());
+        try{channel.read(std::span(got).first(4096));check(false,"reader failure was lost");}
+        catch(const std::runtime_error& error){check(std::string(error.what())=="source paused","reader failure was replaced");}
+        check(channel.position()==failed_at&&!std::memcmp(got.data(),expected.data(),static_cast<std::size_t>(failed_at)*sizeof(v::Complex)),
+              "readers reported a source failure at another row");
+        check(readers->accounted==300,"readers accounted samples past the failure");
+        rejects([&]{channel.read(std::span(got).first(1));});
+    }
+}
+void emission_sources_reproduce_the_lone_reader(){
+    // Two Robust slots and, separately, the Helper's power references: a
+    // channel with lanes evaluates the source with readers, and an emission
+    // evaluates its references on lanes. Samples and both reports agree bit
+    // for bit; the DAC keeps the fused source loop on its own job.
+    v::PublicProfileConfig s;
+    s.format.sample_rate=960;s.format.inner_rate_hz=36;s.format.bit_seconds=2;s.format.epoch=1793850000;
+    s.data_if_hz=240;s.capture_lead_seconds=1;s.capture_trail_seconds=.4;
+    s.arrival_low_seconds=-.4;s.arrival_high_seconds=.4;s.cfo_bound_hz=1.5;
+    const auto key=datapump::Crypto::amateur();
+    const v::PublicProfile profile(s,key);
+    const std::vector<std::uint8_t> bits{1,0};
+    auto cfg=settings();cfg.effects.sample_rate=960;
+    cfg.effects.occupied_bandwidth_hz=profile.geometry().occupied_bandwidth_hz;
+    cfg.effects.nominal_conversion_if_hz=s.data_if_hz;cfg.effects.spread_delay_ms=3;cfg.effects.spread_doppler_hz=.5;
+    cfg.effects.noise_enabled=true;cfg.complex_noise_variance=.01;cfg.effects.tx.phase_noise_rad_per_sqrt_second=.01;
+    struct Run{Capture capture;v::EmissionReport report;};
+    const auto run=[&](v::StreamChannelConfig c,bool lend){
+        v::EmissionOptions options;options.bits=bits;
+        if(lend)options.lanes=c.lanes;
+        v::Emission emission(profile,key,options);
+        Run result{capture(c,4096,emission.source()),emission.report()};
+        return result;
+    };
+    const auto same_report=[](const v::EmissionReport& a,const v::EmissionReport& b){
+        const auto ld=[](long double x){std::array<unsigned char,10> bytes{};std::memcpy(bytes.data(),&x,10);return bytes;};
+        return a.generated_samples==b.generated_samples&&ld(a.data_energy)==ld(b.data_energy)&&
+            ld(a.helper_energy)==ld(b.helper_energy)&&
+            std::bit_cast<std::uint64_t>(a.data_gain)==std::bit_cast<std::uint64_t>(b.data_gain)&&
+            std::bit_cast<std::uint64_t>(a.reference_data_mean_norm)==std::bit_cast<std::uint64_t>(b.reference_data_mean_norm)&&
+            std::bit_cast<std::uint64_t>(a.data_reference.mean_norm)==std::bit_cast<std::uint64_t>(b.data_reference.mean_norm)&&
+            std::bit_cast<std::uint64_t>(a.data_reference.tile_relative_standard_error)==
+                std::bit_cast<std::uint64_t>(b.data_reference.tile_relative_standard_error);
+    };
+    for(const bool dac:{false,true}){
+        auto c=cfg;if(dac)c.frontend.dac.nominal_bits=14;
+        const auto alone=run(c,false);
+        check(alone.report.generated_samples>0,"emission fixture generated no source");
+        for(const unsigned count:{2U,5U}){
+            auto shared=c;shared.lanes={count,threads};
+            const auto out=run(shared,true);
+            check(same_bits(alone.capture.samples,out.capture.samples)&&alone.capture.valid==out.capture.valid&&
+                  same_report(alone.report,out.report),"emission readers or lent references changed a capture or report");
+        }
+    }
+}
 void coordinate_forms_match_the_standard_ones(){
     namespace d=v::detail;
     const auto same=[](long double a,long double b){return (a==b&&std::signbit(a)==std::signbit(b))||(std::isnan(a)&&std::isnan(b));};
@@ -443,4 +569,4 @@ void bounds(){
     rejects([&]{v::StreamingChannel channel(source(),cfg);});
 }
 }
-int main(){try{exact_bypass();chunk_state_and_tails();bounded_spread_evolves_and_streams();bounded_spread_fixed_powers();combined_doppler_reports_simultaneous_physical_trajectory();bounded_spread_phase_integrates_frequency();common_doppler_wander_is_bounded_and_continuous();effects_and_erasures();lanes_reproduce_the_lone_reader();source_failure_reaches_the_reader_in_order();coordinate_forms_match_the_standard_ones();bounds();std::cout<<"triad streaming channel invariants passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){try{exact_bypass();chunk_state_and_tails();bounded_spread_evolves_and_streams();bounded_spread_fixed_powers();combined_doppler_reports_simultaneous_physical_trajectory();bounded_spread_phase_integrates_frequency();common_doppler_wander_is_bounded_and_continuous();effects_and_erasures();lanes_reproduce_the_lone_reader();source_failure_reaches_the_reader_in_order();readers_reproduce_the_lone_reader();emission_sources_reproduce_the_lone_reader();coordinate_forms_match_the_standard_ones();bounds();std::cout<<"triad streaming channel invariants passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

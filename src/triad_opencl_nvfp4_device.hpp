@@ -48,7 +48,7 @@ inline void check(cl_int code, const char* operation) {
     if (code != CL_SUCCESS) throw OpenClError(code, operation);
 }
 
-inline void cancelled(std::stop_token stop) {
+inline void cancelled(const std::stop_token& stop) {
     if (stop.stop_requested()) throw Error("Robust OpenCL NVFP4 work cancelled");
 }
 

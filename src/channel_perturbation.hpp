@@ -194,10 +194,12 @@ private:
             Complex branch{};
             for(std::size_t m=0;m<3;++m)branch+=dft_[band][m]*delayed[m];
             output+=excursion*branch;
-            for(std::size_t component=0;component<2;++component)phase_[band][component]*=step_[component];
+            // Only the sinusoidal law reads these phases.
+            if(!random_coefficients_)
+                for(std::size_t component=0;component<2;++component)phase_[band][component]*=step_[component];
         }
         if(++cursor_==history_.size())cursor_=0;
-        if((++count_&4095U)==0)for(auto& phases:phase_)for(auto& p:phases)p/=std::abs(p);
+        if((++count_&4095U)==0&&!random_coefficients_)for(auto& phases:phase_)for(auto& p:phases)p/=std::abs(p);
         return output;
     }
 };

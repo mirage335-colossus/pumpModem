@@ -1760,6 +1760,136 @@ Limits:
 - Rows, receipts and probes stayed in the sessions' temporary directories
   and were removed; nothing was added to `local-evidence/`.
 
+### Exact receiver and simulator speedups — 20 November 2026
+
+The working tree on `7ed007dc` makes three exact changes, each keeping every
+operation and its order:
+
+- **Coarse template synthesis.** A tiled shared-memory FIR filters stored raw
+  columns. For the matched decimation it warps the raw rows as it stages them,
+  so no raw column is stored. Rescoring reads one rotated observation per
+  frequency. [Routes and limits](triad-gpu-optimization.md#remaining-costs-after-the-dense-search).
+- **Fine owner addressing.** The owner holds one admitted basis call for each
+  resident call and credits the receipts once. It shares block and row terms
+  between taps, passes `std::stop_token` by reference and builds one sink per
+  batch. `unit_remainder` replaces the `fprem` loop of `std::fmod(x, 1.L)`.
+- **Simulator.** Source readers, a separate transmit oscillator job, an
+  overlapped sequential pass, no unread work, larger probe reads, lent power
+  references and hashing.
+  [What changed and why it is exact](channel-models.md#stream-evaluation-workers-and-capture-identity).
+
+The device is one RTX PRO 6000 Blackwell Server Edition: 97,887 MiB,
+compute capability 12.0, driver 595.112.07, MIG disabled. Its host is an
+AMD EPYC 9554 with a 27.2-CPU quota, GNU 13.3.0 and NVCC 12.8. The pod built
+the reference probe `2b77918c…` from `git archive 7ed007dc` and the candidate
+probe `6b106c3e…` from this tree.
+
+Automatic route (`--backend gpu`, the GUI's **Default (fastest)**) on the
+matched captures, reference → candidate, in seconds. The 24-worker severe,
+quiet and stable rows hold two runs each, one in each order:
+
+| Capture, workers | Coarse | Fine | Slot | Simulator |
+| --- | --- | --- | --- | --- |
+| Severe, 24 | 0.088–0.089 → 0.063–0.065 | 0.081–0.093 → 0.084–0.088 | 0.176–0.194 → 0.154–0.156 | 1.94 → 0.65–0.69 |
+| Quiet, 24 | 0.086 → 0.063–0.064 | 0.116–0.117 → 0.110–0.124 | 0.214–0.218 → 0.179–0.195 | 0.95–1.05 → 0.62–0.73 |
+| Stable, 24 | 0.086 → 0.063–0.065 | 0.085–0.095 → 0.082 | 0.181–0.188 → 0.150–0.152 | 1.10–1.77 → 0.60 |
+| Severe, 12 | 0.082 → 0.068 | 0.084 → 0.085 | 0.171 → 0.156 | 1.16 → 0.61 |
+| Stable, 12 | 0.081 → 0.062 | 0.082 → 0.096 | 0.169 → 0.161 | 0.89 → 0.50 |
+| Severe, 4 | 0.085 → 0.061 | 0.110 → 0.107 | 0.207 → 0.173 | 1.37 → 1.11 |
+| Quiet, 4 | 0.082 → 0.059 | 0.142 → 0.131 | 0.229 → 0.196 | 0.82 → 0.73 |
+| Stable, 4 | 0.082 → 0.061 | 0.113 → 0.101 | 0.200 → 0.169 | 1.29 → 0.70 |
+| Severe, 1 | 0.123 → 0.079 | 0.284 → 0.284 | 0.411 → 0.368 | 2.68 → 2.71 |
+| Stable, 1 | 0.130 → 0.073 | 0.287 → 0.284 | 0.423 → 0.361 | 2.05 → 1.44 |
+
+The automatic five-slot message completed its service and verified physical
+quiet in every run. At 24 workers its service took 0.673–0.696 s before and
+0.493–0.494 s after, and its simulator 5.91–6.99 s before and 2.74–2.75 s
+after. At four workers the service went from 0.923 to 0.736 s and the
+simulator from 4.24 to 2.50 s. The peak device lease at 24 workers fell from
+1,110,012,416 bytes to 500,746,240–565,528,320.
+
+Explicit dense route with `--opencl-profile on`, severe slot, 24 workers,
+two runs of each build:
+
+| Device interval or receipt | `7ed007dc` | Candidate |
+| --- | --- | --- |
+| Template synthesis | 62.0–62.2 ms | 15.9 ms: render 7.0, warp and FIR 8.7, Gram 0.2 |
+| Selection | 4.7 ms | 2.7 ms, of which rotation and rescoring 2.68 |
+| FP4 products | 2.6–2.7 ms | 2.6 ms |
+| Dispatches at 24, 12 and 4 workers | 46, 50, 58 | 34, 39, 49 |
+| Session lease at 24, 12 and 4 workers (bytes) | 258,943,744; 252,843,776; 236,576,512 | 139,018,496; 131,758,336; 112,396,800 |
+
+The leases equal the session's quote. The profiled fine split, from one
+`slot` run of each build with device tiles and windows of 16, follows:
+
+| Interval | `7ed007dc` | Candidate |
+| --- | --- | --- |
+| Owner addresses | 22.8 ms | 14.8 ms |
+| Owner staging | 14.8 ms | 9.3 ms |
+| Owner submission | 9.6 ms | 9.8 ms |
+| Owner wait | 13.9 ms | 14.7 ms |
+| Device mapping | 24.7 ms | 24.7 ms |
+| Device span | 60.4 ms | 47.9 ms |
+| Fine work phase | 89.5 ms | 79.3 ms |
+
+| Check | Outcome |
+| --- | --- |
+| `test_triad_opencl_nvfp4` on the device | Passed. Every synthesis route is within 6.1e-7 of native: the fused route at D = 4 with four sources, the matched D = 25 with 1,705 taps and the stage limit at D = 26; stored raw columns tiled at D = 32 and in place at D = 50. |
+| `test_triad_opencl_fine_session` on the device | Passed. |
+| Paired decisions on identical captures, automatic route of both builds | Equal decisions, log evidence, separations, bit evidence and quiet energy for the 12 severe seeds 950201–950212 and for 20 near-threshold stable inputs at −88 to −76 dBm/Hz with seeds 950101–950104. So were every slot and message pair above. |
+| Capture hashes | Severe `b4d8fa5a…`, quiet `2b9ca9df…`, stable `eaa4ae2a…` and message `4a3603c8…` on both hosts at every worker count run. On the 5650U, Helper `0a0a3980…`, interferer `0781fdfe…` and FHSS `b7849cfa…` too, at 1, 2, 3, 4, 12 and 24 workers. |
+| Simulator library comparison against a `7ed007dc` build | 1,878 channel, pattern and emission digests equal. 984 comparisons of workers against a lone reader had no mismatch. AddressSanitizer reported only OpenSSL's per-thread error state. |
+| Coarse emulation against `7ed007dc` | Banks, Grams, FP4 scores and rescored frontiers of 14 synthesis geometries byte-identical with `-ffp-contract=off`, including all three routes and their limits at D = 26, 27, 47 and 48. A bounds-checked emulation of the staged reads matched. |
+| Fine stand-in uploads | A loader without kernels hashed every write, fill, launch and read. Twenty route, epoch and source runs equal `7ed007dc`, and the shared checkout at 24 workers too. Randomized tests compare the batched addresses with the scalar mapping and `unit_remainder` with `std::fmod` bit for bit. ThreadSanitizer is clean on the fine session and the stand-in. |
+| `./build.sh test triad` and `./build.sh test fast` on the shared checkout | 50 of 50 and 72 of 72. |
+
+On the Ryzen 5 PRO 5650U, three alternated pairs per cell, each run beside
+less than 0.75 CPUs of other work, simulator seconds before → after:
+
+| Capture | 1 worker | 12 workers | 24 workers |
+| --- | --- | --- | --- |
+| Severe | 2.67–2.69 → 2.66–2.68 | 1.06–1.07 → 0.56–0.57 | 1.08–1.10 → 0.60–0.63 |
+| Stable | 2.02 → 1.37–1.39 | 0.86–0.87 → 0.30 | 0.86–0.88 → 0.34–0.37 |
+| Five-slot message | 6.79–6.80 → 4.80–4.85 | 3.32–3.36 → 1.47–1.49 | 3.50–3.52 → 1.72–1.81 |
+
+There the fine stand-in session took a median 0.947 of the old time at 24
+workers, below one in 10 of 10 pairs, and 0.955 at four, 9 of 10. Per slot it
+executed 4,346 heap allocations against 62,541. Locked instructions fell
+from 2.78 million to 21,000, `fprem` from 466,560 to none and x87 divisions
+from 241,578 to 125,891.
+
+Findings:
+
+- The fused warp and FIR take 8.7 ms against 55.9 ms for the stored warp and
+  the scalar FIR, despite each raw row being warped about 1.53 times and at
+  most two blocks per SM. Lane rendering, 7.0 ms, is now the largest part of
+  synthesis. The automatic coarse stage fell by 0.02 s, less than the 0.048 s
+  of device intervals removed; the stage was not split further.
+- The owner's address and staging time fell by a third. The unprofiled fine
+  stage at 24 workers did not change, because the device's 24.7 ms FP64
+  mapping and the 14–15 ms window wait now bound it. Addresses on idle lanes
+  would not help until those shrink.
+- With no helper, the severe simulator is unchanged. Stable and the message
+  gain about 30% from the removed unread work. With helpers, the pod's
+  simulator is still four times the 0.15 s receiver slot.
+
+Limits:
+
+- One pod, with one or two runs per cell. The host is an EPYC 9554, not the
+  9355 of the earlier records, so compare builds within this record rather
+  than across records.
+- The RTX 5090 did not run. The tiled FIR near D = 47 was not compared with
+  the in-place FIR, and the fused kernel's stage size and occupancy were not
+  varied.
+- `gui_robust_live` failed once in 10 runs on this host for both `7ed007dc`
+  and the simulator change, with `receiver_workspace_limit` from its 512 MiB
+  limit. It passed in both groups above.
+- The pod ran 0.28 h, was terminated and was verified absent.
+  `local-evidence/next-receiver-costs-20261120/` holds its compact receipts:
+  log, analysis, binary and source hashes, and device test outputs. It also
+  holds the local timing rows and test logs. They support this record. Remove
+  them when a later device comparison supersedes these timings.
+
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 
 The [HF operating results](indexes/robust.md#low-power-hf-alarm-results)

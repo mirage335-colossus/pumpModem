@@ -136,25 +136,71 @@ GUI session relies on when it reports transmit progress after each read.
   the x87 rounding mode. Those switches are the likely explanation of the
   40% difference between binaries with equal simulator objects.
   [Mechanism and guidance](triad-performance.md#code-placement-and-x87-rounding-mode-switches).
+- **Unread work.** The delayed interpolation runs only when a two-ray or
+  bounded law reads it, which removes 48 of the 96 sines and cosines of a
+  row on the unspread stable and five-slot message captures. Rows carry their
+  echo delay into the sequential pass instead of evaluating the path again;
+  a row whose coordinates failed is evaluated again, so the failure is
+  reported at the same row. The selective filter updates and renormalizes
+  its phases only for the sinusoidal law. Without FHSS the transmit dwell
+  index is skipped when a bound found at construction proves that every
+  transmit calendar coordinate converts.
 
 `StreamChannelConfig::lanes` lends a channel the caller's workers. The rows
 of a block are split among up to sixteen jobs. One further job each advances
 the receiver oscillator, the thermal noise and the two bounded path
-trajectories through the block, and one generates the source history of the
-read's next block. None of those states reads the signal, so their values
-depend on the row alone. The reader then applies them in order with the
-selective filter, front end, gain control and report sums. Samples and
-reports are identical for every worker count. Two things differ from a lone
-reader: the source callback can run on a worker, still in order, and a read
+trajectories through the block. None of those states reads the signal, so
+their values depend on the row alone. The next block's source history is
+generated on one of two paths:
+
+- **Split.** When the source offers `EmittedSource::readers` and neither a
+  converter nor diagnostic I/Q noise reads source values, or when the signal
+  is disabled, the transmit oscillator is a job of its own. It forms
+  `signal_gain * polar(phase + white_pm)` for each sample with the same
+  operations and random-number order. Up to eight readers evaluate disjoint
+  parts of the source range at once. The owner then accounts the samples in
+  order exactly as `sample_at` would: forward cursor, stop checks every 256
+  samples, slot transitions and the DATA and Helper energy sums. The
+  earliest failure wins, the oscillator ahead of the source at the same
+  index. Each block's sequential pass runs as one more job beside the
+  preparation of the read's next block. The read's last block, and a block
+  with a recorded failure, is passed alone. A pass that fails inside that
+  overlap discards the range evaluated beside it, so the emission report
+  equals a lone reader's.
+- **Fused.** Without readers, with a converter or diagnostic noise, or with
+  a lone reader, one job generates the source and transmit oscillator chain
+  of the next block in the original order.
+
+`Emission` gives each reader its own DATA `PatternSource` for each slot and
+its own Helper `Generator`, and the probe's composite source forwards to
+every component's readers, including the interferer. `EmissionOptions::lanes`
+evaluates the 32,768-node DATA power reference, the sixteen-tile
+`bounded_tile_power` and the Helper reference norms in parts, each with its
+own source and per-part copies bounded to 32 MiB; the sums keep node and tile
+order. The receiver's `data_power_reference` stays sequential.
+
+The reader applies the prepared terms in order with the selective filter,
+front end, gain control and report sums. Samples, masks and reports are
+identical for every worker count. Two things differ from a lone reader: the
+source, its readers and the sequential pass can run on a worker, and a read
 that fails ends the channel. The probe lends the receiver's executor, whose
-workers are idle while the capture is generated, and charges their stacks to
-its memory limit. The GUI simulation keeps a lone reader, because its
-receiver is using those workers.
+workers are idle while the capture is generated. It charges their stacks to
+its memory limit before it sizes its two read buffers, which start at 4,096
+rows and grow to at most 65,536, so a larger read never removes a simulator
+worker. Its SHA-256, copy and spool append run in 4,096-row pieces, one
+piece as an extra job of each lent preparation. The workspace grows with
+workers: at 16 workers `channel_workspace_bytes` rose from 314,897 to
+1,640,313 on the stable capture and from 3,281,961 to 26,279,953 on the FHSS
+capture, whose readers copy the pattern-source caches, all inside the 65 MiB
+channel bound. The GUI simulation keeps a lone reader, because its receiver
+is using those workers.
 
 The Gaussian FIR path law, the Ornstein–Uhlenbeck ray gains, the sinusoidal
-selective law and the sampled front end remain on the reader. With many
-workers a slot is bounded by the source and transmit oscillator chain of one
-thread and by that sequential pass.
+selective law and the sampled front end remain in the sequential pass. With
+twelve workers on the Ryzen 5 PRO 5650U the severe slot took 0.56 s against
+1.06 s before the readers and the overlapped pass, and twenty-four workers
+were no faster. Which stage now bounds it was not measured.
+[Measurements](validation.md#exact-receiver-and-simulator-speedups--20-november-2026).
 
 Proposals that change sample values, measured and not adopted:
 

@@ -36,11 +36,13 @@ std::size_t multiply(std::size_t a, std::size_t b) {
     require(!a || b <= SIZE_MAX/a, "mapped basis workspace overflow");
     return a*b;
 }
-void cancelled(std::stop_token stop) {
+void cancelled(const std::stop_token& stop) {
     if (stop.stop_requested()) throw Error("Robust receive cancelled");
 }
+// The phase of `value` cycles in [0, 1]: std::fmod(value, 1.L), plus one
+// when negative, without the x87 remainder loop.
 long double unit_cycle(long double value) {
-    auto result = std::fmod(value, 1.L);
+    const auto result = detail::unit_remainder(value);
     return result < 0 ? result+1.L : result;
 }
 void validate_shape(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
@@ -144,7 +146,7 @@ struct MappedBasis::Impl {
     }
 
     // One lane's keyed coefficients, as the native renderer reads them.
-    void key_lane(std::size_t lane, std::span<Complex> chips, std::stop_token stop) {
+    void key_lane(std::size_t lane, std::span<Complex> chips, const std::stop_token& stop) {
         const auto cells = static_cast<std::size_t>(source_geometry.fine_cells);
         require(lane < 2*owner_count && chips.size() == 3*cells, "mapped basis keyed lane extent mismatch");
         const auto epoch = static_cast<unsigned>(lane/2);
@@ -260,7 +262,7 @@ struct MappedBasis::Impl {
     // bits enter the cache together. `ahead` marks the requested bit when no
     // render is waiting for it; otherwise that bit becomes the latest use.
     std::shared_ptr<const Tile> fill(unsigned bit, unsigned epoch, std::uint64_t index, bool ahead,
-                                     std::stop_token stop) {
+                                     const std::stop_token& stop) {
         const Key address{bit, epoch, index};
         prepare_sources(epoch);
         require(index <= UINT64_MAX/tile_samples, "mapped basis tile address overflow");
@@ -296,7 +298,7 @@ struct MappedBasis::Impl {
     }
 
     std::shared_ptr<const Tile> tile(unsigned bit, unsigned epoch, std::uint64_t index,
-                                     std::stop_token stop) {
+                                     const std::stop_token& stop) {
         const Key address{bit, epoch, index};
         {
             std::shared_lock lock(mutex);
@@ -315,7 +317,7 @@ struct MappedBasis::Impl {
     // Pins a render group's tiles in bit-major order. One cache lock serves
     // every tile already present; a missing tile takes the filling path.
     void pin(unsigned first_bit, unsigned bits, unsigned epoch, std::uint64_t low, std::size_t count,
-             std::span<std::shared_ptr<const Tile>> pins, std::stop_token stop) {
+             std::span<std::shared_ptr<const Tile>> pins, const std::stop_token& stop) {
         const auto total = bits*count;
         const auto address = [&](std::size_t item) {
             return Key{first_bit+static_cast<unsigned>(item/count), epoch, low+item%count};
@@ -342,7 +344,7 @@ struct MappedBasis::Impl {
     }
 
     // The fill a later render would otherwise wait for, with no lookup credit.
-    void fill_ahead(unsigned bit, unsigned epoch, std::uint64_t index, std::stop_token stop) {
+    void fill_ahead(unsigned bit, unsigned epoch, std::uint64_t index, const std::stop_token& stop) {
         const Key address{bit, epoch, index};
         {
             std::shared_lock lock(mutex);
@@ -359,7 +361,7 @@ struct MappedBasis::Impl {
     }
 
     void direct(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
-                std::span<const double> offsets, std::span<Complex> output, std::stop_token stop) {
+                std::span<const double> offsets, std::span<Complex> output, const std::stop_token& stop) {
         const auto epoch = source_index(row.epoch_offset_seconds);
         std::lock_guard source_lock(sources[epoch].mutex);
         cancelled(stop);
@@ -391,6 +393,7 @@ struct MappedBasis::Impl {
         std::string_view fallback_reason;
     };
 
+    // The public affine map of one row and tap over a block from `first`.
     Map mapping(const MappedBasisRow& row, const Tap& tap, std::uint64_t first,
                 double first_offset, double last_offset) const {
         Map map;
@@ -398,8 +401,7 @@ struct MappedBasis::Impl {
         const auto wide_scale = static_cast<long double>(scale);
         const auto shift = static_cast<long double>(row.arrival_seconds+tap.delay_seconds)*config.sample_rate_hz;
         const auto dense_origin = ((static_cast<long double>(first)-shift)*wide_scale)*dense_factor;
-        // One map per candidate and tap is the owner's main work on a route
-        // that renders tiles itself. These forms keep the x87 control word.
+        // These forms keep the x87 control word.
         map.origin = detail::floor_coordinate(dense_origin);
         map.fraction = static_cast<double>(dense_origin-map.origin);
         map.scale = scale*dense_factor;
@@ -414,17 +416,83 @@ struct MappedBasis::Impl {
         map.phase = static_cast<double>(unit_cycle(unit_cycle(phases[0])+unit_cycle(phases[1])+unit_cycle(phases[2])));
         map.phase_step = (row.frequency_hz+tap.doppler_hz+config.data_if_hz*(scale-1))/config.sample_rate_hz;
         map.large_phase = std::any_of(phases.begin(), phases.end(), [](auto p) { return std::abs(p) > 0x1p40L; });
+        bound(map, relative_first, relative_last, first_offset, last_offset);
+        return map;
+    }
+
+    // The terms of mapping() shared by every row and tap of one block, and
+    // by both taps of one row in it. The addressed owner path computes each
+    // once, with the same operations on the same operands.
+    struct BlockTerms {
+        std::uint64_t first = 0;
+        long double time = 0;
+        std::array<long double, maximum_taps> doppler_phase{}, doppler_cycle{};
+    };
+    struct RowTerms {
+        double scale = 0, dense_scale = 0;
+        long double wide_scale = 0, wide_first = 0, frequency_phase = 0, frequency_cycle = 0;
+    };
+
+    BlockTerms block_terms(std::uint64_t first, std::span<const Tap> taps) const {
+        BlockTerms block;
+        block.first = first;
+        block.time = static_cast<long double>(first)/config.sample_rate_hz;
+        for (std::size_t tap = 0; tap != taps.size(); ++tap) {
+            block.doppler_phase[tap] = static_cast<long double>(taps[tap].doppler_hz)*block.time;
+            block.doppler_cycle[tap] = unit_cycle(block.doppler_phase[tap]);
+        }
+        return block;
+    }
+
+    RowTerms row_terms(const MappedBasisRow& row, const BlockTerms& block) const {
+        RowTerms terms;
+        terms.scale = 1+row.clock_ppm*1e-6;
+        terms.wide_scale = static_cast<long double>(terms.scale);
+        terms.dense_scale = terms.scale*dense_factor;
+        terms.wide_first = (terms.wide_scale-1)*block.first;
+        terms.frequency_phase = static_cast<long double>(row.frequency_hz)*block.time;
+        terms.frequency_cycle = unit_cycle(terms.frequency_phase);
+        return terms;
+    }
+
+    // mapping(row, taps[tap], block.first, first_offset, last_offset), equal
+    // bit for bit: every value is the same IEEE operation on the same
+    // operands, only evaluated once for its block or row.
+    Map mapping(const MappedBasisRow& row, std::span<const Tap> taps, std::size_t tap, const RowTerms& terms,
+                const BlockTerms& block, double first_offset, double last_offset) const {
+        Map map;
+        const auto shift = static_cast<long double>(row.arrival_seconds+taps[tap].delay_seconds)*config.sample_rate_hz;
+        const auto dense_origin = ((static_cast<long double>(block.first)-shift)*terms.wide_scale)*dense_factor;
+        map.origin = detail::floor_coordinate(dense_origin);
+        map.fraction = static_cast<double>(dense_origin-map.origin);
+        map.scale = terms.dense_scale;
+        const double relative_first = first_offset*map.scale+map.fraction;
+        const double relative_last = last_offset*map.scale+map.fraction;
+        const auto difference = (terms.wide_first-terms.wide_scale*shift)/config.sample_rate_hz;
+        const auto center_phase = static_cast<long double>(config.data_if_hz)*difference;
+        map.phase = static_cast<double>(unit_cycle(terms.frequency_cycle+block.doppler_cycle[tap]+
+                                                   unit_cycle(center_phase)));
+        map.phase_step = (row.frequency_hz+taps[tap].doppler_hz+config.data_if_hz*(terms.scale-1))/
+                         config.sample_rate_hz;
+        map.large_phase = std::abs(terms.frequency_phase) > 0x1p40L || std::abs(block.doppler_phase[tap]) > 0x1p40L ||
+                          std::abs(center_phase) > 0x1p40L;
+        bound(map, relative_first, relative_last, first_offset, last_offset);
+        return map;
+    }
+
+    // The rest of a map whose origin, fraction, scale, phase and step are set.
+    void bound(Map& map, double relative_first, double relative_last, double first_offset, double last_offset) const {
         if (!std::isfinite(relative_first) || !std::isfinite(relative_last) || !std::isfinite(map.origin) ||
                 !std::isfinite(map.phase) || !std::isfinite(map.phase_step)) {
             map.fallback = true;
             map.fallback_reason = "nonfinite-relative-map";
-            return map;
+            return;
         }
         const auto lower = map.origin+std::floor(relative_first)-1;
         const auto upper = map.origin+std::floor(relative_last)+2;
         if (upper < 0 || lower >= dense_samples) {
             map.empty = true;
-            return map;
+            return;
         }
         map.low_tile = detail::unsigned_index(std::max(0.L, lower))/tile_samples;
         const auto high_tile = detail::unsigned_index(std::min(static_cast<long double>(dense_samples-1), upper))/tile_samples;
@@ -438,7 +506,6 @@ struct MappedBasis::Impl {
         if (map.fallback) map.fallback_reason = map.large_phase ? "large-phase" :
             map.staging ? "pinned-tile-limit" : "relative-map-range";
         if (!map.fallback) map.count = static_cast<std::size_t>(count);
-        return map;
     }
 
     unsigned validate_request(const MappedBasisRow& row, std::span<const Tap> taps,
@@ -475,7 +542,7 @@ struct MappedBasis::Impl {
     }
 
     void render(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
-                std::span<const double> offsets, std::span<Complex> output, std::stop_token stop) {
+                std::span<const double> offsets, std::span<Complex> output, const std::stop_token& stop) {
         cancelled(stop);
         require(output.size() == 2*taps.size()*offsets.size(), "mapped basis output extent mismatch");
         const auto epoch = validate_request(row, taps, first, offsets);
@@ -538,7 +605,7 @@ struct MappedBasis::Impl {
 
     // The tiles that render() pins for consecutive rows, and no others.
     void prepare(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
-                 std::size_t rows, std::stop_token stop) {
+                 std::size_t rows, const std::stop_token& stop) {
         cancelled(stop);
         require(rows && rows <= maximum_rows && rows <= maximum_samples && !taps.empty() &&
                 taps.size() <= maximum_taps && rows-1 <= UINT64_MAX-first,
@@ -558,48 +625,79 @@ struct MappedBasis::Impl {
         }
     }
 
-    // An addressed visit supplies each mapped column's public tile address
-    // and leaves the native cache untouched.
+    // The reason every column of a request takes the exact native route, if any.
+    std::string_view request_fallback(std::uint64_t first) const {
+        auto reason = std::string_view(statistics.fallback_reason);
+        if (reason.empty() && std::numeric_limits<long double>::digits < 64 && first > (UINT64_C(1)<<48))
+            reason = "native-origin-precision";
+        return reason;
+    }
+
+    // Both bit columns of one tap by the exact native route. At most one
+    // native bit-pair is materialized: the canonical fallback, never the
+    // normal device path.
+    void direct_columns(const MappedBasisRow& row, std::span<const Tap> taps, std::size_t tap, std::uint64_t first,
+                        std::span<const double> offsets, const BulkMappedSink& sink, const std::stop_token& stop,
+                        std::string_view reason) {
+        std::vector<Complex> values(2*offsets.size());
+        direct(row, taps.subspan(tap, 1), first, offsets, values, stop);
+        const std::array<BulkDirectColumn, 2> columns{{
+            {tap, std::span<const Complex>(values).first(offsets.size()), reason},
+            {taps.size()+tap, std::span<const Complex>(values).subspan(offsets.size()), reason}}};
+        sink(offsets, {}, columns);
+        cancelled(stop);
+        std::lock_guard lock(mutex);
+        statistics.prepared_direct_columns += columns.size();
+    }
+
+    // A map that the native route renders: its columns, then its receipts.
+    void fallback_columns(const MappedBasisRow& row, std::span<const Tap> taps, std::size_t tap, std::uint64_t first,
+                          std::span<const double> offsets, const BulkMappedSink& sink, const std::stop_token& stop,
+                          const Map& map) {
+        direct_columns(row, taps, tap, first, offsets, sink, stop, map.fallback_reason);
+        std::lock_guard lock(mutex);
+        statistics.large_phase_fallback_rows += 2*map.large_phase;
+        statistics.staging_fallback_rows += 2*map.staging;
+    }
+
+    // The bit columns [begin, begin+group) of a mapped tap, without tiles.
+    static void describe_columns(const Map& map, std::int64_t origin, unsigned epoch, std::size_t tap,
+                                 std::size_t taps, unsigned begin, unsigned group,
+                                 std::array<BulkMappedColumn, 2>& columns) {
+        for (unsigned b = 0; b != group; ++b) {
+            auto& column = columns[b];
+            column.fraction = map.fraction;
+            column.scale = map.scale;
+            column.phase = map.phase;
+            column.phase_step = map.phase_step;
+            column.origin = origin;
+            column.output_column = (begin+b)*taps+tap;
+            column.address = {map.low_tile, 2*epoch+begin+b, static_cast<std::uint32_t>(map.count)};
+        }
+    }
+
+    // A prepared visit leases each mapped column's native tiles.
     void visit(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
-               std::span<const double> offsets, const BulkMappedSink& sink, std::stop_token stop,
-               bool consecutive, bool addressed) {
+               std::span<const double> offsets, const BulkMappedSink& sink, const std::stop_token& stop,
+               bool consecutive) {
         cancelled(stop);
         require(static_cast<bool>(sink), "mapped basis requires a synchronous mapping sink");
         const auto epoch = validate_request(row, taps, first, offsets, consecutive);
         calls.fetch_add(1, std::memory_order_relaxed);
-        if (addressed) addressed_calls.fetch_add(1, std::memory_order_relaxed);
-        else {
+        {
             std::lock_guard lock(mutex);
             ++statistics.prepared_calls;
         }
-        auto fallback_reason = std::string_view(statistics.fallback_reason);
-        if (fallback_reason.empty() && std::numeric_limits<long double>::digits < 64 && first > (UINT64_C(1)<<48))
-            fallback_reason = "native-origin-precision";
-        const auto direct_columns = [&](std::size_t tap, std::string_view reason) {
-            // At most one exact native bit-pair is materialized. This is the
-            // existing canonical fallback, never the normal device path.
-            std::vector<Complex> values(2*offsets.size());
-            direct(row, taps.subspan(tap, 1), first, offsets, values, stop);
-            const std::array<BulkDirectColumn, 2> columns{{
-                {tap, std::span<const Complex>(values).first(offsets.size()), reason},
-                {taps.size()+tap, std::span<const Complex>(values).subspan(offsets.size()), reason}}};
-            sink(offsets, {}, columns);
-            cancelled(stop);
-            std::lock_guard lock(mutex);
-            statistics.prepared_direct_columns += columns.size();
-        };
+        const auto fallback_reason = request_fallback(first);
         for (std::size_t tap = 0; tap != taps.size(); ++tap) {
             cancelled(stop);
             if (!fallback_reason.empty()) {
-                direct_columns(tap, fallback_reason);
+                direct_columns(row, taps, tap, first, offsets, sink, stop, fallback_reason);
                 continue;
             }
             const auto map = mapping(row, taps[tap], first, offsets.front(), offsets.back());
             if (map.fallback) {
-                direct_columns(tap, map.fallback_reason);
-                std::lock_guard lock(mutex);
-                statistics.large_phase_fallback_rows += 2*map.large_phase;
-                statistics.staging_fallback_rows += 2*map.staging;
+                fallback_columns(row, taps, tap, first, offsets, sink, stop, map);
                 continue;
             }
             if (map.empty) {
@@ -612,24 +710,7 @@ struct MappedBasis::Impl {
                 map.origin-static_cast<long double>(map.low_tile)*tile_samples);
             for (unsigned begin = 0; begin != 2; begin += group) {
                 std::array<BulkMappedColumn, 2> columns;
-                for (unsigned b = 0; b != group; ++b) {
-                    auto& column = columns[b];
-                    column.fraction = map.fraction;
-                    column.scale = map.scale;
-                    column.phase = map.phase;
-                    column.phase_step = map.phase_step;
-                    column.origin = origin;
-                    column.output_column = (begin+b)*taps.size()+tap;
-                    column.address = {map.low_tile, 2*epoch+begin+b, static_cast<std::uint32_t>(map.count)};
-                }
-                if (addressed) {
-                    // No tile is pinned: the consumer renders these addresses.
-                    cancelled(stop);
-                    sink(offsets, std::span<const BulkMappedColumn>(columns).first(group), {});
-                    cancelled(stop);
-                    addressed_columns.fetch_add(group, std::memory_order_relaxed);
-                    continue;
-                }
+                describe_columns(map, origin, epoch, tap, taps.size(), begin, group, columns);
                 std::array<std::shared_ptr<const Tile>, maximum_pins> pins;
                 pin(begin, group, epoch, map.low_tile, map.count, std::span(pins).first(group*map.count), stop);
                 for (unsigned b = 0; b != group; ++b) {
@@ -650,6 +731,18 @@ struct MappedBasis::Impl {
             }
         }
     }
+};
+
+struct MappedBasis::Addresses::State {
+    explicit State(Impl& value) : impl(value) {}
+    Impl& impl;
+    std::span<const MappedBasisRow> rows;
+    std::span<const Tap> taps;
+    // The block of the latest call, kept for the rows that follow it.
+    Impl::BlockTerms block;
+    bool block_ready = false, admitted = false;
+    // Receipts credited on close.
+    std::uint64_t calls = 0, columns = 0, empty_columns = 0;
 };
 
 ConsecutiveBasisOffsets::ConsecutiveBasisOffsets(std::size_t rows) : offsets_(rows) {
@@ -679,7 +772,7 @@ std::size_t MappedBasis::workspace_bytes(const ReceiverConfig& config, const Rec
 
 void MappedBasis::render_pair(const MappedBasisRow& row, std::span<const Tap> taps,
                               std::uint64_t first, std::span<const double> offsets,
-                              std::span<Complex> output, std::stop_token stop) {
+                              std::span<Complex> output, const std::stop_token& stop) {
     const auto before = impl_->active.fetch_add(1);
     struct Release { std::atomic<unsigned>& active; ~Release() { active.fetch_sub(1); } } release{impl_->active};
     require(before < impl_->workers, "mapped basis concurrency exceeds admitted worker share");
@@ -687,7 +780,7 @@ void MappedBasis::render_pair(const MappedBasisRow& row, std::span<const Tap> ta
 }
 
 void MappedBasis::prepare_pair(const MappedBasisRow& row, std::span<const Tap> taps,
-                               std::uint64_t first, std::size_t rows, std::stop_token stop) {
+                               std::uint64_t first, std::size_t rows, const std::stop_token& stop) {
     const auto before = impl_->active.fetch_add(1);
     struct Release { std::atomic<unsigned>& active; ~Release() { active.fetch_sub(1); } } release{impl_->active};
     require(before < impl_->workers, "mapped basis concurrency exceeds admitted worker share");
@@ -696,33 +789,125 @@ void MappedBasis::prepare_pair(const MappedBasisRow& row, std::span<const Tap> t
 
 void MappedBasis::visit_pair(const MappedBasisRow& row, std::span<const Tap> taps,
                              std::uint64_t first, std::span<const double> offsets,
-                             const BulkMappedSink& sink, std::stop_token stop) {
+                             const BulkMappedSink& sink, const std::stop_token& stop) {
     visit_pair_impl(row, taps, first, offsets, sink, stop, false);
 }
 
 void MappedBasis::visit_pair(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
                              const ConsecutiveBasisOffsets& offsets, std::size_t rows,
-                             const BulkMappedSink& sink, std::stop_token stop) {
+                             const BulkMappedSink& sink, const std::stop_token& stop) {
+    visit_pair_impl(row, taps, first, consecutive(offsets, rows), sink, stop, true);
+}
+
+std::span<const double> MappedBasis::consecutive(const ConsecutiveBasisOffsets& offsets, std::size_t rows) {
     require(rows <= offsets.size(), "mapped basis offsets exceed the consecutive row extent");
-    visit_pair_impl(row, taps, first, std::span(offsets.offsets_).first(rows), sink, stop, true);
+    return std::span(offsets.offsets_).first(rows);
 }
 
 const FineTileSource* MappedBasis::tile_source() { return impl_->describe(); }
 
 void MappedBasis::address_pair(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
                                const ConsecutiveBasisOffsets& offsets, std::size_t rows,
-                               const BulkMappedSink& sink, std::stop_token stop) {
-    require(rows <= offsets.size(), "mapped basis offsets exceed the consecutive row extent");
-    visit_pair_impl(row, taps, first, std::span(offsets.offsets_).first(rows), sink, stop, true, true);
+                               const BulkMappedSink& sink, const std::stop_token& stop) {
+    Addresses addresses(*this);
+    addresses.open(std::span(&row, 1), taps);
+    addresses.address(0, first, offsets, rows, sink, stop);
 }
 
 void MappedBasis::visit_pair_impl(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
                                   std::span<const double> offsets, const BulkMappedSink& sink,
-                                  std::stop_token stop, bool consecutive, bool addressed) {
+                                  const std::stop_token& stop, bool consecutive) {
     const auto before = impl_->active.fetch_add(1);
     struct Release { std::atomic<unsigned>& active; ~Release() { active.fetch_sub(1); } } release{impl_->active};
     require(before < impl_->workers, "mapped basis concurrency exceeds admitted worker share");
-    impl_->visit(row, taps, first, offsets, sink, stop, consecutive, addressed);
+    impl_->visit(row, taps, first, offsets, sink, stop, consecutive);
+}
+
+MappedBasis::Addresses::Addresses(MappedBasis& basis) : state_(std::make_unique<State>(*basis.impl_)) {}
+MappedBasis::Addresses::~Addresses() { close(); }
+
+void MappedBasis::Addresses::open(std::span<const MappedBasisRow> rows, std::span<const Tap> taps) {
+    close();
+    state_->rows = rows;
+    state_->taps = taps;
+}
+
+void MappedBasis::Addresses::close() noexcept {
+    auto& state = *state_;
+    auto& impl = state.impl;
+    if (state.calls) {
+        impl.calls.fetch_add(state.calls, std::memory_order_relaxed);
+        impl.addressed_calls.fetch_add(state.calls, std::memory_order_relaxed);
+    }
+    if (state.columns) impl.addressed_columns.fetch_add(state.columns, std::memory_order_relaxed);
+    if (state.empty_columns) {
+        std::lock_guard lock(impl.mutex);
+        impl.statistics.prepared_empty_columns += state.empty_columns;
+    }
+    if (state.admitted) impl.active.fetch_sub(1);
+    state.calls = state.columns = state.empty_columns = 0;
+    state.admitted = state.block_ready = false;
+    state.rows = {};
+    state.taps = {};
+}
+
+// The steps, checks, cancellation points and sink calls of address_pair. A
+// map's terms of its block are kept for the following rows of that block,
+// and those of its row are shared by both taps.
+void MappedBasis::Addresses::address(std::size_t index, std::uint64_t first,
+                                     const ConsecutiveBasisOffsets& consecutive_offsets, std::size_t count,
+                                     const BulkMappedSink& sink, const std::stop_token& stop) {
+    auto& state = *state_;
+    auto& impl = state.impl;
+    const auto offsets = consecutive(consecutive_offsets, count);
+    require(index < state.rows.size(), "mapped basis address outside its open rows");
+    if (!state.admitted) {
+        const auto before = impl.active.fetch_add(1);
+        if (before >= impl.workers) {
+            impl.active.fetch_sub(1);
+            throw Error("mapped basis concurrency exceeds admitted worker share");
+        }
+        state.admitted = true;
+    }
+    const auto& row = state.rows[index];
+    const auto taps = state.taps;
+    cancelled(stop);
+    require(static_cast<bool>(sink), "mapped basis requires a synchronous mapping sink");
+    const auto epoch = impl.validate_request(row, taps, first, offsets, true);
+    ++state.calls;
+    const auto fallback_reason = impl.request_fallback(first);
+    if (!state.block_ready || state.block.first != first) {
+        state.block = impl.block_terms(first, taps);
+        state.block_ready = true;
+    }
+    const auto terms = impl.row_terms(row, state.block);
+    for (std::size_t tap = 0; tap != taps.size(); ++tap) {
+        cancelled(stop);
+        if (!fallback_reason.empty()) {
+            impl.direct_columns(row, taps, tap, first, offsets, sink, stop, fallback_reason);
+            continue;
+        }
+        const auto map = impl.mapping(row, taps, tap, terms, state.block, offsets.front(), offsets.back());
+        if (map.fallback) {
+            impl.fallback_columns(row, taps, tap, first, offsets, sink, stop, map);
+            continue;
+        }
+        if (map.empty) {
+            state.empty_columns += 2;
+            continue;
+        }
+        const unsigned group = map.count <= maximum_pins/2 ? 2 : 1;
+        const auto origin = detail::signed_index(map.origin-static_cast<long double>(map.low_tile)*tile_samples);
+        for (unsigned begin = 0; begin != 2; begin += group) {
+            std::array<BulkMappedColumn, 2> columns;
+            Impl::describe_columns(map, origin, epoch, tap, taps.size(), begin, group, columns);
+            // No tile is pinned: the consumer renders these addresses.
+            cancelled(stop);
+            sink(offsets, std::span<const BulkMappedColumn>(columns).first(group), {});
+            cancelled(stop);
+            state.columns += group;
+        }
+    }
 }
 
 MappedBasisReport MappedBasis::report() const {

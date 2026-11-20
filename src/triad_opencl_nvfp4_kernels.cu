@@ -398,6 +398,11 @@ static_assert(coarse_ring >= 2 * coarse_groups + 2 && coarse_scale_ring >= coars
 constexpr unsigned pulse_resolution = 256;
 constexpr unsigned pulse_samples = 8 * pulse_resolution;
 constexpr auto no_peak = ~std::uint64_t{0};
+// A block filters one tile of 128 output rows of a column. Its static stage
+// (47 KiB) holds a window of taps, two to a pair, and then the raw span
+// that the tile's rows read through those taps.
+constexpr unsigned fir_stage_pairs = 6016;
+constexpr unsigned fir_chunk = 64;
 
 struct CoarsePeakRow {
     double scores[2];
@@ -602,18 +607,13 @@ extern "C" __global__ void resident_fine_render_tiles(const double2* chips, cons
     tiles[static_cast<std::uint64_t>(request.slot) * source_tile_samples + within] = value;
 }
 
-// Warps resident lane renderings into raw template columns with the native
-// four-point interpolation and echo rotation. A column descriptor holds
-// first position, clock scale, first echo cycles, echo cycle step and lane.
-extern "C" __global__ void coarse_warp_columns(const float2* raster, const double* columns, float2* raw,
-    std::uint32_t source_rows, std::uint32_t raw_rows, std::uint32_t column_count, std::uint32_t first_column,
-    std::uint32_t first_lane) {
-    const auto index = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    const auto column = index / raw_rows;
-    if (column >= column_count) return;
-    const auto row = static_cast<double>(index % raw_rows);
-    const auto* map = columns + (first_column + column) * 5;
-    const auto* lane = raster + (static_cast<std::uint64_t>(map[4]) - first_lane) * source_rows;
+namespace {
+
+// Raw template row `row` of one column: the native four-point interpolation
+// of its resident lane rendering, and the echo rotation. A column descriptor
+// holds first position, clock scale, first echo cycles, echo cycle step and
+// lane. Every warped sample, stored or staged, comes from this expression.
+__device__ float2 warp_sample(const float2* lane, const double* map, double row, std::uint32_t source_rows) {
     const auto position = map[0] + row * map[1];
     auto value = make_float2(0.f, 0.f);
     if (position > -2 && position < static_cast<double>(source_rows) + 1) {
@@ -635,11 +635,130 @@ extern "C" __global__ void coarse_warp_columns(const float2* raster, const doubl
             value = make_float2(value.x * cosine - value.y * sine, value.y * cosine + value.x * sine);
         }
     }
-    raw[index] = value;
+    return value;
 }
 
-// The canonical decimating FIR: output row n is the full convolution at
-// n * decimation. Bounded FP32 partial sums are added in FP64.
+struct RawColumn {
+    const float2* samples;
+    __device__ float2 operator()(std::uint64_t row) const { return samples[row]; }
+};
+
+struct WarpedColumn {
+    const float2* lane;
+    const double* map;
+    std::uint32_t source_rows;
+    __device__ float2 operator()(std::uint64_t row) const {
+        return warp_sample(lane, map, static_cast<double>(row), source_rows);
+    }
+};
+
+// Taps per stage window: half a pair each, beside a raw span of the tile's
+// 127 row strides and the window. Zero when one tap would not fit.
+__device__ std::uint32_t fir_window(std::uint32_t decimation, std::uint32_t tap_count) {
+    const auto spread = static_cast<std::uint64_t>(threads - 1) * decimation;
+    if (spread >= fir_stage_pairs) return 0;
+    const auto window = static_cast<std::uint32_t>(2 * (fir_stage_pairs - spread) / 3);
+    return window < tap_count ? window : tap_count;
+}
+
+// The canonical decimating FIR of one tile of a column: output row n is the
+// full convolution at n * decimation, as FP32 partial sums of 64 taps from
+// the row's first tap, each added in FP64. The block stages the windows of
+// its taps in order, and every thread carries its row's sums across them,
+// so each row performs the same operations in the same order as it would
+// reading its raw rows in place. The window must not be zero.
+template<class Column>
+__device__ void filter_tile(const Column& input, const float* taps, float2* output, float2* stage,
+    std::uint32_t raw_rows, std::uint32_t tap_count, std::uint32_t decimation, std::uint32_t rows,
+    std::uint32_t tile, std::uint32_t window) {
+    const auto first_row = static_cast<std::uint64_t>(tile) * threads;
+    const auto last_row = (first_row + threads < rows ? first_row + threads : rows) - 1;
+    const auto row = first_row + threadIdx.x;
+    const bool active = row < rows;
+    const auto first_newest = first_row * decimation, last_newest = last_row * decimation;
+    // The first tap of the tile's first row, and the tap stop of its last.
+    const auto tile_tap = static_cast<std::uint32_t>(first_newest >= raw_rows ? first_newest - (raw_rows - 1) : 0);
+    const auto tile_stop = static_cast<std::uint32_t>(last_newest + 1 < tap_count ? last_newest + 1 : tap_count);
+    std::uint64_t newest = 0;
+    std::uint32_t tap = 0, tap_stop = 0, chunk_stop = 0;
+    if (active) {
+        newest = row * decimation;
+        tap = static_cast<std::uint32_t>(newest >= raw_rows ? newest - (raw_rows - 1) : 0);
+        tap_stop = static_cast<std::uint32_t>(newest + 1 < tap_count ? newest + 1 : tap_count);
+        chunk_stop = tap + fir_chunk < tap_stop ? tap + fir_chunk : tap_stop;
+    }
+    auto* weights = reinterpret_cast<float*>(stage);
+    auto* span = stage + (window + 1) / 2;
+    double real = 0, imag = 0;
+    float partial_real = 0, partial_imag = 0;
+    for (auto first = tile_tap; first < tile_stop; first += window) {
+        const auto stop = tile_stop - first > window ? first + window : tile_stop;
+        // Raw rows newest - tap of the tile's rows for taps in [first, stop).
+        const auto low = first_newest + 1 > stop ? first_newest + 1 - stop : 0;
+        const auto high = last_newest - first < raw_rows - 1 ? last_newest - first : raw_rows - 1;
+        const auto count = static_cast<std::uint32_t>(high + 1 - low);
+        for (auto i = threadIdx.x; i < stop - first; i += threads) weights[i] = taps[first + i];
+        for (auto i = threadIdx.x; i < count; i += threads) span[i] = input(low + i);
+        __syncthreads();
+        const auto end = tap_stop < stop ? tap_stop : stop;
+        const auto base = static_cast<std::uint32_t>(newest - low);
+        while (tap < end) {
+            const auto chunk_end = chunk_stop < end ? chunk_stop : end;
+            for (; tap < chunk_end; ++tap) {
+                const auto weight = weights[tap - first];
+                const auto value = span[base - tap];
+                partial_real += weight * value.x;
+                partial_imag += weight * value.y;
+            }
+            if (tap == chunk_stop) {
+                real += partial_real;
+                imag += partial_imag;
+                partial_real = partial_imag = 0;
+                chunk_stop = chunk_stop + fir_chunk < tap_stop ? chunk_stop + fir_chunk : tap_stop;
+            }
+        }
+        __syncthreads();
+    }
+    if (active) output[row] = make_float2(static_cast<float>(real), static_cast<float>(imag));
+}
+
+} // namespace
+
+// Stores raw template columns for coarse_fir_tiles or coarse_fir_decimate,
+// for geometries whose taps need more than one stage window of a tile.
+extern "C" __global__ void coarse_warp_columns(const float2* raster, const double* columns, float2* raw,
+    std::uint32_t source_rows, std::uint32_t raw_rows, std::uint32_t column_count, std::uint32_t first_column,
+    std::uint32_t first_lane) {
+    const auto index = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const auto column = index / raw_rows;
+    if (column >= column_count) return;
+    const auto* map = columns + (first_column + column) * 5;
+    const auto* lane = raster + (static_cast<std::uint64_t>(map[4]) - first_lane) * source_rows;
+    raw[index] = warp_sample(lane, map, static_cast<double>(index % raw_rows), source_rows);
+}
+
+// Filters stored raw columns into the resident bank, one tile of output rows
+// per block, in stage windows of taps.
+extern "C" __global__ void coarse_fir_tiles(const float2* raw, const float* taps, float2* bank,
+    std::uint32_t raw_rows, std::uint32_t tap_count, std::uint32_t decimation, std::uint32_t rows,
+    std::uint32_t column_count, std::uint32_t first_column) {
+    __shared__ float2 stage[fir_stage_pairs];
+    const auto tiles = (rows + threads - 1) / threads;
+    const auto column = blockIdx.x / tiles, tile = blockIdx.x % tiles;
+    if (column >= column_count) return;
+    const RawColumn input{raw + static_cast<std::uint64_t>(column) * raw_rows};
+    auto* output = bank + (static_cast<std::uint64_t>(first_column) + column) * rows;
+    const auto window = fir_window(decimation, tap_count);
+    if (window) return filter_tile(input, taps, output, stage, raw_rows, tap_count, decimation, rows, tile, window);
+    // No stage fits: a nonfinite bank, which the host rejects.
+    const auto row = static_cast<std::uint64_t>(tile) * threads + threadIdx.x;
+    if (row < rows) output[row] = make_float2(CUDART_NAN_F, CUDART_NAN_F);
+}
+
+// The canonical decimating FIR of stored raw columns, reading them in place:
+// output row n is the full convolution at n * decimation. Bounded FP32
+// partial sums are added in FP64. It serves row strides too wide for a stage
+// window and keeps the full occupancy of a kernel without shared memory.
 extern "C" __global__ void coarse_fir_decimate(const float2* raw, const float* taps, float2* bank,
     std::uint32_t raw_rows, std::uint32_t tap_count, std::uint32_t decimation, std::uint32_t rows,
     std::uint32_t column_count, std::uint32_t first_column) {
@@ -664,6 +783,30 @@ extern "C" __global__ void coarse_fir_decimate(const float2* raw, const float* t
         imag += partial_imag;
     }
     bank[(first_column + column) * rows + row] = make_float2(static_cast<float>(real), static_cast<float>(imag));
+}
+
+// Warps and filters raw columns without storing them: each block stages
+// the raw span of its tile from the resident lanes by warp_sample, as
+// coarse_warp_columns stores it, and filters it as coarse_fir_tiles does.
+// The host sends geometries whose taps fit one window, so a tile warps each
+// raw row of its span once.
+extern "C" __global__ void coarse_warp_fir(const float2* raster, const double* columns, const float* taps,
+    float2* bank, std::uint32_t source_rows, std::uint32_t raw_rows, std::uint32_t tap_count,
+    std::uint32_t decimation, std::uint32_t rows, std::uint32_t column_count, std::uint32_t first_column,
+    std::uint32_t first_lane) {
+    __shared__ float2 stage[fir_stage_pairs];
+    const auto tiles = (rows + threads - 1) / threads;
+    const auto column = blockIdx.x / tiles, tile = blockIdx.x % tiles;
+    if (column >= column_count) return;
+    const auto* map = columns + (static_cast<std::uint64_t>(first_column) + column) * 5;
+    const WarpedColumn input{raster + (static_cast<std::uint64_t>(map[4]) - first_lane) * source_rows, map,
+                             source_rows};
+    auto* output = bank + (static_cast<std::uint64_t>(first_column) + column) * rows;
+    const auto window = fir_window(decimation, tap_count);
+    if (window) return filter_tile(input, taps, output, stage, raw_rows, tap_count, decimation, rows, tile, window);
+    // No stage fits: a nonfinite bank, which the host rejects.
+    const auto row = static_cast<std::uint64_t>(tile) * threads + threadIdx.x;
+    if (row < rows) output[row] = make_float2(CUDART_NAN_F, CUDART_NAN_F);
 }
 
 // Per workspace: |x|^2, |y|^2 and conj(x) y of its one or two columns.
@@ -959,11 +1102,26 @@ extern "C" __global__ void coarse_select_peaks(const float* input, CoarsePeakRow
     for (unsigned i = 0; i < result.count; ++i) result.scores[i] = scores[result.lags[i]];
 }
 
+// The FP32 observation rotated to each frequency of the tile, as
+// [frequency][sample], for coarse_rescore_peaks. Parameters follow it.
+extern "C" __global__ void coarse_rotate_observation(const float2* observation, const double* parameters,
+    float2* rotated, std::uint32_t samples, std::uint32_t frequencies) {
+    const auto index = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const auto frequency = index / samples;
+    if (frequency >= frequencies) return;
+    const auto sample = index % samples;
+    const auto cycles = -parameters[frequency] * (static_cast<double>(sample) / parameters[frequencies]);
+    float sine, cosine;
+    __sincosf(static_cast<float>((cycles - floor(cycles)) * tau64), &sine, &cosine);
+    const auto input = observation[sample];
+    rotated[index] = make_float2(input.x * cosine - input.y * sine, input.y * cosine + input.x * sine);
+}
+
 // Replaces the retained frontier scores with FP32 products accumulated in
-// FP64 from the unquantized resident bank. One block owns one retained peak.
-// Parameters follow coarse_pack_observation, with the variance in the place
-// of the observation magnitude.
-extern "C" __global__ void coarse_rescore_peaks(const float2* bank, const float2* observation,
+// FP64 from the unquantized resident bank and the rotated observation. One
+// block owns one retained peak. Parameters follow coarse_pack_observation,
+// with the variance in the place of the observation magnitude.
+extern "C" __global__ void coarse_rescore_peaks(const float2* bank, const float2* rotated,
     const double* parameters, const double* inverse, CoarsePeakRow* peaks, std::uint32_t rows,
     std::uint32_t samples, std::uint32_t workspaces, std::uint32_t frequencies, std::uint32_t taps) {
     __shared__ double partial[threads][4];
@@ -974,14 +1132,11 @@ extern "C" __global__ void coarse_rescore_peaks(const float2* bank, const float2
     if (count > 2 || entry >= count) return;
     const auto arrival = peaks[row_index].lags[entry];
     const auto* first = bank + static_cast<std::uint64_t>(workspace) * taps * rows;
+    const auto* observation = rotated + static_cast<std::uint64_t>(frequency) * samples;
     double sums[4] = {0, 0, 0, 0};
     for (std::uint64_t row = threadIdx.x; row < rows && row + arrival < samples; row += threads) {
-        const auto sample = row + arrival;
-        const auto cycles = -parameters[frequency] * (static_cast<double>(sample) / parameters[frequencies]);
-        float sine, cosine;
-        __sincosf(static_cast<float>((cycles - floor(cycles)) * tau64), &sine, &cosine);
-        const auto input = observation[sample];
-        const double real = input.x * cosine - input.y * sine, imag = input.y * cosine + input.x * sine;
+        const auto value = observation[row + arrival];
+        const double real = value.x, imag = value.y;
         const double xr = first[row].x, xi = first[row].y;
         sums[0] += xr * real + xi * imag;
         sums[1] += xr * imag - xi * real;

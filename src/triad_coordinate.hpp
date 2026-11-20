@@ -5,9 +5,9 @@
 
 namespace datapump::triad::v3::detail {
 
-// floor, ceil and integer conversion of long double coordinates for code that
-// runs once per sample. Each returns exactly the value of the standard form
-// named beside it, including the sign of a zero.
+// floor, ceil, remainder and integer conversion of long double coordinates
+// for code that runs once per sample or map. Each returns exactly the value
+// of the standard form named beside it, including the sign of a zero.
 //
 // On x86 the compiler's inline forms switch the x87 rounding mode around
 // every use. A core follows that control word cheaply for a few instructions
@@ -60,6 +60,14 @@ inline std::int64_t signed_index(long double x) {
     if (x >= 0) { if (value > x) --index; }
     else if (value < x) ++index;
     return index;
+}
+
+// std::fmod(x, 1.L), which is exact: x less its integer part, with the sign
+// of x also for a zero result. Below the limit that integer part is
+// signed_index(x), and the difference is exact.
+inline long double unit_remainder(long double x) {
+    if (!(std::abs(x) < coordinate_limit)) return std::fmod(x, 1.L);
+    return std::copysign(x - static_cast<long double>(signed_index(x)), x);
 }
 
 // static_cast<std::uint64_t>(x)

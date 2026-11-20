@@ -18,11 +18,12 @@ struct CoarseTemplateGram;
 
 // Public frequency-tile geometry of one coarse session. Synthesis rows are
 // the raw template rows before the canonical decimating FIR, or zero when
-// the caller supplies channelized columns.
+// the caller supplies channelized columns. The decimation and taps decide
+// whether the FIR warps its raw rows as it filters or stores them first.
 struct OpenClCoarseShape {
     std::size_t taps = 0, kernel_rows = 0, arrivals = 0, workspaces = 0, tile_frequencies = 0;
     std::size_t synthesis_raw_rows = 0, synthesis_source_rows = 0;
-    std::size_t synthesis_lanes = 0, synthesis_cells = 0, synthesis_taps = 0;
+    std::size_t synthesis_lanes = 0, synthesis_cells = 0, synthesis_taps = 0, synthesis_decimation = 0;
     bool operator==(const OpenClCoarseShape&) const = default;
 };
 
@@ -36,6 +37,9 @@ struct OpenClCoarseWork {
     std::uint64_t rendered_samples = 0, warped_samples = 0, filtered_rows = 0;
     // Device command intervals, present when the session profiles its queue.
     double product_seconds = 0, packing_seconds = 0, selection_seconds = 0, synthesis_seconds = 0;
+    // Parts of those intervals: lane rendering, warping with filtering and
+    // the Gram of synthesis, and the rotation and rescoring of selection.
+    double render_seconds = 0, filter_seconds = 0, gram_seconds = 0, rescore_seconds = 0;
 };
 
 // One device-resident frequency-tile search: FP4 Tensor Core scores for every

@@ -630,7 +630,8 @@ struct Capture {
     std::string digest;
     Timing generation, spool_write{0, 0};
     StreamChannelReport channel;
-    std::size_t generation_reserved_bytes = 0;
+    std::size_t generation_reserved_bytes = 0, generation_read_rows = 0, generation_stack_bytes = 0;
+    unsigned generation_helpers = 0;
     std::uint64_t rows() const { return spool ? spool->rows() : iq.size(); }
 };
 
@@ -935,6 +936,10 @@ Json bulk_json(const BulkReceipt& r) {
         {"opencl_coarse_packing_seconds", r.opencl_coarse_packing_seconds},
         {"opencl_coarse_selection_seconds", r.opencl_coarse_selection_seconds},
         {"opencl_coarse_synthesis_seconds", r.opencl_coarse_synthesis_seconds},
+        {"opencl_coarse_render_seconds", r.opencl_coarse_render_seconds},
+        {"opencl_coarse_filter_seconds", r.opencl_coarse_filter_seconds},
+        {"opencl_coarse_gram_seconds", r.opencl_coarse_gram_seconds},
+        {"opencl_coarse_rescore_seconds", r.opencl_coarse_rescore_seconds},
         {"cuda_direct_gram_values", r.cuda_direct_gram_values},
         {"cuda_bmm_gram_values", r.cuda_bmm_gram_values},
         {"cuda_matrix_fp16_calls", r.cuda_matrix_fp16_calls},
@@ -1063,6 +1068,117 @@ struct SecondaryEmission {
     double frequency_offset_hz;
 };
 
+// The largest channel read in rows, a power-of-two multiple of input_chunk.
+// A read prepares its first block, and passes its last block, alone; larger
+// reads leave fewer such blocks. The spool still receives bounded chunks.
+constexpr std::size_t channel_chunk = 65536;
+static_assert(channel_chunk % input_chunk == 0);
+
+// The probe's sum of emissions, one sample at a time or through the
+// readers of every component. A reader evaluates the components in order and
+// a range is accounted component by component.
+class CompositeSource {
+public:
+    CompositeSource(std::vector<EmittedSource>& inputs, std::vector<std::uint64_t>& origins,
+                    const SecondaryEmission* secondary, std::size_t secondary_index)
+        : inputs_(inputs), origins_(origins), secondary_(secondary), secondary_index_(secondary_index) {}
+
+    Complex sample(std::uint64_t i, const std::function<Complex(std::size_t, std::uint64_t)>& component) const {
+        Complex result{};
+        for (std::size_t n = 0; n < inputs_.size(); ++n) {
+            if (i < origins_[n] || i - origins_[n] >= inputs_[n].geometry.source_samples) continue;
+            const auto local = i - origins_[n];
+            auto sample = component(n, local);
+            if (secondary_ && n == secondary_index_) {
+                sample = secondary_->gain * sample;
+                if (secondary_->frequency_offset_hz != 0) {
+                    const long double cycles = static_cast<long double>(local) * secondary_->frequency_offset_hz /
+                        secondary_->waveform.effective_sample_rate();
+                    sample *= std::polar(1., 2 * std::numbers::pi * static_cast<double>(std::remainder(cycles, 1.L)));
+                }
+            }
+            result += sample;
+        }
+        return result;
+    }
+    bool parallel() const {
+        return std::ranges::all_of(inputs_, [](const EmittedSource& input) { return input.readers != nullptr; });
+    }
+
+    class Readers final : public EmittedSourceReaders {
+    public:
+        explicit Readers(const CompositeSource& owner) : owner_(owner) {}
+        std::size_t reader_bytes(std::size_t readers, std::uint64_t plan) const override {
+            std::size_t bytes = readers * sizeof(std::uint64_t);
+            for (const auto& input : owner_.inputs_) bytes += input.readers->reader_bytes(readers, plan);
+            return bytes;
+        }
+        void open(std::size_t readers, std::uint64_t plan) override {
+            for (auto& input : owner_.inputs_) input.readers->open(readers, plan);
+            failed_.assign(readers, {});
+            ranges_.assign(owner_.inputs_.size(), {});
+        }
+        void plan(std::uint64_t first, std::uint64_t count) override {
+            first_ = first;
+            for (std::size_t n = 0; n < owner_.inputs_.size(); ++n) {
+                const auto origin = owner_.origins_[n];
+                const auto stop = origin + owner_.inputs_[n].geometry.source_samples;
+                const auto lo = std::max(first, origin), hi = std::min(first + count, stop);
+                ranges_[n] = {lo, std::max(lo, hi)};
+                if (lo < hi) owner_.inputs_[n].readers->plan(lo - origin, hi - lo);
+            }
+            for (auto& failure : failed_) failure = {};
+        }
+        Complex evaluate(std::size_t reader, std::uint64_t index) override {
+            return owner_.sample(index, [&](std::size_t n, std::uint64_t local) {
+                try {
+                    return owner_.inputs_[n].readers->evaluate(reader, local);
+                } catch (...) {
+                    failed_[reader] = {index, n};
+                    throw;
+                }
+            });
+        }
+        std::uint64_t accept(std::uint64_t count, bool failed, std::exception_ptr& error) override {
+            // The component that failed the next sample; earlier components
+            // generated it, later ones did not reach it.
+            const auto next = first_ + count;
+            auto component = owner_.inputs_.size();
+            if (failed)
+                for (const auto& failure : failed_)
+                    if (failure.index == next) component = failure.component;
+            auto stop = next;
+            for (std::size_t n = 0; n < owner_.inputs_.size(); ++n) {
+                const auto [lo, hi] = ranges_[n];
+                const auto through = n < component && failed ? next + 1 : stop;
+                const auto end = std::max(lo, std::min(hi, through));
+                if (lo == hi) continue;
+                std::exception_ptr check;
+                const auto accepted = owner_.inputs_[n].readers->accept(end - lo,
+                    n == component && next >= lo && next < hi, check);
+                if (check) {
+                    stop = std::min(stop, lo + accepted);
+                    if (!error) error = check;
+                }
+            }
+            first_ = stop;
+            return stop - (next - count);
+        }
+    private:
+        struct Failure { std::uint64_t index = UINT64_MAX; std::size_t component = 0; };
+        const CompositeSource& owner_;
+        std::vector<Failure> failed_;
+        std::vector<std::pair<std::uint64_t, std::uint64_t>> ranges_;
+        std::uint64_t first_ = 0;
+    };
+
+private:
+    std::vector<EmittedSource>& inputs_;
+    std::vector<std::uint64_t>& origins_;
+    const SecondaryEmission* secondary_;
+    std::size_t secondary_index_;
+};
+
 Capture simulate(const Profile& profile, std::span<const EmissionOptions> episodes,
                  std::uint64_t first, std::uint64_t end, std::uint64_t& samples_left,
                  const StreamReceiverResources& resources, std::stop_token stop,
@@ -1074,26 +1190,93 @@ Capture simulate(const Profile& profile, std::span<const EmissionOptions> episod
     if (end <= first || end > samples_left || (!spool && end - first > SIZE_MAX / (sizeof(Complex) + 1)))
         throw Incomplete("Canonical capture exceeds the declared probe sample budget");
     const auto rows = end - first;
-    constexpr auto chunk_bytes = input_chunk * (sizeof(Complex) + sizeof(std::uint8_t));
-    const auto capture_bytes = spool ? spool->working_bytes() + chunk_bytes + 4096 :
-        static_cast<std::size_t>(rows) * (sizeof(Complex) + sizeof(std::uint8_t));
+    constexpr auto row_bytes = sizeof(Complex) + sizeof(std::uint8_t);
+    const auto stored_bytes = spool ? spool->working_bytes() + 4096 : static_cast<std::size_t>(rows) * row_bytes;
     const auto simultaneous_sources = std::max(std::size_t{1}, episodes.size() + (secondary != nullptr));
     const auto reserve = simultaneous_sources * channel_source_bound;
     const auto remaining = memory_remaining(resources);
-    if (reserve > remaining || capture_bytes > remaining - reserve)
+    // Two read buffers: one is delivered while the channel fills the other.
+    // The capture needs at least two input_chunk reads.
+    constexpr auto least_read_bytes = 2 * input_chunk * row_bytes;
+    if (reserve > remaining || stored_bytes > remaining - reserve ||
+        least_read_bytes > remaining - reserve - stored_bytes)
         throw Incomplete("Canonical capture and source preflight exceed the local probe memory limit");
+    // The receiver has not started. Its workers evaluate the sources' power
+    // references and prepare each block of the channel beside this thread's
+    // sequential pass; the capture is the same for every allocation. Each
+    // helper's stack is charged like a receiver worker's, and a limit without
+    // room for one keeps this thread alone. The pool closes with this scope.
+    // Helpers are admitted before larger reads: a read size never changes the
+    // capture, so it only grows, up to channel_chunk rows, into what the
+    // helpers' stacks leave.
+    const auto stack = datapump::triad::v3::detail::stream_worker_stack_bytes();
+    const auto spare = remaining - reserve - stored_bytes - least_read_bytes;
+    const auto helpers = static_cast<unsigned>(std::min<std::size_t>(resources.workers ? resources.workers - 1 : 0,
+        stack ? spare / stack : 0));
+    const auto read_room = remaining - reserve - stored_bytes - helpers * stack;
+    auto read_rows = input_chunk;
+    while (read_rows < channel_chunk && 4 * read_rows * row_bytes <= read_room) read_rows *= 2;
+    const auto capture_bytes = stored_bytes + 2 * read_rows * row_bytes;
     check_stop(stop);
     const Timer timer;
+    Capture capture;
+    capture.generation_helpers = helpers;
+    capture.generation_stack_bytes = stack;
+    capture.generation_read_rows = read_rows;
+    CaptureHasher digest;
+    // The digest and the copy or spool of each read run in pieces in order,
+    // one piece as an extra job of each lent block preparation of the next
+    // read; this thread delivers what remains when that read returns.
+    struct Delivery {
+        std::span<const Complex> iq;
+        std::span<const std::uint8_t> valid;
+        std::uint64_t target = 0;
+        std::size_t done = 0;
+        std::exception_ptr error;
+        bool pending() const { return done < iq.size() && !error; }
+    } delivery;
+    const auto deliver = [&] {
+        const auto n = std::min(input_chunk, delivery.iq.size() - delivery.done);
+        const auto samples = delivery.iq.subspan(delivery.done, n);
+        const auto mask = delivery.valid.subspan(delivery.done, n);
+        digest.add(samples, mask);
+        if (capture.spool) {
+            const Timer io;
+            capture.spool->append(samples, mask);
+            add_time(capture.spool_write, io.elapsed());
+        } else {
+            const auto target = static_cast<std::size_t>(delivery.target + delivery.done);
+            std::ranges::copy(samples, capture.iq.begin() + target);
+            std::ranges::copy(mask, capture.valid.begin() + target);
+        }
+        delivery.done += n;
+    };
+    ReceiverExecutor lanes(helpers + 1);
+    StreamChannelLanes lent;
+    if (helpers)
+        lent = {helpers + 1,
+            [&](std::size_t jobs, const std::function<void(std::size_t)>& job) {
+                const std::size_t extra = delivery.pending() ? 1 : 0;
+                lanes.parallel(0, jobs + extra, helpers + 1, stop,
+                    [&](unsigned, std::size_t index, std::stop_token) {
+                        if (index < jobs) job(index);
+                        else try { deliver(); } catch (...) { delivery.error = std::current_exception(); }
+                    });
+            }};
     std::vector<Emission> emitters;
     std::vector<EmittedSource> inputs;
     std::vector<std::uint64_t> origins;
     for (const auto& episode : episodes) {
-        emitters.emplace_back(profile.waveform, profile.key, episode);
+        auto options = episode;
+        options.lanes = lent;
+        emitters.emplace_back(profile.waveform, profile.key, options);
         inputs.push_back(emitters.back().source());
         origins.push_back(episode.source_first_sample);
     }
     if (secondary) {
-        emitters.emplace_back(secondary->waveform, secondary->key, secondary->options);
+        auto options = secondary->options;
+        options.lanes = lent;
+        emitters.emplace_back(secondary->waveform, secondary->key, options);
         inputs.push_back(emitters.back().source());
         // Emission's bounds are relative to its own configured IF. Move them
         // into the composite frame before the native channel checks Nyquist.
@@ -1118,45 +1301,18 @@ Capture simulate(const Profile& profile, std::span<const EmissionOptions> episod
         composite.minimum_frequency_hz = std::min(composite.minimum_frequency_hz, input.minimum_frequency_hz);
         composite.maximum_frequency_hz = std::max(composite.maximum_frequency_hz, input.maximum_frequency_hz);
     }
+    const CompositeSource sum(inputs, origins, secondary, episodes.size());
     composite.sample_at = [&](std::uint64_t i) {
-        Complex result{};
-        for (std::size_t n = 0; n < inputs.size(); ++n) {
-            if (i < origins[n] || i - origins[n] >= inputs[n].geometry.source_samples) continue;
-            const auto local = i - origins[n];
-            auto sample = inputs[n].sample_at(local);
-            if (n == episodes.size()) {
-                sample = secondary->gain * sample;
-                if (secondary->frequency_offset_hz != 0) {
-                    const long double cycles = static_cast<long double>(local) * secondary->frequency_offset_hz /
-                        secondary->waveform.effective_sample_rate();
-                    sample *= std::polar(1., 2 * std::numbers::pi * static_cast<double>(std::remainder(cycles, 1.L)));
-                }
-            }
-            result += sample;
-        }
-        return result;
+        return sum.sample(i, [&](std::size_t n, std::uint64_t local) { return inputs[n].sample_at(local); });
     };
+    composite.readers = sum.parallel() ? std::make_shared<CompositeSource::Readers>(sum) : nullptr;
     auto configuration = profile.channel;
     configuration.minimum_capture_samples = end;
-    // The receiver has not started. Its workers prepare each block of the
-    // channel beside this thread's sequential pass; the capture is the same
-    // for every allocation. Each helper's stack is charged like a receiver
-    // worker's, and a limit without room for one keeps this thread alone.
-    // The pool closes with this scope.
-    const auto stack = datapump::triad::v3::detail::stream_worker_stack_bytes();
-    const auto helpers = static_cast<unsigned>(std::min<std::size_t>(resources.workers ? resources.workers - 1 : 0,
-        stack ? (remaining - reserve - capture_bytes) / stack : 0));
-    ReceiverExecutor lanes(helpers + 1);
-    if (helpers)
-        configuration.lanes = {helpers + 1,
-            [&](std::size_t jobs, const std::function<void(std::size_t)>& job) {
-                lanes.parallel(0, jobs, helpers + 1, stop,
-                    [&job](unsigned, std::size_t index, std::stop_token) { job(index); });
-            }};
+    configuration.maximum_chunk_samples = read_rows;
+    configuration.lanes = lent;
     StreamingChannel channel(std::move(composite), configuration);
     if (channel.total_samples() < end)
         throw Error("Native channel ended before the public observation");
-    Capture capture;
     capture.first = first;
     capture.spool = std::move(spool);
     capture.generation_reserved_bytes = resources.memory_limit_bytes - remaining + reserve + capture_bytes +
@@ -1168,31 +1324,28 @@ Capture simulate(const Profile& profile, std::span<const EmissionOptions> episod
         capture.iq.resize(static_cast<std::size_t>(rows));
         capture.valid.resize(static_cast<std::size_t>(rows));
     }
-    CaptureHasher digest;
-    std::array<Complex, input_chunk> iq{};
-    std::array<std::uint8_t, input_chunk> valid{};
+    std::array<std::vector<Complex>, 2> iq{std::vector<Complex>(read_rows), std::vector<Complex>(read_rows)};
+    std::array<Bytes, 2> valid{Bytes(read_rows), Bytes(read_rows)};
+    std::size_t buffer = 0;
+    const auto finish_delivery = [&] {
+        while (delivery.pending()) deliver();
+        if (delivery.error) std::rethrow_exception(delivery.error);
+    };
     while (channel.position() < end) {
         check_stop(stop);
         const auto offset = channel.position();
-        const auto chunk = static_cast<std::size_t>(std::min<std::uint64_t>(end - offset, input_chunk));
-        if (channel.read(std::span(iq).first(chunk), std::span(valid).first(chunk)) != chunk)
+        const auto chunk = static_cast<std::size_t>(std::min<std::uint64_t>(end - offset, read_rows));
+        if (channel.read(std::span(iq[buffer]).first(chunk), std::span(valid[buffer]).first(chunk)) != chunk)
             throw Error("Native channel returned a partial public observation");
+        finish_delivery();
         if (offset + chunk > first) {
             const auto begin = static_cast<std::size_t>(std::max(offset, first) - offset);
-            const auto samples = std::span<const Complex>(iq).subspan(begin, chunk - begin);
-            const auto mask = std::span<const std::uint8_t>(valid).subspan(begin, chunk - begin);
-            digest.add(samples, mask);
-            if (capture.spool) {
-                const Timer io;
-                capture.spool->append(samples, mask);
-                add_time(capture.spool_write, io.elapsed());
-            } else {
-                const auto target = static_cast<std::size_t>(offset + begin - first);
-                std::ranges::copy(samples, capture.iq.begin() + target);
-                std::ranges::copy(mask, capture.valid.begin() + target);
-            }
+            delivery = {std::span<const Complex>(iq[buffer]).subspan(begin, chunk - begin),
+                std::span<const std::uint8_t>(valid[buffer]).subspan(begin, chunk - begin), offset + begin - first, 0, {}};
+            buffer ^= 1;
         }
     }
+    finish_delivery();
     if (capture.spool) {
         const Timer io;
         capture.spool->seal();
@@ -1762,6 +1915,9 @@ void generation_phase(Json& report, const Profile& profile, const Capture& captu
         object({{"generated_rows", capture.generated_samples}, {"retained_rows", capture.rows()},
                 {"retained_ram_rows", capture.iq.size()}, {"spool_bytes", capture.spool ? capture.spool->bytes() : 0},
                 {"generation_preflight_reserved_bytes", capture.generation_reserved_bytes},
+                {"generation_helper_workers", capture.generation_helpers},
+                {"generation_stack_bytes_per_helper", capture.generation_stack_bytes},
+                {"generation_read_rows", capture.generation_read_rows},
                 {"channel_workspace_bytes", capture.channel.working_bytes},
                 {"has_selective_filter", capture.channel.selective_perturbation.has_value()}}), 0, "simulator_excluded");
     if (capture.spool) phase(report, "capture_spool_write", capture.spool_write,

@@ -895,7 +895,7 @@ void advance_gain(GainState& state, std::size_t tap_count, std::size_t block_cou
                   const std::array<Complex, 2 * 3 * 2>& correlations,
                   const std::array<Complex, 2 * 3 * 4>& grams, const std::array<unsigned, 2>& ranks,
                   const std::array<double, 2>& powers,
-                  const std::array<double, 4 * 2 * Count>& transitions, std::stop_token stop,
+                  const std::array<double, 4 * 2 * Count>& transitions, const std::stop_token& stop,
                   bool stationary_fading = false) {
     const auto dimensions = stationary_fading ? 2 : tap_count;
     const auto state_square = dimensions * dimensions;
@@ -951,7 +951,7 @@ void advance_state(State& state, const MappedBasisRow& row, MappedBasis& basis,
                    std::span<const Tap> taps, std::span<const ObservationBlock> blocks,
                    const std::array<const FineBulkStatistics*, 2>& prepared,
                    const std::array<double, 4 * 2 * models>& transitions,
-                   double variance, WorkerScratch& scratch, StateBlockWork* work, std::stop_token stop,
+                   double variance, WorkerScratch& scratch, StateBlockWork* work, const std::stop_token& stop,
                    double path_power = 1, SlowGainState* slow = nullptr,
                    const SlowGainTransitions& slow_transitions = no_slow_transitions,
                    bool stationary_fading = false, std::span<FineFloatComplex> float_scratch = {}) {
@@ -1336,8 +1336,10 @@ struct FineSession::Impl {
     std::vector<std::size_t> bulk_progress;
     // One entry per block of a dispatch, or of a window of dispatches.
     std::vector<std::vector<FineBulkStatistics>> bulk_statistics;
-    // Set when the backend renders this slot's dense tiles itself.
+    // Set when the backend renders this slot's dense tiles itself. The
+    // owner then addresses the tiles of each resident call's rows.
     const FineTileSource* tile_source = nullptr;
+    std::unique_ptr<MappedBasis::Addresses> addresses;
     // Dispatches per resident window, or zero for single dispatches.
     std::size_t window_dispatches = 0;
     Window window;
@@ -1490,8 +1492,10 @@ struct FineSession::Impl {
             resident_slots.reserve(block_slots);
             window_calls.resize(std::max<std::size_t>(1, 2 * window_dispatches));
             windows.reserve(maximum_dispatches(calendar));
-            if (const auto* source = basis->tile_source(); source && bulk->renders_source_tiles(*source))
+            if (const auto* source = basis->tile_source(); source && bulk->renders_source_tiles(*source)) {
                 tile_source = source;
+                addresses = std::make_unique<MappedBasis::Addresses>(*basis);
+            }
         } else if (config.bulk_backend) {
             config.bulk_backend->record_native_fine(quote.native_fallback_reason);
         }
@@ -1734,7 +1738,7 @@ struct FineSession::Impl {
     // `slot`. The backend then asks for each candidate once, in order. A
     // backend that renders this slot's tiles receives their addresses.
     bool resident_request(const ObservationBlock& block, std::size_t slot, std::size_t states,
-                          std::uint64_t& projected_values, std::stop_token stop) {
+                          std::uint64_t& projected_values, const std::stop_token& stop) {
         if (!block.observed || !block.line.empty()) return false;
         const auto shape = bulk_shape(block);
         if (shape.rows > bulk_offsets.size() || !bulk->supports_resident_statistics(shape)) return false;
@@ -1745,8 +1749,8 @@ struct FineSession::Impl {
                     std::size_t take, const BulkMappedSink& sink) {
                 if (candidate >= states || candidate != resident_progress[slot] || first || take != rows)
                     throw Error("Robust resident fine backend requested an invalid public block");
-                if (tile_source)
-                    basis->address_pair(bulk_rows[candidate], taps(), block.first, bulk_offsets, rows, sink, stop);
+                if (addresses)
+                    addresses->address(candidate, block.first, bulk_offsets, rows, sink, stop);
                 else
                     basis->visit_pair(bulk_rows[candidate], taps(), block.first, bulk_offsets, rows, sink, stop);
                 ++resident_progress[slot];
@@ -1757,11 +1761,21 @@ struct FineSession::Impl {
     }
 
     // Runs the gathered requests in one resident call and marks the slots
-    // whose statistics it supplied. A declined call marks none.
-    void resident_statistics(std::size_t states, std::uint64_t projected_values, std::stop_token stop) {
+    // whose statistics it supplied. A declined call marks none. Addressed
+    // sources map this call's rows, and their receipts are credited when
+    // the call returns or fails.
+    void resident_statistics(std::size_t states, std::uint64_t projected_values, const std::stop_token& stop) {
         std::fill(resident_done.begin(), resident_done.end(), std::uint8_t{0});
         const auto count = resident_requests.size();
-        const bool executed = count && bulk->resident_statistics(resident_requests, states, stop);
+        bool executed = false;
+        if (count) {
+            const struct Closing {
+                MappedBasis::Addresses* addresses;
+                ~Closing() { if (addresses) addresses->close(); }
+            } closing{addresses.get()};
+            if (addresses) addresses->open(bulk_rows, taps());
+            executed = bulk->resident_statistics(resident_requests, states, stop);
+        }
         resident_requests.clear();
         if (!executed) return;
         check_cancelled(stop);
@@ -1776,7 +1790,7 @@ struct FineSession::Impl {
     }
 
     std::array<bool, 2> resident_statistics_for(const Pair& pair, std::size_t states,
-        std::array<std::uint64_t, 2>& bulk_calls, std::stop_token stop) {
+        std::array<std::uint64_t, 2>& bulk_calls, const std::stop_token& stop) {
         resident_requests.clear();
         resident_slots.clear();
         std::uint64_t projected_values = 0;
@@ -1838,7 +1852,7 @@ struct FineSession::Impl {
 
     // Device statistics of every block of a window of dispatches, on the
     // owner, in one resident call.
-    void window_statistics(std::size_t index, std::stop_token leaf_stop) {
+    void window_statistics(std::size_t index, const std::stop_token& leaf_stop) {
         check_cancelled(leaf_stop);
         const auto [begin, end] = windows[index];
         const auto base = window_base(index), statistics = statistics_base(index), calls = calls_base(index);
@@ -2023,7 +2037,7 @@ struct FineSession::Impl {
 
     void update(State& state, const MappedBasisRow& row, const Pair& pair,
                 const std::array<const FineBulkStatistics*, 2>& prepared, unsigned lane,
-                StateBlockWork* work, std::stop_token leaf_stop, SlowGainState* slow = nullptr) {
+                StateBlockWork* work, const std::stop_token& leaf_stop, SlowGainState* slow = nullptr) {
         check_cancelled(leaf_stop);
         const auto float_rows = observation_float_scratch.size();
         const auto float_scratch = std::span(worker_float_scratch).subspan(lane * float_rows, float_rows);
@@ -2059,7 +2073,7 @@ struct FineSession::Impl {
     // Urgent leaves gate the next chronological step: the dispatch ahead is
     // observed while this dispatch's adaptive states, whose pruning and
     // prediction follow, are scored.
-    void urgent(unsigned lane, std::size_t leaf, std::stop_token leaf_stop) {
+    void urgent(unsigned lane, std::size_t leaf, const std::stop_token& leaf_stop) {
         // A window's state leaves can still be running when the next
         // window posts the native leaves of a block outside the device route.
         if (window.active && leaf >= window.first_leaf && leaf - window.first_leaf < window.leaves) {
@@ -2099,7 +2113,7 @@ struct FineSession::Impl {
 
     // One fixed-affine state through every dispatch of the window, in public
     // order. States are independent chains, so each leaf owns one of them.
-    void advance_window(unsigned lane, std::size_t index, std::stop_token leaf_stop) {
+    void advance_window(unsigned lane, std::size_t index, const std::stop_token& leaf_stop) {
         for (auto dispatch = window.begin; dispatch != window.end; ++dispatch) {
             const auto local = dispatch - window.begin;
             const auto& pair = ring[window.base + local];
@@ -2115,7 +2129,7 @@ struct FineSession::Impl {
 
     // Projects a window's dispatches in chronological order, into the ring
     // group that the window three before it has released.
-    void observe_window(std::size_t index, std::stop_token leaf_stop) {
+    void observe_window(std::size_t index, const std::stop_token& leaf_stop) {
         const auto [begin, end] = windows[index];
         const auto base = window_base(index);
         for (auto dispatch = begin; dispatch != end; ++dispatch)
@@ -2125,7 +2139,7 @@ struct FineSession::Impl {
     // Compiled work releases one independent observation. Native work is
     // dispatch-major: each fixed-affine state, then that dispatch's tile fills.
     // The native owner waits only for the states.
-    void background(unsigned lane, std::size_t leaf, std::stop_token leaf_stop) {
+    void background(unsigned lane, std::size_t leaf, const std::stop_token& leaf_stop) {
         if (window_dispatches) {
             observe_window(leaf, leaf_stop);
             return;

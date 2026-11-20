@@ -4,6 +4,7 @@
 #include "triad_receiver_bulk.hpp"
 
 #include <memory>
+#include <stop_token>
 #include <vector>
 
 namespace datapump::triad::v3::receiver_detail {
@@ -66,13 +67,13 @@ public:
                                        std::size_t maximum_block_rows, unsigned workers);
     void render_pair(const MappedBasisRow&, std::span<const Tap>,
                      std::uint64_t first_window_sample, std::span<const double> offsets,
-                     std::span<Complex> output, std::stop_token = {});
+                     std::span<Complex> output, const std::stop_token& = {});
     // Fills, ahead of need, exactly the tiles that render_pair pins for rows
     // [first, first+rows) at unit spacing. A caller overlaps this serial
     // per-epoch preparation with other lanes' rendering of earlier blocks.
     // Cache receipts equal those of the same fills made on demand.
     void prepare_pair(const MappedBasisRow&, std::span<const Tap>,
-                      std::uint64_t first_window_sample, std::size_t rows, std::stop_token = {});
+                      std::uint64_t first_window_sample, std::size_t rows, const std::stop_token& = {});
     // Prepare the very same public map and cache tiles without rendering the
     // supported basis on the CPU. Columns are indexed [bit][tap]; the consumer
     // initializes missing/empty columns to zero. Each synchronous sink call
@@ -85,9 +86,10 @@ public:
     // the sink call. Device storage/allocator bounds belong to the consumer.
     void visit_pair(const MappedBasisRow&, std::span<const Tap>,
                     std::uint64_t first_window_sample, std::span<const double> offsets,
-                    const BulkMappedSink&, std::stop_token = {});
+                    const BulkMappedSink&, const std::stop_token& = {});
     void visit_pair(const MappedBasisRow&, std::span<const Tap>, std::uint64_t first_window_sample,
-                    const ConsecutiveBasisOffsets&, std::size_t rows, const BulkMappedSink&, std::stop_token = {});
+                    const ConsecutiveBasisOffsets&, std::size_t rows, const BulkMappedSink&,
+                    const std::stop_token& = {});
     // The public description of this slot's dense source for a consumer
     // that renders its tiles, or null when every column takes the exact
     // native route. It stays valid for the lifetime of the basis.
@@ -96,15 +98,45 @@ public:
     // place of native leases: no tile is rendered, pinned or cached here.
     // Exact native fallback columns are still supplied as samples.
     void address_pair(const MappedBasisRow&, std::span<const Tap>, std::uint64_t first_window_sample,
-                      const ConsecutiveBasisOffsets&, std::size_t rows, const BulkMappedSink&, std::stop_token = {});
+                      const ConsecutiveBasisOffsets&, std::size_t rows, const BulkMappedSink&,
+                      const std::stop_token& = {});
     MappedBasisReport report() const;
 
+    class Addresses;
+
 private:
+    // The first `rows` offsets, which must exist.
+    static std::span<const double> consecutive(const ConsecutiveBasisOffsets&, std::size_t rows);
     void visit_pair_impl(const MappedBasisRow&, std::span<const Tap>, std::uint64_t,
-                         std::span<const double>, const BulkMappedSink&, std::stop_token, bool consecutive,
-                         bool addressed = false);
+                         std::span<const double>, const BulkMappedSink&, const std::stop_token&, bool consecutive);
     struct Impl;
     std::unique_ptr<Impl> impl_;
+};
+
+// One owner's address_pair calls for a fixed set of rows, block after block,
+// on its own thread. Each call supplies the same maps, sink calls and
+// receipts as address_pair. The terms of a map that depend only on its row,
+// or only on its block, are computed once for both taps or once per block.
+// The first call after open() takes one admitted call of the basis, which is
+// held until close(). close() releases it and credits the receipts of every
+// call since open(), also after a call failed.
+class MappedBasis::Addresses {
+public:
+    explicit Addresses(MappedBasis&);
+    ~Addresses();
+    Addresses(const Addresses&) = delete;
+    Addresses& operator=(const Addresses&) = delete;
+
+    // The rows and taps stay alive and unchanged until close().
+    void open(std::span<const MappedBasisRow>, std::span<const Tap>);
+    void close() noexcept;
+    // address_pair(rows[row], taps, first_window_sample, offsets, count, sink, stop).
+    void address(std::size_t row, std::uint64_t first_window_sample, const ConsecutiveBasisOffsets& offsets,
+                 std::size_t count, const BulkMappedSink& sink, const std::stop_token& stop);
+
+private:
+    struct State;
+    std::unique_ptr<State> state_;
 };
 
 } // namespace datapump::triad::v3::receiver_detail

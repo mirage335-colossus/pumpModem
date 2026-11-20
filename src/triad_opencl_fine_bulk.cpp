@@ -33,7 +33,7 @@ void require(bool condition, const char* message) {
     if (!condition) throw Error(message);
 }
 
-void cancelled(std::stop_token stop) {
+void cancelled(const std::stop_token& stop) {
     if (stop.stop_requested()) throw Error("Robust OpenCL NVFP4 work cancelled");
 }
 

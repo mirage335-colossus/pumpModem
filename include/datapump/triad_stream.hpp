@@ -122,6 +122,10 @@ struct EmissionOptions {
     // Message mode only, with an empty bits span. The reader receives a
     // draft-relative slot and supplies exactly one 0/1 value on demand.
     std::function<std::uint8_t(std::uint64_t)> bit_at = {};
+    // Optional workers for the power references evaluated at construction,
+    // as for a channel. Each job evaluates its nodes with its own DATA source
+    // and Helper generator; the sums keep their node order.
+    StreamChannelLanes lanes = {};
 };
 
 struct EmissionReport {
@@ -137,7 +141,9 @@ struct EmissionReport {
 // Bounded composite I/Q at baseband, relative to the configured DATA IF.
 // Exactly one reader owns this stream. The object must outlive the consumer
 // of source(), and read() and source() share the same forward cursor. Only the
-// source owner may read report() while the stream is active.
+// source owner may read report() while the stream is active. source() also
+// offers readers that evaluate planned ranges at once, each with its own DATA
+// source and Helper generator; the owner accounts them in order.
 class Emission {
 public:
     Emission(const PublicProfile&, const Crypto& selected_key, const EmissionOptions&);
@@ -155,6 +161,7 @@ public:
     const EmissionReport& report() const;
 private:
     struct Impl;
+    struct Readers;
     explicit Emission(std::unique_ptr<Impl>);
     std::unique_ptr<Impl> impl_;
 };

@@ -57,6 +57,7 @@ std::optional<OpenClCoarseShape> public_shape(const CoarseBulkGeometry& geometry
         shape.synthesis_lanes = source->lanes;
         shape.synthesis_cells = source->cells;
         shape.synthesis_taps = source->taps.size();
+        shape.synthesis_decimation = source->decimation;
     }
     if (!OpenClNvfp4Coarse::supports(shape)) return {};
     return shape;
@@ -230,6 +231,8 @@ public:
         result.opencl_coarse_sessions = result.opencl_coarse_frequency_fallbacks = 0;
         result.opencl_coarse_product_seconds = result.opencl_coarse_packing_seconds = 0;
         result.opencl_coarse_selection_seconds = result.opencl_coarse_synthesis_seconds = 0;
+        result.opencl_coarse_render_seconds = result.opencl_coarse_filter_seconds = 0;
+        result.opencl_coarse_gram_seconds = result.opencl_coarse_rescore_seconds = 0;
         add_opencl_coarse_work(result, local_);
         result.workspace_limit_bytes = lease_;
         result.workspace_scope = "per_coarse_session";
@@ -290,6 +293,10 @@ private:
         delta.opencl_coarse_packing_seconds = device.packing_seconds;
         delta.opencl_coarse_selection_seconds = device.selection_seconds;
         delta.opencl_coarse_synthesis_seconds = device.synthesis_seconds;
+        delta.opencl_coarse_render_seconds = device.render_seconds;
+        delta.opencl_coarse_filter_seconds = device.filter_seconds;
+        delta.opencl_coarse_gram_seconds = device.gram_seconds;
+        delta.opencl_coarse_rescore_seconds = device.rescore_seconds;
         count(local_.upload_bytes, delta.upload_bytes);
         count(local_.download_bytes, delta.download_bytes);
         count(local_.synchronizations, delta.synchronizations);
@@ -336,6 +343,10 @@ void add_opencl_coarse_work(BulkReceipt& to, const BulkReceipt& from) noexcept {
     to.opencl_coarse_packing_seconds += from.opencl_coarse_packing_seconds;
     to.opencl_coarse_selection_seconds += from.opencl_coarse_selection_seconds;
     to.opencl_coarse_synthesis_seconds += from.opencl_coarse_synthesis_seconds;
+    to.opencl_coarse_render_seconds += from.opencl_coarse_render_seconds;
+    to.opencl_coarse_filter_seconds += from.opencl_coarse_filter_seconds;
+    to.opencl_coarse_gram_seconds += from.opencl_coarse_gram_seconds;
+    to.opencl_coarse_rescore_seconds += from.opencl_coarse_rescore_seconds;
 }
 
 std::unique_ptr<CoarseBulk> make_opencl_coarse_bulk(std::shared_ptr<OpenClCoarseHost> host,

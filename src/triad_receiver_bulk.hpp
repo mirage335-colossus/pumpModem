@@ -137,6 +137,11 @@ struct BulkReceipt {
     std::uint64_t opencl_coarse_sessions = 0, opencl_coarse_frequency_fallbacks = 0;
     double opencl_coarse_product_seconds = 0, opencl_coarse_packing_seconds = 0;
     double opencl_coarse_selection_seconds = 0, opencl_coarse_synthesis_seconds = 0;
+    // Parts of the synthesis and selection intervals: lane rendering, raw
+    // warping with the decimating FIR, the bank Gram, and the observation
+    // rotation with the rescoring of retained arrivals.
+    double opencl_coarse_render_seconds = 0, opencl_coarse_filter_seconds = 0;
+    double opencl_coarse_gram_seconds = 0, opencl_coarse_rescore_seconds = 0;
     // CUDA Gram elements credited after the same readback.
     std::uint64_t cuda_direct_gram_values = 0, cuda_bmm_gram_values = 0;
     // Post-channelization matrix work, credited only after synchronization.

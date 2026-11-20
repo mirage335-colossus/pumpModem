@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
+#include <functional>
 #include <limits>
 #include <numbers>
 #include <utility>
@@ -74,7 +76,35 @@ helper::PowerReference helper_reference(const Format& format, long double helper
     return reference;
 }
 
-DataPowerReference bounded_tile_power(PatternSource& source, std::stop_token stop) {
+// Runs part(index, begin, end) over [0, count) in at most parts contiguous
+// parts, on lanes when there are several. The first failing part's error is
+// the one that a single pass in order would have met first.
+void in_parts(std::size_t count, std::size_t parts, const StreamChannelLanes& lanes,
+              const std::function<void(std::size_t, std::size_t, std::size_t)>& part) {
+    parts = std::clamp<std::size_t>(std::min<std::size_t>(parts, count), 1, lanes.run ? std::max(1U, lanes.count) : 1);
+    if (parts == 1) {
+        part(0, 0, count);
+        return;
+    }
+    std::vector<std::exception_ptr> errors(parts);
+    lanes.run(parts, [&](std::size_t index) {
+        try {
+            part(index, count * index / parts, count * (index + 1) / parts);
+        } catch (...) {
+            errors[index] = std::current_exception();
+        }
+    });
+    for (const auto& error : errors) if (error) std::rethrow_exception(error);
+}
+
+// A copy of the reference source per part beyond the first, bounded to 32 MiB.
+std::size_t source_parts(const PatternSource& source, std::size_t wanted) {
+    const auto bytes = std::max<std::size_t>(1, source.working_bytes());
+    return std::clamp<std::size_t>(std::size_t{32} * 1024 * 1024 / bytes, 1, wanted);
+}
+
+DataPowerReference bounded_tile_power(PatternSource& source, std::stop_token stop,
+                                      const StreamChannelLanes& lanes = {}, const Crypto* key = nullptr) {
     // Fixed public bit zero on at most sixteen stratified keyed tiles. One
     // normalization applies to the complete stream, including gaps and tails.
     constexpr unsigned maximum_tiles = 16, nodes_per_tile = 2048;
@@ -87,27 +117,36 @@ DataPowerReference bounded_tile_power(PatternSource& source, std::stop_token sto
     result.active_seconds = static_cast<double>(active_tile * geometry.tile_count);
     result.sampled_tiles = tiles;
     result.nodes = tiles * nodes_per_tile;
-    long double sum = 0, squares = 0;
-    for (unsigned j = 0; j < tiles; ++j) {
-        const auto begin = static_cast<std::uint64_t>(static_cast<long double>(geometry.tile_count) * j / tiles);
-        const auto end = static_cast<std::uint64_t>(static_cast<long double>(geometry.tile_count) * (j + 1) / tiles);
-        const auto tile = begin + mix64(format.epoch ^ (0x54494c45504f57ULL + j)) % (end - begin);
-        long double energy = 0;
-        for (unsigned i = 0; i < nodes_per_tile; ++i) {
-            if ((i & 255) == 0) check_stop(stop);
-            const auto random = mix64(format.epoch ^ tile ^ (0x4e4f4445504f57ULL + i));
-            const auto fraction = static_cast<long double>(random >> 11) / 9007199254740992.L;
-            const auto coordinate = active_tile * (i + fraction) / nodes_per_tile;
-            long double within = coordinate;
-            if (format.fhss) {
-                // Once per node: keep the x87 control word (triad_coordinate.hpp).
-                const auto dwell = detail::floor_coordinate(coordinate / active_dwell);
-                within = dwell * format.dwell_seconds + format.quiet_seconds + coordinate - dwell * active_dwell;
+    // Each tile's nodes sum in order on one part; tiles then sum in order.
+    std::vector<long double> means(tiles);
+    in_parts(tiles, key ? source_parts(source, tiles) : 1, lanes, [&](std::size_t part, std::size_t begin, std::size_t end) {
+        std::unique_ptr<PatternSource> own;
+        if (part) own = std::make_unique<PatternSource>(format, *key, 0);
+        auto& reader = part ? *own : source;
+        for (auto j = static_cast<unsigned>(begin); j < end; ++j) {
+            const auto first = static_cast<std::uint64_t>(static_cast<long double>(geometry.tile_count) * j / tiles);
+            const auto last = static_cast<std::uint64_t>(static_cast<long double>(geometry.tile_count) * (j + 1) / tiles);
+            const auto tile = first + mix64(format.epoch ^ (0x54494c45504f57ULL + j)) % (last - first);
+            long double energy = 0;
+            for (unsigned i = 0; i < nodes_per_tile; ++i) {
+                if ((i & 255) == 0) check_stop(stop);
+                const auto random = mix64(format.epoch ^ tile ^ (0x4e4f4445504f57ULL + i));
+                const auto fraction = static_cast<long double>(random >> 11) / 9007199254740992.L;
+                const auto coordinate = active_tile * (i + fraction) / nodes_per_tile;
+                long double within = coordinate;
+                if (format.fhss) {
+                    // Once per node: keep the x87 control word (triad_coordinate.hpp).
+                    const auto dwell = detail::floor_coordinate(coordinate / active_dwell);
+                    within = dwell * format.dwell_seconds + format.quiet_seconds + coordinate - dwell * active_dwell;
+                }
+                const auto seconds = tile * (static_cast<long double>(format.burst_wait_tiles) + 1) * geometry.tile_seconds + within;
+                energy += std::norm(reader.sample_at(geometry.calendar_origin_sample + seconds * format.sample_rate));
             }
-            const auto seconds = tile * (static_cast<long double>(format.burst_wait_tiles) + 1) * geometry.tile_seconds + within;
-            energy += std::norm(source.sample_at(geometry.calendar_origin_sample + seconds * format.sample_rate));
+            means[j] = energy / nodes_per_tile;
         }
-        const auto mean = energy / nodes_per_tile;
+    });
+    long double sum = 0, squares = 0;
+    for (const auto mean : means) {
         sum += mean;
         squares += mean * mean;
     }
@@ -355,6 +394,29 @@ struct Emission::Impl {
     bool data_enabled = false, helper_enabled = false;
     bool noise = false;
     std::uint8_t isolated_bit = 0;
+    // The bit of the current slot's DATA source once it is resolved.
+    std::optional<std::uint8_t> slot_bit;
+
+    // Readers for a channel with lanes. A plan holds the slot states that
+    // next() would pass through; each reader owns its DATA source and Helper
+    // generator, whose values depend on the sample index alone.
+    struct Span {
+        std::uint64_t begin = 0; // First local sample of this slot state.
+        std::optional<HelperBurstSlot> slot;
+        std::uint64_t data_first = 0, helper_stop = 0;
+        long double helper_begin_seconds = 0, helper_end_seconds = 0;
+        std::optional<std::uint8_t> bit;
+    };
+    struct Reader {
+        std::uint64_t data_slot = 0;
+        std::unique_ptr<PatternSource> data;
+        std::unique_ptr<helper::Generator> helper;
+    };
+    std::vector<Reader> readers;
+    std::vector<Span> spans;
+    std::vector<std::array<double, 2>> norms;
+    std::uint64_t plan_first = 0, plan_count = 0, plan_error_index = UINT64_MAX;
+    std::exception_ptr plan_error;
 
     Impl(const PublicProfile& selected_profile, const Crypto& key, const EmissionOptions& options,
          std::optional<std::pair<std::uint8_t, bool>> isolated = {})
@@ -401,12 +463,13 @@ struct Emission::Impl {
             require(source_first <= active_helper_first, "Robust playback starts after the first transmitted sample");
         }
         report.first_data_sample = data_first - source_first;
-        prepare_power();
+        prepare_power(options.lanes);
     }
 
     void set_slot(const HelperBurstSlot& slot) {
         current = slot;
         data.reset();
+        slot_bit.reset();
         const auto& calendar = profile.calendar();
         const auto origin = profile.origin();
         data_first = calendar.distance(origin, slot.support_begin);
@@ -416,7 +479,7 @@ struct Emission::Impl {
         active_helper_end_seconds = calendar.relative_seconds(origin, slot.helper_end);
     }
 
-    void prepare_power() {
+    void prepare_power(const StreamChannelLanes& lanes) {
         const auto& geometry = profile.geometry();
         const auto rate = format.sample_rate;
         PatternSource reference_source(format, keys.data, 0);
@@ -424,21 +487,34 @@ struct Emission::Impl {
         const auto helper_end = static_cast<long double>(source_stop) / rate;
         auto reference = helper_reference(format, current ? std::max(helper_end, 42.L) : helper_end);
         reference.time_key = keys.helper;
-        long double norm = 0;
-        unsigned nodes = 0;
+        // The active reference nodes in order; each part evaluates its own.
+        std::vector<long double> active;
+        active.reserve(helper::power_reference_nodes);
         for (unsigned i = 0; i < helper::power_reference_nodes; ++i) {
             if ((i & 255) == 0) check_stop(stop);
             const auto seconds = helper::power_reference_node(reference, i);
-            if (!reference.active(seconds)) continue;
-            norm += std::norm(reference_source.sample_at(seconds * rate - preview_offset));
-            ++nodes;
+            if (reference.active(seconds)) active.push_back(seconds);
         }
+        std::vector<double> values(active.size());
+        const auto parts = source_parts(reference_source, 16);
+        in_parts(active.size(), parts, lanes, [&](std::size_t part, std::size_t begin, std::size_t end) {
+            std::unique_ptr<PatternSource> own;
+            if (part) own = std::make_unique<PatternSource>(format, keys.data, 0);
+            auto& source = part ? *own : reference_source;
+            for (auto k = begin; k < end; ++k) {
+                if ((k & 255) == 0) check_stop(stop);
+                values[k] = std::norm(source.sample_at(active[k] * rate - preview_offset));
+            }
+        });
+        long double norm = 0;
+        for (const auto value : values) norm += value;
+        const auto nodes = static_cast<unsigned>(active.size());
         require(nodes && norm > 0, "empty DATA power reference");
         report.reference_data_mean_norm = static_cast<double>(norm / nodes);
         reference.data_mean_power = report.reference_data_mean_norm / 2;
         if (helper_enabled)
             report.helper_plan = helper::plan(profile.config().helper, profile.placement(), rate, 0, 1, &reference);
-        report.data_reference = bounded_tile_power(reference_source, stop);
+        report.data_reference = bounded_tile_power(reference_source, stop, lanes, &keys.data);
         report.data_calibration_gain = std::sqrt(report.reference_data_mean_norm / report.data_reference.mean_norm);
         const auto data_gain = report.helper_plan.data_gain;
         report.composite_gain = helper_enabled ? 1 / (data_gain * std::sqrt(report.reference_data_mean_norm)) : 1.;
@@ -446,15 +522,63 @@ struct Emission::Impl {
             1 / std::sqrt(report.data_reference.mean_norm);
         if (!helper_enabled) return;
         helper = std::make_unique<helper::Generator>(profile.config().helper, report.helper_plan, format.epoch, true, keys.helper);
-        long double measured_helper_norm = 0;
-        for (unsigned i = 0; i < helper::power_reference_nodes; ++i) {
-            if ((i & 255) == 0) check_stop(stop);
-            const auto seconds = helper::power_reference_node(reference, i);
-            if (reference.active(seconds))
-                measured_helper_norm += std::norm(helper->mix_analytic({}, seconds, rate,
+        in_parts(active.size(), 16, lanes, [&](std::size_t part, std::size_t begin, std::size_t end) {
+            std::unique_ptr<helper::Generator> own;
+            if (part) own = std::make_unique<helper::Generator>(profile.config().helper, report.helper_plan,
+                format.epoch, true, keys.helper);
+            const auto& generator = part ? *own : *helper;
+            for (auto k = begin; k < end; ++k) {
+                if ((k & 255) == 0) check_stop(stop);
+                values[k] = std::norm(generator.mix_analytic({}, active[k], rate,
                     reference.helper_end_seconds, 0) * report.composite_gain);
-        }
+            }
+        });
+        long double measured_helper_norm = 0;
+        for (const auto value : values) measured_helper_norm += value;
         report.reference_helper_ratio = static_cast<double>(measured_helper_norm / nodes);
+    }
+
+    // The bit that next() addresses the DATA source of a slot with.
+    std::uint8_t slot_data_bit(const std::optional<HelperBurstSlot>& slot) const {
+        auto bit = isolated_bit;
+        if (slot && !noise) {
+            const auto relative = slot->index-first_slot;
+            bit = bit_at ? bit_at(relative) : bits[static_cast<std::size_t>(relative)];
+            require(bit <= 1, "invalid Robust generated transmit bit");
+        }
+        return bit;
+    }
+    std::unique_ptr<PatternSource> data_source(const std::optional<HelperBurstSlot>& slot, std::uint8_t bit) const {
+        auto addressed_format = format;
+        if (slot) {
+            addressed_format.epoch = slot->pattern_begin.epoch;
+            addressed_format.symbol_ordinal += slot->index;
+        }
+        return std::make_unique<PatternSource>(addressed_format, keys.data, bit);
+    }
+    bool in_data(std::uint64_t index, std::uint64_t first) const {
+        return data_enabled && index >= first && index - first < profile.geometry().source_samples;
+    }
+
+    struct Value {
+        Complex sample;
+        double data_norm = 0, helper_norm = 0;
+    };
+    // One sample of a slot state. data is that slot's DATA source when the
+    // sample lies in its support.
+    Value value_at(std::uint64_t index, PatternSource* source, std::uint64_t first,
+                   long double helper_begin, long double helper_end, const helper::Generator* generator) const {
+        Complex raw_data;
+        if (source) raw_data = source->sample_at(static_cast<long double>(index - first));
+        const auto seconds = static_cast<long double>(index) / format.sample_rate;
+        const auto up = rotation(profile.data_if_hz(), seconds);
+        const auto normalized_data = raw_data * report.data_gain;
+        const bool active = generator && seconds >= helper_begin && seconds < helper_end;
+        const auto audio = active ? generator->mix_analytic(raw_data * report.data_calibration_gain * up,
+            seconds, format.sample_rate, helper_end, helper_begin) * report.composite_gain :
+            normalized_data * up;
+        const auto helper_component = active ? audio - normalized_data * up : Complex{};
+        return {audio * std::conj(up), std::norm(normalized_data), std::norm(helper_component)};
     }
 
     Complex next(std::uint64_t local_index) {
@@ -464,37 +588,167 @@ struct Emission::Impl {
         const auto index = source_first + local_index;
         if (current && current->index < last_slot && index >= active_helper_stop)
             set_slot(profile.calendar().successor(*current));
-        Complex raw_data;
-        if (data_enabled && index >= data_first && index - data_first < profile.geometry().source_samples) {
+        PatternSource* source = nullptr;
+        if (in_data(index, data_first)) {
             if (!data) {
-                auto addressed_format = format;
-                auto bit = isolated_bit;
-                if (current) {
-                    addressed_format.epoch = current->pattern_begin.epoch;
-                    addressed_format.symbol_ordinal += current->index;
-                    if (!noise) {
-                        const auto relative = current->index-first_slot;
-                        bit = bit_at ? bit_at(relative) : bits[static_cast<std::size_t>(relative)];
-                        require(bit <= 1, "invalid Robust generated transmit bit");
+                const auto bit = slot_bit ? *slot_bit : slot_data_bit(current);
+                data = data_source(current, bit);
+                slot_bit = bit;
+            }
+            source = data.get();
+        }
+        const auto value = value_at(index, source, data_first, active_helper_begin_seconds,
+            active_helper_end_seconds, helper.get());
+        report.data_energy += value.data_norm;
+        report.helper_energy += value.helper_norm;
+        ++report.generated_samples;
+        return value.sample;
+    }
+
+    std::size_t reader_bytes(std::size_t count, std::uint64_t plan) const {
+        return count * (sizeof(Reader) + (data_enabled ? profile.geometry().source_workspace_bytes : 0) +
+            (helper ? sizeof(helper::Generator) : 0)) + static_cast<std::size_t>(plan) * sizeof(norms[0]) +
+            16 * sizeof(Span);
+    }
+    void open(std::size_t count, std::uint64_t plan) {
+        readers.resize(count);
+        norms.resize(static_cast<std::size_t>(plan));
+        spans.reserve(16);
+    }
+    Span current_span(std::uint64_t begin) const {
+        return {begin, current, data_first, active_helper_stop, active_helper_begin_seconds,
+            active_helper_end_seconds, slot_bit};
+    }
+    Span successor_span(const Span& span, std::uint64_t begin) const {
+        const auto slot = profile.calendar().successor(*span.slot);
+        const auto& calendar = profile.calendar();
+        const auto origin = profile.origin();
+        return {begin, slot, calendar.distance(origin, slot.support_begin), calendar.distance(origin, slot.helper_end),
+            calendar.relative_seconds(origin, slot.helper_begin), calendar.relative_seconds(origin, slot.helper_end), {}};
+    }
+    // The slot states of local samples [first, first + count) and the bits
+    // of their DATA sources, resolved in order as next() resolves them.
+    void plan(std::uint64_t first, std::uint64_t count) {
+        require(first == report.generated_samples && count <= source_stop - source_first - first,
+            "Robust emitted source requires one forward reader");
+        plan_first = first;
+        plan_count = count;
+        plan_error_index = UINT64_MAX;
+        plan_error = nullptr;
+        if (norms.size() < count) norms.resize(static_cast<std::size_t>(count));
+        spans.clear();
+        const auto end = first + count;
+        auto span = current_span(first);
+        for (auto earliest = first;;) {
+            // next() moves to the following slot at most once per sample.
+            auto stop = end;
+            if (span.slot && span.slot->index < last_slot)
+                stop = std::min(end, std::max(earliest, span.helper_stop > source_first ? span.helper_stop - source_first : 0));
+            if (!span.bit && data_enabled) {
+                const auto lo = std::max(source_first + span.begin, span.data_first);
+                const auto hi = std::min(source_first + stop, span.data_first + profile.geometry().source_samples);
+                if (lo < hi) {
+                    try {
+                        span.bit = slot_data_bit(span.slot);
+                    } catch (...) {
+                        plan_error_index = lo - source_first;
+                        plan_error = std::current_exception();
+                        spans.push_back(span);
+                        return;
                     }
                 }
-                data = std::make_unique<PatternSource>(addressed_format, keys.data, bit);
             }
-            raw_data = data->sample_at(static_cast<long double>(index - data_first));
+            spans.push_back(span);
+            if (stop == end) return;
+            try {
+                span = successor_span(span, stop);
+            } catch (...) {
+                plan_error_index = stop;
+                plan_error = std::current_exception();
+                return;
+            }
+            earliest = stop + 1;
         }
-        const auto seconds = static_cast<long double>(index) / format.sample_rate;
-        const auto up = rotation(profile.data_if_hz(), seconds);
-        const auto normalized_data = raw_data * report.data_gain;
-        const bool active = helper && seconds >= active_helper_begin_seconds && seconds < active_helper_end_seconds;
-        const auto audio = active ? helper->mix_analytic(raw_data * report.data_calibration_gain * up,
-            seconds, format.sample_rate, active_helper_end_seconds, active_helper_begin_seconds) * report.composite_gain :
-            normalized_data * up;
-        const auto helper_component = active ? audio - normalized_data * up : Complex{};
-        report.data_energy += std::norm(normalized_data);
-        report.helper_energy += std::norm(helper_component);
-        ++report.generated_samples;
-        return audio * std::conj(up);
     }
+    Complex evaluate(std::size_t which, std::uint64_t local) {
+        if (local >= plan_error_index) std::rethrow_exception(plan_error);
+        const auto& span = *std::prev(std::upper_bound(spans.begin(), spans.end(), local,
+            [](std::uint64_t value, const Span& candidate) { return value < candidate.begin; }));
+        auto& reader = readers[which];
+        const auto index = source_first + local;
+        PatternSource* source = nullptr;
+        if (in_data(index, span.data_first)) {
+            const auto slot = span.slot ? span.slot->index : 0;
+            if (!reader.data || reader.data_slot != slot) {
+                reader.data.reset();
+                reader.data = data_source(span.slot, *span.bit);
+                reader.data_slot = slot;
+            }
+            source = reader.data.get();
+        }
+        if (helper && !reader.helper)
+            reader.helper = std::make_unique<helper::Generator>(profile.config().helper, report.helper_plan,
+                format.epoch, true, keys.helper);
+        const auto value = value_at(index, source, span.data_first, span.helper_begin_seconds,
+            span.helper_end_seconds, reader.helper.get());
+        norms[static_cast<std::size_t>(local - plan_first)] = {value.data_norm, value.helper_norm};
+        return value.sample;
+    }
+    // next()'s order: its stop check, then the slot state of the sample.
+    bool reach(std::uint64_t local, std::size_t& span, std::exception_ptr& error) {
+        if ((local & 255) == 0) {
+            try {
+                check_stop(stop);
+            } catch (...) {
+                error = std::current_exception();
+                return false;
+            }
+        }
+        if (span + 1 < spans.size() && spans[span + 1].begin == local) {
+            const auto& next_span = spans[++span];
+            current = next_span.slot;
+            data.reset();
+            data_first = next_span.data_first;
+            active_helper_first = profile.calendar().distance(profile.origin(), next_span.slot->helper_begin);
+            active_helper_stop = next_span.helper_stop;
+            active_helper_begin_seconds = next_span.helper_begin_seconds;
+            active_helper_end_seconds = next_span.helper_end_seconds;
+            slot_bit.reset();
+        }
+        return true;
+    }
+    std::uint64_t accept(std::uint64_t count, bool failed, std::exception_ptr& error) {
+        require(count <= plan_count, "Robust emitted source accepted unplanned samples");
+        std::size_t span = 0;
+        std::uint64_t accepted = 0;
+        for (; accepted < count; ++accepted) {
+            const auto local = plan_first + accepted;
+            if (!reach(local, span, error)) break;
+            if (in_data(source_first + local, data_first)) slot_bit = spans[span].bit;
+            const auto& value = norms[static_cast<std::size_t>(accepted)];
+            report.data_energy += value[0];
+            report.helper_energy += value[1];
+            ++report.generated_samples;
+        }
+        if (accepted == count && failed && count < plan_count) (void)reach(plan_first + count, span, error);
+        plan_first += accepted;
+        plan_count = 0;
+        return accepted;
+    }
+};
+
+struct Emission::Readers final : EmittedSourceReaders {
+    explicit Readers(Impl& state) : state(state) {}
+    std::size_t reader_bytes(std::size_t count, std::uint64_t plan) const override {
+        return state.reader_bytes(count, plan);
+    }
+    void open(std::size_t count, std::uint64_t plan) override { state.open(count, plan); }
+    void plan(std::uint64_t first, std::uint64_t count) override { state.plan(first, count); }
+    Complex evaluate(std::size_t reader, std::uint64_t index) override { return state.evaluate(reader, index); }
+    std::uint64_t accept(std::uint64_t count, bool failed, std::exception_ptr& error) override {
+        return state.accept(count, failed, error);
+    }
+    Impl& state;
 };
 
 Emission::Emission(const PublicProfile& profile, const Crypto& key, const EmissionOptions& options)
@@ -524,6 +778,7 @@ EmittedSource Emission::source() const {
     result.working_bytes = sizeof(Impl) + state->bits.capacity() +
         (state->data_enabled ? geometry.source_workspace_bytes : 0) + (state->helper ? sizeof(helper::Generator) : 0);
     result.sample_at = [state](std::uint64_t index) { return state->next(index); };
+    result.readers = std::make_shared<Readers>(*state);
     return result;
 }
 

@@ -675,7 +675,7 @@ struct OpenClNvfp4Projection::Impl {
     // The column names tiles of the bound public source. A missing one is
     // rendered on the device, from keyed coefficients uploaded once a lane.
     void stage_addressed(const BulkMappedColumn& column, std::size_t lane, bool same_tap, OpenClResidentWork& work,
-                         std::stop_token stop) {
+                         const std::stop_token& stop) {
         auto& scratch = *resident;
         const auto& source = *scratch.source;
         const auto& address = column.address;
@@ -708,7 +708,7 @@ struct OpenClNvfp4Projection::Impl {
 
     void stage_columns(std::size_t first_lane, std::span<const double> offsets, const double*& canonical_offsets,
                        std::span<const BulkMappedColumn> mapped, std::span<const BulkDirectColumn> direct,
-                       bool addressed, OpenClResidentWork& work, std::stop_token stop) {
+                       bool addressed, OpenClResidentWork& work, const std::stop_token& stop) {
         auto& scratch = *resident;
         if (offsets.size() != shape.rows) throw Error("Robust OpenCL resident fine source row extent changed");
         if (offsets.data() != canonical_offsets) {
@@ -815,7 +815,7 @@ struct OpenClNvfp4Projection::Impl {
     }
 
     void run_resident(std::span<const FineResidentBlock> blocks, std::size_t candidates,
-                      OpenClResidentWork& work, std::stop_token stop) {
+                      OpenClResidentWork& work, const std::stop_token& stop) {
         auto& scratch = *resident;
         const bool profile = shape.resident.profile;
         const auto lanes_per_block = candidates * resident_columns;
@@ -837,18 +837,24 @@ struct OpenClNvfp4Projection::Impl {
         std::ranges::fill(present, std::uint8_t{0});
         const auto began = profile ? Clock::now() : Clock::time_point{};
         double staging = 0, streaming = 0;
+        // One sink serves the batch: each candidate's first lane and each
+        // block's validated offsets change beneath it.
+        std::size_t first = 0;
+        const double* canonical_offsets = nullptr;
+        const BulkMappedSink sink = [&](std::span<const double> offsets, std::span<const BulkMappedColumn> mapped,
+                                        std::span<const BulkDirectColumn> direct) {
+            const auto entered = profile ? Clock::now() : Clock::time_point{};
+            stage_columns(first, offsets, canonical_offsets, mapped, direct, tiles != nullptr, work, stop);
+            if (profile) staging += seconds_since(entered);
+        };
         for (std::size_t block = 0; block < blocks.size(); ++block) {
             const auto& input = blocks[block];
-            const double* canonical_offsets = nullptr;
+            canonical_offsets = nullptr;
             std::ranges::copy(input.shape.projected_y, scratch.observed.begin() + block * shape.modes);
             for (std::size_t candidate = 0; candidate < candidates; ++candidate) {
                 cancelled(stop);
-                const auto first = block * lanes_per_block + candidate * resident_columns;
-                input.source(candidate, 0, shape.rows, [&](auto offsets, auto mapped, auto direct) {
-                    const auto entered = profile ? Clock::now() : Clock::time_point{};
-                    stage_columns(first, offsets, canonical_offsets, mapped, direct, tiles != nullptr, work, stop);
-                    if (profile) staging += seconds_since(entered);
-                });
+                first = block * lanes_per_block + candidate * resident_columns;
+                input.source(candidate, 0, shape.rows, sink);
             }
             // Rendered tiles need no host staging, so the device can map
             // these blocks while the owner stages the following ones.

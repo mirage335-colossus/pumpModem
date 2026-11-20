@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -244,6 +245,11 @@ void check_session(const std::shared_ptr<r::OpenClNvfp4Device>& device, const da
               dense.work.template_bank.operations.source_render_rows == 0 &&
               dense.work.bulk->opencl_coarse_upload_bytes < 4 * plan.projected_observation_rows * 16 + (1u << 20),
               "device template synthesis still rendered or uploaded the bank on the host");
+    // This FIR's taps fit one stage window of a tile, so it warps the raw
+    // rows that it stages and the session leases no stored raw columns.
+    if (synthesize)
+        check(host->peak < columns * plan.raw_template_rows * sizeof(std::complex<float>),
+              "device template synthesis leased stored raw columns");
 
     const auto& expected = winner(native);
     const auto& actual = winner(dense);

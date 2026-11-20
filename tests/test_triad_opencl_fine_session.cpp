@@ -286,6 +286,8 @@ void check_slot(const std::shared_ptr<r::OpenClNvfp4Device>& device, const datap
               route->receipt.opencl_resident_keyed_lanes == 4 && route->work.cache.native_preparation_calls == 2 &&
               uploaded.work.cache.native_preparation_calls > 2 &&
               route->work.cache.addressed_columns == resident_blocks * states * 4 &&
+              route->work.cache.addressed_calls == resident_blocks * states &&
+              route->work.cache.prepared_calls == 0 && route->work.cache.prepared_empty_columns == 0 &&
               route->work.cache.keyed_lanes == 4 &&
               4 * route->receipt.opencl_resident_upload_bytes < uploaded.receipt.opencl_resident_upload_bytes,
               "a rendering route still uploaded or natively rendered its resident tiles");
@@ -345,6 +347,8 @@ void check_slot(const std::shared_ptr<r::OpenClNvfp4Device>& device, const datap
     const auto pair_bytes = rendered.peak_lease;
     const auto tight = run(f, key, device, options, whole, 3000 + 1500, pair_bytes);
     check(tight.score.bit_evidence == rendered.score.bit_evidence && tight.peak_lease == pair_bytes &&
+          tight.work.cache.addressed_calls == resident_blocks * states &&
+          tight.work.cache.addressed_columns == resident_blocks * states * 4 &&
           tight.receipt.opencl_resident_fine_batches == 5 && tight.receipt.opencl_resident_fine_blocks == resident_blocks &&
           tight.receipt.opencl_resident_window_blocks == 2 && tight.receipt.opencl_resident_reduced_windows > 0,
           "a tight device lease did not fall back to single-dispatch batches");

@@ -228,8 +228,8 @@ def main(executable):
     # expensive receiver search.  The explicit local lease admits the capture
     # but need not admit full scoring; either a finished score or a reported
     # lease/deadline stop is acceptable for this waveform-generation check.
-    def reference_capture(*extra, memory_limit=83886080):
-        proc = subprocess.run([str(executable), "admission", "--workers", "1", "--slot-owners", "1",
+    def reference_capture(*extra, memory_limit=83886080, workers=1):
+        proc = subprocess.run([str(executable), "admission", "--workers", str(workers), "--slot-owners", "1",
                                "--deadline-ms", "12000", "--memory-limit-bytes", str(memory_limit),
                                *reference_args, *extra], check=False, capture_output=True, text=True, timeout=18)
         receipt = json.loads(proc.stdout)
@@ -241,6 +241,29 @@ def main(executable):
     faded = reference_capture("--channel-model", "itu-disturbed")
     faded_again = reference_capture("--channel-model", "itu-disturbed")
     stable = reference_capture("--channel-severity", "0")
+
+    # A read size never changes the capture, so larger reads must not displace
+    # a lent simulator worker: helper stacks are admitted first, and the two
+    # read buffers grow only into what they leave. Place a two-worker limit
+    # where two full-size read buffers would fit beside the capture but not
+    # also beside a helper stack.
+    def generation(receipt):
+        return next(row for row in receipt["phases"] if row["name"] == "simulator")["work"]
+    row_bytes, least_rows, full_rows = 17, 4096, 65536
+    alone = generation(stable)
+    assert alone["generation_helper_workers"] == 0, alone
+    stack = alone["generation_stack_bytes_per_helper"]
+    fixed = alone["generation_preflight_reserved_bytes"] - 2 * alone["generation_read_rows"] * row_bytes
+    band_limit = fixed + stack + 2 * least_rows * row_bytes + 2**20
+    lent_capture = reference_capture("--channel-severity", "0", memory_limit=band_limit, workers=2)
+    lent = generation(lent_capture)
+    assert lent_capture["observation"]["input_sha256"] == stable["observation"]["input_sha256"]
+    assert lent["generation_helper_workers"] == 1, (band_limit, lent)
+    assert least_rows <= lent["generation_read_rows"] < full_rows, (band_limit, lent)
+    lent_fixed = (lent["generation_preflight_reserved_bytes"] - stack -
+                  2 * lent["generation_read_rows"] * row_bytes)
+    assert band_limit - lent_fixed < stack + 2 * full_rows * row_bytes, (band_limit, lent_fixed, lent)
+    assert lent["generation_preflight_reserved_bytes"] <= band_limit, (band_limit, lent)
     for backend, discovery in (("cuda", explicit_half_fft), ("gpu", automatic_gpu_floor)):
         device_args = ("--backend", backend, "--require-accelerator", "on")
         options = (*device_args, "--channel-severity", "0")

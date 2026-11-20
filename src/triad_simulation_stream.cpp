@@ -28,6 +28,9 @@ using modem::detail::SpreadRay;
 using Complex = std::complex<double>;
 constexpr double tau = 2 * std::numbers::pi;
 constexpr std::size_t kHistoryLimitBytes = 64ULL * 1024 * 1024;
+// Source readers of a channel with lanes. Each holds a copy of the source's
+// caches; a block's source range rarely repays more.
+constexpr std::size_t kSourceReaders = 8;
 
 void require(bool condition, const char* message) {
     if (!condition) throw Error(message);
@@ -467,17 +470,28 @@ struct StreamingChannel::Impl {
         std::size_t row = SIZE_MAX;
         bool in_path = false, ran = false;
         std::exception_ptr error;
+        // The first row whose coordinates could not be evaluated.
+        std::size_t path_row = SIZE_MAX;
     };
     struct Block {
         std::vector<Complex> direct, delayed;
         std::vector<std::array<Complex, 2>> path_gain;
         std::vector<Excursions> excursion;
+        // The moving echo delay of each row; others use the fixed delay.
+        std::vector<long double> delay_seconds;
+        // Rows [0, carried) hold their coordinates; the sequential pass
+        // evaluates those of a later row itself, which reports their failure.
+        std::size_t carried = 0;
         std::uint64_t first = 0, source_begin = 0;
         // The row whose source history could not be generated, and why.
         std::size_t source_failure_row = SIZE_MAX;
         std::exception_ptr source_failure;
         Failure failure;
-    } block;
+    };
+    // With split stages the sequential pass over one block runs beside the
+    // preparation of the next, so a block and its chains have two copies.
+    std::array<Block, 2> blocks;
+    std::size_t prepare_slot = 0;
     std::size_t block_rows = 0, lane_jobs = 1;
     std::vector<Reader> readers;
     std::vector<Failure> job_failures;
@@ -490,7 +504,16 @@ struct StreamingChannel::Impl {
         std::vector<detail::BoundedRandomSpread::State> echo;
         std::vector<double> common_doppler_hz;
         std::array<Failure, chain_count> failures;
-    } chains;
+    };
+    std::array<Chains, 2> chain_sets;
+    // One block's sequential pass, delivered at offset of a read's output.
+    struct Pass {
+        std::span<Complex> output;
+        std::span<std::uint8_t> validity;
+        std::size_t offset = 0, rows = 0, slot = 0;
+        std::exception_ptr error;
+        bool ran = false;
+    };
     bool chained = false;
     // The source history that the unbatched reader had generated at the cursor.
     std::uint64_t reader_source_end = 0;
@@ -499,6 +522,26 @@ struct StreamingChannel::Impl {
     std::exception_ptr ahead_failure;
     // A failed read ends a channel whose chains had already passed that row.
     std::exception_ptr ended;
+    // With lanes, a transmit path that never reads a sample's value (no DAC
+    // and no diagnostic I/Q noise) splits a source range into stages: one job
+    // forms the TX oscillator factor of each sample, the source's readers
+    // evaluate disjoint parts of the range on others, and the reader then
+    // accounts the samples in order and multiplies value and factor. Without
+    // readers the fused loop keeps the source callback beside the oscillator.
+    struct Stage {
+        std::uint64_t index = UINT64_MAX;
+        std::exception_ptr error;
+        bool ran = false;
+    };
+    bool split_transmit = false;
+    std::shared_ptr<EmittedSourceReaders> source_readers;
+    std::size_t source_reader_count = 0;
+    std::vector<Complex> tx_rotation;
+    Stage oscillator_stage;
+    std::vector<Stage> source_stages;
+    // Every TX calendar coordinate of the source converts to a dwell index,
+    // so a channel without FHSS need not form them.
+    bool tx_calendar_bounded = false;
     std::unique_ptr<background_noise::Generator> transmit_diagnostic_iq_noise;
     OscillatorState tx_osc, rx_osc;
     Rng tx_rng, rx_rng, thermal_rng;
@@ -759,7 +802,14 @@ struct StreamingChannel::Impl {
         // further job owns a copy of those the selected laws evaluate.
         const bool reads_rays = config.path_evolution.random_doppler_width_hz > 0;
         const bool reads_excursions = perturb_enabled && random_selective;
-        const auto size_block = [&](std::size_t jobs) {
+        const bool moving_delay = config.path_evolution.bounded_spread_knot_seconds == 0 &&
+            config.path_evolution.delay_excursion_seconds > 0;
+        // Only the DAC and the diagnostic I/Q noise read a source value
+        // before the TX oscillator multiplies it.
+        const bool value_free_transmit = !effects.signal_enabled || (!transmit_diagnostic_iq_noise &&
+            !config.frontend.dac.nominal_bits && config.frontend.dac.gain == 1);
+        const bool reads_source = explicit_source && src.readers && effects.signal_enabled;
+        const auto size_block = [&](std::size_t jobs, bool with_readers) {
             lane_jobs = jobs;
             // Each job needs enough rows to repay its hand-off, and a read
             // of several blocks generates all but the first one's source
@@ -771,15 +821,20 @@ struct StreamingChannel::Impl {
             // Chains keep the next block's allowance beside the current one.
             block_lookahead = 2 * block_rows + 16;
             chained = jobs > 1;
+            source_reader_count = chained && value_free_transmit && with_readers && reads_source ?
+                std::min<std::size_t>(jobs, kSourceReaders) : 0;
+            split_transmit = chained && value_free_transmit && (source_reader_count || !effects.signal_enabled);
             const auto chain_row = !chained ? 0 : sizeof(Complex) + (effects.noise_enabled ? sizeof(Complex) : 0) +
                 (config.path_evolution.bounded_spread_knot_seconds > 0 ?
                     sizeof(detail::BoundedRandomSpread::State) + sizeof(Complex) : 0) +
                 (config.path_evolution.common_doppler_wander_hz > 0 ? sizeof(double) + sizeof(Complex) : 0);
-            return (chained ? 2 : 1) * block_lookahead * sizeof(Complex) + block_rows * (2 * sizeof(Complex) + chain_row +
-                    (reads_rays ? sizeof(std::array<Complex, 2>) : 0) + (reads_excursions ? sizeof(Excursions) : 0)) +
+            return (chained ? 2 : 1) * block_lookahead * sizeof(Complex) + (split_transmit ? 2 : 1) * block_rows *
+                    (2 * sizeof(Complex) + chain_row + (reads_rays ? sizeof(std::array<Complex, 2>) : 0) +
+                     (reads_excursions ? sizeof(Excursions) : 0) + (moving_delay ? sizeof(long double) : 0)) +
                 jobs * sizeof(Failure) + (jobs - 1) * (sizeof(Reader) +
                     (reads_rays ? 2 * sizeof(detail::FixedGaussianRay) : 0) +
-                    (reads_excursions ? DispersiveSelectivePerturbation::maximum_random_working_bytes() : 0));
+                    (reads_excursions ? DispersiveSelectivePerturbation::maximum_random_working_bytes() : 0)) +
+                (split_transmit ? block_lookahead * sizeof(Complex) + (source_reader_count + 1) * sizeof(Stage) : 0);
         };
         // All owned arrays are fixed-size; no deque growth or duration-sized
         // history is hidden from this pre-allocation bound. Fixed allowance
@@ -806,10 +861,21 @@ struct StreamingChannel::Impl {
         // without their rows and process copies keeps its reader alone.
         constexpr std::size_t workspace_limit = kHistoryLimitBytes + 1024 * 1024;
         const auto source_bytes = explicit_source ? src.working_bytes : 0;
-        auto block_bytes = size_block(lane_jobs);
-        if (lane_jobs > 1 && (fixed_bytes > workspace_limit || block_bytes > workspace_limit - fixed_bytes ||
-                source_bytes > workspace_limit - fixed_bytes - block_bytes))
-            block_bytes = size_block(1);
+        const auto fits = [&](std::size_t block, std::size_t readers) {
+            return fixed_bytes <= workspace_limit && block <= workspace_limit - fixed_bytes &&
+                source_bytes <= workspace_limit - fixed_bytes - block &&
+                readers <= workspace_limit - fixed_bytes - block - source_bytes;
+        };
+        // The source's readers are charged with the source. Without room for
+        // them a channel keeps its lanes and the fused source loop.
+        auto block_bytes = size_block(lane_jobs, true);
+        std::size_t reader_bytes = source_reader_count ?
+            src.readers->reader_bytes(source_reader_count, block_lookahead) : 0;
+        if (lane_jobs > 1 && !fits(block_bytes, reader_bytes)) {
+            block_bytes = size_block(lane_jobs, false);
+            reader_bytes = 0;
+            if (!fits(block_bytes, 0)) block_bytes = size_block(1, false);
+        }
         stats.working_bytes = fixed_bytes + block_bytes;
         require(stats.working_bytes <= workspace_limit,
                 "stream channel workspace exceeds its fixed bound");
@@ -818,13 +884,28 @@ struct StreamingChannel::Impl {
                     "emitted source and channel workspace exceed the fixed bound");
             stats.working_bytes += src.working_bytes;
         }
+        if (source_reader_count) {
+            stats.working_bytes += reader_bytes;
+            source_readers = src.readers;
+            source_readers->open(source_reader_count, block_lookahead);
+            source_stages.resize(source_reader_count);
+        }
+        if (split_transmit) tx_rotation.resize(block_lookahead);
+        {
+            const long double extent = static_cast<long double>(geometry.source_samples) / tx_clock +
+                std::abs(hop_origin_seconds);
+            tx_calendar_bounded = std::isfinite(extent) && extent / effects.dwell_seconds < 0x1p62L;
+        }
         tx_history.resize(static_cast<std::size_t>(retained_history + (chained ? 2 : 1) * block_lookahead));
-        block.direct.resize(block_rows);
-        block.delayed.resize(block_rows);
-        if (reads_rays) block.path_gain.resize(block_rows);
-        if (reads_excursions) block.excursion.resize(block_rows);
-        job_failures.resize(lane_jobs);
-        if (chained) {
+        for (std::size_t slot = 0; slot < (split_transmit ? 2 : 1); ++slot) {
+            auto& block = blocks[slot];
+            block.direct.resize(block_rows);
+            block.delayed.resize(block_rows);
+            if (reads_rays) block.path_gain.resize(block_rows);
+            if (reads_excursions) block.excursion.resize(block_rows);
+            if (moving_delay) block.delay_seconds.resize(block_rows);
+            if (!chained) continue;
+            auto& chains = chain_sets[slot];
             chains.receive_rotation.resize(block_rows);
             if (effects.noise_enabled) chains.thermal.resize(block_rows);
             if (config.path_evolution.bounded_spread_knot_seconds > 0) {
@@ -836,6 +917,7 @@ struct StreamingChannel::Impl {
                 chains.common_rotation.resize(block_rows);
             }
         }
+        job_failures.resize(lane_jobs);
 
         if (spread_enabled && config.path_evolution.bounded_spread_knot_seconds == 0)
             spread = std::make_unique<SpreadRay>(
@@ -949,25 +1031,9 @@ struct StreamingChannel::Impl {
         if (last >= max_end) last = max_end == 0 ? 0 : max_end - 1;
         if (geometry.source_samples == 0 || tx_next > last) return;
         while (tx_next <= last) {
-            const double t = static_cast<double>(tx_next) * dt_tx;
-            const double calendar_time = static_cast<double>(static_cast<long double>(tx_next) /
-                tx_clock - hop_origin_seconds);
-            const double hop = hop_at(effects, calendar_time);
-            const auto current_dwell = dwell_index(calendar_time, effects.dwell_seconds);
-            if (effects.fhss && current_dwell != previous_tx_dwell) {
-                tx_osc.phase += keyed_phase(root_seed(config.oscillator_seed,effects.seed), current_dwell,
-                                            0x5458484f50504841ULL);
-                previous_tx_dwell = current_dwell;
-            }
-            const double rf = effects.rf_hz + hop;
-            tx_osc.phase += oscillator_phase_step(tx_osc, effects.tx, tx_spectrum_rng, rf, t, dt_tx);
-            // Keep the historical positive-RF arithmetic unchanged when this
-            // supplemental emission-time slope is off.
-            if (config.tx_frequency_drift_hz_per_second != 0)
-                tx_osc.phase += tau * config.tx_frequency_drift_hz_per_second * t * dt_tx;
-            tx_osc.phase = std::remainder(tx_osc.phase, tau);
+            advance_transmit_phase(tx_next);
             auto value = effects.signal_enabled ? source_sample(tx_next) : Complex{};
-            const double white_pm = config.tx_spectrum.white_pm_rms_radians * tx_spectrum_rng.gaussian();
+            const double white_pm = transmit_white_pm();
             if (effects.signal_enabled && transmit_diagnostic_iq_noise) {
                 // Sample once in emitted-calendar order at the narrow
                 // complex-I/Q diagnostic source. Quantized noise is added in code space so
@@ -1004,6 +1070,141 @@ struct StreamingChannel::Impl {
             }
             tx_history[static_cast<std::size_t>(tx_next % tx_history.size())] = value;
             ++tx_next;
+        }
+    }
+
+    // The TX oscillator's phase at source sample n. It advances the
+    // oscillator one sample; the fused loop then reads the source, and both
+    // loops draw the white phase modulation of the sample.
+    void advance_transmit_phase(std::uint64_t n) {
+        const double t = static_cast<double>(n) * dt_tx;
+        double hop = 0;
+        // Without FHSS the dwell index only checked a range that the bound
+        // on the source's calendar already guarantees.
+        if (effects.fhss || !tx_calendar_bounded) {
+            const double calendar_time = static_cast<double>(static_cast<long double>(n) /
+                tx_clock - hop_origin_seconds);
+            hop = hop_at(effects, calendar_time);
+            const auto current_dwell = dwell_index(calendar_time, effects.dwell_seconds);
+            if (effects.fhss && current_dwell != previous_tx_dwell) {
+                tx_osc.phase += keyed_phase(root_seed(config.oscillator_seed,effects.seed), current_dwell,
+                                            0x5458484f50504841ULL);
+                previous_tx_dwell = current_dwell;
+            }
+        }
+        const double rf = effects.rf_hz + hop;
+        tx_osc.phase += oscillator_phase_step(tx_osc, effects.tx, tx_spectrum_rng, rf, t, dt_tx);
+        // Keep the historical positive-RF arithmetic unchanged when this
+        // supplemental emission-time slope is off.
+        if (config.tx_frequency_drift_hz_per_second != 0)
+            tx_osc.phase += tau * config.tx_frequency_drift_hz_per_second * t * dt_tx;
+        tx_osc.phase = std::remainder(tx_osc.phase, tau);
+    }
+    double transmit_white_pm() {
+        return config.tx_spectrum.white_pm_rms_radians * tx_spectrum_rng.gaussian();
+    }
+
+    // The split stages of source samples [first, end). The oscillator forms
+    // each factor exactly as the fused loop does.
+    void run_oscillator(std::uint64_t first, std::uint64_t end) noexcept {
+        auto& stage = oscillator_stage;
+        stage.ran = true;
+        auto n = first;
+        try {
+            for (; n < end; ++n) {
+                advance_transmit_phase(n);
+                const double white_pm = transmit_white_pm();
+                tx_rotation[static_cast<std::size_t>(n - first)] =
+                    config.signal_gain * std::polar(1.0, tx_osc.phase + white_pm);
+            }
+        } catch (...) {
+            stage.index = n;
+            stage.error = std::current_exception();
+        }
+    }
+    // Part job of jobs of the range, evaluated on that reader into the ring.
+    void run_source(std::size_t job, std::size_t jobs, std::uint64_t first, std::uint64_t end) noexcept {
+        auto& stage = source_stages[job];
+        stage.ran = true;
+        const auto count = end - first;
+        auto n = first + count * job / jobs;
+        const auto stop = first + count * (job + 1) / jobs;
+        const auto size = tx_history.size();
+        try {
+            for (; n < stop; ++n)
+                tx_history[static_cast<std::size_t>(n % size)] = source_readers->evaluate(job, n);
+        } catch (...) {
+            stage.index = n;
+            stage.error = std::current_exception();
+        }
+    }
+    std::size_t source_jobs(std::uint64_t count) const {
+        if (!effects.signal_enabled) return 0;
+        return std::clamp<std::size_t>(static_cast<std::size_t>(count / 160), 1, source_reader_count);
+    }
+    void reset_stages(std::size_t jobs) {
+        oscillator_stage = {};
+        for (std::size_t job = 0; job < jobs; ++job) source_stages[job] = {};
+    }
+    // After the stages of [first, end) ran: the source accounts the samples
+    // in order up to the first that the fused loop could not have generated,
+    // and the ring receives value times factor for each generated sample.
+    // Returns the failure of the next sample, if any.
+    std::exception_ptr finish_transmit(std::uint64_t first, std::uint64_t end, std::size_t jobs) {
+        require(oscillator_stage.ran, "streaming channel lanes did not run every job");
+        Stage source;
+        for (std::size_t job = 0; job < jobs; ++job) {
+            require(source_stages[job].ran, "streaming channel lanes did not run every job");
+            if (source_stages[job].index < source.index) source = source_stages[job];
+        }
+        // The fused loop advances the oscillator before it reads the source.
+        const bool oscillator_first = oscillator_stage.index <= source.index;
+        auto good = std::min(end, oscillator_first ? oscillator_stage.index : source.index);
+        auto error = oscillator_first ? oscillator_stage.error : source.error;
+        if (jobs) {
+            std::exception_ptr check;
+            const auto accepted = source_readers->accept(good - first, !oscillator_first, check);
+            if (check) {
+                good = first + accepted;
+                error = check;
+            }
+        }
+        const auto size = tx_history.size();
+        for (auto n = first; n < good; ++n) {
+            auto& slot = tx_history[static_cast<std::size_t>(n % size)];
+            auto value = effects.signal_enabled ? slot : Complex{};
+            value *= tx_rotation[static_cast<std::size_t>(n - first)];
+            slot = value;
+        }
+        tx_next = good;
+        return error;
+    }
+    // The last source sample that generating through needed produces, or
+    // nothing when the history already holds it.
+    std::optional<std::uint64_t> source_end(std::uint64_t needed) const {
+        if (geometry.source_samples == 0) return std::nullopt;
+        const auto last = std::min(needed, geometry.source_samples - 1);
+        if (tx_next > last) return std::nullopt;
+        return last + 1;
+    }
+    // The split counterpart of generate_tx_until on the reader: the stages
+    // of each part of at most one lookahead run as jobs of their own.
+    void generate_split(std::uint64_t needed) {
+        const auto end = source_end(needed);
+        if (!end) return;
+        while (tx_next < *end) {
+            const auto first = tx_next;
+            const auto stop = std::min<std::uint64_t>(*end, first + tx_rotation.size());
+            const auto jobs = source_jobs(stop - first);
+            reset_stages(jobs);
+            if (jobs) source_readers->plan(first, stop - first);
+            const auto run = [&](std::size_t job) {
+                if (job == 0) run_oscillator(first, stop);
+                else run_source(job - 1, jobs, first, stop);
+            };
+            if (jobs == 0 || stop - first < 64) for (std::size_t job = 0; job <= jobs; ++job) run(job);
+            else config.lanes.run(jobs + 1, run);
+            if (auto error = finish_transmit(first, stop, jobs)) std::rethrow_exception(error);
         }
     }
 
@@ -1074,6 +1275,8 @@ struct StreamingChannel::Impl {
     // One sequential state through rows [0, rows) of the block, or the source
     // history of the block after it. Each touches its own state alone.
     void run_chain(Chain chain, std::size_t rows, std::uint64_t ahead_needed) noexcept {
+        auto& block = blocks[prepare_slot];
+        auto& chains = chain_sets[prepare_slot];
         auto& failure = chains.failures[chain];
         failure.ran = true;
         std::size_t row = 0;
@@ -1105,7 +1308,7 @@ struct StreamingChannel::Impl {
             failure = {row, false, true, std::current_exception()};
         }
     }
-    void chain_reached(Chain chain, std::size_t row) const {
+    static void chain_reached(const Chains& chains, Chain chain, std::size_t row) {
         if (row == chains.failures[chain].row) std::rethrow_exception(chains.failures[chain].error);
     }
 
@@ -1113,9 +1316,12 @@ struct StreamingChannel::Impl {
     // reader retained when the unbatched reader reached it, then the
     // fixed-time values of the selected laws at its physical time.
     void prepare_rows(std::size_t job, std::size_t begin, std::size_t end) noexcept {
+        auto& block = blocks[prepare_slot];
         auto& failure = job_failures[job];
         failure.ran = true;
         auto* reader = job ? &readers[job - 1] : nullptr;
+        // Only the bounded and the two-ray laws read the delayed ray.
+        const bool delayed_read = spread || bounded_spread;
         std::size_t row = begin;
         bool in_path = false;
         try {
@@ -1126,11 +1332,12 @@ struct StreamingChannel::Impl {
                 // The sequential pass repeats this row's coordinates and
                 // reports their failure itself, before it reads the row.
                 Path path;
-                try { path = path_at(n, physical_time); } catch (...) { return; }
+                try { path = path_at(n, physical_time); } catch (...) { failure.path_row = row; return; }
+                if (!block.delay_seconds.empty()) block.delay_seconds[row] = path.delay_seconds;
                 const auto stop = geometry.source_samples ? std::max(block.source_begin, path.needed + 1) : 0;
                 const auto first = stop > retained_history ? stop - retained_history : 0;
                 block.direct[row] = interpolate(tx_history, first, stop, path.direct);
-                block.delayed[row] = interpolate(tx_history, first, stop, path.delayed);
+                block.delayed[row] = delayed_read ? interpolate(tx_history, first, stop, path.delayed) : Complex{};
                 if (!block.path_gain.empty()) {
                     in_path = true;
                     auto& direct = reader ? (*reader->rays)[0] : *random_path[0];
@@ -1148,22 +1355,26 @@ struct StreamingChannel::Impl {
         }
     }
 
-    // Generates the source history of the next rows and evaluates their
-    // index-pure terms. following is the size of the block this read holds
-    // after it. Returns the number of rows the block holds.
-    std::size_t prepare(std::size_t wanted, std::size_t following) {
-        block.first = cursor;
+    // Generates the source history of the rows from first and evaluates
+    // their index-pure terms. following is the size of the block this read
+    // holds after it. A pending pass over the block before runs as one of
+    // its jobs. Returns the number of rows the block holds.
+    std::size_t prepare(std::uint64_t first, std::size_t wanted, std::size_t following, Pass* pass) {
+        auto& block = blocks[prepare_slot];
+        auto& chains = chain_sets[prepare_slot];
+        block.first = first;
         block.source_begin = reader_source_end;
         block.source_failure_row = SIZE_MAX;
         block.source_failure = nullptr;
         block.failure = {};
+        block.carried = 0;
         // The last row needs the most source history. Shorten a block whose
         // advance would overwrite samples that its first rows still read.
         auto rows = wanted;
         std::optional<Path> last;
         for (;; rows = (rows + 1) / 2) {
             try {
-                last = path_at(cursor + rows - 1, physical_time_at(cursor + rows - 1));
+                last = path_at(first + rows - 1, physical_time_at(first + rows - 1));
             } catch (...) {
                 // A single row that cannot be placed reports that when the
                 // sequential pass reaches it; nothing is prepared for it.
@@ -1180,16 +1391,24 @@ struct StreamingChannel::Impl {
                 last->needed - reader_source_end < block_lookahead) break;
         }
         auto ready = rows;
+        // Generating the source accounts it. The pass before then runs
+        // first, as a failure there would have stopped the unbatched reader.
+        if (pass && !pass->ran && !ahead_failure && source_end(last->needed)) {
+            run_pass(*pass);
+            if (pass->error) std::rethrow_exception(pass->error);
+        }
         try {
-            if (!ahead_failure) generate_tx_until(last->needed);
-            else if (!source_ready(*last)) std::rethrow_exception(std::exchange(ahead_failure, nullptr));
+            if (!ahead_failure) {
+                if (split_transmit) generate_split(last->needed);
+                else generate_tx_until(last->needed);
+            } else if (!source_ready(*last)) std::rethrow_exception(std::exchange(ahead_failure, nullptr));
         } catch (...) {
             // The reader met this failure at the first row that needs the
             // sample. Earlier rows remain complete and are delivered first.
             block.source_failure = std::current_exception();
             for (ready = 0; ready < rows; ++ready) {
                 try {
-                    if (!source_ready(path_at(cursor + ready, physical_time_at(cursor + ready)))) break;
+                    if (!source_ready(path_at(first + ready, physical_time_at(first + ready)))) break;
                 } catch (...) { break; }
             }
             if (ready < rows) block.source_failure_row = ready;
@@ -1199,54 +1418,101 @@ struct StreamingChannel::Impl {
 
         // The jobs of this block: the sequential states that run ahead, then
         // its rows. The longest come first so that they start first.
-        std::array<Chain, chain_count> sequence{};
-        std::size_t chain_jobs = 0;
-        std::uint64_t ahead_needed = 0;
+        enum class Kind : std::uint8_t { pass, chain, oscillator, source, rows };
+        struct Job { Kind kind; std::size_t index; };
+        std::array<Job, chain_count + kSourceReaders + 18> sequence{};
+        std::size_t jobs = 0, source_count = 0;
+        if (pass && !pass->ran) sequence[jobs++] = {Kind::pass, 0};
+        std::uint64_t ahead_needed = 0, ahead_first = 0, ahead_end = 0;
+        bool split_ahead = false;
         for (auto& failure : chains.failures) failure = {};
         if (chained) {
             if (following && !block.source_failure && !ahead_failure) {
                 try {
-                    const auto n = cursor + rows + following - 1;
+                    const auto n = first + rows + following - 1;
                     ahead_needed = path_at(n, physical_time_at(n)).needed;
-                    if (ahead_needed >= tx_next && ahead_needed - reader_source_end < block_lookahead)
-                        sequence[chain_jobs++] = ahead_chain;
+                    if (ahead_needed >= tx_next && ahead_needed - reader_source_end < block_lookahead) {
+                        const auto end = split_transmit ? source_end(ahead_needed) : std::nullopt;
+                        if (!split_transmit) sequence[jobs++] = {Kind::chain, ahead_chain};
+                        else if (end && *end - tx_next <= tx_rotation.size()) {
+                            split_ahead = true;
+                            ahead_first = tx_next;
+                            ahead_end = *end;
+                        }
+                    }
                 } catch (...) {}
             }
-            sequence[chain_jobs++] = receive_chain;
-            if (bounded_spread) sequence[chain_jobs++] = echo_chain;
-            if (common_doppler_wander) sequence[chain_jobs++] = common_chain;
-            if (effects.noise_enabled) sequence[chain_jobs++] = thermal_chain;
+            if (split_ahead) {
+                source_count = source_jobs(ahead_end - ahead_first);
+                reset_stages(source_count);
+                if (source_count) source_readers->plan(ahead_first, ahead_end - ahead_first);
+                sequence[jobs++] = {Kind::oscillator, 0};
+            }
+            sequence[jobs++] = {Kind::chain, receive_chain};
+            for (std::size_t job = 0; job < source_count; ++job) sequence[jobs++] = {Kind::source, job};
+            if (bounded_spread) sequence[jobs++] = {Kind::chain, echo_chain};
+            if (common_doppler_wander) sequence[jobs++] = {Kind::chain, common_chain};
+            if (effects.noise_enabled) sequence[jobs++] = {Kind::chain, thermal_chain};
         }
         const auto row_jobs = std::clamp<std::size_t>(ready / 64, 1, lane_jobs);
-        for (std::size_t job = 0; job < row_jobs; ++job) job_failures[job] = {};
-        const auto jobs = chain_jobs + row_jobs;
+        for (std::size_t job = 0; job < row_jobs; ++job) {
+            job_failures[job] = {};
+            sequence[jobs++] = {Kind::rows, job};
+        }
         const auto run = [&](std::size_t job) {
-            if (job < chain_jobs) run_chain(sequence[job], rows, ahead_needed);
-            else if (job < jobs) prepare_rows(job - chain_jobs, ready * (job - chain_jobs) / row_jobs,
-                                              ready * (job - chain_jobs + 1) / row_jobs);
+            const auto [kind, index] = sequence[job];
+            switch (kind) {
+            case Kind::pass: run_pass(*pass); break;
+            case Kind::chain: run_chain(static_cast<Chain>(index), rows, ahead_needed); break;
+            case Kind::oscillator: run_oscillator(ahead_first, ahead_end); break;
+            case Kind::source: run_source(index, source_count, ahead_first, ahead_end); break;
+            case Kind::rows: prepare_rows(index, ready * index / row_jobs, ready * (index + 1) / row_jobs); break;
+            }
         };
         // A short block does not repay handing its jobs to other workers.
-        if (jobs == 1 || rows < 64) for (std::size_t job = 0; job < jobs; ++job) run(job);
-        else config.lanes.run(jobs, run);
-        for (std::size_t job = 0; job < chain_jobs; ++job)
-            require(chains.failures[sequence[job]].ran, "streaming channel lanes did not run every job");
+        try {
+            if (jobs == 1 || rows < 64) for (std::size_t job = 0; job < jobs; ++job) run(job);
+            else config.lanes.run(jobs, run);
+        } catch (...) {
+            if (pass && pass->error) std::rethrow_exception(pass->error);
+            throw;
+        }
+        // A failed pass ends the read before this block's source is accounted.
+        if (pass) {
+            require(pass->ran, "streaming channel lanes did not run every job");
+            if (pass->error) std::rethrow_exception(pass->error);
+        }
+        block.carried = ready;
+        for (std::size_t job = 0; job < jobs; ++job) {
+            const auto [kind, index] = sequence[job];
+            if (kind == Kind::chain) require(chains.failures[index].ran, "streaming channel lanes did not run every job");
+        }
         for (std::size_t job = 0; job < row_jobs; ++job) {
             require(job_failures[job].ran, "streaming channel lanes did not run every job");
             if (job_failures[job].error && job_failures[job].row < block.failure.row)
                 block.failure = job_failures[job];
+            block.carried = std::min(block.carried, job_failures[job].path_row);
         }
-        if (auto failure = std::exchange(chains.failures[ahead_chain].error, nullptr)) ahead_failure = failure;
+        if (split_ahead) {
+            if (auto failure = finish_transmit(ahead_first, ahead_end, source_count)) ahead_failure = failure;
+        } else if (auto failure = std::exchange(chains.failures[ahead_chain].error, nullptr)) ahead_failure = failure;
         return rows;
     }
 
-    Complex process_one(std::uint64_t n, std::size_t row, bool& erased) {
+    Complex process_one(std::uint64_t n, std::size_t row, bool& erased, std::size_t slot) {
+        const auto& block = blocks[slot];
+        const auto& chains = chain_sets[slot];
         const long double physical_time = physical_time_at(n);
         const double t = static_cast<double>(physical_time);
-        if (chained && bounded_spread) chain_reached(echo_chain, row);
+        if (chained && bounded_spread) chain_reached(chains, echo_chain, row);
         const auto bounded_state = !bounded_spread ? std::nullopt :
             std::optional<detail::BoundedRandomSpread::State>(chained ? chains.echo[row] :
                                                               bounded_spread->at(physical_time));
-        const long double delay_seconds = path_at(n, physical_time).delay_seconds;
+        // A prepared row carries its echo delay; another evaluates its
+        // coordinates here, which reports their failure at this row.
+        const long double delay_seconds = row < block.carried ?
+            (block.delay_seconds.empty() ? fixed_delay_seconds : block.delay_seconds[row]) :
+            path_at(n, physical_time).delay_seconds;
         if (row == block.source_failure_row) std::rethrow_exception(block.source_failure);
         Complex direct = block.direct[row];
         Complex delayed = block.delayed[row];
@@ -1336,7 +1602,7 @@ struct StreamingChannel::Impl {
         double common_doppler_hz = 0;
         if (common_doppler_wander) {
             if (chained) {
-                chain_reached(common_chain, row);
+                chain_reached(chains, common_chain, row);
                 common_doppler_hz = chains.common_doppler_hz[row];
                 propagated *= chains.common_rotation[row];
             } else {
@@ -1385,7 +1651,7 @@ struct StreamingChannel::Impl {
             ++diagnostic.processed_rows;
         }
 
-        if (chained) chain_reached(receive_chain, row);
+        if (chained) chain_reached(chains, receive_chain, row);
         const auto rx_dwell = dwell_index(receive_calendar, effects.dwell_seconds);
         propagated *= chained ? chains.receive_rotation[row] : receive_rotation(t, rx_hop, rx_dwell);
         stats.signal_energy += std::norm(propagated);
@@ -1444,6 +1710,50 @@ struct StreamingChannel::Impl {
         return propagated;
     }
 
+    void run_pass(Pass& pass) noexcept {
+        pass.ran = true;
+        try {
+            for (std::size_t row = 0; row < pass.rows; ++row) {
+                bool erased = false;
+                pass.output[pass.offset + row] = process_one(cursor++, row, erased, pass.slot);
+                if (!pass.validity.empty()) pass.validity[pass.offset + row] = erased ? 0 : 1;
+            }
+        } catch (...) {
+            pass.error = std::current_exception();
+        }
+    }
+    // Whether the preparation recorded no failure that the pass would meet.
+    bool clean(const Pass& pass) const {
+        const auto& block = blocks[pass.slot];
+        return !block.source_failure && !block.failure.error && block.carried >= pass.rows &&
+            std::ranges::none_of(chain_sets[pass.slot].failures, [](const Failure& f) { return static_cast<bool>(f.error); });
+    }
+    void finish(Pass& pass) {
+        if (!pass.ran) run_pass(pass);
+        if (pass.error) std::rethrow_exception(pass.error);
+    }
+    // Each block's pass runs as a job of the next block's preparation in
+    // the same read; the last block's pass runs alone.
+    void read_overlapped(std::span<Complex> output, std::span<std::uint8_t> validity, std::size_t count) {
+        std::optional<Pass> pending;
+        auto next = cursor;
+        for (std::size_t i = 0; i < count;) {
+            const auto wanted = std::min(block_rows, count - i);
+            if (pending && !clean(*pending)) {
+                finish(*pending);
+                pending.reset();
+            }
+            prepare_slot = pending ? 1 - pending->slot : prepare_slot;
+            const auto rows = prepare(next, wanted, std::min(block_rows, count - i - wanted),
+                                      pending ? &*pending : nullptr);
+            if (pending) finish(*pending);
+            pending = Pass{output, validity, i, rows, prepare_slot, nullptr, false};
+            next += rows;
+            i += rows;
+        }
+        if (pending) finish(*pending);
+    }
+
     std::size_t read(std::span<Complex> output, std::span<std::uint8_t> validity) {
         require(validity.empty() || validity.size() == output.size(),
                 "stream channel validity size differs from output");
@@ -1452,12 +1762,13 @@ struct StreamingChannel::Impl {
         if (ended) std::rethrow_exception(ended);
         const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(output.size(), total - cursor));
         try {
-            for (std::size_t i = 0; i < count;) {
+            if (split_transmit) read_overlapped(output, validity, count);
+            else for (std::size_t i = 0; i < count;) {
                 const auto wanted = std::min(block_rows, count - i);
-                const auto rows = prepare(wanted, std::min(block_rows, count - i - wanted));
+                const auto rows = prepare(cursor, wanted, std::min(block_rows, count - i - wanted), nullptr);
                 for (std::size_t row = 0; row < rows; ++row, ++i) {
                     bool erased = false;
-                    output[i] = process_one(cursor++, row, erased);
+                    output[i] = process_one(cursor++, row, erased, 0);
                     if (!validity.empty()) validity[i] = erased ? 0 : 1;
                 }
             }

@@ -836,6 +836,8 @@ void check_coarse(const OpenClNvfp4Device& device) {
     (void)check_tile(std::span(grid).subspan(2, 1), 2);
     require(work.rescored_peaks > 0 && work.dispatches > 0 && work.upload_bytes > 0 && work.download_bytes > 0,
             "Coarse FP4 work receipt is incomplete");
+    require(work.rescore_seconds > 0 && work.rescore_seconds <= work.selection_seconds && !work.synthesis_seconds,
+            "Coarse FP4 rescoring interval is not part of selection");
 
     std::stop_source cancelled;
     cancelled.request_stop();
@@ -883,10 +885,14 @@ Reference cubic_sample(std::span<const Reference> source, long double index) {
     return value;
 }
 
+// A decimation and tap count whose 128-row tiles fit one stage window warp
+// raw rows as the FIR stages them. Other geometries store raw columns first,
+// and their FIR stages several windows or, past the stage, reads in place.
 void check_coarse_synthesis(const OpenClNvfp4Device& device, const datapump::triad::v3::Format& format,
-                            double receive_rate, const char* label) {
+                            double receive_rate, const char* label, std::size_t decimation = 4,
+                            std::size_t tap_count = 97, bool fused = true) {
     using namespace datapump::triad::v3;
-    constexpr std::size_t workspaces = 3, taps = 2, lanes = 4, decimation = 4, tap_count = 97;
+    constexpr std::size_t workspaces = 3, taps = 2, lanes = 4;
     constexpr double delay_seconds = .021, doppler_hz = 37.25, origin_seconds = -.35;
     std::array<std::uint8_t, 32> seed{};
     for (std::size_t i = 0; i != seed.size(); ++i) seed[i] = static_cast<std::uint8_t>(29 * i + 5);
@@ -981,8 +987,17 @@ void check_coarse_synthesis(const OpenClNvfp4Device& device, const datapump::tri
     synthesis.taps = filter;
     synthesis.columns = columns;
 
-    const OpenClCoarseShape shape{taps, kernel_rows, 40, workspaces, 2, raw_rows, source_rows, lanes, cells, tap_count};
-    const auto coarse = device.make_coarse(shape, OpenClNvfp4Coarse::workspace(shape).device_bytes, true);
+    const OpenClCoarseShape shape{taps, kernel_rows, 40, workspaces, 2, raw_rows, source_rows, lanes, cells,
+                                  tap_count, decimation};
+    // A FIR that warps as it stages leases no raw columns. Large row strides
+    // always store them.
+    auto stored = shape;
+    stored.synthesis_decimation = 64;
+    const auto lease = OpenClNvfp4Coarse::workspace(shape).device_bytes;
+    const auto stored_lease = OpenClNvfp4Coarse::workspace(stored).device_bytes;
+    require(fused ? stored_lease >= lease + raw_rows * sizeof(std::complex<float>) : stored_lease == lease,
+            "Coarse synthesis leased raw storage for the wrong FIR route");
+    const auto coarse = device.make_coarse(shape, lease, true);
     require(static_cast<bool>(coarse), "Could not make the coarse synthesis session");
     OpenClCoarseWork work;
     std::vector<CoarseTemplateGram> grams(workspaces);
@@ -1016,8 +1031,13 @@ void check_coarse_synthesis(const OpenClNvfp4Device& device, const datapump::tri
     }
     require(work.rendered_samples >= lanes * source_rows && work.warped_samples == columns.size() * raw_rows &&
             work.filtered_rows == columns.size() * kernel_rows, "Device template synthesis receipt is incomplete");
+    const auto parts = work.render_seconds + work.filter_seconds + work.gram_seconds;
+    require(work.render_seconds > 0 && work.filter_seconds > 0 && work.gram_seconds > 0 &&
+            std::abs(parts - work.synthesis_seconds) <= 1e-6 * work.synthesis_seconds,
+            "Device template synthesis intervals do not cover their parts");
     std::cout << "OpenCL coarse synthesis " << label << ": " << raw_rows << " raw rows, " << kernel_rows
-              << " filtered rows. Worst column error " << worst << '\n';
+              << " filtered rows, decimation " << decimation << ", " << tap_count << " taps"
+              << (fused ? ", warped in the FIR" : ", stored raw columns") << ". Worst column error " << worst << '\n';
 }
 
 void check_coarse_synthesis(const OpenClNvfp4Device& device) {
@@ -1040,6 +1060,44 @@ void check_coarse_synthesis(const OpenClNvfp4Device& device) {
     burst.burst_wait_tiles = 1;
     burst.bit_seconds = 2 * geometry(plain).tile_seconds;
     check_coarse_synthesis(device, burst, 960, "burst");
+    // The matched coarse FIR: 1705 taps at decimation 25 fit one window of a
+    // tile. Columns span several tiles, and the first and last tiles hold
+    // rows whose taps start late or stop early.
+    check_coarse_synthesis(device, plain, 960, "matched", 25, 1705);
+    // The widest fused FIR of the canonical plan: 887 pairs of taps and a
+    // raw span of 5075 fill 5962 of the 6016 stage pairs.
+    check_coarse_synthesis(device, plain, 960, "stage limit", 26, 1773);
+    // Stored raw columns: two stage windows of taps, then rows read in place.
+    check_coarse_synthesis(device, plain, 960, "windowed", 32, 2183, false);
+    check_coarse_synthesis(device, plain, 960, "in place", 50, 3409, false);
+}
+
+// The synthesis route of the matched dense session's geometry across the
+// canonical plan's decimations. Its FIR has 68.14 D + 1 taps, rounded up to
+// odd, for pass and stop edges at .4 and .49 of the projected rate. Through
+// decimation 26 a 128-row tile stages every tap beside its raw span, so the
+// FIR warps as it filters and the session leases no raw columns. Wider
+// strides store a bounded raw batch, as decimation 64 always does.
+void check_coarse_fir_routes() {
+    // The matched slot projects 6 kHz to 240 Hz: 1,122,562 raw rows, 78
+    // workspaces of two rays, 15 frequencies and 3,377 arrivals.
+    constexpr std::size_t raw_rows = 1'122'562, source_rows = 1'122'407, lanes = 26, cells = 97;
+    struct Route {
+        std::size_t decimation, taps;
+        bool fused;
+    };
+    for (const auto& route : {Route{25, 1705, true}, Route{26, 1773, true}, Route{27, 1841, false},
+                              Route{47, 3205, false}, Route{48, 3273, false}}) {
+        const auto kernel_rows = (raw_rows + route.taps - 2) / route.decimation + 1;
+        const OpenClCoarseShape shape{2, kernel_rows, 3377, 78, 15, raw_rows, source_rows, lanes, cells,
+                                      route.taps, route.decimation};
+        auto stored = shape;
+        stored.synthesis_decimation = 64;
+        const auto lease = OpenClNvfp4Coarse::workspace(shape).device_bytes;
+        const auto stored_lease = OpenClNvfp4Coarse::workspace(stored).device_bytes;
+        require(route.fused ? stored_lease >= lease + raw_rows * sizeof(std::complex<float>) : stored_lease == lease,
+                "Coarse synthesis chose the wrong FIR route for a canonical decimation");
+    }
 }
 
 // "resident" runs only the resident checks, as the deferred-execution
@@ -1067,6 +1125,7 @@ int main(int argc, char** argv) {
         check_resident_tiles(*device);
         check_resident_pressure(*device);
         if (resident_only) return 0;
+        check_coarse_fir_routes();
         check_coarse(*device);
         check_coarse_synthesis(*device);
         return 0;

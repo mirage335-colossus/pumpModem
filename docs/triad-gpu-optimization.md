@@ -60,9 +60,11 @@ selects the [dense FP4 coarse search](#dense-fp4-coarse-search-and-device-templa
 for eligible frequency-tile sessions and resident FP4 for the qualified fine
 geometry at every worker allocation. Fine processing was most of a slot
 after the dense search. [Device-rendered tiles and resident windows](#device-rendered-fine-tiles-and-resident-windows)
-removed its host tile rendering and most round trips: the automatic slot
-now takes 0.14–0.18 s, a little over half in the coarse search and the rest in fine
-processing. Start further work with the [remaining fine costs](#remaining-fine-costs)
+removed its host tile rendering and most round trips, and the
+[exact speedups](validation.md#exact-receiver-and-simulator-speedups--20-november-2026)
+shortened template synthesis: the automatic slot now takes 0.15–0.20 s at 4 to
+24 workers, about 0.06 s in the coarse search and the rest in fine
+processing. A simulated slot still takes about four times as long. Start further work with the [remaining fine costs](#remaining-fine-costs)
 and the [ranked costs after the dense search](#remaining-costs-after-the-dense-search).
 The sections below record the earlier fine-projection work.
 [Precision policy](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling)
@@ -768,8 +770,11 @@ one workspace pair and 512 arrivals. The FP32 quadratic score of every
 arrival is formed in the epilogue from each ray's partner lane. The exact
 arrival frontier of those scores is selected on the device, with the native
 separation rule. Each retained arrival is then rescored in FP32 with FP64
-accumulation from the unquantized resident bank, and only the 40-byte
-frontier of each workspace and frequency is read back. FP4 therefore decides
+accumulation from the unquantized resident bank. Rescoring reads one FP32
+rotation of the observation per frequency of the tile, which the device
+writes once with the statements the rescoring loop formerly evaluated for
+every arrival and row. Only the 40-byte frontier of each workspace and
+frequency is read back. FP4 therefore decides
 which arrivals are kept. It never supplies a score the receiver uses.
 
 **Device template bank.** The exact route's bank is a function of the keyed
@@ -801,8 +806,8 @@ device, and a measured FP4 bound could be lower than 1/16.
 
 **Transfers.** With 24 workers a slot uploads 473,952 bytes and reads back
 49,920 in 13 blocking transfers, against 82,178,320 uploaded before. With
-four workers the plan scores the 15 frequencies as two tiles: 474,048 bytes
-and 22 transfers. Scoring host-prepared
+four workers the plan scores the 15 frequencies as four tiles of at most
+four: 474,048 bytes and 22 transfers. Scoring host-prepared
 columns with the same FP4 products left the coarse stage at 1.6–1.8 s with 24
 workers and 4.3–4.6 s with four: bank preparation on the host was the cost,
 not the FFT.
@@ -821,7 +826,7 @@ dense reference:
 | First layout, every load hoisted: products only | 1,728–1,759 TFLOP/s | 1.75 ms |
 | Ring layout, matched search | 1,215–1,223 TFLOP/s | 2.47–2.48 ms |
 | Ring layout, matched search inside the receiver, 24 workers | 1,138–1,155 TFLOP/s | 2.62–2.66 ms |
-| Ring layout, the same search as two frequency tiles, 4 workers | 936–953 TFLOP/s | 3.18–3.23 ms |
+| Ring layout, the same search as four frequency tiles, 4 workers | 936–953 TFLOP/s | 3.18–3.23 ms |
 | Ring layout, 16,384 arrivals | 1,253–1,256 TFLOP/s | 11.0 ms |
 | Ring layout, 390 workspaces | 1,287–1,290 TFLOP/s | 11.7 ms |
 | Ring layout, one frequency or 4,096 rows | 917–928 TFLOP/s | 0.22–0.30 ms |
@@ -856,30 +861,77 @@ remaining host and round-trip costs below, not of the product kernel.
 
 In measured order for the matched fixtures:
 
-1. **Fine processing: 0.06–0.10 s of a 0.14–0.18 s automatic slot.** It was
+1. **Fine processing: 0.08–0.13 s of a 0.15–0.20 s automatic slot.** It was
    0.37–0.94 s before [device-rendered tiles and resident windows](#device-rendered-fine-tiles-and-resident-windows)
    removed the host tile rendering and seven of every eight round trips.
-   Its [remaining costs](#remaining-fine-costs) are the owner's wait for
-   each window, the FP64 mapping kernel and the owner's address work.
-2. **The simulator: 0.4–1.0 s per simulated slot.** That is the Blackwell
-   host in the [resident fine record](validation.md#resident-fine-tiles-and-windows--20-november-2026),
-   against 2.5–4.4 s for the single-threaded simulator of `c02b726e`.
-   `a4dfb0cc` keeps every capture hash, removes the x87 rounding-mode
-   switches from the sample loops and lends the probe's workers to the
-   channel. Those switches are the likely explanation of a 40% difference
-   between two binaries with equal simulator objects.
+   Its [remaining costs](#remaining-fine-costs) are now the FP64 mapping
+   kernel and the owner's wait for each window. The owner's address work fell
+   by a third without shortening the stage.
+2. **The simulator: 0.50–0.73 s per simulated slot with 12 or 24 workers.**
+   That is the Blackwell host in the
+   [exact speedups record](validation.md#exact-receiver-and-simulator-speedups--20-november-2026),
+   against 0.89–1.94 s for `7ed007dc` and 2.5–4.4 s for the single-threaded
+   simulator of `c02b726e`, with every capture hash kept. Source readers,
+   a separate transmit oscillator job and a sequential pass overlapped with
+   the next block's preparation replaced the one-thread source chain. The
+   x87 rounding-mode switches that `a4dfb0cc` removed from the sample loops
+   are the likely explanation of a 40% difference between two binaries with
+   equal simulator objects.
    [Mechanism](triad-performance.md#code-placement-and-x87-rounding-mode-switches).
-   On the Ryzen 5 PRO 5650U the severe slot fell from 5.0 s to 2.7 s on one
-   thread and to 1.0–1.1 s with twelve or more workers. The simulator still
-   takes longer than the 0.14–0.18 s automatic receiver slot. With many
-   workers, the source and transmit oscillator chain of one thread and the
-   sequential pass remain. The proposals that change sample values are
-   measured beside the channel contracts.
+   On the Ryzen 5 PRO 5650U the severe slot takes 0.56 s with twelve
+   workers, against 1.06 s before and 5.0 s for `c02b726e`. The simulator
+   still takes about four times the automatic receiver slot. Which of its
+   stages bounds it now was not measured. The proposals that change sample
+   values are measured beside the channel contracts.
    [Channel contracts, changes and proposals](channel-models.md#stream-evaluation-workers-and-capture-identity) ·
-   [measurements](validation.md#simulator-throughput-and-capture-identity--20-november-2026).
-3. **The device FIR: 52 of 63 ms of template synthesis.** It is one scalar
-   FP32 dot product per output row. Wider loads, shared taps or an
-   equivalent transform need the same column-fidelity check.
+   [earlier measurements](validation.md#simulator-throughput-and-capture-identity--20-november-2026).
+3. **The coarse stage: 0.06 s, of which device intervals are 22 ms.**
+   Template synthesis took 62 ms on the device, 52 ms of it in a scalar FP32
+   FIR over stored raw columns. It now takes 15.9 ms: lane rendering 7.0,
+   the warp and FIR 8.7 and the Gram 0.2. The FP4 products take 2.6 ms and
+   selection 2.7 ms. The remainder of the stage is host work that was not
+   split, and lane rendering is the largest device part.
+   [Device comparison](validation.md#exact-receiver-and-simulator-speedups--20-november-2026).
+
+   A 128-thread block filters one 128-row tile of a column. It stages a
+   window of taps and the raw span that its rows read in a static 47 KiB
+   shared stage of 6,016 complex pairs. Each row keeps the scalar FIR's
+   operations and order: FP32 partial sums of 64 taps from its own first
+   tap, each added in FP64. The geometry selects the route:
+   - *Warp in the FIR* when every tap fits one window beside the tile's
+     span, at half a pair per tap: 127 D + 1.5 × taps ≤ 6,016 at
+     decimation D. The canonical plan's 68.14 D + 1 taps meet that through
+     D = 26, including the matched D = 25 with 1,705 taps. A block warps
+     the raw rows that it stages with the stored warp's FP64 expressions.
+     No raw column is stored, and a raster group takes two dispatches
+     instead of three.
+     Neighboring tiles overlap by taps − D rows, so the matched shape warps
+     each raw row about 1.53 times. `opencl_coarse_filter_seconds` includes
+     that repetition, while the warped-sample receipt counts each raw row
+     once.
+   - *Tiled FIR over stored raw columns* from D = 27 to 47, in two or more
+     windows of taps: two at D = 32. Windows narrow to 31 taps at D = 47,
+     where each window stages about 1.5 raw pairs per multiply-add.
+   - *The scalar FIR in place* from D = 48, where 127 D fills the stage. It
+     uses no shared memory and keeps its occupancy.
+
+   The stage leaves room for at most two resident blocks, eight warps, per
+   SM of a compute capability 12.0 device; at the matched shape the fused
+   route still took 8.7 ms against 55.9 ms for the stored warp and scalar
+   FIR. The matched slot's dispatches fell from 46 to 34 with 24 workers
+   and from 58 to 49 with four: 13 raster groups lose their separate warp,
+   and each frequency tile adds one rotation. Rescoring reads that rotation
+   instead of evaluating a sine and cosine per arrival and row, and
+   selection fell from 4.7 to 2.7 ms. Evidence and decisions on the device
+   were identical to `7ed007dc`. In emulation the banks, Grams, FP4 scores
+   and rescored frontiers of fourteen synthesis geometries were
+   byte-identical too, covering all three routes and their limits at
+   D = 26, 27, 47 and 48. That identity relies on NVCC's default
+   `--fmad=true` contracting each `partial += weight * value` and the
+   rotation to the same FFMA in the old and new kernels, so a change of
+   those flags needs the device comparison again. Near D = 47, compare the
+   tiled and in-place FIRs before relying on the tiled route's narrow
+   windows; a smaller stage with more resident blocks was not tried.
 4. **Separate processes sharing the device.** Twelve simultaneous trials
    averaged 3.0 s per receiver slot against 0.45–0.81 s alone. Owners inside
    one process overlap on the device without that cost: the five-slot
@@ -907,13 +959,24 @@ same fixture, launcher and stock worker environment.
   and transfer bytes, and a precision label naming the dense search.
 - `--backend vulkan --vulkan-precision nvfp4` requires the dense search,
   reports device event intervals in `opencl_coarse_*_seconds` and fails with
-  a named reason when a session cannot be admitted.
+  a named reason when a session cannot be admitted. The synthesis and
+  selection intervals are stage totals. `opencl_coarse_render_seconds`,
+  `opencl_coarse_filter_seconds` and `opencl_coarse_gram_seconds` divide
+  synthesis, with the warp counted in the filter on every route.
+  `opencl_coarse_rescore_seconds` is the rotation and rescoring part of
+  selection.
   It scores host-prepared columns where a session offers no synthesis, for
   example with a varying passband. `--opencl-coarse-templates device|native`
   states a template source, and the probe then requires it to be the one
   executed. The matched runs gave every explicit route a 1 GiB per-session
-  limit with `--device-memory-limit-bytes`. The dense session leases 247 MiB
-  for this geometry at 24 workers and 226 MiB at four.
+  limit with `--device-memory-limit-bytes`. The measured source leased
+  258,943,744 bytes (247 MiB) for this geometry at 24 workers and
+  236,576,512 (226 MiB) at four. `7ed007dc` quotes the same. Every dense
+  session now also leases the rotated observation, tile frequencies ×
+  (kernel rows + arrivals − 1) × 8 bytes, and warping in the FIR drops this
+  geometry's 14-column raw batch of 125,726,976 bytes. The session quotes
+  139,018,496 bytes (133 MiB) and 112,396,800 (107 MiB), and the device
+  receipts report those leases.
 - The link of the matched fixture is far above threshold. For paired
   decisions near it, raise `--noise-dbm-hz` towards −82 on the stable
   channel. `--signal-gain-db` is accepted on the CPU backend only, and the
@@ -1137,25 +1200,29 @@ switched there.
 ### Remaining fine costs
 
 Ranked by the profiled split of the severe slot at 24 workers with streamed
-mappings, 75 ms profiled and 66–70 ms unprofiled. The owner's work is now the
-critical path, and the device's 36–38 ms mostly overlaps it:
+mappings and the [exact owner addressing](validation.md#exact-receiver-and-simulator-speedups--20-november-2026):
+79 ms of profiled fine work and 82–88 ms of unprofiled fine stage on the
+EPYC 9554 pod. Shortening the owner's addresses from 22.8 to 14.8 ms and
+its staging from 14.8 to 9.3 ms did not shorten the unprofiled stage, so the
+device and the window wait now bound it:
 
-1. **Owner address computation: 22 ms.** Each tile address floors and
-   converts long-double coordinates; an exact floor-based form was no
-   faster. Addresses of different candidates are independent and could be
-   computed on the lanes, which at 24 workers are mostly idle here.
-2. **Owner staging and submission: 12 and 10 ms.** Descriptors are 6.9 MB
-   of the 7.6 MB uploaded, each with its affine map and phase in 40 bytes,
-   and every four blocks add a flush.
-3. **The owner waits for each window: 14 ms**, down from 34 ms staged
+1. **Device mapping: 24.7 ms.** The kernel maps 175 million samples in FP64
+   with one sine and cosine each. A phase recurrence per lane, or FP32 where
+   the FP4 quantization already dominates the error, needs the tile and
+   statistics checks of the device test.
+2. **The owner waits for each window: 14–15 ms**, down from 34 ms staged
    whole. What remains is each window's last four blocks and its packing,
    products and statistics. Overlapping across windows would need a second
    set of batch buffers and twice the lease.
-4. **Device mapping: 24 ms.** The kernel maps 175 million samples in FP64
-   with one sine and cosine each. It bounds the stage once the owner's work
-   shrinks below it. A phase recurrence per lane, or FP32 where the FP4
-   quantization already dominates the error, needs the tile and statistics
-   checks of the device test.
+3. **Owner address computation: 14.8 ms.** Per candidate it holds no lock,
+   allocation or `fprem` loop; two x87 divisions, five exact remainders and
+   about ten long-double multiplies remain. Addresses of the next window
+   could be computed on idle lanes, but that moves rather than removes CPU
+   work, needs per-window records charged to the workspace quote, and pays
+   only once items 1 and 2 shrink below it.
+4. **Owner staging and submission: 9.3 and 9.8 ms.** Descriptors are 6.9 MB
+   of the 7.6 MB uploaded, each with its affine map and phase in 40 bytes,
+   and every four blocks add a flush.
 5. **Device rendering, packing, products and statistics: 13 ms.**
 6. **The native terminal block.** One enlarged block per slot keeps the
    native route, with two tile renders. The device kernels have one fixed
@@ -1256,7 +1323,7 @@ leave that internal use unmeasured.
 | Broad changing-channel timing search | `TensorCoarse::plan_segmented` chooses shapes for FP32 cuFFT. The [CUDA scoring kernels](../src/triad_tensor_peaks.cu) track candidate motion and rank lags on device. Check `cuda_segmented_sessions`, `cuda_segmented_inverse_ffts`, `cuda_segmented_score_rows` and `cuda_segmented_native_fallbacks`. |
 | Fine tracking and decisions | The CUDA `TensorFine` class accelerates eligible bulk basis mapping, Gram products and statistics. Check `mapped_values`, `statistics_blocks`, `cuda_direct_gram_values`, `cuda_bmm_gram_values` and `native_fine_sessions`. The native receiver owns chronological state, bit and quiet decisions, codec and completion. For simulator generation time, read the separate `simulator` phase. [Receiver interfaces](robust-current.md#native-interfaces-and-ownership). |
 | Filtered Blackwell fine projection | The [OpenCL route](../src/triad_opencl_nvfp4_projection.cpp) renders mapped tiles, projects DATA templates and returns sufficient statistics. `opencl_resident_nvfp4_modes` witnesses the Tensor Core projection and `opencl_resident_fft_modes` witnesses the alternate FFT. `opencl_resident_fine_pairs`, `opencl_resident_upload_bytes` and `opencl_resident_download_bytes` describe paired submissions and resident transfers. [Receiver timings and limits](validation.md#blackwell-resident-fine-processing--19-november-2026). |
-| Blackwell dense coarse search | The [OpenCL session](../src/triad_opencl_nvfp4_coarse.cpp) renders the template bank, scores every row with E2M1 Tensor Core products and rescores retained arrivals. `opencl_coarse_score_rows` witnesses the rows it scored, `opencl_coarse_rescored_peaks` the FP32 pass, `opencl_coarse_synthesized_columns` and `opencl_coarse_uploaded_columns` the template source, and `opencl_coarse_frequency_fallbacks` the sessions that kept the FFT route. `opencl_coarse_issued_products` and `opencl_coarse_useful_products` count real multiply-adds. Device intervals appear only on the explicit profiled route. [Receiver timings and limits](validation.md#blackwell-dense-fp4-coarse-search--20-november-2026). |
+| Blackwell dense coarse search | The [OpenCL session](../src/triad_opencl_nvfp4_coarse.cpp) renders the template bank, scores every row with E2M1 Tensor Core products and rescores retained arrivals. `opencl_coarse_score_rows` witnesses the rows it scored, `opencl_coarse_rescored_peaks` the FP32 pass, `opencl_coarse_synthesized_columns` and `opencl_coarse_uploaded_columns` the template source, and `opencl_coarse_frequency_fallbacks` the sessions that kept the FFT route. `opencl_coarse_issued_products` and `opencl_coarse_useful_products` count real multiply-adds. Device intervals appear only on the explicit profiled route, with synthesis divided into render, filter and Gram parts and selection's rescoring part reported separately. [Receiver timings and limits](validation.md#blackwell-dense-fp4-coarse-search--20-november-2026). |
 | Vulkan on integrated Radeon | The [Vulkan backend](../src/triad_vulkan_backend.cpp) runs supported frequency search via VkFFT or direct products. `vulkan_dispatches` and the per-route score-row counters identify actual work. The qualified Vega FP16 direct route uses packed vector arithmetic. VkFFT half storage still computes in FP32. Native CPU retains Helper, lag groups and fine processing. [Vulkan stage scope](gpu-precision-controls.md#vulkan-on-vega-integrated-graphics). |
 
 For example, the 2 mW, 72 Hz/5× severe Blackwell control (manifest
