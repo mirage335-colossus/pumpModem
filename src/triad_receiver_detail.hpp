@@ -47,6 +47,13 @@ public:
                    std::stop_token = {}) const;
     static std::size_t workspace_bytes(std::size_t samples);
     static std::size_t scratch_samples(std::size_t samples);
+    // The forward transform's tables, for a device transform of the same
+    // DFT: the radix-two length, and for a non-power-of-two length the
+    // chirp and the spectrum of its convolution kernel (otherwise empty).
+    std::size_t samples() const noexcept { return samples_; }
+    std::size_t transform_rows() const noexcept { return fft_.maximum; }
+    std::span<const Complex> chirp() const noexcept { return chirp_; }
+    std::span<const Complex> kernel_spectrum() const noexcept { return convolution_; }
 
 private:
     std::size_t samples_;

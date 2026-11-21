@@ -107,14 +107,14 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
     // before considering a larger coherent proposal. This optional route
     // never raises a quote or reduces the ready prefix admitted by callers.
     bool inspect_full_overlap = quote_overlap;
-    const auto build = [&](const DriftPlan& drift, std::optional<DriftPlan> line_override = std::nullopt) {
+    const auto build = [&](const DriftPlan& planned, std::optional<DriftPlan> line_override = std::nullopt) {
         const auto input = checked_multiply(rows, sizeof(Complex) + sizeof(std::uint8_t));
         const bool helper_transfer_full_prior = helper_transfer_requires_full_prior(config, slot);
         const auto helper = helper_transfer_full_prior ? 0 : helper_workspace(config, slot);
         auto varying = varying_fine_plan(config, slot, workers);
         const auto coherent_gain = varying_fine_plan(config, slot, workers, false, true);
         auto search = config;
-        search.time_varying_channel = varying.block_rows || drift.workspace_bytes || coherent_gain.block_rows;
+        search.time_varying_channel = varying.block_rows || planned.workspace_bytes || coherent_gain.block_rows;
         const auto midpoint_support = varying.track_frequency ?
             coarse_midpoint_timing_support(search, slot) : CoarseMidpointSupport{false, "short_tracking_unavailable"};
         const auto midpoint = midpoint_support.available ?
@@ -125,19 +125,30 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
         const auto varying_quiet = varying_quiet_workspace(config, slot, workers);
         const auto line = search.time_varying_channel ? varying_line_workspace(config, slot) : 0;
         const auto line_varying = line ? varying_fine_plan(config, slot, workers, true) : VaryingFinePlan{};
-        const auto line_drift = line_override ? *line_override :
-            (line && drift.workspace_bytes ? drift_plan(config, slot, workers, true) : DriftPlan{});
         const auto line_coherent_gain = line && coherent_gain.block_rows ?
             varying_fine_plan(config, slot, workers, true, true) : VaryingFinePlan{};
-        const auto supplemental = std::max({varying.workspace_bytes, drift.workspace_bytes,
-            coherent_gain.workspace_bytes, varying_quiet, line, line_varying.workspace_bytes,
-            line_drift.workspace_bytes, line_coherent_gain.workspace_bytes, evidence_supplement});
-        const auto lease = [&](std::size_t stage) { return checked_add(checked_add(input, receipts_bytes), stage); };
         // One lane runs acquisition and preparation in turn: nothing coexists.
         const bool overlap_shape = workers > 1 && helper && coarse_defers_frequency_grid(config, slot);
         const bool overlappable = quote_overlap && overlap_shape;
         const auto overlapped_coarse = inspect_full_overlap && overlap_shape ?
             coarse_workspace(search, slot, workers, {helper, helper_widest_wave}, midpoint) : coarse;
+        // Ordinary drift lanes widen only into the largest other stage of
+        // both orchestration leases, so neither lease grows.
+        const auto drift_headroom = std::max({helper, std::min(coarse, overlapped_coarse), fine,
+            varying.workspace_bytes, coherent_gain.workspace_bytes, varying_quiet, line,
+            line_varying.workspace_bytes, line_coherent_gain.workspace_bytes, evidence_supplement});
+        const auto drift = line_override || !planned.workspace_bytes ? planned :
+            drift_plan(config, slot, workers, false, 0, drift_headroom);
+        const auto line_drift = line_override ? *line_override :
+            (line && drift.workspace_bytes ? drift_plan(config, slot, workers, true, 0, drift_headroom) : DriftPlan{});
+        const auto supplemental = std::max({varying.workspace_bytes, drift.workspace_bytes,
+            coherent_gain.workspace_bytes, varying_quiet, line, line_varying.workspace_bytes,
+            line_drift.workspace_bytes, line_coherent_gain.workspace_bytes, evidence_supplement});
+        // A varying device session's host bytes (its compilation and a
+        // unified-memory lease) share this stage, beside the native quote,
+        // and never raise it.
+        varying.device_envelope_bytes = supplemental - varying.workspace_bytes;
+        const auto lease = [&](std::size_t stage) { return checked_add(checked_add(input, receipts_bytes), stage); };
         return StageWorkspace{input, helper, coarse, fine,
                 lease(std::max({helper, coarse, fine, supplemental})),
                 overlappable, overlapped_coarse,
@@ -697,6 +708,12 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         score.signed_lag_gain_proposal_fft_stage_bound = timing.gain_fft_stage_bound;
         score.signed_lag_gain_proposal_score_row_bound = timing.gain_score_row_bound;
         score.signed_lag_gain_proposal_seconds = timing.gain_seconds;
+        score.signed_lag_gain_proposal_route = timing.gain_route == GainRankRoute::device ? gain_device_route :
+            timing.gain_route == GainRankRoute::native ? "native" : "";
+        score.signed_lag_gain_proposal_device_fft_stages = timing.gain_device_fft_row_stages;
+        score.signed_lag_gain_proposal_rescore_fft_stages = timing.gain_rescore_fft_row_stages;
+        score.signed_lag_gain_proposal_rescored_lags = timing.gain_rescored_lags;
+        score.signed_lag_gain_proposal_top2_gap = timing.gain_top2_gap;
     }
     const auto selected = fine.varying_coordinates.empty() ? std::span(fine.coordinates) :
                                                             std::span(fine.varying_coordinates);
@@ -747,11 +764,25 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
             classify_operational_scores(score, ordinary_scores(score), separation);
         else classify_varying_slot(score, fine.grid, varying_prior, drift, separation);
     };
+    // The slot's varying batch receipts cover its ordinary, coherent-gain
+    // and line-conditioned varying stages: phase seconds and batches add,
+    // and the quote and blocks per batch are the largest stage's. The
+    // ordinary stage scores into the slot score itself.
+    const auto add_varying_batches = [&](const ReceiverSlotScore& stage) {
+        score.varying_projection_seconds += stage.varying_projection_seconds;
+        score.varying_statistics_seconds += stage.varying_statistics_seconds;
+        score.varying_recursion_seconds += stage.varying_recursion_seconds;
+        score.varying_wait_seconds += stage.varying_wait_seconds;
+        score.varying_batches = checked_add(score.varying_batches, stage.varying_batches);
+        score.varying_batch_blocks = std::max(score.varying_batch_blocks, stage.varying_batch_blocks);
+        score.varying_workspace_bytes = std::max(score.varying_workspace_bytes, stage.varying_workspace_bytes);
+    };
     const auto score_coherent_gain = [&](const VaryingFinePlan& plan, ReceiverSlotScore& target,
                                          const LineAtom* line) {
         ReceiverSlotScore coherent;
         score_varying_fine(config, slot, key, plan, iq, selected, fine.segmented_timing_coordinates,
             coarse.projected_sample_rate_hz, coarse.clock_gap_ppm, workers, coherent, stop, *executor, line);
+        add_varying_batches(coherent);
         target.coherent_gain_candidates = coherent.varying_candidates;
         target.coherent_gain_bit_evidence = coherent.varying_bit_evidence;
         target.coherent_gain_blocks = coherent.varying_blocks;
@@ -821,10 +852,12 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
                 supplement_evidence.fill(-std::numeric_limits<double>::infinity());
             ReceiverSlotScore residual;
             residual.fine_candidates = score.fine_candidates;
-            if (workspace.line_varying.block_rows)
+            if (workspace.line_varying.block_rows) {
                 score_varying_fine(config, slot, key, workspace.line_varying, iq, selected,
                     fine.segmented_timing_coordinates,
                     coarse.projected_sample_rate_hz, coarse.clock_gap_ppm, workers, residual, stop, *executor, &*line);
+                add_varying_batches(residual);
+            }
             add_line_branch(score, residual, line->log_weighted_evidence);
             if (workspace.line_coherent_gain.block_rows && (compare_all || score.decision != SlotDecision::data)) {
                 score_coherent_gain(workspace.line_coherent_gain, residual, &*line);
@@ -835,10 +868,18 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
                     workers, residual, stop, *executor, &*line);
                 score.drift_line_status = workspace.line_drift.status;
                 score.drift_line_stage_workers = residual.drift_stage_workers;
+                score.drift_line_proposal_route = residual.drift_proposal_route;
+                score.drift_line_device_atoms = residual.drift_device_atoms;
+                score.drift_line_retained_digest = residual.drift_retained_digest;
                 score.drift_coherent_timing_fft_rows = checked_add(score.drift_coherent_timing_fft_rows,
                     residual.drift_coherent_timing_fft_rows);
                 score.drift_coherent_timing_fft_stages = checked_add(score.drift_coherent_timing_fft_stages,
                     residual.drift_coherent_timing_fft_stages);
+                score.drift_render_seconds += residual.drift_render_seconds;
+                score.drift_ridge_seconds += residual.drift_ridge_seconds;
+                score.drift_ridge_search_seconds += residual.drift_ridge_search_seconds;
+                score.drift_slope_seconds += residual.drift_slope_seconds;
+                score.drift_exact_seconds += residual.drift_exact_seconds;
                 add_line_branch(score, residual, line->log_weighted_evidence);
             }
             score.varying_line_frequency_hz = line->frequency_hz;

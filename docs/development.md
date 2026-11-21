@@ -175,8 +175,10 @@ Keep these properties when changing a stage:
   taps, 74 used chunks of 16,384 rows) and the other lanes idle, 74 chunk
   jobs with an ordered add took 10.3 ms at 24 workers and 13.8 ms at 4,
   against 47–50 ms for the one job, with byte-identical output. The
-  elapsed gain on the dense device route itself stays unverified until a
-  matched Blackwell run. Reconsider the native-bank route only with a fresh
+  20 November Blackwell qualification measured the combined restructured
+  kernels and host stages, which include this chunk-parallel FIR: the
+  automatic coarse stage went from 0.052–0.064 to 0.021–0.031 s. The FIR
+  split's own share is unattributed. Reconsider the native-bank route only with a fresh
   CPU-seconds and elapsed comparison under the current AVX2 transform.
 - An overlap-add row that several chunks reach is summed in chunk order:
   the chunk staging it, never the lane finishing first, sets the order.

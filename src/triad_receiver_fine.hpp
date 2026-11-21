@@ -158,6 +158,15 @@ struct VaryingFinePlan {
     // Finite unit-power spatial alternatives at the configured nominal
     // epoch, central clock and public arrival endpoints.
     std::size_t nominal_independent_gain_candidates = 0;
+    // Consecutive blocks scored per batch, and the quoted storage bound of
+    // one batch block and of one tracking coordinate's statistics in it.
+    // workspace_bytes includes batch_blocks * batch_block_bytes.
+    std::size_t batch_blocks = 0, batch_block_bytes = 0, batch_track_bytes = 0;
+    // The preserved supplemental stage beside workspace_bytes, which the
+    // receiver's quote sets: a device session's host memory, its compilation
+    // and any unified-memory lease, must fit in it
+    // (ReceiverBulkBackend::stage_host_bytes). Zero admits none.
+    std::size_t device_envelope_bytes = 0;
 };
 struct LineAtom {
     std::size_t first = 0, stop = 0;
@@ -204,6 +213,10 @@ struct MidpointTrackInput {
     long double middle_seconds = 0;
 };
 void enable_midpoint_tracking(VaryingFinePlan&);
+// The signed half-bin of projected tracking state `state` of a lattice of
+// step_hz about -radius on a block of `rows` rows: the bins the projected
+// tracker and a varying device session score.
+std::int64_t projected_half_bin(std::size_t rows, double fs, double step_hz, std::int64_t radius, std::size_t state);
 std::size_t tracked_frequency_span_workspace(const ReceiverSlotPlan&, const VaryingFinePlan&,
                                               bool clock_shadow = false);
 std::size_t nominal_epoch_timing_capacity(const ReceiverConfig&, const ReceiverSlotPlan&);
@@ -232,11 +245,98 @@ struct DriftPlan {
     double frequency_step = 0, slope_step = 0, slope_reference_seconds = 0;
     bool project_data = false;
     std::string_view status;
+    // The owner-lease stage envelope this plan's stage runs within, at
+    // least workspace_bytes: the largest other stage an ordinary plan widens
+    // into, or an extended plan's preserved stage. A device proposal route
+    // holds its own host memory only in the difference.
+    std::size_t device_envelope_bytes = 0;
 };
 // A positive allowance permits a bandwidth-faithful larger proposal only
 // inside a stage envelope already admitted by the complete receiver.
+// An ordinary (unextended) plan keeps the former width of at most eight
+// lanes; it widens toward the worker budget only while its quote stays
+// within the headroom, the largest other stage of the same owner lease.
 DriftPlan drift_plan(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers, bool project_line = false,
-                     std::size_t preserved_workspace_bytes = 0);
+                     std::size_t preserved_workspace_bytes = 0, std::size_t ordinary_headroom_bytes = 0);
+
+// Proposal-only linear-ridge search over short coherent segment spectra (one
+// fast or slow segment count). The grid, its native coarse slope order and
+// the selection are shared by every ridge implementation; another backend
+// may supply only the per-slope records, inserted in the same slope order.
+struct DriftRidgeGrid {
+    std::size_t segments = 0, fft_rows = 0, centers = 0, slopes = 0;
+    double frequency_step = 0;
+    std::int64_t bin_radius = 0, bin_stride = 1, slope_stride = 1;
+};
+// DriftRidgeRecord (triad_receiver_bulk.hpp) holds one slope's record.
+struct DriftProposals {
+    std::vector<std::int64_t> slopes;
+    double rank = 0;
+};
+// Every public slope fits the exact budget: no ridge ranking is needed.
+bool drift_ridge_exhaustive(const DriftPlan&, std::size_t slope_budget);
+// Also writes each segment's time center, relative to the slope reference.
+DriftRidgeGrid drift_ridge_grid(const DriftPlan&, double proposal_rate_hz, std::size_t segments,
+                                std::span<double> segment_centers);
+// Native order: the negative public edge, the interior stride grid, then the
+// positive public edge.
+std::int64_t drift_ridge_slope(const DriftPlan&, const DriftRidgeGrid&, std::size_t index);
+// The bin offset of a slope's linear ridge at one segment center, rounded
+// on the host. The native record and a device ridge request share it.
+std::int64_t drift_ridge_offset(const DriftPlan&, const DriftRidgeGrid&, double segment_center, std::int64_t slope);
+// The native records of a block of slopes from an FP64 power table laid
+// out as [bit][segment][bin], in one pass over its rows: segments outer,
+// then bit, then each slope's center window. Each (slope, bit, center) sum
+// starts at zero and adds one value per segment in segment order, read
+// from the upper half for a negative bin and skipped when the shifted bin
+// leaves the open half band; each bit's record is the first maximum by
+// ascending center. A record therefore does not depend on the block size
+// or on the other slopes of its block. The block's FP64 center sums
+// [slope][bit][center] use the caller's sums, at least 2 * centers per
+// slope. It is the native reference of a device ridge.
+inline constexpr std::size_t maximum_drift_ridge_block = 64;
+void drift_ridge_records(const DriftPlan&, const DriftRidgeGrid&, std::span<const double> power,
+                         std::span<const double> segment_centers, std::span<const std::int64_t> slopes,
+                         std::span<DriftRidgeRecord> records, std::span<double> sums);
+// The cache-bounded block of a grid: at most maximum_drift_ridge_block
+// slopes whose sums fit the native block budget.
+std::size_t drift_ridge_block(const DriftRidgeGrid&);
+// Four best ridges per bit by strict-greater insertion in native slope
+// order, then slow-plan local refinement on the same power table and the
+// bounded exact slope list. An exhaustive bank needs no records or tables;
+// a plan without slow segments reads no power table.
+class DriftRidgeFrontier {
+public:
+    void insert(std::int64_t slope, const DriftRidgeRecord&);
+    DriftProposals select(const DriftPlan&, const DriftRidgeGrid&, std::span<const double> power,
+                          std::span<const double> segment_centers, std::size_t slope_budget) const;
+private:
+    struct Ridge {
+        double score = -std::numeric_limits<double>::infinity();
+        std::int64_t slope = 0, center = 0;
+    };
+    std::array<std::array<Ridge, 4>, 2> best_{};
+};
+// The native search: every slope's record inserted in native order, from
+// consecutive blocks of at most `block` slopes (and the slope count and
+// maximum_drift_ridge_block), checking cancellation once per block.
+DriftRidgeFrontier drift_ridge_frontier(const DriftPlan&, const DriftRidgeGrid&, std::span<const double> power,
+                                        std::span<const double> segment_centers, std::size_t block,
+                                        std::span<double> sums, std::stop_token);
+// One dechirped slope's rank at a signed public bin, and the eight best per
+// bit retained for exact statistics.
+struct DriftPeak {
+    double rank = -std::numeric_limits<double>::infinity();
+    std::int64_t slope = 0, center = 0;
+};
+inline constexpr std::size_t retained_drift_per_bit = 8;
+using DriftPeakFrontier = std::array<DriftPeak, retained_drift_per_bit>;
+// Stable top-eight insertion: an equal rank keeps its arrival order, and a
+// NaN or -inf rank never enters. The native scan inserts every bin of each
+// slope, by ascending signed bin, in scoring order. Merging each slope's
+// stable top eight (equal ranks by ascending signed bin) in the same slope
+// order gives the identical frontier, so a slope backend shares this rule.
+void merge_drift_peak(DriftPeakFrontier&, const DriftPeak&);
 std::array<double, 2> mix_drift_sign_evidence(const std::array<double, 2>& first, std::size_t first_atoms,
                                            const std::array<double, 2>& second, std::size_t second_atoms);
 enum class DriftZeroSlopeEvaluation { reuse, recompute };

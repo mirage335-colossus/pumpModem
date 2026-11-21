@@ -44,6 +44,7 @@ class TriadGpuBundleTests(unittest.TestCase):
             "tests/test_triad_tensor_fft.cpp": '#include "triad_tensor_fft.hpp"\nint main() {}\n',
             "tests/test_triad_nvfp4_projection.cpp": '#include "triad_nvfp4_projection.hpp"\nint main() {}\n',
             "tests/test_triad_vulkan.cpp": "int main() {}\n",
+            **{name: "" for name in bundle._VULKAN_TEST_SOURCES},
             "tests/test_triad_opencl_nvfp4.cpp": "int main() {}\n",
             "tests/test_triad_opencl_fine_session.cpp": '#include "triad_crypto_fixture.hpp"\nint main() {}\n',
             "tests/triad_crypto_fixture.hpp": '#include "fixture_crypto.hpp"\n',
@@ -169,6 +170,8 @@ class TriadGpuBundleTests(unittest.TestCase):
         self.assertIn("tests/test_triad_tensor_fft.cpp", names)
         self.assertIn("tests/test_triad_nvfp4_projection.cpp", names)
         self.assertIn("tests/test_triad_vulkan.cpp", names)
+        for name in bundle._VULKAN_TEST_SOURCES:
+            self.assertIn(name, names)
         self.assertIn("tests/test_triad_opencl_nvfp4.cpp", names)
         self.assertIn("tests/test_triad_opencl_fine_session.cpp", names)
         self.assertIn("tests/triad_crypto_fixture.hpp", names)
@@ -201,8 +204,15 @@ class TriadGpuBundleTests(unittest.TestCase):
                    "tests/test_triad_tensor_fft.cpp", "tests/test_triad_nvfp4_projection.cpp",
                    "tests/test_triad_vulkan.cpp", "tests/test_gui_robust_live.cpp"]
         seen = set()
+        # Every source of the Vulkan device test, which the pod configures.
+        cmake = (MODULE.parents[1] / "cmake/TriadVulkan.cmake").read_text()
+        target = re.search(r"add_executable\(test_triad_vulkan EXCLUDE_FROM_ALL([^)]*)\)", cmake)
+        self.assertIsNotNone(target)
         with tarfile.open(out, "r:gz") as tar:
             names = set(tar.getnames())
+            for source in target.group(1).split():
+                self.assertIn(source, names, "Bundle omits a test_triad_vulkan source")
+                pending.append(source)
             while pending:
                 source = pending.pop()
                 if source in seen:

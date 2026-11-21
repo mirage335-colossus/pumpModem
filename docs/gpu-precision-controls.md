@@ -36,10 +36,13 @@ expectation is not a proof about FFT intermediate range, accumulation or
 conditioning. Do not impose FP64 on bulk work because one sensitive stage needs it.
 
 The socket-free Blackwell capability probe identified cooperative FP16, BF16,
-FP8 and INT8 matrix shapes. The matched severe-channel replay put about 70%
-of the measured fine worker intervals in template projection and about 0.3%
-in post-projection correlation and Gram products. Prioritize batched projection
-and efficient mapping for that shape. Evaluate matrix contractions independently
+FP8 and INT8 matrix shapes. On the native CPU fine route (19 November), the
+matched severe-channel replay put about 70% of the measured fine worker
+intervals in template projection and about 0.3% in post-projection
+correlation and Gram products, which made batched projection and efficient
+mapping the priority for that shape. On the Blackwell Vulkan/OpenCL route the
+fine stage is now bounded by owner work and the window wait
+([remaining fine costs](triad-gpu-optimization.md#remaining-fine-costs)). Evaluate matrix contractions independently
 where they are a substantial part of complete service. See the [runtime and
 stage measurements](validation.md#receive-previews-and-clean-low-rate-admission--19-november-2026).
 The native AVX2 fine path uses FP32 Bluestein projection for the measured
@@ -138,9 +141,9 @@ offers no device synthesis, and `--opencl-coarse-templates device|native`
 states the template source that must then be the one executed. `--vulkan-fine-projection nvfp4` explicitly
 requests the earlier staged projection and checks for executed work.
 [Measured service and paired decisions](validation.md#blackwell-dense-fp4-coarse-search--20-november-2026).
-For further FP4 work, use the
-[Blackwell continuation guide](triad-gpu-optimization.md#continue-blackwell-fp4-work)
-for the matched production timings, reproduction, and next profiling scope.
+For further GPU work, start with
+[current GPU limits and next steps](triad-gpu-optimization.md#current-gpu-limits-and-next-steps)
+and the [method](triad-gpu-optimization.md#find-and-qualify-a-gpu-improvement).
 
 The developer probe can also select `--vulkan-fine-projection resident-nvfp4`
 or `resident-fft` for the same isolated geometry. Both retain mapped DATA
@@ -148,13 +151,15 @@ tiles and the intermediate projection on the device. They combine a window
 of already-prepared observation blocks while the native receiver still
 advances each state in public order. The fixed-affine maps of a window do
 not depend on its statistics. The adaptive diagnostic lane, whose maps do,
-keeps one dispatch per batch. The session renders each dense source tile in
-FP64 from the keyed coefficients, the pulse table and public geometry, in
-the native renderer's operation order. That is a change of where the tile
-is computed, with no reduction of precision: on the device and in emulation
-rendered tiles match native ones within 2.5e-12 of the tile peak, and the
-FP64 mapper and the C64 lanes are unchanged. NVCC may fuse the envelope's
-multiply-adds, which moves a tile by about 1e-15 of its peak.
+keeps one dispatch per batch. The session renders each dense source tile
+on the device from the keyed coefficients, the pulse table and public
+geometry. With the FP64 kernels, now the `--opencl-fine-map fp64` control,
+it renders in FP64 in the native renderer's operation order. That is a
+change of where the tile is computed, with no reduction of precision: on
+the device and in emulation rendered tiles match native ones within
+2.5e-12 of the tile peak, and the FP64 mapper and the C64 lanes are
+unchanged. NVCC may fuse the envelope's multiply-adds, which moves a tile
+by about 1e-15 of its peak.
 
 The same module holds FP32 forms of both kernels
 (`VulkanReceiverOptions::opencl_fine_fp32`), the automatic and explicit
@@ -197,8 +202,7 @@ tile peak and the FFT route's statistics to 1e-5; in emulation the tiles
 were within 4.9e-7 to 7.5e-7 of native ones, FFT statistics within 3.5e-7
 of the FP64 kernels, and the complete fine-session fixture's evidence
 within 6e-9. Receipts count mapped columns and rendered tiles of each
-arithmetic. Device time and paired decisions of the FP32 kernels are not
-yet measured.
+arithmetic.
 
 `--opencl-fine-tiles native` uploads native tiles and
 `--opencl-fine-window 2` keeps one dispatch per batch. Together they are the
@@ -374,7 +378,7 @@ For example, at a 64 GiB device limit a length-8,388,608 two-ray search used
 The full RTX PRO 6000 Blackwell Server Edition has measured results. Other
 SM120 devices and multi-slot service need separate throughput qualification.
 See the [paired full-slot trials](validation.md#blackwell-receiver-trials-at-2-mw)
-and [Tensor Core operator comparison](triad-gpu-optimization.md).
+and [Tensor Core operator comparison](triad-gpu-optimization.md#hardware-and-library-dispatch).
 
 The Vulkan coarse session runs the same segmented search with VkFFT FP32
 transforms and GLSL kernels that reproduce the CUDA kernel arithmetic: FP32
@@ -419,6 +423,8 @@ on that queue. Other owners' submissions wait meanwhile. Its cost under
 several owners is unmeasured; record the segmented sessions'
 `vulkan_fft_plan_seconds` in the multi-owner device check, and give the
 upload its own queue or keep the plans warm per shape if it matters.
+Fine-stage sessions build their plans the same way
+([single queue](triad-gpu-optimization.md#what-bounds-the-challenging-slots)).
 
 Automatic selection admits the CUDA envelope above only on the GPU that the
 OpenCL NVFP4 route matched by UUID, which requires NVIDIA SM 12.0: the GPU
@@ -508,6 +514,138 @@ report the actual coarse and fine arithmetic, device/runtime and memory use.
 Fine Gaussian state retains the native higher-precision policy. No arithmetic
 is silently selected from the observed score or transmitted truth.
 
+### Fine-stage device routes
+
+`VulkanReceiverOptions` has a `VulkanStageRoute` (`automatic`, `device`,
+`native`) for each fine-stage family:
+
+| Field | Family |
+|---|---|
+| `gain_rank` | signed-lag gain direct rank |
+| `drift_proposals` | drift proposals |
+| `varying_fine` | varying statistics |
+
+`varying_arithmetic` (`automatic`, `fp64`, `fp32_template`) selects the
+varying statistics' projection arithmetic. All four default to automatic,
+so **Default (fastest)** inherits a family once its qualification sets that
+default.
+
+Current routes:
+
+- **Automatic** runs a family only where its automatic constant is set,
+  after a full RTX PRO 6000 Blackwell qualification, and only on that
+  OpenCL-identified SM 12.0 class. The signed-lag gain rank is qualified
+  there (21 November 2026). On the 40.8-CPU Xeon host at W = 80, where the
+  native rank ran 2.4–4.6× slower than on the 5650U, the automatic slot ran
+  2.4–2.8× faster pairwise in two 72 Hz/5× control pairs and one
+  36 Hz/10× holdout pair, with identical lags, evidence and decisions; a
+  third unflipped 72 Hz/5× run took 38.4 s against 17.8–19.8 s flipped.
+  Device margins are host-specific: on the 20 November EPYC 9335 host, with
+  earlier source and the rank native, that automatic slot already took
+  18.4–20.5 s
+  ([where the time goes](triad-gpu-optimization.md#where-the-time-goes)).
+  Drift proposals and varying statistics were slower on the device than
+  native on the Xeon host and stay native. Every other device keeps all
+  three stages native. Qualifying the gain rank also
+  gives that class the larger plan and shader caches, 59,088,896 B more
+  per owner. The class is identified only when the backend opens the
+  OpenCL device of a build with the OpenCL NVFP4 projection. The automatic
+  GPU factory opens it: the GUI, or `--backend gpu` when it selects Vulkan,
+  with automatic coarse precision. So does an explicit OpenCL request:
+  `--vulkan-precision nvfp4`, or `--vulkan-fine-projection` `nvfp4`,
+  `resident-nvfp4` or `resident-fft`. Under `--backend vulkan` without one,
+  a qualified family still declines as `unqualified-device`. Check
+  automatic family selection through one of those routes.
+- **Device and native** are explicit qualification controls. A device
+  route runs each family on the Vulkan device: signed-lag ranks publish
+  only certified nominations (decision-identical); drift proposals use FP32
+  transforms with FP64 power, ridge and ranks and host FP64 evidence
+  (proposal-qualified); varying statistics use FP64 transforms (FP64
+  roundoff). The varying `fp32-template` arithmetic has no kernels and
+  stays native with its reason.
+- **Explicit workspaces.** Under an explicit `--device-memory-limit-bytes`
+  (the Vulkan workspace), a gain-rank or drift session is bounded by that ceiling by itself, as a
+  coarse session is; varying sessions share it.
+
+[Port status](triad-gpu-optimization.md#fine-stage-device-ports).
+
+The probe flags `--vulkan-gain-rank`, `--vulkan-drift` and
+`--vulkan-varying-fine` take `automatic|device|native`.
+`--vulkan-varying-arithmetic` takes `automatic|fp64|fp32-template`. A
+non-automatic value needs explicit `--backend vulkan`. A stated arithmetic
+also needs `--vulkan-varying-fine device`, because automatic and native
+routes never apply it. The identity records each request as
+`requested_vulkan_<flag>`. These flags never change a capture, so
+`--capture-cache` keys omit them.
+
+Every stated route, with or without `--require-accelerator`, records
+`vulkan_<family>_route_decline` in the identity. It is the backend's
+shape-independent policy decline, or empty when the backend can serve the
+route. Today a device route on a device with FP64/INT64 shaders reports
+none, except `vulkan-varying-unimplemented` for the `fp32-template`
+arithmetic; a native route reports `vulkan-<family>-native-requested`.
+
+With `--require-accelerator on`, a device route must run every planned stage
+of its family on the device: nonzero sessions and score rows, and no
+declines or fallbacks. The probe records `vulkan_<family>_requirement`:
+
+- `unservable`: the route decline is not empty. The route cannot be served
+  on any geometry, so the probe reports incomplete before generating or
+  scoring anything. Today a device request ends here only for the varying
+  `fp32-template` arithmetic, forced host scoring, or a device without
+  FP64/INT64 shaders.
+- `required`: the family recorded a planned call, a decline or a fallback.
+- `not_applicable`: the geometry has no stage of the family.
+
+`tools/triad_native.py` holds receipts to these rules.
+
+Receipts report for each family, as `vulkan_<family>_<field>`:
+
+- `planned_calls`: stages offered to the backend. These are factory calls
+  and stages the receiver kept native before calling one, as a decline or
+  as a fallback, such as a lease outside the unified-memory envelope.
+- `declined_calls`, with `decline_reason`: stages the policy or the receiver
+  kept native.
+- `native_fallbacks`, with `fallback_reason`: calls selected for the device
+  that ran natively. A fallback of an admitted session's call adds no
+  planned call, because its factory counted one.
+- `sessions`, `forward_ffts`, `inverse_ffts`, `fft_row_stages`,
+  `score_rows` and `upload_bytes`: device work, credited after validated
+  readback.
+- `qualified_device`: whether automatic selection may run the family on
+  this GPU. It is true only for the gain rank on the OpenCL-identified
+  SM 12.0 class, and false for drift and varying on every device.
+
+Every planned call is a decline, a session or a fallback before any
+session. Declines plus sessions therefore never exceed planned calls, and
+planned calls never exceed declines, sessions and fallbacks together.
+Fine-stage device work never enters the coarse search's `fft_calls`,
+`fft_rows`, `vulkan_dispatches`, `synchronizations`, `executed`,
+`wall_seconds` or device command time. Receipts use those as proof of
+coarse work and as coarse throughput.
+
+Reasons carry the `vulkan-<family>-` prefix, with the family names
+`gain-rank`, `drift` and `varying`. The first reason of each kind is kept.
+
+| Kind | Reasons |
+|---|---|
+| Policy | `native-requested`, `fp64-requested`, `host-scoring-forced`, `shader-fp64-unavailable`, `unsupported-shape`, `unqualified-device`, `unimplemented` |
+| Fallback | `workspace`, `unified-memory-envelope`, `unsupported-transform`, `nonfinite-input`, `nonfinite-device` |
+| Signed-lag gain only | `verify-mode`, `no-direct-rank`, `no-unsampled-blocks`, `audit-unavailable`, `shift-runs`, `shift-range`, `band-violated`, `frontier-overflow`, `near-tie` |
+| Varying only | `diagnostic`, `line`, `coherent-gain`, `projected-tracker` |
+
+The receiver checks its varying reasons after the shape-independent policy
+and before the shape check. A coherent-gain stage has no device items, so
+it records `vulkan-varying-coherent-gain` on a device route and
+`vulkan-varying-unsupported-shape` under automatic selection.
+
+`tools/triad_native.py` validates these names against
+[the header lists](../src/triad_receiver_bulk.hpp). Forced host scoring and
+devices without FP64/INT64 shaders decline every family. So does a receiver
+configuration that requests FP64 coarse search with a Vulkan bulk backend.
+The probe cannot state that request, because `--native-coarse-precision`
+needs `--backend cpu`.
+
 ### GUI automatic GPU selection
 
 The GUI GPU control and headless `--backend gpu` share the compiled C++ factory.
@@ -518,7 +656,13 @@ accelerator is ready, the session reports GPU unavailability. Receipts preserve
 the user-requested `gpu` selection separately from the actual CUDA/Vulkan
 backend and selection reason; accelerator qualification additionally requires
 completed backend-specific work. Explicit CUDA and Vulkan probe modes remain
-pinned to their named backend.
+pinned to their named backend. Because CUDA is tried first, a build with both
+backends reaches the Vulkan/OpenCL Blackwell routes only when automatic CUDA
+is unavailable or fails to initialize; on a working SM 12.0 CUDA device it
+selects CUDA. On the SM 12.0 class, FP32
+minimum sets FP32 Vulkan coarse precision, so the backend does not open
+OpenCL and runs none of those routes. See
+[What automatic selection runs](triad-gpu-optimization.md#what-automatic-selection-runs).
 
 Automatic CUDA uses the guarded native half-cuFFT route for broad frequency
 search on exact SM89 or SM120 devices when NFFT is 4096–2^20, there are at least
@@ -598,8 +742,11 @@ or FP32 storage. Native FIR keeps strong Helper energy out of this
 reduced-precision search. Helper acquisition, template generation, lag groups,
 the compact tight-clock FP64 class and fine processing stay on the canonical CPU
 path with explicit stage routing. Automatic mode also keeps the changing-channel
-segmented timing search on the CPU here. A numerical or resource failure must not
-silently fall back.
+segmented timing search on the CPU here. Explicit `--vulkan-gain-rank`,
+`--vulkan-drift` and `--vulkan-varying-fine` `device` routes run on RADV and
+match native within their exactness classes; automatic selection keeps them
+native here ([fine-stage ports](triad-gpu-optimization.md#fine-stage-device-ports)).
+A numerical or resource failure must not silently fall back.
 
 The explicit Vega segmented route was checked on 16k and 32k production
 shapes against an FP64 reference of the same FP32 inputs. Without twiddle
@@ -918,7 +1065,11 @@ evidence justifies it under the automatic-mode contract, and label conservative
 implementation choices separately from demonstrated precision requirements.
 Record requested and effective arithmetic,
 actual backend execution and any fallback; do not silently label CPU or FP64
-fallback work as low-precision GPU acceleration.
+fallback work as low-precision GPU acceleration. The
+[GPU performance method](triad-gpu-optimization.md#find-and-qualify-a-gpu-improvement)
+covers attribution, route comparison and a bounded device qualification, and
+[paired timing](triad-performance.md#paired-timing-and-load-gating) the
+timing discipline.
 
 A GPU-only optimization needs new applicable GPU precision/work evidence while
 unchanged CPU calibration remains reusable. A CPU algorithm or arithmetic

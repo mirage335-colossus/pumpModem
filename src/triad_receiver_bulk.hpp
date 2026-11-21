@@ -4,11 +4,19 @@
 #include "triad_bulk_peaks.hpp"
 
 #include <array>
+#include <complex>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stop_token>
+#include <string>
 #include <string_view>
+#include <type_traits>
+#include <variant>
 
 namespace datapump::triad::v3::receiver_detail {
 
@@ -48,6 +56,102 @@ inline constexpr std::array<std::string_view, 17> opencl_coarse_fallback_reasons
     "description-storage", "device-templates-off", "few-arrivals", "one-ray-unqualified", "dense-cost",
     "keyed-chip-limit", "kernel-extent", "workspace-lease", "host-allocation", "device-allocation",
     "ill-conditioned-template", "unoffered"
+};
+
+// Fine-stage device families: the signed-lag gain direct rank of the coarse
+// search, drift proposals and varying statistics of fine scoring. Their
+// session interfaces follow CoarseBulk below.
+enum class StageFamily : std::uint8_t { gain_rank, drift, varying };
+inline constexpr std::array<StageFamily, 3> stage_families{
+    StageFamily::gain_rank, StageFamily::drift, StageFamily::varying};
+// Receipt names: vulkan_<receipt name>_<field>, reasons vulkan-<reason name>-<suffix>.
+inline constexpr std::array<std::string_view, 3> stage_family_receipt_names{"gain_rank", "drift", "varying"};
+inline constexpr std::array<std::string_view, 3> stage_family_reason_names{"gain-rank", "drift", "varying"};
+
+// Why a family stage stayed native, in StageReason order. Policy declines
+// come in the order the pure selection policy tests them, then the
+// fallbacks of a call selected for the device, then the receiver's own
+// reasons of one family. tools/triad_native.py validates receipts against
+// these names; a backend prefixes them with its name and the family's.
+inline constexpr std::array<std::string_view, 7> stage_policy_reasons{
+    "native-requested", "fp64-requested", "host-scoring-forced", "shader-fp64-unavailable",
+    "unsupported-shape", "unqualified-device", "unimplemented"};
+inline constexpr std::array<std::string_view, 5> stage_fallback_reasons{
+    "workspace", "unified-memory-envelope", "unsupported-transform", "nonfinite-input", "nonfinite-device"};
+inline constexpr std::array<std::string_view, 9> gain_rank_stage_reasons{
+    "verify-mode", "no-direct-rank", "no-unsampled-blocks", "audit-unavailable", "shift-runs", "shift-range",
+    "band-violated", "frontier-overflow", "near-tie"};
+inline constexpr std::array<std::string_view, 4> varying_stage_reasons{
+    "diagnostic", "line", "coherent-gain", "projected-tracker"};
+enum class StageReason : std::uint8_t {
+    native_requested, fp64_requested, host_scoring_forced, shader_fp64_unavailable, unsupported_shape,
+    unqualified_device, unimplemented,
+    workspace, unified_memory_envelope, unsupported_transform, nonfinite_input, nonfinite_device,
+    verify_mode, no_direct_rank, no_unsampled_blocks, audit_unavailable, shift_runs, shift_range,
+    band_violated, frontier_overflow, near_tie,
+    diagnostic, line, coherent_gain, projected_tracker
+};
+inline constexpr std::size_t stage_reason_count = stage_policy_reasons.size() + stage_fallback_reasons.size() +
+    gain_rank_stage_reasons.size() + varying_stage_reasons.size();
+static_assert(static_cast<std::size_t>(StageReason::workspace) == stage_policy_reasons.size() &&
+              static_cast<std::size_t>(StageReason::verify_mode) ==
+                  stage_policy_reasons.size() + stage_fallback_reasons.size() &&
+              static_cast<std::size_t>(StageReason::diagnostic) ==
+                  static_cast<std::size_t>(StageReason::verify_mode) + gain_rank_stage_reasons.size() &&
+              static_cast<std::size_t>(StageReason::projected_tracker) + 1 == stage_reason_count);
+
+constexpr std::string_view stage_reason_suffix(StageReason reason) noexcept {
+    auto index = static_cast<std::size_t>(reason);
+    if (index < stage_policy_reasons.size()) return stage_policy_reasons[index];
+    index -= stage_policy_reasons.size();
+    if (index < stage_fallback_reasons.size()) return stage_fallback_reasons[index];
+    index -= stage_fallback_reasons.size();
+    if (index < gain_rank_stage_reasons.size()) return gain_rank_stage_reasons[index];
+    return varying_stage_reasons[index - gain_rank_stage_reasons.size()];
+}
+// The receiver's own reasons belong to one family.
+constexpr bool stage_reason_applies(StageFamily family, StageReason reason) noexcept {
+    if (reason >= StageReason::diagnostic) return family == StageFamily::varying;
+    if (reason >= StageReason::verify_mode) return family == StageFamily::gain_rank;
+    return true;
+}
+// Fallbacks follow a call selected for the device; the rest are declines.
+constexpr bool stage_reason_is_fallback(StageReason reason) noexcept {
+    return reason >= StageReason::workspace && reason <= StageReason::nonfinite_device;
+}
+
+// How a stage that ran natively relates to the backend's sessions, for
+// ReceiverBulkBackend::record_stage_native.
+enum class StageNative : std::uint8_t {
+    // Kept native before any factory call: a planned and declined call.
+    decline,
+    // Selected for the device but kept native before any factory call, such
+    // as session host bytes outside the preserved fine envelope: a planned
+    // call and a native fallback.
+    fallback,
+    // A call of an admitted session that ran natively, such as a failed host
+    // check of device results: a native fallback of the planned call that
+    // its factory already counted.
+    session_fallback
+};
+
+// One family's device stage in a backend receipt. A planned call is a stage
+// offered to the backend: a factory call, or a stage the receiver kept
+// native before calling one, whether declined or as a fallback. A declined
+// call is one the selection policy or the receiver kept native. A native
+// fallback is a call selected for the device that ran natively instead: a
+// refused lease, an unplannable transform, nonfinite values or a failed
+// host check of device results. Every planned call is a decline, a session
+// or a fallback before any session, so declines plus sessions never exceed
+// planned calls, and planned calls never exceed declines, sessions and
+// fallbacks together. Sessions and device work are credited after
+// validated readback. The first reason of each kind is kept.
+struct StageDeviceReceipt {
+    std::uint64_t sessions = 0, forward_ffts = 0, inverse_ffts = 0, fft_row_stages = 0, score_rows = 0;
+    std::uint64_t planned_calls = 0, declined_calls = 0, native_fallbacks = 0, upload_bytes = 0;
+    std::string decline_reason, fallback_reason;
+    // The device class on which automatic selection admits this family.
+    bool qualified_device = false;
 };
 
 struct BulkReceipt {
@@ -97,6 +201,20 @@ struct BulkReceipt {
     std::string vulkan_segmented_decline_reason, vulkan_segmented_fallback_reason;
     // The device class on which automatic selection admits qualified shapes.
     bool vulkan_segmented_qualified_device = false;
+    // Fine-stage device families on Vulkan, vulkan_<family>_<field> in a
+    // receipt. Family extras: the signed-lag frontier and FP64-rescored lags
+    // with the host rescoring time (sums over certifications), the largest
+    // rescored error over its lag band (the maximum over certifications) and
+    // the band source ("audit" or "fp32-floor"). The source is the band term
+    // of the first recorded certification's bit with the larger band; it
+    // does not identify the lag band behind the ratio. Then drift ridge
+    // cells and dechirped slope transforms; varying blocks and batches.
+    StageDeviceReceipt vulkan_gain_rank, vulkan_drift, vulkan_varying;
+    std::uint64_t vulkan_gain_rank_frontier_lags = 0, vulkan_gain_rank_rescored_lags = 0;
+    double vulkan_gain_rank_rescore_seconds = 0, vulkan_gain_rank_band_ratio = 0;
+    std::string vulkan_gain_rank_band_source;
+    std::uint64_t vulkan_drift_ridge_cells = 0, vulkan_drift_slope_ffts = 0;
+    std::uint64_t vulkan_varying_blocks = 0, vulkan_varying_batches = 0;
     // Physical cuFFT transforms include padded rows. Score rows count only
     // validated results on the public grid, with no padded hypotheses.
     std::uint64_t cuda_half_fft_forward_ffts = 0, cuda_half_fft_inverse_ffts = 0;
@@ -212,6 +330,34 @@ struct BulkReceipt {
     double wall_seconds = 0;
     bool cuda = false, executed = false;
 };
+
+inline StageDeviceReceipt& vulkan_stage_receipt(BulkReceipt& receipt, StageFamily family) noexcept {
+    return family == StageFamily::gain_rank ? receipt.vulkan_gain_rank
+         : family == StageFamily::drift ? receipt.vulkan_drift : receipt.vulkan_varying;
+}
+inline const StageDeviceReceipt& vulkan_stage_receipt(const BulkReceipt& receipt, StageFamily family) noexcept {
+    return vulkan_stage_receipt(const_cast<BulkReceipt&>(receipt), family);
+}
+// A session's own fine-stage work over a copy of the backend receipt,
+// keeping the backend's qualified-device flags. An empty source clears
+// the work from a session receipt that did none.
+inline void copy_stage_work(BulkReceipt& to, const BulkReceipt& from) {
+    for (const auto family : stage_families) {
+        auto& stage = vulkan_stage_receipt(to, family);
+        const bool qualified = stage.qualified_device;
+        stage = vulkan_stage_receipt(from, family);
+        stage.qualified_device = qualified;
+    }
+    to.vulkan_gain_rank_frontier_lags = from.vulkan_gain_rank_frontier_lags;
+    to.vulkan_gain_rank_rescored_lags = from.vulkan_gain_rank_rescored_lags;
+    to.vulkan_gain_rank_rescore_seconds = from.vulkan_gain_rank_rescore_seconds;
+    to.vulkan_gain_rank_band_ratio = from.vulkan_gain_rank_band_ratio;
+    to.vulkan_gain_rank_band_source = from.vulkan_gain_rank_band_source;
+    to.vulkan_drift_ridge_cells = from.vulkan_drift_ridge_cells;
+    to.vulkan_drift_slope_ffts = from.vulkan_drift_slope_ffts;
+    to.vulkan_varying_blocks = from.vulkan_varying_blocks;
+    to.vulkan_varying_batches = from.vulkan_varying_batches;
+}
 
 struct BulkMappedTile {
     std::shared_ptr<const void> owner;
@@ -532,6 +678,311 @@ public:
     }
 };
 
+// ---- Fine-stage device sessions ----------------------------------------
+// The shared part of this block (the session contract, StageDeviceWork,
+// StageShape and the ReceiverBulkBackend factories) changes only together
+// with every family. Each family's block is append-only for that family.
+//
+// A factory is the session's admission. The slot owner calls it on its own
+// thread when the stage starts. It runs the pure selection policy
+// (stage_decline), a lease that never waits, and creates every buffer,
+// pipeline and transform plan. If any of these fails it returns null and
+// records the decline or native fallback in the backend receipt; the
+// caller then runs the unchanged native stage, whose host workspace stays
+// quoted. An explicit device route throws instead only where the segmented
+// route does: a transform the device library cannot plan has no substitute
+// on a requested device route. A policy decline of an explicit device route
+// is recorded, and the probe's --require-accelerator rule reports it.
+// The session ends with the stage and releases its lease on destruction.
+// The stage's lanes may call it concurrently; it serializes its own device
+// context. A call either returns false, before device work (such as a
+// nonfinite input) or after it (such as nonfinite device results), with its
+// outputs and the work counters untouched and its native fallback recorded,
+// or publishes all of its outputs, or throws. After false the receiver runs
+// that call's work natively.
+// A stage the receiver keeps native before calling a factory is recorded
+// with record_stage_native, so that its planned call is counted: a decline
+// for the receiver's own reason, or a fallback when the device was selected
+// but its lease cannot be held, such as host memory (a unified-memory
+// lease or compilation) that stage_host_bytes quotes outside the preserved
+// fine envelope even at the narrowest batch.
+
+// Device work of one call, credited only after validated readback.
+struct StageDeviceWork {
+    std::uint64_t forward_ffts = 0, inverse_ffts = 0, fft_rows = 0, fft_row_stages = 0;
+    std::uint64_t score_rows = 0, upload_bytes = 0, download_bytes = 0;
+    bool operator==(const StageDeviceWork&) const = default;
+};
+
+// --- signed-lag gain direct rank -------------------------------------------
+// The public shape, from the coarse midpoint gain plan. The device always
+// tiles each block's direct statistic into tile_fft_rows transforms. Shift
+// runs and audit blocks are table capacities: the run limit (at most the
+// blocks) and the sampled blocks. Maximum outputs bounds every block's
+// outputs (its run's last minus first shift, plus one) from both ends of
+// the aperture, where each lag's monotone shift takes its extremes. All of
+// it is public geometry, so the DSP preflight builds the same shape as the
+// rank before any device work.
+struct GainRankShape {
+    std::size_t observation_rows = 0, kernel_rows = 0, block_rows = 0, blocks = 0, lags = 0;
+    std::size_t direct_frequencies = 0, direct_radius = 0, frequency_stride = 0;
+    std::size_t tile_fft_rows = 0;
+    std::size_t shift_runs = 0, audit_blocks = 0;
+    std::size_t maximum_outputs = 0;
+    bool operator==(const GainRankShape&) const = default;
+};
+// One block's host-prepared native geometry: rows, outputs, its shift run
+// and first shift, the earliest observation row, and the FP64 template
+// scales and log-determinants of both bits.
+struct GainRankBlock {
+    std::uint32_t block = 0, first = 0, rows = 0, outputs = 0, run = 0;
+    std::int64_t first_shift = 0, earliest = 0;
+    std::array<double, 2> scale{}, logdet{};
+};
+struct GainRankRequest {
+    std::span<const Complex> observation;                   // FP64; a session packs the spans it scores
+    std::array<std::span<const Complex>, 2> direct_columns; // each bit's direct template column
+    std::span<const GainRankBlock> blocks;                  // unsampled blocks in block order, then audit blocks
+    std::span<const std::int32_t> run_shifts;               // [run][lag]: shift minus the run's first shift
+    double correlation_scale = 0;
+};
+// The receiver's certification of a session's published call, for the
+// backend receipt's family extras. The band ratio is the largest
+// |T - R| / lag band over the rescored lags; above 1 the band failed. The
+// band source is the band term of the bit with the larger band.
+struct GainRankCertificationRecord {
+    std::uint64_t frontier_lags = 0, rescored_lags = 0;
+    double rescore_seconds = 0, band_ratio = 0;
+    std::string_view band_source;
+};
+class GainRankBulk {
+public:
+    virtual ~GainRankBulk() = default;
+    // direct_totals: [2][lags] FP64 sums over the unsampled blocks in block
+    // order. audit: [audits][2][lags] FP32 per-block log-means of the
+    // request's last `audits` blocks (at most the shape's audit_blocks),
+    // which set the certificate band against the native values. Every
+    // other block is unsampled. A published total may be nonfinite; the
+    // receiver's certification then runs the native rank.
+    virtual bool direct_ranks(const GainRankRequest&, std::span<double> direct_totals,
+                              std::span<float> audit, StageDeviceWork&, std::stop_token) = 0;
+    virtual BulkReceipt receipt() const = 0;
+    // Ends the session's device work after its last call: its buffers,
+    // plans and lease return before the receiver's FP64 certification,
+    // which can outlast the call. receipt() and record_certification()
+    // stay valid; no call may follow.
+    virtual void release() {}
+    // Records the receiver's certification of a published call, whether it
+    // published or fell back.
+    virtual void record_certification(const GainRankCertificationRecord&) {}
+};
+
+// --- drift proposals ---------------------------------------------------------
+// The public shape, from the drift plan and its slope proposals. A ridge
+// with no segments is an exhaustive slope bank or an absent slow plan.
+// slope_batch bounds the dechirped slopes one device transform batch holds;
+// the receiver halves it until the session's host bytes fit its envelope.
+struct DriftBulkShape {
+    std::size_t rows = 0, taps = 0, nfft = 0, frequency_radius = 0;
+    std::size_t segments = 0, segment_fft = 0, slow_segments = 0, slow_segment_fft = 0;
+    std::size_t ridge_slopes = 0, ridge_centers = 0, slope_budget = 0, lanes = 0;
+    std::size_t slope_batch = 0;
+    bool operator==(const DriftBulkShape&) const = default;
+};
+// One ridge search: S+1 segment row bounds, slopes in the native visit
+// order, [slope][segment] host-rounded offsets, and whether the slow
+// refinement reads the power table back.
+struct DriftRidgeGeometry {
+    std::size_t segments = 0, segment_fft = 0;
+    std::span<const std::size_t> segment_bounds;
+    std::span<const std::int64_t> slopes;
+    std::span<const std::int64_t> offsets;
+    std::int64_t bin_radius = 0, bin_stride = 0;
+    bool return_power = false;
+};
+// Per slope and bit: the first maximum, by ascending center, of the FP64
+// incoherent sum over segments in segment order. A center whose shifted bin
+// leaves the open half band (-fft_rows/2, fft_rows/2) skips that segment.
+// The native ridge (drift_ridge_records) and a device ridge share this
+// record.
+struct DriftRidgeRecord {
+    std::array<double, 2> score{-std::numeric_limits<double>::infinity(),
+                                -std::numeric_limits<double>::infinity()};
+    std::array<std::int64_t, 2> center{};
+};
+// One entry of a slope's per-bit top-eight frontier.
+inline constexpr std::size_t drift_frontier_ranks = 8;
+struct DriftFrontierRow {
+    double rank = 0;
+    std::int64_t bin = 0;
+};
+struct DriftAtomRequest {
+    std::size_t lane = 0;                          // selects this lane's staging slot
+    std::array<std::array<double, 2>, 2> energy{}; // proposal normalization only
+    double normalized = 0;                         // staged products are round32(P * normalized)
+    DriftRidgeGeometry fast, slow;                 // slow.segments == 0: no slow refinement
+    std::span<const std::int64_t> slopes;          // dechirp slopes; empty for the ridge alone
+    double rate_step = 0, delta = 0, first_t = 0;
+    bool nominate = false;                         // the rank pass nominates zero-slope bins
+};
+// A ridge call computes the records of each geometry with segments, and
+// its FP64 power table [bit][segment][bin] where return_power is set. A
+// geometry's segment bounds and offsets must stay valid and unchanged for
+// the session's lifetime: a session may upload them once. A slopes call
+// writes each requested slope's per-bit stable top eight (equal ranks by
+// ascending signed bin, NaN and -inf excluded, padded with -inf ranks) in
+// request order, and with nominate each bit's largest energy-normalized
+// power over the public bins, -inf if none.
+struct DriftAtomResult {
+    std::span<DriftRidgeRecord> fast, slow;
+    std::span<double> slow_power;
+    std::span<DriftFrontierRow> frontiers;         // [slope][bit][8]
+    std::array<double, 2> nomination{};
+    std::span<double> fast_power;
+};
+// A ridge or slopes call that returns false has recorded its native
+// fallback reason in the backend receipt and left its outputs and work
+// untouched; the receiver then scores the atom natively.
+class DriftBulk {
+public:
+    virtual ~DriftBulk() = default;
+    // Host-visible slot of one lane, [2 * taps][rows], written outside the
+    // session's mutex.
+    virtual std::span<std::complex<float>> staging(std::size_t lane) noexcept = 0;
+    virtual bool ridge(const DriftAtomRequest&, DriftAtomResult&, StageDeviceWork&, std::stop_token) = 0;
+    virtual bool slopes(const DriftAtomRequest&, DriftAtomResult&, StageDeviceWork&, std::stop_token) = 0;
+    virtual BulkReceipt receipt() const = 0;
+};
+
+// --- varying statistics --------------------------------------------------------
+// The arithmetic of the template-side projections: FP64 transforms, or FP32
+// templates and transforms with FP64 state.
+enum class VaryingArithmetic : std::uint8_t { fp64, fp32_template };
+// The public shape, from the varying fine plan and its tracking plans. A
+// block's items are the affine items, 2 * taps template columns each (the
+// fixed-affine states, then center_atoms central independent atoms, whose
+// projected frequency lattice is empty), then the tracked independent atoms
+// of four columns each. bluestein_rows is the transform length of the block
+// and final projections, zero for a projection without a DFT plan; taps is
+// the most taps of any item and affine_columns the affine items' template
+// columns per block.
+struct VaryingBulkShape {
+    std::size_t block_rows = 0, final_rows = 0;
+    std::array<std::size_t, 2> bluestein_rows{}, modes{};
+    std::size_t independent_states = 0, affine_states = 0, independent_atoms = 0, taps = 0;
+    std::size_t batch_blocks = 0;
+    VaryingArithmetic arithmetic = VaryingArithmetic::fp64;
+    std::size_t affine_columns = 0, center_atoms = 0;
+    bool operator==(const VaryingBulkShape&) const = default;
+};
+// The native projection's chirp and kernel spectrum (empty for a power-of-two
+// transform), retained indices and scale.
+struct VaryingProjectionTables {
+    std::span<const Complex> chirp, kernel_spectrum;
+    std::span<const std::size_t> indices;
+    double scale = 0;
+};
+// One template staging slot of a session admitted for `blocks` blocks, in
+// bytes from the slot's start. FP64 templates [block][column][rows]: a
+// block's columns are packed at its own rows, in a block stride of every
+// item's columns at final_rows. Then the block observations projected by the
+// host, [block][mode] at the larger mode count, and one nonzero-basis byte per
+// [block][item] that only the host reads. Last, the stage's constants: the
+// tracked states' signed half-bins [length][state] and each affine item's
+// taps, which a call names by spans into either slot.
+struct VaryingStagingLayout {
+    std::size_t template_columns = 0, block_values = 0, mode_stride = 0, items = 0;
+    std::size_t projected_offset = 0, flags_offset = 0, shifts_offset = 0, taps_offset = 0, bytes = 0;
+};
+inline VaryingStagingLayout varying_staging_layout(const VaryingBulkShape& shape, std::size_t blocks) {
+    const auto multiply = [](std::size_t a, std::size_t b) {
+        if (a && b > SIZE_MAX / a) throw Error("Robust varying staging extent overflow");
+        return a * b;
+    };
+    const auto add = [](std::size_t a, std::size_t b) {
+        if (b > SIZE_MAX - a) throw Error("Robust varying staging extent overflow");
+        return a + b;
+    };
+    VaryingStagingLayout layout;
+    layout.template_columns = add(shape.affine_columns, multiply(4, shape.independent_atoms));
+    layout.block_values = multiply(layout.template_columns, shape.final_rows);
+    layout.mode_stride = shape.modes[0] < shape.modes[1] ? shape.modes[1] : shape.modes[0];
+    layout.items = add(shape.affine_states, shape.independent_atoms);
+    layout.projected_offset = multiply(multiply(blocks, layout.block_values), sizeof(Complex));
+    layout.flags_offset = add(layout.projected_offset,
+        multiply(multiply(blocks, layout.mode_stride), sizeof(Complex)));
+    // Each region starts on a complex-value boundary.
+    const auto aligned = [&](std::size_t bytes) {
+        return add(bytes, (sizeof(Complex) - bytes % sizeof(Complex)) % sizeof(Complex));
+    };
+    layout.shifts_offset = add(layout.flags_offset, aligned(multiply(blocks, layout.items)));
+    layout.taps_offset = add(layout.shifts_offset,
+        multiply(multiply(2, shape.independent_states), sizeof(std::int64_t)));
+    layout.bytes = add(layout.taps_offset, aligned(multiply(shape.affine_states, sizeof(std::uint32_t))));
+    return layout;
+}
+// One call: consecutive public blocks from first_block, the last of them the
+// slot's final-length block when terminal_last. The host has written the
+// staging slot's templates and projected observations for blocks
+// [0, blocks); projected_y is that slot's projected region. affine_taps holds
+// each affine item's taps. independent_shifts is [length][state]: each
+// tracked state's signed half-bin for the block and final lengths, as the
+// native projected tracker rounds it. Both constants lie in a staging slot.
+// Correlations and Gram entries of the affine items are divided by the noise
+// variance, as the native ones are.
+struct VaryingBatch {
+    std::size_t first_block = 0, blocks = 0;
+    bool terminal_last = false;
+    std::array<VaryingProjectionTables, 2> tables;     // block, final
+    std::span<const Complex> projected_y;
+    std::span<const std::int64_t> independent_shifts;
+    std::size_t staging_slot = 0;                      // double-buffered template staging
+    std::span<const std::uint32_t> affine_taps;
+    double variance = 0;
+};
+// One tracked independent-gain statistic cell of a block: a (bit, state) of
+// the projected tracker, in the order the native visitor produces them (the
+// even half-bin states, then the odd ones, each in state order, both bits).
+struct VaryingIndependentRow {
+    std::array<Complex, 2> correlations{};
+    std::array<double, 2> diagonal{};
+    Complex cross{};
+    std::int64_t half_bin = 0;
+    std::uint32_t bit = 0, state = 0;
+};
+// Item-major outputs, [item][block_stride] from the call's first block: the
+// fixed-affine states and central atoms, whose nonzero_basis flags the host
+// sets, and [atom][block_stride][2 * independent_states] tracked cells.
+struct VaryingBatchOutput {
+    std::span<FineBulkStatistics> affine;
+    std::span<VaryingIndependentRow> independent;
+    std::span<FineBulkStatistics> center;
+    std::size_t block_stride = 0;
+};
+class VaryingBulk {
+public:
+    virtual ~VaryingBulk() = default;
+    // Host-visible template staging of one slot (varying_staging_layout).
+    virtual std::span<std::byte> template_staging(std::size_t slot) noexcept = 0;
+    virtual bool statistics(const VaryingBatch&, VaryingBatchOutput&, StageDeviceWork&, std::stop_token) = 0;
+    virtual BulkReceipt receipt() const = 0;
+    // The admitted blocks per call, at most the shape's batch_blocks.
+    virtual std::size_t batch_blocks() const noexcept = 0;
+};
+
+// A family's public shape, or the family alone for the shape-independent
+// part of its selection policy.
+using StageShape = std::variant<StageFamily, GainRankShape, DriftBulkShape, VaryingBulkShape>;
+static_assert(std::is_same_v<std::variant_alternative_t<0, StageShape>, StageFamily> &&
+              std::is_same_v<std::variant_alternative_t<1, StageShape>, GainRankShape> &&
+              std::is_same_v<std::variant_alternative_t<2, StageShape>, DriftBulkShape> &&
+              std::is_same_v<std::variant_alternative_t<3, StageShape>, VaryingBulkShape> &&
+              std::variant_size_v<StageShape> == 4, "stage_family names StageShape alternatives by index");
+constexpr StageFamily stage_family(const StageShape& shape) noexcept {
+    if (const auto* family = std::get_if<StageFamily>(&shape)) return *family;
+    return shape.index() == 1 ? StageFamily::gain_rank : shape.index() == 2 ? StageFamily::drift : StageFamily::varying;
+}
+
 class ReceiverBulkBackend {
 public:
     virtual ~ReceiverBulkBackend() = default;
@@ -576,6 +1027,40 @@ public:
     virtual BulkReceipt receipt() const = 0;
     // GUI polling must not query a driver or synchronize outstanding device work.
     virtual BulkReceipt status_receipt() const { return receipt(); }
+    // Fine-stage device sessions, under the contract above the family
+    // interfaces. A wrapping backend forwards every one of these.
+    // The pure selection policy, shared by preflight and execution: empty
+    // when the backend would construct a session for this shape, otherwise
+    // why the stage stays native. fp64_forced states an explicit native FP64
+    // coarse request, which every family declines. It starts no device work.
+    virtual std::string_view stage_decline(const StageShape&, bool /*fp64_forced*/) const noexcept {
+        return "native-stage-backend";
+    }
+    virtual std::unique_ptr<GainRankBulk> make_gain_rank(const GainRankShape&, bool /*fp64_forced*/, std::stop_token) {
+        return {};
+    }
+    virtual std::unique_ptr<DriftBulk> make_drift(const DriftBulkShape&, bool /*fp64_forced*/, std::stop_token) {
+        return {};
+    }
+    virtual std::unique_ptr<VaryingBulk> make_varying(const VaryingBulkShape&, bool /*fp64_forced*/, std::stop_token) {
+        return {};
+    }
+    // Host RAM that one session of this shape can hold, for the native DSP
+    // preflight: its plan and shader compilation and, where device memory is
+    // host memory, its lease; zero when the policy declines it. It must not
+    // start device work.
+    virtual std::size_t stage_host_bytes(const StageShape&, bool /*fp64_forced*/) const { return 0; }
+    // A stage the receiver ran natively without a factory's own record: a
+    // decline or a fallback before any factory call, which counts its
+    // planned call, or a fallback of an admitted session's call. A decline
+    // takes a policy or family reason, a fallback a fallback or family
+    // reason (StageNative).
+    virtual void record_stage_native(StageFamily, StageReason, StageNative) {}
 };
+
+// The application's GPU selection wrapper (src/triad_gpu_backend.cpp). It
+// forwards every query and factory of the backend it wraps and adds the
+// selection reason to receipts. Exposed for its forwarding check.
+std::shared_ptr<ReceiverBulkBackend> make_selected_gpu_backend(std::shared_ptr<ReceiverBulkBackend>, std::string reason);
 
 } // namespace datapump::triad::v3::receiver_detail

@@ -17,6 +17,8 @@
 | [Development contract](../development.md) | Compatibility and preservation tests required by implementation changes. |
 | [Simulation channel integration](../channel-models.md) | Required starting point for new Robust sampled simulations: Doppler/delay spread, additional frequency-selective amplitude modulation, implementation APIs and focused checks. |
 | [Stream evaluation and capture identity](../channel-models.md#stream-evaluation-workers-and-capture-identity) | Required before changing channel or pattern-source arithmetic, its speed or its workers: what keeps captures bit-identical, and proposals that would not. |
+| [GPU performance method](../triad-gpu-optimization.md#find-and-qualify-a-gpu-improvement) | Attribute GPU and stage time, compare routes, run a bounded device qualification. |
+| [Paired timing and load gating](../triad-performance.md#paired-timing-and-load-gating) | Alternated pairs, load gate, one-binary comparisons, microbenchmarks. |
 | [Current Robust architecture](../robust-current.md) | Canonical native waveform/channel/Helper path, staged Python receiver limits, GUI availability and computationally minimal checks. |
 | [Contributor requirements](../../AGENTS.md) | Repository instructions and testing stages. |
 

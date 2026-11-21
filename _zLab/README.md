@@ -476,10 +476,9 @@ while the local controller runs with an API key, and automatic restart
 reconciliation remains unimplemented. The v2 creation schema does not supply
 an automatic termination deadline. Report any still-billable resource
 and separately owned cache volume. Read current spending authorization before
-launch. The previous campaign's private closeout is under
-`${XDG_STATE_HOME:-$HOME/.local/state}/pumpModem/runpod/2026-11-18-hf/` on the
-original host. It records how many instances ran, elapsed and summed compute
-time, estimated charges, peak concurrent rate and deletion confirmations.
+launch. Closeout receipts of earlier campaigns, with instance counts, elapsed
+and summed compute time, charges and deletion confirmations, are kept
+privately outside the checkout.
 
 ## Shared GUI controls and remaining requirements
 

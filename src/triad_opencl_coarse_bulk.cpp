@@ -314,6 +314,8 @@ public:
         if (delegated_) return fallback_->receipt();
         auto result = host_->receipt();
         // The session receipt carries its own work beside the backend identity.
+        // It runs no fine-stage family.
+        copy_stage_work(result, BulkReceipt{});
         result.upload_bytes = local_.upload_bytes;
         result.download_bytes = local_.download_bytes;
         result.synchronizations = local_.synchronizations;

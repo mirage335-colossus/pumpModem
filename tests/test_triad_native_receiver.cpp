@@ -9,20 +9,25 @@
 #include "../src/triad_receiver_executor.hpp"
 #include "../src/triad_receiver_fine.hpp"
 #include "../src/triad_receiver_helper.hpp"
+#include "triad_signed_gain_fixture.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <iostream>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <numbers>
 #include <optional>
 #include <random>
 #include <stdexcept>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 
 namespace {
@@ -436,6 +441,612 @@ void bounded_short_competition() {
           "a broad receiver allowance must preserve the complete physical quiet observation");
 }
 
+// The native ridge search sums segments outer, then each slope of a block,
+// then centers. Compare it at every block size from one slope to the block
+// maximum with a direct center-outer reference on synthetic FP64 power
+// tables that reach the half-band edges, wrap negative bins, tie exactly
+// and carry nonfinite powers. The records, the selected slopes and the
+// rank must match bit for bit.
+void drift_ridge_interchange_oracle() {
+    using namespace receiver_detail;
+    const auto same_bits = [](double a, double b) {
+        return std::bit_cast<std::uint64_t>(a) == std::bit_cast<std::uint64_t>(b);
+    };
+    const auto direct_record = [](const DriftPlan& plan, const DriftRidgeGrid& grid, std::span<const double> power,
+                                  std::span<const double> centers, std::int64_t slope) {
+        DriftRidgeRecord record;
+        const auto half = static_cast<std::int64_t>(grid.fft_rows / 2);
+        for (auto center = -grid.bin_radius; center <= grid.bin_radius; center += grid.bin_stride) {
+            std::array<double, 2> sum{};
+            for (std::size_t segment = 0; segment < grid.segments; ++segment) {
+                const auto bin = center + std::llround(slope * plan.slope_step * centers[segment] / grid.frequency_step);
+                if (std::abs(bin) >= half) continue;
+                const auto column = static_cast<std::size_t>(bin < 0 ? bin + 2 * half : bin);
+                for (std::size_t bit = 0; bit < 2; ++bit)
+                    sum[bit] += power[(bit * grid.segments + segment) * grid.fft_rows + column];
+            }
+            for (std::size_t bit = 0; bit < 2; ++bit)
+                if (sum[bit] > record.score[bit]) {
+                    record.score[bit] = sum[bit];
+                    record.center[bit] = center;
+                }
+        }
+        return record;
+    };
+    enum class Values { uniform, ties, nonfinite };
+    struct Case {
+        std::size_t rows, segments, slope_budget;
+        std::int64_t slope_radius, frequency_radius;
+        double rate, edge_offset_bins;
+        Values values;
+        bool slow;
+    };
+    const std::array cases{
+        Case{1000, 8, 3, 300, 1'000'000, 100, 60, Values::uniform, false},  // edges lie on the slope grid
+        Case{1000, 8, 4, 301, 1'000'000, 100, 60, Values::ties, false},
+        Case{16384, 8, 3, 40'000, 12'000, 1000, 2500, Values::nonfinite, false},  // center stride 3, whole-row skips
+        Case{4000, 12, 6, 5000, 1'000'000, 200, 90, Values::uniform, true},  // wide slow-plan refinement
+        Case{4000, 12, 6, 5000, 1'000'000, 200, 90, Values::ties, true},
+        Case{64, 8, 3, 9, 0, 50, 3, Values::nonfinite, false},  // one center
+        Case{2048, 9, 8, 700, 40, 300, 100, Values::uniform, true},  // narrow slow plan
+    };
+    std::mt19937_64 random(4066);
+    std::uniform_real_distribution<double> uniform(0, 1);
+    std::size_t compared_records = 0, skipped_cells = 0, blocked_records = 0, largest_block = 0;
+    for (const auto& test : cases) {
+        DriftPlan plan;
+        plan.first = 485;
+        plan.rows = test.rows;
+        plan.sample_stride = 2;
+        plan.nfft = std::bit_ceil(2 * test.rows);
+        plan.frequency_step = test.rate / static_cast<double>(plan.nfft);
+        plan.frequency_radius = test.frequency_radius;
+        plan.slope_radius = test.slope_radius;
+        plan.slow_ridge_segments = test.slow ? test.segments - 1 : 0;
+        const auto duration = static_cast<double>(test.rows) / test.rate;
+        plan.slope_reference_seconds = (plan.first + .5) / (test.rate * plan.sample_stride) + duration * .5;
+        const auto segment_step = test.rate / static_cast<double>(std::bit_ceil(2 * ((test.rows + test.segments - 1) /
+            test.segments)));
+        plan.slope_step = test.edge_offset_bins * segment_step / (static_cast<double>(test.slope_radius) * duration * .5);
+        std::vector<double> centers(test.segments);
+        const auto grid = drift_ridge_grid(plan, test.rate, test.segments, centers);
+        check(!drift_ridge_exhaustive(plan, test.slope_budget) && grid.fft_rows == std::bit_ceil(2 * ((test.rows +
+              test.segments - 1) / test.segments)), "ridge oracle case lost its ranked public slope grid");
+        std::vector<double> power(2 * grid.segments * grid.fft_rows);
+        for (auto& value : power) {
+            const auto draw = uniform(random);
+            value = test.values == Values::ties ? std::floor(3 * draw) : uniform(random);
+            if (test.values == Values::nonfinite && draw < .03)
+                value = draw < .01 ? std::numeric_limits<double>::quiet_NaN() :
+                        draw < .02 ? std::numeric_limits<double>::infinity() : -std::numeric_limits<double>::infinity();
+        }
+        std::vector<std::int64_t> order{-plan.slope_radius};
+        for (auto slope = -(plan.slope_radius / grid.slope_stride) * grid.slope_stride; slope <= plan.slope_radius;
+             slope += grid.slope_stride)
+            if (slope != -plan.slope_radius && slope != plan.slope_radius) order.push_back(slope);
+        order.push_back(plan.slope_radius);
+        std::size_t center_count = 0;
+        for (auto center = -grid.bin_radius; center <= grid.bin_radius; center += grid.bin_stride) ++center_count;
+        check(grid.slopes == order.size() && grid.centers == center_count,
+              "ridge grid counts differ from the native coarse slope and center loops");
+        std::vector<DriftRidgeRecord> references;
+        DriftRidgeFrontier direct_frontier;
+        for (std::size_t index = 0; index < grid.slopes; ++index) {
+            check(drift_ridge_slope(plan, grid, index) == order[index], "ridge slope order changed");
+            const auto direct = direct_record(plan, grid, power, centers, order[index]);
+            references.push_back(direct);
+            direct_frontier.insert(order[index], direct);
+            for (std::size_t segment = 0; segment < grid.segments; ++segment) {
+                const auto offset = std::llround(order[index] * plan.slope_step * centers[segment] / grid.frequency_step);
+                skipped_cells += grid.bin_radius + std::abs(offset) >= static_cast<std::int64_t>(grid.fft_rows / 2);
+            }
+            ++compared_records;
+        }
+        const auto direct = direct_frontier.select(plan, grid, power, centers, test.slope_budget);
+        check(!direct.slopes.empty() && direct.slopes.front() == 0 && direct.slopes.size() <= test.slope_budget,
+              "the direct ridge reference lost its zero-first bounded exact slope list");
+        // Slope blocks of 1, 2, 3 and 16 slopes, the cache rule's and one past
+        // the slope count: each record and the frontier's selection equal the
+        // direct reference's. NaN-poisoned sums expose any unreset term.
+        const std::array<std::size_t, 6> blocks{1, 2, 3, 16, drift_ridge_block(grid), grid.slopes + 1};
+        for (const auto block : blocks) {
+            const auto width = std::min({block, grid.slopes, maximum_drift_ridge_block});
+            std::vector<double> sums(2 * width * grid.centers, std::numeric_limits<double>::quiet_NaN());
+            std::array<std::int64_t, maximum_drift_ridge_block> slopes{};
+            std::array<DriftRidgeRecord, maximum_drift_ridge_block> records{};
+            for (std::size_t first = 0; first < grid.slopes; first += width) {
+                const auto count = std::min(width, grid.slopes - first);
+                std::copy_n(order.begin() + static_cast<std::ptrdiff_t>(first), count, slopes.begin());
+                drift_ridge_records(plan, grid, power, centers, std::span(slopes).first(count),
+                                    std::span(records).first(count), sums);
+                for (std::size_t j = 0; j < count; ++j, ++blocked_records)
+                    for (std::size_t bit = 0; bit < 2; ++bit)
+                        check(same_bits(records[j].score[bit], references[first + j].score[bit]) &&
+                              records[j].center[bit] == references[first + j].center[bit],
+                              "slope-blocked ridge records differ from the direct center-major reference");
+            }
+            std::ranges::fill(sums, std::numeric_limits<double>::quiet_NaN());
+            const auto blocked = drift_ridge_frontier(plan, grid, power, centers, block, sums, {})
+                .select(plan, grid, power, centers, test.slope_budget);
+            check(blocked.slopes == direct.slopes && same_bits(blocked.rank, direct.rank),
+                  "slope-blocked ridge search changed the selected exact slopes or atom rank");
+            largest_block = std::max(largest_block, width);
+        }
+        rejects<Error>([&] {
+            std::vector<double> short_sums(2 * grid.centers - 1);
+            std::array<DriftRidgeRecord, 1> record{};
+            drift_ridge_records(plan, grid, power, centers, std::span(order).first(1), record, short_sums);
+        }, "a ridge block must reject sums shorter than its slopes' centers");
+    }
+    std::cerr << "ridge oracle records=" << compared_records << " blocked=" << blocked_records
+              << " largest block=" << largest_block << " edge segment checks=" << skipped_cells << '\n';
+    check(compared_records > 900 && skipped_cells > 0, "ridge oracle no longer reaches its edge strata");
+    check(blocked_records == 6 * compared_records && largest_block == maximum_drift_ridge_block,
+          "ridge block oracle no longer covers every block size");
+    // The cache rule: 16 slopes at the largest and the HF 984-center grids,
+    // the block maximum on small grids.
+    const auto rule = [](std::size_t centers) { return drift_ridge_block(DriftRidgeGrid{.centers = centers}); };
+    check(rule(1025) == 16 && rule(984) == 16 && rule(513) == 31 && rule(100) == maximum_drift_ridge_block &&
+          rule(1) == maximum_drift_ridge_block, "ridge slope block rule changed");
+    rejects<Error>([&] { (void)rule(0); }, "a ridge block rule must reject an empty grid");
+    rejects<Error>([&] { (void)rule(1026); }, "a ridge block rule must reject an unbounded grid");
+    // Every public slope fits the exact budget: no ranking and zero rank.
+    DriftPlan small;
+    small.slope_radius = 3;
+    const auto all = DriftRidgeFrontier{}.select(small, {}, {}, {}, 8);
+    check(drift_ridge_exhaustive(small, 7) && !drift_ridge_exhaustive(small, 6) &&
+          all.slopes == std::vector<std::int64_t>{0, -3, -2, -1, 1, 2, 3} && same_bits(all.rank, 0.),
+          "an exhaustive public slope bank must keep zero first and every public slope");
+    // Slope backend contract: each slope's stable top eight (equal ranks by
+    // ascending signed bin, NaN and -inf excluded, padded with -inf), merged
+    // in scoring order, equals the native bin-by-bin streaming frontier and
+    // a direct stable sort of every scored bin.
+    const auto rank_descending = [](const DriftPeak& a, const DriftPeak& b) { return a.rank > b.rank; };
+    std::size_t sparse_frontiers = 0, infinite_peaks = 0, tied_peaks = 0;
+    for (std::size_t trial = 0; trial < 96; ++trial) {
+        const auto radius = static_cast<std::int64_t>(random() % 24);
+        std::vector<std::int64_t> slopes(1 + random() % 10);
+        for (std::size_t index = 0; index < slopes.size(); ++index)
+            slopes[index] = static_cast<std::int64_t>(index) - static_cast<std::int64_t>(slopes.size() / 2);
+        std::ranges::shuffle(slopes, random);
+        DriftPeakFrontier streaming{}, merged{};
+        std::vector<DriftPeak> scored;
+        for (const auto slope : slopes) {
+            std::vector<DriftPeak> own;
+            for (auto bin = -radius; bin <= radius; ++bin) {
+                const auto draw = uniform(random);
+                double rank = uniform(random);
+                switch (trial % 4) {
+                case 1: rank = std::floor(3 * rank); break;
+                case 2: rank = draw < .1 ? std::numeric_limits<double>::quiet_NaN() :
+                               draw < .15 ? std::numeric_limits<double>::infinity() :
+                               draw < .25 ? -std::numeric_limits<double>::infinity() : std::floor(4 * rank);
+                        break;
+                case 3: rank = draw < .45 ? std::numeric_limits<double>::quiet_NaN() :
+                               draw < .9 ? -std::numeric_limits<double>::infinity() :
+                               draw < .93 ? std::numeric_limits<double>::infinity() : std::floor(2 * rank);
+                        break;
+                default: break;
+                }
+                const DriftPeak peak{rank, slope, bin};
+                merge_drift_peak(streaming, peak);
+                if (rank > -std::numeric_limits<double>::infinity()) {
+                    own.push_back(peak);
+                    scored.push_back(peak);
+                }
+            }
+            std::ranges::stable_sort(own, rank_descending);
+            DriftPeakFrontier list{};
+            std::copy_n(own.begin(), std::min(own.size(), list.size()), list.begin());
+            for (const auto& peak : list) merge_drift_peak(merged, peak);
+        }
+        std::ranges::stable_sort(scored, rank_descending);
+        DriftPeakFrontier direct{};
+        std::copy_n(scored.begin(), std::min(scored.size(), direct.size()), direct.begin());
+        for (std::size_t rank = 0; rank < retained_drift_per_bit; ++rank)
+            for (const auto* other : {&merged, &direct})
+                check(same_bits(streaming[rank].rank, (*other)[rank].rank) &&
+                      streaming[rank].slope == (*other)[rank].slope && streaming[rank].center == (*other)[rank].center,
+                      "merged per-slope peak lists differ from the native streaming drift frontier");
+        sparse_frontiers += scored.size() < retained_drift_per_bit;
+        for (std::size_t rank = 0; rank < retained_drift_per_bit; ++rank) {
+            infinite_peaks += std::isinf(streaming[rank].rank) && streaming[rank].rank > 0;
+            tied_peaks += rank && std::isfinite(streaming[rank].rank) && streaming[rank].rank == streaming[rank - 1].rank;
+        }
+    }
+    std::cerr << "drift peak merge sparse=" << sparse_frontiers << " infinite=" << infinite_peaks
+              << " tied=" << tied_peaks << '\n';
+    check(sparse_frontiers > 0 && infinite_peaks > 0 && tied_peaks > 0,
+          "drift peak merge contract no longer reaches sparse, infinite and tied frontiers");
+}
+
+// A device drift session that mirrors the native proposals on the host
+// (device-free). Its ridge reproduces the native segment spectra, power
+// tables and records from the staged FP32 products bit for bit; its
+// slopes dechirp those staged values, which the native route cannot see,
+// so their frontiers are an FP32-input mirror of the device route.
+class MirrorDriftBackend final : public receiver_detail::ReceiverBulkBackend {
+public:
+    enum class Mode { exact_ridge, all_native, staged_slopes, declined, envelope };
+    explicit MirrorDriftBackend(Mode mode, bool unified = true) : mode_(mode), unified_(unified) {}
+    std::unique_ptr<receiver_detail::FineBulk> make_fine(double, double) override { return {}; }
+    std::unique_ptr<receiver_detail::CoarseBulk> make_coarse(double, double) override { return {}; }
+    std::size_t fine_host_bytes(std::size_t, std::size_t) const override { return 0; }
+    std::size_t coarse_host_bytes(std::size_t, std::size_t, std::size_t) const override { return 0; }
+    receiver_detail::BulkReceipt receipt() const override {
+        receiver_detail::BulkReceipt receipt;
+        receipt.vulkan = false;
+        // An integrated device by default, whose envelope fallback names
+        // unified memory; a discrete one names its workspace.
+        receipt.unified_memory = unified_;
+        return receipt;
+    }
+    std::string_view stage_decline(const receiver_detail::StageShape&, bool fp64) const noexcept override {
+        return mode_ == Mode::declined || fp64 ? "mirror-declined" : "";
+    }
+    std::size_t stage_host_bytes(const receiver_detail::StageShape&, bool) const override {
+        ++host_queries;
+        return mode_ == Mode::envelope ? std::numeric_limits<std::size_t>::max() / 2 : 0;
+    }
+    std::unique_ptr<receiver_detail::DriftBulk> make_drift(const receiver_detail::DriftBulkShape& shape, bool,
+                                                           std::stop_token) override;
+    void record_stage_native(receiver_detail::StageFamily, receiver_detail::StageReason reason,
+                             receiver_detail::StageNative kind) override {
+        std::lock_guard lock(mutex);
+        records.emplace_back(reason, kind);
+    }
+    Mode mode_;
+    bool unified_;
+    mutable std::size_t host_queries = 0;
+    std::size_t factories = 0, ridge_calls = 0, slope_calls = 0, staged_lanes = 0;
+    receiver_detail::DriftBulkShape shape;
+    std::vector<std::pair<receiver_detail::StageReason, receiver_detail::StageNative>> records;
+    std::mutex mutex;
+};
+
+class MirrorDrift final : public receiver_detail::DriftBulk {
+public:
+    MirrorDrift(MirrorDriftBackend& owner, const receiver_detail::DriftBulkShape& shape)
+        : owner_(owner), shape_(shape), staging_(shape.lanes, std::vector<std::complex<float>>(2 * shape.taps * shape.rows)) {}
+    std::span<std::complex<float>> staging(std::size_t lane) noexcept override {
+        if (lane >= staging_.size()) return {};
+        return staging_[lane];
+    }
+    bool ridge(const receiver_detail::DriftAtomRequest& request, receiver_detail::DriftAtomResult& result,
+               receiver_detail::StageDeviceWork& work, std::stop_token stop) override {
+        using namespace receiver_detail;
+        {
+            std::lock_guard lock(owner_.mutex);
+            ++owner_.ridge_calls;
+        }
+        if (owner_.mode_ == MirrorDriftBackend::Mode::all_native) return false;
+        const auto columns = 2 * shape_.taps;
+        const auto& staged = staging_.at(request.lane);
+        for (const auto& [geometry, records, power] : {std::tuple(&request.fast, result.fast, result.fast_power),
+                                                     std::tuple(&request.slow, result.slow, result.slow_power)}) {
+            const auto& g = *geometry;
+            if (!g.segments) continue;
+            const auto rows = g.segment_fft;
+            const modem::detail::search_fft::FloatPlan plan(rows, stop);
+            std::vector<double> table(2 * g.segments * rows, 0.);
+            std::vector<std::complex<float>> spectrum(rows);
+            for (std::size_t segment = 0; segment < g.segments; ++segment)
+                for (std::size_t column = 0; column < columns; ++column) {
+                    std::fill(spectrum.begin(), spectrum.end(), std::complex<float>{});
+                    for (auto i = g.segment_bounds[segment]; i < g.segment_bounds[segment + 1]; ++i)
+                        spectrum[i - g.segment_bounds[segment]] = staged[column * shape_.rows + i];
+                    modem::detail::search_fft::fft(spectrum, false, plan, stop);
+                    const auto bit = column / shape_.taps, tap = column % shape_.taps;
+                    if (request.energy[bit][tap] <= 0) continue;
+                    for (std::size_t bin = 0; bin < rows; ++bin)
+                        table[(bit * g.segments + segment) * rows + bin] +=
+                            std::norm(static_cast<Complex>(spectrum[bin])) / request.energy[bit][tap];
+                }
+            const auto half = static_cast<std::int64_t>(rows / 2);
+            for (std::size_t index = 0; index < g.slopes.size(); ++index) {
+                DriftRidgeRecord record;
+                for (auto center = -g.bin_radius; center <= g.bin_radius; center += g.bin_stride) {
+                    std::array<double, 2> sum{};
+                    for (std::size_t segment = 0; segment < g.segments; ++segment) {
+                        const auto bin = center + g.offsets[index * g.segments + segment];
+                        if (std::abs(bin) >= half) continue;
+                        const auto column = static_cast<std::size_t>(bin < 0 ? bin + 2 * half : bin);
+                        for (std::size_t bit = 0; bit < 2; ++bit) sum[bit] += table[(bit * g.segments + segment) * rows + column];
+                    }
+                    for (std::size_t bit = 0; bit < 2; ++bit)
+                        if (sum[bit] > record.score[bit]) {
+                            record.score[bit] = sum[bit];
+                            record.center[bit] = center;
+                        }
+                }
+                records[index] = record;
+            }
+            if (g.return_power) std::ranges::copy(table, power.begin());
+            ++work.score_rows;
+        }
+        return true;
+    }
+    bool slopes(const receiver_detail::DriftAtomRequest& request, receiver_detail::DriftAtomResult& result,
+                receiver_detail::StageDeviceWork& work, std::stop_token stop) override {
+        using namespace receiver_detail;
+        {
+            std::lock_guard lock(owner_.mutex);
+            ++owner_.slope_calls;
+        }
+        if (owner_.mode_ != MirrorDriftBackend::Mode::staged_slopes) return false;
+        const auto columns = 2 * shape_.taps, nfft = shape_.nfft;
+        const auto radius = static_cast<std::int64_t>(shape_.frequency_radius);
+        const auto& staged = staging_.at(request.lane);
+        const modem::detail::search_fft::FloatPlan plan(nfft, stop);
+        std::vector<std::complex<float>> spectra(columns * nfft);
+        std::array<double, 2> nomination{-std::numeric_limits<double>::infinity(),
+                                         -std::numeric_limits<double>::infinity()};
+        for (std::size_t index = 0; index < request.slopes.size(); ++index) {
+            const double rate = request.slopes[index] * request.rate_step;
+            std::ranges::fill(spectra, std::complex<float>{});
+            for (std::size_t column = 0; column < columns; ++column) {
+                for (std::size_t j = 0; j < shape_.rows; ++j) {
+                    const double t = request.first_t + j * request.delta;
+                    spectra[column * nfft + j] = static_cast<std::complex<float>>(
+                        static_cast<Complex>(staged[column * shape_.rows + j]) *
+                        std::polar(1., -std::numbers::pi * rate * t * t));
+                }
+                modem::detail::search_fft::fft(std::span(spectra).subspan(column * nfft, nfft), false, plan, stop);
+            }
+            std::array<DriftPeakFrontier, 2> frontier{};
+            for (auto bin = -radius; bin <= radius; ++bin) {
+                const auto offset = static_cast<std::size_t>(bin < 0 ? bin + static_cast<std::int64_t>(nfft) : bin);
+                for (std::size_t bit = 0; bit < 2; ++bit) {
+                    const auto r0 = static_cast<Complex>(spectra[bit * shape_.taps * nfft + offset]);
+                    const auto r1 = shape_.taps == 2 ?
+                        static_cast<Complex>(spectra[(bit * shape_.taps + 1) * nfft + offset]) : Complex{};
+                    merge_drift_peak(frontier[bit], {std::norm(r0) + std::norm(r1), 0, bin});
+                    double normalized = 0;
+                    if (request.energy[bit][0] > 0) normalized += std::norm(r0) / request.energy[bit][0];
+                    if (shape_.taps == 2 && request.energy[bit][1] > 0) normalized += std::norm(r1) / request.energy[bit][1];
+                    nomination[bit] = std::max(nomination[bit], normalized);
+                }
+            }
+            for (std::size_t bit = 0; bit < 2; ++bit)
+                for (std::size_t rank = 0; rank < drift_frontier_ranks; ++rank)
+                    result.frontiers[(2 * index + bit) * drift_frontier_ranks + rank] =
+                        {frontier[bit][rank].rank, frontier[bit][rank].center};
+        }
+        result.nomination = nomination;
+        work.score_rows += request.slopes.size();
+        return true;
+    }
+    receiver_detail::BulkReceipt receipt() const override { return owner_.receipt(); }
+private:
+    MirrorDriftBackend& owner_;
+    receiver_detail::DriftBulkShape shape_;
+    std::vector<std::vector<std::complex<float>>> staging_;
+};
+
+std::unique_ptr<receiver_detail::DriftBulk> MirrorDriftBackend::make_drift(
+        const receiver_detail::DriftBulkShape& requested, bool, std::stop_token) {
+    ++factories;
+    shape = requested;
+    if (mode_ == Mode::declined) return {};
+    return std::make_unique<MirrorDrift>(*this, requested);
+}
+
+// The receiver's device drift plumbing against native scoring of the same
+// observation: staging, per-call native fallbacks, policy declines and the
+// unified-memory envelope leave every drift field bit-identical, and an
+// exact ridge mirror changes no record, slope, frontier or likelihood. The
+// staged-slope mirror stands in for a device slope route.
+void drift_device_mirror() {
+    using namespace receiver_detail;
+    auto input = fixture(std::nullopt, true, false, 2026);
+    input.config.frequency_bound_hz = 8;
+    input.config.spread_delay_seconds = .007;
+    input.config.spread_doppler_hz = 30;
+    input.config.time_varying_channel = true;
+    input.config.time_varying_common_doppler_hz = 8;
+    constexpr unsigned workers = 2;
+    const auto plan = drift_plan(input.config, input.slot, workers, false, 0, std::size_t{1} << 30);
+    check(plan.workspace_bytes && plan.status == "linear_drift_ridge_proposals" &&
+          plan.device_envelope_bytes == std::size_t{1} << 30, "the drift mirror fixture lost its ranked ridge plan");
+    std::vector<FineCoordinate> timings;
+    for (std::int64_t epoch = -5; epoch < 5; ++epoch) timings.push_back({epoch, .002 * (epoch % 3), 0, 0});
+    ReceiverExecutor executor(workers);
+    const auto run = [&](std::shared_ptr<ReceiverBulkBackend> backend) {
+        auto config = input.config;
+        config.bulk_backend = std::move(backend);
+        ReceiverSlotScore result;
+        score_drift_fine(config, input.slot, input.key, plan, input.iq, timings, {}, workers, result, {}, executor);
+        return result;
+    };
+    const auto same_bits = [](double a, double b) { return std::bit_cast<std::uint64_t>(a) == std::bit_cast<std::uint64_t>(b); };
+    const auto identical = [&](const ReceiverSlotScore& a, const ReceiverSlotScore& b) {
+        return same_bits(a.drift_bit_evidence[0], b.drift_bit_evidence[0]) &&
+               same_bits(a.drift_bit_evidence[1], b.drift_bit_evidence[1]) && a.drift_timing_atoms == b.drift_timing_atoms &&
+               a.drift_slopes == b.drift_slopes && a.drift_retained_digest == b.drift_retained_digest &&
+               a.drift_coherent_timing_fft_rows == b.drift_coherent_timing_fft_rows &&
+               a.drift_frequency_bins == b.drift_frequency_bins && a.drift_stage_workers == b.drift_stage_workers;
+    };
+    const auto native = run(nullptr);
+    check(native.drift_timing_atoms > 0 && native.drift_relative_doppler_models == 2 && native.drift_proposal_route.empty() &&
+          !native.drift_device_atoms && native.drift_retained_digest, "native drift lost its two signs or its digest");
+    using Mode = MirrorDriftBackend::Mode;
+    const auto exact = std::make_shared<MirrorDriftBackend>(Mode::exact_ridge);
+    const auto ridged = run(exact);
+    check(identical(ridged, native) && exact->factories == 1 && exact->ridge_calls > 0 && exact->slope_calls > 0 &&
+          ridged.drift_proposal_route == "device_fp32_fft_fp64_ridge_with_native_atoms" && ridged.drift_device_atoms &&
+          exact->shape.lanes == std::min<std::size_t>(plan.stage_workers, timings.size()) &&
+          exact->shape.rows == plan.rows && exact->shape.slope_budget == plan.slope_budget && exact->records.empty(),
+          "an exact device ridge with native slopes must reproduce native drift bit for bit");
+    // Every evaluation of the exact ridge mirror published a device ridge
+    // before its slopes fell back: each counts as a device atom, and the
+    // route names its native fallbacks. A ridge that also falls back
+    // leaves no device atom.
+    const auto fallback = std::make_shared<MirrorDriftBackend>(Mode::all_native);
+    const auto fallen = run(fallback);
+    check(identical(fallen, native) && fallback->ridge_calls > 0 && !fallback->slope_calls && !fallen.drift_device_atoms &&
+          fallen.drift_proposal_route == "device_fp32_fft_fp64_ridge_with_native_atoms",
+          "per-call native fallbacks must reproduce native drift bit for bit");
+    const auto declined = std::make_shared<MirrorDriftBackend>(Mode::declined);
+    const auto kept = run(declined);
+    check(identical(kept, native) && declined->factories == 1 && kept.drift_proposal_route.empty(),
+          "a declined drift session must leave native drift unchanged");
+    const auto envelope = std::make_shared<MirrorDriftBackend>(Mode::envelope);
+    check(identical(run(envelope), native) && !envelope->factories &&
+          envelope->host_queries == static_cast<std::size_t>(std::bit_width(plan.slope_budget)) &&
+          envelope->records.size() == 1 && envelope->records[0].first == StageReason::unified_memory_envelope &&
+          envelope->records[0].second == StageNative::fallback,
+          "a unified-memory lease outside the drift envelope must halve its batch, then record one fallback");
+    const auto discrete = std::make_shared<MirrorDriftBackend>(Mode::envelope, false);
+    check(identical(run(discrete), native) && !discrete->factories && discrete->records.size() == 1 &&
+          discrete->records[0].first == StageReason::workspace && discrete->records[0].second == StageNative::fallback,
+          "discrete-device host bytes outside the drift envelope must record a workspace fallback");
+    // A plan whose stage envelope holds no slack keeps the route native.
+    auto tight = plan;
+    tight.device_envelope_bytes = tight.workspace_bytes;
+    const auto starved = std::make_shared<MirrorDriftBackend>(Mode::exact_ridge);
+    {
+        auto config = input.config;
+        config.bulk_backend = starved;
+        ReceiverSlotScore result;
+        score_drift_fine(config, input.slot, input.key, tight, input.iq, timings, {}, workers, result, {}, executor);
+        check(identical(result, native) && !starved->factories && starved->records.size() == 1 &&
+              starved->records[0].first == StageReason::workspace, "drift device tables need their own envelope slack");
+    }
+    const auto staged = std::make_shared<MirrorDriftBackend>(Mode::staged_slopes);
+    const auto mirrored = run(staged);
+    const auto difference = std::max(std::abs(mirrored.drift_bit_evidence[0] - native.drift_bit_evidence[0]),
+                                     std::abs(mirrored.drift_bit_evidence[1] - native.drift_bit_evidence[1]));
+    check(mirrored.drift_timing_atoms == native.drift_timing_atoms && mirrored.drift_slopes == native.drift_slopes &&
+          mirrored.drift_device_atoms > 0 && mirrored.drift_proposal_route == "device_fp32_fft_fp64_ridge" &&
+          std::isfinite(difference), "a staged-input slope route must keep the drift atoms and slopes");
+    check(ridged.drift_device_atoms == mirrored.drift_device_atoms,
+          "an evaluation whose device ridge published must count as a device atom after a slope fallback");
+    // A drift-only FP64 reference on the same timing atoms (its own plan of
+    // the same geometry): how far native FP32 proposals and the staged-slope
+    // mirror sit from it. Reported, not gated: the qualified question is the
+    // device being no worse than native FP32 against FP64.
+    auto precise = input.config;
+    precise.native_coarse_precision = NativeCoarsePrecision::fp64;
+    const auto precise_plan = drift_plan(precise, input.slot, workers, false, 0, std::size_t{1} << 30);
+    check(precise_plan.workspace_bytes && precise_plan.rows == plan.rows && precise_plan.nfft == plan.nfft &&
+          precise_plan.slope_budget == plan.slope_budget && precise_plan.ridge_segments == plan.ridge_segments &&
+          precise_plan.slow_ridge_segments == plan.slow_ridge_segments,
+          "the FP64 drift reference must keep the FP32 plan's geometry");
+    ReceiverSlotScore reference;
+    score_drift_fine(precise, input.slot, input.key, precise_plan, input.iq, timings, {}, workers, reference, {}, executor);
+    const auto from_reference = [&](const ReceiverSlotScore& score) {
+        return std::max(std::abs(score.drift_bit_evidence[0] - reference.drift_bit_evidence[0]),
+                        std::abs(score.drift_bit_evidence[1] - reference.drift_bit_evidence[1]));
+    };
+    check(reference.drift_timing_atoms == native.drift_timing_atoms && reference.drift_slopes == native.drift_slopes &&
+          std::isfinite(from_reference(native)) && std::isfinite(from_reference(mirrored)),
+          "the FP64 drift reference must score the same atoms and slopes");
+    // A retained coherent line: the projected ranking copy feeds the same
+    // staging, so an exact ridge mirror stays bit-identical to native and
+    // the staged-slope mirror keeps the atoms and slopes.
+    const auto line_plan = drift_plan(input.config, input.slot, workers, true, 0, std::size_t{1} << 30);
+    check(line_plan.workspace_bytes && line_plan.project_data, "the drift mirror fixture lost its line-conditioned plan");
+    const LineAtom line{0, input.iq.size(), 3.25, 0};
+    const auto run_line = [&](std::shared_ptr<ReceiverBulkBackend> backend) {
+        auto config = input.config;
+        config.bulk_backend = std::move(backend);
+        ReceiverSlotScore result;
+        score_drift_fine(config, input.slot, input.key, line_plan, input.iq, timings, {}, workers, result, {}, executor,
+                         &line);
+        return result;
+    };
+    const auto line_native = run_line(nullptr);
+    const auto line_exact = std::make_shared<MirrorDriftBackend>(Mode::exact_ridge);
+    const auto line_ridged = run_line(line_exact);
+    const auto line_staged = std::make_shared<MirrorDriftBackend>(Mode::staged_slopes);
+    const auto line_mirrored = run_line(line_staged);
+    check(line_native.drift_timing_atoms > 0 && line_native.drift_proposal_route.empty() &&
+          identical(line_ridged, line_native) && line_exact->ridge_calls > 0 &&
+          line_ridged.drift_proposal_route == "device_fp32_fft_fp64_ridge_with_native_atoms" &&
+          line_ridged.drift_device_atoms == line_mirrored.drift_device_atoms &&
+          line_mirrored.drift_timing_atoms == line_native.drift_timing_atoms &&
+          line_mirrored.drift_slopes == line_native.drift_slopes && line_mirrored.drift_device_atoms > 0 &&
+          line_mirrored.drift_proposal_route == "device_fp32_fft_fp64_ridge" && line_mirrored.drift_retained_digest,
+          "a line-conditioned drift stage must keep its device route, atoms and slopes");
+    const auto line_difference = std::max(std::abs(line_mirrored.drift_bit_evidence[0] - line_native.drift_bit_evidence[0]),
+                                          std::abs(line_mirrored.drift_bit_evidence[1] - line_native.drift_bit_evidence[1]));
+    std::cerr << "drift device mirror atoms=" << mirrored.drift_device_atoms << " digest "
+              << (mirrored.drift_retained_digest == native.drift_retained_digest ? "equal" : "differs")
+              << " |delta evidence|=" << difference << " ridge segments=" << staged->shape.segments
+              << " slow segments=" << staged->shape.slow_segments
+              << "; fp64 reference: native digest "
+              << (native.drift_retained_digest == reference.drift_retained_digest ? "equal" : "differs")
+              << " |delta|=" << from_reference(native) << ", staged digest "
+              << (mirrored.drift_retained_digest == reference.drift_retained_digest ? "equal" : "differs")
+              << " |delta|=" << from_reference(mirrored)
+              << "; line: atoms=" << line_mirrored.drift_device_atoms << " digest "
+              << (line_mirrored.drift_retained_digest == line_native.drift_retained_digest ? "equal" : "differs")
+              << " |delta evidence|=" << line_difference << '\n';
+}
+
+// An ordinary (unextended) drift plan widens past its former eight lanes
+// only into the largest other stage of its owner lease. At W10 the short
+// drift slot is drift-led and keeps the eight-lane width and lease; at W24
+// other stages leave headroom and it widens without changing its lease.
+void ordinary_drift_width_keeps_owner_lease() {
+    using namespace receiver_detail;
+    constexpr auto unlimited = std::numeric_limits<std::size_t>::max();
+    std::array<std::size_t, 2> shapes{};
+    auto input = fixture(std::nullopt, true, false, 2026);
+    input.config.frequency_bound_hz = 8;
+    input.config.spread_delay_seconds = .007;
+    input.config.spread_doppler_hz = 30;
+    input.config.time_varying_channel = true;
+    input.config.time_varying_common_doppler_hz = 8;
+    const auto input_bytes = input.iq.size() * (sizeof(Complex) + sizeof(std::uint8_t)) + 64 * 1024;
+    for (const unsigned workers : {10U, 24U}) {
+        const auto floor = drift_plan(input.config, input.slot, workers);
+        const auto floor_line = drift_plan(input.config, input.slot, workers, true);
+        const auto unbounded = drift_plan(input.config, input.slot, workers, false, 0, unlimited);
+        const auto admitted = receiver_drift_admission(input.config, input.slot, workers);
+        const auto lease = receiver_slot_workspace(input.config, input.slot, workers);
+        const auto stage = lease - input_bytes;
+        const auto drift_stage = std::max(floor.workspace_bytes, admitted.line.workspace_bytes ?
+            floor_line.workspace_bytes : std::size_t{0});
+        check(floor.workspace_bytes && floor.stage_workers == 8 && unbounded.stage_workers == workers &&
+              unbounded.workspace_bytes > floor.workspace_bytes && unbounded.nfft == floor.nfft &&
+              unbounded.status == floor.status && admitted.ordinary.status == floor.status &&
+              admitted.workspace_bytes == lease &&
+              admitted.overlap_workspace_bytes == receiver_slot_overlap_workspace(input.config, input.slot, workers),
+              "short drift fixture no longer plans an ordinary eight-lane floor below the worker budget");
+        std::cerr << "ordinary drift W" << workers << " lease=" << lease << " stage=" << stage
+                  << " floor=" << floor.workspace_bytes << '/' << floor.stage_workers
+                  << " admitted=" << admitted.ordinary.workspace_bytes << '/' << admitted.ordinary.stage_workers
+                  << " line=" << admitted.line.workspace_bytes << '/' << admitted.line.stage_workers
+                  << " unbounded=" << unbounded.workspace_bytes << '\n';
+        ++shapes[drift_stage != stage];
+        if (drift_stage == stage) {
+            // Drift sets the lease: no other stage leaves headroom.
+            check(admitted.ordinary.stage_workers == floor.stage_workers &&
+                  admitted.ordinary.workspace_bytes == floor.workspace_bytes && unbounded.workspace_bytes > stage,
+                  "a drift-led owner lease must keep the former drift width and quote");
+        } else {
+            const auto wider = drift_plan(input.config, input.slot, admitted.ordinary.stage_workers + 1, false, 0,
+                                          unlimited);
+            // Unbounded widening would make drift lead and raise this lease.
+            check(drift_stage < stage && unbounded.workspace_bytes > stage &&
+                  admitted.ordinary.stage_workers > floor.stage_workers &&
+                  admitted.ordinary.workspace_bytes <= stage && admitted.line.workspace_bytes <= stage &&
+                  (admitted.ordinary.stage_workers == workers || wider.workspace_bytes > stage),
+                  "ordinary drift must take the widest width inside other-stage headroom");
+        }
+        const auto scored = score_receiver_slot(input.config, input.slot, input.key, input.iq, input.valid, workers,
+                                                workspace_limit);
+        check(scored.complete && scored.workspace_peak_bytes == lease &&
+              scored.drift_planned_stage_workers == admitted.ordinary.stage_workers &&
+              scored.drift_line_planned_stage_workers == admitted.line.stage_workers &&
+              scored.drift_timing_atoms && scored.drift_stage_workers &&
+              scored.drift_stage_workers <= admitted.ordinary.stage_workers,
+              "a drift slot must execute its admitted width inside the unchanged lease");
+    }
+    check(shapes[0] && shapes[1], "ordinary drift width fixtures no longer cover drift-led and headroom leases");
+}
+
 // One short DATA window per case, same observation and declared static
 // search with and without the added model. Exact channel slope, offset and
 // timing go only to the independent waveform generator.
@@ -813,11 +1424,13 @@ void long_calm_drift_owner_lease(bool active = true, std::uint8_t bit = 0, bool 
     const auto larger = receiver_drift_admission(narrow_clock, narrow_slot, workers);
     // This reproduces the formerly omitted model at an eight-lane owner
     // shape, which automatic W24 can also admit as part of a balanced group.
+    // W24 widens past the former eight-lane drift cap only inside the same
+    // preserved owner lease.
     check(smaller.workspace_bytes == 276033982ULL && larger.workspace_bytes == 453996094ULL &&
           smaller.ordinary.workspace_bytes && smaller.line.workspace_bytes &&
           smaller.ordinary.stage_workers > 0 && smaller.ordinary.stage_workers < 8 &&
           smaller.line.stage_workers > 0 && smaller.line.stage_workers < 8 &&
-          larger.ordinary.stage_workers == 8 && larger.line.stage_workers == 8 &&
+          larger.ordinary.stage_workers == 9 && larger.line.stage_workers == 9 &&
           smaller.ordinary.nfft == larger.ordinary.nfft &&
           smaller.ordinary.slope_budget == larger.ordinary.slope_budget &&
           smaller.ordinary.frequency_radius == larger.ordinary.frequency_radius &&
@@ -902,6 +1515,9 @@ void long_calm_drift_owner_lease(bool active = true, std::uint8_t bit = 0, bool 
         check(difference < 1e-9 && cached.drift_timing_atoms == recomputed.drift_timing_atoms &&
               cached.drift_slopes == recomputed.drift_slopes && cached.drift_coherent_timing_fft_rows > 0,
               "cached zero-slope frontiers must preserve recomputed native likelihood and selected public atoms");
+        check(cached.drift_render_seconds > 0 && cached.drift_ridge_seconds > 0 &&
+              cached.drift_ridge_search_seconds > 0 && cached.drift_slope_seconds > 0 &&
+              cached.drift_exact_seconds > 0, "every executed drift phase must report its lane-summed time");
         std::cerr << "cached/recomputed drift evidence max difference=" << difference << '\n';
     }
     if (cache_only) return;
@@ -910,7 +1526,8 @@ void long_calm_drift_owner_lease(bool active = true, std::uint8_t bit = 0, bool 
           score.decision == SlotDecision::data && score.operational_passes_conditional_bound &&
           score.drift_relative_doppler_models == 2 && score.drift_slopes >= 6 &&
           score.drift_timing_atoms >= 16 && score.drift_timing_atoms <= 20 &&
-          score.drift_coherent_timing_fft_rows > 0 && score.drift_stage_workers == 8 &&
+          score.drift_coherent_timing_fft_rows > 0 && score.drift_stage_workers == 15 &&
+          score.drift_planned_stage_workers == 15 && score.drift_line_planned_stage_workers == 14 &&
           score.drift_status == "linear_drift_ridge_proposals_within_preserved_owner_lease" &&
           score.drift_line_status == "eligible_not_executed",
           "ordinary reception lost a long calm delayed ray under conservative GUI bounds");
@@ -1953,32 +2570,14 @@ void signed_relative_doppler_endpoints() {
           "zero relative Doppler must retain the original single drift model and timing mass");
 }
 
+// The signed-gain fixtures (triad_signed_gain_fixture.hpp), shared with the
+// Vulkan gain-rank checks.
+using namespace signed_gain_fixtures;
+
 void signed_gain_timing_and_exact_admission() {
     using namespace receiver_detail;
-    PublicProfileConfig profile_config;
-    auto& format = profile_config.format;
-    format.sample_rate = 1920;
-    format.inner_rate_hz = 36;
-    format.added_symbols = 10;
-    format.bit_seconds = 278.4;
-    format.epoch = 1793404800;
-    format.encrypt = true;
-    profile_config.data_if_hz = 240;
-    profile_config.clock_bound_ppm = 150;
-    profile_config.spread_delay_ms = 7;
-    profile_config.arrival_high_seconds = .01;
-    profile_config.cfo_bound_hz = 90;
-    profile_config.capture_lead_seconds = .25;
-    ReceiverConfig config;
-    config.sample_rate_hz = format.sample_rate;
-    config.data_if_hz = profile_config.data_if_hz;
-    config.clock_bound_ppm = profile_config.clock_bound_ppm;
-    config.spread_delay_seconds = .007;
-    config.time_varying_atmospheric_hz = 90;
-    config.time_varying_common_doppler_hz = 90;
-    config.time_varying_channel = true;
-    config.random_doppler_width_hz = 30;
-    config.noise_variance = .003;
+    const auto profile_config = signed_gain_profile_config();
+    const auto config = signed_gain_receiver_config(profile_config);
     const std::array intervals{FrequencyInterval{0, 0}};
     const PublicProfile long_profile(profile_config);
     const auto long_slot = make_receiver_slot_plan(long_profile, config, 6);
@@ -1997,21 +2596,13 @@ void signed_gain_timing_and_exact_admission() {
           late_rank.gain_direct_blocks > 0 && late_rank.gain_fft_stage_bound > (std::uint64_t{1} << 32),
           "the stationary sampling budget must not discard admissible full-aperture direct timing");
 
-    format.bit_seconds = 1.;
-    const PublicProfile short_profile(profile_config);
-    const auto slot = make_receiver_slot_plan(short_profile, config, 5);
+    const auto short_fixture = signed_gain_fixture(-1);
+    const PublicProfile short_profile(short_fixture.profile_config);
+    const auto& slot = short_fixture.slot;
+    const auto& iq = short_fixture.iq;
     const auto key = Crypto::amateur();
-    PatternSource source(slot.format, key, 0);
-    std::vector<Complex> iq(slot.stop_sample - slot.first_sample);
-    constexpr long double realized_scale = 1 - 100e-6L;
+    const auto realized_scale = short_fixture.rate;
     check(iq.size() < 25'000, "signed gain timing fixture must remain bounded");
-    for (std::size_t i = 0; i < iq.size(); ++i) {
-        const auto t = i / static_cast<long double>(format.sample_rate) - slot.window_capture_lead_seconds;
-        const auto position = (t * realized_scale - slot.source_start_seconds) * format.sample_rate;
-        const auto delayed = position - config.spread_delay_seconds * realized_scale * format.sample_rate;
-        const auto phase = std::polar(1., .4 + .08 * std::sin(.013 * i));
-        iq[i] = source.sample_at(position) + .5 * phase * source.sample_at(delayed);
-    }
     const auto quote = coarse_workspace(config, slot, 2, {}, MidpointTimingEvaluation::verify);
     rejects<ReceiverWorkspaceError>([&] {
         (void)score_coarse(config, slot, key, iq, intervals, 2, quote - 1, {}, nullptr, MidpointTimingEvaluation::verify);
@@ -2069,13 +2660,10 @@ void signed_gain_timing_and_exact_admission() {
     // lag FFT. Exercise two widths and both clock signs without rendering
     // a full calendar prefix. The diagnostic checks every tiled lag and
     // frequency for one block against an independent finite direct sum.
-    for (auto bit : {std::uint8_t{0}, std::uint8_t{1}}) {
-        auto aged_format = profile_config;
-        if (bit) aged_format.format.added_symbols = 5;
-        auto wide_config = config;
-        wide_config.spread_doppler_hz = 90;
-        const PublicProfile aged_profile(aged_format);
-        const auto aged = make_receiver_slot_plan(aged_profile, wide_config, bit ? 192 : 128);
+    for (const int bit : {0, 1}) {
+        const auto fixture = signed_gain_fixture(bit);
+        const auto& wide_config = fixture.config;
+        const auto& aged = fixture.slot;
         const auto plan = coarse_midpoint_timing_support(wide_config, aged, 2);
         const auto stages_per_fft = std::uint64_t{plan.gain_fft_rows} * std::countr_zero(plan.gain_fft_rows);
         const auto old_bound = stages_per_fft * (plan.gain_sampled_blocks *
@@ -2086,16 +2674,7 @@ void signed_gain_timing_and_exact_admission() {
               plan.gain_frequency_status == "common_plus_relative_doppler" &&
               plan.gain_fft_stage_bound < old_bound && aged.stop_sample - aged.first_sample < 40'000,
               "aged signed-rank test must quote a bounded tiled transform reduction");
-        const auto rate = 1 + (bit ? 75e-6L : -100e-6L);
-        PatternSource aged_source(aged.format, key, bit);
-        std::vector<Complex> aged_iq(aged.stop_sample - aged.first_sample);
-        for (std::size_t i = 0; i < aged_iq.size(); ++i) {
-            const auto t = i / static_cast<long double>(format.sample_rate) - aged.window_capture_lead_seconds;
-            const auto position = (t * rate - aged.source_start_seconds) * format.sample_rate;
-            const auto delayed = position - config.spread_delay_seconds * rate * format.sample_rate;
-            aged_iq[i] = aged_source.sample_at(position) +
-                std::polar(.5, .4 + .08 * std::sin(.013 * i)) * aged_source.sample_at(delayed);
-        }
+        const auto& aged_iq = fixture.iq;
         const auto aged_quote = coarse_workspace(wide_config, aged, 2, {}, MidpointTimingEvaluation::verify);
         const auto tiled = score_coarse(wide_config, aged, key, aged_iq, intervals, 2, aged_quote,
                                         {}, nullptr, MidpointTimingEvaluation::verify);
@@ -2113,6 +2692,705 @@ void signed_gain_timing_and_exact_admission() {
               "tiled signed gain timing must verify every lag/frequency on both bits and charge full work");
     }
 }
+
+// The per-block shift expression used before exact shift runs, kept here as an
+// independent reference.
+std::int64_t reference_gain_shift(const receiver_detail::GainShiftGeometry& g,
+                                  const receiver_detail::FineCoordinate& coordinate, std::size_t block) {
+    const auto first = block * g.block_rows;
+    const auto rows = std::min(g.block_rows, g.kernel_rows - first);
+    const auto time = g.origin + (first + (rows - 1.L) / 2) / g.output_fs - (g.taps - 1.L) / (2 * g.fs);
+    const auto epsilon = coordinate.clock_ppm * 1e-6L;
+    return std::llround(g.output_fs *
+        (coordinate.arrival_seconds - g.arrival_lower_seconds - time * epsilon / (1 + epsilon)));
+}
+
+void reference_gain_shifts(const receiver_detail::GainShiftMap& map,
+                           std::span<const receiver_detail::FineCoordinate> coordinates, std::size_t block,
+                           std::span<std::int64_t> shifts) {
+    for (std::size_t lag = 0; lag < shifts.size(); ++lag)
+        shifts[lag] = reference_gain_shift(map.geometry(), coordinates[lag], block);
+}
+
+// Visits every block in the rank's lane order with the production cursor and
+// compares its vector and extremes with the per-block reference at every
+// re-evaluation and at every `stride`-th block (all blocks when 1). Returns
+// the shift vectors evaluated.
+std::uint64_t check_gain_shift_lanes(const receiver_detail::GainShiftMap& map,
+                                     std::span<const receiver_detail::FineCoordinate> coordinates,
+                                     std::span<const std::size_t> samples, unsigned workers, bool full_direct,
+                                     const char* reason, std::size_t stride = 1) {
+    using namespace receiver_detail;
+    const auto blocks = map.blocks();
+    std::vector<std::uint8_t> sampled(blocks);
+    for (const auto block : samples) sampled[block] = 1;
+    const auto fixed_lanes = std::min<std::size_t>(workers, samples.size());
+    const auto rank_lanes = full_direct ? std::min<std::size_t>(workers, blocks) : fixed_lanes;
+    std::vector<std::int64_t> shifts(map.lags()), reference(map.lags());
+    std::uint64_t vectors = 0;
+    std::size_t visits = 0;
+    const auto visit = [&](GainShiftCursor& cursor, std::size_t block, std::size_t horizon) {
+        const auto evaluated = cursor.seek(map, block, horizon, shifts);
+        ++visits;
+        if (!evaluated && block % stride && block + 1 != blocks) return;
+        reference_gain_shifts(map, coordinates, block, reference);
+        const auto [low, high] = std::ranges::minmax(reference);
+        check(shifts == reference && cursor.first_shift == low && cursor.last_shift == high &&
+              cursor.begin <= block && block < cursor.end, reason);
+    };
+    for (std::size_t lane = 0; lane < rank_lanes; ++lane) {
+        GainShiftCursor cursor;
+        if (lane < fixed_lanes)
+            for (auto sample = lane; sample < samples.size(); sample += fixed_lanes)
+                visit(cursor, samples[sample], sample + fixed_lanes < samples.size() ?
+                      samples[sample + fixed_lanes] : blocks);
+        if (full_direct && samples.size() < blocks)
+            for (auto block = lane; block < blocks; block += rank_lanes) {
+                if (sampled[block]) continue;
+                auto next = block + rank_lanes;
+                while (next < blocks && sampled[next]) next += rank_lanes;
+                visit(cursor, block, std::min(next, blocks));
+            }
+        vectors += cursor.vectors;
+    }
+    check(visits == (full_direct ? blocks : samples.size()) && vectors <= visits, reason);
+    return vectors;
+}
+
+// Exact run enumeration: every block of a run has the run's vector, adjacent
+// runs differ, and the run lookup agrees. Returns the run count.
+std::size_t check_gain_shift_runs(const receiver_detail::GainShiftMap& map,
+                                  std::span<const receiver_detail::FineCoordinate> coordinates, const char* reason) {
+    using namespace receiver_detail;
+    const auto runs = gain_shift_runs(map, map.blocks());
+    const auto lags = map.lags();
+    check(!runs.overflow && !runs.range && !runs.first_blocks.empty() && runs.first_blocks.front() == 0 &&
+          runs.count == runs.first_blocks.size() && runs.relative.size() == runs.first_blocks.size() * lags, reason);
+    std::vector<std::int64_t> reference(lags), previous;
+    for (std::size_t run = 0; run < runs.first_blocks.size(); ++run) {
+        const auto end = run + 1 < runs.first_blocks.size() ? runs.first_blocks[run + 1] : map.blocks();
+        std::vector<std::int64_t> vector(lags);
+        for (std::size_t lag = 0; lag < lags; ++lag)
+            vector[lag] = runs.first_shift[run] + runs.relative[run * lags + lag];
+        check(vector != previous && std::ranges::min(vector) == runs.first_shift[run] &&
+              std::ranges::max(vector) == runs.last_shift[run], reason);
+        for (auto block = runs.first_blocks[run]; block < end; ++block) {
+            reference_gain_shifts(map, coordinates, block, reference);
+            check(reference == vector && runs.run(block) == run, reason);
+        }
+        previous = std::move(vector);
+    }
+    if (runs.first_blocks.size() > 1) {
+        const auto capped = gain_shift_runs(map, runs.first_blocks.size() - 1);
+        check(capped.overflow && !capped.range && capped.first_blocks.empty() && capped.relative.empty() &&
+              capped.count == runs.first_blocks.size(),
+              "signed gain shift runs must report overflow, with the overflowing count, instead of truncating");
+    }
+    return runs.first_blocks.size();
+}
+
+void signed_gain_shift_runs() {
+    using namespace receiver_detail;
+    // Receiver fixtures: the short aged slot and both aged later slots.
+    for (const int aged : {-1, 0, 1}) {
+        const auto fixture = signed_gain_fixture(aged);
+        const auto setup = coarse_gain_shift_setup(fixture.config, fixture.slot, 2);
+        const GainShiftMap map(setup.geometry, setup.coordinates);
+        check(map.blocks() == setup.blocks && map.lags() == setup.coordinates.size(),
+              "signed gain shift setup must describe the planned rank");
+        for (const unsigned workers : {1u, 2u, 3u, 7u})
+            check_gain_shift_lanes(map, setup.coordinates, setup.sampled, workers, setup.full_direct,
+                                   "signed gain shift runs must reproduce every per-block shift");
+        check(check_gain_shift_runs(map, setup.coordinates, "signed gain run enumeration must be exact") > 1,
+              "the 150 ppm signed gain fixtures must exercise shift run boundaries");
+    }
+    // Synthetic 72 Hz/5x shape: 3028 32-row blocks at 750 Hz and 10553 lags,
+    // with a disciplined clock (one run) and a 150 ppm clock (a run per block).
+    GainShiftGeometry geometry{750, 9000, 513, 32, 3028 * 32 - 5, -(3028 * 32 - 5) / 1500.L, .0125};
+    for (const double bound : {.01, 150.}) {
+        std::vector<FineCoordinate> coordinates(10553);
+        for (std::size_t lag = 0; lag < coordinates.size(); ++lag)
+            coordinates[lag] = {0, .0125 + (lag + .25) / 750., 0, bound * std::sin(.37 * lag)};
+        const GainShiftMap map(geometry, coordinates);
+        std::vector<std::size_t> samples;
+        for (std::size_t sample = 0; sample < 256; ++sample) samples.push_back(sample * map.blocks() / 256 + sample % 7);
+        const auto vectors = check_gain_shift_lanes(map, coordinates, samples, 24, true,
+                                                    "synthetic signed gain shift runs must stay exact", 16);
+        // The lane check above already compared every block with the reference.
+        if (bound < 1)
+            check(vectors <= 2 * 24 && !gain_shift_runs(map, 1).overflow,
+                  "a disciplined clock must form one run, evaluated at most once per lane pass");
+        else
+            check(gain_shift_runs(map, 64).overflow && gain_shift_runs(map, 64).count == 65,
+                  "a 150 ppm 72 Hz/5x map must exceed the device run limit");
+    }
+    // Relative shifts beyond the int32 table range are reported apart from the run cap.
+    const std::array wide{FineCoordinate{0, 0, 0, 0}, FineCoordinate{0, 3e6, 0, 0}};
+    const auto range = gain_shift_runs(GainShiftMap(geometry, wide), 64);
+    check(range.overflow && range.range && range.count == 1 && range.first_blocks.empty(),
+          "a shift span beyond the int32 table must overflow as a range error");
+}
+
+void signed_gain_certification_contract() {
+    using namespace receiver_detail;
+    constexpr std::size_t lags = 40, audits = 4, unsampled = 1000;
+    constexpr std::size_t cells = 2 * lags;
+    // Native totals N = S + U with one clear winner per bit; the rescoring
+    // returns U exactly, the device U plus an error.
+    std::vector<double> native(cells), sampled(cells), exact(cells), device(cells);
+    for (std::size_t bit = 0; bit < 2; ++bit)
+        for (std::size_t lag = 0; lag < lags; ++lag) {
+            const auto i = bit * lags + lag;
+            native[i] = 1000 + 40 * std::cos(.3 * lag + bit) + (lag == 7 + 9 * bit ? 100 : 0);
+            sampled[i] = .1 * native[i];
+            exact[i] = native[i] - sampled[i];
+        }
+    std::vector<double> audit_native(audits * cells);
+    for (std::size_t i = 0; i < audit_native.size(); ++i) audit_native[i] = 1 + 20 * std::sin(.7 * i);
+    const auto hash = [](std::size_t i) {
+        const auto x = std::sin(12.9898 * static_cast<double>(i + 1)) * 43758.5453;
+        return x - std::floor(x) - .5;
+    };
+    struct Case {
+        double device_error = 1e-6, audit_error = 1e-6, spike = 0;
+        std::size_t audits = 4;
+    };
+    const auto run = [&](const Case& c, const GainCertificationLimits& limits) {
+        for (std::size_t i = 0; i < cells; ++i) device[i] = exact[i] + c.device_error * hash(i);
+        device[7] += c.spike;
+        std::vector<float> audit_device(c.audits * cells);
+        for (std::size_t i = 0; i < audit_device.size(); ++i)
+            audit_device[i] = static_cast<float>(audit_native[i] + c.audit_error * hash(7 * i + 3));
+        const auto rescore = [&](std::array<std::span<const std::size_t>, 2> frontier,
+                                 std::array<std::span<double>, 2> sums, std::array<std::span<double>, 2> magnitudes) {
+            for (std::size_t bit = 0; bit < 2; ++bit)
+                for (std::size_t j = 0; j < frontier[bit].size(); ++j) {
+                    sums[bit][j] = exact[bit * lags + frontier[bit][j]];
+                    magnitudes[bit][j] = std::abs(sums[bit][j]);
+                }
+        };
+        return certify_gain_direct_rank({lags, unsampled, unsampled + c.audits, sampled, device,
+            std::span<const double>(audit_native).first(c.audits * cells), audit_device}, limits, rescore);
+    };
+    const GainCertificationLimits limits;
+    const auto clean = run({}, limits);
+    check(clean.fallback.empty() && clean.bits[0].best_lag == 7 && clean.bits[1].best_lag == 16 &&
+          clean.rescored_lags == clean.frontier_lags && clean.frontier_lags == 2 * limits.frontier_minimum &&
+          clean.bits[0].band >= clean.bits[0].floor_band && clean.bits[0].band >= clean.bits[0].audit_band,
+          "certification must publish the native argmax of a clean device rank");
+    for (std::size_t i = 0; i < cells; ++i)
+        check(std::isinf(clean.nomination[i]) || std::abs(clean.nomination[i] - native[i]) <= 1e-12 * native[i],
+              "certified nominations must use FP64 rescored totals on the frontier only");
+    // Larger audited errors widen the band and grow the frontier, never the lags.
+    auto previous = clean.frontier_lags;
+    for (const double error : {1e-2, 1e-1, .5}) {
+        const auto wider = run({error, error}, limits);
+        check(wider.fallback.empty() && wider.frontier_lags >= previous && wider.bits[0].best_lag == 7 &&
+              wider.bits[1].best_lag == 16 && wider.bits[0].band_source == "audit",
+              "a wider audit band must grow the frontier while publishing native lags");
+        previous = wider.frontier_lags;
+    }
+    check(previous > clean.frontier_lags, "the audit band must be able to grow the frontier");
+    // A device error on a frontier lag beyond the audited band.
+    const auto violated = run({.spike = 10 * clean.bits[0].band + 1}, limits);
+    check(violated.fallback == gain_certification_band && violated.bits[0].maximum_error > violated.bits[0].band,
+          "a device total outside its band on the frontier must request native");
+    auto narrow = limits;
+    narrow.frontier_maximum = 12;
+    const auto overflow = run({1, 2}, narrow);
+    check(overflow.fallback == gain_certification_overflow && overflow.bits[0].frontier > 12,
+          "a frontier beyond its predeclared size must request native");
+    // Two native totals closer than the roundoff threshold.
+    exact[3] = native[7] - 1e-9 - sampled[3];
+    const auto tie = run({}, limits);
+    check(tie.fallback == gain_certification_tie && tie.bits[0].top2_gap < tie.bits[0].tie_threshold,
+          "a native near-tie must request native");
+    exact[3] = native[3] - sampled[3];
+    auto strict = limits;
+    strict.near_tie = 1;
+    check(run({}, strict).fallback == gain_certification_tie, "a forced near-tie threshold must request native");
+    check(run({.audits = 0}, limits).fallback == gain_certification_no_audit,
+          "certification without audit blocks must request native");
+    check(run({.device_error = std::numeric_limits<double>::quiet_NaN()}, limits).fallback == gain_certification_nonfinite,
+          "nonfinite device totals must request native");
+    check(run({.audit_error = std::numeric_limits<double>::infinity()}, limits).fallback == gain_certification_nonfinite,
+          "nonfinite device audit values must request native");
+}
+
+// Clean per-block mirror values of one fixture's request, shared by its trials.
+struct MirrorGainValues {
+    receiver_detail::GainRankShape shape{};
+    std::vector<float> values;                    // [block][2][lags]
+};
+
+// C++ stand-in for the unfused device kernels behind the backend seam:
+// FP64 native FFTs of the device tile, then the FP32 emission
+// g^2|r|^2 - logdet and two-pass FP32 log-mean-exp per block, and FP64
+// block-order sums. Optional perturbations exercise the certification. Like
+// the Vulkan factory, every factory call counts a planned call; a declined
+// or fallen-back session, or a refused call, records the backend's own
+// reason and counter in its receipt, and the receiver's own reasons arrive
+// through record_stage_native.
+struct MirrorGainBackend final : receiver_detail::ReceiverBulkBackend {
+    double noise = 0, audit_noise = 0, spike = 0;
+    std::size_t spike_lag = 0;
+    // Backend reasons; empty accepts. A session fallback is the factory's
+    // planned fallback, such as a refused lease.
+    std::string_view session_decline, session_fallback, call_decline;
+    bool silent = false;                              // decline the session without a reason
+    std::size_t sessions = 0, calls = 0, releases = 0;
+    bool released_at_certification = false;
+    receiver_detail::GainRankShape shape{};
+    std::size_t blocks = 0, audits = 0, observation_rows = 0, max_outputs = 0;
+    std::shared_ptr<MirrorGainValues> cache;
+    receiver_detail::BulkReceipt work;
+    struct Native {
+        receiver_detail::StageFamily family;
+        receiver_detail::StageReason reason;
+        receiver_detail::StageNative kind;
+    };
+    std::vector<Native> natives;                      // the receiver's own records, in order
+
+    struct Session final : receiver_detail::GainRankBulk {
+        MirrorGainBackend& backend;
+        receiver_detail::GainRankShape shape;
+        Session(MirrorGainBackend& owner, const receiver_detail::GainRankShape& planned)
+            : backend(owner), shape(planned) {}
+        bool direct_ranks(const receiver_detail::GainRankRequest& request, std::span<double> totals,
+                          std::span<float> audit, receiver_detail::StageDeviceWork&, std::stop_token stop) override {
+            return backend.direct_ranks(shape, request, totals, audit, stop);
+        }
+        receiver_detail::BulkReceipt receipt() const override { return backend.work; }
+        void release() override { ++backend.releases; }
+        void record_certification(const receiver_detail::GainRankCertificationRecord&) override {
+            backend.released_at_certification = backend.releases == backend.calls;
+        }
+    };
+    std::unique_ptr<receiver_detail::GainRankBulk> make_gain_rank(const receiver_detail::GainRankShape& planned,
+                                                                  bool fp64_forced, std::stop_token) override {
+        ++sessions;
+        shape = planned;
+        check(!fp64_forced, "the signed-gain fixtures request no FP64 coarse search");
+        auto& stage = work.vulkan_gain_rank;
+        ++stage.planned_calls;
+        if (silent) return nullptr;
+        if (!session_decline.empty()) {
+            ++stage.declined_calls;
+            if (stage.decline_reason.empty()) stage.decline_reason = session_decline;
+            return nullptr;
+        }
+        if (!session_fallback.empty()) {
+            ++stage.native_fallbacks;
+            if (stage.fallback_reason.empty()) stage.fallback_reason = session_fallback;
+            return nullptr;
+        }
+        return std::make_unique<Session>(*this, planned);
+    }
+    // The mirror's policy accepts every shape; its factory and calls decline.
+    std::string_view stage_decline(const receiver_detail::StageShape&, bool) const noexcept override { return {}; }
+    void record_stage_native(receiver_detail::StageFamily family, receiver_detail::StageReason reason,
+                             receiver_detail::StageNative kind) override {
+        natives.push_back({family, reason, kind});
+    }
+    std::unique_ptr<receiver_detail::FineBulk> make_fine(double, double) override { return {}; }
+    std::unique_ptr<receiver_detail::CoarseBulk> make_coarse(double, double) override { return {}; }
+    std::size_t fine_host_bytes(std::size_t, std::size_t) const override { return 0; }
+    std::size_t coarse_host_bytes(std::size_t, std::size_t, std::size_t) const override { return 0; }
+    receiver_detail::BulkReceipt receipt() const override { return work; }
+
+    bool direct_ranks(const receiver_detail::GainRankShape& s, const receiver_detail::GainRankRequest& request,
+                      std::span<double> totals, std::span<float> audit, std::stop_token stop) {
+        using namespace receiver_detail;
+        ++calls;
+        blocks = request.blocks.size();
+        audits = audit.size() / (2 * s.lags);
+        observation_rows = request.observation.size();
+        max_outputs = 0;
+        for (const auto& block : request.blocks) max_outputs = std::max<std::size_t>(max_outputs, block.outputs);
+        if (!call_decline.empty()) {
+            ++work.vulkan_gain_rank.native_fallbacks;
+            if (work.vulkan_gain_rank.fallback_reason.empty()) work.vulkan_gain_rank.fallback_reason = call_decline;
+            return false;
+        }
+        const auto tile = s.tile_fft_rows, lags = s.lags, frequencies = s.direct_frequencies;
+        const auto capacity = tile - s.block_rows + 1;
+        const auto unit_bin = static_cast<std::int64_t>(s.frequency_stride * (tile / (2 * s.block_rows)));
+        const modem::detail::search_fft::DoublePlan plan(tile, stop);
+        const auto unsampled = request.blocks.size() - audits;
+        std::vector<double> sums(2 * lags);
+        std::vector<float> values(2 * lags), emissions(2 * lags * frequencies);
+        std::array<std::vector<Complex>, 2> spectra{std::vector<Complex>(tile), std::vector<Complex>(tile)};
+        std::vector<Complex> y(tile), product(tile), correlations;
+        const auto transform = [&](std::span<const Complex> input, std::span<Complex> output, bool inverse) {
+            std::ranges::copy(input, output.begin());
+            std::fill(output.begin() + input.size(), output.end(), Complex{});
+            modem::detail::search_fft::fft(output, inverse, plan, stop);
+        };
+        const auto hash = [](std::size_t i) {
+            const auto x = std::sin(12.9898 * static_cast<double>(i % 1000003 + 1)) * 43758.5453;
+            return x - std::floor(x) - .5;
+        };
+        const bool cached = cache && cache->shape == s && cache->values.size() == request.blocks.size() * 2 * lags;
+        if (cache && !cached) {
+            cache->shape = s;
+            cache->values.assign(request.blocks.size() * 2 * lags, 0.f);
+        }
+        for (std::size_t b = 0; b < request.blocks.size(); ++b) {
+            const auto cell_of = [&](std::size_t bit, std::size_t lag) { return (b * 2 + bit) * lags + lag; };
+            if (cached) {
+                for (std::size_t bit = 0; bit < 2; ++bit)
+                    for (std::size_t lag = 0; lag < lags; ++lag) {
+                        const auto cell = cell_of(bit, lag);
+                        values[bit * lags + lag] = cache->values[cell] +
+                            static_cast<float>((b < unsampled ? noise : noise + audit_noise) * hash(cell));
+                    }
+                if (b < unsampled) {
+                    for (std::size_t i = 0; i < sums.size(); ++i) sums[i] += values[i];
+                } else {
+                    std::ranges::copy(values, audit.begin() + static_cast<std::ptrdiff_t>((b - unsampled) * 2 * lags));
+                }
+                continue;
+            }
+            const auto& block = request.blocks[b];
+            const auto relative = request.run_shifts.subspan(block.run * lags, lags);
+            const auto input = request.observation.subspan(static_cast<std::size_t>(block.earliest),
+                                                           block.outputs + block.rows - 1);
+            correlations.assign(2 * frequencies * block.outputs, {});
+            for (std::size_t bit = 0; bit < 2; ++bit)
+                transform(request.direct_columns[bit].subspan(block.first, block.rows), spectra[bit], false);
+            for (std::size_t start = 0; start < block.outputs; start += capacity) {
+                const auto outputs = std::min(capacity, block.outputs - start);
+                transform(input.subspan(start, outputs + block.rows - 1), y, false);
+                for (std::size_t bit = 0; bit < 2; ++bit)
+                    for (std::size_t f = 0; f < frequencies; ++f) {
+                        const auto bin = (static_cast<std::int64_t>(f) - static_cast<std::int64_t>(s.direct_radius)) * unit_bin;
+                        for (std::size_t k = 0; k < tile; ++k)
+                            product[k] = y[(k + static_cast<std::size_t>(bin)) & (tile - 1)] * std::conj(spectra[bit][k]);
+                        modem::detail::search_fft::fft(product, true, plan, stop);
+                        std::copy_n(product.begin(), outputs,
+                                    correlations.begin() + static_cast<std::ptrdiff_t>((bit * frequencies + f) * block.outputs + start));
+                    }
+            }
+            for (std::size_t bit = 0; bit < 2; ++bit) {
+                const auto g = static_cast<float>(request.correlation_scale / block.scale[bit]);
+                const auto logdet = static_cast<float>(block.logdet[bit]);
+                for (std::size_t lag = 0; lag < lags; ++lag) {
+                    const auto at = static_cast<std::size_t>(relative[lag]);
+                    float maximum = -std::numeric_limits<float>::infinity();
+                    auto* e = &emissions[(bit * lags + lag) * frequencies];
+                    for (std::size_t f = 0; f < frequencies; ++f) {
+                        const auto r = correlations[(bit * frequencies + f) * block.outputs + at];
+                        const auto re = static_cast<float>(r.real()), im = static_cast<float>(r.imag());
+                        e[f] = g * g * (re * re + im * im) - logdet;
+                        maximum = std::max(maximum, e[f]);
+                    }
+                    float total = 0;
+                    for (std::size_t f = 0; f < frequencies; ++f) total += std::exp(e[f] - maximum);
+                    auto value = maximum + std::log(total / static_cast<float>(frequencies));
+                    const auto cell = cell_of(bit, lag);
+                    if (cache) cache->values[cell] = value;
+                    value += static_cast<float>((b < unsampled ? noise : noise + audit_noise) * hash(cell));
+                    values[bit * lags + lag] = value;
+                }
+            }
+            if (b < unsampled) {
+                for (std::size_t i = 0; i < sums.size(); ++i) sums[i] += values[i];
+            } else {
+                std::ranges::copy(values, audit.begin() + static_cast<std::ptrdiff_t>((b - unsampled) * 2 * lags));
+            }
+        }
+        sums[spike_lag] += spike;
+        std::ranges::copy(sums, totals.begin());
+        return true;
+    }
+};
+
+bool same_bits(std::span<const double> a, std::span<const double> b) {
+    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](double x, double y) {
+        return std::bit_cast<std::uint64_t>(x) == std::bit_cast<std::uint64_t>(y);
+    });
+}
+
+// The native rank, bit for bit: totals, nominations, scores and work.
+void same_native_rank(const receiver_detail::CoarseGainRankTrial& native,
+                      const receiver_detail::CoarseGainRankTrial& other, const char* reason) {
+    const auto& a = *native.coarse.midpoint_timing;
+    const auto& b = *other.coarse.midpoint_timing;
+    check(same_bits(native.fixed_totals, other.fixed_totals) && same_bits(native.direct_totals, other.direct_totals) &&
+          a.gain_proposal_count == b.gain_proposal_count && a.gain_fixed_proposal_count == b.gain_fixed_proposal_count &&
+          a.gain_proposal_lags == b.gain_proposal_lags && a.gain_fft_row_stages == b.gain_fft_row_stages &&
+          a.gain_score_rows == b.gain_score_rows && a.gain_blocks == b.gain_blocks &&
+          a.gain_direct_blocks == b.gain_direct_blocks && a.gain_tiled_blocks == b.gain_tiled_blocks &&
+          a.gain_projected_rows == b.gain_projected_rows && a.gain_status == b.gain_status &&
+          other.report.route == "native" && !other.report.reason.empty() && other.report.device_blocks == 0, reason);
+    for (std::size_t i = 0; i < a.gain_proposal_count; ++i)
+        check(a.gain_proposals[i].coordinate == b.gain_proposals[i].coordinate &&
+              std::bit_cast<std::uint64_t>(a.gain_proposals[i].score) ==
+                  std::bit_cast<std::uint64_t>(b.gain_proposals[i].score), reason);
+}
+
+// A backend present but declined before any device work: recorded reason,
+// no session, the native rank bit for bit.
+void same_declined_rank(const receiver_detail::CoarseGainRankTrial& native,
+                        const receiver_detail::CoarseGainRankTrial& other, const MirrorGainBackend& backend,
+                        std::string_view expected, const char* reason) {
+    using namespace receiver_detail;
+    const auto kind = expected == gain_direct_workspace ? StageNative::fallback : StageNative::decline;
+    check(backend.sessions == 0 && backend.calls == 0 && other.report.reason == expected && !other.report.fallback &&
+          !other.certification && other.device_totals.empty() &&
+          !other.coarse.midpoint_timing->gain_device_fft_row_stages &&
+          !other.coarse.midpoint_timing->gain_rescore_fft_row_stages && backend.natives.size() == 1 &&
+          backend.natives[0].family == StageFamily::gain_rank && backend.natives[0].kind == kind &&
+          stage_reason_suffix(backend.natives[0].reason) == expected, reason);
+    same_native_rank(native, other, reason);
+}
+
+void signed_gain_device_certification() {
+    using namespace receiver_detail;
+    const std::array intervals{FrequencyInterval{0, 0}};
+    const auto key = Crypto::amateur();
+    // The 150 ppm fixtures exceed the device run limit (checked below); lift
+    // it so that the mirror exercises the certification on these lags.
+    GainCertificationLimits all_runs;
+    all_runs.maximum_shift_runs = std::numeric_limits<std::size_t>::max();
+    // Every block of the short fixture is sampled, so no unsampled direct
+    // work exists; verification keeps every rank native.
+    {
+        const auto fixture = signed_gain_fixture(-1);
+        for (const auto evaluation : {MidpointTimingEvaluation::short_tracking, MidpointTimingEvaluation::verify}) {
+            const auto quote = coarse_workspace(fixture.config, fixture.slot, 2, {}, evaluation);
+            const auto native = coarse_gain_rank_trial(fixture.config, fixture.slot, key, fixture.iq, intervals, 2,
+                                                       quote, evaluation, nullptr, all_runs);
+            check(native.report.reason.empty() && native.native_quote == quote &&
+                  native.coarse.midpoint_timing->gain_sampled_blocks ==
+                      native.coarse.midpoint_timing->gain_available_blocks,
+                  "the short signed-gain fixture must sample every block natively");
+            MirrorGainBackend unused;
+            const auto declined = coarse_gain_rank_trial(fixture.config, fixture.slot, key, fixture.iq, intervals, 2,
+                quote + native.device_host_bytes, evaluation, &unused, all_runs);
+            same_declined_rank(native, declined, unused, evaluation == MidpointTimingEvaluation::verify ?
+                gain_direct_verify_mode : gain_direct_no_unsampled,
+                "a backend must decline verification and fully sampled ranks with their reasons");
+        }
+    }
+    // Both aged fixtures publish; the first one also takes every fallback.
+    for (const int aged : {0, 1}) {
+        const auto fixture = signed_gain_fixture(aged);
+        const auto workers = aged ? 3u : 2u;
+        const auto quote = coarse_workspace(fixture.config, fixture.slot, workers, {},
+                                            MidpointTimingEvaluation::short_tracking);
+        const auto run = [&](ReceiverBulkBackend* backend, const GainCertificationLimits& limits, std::size_t limit) {
+            return coarse_gain_rank_trial(fixture.config, fixture.slot, key, fixture.iq, intervals, workers, limit,
+                                          MidpointTimingEvaluation::short_tracking, backend, limits);
+        };
+        const auto native = run(nullptr, all_runs, quote);
+        const auto& rank = *native.coarse.midpoint_timing;
+        check(rank.gain_status == "signed_gain_full_direct" && rank.gain_sampled_blocks < rank.gain_available_blocks &&
+              rank.gain_tiled_blocks > 0 && native.report.route == "native" && native.report.reason.empty() &&
+              !native.certification && native.native_quote == quote && native.device_host_bytes > 0 &&
+              !rank.gain_device_fft_row_stages && !rank.gain_rescore_fft_row_stages &&
+              native.report.shift_vectors > 0 && native.report.shift_vectors <= rank.gain_available_blocks,
+              "the aged signed-gain rank must run natively with shift runs and no backend");
+        // The session admits its native quote; the device host buffers need the rest.
+        const auto admitted = quote + native.device_host_bytes;
+        const auto trial = [&](ReceiverBulkBackend* backend, const GainCertificationLimits& limits) {
+            return run(backend, limits, admitted);
+        };
+
+        const auto values = std::make_shared<MirrorGainValues>();
+        MirrorGainBackend mirror;
+        mirror.cache = values;
+        const auto device = trial(&mirror, all_runs);
+        check(device.certification.has_value(), "a mirror device must reach certification");
+        const auto& certified = *device.coarse.midpoint_timing;
+        const auto& certification = *device.certification;
+        const auto& report = device.report;
+        const auto unsampled = mirror.blocks - mirror.audits;
+        // The FP64 rescoring takes one forward 2B-point transform per
+        // unsampled block and rescored lag, counted apart from native work.
+        const auto period = 2 * mirror.shape.block_rows;
+        const auto rescore_stages = [&](std::size_t rescored) {
+            return static_cast<std::uint64_t>(rescored) * unsampled * period *
+                static_cast<std::uint64_t>(std::countr_zero(period));
+        };
+        check(mirror.sessions == 1 && mirror.calls == 1 && certification.fallback.empty() && report.route == "device" &&
+              report.reason.empty() && !report.fallback && mirror.natives.empty() &&
+              mirror.releases == 1 && mirror.released_at_certification &&
+              report.band_ratio > 0 && report.band_ratio <= 1 &&
+              std::has_single_bit(mirror.shape.tile_fft_rows) && mirror.shape.tile_fft_rows < rank.gain_fft_rows &&
+              mirror.shape.tile_fft_rows >= 2 * mirror.shape.block_rows && mirror.shape.lags == rank.lag_count &&
+              mirror.shape.shift_runs == std::min(all_runs.maximum_shift_runs, rank.gain_available_blocks) &&
+              report.shift_runs <= mirror.shape.shift_runs && mirror.shape.observation_rows == mirror.observation_rows &&
+              mirror.shape.audit_blocks == rank.gain_sampled_blocks && mirror.audits == rank.gain_blocks &&
+              mirror.max_outputs <= mirror.shape.maximum_outputs && report.device_blocks == unsampled &&
+              certified.gain_direct_blocks == rank.gain_direct_blocks && certified.gain_score_rows == rank.gain_score_rows &&
+              certified.gain_score_rows <= certified.gain_score_row_bound &&
+              certified.gain_fft_row_stages <= certified.gain_fft_stage_bound &&
+              certified.gain_fft_row_stages < rank.gain_fft_row_stages && certified.gain_blocks == rank.gain_blocks &&
+              report.rescored_lags == certification.rescored_lags &&
+              report.frontier_lags == certification.frontier_lags && report.rescore_seconds > 0 &&
+              certification.rescored_lags > 0 && certified.gain_rescored_lags == certification.rescored_lags &&
+              certified.gain_rescore_fft_row_stages == rescore_stages(certification.rescored_lags) &&
+              same_bits(native.fixed_totals, device.fixed_totals),
+              "a clean mirror must publish with full work credit and the native fixed rank");
+        check(report.device_host_bytes == native.device_host_bytes && certification.host_bytes > 0 &&
+              report.device_host_held > certification.host_bytes && report.device_host_held <= report.device_host_bytes,
+              "every device host buffer must be held within its admitted quote");
+        check(certified.gain_proposal_count == rank.gain_proposal_count &&
+              certified.gain_fixed_proposal_count == rank.gain_fixed_proposal_count &&
+              certified.gain_proposal_lags == rank.gain_proposal_lags,
+              "certified device nominations must equal the native lags and order");
+        for (std::size_t i = 0; i < rank.gain_proposal_count; ++i)
+            check(certified.gain_proposals[i].coordinate == rank.gain_proposals[i].coordinate &&
+                  std::abs(certified.gain_proposals[i].score - rank.gain_proposals[i].score) <=
+                      1e-9 * (1 + std::abs(rank.gain_proposals[i].score)),
+                  "certified nominations must carry FP64 scores at roundoff from native");
+        // The FP64 magnitude-identity rescoring reproduces the native totals,
+        // and the audit captures exactly the sampled blocks' direct values.
+        const auto cells = 2 * rank.lag_count;
+        for (std::size_t i = 0; i < cells; ++i) {
+            const auto value = certification.nomination[i];
+            check(std::isinf(value) || std::abs(value - native.direct_totals[i]) <=
+                      1e-10 * (1 + std::abs(native.direct_totals[i])),
+                  "FP64 frontier rescoring must agree with the native direct totals");
+        }
+        double audit_error = 0;
+        for (std::size_t i = 0; i < device.audit_native.size(); ++i) {
+            check(std::isfinite(device.audit_native[i]), "every audit block must capture its native direct values");
+            audit_error = std::max(audit_error, std::abs(device.audit_device[i] - device.audit_native[i]) /
+                                                    (1 + std::abs(device.audit_native[i])));
+        }
+        for (std::size_t i = 0; i < cells; ++i) {
+            double sum = 0, magnitude = 0;
+            for (std::size_t a = 0; a < mirror.audits; ++a) {
+                sum += device.audit_native[a * cells + i];
+                magnitude += std::abs(device.audit_native[a * cells + i]);
+            }
+            check(std::abs(sum - device.direct_totals[i]) <= 1e-12 * (1 + magnitude),
+                  "captured audit values must sum to the fixed lanes' direct totals");
+        }
+        check(audit_error < 1e-5 && certification.bits[0].band > 0 && certification.bits[1].band > 0,
+              "the FP32 mirror must agree with its native audit to FP32 roundoff");
+        for (std::size_t bit = 0; bit < 2; ++bit) {
+            const auto totals = std::span(certification.totals).subspan(bit * rank.lag_count, rank.lag_count);
+            check(std::isfinite(certification.bits[bit].excluded) &&
+                  certification.bits[bit].excluded < std::ranges::max(totals) - 2 * certification.bits[bit].band,
+                  "lags outside the frontier must stay below its boundary");
+        }
+        if (aged) continue;
+
+        // Perturbed per-block values widen the band and the frontier; the
+        // published lags stay native. The predeclared noise puts 2 band
+        // midway between the native distances from the best total to the
+        // 9th and the 64th lag of either bit. For uniform noise on A audit
+        // blocks the band is about N (8 + 3.5) 0.29 noise / sqrt(A): k
+        // standard errors and the largest lag's sampled mean error, about
+        // 3.5 standard errors over these lags.
+        double ninth = std::numeric_limits<double>::infinity(), last = ninth;
+        for (std::size_t bit = 0; bit < 2; ++bit) {
+            std::vector<double> totals(native.direct_totals.begin() + static_cast<std::ptrdiff_t>(bit * rank.lag_count),
+                                       native.direct_totals.begin() + static_cast<std::ptrdiff_t>((bit + 1) * rank.lag_count));
+            std::ranges::sort(totals, std::greater<>{});
+            ninth = std::min(ninth, totals[0] - totals[8]);
+            last = std::min(last, totals[0] - totals[63]);
+        }
+        check(1.5 * ninth < last, "the frontier growth fixture must separate its 9th and 64th native lags");
+        MirrorGainBackend noisy;
+        noisy.cache = values;
+        noisy.noise = std::sqrt(ninth * last) * std::sqrt(12. * static_cast<double>(mirror.audits)) /
+                      (2 * (8 + 3.5) * static_cast<double>(unsampled));
+        const auto widened = trial(&noisy, all_runs);
+        check(widened.certification && widened.certification->fallback.empty() && widened.report.route == "device" &&
+              widened.certification->frontier_lags > certification.frontier_lags &&
+              widened.coarse.midpoint_timing->gain_proposal_lags == rank.gain_proposal_lags,
+              "perturbed device values must grow the published frontier and keep native lags");
+        // Every fallback after a device call reruns the native unsampled loop:
+        // native bit for bit, with the certification's reason.
+        // The session's planned call is already counted, so the receiver
+        // records a session fallback.
+        const auto fell_back = [&](const MirrorGainBackend& backend, const CoarseGainRankTrial& other,
+                                   std::string_view expected, const char* reason) {
+            check(other.certification && other.certification->fallback == expected &&
+                  other.report.reason == expected && other.report.fallback && backend.natives.size() == 1 &&
+                  backend.natives[0].kind == StageNative::session_fallback &&
+                  stage_reason_suffix(backend.natives[0].reason) == expected &&
+                  backend.releases == 1 && backend.released_at_certification &&
+                  !other.coarse.midpoint_timing->gain_rescored_lags && other.coarse.midpoint_timing->gain_top2_gap == 0 &&
+                  // Rescoring runs before the band and tie checks, not after an overflow.
+                  (expected == gain_certification_overflow) == !other.certification->rescored_lags &&
+                  other.coarse.midpoint_timing->gain_rescore_fft_row_stages ==
+                      rescore_stages(other.certification->rescored_lags),
+                  reason);
+            same_native_rank(native, other, reason);
+        };
+        MirrorGainBackend spiked;
+        spiked.cache = values;
+        spiked.spike_lag = certification.bits[0].best_lag;
+        spiked.spike = 1e3 * (1 + certification.bits[0].band);
+        fell_back(spiked, trial(&spiked, all_runs), gain_certification_band,
+                  "an unaudited device error must fall back as band-violated");
+        MirrorGainBackend scattered;
+        scattered.cache = values;
+        scattered.audit_noise = 10 * std::max(certification.bits[0].audit.magnitude, certification.bits[1].audit.magnitude);
+        fell_back(scattered, trial(&scattered, all_runs), gain_certification_overflow,
+                  "an exploded audit band must fall back as frontier-overflow");
+        auto tie_limits = all_runs;
+        tie_limits.near_tie = 1e6;
+        MirrorGainBackend tied;
+        tied.cache = values;
+        fell_back(tied, trial(&tied, tie_limits), gain_certification_tie,
+                  "a forced near-tie threshold must fall back as near-tie");
+        // The backend's own decline (no session), its factory's fallback (a
+        // refused lease, no session) and a session fallback (a refused call)
+        // carry its reason; one without a reason is a contract error.
+        MirrorGainBackend refusing;
+        refusing.session_decline = "mirror-gain-rank-unqualified-device";
+        const auto refused = trial(&refusing, all_runs);
+        check(refusing.sessions == 1 && refusing.calls == 0 && !refused.certification && !refused.report.fallback &&
+              refused.report.reason == refusing.session_decline && refusing.natives.empty() &&
+              !refused.coarse.midpoint_timing->gain_rescore_fft_row_stages,
+              "a backend decline must carry the backend's reason");
+        same_native_rank(native, refused, "a backend decline must reproduce the native rank");
+        // An earlier call's decline reason stays in the receipt; the counter
+        // that grew names this one.
+        MirrorGainBackend unadmitting;
+        unadmitting.session_fallback = "mirror-gain-rank-workspace";
+        unadmitting.work.vulkan_gain_rank.planned_calls = unadmitting.work.vulkan_gain_rank.declined_calls = 1;
+        unadmitting.work.vulkan_gain_rank.decline_reason = refusing.session_decline;
+        const auto unadmitted_session = trial(&unadmitting, all_runs);
+        const auto& refused_lease = unadmitting.work.vulkan_gain_rank;
+        check(unadmitting.sessions == 1 && unadmitting.calls == 0 && !unadmitted_session.certification &&
+              !unadmitted_session.report.fallback && unadmitted_session.report.reason == unadmitting.session_fallback &&
+              unadmitting.natives.empty() && refused_lease.planned_calls == 2 && refused_lease.declined_calls == 1 &&
+              refused_lease.native_fallbacks == 1 && !unadmitted_session.coarse.midpoint_timing->gain_rescored_lags,
+              "a factory fallback must carry the backend's fallback reason and run natively");
+        same_native_rank(native, unadmitted_session, "a factory fallback must reproduce the native rank");
+        MirrorGainBackend declining;
+        declining.call_decline = "mirror-gain-rank-nonfinite-input";
+        const auto declined = trial(&declining, all_runs);
+        check(declining.sessions == 1 && declining.calls == 1 && !declined.certification && declined.report.fallback &&
+              declined.report.reason == declining.call_decline && declining.natives.empty() && declining.releases == 1 &&
+              !declined.coarse.midpoint_timing->gain_device_fft_row_stages &&
+              !declined.coarse.midpoint_timing->gain_rescore_fft_row_stages,
+              "a backend fallback must carry the backend's reason");
+        same_native_rank(native, declined, "a backend fallback must reproduce the native rank");
+        MirrorGainBackend silent;
+        silent.silent = true;
+        rejects<Error>([&] { (void)trial(&silent, all_runs); }, "a backend decline without a reason must be rejected");
+        // Declines before any device work: the host quote must fit its
+        // admission, and the default run limit holds the fixture's runs.
+        MirrorGainBackend unadmitted;
+        same_declined_rank(native, run(&unadmitted, all_runs, admitted - 1), unadmitted, gain_direct_workspace,
+                           "device host buffers one byte beyond their admission must decline as workspace");
+        MirrorGainBackend unused;
+        const auto runs = trial(&unused, {});
+        same_declined_rank(native, runs, unused, gain_direct_shift_runs,
+                           "more shift runs than the device limit must decline before device work");
+        check(runs.report.shift_runs == GainCertificationLimits{}.maximum_shift_runs + 1 &&
+              report.shift_runs > GainCertificationLimits{}.maximum_shift_runs,
+              "a shift-run decline must report the overflowing run count");
+    }
+}
 }
 
 int main(int argc, char** argv) {
@@ -2123,6 +3401,9 @@ int main(int argc, char** argv) {
             const std::string_view part = argv[1];
             if (part == "carrier") configured_carrier_reception();
             else if (part == "short-drift") {
+                drift_ridge_interchange_oracle();
+                drift_device_mirror();
+                ordinary_drift_width_keeps_owner_lease();
                 bounded_short_competition();
                 bounded_drift_recovery();
             }
@@ -2132,6 +3413,11 @@ int main(int argc, char** argv) {
             else if (part == "late-helper") late_helper_timing_recovery(false);
             else if (part == "late-helper-delay") late_helper_timing_recovery(true);
             else if (part == "signed-gain-timing") signed_gain_timing_and_exact_admission();
+            else if (part == "signed-gain-certification") {
+                signed_gain_shift_runs();
+                signed_gain_certification_contract();
+                signed_gain_device_certification();
+            }
             else if (part == "signed-doppler") signed_relative_doppler_endpoints();
             else if (part == "long-calm") long_calm_drift_owner_lease();
             else if (part == "long-calm-polarity") long_calm_drift_owner_lease(true, 1, true);

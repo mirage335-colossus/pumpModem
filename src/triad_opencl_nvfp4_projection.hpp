@@ -19,13 +19,15 @@ enum class OpenClFineMethod { staged, resident_fp4, resident_fft };
 
 // Arithmetic of resident dense tile rendering and template mapping. FP32
 // keeps FP64 tiles, time base and support decisions, and reduces each row's
-// coordinate and phase exactly in fixed point; FP64 is the matched control
-// and the default until the FP32 kernels are device-qualified.
+// coordinate and phase exactly in fixed point; FP64 is the matched control.
+// The receiver selects FP32 by default (VulkanReceiverOptions::
+// opencl_fine_fp32, qualified on the RTX PRO 6000 on 20 November 2026).
 enum class OpenClFineArithmetic { fp32, fp64 };
 
 // Accumulation of the coarse rescoring products: FP32 partial sums of 64
-// rows added in FP64, or every product in FP64, the matched control and the
-// default until the FP32 partial sums are device-qualified.
+// rows added in FP64, or every product in FP64, the matched control. The
+// receiver selects the FP32 partial sums by default (VulkanReceiverOptions::
+// opencl_coarse_fp32_rescore, qualified on the RTX PRO 6000 on 20 November 2026).
 enum class OpenClRescoreArithmetic { fp32_partial, fp64 };
 
 struct FineResidentBlock;

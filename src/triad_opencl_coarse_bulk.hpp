@@ -32,12 +32,15 @@ struct OpenClCoarseOptions {
     bool synthesize = true;
     // Also score banks whose channelized columns the host prepared.
     bool uploaded_banks = true;
-    // Accumulation of the rescored retained arrivals.
+    // Accumulation of the rescored retained arrivals. The Vulkan backend
+    // sets it from VulkanReceiverOptions::opencl_coarse_fp32_rescore (FP32
+    // partial sums by default); FP64 here is only this layer's control.
     OpenClRescoreArithmetic rescore = OpenClRescoreArithmetic::fp64;
     // Admit one-ray sessions on an automatic route, within the measured
-    // dense cost bound. A required route always admits them. Off until an
-    // NVCC build and a full RTX PRO 6000 qualify the one-ray epilogue
-    // against the FFT session that it replaces.
+    // dense cost bound. A required route always admits them. The Vulkan
+    // backend sets it from VulkanReceiverOptions::opencl_coarse_one_ray, on
+    // by default since the RTX PRO 6000 qualification of 20 November 2026;
+    // false here is only this layer's default.
     bool one_ray = false;
 };
 

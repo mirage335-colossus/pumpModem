@@ -41,11 +41,17 @@ _PROBE_TOOLS = (
     "triad_gpu_cpu_forecast.py", "triad_case_metrics.py", "triad_case_capacity.py",
     "triad_opencl_embed_ptx.py",
 )
+# The other sources of test_triad_vulkan (cmake/TriadVulkan.cmake).
+_VULKAN_TEST_SOURCES = (
+    "tests/triad_vulkan_stage_checks.hpp", "tests/triad_vulkan_gain_checks.cpp",
+    "tests/triad_signed_gain_fixture.hpp", "tests/triad_vulkan_drift_checks.cpp",
+    "tests/triad_vulkan_varying_checks.cpp",
+)
 _EXACT_FILES = (*_TOP_FILES, "src/pump.manifest", "tools/build_capacity.py",
                 *("tools/" + name for name in _PROBE_TOOLS),
                 "tools/diagnostic_iq_noise_options.hpp", "tests/test_triad_tensor.cpp",
                 "tests/test_triad_tensor_fft.cpp", "tests/test_triad_nvfp4_projection.cpp",
-                "tests/test_triad_vulkan.cpp", "tests/test_triad_opencl_nvfp4.cpp",
+                "tests/test_triad_vulkan.cpp", *_VULKAN_TEST_SOURCES, "tests/test_triad_opencl_nvfp4.cpp",
                 "tests/test_triad_opencl_fine_session.cpp", "tests/triad_crypto_fixture.hpp",
                 "tests/fixture_crypto.hpp", "tests/test_gui_robust_live.cpp",
                 "third_party/xz/README.datapump.md",

@@ -28,10 +28,12 @@ to the native code. The
 and [GPU operation counters](triad-gpu-optimization.md#which-arithmetic-ran-in-a-remote-simulation)
 cover the measured compute paths.
 
-For Blackwell FP4 performance work, start with the
-[continuation guide](triad-gpu-optimization.md#continue-blackwell-fp4-work).
-It links the exact filtered RunPod reproduction, the per-phase and per-slot
-receiver timings, and the next bounded profiling experiment.
+For GPU performance work, start with
+[current GPU limits and next steps](triad-gpu-optimization.md#current-gpu-limits-and-next-steps):
+what automatic selection runs on each build and device, where the time goes
+on the qualification slots, and the ranked levers. The
+[method](triad-gpu-optimization.md#find-and-qualify-a-gpu-improvement) covers
+attribution, route comparison and a bounded device qualification.
 
 **Automatic CPU/GPU choices must prioritize challenging-case receiver capacity
 and prevent input backlog.** Start with the
@@ -110,7 +112,7 @@ the [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-cap
 | Development and delivery | [Development contract](development.md), [build and test guide](building.md), [release procedures](releases.md), [offline installation](offline-installation.md) |
 | Helper Carrier | Native generation and acquisition share the [Robust stack](robust-current.md); historical measurements retain their original scope |
 | Simulation channels | [Doppler, delay spread, selective amplitude and FHSS tails](channel-models.md) |
-| GPU hardware and precision | [GPU selection contract](triad-performance.md#gpu-selection-for-accelerated-development): prefer a full RTX PRO 6000 Blackwell or a demonstrably more suitable modern accelerator; [representative receiver targets](triad-performance.md#representative-receiver-hardware) and [precision guidance](gpu-precision-controls.md) define qualification |
+| GPU hardware and precision | [GPU selection contract](triad-performance.md#gpu-selection-for-accelerated-development): prefer a full RTX PRO 6000 Blackwell or a demonstrably more suitable modern accelerator; [representative receiver targets](triad-performance.md#representative-receiver-hardware) and [precision guidance](gpu-precision-controls.md) define qualification; the [GPU performance guide](triad-gpu-optimization.md) holds current limits, levers and method |
 | Fast Modem | [Fast topic index](indexes/fast.md) |
 | Legacy Modem | [Legacy reference](legacy-modem.md) and retained interoperability fixtures |
 | GUI and frontends | [Interfaces index](indexes/interfaces.md), [GUI contract](gui-contract.md), [frontend interfaces](frontend-interfaces.md) |

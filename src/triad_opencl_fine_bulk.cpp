@@ -295,6 +295,8 @@ public:
     BulkReceipt receipt() const override {
         auto result = host_->receipt();
         // The session receipt carries its own work beside the backend identity.
+        // It runs no fine-stage family.
+        copy_stage_work(result, BulkReceipt{});
         for (const auto field : fine_counters) result.*field = 0;
         for (const auto field : fine_intervals) result.*field = 0;
         result.opencl_resident_window_blocks = 0;

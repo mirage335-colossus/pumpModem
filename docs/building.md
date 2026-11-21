@@ -657,7 +657,7 @@ modem benchmarks. Keep maintained outcomes concise in
 current work or a specific raw record is required to interpret it; record its
 provenance, limitations and cleanup reason. Do not accumulate historical runs.
 
-### Vulkan compute on integrated Radeon
+### Vulkan and OpenCL GPU builds
 
 The optional `DATAPUMP_TRIAD_VULKAN` build links the native Vulkan/VkFFT coarse
 backend without Torch or a Python runtime. VkFFT 1.3.4 is pinned in
@@ -682,11 +682,42 @@ preflight registered as `triad_vulkan_plan` when the backend is built. Setting
 `DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON` also registers `triad_vulkan`, which
 requires an actual GPU, runs serially and has a 120-second timeout. A software
 Vulkan device does not satisfy it; missing device access is not a skipped pass.
+`triad_vulkan_host_scoring` runs the forced host-scoring compatibility
+route: FP32 device transforms with host FP64 scoring, bounded frequency tiles
+and full slots that keep native scoring and fine work around the device
+FFTs. `triad_vulkan_workspace_admission` checks automatic shared-workspace
+admission under a deliberately small shared budget, where a second owner
+must wait without allocating.
 Its `triad_vulkan_segmented` sibling checks the device segmented timing search
 against a time-domain oracle, the native FP32 scorer and an FP64 reference of
 the same inputs. It also checks the workspace, transform-cache reuse and
-selection policy. `test_triad_vulkan --segmented-benchmark` prints an
-indicative per-workspace comparison with the native scorer on every thread.
+selection policy. `triad_vulkan_core` checks the device core's fine-stage
+additions: FP64 twiddle-table transforms against a host DFT, six-binding
+pipelines in a larger descriptor pool, the shader registry, and a fine-stage
+context that leaves the coarse counters unchanged. `triad_vulkan_gain_rank`,
+`triad_vulkan_drift` and `triad_vulkan_varying` check the fine-stage device
+sessions on the device: the signed-lag kernels and certification band at the
+HF and 60 Hz shapes and the receiver's rank with a real session; the drift
+kernels bit for bit against native C++, its transforms against FP64, and a
+batch of transforms and a sub-batched session bit for bit against single
+ones; the varying FP64 statistics oracle and the receiver's device route;
+and for each family its policy order, receipts, leases, fallbacks and
+cancellation. On a device without FP64/INT64 shaders the three family tests
+fail, and `triad_vulkan_core` skips its FP64 plans and reports the narrower
+scope; forced host scoring and `triad_vulkan_stage_policy` cover the
+declines there. The device-free `triad_vulkan_stage_policy` is in every
+build, with or without Vulkan. It checks the selection order, the reason
+names, the `SelectedGpu` forwarding and the host-RAM part of a session's
+host quote. `test_triad_vulkan --segmented-benchmark` prints an indicative
+per-workspace comparison with the native scorer on every thread. Unregistered
+modes: `--automatic-workspace` also checks that the automatic workspace admits
+a broad full-prior geometry above the former 256 MiB device ceiling before the
+admission checks, and `--precision-fp32`, `--precision-fp16-storage`,
+`--precision-direct-fp32`, `--precision-direct-fp16` and
+`--precision-direct-fp16-storage` run the direct frequency-grid checks at
+16, 256 and 65,536 rows for one stated coarse precision. The
+[GPU performance method](triad-gpu-optimization.md#attribute-the-time) lists
+which of these give component rates.
 Only request that option on a runner with suitable render-device access.
 `--device-index` selects the enumerated physical device; probe receipts identify
 its actual vendor/device, driver and executed work.

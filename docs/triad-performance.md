@@ -22,6 +22,7 @@ The tools answer different questions:
 | `test_triad_vulkan --benchmark-cpu-precision` | Matched explicit-FP64/automatic native CPU coarse comparison, without Vulkan device creation. |
 | `triad_manual_cases.py` | Absolute local CPU capacity for the current ordered manual cases. |
 | `triad_gpu_workload.py` and `triad_gpu_cpu_forecast.py` | GPU-observed native work combined with local native phase costs and independent CPU holdouts. |
+| `triad_receiver_probe admission` or `message` with `--backend gpu` | Production complete-slot or stream timing of the automatic GPU route on one binary; see [Find and qualify a GPU improvement](triad-gpu-optimization.md#find-and-qualify-a-gpu-improvement). |
 
 None inherits a pass from the historical Python runtime. Its timings, process
 transport applicability exceptions and old GPU forecasts are inadmissible as
@@ -71,6 +72,9 @@ Before choosing hardware:
   transfers, synchronization and host preparation. Verify useful native work and
   actual accelerator execution; GPU utilization, device names and peak FLOPS do
   not establish a receiver speedup or a CPU capacity forecast.
+- A stage's device-versus-native result depends on the host's CPU quota and
+  `W`. Record both and compare only within one pod
+  ([Where the time goes](triad-gpu-optimization.md#where-the-time-goes)).
 
 The RTX PRO 6000 preference remains applicable despite the slower small FP16
 Gram experiment in the [current validation record](validation.md#native-throughput-and-precision-investigation).
@@ -95,8 +99,8 @@ Keep target requirements, actual device receipts and validation outcomes separat
 | GeForce RTX 4090 desktop | Ada CUDA target, compute capability 8.9, 24 GB GDDR6X. Record the actual device and usable memory. [NVIDIA specifications](https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4090/) |
 | GeForce RTX 4090 Laptop GPU | Separate Ada product with 16 GB GDDR6. NVIDIA lists an 80–150 W GPU subsystem range; record the laptop/OEM power configuration rather than applying desktop results. [NVIDIA laptop comparison](https://www.nvidia.com/en-eu/geforce/laptops/compare/) |
 | GeForce RTX 4060 Ti 16 GB | Ada CUDA target with an explicitly required 16 GB variant. The 8 GB variant is a different memory target even when the device name is similar. [NVIDIA specifications](https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4060-4060ti/) |
-| GeForce RTX 5090 | Blackwell CUDA compatibility and performance target. Record exact SKU, driver/runtime, full-device allocation and actual arithmetic; no automatic-GUI result is implied by the target name. |
-| NVIDIA RTX PRO 6000 Blackwell | Preferred development accelerator. A bounded automatic-GUI integration comparison is now measured; see [NVIDIA/Intel GPU-toggle integration](validation.md#nvidia-and-intel-gpu-toggle-integration). It qualifies a scoped broad-search gain, not a general GPU speedup or sustained capacity. |
+| GeForce RTX 5090 | Blackwell CUDA compatibility and performance target. Record exact SKU, driver/runtime, full-device allocation and actual arithmetic; no automatic-GUI result is implied by the target name. Automatic Vulkan/OpenCL selection treats it as the qualified SM 12.0 class when OpenCL reports compute capability 12.0, so it inherits the RTX PRO 6000's routes unmeasured. |
+| NVIDIA RTX PRO 6000 Blackwell | Preferred development accelerator and the only qualified SM 12.0 device. The [19–21 November Blackwell entries](validation.md#blackwell-qualification-of-the-fine-stage-device-routes--21-november-2026) qualify its routes, listed in the [route table](triad-gpu-optimization.md#what-automatic-selection-runs); the earlier [GPU-toggle integration](validation.md#nvidia-and-intel-gpu-toggle-integration) measured the automatic GUI path. These qualify scoped gains, not a general GPU speedup or sustained capacity. |
 | Intel UHD Graphics 630 (Core i9-9900K) | Portable Vulkan compatibility target. The shader-feature fallback is designed not to require device FP64/INT64 for FP32 frequency-search work; no Intel host is available, so this is not physical UHD 630 qualification. |
 | AMD Ryzen 5 PRO 5650U with Radeon Graphics | Zen 3 CPU, six cores/twelve threads and integrated Radeon graphics with seven graphics cores. Record CPU execution separately from integrated-GPU execution and actual host/shared memory. [AMD specifications](https://www.amd.com/en/support/downloads/drivers.html/processors/ryzen-pro/ryzen-pro-5000-series/amd-ryzen-5-pro-5650u.html), [Zen 3 introduction](https://www.amd.com/en/newsroom/press-releases/2021-3-16-amd-brings-power-of-zen-3-to-world-s-best-mobile.html) |
 | AMD Ryzen 7 8840U with Radeon Graphics | Zen 4 CPU, eight cores/sixteen threads and Radeon 780M graphics with twelve graphics cores. Its separate NPU is not a substitute for a qualified graphics or CPU backend. Record actual host/shared memory and CPU features. [AMD specifications](https://www.amd.com/en/products/processors/laptop/ryzen/8000-series/amd-ryzen-7-8840u.html) |
@@ -140,6 +144,10 @@ The GUI GPU toggle and native probe `--backend gpu` use the same C++ automatic
 factory. It tries the compatible automatic CUDA receiver first when CUDA is
 compiled and a usable discrete CUDA device can be initialized. If CUDA is
 unavailable or initialization fails, it tries a compatible physical Vulkan GPU.
+On the SM 12.0 class of a Vulkan build with the OpenCL module, that route
+runs the dense FP4 search, resident fine statistics, segmented timing and the
+signed-lag gain rank on the device
+([route table](triad-gpu-optimization.md#what-automatic-selection-runs)).
 Vulkan automatic selection prefers a discrete GPU, then the candidate with more
 device-local memory. It accepts only physical integrated or discrete GPUs that
 meet runtime, queue, workgroup, coherent-memory and workspace requirements.
@@ -265,6 +273,10 @@ Helper acquisition, template generation, lag-group search, the compact
 tight-clock FP64 class and fine tracking. Automatic mode on this device also
 keeps the changing-channel segmented timing search native. The probe's
 `--vulkan-segmented-timing device` runs it on the GPU for qualification.
+The explicit `--vulkan-gain-rank`, `--vulkan-drift` and
+`--vulkan-varying-fine` `device` routes also run on RADV and match native
+within their exactness classes; automatic selection keeps those stages native
+there ([fine-stage ports](triad-gpu-optimization.md#fine-stage-device-ports)).
 The public route chooser is unchanged;
 `native-lag-groups` and `compact-tight-clock-fp64` are explicit native routes.
 A GPU device or allocation failure is not permission to substitute CPU work.
@@ -278,7 +290,7 @@ one backend/cache per settings generation across transmissions. Requested
 device failure remains explicit; device readiness alone is not proof of
 accelerated search work. See the [shared control contract](gui-contract.md).
 
-Use the [Vulkan build and test recipe](building.md#vulkan-compute-on-integrated-radeon)
+Use the [Vulkan build and test recipe](building.md#vulkan-and-opencl-gpu-builds)
 and record the physical device, driver, features, source/build identity, full
 work and per-stage routing. The local device is Cezanne `1002:1638`, reported by
 Mesa as `AMD Radeon Graphics (RADV RENOIR)`; reject `llvmpipe` and other CPU
@@ -293,10 +305,15 @@ and separate host staging/metadata. Keep each lease until submitted work
 completes, including cancellation. Coherent mappings still require correct
 GPU-to-host synchronization; they do not establish free transfers or zero-copy
 performance. Device plans and work buffers remain private to each coarse session.
-A backend-owned cache may retain at most eight serialized VkFFT programs and
-8 MiB of payload, with a separate 64 KiB metadata reservation. It has its own
-persistent host-memory charge, including periods with no live coarse owner;
-it is not uncharged GPU storage. Automatic GUI admission reports
+A backend-owned cache may retain at most 16 serialized VkFFT programs and
+8 MiB of payload, with a separate 64 KiB metadata reservation, and 20 SPIR-V
+shaders in 160 KiB with 8 KiB of metadata. Only a backend that can serve a
+fine-stage family route on the device (an explicit device route, or a family
+qualified for automatic selection on that device class) raises this to 48
+programs in 64 MiB and 64 shaders in 512 KiB with 16 KiB of metadata. The
+bound is a persistent host-memory charge, in the stream's fixed reservation
+and again in each owner's DSP lease, including periods with no live coarse
+owner; it is not uncharged GPU storage. Automatic GUI admission reports
 `workspace_scope=backend_shared`: one device budget is shared across concurrent
 coarse-session owners through explicit leases. Pinned/individual Vulkan backends
 report `workspace_scope=per_coarse_session`, where the configured limit applies
@@ -651,6 +668,75 @@ its `c02b726e` code was slow in every layout tried.
   changes and leave those of `floor` and `ceil`. It raises the minimum
   processor of every binary, which is a [packaging decision](building.md).
 
+### Paired timing and load gating
+
+These rules serve CPU and GPU comparisons alike;
+[the GPU method](triad-gpu-optimization.md#find-and-qualify-a-gpu-improvement)
+adds the device-specific ones.
+
+- **One binary.** Compare routes through one binary's options. Build any
+  reference with the same toolchain on the same host: two binaries with
+  equal simulator objects differed by about 40% in the simulator, and a
+  5–21% Vulkan coarse difference persisted in a control build that restored
+  the reference coarse-session source
+  ([above](#code-placement-and-x87-rounding-mode-switches)).
+- **Alternated pairs on identical inputs.** Reuse captures with
+  `--capture-cache`. Predeclare the cells, pairs and decision rule before
+  the runs, for example "established only if all three pairs agree in
+  direction and the median moves by more than 3%". The rule follows the
+  [automatic-mode contract](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling):
+  judge on challenging cases and complete service, and do not let an
+  easy-case loss veto. Record any deviation before the runs it affects.
+- **Load gate (local).** Start a run only when `/proc/stat` shows less than
+  0.75 CPUs of other work over about 1.5 s. Accept it only if the busy CPU
+  time minus the child's own `RUSAGE_CHILDREN` time, over the wall time,
+  stayed below 0.75 CPUs. About 1.6 is still usable for one-thread runs;
+  desktop background alone is 0.3–0.6 on the 5650U. Never time beside
+  builds, sanitizer runs or agent reviews: a five-agent read-only review
+  held about 1.2 CPUs, and a 15 s test read 71 s beside a ThreadSanitizer
+  run. Multi-GB allocations make the gate count kernel page zeroing, 1.3–1.5
+  CPUs: pre-fault the tables before the timed section, or treat the run as
+  indicative.
+- **Decide on slot totals.** The drift and varying phase timers
+  (`drift_{render,ridge,ridge_search,slope,exact}_seconds`,
+  `varying_{projection,statistics,recursion}_seconds`,
+  `varying_wait_seconds`) are lane-summed and inflated when lanes share
+  hardware threads. Stage timers are wall spans, and a stage shift can come
+  from the previous stage: a coarse-side change (a skipped finiteness scan
+  and shared serial filter code, not split further) moved about 0.15 s into
+  fine at four workers while the slot moved only 0.2–1.6%
+  ([bisect](validation.md#gpu-offload-survey-and-gated-device-routes--20-november-2026)).
+  In a bisect include a placebo
+  variant: one unused `noinline` function in the suspect object moved the
+  fine stage by 0.2–1.5%.
+- **Section timers and samplers** where `perf` is unavailable: copy the
+  object's source, add `__rdtsc()` accumulators between stages and link the
+  object ahead of the build tree's libraries with the compile line from
+  `ninja -t commands`. Compilers can move pure work across a timer, so
+  adjacent sections blur. `gprof` misses time in shared `libm` and credits
+  inlined code to its caller. Thread states come from
+  `/proc/<pid>/task/*/stat`, and repeated
+  `gdb -p <pid> -batch -ex 'thread apply all bt 3'` samples give top frames.
+- **Shapes no local slot reaches.** Copy the hot loop verbatim into a
+  microbenchmark at production geometry with the project's flags
+  (`-O3 -ffp-contract=off -fno-fast-math`), check bitwise equality against
+  the old loop, and time one thread and N lanes with their own tables. Six
+  lanes saturated the 5650U's DRAM at about 17.5 GB/s and hid most of a
+  loop interchange's gain. Example: the
+  [HF ridge benchmark](validation.md#fine-stage-device-routes-and-exact-cpu-stages--21-november-2026).
+- **On a pod.** Pod CPUs differ between rentals: EPYC 9355 and EPYC 9335
+  with 13.6-CPU quotas, EPYC 9554 and EPYC 9555 with 27.2, and Xeon 6952P
+  with 40.8. Native per-thread rates differed about 2–6× for 16,384-point
+  signed-lag ranks and 1.3–3.2× for 200-row varying blocks between 13-CPU
+  allocations and 27-CPU quotas, so compare only within one run and never
+  use pod rates as local costs. Record whether a run used the whole quota or an
+  affinity-restricted allocation inside it. The probe's default `W` is
+  twice the quota's whole CPUs (the floor of quota over period, at least
+  one); size memory limits for it.
+- **HF-scale slots.** Do not rerun them routinely. Extrapolate by fixed
+  geometry from component timings and one moderate holdout, and record the
+  assumptions and provenance.
+
 ## Relative regression harness
 
 Run cheap native correctness checks before a declared timing comparison:
@@ -749,8 +835,9 @@ bundle and built against the remote runtime, with no persistent volume needed.
 
 ## Run a native simulation on RunPod
 
-One Pod with one GPU runs one complete receiver. A CPU-only Pod can run the
-same simulation with the native CPU backend. Use extra Pods for independent
+One Pod with one GPU runs one complete receiver: separate receiver processes
+sharing one device made each slot take 3.0 s against 0.45–0.81 s alone. A
+CPU-only Pod can run the same simulation with the native CPU backend. Use extra Pods for independent
 seeds, noise controls, channel laws or configurations when parallel completion
 is worth the aggregate cost. The measured receiver has no cross-Pod
 distribution of one public search or ordered message stream. Plan the
@@ -812,6 +899,13 @@ tar -xmzf source.tar.gz -C source
 cd source
 ```
 
+**Which build reaches which route.** The CUDA probe build below
+(`-DDATAPUMP_TRIAD_VULKAN=OFF`) measures the CUDA route only. The dense FP4
+search, the resident fine route, Vulkan segmented timing and the signed-lag
+gain rank need the lab's Vulkan and OpenCL deployment; follow the
+[bounded device qualification](triad-gpu-optimization.md#run-a-bounded-device-qualification)
+for those.
+
 **Build the GPU probe.** Read `nvidia-smi -L` and
 `nvidia-smi --query-gpu=name,driver_version,memory.total,compute_cap --format=csv`
 to identify the edition, full device and available architecture. Compare the
@@ -856,8 +950,13 @@ and keep its `describe` record. In the linked replay, substitute
 Run `plan` with the intended case options,
 sample and memory budgets, and the same affinity as the measurement. Read
 `configuration.bit_seconds`, `slot_interval_seconds`, `slot_plan`,
-`receiver_slot_workspace_bytes` and the allocation. Check the host cgroup RAM
-and device workspace separately. Run `admission` for a single-bit decision
+`receiver_slot_workspace_bytes` and the allocation. That quote is the CPU
+route's; device routes add host quotes, such as the gain-rank certification
+and the larger plan caches. Size `--memory-limit-bytes` for `W = 2 ×` the
+pod quota's whole CPUs: a 9 GB limit sized on a 12-thread host refused the
+72 Hz/5× control at W = 80. Check the host cgroup RAM and device workspace
+separately. `--backend gpu` rejects `--device-memory-limit-bytes`,
+`--device-index` and backend arithmetic options. Run `admission` for a single-bit decision
 or `message` through both physical quiet slots for complete delivery. Use
 `--backend gpu --require-accelerator on` for automatic GPU stage routing, or
 `--backend cpu` for the CPU comparison. Preserve the arguments, result JSON,
@@ -912,7 +1011,9 @@ MiB-only command and relabeled as matched.
 
 Use the [native RunPod deployment procedure](#run-a-native-simulation-on-runpod)
 to prepare the probe. Run the forecasting script from the extracted source
-directory with the matching path to the probe.
+directory with the matching path to the probe. Its `--device` accepts only
+`cpu` and `cuda`, so a forecast cannot yet observe the Vulkan/OpenCL route's
+work.
 
 The following placeholders are explicit declared limits, not portable defaults:
 
@@ -1057,15 +1158,12 @@ independent bounded holdouts before a performance or capacity claim. The earlier
 native regression baseline was established without a comparison; it is not a
 pass for later changes.
 
-The user authorized RunPod use for up to eight hours at an aggregate ceiling of
-$20/hour. This superseded the earlier $2/60-minute A5000 proposal. The selected
-task allocation was one full RTX PRO 6000, with a conservative $2.50/hour price
-ceiling and $25 total task budget, for at most eight hours and without a
-persistent volume. The roughly 100-minute rental was deleted by 20:47:10 UTC;
-no pod or cloud volume remains. The observed balance decrease was about $4.08,
-not a finalized invoice. Spending is separate from receiver performance. Pod identifiers,
-account balances, billing records and operational logs remain outside the
-checkout; do not copy them into documentation.
+The rental was separately authorized and bounded: one full RTX PRO 6000,
+without a persistent volume, deleted after about 100 minutes with no pod or
+cloud volume remaining. Past budgets are not new spending authority, and
+spending is separate from receiver performance. Pod identifiers, account
+balances, billing records and operational logs remain outside the checkout;
+do not copy them into documentation.
 
 Preserve the automatic `2*H` receiver-worker budget and exact explicit limits.
 Measure productive work in one stream and distinguish ready-input backlog from

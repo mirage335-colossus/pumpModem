@@ -63,6 +63,18 @@ enum class VulkanFineProjection {
 // the device and workspace admit, for qualification; native keeps the CPU
 // scorer. Unadmitted shapes stay native and are reported as fallbacks.
 enum class VulkanSegmentedTiming { automatic, device, native };
+// A fine-stage device route: the signed-lag gain direct rank, drift
+// proposals or varying statistics. Automatic runs a family on the device
+// only where it is qualified for the selected device class (today the
+// gain rank on the OpenCL-identified SM 12.0 class); device runs every
+// admitted stage there, for
+// qualification; native keeps the CPU stage. Declines and fallbacks are
+// reported. Every family has a Vulkan implementation; the varying
+// fp32_template arithmetic has none and declines.
+enum class VulkanStageRoute { automatic, device, native };
+// Arithmetic of the varying statistics' template projections on the
+// device. Automatic chooses the qualified one.
+enum class VulkanVaryingArithmetic { automatic, fp64, fp32_template };
 
 struct VulkanReceiverOptions {
     unsigned device_index = 0;
@@ -79,6 +91,12 @@ struct VulkanReceiverOptions {
     bool force_host_scoring = false;
     VulkanFineProjection fine_projection = VulkanFineProjection::automatic;
     VulkanSegmentedTiming segmented_timing = VulkanSegmentedTiming::automatic;
+    // The GUI's Default (fastest) takes these automatic defaults, so a
+    // qualification changes the default alone.
+    VulkanStageRoute gain_rank = VulkanStageRoute::automatic;
+    VulkanStageRoute drift_proposals = VulkanStageRoute::automatic;
+    VulkanStageRoute varying_fine = VulkanStageRoute::automatic;
+    VulkanVaryingArithmetic varying_arithmetic = VulkanVaryingArithmetic::automatic;
     // Record OpenCL device command intervals in the receipt. Developer
     // probes use this to separate Tensor Core time from complete service.
     bool profile_opencl = false;

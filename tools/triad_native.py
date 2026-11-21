@@ -27,6 +27,36 @@ OPENCL_COARSE_FALLBACK_REASONS = frozenset((
     "description-storage", "device-templates-off", "few-arrivals", "one-ray-unqualified", "dense-cost",
     "keyed-chip-limit", "kernel-extent", "workspace-lease", "host-allocation", "device-allocation",
     "ill-conditioned-template", "unoffered"))
+# Fine-stage device families and why a stage stayed native, as
+# stage_family_receipt_names and the stage_*_reasons lists in
+# src/triad_receiver_bulk.hpp give them; tests/test_triad_abbreviated.py
+# compares the lists. A Vulkan receipt names a reason
+# vulkan-<family>-<suffix>, with the family's hyphenated name.
+VULKAN_STAGE_FAMILIES = ("gain_rank", "drift", "varying")
+VULKAN_STAGE_ROUTES = ("automatic", "device", "native")
+VULKAN_VARYING_ARITHMETIC = ("automatic", "fp64", "fp32-template")
+STAGE_POLICY_REASONS = (
+    "native-requested", "fp64-requested", "host-scoring-forced", "shader-fp64-unavailable",
+    "unsupported-shape", "unqualified-device", "unimplemented")
+STAGE_FALLBACK_REASONS = (
+    "workspace", "unified-memory-envelope", "unsupported-transform", "nonfinite-input", "nonfinite-device")
+GAIN_RANK_STAGE_REASONS = (
+    "verify-mode", "no-direct-rank", "no-unsampled-blocks", "audit-unavailable", "shift-runs", "shift-range",
+    "band-violated", "frontier-overflow", "near-tie")
+VARYING_STAGE_REASONS = ("diagnostic", "line", "coherent-gain", "projected-tracker")
+# The serialized VkFFT plan cache's entries by its byte limit, a receipt's
+# host_cache_limit_bytes: coarse_cache_bounds and stage_cache_bounds in
+# src/triad_vulkan_core.hpp. Only a backend that can select a fine-stage
+# family for the device holds the larger cache.
+VULKAN_SERIALIZED_CACHE_ENTRIES = {8 << 20: 16, 64 << 20: 48}
+
+
+def vulkan_stage_reasons(family):
+    """The decline and fallback reasons a Vulkan receipt may name for a family."""
+    own = {"gain_rank": GAIN_RANK_STAGE_REASONS, "varying": VARYING_STAGE_REASONS}.get(family, ())
+    prefix = "vulkan-" + family.replace("_", "-") + "-"
+    return (frozenset(prefix + reason for reason in (*STAGE_POLICY_REASONS, *own)),
+            frozenset(prefix + reason for reason in (*STAGE_FALLBACK_REASONS, *own)))
 
 
 class ProbeError(ValueError):
@@ -144,6 +174,12 @@ def runtime_identity(receipt):
             del runtime["bulk"]["precision"]
         if "requested_vulkan_fine_projection" in identity:
             runtime["requested_vulkan_fine_projection"] = identity["requested_vulkan_fine_projection"]
+        # A stated fine-stage route or arithmetic; automatic receipts stay
+        # comparable with those from before the routes existed.
+        for key in ("requested_vulkan_gain_rank", "requested_vulkan_drift", "requested_vulkan_varying_fine",
+                    "requested_vulkan_varying_arithmetic"):
+            if identity.get(key, "automatic") != "automatic":
+                runtime[key] = identity[key]
     else:
         runtime["bulk"] = {name: bulk.get(name) for name in (
             "device", "device_name", "library_version", "cuda_runtime_version", "cuda_driver_version",
@@ -196,6 +232,71 @@ def _validate_frequency_admission(value, where):
         raise ProbeError(f"Admitted Vulkan bulk work lacks a positive device allocation in {where}")
 
 
+def _validate_vulkan_stage_requests(identity, backend, status):
+    """A stated fine-stage route names the backend's shape-independent policy
+    decline, empty when it can be served; a required device route the
+    backend cannot serve is unservable and the work incomplete."""
+    for family in VULKAN_STAGE_FAMILIES:
+        key = "requested_vulkan_" + ("varying_fine" if family == "varying" else family)
+        route = identity.get(key, "automatic")
+        requirement = identity.get("vulkan_" + family + "_requirement")
+        decline = identity.get("vulkan_" + family + "_route_decline")
+        prefix = "vulkan-" + family.replace("_", "-") + "-"
+        policy = {prefix + reason for reason in STAGE_POLICY_REASONS}
+        selected = isinstance(identity.get("backend_receipt"), dict)
+        if (route not in VULKAN_STAGE_ROUTES or (route != "automatic" and backend != "vulkan")
+                or requirement not in (None, "required", "not_applicable", "unservable")
+                or (requirement is not None and route != "device")
+                or (decline is not None and (route == "automatic" or not isinstance(decline, str)
+                                             or (decline and decline not in policy)))
+                or (route != "automatic" and selected and decline is None)
+                or (route == "native" and decline is not None and decline != prefix + "native-requested")
+                or (requirement == "unservable" and (not decline or status == "complete"))
+                or (requirement in ("required", "not_applicable") and decline)):
+            raise ProbeError("Invalid Vulkan fine-stage route request")
+    arithmetic = identity.get("requested_vulkan_varying_arithmetic", "automatic")
+    if arithmetic not in VULKAN_VARYING_ARITHMETIC or (arithmetic != "automatic" and (
+            backend != "vulkan" or identity.get("requested_vulkan_varying_fine") != "device")):
+        raise ProbeError("Invalid Vulkan varying arithmetic request")
+
+
+def _validate_vulkan_stages(bulk, identity):
+    """Each fine-stage family of a complete receipt names the reasons of its
+    native stages, counts device work only for sessions it admitted, and
+    meets a required device route."""
+    counters = ("sessions", "forward_ffts", "inverse_ffts", "fft_row_stages", "score_rows",
+                "planned_calls", "declined_calls", "native_fallbacks", "upload_bytes")
+    for family in VULKAN_STAGE_FAMILIES:
+        prefix = "vulkan_" + family + "_"
+        requirement = identity.get(prefix + "requirement")
+        if prefix + "planned_calls" not in bulk:
+            if requirement is not None:
+                raise ProbeError("Vulkan receipt lacks the fine-stage work of a required route")
+            continue  # a receipt from before the fine-stage routes
+        counts = {name: positive_int(bulk.get(prefix + name), f"Vulkan {family} {name}", allow_zero=True)
+                  for name in counters}
+        declines, fallbacks = vulkan_stage_reasons(family)
+        decline = bulk.get(prefix + "decline_reason")
+        fallback = bulk.get(prefix + "fallback_reason")
+        # Every planned call is a decline, a session or a fallback before
+        # any session; a session's own fallbacks add no planned call.
+        recorded = counts["planned_calls"] or counts["declined_calls"] or counts["native_fallbacks"]
+        if (not isinstance(decline, str) or not isinstance(fallback, str)
+                or type(bulk.get(prefix + "qualified_device")) is not bool
+                or (decline and decline not in declines) or (fallback and fallback not in fallbacks)
+                or bool(decline) != bool(counts["declined_calls"])
+                or bool(fallback) != bool(counts["native_fallbacks"])
+                or counts["declined_calls"] + counts["sessions"] > counts["planned_calls"]
+                or counts["planned_calls"] > counts["declined_calls"] + counts["sessions"] + counts["native_fallbacks"]
+                or (not counts["sessions"] and any(counts[name] for name in (
+                    "forward_ffts", "inverse_ffts", "fft_row_stages", "score_rows", "upload_bytes")))
+                or (requirement == "not_applicable" and recorded)
+                or (requirement == "required" and (not recorded or not counts["sessions"] or not counts["score_rows"]
+                                                   or counts["declined_calls"] or counts["native_fallbacks"]))
+                or requirement == "unservable"):
+            raise ProbeError("Vulkan receipt does not identify its fine-stage device work and native stages")
+
+
 def validate_receipt(receipt, *, command, backend, returncode, expected_require_accelerator=None):
     if not isinstance(receipt, dict) or receipt.get("schema") != SCHEMA:
         raise ProbeError("Expected a current native Robust probe receipt")
@@ -221,6 +322,7 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
         raise ProbeError("Native receipt backend disagrees with requested backend")
     if identity.get("implementation") != "native-production-receiver":
         raise ProbeError("Measurement did not identify the canonical native receiver")
+    _validate_vulkan_stage_requests(identity, backend, status)
     if (backend in ("vulkan", "gpu") and expected_require_accelerator is not None
             and identity.get("require_accelerator") is not expected_require_accelerator):
         raise ProbeError("Native probe did not honor the requested accelerator requirement")
@@ -302,6 +404,7 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
             for key in ("vulkan_float16", "vulkan_int8", "vulkan_integer_dot8_accelerated"):
                 if type(bulk.get(key)) is not bool:
                     raise ProbeError("Vulkan receipt lacks queried arithmetic features")
+            _validate_vulkan_stages(bulk, identity)
             if "requested_vulkan_precision" in identity:
                 requested = identity["requested_vulkan_precision"]
                 if requested not in ("automatic", "fp32", "fp16-storage",
@@ -640,9 +743,10 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                     or type(owner_peak) is not int or not (0 if fft_rows == 0 else 1) <= owner_peak <= workspace_limit
                     or type(active_sessions) is not int or active_sessions < 0
                     or type(aggregate_peak) is not int or aggregate_peak < owner_peak
-                    or type(cache_limit) is not int or cache_limit <= 0
+                    or type(cache_limit) is not int or cache_limit not in VULKAN_SERIALIZED_CACHE_ENTRIES
                     or type(cache_bytes) is not int or not 0 <= cache_bytes <= cache_limit
-                    or type(cache_entries) is not int or not 0 <= cache_entries <= 8):
+                    or type(cache_entries) is not int
+                    or not 0 <= cache_entries <= VULKAN_SERIALIZED_CACHE_ENTRIES[cache_limit]):
                 raise ProbeError("Vulkan receipt does not prove bounded device and serialized FFT cache allocation")
             if backend == "gpu":
                 shared_limit = positive_int(accelerator.get("vulkan_shared_workspace_limit_bytes"),

@@ -361,6 +361,10 @@ public:
     std::size_t modes() const { return indices_.size(); }
     std::size_t float_scratch_rows() const { return float_plan_ ? FloatProjection::scratch_rows : 0; }
     std::span<const std::size_t> indices() const { return indices_; }
+    // For a device transform of this projection: its DFT plan, null for a
+    // tapered or DC-only projection, and the unitary scale of its modes.
+    const DftPlan* plan() const noexcept { return plan_ ? &*plan_ : nullptr; }
+    double normalization() const noexcept { return normalization_; }
 
     // In the original DFT order with unitary normalization. A caller
     // applying a circular frequency-bin shift needs every template bin,
@@ -2648,6 +2652,12 @@ constexpr double varying_power = 1. / 16;
 constexpr std::array tracking_powers{varying_power, 1. / 256, 1. / 512, 1. / 4096};
 constexpr std::size_t maximum_tracking_states = 65;
 constexpr double nominal_independent_gain_weight = 1. / 8;
+// Consecutive public blocks scored per three-phase batch: their storage is
+// charged in the varying quote. A statistics leaf covers about this many
+// rows of one family item, so lanes stay inside a short basis window.
+constexpr std::size_t maximum_varying_batch_bytes = 16U << 20;
+constexpr std::size_t maximum_varying_batch_blocks = 256;
+constexpr std::size_t varying_chunk_rows = 2048;
 
 struct DriftGram {
     // Cholesky factor of I + A^H A/(noise variance * precision).
@@ -2787,20 +2797,16 @@ double tracking_emission(double direct, double echo, Complex cross, Complex r0, 
 }
 
 // Normalize the two equal-power independent spatial gains against the
-// same projected white null as the short tracked/fixed alternatives.
-void accumulate_independent_center(IndependentGainState& state, MappedBasis& basis, const MappedBasisRow& map,
-                                   double delay, const ObservationBlock& observation, double variance,
-                                   WorkerScratch& scratch, std::stop_token stop) {
-    const std::array<Tap, 2> paths{{{0, 0}, {delay, 0}}};
-    std::array<Complex, 6> correlations{};
-    std::array<Complex, 12> gram{};
-    sufficient_statistics(basis, map, paths, observation, variance, scratch,
-        correlations, gram, state.nonzero_basis, stop);
+// same projected white null as the short tracked/fixed alternatives. The
+// block statistics come from sufficient_statistics in the statistics phase.
+void advance_independent_center(IndependentGainState& state, const FineBulkStatistics& statistics,
+                                const ObservationBlock& observation) {
+    state.nonzero_basis |= statistics.nonzero_basis;
     const auto rank = highest_observation_rank(observation);
     for (std::size_t bit = 0; bit < 2; ++bit) {
         const auto hypothesis = bit + 1;
-        const auto g = std::span(gram).subspan(4 * hypothesis, 4);
-        const auto r = std::span(correlations).subspan(2 * hypothesis, 2);
+        const auto g = std::span(statistics.gram).subspan(4 * hypothesis, 4);
+        const auto r = std::span(statistics.correlations).subspan(2 * hypothesis, 2);
         // These statistics already include the inverse noise variance.
         for (std::size_t power = 0; power < state.powers.size(); ++power) {
             auto& evidence = state.powers[power].fixed_centroid[bit][0];
@@ -2877,6 +2883,18 @@ void update_frequency_weights(std::span<const double> evidence, std::span<double
     std::copy_n(next.begin(), previous.size(), previous.begin());
 }
 
+} // namespace
+
+std::int64_t projected_half_bin(std::size_t rows, double fs, double step_hz, std::int64_t radius, std::size_t state) {
+    const auto half_bins = 2 * rows * step_hz * (static_cast<std::int64_t>(state) - radius) / fs;
+    // Distinguish the two sampled Nyquist endpoints. Keep a rounding
+    // error within the half-bin lattice even on the merged last block.
+    const auto last = static_cast<std::int64_t>(rows) - 1;
+    return std::clamp(static_cast<std::int64_t>(std::llround(half_bins)), -last, last);
+}
+
+namespace {
+
 template<class Visitor>
 void visit_projected_tracks(std::span<const Complex> templates, std::size_t taps, const ObservationBlock& block,
                             double fs, const FrequencyTrackingPlan& plan, WorkerScratch& scratch,
@@ -2884,11 +2902,7 @@ void visit_projected_tracks(std::span<const Complex> templates, std::size_t taps
     const auto& projection = *block.projection;
     const auto rows = projection.rows();
     const auto frequency_bin = [&](std::size_t i) {
-        const auto half_bins = 2 * rows * plan.step_hz * (static_cast<std::int64_t>(i) - plan.radius) / fs;
-        // Distinguish the two sampled Nyquist endpoints. Keep a rounding
-        // error within the half-bin lattice even on the merged last block.
-        const auto last = static_cast<std::int64_t>(rows) - 1;
-        return std::clamp(static_cast<std::int64_t>(std::llround(half_bins)), -last, last);
+        return projected_half_bin(rows, fs, plan.step_hz, plan.radius, i);
     };
     const auto indices = projection.indices();
     const auto rank_bound = highest_observation_rank(block);
@@ -2947,67 +2961,74 @@ void visit_projected_tracks(std::span<const Complex> templates, std::size_t taps
     }
 }
 
-void track_projected_block(std::span<const Complex> templates, std::size_t taps,
-                            const ObservationBlock& block, double variance, double fs,
-                            const FrequencyTrackingPlan& plan, WorkerScratch& scratch,
-                            std::span<Complex> spectrum, TrackingLogWeights& log_weights,
-                            TrackingPosteriors* persistent, double gain_correlation,
-                            std::stop_token stop) {
-    TrackingLogWeights evidence{};
+// One (bit, frequency state) of a projected track block, in the order the
+// visitor produced it. The recursion phase replays that order exactly. A
+// device session publishes the independent atoms' cells in this layout.
+using ProjectedTrackCell = VaryingIndependentRow;
+static_assert(sizeof(ProjectedTrackCell) == 80, "the varying batch quote charges 80-byte track cells");
+
+void projected_track_cells(std::span<const Complex> templates, std::size_t taps, const ObservationBlock& block,
+                           double fs, const FrequencyTrackingPlan& plan, WorkerScratch& scratch,
+                           std::span<Complex> spectrum, std::span<ProjectedTrackCell> cells, std::stop_token stop) {
+    std::size_t next = 0;
     visit_projected_tracks(templates, taps, block, fs, plan, scratch, spectrum,
-        [&](std::size_t bit, std::size_t state, std::int64_t half_bin, unsigned rank,
+        [&](std::size_t bit, std::size_t state, std::int64_t half_bin, unsigned,
             const auto& correlation, const auto& diagonal, Complex cross) {
-                for (std::size_t power = 0; power < tracking_powers.size(); ++power) {
-                    evidence[bit][power][state] = tracking_emission(diagonal[0], diagonal[1], cross,
-                        correlation[0], correlation[1], taps, tracking_powers[power], variance, rank);
-                    if (persistent) {
-                        // Correct the deterministic per-state frequency
-                        // reference before transporting a complex gain.
-                        const auto hz = half_bin * fs / (2 * block.projection->rows());
-                        const auto phase = std::polar(1., -tau * hz * block.first / fs);
-                        auto& posterior = (*persistent)[bit][power][state];
-                        const auto value = coherent_gain_update(posterior.posterior, diagonal[0], diagonal[1], cross,
-                            correlation[0] * phase, correlation[1] * phase, taps, tracking_powers[power],
-                            variance, gain_correlation, rank);
-                        // The persistent branch uses its own accumulated
-                        // likelihood. Keep its independent gain peer below.
-                        posterior.log_evidence += value;
-                    }
-                }
+            if (next == cells.size()) throw ReceiverWorkspaceError("Robust projected track cells exceed their batch");
+            cells[next++] = {correlation, diagonal, cross, half_bin, static_cast<std::uint32_t>(bit),
+                             static_cast<std::uint32_t>(state)};
         }, stop);
+    if (next != cells.size()) throw Error("Robust projected track omitted a frequency state");
+}
+
+void advance_projected_track(std::span<const ProjectedTrackCell> cells, std::size_t taps,
+                             const ObservationBlock& block, double variance, double fs,
+                             const FrequencyTrackingPlan& plan, TrackingLogWeights& log_weights,
+                             TrackingPosteriors* persistent, double gain_correlation) {
+    const auto rank = highest_observation_rank(block);
+    TrackingLogWeights evidence{};
+    for (const auto& cell : cells) {
+        const auto bit = cell.bit, state = cell.state;
+        for (std::size_t power = 0; power < tracking_powers.size(); ++power) {
+            evidence[bit][power][state] = tracking_emission(cell.diagonal[0], cell.diagonal[1], cell.cross,
+                cell.correlations[0], cell.correlations[1], taps, tracking_powers[power], variance, rank);
+            if (persistent) {
+                // Correct the deterministic per-state frequency
+                // reference before transporting a complex gain.
+                const auto hz = cell.half_bin * fs / (2 * block.projection->rows());
+                const auto phase = std::polar(1., -tau * hz * block.first / fs);
+                auto& posterior = (*persistent)[bit][power][state];
+                const auto value = coherent_gain_update(posterior.posterior, cell.diagonal[0], cell.diagonal[1],
+                    cell.cross, cell.correlations[0] * phase, cell.correlations[1] * phase, taps, tracking_powers[power],
+                    variance, gain_correlation, rank);
+                // The persistent branch uses its own accumulated
+                // likelihood. Keep its independent gain peer below.
+                posterior.log_evidence += value;
+            }
+        }
+    }
     for (std::size_t bit = 0; bit < 2; ++bit)
         for (std::size_t power = 0; power < tracking_powers.size(); ++power)
             update_frequency_weights(std::span(evidence[bit][power]).first(plan.states),
                                      std::span(log_weights[bit][power]).first(plan.states), plan.coherent_gain_blocks);
 }
 
-void accumulate_independent_gain(IndependentGainState& state, MappedBasis& basis, const MappedBasisRow& map,
-                                 double delay, const ObservationBlock& block, double variance, double fs,
-                                 const FrequencyTrackingPlan& plan, WorkerScratch& scratch,
-                                 std::span<Complex> spectrum, std::stop_token stop) {
-    if (!plan.states) {
-        accumulate_independent_center(state, basis, map, delay, block, variance, scratch, stop);
-        return;
-    }
-    const auto rows = block.projection->rows();
-    const std::array<Tap, 2> paths{{{0, 0}, {delay, 0}}};
-    auto templates = std::span(scratch.raw).first(4 * rows);
-    basis.render_pair(map, paths, block.first, std::span(scratch.offsets).first(rows), templates, stop);
-    if (!state.nonzero_basis)
-        state.nonzero_basis = std::ranges::any_of(templates, [](auto value) { return value != Complex{}; });
+void advance_independent_gain(IndependentGainState& state, std::span<const ProjectedTrackCell> cells, bool nonzero_basis,
+                              const ObservationBlock& block, double variance, const FrequencyTrackingPlan& plan,
+                              std::stop_token stop) {
+    state.nonzero_basis |= nonzero_basis;
+    const auto rank = highest_observation_rank(block);
     auto evidence = std::span(state.emissions);
-    visit_projected_tracks(templates, paths.size(), block, fs, plan, scratch, spectrum,
-        [&](std::size_t bit, std::size_t frequency, std::int64_t, unsigned rank,
-            const auto& correlation, const auto& diagonal, Complex cross) {
-            for (std::size_t power = 0; power < state.powers.size(); ++power) {
-                const auto value = tracking_emission(diagonal[0], diagonal[1], cross, correlation[0], correlation[1],
-                    paths.size(), independent_gain_powers[power], variance, rank);
-                evidence[(2 * power + bit) * plan.states + frequency] = value;
-                auto& fixed = state.powers[power].fixed_centroid[bit][frequency];
-                fixed += value;
-                if (!std::isfinite(fixed)) throw Error("Robust stationary centroid evidence is nonfinite");
-            }
-        }, stop);
+    for (const auto& cell : cells) {
+        for (std::size_t power = 0; power < state.powers.size(); ++power) {
+            const auto value = tracking_emission(cell.diagonal[0], cell.diagonal[1], cell.cross, cell.correlations[0],
+                cell.correlations[1], 2, independent_gain_powers[power], variance, rank);
+            evidence[(2 * power + cell.bit) * plan.states + cell.state] = value;
+            auto& fixed = state.powers[power].fixed_centroid[cell.bit][cell.state];
+            fixed += value;
+            if (!std::isfinite(fixed)) throw Error("Robust stationary centroid evidence is nonfinite");
+        }
+    }
     for (std::size_t power = 0; power < state.powers.size(); ++power)
         for (std::size_t bit = 0; bit < 2; ++bit)
             update_frequency_weights(evidence.subspan((2 * power + bit) * plan.states, plan.states),
@@ -3123,24 +3144,27 @@ TrackedFrequencySpanBlock track_span_maximum(
     return result;
 }
 
-void track_frequency_block(MappedBasis& basis, const MappedBasisRow& map, std::span<const Tap> taps,
-                            std::size_t first, std::span<const Complex> observation, double variance,
-                            const FrequencyTrackingPlan& plan,
-                            const modem::detail::search_fft::DoublePlan& fft, WorkerScratch& scratch,
-                            std::span<Complex> spectrum, TrackingLogWeights& log_weights,
-                            const ObservationBlock* projected, double sample_rate, TrackingPosteriors* persistent,
-                            double gain_correlation, std::stop_token stop,
-                            std::array<TrackedFrequencySpanBlock, 2>* span_maxima, double observation_energy) {
+// The unprojected tracker's block statistics for one bit: the template Gram
+// shared by every frequency state, beside its lattice correlations.
+struct RawTrackGram {
+    double direct = 0, echo = 0;
+    Complex cross{};
+};
+
+std::size_t raw_track_lattice(std::size_t states) { return checked_multiply(4, states); }
+
+void raw_track_statistics(MappedBasis& basis, const MappedBasisRow& map, std::span<const Tap> taps,
+                          std::size_t first, std::span<const Complex> observation,
+                          const FrequencyTrackingPlan& plan,
+                          const modem::detail::search_fft::DoublePlan& fft, WorkerScratch& scratch,
+                          std::span<Complex> spectrum, std::span<RawTrackGram, 2> grams, std::span<Complex> lattice,
+                          double sample_rate, std::array<TrackedFrequencySpanBlock, 2>* span_maxima,
+                          double observation_energy, std::stop_token stop) {
     const auto rows = observation.size();
     const auto columns = 2 * taps.size();
     auto templates = std::span(scratch.raw).first(columns * rows);
     // Tracking uses a compact block, so this render is always one cache request.
     basis.render_pair(map, taps, first, std::span(scratch.offsets).first(rows), templates, stop);
-    if (projected) {
-        track_projected_block(templates, taps.size(), *projected, variance, sample_rate, plan,
-                              scratch, spectrum, log_weights, persistent, gain_correlation, stop);
-        return;
-    }
     for (std::size_t column = 0; column < columns; ++column) {
         auto values = spectrum.subspan(column * plan.fft_rows, plan.fft_rows);
         std::fill(values.begin(), values.end(), Complex{});
@@ -3166,27 +3190,45 @@ void track_frequency_block(MappedBasis& basis, const MappedBasisRow& map, std::s
                 spectrum.subspan(column * plan.fft_rows, taps.size() * plan.fft_rows),
                 templates.subspan(column * rows, taps.size() * rows), observation, plan, taps.size(),
                 sample_rate, observation_energy, stop);
+        grams[bit] = {direct_energy, echo_energy, cross};
+        auto values = lattice.subspan(2 * bit * plan.states, 2 * plan.states);
+        for (std::size_t i = 0; i < plan.states; ++i) {
+            const auto signed_bin = (static_cast<std::int64_t>(i) - plan.radius) *
+                static_cast<std::int64_t>(plan.step_bins);
+            const auto bin = static_cast<std::size_t>(signed_bin < 0 ?
+                signed_bin + static_cast<std::int64_t>(plan.fft_rows) : signed_bin);
+            values[i] = spectrum[column * plan.fft_rows + bin];
+            values[plan.states + i] = taps.size() == 2 ? spectrum[(column + 1) * plan.fft_rows + bin] : Complex{};
+        }
+    }
+}
+
+void advance_raw_track(std::span<const RawTrackGram, 2> grams, std::span<const Complex> lattice, std::size_t taps,
+                       std::size_t first, std::size_t rows, double variance, const FrequencyTrackingPlan& plan,
+                       TrackingLogWeights& log_weights, double sample_rate, TrackingPosteriors* persistent,
+                       double gain_correlation) {
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        const auto& block = grams[bit];
+        const auto values = lattice.subspan(2 * bit * plan.states, 2 * plan.states);
         // A constant finite Gaussian gain model for this block. Frequency
         // states change only its phase, so all states share the same Gram.
         for (std::size_t power = 0; power < tracking_powers.size(); ++power) {
-            const double precision = taps.size() / tracking_powers[power];
-            const DriftGram gram(direct_energy, echo_energy, cross, precision, variance);
+            const double precision = taps / tracking_powers[power];
+            const DriftGram gram(block.direct, block.echo, block.cross, precision, variance);
             const double scaling = 1. / (std::sqrt(precision) * std::sqrt(variance));
             FrequencyWeights evidence{};
             for (std::size_t i = 0; i < plan.states; ++i) {
                 const auto signed_bin = (static_cast<std::int64_t>(i) - plan.radius) *
                     static_cast<std::int64_t>(plan.step_bins);
-                const auto bin = static_cast<std::size_t>(signed_bin < 0 ?
-                    signed_bin + static_cast<std::int64_t>(plan.fft_rows) : signed_bin);
-                const auto r0 = spectrum[column * plan.fft_rows + bin];
-                const auto r1 = taps.size() == 2 ? spectrum[(column + 1) * plan.fft_rows + bin] : Complex{};
+                const auto r0 = values[i];
+                const auto r1 = values[plan.states + i];
                 evidence[i] = gram.score(r0 * scaling, r1 * scaling, 1 / variance);
                 if (persistent) {
                     const auto hz = signed_bin * sample_rate / plan.fft_rows;
                     const auto phase = std::polar(1., -tau * hz * first / sample_rate);
                     auto& posterior = (*persistent)[bit][power][i];
-                    posterior.log_evidence += coherent_gain_update(posterior.posterior, direct_energy, echo_energy, cross,
-                        r0 * phase, r1 * phase, taps.size(), tracking_powers[power], variance, gain_correlation,
+                    posterior.log_evidence += coherent_gain_update(posterior.posterior, block.direct, block.echo,
+                        block.cross, r0 * phase, r1 * phase, taps, tracking_powers[power], variance, gain_correlation,
                         static_cast<unsigned>(std::min<std::size_t>(2, rows)));
                 }
             }
@@ -3194,6 +3236,81 @@ void track_frequency_block(MappedBasis& basis, const MappedBasisRow& map, std::s
                                      std::span(log_weights[bit][power]).first(plan.states), plan.coherent_gain_blocks);
         }
     }
+}
+
+// One public block of a batch: its projected observation and the inputs of
+// every recursion at this block. Storage is reserved once for the batch.
+struct VaryingBlock {
+    ObservationBlock observation;
+    std::vector<Complex> line_storage;
+    std::array<double, 4 * 2 * models> transitions{};
+    double gain_correlation = 0, observation_energy = 0;
+};
+
+// A stage's device session for the template-side statistics of its affine
+// items and tracked independent atoms, its staging layout, the native
+// projection tables and the stage constants it reads from staging.
+struct VaryingDeviceRoute {
+    std::unique_ptr<VaryingBulk> session;
+    VaryingBulkShape shape;
+    VaryingStagingLayout layout;
+    std::array<VaryingProjectionTables, 2> tables;
+    std::span<const std::uint32_t> taps;
+    std::span<const std::int64_t> shifts;
+    std::size_t device_batches = 0, native_batches = 0;
+};
+
+// render_templates into caller storage [column][rows]: the same basis
+// requests, so the same values.
+void render_templates_into(MappedBasis& basis, const MappedBasisRow& row, std::span<const Tap> taps,
+                           std::size_t block_first, std::size_t rows, std::span<Complex> out, WorkerScratch& scratch,
+                           std::stop_token stop) {
+    const auto columns = 2 * taps.size();
+    for (std::size_t first = 0; first < rows; first += maximum_basis_rows) {
+        const auto count = std::min(maximum_basis_rows, rows - first);
+        auto rendered = count == rows ? out.first(rows * columns) : std::span(scratch.chunk).first(count * columns);
+        basis.render_pair(row, taps, block_first + first, std::span(scratch.offsets).first(count), rendered, stop);
+        if (count != rows) {
+            for (std::size_t column = 0; column < columns; ++column)
+                std::copy_n(rendered.begin() + static_cast<std::ptrdiff_t>(column * count), count,
+                            out.begin() + static_cast<std::ptrdiff_t>(column * rows + first));
+        }
+    }
+}
+
+// One lane's phase receipts, on its own cache line. A lane's idle time in a
+// phase runs from its first leaf there to the end of the phase.
+struct alignas(64) VaryingLaneTime {
+    double projection = 0, statistics = 0, recursion = 0, phase_busy = 0;
+    FineClock::time_point phase_first{};
+    std::size_t phase = 0;
+};
+
+// The families of one block's batch storage. A quote passes public maxima;
+// the scorer checks its actual families against the quoted bound.
+struct VaryingBatchShape {
+    std::size_t final_rows = 0, affine = 0, tracks = 0, track_states = 0;
+    std::size_t independent = 0, independent_states = 0;
+    bool line = false, projected_tracks = false;
+};
+
+std::size_t varying_track_block_bytes(bool projected, std::size_t states) {
+    return projected ? checked_multiply(2 * states, sizeof(ProjectedTrackCell)) :
+        checked_add(2 * sizeof(RawTrackGram), checked_multiply(raw_track_lattice(states), sizeof(Complex)));
+}
+
+std::size_t varying_batch_block_bytes(const VaryingBatchShape& shape) {
+    auto bytes = checked_add(sizeof(VaryingBlock),
+        checked_multiply(checked_multiply(shape.line ? 2 : 1, shape.final_rows), sizeof(Complex)));
+    bytes = checked_add(bytes, checked_multiply(shape.affine, sizeof(FineBulkStatistics)));
+    if (shape.track_states)
+        bytes = checked_add(bytes, checked_multiply(shape.tracks,
+            varying_track_block_bytes(shape.projected_tracks, shape.track_states)));
+    // A nominal or signed-lag atom keeps its projected cells and a basis
+    // flag, or the central fallback's sufficient statistics.
+    const auto independent = std::max(sizeof(FineBulkStatistics), checked_add(1,
+        checked_multiply(2 * std::max<std::size_t>(1, shape.independent_states), sizeof(ProjectedTrackCell))));
+    return checked_add(bytes, checked_multiply(shape.independent, independent));
 }
 
 struct VaryingBasis {
@@ -3267,6 +3384,10 @@ void enable_midpoint_tracking(VaryingFinePlan& plan) {
     plan.workspace_bytes = checked_add(plan.workspace_bytes,
         maximum_midpoint_timing_coordinates * (sizeof(TrackingLogWeights) + sizeof(MappedBasisRow) +
             2 * sizeof(FineCoordinate)));
+    // Each added coordinate's track statistics in every block of a batch.
+    const auto batch_tracks = checked_multiply(maximum_midpoint_timing_coordinates, plan.batch_track_bytes);
+    plan.batch_block_bytes = checked_add(plan.batch_block_bytes, batch_tracks);
+    plan.workspace_bytes = checked_add(plan.workspace_bytes, checked_multiply(plan.batch_blocks, batch_tracks));
     plan.midpoint_tracking = true;
 }
 
@@ -3320,8 +3441,6 @@ VaryingFinePlan varying_fine_plan(const ReceiverConfig& config, const ReceiverSl
         bytes = checked_add(bytes, checked_multiply(count, width));
     };
     add(block + final, sizeof(std::size_t)); // projection indices
-    add(final + fft, sizeof(Complex));       // observation + scratch
-    if (project_line_atom) add(final, sizeof(Complex));
     std::size_t geometry_count = 0;
     (void)varying_bases(config, slot, geometry_count);
     const auto states = maximum_varying_coordinates * geometry_count;
@@ -3360,7 +3479,7 @@ VaryingFinePlan varying_fine_plan(const ReceiverConfig& config, const ReceiverSl
     // per frequency and independent timing atom. Allocate before scoring.
     add(checked_multiply(gain_atoms, std::max<std::size_t>(1, independent_track.states)),
         (4 * independent_gain_powers.size() + 2 * independent_gain_powers.size() + 1) * sizeof(double));
-    add(active, sizeof(WorkerScratch));
+    add(active, sizeof(WorkerScratch) + sizeof(VaryingLaneTime));
     add(checked_multiply(active, 4 * final + fft + (final > mapped ? 4 * mapped : 0)), sizeof(Complex));
     add(checked_multiply(active, mapped), sizeof(double));
     add(1, MappedBasis::workspace_bytes(config, slot, mapped, static_cast<unsigned>(active)));
@@ -3375,10 +3494,24 @@ VaryingFinePlan varying_fine_plan(const ReceiverConfig& config, const ReceiverSl
             add(maximum_varying_coordinates + maximum_segmented_timing_coordinates, sizeof(TrackingPosteriors));
         add(checked_multiply(active, 4 * track.fft_rows), sizeof(Complex));
     }
+    // A batch's observations, block statistics and track cells stay live
+    // until its recursions finish. Quote every family at its public maximum.
+    const bool projected_tracks = tracking_config.helper_enabled;
+    const auto tracks = track.states ? maximum_varying_coordinates + maximum_segmented_timing_coordinates +
+        (!coherent_gain_blocks && !project_line_atom ? nominal_epoch_timing_capacity(config, slot) : 0) : 0;
+    const auto block_bytes = varying_batch_block_bytes({final, coherent_gain_blocks ? 0 : states, tracks, track.states,
+        gain_atoms, independent_track.states, project_line_atom, projected_tracks});
+    const auto batch_blocks = std::clamp<std::size_t>(maximum_varying_batch_bytes / block_bytes, 1,
+        std::min<std::size_t>(rows / block, maximum_varying_batch_blocks));
+    add(batch_blocks, block_bytes);
     add(1, 64 * 1024);
-    return {block, bytes, coherent_gain_blocks ? "coherent_gain_blocks" :
+    VaryingFinePlan result{block, bytes, coherent_gain_blocks ? "coherent_gain_blocks" :
             (residual * final / fs > .25 ? "short_block_partial_bandwidth" : "short_block"),
             track.states != 0, coherent_gain_blocks, false, independent};
+    result.batch_blocks = batch_blocks;
+    result.batch_block_bytes = block_bytes;
+    result.batch_track_bytes = track.states ? varying_track_block_bytes(projected_tracks, track.states) : 0;
+    return result;
 }
 
 std::size_t tracked_frequency_span_workspace(const ReceiverSlotPlan& slot, const VaryingFinePlan& plan,
@@ -3603,99 +3736,575 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
             for (std::size_t tap = 0; tap < taps; ++tap)
                 channel.uncertainty[tap * taps + tap] = initial_gain_diagonal(taps, varying_power / taps);
     }
-    std::vector<Complex> observation_scratch(fft_rows);
-    std::vector<Complex> line_storage(line ? final_rows : 0);
-    ObservationBlock block;
-    block.observed = true;
-    block.projected.reserve(final_rows);
+    // Consecutive blocks are scored in batches of three executor phases:
+    // P projects each block's observation; S computes every family's block
+    // statistics, chunk by chunk and longest family first; R advances each
+    // recursive chain through the batch in block order. Every statistic and
+    // recursion is the same per-element operation, in the same order, as one
+    // wave per block, so a batch of one block is the block-serial schedule.
+    const auto total_blocks = static_cast<std::size_t>(iq.size() / block_rows);
+    if (!plan.batch_blocks || !total_blocks) throw Error("Robust varying fine requires its admitted block batch");
+    auto batch_capacity = std::min(plan.batch_blocks, total_blocks);
+    const bool projected_tracks = tracking_config.helper_enabled;
+    const auto track_count = tracking_weights.size();
+    const bool independent_tracked = independent_track.states != 0;
+    if (varying_batch_block_bytes({final_rows, states.size(), track_count, track.states, independent_count,
+            independent_track.states, line != nullptr, projected_tracks}) > plan.batch_block_bytes)
+        throw ReceiverWorkspaceError("Robust varying batch exceeds its quoted block storage");
+    // A device session may compute the affine items' and tracked atoms'
+    // statistics; its admitted batch bounds the host batch, which never
+    // changes a result.
+    const auto center_atoms = independent_tracked ? 0 : independent_count;
+    const auto affine_items = states.size() + center_atoms;
+    const auto tracked_atoms = independent_tracked ? independent_count : 0;
+    constexpr std::size_t independent_taps = 2;
+    const auto affine_taps = [&](std::size_t item) -> std::size_t {
+        return item < states.size() ? bases[item % model_count].count : independent_taps;
+    };
+    VaryingDeviceRoute device;
+    if (auto* backend = config.bulk_backend.get()) {
+        const bool fp64_forced = config.native_coarse_precision == NativeCoarsePrecision::fp64;
+        auto& shape = device.shape;
+        const auto* block_plan = block_projection.plan();
+        const auto* final_plan = final_projection.plan();
+        shape.block_rows = block_rows;
+        shape.final_rows = final_rows;
+        shape.bluestein_rows = {block_plan ? block_plan->transform_rows() : 0, final_plan ? final_plan->transform_rows() : 0};
+        shape.modes = {block_projection.modes(), final_projection.modes()};
+        shape.independent_states = tracked_atoms ? independent_track.states : 0;
+        shape.affine_states = affine_items;
+        shape.independent_atoms = tracked_atoms;
+        shape.center_atoms = center_atoms;
+        shape.taps = tracked_atoms || center_atoms ? independent_taps : 1;
+        for (std::size_t item = 0; item < affine_items; ++item) {
+            shape.taps = std::max(shape.taps, affine_taps(item));
+            shape.affine_columns = checked_add(shape.affine_columns, 2 * affine_taps(item));
+        }
+        shape.batch_blocks = batch_capacity;
+        shape.arithmetic = VaryingArithmetic::fp64;
+        // The receiver's own declines: evaluator diagnostics, the line
+        // branch, coherent posteriors and the Helper projected tracker.
+        // They follow the shape-independent policy (a native or FP64
+        // request, forced host scoring, missing FP64 shaders, automatic
+        // qualification) and precede the shaped one, so a stage the route
+        // would serve reports the receiver's reason even where its shape has
+        // no device items, as a coherent-gain shape has none.
+        const auto own = span || clock_shadow ? std::optional{StageReason::diagnostic} :
+            line ? std::optional{StageReason::line} :
+            plan.coherent_gain_blocks ? std::optional{StageReason::coherent_gain} :
+            projected_tracks ? std::optional{StageReason::projected_tracker} : std::nullopt;
+        if (own && backend->stage_decline(StageShape{StageFamily::varying}, fp64_forced).empty()) {
+            backend->record_stage_native(StageFamily::varying, *own, StageNative::decline);
+        } else if (!backend->stage_decline(shape, fp64_forced).empty()) {
+            // The factory records the policy decline and admits nothing.
+            if (backend->make_varying(shape, fp64_forced, stop))
+                throw Error("Robust varying device factory admitted a declined stage");
+        } else if (own) {
+            // A backend whose shape policy accepts what its family policy declines.
+            backend->record_stage_native(StageFamily::varying, *own, StageNative::decline);
+        } else {
+            // The session's host memory (plan and shader compilation, and a
+            // unified-memory lease) shares the owner's preserved stage:
+            // halve the batch until it fits beside this quote.
+            while (shape.batch_blocks &&
+                   backend->stage_host_bytes(shape, fp64_forced) > plan.device_envelope_bytes)
+                shape.batch_blocks /= 2;
+            if (!shape.batch_blocks)
+                backend->record_stage_native(StageFamily::varying, backend->receipt().unified_memory ?
+                    StageReason::unified_memory_envelope : StageReason::workspace, StageNative::fallback);
+            else device.session = backend->make_varying(shape, fp64_forced, stop);
+        }
+        if (device.session) {
+            const auto admitted = device.session->batch_blocks();
+            if (!admitted || admitted > shape.batch_blocks)
+                throw Error("Robust varying device session exceeds its requested batch");
+            batch_capacity = std::min(batch_capacity, admitted);
+            device.layout = varying_staging_layout(shape, admitted);
+            for (std::size_t length = 0; length < 2; ++length) {
+                const auto& projection = length ? final_projection : block_projection;
+                const auto* plan_tables = projection.plan();
+                device.tables[length] = {plan_tables->chirp(), plan_tables->kernel_spectrum(), projection.indices(),
+                                         projection.normalization()};
+            }
+            // The stage's constants live in staging slot 0.
+            const auto constants = device.session->template_staging(0);
+            auto* taps = reinterpret_cast<std::uint32_t*>(constants.data() + device.layout.taps_offset);
+            for (std::size_t item = 0; item < affine_items; ++item) taps[item] = static_cast<std::uint32_t>(affine_taps(item));
+            device.taps = {taps, affine_items};
+            auto* bins = reinterpret_cast<std::int64_t*>(constants.data() + device.layout.shifts_offset);
+            for (std::size_t length = 0; length < 2 && tracked_atoms; ++length)
+                for (std::size_t state = 0; state < independent_track.states; ++state)
+                    bins[length * independent_track.states + state] =
+                        projected_half_bin(length ? final_rows : block_rows, config.sample_rate_hz,
+                                           independent_track.step_hz, independent_track.radius, state);
+            device.shifts = {bins, 2 * shape.independent_states};
+        }
+    }
+    std::vector<VaryingBlock> batch(batch_capacity);
+    for (auto& entry : batch) {
+        entry.observation.observed = true;
+        entry.observation.projected.reserve(final_rows);
+        if (line) entry.line_storage.resize(final_rows);
+    }
+    // Item-major [item][block] storage: a statistics leaf writes, and a
+    // recursion leaf reads, one item's consecutive blocks.
+    const auto track_cells = 2 * track.states, independent_cells = 2 * independent_track.states;
+    std::vector<FineBulkStatistics> affine_statistics(checked_multiply(states.size(), batch_capacity));
+    std::vector<FineBulkStatistics> center_statistics(independent_tracked ? 0 :
+        checked_multiply(independent_count, batch_capacity));
+    std::vector<ProjectedTrackCell> independent_track_cells(independent_tracked ?
+        checked_multiply(checked_multiply(independent_count, batch_capacity), independent_cells) : 0);
+    std::vector<unsigned char> independent_nonzero(independent_tracked ? independent_count * batch_capacity : 0);
+    std::vector<ProjectedTrackCell> projected_track_storage(projected_tracks ?
+        checked_multiply(checked_multiply(track_count, batch_capacity), track_cells) : 0);
+    std::vector<RawTrackGram> raw_track_grams(projected_tracks ? 0 : checked_multiply(2 * track_count, batch_capacity));
+    std::vector<Complex> raw_track_values(projected_tracks ? 0 :
+        checked_multiply(checked_multiply(track_count, batch_capacity), raw_track_lattice(track.states)));
+    // Statistics items in the order a chunk's leaves are claimed: the 16-FFT
+    // gain atoms, the 8-FFT fixed-affine states, then the tracker's 4 FFTs.
+    const auto items = independent_count + states.size() + track_count;
+    const auto chunk_blocks = std::max<std::size_t>(1, std::min(batch_capacity, varying_chunk_rows / block_rows));
+    const auto block_extent = [&](std::size_t index) {
+        return std::pair{index * block_rows, index + 1 == total_blocks ? final_rows : block_rows};
+    };
+    // One mapping per item with its taps; the delay and offset match the leaf.
+    const auto track_delay = config.spread_delay_seconds * (plan.coherent_gain_blocks ? 1. : .5);
+    const auto track_offset = plan.coherent_gain_blocks ? config.spread_doppler_hz : 0.;
+    const std::array<Tap, 2> track_paths{{{0, 0}, {track_delay, track_offset}}};
+    const auto track_taps = std::span(track_paths).first(track_delay || track_offset ? 2 : 1);
+    const std::array<Tap, 2> independent_paths{{{0, 0}, {config.spread_delay_seconds, 0}}};
+    const auto item_basis = [&](std::size_t item) -> std::pair<const MappedBasisRow&, std::span<const Tap>> {
+        if (item < independent_count) return {independent_maps[item], independent_paths};
+        item -= independent_count;
+        if (item < states.size()) {
+            const auto& paths = bases[item % model_count];
+            return {mapped[item / model_count], std::span(paths.taps).first(paths.count)};
+        }
+        return {tracking_maps[item - states.size()], track_taps};
+    };
+    // Fill ahead, as FineSession does, the tiles a later chunk's leaves pin:
+    // the per-epoch preparation is serial, and would stall those leaves. A
+    // multi-block chunk covers at most 2,048 rows, no longer than one dense
+    // tile even at the 4x source rate, so its first and last blocks pin every
+    // tile it touches. A tile missed beside the merged final block is filled
+    // on demand. Rendered values never depend on when a tile was filled.
+    const auto prepare_blocks = [&](std::size_t begin, std::size_t end, std::stop_token leaf_stop) {
+        if (begin >= end) return;
+        for (std::size_t item = 0; item < items; ++item) {
+            const auto [map, taps] = item_basis(item);
+            for (const auto index : {begin, end - 1}) {
+                const auto [block_first, rows] = block_extent(index);
+                for (std::size_t offset = 0; offset < rows; offset += maximum_basis_rows)
+                    basis.prepare_pair(map, taps, block_first + offset, std::min(maximum_basis_rows, rows - offset),
+                                       leaf_stop);
+                if (end - 1 == begin) break;
+            }
+        }
+    };
+    // Lanes another owner held, or that never claimed a leaf, are not idle
+    // time of this stage: only a lane's span from its first leaf counts.
+    std::vector<VaryingLaneTime> lane_time(active);
+    std::size_t phase_index = 0;
+    double idle_lane_seconds = 0;
+    const auto phase = [&](std::size_t count, const ReceiverExecutor::Leaf& leaf) {
+        ++phase_index;
+        executor.parallel(slot.index, count, static_cast<unsigned>(active), stop, leaf);
+        const auto ended = FineClock::now();
+        for (const auto& lane : lane_time)
+            if (lane.phase == phase_index)
+                idle_lane_seconds += std::max(0., std::chrono::duration<double>(ended - lane.phase_first).count() -
+                                                  lane.phase_busy);
+    };
+    const auto lane_began = [&](unsigned lane, FineClock::time_point began) {
+        auto& time = lane_time[lane];
+        if (time.phase == phase_index) return;
+        time.phase = phase_index;
+        time.phase_first = began;
+        time.phase_busy = 0;
+    };
+    const auto lane_spent = [&](double& phase_total, unsigned lane, FineClock::time_point began) {
+        const auto spent = seconds_since(began);
+        phase_total += spent;
+        lane_time[lane].phase_busy += spent;
+    };
+    // One statistics leaf: a chunk of one item's blocks of the batch that
+    // starts at block batch_first.
+    const auto statistics_leaf = [&](unsigned lane, std::size_t chunk, std::size_t item, std::size_t batch_first,
+                                     std::size_t count, std::stop_token leaf_stop) {
+        const auto begin = chunk * chunk_blocks, end = std::min(count, begin + chunk_blocks);
+        if (!item) {
+            const auto global = batch_first + end;
+            if (!batch_first && !chunk) prepare_blocks(batch_first, global, leaf_stop);
+            prepare_blocks(global, std::min({global + chunk_blocks, (global / batch_capacity + 1) * batch_capacity,
+                total_blocks}), leaf_stop);
+        }
+        auto& lane_scratch = scratch[lane];
+        if (item < independent_count) {
+            auto& atom = independent_states[item];
+            bool nonzero = atom.nonzero_basis;
+            for (auto index = begin; index < end; ++index) {
+                check_cancelled(leaf_stop);
+                const auto& block = batch[index].observation;
+                const auto slot_index = item * batch_capacity + index;
+                if (!independent_tracked) {
+                    auto& statistics = center_statistics[slot_index];
+                    statistics = {};
+                    sufficient_statistics(basis, independent_maps[item], independent_paths, block,
+                        config.noise_variance, lane_scratch, statistics.correlations, statistics.gram, nonzero,
+                        leaf_stop);
+                    statistics.nonzero_basis = nonzero;
+                    continue;
+                }
+                const auto rows = block.projection->rows();
+                auto templates = std::span(lane_scratch.raw).first(4 * rows);
+                basis.render_pair(independent_maps[item], independent_paths, block.first,
+                    std::span(lane_scratch.offsets).first(rows), templates, leaf_stop);
+                if (!nonzero) nonzero = std::ranges::any_of(templates, [](auto value) { return value != Complex{}; });
+                independent_nonzero[slot_index] = nonzero;
+                projected_track_cells(templates, independent_paths.size(), block, config.sample_rate_hz,
+                    independent_track, lane_scratch, tracking_scratch[lane],
+                    std::span(independent_track_cells).subspan(slot_index * independent_cells, independent_cells),
+                    leaf_stop);
+            }
+        } else if (item < independent_count + states.size()) {
+            const auto candidate = item - independent_count;
+            const auto& paths = bases[candidate % model_count];
+            bool nonzero = states[candidate].nonzero_basis;
+            for (auto index = begin; index < end; ++index) {
+                check_cancelled(leaf_stop);
+                auto& statistics = affine_statistics[candidate * batch_capacity + index];
+                statistics = {};
+                sufficient_statistics(basis, mapped[candidate / model_count], std::span(paths.taps).first(paths.count),
+                    batch[index].observation, config.noise_variance, lane_scratch, statistics.correlations,
+                    statistics.gram, nonzero, leaf_stop);
+                statistics.nonzero_basis = nonzero;
+            }
+        } else {
+            // One short interior echo with a free gain. A stable
+            // geometry term and the original dynamic gains remain in
+            // the other half of this public likelihood mixture.
+            const auto coordinate = item - independent_count - states.size();
+            for (auto index = begin; index < end; ++index) {
+                check_cancelled(leaf_stop);
+                const auto& entry = batch[index];
+                const auto& block = entry.observation;
+                const auto rows = block.projection->rows();
+                const auto slot_index = coordinate * batch_capacity + index;
+                if (projected_tracks) {
+                    auto templates = std::span(lane_scratch.raw).first(2 * track_taps.size() * rows);
+                    basis.render_pair(tracking_maps[coordinate], track_taps, block.first,
+                        std::span(lane_scratch.offsets).first(rows), templates, leaf_stop);
+                    projected_track_cells(templates, track_taps.size(), block, config.sample_rate_hz, track,
+                        lane_scratch, tracking_scratch[lane],
+                        std::span(projected_track_storage).subspan(slot_index * track_cells, track_cells), leaf_stop);
+                    continue;
+                }
+                const auto lattice = raw_track_lattice(track.states);
+                raw_track_statistics(basis, tracking_maps[coordinate], track_taps, block.first,
+                    iq.subspan(block.first, rows), track, *tracking_fft, lane_scratch, tracking_scratch[lane],
+                    std::span(raw_track_grams).subspan(2 * slot_index).first<2>(),
+                    std::span(raw_track_values).subspan(slot_index * lattice, lattice), config.sample_rate_hz,
+                    span ? &span->coordinates[coordinate].blocks[block.first / block_rows] : nullptr,
+                    entry.observation_energy, leaf_stop);
+            }
+        }
+    };
+    // A device item's chunk of the batch that starts at block render_first,
+    // rendered into a staging slot with each block's nonzero-basis flag, by
+    // the native requests: the affine items as sufficient_statistics renders
+    // them and the tracked atoms as the projected tracker does. Its first
+    // item fills the tiles ahead, as a statistics leaf does.
+    const auto device_items = device.session ? affine_items + tracked_atoms : 0;
+    const auto render_leaf = [&](unsigned lane, std::size_t chunk, std::size_t item, std::size_t render_first,
+                                 std::size_t count, std::size_t staging_slot, std::stop_token leaf_stop) {
+        const auto begin = chunk * chunk_blocks, end = std::min(count, begin + chunk_blocks);
+        if (!item) {
+            const auto global = render_first + end;
+            if (!render_first && !chunk) prepare_blocks(render_first, global, leaf_stop);
+            prepare_blocks(global, std::min({global + chunk_blocks, (global / batch_capacity + 1) * batch_capacity,
+                total_blocks}), leaf_stop);
+        }
+        auto& lane_scratch = scratch[lane];
+        const auto staging = device.session->template_staging(staging_slot);
+        auto* templates = reinterpret_cast<Complex*>(staging.data());
+        auto* flags = reinterpret_cast<unsigned char*>(staging.data() + device.layout.flags_offset);
+        std::size_t column = device.shape.affine_columns + 4 * (item - std::min(item, affine_items));
+        if (item < affine_items) {
+            column = 0;
+            for (std::size_t prior = 0; prior < item; ++prior) column += 2 * affine_taps(prior);
+        }
+        const auto columns = item < affine_items ? 2 * affine_taps(item) : 2 * independent_taps;
+        for (auto index = begin; index < end; ++index) {
+            check_cancelled(leaf_stop);
+            const auto [block_first, rows] = block_extent(render_first + index);
+            const auto out = std::span(templates + index * device.layout.block_values + column * rows, columns * rows);
+            bool nonzero = false;
+            if (item < states.size()) {
+                const auto& paths = bases[item % model_count];
+                render_templates_into(basis, mapped[item / model_count], std::span(paths.taps).first(paths.count),
+                                      block_first, rows, out, lane_scratch, leaf_stop);
+            } else if (item < affine_items) {
+                render_templates_into(basis, independent_maps[item - states.size()], independent_paths, block_first,
+                                      rows, out, lane_scratch, leaf_stop);
+            } else {
+                basis.render_pair(independent_maps[item - affine_items], independent_paths, block_first,
+                    std::span(lane_scratch.offsets).first(rows), out, leaf_stop);
+                nonzero = std::ranges::any_of(out, [](auto value) { return value != Complex{}; });
+            }
+            // Required for a complete receipt even on slots that contain only noise.
+            for (std::size_t c = 0; item < affine_items && c < columns && !nonzero; ++c)
+                nonzero = finite_energy(out.subspan(c * rows, rows)) > 0;
+            flags[index * device.layout.items + item] = nonzero;
+        }
+    };
+    // One device call for the batch from batch_first, whose templates and
+    // projected observations are in its staging slot. A published call's
+    // statistics take each block's rendered nonzero-basis flag, whose OR
+    // over the stage is the native one.
+    const auto device_statistics = [&](std::size_t staging_slot, std::size_t batch_first, std::size_t count,
+                                       std::stop_token leaf_stop) {
+        const auto staging = device.session->template_staging(staging_slot);
+        VaryingBatch request;
+        request.first_block = batch_first;
+        request.blocks = count;
+        request.terminal_last = batch_first + count == total_blocks;
+        request.tables = device.tables;
+        request.projected_y = {reinterpret_cast<const Complex*>(staging.data() + device.layout.projected_offset),
+                               count * device.layout.mode_stride};
+        request.independent_shifts = device.shifts;
+        request.staging_slot = staging_slot;
+        request.affine_taps = device.taps;
+        request.variance = config.noise_variance;
+        VaryingBatchOutput output{affine_statistics, independent_track_cells, center_statistics, batch_capacity};
+        StageDeviceWork work;
+        if (!device.session->statistics(request, output, work, leaf_stop)) return false;
+        const auto* flags = reinterpret_cast<const unsigned char*>(staging.data() + device.layout.flags_offset);
+        for (std::size_t index = 0; index < count; ++index)
+            for (std::size_t item = 0; item < device_items; ++item) {
+                const bool nonzero = flags[index * device.layout.items + item] != 0;
+                if (item < states.size()) affine_statistics[item * batch_capacity + index].nonzero_basis = nonzero;
+                else if (item < affine_items)
+                    center_statistics[(item - states.size()) * batch_capacity + index].nonzero_basis = nonzero;
+                else independent_nonzero[(item - affine_items) * batch_capacity + index] = nonzero;
+            }
+        return true;
+    };
     std::uint64_t rendered_rows = 0;
     double previous_center = 0;
-    for (std::size_t first = 0; first < iq.size();) {
-        check_cancelled(stop);
-        const auto terminal = iq.size() - first < 2 * block_rows;
-        const auto& projection = terminal ? final_projection : block_projection;
-        const auto rows = projection.rows();
-        block.first = first;
-        block.projection = &projection;
-        const auto center = (static_cast<double>(first) + (rows - 1) * .5) / config.sample_rate_hz;
-        block.elapsed = first ? center - previous_center : 0;
-        previous_center = center;
-        // Diffuse Gaussian amplitude correlations decay with squared lag.
-        // The first-order approximation retains the correct block-step
-        // correlation without keeping any realized channel history.
-        const auto gain_width = config.random_doppler_width_hz > 0 ? config.random_doppler_width_hz : .35;
-        const auto gain_lag = std::numbers::pi * gain_width * block.elapsed;
-        const auto gain_correlation = std::exp(-.5 * gain_lag * gain_lag);
-        const auto raw = iq.subspan(first, rows);
-        const auto span_block = span ? first / block_rows : 0;
-        const auto observation_energy = span ? finite_energy(raw) : 0.;
-        if (span) span->observation_energy[span_block] = observation_energy;
-        block.projected.assign(raw.begin(), raw.end());
-        projection.apply(block.projected, observation_scratch, stop);
-        block.projected.resize(projection.modes());
-        if (line) {
-            block.line = project_line(*line, projection, first, config.sample_rate_hz,
-                std::span(line_storage).first(rows), observation_scratch, stop);
-            remove_line(block.projected, block.line);
-        }
-        std::array<double, 4 * 2 * models> transitions{};
-        const auto coherence = block_rows / config.sample_rate_hz;
-        for (std::size_t model = 0; model < models; ++model) {
-            const double exponent = -block.elapsed / (coherence * (1 << model));
-            transitions[4 * model] = std::exp(2 * exponent);
-            transitions[4 * model + 1] = -std::expm1(2 * exponent);
-            transitions[4 * model + 2] = std::exp(exponent);
-        }
-        const auto original = states.size() + tracking_weights.size();
-        executor.parallel(slot.index, original + independent_count, static_cast<unsigned>(active), stop,
-            [&](unsigned lane, std::size_t candidate, std::stop_token leaf_stop) {
-                if (candidate >= original) {
-                    const auto index = candidate - original;
-                    accumulate_independent_gain(independent_states[index], basis, independent_maps[index],
-                        config.spread_delay_seconds, block, config.noise_variance, config.sample_rate_hz,
-                        independent_track, scratch[lane], independent_track.states ? std::span(tracking_scratch[lane]) :
-                        std::span<Complex>{}, leaf_stop);
-                    return;
-                }
-                if (candidate >= states.size()) {
-                    const auto index = candidate - states.size();
-                    // One short interior echo with a free gain. A stable
-                    // geometry term and the original dynamic gains remain in
-                    // the other half of this public likelihood mixture.
-                    const auto delay = config.spread_delay_seconds * (plan.coherent_gain_blocks ? 1. : .5);
-                    const auto offset = plan.coherent_gain_blocks ? config.spread_doppler_hz : 0.;
-                    const std::array<Tap, 2> paths{{{0, 0}, {delay, offset}}};
-                    track_frequency_block(basis, tracking_maps[index], std::span(paths).first(delay || offset ? 2 : 1),
-                        first, raw, config.noise_variance, track, *tracking_fft, scratch[lane],
-                        tracking_scratch[lane], tracking_weights[index], tracking_config.helper_enabled ? &block : nullptr,
-                        config.sample_rate_hz, tracking_posteriors.empty() ? nullptr : &tracking_posteriors[index],
-                        gain_correlation, leaf_stop, span ? &span->coordinates[index].blocks[span_block] : nullptr,
-                        observation_energy);
-                    return;
-                }
-                const auto& paths = bases[candidate % model_count];
-                advance_state(states[candidate], mapped[candidate / model_count], basis,
-                    std::span(paths.taps).first(paths.count), std::span(&block, 1), {},
-                    transitions, config.noise_variance, scratch[lane], nullptr, leaf_stop, varying_power);
-            });
-        for (std::size_t model = 0; !plan.coherent_gain_blocks && model < model_count; ++model)
-            add_work(rendered_rows, checked_multiply(rows, 2 * bases[model].count * selected.size()));
-        add_work(score.nominal_independent_gain_basis_rows, checked_multiply(rows, 4 * nominal_count));
-        add_work(score.signed_lag_gain_basis_rows, checked_multiply(rows, 4 * lag_count));
-        add_work(score.independent_gain_emission_cells, checked_multiply(2 * independent_gain_powers.size() *
-            independent_count, std::max<std::size_t>(1, independent_track.states)));
-        if (track.states) {
-            const auto per_coordinate = checked_multiply(rows,
-                2 * (config.spread_delay_seconds || (plan.coherent_gain_blocks && config.spread_doppler_hz) ? 2 : 1));
-            const auto extra = midpoint ? tracking_coordinates.size() - ordinary_tracking_coordinates : 0;
-            add_work(rendered_rows, checked_multiply(per_coordinate, ordinary_tracking_coordinates + extra));
-            if (midpoint) add_work(score.midpoint_timing_basis_rows, checked_multiply(per_coordinate, extra));
-            if (clock_shadow)
-                add_work(clock_shadow->added_basis_rows, checked_multiply(per_coordinate, clock_shadow->added_coordinates));
-        }
-        first += rows;
-        ++score.varying_blocks;
+    std::size_t batch_index = 0;
+    if (device.session) {
+        // The first batch's templates, before its observations are projected.
+        const auto count = std::min(batch_capacity, total_blocks);
+        phase((count + chunk_blocks - 1) / chunk_blocks * device_items,
+              [&](unsigned lane, std::size_t leaf, std::stop_token leaf_stop) {
+            const auto began = FineClock::now();
+            lane_began(lane, began);
+            render_leaf(lane, leaf / device_items, leaf % device_items, 0, count, 0, leaf_stop);
+            lane_spent(lane_time[lane].statistics, lane, began);
+        });
     }
+    for (std::size_t first = 0, batch_first = 0; first < iq.size(); batch_first += batch_capacity) {
+        check_cancelled(stop);
+        std::size_t count = 0;
+        for (; count < batch_capacity && first < iq.size(); ++count) {
+            auto& block = batch[count].observation;
+            const auto terminal = iq.size() - first < 2 * block_rows;
+            const auto& projection = terminal ? final_projection : block_projection;
+            const auto rows = projection.rows();
+            block.first = first;
+            block.projection = &projection;
+            const auto center = (static_cast<double>(first) + (rows - 1) * .5) / config.sample_rate_hz;
+            block.elapsed = first ? center - previous_center : 0;
+            previous_center = center;
+            first += rows;
+        }
+        // P: each block's projected observation and its recursion inputs.
+        phase(count, [&](unsigned lane, std::size_t index, std::stop_token leaf_stop) {
+            const auto began = FineClock::now();
+            lane_began(lane, began);
+            auto& entry = batch[index];
+            auto& block = entry.observation;
+            const auto& projection = *block.projection;
+            const auto rows = projection.rows();
+            // Diffuse Gaussian amplitude correlations decay with squared lag.
+            // The first-order approximation retains the correct block-step
+            // correlation without keeping any realized channel history.
+            const auto gain_width = config.random_doppler_width_hz > 0 ? config.random_doppler_width_hz : .35;
+            const auto gain_lag = std::numbers::pi * gain_width * block.elapsed;
+            entry.gain_correlation = std::exp(-.5 * gain_lag * gain_lag);
+            const auto raw = iq.subspan(block.first, rows);
+            entry.observation_energy = span ? finite_energy(raw) : 0.;
+            if (span) span->observation_energy[block.first / block_rows] = entry.observation_energy;
+            auto& observation_scratch = scratch[lane].fft;
+            block.projected.assign(raw.begin(), raw.end());
+            projection.apply(block.projected, observation_scratch, leaf_stop);
+            block.projected.resize(projection.modes());
+            if (line) {
+                block.line = project_line(*line, projection, block.first, config.sample_rate_hz,
+                    std::span(entry.line_storage).first(rows), observation_scratch, leaf_stop);
+                remove_line(block.projected, block.line);
+            }
+            if (device.session) {
+                // The device reads this batch's observations from its staging slot.
+                const auto staging = device.session->template_staging(batch_index % 2);
+                std::ranges::copy(block.projected, reinterpret_cast<Complex*>(staging.data() +
+                    device.layout.projected_offset) + index * device.layout.mode_stride);
+            }
+            entry.transitions = {};
+            const auto coherence = block_rows / config.sample_rate_hz;
+            for (std::size_t model = 0; model < models; ++model) {
+                const double exponent = -block.elapsed / (coherence * (1 << model));
+                entry.transitions[4 * model] = std::exp(2 * exponent);
+                entry.transitions[4 * model + 1] = -std::expm1(2 * exponent);
+                entry.transitions[4 * model + 2] = std::exp(exponent);
+            }
+            lane_spent(lane_time[lane].projection, lane, began);
+        });
+        // S: block statistics of every family, chunk-major. A chunk's first
+        // leaf fills the next chunk's tiles while the others score this one.
+        // With a device session, its call scores this batch's affine items
+        // and tracked atoms beside the tracker's leaves, while the remaining
+        // leaves render the next batch into the other staging slot. A call
+        // the session returns natively scores those items here instead.
+        const auto chunks = (count + chunk_blocks - 1) / chunk_blocks;
+        const auto host_items = independent_count + states.size();
+        const auto native_statistics = [&](std::size_t phase_items) {
+            phase(chunks * phase_items, [&](unsigned lane, std::size_t leaf, std::stop_token leaf_stop) {
+                const auto began = FineClock::now();
+                lane_began(lane, began);
+                statistics_leaf(lane, leaf / phase_items, leaf % phase_items, batch_first, count, leaf_stop);
+                lane_spent(lane_time[lane].statistics, lane, began);
+            });
+        };
+        if (!device.session) {
+            native_statistics(items);
+        } else {
+            const auto slot_index = batch_index % 2;
+            const auto next_first = batch_first + count;
+            const auto next_count = std::min(batch_capacity, total_blocks - next_first);
+            const auto next_chunks = (next_count + chunk_blocks - 1) / chunk_blocks;
+            const auto track_leaves = chunks * track_count;
+            bool accepted = false;
+            phase(1 + track_leaves + next_chunks * device_items,
+                  [&](unsigned lane, std::size_t leaf, std::stop_token leaf_stop) {
+                const auto began = FineClock::now();
+                lane_began(lane, began);
+                if (!leaf) {
+                    accepted = device_statistics(slot_index, batch_first, count, leaf_stop);
+                } else if (leaf - 1 < track_leaves) {
+                    const auto track_leaf = leaf - 1;
+                    statistics_leaf(lane, track_leaf / track_count, host_items + track_leaf % track_count,
+                                    batch_first, count, leaf_stop);
+                } else {
+                    const auto render = leaf - 1 - track_leaves;
+                    render_leaf(lane, render / device_items, render % device_items, next_first, next_count,
+                                1 - slot_index, leaf_stop);
+                }
+                lane_spent(lane_time[lane].statistics, lane, began);
+            });
+            check_cancelled(stop);
+            if (accepted) {
+                ++device.device_batches;
+            } else {
+                ++device.native_batches;
+                native_statistics(host_items);
+            }
+        }
+        // R: one leaf per recursive chain, through the batch in block order.
+        phase(items, [&](unsigned lane, std::size_t chain, std::stop_token leaf_stop) {
+            const auto began = FineClock::now();
+            lane_began(lane, began);
+            if (chain < independent_count) {
+                auto& atom = independent_states[chain];
+                for (std::size_t index = 0; index < count; ++index) {
+                    check_cancelled(leaf_stop);
+                    const auto& block = batch[index].observation;
+                    const auto slot_index = chain * batch_capacity + index;
+                    if (!independent_tracked) {
+                        advance_independent_center(atom, center_statistics[slot_index], block);
+                        continue;
+                    }
+                    advance_independent_gain(atom,
+                        std::span(independent_track_cells).subspan(slot_index * independent_cells, independent_cells),
+                        independent_nonzero[slot_index] != 0, block, config.noise_variance, independent_track, leaf_stop);
+                }
+            } else if (chain < independent_count + track_count) {
+                const auto coordinate = chain - independent_count;
+                auto* persistent = tracking_posteriors.empty() ? nullptr : &tracking_posteriors[coordinate];
+                for (std::size_t index = 0; index < count; ++index) {
+                    check_cancelled(leaf_stop);
+                    const auto& entry = batch[index];
+                    const auto& block = entry.observation;
+                    const auto slot_index = coordinate * batch_capacity + index;
+                    if (projected_tracks) {
+                        advance_projected_track(std::span(projected_track_storage).subspan(slot_index * track_cells,
+                            track_cells), track_taps.size(), block, config.noise_variance, config.sample_rate_hz, track,
+                            tracking_weights[coordinate], persistent, entry.gain_correlation);
+                        continue;
+                    }
+                    const auto lattice = raw_track_lattice(track.states);
+                    advance_raw_track(std::span<const RawTrackGram>(raw_track_grams).subspan(2 * slot_index).first<2>(),
+                        std::span(raw_track_values).subspan(slot_index * lattice, lattice), track_taps.size(),
+                        block.first, block.projection->rows(), config.noise_variance, track, tracking_weights[coordinate],
+                        config.sample_rate_hz, persistent, entry.gain_correlation);
+                }
+            } else {
+                const auto candidate = chain - independent_count - track_count;
+                const auto& paths = bases[candidate % model_count];
+                for (std::size_t index = 0; index < count; ++index) {
+                    check_cancelled(leaf_stop);
+                    const auto& entry = batch[index];
+                    advance_state(states[candidate], mapped[candidate / model_count], basis,
+                        std::span(paths.taps).first(paths.count), std::span(&entry.observation, 1),
+                        {&affine_statistics[candidate * batch_capacity + index], nullptr},
+                        entry.transitions, config.noise_variance, scratch[lane], nullptr, leaf_stop, varying_power);
+                }
+            }
+            lane_spent(lane_time[lane].recursion, lane, began);
+        });
+        for (std::size_t index = 0; index < count; ++index) {
+            const auto rows = batch[index].observation.projection->rows();
+            for (std::size_t model = 0; !plan.coherent_gain_blocks && model < model_count; ++model)
+                add_work(rendered_rows, checked_multiply(rows, 2 * bases[model].count * selected.size()));
+            add_work(score.nominal_independent_gain_basis_rows, checked_multiply(rows, 4 * nominal_count));
+            add_work(score.signed_lag_gain_basis_rows, checked_multiply(rows, 4 * lag_count));
+            add_work(score.independent_gain_emission_cells, checked_multiply(2 * independent_gain_powers.size() *
+                independent_count, std::max<std::size_t>(1, independent_track.states)));
+            if (track.states) {
+                const auto per_coordinate = checked_multiply(rows,
+                    2 * (config.spread_delay_seconds || (plan.coherent_gain_blocks && config.spread_doppler_hz) ? 2 : 1));
+                const auto extra = midpoint ? tracking_coordinates.size() - ordinary_tracking_coordinates : 0;
+                add_work(rendered_rows, checked_multiply(per_coordinate, ordinary_tracking_coordinates + extra));
+                if (midpoint) add_work(score.midpoint_timing_basis_rows, checked_multiply(per_coordinate, extra));
+                if (clock_shadow)
+                    add_work(clock_shadow->added_basis_rows, checked_multiply(per_coordinate, clock_shadow->added_coordinates));
+            }
+            ++score.varying_blocks;
+        }
+        ++score.varying_batches;
+        ++batch_index;
+    }
+    // The route of the affine and tracked independent statistics; the
+    // raw-composite tracker, observation projection and every recursion
+    // are native FP64 on every route.
+    if (device.device_batches) {
+        score.varying_fine_route = device.native_batches ? "vulkan_partly_native" : "vulkan";
+        score.varying_fine_arithmetic = device.native_batches ? "vulkan_fp64_fft_fp64_state_partly_native_fp64" :
+                                                                "vulkan_fp64_fft_fp64_state";
+    } else {
+        score.varying_fine_route = "native";
+        score.varying_fine_arithmetic = "native_fp64";
+    }
+    // Release the device lease with the stage's batches.
+    device.session.reset();
+    score.varying_batch_blocks = batch_capacity;
+    score.varying_workspace_bytes = plan.workspace_bytes;
+    for (const auto& lane : lane_time) {
+        score.varying_projection_seconds += lane.projection;
+        score.varying_statistics_seconds += lane.statistics;
+        score.varying_recursion_seconds += lane.recursion;
+    }
+    score.varying_wait_seconds += idle_lane_seconds;
     const auto independent = std::span(independent_states).first(independent_count);
     if (!plan.coherent_gain_blocks && !std::ranges::any_of(states, [](const State& state) { return state.nonzero_basis; }) &&
         !std::ranges::any_of(independent, [](const auto& state) { return state.nonzero_basis; })) {
@@ -4068,13 +4677,44 @@ constexpr std::size_t preferred_drift_fft_rows = 262'144;
 // Preferred proposal work per retained timing atom. Three slopes are the
 // minimum fair bank: zero followed by the best ridge for each bit.
 constexpr std::size_t target_drift_fft_rows_per_atom = 2 * 1024 * 1024;
-constexpr std::size_t maximum_drift_stage_workers = 8;
 constexpr std::size_t retained_drift_ridge_timing_atoms = 8;
 constexpr std::size_t maximum_drift_public_timing_atoms = maximum_varying_coordinates +
     2 * receiver_epoch_offsets.size() + maximum_segmented_timing_coordinates;
+// Timing atoms are independent leaves whose evidence is combined in atom
+// order, so the stage may use the whole worker budget. A lane beyond the
+// public atom bound could never run. An extended plan narrows only to fit
+// its preserved owner lease. An ordinary plan always admits the former
+// eight-lane width and widens only into the owner lease's other stages.
+constexpr std::size_t maximum_drift_stage_workers = maximum_drift_public_timing_atoms;
+constexpr std::size_t ordinary_drift_stage_workers = 8;
 constexpr std::size_t minimum_drift_segments = 8;
 constexpr std::int64_t maximum_drift_proposal_slope_radius = 128;
 constexpr std::int64_t maximum_drift_proposal_frequency_radius = 512;
+// The coarse ridge grid strides keep at most 2*512+1 centers and 2*128+1
+// interior slopes plus both public slope edges.
+constexpr std::size_t maximum_drift_ridge_centers = 2 * maximum_drift_proposal_frequency_radius + 1;
+constexpr std::size_t maximum_drift_ridge_slopes = 2 * maximum_drift_proposal_slope_radius + 3;
+// Stack use of a ridge search on the lane's charged worker stack: a block's
+// slopes, records and windows.
+constexpr std::size_t drift_ridge_stack_bytes = 32 * 1024;
+// Slope blocks keep their FP64 sums at most about 256 KiB, 16 slopes at the
+// largest 1,025-center grid and more on smaller grids up to the block
+// maximum, so they stay cache resident while each segment row is read once
+// per block. One slope at a time re-streams every row's center window
+// (about 111 MB of the 462 MB table at the HF shape). On the 5650U at the
+// HF ridge shape (1,762 segments x 16,384 bins, 984 centers at stride 4,
+// -O3 -ffp-contract=off) a ridge load took 1.66 ns on one thread and
+// 11.9 ns with six concurrent lanes, DRAM bound; blocks of 16 took 0.45 and
+// 0.83 ns (32: 0.44 and 0.75; six-lane runs indicative only, on a loaded
+// shared host) with bit-identical records.
+constexpr std::size_t drift_ridge_block_bytes = 16 * 2 * maximum_drift_ridge_centers * sizeof(double);
+
+// Lane-summed phases of one atom evaluation, one clock read per boundary:
+// template render and products, ridge segment FFTs and power tables, ridge
+// records/selection, slope dechirp/FFT/scan, and exact statistics.
+enum DriftPhase : std::size_t {
+    drift_render, drift_ridge, drift_ridge_search, drift_slope, drift_exact, drift_phases
+};
 
 template<class T>
 struct DriftScratch {
@@ -4083,17 +4723,19 @@ struct DriftScratch {
     std::vector<std::complex<T>> segment_spectrum;
     std::vector<double> segment_power;
     std::vector<double> segment_centers;
-    std::vector<std::int64_t> segment_offsets;
+    // The render tile, idle during the ridge search, holds its block sums.
     std::vector<Complex> raw;
     std::vector<Complex> rendered;
     std::vector<double> offsets;
     std::vector<Complex> projected_columns;
     std::vector<Complex> projection_scratch;
-};
-
-struct DriftPeak {
-    double rank = -infinity;
-    std::int64_t slope = 0, center = 0;
+    std::array<double, drift_phases> seconds{};
+    // Device proposal route: this lane's ridge records and slope frontiers,
+    // and its device and native atoms (evaluations with device-published
+    // proposals, and those with a native fallback; a mixed one is both).
+    std::vector<DriftRidgeRecord> device_records;
+    std::vector<DriftFrontierRow> device_frontiers;
+    std::size_t device_evaluations = 0, native_evaluations = 0;
 };
 
 struct DriftStatistics {
@@ -4154,7 +4796,6 @@ struct DriftProjection {
     std::vector<Complex> ranking, observed, line_storage;
 };
 
-constexpr std::size_t retained_drift_per_bit = 8;
 struct DriftZeroSlopeCache {
     std::array<std::array<DriftPeak, retained_drift_per_bit>, 2> peaks{};
     std::array<double, 2> nomination{-infinity, -infinity};
@@ -4163,38 +4804,241 @@ struct DriftZeroSlopeCache {
 };
 // This small cache occupies the existing metadata reservation, not a
 // candidate-wide transform or template bank. Include the timing vectors,
-// lane owners/frontiers/statistics and fixed controls in the same bound.
+// the first eight lane owners/frontiers/statistics and fixed controls in the
+// same bound. Each wider lane adds its own bounded lane reservation.
 constexpr std::size_t drift_metadata_reservation = 64 * 1024;
+constexpr std::size_t drift_reserved_metadata_lanes = 8;
+constexpr std::size_t drift_lane_metadata_reservation = 2 * 1024;
+constexpr auto drift_lane_metadata_bound = sizeof(DriftScratch<double>) +
+    sizeof(std::array<std::array<DriftPeak, retained_drift_per_bit>, 2>) +
+    sizeof(std::array<std::array<DriftStatistics, retained_drift_per_bit>, 2>);
+static_assert(sizeof(DriftScratch<double>) >= sizeof(DriftScratch<float>) &&
+              drift_lane_metadata_bound <= drift_lane_metadata_reservation);
 constexpr auto drift_metadata_bound = maximum_drift_public_timing_atoms *
     (sizeof(DriftZeroSlopeCache) + sizeof(FineCoordinate) + sizeof(std::array<double, 2>) +
-     2 * sizeof(std::size_t) + sizeof(double)) + maximum_drift_stage_workers *
-    (sizeof(DriftScratch<double>) + sizeof(std::array<std::array<DriftPeak, retained_drift_per_bit>, 2>) +
-     sizeof(std::array<std::array<DriftStatistics, retained_drift_per_bit>, 2>)) +
+     2 * sizeof(std::size_t) + sizeof(double) + 2 * sizeof(std::uint64_t)) +
+    drift_reserved_metadata_lanes * drift_lane_metadata_bound +
     sizeof(DriftProjection) + 6 * sizeof(std::vector<std::size_t>) + 4096;
 static_assert(drift_metadata_bound <= drift_metadata_reservation);
+
+static_assert(drift_frontier_ranks == retained_drift_per_bit);
+
+std::size_t drift_metadata_bytes(std::size_t lanes) {
+    return checked_add(drift_metadata_reservation, checked_multiply(
+        lanes - std::min(lanes, drift_reserved_metadata_lanes), drift_lane_metadata_reservation));
+}
 
 bool same_timing(const FineCoordinate& a, const FineCoordinate& b) {
     return a.epoch_offset_seconds == b.epoch_offset_seconds && a.arrival_seconds == b.arrival_seconds &&
            a.clock_ppm == b.clock_ppm;
 }
 
+// The drift stage's timing atoms: the selected coordinates, then the epoch
+// timing, each distinct (epoch, arrival, clock) once in that order.
+std::vector<FineCoordinate> drift_timing_atoms(std::span<const FineCoordinate> selected,
+                                               std::span<const FineCoordinate> epoch_timing) {
+    std::vector<FineCoordinate> timing;
+    timing.reserve(selected.size() + epoch_timing.size());
+    const auto append = [&](const FineCoordinate& coordinate) {
+        if (std::none_of(timing.begin(), timing.end(), [&](const auto& other) { return same_timing(coordinate, other); }))
+            timing.push_back(coordinate);
+    };
+    for (const auto& coordinate : selected) append(coordinate);
+    for (const auto& coordinate : epoch_timing) append(coordinate);
+    return timing;
+}
+
+// The fast ridge's exact slope budget; a slow plan keeps the rest.
+std::size_t drift_fast_slope_budget(const DriftPlan& plan) {
+    return plan.slow_ridge_segments ? std::max<std::size_t>(3, plan.slope_budget / 4) : plan.slope_budget;
+}
+
+// FNV-1a over the little-endian bytes of one value.
+constexpr std::uint64_t drift_digest_basis = 14695981039346656037ULL;
+void drift_digest_add(std::uint64_t& digest, std::uint64_t value) {
+    for (unsigned byte = 0; byte < 8; ++byte) {
+        digest ^= (value >> (8 * byte)) & 0xffU;
+        digest *= 1099511628211ULL;
+    }
+}
+
 std::size_t fft_bin(std::int64_t signed_bin, std::size_t fft_rows) {
     return static_cast<std::size_t>(signed_bin < 0 ? signed_bin + static_cast<std::int64_t>(fft_rows) : signed_bin);
 }
 
+// A ridge segment's center time relative to the slope reference.
+double drift_segment_center(const DriftPlan& plan, double fs, std::size_t segments, std::size_t segment) {
+    const auto first = plan.rows * segment / segments;
+    const auto stop_row = plan.rows * (segment + 1) / segments;
+    return (plan.first + (plan.sample_stride - 1) * .5) / (fs * plan.sample_stride) +
+        (first + stop_row - 1) * .5 / fs - plan.slope_reference_seconds;
+}
+
+// The ridge grid of a segment count; its slope stride reads only the first
+// and last segment centers.
+DriftRidgeGrid drift_ridge_grid_shape(const DriftPlan& plan, double fs, std::size_t segments) {
+    if (!plan.rows || !segments || plan.slope_radius < 1)
+        throw Error("Robust drift ridge grid requires public rows, slopes and one center per segment");
+    DriftRidgeGrid grid;
+    grid.segments = segments;
+    grid.fft_rows = std::bit_ceil(2 * ((plan.rows + segments - 1) / segments));
+    grid.frequency_step = fs / grid.fft_rows;
+    const auto front = drift_segment_center(plan, fs, segments, 0);
+    const auto back = drift_segment_center(plan, fs, segments, segments - 1);
+    const auto nominal_slope_stride = std::max<std::int64_t>(1, std::llround(grid.frequency_step /
+        (plan.slope_step * std::max(std::abs(front), std::abs(back)))));
+    grid.slope_stride = std::max(nominal_slope_stride,
+        1 + (plan.slope_radius - 1) / maximum_drift_proposal_slope_radius);
+    grid.bin_radius = std::min(static_cast<std::int64_t>(grid.fft_rows / 2 - 1),
+        static_cast<std::int64_t>(std::ceil(plan.frequency_radius * plan.frequency_step / grid.frequency_step)));
+    grid.bin_stride = std::max<std::int64_t>(1,
+        1 + (grid.bin_radius - 1) / maximum_drift_proposal_frequency_radius);
+    grid.centers = static_cast<std::size_t>(2 * grid.bin_radius / grid.bin_stride) + 1;
+    // The interior grid includes both public edges only when they lie on it.
+    const auto interior = plan.slope_radius / grid.slope_stride;
+    grid.slopes = static_cast<std::size_t>(2 * interior + 1) + (interior * grid.slope_stride == plan.slope_radius ? 0 : 2);
+    if (grid.bin_radius < 0 || grid.centers > maximum_drift_ridge_centers || grid.slopes > maximum_drift_ridge_slopes)
+        throw Error("Robust drift ridge grid exceeds its bounded centers or slopes");
+    return grid;
+}
+} // namespace
+
 // Match a linear ridge through short coherent spectra. This ranking only
 // chooses exact slope atoms of the fixed full-slot likelihood below. Noise
 // maxima get no posterior mass credit for discarded alternatives.
-struct DriftProposals {
-    std::vector<std::int64_t> slopes;
-    double rank = 0;
-};
+bool drift_ridge_exhaustive(const DriftPlan& plan, std::size_t slope_budget) {
+    return 2 * plan.slope_radius + 1 <= static_cast<std::int64_t>(slope_budget);
+}
 
-template<class T, class Fft>
-DriftProposals drift_slope_proposals(
-        DriftScratch<T>& scratch, const DriftPlan& plan, const Fft& fft, double fs, double normalized, std::size_t taps,
-        const std::array<std::array<double, 2>, 2>& energy, std::size_t drift_segments,
-        std::size_t slope_budget, std::stop_token stop) {
+DriftRidgeGrid drift_ridge_grid(const DriftPlan& plan, double fs, std::size_t segments,
+                                std::span<double> centers) {
+    if (centers.size() != segments)
+        throw Error("Robust drift ridge grid requires public rows, slopes and one center per segment");
+    const auto grid = drift_ridge_grid_shape(plan, fs, segments);
+    for (std::size_t segment = 0; segment < segments; ++segment)
+        centers[segment] = drift_segment_center(plan, fs, segments, segment);
+    return grid;
+}
+
+std::int64_t drift_ridge_slope(const DriftPlan& plan, const DriftRidgeGrid& grid, std::size_t index) {
+    if (index >= grid.slopes) throw Error("Robust drift ridge slope index is outside the grid");
+    if (!index) return -plan.slope_radius;
+    if (index + 1 == grid.slopes) return plan.slope_radius;
+    const auto interior = plan.slope_radius / grid.slope_stride;
+    const auto first = interior * grid.slope_stride == plan.slope_radius ? 0 : 1;
+    return (static_cast<std::int64_t>(index) - first - interior) * grid.slope_stride;
+}
+
+std::int64_t drift_ridge_offset(const DriftPlan& plan, const DriftRidgeGrid& grid, double center, std::int64_t slope) {
+    return std::llround(slope * plan.slope_step * center / grid.frequency_step);
+}
+
+namespace {
+// One slope's window in one segment: its first center's signed bin and
+// the center index bounds of its wrapped and unwrapped reads.
+struct DriftRidgeWindow {
+    std::int64_t origin = 0, low = 0, negative = 0, high = 0;
+};
+} // namespace
+
+void drift_ridge_records(const DriftPlan& plan, const DriftRidgeGrid& grid, std::span<const double> power,
+                         std::span<const double> centers, std::span<const std::int64_t> slopes,
+                         std::span<DriftRidgeRecord> records, std::span<double> sums) {
+    const auto segments = grid.segments;
+    const auto fft_rows = grid.fft_rows;
+    const auto block = slopes.size();
+    const auto width = grid.centers;
+    if (power.size() != 2 * segments * fft_rows || centers.size() != segments || !width ||
+        width > maximum_drift_ridge_centers || !block || block > maximum_drift_ridge_block ||
+        records.size() != block || sums.size() < 2 * block * width)
+        throw Error("Robust drift ridge records require the grid's power table, segment centers and block sums");
+    const auto half = static_cast<std::int64_t>(fft_rows / 2);
+    const auto count = static_cast<std::int64_t>(width);
+    const auto stride = grid.bin_stride;
+    // Center indices i >= 0 with i * stride < bound.
+    const auto below = [&](std::int64_t bound) {
+        return bound <= 0 ? std::int64_t{0} : std::min(count, (bound - 1) / stride + 1);
+    };
+    std::fill_n(sums.begin(), 2 * block * width, 0.);
+    std::array<DriftRidgeWindow, maximum_drift_ridge_block> windows;
+    for (std::size_t segment = 0; segment < segments; ++segment) {
+        // Center index i of a slope reads signed bin origin + i * stride. It
+        // skips this segment unless that bin lies in (-half, half), and a
+        // negative bin wraps to the upper half of the spectrum.
+        for (std::size_t b = 0; b < block; ++b) {
+            const auto origin = drift_ridge_offset(plan, grid, centers[segment], slopes[b]) - grid.bin_radius;
+            windows[b] = {origin, below(1 - half - origin), below(-origin), below(half - origin)};
+        }
+        // Each (slope, bit, center) sum gets its addends in segment order
+        // whatever the block; the row stays cached for the block.
+        for (std::size_t bit = 0; bit < 2; ++bit) {
+            const auto* row = power.data() + (bit * segments + segment) * fft_rows;
+            for (std::size_t b = 0; b < block; ++b) {
+                const auto [origin, low, negative, high] = windows[b];
+                const auto wrapped = origin + static_cast<std::int64_t>(fft_rows);
+                auto* sum = sums.data() + (2 * b + bit) * width;
+                for (auto i = low; i < negative; ++i) sum[i] += row[wrapped + i * stride];
+                for (auto i = negative; i < high; ++i) sum[i] += row[origin + i * stride];
+            }
+        }
+    }
+    for (std::size_t b = 0; b < block; ++b) {
+        DriftRidgeRecord record;
+        for (std::size_t bit = 0; bit < 2; ++bit) {
+            const auto* sum = sums.data() + (2 * b + bit) * width;
+            for (std::int64_t i = 0; i < count; ++i)
+                if (sum[i] > record.score[bit]) {
+                    record.score[bit] = sum[i];
+                    record.center[bit] = i * stride - grid.bin_radius;
+                }
+        }
+        records[b] = record;
+    }
+}
+
+std::size_t drift_ridge_block(const DriftRidgeGrid& grid) {
+    if (!grid.centers || grid.centers > maximum_drift_ridge_centers)
+        throw Error("Robust drift ridge block requires the grid's bounded centers");
+    return std::min(maximum_drift_ridge_block, drift_ridge_block_bytes / (2 * grid.centers * sizeof(double)));
+}
+
+DriftRidgeFrontier drift_ridge_frontier(const DriftPlan& plan, const DriftRidgeGrid& grid,
+                                        std::span<const double> power, std::span<const double> centers,
+                                        std::size_t block, std::span<double> sums, std::stop_token stop) {
+    block = std::min({block, grid.slopes, maximum_drift_ridge_block});
+    if (!block) throw Error("Robust drift ridge search requires one slope per block");
+    std::array<std::int64_t, maximum_drift_ridge_block> slopes;
+    std::array<DriftRidgeRecord, maximum_drift_ridge_block> records;
+    static_assert(sizeof(slopes) + sizeof(records) + sizeof(std::array<DriftRidgeWindow, maximum_drift_ridge_block>) <=
+                  drift_ridge_stack_bytes);
+    DriftRidgeFrontier frontier;
+    for (std::size_t first = 0; first < grid.slopes; first += block) {
+        check_cancelled(stop);
+        const auto count = std::min(block, grid.slopes - first);
+        for (std::size_t j = 0; j < count; ++j) slopes[j] = drift_ridge_slope(plan, grid, first + j);
+        drift_ridge_records(plan, grid, power, centers, std::span(slopes).first(count),
+                            std::span(records).first(count), sums);
+        for (std::size_t j = 0; j < count; ++j) frontier.insert(slopes[j], records[j]);
+    }
+    return frontier;
+}
+
+void DriftRidgeFrontier::insert(std::int64_t slope, const DriftRidgeRecord& record) {
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        const Ridge score{record.score[bit], slope, record.center[bit]};
+        auto& frontier = best_[bit];
+        const auto where = std::ranges::find_if(frontier, [&](const auto& peak) {
+            return score.score > peak.score;
+        });
+        if (where == frontier.end()) continue;
+        std::move_backward(where, frontier.end() - 1, frontier.end());
+        *where = score;
+    }
+}
+
+DriftProposals DriftRidgeFrontier::select(const DriftPlan& plan, const DriftRidgeGrid& grid,
+                                          std::span<const double> power, std::span<const double> centers,
+                                          std::size_t slope_budget) const {
     DriftProposals proposals;
     auto& result = proposals.slopes;
     result.reserve(slope_budget);
@@ -4203,84 +5047,21 @@ DriftProposals drift_slope_proposals(
             std::ranges::find(result, slope) == result.end()) result.push_back(slope);
     };
     append(0);
-    if (2 * plan.slope_radius + 1 <= static_cast<std::int64_t>(slope_budget)) {
+    if (drift_ridge_exhaustive(plan, slope_budget)) {
         for (auto slope = -plan.slope_radius; slope <= plan.slope_radius; ++slope) append(slope);
         return proposals;
     }
-
-    const auto fft_rows = std::bit_ceil(2 * ((plan.rows + drift_segments - 1) / drift_segments));
-    const double frequency_step = fs / fft_rows;
-    const auto& products = scratch.products;
-    const auto columns = 2 * taps;
-    scratch.segment_spectrum.resize(fft_rows);
-    scratch.segment_power.assign(2 * drift_segments * fft_rows, 0.);
-    auto& centers = scratch.segment_centers;
-    centers.resize(drift_segments);
-    for (std::size_t segment = 0; segment < drift_segments; ++segment) {
-        const auto first = plan.rows * segment / drift_segments;
-        const auto stop_row = plan.rows * (segment + 1) / drift_segments;
-        centers[segment] = (plan.first + (plan.sample_stride - 1) * .5) / (fs * plan.sample_stride) +
-            (first + stop_row - 1) * .5 / fs - plan.slope_reference_seconds;
-        for (std::size_t column = 0; column < columns; ++column) {
-            auto& spectrum = scratch.segment_spectrum;
-            std::fill(spectrum.begin(), spectrum.end(), std::complex<T>{});
-            for (auto i = first; i < stop_row; ++i)
-                spectrum[i - first] = static_cast<std::complex<T>>(products[column][i] * normalized);
-            modem::detail::search_fft::fft(spectrum, false, fft, stop);
-            const auto bit = column / taps;
-            const auto tap = column % taps;
-            if (energy[bit][tap] <= 0) continue;
-            auto* power = scratch.segment_power.data() + (bit * drift_segments + segment) * fft_rows;
-            for (std::size_t bin = 0; bin < fft_rows; ++bin)
-                power[bin] += std::norm(static_cast<Complex>(spectrum[bin])) / energy[bit][tap];
-        }
-    }
-    const auto nominal_slope_stride = std::max<std::int64_t>(1, std::llround(frequency_step /
-        (plan.slope_step * std::max(std::abs(centers.front()), std::abs(centers[drift_segments - 1])))));
-    const auto slope_stride = std::max(nominal_slope_stride,
-        1 + (plan.slope_radius - 1) / maximum_drift_proposal_slope_radius);
-    const auto bin_radius = std::min(static_cast<std::int64_t>(fft_rows / 2 - 1),
-        static_cast<std::int64_t>(std::ceil(plan.frequency_radius * plan.frequency_step / frequency_step)));
-    const auto bin_stride = std::max<std::int64_t>(1,
-        1 + (bin_radius - 1) / maximum_drift_proposal_frequency_radius);
-    struct Ridge { double score = -infinity; std::int64_t slope = 0, center = 0; };
-    constexpr std::size_t retained = 4;
-    std::array<std::array<Ridge, retained>, 2> best{};
-    auto consider = [&](std::int64_t slope) {
-        check_cancelled(stop);
-        auto& offset = scratch.segment_offsets;
-        offset.resize(drift_segments);
-        for (std::size_t s = 0; s < drift_segments; ++s)
-            offset[s] = std::llround(slope * plan.slope_step * centers[s] / frequency_step);
-        std::array<Ridge, 2> score{};
-        for (auto center = -bin_radius; center <= bin_radius; center += bin_stride) {
-            std::array<double, 2> evidence{};
-            for (std::size_t segment = 0; segment < drift_segments; ++segment) {
-                const auto signed_bin = center + offset[segment];
-                if (std::abs(signed_bin) >= static_cast<std::int64_t>(fft_rows / 2)) continue;
-                const auto bin = fft_bin(signed_bin, fft_rows);
-                for (std::size_t bit = 0; bit < 2; ++bit)
-                    evidence[bit] += scratch.segment_power[(bit * drift_segments + segment) * fft_rows + bin];
-            }
-            for (std::size_t bit = 0; bit < 2; ++bit)
-                if (evidence[bit] > score[bit].score) score[bit] = {evidence[bit], slope, center};
-        }
-        for (std::size_t bit = 0; bit < 2; ++bit) {
-            auto& frontier = best[bit];
-            const auto where = std::ranges::find_if(frontier, [&](const auto& peak) {
-                return score[bit].score > peak.score;
-            });
-            if (where == frontier.end()) continue;
-            std::move_backward(where, frontier.end() - 1, frontier.end());
-            *where = score[bit];
-        }
-    };
-    consider(-plan.slope_radius);
-    for (auto slope = -(plan.slope_radius / slope_stride) * slope_stride;
-         slope <= plan.slope_radius; slope += slope_stride) {
-        if (slope != -plan.slope_radius && slope != plan.slope_radius) consider(slope);
-    }
-    consider(plan.slope_radius);
+    const auto drift_segments = grid.segments;
+    const auto fft_rows = grid.fft_rows;
+    // Only the slow-plan refinement reads the power table.
+    if ((plan.slow_ridge_segments && power.size() != 2 * drift_segments * fft_rows) || centers.size() != drift_segments)
+        throw Error("Robust drift ridge selection requires the grid's power table and segment centers");
+    const auto frequency_step = grid.frequency_step;
+    const auto slope_stride = grid.slope_stride;
+    const auto bin_radius = grid.bin_radius;
+    const auto bin_stride = grid.bin_stride;
+    const auto retained = best_[0].size();
+    auto best = best_;
     // Adjacent coarse slope hypotheses can differ by many full-aperture
     // bins. Refine the best ridges on the stored spectra before spending
     // an exact dechirp FFT on a nominal neighbor.
@@ -4289,7 +5070,7 @@ DriftProposals drift_slope_proposals(
         const auto low = static_cast<std::int64_t>(std::floor(bin));
         if (low <= -static_cast<std::int64_t>(fft_rows / 2) || low + 1 >= static_cast<std::int64_t>(fft_rows / 2))
             return 0.;
-        const auto* row = scratch.segment_power.data() + (bit * drift_segments + segment) * fft_rows;
+        const auto* row = power.data() + (bit * drift_segments + segment) * fft_rows;
         return std::lerp(row[fft_bin(low, fft_rows)], row[fft_bin(low + 1, fft_rows)], bin - low);
     };
     for (std::size_t bit = 0; plan.slow_ridge_segments && bit < 2; ++bit) {
@@ -4344,10 +5125,199 @@ DriftProposals drift_slope_proposals(
     proposals.rank = std::max(best[0][0].score, best[1][0].score);
     return proposals;
 }
+
+void merge_drift_peak(DriftPeakFrontier& frontier, const DriftPeak& peak) {
+    const auto where = std::ranges::find_if(frontier, [&](const DriftPeak& other) { return peak.rank > other.rank; });
+    if (where == frontier.end()) return;
+    std::move_backward(where, frontier.end() - 1, frontier.end());
+    *where = peak;
+}
+
+namespace {
+// Segment spectra of the normalized products and their FP64 power table
+// [bit][segment][bin], each tap normalized by its template energy.
+template<class T, class Fft>
+void drift_ridge_tables(DriftScratch<T>& scratch, const DriftPlan& plan, const DriftRidgeGrid& grid, const Fft& fft,
+                        double normalized, std::size_t taps, const std::array<std::array<double, 2>, 2>& energy,
+                        std::stop_token stop) {
+    const auto drift_segments = grid.segments;
+    const auto fft_rows = grid.fft_rows;
+    const auto& products = scratch.products;
+    const auto columns = 2 * taps;
+    scratch.segment_spectrum.resize(fft_rows);
+    scratch.segment_power.assign(2 * drift_segments * fft_rows, 0.);
+    for (std::size_t segment = 0; segment < drift_segments; ++segment) {
+        const auto first = plan.rows * segment / drift_segments;
+        const auto stop_row = plan.rows * (segment + 1) / drift_segments;
+        for (std::size_t column = 0; column < columns; ++column) {
+            auto& spectrum = scratch.segment_spectrum;
+            std::fill(spectrum.begin(), spectrum.end(), std::complex<T>{});
+            for (auto i = first; i < stop_row; ++i)
+                spectrum[i - first] = static_cast<std::complex<T>>(products[column][i] * normalized);
+            modem::detail::search_fft::fft(spectrum, false, fft, stop);
+            const auto bit = column / taps;
+            const auto tap = column % taps;
+            if (energy[bit][tap] <= 0) continue;
+            auto* power = scratch.segment_power.data() + (bit * drift_segments + segment) * fft_rows;
+            for (std::size_t bin = 0; bin < fft_rows; ++bin)
+                power[bin] += std::norm(static_cast<Complex>(spectrum[bin])) / energy[bit][tap];
+        }
+    }
+}
+
+// lap(phase) charges the time since the previous boundary to that phase.
+template<class T, class Fft, class Lap>
+DriftProposals drift_slope_proposals(
+        DriftScratch<T>& scratch, const DriftPlan& plan, const Fft& fft, double fs, double normalized, std::size_t taps,
+        const std::array<std::array<double, 2>, 2>& energy, std::size_t drift_segments,
+        std::size_t slope_budget, std::stop_token stop, const Lap& lap) {
+    if (drift_ridge_exhaustive(plan, slope_budget)) {
+        auto proposals = DriftRidgeFrontier{}.select(plan, {}, {}, {}, slope_budget);
+        lap(drift_ridge_search);
+        return proposals;
+    }
+    auto& centers = scratch.segment_centers;
+    centers.resize(drift_segments);
+    const auto grid = drift_ridge_grid(plan, fs, drift_segments, centers);
+    drift_ridge_tables(scratch, plan, grid, fft, normalized, taps, energy, stop);
+    lap(drift_ridge);
+    // The block sums reuse the lane's render tile (charged in the lane quote
+    // as 4 * render rows complex words), addressed as its real and imaginary
+    // doubles. An evaluation reads the tile only right after rendering into
+    // it, so it is idle here. Its 2 * taps * tile complex words, tile =
+    // min(16,384, raw rows), hold one slope's 2 * centers sums at every
+    // admitted grid: centers <= min(1,025, fft_rows - 1), and with at least
+    // two segments fft_rows <= 2 * rows <= 2 * raw rows. Only an aperture
+    // under 16,384 raw rows can hold fewer slopes than the cache rule.
+    const auto sums = std::span(reinterpret_cast<double*>(scratch.raw.data()), 2 * scratch.raw.size());
+    const auto block = std::min(drift_ridge_block(grid), sums.size() / (2 * grid.centers));
+    if (!block) throw Error("Robust drift ridge block exceeds the lane's render tile");
+    const auto frontier = drift_ridge_frontier(plan, grid, scratch.segment_power, centers, block, sums, stop);
+    auto proposals = frontier.select(plan, grid, scratch.segment_power, centers, slope_budget);
+    lap(drift_ridge_search);
+    return proposals;
+}
+
+// The public geometry of one device ridge call, built once per drift stage
+// for both relative-Doppler signs and every lane, and only once a session
+// holds it: the grid, segment centers and row bounds, the native slope
+// order and the host-rounded offsets [slope][segment].
+struct DriftDeviceRidge {
+    DriftRidgeGrid grid;
+    std::vector<double> centers;
+    std::vector<std::size_t> bounds;
+    std::vector<std::int64_t> slopes, offsets;
+    DriftRidgeGeometry request(bool return_power) const {
+        return {grid.segments, grid.fft_rows, bounds, slopes, offsets, grid.bin_radius, grid.bin_stride, return_power};
+    }
+    // Every table above at a grid's shape.
+    static std::size_t host_bytes(const DriftRidgeGrid& grid) {
+        const auto segments = grid.segments, slopes_count = grid.slopes;
+        return checked_multiply(checked_add(checked_add(2 * segments + 1, slopes_count),
+                                            checked_multiply(slopes_count, segments)), sizeof(std::int64_t));
+    }
+    DriftDeviceRidge(const DriftPlan& plan, double rate, const DriftRidgeGrid& shape) : centers(shape.segments) {
+        const auto segments = shape.segments;
+        grid = drift_ridge_grid(plan, rate, segments, centers);
+        bounds.resize(segments + 1);
+        for (std::size_t segment = 0; segment <= segments; ++segment) bounds[segment] = plan.rows * segment / segments;
+        slopes.resize(grid.slopes);
+        offsets.resize(checked_multiply(grid.slopes, segments));
+        for (std::size_t index = 0; index < grid.slopes; ++index) {
+            slopes[index] = drift_ridge_slope(plan, grid, index);
+            for (std::size_t segment = 0; segment < segments; ++segment)
+                offsets[index * segments + segment] = drift_ridge_offset(plan, grid, centers[segment], slopes[index]);
+        }
+    }
+};
+// A device stage's ridges, absent where the call's slope budget is
+// exhaustive or the plan has no slow segments, with its counts over both
+// signs: evaluations with device-published proposals, and those with a
+// native fallback (a mixed evaluation counts in both). A stage without a
+// session holds no ridge tables.
+struct DriftDeviceStage {
+    DriftBulk* session = nullptr;
+    ReceiverBulkBackend* backend = nullptr;
+    std::optional<DriftDeviceRidge> fast, slow;
+    std::size_t device_evaluations = 0, native_evaluations = 0;
+};
+
+// A device ridge's grid shape, computed without its tables.
+std::optional<DriftRidgeGrid> drift_device_grid(const DriftPlan& plan, double rate, std::size_t segments,
+                                                std::size_t slope_budget) {
+    if (!segments || drift_ridge_exhaustive(plan, slope_budget)) return std::nullopt;
+    return drift_ridge_grid_shape(plan, rate, segments);
+}
+
+// Opens the one device proposal session of a drift stage, or records why
+// the stage stays native. The policy's own declines are the factory's
+// record. The route's host tables and lane records, and the session's host
+// bytes (its compilation and a unified-memory lease), must fit in the stage
+// envelope above the plan's native quote, which stays held for per-atom
+// fallbacks; the transform batch halves to fit.
+// The policy, envelope and lease read only grid shapes, so a declined or
+// native stage allocates nothing here; the tables exist only with a session.
+std::unique_ptr<DriftBulk> open_drift_device(const ReceiverConfig& config, const DriftPlan& plan,
+        std::span<const FineCoordinate> selected, std::span<const FineCoordinate> epoch_timing,
+        DriftDeviceStage& stage, std::stop_token stop) {
+    auto* backend = config.bulk_backend.get();
+    if (!backend || !plan.workspace_bytes || !plan.stage_workers) return {};
+    const bool fp64 = config.native_coarse_precision == NativeCoarsePrecision::fp64;
+    const auto rate = config.sample_rate_hz / plan.sample_stride;
+    const auto fast_budget = drift_fast_slope_budget(plan);
+    const auto fast = drift_device_grid(plan, rate, plan.ridge_segments, fast_budget);
+    const auto slow = drift_device_grid(plan, rate, plan.slow_ridge_segments, plan.slope_budget - fast_budget + 1);
+    // A transient list, freed before the stage's own (its metadata term).
+    const auto lanes = std::min<std::size_t>(plan.stage_workers, drift_timing_atoms(selected, epoch_timing).size());
+    const bool echo = config.spread_delay_seconds || config.spread_doppler_hz;
+    DriftBulkShape shape;
+    shape.rows = plan.rows; shape.taps = echo ? 2 : 1; shape.nfft = plan.nfft;
+    shape.frequency_radius = static_cast<std::size_t>(plan.frequency_radius);
+    std::size_t host_bytes = 0, lane_bytes = 0;
+    if (fast) { shape.segments = fast->segments; shape.segment_fft = fast->fft_rows; }
+    if (slow) { shape.slow_segments = slow->segments; shape.slow_segment_fft = slow->fft_rows; }
+    for (const auto* grid : {&fast, &slow}) {
+        if (!*grid) continue;
+        shape.ridge_slopes = std::max(shape.ridge_slopes, (*grid)->slopes);
+        shape.ridge_centers = std::max(shape.ridge_centers, (*grid)->centers);
+        host_bytes = checked_add(host_bytes, DriftDeviceRidge::host_bytes(**grid));
+    }
+    shape.slope_budget = shape.slope_batch = plan.slope_budget;
+    shape.lanes = lanes;
+    lane_bytes = checked_add(checked_multiply(shape.ridge_slopes, sizeof(DriftRidgeRecord)),
+        checked_multiply(plan.slope_budget, 2 * retained_drift_per_bit * sizeof(DriftFrontierRow)));
+    host_bytes = checked_add(host_bytes, checked_multiply(lanes, lane_bytes));
+    std::unique_ptr<DriftBulk> session;
+    if (!backend->stage_decline(shape, fp64).empty()) {
+        session = backend->make_drift(shape, fp64, stop);
+    } else {
+        const auto slack = plan.device_envelope_bytes - std::min(plan.device_envelope_bytes, plan.workspace_bytes);
+        if (host_bytes > slack) {
+            backend->record_stage_native(StageFamily::drift, StageReason::workspace, StageNative::fallback);
+            return {};
+        }
+        for (;; shape.slope_batch /= 2) {
+            if (!shape.slope_batch) {
+                backend->record_stage_native(StageFamily::drift, backend->receipt().unified_memory ?
+                    StageReason::unified_memory_envelope : StageReason::workspace, StageNative::fallback);
+                return {};
+            }
+            if (backend->stage_host_bytes(shape, fp64) <= slack - host_bytes) break;
+        }
+        session = backend->make_drift(shape, fp64, stop);
+    }
+    if (!session) return {};
+    stage.backend = backend;
+    if (fast) stage.fast.emplace(plan, rate, *fast);
+    if (slow) stage.slow.emplace(plan, rate, *slow);
+    stage.session = session.get();
+    return session;
+}
 } // namespace
 
 DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
-                     bool project_line_atom, std::size_t preserved_workspace_bytes) {
+                     bool project_line_atom, std::size_t preserved_workspace_bytes,
+                     std::size_t ordinary_headroom_bytes) {
     if (!config.time_varying_channel || !(config.time_varying_common_doppler_hz > 0)) return {};
     const auto fs = config.sample_rate_hz;
     const auto source_geometry = geometry(slot.format);
@@ -4455,6 +5425,8 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
             checked_multiply(checked_multiply(4, checked_add(result.rows, checked_add(tile, render_rows))), sizeof(Complex)),
             checked_add(checked_multiply(checked_add(checked_multiply(4, result.nfft), segment_fft), fft_value_bytes),
                         checked_multiply(checked_add(tile, checked_multiply(2, segment_power_rows)), sizeof(double))));
+        // Each segment's center and one spare word: the native ridge rounds
+        // its block's segment offsets on the stack, with no offset table.
         const auto ridge_metadata = checked_multiply(result.ridge_segments, sizeof(double) + sizeof(std::int64_t));
         bytes = checked_add(bytes, checked_multiply(active, checked_add(per_lane, ridge_metadata)));
         bytes = checked_add(bytes, MappedBasis::workspace_bytes(config, slot, render_rows, static_cast<unsigned>(active)));
@@ -4471,24 +5443,43 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                 checked_multiply(checked_add(checked_multiply(2, projection_rows), scratch), sizeof(Complex))));
         }
         if (config.spread_doppler_hz != 0) bytes = checked_add(bytes, sizeof(ReceiverSlotScore));
-        return checked_add(bytes, drift_metadata_reservation);
+        return checked_add(bytes, drift_metadata_bytes(active));
     };
     const auto widest = static_cast<unsigned>(std::min<std::size_t>(workers, maximum_drift_stage_workers));
+    const auto admit = [&](unsigned active, std::size_t bytes) {
+        result.workspace_bytes = bytes;
+        result.stage_workers = active;
+        result.device_envelope_bytes = std::max(bytes, extended ? preserved_workspace_bytes : ordinary_headroom_bytes);
+        return result;
+    };
+    if (!extended && widest) {
+        // The former width is always admitted and its quote is the floor. A
+        // wider quote between that floor and the headroom leaves the largest
+        // stage, hence every owner lease and admitted shape, unchanged.
+        const auto floor = static_cast<unsigned>(std::min<std::size_t>(workers, ordinary_drift_stage_workers));
+        const auto floor_bytes = quote(floor);
+        for (auto active = widest; active > floor && ordinary_headroom_bytes > floor_bytes; --active) {
+            try {
+                const auto bytes = quote(active);
+                if (bytes >= floor_bytes && bytes <= ordinary_headroom_bytes) return admit(active, bytes);
+            } catch (const Error& error) {
+                if (std::string_view(error.what()) == "Robust reception cancelled") throw;
+            }
+        }
+        return admit(floor, floor_bytes);
+    }
     bool unsupported = false;
     for (auto active = widest; active; --active) {
         try {
             const auto bytes = quote(active);
-            if (!extended || bytes <= preserved_workspace_bytes) {
-                result.workspace_bytes = bytes;
-                result.stage_workers = active;
-                if (extended) result.status = "linear_drift_ridge_proposals_within_preserved_owner_lease";
-                return result;
+            if (bytes <= preserved_workspace_bytes) {
+                result.status = "linear_drift_ridge_proposals_within_preserved_owner_lease";
+                return admit(active, bytes);
             }
         } catch (const Error& error) {
-            if (!extended || std::string_view(error.what()) == "Robust reception cancelled") throw;
+            if (std::string_view(error.what()) == "Robust reception cancelled") throw;
             unsupported = true;
         }
-        if (!extended) break;
     }
     return {.status = unsupported ? "drift_extension_workspace_shape_unavailable" :
                                    "drift_extension_exceeds_preserved_owner_lease"};
@@ -4501,21 +5492,14 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
                        std::span<const FineCoordinate> selected, std::span<const FineCoordinate> epoch_timing,
                        unsigned workers,
                        ReceiverSlotScore& score, std::stop_token stop, ReceiverExecutor& executor, const LineAtom* line,
-                       DriftZeroSlopeEvaluation zero_evaluation) {
+                       DriftZeroSlopeEvaluation zero_evaluation, DriftDeviceStage* device) {
     if (!plan.workspace_bytes || !plan.stage_workers || plan.stage_workers > workers ||
         selected.empty() || selected.size() > maximum_varying_coordinates ||
         epoch_timing.size() > 2 * receiver_epoch_offsets.size() + maximum_segmented_timing_coordinates ||
         iq.size() != slot.stop_sample - slot.first_sample)
         throw Error("Robust drift scorer requires bounded public timing atoms and observation");
     const auto began = FineClock::now();
-    std::vector<FineCoordinate> timing;
-    timing.reserve(selected.size() + epoch_timing.size());
-    const auto append = [&](const FineCoordinate& coordinate) {
-        if (std::none_of(timing.begin(), timing.end(), [&](const auto& other) { return same_timing(coordinate, other); }))
-            timing.push_back(coordinate);
-    };
-    for (const auto& coordinate : selected) append(coordinate);
-    for (const auto& coordinate : epoch_timing) append(coordinate);
+    const auto timing = drift_timing_atoms(selected, epoch_timing);
     const auto active = std::min<std::size_t>(plan.stage_workers, timing.size());
     const bool rank_timing = timing.size() > retained_drift_ridge_timing_atoms;
     std::vector<DriftZeroSlopeCache> zero(rank_timing ? timing.size() : 0);
@@ -4540,12 +5524,37 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
     std::vector<std::array<double, 2>> evidence(timing.size(), {-infinity, -infinity});
     std::vector<std::size_t> scored_slopes(timing.size());
     std::vector<double> ranks(timing.size());
+    std::vector<std::uint64_t> retained_digests(timing.size(), drift_digest_basis);
     std::vector<std::size_t> survivors(timing.size());
     std::iota(survivors.begin(), survivors.end(), 0);
+    if (device && device->session && device->session->staging(0).size() != 2 * taps * plan.rows)
+        throw Error("Robust drift device staging differs from its public shape");
+    // A device lane reserves its tables once, at their quoted sizes: every
+    // ridge slope's record, the slope budget's frontiers and, with a slow
+    // refinement, the larger of the fast and slow power tables. Growing them
+    // call by call could keep up to twice the larger table.
+    if (device && device->session) {
+        std::size_t slopes = 0, power = 0;
+        for (const auto* ridge : {&device->fast, &device->slow})
+            if (*ridge) {
+                slopes = std::max(slopes, (*ridge)->grid.slopes);
+                power = std::max(power, checked_multiply(2 * (*ridge)->grid.segments, (*ridge)->grid.fft_rows));
+            }
+        for (auto& own : scratch) {
+            own.device_records.reserve(slopes);
+            own.device_frontiers.reserve(checked_multiply(plan.slope_budget, 2 * retained_drift_per_bit));
+            if (plan.slow_ridge_segments) own.segment_power.reserve(power);
+        }
+    }
     const auto evaluate = [&](unsigned lane, std::size_t index, bool rank_only, std::stop_token leaf_stop) {
             auto& own = scratch[lane];
+            auto mark = FineClock::now();
+            const auto lap = [&](DriftPhase phase) {
+                const auto now = FineClock::now();
+                own.seconds[phase] += std::chrono::duration<double>(now - mark).count();
+                mark = now;
+            };
             for (auto& product : std::span(own.products).first(2 * taps)) product.assign(plan.rows, {});
-            own.frequency.resize(4 * plan.nfft);
             own.raw.resize(2 * taps * tile);
             own.offsets.resize(tile);
             std::iota(own.offsets.begin(), own.offsets.end(), 0.);
@@ -4592,14 +5601,37 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
             const auto normalized = std::scalbn(1., -exponent);
             const auto inverse_variance = 1 / variance;
             const auto projected_rate = config.sample_rate_hz / plan.sample_stride;
-            const auto score_slope = [&](std::int64_t slope,
-                    std::array<std::array<DriftPeak, retained_drift_per_bit>, 2>& peaks,
-                    std::array<double, 2>* nomination) {
+            const double delta = plan.sample_stride / config.sample_rate_hz;
+            const double first_t = (plan.first + (plan.sample_stride - 1) * .5) /
+                config.sample_rate_hz - plan.slope_reference_seconds;
+            // A device session scores this evaluation's proposals from the
+            // lane's staged products round32(P * normalized), the native ridge
+            // transform input. A product outside the FP32 range, or a device
+            // call that returns false, leaves the rest of this evaluation to
+            // the native proposals; every exact statistic stays native FP64.
+            // published: a device call published ridge records or slope
+            // frontiers for this evaluation.
+            bool on_device = device && device->session, published = false;
+            if (on_device) {
+                const auto staged = device->session->staging(lane);
+                constexpr double largest = std::numeric_limits<float>::max();
+                for (std::size_t column = 0; column < 2 * taps; ++column)
+                    for (std::size_t i = 0; i < plan.rows; ++i) {
+                        if (!(i & 65535U)) check_cancelled(leaf_stop);
+                        const auto value = own.products[column][i] * normalized;
+                        on_device = on_device && std::abs(value.real()) <= largest && std::abs(value.imag()) <= largest;
+                        staged[column * plan.rows + i] = static_cast<std::complex<float>>(value);
+                    }
+                if (!on_device)
+                    device->backend->record_stage_native(StageFamily::drift, StageReason::nonfinite_input,
+                                                         StageNative::session_fallback);
+            }
+            lap(drift_render);
+            // Dechirp one slope's normalized products, then transform each column.
+            const auto dechirp_fft = [&](std::int64_t slope) {
                 check_cancelled(leaf_stop);
+                own.frequency.resize(4 * plan.nfft);
                 const double rate = slope * plan.slope_step;
-                const double delta = plan.sample_stride / config.sample_rate_hz;
-                const double first_t = (plan.first + (plan.sample_stride - 1) * .5) /
-                    config.sample_rate_hz - plan.slope_reference_seconds;
                 const auto curve = std::polar(1., -std::numbers::pi * rate * delta * delta * 2);
                 Complex phase, step;
                 for (std::size_t i = 0; i < plan.rows; ++i) {
@@ -4621,6 +5653,12 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
                     std::fill(values.begin() + static_cast<std::ptrdiff_t>(plan.rows), values.end(), std::complex<T>{});
                     modem::detail::search_fft::fft(values, false, fft, leaf_stop);
                 }
+            };
+            // Merge every public bin of the transformed slope into the
+            // atom's persistent frontiers, and optionally its nominations.
+            const auto frontier_merge = [&](std::int64_t slope,
+                    std::array<std::array<DriftPeak, retained_drift_per_bit>, 2>& peaks,
+                    std::array<double, 2>* nomination) {
                 for (auto bin = -plan.frequency_radius; bin <= plan.frequency_radius; ++bin) {
                     if (!(static_cast<std::uint64_t>(bin) & 4095U)) check_cancelled(leaf_stop);
                     const auto offset = fft_bin(bin, plan.nfft);
@@ -4629,7 +5667,6 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
                         const auto r0 = static_cast<Complex>(own.frequency[column * plan.nfft + offset]);
                         const auto r1 = taps == 2 ?
                             static_cast<Complex>(own.frequency[(column + 1) * plan.nfft + offset]) : Complex{};
-                        auto& frontier = peaks[bit];
                         const auto rank = std::norm(r0) + std::norm(r1);
                         if (nomination) {
                             double normalized_power = 0;
@@ -4637,33 +5674,112 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
                             if (taps == 2 && energy[bit][1] > 0) normalized_power += std::norm(r1) / energy[bit][1];
                             (*nomination)[bit] = std::max((*nomination)[bit], normalized_power);
                         }
-                        const auto where = std::ranges::find_if(frontier, [&](const DriftPeak& peak) {
-                            return rank > peak.rank;
-                        });
-                        if (where != frontier.end()) {
-                            std::move_backward(where, frontier.end() - 1, frontier.end());
-                            *where = {rank, slope, bin};
-                        }
+                        merge_drift_peak(peaks[bit], {rank, slope, bin});
                     }
                 }
+            };
+            const auto score_slope = [&](std::int64_t slope,
+                    std::array<std::array<DriftPeak, retained_drift_per_bit>, 2>& peaks,
+                    std::array<double, 2>* nomination) {
+                dechirp_fft(slope);
+                frontier_merge(slope, peaks, nomination);
+            };
+            // The device ridge supplies the per-slope records in native slope
+            // order; the frontier, refinement and slope list stay shared.
+            const auto ridge_proposals = [&](const Fft& transform, const DriftDeviceRidge* ridge,
+                                             std::size_t segments, std::size_t budget, bool slow) {
+                if (on_device && ridge) {
+                    const auto& grid = ridge->grid;
+                    const bool refine = plan.slow_ridge_segments != 0;
+                    std::span<double> power;
+                    if (refine) {
+                        own.segment_power.resize(2 * grid.segments * grid.fft_rows);
+                        power = own.segment_power;
+                    }
+                    own.device_records.resize(grid.slopes);
+                    DriftAtomRequest request;
+                    request.lane = lane; request.energy = energy; request.normalized = normalized;
+                    (slow ? request.slow : request.fast) = ridge->request(refine);
+                    DriftAtomResult result;
+                    (slow ? result.slow : result.fast) = own.device_records;
+                    (slow ? result.slow_power : result.fast_power) = power;
+                    StageDeviceWork work;
+                    if (device->session->ridge(request, result, work, leaf_stop)) {
+                        published = true;
+                        lap(drift_ridge);
+                        DriftRidgeFrontier frontier;
+                        for (std::size_t index = 0; index < grid.slopes; ++index)
+                            frontier.insert(ridge->slopes[index], own.device_records[index]);
+                        auto proposals = frontier.select(plan, grid, power, ridge->centers, budget);
+                        lap(drift_ridge_search);
+                        return proposals;
+                    }
+                    on_device = false;
+                }
+                return drift_slope_proposals(own, plan, transform, projected_rate, normalized, taps,
+                                             energy, segments, budget, leaf_stop, lap);
+            };
+            // Each requested slope's top eight per bit, merged in request
+            // order as the native scan inserts them.
+            const auto device_slopes = [&](std::span<const std::int64_t> list,
+                    std::array<std::array<DriftPeak, retained_drift_per_bit>, 2>& peaks,
+                    std::array<double, 2>* nomination) {
+                if (list.empty()) return true;
+                own.device_frontiers.resize(list.size() * 2 * retained_drift_per_bit);
+                DriftAtomRequest request;
+                request.lane = lane; request.energy = energy; request.normalized = normalized;
+                request.slopes = list; request.rate_step = plan.slope_step;
+                request.delta = delta; request.first_t = first_t; request.nominate = nomination != nullptr;
+                DriftAtomResult result;
+                result.frontiers = own.device_frontiers;
+                StageDeviceWork work;
+                if (!device->session->slopes(request, result, work, leaf_stop)) return on_device = false;
+                published = true;
+                for (std::size_t index = 0; index < list.size(); ++index)
+                    for (std::size_t bit = 0; bit < 2; ++bit)
+                        for (std::size_t rank = 0; rank < retained_drift_per_bit; ++rank) {
+                            const auto& row = own.device_frontiers[(2 * index + bit) * retained_drift_per_bit + rank];
+                            merge_drift_peak(peaks[bit], {row.rank, list[index], row.bin});
+                        }
+                if (nomination)
+                    for (std::size_t bit = 0; bit < 2; ++bit)
+                        (*nomination)[bit] = std::max((*nomination)[bit], result.nomination[bit]);
+                return true;
+            };
+            // A device atom: a device call published this evaluation's ridge
+            // records or slope frontiers, or it needed no device call. A
+            // native atom: any of its steps fell back. An evaluation whose
+            // device ridge published before a later call fell back is both.
+            const auto count_evaluation = [&] {
+                if (!device || !device->session) return;
+                if (published || on_device) ++own.device_evaluations;
+                if (!on_device) ++own.native_evaluations;
             };
             // Use the same bounded exact slope budget. A small fast
             // frontier remains even where the slower ridge is more
             // sensitive. No data-selected slope gets extra prior mass.
-            const auto fast_budget = slow_fft ? std::max<std::size_t>(3, plan.slope_budget / 4) : plan.slope_budget;
-            auto slopes = drift_slope_proposals(own, plan, segment_fft, projected_rate, normalized, taps,
-                                                energy, plan.ridge_segments, fast_budget, leaf_stop);
+            const auto fast_budget = drift_fast_slope_budget(plan);
+            const auto device_ridge = [&](const std::optional<DriftDeviceRidge>& ridge) {
+                return ridge ? &*ridge : nullptr;
+            };
+            auto slopes = ridge_proposals(segment_fft, device ? device_ridge(device->fast) : nullptr,
+                                          plan.ridge_segments, fast_budget, false);
             if (slow_fft) {
-                const auto slow = drift_slope_proposals(own, plan, *slow_fft, projected_rate, normalized, taps,
-                    energy, plan.slow_ridge_segments, plan.slope_budget - fast_budget + 1, leaf_stop);
+                const auto slow = ridge_proposals(*slow_fft, device ? device_ridge(device->slow) : nullptr,
+                    plan.slow_ridge_segments, plan.slope_budget - fast_budget + 1, true);
                 slopes.rank = std::max(slopes.rank, slow.rank);
                 for (const auto slope : slow.slopes)
                     if (std::ranges::find(slopes.slopes, slope) == slopes.slopes.end())
                         slopes.slopes.push_back(slope);
+                lap(drift_ridge_search);
             }
             if (rank_only) {
                 auto& cached = zero[index];
-                score_slope(0, cached.peaks, &cached.nomination);
+                constexpr std::array<std::int64_t, 1> zero_slope{0};
+                if (!on_device || !device_slopes(zero_slope, cached.peaks, &cached.nomination))
+                    score_slope(0, cached.peaks, &cached.nomination);
+                lap(drift_slope);
+                count_evaluation();
                 for (auto& rank : cached.nomination)
                     rank = rank > 0 ? std::log(rank) + 2 * exponent * std::numbers::ln2 - std::log(variance) : -infinity;
                 cached.exponent = exponent;
@@ -4677,9 +5793,31 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
             scored_slopes[index] = slopes.slopes.size();
             const auto cached = zero_evaluation == DriftZeroSlopeEvaluation::reuse && rank_timing &&
                 zero[index].ready && zero[index].exponent == exponent;
-            if (cached) peaks = zero[index].peaks;
-            for (const auto slope : slopes.slopes)
-                if (slope != 0 || !cached) score_slope(slope, peaks, nullptr);
+            if (cached) {
+                peaks = zero[index].peaks;
+                std::erase(slopes.slopes, 0);
+            }
+            if (!on_device || !device_slopes(slopes.slopes, peaks, nullptr))
+                for (const auto slope : slopes.slopes) score_slope(slope, peaks, nullptr);
+            lap(drift_slope);
+            count_evaluation();
+            // The atom's timing and exactly scored (bit, slope, bin) set, in a
+            // canonical order.
+            {
+                std::array<std::array<std::int64_t, 3>, 2 * retained_drift_per_bit> retained{};
+                std::size_t retained_count = 0;
+                for (std::size_t bit = 0; bit < 2; ++bit)
+                    for (const auto& peak : peaks[bit])
+                        if (std::isfinite(peak.rank))
+                            retained[retained_count++] = {static_cast<std::int64_t>(bit), peak.slope, peak.center};
+                std::sort(retained.begin(), retained.begin() + static_cast<std::ptrdiff_t>(retained_count));
+                auto& digest = retained_digests[index];
+                drift_digest_add(digest, static_cast<std::uint64_t>(coordinate.epoch_offset_seconds));
+                drift_digest_add(digest, std::bit_cast<std::uint64_t>(coordinate.arrival_seconds));
+                drift_digest_add(digest, std::bit_cast<std::uint64_t>(coordinate.clock_ppm));
+                for (std::size_t i = 0; i < retained_count; ++i)
+                    for (const auto value : retained[i]) drift_digest_add(digest, static_cast<std::uint64_t>(value));
+            }
             std::array<std::array<DriftStatistics, retained_drift_per_bit>, 2> statistics{};
             const auto with_phase = [&](const DriftPeak& peak, std::size_t first, std::size_t rows,
                                         double direction, const auto& accumulate) {
@@ -4784,6 +5922,7 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
                         evidence[index][bit] = log_add(evidence[index][bit], value);
                     }
                 }
+            lap(drift_exact);
     };
     if (rank_timing) {
         executor.parallel(slot.index, timing.size(), static_cast<unsigned>(active), stop,
@@ -4817,6 +5956,21 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
         for (const auto& atom : evidence) total = log_add(total, atom[bit]);
         score.drift_bit_evidence[bit] = total - log_mass;
     }
+    // A set digest: independent of the order of equal timing atoms.
+    std::vector<std::uint64_t> retained;
+    retained.reserve(survivors.size());
+    for (const auto index : survivors) retained.push_back(retained_digests[index]);
+    std::ranges::sort(retained);
+    score.drift_retained_digest = drift_digest_basis;
+    for (const auto digest : retained) drift_digest_add(score.drift_retained_digest, digest);
+    score.drift_device_atoms = 0;
+    for (const auto& own : scratch) {
+        score.drift_device_atoms += own.device_evaluations;
+        if (device) {
+            device->device_evaluations += own.device_evaluations;
+            device->native_evaluations += own.native_evaluations;
+        }
+    }
     score.drift_stage_workers = static_cast<unsigned>(active);
     score.drift_coherent_timing_fft_rows = rank_timing ?
         checked_multiply(timing.size(), checked_multiply(2 * taps, plan.nfft)) : 0;
@@ -4827,6 +5981,14 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
     score.drift_frequency_bins = count;
     score.drift_observation_rows = plan.raw_rows;
     score.drift_proposal_stride = plan.sample_stride;
+    std::array<double, drift_phases> seconds{};
+    for (const auto& own : scratch)
+        for (std::size_t phase = 0; phase < drift_phases; ++phase) seconds[phase] += own.seconds[phase];
+    score.drift_render_seconds = seconds[drift_render];
+    score.drift_ridge_seconds = seconds[drift_ridge];
+    score.drift_ridge_search_seconds = seconds[drift_ridge_search];
+    score.drift_slope_seconds = seconds[drift_slope];
+    score.drift_exact_seconds = seconds[drift_exact];
     score.drift_seconds = seconds_since(began);
 }
 } // namespace
@@ -4851,17 +6013,31 @@ void score_drift_fine(const ReceiverConfig& config, const ReceiverSlotPlan& slot
                        ReceiverExecutor& executor, const LineAtom* line, DriftZeroSlopeEvaluation zero_evaluation) {
     namespace fft = modem::detail::search_fft;
     const auto began = FineClock::now();
+    // One device proposal session, if any, serves both relative-Doppler
+    // signs and ends with the stage.
+    DriftDeviceStage device;
+    const auto session = open_drift_device(config, plan, selected, epoch_timing, device, stop);
     const auto evaluate = [&](const ReceiverConfig& physical, ReceiverSlotScore& target) {
         if (config.native_coarse_precision == NativeCoarsePrecision::fp64)
             score_drift_impl<double, fft::DoublePlan>(physical, slot, key, plan, iq, selected, epoch_timing,
-                                                    workers, target, stop, executor, line, zero_evaluation);
+                                                    workers, target, stop, executor, line, zero_evaluation, nullptr);
         else
             score_drift_impl<float, fft::FloatPlan>(physical, slot, key, plan, iq, selected, epoch_timing,
-                                                   workers, target, stop, executor, line, zero_evaluation);
+                                                   workers, target, stop, executor, line, zero_evaluation,
+                                                   session ? &device : nullptr);
+    };
+    // A session's route, with any evaluation that fell back to the native proposals.
+    const auto name_route = [&] {
+        if (!session) return;
+        score.drift_proposal_route = std::string(session->receipt().vulkan ? "vulkan" : "device") +
+            "_fp32_fft_fp64_ridge" + (device.native_evaluations ? "_with_native_atoms" : "");
     };
     evaluate(config, score);
     score.drift_relative_doppler_models = 1;
-    if (config.spread_doppler_hz == 0) return;
+    if (config.spread_doppler_hz == 0) {
+        name_route();
+        return;
+    }
 
     // The public relative-Doppler allowance admits either sign. Evaluate
     // each coherent spatial basis under half the existing drift mass.
@@ -4880,12 +6056,22 @@ void score_drift_fine(const ReceiverConfig& config, const ReceiverSlotPlan& slot
                                                      mirrored.drift_bit_evidence, second_atoms);
     score.drift_timing_atoms = atoms;
     score.drift_slopes = checked_add(score.drift_slopes, mirrored.drift_slopes);
+    score.drift_device_atoms = checked_add(score.drift_device_atoms, mirrored.drift_device_atoms);
+    const auto first_digest = std::exchange(score.drift_retained_digest, drift_digest_basis);
+    drift_digest_add(score.drift_retained_digest, first_digest);
+    drift_digest_add(score.drift_retained_digest, mirrored.drift_retained_digest);
+    name_route();
     score.drift_relative_doppler_models = 2;
     score.drift_stage_workers = std::max(score.drift_stage_workers, mirrored.drift_stage_workers);
     score.drift_coherent_timing_fft_rows = checked_add(score.drift_coherent_timing_fft_rows,
         mirrored.drift_coherent_timing_fft_rows);
     score.drift_coherent_timing_fft_stages = checked_add(score.drift_coherent_timing_fft_stages,
         mirrored.drift_coherent_timing_fft_stages);
+    score.drift_render_seconds += mirrored.drift_render_seconds;
+    score.drift_ridge_seconds += mirrored.drift_ridge_seconds;
+    score.drift_ridge_search_seconds += mirrored.drift_ridge_search_seconds;
+    score.drift_slope_seconds += mirrored.drift_slope_seconds;
+    score.drift_exact_seconds += mirrored.drift_exact_seconds;
     score.drift_seconds = seconds_since(began);
 }
 

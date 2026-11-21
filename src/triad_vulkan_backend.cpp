@@ -2,7 +2,9 @@
 #include "datapump/triad_receiver.hpp"
 #include "triad_receiver_bulk.hpp"
 #include "triad_vulkan_backend.hpp"
+#include "triad_vulkan_core.hpp"
 #include "triad_vulkan_peaks.hpp"
+#include "triad_vulkan_stages.hpp"
 #ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
 #include "triad_opencl_coarse_bulk.hpp"
 #include "triad_opencl_fine_bulk.hpp"
@@ -11,10 +13,6 @@
 #endif
 
 #include <vulkan/vulkan.h>
-#include <glslang_c_interface.h>
-#include <glslang/build_info.h>
-#include <glslang/Public/resource_limits_c.h>
-#include <vkFFT.h>
 
 #include <algorithm>
 #include <array>
@@ -38,22 +36,37 @@
 namespace datapump::triad::v3 {
 namespace receiver_detail {
 namespace {
-using Clock = std::chrono::steady_clock;
-constexpr std::size_t mib = 1024 * 1024;
-constexpr std::size_t plan_cache_limit = 4;
-// Up to eight frequency-search transforms and six segmented-timing plans
-// (two shapes, each a forward, a tile and a tail plan) stay warm across
-// slots. The byte limit bounds their host memory.
-constexpr std::size_t serialized_cache_entries = 16;
-constexpr std::size_t serialized_cache_limit = 8 * mib;
-constexpr std::size_t serialized_cache_metadata_bound = 64 * 1024;
-constexpr std::size_t shader_cache_entries = 20;
-constexpr std::size_t shader_cache_limit = 160 * 1024;
-constexpr std::size_t shader_cache_metadata_bound = 8 * 1024;
+// The shared device core (triad_vulkan_core.hpp). These declarations keep
+// the names this file used when the core lived here.
+using vulkan::add;
+using vulkan::Buffer;
+using vulkan::cancelled;
+using vulkan::ceil_div;
+using vulkan::Context;
+using vulkan::count;
+using vulkan::direct_request;
+using vulkan::energy;
+using vulkan::FftPlan;
+using vulkan::fft_scale;
+using vulkan::FloatComplex;
+using vulkan::lut_quote;
+using vulkan::mib;
+using vulkan::mul;
+using vulkan::narrow;
+using vulkan::pack;
+using vulkan::PhaseStep;
+using vulkan::phase_step;
+using vulkan::Pipeline;
+using vulkan::require;
+using vulkan::ShaderKind;
+using vulkan::Shared;
+using vulkan::submission_row_limit;
+using vulkan::unpack_half;
+using vulkan::VkFftUnsupported;
 // Admit enough independent transforms to amortize submissions and feed the
 // compute units. Exact allocation checks halve this width when RAM is tighter.
 constexpr std::size_t maximum_batch = 64;
-constexpr std::size_t compiler_host_bound = 128 * mib;
+using vulkan::compiler_host_bound;
 // A nonzero observation and the largest nonzero bank column are scaled to
 // norms in [64, 128). At this length, flushing subnormal operand components
 // adds at most sqrt(2 * rows) * 2^-14 to a column's absolute L2 error, one
@@ -61,651 +74,11 @@ constexpr std::size_t compiler_host_bound = 128 * mib;
 // relative error. Product underflow and FP32 accumulation are separate.
 constexpr std::size_t packed_dot_row_limit = 1u << 17;
 
-void require(bool ok, const char* message) { if (!ok) throw Error(message); }
-void check(VkResult status, const char* operation) {
-    if (status != VK_SUCCESS) throw Error(std::string("Robust Vulkan ") + operation + " failed (" + std::to_string(status) + ")");
-}
-void cancelled(std::stop_token stop) {
-    if (stop.stop_requested()) throw Error("Robust Vulkan operation cancelled");
-}
-std::size_t add(std::size_t a, std::size_t b) {
-    if (b > SIZE_MAX - a) throw ReceiverWorkspaceError("Robust Vulkan workspace extent overflow");
-    return a + b;
-}
-std::size_t mul(std::size_t a, std::size_t b) {
-    if (a && b > SIZE_MAX / a) throw ReceiverWorkspaceError("Robust Vulkan workspace extent overflow");
-    return a * b;
-}
-std::uint32_t narrow(std::size_t value) {
-    require(value <= UINT32_MAX, "Robust Vulkan index extent exceeds uint32");
-    return static_cast<std::uint32_t>(value);
-}
-void count(std::uint64_t& into, std::uint64_t value) { into += std::min(value, UINT64_MAX - into); }
 void credit_search_work(CoarseBulkWork& into, const CoarseBulkWork& completed) {
     count(into.forward_ffts, completed.forward_ffts); count(into.inverse_ffts, completed.inverse_ffts);
     count(into.fft_rows, completed.fft_rows); count(into.fft_row_stages, completed.fft_row_stages);
     count(into.singleton_dot_terms, completed.singleton_dot_terms);
 }
-
-struct FloatComplex { float real, imag; };
-static_assert(sizeof(FloatComplex) == 8);
-struct PhaseStep { std::uint32_t low, high; };
-static_assert(sizeof(PhaseStep) == sizeof(double));
-PhaseStep phase_step(double frequency, double rate) {
-    // Reduce in FP64 before conversion, including frequencies outside the
-    // fundamental interval. The centered step has magnitude at most 1/2.
-    // A uint32 row amplifies rounding of a Q64 step by less than 2^-33 turns.
-    const auto turns = -std::remainder(frequency, rate) / rate;
-    const auto magnitude = static_cast<std::uint64_t>(std::round(std::ldexp(std::abs(turns), 64)));
-    const auto word = turns < 0 ? std::uint64_t{0} - magnitude : magnitude;
-    return {static_cast<std::uint32_t>(word), static_cast<std::uint32_t>(word >> 32)};
-}
-
-VkDeviceSize device_local_bytes(const VkPhysicalDeviceMemoryProperties& memory) {
-    VkDeviceSize bytes = 0;
-    for (std::uint32_t i = 0; i < memory.memoryHeapCount; ++i)
-        if (memory.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
-            bytes += std::min(memory.memoryHeaps[i].size, UINT64_MAX - bytes);
-    return bytes;
-}
-
-// Rows, batches, inverse, FP16 storage and FP32 twiddle tables.
-using FftKey = std::tuple<std::size_t, std::size_t, bool, bool, bool>;
-constexpr auto fp32_arithmetic = "fp32_fft_fp64_coordinates_and_scores_native_fir_and_fine";
-constexpr auto half_storage_arithmetic = "fp16_fft_storage_fp32_fft_and_products";
-constexpr auto fp32_direct_arithmetic = "fp32_direct_dot_fp64_scoring";
-constexpr auto half_storage_direct_arithmetic = "fp16_storage_fp32_direct_dot_fp64_scoring";
-constexpr auto packed_direct_arithmetic = "packed_fp16_direct_dot_fp32_reduction_fp64_scoring";
-constexpr auto host_score_suffix = "_fixed_phase_host_fp64_scoring";
-constexpr auto dense_fp4_arithmetic = "nvfp4_dense_coarse_fp32_rescored_peaks_native_fir_and_fine";
-// The same with its retained arrivals rescored by FP32 partial sums of 64
-// rows added in FP64 rather than by FP64 accumulation.
-constexpr auto dense_fp4_partial_arithmetic =
-    "nvfp4_dense_coarse_fp32_partial_rescored_peaks_native_fir_and_fine";
-constexpr auto mixed_dense_fp4_arithmetic = "mixed_nvfp4_dense_and_fft_coarse_native_fir_and_fine";
-
-bool direct_request(VulkanCoarsePrecision precision) {
-    return precision == VulkanCoarsePrecision::direct_fp32 ||
-           precision == VulkanCoarsePrecision::direct_fp16_storage || precision == VulkanCoarsePrecision::direct_fp16;
-}
-
-VkBufferCreateInfo storage_buffer(std::size_t bytes) {
-    VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    info.size = bytes;
-    info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    return info;
-}
-
-struct SerializedFft {
-    std::unique_ptr<unsigned char[]> bytes;
-    std::size_t size;
-    SerializedFft(const void* source, std::size_t length)
-        : bytes(std::make_unique<unsigned char[]>(length)), size(length) {
-        std::memcpy(bytes.get(), source, size);
-    }
-};
-struct CachedFft {
-    std::shared_ptr<const SerializedFft> binary;
-    std::uint64_t age;
-};
-
-enum class ShaderKind {
-    rotate, products, direct_dot, quadratic, peaks,
-    segmented_column, segmented_product, segmented_ranks, segmented_finish
-};
-using ShaderKey = std::tuple<ShaderKind, bool, bool, bool>;
-using Spirv = std::vector<unsigned int>;
-
-Spirv compile_spirv(const ShaderKey& key) {
-    const auto [kind, half_storage, packed_direct, fixed_phase] = key;
-    constexpr std::array<std::string_view, 9> sources{
-        vulkan_rotate_shader, vulkan_products_shader, vulkan_direct_dot_shader,
-        vulkan_quadratic_shader, vulkan_coarse_peaks_shader, vulkan_segmented_column_shader,
-        vulkan_segmented_product_shader, vulkan_segmented_ranks_shader, vulkan_segmented_finish_shader};
-    std::string code(sources[static_cast<std::size_t>(kind)]);
-    if (half_storage || fixed_phase) {
-        constexpr std::string_view version = "#version 450\n";
-        const auto start = code.find(version);
-        require(start != std::string::npos, "invalid Vulkan precision shader prelude");
-        std::string defines;
-        if (half_storage) defines = "#define HALF_STORAGE\n";
-        if (packed_direct) defines += "#define PACKED_DIRECT\n";
-        if (fixed_phase) defines += "#define FIXED_PHASE\n";
-        code.insert(start + version.size(), defines);
-    }
-    const auto messages = static_cast<glslang_messages_t>(GLSLANG_MSG_SPV_RULES_BIT | GLSLANG_MSG_VULKAN_RULES_BIT);
-    glslang_input_t input{};
-    input.language = GLSLANG_SOURCE_GLSL; input.stage = GLSLANG_STAGE_COMPUTE;
-    input.client = GLSLANG_CLIENT_VULKAN; input.client_version = GLSLANG_TARGET_VULKAN_1_2;
-    input.target_language = GLSLANG_TARGET_SPV; input.target_language_version = GLSLANG_TARGET_SPV_1_5;
-    input.code = code.c_str(); input.default_version = 450; input.default_profile = GLSLANG_NO_PROFILE;
-    input.messages = messages; input.resource = glslang_default_resource();
-    std::unique_ptr<glslang_shader_t, decltype(&glslang_shader_delete)> shader(
-        glslang_shader_create(&input), glslang_shader_delete);
-    require(shader != nullptr, "Robust Vulkan shader creation failed");
-    if (!glslang_shader_preprocess(shader.get(), &input) || !glslang_shader_parse(shader.get(), &input))
-        throw Error(std::string("Robust Vulkan shader compilation failed: ") + glslang_shader_get_info_log(shader.get()));
-    std::unique_ptr<glslang_program_t, decltype(&glslang_program_delete)> program(
-        glslang_program_create(), glslang_program_delete);
-    require(program != nullptr, "Robust Vulkan shader program creation failed");
-    glslang_program_add_shader(program.get(), shader.get());
-    if (!glslang_program_link(program.get(), messages))
-        throw Error(std::string("Robust Vulkan shader link failed: ") + glslang_program_get_info_log(program.get()));
-    glslang_program_SPIRV_generate(program.get(), GLSLANG_STAGE_COMPUTE);
-    const auto words = glslang_program_SPIRV_get_size(program.get());
-    require(words && words <= 1024 * 1024, "Robust Vulkan shader output exceeds its compiler bound");
-    Spirv spirv(words);
-    glslang_program_SPIRV_get(program.get(), spirv.data());
-    return spirv;
-}
-
-struct Shared {
-    VulkanReceiverOptions options;
-    const bool automatic_workspace;
-    bool automatic_half_device = false, automatic_direct_device = false;
-    bool host_scoring = false;
-    // Set once by the backend before any session: the OpenCL NVFP4 route
-    // matched this GPU by UUID, which requires NVIDIA SM 12.0.
-    bool opencl_sm120 = false;
-    VkInstance instance = VK_NULL_HANDLE;
-    VkPhysicalDevice physical = VK_NULL_HANDLE;
-    VkDevice device = VK_NULL_HANDLE;
-    VkQueue queue = VK_NULL_HANDLE;
-    std::uint32_t family = 0, timestamp_bits = 0;
-    VkPhysicalDeviceProperties properties{};
-    VkPhysicalDeviceMemoryProperties memory{};
-    VkDeviceSize maximum_allocation_size = 0;
-    std::array<bool, VK_MAX_MEMORY_HEAPS> allowed_heaps{};
-    mutable std::mutex receipt_mutex;
-    std::condition_variable_any memory_ready;
-    struct PendingLease { PendingLease* previous = nullptr; PendingLease* next = nullptr; };
-    PendingLease* first_waiter = nullptr;
-    PendingLease* last_waiter = nullptr;
-    std::mutex queue_mutex;
-    std::mutex fft_cache_mutex, fft_compile_mutex;
-    std::map<FftKey, CachedFft> fft_cache;
-    std::size_t fft_cache_bytes = 0;
-    std::uint64_t fft_cache_age = 0;
-    std::mutex shader_cache_mutex;
-    std::map<ShaderKey, std::shared_ptr<const Spirv>> shader_cache;
-    std::size_t shader_cache_bytes = 0;
-    BulkReceipt total;
-
-    explicit Shared(const VulkanReceiverOptions& requested, bool automatic_device = false)
-        : options(requested), automatic_workspace(automatic_device) {
-        require(options.workspace_bytes >= mib || (automatic_workspace && !options.workspace_bytes),
-                "Robust Vulkan requires an explicit workspace of at least 1 MiB");
-        require(options.coarse_precision == VulkanCoarsePrecision::automatic ||
-                options.coarse_precision == VulkanCoarsePrecision::fp32 ||
-                options.coarse_precision == VulkanCoarsePrecision::fp16_storage ||
-                options.coarse_precision == VulkanCoarsePrecision::opencl_nvfp4 ||
-                direct_request(options.coarse_precision),
-                "invalid Robust Vulkan storage precision policy");
-        try { initialize(automatic_device); } catch (...) { release(); throw; }
-    }
-    ~Shared() { release(); }
-    Shared(const Shared&) = delete;
-    void release() noexcept {
-        if (device) vkDestroyDevice(device, nullptr);
-        if (instance) vkDestroyInstance(instance, nullptr);
-        device = VK_NULL_HANDLE; instance = VK_NULL_HANDLE;
-    }
-    void initialize(bool automatic_device) {
-        static std::once_flag compiler;
-        std::call_once(compiler, [] {
-            require(glslang_initialize_process() != 0, "Robust Vulkan GLSL compiler initialization failed");
-        });
-        VkApplicationInfo application{VK_STRUCTURE_TYPE_APPLICATION_INFO};
-        application.pApplicationName = "datapump-native-receiver";
-        application.apiVersion = VK_API_VERSION_1_2;
-        VkInstanceCreateInfo create{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
-        create.pApplicationInfo = &application;
-        auto status = vkCreateInstance(&create, nullptr, &instance);
-        if (status != VK_SUCCESS) throw VulkanBackendUnavailable("Vulkan 1.2 runtime is unavailable");
-        std::uint32_t devices = 0;
-        check(vkEnumeratePhysicalDevices(instance, &devices, nullptr), "device enumeration");
-        std::vector<VkPhysicalDevice> available(devices);
-        if (devices)
-            check(vkEnumeratePhysicalDevices(instance, &devices, available.data()), "device enumeration");
-        if (!automatic_device) {
-            if (options.device_index >= devices)
-                throw VulkanBackendUnavailable("requested Vulkan physical device is unavailable");
-            initialize_device(available[options.device_index]);
-            return;
-        }
-        struct Candidate {
-            std::uint32_t index;
-            bool discrete;
-            VkDeviceSize local_bytes;
-        };
-        std::vector<Candidate> candidates;
-        for (std::uint32_t i = 0; i < devices; ++i) {
-            VkPhysicalDeviceProperties device_properties{};
-            vkGetPhysicalDeviceProperties(available[i], &device_properties);
-            const bool discrete = device_properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
-            if (discrete || device_properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
-                VkPhysicalDeviceMemoryProperties device_memory{};
-                vkGetPhysicalDeviceMemoryProperties(available[i], &device_memory);
-                candidates.push_back({i, discrete, device_local_bytes(device_memory)});
-            }
-        }
-        // Prefer a discrete GPU for backlog throughput. Within a device class
-        // prefer more local memory for broader resident template banks.
-        std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
-            return std::tie(a.discrete, a.local_bytes) > std::tie(b.discrete, b.local_bytes);
-        });
-        std::string failures;
-        for (const auto& candidate : candidates) {
-            options.device_index = candidate.index;
-            try {
-                initialize_device(available[candidate.index]);
-                if (!failures.empty()) total.selection_reason = "Higher-ranked Vulkan candidates unavailable" + failures;
-                return;
-            } catch (const VulkanBackendUnavailable& unavailable) {
-                failures += "; " + std::string(properties.deviceName) + ": " + unavailable.what();
-            }
-        }
-        throw VulkanBackendUnavailable("No compatible physical Vulkan GPU" + failures);
-    }
-    void initialize_device(VkPhysicalDevice selected) {
-        physical = selected;
-        VkPhysicalDeviceSubgroupProperties subgroup{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
-        VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
-        VkPhysicalDeviceMaintenance3Properties allocation{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES};
-        VkPhysicalDeviceIDProperties identity{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
-        subgroup.pNext = &driver;
-        driver.pNext = &allocation;
-        allocation.pNext = &identity;
-        VkPhysicalDeviceShaderIntegerDotProductProperties dot{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_PROPERTIES};
-        VkPhysicalDeviceProperties2 props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
-        props.pNext = &subgroup;
-        vkGetPhysicalDeviceProperties2(physical, &props);
-        properties = props.properties;
-        maximum_allocation_size = allocation.maxMemoryAllocationSize;
-        if (properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU &&
-            properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
-            throw VulkanBackendUnavailable("requested Vulkan device is not a physical integrated or discrete GPU");
-        if (properties.apiVersion < VK_API_VERSION_1_2)
-            throw VulkanBackendUnavailable("Robust Vulkan requires physical-device Vulkan 1.2");
-        if (properties.limits.maxComputeWorkGroupInvocations < 256 || properties.limits.maxComputeWorkGroupSize[0] < 256)
-            throw VulkanBackendUnavailable("Robust Vulkan requires 256-lane compute workgroups");
-        if (properties.apiVersion >= VK_API_VERSION_1_3) {
-            props.pNext = &dot;
-            vkGetPhysicalDeviceProperties2(physical, &props);
-        }
-        VkPhysicalDeviceVulkan12Features twelve{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
-        VkPhysicalDeviceVulkan11Features eleven{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
-        eleven.pNext = &twelve;
-        VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-        features.pNext = &eleven;
-        vkGetPhysicalDeviceFeatures2(physical, &features);
-        host_scoring = options.force_host_scoring || !features.features.shaderFloat64 || !features.features.shaderInt64;
-        vkGetPhysicalDeviceMemoryProperties(physical, &memory);
-        const auto local_bytes = device_local_bytes(memory);
-        if ((!automatic_workspace && options.workspace_bytes > local_bytes) || local_bytes > SIZE_MAX)
-            throw VulkanBackendUnavailable("Robust Vulkan workspace exceeds the physical device heap or host address range");
-        constexpr auto coherent = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-        const auto types = std::span(memory.memoryTypes).first(memory.memoryTypeCount);
-        if (!std::ranges::any_of(types, [=](const VkMemoryType& type) {
-                return (type.propertyFlags & coherent) == coherent;
-            }))
-            throw VulkanBackendUnavailable("Robust Vulkan requires host-visible coherent compute memory");
-        if (automatic_workspace) initialize_workspace();
-        std::uint32_t families = 0;
-        vkGetPhysicalDeviceQueueFamilyProperties(physical, &families, nullptr);
-        std::vector<VkQueueFamilyProperties> queues(families);
-        vkGetPhysicalDeviceQueueFamilyProperties(physical, &families, queues.data());
-        family = families;
-        for (std::uint32_t i = 0; i < families; ++i)
-            if (queues[i].queueCount && (queues[i].queueFlags & VK_QUEUE_COMPUTE_BIT) &&
-                (family == families || !(queues[i].queueFlags & VK_QUEUE_GRAPHICS_BIT))) {
-                family = i;
-                if (!(queues[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) break;
-            }
-        if (family == families) throw VulkanBackendUnavailable("Vulkan device has no compute queue");
-        timestamp_bits = queues[family].timestampValidBits;
-        const float priority = 1;
-        VkDeviceQueueCreateInfo queue_info{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
-        queue_info.queueFamilyIndex = family; queue_info.queueCount = 1; queue_info.pQueuePriorities = &priority;
-        VkPhysicalDeviceFeatures enabled{};
-        enabled.shaderFloat64 = enabled.shaderInt64 = host_scoring ? VK_FALSE : VK_TRUE;
-        VkDeviceCreateInfo info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
-        info.queueCreateInfoCount = 1; info.pQueueCreateInfos = &queue_info; info.pEnabledFeatures = &enabled;
-        VkPhysicalDeviceVulkan11Features enable_eleven{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
-        const bool storage_available = eleven.storageBuffer16BitAccess &&
-            std::endian::native == std::endian::little && std::numeric_limits<float>::is_iec559;
-        automatic_half_device = storage_available && driver.driverID == VK_DRIVER_ID_MESA_RADV &&
-            properties.vendorID == 0x1002 && properties.deviceID == 0x1638 &&
-            properties.driverVersion == VK_MAKE_VERSION(25, 0, 7);
-        const auto requested = options.coarse_precision;
-        const bool explicit_half = requested == VulkanCoarsePrecision::fp16_storage ||
-                                   requested == VulkanCoarsePrecision::direct_fp16_storage ||
-                                   requested == VulkanCoarsePrecision::direct_fp16;
-        if (explicit_half && !storage_available)
-            throw VulkanBackendUnavailable("Robust Vulkan FP16 storage requires compatible 16-bit device and host storage");
-        const bool subgroup_compute = (subgroup.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) &&
-            (subgroup.supportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT) &&
-            (subgroup.supportedOperations & VK_SUBGROUP_FEATURE_BASIC_BIT);
-        automatic_direct_device = automatic_half_device && subgroup_compute && twelve.shaderFloat16;
-        if (direct_request(requested) && !subgroup_compute)
-            throw VulkanBackendUnavailable("Robust Vulkan direct dot requires compute subgroup arithmetic");
-        VkPhysicalDeviceVulkan12Features enable_twelve{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
-        if (requested == VulkanCoarsePrecision::direct_fp16 ||
-            (requested == VulkanCoarsePrecision::automatic && automatic_direct_device)) {
-            if (!twelve.shaderFloat16)
-                throw VulkanBackendUnavailable("Robust Vulkan packed direct dot requires shaderFloat16");
-            enable_twelve.shaderFloat16 = VK_TRUE;
-            enable_eleven.pNext = &enable_twelve;
-        }
-        if (explicit_half ||
-            (requested == VulkanCoarsePrecision::automatic && automatic_half_device)) {
-            enable_eleven.storageBuffer16BitAccess = VK_TRUE;
-            info.pNext = &enable_eleven;
-        }
-        VkDevice created = VK_NULL_HANDLE;
-        const auto status = vkCreateDevice(physical, &info, nullptr, &created);
-        if (status == VK_ERROR_DEVICE_LOST || status == VK_ERROR_EXTENSION_NOT_PRESENT ||
-            status == VK_ERROR_FEATURE_NOT_PRESENT || status == VK_ERROR_INITIALIZATION_FAILED)
-            throw VulkanBackendUnavailable("Robust Vulkan device initialization unavailable (" + std::to_string(status) + ")");
-        check(status, "device creation");
-        device = created;
-        vkGetDeviceQueue(device, family, 0, &queue);
-        total.device = "vulkan:" + std::to_string(options.device_index);
-        total.device_name = properties.deviceName;
-        total.device_uuid.emplace();
-        std::copy_n(identity.deviceUUID,total.device_uuid->size(),total.device_uuid->begin());
-        total.library_version = "VkFFT " + std::to_string(VkFFTGetVersion()) + "; glslang " +
-            std::to_string(GLSLANG_VERSION_MAJOR) + "." + std::to_string(GLSLANG_VERSION_MINOR) + "." +
-            std::to_string(GLSLANG_VERSION_PATCH) + GLSLANG_VERSION_FLAVOR;
-        total.precision = requested == VulkanCoarsePrecision::automatic ? "vulkan_frequency_automatic_pending" :
-            requested == VulkanCoarsePrecision::fp16_storage ? half_storage_arithmetic :
-            requested == VulkanCoarsePrecision::direct_fp16 ? packed_direct_arithmetic :
-            requested == VulkanCoarsePrecision::direct_fp16_storage ? half_storage_direct_arithmetic :
-            requested == VulkanCoarsePrecision::direct_fp32 ? fp32_direct_arithmetic :
-            requested == VulkanCoarsePrecision::opencl_nvfp4
-                ? (options.opencl_coarse_fp32_rescore ? dense_fp4_partial_arithmetic : dense_fp4_arithmetic)
-                : fp32_arithmetic;
-        total.requested_coarse_math = "fft";
-        total.vulkan = true;
-        total.vulkan_api_version = properties.apiVersion; total.vulkan_driver_version = properties.driverVersion;
-        total.vulkan_vendor_id = properties.vendorID; total.vulkan_device_id = properties.deviceID;
-        total.vulkan_subgroup_size = subgroup.subgroupSize;
-        total.vulkan_float16 = twelve.shaderFloat16; total.vulkan_int8 = twelve.shaderInt8;
-        total.vulkan_integer_dot8_accelerated = dot.integerDotProduct8BitUnsignedAccelerated ||
-            dot.integerDotProduct8BitSignedAccelerated || dot.integerDotProduct4x8BitPackedUnsignedAccelerated ||
-            dot.integerDotProduct4x8BitPackedSignedAccelerated;
-        total.unified_memory = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
-        total.workspace_limit_bytes = automatic_workspace ? total.vulkan_shared_workspace_limit_bytes : options.workspace_bytes;
-        total.workspace_scope = automatic_workspace ? "backend_shared" : "per_coarse_session";
-        total.host_cache_limit_bytes = serialized_cache_limit;
-        total.fft_plan_cache_limit = plan_cache_limit;
-        // Physical heap capacity is descriptive, not permission to consume it.
-        // Host DSP admission separately charges the complete session ceiling.
-        total.total_device_bytes = static_cast<std::size_t>(local_bytes);
-    }
-    std::uint32_t memory_type(std::uint32_t compatible, bool host_reads, bool restrict_heaps = true) const {
-        constexpr auto required = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-        auto selected = memory.memoryTypeCount;
-        int best_rank = -1;
-        for (std::uint32_t i = 0; i < memory.memoryTypeCount; ++i) {
-            const auto& type = memory.memoryTypes[i];
-            const auto flags = type.propertyFlags;
-            if (!(compatible & (1u << i)) || (flags & required) != required ||
-                (automatic_workspace && restrict_heaps && !allowed_heaps[type.heapIndex])) continue;
-            const auto rank = ((host_reads && (flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) ? 2 : 0) +
-                ((flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) ? 1 : 0);
-            if (rank > best_rank || (!host_reads && rank == 0 && best_rank == 0)) {
-                selected = i; best_rank = rank;
-            }
-        }
-        return selected;
-    }
-    void initialize_workspace() {
-        // Preserve the regular device-local and host-read cached preferences.
-        // An aggregate lease bounded by the smallest reachable heap protects
-        // each such heap even if actual buffer requirements restrict its type.
-        allowed_heaps.fill(false);
-        allowed_heaps[memory.memoryTypes[memory_type(UINT32_MAX, false, false)].heapIndex] = true;
-        if (host_scoring)
-            allowed_heaps[memory.memoryTypes[memory_type(UINT32_MAX, true, false)].heapIndex] = true;
-        std::uint32_t count = 0;
-        check(vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr), "memory extension enumeration");
-        std::vector<VkExtensionProperties> extensions(count);
-        if (count)
-            check(vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, extensions.data()),
-                  "memory extension enumeration");
-        const bool reports_budget = std::ranges::any_of(std::span(extensions).first(count), [](const auto& entry) {
-            return std::string_view(entry.extensionName) == VK_EXT_MEMORY_BUDGET_EXTENSION_NAME;
-        });
-        VkPhysicalDeviceMemoryBudgetPropertiesEXT budget{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
-        if (reports_budget) {
-            VkPhysicalDeviceMemoryProperties2 details{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
-            details.pNext = &budget;
-            vkGetPhysicalDeviceMemoryProperties2(physical, &details);
-        }
-        auto usable = VkDeviceSize{SIZE_MAX};
-        auto accessible_min = VkDeviceSize{SIZE_MAX};
-        for (std::uint32_t heap = 0; heap < memory.memoryHeapCount; ++heap) {
-            if (!allowed_heaps[heap]) continue;
-            const auto size = memory.memoryHeaps[heap].size;
-            const auto reported = reports_budget ? std::min(size, budget.heapBudget[heap]) : size;
-            const auto accessible = reported - std::min(reported, budget.heapUsage[heap]);
-            const auto headroom = std::min(accessible / 8,
-                std::clamp(size / 20, VkDeviceSize{64 * mib}, VkDeviceSize{1024 * mib}));
-            usable = std::min(usable, accessible - headroom);
-            accessible_min = std::min(accessible_min, accessible);
-        }
-        total.initial_free_device_bytes = static_cast<std::size_t>(accessible_min);
-        total.runtime_headroom_bytes = static_cast<std::size_t>(accessible_min - usable);
-        total.vulkan_shared_workspace_limit_bytes = static_cast<std::size_t>(
-            options.workspace_bytes ? std::min<VkDeviceSize>(usable, options.workspace_bytes) : usable);
-    }
-    std::optional<std::size_t> quote_buffer(std::size_t bytes, bool host_reads) const {
-        if (!bytes) return 0;
-        if (bytes > properties.limits.maxStorageBufferRange || bytes > maximum_allocation_size) return {};
-        const auto info = storage_buffer(bytes);
-        VkBuffer handle = VK_NULL_HANDLE;
-        check(vkCreateBuffer(device, &info, nullptr, &handle), "workspace buffer requirements");
-        VkMemoryRequirements requirements{};
-        vkGetBufferMemoryRequirements(device, handle, &requirements);
-        vkDestroyBuffer(device, handle, nullptr);
-        if (requirements.size > maximum_allocation_size || requirements.size > SIZE_MAX ||
-            memory_type(requirements.memoryTypeBits, host_reads) == memory.memoryTypeCount) return {};
-        return static_cast<std::size_t>(requirements.size);
-    }
-    void acquire(std::size_t bytes, std::stop_token stop) {
-        const auto limit = total.vulkan_shared_workspace_limit_bytes;
-        if (!bytes || bytes > limit) throw ReceiverWorkspaceError("Robust Vulkan geometry exceeds its shared device workspace");
-        std::unique_lock lock(receipt_mutex);
-        const auto fits = [&] { return bytes <= limit - total.vulkan_leased_bytes; };
-        if (first_waiter || !fits()) {
-            // Queue only blocked owners, using each waiting thread's stack.
-            // A later small lease cannot continually delay a larger request.
-            PendingLease pending{last_waiter};
-            if (last_waiter) last_waiter->next = &pending;
-            else first_waiter = &pending;
-            last_waiter = &pending;
-            ++total.vulkan_waiting_sessions;
-            const auto remove = [&] {
-                if (pending.previous) pending.previous->next = pending.next;
-                else first_waiter = pending.next;
-                if (pending.next) pending.next->previous = pending.previous;
-                else last_waiter = pending.previous;
-                --total.vulkan_waiting_sessions;
-                memory_ready.notify_all();
-            };
-            try { memory_ready.wait(lock, stop, [&] { return first_waiter == &pending && fits(); }); }
-            catch (...) { remove(); throw; }
-            remove();
-        }
-        cancelled(stop);
-        total.vulkan_leased_bytes += bytes;
-        total.vulkan_peak_leased_bytes = std::max(total.vulkan_peak_leased_bytes, total.vulkan_leased_bytes);
-        total.vulkan_peak_owner_lease_bytes = std::max(total.vulkan_peak_owner_lease_bytes, bytes);
-    }
-    void release_lease(std::size_t bytes) noexcept {
-        {
-            std::lock_guard lock(receipt_mutex);
-            total.vulkan_leased_bytes -= bytes;
-        }
-        memory_ready.notify_all();
-    }
-    // An optional lease that never waits. It declines while any owner is
-    // queued, so it never passes one.
-    bool try_acquire(std::size_t bytes) {
-        const auto limit = total.vulkan_shared_workspace_limit_bytes;
-        if (!bytes || bytes > limit) return false;
-        std::lock_guard lock(receipt_mutex);
-        if (first_waiter || bytes > limit - total.vulkan_leased_bytes) return false;
-        total.vulkan_leased_bytes += bytes;
-        total.vulkan_peak_leased_bytes = std::max(total.vulkan_peak_leased_bytes, total.vulkan_leased_bytes);
-        total.vulkan_peak_owner_lease_bytes = std::max(total.vulkan_peak_owner_lease_bytes, bytes);
-        return true;
-    }
-#ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
-    bool try_fine_device_lease(std::size_t bytes) {
-        std::lock_guard lock(receipt_mutex);
-        const auto limit = automatic_workspace ? total.vulkan_shared_workspace_limit_bytes : options.workspace_bytes;
-        if (first_waiter || total.vulkan_leased_bytes > limit || bytes > limit - total.vulkan_leased_bytes) return false;
-        total.vulkan_leased_bytes += bytes;
-        total.vulkan_peak_leased_bytes = std::max(total.vulkan_peak_leased_bytes, total.vulkan_leased_bytes);
-        total.vulkan_peak_owner_lease_bytes = std::max(total.vulkan_peak_owner_lease_bytes, bytes);
-        return true;
-    }
-#endif
-    BulkReceipt receipt() const {
-        std::lock_guard lock(receipt_mutex);
-        auto result = total;
-        if (result.score_rows && result.opencl_coarse_score_rows) {
-            const bool partial = result.opencl_coarse_rescore_fp32_partial_peaks &&
-                                 !result.opencl_coarse_rescore_fp64_peaks;
-            result.precision = result.opencl_coarse_score_rows != result.score_rows ? mixed_dense_fp4_arithmetic
-                : partial ? dense_fp4_partial_arithmetic : dense_fp4_arithmetic;
-        } else if (result.score_rows) {
-            if (result.vulkan_direct_fp32_score_rows == result.score_rows) result.precision = fp32_direct_arithmetic;
-            else if (result.vulkan_direct_fp16_score_rows == result.score_rows) result.precision = packed_direct_arithmetic;
-            else if (result.vulkan_direct_fp16_storage_score_rows == result.score_rows)
-                result.precision = half_storage_direct_arithmetic;
-            else if (result.vulkan_direct_dot_terms) result.precision = "mixed_vulkan_frequency_arithmetic";
-            else result.precision = result.vulkan_fp16_storage_score_rows
-                    ? (result.vulkan_fp32_score_rows ? "mixed_fp16_fp32_fft_storage_fp32_compute" : half_storage_arithmetic)
-                    : fp32_arithmetic;
-        }
-        if (result.opencl_nvfp4_fine_modes || result.opencl_resident_fft_modes) {
-            constexpr std::string_view native_fine = "_and_fine";
-            if (result.precision.ends_with(native_fine)) result.precision.resize(result.precision.size() - native_fine.size());
-            if (result.opencl_resident_nvfp4_modes) result.precision += "_opencl_resident_nvfp4_fine";
-            if (result.opencl_resident_fft_modes) result.precision += "_opencl_resident_fft_fine";
-            if (result.opencl_nvfp4_fine_modes && !result.opencl_resident_nvfp4_modes)
-                result.precision += "_opencl_nvfp4_fine_projection";
-            if (result.opencl_nvfp4_native_blocks || result.native_fine_sessions) result.precision += "_mixed_native_fine";
-        }
-        if (host_scoring) result.precision += host_score_suffix;
-        return result;
-    }
-    std::pair<std::shared_ptr<const Spirv>, bool> shader_spirv(const ShaderKey& key) {
-        std::lock_guard lock(shader_cache_mutex);
-        if (const auto found = shader_cache.find(key); found != shader_cache.end())
-            return {found->second, true};
-        const auto binary = std::make_shared<const Spirv>(compile_spirv(key));
-        const auto bytes = binary->capacity() * sizeof(Spirv::value_type);
-        // These built-in shader variants do not depend on owner or waveform
-        // geometry. Keep immutable binaries only, with no pinned eviction.
-        if (shader_cache.size() < shader_cache_entries && bytes <= shader_cache_limit - shader_cache_bytes) {
-            try {
-                shader_cache.emplace(key, binary);
-                shader_cache_bytes += bytes;
-            } catch (const std::bad_alloc&) {
-                // The private pipeline can still use the compiled binary.
-            }
-        }
-        return {binary, false};
-    }
-    std::shared_ptr<const SerializedFft> cached_fft(const FftKey& key) {
-        std::lock_guard lock(fft_cache_mutex);
-        const auto found = fft_cache.find(key);
-        if (found == fft_cache.end()) return {};
-        found->second.age = ++fft_cache_age;
-        return found->second.binary;
-    }
-    void cache_fft(const FftKey& key, const void* source, std::size_t size) {
-        if (!source || !size || size > serialized_cache_limit) return;
-        std::lock_guard lock(fft_cache_mutex);
-        if (fft_cache.contains(key)) return;
-        while (fft_cache.size() >= serialized_cache_entries || size > serialized_cache_limit - fft_cache_bytes) {
-            auto oldest = fft_cache.end();
-            for (auto entry = fft_cache.begin(); entry != fft_cache.end(); ++entry)
-                if (entry->second.binary.use_count() == 1 &&
-                    (oldest == fft_cache.end() || entry->second.age < oldest->second.age)) oldest = entry;
-            // Pins are counted within the cache's bound. Never evict a pinned
-            // entry and hide its still-live bytes outside the payload receipt.
-            if (oldest == fft_cache.end()) return;
-            fft_cache_bytes -= oldest->second.binary->size;
-            fft_cache.erase(oldest);
-            std::lock_guard receipt_lock(receipt_mutex);
-            total.host_cache_bytes = fft_cache_bytes;
-            total.host_cache_entries = fft_cache.size();
-        }
-        try {
-            auto binary = std::make_shared<const SerializedFft>(source, size);
-            fft_cache.emplace(key, CachedFft{std::move(binary), ++fft_cache_age});
-        } catch (const std::bad_alloc&) {
-            // The already constructed private plan remains usable without an
-            // optional cache insertion; no public work is dropped.
-            return;
-        }
-        fft_cache_bytes += size;
-        std::lock_guard receipt_lock(receipt_mutex);
-        total.host_cache_bytes = fft_cache_bytes;
-        total.host_cache_entries = fft_cache.size();
-    }
-    void charge(std::size_t bytes, std::size_t owner_peak) {
-        std::lock_guard lock(receipt_mutex);
-        total.reserved_bytes = add(total.reserved_bytes, bytes);
-        total.peak_reserved_bytes = std::max(total.peak_reserved_bytes, total.reserved_bytes);
-        total.allocator_live_bytes = total.allocator_reserved_bytes = total.reserved_bytes;
-        total.allocator_peak_live_bytes = total.allocator_peak_reserved_bytes = total.peak_reserved_bytes;
-        total.vulkan_peak_owner_bytes = std::max<std::uint64_t>(total.vulkan_peak_owner_bytes, owner_peak);
-    }
-    void uncharge(std::size_t bytes) noexcept {
-        std::lock_guard lock(receipt_mutex);
-        total.reserved_bytes -= bytes;
-        total.allocator_live_bytes = total.allocator_reserved_bytes = total.reserved_bytes;
-    }
-    void accumulate(const BulkReceipt& delta) {
-        std::lock_guard lock(receipt_mutex);
-#define ADD_FIELD(name) count(total.name, delta.name)
-        ADD_FIELD(upload_bytes); ADD_FIELD(download_bytes); ADD_FIELD(synchronizations);
-        ADD_FIELD(fft_calls); ADD_FIELD(fft_rows); ADD_FIELD(score_rows);
-        ADD_FIELD(vulkan_dispatches); ADD_FIELD(vulkan_arrival_peak_rows); ADD_FIELD(vulkan_arrival_peak_values);
-        ADD_FIELD(vulkan_timed_submissions);
-        ADD_FIELD(vulkan_host_scored_rows);
-        ADD_FIELD(vulkan_fp32_score_rows); ADD_FIELD(vulkan_fp16_storage_score_rows);
-        ADD_FIELD(vulkan_direct_dot_terms); ADD_FIELD(vulkan_direct_fp32_score_rows); ADD_FIELD(vulkan_direct_fp16_score_rows);
-        ADD_FIELD(vulkan_direct_fp16_storage_score_rows);
-        ADD_FIELD(vulkan_fft_cache_hits); ADD_FIELD(vulkan_fft_cache_misses);
-        ADD_FIELD(vulkan_shader_spirv_compiles); ADD_FIELD(vulkan_shader_spirv_cache_hits);
-        ADD_FIELD(vulkan_segmented_sessions); ADD_FIELD(vulkan_segmented_forward_ffts);
-        ADD_FIELD(vulkan_segmented_inverse_ffts); ADD_FIELD(vulkan_segmented_score_rows);
-        ADD_FIELD(vulkan_segmented_planned_shapes); ADD_FIELD(vulkan_segmented_declined_calls);
-        ADD_FIELD(vulkan_segmented_native_fallbacks);
-#undef ADD_FIELD
-        total.executed |= delta.executed;
-        total.wall_seconds += delta.wall_seconds;
-        total.vulkan_fft_plan_seconds += delta.vulkan_fft_plan_seconds;
-        total.vulkan_shader_compile_seconds += delta.vulkan_shader_compile_seconds;
-        total.vulkan_device_command_seconds += delta.vulkan_device_command_seconds;
-        total.vulkan_direct_dot_seconds += delta.vulkan_direct_dot_seconds;
-        if (total.vulkan_segmented_fallback_reason.empty())
-            total.vulkan_segmented_fallback_reason = delta.vulkan_segmented_fallback_reason;
-        if (total.vulkan_segmented_decline_reason.empty())
-            total.vulkan_segmented_decline_reason = delta.vulkan_segmented_decline_reason;
-#ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
-        add_opencl_coarse_work(total, delta);
-#endif
-    }
-};
 
 bool direct_geometry(const Shared& shared, const CoarseBulkGeometry& geometry) {
     const auto request = shared.options.coarse_precision;
@@ -798,727 +171,6 @@ CoarseFrequencyPlan automatic_frequency_plan(const Shared& shared, const CoarseB
     return unsupported;
 }
 
-struct Context;
-struct Buffer {
-    Context* owner = nullptr;
-    VkBuffer handle = VK_NULL_HANDLE;
-    VkDeviceMemory memory = VK_NULL_HANDLE;
-    void* mapped = nullptr;
-    // Usable capacity; each dispatch/readback supplies its active extent.
-    std::size_t bytes = 0, charged = 0;
-    Buffer(Context&, std::size_t, bool host_reads = false);
-    ~Buffer();
-    Buffer(const Buffer&) = delete;
-};
-
-struct Pipeline {
-    VkDevice device = VK_NULL_HANDLE;
-    VkDescriptorSetLayout descriptors = VK_NULL_HANDLE;
-    VkPipelineLayout layout = VK_NULL_HANDLE;
-    VkPipeline pipeline = VK_NULL_HANDLE;
-    VkDescriptorSet set = VK_NULL_HANDLE;
-    std::uint32_t bindings = 0, push_bytes = 0;
-    Pipeline(Context&, const Spirv&, std::uint32_t, std::uint32_t);
-    ~Pipeline() {
-        if (pipeline) vkDestroyPipeline(device, pipeline, nullptr);
-        if (layout) vkDestroyPipelineLayout(device, layout, nullptr);
-        if (descriptors) vkDestroyDescriptorSetLayout(device, descriptors, nullptr);
-    }
-};
-struct Context;
-struct FftPlan {
-    VkFFTApplication app{};
-    // VkFFT retains these addresses, including the handle-array addresses.
-    pfUINT data_bytes = 0, temporary_bytes = 0;
-    std::array<VkBuffer, 2> data_handles{}, temporary_handles{};
-    unsigned handle_slot = 0;
-    bool initialized = false;
-    std::uint64_t age = 0;
-    // The session reservation for VkFFT's own twiddle tables, held until
-    // the plan has freed them.
-    Context* lut_owner = nullptr;
-    std::size_t lut_charge = 0;
-    FftPlan() = default;
-    FftPlan(const FftPlan&) = delete;
-    ~FftPlan();
-};
-
-// A VkFFT status reporting that it does not implement this transform
-// configuration, before it records or allocates anything for it.
-class VkFftUnsupported : public Error {
-public:
-    using Error::Error;
-};
-
-// VkFFT's FP32 twiddle tables for one power-of-two plan of these rows. Each
-// of at most four axis uploads holds fewer than 2*rows complex entries: its
-// stage table is shorter than the upload's own length, and its four-step
-// table at most the whole transform. One same-size host-visible staging
-// copy is live while a table uploads. VkFFT places the tables on the first
-// device-local memory type, which need not be the heap this quote leases;
-// an allocation failure there becomes a workspace fallback (make_plan).
-constexpr std::size_t max_lut_uploads = 4;
-std::size_t lut_upload_bytes(std::size_t rows) {
-    return mul(2 * rows, sizeof(FloatComplex));
-}
-std::optional<std::size_t> lut_quote(const Shared& shared, std::size_t rows) {
-    const auto table = shared.quote_buffer(lut_upload_bytes(rows), false);
-    const auto staging = shared.quote_buffer(lut_upload_bytes(rows), true);
-    if (!table || !staging) return {};
-    return add(mul(max_lut_uploads, *table), *staging);
-}
-
-struct Context {
-    enum TimingQuery : std::uint32_t {
-        command_start_query, command_end_query, dot_start_query, dot_end_query, timing_query_count
-    };
-
-    std::shared_ptr<Shared> shared;
-    VkCommandPool pool = VK_NULL_HANDLE;
-    VkCommandBuffer command = VK_NULL_HANDLE;
-    VkFence fence = VK_NULL_HANDLE;
-    VkDescriptorPool descriptors = VK_NULL_HANDLE;
-    VkQueryPool timestamps = VK_NULL_HANDLE;
-    std::size_t allocated = 0, peak_allocated = 0;
-    std::size_t allocation_limit, lease = 0;
-    bool active = false, half_storage = false, direct_dot = false, packed_direct = false, timed_direct = false;
-    std::uint64_t age = 0;
-    BulkReceipt local;
-    std::map<FftKey, std::unique_ptr<FftPlan>> plans;
-    std::unique_ptr<Pipeline> rotate, products, quadratic, peaks;
-    std::unique_ptr<Pipeline> segment_column, segment_product, segment_ranks, segment_finish;
-    std::size_t fft_element_bytes() const { return half_storage ? sizeof(std::uint32_t) : sizeof(FloatComplex); }
-
-    explicit Context(std::shared_ptr<Shared> owner)
-        : shared(std::move(owner)), allocation_limit(shared->options.workspace_bytes) {
-        try {
-            VkCommandPoolCreateInfo p{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-            p.queueFamilyIndex = shared->family; p.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-            check(vkCreateCommandPool(shared->device, &p, nullptr, &pool), "command pool creation");
-            VkCommandBufferAllocateInfo c{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-            c.commandPool = pool; c.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; c.commandBufferCount = 1;
-            check(vkAllocateCommandBuffers(shared->device, &c, &command), "command buffer allocation");
-            VkFenceCreateInfo f{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-            check(vkCreateFence(shared->device, &f, nullptr, &fence), "fence creation");
-            // Four frequency-search and four segmented-timing pipelines.
-            VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 32};
-            VkDescriptorPoolCreateInfo d{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-            d.maxSets = 8; d.poolSizeCount = 1; d.pPoolSizes = &size;
-            check(vkCreateDescriptorPool(shared->device, &d, nullptr, &descriptors), "descriptor pool creation");
-            if (shared->timestamp_bits && shared->properties.limits.timestampPeriod > 0) {
-                VkQueryPoolCreateInfo q{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
-                q.queryType = VK_QUERY_TYPE_TIMESTAMP; q.queryCount = timing_query_count;
-                VkQueryPool created = VK_NULL_HANDLE;
-                if (vkCreateQueryPool(shared->device, &q, nullptr, &created) == VK_SUCCESS)
-                    timestamps = created;
-            }
-            std::lock_guard lock(shared->receipt_mutex);
-            require(shared->total.vulkan_active_sessions < UINT64_MAX, "Robust Vulkan active-session count overflow");
-            ++shared->total.vulkan_active_sessions;
-            active = true;
-        } catch (...) { release(); throw; }
-    }
-    ~Context() { release(); }
-    void release() noexcept {
-        plans.clear(); peaks.reset(); quadratic.reset(); products.reset(); rotate.reset();
-        segment_finish.reset(); segment_ranks.reset(); segment_product.reset(); segment_column.reset();
-        if (timestamps) vkDestroyQueryPool(shared->device, timestamps, nullptr);
-        timestamps = VK_NULL_HANDLE;
-        if (descriptors) vkDestroyDescriptorPool(shared->device, descriptors, nullptr);
-        if (fence) vkDestroyFence(shared->device, fence, nullptr);
-        if (pool) vkDestroyCommandPool(shared->device, pool, nullptr);
-        descriptors = VK_NULL_HANDLE; fence = VK_NULL_HANDLE; pool = VK_NULL_HANDLE;
-        if (active) {
-            std::lock_guard lock(shared->receipt_mutex);
-            --shared->total.vulkan_active_sessions;
-            active = false;
-        }
-        if (lease) {
-            shared->release_lease(lease);
-            lease = 0;
-        }
-    }
-    void admit(std::size_t bytes, std::stop_token stop) {
-        require(!lease, "Robust Vulkan session already holds a device lease");
-        shared->acquire(bytes, stop);
-        allocation_limit = lease = bytes;
-    }
-    // Admits without waiting or queueing. False holds nothing.
-    bool try_admit(std::size_t bytes) {
-        require(!lease, "Robust Vulkan session already holds a device lease");
-        if (!shared->try_acquire(bytes)) return false;
-        allocation_limit = lease = bytes;
-        return true;
-    }
-    // Reserves memory that a library allocates itself, against this
-    // session's ceiling and the shared receipt, before it is allocated.
-    void charge_external(std::size_t bytes) {
-        if (bytes > shared->maximum_allocation_size ||
-            bytes > allocation_limit - std::min(allocated, allocation_limit))
-            throw ReceiverWorkspaceError("Robust Vulkan operation exceeds its session allocation ceiling");
-        const auto next_allocated = add(allocated, bytes);
-        const auto next_peak = std::max(peak_allocated, next_allocated);
-        shared->charge(bytes, next_peak);
-        allocated = next_allocated; peak_allocated = next_peak;
-    }
-    void uncharge_external(std::size_t bytes) noexcept {
-        allocated -= bytes;
-        shared->uncharge(bytes);
-    }
-    // Returns a lease whose buffers are all released, so the session can
-    // admit its next stage without holding two.
-    void release_admission() noexcept {
-        if (lease) shared->release_lease(std::exchange(lease, 0));
-        allocation_limit = shared->options.workspace_bytes;
-    }
-    void account(BulkReceipt delta) {
-#define ADD_FIELD(name) count(local.name, delta.name)
-        ADD_FIELD(upload_bytes); ADD_FIELD(download_bytes); ADD_FIELD(synchronizations);
-        ADD_FIELD(fft_calls); ADD_FIELD(fft_rows); ADD_FIELD(score_rows);
-        ADD_FIELD(vulkan_dispatches); ADD_FIELD(vulkan_arrival_peak_rows); ADD_FIELD(vulkan_arrival_peak_values);
-        ADD_FIELD(vulkan_timed_submissions);
-        ADD_FIELD(vulkan_host_scored_rows);
-        ADD_FIELD(vulkan_fp32_score_rows); ADD_FIELD(vulkan_fp16_storage_score_rows);
-        ADD_FIELD(vulkan_direct_dot_terms); ADD_FIELD(vulkan_direct_fp32_score_rows); ADD_FIELD(vulkan_direct_fp16_score_rows);
-        ADD_FIELD(vulkan_direct_fp16_storage_score_rows);
-        ADD_FIELD(vulkan_fft_cache_hits); ADD_FIELD(vulkan_fft_cache_misses);
-        ADD_FIELD(vulkan_shader_spirv_compiles); ADD_FIELD(vulkan_shader_spirv_cache_hits);
-        ADD_FIELD(vulkan_segmented_sessions); ADD_FIELD(vulkan_segmented_forward_ffts);
-        ADD_FIELD(vulkan_segmented_inverse_ffts); ADD_FIELD(vulkan_segmented_score_rows);
-        ADD_FIELD(vulkan_segmented_planned_shapes); ADD_FIELD(vulkan_segmented_declined_calls);
-        ADD_FIELD(vulkan_segmented_native_fallbacks);
-#undef ADD_FIELD
-        local.wall_seconds += delta.wall_seconds; local.executed |= delta.executed;
-        local.vulkan_fft_plan_seconds += delta.vulkan_fft_plan_seconds;
-        local.vulkan_shader_compile_seconds += delta.vulkan_shader_compile_seconds;
-        local.vulkan_device_command_seconds += delta.vulkan_device_command_seconds;
-        local.vulkan_direct_dot_seconds += delta.vulkan_direct_dot_seconds;
-        if (local.vulkan_segmented_fallback_reason.empty())
-            local.vulkan_segmented_fallback_reason = delta.vulkan_segmented_fallback_reason;
-        if (local.vulkan_segmented_decline_reason.empty())
-            local.vulkan_segmented_decline_reason = delta.vulkan_segmented_decline_reason;
-        shared->accumulate(delta);
-    }
-    BulkReceipt receipt() const {
-        auto result = shared->receipt();
-#define COPY_FIELD(name) result.name = local.name
-        COPY_FIELD(upload_bytes); COPY_FIELD(download_bytes); COPY_FIELD(synchronizations);
-        COPY_FIELD(fft_calls); COPY_FIELD(fft_rows); COPY_FIELD(score_rows);
-        COPY_FIELD(vulkan_dispatches); COPY_FIELD(vulkan_arrival_peak_rows); COPY_FIELD(vulkan_arrival_peak_values);
-        COPY_FIELD(vulkan_timed_submissions); COPY_FIELD(vulkan_device_command_seconds);
-        COPY_FIELD(vulkan_host_scored_rows);
-        COPY_FIELD(vulkan_fp32_score_rows); COPY_FIELD(vulkan_fp16_storage_score_rows);
-        COPY_FIELD(vulkan_direct_dot_terms); COPY_FIELD(vulkan_direct_fp32_score_rows); COPY_FIELD(vulkan_direct_fp16_score_rows);
-        COPY_FIELD(vulkan_direct_fp16_storage_score_rows);
-        COPY_FIELD(vulkan_fft_cache_hits); COPY_FIELD(vulkan_fft_cache_misses);
-        COPY_FIELD(vulkan_shader_spirv_compiles); COPY_FIELD(vulkan_shader_spirv_cache_hits);
-        COPY_FIELD(vulkan_fft_plan_seconds); COPY_FIELD(vulkan_shader_compile_seconds);
-        COPY_FIELD(vulkan_direct_dot_seconds);
-        COPY_FIELD(vulkan_segmented_sessions); COPY_FIELD(vulkan_segmented_forward_ffts);
-        COPY_FIELD(vulkan_segmented_inverse_ffts); COPY_FIELD(vulkan_segmented_score_rows);
-        COPY_FIELD(vulkan_segmented_planned_shapes); COPY_FIELD(vulkan_segmented_declined_calls);
-        COPY_FIELD(vulkan_segmented_decline_reason);
-        COPY_FIELD(vulkan_segmented_native_fallbacks); COPY_FIELD(vulkan_segmented_fallback_reason);
-        COPY_FIELD(wall_seconds); COPY_FIELD(executed);
-#undef COPY_FIELD
-        // Generic allocation fields retain the shared backend's aggregate.
-        result.vulkan_peak_owner_bytes = peak_allocated;
-        result.workspace_limit_bytes = allocation_limit;
-        result.workspace_scope = "per_coarse_session";
-        result.fft_plan_cache_count = plans.size();
-        result.precision = direct_dot ? (packed_direct ? packed_direct_arithmetic :
-            half_storage ? half_storage_direct_arithmetic : fp32_direct_arithmetic) :
-            (half_storage ? half_storage_arithmetic : fp32_arithmetic);
-        if (shared->host_scoring) result.precision += host_score_suffix;
-        return result;
-    }
-    void barrier(VkPipelineStageFlags source_stage, VkAccessFlags source,
-                 VkPipelineStageFlags destination_stage, VkAccessFlags destination) {
-        VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-        barrier.srcAccessMask = source; barrier.dstAccessMask = destination;
-        vkCmdPipelineBarrier(command, source_stage, destination_stage, 0, 1, &barrier, 0, nullptr, 0, nullptr);
-    }
-    void compute_barrier() {
-        barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
-    }
-    void begin_dot_timing() {
-        if (!timestamps) return;
-        vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestamps, dot_start_query);
-        timed_direct = true;
-    }
-    void end_dot_timing() {
-        if (timed_direct)
-            vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, timestamps, dot_end_query);
-    }
-    void account_timestamps(BulkReceipt& delta) const {
-        if (!timestamps) return;
-        struct QueryResult { std::uint64_t tick, available; };
-        std::array<QueryResult, timing_query_count> results{};
-        const auto queries = timed_direct ? std::uint32_t{timing_query_count} : std::uint32_t{2};
-        // The submission fence has already signaled. Read availability
-        // without a new wait, including if an inner timestamp is missing.
-        const auto status = vkGetQueryPoolResults(shared->device, timestamps, 0, queries,
-            sizeof(results), results.data(), sizeof(results[0]),
-            VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
-        if (status != VK_SUCCESS && status != VK_NOT_READY) return;
-        const auto bits = shared->timestamp_bits;
-        const auto mask = bits >= 64 ? UINT64_MAX : (std::uint64_t{1} << bits) - 1;
-        const auto elapsed = [&](TimingQuery first, TimingQuery last) {
-            return ((results[last].tick - results[first].tick) & mask) *
-                static_cast<double>(shared->properties.limits.timestampPeriod) * 1e-9;
-        };
-        if (results[command_start_query].available && results[command_end_query].available) {
-            delta.vulkan_timed_submissions = 1;
-            delta.vulkan_device_command_seconds = elapsed(command_start_query, command_end_query);
-        }
-        if (timed_direct && results[dot_start_query].available && results[dot_end_query].available)
-            delta.vulkan_direct_dot_seconds = elapsed(dot_start_query, dot_end_query);
-    }
-    void drain_submission() {
-        // An OOM/unknown wait error says nothing about pending GPU work. Keep
-        // its owner and allocations alive until completion or device loss is
-        // established; a timeout or cancellation cannot authorize release.
-        for (;;) {
-            VkResult drained;
-            {
-                std::lock_guard lock(shared->queue_mutex);
-                drained = vkQueueWaitIdle(shared->queue);
-            }
-            if (drained == VK_SUCCESS || drained == VK_ERROR_DEVICE_LOST) return;
-            const auto waited = vkWaitForFences(shared->device, 1, &fence, VK_TRUE, 100'000'000);
-            if (waited == VK_SUCCESS || waited == VK_ERROR_DEVICE_LOST) return;
-            // Do not spin if the driver returns an immediate ambiguous error.
-            if (waited != VK_TIMEOUT) std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-    }
-    template<class Record> void run(std::stop_token stop, Record record) {
-        cancelled(stop);
-        check(vkResetFences(shared->device, 1, &fence), "fence reset");
-        check(vkResetCommandBuffer(command, 0), "command reset");
-        VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-        begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        check(vkBeginCommandBuffer(command, &begin), "command begin");
-        if (timestamps) {
-            vkCmdResetQueryPool(command, timestamps, 0, timing_query_count);
-            vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestamps, command_start_query);
-        }
-        barrier(VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_WRITE_BIT,
-                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
-        BulkReceipt delta;
-        timed_direct = false;
-        record(delta);
-        barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
-                VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_READ_BIT);
-        if (timestamps)
-            vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestamps, command_end_query);
-        check(vkEndCommandBuffer(command), "command end");
-        VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-        submit.commandBufferCount = 1; submit.pCommandBuffers = &command;
-        const auto began = Clock::now();
-        {
-            // Vulkan requires external synchronization of the queue, not of
-            // independent CPU preparation or the full fence-wait lifetime.
-            std::lock_guard lock(shared->queue_mutex);
-            cancelled(stop);
-            check(vkQueueSubmit(shared->queue, 1, &submit, fence), "queue submit");
-        }
-        VkResult waited;
-        do { waited = vkWaitForFences(shared->device, 1, &fence, VK_TRUE, 100'000'000); }
-        while (waited == VK_TIMEOUT);
-        if (waited != VK_SUCCESS && waited != VK_ERROR_DEVICE_LOST) drain_submission();
-        check(waited, "fence wait");
-        delta.synchronizations = 1; delta.executed = true;
-        delta.wall_seconds = std::chrono::duration<double>(Clock::now() - began).count();
-        account_timestamps(delta);
-        account(delta);
-        // Cancellation never releases buffers still referenced by a submission.
-        cancelled(stop);
-    }
-    Pipeline& pipeline(std::unique_ptr<Pipeline>& slot, ShaderKind kind,
-                       std::uint32_t bindings, std::uint32_t push_bytes, bool storage_shader = true,
-                       bool fixed_phase = false) {
-        if (!slot) {
-            const auto began = Clock::now();
-            const bool half = half_storage && storage_shader && kind != ShaderKind::peaks;
-            const bool packed = half && packed_direct && kind == ShaderKind::direct_dot;
-            const auto [spirv, cache_hit] = shared->shader_spirv({kind, half, packed, fixed_phase});
-            slot = std::make_unique<Pipeline>(*this, *spirv, bindings, push_bytes);
-            BulkReceipt compiled;
-            if (cache_hit) compiled.vulkan_shader_spirv_cache_hits = 1;
-            else compiled.vulkan_shader_spirv_compiles = 1;
-            // Includes any GLSL/SPIR-V compilation and private driver pipeline construction.
-            compiled.vulkan_shader_compile_seconds = std::chrono::duration<double>(Clock::now() - began).count();
-            account(compiled);
-        }
-        return *slot;
-    }
-    void bind(Pipeline& p, std::span<Buffer* const> buffers) {
-        require(buffers.size() == p.bindings, "Robust Vulkan descriptor binding count mismatch");
-        std::array<VkDescriptorBufferInfo, 3> infos{};
-        std::array<VkWriteDescriptorSet, 3> writes{};
-        for (std::size_t i = 0; i < buffers.size(); ++i) {
-            infos[i] = {buffers[i]->handle, 0, buffers[i]->bytes};
-            writes[i] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-            writes[i].dstSet = p.set; writes[i].dstBinding = narrow(i);
-            writes[i].descriptorCount = 1; writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            writes[i].pBufferInfo = &infos[i];
-        }
-        vkUpdateDescriptorSets(shared->device, narrow(buffers.size()), writes.data(), 0, nullptr);
-    }
-    template<class Push> void dispatch(Pipeline& p, const Push& push, std::size_t groups, BulkReceipt& delta) {
-        require(sizeof(Push) == p.push_bytes && groups, "invalid Robust Vulkan dispatch geometry");
-        const auto x = std::min<std::size_t>(groups, shared->properties.limits.maxComputeWorkGroupCount[0]);
-        const auto y = (groups + x - 1) / x;
-        require(y <= shared->properties.limits.maxComputeWorkGroupCount[1] && (p.bindings != 2 || y == 1),
-                "Robust Vulkan dispatch exceeds public geometry or device bounds");
-        vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, p.pipeline);
-        vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE, p.layout, 0, 1, &p.set, 0, nullptr);
-        vkCmdPushConstants(command, p.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(Push), &push);
-        vkCmdDispatch(command, narrow(x), narrow(y), 1);
-        count(delta.vulkan_dispatches, 1);
-        compute_barrier();
-    }
-    // A shader that reads its workgroup row as a separate index.
-    template<class Push> void dispatch_rows(Pipeline& p, const Push& push, std::size_t x, std::size_t y,
-                                            BulkReceipt& delta) {
-        const auto& limits = shared->properties.limits.maxComputeWorkGroupCount;
-        require(sizeof(Push) == p.push_bytes && x && y && x <= limits[0] && y <= limits[1],
-                "Robust Vulkan dispatch exceeds public geometry or device bounds");
-        vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, p.pipeline);
-        vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE, p.layout, 0, 1, &p.set, 0, nullptr);
-        vkCmdPushConstants(command, p.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(Push), &push);
-        vkCmdDispatch(command, narrow(x), narrow(y), 1);
-        count(delta.vulkan_dispatches, 1);
-        compute_barrier();
-    }
-    FftPlan& plan(std::size_t rows, std::size_t batches, bool inverse, Buffer& data, Buffer& temporary,
-                  std::stop_token stop) {
-        cancelled(stop);
-        require(rows && std::has_single_bit(rows) && batches, "Robust Vulkan FFT requires bounded power-of-two rows");
-        const auto key = std::tuple(rows, batches, inverse, half_storage, false);
-        if (auto found = plans.find(key); found != plans.end()) {
-            require(data.bytes >= found->second->data_bytes && temporary.bytes >= found->second->temporary_bytes,
-                    "Robust Vulkan cached FFT buffers are smaller than their plan extents");
-            found->second->age = ++age; return *found->second;
-        }
-        if (plans.size() == plan_cache_limit) {
-            const auto oldest = std::min_element(plans.begin(), plans.end(), [](const auto& a, const auto& b) {
-                return a.second->age < b.second->age;
-            });
-            plans.erase(oldest);
-        }
-        auto result = make_plan(rows, batches, inverse, data, temporary, stop);
-        result->age = ++age;
-        auto& value = *result;
-        plans.emplace(key, std::move(result));
-        return value;
-    }
-    // A plan bound to these buffers, outside the session's LRU cache. Its
-    // owner appends it only with the same buffers.
-    // With lut, VkFFT allocates and uploads its own twiddle tables. Their
-    // quoted extent is charged to this session before the plan exists.
-    std::unique_ptr<FftPlan> make_plan(std::size_t rows, std::size_t batches, bool inverse, Buffer& data,
-                                       Buffer& temporary, std::stop_token stop, bool lut = false) {
-        cancelled(stop);
-        require(rows && std::has_single_bit(rows) && batches, "Robust Vulkan FFT requires bounded power-of-two rows");
-        require(!lut || !half_storage, "Robust VkFFT twiddle tables serve FP32 storage only");
-        const auto key = std::tuple(rows, batches, inverse, half_storage, lut);
-        auto result = std::make_unique<FftPlan>();
-        if (lut) {
-            const auto tables = lut_quote(*shared, rows);
-            if (!tables) throw ReceiverWorkspaceError("Robust VkFFT twiddle tables exceed device buffer bounds");
-            charge_external(*tables);
-            result->lut_owner = this;
-            result->lut_charge = *tables;
-        }
-        VkFFTConfiguration config{};
-        config.FFTdim = 1; config.size[0] = rows; config.numberBatches = batches;
-        config.physicalDevice = &shared->physical; config.device = &shared->device;
-        config.queue = &shared->queue; config.commandPool = &pool; config.fence = &fence;
-        config.isCompilerInitialized = 1;
-        config.makeForwardPlanOnly = inverse ? 0 : 1;
-        config.makeInversePlanOnly = inverse ? 1 : 0;
-        config.normalize = 1;
-        // Twiddle tables are computed in FP64 on the host and rounded once,
-        // as the native FloatPlan does. Without them VkFFT evaluates FP32
-        // sin/cos in the shader.
-        config.useLUT = config.useLUT_4step = lut ? 1 : -1;
-        config.userTempBuffer = 1;
-        config.halfPrecision = half_storage;
-        result->data_bytes = mul(mul(rows, batches), fft_element_bytes());
-        result->temporary_bytes = mul(mul(rows, batches), sizeof(FloatComplex));
-        require(data.bytes >= result->data_bytes && temporary.bytes >= result->temporary_bytes,
-                "Robust Vulkan FFT buffers are smaller than their public geometry");
-        result->data_handles[0] = data.handle; result->temporary_handles[0] = temporary.handle;
-        config.buffer = &result->data_handles[0]; config.tempBuffer = &result->temporary_handles[0];
-        config.bufferSize = &result->data_bytes; config.tempBufferSize = &result->temporary_bytes;
-        config.maxCodeLength = 1'048'576;
-        auto binary = shared->cached_fft(key);
-        std::unique_lock compile_lock(shared->fft_compile_mutex, std::defer_lock);
-        if (!binary) {
-            // Only cold misses serialize. Warm lookups/loads retain an immutable
-            // byte pin and never hold the cache mutex during driver compilation.
-            compile_lock.lock();
-            cancelled(stop);
-            binary = shared->cached_fft(key);
-            if (binary) compile_lock.unlock();
-        }
-        const bool cache_hit = static_cast<bool>(binary);
-        if (cache_hit) {
-            config.loadApplicationFromString = 1;
-            config.loadApplicationString = binary->bytes.get();
-        } else config.saveApplicationToString = 1;
-        cancelled(stop);
-        const auto began = Clock::now();
-        VkFFTResult status;
-        if (lut) {
-            // VkFFT uploads the tables through this session's pool and fence
-            // on the shared queue, which Vulkan requires to be externally
-            // synchronized. No submission of this session is pending.
-            check(vkResetFences(shared->device, 1, &fence), "fence reset");
-            std::lock_guard lock(shared->queue_mutex);
-            status = initializeVkFFT(&result->app, config);
-        } else status = initializeVkFFT(&result->app, config);
-        // VkFFT 1.3.4 power-of-two append/destruction do not use the borrowed
-        // serialization. Detach it before releasing the immutable cache pin.
-        result->app.configuration.loadApplicationString = nullptr;
-        result->app.configuration.loadApplicationFromString = 0;
-        binary.reset();
-        if (status != VKFFT_SUCCESS) {
-            deleteVkFFT(&result->app);
-            std::string message = std::string("Robust VkFFT plan failed: ") + getVkFFTErrorString(status);
-            if (status >= VKFFT_ERROR_UNSUPPORTED_RADIX && status <= VKFFT_ERROR_UNSUPPORTED_FFT_OMIT)
-                throw VkFftUnsupported(std::move(message));
-            // VkFFT allocates twiddle tables and their staging itself. Memory
-            // exhaustion there is a workspace shortfall, like Buffer's, so the
-            // segmented session takes its reported native fallback.
-            if (lut && (status == VKFFT_ERROR_FAILED_TO_ALLOCATE_MEMORY ||
-                        status == VKFFT_ERROR_FAILED_TO_CREATE_BUFFER || status == VKFFT_ERROR_MALLOC_FAILED))
-                throw ReceiverWorkspaceError(std::move(message));
-            throw Error(std::move(message));
-        }
-        result->initialized = true;
-        BulkReceipt compiled;
-        compiled.vulkan_fft_plan_seconds = std::chrono::duration<double>(Clock::now() - began).count();
-        if (cache_hit) compiled.vulkan_fft_cache_hits = 1;
-        else {
-            compiled.vulkan_fft_cache_misses = 1;
-            if (result->app.applicationStringSize <= serialized_cache_limit)
-                shared->cache_fft(key, result->app.saveApplicationString,
-                                  static_cast<std::size_t>(result->app.applicationStringSize));
-            // VkFFT uses malloc/calloc here. Keep its save flag set so the
-            // private plan still frees retained axis binaries at destruction.
-            std::free(result->app.saveApplicationString);
-            result->app.saveApplicationString = nullptr;
-            compile_lock.unlock();
-        }
-        account(compiled);
-        require(!result->app.configuration.allocateTempBuffer &&
-                (lut || (result->app.configuration.useLUT != 1 && result->app.configuration.useLUT_4step != 1)),
-                "Robust VkFFT allocated unreserved auxiliary storage");
-        if (lut) {
-            // The reservation covers every table VkFFT allocated.
-            std::size_t tables = 0;
-            for (const auto* plan : {result->app.localFFTPlan, result->app.localFFTPlan_inverse}) {
-                if (!plan) continue;
-                require(plan->numAxisUploads[0] <= max_lut_uploads, "Robust VkFFT exceeded its quoted table uploads");
-                for (pfUINT upload = 0; upload < plan->numAxisUploads[0]; ++upload) {
-                    const auto& axis = plan->axes[0][upload];
-                    require(axis.bufferLUTSize <= lut_upload_bytes(rows), "Robust VkFFT table exceeds its quote");
-                    if (!axis.referenceLUT) tables = add(tables, static_cast<std::size_t>(axis.bufferLUTSize));
-                }
-            }
-            require(tables <= mul(max_lut_uploads, lut_upload_bytes(rows)), "Robust VkFFT tables exceed their quote");
-        }
-        return result;
-    }
-    void fft(std::size_t rows, std::size_t batches, Buffer& data, Buffer& temporary,
-             bool inverse, CoarseBulkWork& work, BulkReceipt& delta, std::stop_token stop) {
-        auto& p = plan(rows, batches, inverse, data, temporary, stop);
-        // VkFFT detects descriptor changes by pointer identity. Alternate the
-        // owned slots on every append, even if Vulkan reused a freed handle.
-        p.handle_slot ^= 1;
-        p.data_handles[p.handle_slot] = data.handle;
-        p.temporary_handles[p.handle_slot] = temporary.handle;
-        append(p, rows, batches, inverse, work, delta);
-    }
-    // Appends a plan with the buffers it was created with. VkFFT then
-    // updates no descriptor, so one command buffer can hold many appends.
-    void append(FftPlan& p, std::size_t rows, std::size_t batches, bool inverse,
-                CoarseBulkWork& work, BulkReceipt& delta) {
-        VkFFTLaunchParams launch{};
-        launch.commandBuffer = &command;
-        launch.buffer = launch.inputBuffer = launch.outputBuffer = &p.data_handles[p.handle_slot];
-        launch.tempBuffer = &p.temporary_handles[p.handle_slot];
-        const auto status = VkFFTAppend(&p.app, inverse ? 1 : -1, &launch);
-        if (status != VKFFT_SUCCESS) throw Error(std::string("Robust VkFFT append failed: ") + getVkFFTErrorString(status));
-        compute_barrier();
-        const auto samples = mul(rows, batches);
-        count(inverse ? work.inverse_ffts : work.forward_ffts, batches);
-        count(work.fft_rows, samples); count(work.fft_row_stages, mul(samples, std::bit_width(rows - 1)));
-        count(delta.fft_calls, 1); count(delta.fft_rows, samples);
-    }
-};
-
-FftPlan::~FftPlan() {
-    if (initialized) deleteVkFFT(&app);
-    if (lut_owner) lut_owner->uncharge_external(lut_charge);
-}
-
-Buffer::Buffer(Context& context, std::size_t size, bool host_reads) : owner(&context), bytes(size) {
-    require(size, "Robust Vulkan buffer must be nonempty");
-    if (size > context.shared->properties.limits.maxStorageBufferRange)
-        throw ReceiverWorkspaceError("Robust Vulkan buffer exceeds maxStorageBufferRange");
-    auto& shared = *context.shared;
-    try {
-        const auto info = storage_buffer(size);
-        check(vkCreateBuffer(shared.device, &info, nullptr, &handle), "buffer creation");
-        VkMemoryRequirements requirements{};
-        vkGetBufferMemoryRequirements(shared.device, handle, &requirements);
-        if (requirements.size > shared.maximum_allocation_size ||
-            requirements.size > context.allocation_limit - std::min(context.allocated, context.allocation_limit))
-            throw ReceiverWorkspaceError("Robust Vulkan operation exceeds its session allocation ceiling");
-        const auto type = shared.memory_type(requirements.memoryTypeBits, host_reads);
-        if (type == shared.memory.memoryTypeCount)
-            throw VulkanBackendUnavailable("Robust Vulkan requires bounded host-visible coherent compute memory");
-        // Reserve the actual Vulkan allocation extent before allocating it.
-        const auto next_allocated = add(context.allocated, requirements.size);
-        const auto next_peak = std::max(context.peak_allocated, next_allocated);
-        shared.charge(requirements.size, next_peak);
-        charged = requirements.size;
-        context.allocated = next_allocated; context.peak_allocated = next_peak;
-        VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-        allocation.allocationSize = requirements.size; allocation.memoryTypeIndex = type;
-        const auto status = vkAllocateMemory(shared.device, &allocation, nullptr, &memory);
-        if (status == VK_ERROR_OUT_OF_HOST_MEMORY || status == VK_ERROR_OUT_OF_DEVICE_MEMORY)
-            throw ReceiverWorkspaceError("Robust Vulkan buffer memory allocation exhausted available workspace (" +
-                std::to_string(status) + ")");
-        check(status, "memory allocation");
-        check(vkBindBufferMemory(shared.device, handle, memory, 0), "buffer binding");
-        check(vkMapMemory(shared.device, memory, 0, size, 0, &mapped), "memory mapping");
-    } catch (...) {
-        if (mapped) vkUnmapMemory(shared.device, memory);
-        if (handle) vkDestroyBuffer(shared.device, handle, nullptr);
-        if (memory) vkFreeMemory(shared.device, memory, nullptr);
-        if (charged) { context.allocated -= charged; shared.uncharge(charged); }
-        throw;
-    }
-}
-Buffer::~Buffer() {
-    if (!owner) return;
-    auto& shared = *owner->shared;
-    if (mapped) vkUnmapMemory(shared.device, memory);
-    if (handle) vkDestroyBuffer(shared.device, handle, nullptr);
-    if (memory) vkFreeMemory(shared.device, memory, nullptr);
-    owner->allocated -= charged; shared.uncharge(charged);
-}
-
-Pipeline::Pipeline(Context& context, const Spirv& spirv, std::uint32_t inputs, std::uint32_t push)
-    : device(context.shared->device), bindings(inputs), push_bytes(push) {
-    VkShaderModule module = VK_NULL_HANDLE;
-    try {
-        VkShaderModuleCreateInfo shader_info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-        shader_info.codeSize = spirv.size() * sizeof(unsigned int); shader_info.pCode = spirv.data();
-        check(vkCreateShaderModule(device, &shader_info, nullptr, &module), "shader module creation");
-        std::array<VkDescriptorSetLayoutBinding, 3> binding{};
-        for (std::uint32_t i = 0; i < inputs; ++i)
-            binding[i] = {i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
-        VkDescriptorSetLayoutCreateInfo descriptor_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-        descriptor_info.bindingCount = inputs; descriptor_info.pBindings = binding.data();
-        check(vkCreateDescriptorSetLayout(device, &descriptor_info, nullptr, &descriptors), "descriptor layout creation");
-        VkPushConstantRange range{VK_SHADER_STAGE_COMPUTE_BIT, 0, push};
-        VkPipelineLayoutCreateInfo layout_info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-        layout_info.setLayoutCount = 1; layout_info.pSetLayouts = &descriptors;
-        layout_info.pushConstantRangeCount = 1; layout_info.pPushConstantRanges = &range;
-        check(vkCreatePipelineLayout(device, &layout_info, nullptr, &layout), "pipeline layout creation");
-        VkComputePipelineCreateInfo pipeline_info{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
-        pipeline_info.layout = layout;
-        pipeline_info.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
-        pipeline_info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT; pipeline_info.stage.module = module;
-        pipeline_info.stage.pName = "main";
-        check(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline), "compute pipeline creation");
-        VkDescriptorSetAllocateInfo allocation{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-        allocation.descriptorPool = context.descriptors; allocation.descriptorSetCount = 1; allocation.pSetLayouts = &descriptors;
-        check(vkAllocateDescriptorSets(device, &allocation, &set), "descriptor set allocation");
-    } catch (...) {
-        if (module) vkDestroyShaderModule(device, module, nullptr);
-        if (pipeline) vkDestroyPipeline(device, pipeline, nullptr);
-        if (layout) vkDestroyPipelineLayout(device, layout, nullptr);
-        if (descriptors) vkDestroyDescriptorSetLayout(device, descriptors, nullptr);
-        throw;
-    }
-    vkDestroyShaderModule(device, module, nullptr);
-}
-
-// Normalized bank samples are below 128. Round their IEEE binary32 encoding
-// to binary16, including ties and subnormals, without needing host F16C.
-std::uint32_t half_bits(float x) {
-    const auto bits = std::bit_cast<std::uint32_t>(x);
-    const auto sign = (bits >> 16) & 0x8000u;
-    const auto magnitude = bits & 0x7fffffffu;
-    if (magnitude < 0x33000000u) return sign;
-    if (magnitude >= 0x38800000u)
-        return sign | ((magnitude - 0x38000000u + 0xfffu + ((magnitude >> 13) & 1u)) >> 13);
-    const auto shift = 126u - (magnitude >> 23);
-    const auto mantissa = (magnitude & 0x7fffffu) | 0x800000u;
-    return sign | ((mantissa + (1u << (shift - 1)) - 1u + ((mantissa >> shift) & 1u)) >> shift);
-}
-
-float unpack_half(std::uint32_t bits) {
-    const auto sign = (bits & 0x8000u) << 16;
-    const auto exponent = (bits >> 10) & 31u;
-    const auto significand = bits & 1023u;
-    if (!exponent) {
-        const auto value = std::ldexp(static_cast<float>(significand), -24);
-        return std::bit_cast<float>(std::bit_cast<std::uint32_t>(value) | sign);
-    }
-    const auto biased_exponent = exponent == 31u ? 255u : exponent + 112u;
-    return std::bit_cast<float>(sign | (biased_exponent << 23) | (significand << 13));
-}
-
-void pack(Buffer& destination, std::span<const Complex> input, std::size_t first = 0,
-          double scale = 1, bool half = false) {
-    require(mul(add(first, input.size()), half ? sizeof(std::uint32_t) : sizeof(FloatComplex)) <= destination.bytes,
-            "Robust Vulkan packed input exceeds storage");
-    for (std::size_t i = 0; i < input.size(); ++i) {
-        const double real = input[i].real() * scale, imag = input[i].imag() * scale;
-        constexpr double largest = std::numeric_limits<float>::max();
-        require(std::isfinite(real) && std::isfinite(imag) && std::abs(real) <= largest && std::abs(imag) <= largest,
-                "Robust Vulkan FP32 packing is nonfinite or out of range");
-        const auto a = static_cast<float>(real), b = static_cast<float>(imag);
-        if (half)
-            static_cast<std::uint32_t*>(destination.mapped)[first + i] = half_bits(a) | (half_bits(b) << 16);
-        else
-            static_cast<FloatComplex*>(destination.mapped)[first + i] = {a, b};
-    }
-}
-
-std::optional<long double> energy(std::span<const Complex> input, std::stop_token stop) {
-    long double sum = 0;
-    bool nonzero = false;
-    for (std::size_t i = 0; i < input.size(); ++i) {
-        if ((i & 4095u) == 0) cancelled(stop);
-        const auto z = input[i];
-        const long double a = z.real(), b = z.imag();
-        sum += a * a + b * b;
-        nonzero |= a != 0 || b != 0;
-    }
-    if (!std::isfinite(sum) || (!sum && nonzero)) return {};
-    return sum;
-}
-
-int fft_scale(long double input_energy, std::size_t nfft) {
-    if (!input_energy) return 0;
-    const auto spectrum_norm = std::sqrt(input_energy) * std::sqrt(static_cast<long double>(nfft));
-    // The energy check and per-buffer uint32 geometry bound keep this finite.
-    // Parseval bounds each spectrum's L2 norm and Cauchy-Schwarz bounds the
-    // product's L1 norm. Scaling each norm below 128 bounds the unnormalized
-    // inverse partial sums below 16384, with margin for rounding. It avoids
-    // shrinking each operand by an extra sqrt(N), which underflows long FFTs.
-    return 7 - std::ilogb(spectrum_norm) - 1;
-}
-
 void validate_peaks(std::span<const CoarseBulkPeaks> rows, std::size_t arrivals) {
     for (const auto& row : rows) {
         require(row.count && row.count <= 2, "Robust Vulkan score is nonfinite or frontier count is invalid");
@@ -1555,9 +207,7 @@ constexpr std::size_t segmented_tile_limit = 128;
 constexpr std::size_t segmented_rows_per_group = 8, segmented_group_limit = 64;
 // Inverse transform rows of one submission. It bounds the command a
 // cancellation or device watchdog waits for; a block is never split.
-constexpr std::size_t segmented_submission_rows = std::size_t{1} << 28;
-
-std::size_t ceil_div(std::size_t a, std::size_t b) { return a / b + (a % b != 0); }
+constexpr std::size_t segmented_submission_rows = submission_row_limit;
 
 // Shapes the device kernels index with 32-bit integers, on the same public
 // geometry checks as the CUDA plan.
@@ -2499,6 +1149,20 @@ public:
 #else
         if (required) throw VulkanBackendUnavailable("This Vulkan build has no OpenCL NVFP4 work");
 #endif
+        // After the device class is known and before any session reads them.
+        shared_->total.vulkan_gain_rank.qualified_device = vulkan::vulkan_gain_rank_qualified_device(*shared_);
+        shared_->total.vulkan_drift.qualified_device = vulkan::vulkan_drift_qualified_device(*shared_);
+        shared_->total.vulkan_varying.qualified_device = vulkan::vulkan_varying_qualified_device(*shared_);
+        // The larger caches hold fine-stage plans and shaders, so only a
+        // backend whose policy can select some family for the device keeps
+        // them: an explicit device route, or a family qualified for automatic
+        // selection on this device class. Every other route, including the
+        // automatic default on device classes where no family is qualified,
+        // charges the coarse search's bounds alone.
+        const bool stage_device = vulkan::vulkan_gain_rank_decline(*shared_, nullptr, false).empty() ||
+                                  vulkan::vulkan_drift_decline(*shared_, nullptr, false).empty() ||
+                                  vulkan::vulkan_varying_decline(*shared_, nullptr, false).empty();
+        shared_->size_caches(stage_device ? vulkan::stage_cache_bounds : vulkan::coarse_cache_bounds);
     }
     bool supports_fine() const noexcept override { return false; }
     bool opencl_open() const noexcept {
@@ -2651,8 +1315,7 @@ public:
         return plan ? plan->device_bytes : 0;
     }
     std::size_t persistent_host_workspace() const noexcept override {
-        return serialized_cache_limit + serialized_cache_metadata_bound +
-               shader_cache_limit + shader_cache_metadata_bound + (opencl_open() ? 2 * mib : 0);
+        return shared_->cache.host_bytes() + (opencl_open() ? 2 * mib : 0);
     }
     std::size_t coarse_host_bytes(std::size_t maximum_fft_rows, std::size_t maximum_tile_frequencies,
                                  std::size_t arrivals) const override {
@@ -2662,6 +1325,46 @@ public:
         // as separate host metadata/compilation and potential score consumers.
         return add(shared_->options.workspace_bytes, add(compiler_host_bound,
             add(mul(maximum_fft_rows, sizeof(Complex)), host_scores)));
+    }
+    // Fine-stage device sessions (triad_vulkan_stages.hpp).
+    std::string_view stage_decline(const StageShape& shape, bool fp64_forced) const noexcept override {
+        if (const auto* gain = std::get_if<GainRankShape>(&shape))
+            return vulkan::vulkan_gain_rank_decline(*shared_, gain, fp64_forced);
+        if (const auto* drift = std::get_if<DriftBulkShape>(&shape))
+            return vulkan::vulkan_drift_decline(*shared_, drift, fp64_forced);
+        if (const auto* varying = std::get_if<VaryingBulkShape>(&shape))
+            return vulkan::vulkan_varying_decline(*shared_, varying, fp64_forced);
+        switch (stage_family(shape)) {
+        case StageFamily::gain_rank: return vulkan::vulkan_gain_rank_decline(*shared_, nullptr, fp64_forced);
+        case StageFamily::drift: return vulkan::vulkan_drift_decline(*shared_, nullptr, fp64_forced);
+        case StageFamily::varying: return vulkan::vulkan_varying_decline(*shared_, nullptr, fp64_forced);
+        }
+        return "native-stage-backend";
+    }
+    std::unique_ptr<GainRankBulk> make_gain_rank(const GainRankShape& shape, bool fp64_forced,
+                                                 std::stop_token stop) override {
+        return vulkan::make_vulkan_gain_rank_bulk(shared_, shape, fp64_forced, stop);
+    }
+    std::unique_ptr<DriftBulk> make_drift(const DriftBulkShape& shape, bool fp64_forced,
+                                          std::stop_token stop) override {
+        return vulkan::make_vulkan_drift_bulk(shared_, shape, fp64_forced, stop);
+    }
+    std::unique_ptr<VaryingBulk> make_varying(const VaryingBulkShape& shape, bool fp64_forced,
+                                              std::stop_token stop) override {
+        return vulkan::make_vulkan_varying_bulk(shared_, shape, fp64_forced, stop);
+    }
+    std::size_t stage_host_bytes(const StageShape& shape, bool fp64_forced) const override {
+        if (const auto* gain = std::get_if<GainRankShape>(&shape))
+            return vulkan::vulkan_gain_rank_host_bytes(*shared_, *gain, fp64_forced);
+        if (const auto* drift = std::get_if<DriftBulkShape>(&shape))
+            return vulkan::vulkan_drift_host_bytes(*shared_, *drift, fp64_forced);
+        if (const auto* varying = std::get_if<VaryingBulkShape>(&shape))
+            return vulkan::vulkan_varying_host_bytes(*shared_, *varying, fp64_forced);
+        return 0;
+    }
+    void record_stage_native(StageFamily family, StageReason reason, StageNative kind) override {
+        if (kind == StageNative::decline) shared_->record_stage_decline(family, reason);
+        else shared_->record_stage_fallback(family, reason, kind == StageNative::fallback);
     }
     BulkReceipt receipt() const override { return shared_->receipt(); }
     std::shared_ptr<Shared> shared() const { return shared_; }

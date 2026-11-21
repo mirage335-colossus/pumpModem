@@ -135,6 +135,18 @@ struct ReceiverSlotScore {
     std::size_t varying_candidates = 0, varying_blocks = 0, varying_block_rows = 0;
     std::uint64_t varying_basis_rows = 0;
     double varying_coarse_seconds = 0, varying_fine_seconds = 0;
+    // --- Varying fine batch receipts (append-only block) ---
+    // Lane-seconds of the projection, statistics and recursion phases, and
+    // the idle seconds of the lanes that ran a leaf, from each lane's first
+    // leaf to the end of that phase. The quote, blocks per batch and batch
+    // count are geometry receipts. A slot's receipts cover its ordinary,
+    // coherent-gain and line-conditioned varying stages: seconds and
+    // batches add, and the quote and blocks per batch are the largest
+    // stage's.
+    double varying_projection_seconds = 0, varying_statistics_seconds = 0;
+    double varying_recursion_seconds = 0, varying_wait_seconds = 0;
+    std::size_t varying_workspace_bytes = 0, varying_batch_blocks = 0, varying_batches = 0;
+    // --- end varying fine batch receipts ---
     std::size_t varying_timing_blocks = 0, varying_timing_frequencies = 0;
     std::string varying_timing_status;
     // The coarse search's raw changing-channel timing proposals, in their
@@ -151,6 +163,9 @@ struct ReceiverSlotScore {
     std::uint64_t midpoint_timing_basis_rows = 0, midpoint_timing_widened_inverses = 0, midpoint_timing_scored_lags = 0;
     std::array<double, 2> varying_bit_evidence{};
     std::string varying_status;
+    // The varying statistics route and its executed arithmetic, as for the
+    // signed-lag route below.
+    std::string varying_fine_route, varying_fine_arithmetic;
     std::size_t varying_frequency_states = 0;
     // Component receipts before the fixed short-gain / frequency mixture.
     std::array<double, 2> fixed_varying_bit_evidence{};
@@ -176,6 +191,17 @@ struct ReceiverSlotScore {
     std::uint64_t signed_lag_gain_proposal_fft_stages = 0, signed_lag_gain_proposal_score_rows = 0;
     std::uint64_t signed_lag_gain_proposal_fft_stage_bound = 0, signed_lag_gain_proposal_score_row_bound = 0;
     double signed_lag_gain_proposal_seconds = 0;
+    // Fine-stage device routes. A route names where the stage ran and its
+    // arithmetic, or the native route; empty when the stage did not run or
+    // no family route reports it. Device FFT row-stages and those of the
+    // host's FP64 frontier rescoring (whenever it ran) are counted apart
+    // from the native fft_stages above. The lags rescored in FP64 and the
+    // gap between the best two rescored lags describe a certified rank.
+    std::string signed_lag_gain_proposal_route;
+    std::uint64_t signed_lag_gain_proposal_device_fft_stages = 0;
+    std::uint64_t signed_lag_gain_proposal_rescore_fft_stages = 0;
+    std::size_t signed_lag_gain_proposal_rescored_lags = 0;
+    double signed_lag_gain_proposal_top2_gap = 0;
     std::array<double, 2> nominal_independent_gain_bit_evidence{};
     std::array<std::array<double, 2>, receiver_independent_gain_power_count> nominal_independent_gain_power_bit_evidence{};
     std::array<double, 2> nominal_independent_fixed_centroid_bit_evidence{}, nominal_independent_moving_centroid_bit_evidence{};
@@ -192,6 +218,19 @@ struct ReceiverSlotScore {
     double varying_line_frequency_hz = 0, varying_line_log_evidence = 0;
     std::size_t drift_timing_atoms = 0, drift_slopes = 0, drift_frequency_bins = 0;
     std::size_t drift_relative_doppler_models = 0;
+    // The drift proposal route, as for the signed-lag route above, and the
+    // timing atom evaluations for which a device call published ridge
+    // records or slope frontiers, including those that then fell back. The
+    // retained digest hashes each sign's set of survivor timing atoms, each
+    // with its exactly scored (bit, slope, bin) set, so routes that select
+    // differently differ in it. The line fields are the same three for the
+    // line-conditioned drift stage of a retained coherent line.
+    std::string drift_proposal_route;
+    std::size_t drift_device_atoms = 0;
+    std::uint64_t drift_retained_digest = 0;
+    std::string drift_line_proposal_route;
+    std::size_t drift_line_device_atoms = 0;
+    std::uint64_t drift_line_retained_digest = 0;
     unsigned drift_stage_workers = 0, drift_line_stage_workers = 0;
     unsigned drift_planned_stage_workers = 0, drift_line_planned_stage_workers = 0;
     std::uint64_t drift_coherent_timing_fft_rows = 0, drift_coherent_timing_fft_stages = 0;
@@ -199,6 +238,17 @@ struct ReceiverSlotScore {
     double drift_seconds = 0;
     std::array<double, 2> drift_bit_evidence{};
     std::string drift_status, drift_line_status;
+    // --- Drift section timers (append-only block) ---
+    // Lane-summed seconds of the drift stages over both relative-Doppler
+    // signs, including a line-conditioned drift stage when it runs:
+    // template render and products, ridge segment FFTs and power tables,
+    // ridge record search and slope selection, slope dechirp/FFT/scan, and
+    // exact statistics with their likelihoods. Each lane's wall time
+    // counts; lanes overlap and may share hardware threads, so the sum can
+    // exceed drift_seconds, which times only the ordinary stage.
+    double drift_render_seconds = 0, drift_ridge_seconds = 0, drift_ridge_search_seconds = 0;
+    double drift_slope_seconds = 0, drift_exact_seconds = 0;
+    // --- end drift section timers ---
     double helper_seconds = 0, coarse_seconds = 0, fine_seconds = 0;
     // Helper acquisition ran beside coarse preparation: helper_seconds then
     // lies inside coarse_seconds instead of preceding it.

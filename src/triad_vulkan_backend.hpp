@@ -3,7 +3,10 @@
 #include "datapump/triad_acceleration.hpp"
 #include "triad_bulk_peaks.hpp"
 
+#include <cstddef>
+#include <cstdint>
 #include <span>
+#include <stop_token>
 #include <string_view>
 #include <vector>
 
@@ -13,6 +16,27 @@ namespace datapump::triad::v3::receiver_detail {
 // bounded allocation and exact peak pipeline as production frequency search.
 std::vector<CoarseBulkPeaks> vulkan_select_peak_rows(const VulkanReceiverOptions&,
     std::span<const double> scores, std::size_t arrivals, std::size_t separation);
+
+// Bounded device self-check of the core's fine-stage generalizations
+// (test_triad_vulkan --core), on a backend device of these options. It
+// checks the shader registry's family ranges; a fine-stage context with a
+// descriptor pool beyond the default, whose six-binding pipelines run and
+// whose work leaves every coarse counter unchanged; and FP64 twiddle-table
+// VkFFT plans against a host DFT, with their quoted table charge released
+// with the plans. It throws on any failed check. Without FP64/INT64 shaders
+// fp64_plans is false and the FP64 plans are not checked.
+struct VulkanCoreCheck {
+    std::size_t built_in_kinds = 0, stage_kinds = 0;
+    std::size_t pipelines = 0, bindings = 0, product_rows = 0;
+    double product_error = 0;
+    bool fp64_plans = false;
+    std::size_t fft_rows = 0, fft_batches = 0, fp64_lut_bytes = 0, fp32_lut_bytes = 0;
+    std::uint64_t fft_row_stages = 0;
+    // Largest error relative to the reference's RMS: the forward transform
+    // against the host DFT, and the normalized round trip against its input.
+    double forward_error = 0, round_trip_error = 0;
+};
+VulkanCoreCheck vulkan_core_self_check(const VulkanReceiverOptions&, std::stop_token);
 
 inline constexpr std::string_view vulkan_rotate_shader = R"glsl(
 #version 450

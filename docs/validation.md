@@ -1215,7 +1215,7 @@ retained fixtures. The [20 November comparison](#blackwell-dense-fp4-coarse-sear
 measured the same geometry again with device event intervals for the coarse
 search, so the compact receipts of this campaign were removed. The tracked
 timings, fixture commands and acceptance receipts remain its record.
-[Blackwell continuation guide](triad-gpu-optimization.md#continue-blackwell-fp4-work)
+[Current GPU limits](triad-gpu-optimization.md#current-gpu-limits-and-next-steps)
 · [Reproduction](triad-gpu-optimization.md#reproduce-the-matched-blackwell-runs).
 
 ### Blackwell dense FP4 coarse search — 20 November 2026
@@ -2022,12 +2022,12 @@ bank or on device routes.
 At four workers the fine stage was 3.1–4.7% slower in all three pairs. Coarse
 was 1.4% faster, and the complete slot moved +0.2% to +1.6%, which does not
 meet the rule. A predeclared bisect at four workers found:
-- The CPU-restructure track alone reproduced it: fine 4–6% slower, slot 0.7–1.5%.
+- The CPU restructures alone reproduced it: fine 4–6% slower, slot 0.7–1.5%.
 - Without the Gaussian null skip, timing was the same as the candidate.
 - A placebo function in the fine source moved fine by 0.2–1.5%.
-- `b3c7c48f` plus only the track's fine-stage files kept the old fine time.
+- `b3c7c48f` plus only the CPU restructures' fine-stage files kept the old fine time.
 
-So the shift follows the track's coarse-side change. On the CPU route that
+So the shift follows their coarse-side change. On the CPU route that
 change is the skipped second finiteness scan and the shared serial filter
 code; it was not split further. The
 Gaussian skip gave no measurable fine gain on this capture. Complete slots at
@@ -2077,7 +2077,80 @@ better.
 - the probe hashes;
 - the test outcomes.
 
-Remove it when the Blackwell checks above are recorded.
+Remove it when a later device comparison supersedes these results or the
+routes are removed.
+
+#### Cost model of the CPU families
+
+A fixed-geometry model of the stored receipts, made on 20 November before
+the fine-stage ports, supplies the receipt splits, family scenario results,
+arithmetic and rates that the GPU guide's
+[bounds and levers](triad-gpu-optimization.md#what-bounds-the-challenging-slots)
+quote. Nothing was rerun. Its inputs:
+
+- **Receipts.** Of 591 stored `native_slot` phases, the 20 with the most
+  drift, varying fine and signed-lag seconds are all CUDA-route Blackwell
+  receipts: 16 on an RTX PRO 6000 and 4 on an RTX PRO 4500. Eighteen scored
+  the segmented search on the CUDA device, and two (`long36`, `long36m16`)
+  scored it natively. The three families took 25–65% of each slot. The
+  receipts are in `local-evidence/hf-100mw-extended-20261118/` (5),
+  `hf-100mw-gaussian-transfer-20261118/results/` (2),
+  `hf-2mw-gpu-20261118/` (3) and `lowrate-2mw-runpod/` (10); the derived
+  per-receipt tables were not kept. Those directories also back this
+  model: keep them until the CPU families are re-measured on a device
+  route.
+- **The two receipts the guide tables.** `admission` seconds; "other" is
+  the stage minus its named parts. The HF receipt ran the automatic CUDA
+  route, the −12.9897 receipt explicit `--backend cuda` with CUDA segmented
+  timing.
+
+| Receipt | Allocation | Slot | Coarse: segmented / signed-lag / other | Fine: drift / varying fine / other | Process CPU-s |
+| --- | --- | --- | --- | --- | --- |
+| [HF 100 mW 36 Hz/10× Target −22.5](../local-evidence/hf-100mw-extended-20261118/admission-active-940600-0-target--22.5.json) | EPYC 9555 pod, 27.2-CPU quota, 13-CPU affinity, W = 26 | 3,706.8 | 2,220.0: 1,626.3 / 385.8 / 207.9 | 1,486.5: 899.5 / 401.4 / 185.6 | 14,050 |
+| [36 Hz/10× 100 mW Target −12.9897](../local-evidence/lowrate-2mw-runpod/100mw-36hz10x-target-m12p9897-seed940600-bit0.json) | 13-CPU allocation, W = 26 | 400.9 | 218.3: 133.2 / 81.2 / 3.8 | 182.6: 128.5 / 37.6 / 16.5 | 2,257 |
+
+The HF receipt also uploaded 249 GB and reserved 99,243,065,344 of
+101,975,851,008 device bytes.
+
+- **Work.** Signed-lag FFT row-stages are counted. Total drift FFT work is
+  rebuilt from the drift plan and counters, because the receipt counts only
+  rank-pass zero-slope dechirps. Varying fine projections are modeled from
+  the block shapes.
+- **Scenarios.** Moving only the FFTs transfers 95% of the signed-lag
+  stage, 15–30% of drift and 25–60% of varying fine to the device.
+  Whole-family fused ports leave 3%, 5–10% and 5–10% on the CPU. Device
+  time is added at 3e11 FFT row-stages/s for correlation stages (the in-slot
+  Vulkan segmented rate of the 72 Hz/5× control), 2e11 for the
+  2^21–2^25-point drift transforms and an assumed 2e10 rendered template
+  column-rows/s. On the HF receipt that is 8.7 s for signed-lag, 5.7 s for
+  drift and 6.5 s for varying fine; tripling them moves the whole-family
+  result by about 40 s. The two native-segmented receipts also divide their
+  segmented stage by 8.
+- **Results.** HF receipt: 1.19–1.30× with FFTs only and 1.70–1.75×
+  (2,118–2,183 s) whole-family, after which the CUDA segmented stage is
+  75–77% of the slot. Across the 18 CUDA-segmented receipts: 1.33–2.6×,
+  with the segmented stage then 71–92% of the slot. The two native-segmented
+  receipts: 7.4–8.0×.
+- **Arithmetic on the HF receipt.** Signed-lag 1.3e13 FP64 operations;
+  drift 3.0e12 in FP32 FFTs, about 2e12 in rendering and 1.6e12 in FP64
+  exact likelihoods; varying fine about 7e12 in FP64 FFTs and 1.4e12 in
+  rendering. That is about 2.8e13 in all, against about 3.2e15 for the CUDA
+  segmented stage.
+- **Rates.** 16,384-point signed-lag ranks ran 2.5–5.3e8 FFT row-stages
+  per thread-second on 13-CPU allocations, the highest on the EPYC 9555
+  pod, and 0.9–1.2e8 on 27-CPU quotas; the two 8,192-point ranks ran 1.2e9
+  on a 13-CPU allocation and 6.2e8 on a 27-CPU quota. Varying fine took
+  0.6–0.8 ms per 200-row block on 13-CPU allocations and 1.1–1.9 ms on
+  27-CPU quotas. Drift used about 4.9–5.0 of 13 CPUs: the CPU-second
+  difference of two pairs of equal-geometry slots with and without drift,
+  over the drift seconds. On a 27-CPU RTX PRO 4500 pair the same method
+  gives 8.3–8.7, above the 8-lane cap (6.9–7.7 over the wall difference),
+  so that pair, which also differs in seed and decision, is not clean.
+  CUDA segmented timing ran 3.9–5.2e11 row-stages/s at N = 32,768 on the
+  RTX PRO 6000 and 0.7–1.4e11 on the RTX PRO 4500.
+- **Weakest input.** The FFT shares of drift and varying fine CPU time set
+  the FFTs-only result. Per-family section timers on one HF-class
+  abbreviated slot would settle them.
 
 ### Blackwell qualification of the offload routes — 20 November 2026
 
@@ -2214,6 +2287,9 @@ final:
 | Stable, 4 workers | 0.131 → 0.082 |
 | One-ray 36 Hz, 24 workers | 0.231–0.257 → 0.053–0.060 |
 
+At 24 workers the final tree's matched slots spent 0.020–0.024 s in coarse
+and 0.039–0.043 s in fine.
+
 The five-slot message's receiver service took 0.393 s against 0.213 s and
 verified message and physical quiet in both. Under automatic selection:
 - the 72 Hz/5× control took 19.7 s;
@@ -2231,9 +2307,10 @@ routes are OpenCL-only.
 **Limits.**
 - One pod, one or two runs per timing cell. The host differs from earlier
   records, so compare within this record.
-- RTX 5090, RTX 4090-class and other generations remain unmeasured. They
-  keep the native segmented scorer, and have no FP4 dense or resident
-  route.
+- RTX 5090, RTX 4090-class and other generations remain unmeasured.
+  RTX 4090-class devices keep the native segmented scorer and have no FP4
+  dense or resident route. An RTX 5090 that OpenCL reports as compute
+  capability 12.0 would receive these routes without a measurement.
 - The multi-owner cost of the segmented plan-time queue lock and the
   non-blocking lease is unmeasured.
 - Proposal changes at near-ties remain possible on explicit `device`
@@ -2251,6 +2328,376 @@ routes are OpenCL-only.
 
 Remove it with the rest of that directory when a later device comparison
 supersedes these results.
+
+### Fine-stage device routes and exact CPU stages — 21 November 2026
+
+**Question.** Can drift evidence, varying fine tracking and the signed-lag
+gain ranks run on device FFTs, and which exact CPU changes should come
+first? These are the largest native CPU costs on challenging geometries.
+On the hardest stored HF receipt, a 3,707 s slot, drift alone took 899 s.
+
+**Changes.** Source `cdd1cb20` plus this change (46 files, about +14,800
+lines). [Port status and limits](triad-gpu-optimization.md#fine-stage-device-ports).
+
+- **Exact CPU stages, on every route:**
+  - Drift ridge search: segments outer and contiguous center windows, in
+    blocks of up to 16 consecutive slopes at the largest grid (64 on small
+    grids). The block's sums reuse the lane's idle render tile, so no
+    quote changes.
+  - Drift stage width: ordinary plans keep eight lanes and widen toward the
+    worker budget only into the largest other stage of the same owner
+    lease, so no lease grows. The 72 Hz slots run 24 lanes instead of 8.
+  - Varying fine block batches, charged in the varying quote.
+  - Signed-lag exact shift runs, and host certification machinery for a
+    device rank.
+  - Lane-summed drift and varying phase timers; drift and varying width and
+    batch receipts.
+- **Interface.** A backend-neutral stage interface for the three families,
+  and the Vulkan core moved out of `triad_vulkan_backend.cpp` into
+  `triad_vulkan_core.*`.
+- **Vulkan device routes, explicit requests only:**
+  - `--vulkan-gain-rank device`: FP32 VkFFT direct ranks with an FP64
+    rescored, certified frontier.
+  - `--vulkan-drift device`: FP32 FFT drift proposals; drift evidence stays
+    FP64 on the host.
+  - `--vulkan-varying-fine device --vulkan-varying-arithmetic fp64`: FP64
+    varying statistics.
+  - **Default (fastest)** declines every family as
+    `vulkan-<family>-unqualified-device` until a full RTX PRO 6000
+    Blackwell qualification sets `automatic_<family>_qualified`.
+  - The VkFFT and SPIR-V caches keep the former bounds (16 programs in
+    8 MiB, 20 shaders in 160 KiB) unless a family route can be served on
+    the backend; then they hold 48 programs in 64 MiB and 64 shaders in
+    512 KiB, charged in the stream reservation and in every owner's lease.
+
+**Review.** An independent read-only review in six areas, with a skeptic
+per finding, found no must-fix defect. Twelve distinct should-fix findings
+were fixed. The main ones:
+- The raised caches were charged on automatic routes that cannot use them,
+  59,088,896 B per owner and once more in the stream reservation. Now the
+  default routes charge exactly what `cdd1cb20` charged.
+- Host-read buffers that land in system RAM on discrete GPUs were missing
+  from the family host quotes.
+- An explicit varying device route reported a coherent-gain stage as
+  `unsupported-shape`; it now records `coherent-gain`.
+- The drift device test measured batch invariance without gating it, and
+  passed on a device without FP64/INT64 shaders.
+- The rest were stale or wrong documentation, including a flag that did
+  not exist.
+
+Two findings were refuted. The optional findings that were applied:
+- OpenCL session receipts no longer carry backend-wide fine-stage
+  counters.
+- The FP64 frontier rescoring has its own transform receipt.
+- Drift device lanes allocate exactly their quote.
+- Two always-zero receipt fields were removed.
+
+A second review of the slope blocks found no exactness defect. Its fix
+removed the superseded one-slope ridge function, so a single native ridge
+implementation remains.
+
+**Exactness.** Ryzen 5 PRO 5650U, Radeon RADV RENOIR (unified memory),
+GNU 14.2.0. Each probe ran alone, compared with receipts of `cdd1cb20`:
+- **Default routes are exact.** The 72 Hz/1× admission slot (input
+  `7e8ef8fa…`) on Vulkan and CPU, the 72 Hz/5× control (`af364b67…`) on
+  Vulkan, and the matched severe and quiet fixtures on CPU have identical
+  decisions, evidence values, native counters and drift digests. Leases are
+  unchanged: `workspace_peak_bytes` 1,166,014,368 (72 Hz/1×) and
+  4,856,566,759 (72 Hz/5×). The severe fixture keeps its known
+  current-policy wrong-bit receipt.
+- **Declared receipt differences only:**
+  - each family's decline record;
+  - `requested_vulkan_*`;
+  - 16 new zero, empty or route slot fields;
+  - 18 `varying_components` copies of existing evidence terms;
+  - the drift width receipts, 8 → 24.
+  Coarse `retained_bytes` receipts grow by 1,120 B, because the session
+  holds two copies of the grown timing and bulk receipt structs.
+  `ReceiverSlotScore` grew from 1,912 to 2,232 B, which every drift quote
+  with spread Doppler charges.
+- **Signed-lag device ranks (decision-identical).** Lags 1213, 1708, 2572,
+  3084 on the 72 Hz/1× slot and 5438, 346, 1215 on the 72 Hz/5× control
+  equal native, with bit-identical evidence. Band ratios were 0.54 and 0.48.
+- **Drift device proposals (proposal-qualified).** Decisions are
+  identical. On the 72 Hz/1× slot the device keeps a different clock
+  neighbour at one zero-slope near-tie (digest `eb829892…` against
+  `a626c2e8…`), and drift evidence moves by 8.0e-10 and 4.4e-9 nats. On the
+  72 Hz/5× control the digest and evidence equal native.
+- **FP64 varying statistics (roundoff).** Decisions and counters are
+  identical, and evidence is within 3.0e-14 nats (72 Hz/1×) and 1.8e-15
+  (72 Hz/5×).
+- **All three device routes together** reproduce each single-family run on
+  the 72 Hz/1× slot. On the 72 Hz/5× control they complete with no declines
+  or fallbacks; that run predates the review fixes.
+
+**Checks.** On the final tree:
+
+| Tree | Group | Outcome |
+| --- | --- | --- |
+| `build/dev` (`./build.sh test`) | triad | 53 of 53 |
+| `build/dev` (`./build.sh test`) | fast | 72 of 72 |
+| Device tree (`DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON`) | triad label | 61 of 61 |
+| Device tree | `triad_vulkan*` and `gui_robust_gpu*` | 14 of 14 |
+| — | Python receipt and bundle tests | 59 of 59 |
+| NVFP4 branch | `-fsyntax-only` of the seven changed TUs | no errors |
+
+The device triad label includes the six emulated OpenCL tests and the
+three new family tests. The drift test now gates batch invariance: 0 of
+1,138,688 bits and 0 of 336 rows on the Radeon.
+
+On an earlier run of the default tree, `triad_native_receiver_long-calm-polarity`
+timed out at 60.07 s against its 60 s limit. A review workflow was running
+beside it. Timed alone, the candidate's test binary took 32.7–33.0 s
+against 34.9–35.5 s for `cdd1cb20` (three pairs, 7.4% faster). The final
+run took 53.8 s.
+
+**Local timing.** Three alternated pairs per cell, each run started only
+below 0.75 CPUs of other work. Reference `cdd1cb20` (probe `1c30106d…`)
+against the final tree (probe `663a4ca4…`), same configure. A change counts
+as established only if all three pairs agree in direction and the median
+moves by more than 3%. Times in seconds, reference → candidate (median
+ratio):
+
+| Slot, route, workers | Drift | Varying fine | Fine stage | Signed-lag ranks | Slot |
+| --- | --- | --- | --- | --- | --- |
+| 72 Hz/1×, Vulkan, 24 | 1.32–1.41 → 1.11–1.15 (0.84) | 0.69–0.70 → 0.59–0.60 (0.85) | 2.50–2.62 → 2.20–2.24 (0.88) | 0.47–0.50 → 0.48–0.52 † | 23.3–24.2 → 22.9–23.9 † |
+| 72 Hz/1×, CPU, 24 | 1.32–1.34 → 1.08–1.09 (0.81) | 0.70–0.71 → 0.57–0.58 (0.82) | 2.51–2.55 → 2.15–2.16 (0.85) | 0.48–0.49 → 0.47–0.48 † | 23.06–23.11 → 22.54–22.59 (0.978) † |
+| 72 Hz/1×, Vulkan, 4 | 1.77–1.82 → 1.41–1.48 (0.80) | 0.86–0.88 → 0.75–0.77 (0.87) | 3.23–3.33 → 2.78–2.91 (0.86) | 0.58–0.59 → 0.57–0.60 † | 30.25–30.29 → 29.70–29.99 (0.982) † |
+| 72 Hz/5×, Vulkan, 24 | 9.79–9.86 → 6.51–6.61 (0.67) | 4.47–4.54 → 2.82–2.92 (0.63) | 15.79–15.97 → 10.94–11.02 (0.69) | 8.36–8.47 → 8.26–8.36 † | 255.5–256.6 → 250.9–251.6 (0.981) † |
+
+† Not established by the rule. Drift, varying fine and the fine stage are
+established in every cell. The slot totals were 1.8–2.2% faster, in every
+pair except one at 72 Hz/1× Vulkan with 24 workers, but below the 3%
+threshold. The coarse stage dominates these slots and did not change:
+20.4–27.1 s (20.7–21.7 s in the 72 Hz/1× Vulkan cell at 24 workers) and
+240 s. Every run in a cell had the same input hash and the
+same decisions.
+
+A first round on the tree before the slope blocks (probe `461e7567…`, same
+cells) gave the same picture:
+- The 72 Hz/5× drift stage was 0.70 of the reference, against 0.67 with
+  the slope blocks. On the 72 Hz/1× slot the ridge search is a small share,
+  and the blocks changed nothing measurable.
+- Signed-lag ranks were not established in any cell. The shift runs remove
+  shift evaluations, but the direct-rank transforms dominate the stage.
+- Timed alone, `long-calm-polarity` was 7.4% faster (above).
+
+**HF ridge microbenchmark.** The same two loops at the HF ridge shape
+(1,762 segments × 16,384 bins, 984 centers at stride 4, random FP64 tables,
+64 slopes in native order), records bit-identical:
+
+| Loop | One thread (ns per load) | Six lanes (ns per load) |
+| --- | --- | --- |
+| Former center-major | 6.4–6.8 | 20–21 |
+| Segment-major, one slope | 1.43–1.67 | 11.0–12.0 |
+| Segment-major, blocks of 16 slopes | 0.45 | 0.83 (indicative) |
+
+- One slope at a time, six lanes saturate the 5650U's DRAM. Each slope
+  re-reads about 111 MB of row windows.
+- The six-lane block runs exceeded the load gate, apparently from kernel
+  page zeroing of 2.7 GB of tables, so treat them as indicative.
+- The pod's 899 s drift stage, on an EPYC 9555 pod with 13-CPU affinity,
+  implies about 63 ns per critical-path load, derived from the receipt's
+  drift seconds and a modeled load count (ridge share assumed 85–95%), not
+  timed. That latency is not reproduced here, so the HF gain is still
+  unmeasured. Time the same shape on the host that runs the HF slots.
+
+**Limits.**
+- One local host and two slots exercise the drift, varying and signed-lag
+  stages. The CPU route's HF-shape gain is unmeasured.
+- This entry checked the device routes only on RADV. On the Radeon, single
+  noisy runs looked slower than native for drift and varying, so it stays
+  declined. The NVIDIA timing and batch-invariance checks are in the
+  Blackwell gate below.
+- No HF-shape device stage has run.
+- No CUDA equivalents exist yet. The CUDA-built HF, 36 Hz and 60 Hz
+  receipts take no device route.
+- In an explicit device workspace, gain-rank and drift sessions are each
+  bounded by the ceiling, while varying sessions share it.
+- Every family's host quote includes 128 MiB of plan and shader
+  compilation on every device. That can keep a tight envelope native on a
+  discrete GPU.
+- The backend-wide cache is still charged once per owner plus once in the
+  stream reservation, as at `cdd1cb20`.
+
+**Blackwell gate.** The predeclared RTX PRO 6000 qualification ran the
+same day. It qualified the signed-lag gain rank for automatic selection on
+that class, and kept drift and varying declined. It also timed the three
+families on NVIDIA and checked drift batch invariance there; the HF-shape
+device stage stays open
+([entry below](#blackwell-qualification-of-the-fine-stage-device-routes--21-november-2026)).
+
+**Evidence.** `local-evidence/fine-stage-offload-20261121/` holds:
+- the predeclared timing plan, run indexes and summaries;
+- the binary hashes;
+- the microbenchmark source and outputs;
+- the identity comparisons;
+- the test outcomes;
+- the Blackwell plan.
+
+Remove it when a later device comparison supersedes these results.
+
+### Blackwell qualification of the fine-stage device routes — 21 November 2026
+
+**Device.** One full RTX PRO 6000 Blackwell Server Edition: 97,887 MiB,
+compute capability 12.0, driver 595.112.07, MIG disabled. The host was a
+Xeon 6952P with a 40.8-CPU quota and 188 GB of memory, so `W` was 80. GNU
+13.3.0 and NVCC 12.8. The pod built three probes:
+- the reference `cdd1cb20`, `00c94f3e…`;
+- the candidate, the tree of the
+  [entry above](#fine-stage-device-routes-and-exact-cpu-stages--21-november-2026),
+  `81df60a5…`;
+- the candidate with `automatic_gain_rank_qualified` set, `f18fa728…`.
+
+The pass rules were predeclared before renting. The pod ran 0.81 h and
+was verified absent afterwards.
+
+**Gates passed.**
+- Every device test passed:
+  - `test_triad_opencl_nvfp4` and `test_triad_opencl_fine_session`;
+  - `test_triad_vulkan` in its default, `--segmented`,
+    `--workspace-admission`, `--host-scoring`, `--core`, `--gain-rank`,
+    `--drift` and `--varying` modes.
+- The moved Vulkan core's OpenCL NVFP4 branch built and ran for the first
+  time. No kernel spilled registers.
+- The gain-rank oracle's worst lag error was 0.81 of its band at the HF
+  shape and 0.73 at 60 Hz. Its single timed call took 0.516 s for 2,340
+  padded HF blocks and 0.0149 s for 294 padded 60 Hz blocks in a 512 MiB
+  explicit workspace. These calls include host staging and their own batch
+  width, so they are component times, not production rates.
+- Drift transforms are batch-invariant on NVIDIA too: 0 of 1,138,688 bits
+  and 0 of 336 rows differ.
+- Varying statistics were within 5.5e-10 nats.
+
+**Defaults unchanged, reference against candidate.** On the automatic route
+(Vulkan with OpenCL NVFP4) every existing receipt value was identical:
+- the matched severe, quiet and stable fixtures, severe in both orders;
+- the 72 Hz/1× slot and the 72 Hz/5× control.
+
+Capture hashes were identical too. The only differences were new fields and
+the drift width: 8 lanes grew to 58 planned, with 43–48 running.
+
+The exact CPU stages cut the candidate's automatic fine stage from 1.58 to
+0.89–0.94 s on the 72 Hz/1× slot and from 17.1 to 8.0–8.7 s on the
+72 Hz/5× control. Those are single reference runs, so they are indications.
+
+**Explicit device routes against native.** One binary, two alternated pairs
+per family. Seconds, native → device:
+
+| Family | 72 Hz/1× stage | 72 Hz/5× stage | 72 Hz/5× slot |
+| --- | --- | --- | --- |
+| Signed-lag ranks | 0.19–0.20 → 0.24–0.46 | 26.7–32.6 → 0.57–0.68 | 43.4–48.7 → 16.3–16.9 |
+| Drift proposals | 0.36 → 0.81–1.65 | 2.23–2.26 → 2.96–3.28 | 42.6–53.4 † |
+| Varying statistics | 0.18–0.30 → 3.16–3.60 | 4.97–5.23 → 13.2 | 49.8–50.9 † |
+
+† The other families were native in these runs, so the slot includes the
+native signed-lag stage.
+
+With all three families on the device, the 72 Hz/1× slot took 5.97–6.39 s
+against 2.61–2.97 s native, and the 72 Hz/5× slot 24.5–25.6 s against
+16.3–16.9 s with the gain rank alone; varying fine took 12.8–13.5 s of it.
+
+Exactness held for every family:
+- Every run had the same `/result` as native.
+- Signed-lag lags and evidence were identical, with band ratios 0.56 and
+  0.26.
+- Drift evidence moved by at most 2.2e-9 relative on the 72 Hz/1× slot and
+  not at all on the 72 Hz/5× control.
+- Varying evidence differed by FP64 roundoff, at most 2.5e-14 relative.
+- No run had a decline or fallback.
+
+**Decision.** By the predeclared rule a family needed a faster stage on both
+slots.
+- **Drift and varying** were slower on both, so they stay declined. Their
+  per-call overhead and the drift session's serialized lanes likely
+  outweigh the transform work at these shapes on a 40-CPU host; no
+  device-phase timing separated them
+  ([mechanism](triad-gpu-optimization.md#drift-proposals)).
+- **Signed-lag ranks** failed only on the easy 72 Hz/1× slot, where the
+  slot difference stayed within noise. The automatic-mode contract does not
+  let an easy-case loss veto a challenging-case advantage, so that clause
+  was not applied. The deviation was recorded before the flip runs, and the
+  check was narrowed to this family.
+
+With the gain rank qualified, the automatic route compared with the same
+build unflipped:
+
+| Slot | Unflipped | Flipped |
+| --- | --- | --- |
+| 72 Hz/5× control | 38.4–55.5 s in three runs; 43.7–55.5 s in the two flip pairs | 17.8–19.8 s |
+| 36 Hz/10× 100 mW holdout (`8a6c8ab2…`) | 688 s, 21,689 CPU-s | 281 s, 4,919 CPU-s |
+| 72 Hz/1× slot | 5.58–6.61 s | 6.56 s |
+
+The holdout's signed-lag stage fell from 415 s to 3.05 s. `/result` and
+every evidence value stayed identical, there were no declines or
+fallbacks, and the matched severe fixture was unchanged.
+
+Stage seconds on the automatic route (`admission`; signed-lag lies inside
+coarse, drift and varying fine inside fine):
+
+| Slot, build | Slot | Coarse | Signed-lag | Fine | Drift | Varying fine |
+| --- | --- | --- | --- | --- | --- | --- |
+| 72 Hz/1×, flipped | 6.56 | 5.52 | 0.43 | 1.03 | 0.41 | 0.36 |
+| 72 Hz/1×, unflipped, two runs | 5.58–6.61 | 4.69–5.66 | 0.25–0.26 | 0.89–0.94 | 0.37–0.41 | 0.27–0.28 |
+| 72 Hz/5×, flipped, two runs | 17.75–19.76 | 9.36–11.2 | 1.34–1.47 | 8.38–8.55 | 2.18–2.22 | 5.32–5.47 |
+| 72 Hz/5×, unflipped, three runs | 38.41–55.47 | 30.18–46.72 | 20.33–38.21 | 8.01–8.74 | 2.17–2.27 | 4.97–5.46 |
+| Holdout, flipped | 280.99 | 113.27 | 3.05 | 167.56 | 60.91 | 89.87 |
+| Holdout, unflipped | 688.27 | 524.5 | 415.12 | 163.65 | 49.61 | 96.7 |
+
+With explicit device segmented timing and every family native
+(`--backend vulkan`), the 72 Hz/1× slot took 2.61–2.97 s with coarse
+1.71–2.21 s, against 5.58–6.61 s on the automatic route, which keeps those
+segmented shapes native. On the 72 Hz/5× control the explicit signed-lag
+stage took 0.57–0.68 s against 1.34–1.47 s on the automatic route; the
+difference is not explained. The holdout's band ratio was 0.28.
+
+`automatic_gain_rank_qualified` is now set. It applies only to the
+OpenCL-identified SM 12.0 class. Holding the device rank costs 6.8–72 MB
+of host quote per owner (6.8 MB on the 72 Hz/1× slot, 68.7 MB on the
+72 Hz/5× control, 71.6 MB on the holdout). Serving a family also gives that class the larger
+plan and shader caches, 59,088,896 B more per owner, all charged.
+
+**HF ridge microbenchmark on the pod's CPU.** Nanoseconds per load,
+records bit-identical. Each lane count ran twice, once per block size, so
+the first two columns span both runs. Multi-lane cells give the per-thread
+median and, in parentheses, the range across threads:
+
+| Lanes | Former loop | One slope per pass | Blocks of 16 | Blocks of 32 |
+| --- | --- | --- | --- | --- |
+| 1 | 5.3–6.2 | 1.36–2.19 | 0.61 | 0.33 |
+| 8 | 5.6 (5.3–10.4) | 2.2–2.4 (1.2–3.0) | 0.42 (0.37–0.46) | 0.41 (0.35–0.41) |
+| 16 | 6.0 (5.4–11.7) | 2.6–3.0 (1.6–3.4) | 0.47 (0.37–0.49) | 0.42 (0.36–0.59) |
+
+Per thread, blocks of 16 ran a median 13–14× faster than the former loop at
+8 and 16 lanes (12–23× across threads); blocks of 32 stayed within the
+run-to-run spread. The 63 ns per load derived from the 899 s HF receipt's
+drift seconds and a modeled load count (ridge share assumed 85–95%), on an
+EPYC 9555 pod (27.2-CPU quota, run with 13-CPU affinity and W = 26), was
+not reproduced: the former loop ran at 5–12 ns here. Time the benchmark
+on that CPU class to test it. The HF slot itself was not rerun.
+
+**Limits.**
+- One pod, two pairs per cell, a 40-CPU host. On this host the native
+  signed-lag and varying stages were slower than on the 12-thread 5650U
+  (72 Hz/5×: 20.3–38.2 s across nine runs against 8.26–8.36 s, and 4.8–5.6 s
+  against 2.82–2.92 s), cause unmeasured, so the device margins are
+  host-specific. That fewer CPUs per GPU favour the device remains a
+  hypothesis for stages that scale, such as drift.
+- The explicit-workspace holdout runs failed their memory ceilings: 4 GiB
+  of device workspace, then 48 GiB against a 64 GB host limit at 80
+  owners. Only the automatic pair completed.
+- RTX 5090, RTX 4090-class and other generations remain unqualified for
+  every family.
+- CUDA-routed builds have no equivalent yet.
+
+**Evidence.** `local-evidence/fine-stage-offload-20261121/blackwell/`
+holds:
+- the sanitized plan, amendments and outcome;
+- the per-run phase summaries;
+- the device test outputs, with UUIDs removed;
+- the `ptxas` registers and spills;
+- the hashes;
+- the microbenchmark outputs.
 
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 
@@ -8533,11 +8980,10 @@ erased and higher SNR may not restore reception. `./build.sh test gui` passed
 30/30 in 154.46 seconds after that text change. No production thresholds,
 DSP search, allocations or worker defaults changed in this follow-up.
 
-The RunPod allocation was terminated and deleted after fetching the complete
-GPU results. Provider billing then showed zero GPUs, vCPUs and storage, and
-$0/hour ongoing spend. The observed account-balance decrease was about $3.83
-(about 1.4 hours of allocation), not an invoice-certified job charge. No
-persistent volume was created. Temporary local manifests, receipts and
+The RunPod allocation was authorized and bounded. It was terminated and
+deleted after fetching the complete GPU results, after about 1.4 hours, and
+the provider then showed no GPU, CPU or storage allocation. No persistent
+volume was created. Past budgets are not new spending authority. Temporary local manifests, receipts and
 analysis under `local-evidence/wrong-key-rates/` were removed after their
 results were reviewed and distilled here; the reusable native probe, scoped
 findings, original failures, reproduction command and provenance remain
@@ -11799,12 +12245,11 @@ checks. The baseline compiled source was
 Preserve the global `2*H` worker policy, full resource accounting, complete public
 work and physical completion while investigating serialization and repeated work.
 
-The authorized cloud envelope was at most eight hours and $20/hour aggregate.
-The selected task used one full RTX PRO 6000 under a $2.50/hour ceiling and $25
-total budget, without persistent volume. The roughly 100-minute rental ended
-with confirmed deletion by 20:47:10 UTC; no pod or cloud volume remains. The
-observed balance decrease was about $4.08, not a finalized invoice.
-Provider/account details and operational logs stay outside the checkout.
+The rental was separately authorized and bounded: one full RTX PRO 6000,
+without a persistent volume, deleted after about 100 minutes with no pod or
+cloud volume remaining. Past budgets are not new spending authority.
+Provider/account details, balances and operational logs stay outside the
+checkout.
 See [the completed scope](triad-performance.md#native-throughput-and-precision-investigation--10-november-2026).
 
 Verified current evidence remains scoped to the measured source:

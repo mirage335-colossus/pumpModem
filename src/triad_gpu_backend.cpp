@@ -55,6 +55,28 @@ public:
     }
     receiver_detail::BulkReceipt receipt() const override { return annotate(backend_->receipt()); }
     receiver_detail::BulkReceipt status_receipt() const override { return annotate(backend_->status_receipt()); }
+    std::string_view stage_decline(const receiver_detail::StageShape& shape, bool fp64_forced) const noexcept override {
+        return backend_->stage_decline(shape, fp64_forced);
+    }
+    std::unique_ptr<receiver_detail::GainRankBulk> make_gain_rank(const receiver_detail::GainRankShape& shape,
+            bool fp64_forced, std::stop_token stop) override {
+        return backend_->make_gain_rank(shape, fp64_forced, stop);
+    }
+    std::unique_ptr<receiver_detail::DriftBulk> make_drift(const receiver_detail::DriftBulkShape& shape,
+            bool fp64_forced, std::stop_token stop) override {
+        return backend_->make_drift(shape, fp64_forced, stop);
+    }
+    std::unique_ptr<receiver_detail::VaryingBulk> make_varying(const receiver_detail::VaryingBulkShape& shape,
+            bool fp64_forced, std::stop_token stop) override {
+        return backend_->make_varying(shape, fp64_forced, stop);
+    }
+    std::size_t stage_host_bytes(const receiver_detail::StageShape& shape, bool fp64_forced) const override {
+        return backend_->stage_host_bytes(shape, fp64_forced);
+    }
+    void record_stage_native(receiver_detail::StageFamily family, receiver_detail::StageReason reason,
+                             receiver_detail::StageNative kind) override {
+        backend_->record_stage_native(family, reason, kind);
+    }
 private:
     receiver_detail::BulkReceipt annotate(receiver_detail::BulkReceipt receipt) const {
         receipt.selection_reason = reason_ + (receipt.selection_reason.empty() ? "" : "; " + receipt.selection_reason);
@@ -63,6 +85,11 @@ private:
     std::shared_ptr<receiver_detail::ReceiverBulkBackend> backend_;
     std::string reason_;
 };
+}
+
+std::shared_ptr<receiver_detail::ReceiverBulkBackend> receiver_detail::make_selected_gpu_backend(
+        std::shared_ptr<ReceiverBulkBackend> backend, std::string reason) {
+    return std::make_shared<SelectedGpu>(std::move(backend), std::move(reason));
 }
 
 bool gpu_receiver_backend_available() noexcept {

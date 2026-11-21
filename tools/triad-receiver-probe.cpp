@@ -95,6 +95,9 @@ struct Options {
     bool cuda_segmented_timing = false;
     std::string vulkan_precision = "automatic", vulkan_fine_projection = "automatic";
     std::string vulkan_segmented_timing = "automatic";
+    // Fine-stage device routes and the varying statistics' arithmetic.
+    std::string vulkan_gain_rank = "automatic", vulkan_drift = "automatic", vulkan_varying_fine = "automatic";
+    std::string vulkan_varying_arithmetic = "automatic";
     std::string opencl_coarse_templates = "device", opencl_fine_tiles = "device";
     bool opencl_coarse_templates_supplied = false, opencl_fine_tiles_supplied = false;
     std::size_t opencl_fine_window = 0, opencl_fine_stream = 4;
@@ -145,9 +148,10 @@ struct Options {
 // Options that select receiver arithmetic, backends, allocation, budgets or
 // deadlines. None of them changes a generated capture, so a capture cache key
 // leaves them out; every other given option is part of the key.
-constexpr std::array<std::string_view, 33> receiver_only_options{
+constexpr std::array<std::string_view, 37> receiver_only_options{
     "--backend", "--tensor-precision", "--tensor-coarse-math", "--tensor-fine-projection",
     "--cuda-segmented-timing", "--vulkan-precision", "--vulkan-fine-projection", "--vulkan-segmented-timing",
+    "--vulkan-gain-rank", "--vulkan-drift", "--vulkan-varying-fine", "--vulkan-varying-arithmetic",
     "--opencl-coarse-templates", "--opencl-coarse-rescore", "--opencl-coarse-one-ray", "--opencl-fine-map",
     "--opencl-fine-tiles", "--opencl-fine-window", "--opencl-fine-stream", "--opencl-profile",
     "--gpu-fp32-minimum", "--native-coarse-precision", "--wrong-key-admission", "--require-accelerator",
@@ -232,6 +236,10 @@ Options parse(int argc, char** argv) {
     assign("--vulkan-precision", o.vulkan_precision);
     assign("--vulkan-fine-projection", o.vulkan_fine_projection);
     assign("--vulkan-segmented-timing", o.vulkan_segmented_timing);
+    assign("--vulkan-gain-rank", o.vulkan_gain_rank);
+    assign("--vulkan-drift", o.vulkan_drift);
+    assign("--vulkan-varying-fine", o.vulkan_varying_fine);
+    assign("--vulkan-varying-arithmetic", o.vulkan_varying_arithmetic);
     const bool coarse_templates_supplied = values.contains("--opencl-coarse-templates");
     assign("--opencl-coarse-templates", o.opencl_coarse_templates);
     o.opencl_coarse_templates_supplied = coarse_templates_supplied;
@@ -351,6 +359,18 @@ Options parse(int argc, char** argv) {
     require(one_of(o.vulkan_segmented_timing, {"automatic", "device", "native"}) &&
             (o.backend == "vulkan" || o.vulkan_segmented_timing == "automatic"),
             "--vulkan-segmented-timing expects automatic, device or native with explicit --backend vulkan");
+    const std::array<std::pair<const char*, const std::string*>, 3> stage_routes{{
+        {"--vulkan-gain-rank", &o.vulkan_gain_rank}, {"--vulkan-drift", &o.vulkan_drift},
+        {"--vulkan-varying-fine", &o.vulkan_varying_fine}}};
+    for (const auto& [flag, route] : stage_routes)
+        if (!one_of(*route, {"automatic", "device", "native"}) || (o.backend != "vulkan" && *route != "automatic"))
+            throw Error(std::string(flag) + " expects automatic, device or native with explicit --backend vulkan");
+    // Automatic and native routes never apply a stated arithmetic.
+    require(one_of(o.vulkan_varying_arithmetic, {"automatic", "fp64", "fp32-template"}) &&
+            (o.vulkan_varying_arithmetic == "automatic" ||
+             (o.backend == "vulkan" && o.vulkan_varying_fine == "device")),
+            "--vulkan-varying-arithmetic expects automatic, fp64 or fp32-template with explicit --backend vulkan "
+            "and --vulkan-varying-fine device");
     require(one_of(o.opencl_coarse_templates, {"device", "native"}) &&
             (!coarse_templates_supplied || (o.backend == "vulkan" && o.vulkan_precision == "nvfp4")),
             "--opencl-coarse-templates expects device or native with explicit Vulkan nvfp4 coarse search");
@@ -738,6 +758,13 @@ std::string hex_bytes(std::span<const std::uint8_t> bytes) {
     return result;
 }
 
+// A 64-bit digest as 16 hex digits, most significant first.
+std::string digest_hex(std::uint64_t digest) {
+    std::array<std::uint8_t, 8> bytes{};
+    for (std::size_t i = 0; i < bytes.size(); ++i) bytes[i] = static_cast<std::uint8_t>(digest >> (56 - 8 * i));
+    return hex_bytes(bytes);
+}
+
 // What a cached capture is bound to besides its arguments: the running
 // probe executable and, on Linux, the loaded runtime libraries whose code
 // can change sample values (C, math, C++ and GCC runtimes and the dynamic
@@ -1023,7 +1050,7 @@ Json bulk_json(const BulkReceipt& r) {
     Json::Object dense_coarse_fallbacks;
     for (std::size_t i = 0; i < r.opencl_coarse_fallback_counts.size(); ++i)
         dense_coarse_fallbacks.emplace(std::string(opencl_coarse_fallback_reasons[i]), r.opencl_coarse_fallback_counts[i]);
-    return object({
+    auto result = object({
         {"device", r.device}, {"device_name", r.device_name}, {"library_version", r.library_version},
         {"cuda_runtime_version", r.cuda_runtime_version}, {"cuda_driver_version", r.cuda_driver_version},
         {"cuda_fft_version", r.cuda_fft_version},
@@ -1206,6 +1233,33 @@ Json bulk_json(const BulkReceipt& r) {
         {"direct_columns", r.direct_columns}, {"direct_values", r.direct_values},
         {"direct_fallback_counts", std::move(fallbacks)}, {"wall_seconds", r.wall_seconds},
         {"selection_reason", r.selection_reason}});
+    // Fine-stage device families, vulkan_<family>_<field>.
+    for (const auto family : stage_families) {
+        const auto& stage = vulkan_stage_receipt(r, family);
+        const auto prefix = "vulkan_" + std::string(stage_family_receipt_names[static_cast<std::size_t>(family)]) + "_";
+        result[prefix + "sessions"] = stage.sessions;
+        result[prefix + "forward_ffts"] = stage.forward_ffts;
+        result[prefix + "inverse_ffts"] = stage.inverse_ffts;
+        result[prefix + "fft_row_stages"] = stage.fft_row_stages;
+        result[prefix + "score_rows"] = stage.score_rows;
+        result[prefix + "planned_calls"] = stage.planned_calls;
+        result[prefix + "declined_calls"] = stage.declined_calls;
+        result[prefix + "native_fallbacks"] = stage.native_fallbacks;
+        result[prefix + "upload_bytes"] = stage.upload_bytes;
+        result[prefix + "decline_reason"] = stage.decline_reason;
+        result[prefix + "fallback_reason"] = stage.fallback_reason;
+        result[prefix + "qualified_device"] = stage.qualified_device;
+    }
+    result["vulkan_gain_rank_frontier_lags"] = r.vulkan_gain_rank_frontier_lags;
+    result["vulkan_gain_rank_rescored_lags"] = r.vulkan_gain_rank_rescored_lags;
+    result["vulkan_gain_rank_rescore_seconds"] = r.vulkan_gain_rank_rescore_seconds;
+    result["vulkan_gain_rank_band_ratio"] = r.vulkan_gain_rank_band_ratio;
+    result["vulkan_gain_rank_band_source"] = r.vulkan_gain_rank_band_source;
+    result["vulkan_drift_ridge_cells"] = r.vulkan_drift_ridge_cells;
+    result["vulkan_drift_slope_ffts"] = r.vulkan_drift_slope_ffts;
+    result["vulkan_varying_blocks"] = r.vulkan_varying_blocks;
+    result["vulkan_varying_batches"] = r.vulkan_varying_batches;
+    return result;
 }
 
 std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
@@ -1247,6 +1301,16 @@ std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
             else if (o.vulkan_fine_projection == "native") options.fine_projection = VulkanFineProjection::native;
             if (o.vulkan_segmented_timing == "device") options.segmented_timing = VulkanSegmentedTiming::device;
             else if (o.vulkan_segmented_timing == "native") options.segmented_timing = VulkanSegmentedTiming::native;
+            const auto stage_route = [](const std::string& route) {
+                return route == "device" ? VulkanStageRoute::device :
+                    route == "native" ? VulkanStageRoute::native : VulkanStageRoute::automatic;
+            };
+            options.gain_rank = stage_route(o.vulkan_gain_rank);
+            options.drift_proposals = stage_route(o.vulkan_drift);
+            options.varying_fine = stage_route(o.vulkan_varying_fine);
+            options.varying_arithmetic = o.vulkan_varying_arithmetic == "fp64" ? VulkanVaryingArithmetic::fp64 :
+                o.vulkan_varying_arithmetic == "fp32-template" ? VulkanVaryingArithmetic::fp32_template
+                                                               : VulkanVaryingArithmetic::automatic;
             return make_vulkan_receiver_backend(options);
         } catch (const VulkanBackendUnavailable& error) {
             throw Unavailable(error.what());
@@ -1890,11 +1954,35 @@ Json score_json(const ReceiverSlotScore& score) {
         {"nominal_independent_gain_frequency_status", score.nominal_independent_gain_frequency_status},
         {"varying_coarse_seconds", score.varying_coarse_seconds},
         {"varying_fine_seconds", score.varying_fine_seconds},
+        {"varying_projection_seconds", score.varying_projection_seconds},
+        {"varying_statistics_seconds", score.varying_statistics_seconds},
+        {"varying_recursion_seconds", score.varying_recursion_seconds},
+        {"varying_wait_seconds", score.varying_wait_seconds},
+        {"varying_workspace_bytes", score.varying_workspace_bytes},
+        {"varying_batch_blocks", score.varying_batch_blocks}, {"varying_batches", score.varying_batches},
         {"varying_bit_evidence", scores(score.varying_bit_evidence)}, {"varying_status", score.varying_status},
         {"varying_frequency_states", score.varying_frequency_states},
         {"varying_timing_blocks", score.varying_timing_blocks},
         {"varying_timing_frequencies", score.varying_timing_frequencies},
         {"varying_timing_status", score.varying_timing_status},
+        {"varying_fine_route", score.varying_fine_route}, {"varying_fine_arithmetic", score.varying_fine_arithmetic},
+        // The components mixed into varying_bit_evidence, so that a device
+        // route of the varying statistics can be compared component by component.
+        {"varying_components", object({
+            {"fixed_bit_evidence", scores(score.fixed_varying_bit_evidence)},
+            {"tracked_frequency_log_prior_adjustment", score.tracked_frequency_log_prior_adjustment},
+            {"nominal_independent_gain_bit_evidence", scores(score.nominal_independent_gain_bit_evidence)},
+            {"nominal_independent_gain_power_bit_evidence", [&] {
+                Json::Array powers;
+                for (const auto& power : score.nominal_independent_gain_power_bit_evidence)
+                    powers.push_back(scores(power));
+                return Json(std::move(powers));
+            }()},
+            {"nominal_independent_fixed_centroid_bit_evidence",
+             scores(score.nominal_independent_fixed_centroid_bit_evidence)},
+            {"nominal_independent_moving_centroid_bit_evidence",
+             scores(score.nominal_independent_moving_centroid_bit_evidence)},
+            {"nominal_independent_gain_log_prior_adjustment", score.nominal_independent_gain_log_prior_adjustment}})},
         {"varying_timing_proposals", [&] {
             Json::Array proposals;
             for (const auto& p : std::span(score.varying_timing_proposals).first(score.varying_timing_proposal_count))
@@ -1927,6 +2015,11 @@ Json score_json(const ReceiverSlotScore& score) {
             {"score_row_bound", score.signed_lag_gain_proposal_score_row_bound},
             {"workspace_bytes", score.signed_lag_gain_proposal_workspace_bytes},
             {"proposal_seconds", score.signed_lag_gain_proposal_seconds},
+            {"proposal_route", score.signed_lag_gain_proposal_route},
+            {"device_fft_row_stages", score.signed_lag_gain_proposal_device_fft_stages},
+            {"rescore_fft_row_stages", score.signed_lag_gain_proposal_rescore_fft_stages},
+            {"rescored_lags", score.signed_lag_gain_proposal_rescored_lags},
+            {"top2_gap", score.signed_lag_gain_proposal_top2_gap},
             {"candidates", score.signed_lag_gain_candidates}, {"basis_rows", score.signed_lag_gain_basis_rows},
             {"bit_evidence", score.signed_lag_gain_candidates ? scores(score.signed_lag_gain_bit_evidence) : Json{}}})},
         {"tracked_frequency_bit_evidence", scores(score.tracked_frequency_bit_evidence)},
@@ -1957,6 +2050,9 @@ Json score_json(const ReceiverSlotScore& score) {
         {"drift_observation_rows", score.drift_observation_rows},
         {"drift_proposal_stride", score.drift_proposal_stride},
         {"drift_frequency_bins", score.drift_frequency_bins}, {"drift_seconds", score.drift_seconds},
+        {"drift_render_seconds", score.drift_render_seconds}, {"drift_ridge_seconds", score.drift_ridge_seconds},
+        {"drift_ridge_search_seconds", score.drift_ridge_search_seconds},
+        {"drift_slope_seconds", score.drift_slope_seconds}, {"drift_exact_seconds", score.drift_exact_seconds},
         {"drift_bit_evidence", scores(score.drift_bit_evidence)}, {"drift_status", score.drift_status},
         {"drift_line_status", score.drift_line_status},
         {"drift_stage_workers", score.drift_stage_workers}, {"drift_line_stage_workers", score.drift_line_stage_workers},
@@ -1964,6 +2060,11 @@ Json score_json(const ReceiverSlotScore& score) {
         {"drift_line_planned_stage_workers", score.drift_line_planned_stage_workers},
         {"drift_coherent_timing_fft_rows", score.drift_coherent_timing_fft_rows},
         {"drift_coherent_timing_fft_stages", score.drift_coherent_timing_fft_stages},
+        {"drift_proposal_route", score.drift_proposal_route}, {"drift_device_atoms", score.drift_device_atoms},
+        {"drift_retained_digest", digest_hex(score.drift_retained_digest)},
+        {"drift_line_proposal_route", score.drift_line_proposal_route},
+        {"drift_line_device_atoms", score.drift_line_device_atoms},
+        {"drift_line_retained_digest", digest_hex(score.drift_line_retained_digest)},
         {"coarse_workspaces", score.coarse_workspaces}, {"coarse_frequency_points", score.coarse_frequency_points},
         {"coarse_arrival_points", score.coarse_arrival_points},
         {"coarse_projected_rate_hz", score.coarse_projected_rate_hz},
@@ -3082,21 +3183,32 @@ void help() {
         "  --vulkan-segmented-timing automatic|device|native (explicit Vulkan changing-channel timing search;\n"
         "    device scores every admitted shape there and, with --require-accelerator on, every workspace\n"
         "    of a geometry that has segmented shapes)\n"
+        "  --vulkan-gain-rank|--vulkan-drift|--vulkan-varying-fine automatic|device|native (explicit Vulkan fine-stage\n"
+        "    routes: signed-lag gain direct rank, drift proposals and varying statistics; automatic runs only the\n"
+        "    gain rank, only on the OpenCL-identified SM 12.0 class, and otherwise declines as unqualified-device;\n"
+        "    device runs every admitted stage on the family's Vulkan kernels and,\n"
+        "    with --require-accelerator on, requires a backend that can serve the route before any work and device\n"
+        "    work for every planned stage; the varying fp32-template arithmetic has no kernels and declines as\n"
+        "    unimplemented; the identity names the backend's decline of a stated route)\n"
+        "  --vulkan-varying-arithmetic automatic|fp64|fp32-template (explicit Vulkan varying statistics arithmetic;\n"
+        "    needs --vulkan-varying-fine device)\n"
         "  --opencl-fine-tiles device|native --opencl-fine-window 2..64, even (explicit resident fine projection;\n"
         "    native tiles in two-block batches reproduce the route before device tiles and windows; a stated\n"
         "    source or window must be the one executed)\n"
         "  --opencl-fine-stream 0..64 (blocks whose mappings device tiles submit while the next are staged;\n"
         "    default 4, 0 stages a whole batch first)\n"
         "  --opencl-fine-map fp32|fp64 (explicit resident fine projection: FP32 tile rendering and mapping with\n"
-        "    FP64 tiles and exact fixed-point coordinates and phase, or the FP64 kernels, default until the FP32\n"
-        "    kernels are device-qualified)\n"
+        "    FP64 tiles and exact fixed-point coordinates and phase, the default, or the FP64 kernels as the\n"
+        "    control)\n"
         "  --opencl-coarse-rescore fp32|fp64 (explicit Vulkan nvfp4 coarse search: FP32 partial sums of 64 rows\n"
-        "    added in FP64, or every product in FP64, default; a stated choice must be the one executed)\n"
+        "    added in FP64, the default, or every product in FP64 as the control; a stated choice must be the\n"
+        "    one executed)\n"
         "  --opencl-profile on|off (Vulkan: record OpenCL device command intervals, on by default for explicit\n"
         "    nvfp4 coarse search; on also times the resident fine session's host spans and commands)\n"
         "  --gpu-fp32-minimum on|off (automatic GPU arithmetic floor; GPU backend only)\n"
         "  --opencl-coarse-one-ray on|off (GPU backend only: automatic Vulkan selection scores one-ray sessions\n"
-        "    with the dense FP4 search within its measured cost bound; off by default until device-qualified)\n"
+        "    with the dense FP4 search within its measured cost bound; on by default, off keeps their FFT\n"
+        "    sessions)\n"
         "  --device-index N --device-memory-limit-bytes N\n"
         "  --case hf|eme and the normalized manual-case options from triad_cases.py\n"
         "  --workers N --slot-owners N --memory-limit-bytes N --max-samples N --deadline-ms N\n"
@@ -3177,8 +3289,27 @@ void run(Json& report, const Options& o, std::stop_token stop) {
     report["identity"]["requested_tensor_fine_projection"] = o.tensor_fine_projection;
     report["identity"]["requested_cuda_segmented_timing"] = o.cuda_segmented_timing;
     report["identity"]["requested_vulkan_segmented_timing"] = o.vulkan_segmented_timing;
+    report["identity"]["requested_vulkan_gain_rank"] = o.vulkan_gain_rank;
+    report["identity"]["requested_vulkan_drift"] = o.vulkan_drift;
+    report["identity"]["requested_vulkan_varying_fine"] = o.vulkan_varying_fine;
+    report["identity"]["requested_vulkan_varying_arithmetic"] = o.vulkan_varying_arithmetic;
     report["identity"]["requested_native_coarse_precision"] = o.native_coarse_precision;
     const auto backend = selected_backend(o);
+    // Each stated fine-stage route names the backend's shape-independent
+    // decline, empty when the backend can serve it. The probe cannot state
+    // explicit FP64 coarse arithmetic with a Vulkan backend
+    // (--native-coarse-precision needs --backend cpu), so its queries never
+    // do; a receiver configuration can.
+    const std::array<std::pair<StageFamily, const std::string*>, 3> stage_routes{{
+        {StageFamily::gain_rank, &o.vulkan_gain_rank}, {StageFamily::drift, &o.vulkan_drift},
+        {StageFamily::varying, &o.vulkan_varying_fine}}};
+    const auto stage_name = [](StageFamily family) {
+        return std::string(stage_family_receipt_names[static_cast<std::size_t>(family)]);
+    };
+    for (const auto& [family, route] : stage_routes)
+        if (backend && *route != "automatic")
+            report["identity"]["vulkan_" + stage_name(family) + "_route_decline"] =
+                std::string(backend->stage_decline(StageShape{family}, false));
     const auto describe_backend = [&] {
         const auto receipt = backend ? backend->receipt() : BulkReceipt{};
         report["identity"]["backend_receipt"] = backend ? bulk_json(receipt) : Json{};
@@ -3202,6 +3333,17 @@ void run(Json& report, const Options& o, std::stop_token stop) {
         return;
     }
     try {
+        // A requested device route that the backend declines for every shape
+        // cannot be served on any geometry: report it before any work.
+        if (backend && o.backend == "vulkan" && o.require_accelerator && o.command != "plan")
+            for (const auto& [family, route] : stage_routes) {
+                if (*route != "device") continue;
+                const auto decline = backend->stage_decline(StageShape{family}, false);
+                if (decline.empty()) continue;
+                report["identity"]["vulkan_" + stage_name(family) + "_requirement"] = "unservable";
+                throw Incomplete("Requested Vulkan " + stage_name(family) + " route is unavailable on this backend: " +
+                                 std::string(decline));
+            }
         auto settings = settings_for(o, resources.memory_limit_bytes);
         const Timer preparation;
         auto profile = live::detail::prepare_profile(settings, *settings.calendar, stop,
@@ -3421,6 +3563,23 @@ void run(Json& report, const Options& o, std::stop_token stop) {
                     !actual.vulkan_segmented_score_rows || actual.vulkan_segmented_declined_calls ||
                     actual.vulkan_segmented_native_fallbacks))
                 throw Incomplete("Requested Vulkan segmented timing did not score every changing-channel workspace on the device");
+        }
+        if (o.backend == "vulkan" && o.require_accelerator && o.command != "codec") {
+            // A requested fine-stage route must run every stage planned for
+            // it on the device. Any recorded call, decline or fallback makes
+            // the family applicable; a route the backend cannot serve failed
+            // before the work.
+            for (const auto& [family, route] : stage_routes) {
+                if (*route != "device") continue;
+                const auto name = stage_name(family);
+                const auto& stage = vulkan_stage_receipt(actual_backend, family);
+                const bool applicable = stage.planned_calls || stage.declined_calls || stage.native_fallbacks;
+                report["identity"]["vulkan_" + name + "_requirement"] = applicable ? "required" : "not_applicable";
+                if (applicable && (!stage.sessions || !stage.score_rows || stage.declined_calls || stage.native_fallbacks))
+                    throw Incomplete("Requested Vulkan " + name + " route did not run every planned stage on the device: " +
+                        (!stage.fallback_reason.empty() ? stage.fallback_reason :
+                         !stage.decline_reason.empty() ? stage.decline_reason : std::string("no device work")));
+            }
         }
         if (o.require_accelerator && o.command == "codec")
             throw Incomplete("Isolated codec work does not execute accelerator stages");

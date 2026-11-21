@@ -7,6 +7,7 @@
 #include "triad_receiver_fine.hpp"
 #include "triad_stream_backend.hpp"
 #include "triad_vulkan_backend.hpp"
+#include "triad_vulkan_stage_checks.hpp"
 #include "triad_probe_json.hpp"
 
 #include <algorithm>
@@ -1006,6 +1007,53 @@ void idle_stream_cache_admission(const std::shared_ptr<r::ReceiverBulkBackend>& 
         "idle receiver admitted a persistent program cache beyond its memory budget");
 }
 
+// The plan and shader caches keep the coarse search's bounds (16 plans in
+// 8 MiB with 64 KiB of metadata, 20 shaders in 160 KiB with 8 KiB) unless
+// the backend's policy can select a fine-stage family for the device. Only
+// then do they hold 48 plans in 64 MiB and 64 shaders in 512 KiB with
+// 16 KiB, 59,088,896 more persistent bytes.
+void stage_cache_bounds() {
+    static constexpr std::size_t coarse = 8 * mib + 64 * 1024 + 160 * 1024 + 8 * 1024;
+    static constexpr std::size_t stage = 64 * mib + 64 * 1024 + 512 * 1024 + 16 * 1024;
+    static_assert(stage - coarse == 59'088'896);
+    const auto bound = [](const r::ReceiverBulkBackend& backend) {
+        const bool device = std::ranges::any_of(r::stage_families, [&](r::StageFamily family) {
+            return backend.stage_decline(r::StageShape{family}, false).empty();
+        });
+        return std::pair{device ? stage : coarse, device ? 64 * mib : 8 * mib};
+    };
+    // An explicit workspace opens no OpenCL device for these options.
+    const auto exact = [&](const r::ReceiverBulkBackend& backend, std::size_t expected, const char* message) {
+        const auto [persistent, limit] = bound(backend);
+        check(persistent == expected && backend.persistent_host_workspace() == persistent &&
+              backend.receipt().host_cache_limit_bytes == limit, message);
+    };
+    const auto automatic = v::make_vulkan_receiver_backend({0, device_workspace});
+    exact(*automatic, coarse, "automatic fine-stage routes held the fine-stage cache bounds");
+    v::VulkanReceiverOptions native{0, device_workspace};
+    native.gain_rank = native.drift_proposals = native.varying_fine = v::VulkanStageRoute::native;
+    exact(*v::make_vulkan_receiver_backend(native), coarse, "native fine-stage routes held the fine-stage cache bounds");
+    auto requested = native;
+    requested.drift_proposals = v::VulkanStageRoute::device;
+    const auto device = v::make_vulkan_receiver_backend(requested);
+    // A device without FP64/INT64 shaders declines every family.
+    exact(*device, device->receipt().precision.ends_with("_fixed_phase_host_fp64_scoring") ? coarse : stage,
+          "an explicit drift device route did not hold the fine-stage cache bounds");
+    requested.force_host_scoring = true;
+    exact(*v::make_vulkan_receiver_backend(requested), coarse,
+          "a device route that forced host scoring held the fine-stage cache bounds");
+    // An automatic device workspace may also open OpenCL's 2 MiB on NVIDIA.
+    // On a device class qualified for a family (the gain rank on the SM 12.0
+    // class) the automatic GPU route serves that family and holds the
+    // fine-stage bounds; every other device keeps the coarse bounds.
+    const auto shared = v::make_automatic_vulkan_receiver_backend({});
+    const auto [persistent, limit] = bound(*shared);
+    const bool qualified = shared->receipt().vulkan_gain_rank.qualified_device;
+    check(persistent == (qualified ? stage : coarse) && shared->receipt().host_cache_limit_bytes == limit &&
+          (shared->persistent_host_workspace() == persistent || shared->persistent_host_workspace() == persistent + 2 * mib),
+          "the automatic GPU route held the fine-stage cache bounds");
+}
+
 void full_slots(const std::shared_ptr<r::ReceiverBulkBackend>& backend, std::stop_token stop) {
     // Keep the existing tensor fixture's public geometry and threshold bracket.
     // Only its acceleration boundary differs: GPU coarse and native fine.
@@ -1781,12 +1829,41 @@ int main(int argc, char** argv) {
         const bool auto_workspace = mode == "--automatic-workspace";
         const bool workspace_admission = mode == "--workspace-admission";
         const bool segmented = mode == "--segmented" || mode == "--segmented-benchmark";
+        const bool core = mode == "--core";
+        const bool stage_family = mode == "--gain-rank" || mode == "--drift" || mode == "--varying";
         check(argc <= 2 && (mode.empty() || mode == "--plan" || mode == "--benchmark" || host_scoring ||
                            mode == "--plan-wide" || mode == "--benchmark-wide" || cpu_precision ||
-                           precision_diagnostic || auto_workspace || workspace_admission || segmented),
+                           precision_diagnostic || auto_workspace || workspace_admission || segmented ||
+                           core || stage_family),
               "expected test_triad_vulkan [--plan|--benchmark|--benchmark-cpu-precision|--host-scoring|--workspace-admission|"
-              "--automatic-workspace|--segmented|--segmented-benchmark], with optional -wide suffix");
+              "--automatic-workspace|--segmented|--segmented-benchmark|--core|--gain-rank|--drift|--varying], "
+              "with optional -wide suffix");
         const Deadline deadline;
+        if (core) {
+            // The core's fine-stage generalizations on the device.
+            const auto result = r::vulkan_core_self_check(v::VulkanReceiverOptions{0, 32 * 1024 * 1024},
+                                                          deadline.token());
+            check(!deadline.token().stop_requested(), "Vulkan core checks exceeded the fixed invocation deadline");
+            // A device without FP64/INT64 shaders skips the FP64 plans.
+            output(j::object({{"schema", "datapump.triad.vulkan-checks.v1"}, {"status", "checks_passed"},
+                {"actual_gpu_work", true}, {"scope", result.fp64_plans ? "fine_stage_core_registry_pipelines_and_fp64_plans"
+                                                                         : "fine_stage_core_registry_pipelines"},
+                {"built_in_shader_kinds", result.built_in_kinds}, {"stage_shader_kinds", result.stage_kinds},
+                {"pipelines", result.pipelines}, {"bindings", result.bindings},
+                {"product_rows", result.product_rows}, {"product_max_abs_error", result.product_error},
+                {"fp64_plans", result.fp64_plans}, {"fft_rows", result.fft_rows}, {"fft_batches", result.fft_batches},
+                {"fft_row_stages", result.fft_row_stages}, {"fp64_lut_bytes", result.fp64_lut_bytes},
+                {"fp32_lut_bytes", result.fp32_lut_bytes}, {"forward_relative_error", result.forward_error},
+                {"round_trip_relative_error", result.round_trip_error}}));
+            return 0;
+        }
+        if (stage_family) {
+            if (mode == "--gain-rank") v::test::vulkan_gain_rank_checks(deadline.token());
+            else if (mode == "--drift") v::test::vulkan_drift_checks(deadline.token());
+            else v::test::vulkan_varying_checks(deadline.token());
+            check(!deadline.token().stop_requested(), "Vulkan fine-stage checks exceeded the fixed invocation deadline");
+            return 0;
+        }
         if (segmented) {
             if (mode == "--segmented-benchmark") segmented_benchmark(deadline.token());
             else {
@@ -1869,6 +1946,7 @@ int main(int argc, char** argv) {
             bounded_frequency_tiles(false, deadline.token());
             simultaneous_owner_accounting(backend);
             idle_stream_cache_admission(backend);
+            stage_cache_bounds();
             direct_frequency_grid(backend, 16);
             direct_frequency_grid(backend, 256);
             check_workspace_receipt(backend->receipt(), true);

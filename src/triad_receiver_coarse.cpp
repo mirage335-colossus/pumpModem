@@ -325,11 +325,11 @@ std::optional<std::uint64_t> gain_work_count(std::initializer_list<std::uint64_t
 
 // A short template admits N-B+1 linear correlation outputs from each
 // N-point transform. Keep the same Doppler grid by using multiples of 2B.
-// The sampled two-ray rank still uses its original whole-span transforms.
-std::pair<std::size_t, std::uint64_t> gain_direct_tile(std::size_t fft, std::size_t block,
-        std::size_t frequencies, std::uint64_t whole_block_stages) {
+// The cheapest tile below `ceiling` stages, or none.
+std::pair<std::size_t, std::uint64_t> gain_tile_search(std::size_t fft, std::size_t block,
+        std::size_t frequencies, std::uint64_t ceiling) {
     std::size_t selected = 0;
-    auto best = whole_block_stages;
+    auto best = ceiling;
     const auto outputs = fft - block + 1;
     for (auto tile = 2 * block; tile < fft; tile *= 2) {
         const auto chunks = ceil_div(outputs, tile - block + 1);
@@ -341,6 +341,14 @@ std::pair<std::size_t, std::uint64_t> gain_direct_tile(std::size_t fft, std::siz
             selected = tile;
         }
     }
+    return {selected, best};
+}
+
+// The native direct rank tiles only where that saves 15% of the whole-span
+// stages. The sampled two-ray rank still uses its original whole-span transforms.
+std::pair<std::size_t, std::uint64_t> gain_direct_tile(std::size_t fft, std::size_t block,
+        std::size_t frequencies, std::uint64_t whole_block_stages) {
+    const auto [selected, best] = gain_tile_search(fft, block, frequencies, whole_block_stages);
     return best <= .85L * whole_block_stages ? std::pair{selected, best} : std::pair{std::size_t{0}, whole_block_stages};
 }
 
@@ -3373,6 +3381,11 @@ void refine(std::vector<FineCoordinate>& result, std::span<const CoarseProposal>
     }
 }
 
+// The DSP preflight's charge for a production device direct rank, defined
+// with the rank below.
+std::size_t gain_device_charge(const Plan&, const ReceiverConfig&, const ReceiverSlotPlan&, const MidpointPlan&,
+                               const WorkspaceQuote&, unsigned workers);
+
 } // namespace
 
 std::vector<FineCoordinate> nominate_quarter_clock_timing(const ReceiverConfig& config,
@@ -3420,11 +3433,12 @@ std::size_t coarse_workspace(const ReceiverConfig& config, const ReceiverSlotPla
     const auto plan = make_plan(config, slot);
     require_coarse(!overlapped.workspace_bytes || defers_frequency_grid(plan, config),
                    "coarse preparation cannot overlap frequency acquisition for this profile");
-    const auto normal = scratch_workspace(plan, config, frequency_bound(plan, config), workers, overlapped).total;
-    if (midpoint_timing == MidpointTimingEvaluation::off) return normal;
+    const auto quote = scratch_workspace(plan, config, frequency_bound(plan, config), workers, overlapped);
+    if (midpoint_timing == MidpointTimingEvaluation::off) return quote.total;
     const auto midpoint = midpoint_plan(plan, config, slot, workers, midpoint_timing);
     require_coarse(midpoint.lag_count, "Robust midpoint timing plan is outside supported public geometry");
-    return add(normal, midpoint.extra_workspace_bytes);
+    return add(add(quote.total, midpoint.extra_workspace_bytes),
+               gain_device_charge(plan, config, slot, midpoint, quote, workers));
 }
 
 CoarseMidpointSupport coarse_midpoint_timing_support(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
@@ -3491,6 +3505,294 @@ double fixed_gain_frequency_rank(std::span<const double> totals, std::size_t lag
     return maximum + std::log(relative / frequencies);
 }
 
+GainShiftMap::GainShiftMap(const GainShiftGeometry& geometry, std::span<const FineCoordinate> coordinates)
+    : geometry_(geometry), coordinates_(coordinates) {
+    require_coarse(geometry.block_rows && geometry.output_fs && geometry.fs && geometry.kernel_rows &&
+                   !coordinates.empty(), "signed gain shift map requires public block and lag geometry");
+    blocks_ = ceil_div(geometry.kernel_rows, geometry.block_rows);
+    // A shift moves at a rate proportional to |clock|; lowest lag on ties.
+    for (std::size_t lag = 1; lag < coordinates.size(); ++lag)
+        if (std::abs(coordinates[lag].clock_ppm) > std::abs(coordinates[fastest_].clock_ppm)) fastest_ = lag;
+}
+
+long double GainShiftMap::time(std::size_t block) const noexcept {
+    const auto first = block * geometry_.block_rows;
+    const auto rows = std::min(geometry_.block_rows, geometry_.kernel_rows - first);
+    return geometry_.origin + (first + (rows - 1.L) / 2) / geometry_.output_fs -
+        (geometry_.taps - 1.L) / (2 * geometry_.fs);
+}
+
+std::int64_t GainShiftMap::shift(std::size_t lag, long double time) const noexcept {
+    const auto& coordinate = coordinates_[lag];
+    const auto epsilon = coordinate.clock_ppm * 1e-6L;
+    return std::llround(geometry_.output_fs *
+        (coordinate.arrival_seconds - geometry_.arrival_lower_seconds - time * epsilon / (1 + epsilon)));
+}
+
+void GainShiftMap::fill(std::size_t block, std::span<std::int64_t> shifts) const {
+    require_coarse(block < blocks_ && shifts.size() == coordinates_.size(), "signed gain shift vector is outside its map");
+    const auto at = time(block);
+    for (std::size_t lag = 0; lag < shifts.size(); ++lag) shifts[lag] = shift(lag, at);
+}
+
+std::size_t GainShiftMap::lag_end(std::size_t lag, std::size_t block, std::int64_t value,
+                                  std::size_t limit) const noexcept {
+    if (limit <= block + 1 || shift(lag, limit - 1) == value) return limit;
+    // shift(low) == value != shift(high); monotonicity leaves one boundary.
+    auto low = block, high = limit - 1;
+    while (high - low > 1) {
+        const auto middle = low + (high - low) / 2;
+        (shift(lag, middle) == value ? low : high) = middle;
+    }
+    return high;
+}
+
+std::size_t GainShiftMap::run_end(std::size_t block, std::span<const std::int64_t> shifts,
+                                  std::size_t horizon) const {
+    require_coarse(block < blocks_ && shifts.size() == coordinates_.size(), "signed gain shift run is outside its map");
+    // Every order gives the same minimum; the fastest lag ends the search early.
+    if (blocks_ <= horizon) return block + 1;
+    auto end = lag_end(fastest_, block, shifts[fastest_], blocks_);
+    for (std::size_t lag = 0; lag < shifts.size(); ++lag) {
+        if (end <= horizon) return block + 1;
+        if (lag != fastest_) end = lag_end(lag, block, shifts[lag], end);
+    }
+    return end;
+}
+
+bool GainShiftCursor::seek(const GainShiftMap& map, std::size_t block, std::size_t horizon,
+                           std::span<std::int64_t> shifts) {
+    if (begin <= block && block < end) return false;
+    map.fill(block, shifts);
+    begin = block;
+    end = map.run_end(block, shifts, horizon);
+    const auto [low, high] = std::ranges::minmax(shifts);
+    first_shift = low;
+    last_shift = high;
+    order_known = false;
+    ++vectors;
+    return true;
+}
+
+std::size_t GainShiftRuns::run(std::size_t block) const {
+    require_coarse(!first_blocks.empty() && block >= first_blocks.front(), "signed gain block precedes its shift runs");
+    return static_cast<std::size_t>(std::ranges::upper_bound(first_blocks, block) - first_blocks.begin()) - 1;
+}
+
+GainShiftRuns gain_shift_runs(const GainShiftMap& map, std::size_t maximum_runs, std::stop_token stop) {
+    GainShiftRuns runs;
+    const auto lags = map.lags();
+    const auto capacity = std::min(maximum_runs, map.blocks());
+    runs.first_blocks.reserve(capacity);
+    runs.first_shift.reserve(capacity);
+    runs.last_shift.reserve(capacity);
+    runs.relative.reserve(mul(capacity, lags));
+    std::vector<std::int64_t> shifts(lags);
+    for (std::size_t block = 0; block < map.blocks();) {
+        check_stop(stop);
+        map.fill(block, shifts);
+        const auto [low, high] = std::ranges::minmax(shifts);
+        const auto range = high - low > INT32_MAX;
+        if (runs.first_blocks.size() == maximum_runs || range) {
+            GainShiftRuns overflow;
+            overflow.count = runs.first_blocks.size() + 1;
+            overflow.overflow = true;
+            overflow.range = range;
+            return overflow;
+        }
+        runs.first_blocks.push_back(block);
+        runs.first_shift.push_back(low);
+        runs.last_shift.push_back(high);
+        for (const auto value : shifts) runs.relative.push_back(static_cast<std::int32_t>(value - low));
+        // A horizon of block + 1 returns the exact first change.
+        block = map.run_end(block, shifts, block + 1);
+    }
+    runs.count = runs.first_blocks.size();
+    return runs;
+}
+
+GainCertification certify_gain_direct_rank(const GainCertificationInput& input, const GainCertificationLimits& limits,
+                                           const GainFrontierRescore& rescore) {
+    const auto lags = input.lags;
+    const auto cells = mul(2, lags);
+    require_coarse(lags && input.sampled.size() == cells && input.device.size() == cells &&
+                   input.audit_native.size() % cells == 0 && input.audit_device.size() == input.audit_native.size() &&
+                   limits.frontier_minimum && limits.frontier_minimum <= limits.frontier_maximum &&
+                   limits.band_sigmas > 0 && limits.near_tie > 0 && static_cast<bool>(rescore),
+                   "signed gain certification received an inconsistent device result");
+    const auto finite = [](double value) { return std::isfinite(value); };
+    GainCertification result;
+    // Every buffer of the certification stays held until it returns.
+    std::array<std::vector<std::size_t>, 2> frontier;
+    std::vector<std::size_t> order;
+    std::array<std::vector<double>, 2> sums, magnitudes;
+    const auto done = [&](std::string_view reason) {
+        result.fallback = reason;
+        auto bytes = add(mul(result.totals.capacity() + result.nomination.capacity(), sizeof(double)),
+                         mul(order.capacity(), sizeof(std::size_t)));
+        for (std::size_t bit = 0; bit < 2; ++bit)
+            bytes = add(bytes, add(mul(frontier[bit].capacity(), sizeof(std::size_t)),
+                                   mul(sums[bit].capacity() + magnitudes[bit].capacity(), sizeof(double))));
+        result.host_bytes = bytes;
+        return std::move(result);
+    };
+    // 1. T = S + D. Native validity is decided over every lag.
+    result.totals.resize(cells);
+    for (std::size_t i = 0; i < cells; ++i) result.totals[i] = input.sampled[i] + input.device[i];
+    if (!std::ranges::all_of(result.totals, finite)) return done(gain_certification_nonfinite);
+    const auto audits = input.audit_native.size() / cells;
+    // A per-lag standard error needs two audit blocks.
+    if (audits < 2) return done(gain_certification_no_audit);
+    // 2. Band from the audit blocks, per lag. A lag's error over the N
+    // unsampled blocks is N times their mean per-block error, which the
+    // stratified random audit blocks estimate: the lag's band is
+    // N (|mean| + k standard errors) of its audit errors, with an FP32
+    // floor. Its standard deviation is at least the bit's pooled one,
+    // which guards a lag whose few audit errors understate its spread. It
+    // needs no model of how errors vary across lags: on the RADV oracle
+    // they are a systematic relative error of the correlation power (about
+    // -3e-7), largest at the best lag, where a pooled band failed. The
+    // bit's band is the largest lag band.
+    const auto blocks = static_cast<double>(input.unsampled_blocks);
+    const auto survey_band = [&](std::size_t bit, std::size_t lag) {
+        double sum = 0, square = 0;
+        for (std::size_t audit = 0; audit < audits; ++audit) {
+            const auto index = (audit * 2 + bit) * lags + lag;
+            const auto delta = static_cast<double>(input.audit_device[index]) - input.audit_native[index];
+            sum += delta;
+            square += delta * delta;
+        }
+        const auto count = static_cast<double>(audits);
+        const auto mean = sum / count;
+        const auto deviation = std::max(result.bits[bit].audit.deviation,
+                                        std::sqrt(std::max(0., square - sum * mean) / (count - 1)));
+        return blocks * (std::abs(mean) + limits.band_sigmas * deviation / std::sqrt(count));
+    };
+    const auto lag_band = [&](std::size_t bit, std::size_t lag) {
+        return std::max(result.bits[bit].floor_band, survey_band(bit, lag));
+    };
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        double difference = 0, square = 0, native = 0;
+        for (std::size_t audit = 0; audit < audits; ++audit)
+            for (std::size_t lag = 0; lag < lags; ++lag) {
+                const auto index = (audit * 2 + bit) * lags + lag;
+                const auto value = input.audit_native[index];
+                const auto delta = static_cast<double>(input.audit_device[index]) - value;
+                if (!std::isfinite(delta)) return done(gain_certification_nonfinite);
+                difference += delta;
+                square += delta * delta;
+                native += value * value;
+            }
+        auto& out = result.bits[bit];
+        const auto count = static_cast<double>(audits * lags);
+        out.audit = {audits * lags, std::sqrt(native / count),
+                     std::sqrt(std::max(0., square - difference * difference / count) / (count - 1))};
+        // At least one FP32 rounding of every block value, as a random walk.
+        out.floor_band = limits.band_sigmas * std::sqrt(blocks) * 0x1p-24 * (1 + out.audit.magnitude);
+        out.audit_band = 0;
+        for (std::size_t lag = 0; lag < lags; ++lag) {
+            const auto band = survey_band(bit, lag);
+            if (band > out.audit_band) {
+                out.audit_band = band;
+                out.band_lag = lag;
+            }
+        }
+        out.band = std::max(out.audit_band, out.floor_band);
+        out.band_source = out.audit_band >= out.floor_band ? "audit" : "fp32-floor";
+    }
+    // 3. Frontier: every lag within 2 band of the best total, and the top
+    // lags. Both sets are prefixes of the descending order (lowest lag on
+    // ties), so their union is the larger one and is counted before it is held.
+    std::array<std::size_t, 2> star{};
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        const auto totals = std::span(result.totals).subspan(bit * lags, lags);
+        auto& out = result.bits[bit];
+        const auto best = std::ranges::max_element(totals);
+        star[bit] = static_cast<std::size_t>(best - totals.begin());
+        const auto threshold = *best - 2 * out.band;
+        const auto within = static_cast<std::size_t>(std::ranges::count_if(totals,
+            [&](double total) { return total >= threshold; }));
+        const auto minimum = std::min(lags, limits.frontier_minimum);
+        out.frontier = std::max(within, minimum);
+        result.frontier_lags += out.frontier;
+        if (out.frontier > limits.frontier_maximum) return done(gain_certification_overflow);
+        auto& lags_of = frontier[bit];
+        lags_of.reserve(out.frontier);
+        if (within >= minimum) {
+            for (std::size_t lag = 0; lag < lags; ++lag)
+                if (totals[lag] >= threshold) lags_of.push_back(lag);
+        } else {
+            order.resize(lags);
+            std::iota(order.begin(), order.end(), std::size_t{0});
+            std::ranges::partial_sort(order, order.begin() + static_cast<std::ptrdiff_t>(minimum),
+                [&](std::size_t a, std::size_t b) { return totals[a] > totals[b] || (totals[a] == totals[b] && a < b); });
+            lags_of.assign(order.begin(), order.begin() + static_cast<std::ptrdiff_t>(minimum));
+            std::ranges::sort(lags_of);
+        }
+        require_coarse(lags_of.size() == out.frontier, "signed gain frontier sets must nest");
+        for (std::size_t lag = 0, j = 0; lag < lags; ++lag) {
+            if (j < lags_of.size() && lags_of[j] == lag) ++j;
+            else out.excluded = std::max(out.excluded, totals[lag]);
+        }
+    }
+    // 4. FP64 rescoring R = S + U of the frontier lags.
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        sums[bit].assign(frontier[bit].size(), 0.);
+        magnitudes[bit].assign(frontier[bit].size(), 0.);
+    }
+    rescore({frontier[0], frontier[1]}, {sums[0], sums[1]}, {magnitudes[0], magnitudes[1]});
+    result.rescored_lags = frontier[0].size() + frontier[1].size();
+    // A sum of n FP64 terms in any order is within (n-1) u sum|v| of exact.
+    const auto tie = std::max(limits.near_tie,
+        8 * static_cast<double>(input.scored_blocks) * std::numeric_limits<double>::epsilon());
+    result.nomination.assign(cells, -infinity);
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        auto& out = result.bits[bit];
+        const auto& lags_of = frontier[bit];
+        std::size_t best = 0, second = lags_of.size();
+        for (std::size_t j = 0; j < lags_of.size(); ++j) {
+            const auto index = bit * lags + lags_of[j];
+            const auto rescored = input.sampled[index] + sums[bit][j];
+            // sum |v| over the sampled blocks, which the audit captured.
+            for (std::size_t audit = 0; audit < audits; ++audit)
+                magnitudes[bit][j] += std::abs(input.audit_native[(audit * 2 + bit) * lags + lags_of[j]]);
+            sums[bit][j] = rescored;
+            // 5. Each rescored lag's own band must hold, which validates
+            // the band model where it matters; the bit's band bounds them.
+            const auto error = std::abs(result.totals[index] - rescored);
+            const auto band = lag_band(bit, lags_of[j]);
+            out.band_ratio = std::max(out.band_ratio, error / band);
+            if (!(error <= band)) {
+                out.maximum_error = error;
+                return done(gain_certification_band);
+            }
+            out.maximum_error = std::max(out.maximum_error, error);
+            result.nomination[index] = rescored;
+        }
+        // 6. The native argmax (lowest lag on ties) is certain only beyond roundoff.
+        const auto roundoff = [&](std::size_t j) { return tie * (1 + std::abs(sums[bit][j]) + magnitudes[bit][j]); };
+        for (std::size_t j = 1; j < lags_of.size(); ++j)
+            if (sums[bit][j] > sums[bit][best]) best = j;
+        for (std::size_t j = 0; j < lags_of.size(); ++j)
+            if (j != best && (second == lags_of.size() || sums[bit][j] > sums[bit][second])) second = j;
+        out.best_lag = lags_of[best];
+        out.top2_gap = second == lags_of.size() ? infinity : sums[bit][best] - sums[bit][second];
+        if (second != lags_of.size()) {
+            out.tie_threshold = tie * (1 + std::max(std::abs(sums[bit][best]), std::abs(sums[bit][second])) +
+                                       std::max(magnitudes[bit][best], magnitudes[bit][second]));
+            if (!(out.top2_gap >= out.tie_threshold)) return done(gain_certification_tie);
+        }
+        // 7. Outside the frontier N <= T + band < max T - band - e <= R* - e
+        // <= N*, with e the best device lag's roundoff: the frontier holds
+        // the native argmax unless its boundary lies within that roundoff.
+        const auto at = static_cast<std::size_t>(std::ranges::lower_bound(lags_of, star[bit]) - lags_of.begin());
+        require_coarse(at < lags_of.size() && lags_of[at] == star[bit], "signed gain frontier lost its best device lag");
+        if (!(out.excluded < result.totals[bit * lags + star[bit]] - 2 * out.band - roundoff(at)))
+            return done(gain_certification_tie);
+    }
+    return done({});
+}
+
 namespace {
 
 // Split the time axis into disjoint strata and take one public sample in
@@ -3543,33 +3845,30 @@ std::vector<FineCoordinate> gain_rank_coordinates(const Plan& plan, const Receiv
     return coordinates;
 }
 
-struct GainRankBlock {
+GainShiftGeometry gain_shift_geometry(const Plan& plan, const ReceiverSlotPlan& slot,
+                                      const MidpointPlan::GainPlan& geometry) {
+    return {plan.output_fs, plan.fs, plan.taps, geometry.block_rows, plan.layout.kernel_rows,
+            plan.layout.origin, slot.arrival_lower_seconds};
+}
+
+struct GainBlockGeometry {
     std::size_t first, rows, fft_rows, outputs, unit_bin;
     std::int64_t first_shift, earliest;
 };
 
-std::optional<GainRankBlock> gain_rank_block(const Plan& plan, const ReceiverSlotPlan& slot,
-        const MidpointPlan::GainPlan& geometry, std::size_t block, std::span<const FineCoordinate> coordinates,
-        std::span<std::int64_t> shifts, std::size_t observation_size) {
+// A block's geometry from the extreme shifts of the run that contains it.
+std::optional<GainBlockGeometry> gain_rank_block(const Plan& plan, const MidpointPlan::GainPlan& geometry,
+        std::size_t block, std::int64_t first_shift, std::int64_t last_shift, std::size_t observation_size) {
     const auto& layout = plan.layout;
     const auto first = block * geometry.block_rows;
     const auto rows = std::min(geometry.block_rows, layout.kernel_rows - first);
-    const auto time = layout.origin + (first + (rows - 1.L) / 2) / plan.output_fs -
-        (plan.taps - 1.L) / (2 * plan.fs);
-    for (std::size_t i = 0; i < coordinates.size(); ++i) {
-        const auto& coordinate = coordinates[i];
-        const auto epsilon = coordinate.clock_ppm * 1e-6L;
-        shifts[i] = std::llround(plan.output_fs *
-            (coordinate.arrival_seconds - slot.arrival_lower_seconds - time * epsilon / (1 + epsilon)));
-    }
-    const auto [first_shift, last_shift] = std::ranges::minmax(shifts);
     const auto earliest = static_cast<std::int64_t>(first) + first_shift;
     const auto latest = static_cast<std::int64_t>(first + rows) + last_shift;
     if (earliest < 0 || latest > static_cast<std::int64_t>(observation_size)) return {};
     const auto observation_rows = static_cast<std::size_t>(latest - earliest);
     const auto nfft = fft_size(std::max(mul(2, geometry.block_rows), observation_rows));
     require_coarse(nfft <= geometry.fft_rows, "signed gain rank exceeded its finite FFT quote");
-    return GainRankBlock{first, rows, nfft, static_cast<std::size_t>(last_shift - first_shift + 1),
+    return GainBlockGeometry{first, rows, nfft, static_cast<std::size_t>(last_shift - first_shift + 1),
         geometry.frequency_stride * (nfft / (2 * geometry.block_rows)), first_shift, earliest};
 }
 
@@ -3589,9 +3888,9 @@ void gain_rank_correlation(std::span<const Complex> observation, std::span<const
     tracked_fft(product, true, fft, work, stop, outputs);
 }
 
-void gain_rank_direct_tiles(const MidpointPlan::GainPlan& geometry, const GainRankBlock& block,
+void gain_rank_direct_tiles(const MidpointPlan::GainPlan& geometry, const GainBlockGeometry& block,
         std::array<std::span<const Complex>, 2> columns, std::span<const Complex> observation,
-        double correlation_scale, double gram_scale, GainTimingScratch& work,
+        double correlation_scale, double gram_scale, GainTimingScratch& work, GainShiftCursor& cursor,
         const native_fft::DoublePlan& fft, bool verify, std::stop_token stop) {
     const auto nfft = geometry.direct_tile_fft_rows;
     const auto period = 2 * geometry.block_rows;
@@ -3611,11 +3910,16 @@ void gain_rank_direct_tiles(const MidpointPlan::GainPlan& geometry, const GainRa
     }
     // The old per-block clock/arrival mapping can produce repeated shifts.
     // Partition lags by the actual rounded offsets, never by a second map.
-    const auto ordered = std::ranges::is_sorted(work.shifts);
-    if (!ordered) {
-        std::iota(work.lag_order.begin(), work.lag_order.end(), std::uint32_t{0});
-        std::ranges::sort(work.lag_order, {}, [&](std::uint32_t lag) { return work.shifts[lag]; });
+    // One shift run shares its vector, hence its order.
+    if (!cursor.order_known) {
+        cursor.ordered = std::ranges::is_sorted(work.shifts);
+        if (!cursor.ordered) {
+            std::iota(work.lag_order.begin(), work.lag_order.end(), std::uint32_t{0});
+            std::ranges::sort(work.lag_order, {}, [&](std::uint32_t lag) { return work.shifts[lag]; });
+        }
+        cursor.order_known = true;
     }
+    const auto ordered = cursor.ordered;
     const auto lag_index = [&](std::size_t i) { return ordered ? i : work.lag_order[i]; };
     const auto shift = [&](std::size_t i) { return static_cast<std::size_t>(work.shifts[lag_index(i)] - block.first_shift); };
     const auto input = observation.subspan(static_cast<std::size_t>(block.earliest), block.outputs + block.rows - 1);
@@ -3667,13 +3971,264 @@ void gain_rank_direct_tiles(const MidpointPlan::GainPlan& geometry, const GainRa
     ++work.tiled_blocks;
 }
 
+// The device always tiles: the cheapest 2B, 4B, ... tile below the whole
+// span, without the native whole-span preference (60 Hz/1x: 1024 of 8192).
+std::size_t gain_device_tile_rows(const MidpointPlan::GainPlan& geometry) {
+    const auto [tile, stages] = gain_tile_search(geometry.fft_rows, geometry.block_rows,
+                                                 geometry.direct_frequencies(), UINT64_MAX);
+    (void)stages;
+    return tile ? tile : geometry.fft_rows;
+}
+
+// Shape of a device direct-rank session for this rank: public geometry
+// only, so the DSP preflight and the rank build the same shape. Its run and
+// audit tables have their capacities. Each lag's shift is monotone in the
+// block, so its extremes over the aperture are at the two end blocks, which
+// bound every block's outputs.
+GainRankShape gain_direct_shape(const Plan& plan, const MidpointPlan& midpoint, const GainShiftMap& map,
+                                const GainCertificationLimits& limits) {
+    const auto& gain = midpoint.gain;
+    auto low = std::numeric_limits<std::int64_t>::max(), high = std::numeric_limits<std::int64_t>::min();
+    for (const auto block : {std::size_t{0}, map.blocks() - 1})
+        for (std::size_t lag = 0; lag < map.lags(); ++lag) {
+            const auto shift = map.shift(lag, block);
+            low = std::min(low, shift);
+            high = std::max(high, shift);
+        }
+    // A span beyond the observation is an unsupported device shape.
+    const auto span = static_cast<std::uint64_t>(high) - static_cast<std::uint64_t>(low);
+    return {plan.layout.crop_rows, plan.layout.kernel_rows, gain.block_rows, gain.blocks, midpoint.lag_count,
+            gain.direct_frequencies(), gain.direct_radius, gain.frequency_stride, gain_device_tile_rows(gain),
+            std::min(limits.maximum_shift_runs, gain.blocks), gain.sampled_blocks,
+            span < plan.layout.crop_rows ? static_cast<std::size_t>(span) + 1 : SIZE_MAX};
+}
+
+// Host buffers of a device direct rank beside the native quote, for their
+// whole lifetime: run table with its enumeration vector, block table, sample
+// map, device totals D, both audit copies, S, T and the nomination vector,
+// the frontier with its selection order, and the FP64 rescoring partials,
+// rows and plan. Pure public geometry, so a preflight can charge it before
+// any device work; the device rank checks every buffer it holds against it.
+std::size_t gain_direct_device_host_bytes(const MidpointPlan& midpoint, unsigned workers,
+                                          const GainCertificationLimits& limits) {
+    const auto& gain = midpoint.gain;
+    const auto lags = midpoint.lag_count;
+    const auto cells = mul(2, lags);
+    const auto runs = std::min(limits.maximum_shift_runs, gain.blocks);
+    const auto run_table = add(mul(runs, add(3 * sizeof(std::int64_t), mul(lags, sizeof(std::int32_t)))),
+                               mul(lags, sizeof(std::int64_t)));
+    const auto tables = add(mul(gain.blocks, sizeof(GainRankBlock)), mul(gain.sampled_blocks, sizeof(std::size_t)));
+    const auto audit = mul(mul(gain.sampled_blocks, cells), sizeof(double) + sizeof(float));
+    // D, S, T and the nomination vector, and the frontier selection order.
+    const auto certification = add(mul(cells, 4 * sizeof(double)), mul(lags, sizeof(std::size_t)));
+    // Per frontier lag: its index, rescored sum and magnitude.
+    const auto frontier = mul(2, limits.frontier_maximum);
+    const auto frontier_lags = mul(frontier, sizeof(std::size_t) + 2 * sizeof(double));
+    const auto chunks = ceil_div(std::max<std::size_t>(gain.blocks, 1),
+                                 std::max<std::size_t>(limits.rescore_chunk_blocks, 1));
+    const auto period = mul(2, gain.block_rows);
+    // Chunk partials, one row per lane, the 2B-point plan and the bin table.
+    const auto rescoring = add(add(mul(mul(chunks, frontier), 2 * sizeof(double)),
+                                   mul(mul(std::min<std::size_t>(std::max(1U, workers), chunks) + 1, period),
+                                       sizeof(Complex))),
+                               mul(gain.direct_frequencies(), sizeof(std::size_t)));
+    return add(add(add(run_table, tables), add(audit, certification)), add(add(frontier_lags, rescoring), 64 * 1024));
+}
+
+// A production device direct rank exists where the backend's pure policy
+// accepts the rank's shape and the receiver's own gates pass: no
+// verification, a full direct rank and both sampled and unsampled blocks.
+// Its DSP preflight then holds the receiver's device host buffers beside
+// the native quote, and the backend's host bytes (its compilation and the
+// part of its lease in host RAM) join the maximum of the coarse bulk terms:
+// it runs after the segmented search has returned its lease and before the
+// frequency search admits its own.
+std::size_t gain_device_charge(const Plan& plan, const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                               const MidpointPlan& midpoint, const WorkspaceQuote& quote, unsigned workers) {
+    const auto& gain = midpoint.gain;
+    const auto* backend = config.bulk_backend.get();
+    const bool fp64 = config.native_coarse_precision == NativeCoarsePrecision::fp64;
+    if (!backend || midpoint.verify || !gain.block_rows || !gain.full_direct || !gain.sampled_blocks ||
+        gain.sampled_blocks >= gain.blocks || !backend->stage_decline(StageShape{StageFamily::gain_rank}, fp64).empty())
+        return 0;
+    const auto coordinates = gain_rank_coordinates(plan, config, slot, midpoint);
+    const auto shape = gain_direct_shape(plan, midpoint, GainShiftMap(gain_shift_geometry(plan, slot, gain), coordinates), {});
+    if (!backend->stage_decline(StageShape{shape}, fp64).empty()) return 0;
+    const auto lease = backend->stage_host_bytes(StageShape{shape}, fp64);
+    const auto persistent = backend->persistent_host_workspace();
+    const auto held = quote.bulk_host - std::min(quote.bulk_host, persistent);
+    return add(gain_direct_device_host_bytes(midpoint, workers, {}), lease > held ? lease - held : 0);
+}
+
+// FP64 direct totals of the frontier lags over the unsampled blocks, through
+// the native magnitude identity |r(lag, f)| = |DFT_2B[v](k_f)| with
+// v_j = conj(t_j) y_{first+shift+j} and k_f = (f - R) * stride mod 2B. Fixed
+// block chunks are summed in chunk order, independent of the worker count.
+// `work` gains one forward 2B-point transform per block and frontier lag,
+// credited once every chunk has completed. Returns the bytes it held: bins,
+// partials, lane rows and the plan.
+std::size_t gain_rescore_frontier(const MidpointPlan::GainPlan& geometry, const GainShiftRuns& runs,
+        std::span<const GainRankBlock> blocks, std::array<std::span<const Complex>, 2> columns,
+        std::span<const Complex> observation, double correlation_scale, std::size_t lags,
+        std::array<std::span<const std::size_t>, 2> frontier, std::array<std::span<double>, 2> sums,
+        std::array<std::span<double>, 2> magnitudes, CoarseOperationCounts& work, std::size_t chunk_blocks,
+        unsigned workers, ReceiverExecutor& executor, std::uint64_t public_slot, std::stop_token stop) {
+    const auto period = 2 * geometry.block_rows;
+    const native_fft::DoublePlan fft(period, stop);
+    const auto frequencies = geometry.direct_frequencies();
+    std::vector<std::size_t> bins(frequencies);
+    for (std::size_t f = 0; f < frequencies; ++f) {
+        const auto bin = (static_cast<std::int64_t>(f) - static_cast<std::int64_t>(geometry.direct_radius)) *
+            static_cast<std::int64_t>(geometry.frequency_stride);
+        const auto wrapped = bin % static_cast<std::int64_t>(period);
+        bins[f] = static_cast<std::size_t>(wrapped < 0 ? wrapped + static_cast<std::int64_t>(period) : wrapped);
+    }
+    const auto width = frontier[0].size() + frontier[1].size();
+    chunk_blocks = std::max<std::size_t>(chunk_blocks, 1);
+    const auto chunks = ceil_div(blocks.size(), chunk_blocks);
+    std::vector<double> partial(mul(mul(chunks, width), 2));
+    const auto lanes = static_cast<unsigned>(std::min<std::size_t>(std::max(1U, workers), std::max<std::size_t>(chunks, 1)));
+    std::vector<std::vector<Complex>> rows(lanes, std::vector<Complex>(period));
+    parallel(chunks, lanes, stop, executor, public_slot,
+        [&](unsigned lane, std::size_t chunk, std::stop_token job_stop) {
+            auto v = std::span(rows[lane]);
+            const auto out = std::span(partial).subspan(chunk * width * 2, width * 2);
+            const auto last = std::min(blocks.size(), (chunk + 1) * chunk_blocks);
+            for (auto b = chunk * chunk_blocks; b < last; ++b) {
+                check_stop(job_stop);
+                const auto& block = blocks[b];
+                const auto relative = std::span(runs.relative).subspan(block.run * lags, lags);
+                std::size_t index = 0;
+                for (std::size_t bit = 0; bit < 2; ++bit) {
+                    const auto column = columns[bit].subspan(block.first, block.rows);
+                    for (const auto lag : frontier[bit]) {
+                        const auto shift = runs.first_shift[block.run] + relative[lag];
+                        const auto y = observation.subspan(static_cast<std::size_t>(
+                            static_cast<std::int64_t>(block.first) + shift), block.rows);
+                        for (std::size_t j = 0; j < block.rows; ++j) v[j] = std::conj(column[j]) * y[j];
+                        std::fill(v.begin() + block.rows, v.end(), Complex{});
+                        native_fft::fft(v, false, fft, job_stop);
+                        GainFrequencyMean mean;
+                        for (std::size_t f = 0; f < frequencies; ++f) {
+                            const auto r = correlation_scale * v[bins[f]];
+                            mean.include(std::norm(r / block.scale[bit]) - block.logdet[bit]);
+                        }
+                        const auto value = mean.log_mean(frequencies);
+                        out[index] += value;
+                        out[width + index] += std::abs(value);
+                        ++index;
+                    }
+                }
+            }
+        });
+    for (std::size_t bit = 0; bit < 2; ++bit) {
+        std::ranges::fill(sums[bit], 0.);
+        std::ranges::fill(magnitudes[bit], 0.);
+    }
+    for (std::size_t chunk = 0; chunk < chunks; ++chunk) {
+        const auto out = std::span(partial).subspan(chunk * width * 2, width * 2);
+        std::size_t index = 0;
+        for (std::size_t bit = 0; bit < 2; ++bit)
+            for (std::size_t j = 0; j < frontier[bit].size(); ++j, ++index) {
+                sums[bit][j] += out[index];
+                magnitudes[bit][j] += out[width + index];
+            }
+    }
+    // The same credit as tracked_fft() for each of these transforms.
+    const auto transforms = static_cast<std::uint64_t>(mul(blocks.size(), width));
+    const auto levels = static_cast<std::uint64_t>(std::countr_zero(period));
+    require_coarse(!transforms || period <= UINT64_MAX / transforms, "coarse transform work count overflow");
+    const auto points = transforms * period;
+    require_coarse(!levels || points <= UINT64_MAX / levels, "coarse transform work count overflow");
+    note(work.forward_ffts, transforms);
+    note(work.fft_rows, points);
+    note(work.fft_row_stages, levels * points);
+    auto held = add(add(mul(bins.capacity(), sizeof(std::size_t)), mul(partial.capacity(), sizeof(double))),
+                    fft.working_bytes());
+    for (const auto& row : rows) held = add(held, mul(row.capacity(), sizeof(Complex)));
+    return held;
+}
+
+// The StageReason of a signed-lag rank's own reason suffix.
+StageReason gain_rank_reason(std::string_view suffix) {
+    for (std::size_t i = 0; i < stage_reason_count; ++i) {
+        const auto reason = static_cast<StageReason>(i);
+        if (stage_reason_applies(StageFamily::gain_rank, reason) && stage_reason_suffix(reason) == suffix) return reason;
+    }
+    throw Error("a signed gain direct-rank decline must report its reason");
+}
+
+// A device session scores the unsampled direct statistic. The fixed lanes
+// keep their exact sampled rank and capture each sample's direct values as
+// the audit. Published lags must pass certify_gain_direct_rank().
+struct GainDeviceRank {
+    GainShiftRuns runs;
+    std::vector<GainRankBlock> blocks;            // unsampled in block order, then audit
+    std::vector<std::size_t> audit_rows;          // per sample: audit index or npos
+    std::vector<double> totals, audit_native;
+    std::vector<float> audit_device;
+    std::size_t unsampled = 0;
+};
+
+// Test-only hook for coarse_gain_rank_trial(): set on the scoring thread for
+// one score_coarse call, null otherwise.
+struct GainRankTrialHook {
+    ReceiverBulkBackend* backend = nullptr;
+    GainCertificationLimits limits;
+    std::size_t device_host_limit = 0;          // admitted beyond the native coarse quote
+    CoarseGainRankTrial* trial = nullptr;
+};
+thread_local GainRankTrialHook* gain_rank_trial_hook = nullptr;
+
 void rank_gain_timing(const Plan& plan, const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                      const MidpointPlan& midpoint, std::span<const Workspace> bank,
                      std::span<const Complex> observation, double variance, CoarseMidpointTiming& result,
-                     CoarsePhaseWork& phase, unsigned workers, ReceiverExecutor& executor, std::stop_token stop) {
+                     CoarsePhaseWork& phase, unsigned workers, ReceiverExecutor& executor, std::stop_token stop,
+                     ReceiverBulkBackend* backend = nullptr, std::size_t device_host_limit = 0,
+                     const GainCertificationLimits& limits = {}, CoarseGainRankTrial* trial = nullptr) {
+    // Diagnostics stay rank-local; only a trial reads them.
+    GainDirectReport report;
+    struct Publish {
+        CoarseGainRankTrial* trial;
+        const GainDirectReport& report;
+        ~Publish() { if (trial) trial->report = report; }
+    } publish{trial, report};
+    // The receiver's own reason, recorded in the backend receipt: before
+    // any factory call a decline, or a fallback for a fallback reason;
+    // after a session call a fallback of that session's planned call.
+    const auto native_because = [&](std::string_view suffix, bool after_call) {
+        const auto reason = gain_rank_reason(suffix);
+        backend->record_stage_native(StageFamily::gain_rank, reason, after_call ? StageNative::session_fallback :
+            stage_reason_is_fallback(reason) ? StageNative::fallback : StageNative::decline);
+        report.route = "native";
+        report.reason = suffix;
+        report.fallback = after_call;
+    };
+    // The backend's own reason, which its factory or session recorded: a
+    // factory records a decline or its planned fallback (such as a refused
+    // lease or an unplannable transform), a session's call a fallback. The
+    // counter that grew since `before` tells them apart; the receipt keeps
+    // the first reason of each kind.
+    struct StageCounts { std::uint64_t declined = 0, fallbacks = 0; };
+    const auto stage_counts = [&] {
+        const auto receipt = backend->status_receipt();
+        const auto& stage = vulkan_stage_receipt(receipt, StageFamily::gain_rank);
+        return StageCounts{stage.declined_calls, stage.native_fallbacks};
+    };
+    const auto backend_native = [&](const StageCounts& before, bool after_call) {
+        const auto receipt = backend->status_receipt();
+        const auto& stage = vulkan_stage_receipt(receipt, StageFamily::gain_rank);
+        auto reason = stage.native_fallbacks > before.fallbacks ? stage.fallback_reason :
+            !after_call && stage.declined_calls > before.declined ? stage.decline_reason : std::string{};
+        require_coarse(!reason.empty(), "a signed gain direct-rank decline must report its reason");
+        report.route = "native";
+        report.reason = std::move(reason);
+        report.fallback = after_call;
+    };
     const auto& geometry = midpoint.gain;
     result.gain_status = geometry.status;
     result.gain_available_blocks = geometry.blocks;
+    // Without a planned rank no stage is offered to the backend.
     if (!geometry.block_rows) return;
     result.gain_fft_rows = geometry.fft_rows;
     result.gain_frequency_points = geometry.direct_frequencies();
@@ -3691,12 +4246,32 @@ void rank_gain_timing(const Plan& plan, const ReceiverConfig& config, const Rece
     const auto maximum_workers = geometry.full_direct ? std::min<std::size_t>(workers, geometry.blocks) : fixed_workers;
     const native_fft::DoublePlan fft(geometry.fft_rows, stop);
     const auto coordinates = gain_rank_coordinates(plan, config, slot, midpoint);
+    const GainShiftMap shift_map(gain_shift_geometry(plan, slot, geometry), coordinates);
     std::vector<std::uint8_t> sampled;
     if (geometry.full_direct && geometry.sampled_blocks && geometry.sampled_blocks < geometry.blocks) {
         sampled.resize(geometry.blocks);
         for (std::size_t sample = 0; sample < geometry.sampled_blocks; ++sample) {
             check_stop(stop);
             sampled[gain_timing_block(geometry, sample, slot)] = 1;
+        }
+    }
+
+    // The backend's pure policy comes first, so that a declined route
+    // reports its own reason. A factory records that decline as the stage's
+    // planned call; a backend without fine-stage sessions records none.
+    const bool fp64_forced = config.native_coarse_precision == NativeCoarsePrecision::fp64;
+    std::optional<GainRankShape> device_shape;
+    if (backend) {
+        device_shape = gain_direct_shape(plan, midpoint, shift_map, limits);
+        require_coarse(device_shape->observation_rows == observation.size(),
+                       "signed gain device shape differs from its observation");
+        report.route = "native";
+        result.gain_route = GainRankRoute::native;
+        if (const auto decline = backend->stage_decline(StageShape{*device_shape}, fp64_forced); !decline.empty()) {
+            require_coarse(!backend->make_gain_rank(*device_shape, fp64_forced, stop),
+                           "a declined signed gain direct rank opened a device session");
+            report.reason = decline;
+            backend = nullptr;
         }
     }
 
@@ -3707,6 +4282,7 @@ void rank_gain_timing(const Plan& plan, const ReceiverConfig& config, const Rece
     const auto gram_scale = gain * gain / variance;
     if (!(std::isfinite(correlation_scale) && std::isfinite(gram_scale))) {
         result.gain_status = "signed_gain_proposal_numeric_range";
+        if (backend) native_because(gain_direct_nonfinite_input, false);
         return;
     }
     const auto banks = gain_timing_workspaces(plan);
@@ -3717,115 +4293,300 @@ void rank_gain_timing(const Plan& plan, const ReceiverConfig& config, const Rece
     for (std::size_t lane = 0; lane < maximum_workers; ++lane)
         scratch.emplace_back(geometry.fft_rows, lags, frequencies, lane < fixed_workers, geometry.full_direct,
             geometry.direct_tile_fft_rows != 0);
-    parallel(maximum_workers, static_cast<unsigned>(maximum_workers), stop, executor, slot.index,
-        [&](unsigned, std::size_t lane, std::stop_token job_stop) {
-            auto& work = scratch[lane];
-            const auto score_block = [&](std::size_t block, bool fixed) {
-                check_stop(job_stop);
-                const auto prepared = gain_rank_block(plan, slot, geometry, block,
-                    coordinates, work.shifts, observation.size());
-                if (!prepared) return;
-                const auto [first, rows, nfft, outputs, unit_bin, first_shift, earliest] = *prepared;
-                if (!fixed && geometry.direct_tile_fft_rows && nfft == geometry.fft_rows &&
-                    outputs <= nfft - geometry.block_rows + 1) {
-                    const std::array columns{std::span(bank[banks[0]].columns[0]).subspan(first, rows),
-                                             std::span(bank[banks[1]].columns[0]).subspan(first, rows)};
-                    gain_rank_direct_tiles(geometry, *prepared, columns, observation, correlation_scale, gram_scale,
-                        work, fft, midpoint.verify && lane == 0 && work.tiled_verified == 0, job_stop);
-                    ++work.direct_blocks;
-                    note(work.operations.score_rows, direct_cells);
-                    return;
+    std::atomic<std::uint64_t> shift_vectors{0};
+    // One lane's static assignment. The fixed pass keeps the stationary
+    // rank's sample order; with an audit it also records each sample's
+    // direct values. The direct pass visits the remaining blocks.
+    const auto run_lane = [&](std::size_t lane, bool fixed_pass, bool direct_pass, GainDeviceRank* audit,
+                              std::stop_token job_stop) {
+        auto& work = scratch[lane];
+        GainShiftCursor cursor;
+        const auto score_block = [&](std::size_t block, std::size_t horizon, bool fixed, std::span<double> captured) {
+            check_stop(job_stop);
+            cursor.seek(shift_map, block, horizon, work.shifts);
+            const auto prepared = gain_rank_block(plan, geometry, block, cursor.first_shift, cursor.last_shift,
+                                                  observation.size());
+            if (!prepared) return;
+            const auto [first, rows, nfft, outputs, unit_bin, first_shift, earliest] = *prepared;
+            if (!fixed && geometry.direct_tile_fft_rows && nfft == geometry.fft_rows &&
+                outputs <= nfft - geometry.block_rows + 1) {
+                const std::array columns{std::span(bank[banks[0]].columns[0]).subspan(first, rows),
+                                         std::span(bank[banks[1]].columns[0]).subspan(first, rows)};
+                gain_rank_direct_tiles(geometry, *prepared, columns, observation, correlation_scale, gram_scale,
+                    work, cursor, fft, midpoint.verify && lane == 0 && work.tiled_verified == 0, job_stop);
+                ++work.direct_blocks;
+                note(work.operations.score_rows, direct_cells);
+                return;
+            }
+            auto y = std::span(work.observation).first(nfft);
+            gain_rank_spectrum(observation.subspan(static_cast<std::size_t>(earliest), outputs + rows - 1),
+                y, fft, work.operations, job_stop);
+            const auto rays = fixed ? 2u : 1u;
+            const auto block_frequencies = fixed ? frequencies : geometry.direct_frequencies();
+            const auto block_radius = fixed ? geometry.radius : geometry.direct_radius;
+            for (std::size_t bit = 0; bit < 2; ++bit) {
+                std::array<std::span<const Complex>, 2> columns;
+                for (std::size_t ray = 0; ray < rays; ++ray) {
+                    columns[ray] = std::span(bank[banks[bit]].columns[ray]).subspan(first, rows);
+                    gain_rank_spectrum(columns[ray], std::span(work.templates[ray]).first(nfft),
+                        fft, work.operations, job_stop);
                 }
-                auto y = std::span(work.observation).first(nfft);
-                gain_rank_spectrum(observation.subspan(static_cast<std::size_t>(earliest), outputs + rows - 1),
-                    y, fft, work.operations, job_stop);
-                const auto rays = fixed ? 2u : 1u;
-                const auto block_frequencies = fixed ? frequencies : geometry.direct_frequencies();
-                const auto block_radius = fixed ? geometry.radius : geometry.direct_radius;
-                for (std::size_t bit = 0; bit < 2; ++bit) {
-                    std::array<std::span<const Complex>, 2> columns;
+                std::optional<ProposalGram> gram;
+                if (fixed) gram.emplace(columns[0], columns[1], gram_scale);
+                const auto direct = gram ? gram->direct : std::sqrt(1 + gram_scale * dot(columns[0], columns[0]).real());
+                const auto direct_logdet = geometry.full_direct ? 2 * std::log(direct) : 0.;
+                std::ranges::fill(work.block_means, GainFrequencyMean{});
+                for (std::size_t f = 0; f < block_frequencies; ++f) {
+                    const auto bin = (static_cast<std::int64_t>(f) - static_cast<std::int64_t>(block_radius)) *
+                        static_cast<std::int64_t>(unit_bin);
                     for (std::size_t ray = 0; ray < rays; ++ray) {
-                        columns[ray] = std::span(bank[banks[bit]].columns[ray]).subspan(first, rows);
-                        gain_rank_spectrum(columns[ray], std::span(work.templates[ray]).first(nfft),
+                        auto product = std::span(work.correlations[ray]).first(nfft);
+                        gain_rank_correlation(y, work.templates[ray], product, bin, outputs,
                             fft, work.operations, job_stop);
-                    }
-                    std::optional<ProposalGram> gram;
-                    if (fixed) gram.emplace(columns[0], columns[1], gram_scale);
-                    const auto direct = gram ? gram->direct : std::sqrt(1 + gram_scale * dot(columns[0], columns[0]).real());
-                    const auto direct_logdet = geometry.full_direct ? 2 * std::log(direct) : 0.;
-                    std::ranges::fill(work.block_means, GainFrequencyMean{});
-                    for (std::size_t f = 0; f < block_frequencies; ++f) {
-                        const auto bin = (static_cast<std::int64_t>(f) - static_cast<std::int64_t>(block_radius)) *
-                            static_cast<std::int64_t>(unit_bin);
-                        for (std::size_t ray = 0; ray < rays; ++ray) {
-                            auto product = std::span(work.correlations[ray]).first(nfft);
-                            gain_rank_correlation(y, work.templates[ray], product, bin, outputs,
-                                fft, work.operations, job_stop);
-                            if (midpoint.verify && !(fixed ? work.blocks : work.direct_blocks)) {
-                                for (auto k : {std::size_t{0}, outputs / 2, outputs - 1}) {
-                                    Complex direct{};
-                                    for (std::size_t i = 0; i < rows; ++i)
-                                        direct += std::conj(columns[ray][i]) * observation[earliest + k + i] *
-                                            rotation(-static_cast<long double>(bin) * (k + i) / nfft);
-                                    require_coarse(std::abs(direct - product[k]) <= 2e-9 * (1 + std::abs(direct)),
-                                        "signed gain rank disagrees with finite linear correlation");
-                                    ++work.verified;
-                                }
+                        if (midpoint.verify && !(fixed ? work.blocks : work.direct_blocks)) {
+                            for (auto k : {std::size_t{0}, outputs / 2, outputs - 1}) {
+                                Complex direct{};
+                                for (std::size_t i = 0; i < rows; ++i)
+                                    direct += std::conj(columns[ray][i]) * observation[earliest + k + i] *
+                                        rotation(-static_cast<long double>(bin) * (k + i) / nfft);
+                                require_coarse(std::abs(direct - product[k]) <= 2e-9 * (1 + std::abs(direct)),
+                                    "signed gain rank disagrees with finite linear correlation");
+                                ++work.verified;
                             }
                         }
-                        auto accumulated = fixed ? std::span(work.scores).subspan((bit * frequencies + f) * lags, lags) :
-                                                   std::span<double>{};
+                    }
+                    auto accumulated = fixed ? std::span(work.scores).subspan((bit * frequencies + f) * lags, lags) :
+                                               std::span<double>{};
+                    for (std::size_t i = 0; i < lags; ++i) {
+                        const auto at = static_cast<std::size_t>(work.shifts[i] - first_shift);
+                        const auto r0 = correlation_scale * work.correlations[0][at];
+                        if (fixed) accumulated[i] += gram->score(r0, correlation_scale * work.correlations[1][at]);
+                        if (geometry.full_direct)
+                            work.block_means[i].include(std::norm(r0 / direct) - direct_logdet);
+                    }
+                }
+                if (geometry.full_direct && fixed) {
+                    // Keep every original fixed-frequency operation in
+                    // its old order. Only the direct statistic visits
+                    // the added outer cells at the same lattice step.
+                    for (std::int64_t f = -static_cast<std::int64_t>(geometry.direct_radius);
+                         f <= static_cast<std::int64_t>(geometry.direct_radius); ++f) {
+                        if (f >= -static_cast<std::int64_t>(geometry.radius) &&
+                            f <= static_cast<std::int64_t>(geometry.radius)) continue;
+                        check_stop(job_stop);
+                        gain_rank_correlation(y, work.templates[0], std::span(work.correlations[0]).first(nfft),
+                            f * static_cast<std::int64_t>(unit_bin), outputs, fft, work.operations, job_stop);
                         for (std::size_t i = 0; i < lags; ++i) {
                             const auto at = static_cast<std::size_t>(work.shifts[i] - first_shift);
-                            const auto r0 = correlation_scale * work.correlations[0][at];
-                            if (fixed) accumulated[i] += gram->score(r0, correlation_scale * work.correlations[1][at]);
-                            if (geometry.full_direct)
-                                work.block_means[i].include(std::norm(r0 / direct) - direct_logdet);
+                            const auto r = correlation_scale * work.correlations[0][at];
+                            work.block_means[i].include(std::norm(r / direct) - direct_logdet);
                         }
                     }
-                    if (geometry.full_direct && fixed) {
-                        // Keep every original fixed-frequency operation in
-                        // its old order. Only the direct statistic visits
-                        // the added outer cells at the same lattice step.
-                        for (std::int64_t f = -static_cast<std::int64_t>(geometry.direct_radius);
-                             f <= static_cast<std::int64_t>(geometry.direct_radius); ++f) {
-                            if (f >= -static_cast<std::int64_t>(geometry.radius) &&
-                                f <= static_cast<std::int64_t>(geometry.radius)) continue;
-                            check_stop(job_stop);
-                            gain_rank_correlation(y, work.templates[0], std::span(work.correlations[0]).first(nfft),
-                                f * static_cast<std::int64_t>(unit_bin), outputs, fft, work.operations, job_stop);
-                            for (std::size_t i = 0; i < lags; ++i) {
-                                const auto at = static_cast<std::size_t>(work.shifts[i] - first_shift);
-                                const auto r = correlation_scale * work.correlations[0][at];
-                                work.block_means[i].include(std::norm(r / direct) - direct_logdet);
-                            }
-                        }
+                }
+                if (geometry.full_direct && captured.empty())
+                    for (std::size_t i = 0; i < lags; ++i)
+                        work.direct_scores[bit * lags + i] += work.block_means[i].log_mean(geometry.direct_frequencies());
+                else if (geometry.full_direct)
+                    for (std::size_t i = 0; i < lags; ++i) {
+                        // The audit captures exactly the value the rank adds.
+                        const auto value = work.block_means[i].log_mean(geometry.direct_frequencies());
+                        work.direct_scores[bit * lags + i] += value;
+                        captured[bit * lags + i] = value;
                     }
-                    if (geometry.full_direct)
-                        for (std::size_t i = 0; i < lags; ++i)
-                            work.direct_scores[bit * lags + i] += work.block_means[i].log_mean(geometry.direct_frequencies());
+            }
+            if (fixed) {
+                ++work.blocks;
+                work.rows += rows;
+                note(work.operations.score_rows, cells);
+            }
+            if (geometry.full_direct) {
+                ++work.direct_blocks;
+                note(work.operations.score_rows, direct_cells);
+            }
+        };
+        // Keep the stationary rank's lane assignment, sample order
+        // and reduction unchanged while sharing its direct correlations.
+        if (fixed_pass && lane < fixed_workers)
+            for (std::size_t sample = lane; sample < geometry.sampled_blocks; sample += fixed_workers) {
+                const auto next = sample + fixed_workers;
+                std::span<double> captured;
+                if (audit && audit->audit_rows[sample] != std::numeric_limits<std::size_t>::max())
+                    captured = std::span(audit->audit_native).subspan(audit->audit_rows[sample] * 2 * lags, 2 * lags);
+                score_block(gain_timing_block(geometry, sample, slot),
+                    next < geometry.sampled_blocks ? gain_timing_block(geometry, next, slot) : geometry.blocks,
+                    true, captured);
+            }
+        const auto unsampled = [&](std::size_t block) { return sampled.empty() || !sampled[block]; };
+        if (direct_pass && geometry.full_direct && geometry.sampled_blocks < geometry.blocks)
+            for (std::size_t block = lane; block < geometry.blocks; block += maximum_workers) {
+                check_stop(job_stop);
+                if (!unsampled(block)) continue;
+                // The run search pays off only before another visit.
+                auto next = block + maximum_workers;
+                while (next < geometry.blocks && !unsampled(next)) next += maximum_workers;
+                score_block(block, std::min(next, geometry.blocks), false, {});
+            }
+        shift_vectors += cursor.vectors;
+    };
+    const auto native_lanes = [&](bool fixed_pass) {
+        parallel(maximum_workers, static_cast<unsigned>(maximum_workers), stop, executor, slot.index,
+            [&](unsigned, std::size_t lane, std::stop_token job_stop) {
+                run_lane(lane, fixed_pass, true, nullptr, job_stop);
+            });
+    };
+
+    // A device direct rank publishes only certified nominations. Every
+    // decline or fallback runs the native unsampled loop on the same lanes
+    // after their unchanged fixed pass, so its totals are native bit for bit.
+    std::optional<GainDeviceRank> device_rank;
+    std::optional<GainCertification> certification;
+    bool certified = false, fixed_done = false;
+    if (backend) {
+        report.device_host_bytes = gain_direct_device_host_bytes(midpoint, workers, limits);
+        if (midpoint.verify) native_because(gain_direct_verify_mode, false);
+        else if (!geometry.full_direct) native_because(gain_direct_no_rank, false);
+        else if (geometry.sampled_blocks >= geometry.blocks) native_because(gain_direct_no_unsampled, false);
+        // Without a sampled block there is no audit to set the band.
+        else if (!fixed_workers) native_because(gain_certification_no_audit, false);
+        else if (report.device_host_bytes > device_host_limit) native_because(gain_direct_workspace, false);
+        else {
+            auto& rank = device_rank.emplace();
+            rank.runs = gain_shift_runs(shift_map, limits.maximum_shift_runs, stop);
+            shift_vectors += rank.runs.count;
+            report.shift_runs = rank.runs.count;
+            if (rank.runs.overflow) {
+                native_because(rank.runs.range ? gain_direct_shift_range : gain_direct_shift_runs, false);
+            } else {
+                const auto table_block = [&](std::size_t block) {
+                    const auto run = rank.runs.run(block);
+                    const auto prepared = gain_rank_block(plan, geometry, block, rank.runs.first_shift[run],
+                                                          rank.runs.last_shift[run], observation.size());
+                    if (!prepared) return false;
+                    require_coarse(prepared->outputs <= UINT32_MAX, "signed gain device block exceeds its index range");
+                    GainRankBlock entry{static_cast<std::uint32_t>(block), static_cast<std::uint32_t>(prepared->first),
+                        static_cast<std::uint32_t>(prepared->rows), static_cast<std::uint32_t>(prepared->outputs),
+                        static_cast<std::uint32_t>(run), prepared->first_shift, prepared->earliest, {}, {}};
+                    for (std::size_t bit = 0; bit < 2; ++bit) {
+                        const auto column = std::span(bank[banks[bit]].columns[0]).subspan(prepared->first, prepared->rows);
+                        entry.scale[bit] = std::sqrt(1 + gram_scale * dot(column, column).real());
+                        entry.logdet[bit] = 2 * std::log(entry.scale[bit]);
+                    }
+                    rank.blocks.push_back(entry);
+                    return true;
+                };
+                // Block, first row, rows, outputs and run are 32-bit table fields.
+                require_coarse(geometry.blocks <= UINT32_MAX && plan.layout.kernel_rows <= UINT32_MAX &&
+                               observation.size() <= INT64_MAX, "signed gain device table exceeds its index range");
+                rank.blocks.reserve(geometry.blocks);
+                for (std::size_t block = 0; block < geometry.blocks; ++block) {
+                    if ((block & 4095) == 0) check_stop(stop);
+                    if (sampled.empty() || !sampled[block]) table_block(block);
                 }
-                if (fixed) {
-                    ++work.blocks;
-                    work.rows += rows;
-                    note(work.operations.score_rows, cells);
+                rank.unsampled = rank.blocks.size();
+                rank.audit_rows.assign(geometry.sampled_blocks, std::numeric_limits<std::size_t>::max());
+                for (std::size_t sample = 0; sample < geometry.sampled_blocks; ++sample)
+                    if (table_block(gain_timing_block(geometry, sample, slot)))
+                        rank.audit_rows[sample] = rank.blocks.size() - rank.unsampled - 1;
+                const auto audits = rank.blocks.size() - rank.unsampled;
+                rank.totals.assign(2 * lags, 0.);
+                rank.audit_native.assign(audits * 2 * lags, std::numeric_limits<double>::quiet_NaN());
+                rank.audit_device.assign(audits * 2 * lags, std::numeric_limits<float>::quiet_NaN());
+                // Every buffer held here, by the certification and by the
+                // rescoring stays within the admitted quote.
+                const auto bytes = [](const auto& vector) {
+                    return mul(vector.capacity(), sizeof(typename std::decay_t<decltype(vector)>::value_type));
+                };
+                auto held = add(add(add(bytes(rank.runs.first_blocks), bytes(rank.runs.first_shift)),
+                                    add(bytes(rank.runs.last_shift), bytes(rank.runs.relative))),
+                                mul(lags, sizeof(std::int64_t)));
+                held = add(held, add(add(bytes(rank.blocks), bytes(rank.audit_rows)),
+                                     add(add(bytes(rank.totals), bytes(rank.audit_native)), bytes(rank.audit_device))));
+                require_coarse(held <= report.device_host_bytes, "signed gain device rank exceeded its host quote");
+                report.device_host_held = held;
+                const std::array<std::span<const Complex>, 2> columns{bank[banks[0]].columns[0], bank[banks[1]].columns[0]};
+                // The device needs unsampled blocks inside the observation,
+                // and the band two prepared audit blocks.
+                std::unique_ptr<GainRankBulk> session;
+                if (!rank.unsampled) native_because(gain_direct_no_unsampled, false);
+                else if (audits < 2) native_because(gain_certification_no_audit, false);
+                else {
+                    const auto before = stage_counts();
+                    session = backend->make_gain_rank(*device_shape, fp64_forced, stop);
+                    if (!session) backend_native(before, false);
                 }
-                if (geometry.full_direct) {
-                    ++work.direct_blocks;
-                    note(work.operations.score_rows, direct_cells);
+                if (session) {
+                    const GainRankRequest request{observation, columns, rank.blocks, rank.runs.relative,
+                                                  correlation_scale};
+                    bool accepted = false;
+                    // The call's validated device work; its transforms are
+                    // the slot's device FFT row-stages.
+                    StageDeviceWork device_work;
+                    const auto before = stage_counts();
+                    // The device job comes first so that it starts beside the
+                    // fixed lanes. Its session returns every device buffer and
+                    // its lease as soon as the call ends, before the fixed
+                    // lanes finish and the FP64 certification runs.
+                    parallel(fixed_workers + 1, static_cast<unsigned>(std::min<std::size_t>(workers, fixed_workers + 1)),
+                        stop, executor, slot.index, [&](unsigned, std::size_t job, std::stop_token job_stop) {
+                            if (job == 0) {
+                                accepted = session->direct_ranks(request, rank.totals, rank.audit_device,
+                                                                 device_work, job_stop);
+                                session->release();
+                            } else run_lane(job - 1, true, false, &rank, job_stop);
+                        });
+                    fixed_done = true;
+                    if (!accepted) {
+                        backend_native(before, true);
+                    } else {
+                        result.gain_device_fft_row_stages = device_work.fft_row_stages;
+                        // S: the fixed lanes' direct sums in native lane order.
+                        std::vector<double> sums(2 * lags);
+                        for (std::size_t lane = 0; lane < fixed_workers; ++lane)
+                            for (std::size_t i = 0; i < sums.size(); ++i) sums[i] += scratch[lane].direct_scores[i];
+                        std::size_t rescoring = 0;
+                        // The rescoring's host transforms, a CPU cost of
+                        // the device route whether it publishes or not.
+                        CoarseOperationCounts rescore_work;
+                        const auto rescore = [&](std::array<std::span<const std::size_t>, 2> frontier,
+                                                 std::array<std::span<double>, 2> totals,
+                                                 std::array<std::span<double>, 2> magnitudes) {
+                            const auto began = PhaseClock::now();
+                            rescoring = gain_rescore_frontier(geometry, rank.runs, std::span(rank.blocks).first(rank.unsampled),
+                                columns, observation, correlation_scale, lags, frontier, totals, magnitudes,
+                                rescore_work, limits.rescore_chunk_blocks, workers, executor, slot.index, stop);
+                            report.rescore_seconds = elapsed(began);
+                        };
+                        certification = certify_gain_direct_rank({lags, rank.unsampled, rank.unsampled + audits, sums,
+                            rank.totals, rank.audit_native, rank.audit_device}, limits, rescore);
+                        result.gain_rescore_fft_row_stages = rescore_work.fft_row_stages;
+                        held = add(held, add(bytes(sums), add(certification->host_bytes, rescoring)));
+                        require_coarse(held <= report.device_host_bytes, "signed gain certification exceeded its host quote");
+                        report.device_host_held = held;
+                        report.frontier_lags = certification->frontier_lags;
+                        report.rescored_lags = certification->rescored_lags;
+                        const auto& bits = certification->bits;
+                        report.band_source = bits[bits[1].band > bits[0].band].band_source;
+                        report.top2_gap = std::min(bits[0].top2_gap, bits[1].top2_gap);
+                        report.band_ratio = std::max(bits[0].band_ratio, bits[1].band_ratio);
+                        // The backend receipt records every certification; the
+                        // slot's fields describe a certified one only.
+                        session->record_certification({certification->frontier_lags, certification->rescored_lags,
+                                                       report.rescore_seconds, report.band_ratio, report.band_source});
+                        if (certification->fallback.empty()) {
+                            certified = true;
+                            result.gain_rescored_lags = static_cast<std::uint16_t>(
+                                std::min<std::size_t>(certification->rescored_lags, UINT16_MAX));
+                            // A frontier of one lag per bit has no second lag.
+                            result.gain_top2_gap = std::isfinite(report.top2_gap) ? report.top2_gap : 0;
+                        } else native_because(certification->fallback, true);
+                    }
                 }
-            };
-            // Keep the stationary rank's lane assignment, sample order
-            // and reduction unchanged while sharing its direct correlations.
-            if (lane < fixed_workers)
-                for (std::size_t sample = lane; sample < geometry.sampled_blocks; sample += fixed_workers)
-                    score_block(gain_timing_block(geometry, sample, slot), true);
-            if (geometry.full_direct && geometry.sampled_blocks < geometry.blocks)
-                for (std::size_t block = lane; block < geometry.blocks; block += maximum_workers) {
-                    check_stop(job_stop);
-                    if (sampled.empty() || !sampled[block]) score_block(block, false);
-                }
-        });
+            }
+        }
+    }
+    // The unsampled loop continues each lane's own direct sums in order.
+    if (!certified) native_lanes(!fixed_done);
+    report.shift_vectors = shift_vectors;
     result.gain_seconds = elapsed(started);
     phase.wall_seconds = result.gain_seconds;
     std::vector<double> reduced(geometry.sampled_blocks ? cells : 0);
@@ -3843,10 +4604,26 @@ void rank_gain_timing(const Plan& plan, const ReceiverConfig& config, const Rece
         for (std::size_t i = 0; i < work.scores.size(); ++i) reduced[i] += work.scores[i];
         for (std::size_t i = 0; i < work.direct_scores.size(); ++i) direct_reduced[i] += work.direct_scores[i];
     }
+    if (certified) {
+        // Credit device-scored blocks only after a certified readback.
+        const auto device_rows = mul(device_rank->unsampled, direct_cells);
+        result.gain_direct_blocks += device_rank->unsampled;
+        report.route = "device";
+        result.gain_route = GainRankRoute::device;
+        report.device_blocks = device_rank->unsampled;
+        note(result.gain_score_rows, device_rows);
+        note(phase.operations.score_rows, device_rows);
+    }
     require_coarse(result.gain_fft_row_stages <= geometry.fft_stage_bound &&
                    result.gain_score_rows <= geometry.score_row_bound,
                    "signed gain rank exceeded its exact public work quote");
 
+    // A certified device rank nominates from its FP64 frontier totals; the
+    // nonfinite check still covers every lag of its device totals.
+    const std::span<const double> direct_ranks = certified ? std::span<const double>(certification->nomination) :
+                                                             std::span<const double>(direct_reduced);
+    const std::span<const double> direct_values = certified ? std::span<const double>(certification->totals) :
+                                                              std::span<const double>(direct_reduced);
     const auto nominate = [&](bool direct) {
         for (std::size_t bit = 0; bit < 2; ++bit) {
             CoarseProposal best{{}, -infinity, static_cast<std::uint8_t>(bit), 2};
@@ -3854,7 +4631,7 @@ void rank_gain_timing(const Plan& plan, const ReceiverConfig& config, const Rece
             const auto fixed = direct ? std::span<double>{} :
                 std::span(reduced).subspan(bit * frequencies * lags, frequencies * lags);
             for (std::size_t lag = 0; lag < lags; ++lag) {
-                const auto rank = direct ? direct_reduced[bit * lags + lag] :
+                const auto rank = direct ? direct_ranks[bit * lags + lag] :
                     fixed_gain_frequency_rank(fixed, lags, lag);
                 if (rank > best.score) {
                     best.coordinate = coordinates[lag];
@@ -3871,7 +4648,7 @@ void rank_gain_timing(const Plan& plan, const ReceiverConfig& config, const Rece
     };
     const auto finite = [](double value) { return std::isfinite(value); };
     const bool valid_fixed = result.gain_blocks && std::ranges::all_of(reduced, finite);
-    const bool valid_direct = result.gain_direct_blocks && std::ranges::all_of(direct_reduced, finite);
+    const bool valid_direct = result.gain_direct_blocks && std::ranges::all_of(direct_values, finite);
     if (valid_fixed) nominate(false);
     result.gain_fixed_proposal_count = result.gain_proposal_count;
     if (valid_direct) nominate(true);
@@ -3884,6 +4661,16 @@ void rank_gain_timing(const Plan& plan, const ReceiverConfig& config, const Rece
     else if (geometry.sampled_blocks && !valid_fixed)
         result.gain_status = result.gain_blocks ? "signed_gain_fixed_numeric_range_direct_retained" :
                                                   "signed_gain_fixed_no_common_block_support_direct_retained";
+    if (trial) {
+        trial->fixed_totals = reduced;
+        trial->direct_totals = direct_reduced;
+        if (device_rank) {
+            trial->device_totals = device_rank->totals;
+            trial->audit_native = device_rank->audit_native;
+            trial->audit_device = device_rank->audit_device;
+        }
+        trial->certification = certification;
+    }
 }
 } // namespace
 
@@ -3950,7 +4737,8 @@ struct CoarseSession::Impl {
         if (midpoint_evaluation != MidpointTimingEvaluation::off) {
             midpoint_geometry = midpoint_plan(geometry, config, slot, workers, midpoint_evaluation);
             require_coarse(midpoint_geometry->lag_count, "Robust midpoint timing plan is outside supported public geometry");
-            workspace.total = add(workspace.total, midpoint_geometry->extra_workspace_bytes);
+            workspace.total = add(add(workspace.total, midpoint_geometry->extra_workspace_bytes),
+                gain_device_charge(geometry, config, slot, *midpoint_geometry, workspace, workers));
             midpoint_timing.emplace();
         }
         if (workspace.total > limit) throw ReceiverWorkspaceError("complete coarse receiver exceeds its admitted workspace");
@@ -4329,9 +5117,18 @@ struct CoarseSession::Impl {
         receipt.template_bank.wall_seconds = echo_setup_seconds + bank_span.seconds();
         receipt.observation.wall_seconds = observation_span.seconds();
         if (midpoint_geometry) {
+            // The receiver's bulk backend, or coarse_gain_rank_trial()'s.
+            // Where the backend's policy accepts the rank's shape, the DSP
+            // preflight charged the device host buffers' quote
+            // (gain_device_charge), which the rank's host admission is.
+            const auto* trial = gain_rank_trial_hook;
+            auto* backend = trial ? trial->backend : config.bulk_backend.get();
+            const auto device_host_limit = trial ? trial->device_host_limit :
+                backend ? gain_direct_device_host_bytes(*midpoint_geometry, workers, {}) : 0;
             rank_gain_timing(geometry, config, slot, *midpoint_geometry, bank, observation,
                 projection.variance(config.noise_variance), *midpoint_timing, receipt.signed_gain_proposal,
-                workers, executor, stop);
+                workers, executor, stop, backend, device_host_limit,
+                trial ? trial->limits : GainCertificationLimits{}, trial ? trial->trial : nullptr);
         }
         if (retain_gain_columns && (spectrum_fft || float_fft)) {
             const auto transformed = PhaseClock::now();
@@ -4722,6 +5519,40 @@ CoarseResult score_coarse(const ReceiverConfig& config, const ReceiverSlotPlan& 
                           CoarseInputCheck input_check) {
     return complete(CoarseSession(config, slot, key, iq, assistance, workers, scratch_limit_bytes, stop, executor,
                                   midpoint_timing, input_check));
+}
+
+CoarseGainShiftSetup coarse_gain_shift_setup(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                                             unsigned workers) {
+    const auto plan = make_plan(config, slot);
+    const auto midpoint = midpoint_plan(plan, config, slot, workers, MidpointTimingEvaluation::short_tracking);
+    const auto& gain = midpoint.gain;
+    require_coarse(midpoint.lag_count && gain.block_rows, "signed gain shift setup requires a planned rank");
+    CoarseGainShiftSetup setup{gain_shift_geometry(plan, slot, gain), gain_rank_coordinates(plan, config, slot, midpoint),
+        {}, gain.blocks, std::min<std::size_t>(workers, gain.sampled_blocks),
+        gain.full_direct ? std::min<std::size_t>(workers, gain.blocks) : std::min<std::size_t>(workers, gain.sampled_blocks),
+        gain.full_direct, plan.layout.crop_rows};
+    for (std::size_t sample = 0; sample < gain.sampled_blocks; ++sample)
+        setup.sampled.push_back(gain_timing_block(gain, sample, slot));
+    return setup;
+}
+
+CoarseGainRankTrial coarse_gain_rank_trial(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
+                                           std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
+                                           unsigned workers, std::size_t limit, MidpointTimingEvaluation evaluation,
+                                           ReceiverBulkBackend* backend, const GainCertificationLimits& limits) {
+    require_coarse(!gain_rank_trial_hook, "signed gain rank trials do not nest");
+    CoarseGainRankTrial trial;
+    // The session admits its own quote; the rest of `limit` admits the device host buffers.
+    trial.native_quote = coarse_workspace(config, slot, workers, {}, evaluation);
+    trial.device_host_bytes = gain_direct_device_host_bytes(
+        midpoint_plan(make_plan(config, slot), config, slot, workers, evaluation), workers, limits);
+    GainRankTrialHook hook{backend, limits, limit > trial.native_quote ? limit - trial.native_quote : 0, &trial};
+    struct Restore {
+        ~Restore() { gain_rank_trial_hook = nullptr; }
+    } restore;
+    gain_rank_trial_hook = &hook;
+    trial.coarse = score_coarse(config, slot, key, iq, intervals, workers, limit, {}, nullptr, evaluation);
+    return trial;
 }
 
 CoarseFirChunkTrial coarse_fir_chunk_trial(std::span<const Complex> iq, std::size_t decimation, std::size_t taps,

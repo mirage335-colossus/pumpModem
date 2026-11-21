@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"tools"))
 import triad_abbreviated as abbreviated
 from triad_abbreviated import (analyze, log_interval, policy, validate_baseline, stream_unit,
                               stream_batch, regression_batch_list, KERNELS, SCHEMA)
+import triad_native
 from triad_native import (NativeProbe, OPENCL_COARSE_FALLBACK_REASONS, ProbeError, runtime_identity,
                           validate_receipt)
 
@@ -416,6 +417,13 @@ class AbbreviatedTests(unittest.TestCase):
         # Their receipt has no automatic shared workspace or lease.
         validate_receipt(receipt, command="continuation", backend="vulkan", returncode=0,
                          expected_require_accelerator=True)
+        # A backend that can select a fine-stage family holds the larger cache.
+        stage_cache = copy.deepcopy(receipt)
+        stage_cache["identity"]["backend_receipt"].update(
+            host_cache_limit_bytes=64 << 20, host_cache_bytes=9 << 20,
+            host_cache_entries=triad_native.VULKAN_SERIALIZED_CACHE_ENTRIES[64 << 20])
+        validate_receipt(stage_cache, command="continuation", backend="vulkan", returncode=0,
+                         expected_require_accelerator=True)
         mutations = (lambda x: x["identity"]["backend_receipt"].update(vulkan=False),
                      lambda x: x["identity"]["backend_receipt"].update(vulkan_dispatches=0),
                      lambda x: x["identity"]["backend_receipt"].update(vulkan_arrival_peak_rows=0),
@@ -426,7 +434,9 @@ class AbbreviatedTests(unittest.TestCase):
                      lambda x: x["identity"]["backend_receipt"].update(allocator_peak_reserved_bytes=1 << 28),
                      lambda x: x["identity"]["backend_receipt"].update(native_coarse_workspace_sessions=-1),
                      lambda x: x["identity"]["backend_receipt"].update(host_cache_bytes=9 << 20),
-                     lambda x: x["identity"]["backend_receipt"].update(host_cache_entries=9),
+                     lambda x: x["identity"]["backend_receipt"].update(
+                         host_cache_entries=triad_native.VULKAN_SERIALIZED_CACHE_ENTRIES[8 << 20] + 1),
+                     lambda x: x["identity"]["backend_receipt"].update(host_cache_limit_bytes=16 << 20),
                      lambda x: x["identity"].update(require_accelerator=False),
                      lambda x: x["identity"].pop("require_accelerator"),
                      lambda x: x["phases"][0]["work"].update(native_fallback_reason="native-lag-groups"))
@@ -758,6 +768,141 @@ class AbbreviatedTests(unittest.TestCase):
         self.assertEqual(len(names), int(match.group(1)))
         self.assertEqual(len(set(names)), len(names))
         self.assertEqual(set(names), OPENCL_COARSE_FALLBACK_REASONS)
+
+    def test_vulkan_stage_reasons_match_native_receipt(self):
+        # The fine-stage families, reason lists and plan cache bounds are the
+        # native receipt's.
+        source = Path(__file__).resolve().parents[1] / "src"
+        header = (source / "triad_receiver_bulk.hpp").read_text()
+        def names(array):
+            match = re.search(r"std::array<std::string_view, (\d+)> " + array + r"\{(.*?)\};", header, re.S)
+            self.assertIsNotNone(match, array)
+            found = tuple(re.findall(r'"([^"]+)"', match.group(2)))
+            self.assertEqual(len(found), int(match.group(1)))
+            return found
+        self.assertEqual(names("stage_family_receipt_names"), triad_native.VULKAN_STAGE_FAMILIES)
+        self.assertEqual(names("stage_policy_reasons"), triad_native.STAGE_POLICY_REASONS)
+        self.assertEqual(names("stage_fallback_reasons"), triad_native.STAGE_FALLBACK_REASONS)
+        self.assertEqual(names("gain_rank_stage_reasons"), triad_native.GAIN_RANK_STAGE_REASONS)
+        self.assertEqual(names("varying_stage_reasons"), triad_native.VARYING_STAGE_REASONS)
+        core = (source / "triad_vulkan_core.hpp").read_text()
+        bounds = {}
+        for name in ("coarse", "stage"):
+            match = re.search(name + r"_cache_bounds\{\.serialized_entries = (\d+), \.serialized_bytes = (\d+) \* mib,",
+                              core)
+            self.assertIsNotNone(match, name)
+            bounds[int(match.group(2)) << 20] = int(match.group(1))
+        self.assertEqual(bounds, triad_native.VULKAN_SERIALIZED_CACHE_ENTRIES)
+
+    def test_vulkan_stage_receipt_names_its_native_stages(self):
+        receipt = device_receipt()
+        receipt["identity"].update(backend="vulkan", configured_vulkan_backend=True,
+                                  backend_receipt=vulkan_bulk_receipt())
+        receipt["phases"][0]["name"] = "coarse_tiles"
+        receipt["phases"][0]["work"] = {"route": "frequency_tiles", "native_fallback_reason": ""}
+        bulk = receipt["identity"]["backend_receipt"]
+        for family in triad_native.VULKAN_STAGE_FAMILIES:
+            bulk.update({f"vulkan_{family}_{name}": 0 for name in (
+                "sessions", "forward_ffts", "inverse_ffts", "fft_row_stages", "score_rows", "planned_calls",
+                "declined_calls", "native_fallbacks", "upload_bytes")})
+            bulk.update({f"vulkan_{family}_decline_reason": "", f"vulkan_{family}_fallback_reason": "",
+                         f"vulkan_{family}_qualified_device": False})
+        # Automatic selection declines an unqualified family; the receiver
+        # records its own decline of another.
+        bulk.update(vulkan_drift_planned_calls=2, vulkan_drift_declined_calls=2,
+                    vulkan_drift_decline_reason="vulkan-drift-unqualified-device",
+                    vulkan_gain_rank_planned_calls=1, vulkan_gain_rank_declined_calls=1,
+                    vulkan_gain_rank_decline_reason="vulkan-gain-rank-verify-mode",
+                    vulkan_gain_rank_native_fallbacks=1, vulkan_gain_rank_fallback_reason="vulkan-gain-rank-near-tie")
+        receipt["identity"].update(requested_vulkan_gain_rank="automatic", requested_vulkan_drift="automatic",
+                                   requested_vulkan_varying_fine="native",
+                                   requested_vulkan_varying_arithmetic="automatic",
+                                   vulkan_varying_route_decline="vulkan-varying-native-requested")
+        validate_receipt(receipt, command="continuation", backend="vulkan", returncode=0,
+                         expected_require_accelerator=True)
+        for patch in ({"vulkan_drift_decline_reason": "vulkan-gain-rank-unqualified-device"},
+                      {"vulkan_drift_decline_reason": "vulkan-drift-verify-mode"},
+                      {"vulkan_drift_decline_reason": ""},
+                      {"vulkan_varying_fallback_reason": "vulkan-varying-workspace"},
+                      {"vulkan_gain_rank_fallback_reason": "vulkan-gain-rank-unimplemented"},
+                      {"vulkan_drift_declined_calls": 3},
+                      {"vulkan_varying_score_rows": 8},
+                      {"vulkan_varying_sessions": 1},
+                      {"vulkan_drift_qualified_device": 0},
+                      {"vulkan_gain_rank_planned_calls": -1},
+                      # A planned call is a decline, a session or a
+                      # fallback before any session.
+                      {"vulkan_drift_planned_calls": 1},
+                      {"vulkan_drift_planned_calls": 3}):
+            wrong = copy.deepcopy(receipt)
+            wrong["identity"]["backend_receipt"].update(patch)
+            with self.subTest(patch=patch), self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="continuation", backend="vulkan", returncode=0,
+                                 expected_require_accelerator=True)
+        for identity in ({"requested_vulkan_drift": "gpu"}, {"requested_vulkan_varying_arithmetic": "fp64"},
+                         {"requested_vulkan_varying_arithmetic": "fp16"},
+                         {"vulkan_gain_rank_requirement": "required"},
+                         # A stated route names the backend's policy decline.
+                         {"vulkan_varying_route_decline": None},
+                         {"vulkan_varying_route_decline": "vulkan-varying-unimplemented"},
+                         {"vulkan_varying_route_decline": "vulkan-varying-workspace"},
+                         {"vulkan_drift_route_decline": ""},
+                         # A stated arithmetic needs the device route.
+                         {"requested_vulkan_varying_fine": "automatic", "vulkan_varying_route_decline": None,
+                          "requested_vulkan_varying_arithmetic": "fp64"},
+                         # A device route the backend cannot serve is never complete.
+                         {"requested_vulkan_drift": "device", "vulkan_drift_requirement": "unservable",
+                          "vulkan_drift_route_decline": "vulkan-drift-unimplemented"},
+                         # A required route whose stages were declined, and
+                         # one with recorded stages that claims none.
+                         {"requested_vulkan_drift": "device", "vulkan_drift_requirement": "required",
+                          "vulkan_drift_route_decline": ""},
+                         {"requested_vulkan_drift": "device", "vulkan_drift_requirement": "not_applicable",
+                          "vulkan_drift_route_decline": ""}):
+            wrong = copy.deepcopy(receipt)
+            wrong["identity"].update(identity)
+            with self.subTest(identity=identity), self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="continuation", backend="vulkan", returncode=0,
+                                 expected_require_accelerator=True)
+        cpu = cpu_receipt("continuation")
+        cpu["identity"]["requested_vulkan_gain_rank"] = "device"
+        with self.assertRaises(ProbeError):
+            validate_receipt(cpu, command="continuation", backend="cpu", returncode=0)
+        # A required device route that ran every planned stage there, a
+        # stated arithmetic on it, and a family with no stage on this geometry.
+        served = copy.deepcopy(receipt)
+        served["identity"].update(requested_vulkan_varying_fine="device", vulkan_varying_route_decline="",
+                                  vulkan_varying_requirement="required", requested_vulkan_varying_arithmetic="fp64",
+                                  requested_vulkan_gain_rank="device", vulkan_gain_rank_route_decline="",
+                                  vulkan_gain_rank_requirement="not_applicable")
+        served["identity"]["backend_receipt"].update(
+            vulkan_varying_planned_calls=1, vulkan_varying_sessions=1, vulkan_varying_score_rows=8,
+            vulkan_varying_forward_ffts=2, vulkan_gain_rank_planned_calls=0, vulkan_gain_rank_declined_calls=0,
+            vulkan_gain_rank_decline_reason="", vulkan_gain_rank_native_fallbacks=0,
+            vulkan_gain_rank_fallback_reason="")
+        validate_receipt(served, command="continuation", backend="vulkan", returncode=0,
+                         expected_require_accelerator=True)
+        for patch in ({"vulkan_varying_score_rows": 0}, {"vulkan_varying_planned_calls": 2,
+                      "vulkan_varying_native_fallbacks": 1,
+                      "vulkan_varying_fallback_reason": "vulkan-varying-unified-memory-envelope"},
+                      {"vulkan_gain_rank_planned_calls": 1, "vulkan_gain_rank_native_fallbacks": 1,
+                       "vulkan_gain_rank_fallback_reason": "vulkan-gain-rank-unified-memory-envelope"}):
+            wrong = copy.deepcopy(served)
+            wrong["identity"]["backend_receipt"].update(patch)
+            with self.subTest(served=patch), self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="continuation", backend="vulkan", returncode=0,
+                                 expected_require_accelerator=True)
+        # An unservable device route stops before any work, naming the decline.
+        unservable = copy.deepcopy(receipt)
+        unservable.update(status="incomplete", reason="Requested Vulkan drift route is unavailable on this backend")
+        unservable["identity"].update(requested_vulkan_drift="device", vulkan_drift_requirement="unservable",
+                                      vulkan_drift_route_decline="vulkan-drift-unimplemented")
+        validate_receipt(unservable, command="continuation", backend="vulkan", returncode=2,
+                         expected_require_accelerator=True)
+        unservable["identity"]["vulkan_drift_route_decline"] = ""
+        with self.assertRaises(ProbeError):
+            validate_receipt(unservable, command="continuation", backend="vulkan", returncode=2,
+                             expected_require_accelerator=True)
 
     def test_vulkan_dense_coarse_receipt_partitions_rows_and_bounds_leases(self):
         dense_only = dict(vulkan_vendor_id=0x10de, vulkan_fp32_score_rows=0, vulkan_dispatches=0,

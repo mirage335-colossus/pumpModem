@@ -47,7 +47,9 @@ foreach(_entry IN LISTS _triad_vkfft_inventory)
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_path}")
 endforeach()
 
-add_library(datapump_triad_vulkan STATIC src/triad_vulkan_backend.cpp)
+# The backend, its shared device core and the fine-stage device sessions.
+add_library(datapump_triad_vulkan STATIC src/triad_vulkan_backend.cpp src/triad_vulkan_core.cpp
+  src/triad_vulkan_gain.cpp src/triad_vulkan_drift.cpp src/triad_vulkan_varying.cpp)
 target_include_directories(datapump_triad_vulkan PUBLIC include PRIVATE src)
 target_include_directories(datapump_triad_vulkan SYSTEM PRIVATE
   "${_triad_vkfft_root}/vkFFT" "${DATAPUMP_GLSLANG_C_INCLUDE_DIR}")
@@ -64,7 +66,9 @@ elseif(MSVC)
   target_compile_options(datapump_triad_vulkan PRIVATE /fp:strict)
 endif()
 
-add_executable(test_triad_vulkan EXCLUDE_FROM_ALL tests/test_triad_vulkan.cpp)
+add_executable(test_triad_vulkan EXCLUDE_FROM_ALL tests/test_triad_vulkan.cpp
+  tests/triad_vulkan_stage_checks.hpp tests/triad_signed_gain_fixture.hpp tests/triad_vulkan_gain_checks.cpp
+  tests/triad_vulkan_drift_checks.cpp tests/triad_vulkan_varying_checks.cpp)
 target_include_directories(test_triad_vulkan PRIVATE src tools)
 target_link_libraries(test_triad_vulkan PRIVATE datapump_triad_receiver)
 if(BUILD_TESTING)
@@ -76,8 +80,16 @@ if(BUILD_TESTING)
     add_test(NAME triad_vulkan_host_scoring COMMAND test_triad_vulkan --host-scoring)
     add_test(NAME triad_vulkan_workspace_admission COMMAND test_triad_vulkan --workspace-admission)
     add_test(NAME triad_vulkan_segmented COMMAND test_triad_vulkan --segmented)
+    # The core's fine-stage generalizations and the fine-stage device
+    # sessions on the device. The device-free stage policy check,
+    # triad_vulkan_stage_policy, is in every build (CMakeLists.txt).
+    add_test(NAME triad_vulkan_core COMMAND test_triad_vulkan --core)
+    add_test(NAME triad_vulkan_gain_rank COMMAND test_triad_vulkan --gain-rank)
+    add_test(NAME triad_vulkan_drift COMMAND test_triad_vulkan --drift)
+    add_test(NAME triad_vulkan_varying COMMAND test_triad_vulkan --varying)
     add_custom_target(test_triad_vulkan_host_scoring DEPENDS test_triad_vulkan)
     set_tests_properties(triad_vulkan triad_vulkan_host_scoring triad_vulkan_workspace_admission triad_vulkan_segmented
+      triad_vulkan_core triad_vulkan_gain_rank triad_vulkan_drift triad_vulkan_varying
       PROPERTIES LABELS "triad_gpu" TIMEOUT 120 RUN_SERIAL TRUE)
   endif()
 endif()

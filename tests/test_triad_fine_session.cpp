@@ -1,9 +1,12 @@
 #include "triad_receiver_fine.hpp"
+#include "triad_receiver_driver.hpp"
 #include "triad_receiver_executor.hpp"
+#include "triad_vulkan_stages.hpp"
 #include "triad_gaussian_kernel.hpp"
 #include "triad_mapped_kernel.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <cmath>
@@ -1614,6 +1617,92 @@ void two_tap_native_dc_projection_preserves_complete_scores() {
           "native two-tap DC-only evidence must preserve prefix and worker partitioning");
 }
 
+// Every varying evidence field, work counter and diagnostic, bit for bit.
+// Batch receipts and the quote are excluded: they describe the schedule.
+std::string varying_receipt(const ReceiverSlotScore& r, const TrackedFrequencySpan* span = nullptr,
+                            const TrackedFrequencyClockShadow* shadow = nullptr) {
+    std::string out;
+    const auto bits = [&](double value) { out += std::to_string(std::bit_cast<std::uint64_t>(value)) + ','; };
+    const auto count = [&](std::uint64_t value) { out += std::to_string(value) + ','; };
+    const auto pair = [&](const std::array<double, 2>& value) { bits(value[0]); bits(value[1]); };
+    out += r.varying_status + ',' + r.nominal_independent_gain_frequency_status + ',';
+    for (const auto value : {std::uint64_t{r.varying_candidates}, std::uint64_t{r.varying_blocks},
+             std::uint64_t{r.varying_block_rows}, r.varying_basis_rows, std::uint64_t{r.varying_frequency_states},
+             std::uint64_t{r.midpoint_timing_candidates}, r.midpoint_timing_basis_rows,
+             r.nominal_independent_gain_basis_rows, r.signed_lag_gain_basis_rows, r.independent_gain_emission_cells,
+             std::uint64_t{r.nominal_independent_gain_candidates}, std::uint64_t{r.signed_lag_gain_candidates},
+             std::uint64_t{r.nominal_independent_gain_frequency_states}})
+        count(value);
+    for (const auto& value : {r.varying_bit_evidence, r.fixed_varying_bit_evidence, r.tracked_frequency_bit_evidence,
+             r.nominal_independent_fixed_centroid_bit_evidence, r.nominal_independent_moving_centroid_bit_evidence,
+             r.nominal_independent_gain_bit_evidence, r.signed_lag_gain_bit_evidence})
+        pair(value);
+    for (const auto& value : r.nominal_independent_gain_power_bit_evidence) pair(value);
+    for (const auto& value : r.signed_lag_gain_map_bit_evidence) pair(value);
+    bits(r.tracked_frequency_log_prior_adjustment);
+    bits(r.nominal_independent_gain_log_prior_adjustment);
+    if (span) {
+        out += "span,";
+        for (const auto energy : span->observation_energy) bits(energy);
+        for (const auto& coordinate : span->coordinates) {
+            bits(coordinate.coordinate.arrival_seconds);
+            bits(coordinate.coordinate.clock_ppm);
+            for (const auto& block : coordinate.blocks)
+                for (const auto& value : block) {
+                    bits(value.captured_energy);
+                    bits(value.frequency_hz);
+                    count(value.rank_ambiguous);
+                    count(value.verified);
+                }
+        }
+    }
+    if (shadow) {
+        out += "shadow,";
+        count(shadow->ordinary_coordinates);
+        count(shadow->added_coordinates);
+        count(shadow->added_basis_rows);
+        pair(shadow->tracked_bit_evidence);
+        pair(shadow->varying_bit_evidence);
+        bits(shadow->tracked_log_prior_adjustment);
+    }
+    return out;
+}
+
+unsigned wide_varying_workers() {
+    // The receiver's default: two software workers per hardware thread.
+    return std::clamp(2 * std::thread::hardware_concurrency(), 3U, 64U);
+}
+
+// The batched schedule must reproduce one wave per block exactly. Its
+// reference is a batch of one block on one lane, the block-serial schedule.
+// Each run receives its own quote for the lane count and a forced batch size:
+// one block, three (crossing batches every chunk), 64 (a partial final
+// statistics chunk per batch) and the whole slot, on one, two and W lanes.
+// These compare schedules of the current code. Equality with the code before
+// batching (one wave per block) was shown once, bit for bit, by a scratch
+// digest of these scenarios built against both versions; an arithmetic
+// change common to every schedule needs that comparison again.
+template <class PlanFor, class Run>
+std::string batch_invariant(const PlanFor& plan_for, const Run& run, const char* reason) {
+    const auto wide = wide_varying_workers();
+    constexpr auto all = SIZE_MAX;
+    const std::array<std::pair<unsigned, std::size_t>, 6> schedules{{
+        {1, 1}, {2, 3}, {wide, 64}, {wide, all}, {1, all}, {wide, 1}}};
+    std::string reference;
+    for (const auto& [workers, blocks] : schedules) {
+        ReceiverExecutor executor(workers);
+        VaryingFinePlan plan = plan_for(workers);
+        check(plan.batch_blocks > 0 && plan.batch_block_bytes > 0 &&
+              plan.workspace_bytes > plan.batch_blocks * plan.batch_block_bytes,
+              "varying quote must charge every block of its admitted batch");
+        plan.batch_blocks = blocks;
+        const auto receipt = run(plan, workers, executor);
+        if (reference.empty()) reference = receipt;
+        else check(receipt == reference, reason);
+    }
+    return reference;
+}
+
 void tracked_span_matches_signed_correlation_without_changing_evidence() {
     const Fixture f(480);
     auto config = f.config;
@@ -1706,6 +1795,20 @@ void tracked_span_matches_signed_correlation_without_changing_evidence() {
     check(std::ranges::any_of(span.coordinates[0].blocks,
           [](const auto& block) { return block[1].rank_ambiguous; }),
           "a nearly coincident second column must carry a rank uncertainty bound");
+    // Per-block span maxima and the shadow's added coordinates keep their
+    // hooks inside the batch phases, including on the merged final block.
+    batch_invariant([&](unsigned workers) { return varying_fine_plan(config, f.slot, workers); },
+        [&](const VaryingFinePlan& shape, unsigned workers, ReceiverExecutor& lanes) {
+            TrackedFrequencySpan batch_span;
+            TrackedFrequencyClockShadow batch_shadow{nominations};
+            ReceiverSlotScore spanned, shadowed;
+            score_varying_fine(config, f.slot, f.key, shape, observation, f.coordinates, {}, 100, 12, workers,
+                               spanned, {}, lanes, nullptr, &batch_span);
+            auto receipt = varying_receipt(spanned, &batch_span);
+            score_varying_fine(config, f.slot, f.key, shape, observation, f.coordinates, {}, 100, 12, workers,
+                               shadowed, {}, lanes, nullptr, &batch_span, &batch_shadow);
+            return receipt + varying_receipt(shadowed, &batch_span, &batch_shadow);
+        }, "tracked span and clock shadow must not depend on the varying batch or lane count");
 }
 
 void independent_gain_keeps_full_public_prior_and_bounded_work() {
@@ -1796,6 +1899,13 @@ void independent_gain_keeps_full_public_prior_and_bounded_work() {
     check(std::ranges::all_of(null.nominal_independent_gain_bit_evidence,
           [&](double value) { return value < null_adjustment; }),
           "independent gain must charge the Gaussian determinant under zero input, with no fitted noise power");
+    const auto batched = batch_invariant([&](unsigned workers) { return varying_fine_plan(config, slot, workers); },
+        [&](const VaryingFinePlan& shape, unsigned workers, ReceiverExecutor& lanes) {
+            ReceiverSlotScore result;
+            score_varying_fine(config, slot, f.key, shape, f.iq, narrow, {}, 100, 12, workers, result, {}, lanes);
+            return varying_receipt(result);
+        }, "projected independent gain atoms must not depend on the varying batch or lane count");
+    check(batched == varying_receipt(added), "the quoted varying batch must reproduce the block-serial atoms");
 }
 
 void signed_gain_retains_full_unselected_mass() {
@@ -1855,6 +1965,17 @@ void signed_gain_retains_full_unselected_mass() {
     }
     const std::array<std::int64_t, 2> repeated{0, 0};
     rejects([&] { (void)run(true, repeated); }, "duplicate signed lag identifiers must fail before scoring");
+    batch_invariant([&](unsigned workers) {
+            auto shape = varying_fine_plan(config, slot, workers);
+            enable_midpoint_tracking(shape);
+            return shape;
+        }, [&](const VaryingFinePlan& shape, unsigned workers, ReceiverExecutor& lanes) {
+            ReceiverSlotScore result;
+            const MidpointTrackInput public_lags{{}, lags, timing_log_count, choices, true, 0, midpoint};
+            score_varying_fine(config, slot, f.key, shape, zero, f.coordinates, {}, 100, 12, workers,
+                               result, {}, lanes, nullptr, nullptr, nullptr, &public_lags);
+            return varying_receipt(result);
+        }, "signed lag gain atoms must not depend on the varying batch or lane count");
 }
 
 void projected_tracking_grid_preserves_the_rounded_edge() {
@@ -1881,6 +2002,14 @@ void projected_tracking_grid_preserves_the_rounded_edge() {
           result.nominal_independent_gain_frequency_states <= 65 &&
           std::ranges::all_of(result.nominal_independent_gain_bit_evidence, [](double value) { return std::isfinite(value); }),
           "coarsened projection must score the declared frequency edge within the fixed state budget");
+    const auto batched = batch_invariant([&](unsigned workers) { return varying_fine_plan(config, f.slot, workers); },
+        [&](const VaryingFinePlan& shape, unsigned workers, ReceiverExecutor& lanes) {
+            ReceiverSlotScore batch_result;
+            score_varying_fine(config, f.slot, f.key, shape, f.iq, f.coordinates, {}, 100, 12, workers, batch_result,
+                               {}, lanes);
+            return varying_receipt(batch_result);
+        }, "the projected tracking grid must not depend on the varying batch or lane count");
+    check(batched == varying_receipt(result), "the quoted varying batch must reproduce the projected grid");
 }
 
 void added_epoch_track_keeps_prior_mass_and_work() {
@@ -1984,6 +2113,452 @@ void added_epoch_track_keeps_prior_mass_and_work() {
               std::abs(empty.varying_bit_evidence[bit] + caller - missing) < 2e-10,
               "receiver evidence must keep the whole public timing mass, including omitted midpoint candidates");
     }
+    const auto supplemental = batch_invariant([&](unsigned workers) { return varying_fine_plan(config, slot, workers); },
+        [&](const VaryingFinePlan& shape, unsigned workers, ReceiverExecutor& lanes) {
+            ReceiverSlotScore result;
+            score_varying_fine(config, slot, f.key, shape, f.iq, base, all, 100, 12, workers, result, {}, lanes);
+            return varying_receipt(result);
+        }, "added epoch timing must not depend on the varying batch or lane count");
+    check(supplemental == varying_receipt(complete), "the quoted varying batch must reproduce added epoch timing");
+    const auto observed = batch_invariant([&](unsigned workers) {
+            auto shape = varying_fine_plan(config, slot, workers);
+            enable_midpoint_tracking(shape);
+            return shape;
+        }, [&](const VaryingFinePlan& shape, unsigned workers, ReceiverExecutor& lanes) {
+            ReceiverSlotScore result;
+            const MidpointTrackInput family{nominations, public_lags, log_original_timing};
+            score_varying_fine(config, slot, f.key, shape, f.iq, base, original, 100, 12, workers, result, {}, lanes,
+                               nullptr, nullptr, nullptr, &family);
+            return varying_receipt(result);
+        }, "the midpoint family must not depend on the varying batch or lane count");
+    check(observed == varying_receipt(mixed), "the quoted varying batch must reproduce the midpoint family");
+}
+
+void varying_batches_match_block_serial_schedule() {
+    const Fixture f(480);
+    auto config = f.config;
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = config.time_varying_atmospheric_hz = 12;
+    config.spread_delay_seconds = .004;
+    const auto plan = varying_fine_plan(config, f.slot, 2);
+    const auto blocks = f.iq.size() / plan.block_rows;
+    check(plan.block_rows && f.iq.size() % plan.block_rows && blocks > 64 && plan.batch_blocks == blocks &&
+          plan.batch_track_bytes > 0,
+          "batch fixture must merge a terminal remainder and fit one quoted batch");
+    auto midpoint_plan = plan;
+    enable_midpoint_tracking(midpoint_plan);
+    const auto added = maximum_midpoint_timing_coordinates * plan.batch_track_bytes;
+    check(midpoint_plan.batch_block_bytes == plan.batch_block_bytes + added &&
+          midpoint_plan.workspace_bytes > plan.workspace_bytes + plan.batch_blocks * added,
+          "midpoint coordinates must charge their track statistics in every batch block");
+
+    // A tone in the DATA band selects the line-conditioned projected tracker.
+    auto toned = f.iq;
+    for (std::size_t i = 0; i < toned.size(); ++i)
+        toned[i] += 2. * std::polar(1., 2 * std::numbers::pi * 13.37 * i / f.fs);
+    const auto line = find_varying_line(config, f.slot, toned, {}, 1.);
+    check(line.has_value(), "batch fixture must retain a public line atom");
+    auto coherent_config = config;
+    coherent_config.time_varying_atmospheric_hz = 6;
+    for (const bool coherent : {false, true}) {
+        const auto& scored = coherent ? coherent_config : config;
+        check(varying_fine_plan(scored, f.slot, 2, false, coherent).block_rows &&
+              varying_fine_plan(scored, f.slot, 2, true, coherent).block_rows,
+              "batch fixture must plan the ordinary and line branches");
+        batch_invariant([&](unsigned workers) { return varying_fine_plan(scored, f.slot, workers, false, coherent); },
+            [&](const VaryingFinePlan& shape, unsigned workers, ReceiverExecutor& lanes) {
+                ReceiverSlotScore result;
+                score_varying_fine(scored, f.slot, f.key, shape, toned, f.coordinates, {}, 100, 12, workers, result, {},
+                                   lanes);
+                check(!coherent || (result.varying_frequency_states > 1 &&
+                                    result.varying_status == "" && std::isfinite(result.varying_bit_evidence[0])),
+                      "coherent gain blocks must score persistent posteriors");
+                return varying_receipt(result);
+            }, "ordinary and coherent varying evidence must not depend on the batch or lane count");
+        batch_invariant([&](unsigned workers) { return varying_fine_plan(scored, f.slot, workers, true, coherent); },
+            [&](const VaryingFinePlan& shape, unsigned workers, ReceiverExecutor& lanes) {
+                ReceiverSlotScore result;
+                score_varying_fine(scored, f.slot, f.key, shape, toned, f.coordinates, {}, 100, 12, workers, result, {},
+                                   lanes, &*line);
+                return varying_receipt(result);
+            }, "line-conditioned varying evidence must not depend on the batch or lane count");
+    }
+
+    // Helper exclusions also select the projected tracker, without a line.
+    {
+        const Fixture wide(2400);
+        auto helper = wide.config;
+        helper.time_varying_channel = true;
+        helper.time_varying_common_doppler_hz = helper.time_varying_atmospheric_hz = 12;
+        helper.spread_delay_seconds = .004;
+        helper.helper_enabled = true;
+        helper.helper.low_frequency_hz = helper.data_if_hz - 700;
+        helper.helper.frequency_hz = helper.data_if_hz + 700;
+        helper.helper.auxiliary_frequency_hz = helper.data_if_hz - 850;
+        const auto shape = varying_fine_plan(helper, wide.slot, 2);
+        check(shape.track_frequency && shape.nominal_independent_gain_candidates == 1,
+              "Helper batch fixture must track projected frequency and an independent atom");
+        batch_invariant([&](unsigned workers) { return varying_fine_plan(helper, wide.slot, workers); },
+            [&](const VaryingFinePlan& batch_shape, unsigned workers, ReceiverExecutor& lanes) {
+                ReceiverSlotScore result;
+                score_varying_fine(helper, wide.slot, wide.key, batch_shape, wide.iq, wide.coordinates, {}, 100, 12,
+                                   workers, result, {}, lanes);
+                return varying_receipt(result);
+            }, "Helper-projected varying evidence must not depend on the batch or lane count");
+    }
+
+    // Signed lag atoms and midpoint nominations on an actual observation.
+    {
+        auto lagged = config;
+        lagged.spread_doppler_hz = 12;
+        auto slot = f.slot;
+        slot.arrival_lower_seconds = -.01;
+        slot.arrival_upper_seconds = .01;
+        const AdmissionGrid grid(slot.arrival_lower_seconds, slot.arrival_upper_seconds,
+            lagged.time_varying_atmospheric_hz, lagged.clock_bound_ppm,
+            std::min(.01, receiver_coarse_frequency_step(slot.format, lagged.sample_rate_hz)));
+        const auto timing_log_count = grid.log_count() - std::log1p(2 * grid.frequency_radius);
+        const std::array<std::int64_t, 3> choices{0, 2, 1};
+        const std::array<FineCoordinate, 2> nominations{{{0, -.002, 0, 10}, {2, .003, 0, -20}}};
+        batch_invariant([&](unsigned workers) {
+                auto shape = varying_fine_plan(lagged, slot, workers);
+                enable_midpoint_tracking(shape);
+                return shape;
+            }, [&](const VaryingFinePlan& shape, unsigned workers, ReceiverExecutor& lanes) {
+                const MidpointTrackInput lags{nominations, 3, timing_log_count, choices, true, 0, 26.5L};
+                ReceiverSlotScore result;
+                score_varying_fine(lagged, slot, f.key, shape, f.iq, f.coordinates, {}, 100, 12, workers, result, {},
+                                   lanes, nullptr, nullptr, nullptr, &lags);
+                check(result.signed_lag_gain_candidates == choices.size() && result.midpoint_timing_candidates == 2,
+                      "signed lag batch fixture must score every lag atom and midpoint nomination");
+                return varying_receipt(result);
+            }, "signed lag atoms on an actual observation must not depend on the batch or lane count");
+    }
+
+    // Near Nyquist the projected independent lattice can be empty while the
+    // ordinary tracker still resolves frequency states. The nominal atoms then
+    // keep their central two-path fallback: sufficient statistics in phase S,
+    // fixed-centroid sums in phase R.
+    {
+        const Fixture edge(2400);
+        auto central = edge.config;
+        central.time_varying_channel = true;
+        central.frequency_bound_hz = central.time_varying_common_doppler_hz = 1161;
+        central.spread_delay_seconds = .004;
+        central.clock_bound_ppm = 0;
+        auto slot = edge.slot;
+        slot.arrival_lower_seconds = -.004;
+        slot.arrival_upper_seconds = .004;
+        const auto narrow = std::array{edge.coordinates[0], FineCoordinate{2, .001, 0, 0}, FineCoordinate{-2, -.001, 0, 0}};
+        check(varying_fine_plan(central, slot, 2).nominal_independent_gain_candidates == 2,
+              "central fallback fixture must quote both nominal independent atoms");
+        batch_invariant([&](unsigned workers) { return varying_fine_plan(central, slot, workers); },
+            [&](const VaryingFinePlan& shape, unsigned workers, ReceiverExecutor& lanes) {
+                ReceiverSlotScore result;
+                score_varying_fine(central, slot, edge.key, shape, edge.iq, narrow, {}, 100, 12, workers, result, {},
+                                   lanes);
+                check(result.nominal_independent_gain_candidates == 2 && result.varying_frequency_states > 1 &&
+                      result.nominal_independent_gain_frequency_states == 0 &&
+                      result.nominal_independent_gain_frequency_status.empty() &&
+                      std::ranges::all_of(result.nominal_independent_gain_bit_evidence,
+                          [](double value) { return std::isfinite(value); }),
+                      "an empty projected lattice must score the central independent-gain fallback");
+                return varying_receipt(result);
+            }, "the central independent-gain fallback must not depend on the batch or lane count");
+    }
+
+    // Receipts: the quote, the batch geometry and finite phase timers.
+    const auto wide = wide_varying_workers();
+    ReceiverExecutor lanes(wide);
+    const auto wide_plan = varying_fine_plan(config, f.slot, wide);
+    ReceiverSlotScore reference;
+    score_varying_fine(config, f.slot, f.key, wide_plan, f.iq, f.coordinates, {}, 100, 12, wide, reference, {}, lanes);
+    check(reference.varying_workspace_bytes == wide_plan.workspace_bytes && reference.varying_batches == 1 &&
+          reference.varying_batch_blocks == blocks && reference.varying_blocks == blocks &&
+          reference.varying_statistics_seconds > 0 && reference.varying_recursion_seconds > 0 &&
+          reference.varying_projection_seconds > 0 && std::isfinite(reference.varying_wait_seconds) &&
+          reference.varying_wait_seconds >= 0,
+          "varying receipts must report the quote, batch geometry and phase lane time");
+    for (const std::size_t batch : {std::size_t{1}, std::size_t{3}, std::size_t{64}}) {
+        auto shape = wide_plan;
+        shape.batch_blocks = batch;
+        ReceiverSlotScore result;
+        score_varying_fine(config, f.slot, f.key, shape, f.iq, f.coordinates, {}, 100, 12, wide, result, {}, lanes);
+        check(result.varying_batch_blocks == batch && result.varying_batches == (blocks + batch - 1) / batch,
+              "a varying batch must hold its quoted number of consecutive blocks");
+    }
+    // Every family at its public maximum fits the quoted block storage:
+    // 24 selected maps, 8 + 8 timing coordinates, six midpoint nominations
+    // and two nominal plus four signed-lag gain atoms.
+    {
+        auto full = config;
+        full.spread_doppler_hz = 12;
+        auto slot = f.slot;
+        slot.arrival_lower_seconds = -.01;
+        slot.arrival_upper_seconds = .01;
+        auto shape = varying_fine_plan(full, slot, wide);
+        enable_midpoint_tracking(shape);
+        std::vector<FineCoordinate> selected, timing, nominations;
+        for (int i = 0; i < 24; ++i) selected.push_back({i % 3 - 1, -.009 + .0007 * i, 0, 10. * (i % 5 - 2)});
+        for (int i = 0; i < 16; ++i) timing.push_back({2, -.0095 + .0011 * i, 0, 7. * (i % 4) - 9});
+        for (int i = 0; i < 6; ++i) nominations.push_back({3, -.008 + .003 * i, 0, 5. * i - 15});
+        const std::array<std::int64_t, 4> choices{0, 3, 1, 2};
+        const MidpointTrackInput lags{nominations, 5, 12., choices, true, 0, 26.5L};
+        ReceiverSlotScore result;
+        // A 400 Hz projected rate keeps all four signed lags inside the arrival aperture.
+        score_varying_fine(full, slot, f.key, shape, f.iq, selected, timing, 400, 12, wide, result, {}, lanes,
+                           nullptr, nullptr, nullptr, &lags);
+        check(result.varying_candidates == 24 && result.signed_lag_gain_candidates == 4 &&
+              result.midpoint_timing_candidates == 6 && result.nominal_independent_gain_candidates == 2 &&
+              result.varying_batch_blocks == shape.batch_blocks,
+              "the maximum public varying families must fit their quoted batch");
+    }
+    auto unquoted = wide_plan;
+    unquoted.batch_block_bytes = 1;
+    rejects<ReceiverWorkspaceError>([&] {
+        ReceiverSlotScore result;
+        score_varying_fine(config, f.slot, f.key, unquoted, f.iq, f.coordinates, {}, 100, 12, wide, result, {}, lanes);
+    }, "a varying batch must not exceed its quoted block storage");
+    auto unbatched = wide_plan;
+    unbatched.batch_blocks = 0;
+    rejects([&] {
+        ReceiverSlotScore result;
+        score_varying_fine(config, f.slot, f.key, unbatched, f.iq, f.coordinates, {}, 100, 12, wide, result, {}, lanes);
+    }, "varying fine must require its admitted batch");
+
+    // A failure inside a batch drains its peers; the same lanes then score
+    // the clean slot exactly. External cancellation stops a running batch.
+    auto whole = wide_plan;
+    whole.batch_blocks = SIZE_MAX;
+    auto poisoned = f.iq;
+    poisoned[(blocks - 2) * plan.block_rows + 3] = std::numeric_limits<double>::quiet_NaN();
+    rejects([&] {
+        ReceiverSlotScore result;
+        score_varying_fine(config, f.slot, f.key, whole, poisoned, f.coordinates, {}, 100, 12, wide, result, {}, lanes);
+    }, "a nonfinite observation late in a batch must fail the varying scorer");
+    // A stop requested once the scorer runs a whole-slot batch of 24 maps
+    // lands inside its phases. Phase P has then written span energies; no
+    // cancellation check lies between the batch's phases and its return.
+    {
+        auto slot = f.slot;
+        slot.arrival_lower_seconds = -.01;
+        slot.arrival_upper_seconds = .01;
+        std::vector<FineCoordinate> selected;
+        for (int i = 0; i < 24; ++i) selected.push_back({i % 3 - 1, -.009 + .0007 * i, 0, 10. * (i % 5 - 2)});
+        auto long_batch = varying_fine_plan(config, slot, wide);
+        long_batch.batch_blocks = SIZE_MAX;
+        const auto score = [&](TrackedFrequencySpan& observed, ReceiverSlotScore& result, std::stop_token token) {
+            score_varying_fine(config, slot, f.key, long_batch, f.iq, selected, {}, 100, 12, wide, result, token,
+                               lanes, nullptr, &observed);
+        };
+        auto fastest = std::numeric_limits<double>::infinity();
+        std::string exact;
+        for (int repeat = 0; repeat < 2; ++repeat) {
+            TrackedFrequencySpan reference_span;
+            ReceiverSlotScore uncancelled;
+            const auto began = std::chrono::steady_clock::now();
+            score(reference_span, uncancelled, {});
+            fastest = std::min(fastest, std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count());
+            const auto receipt = varying_receipt(uncancelled, &reference_span);
+            check(exact.empty() || receipt == exact, "repeated varying batches must be exact");
+            exact = receipt;
+        }
+        std::size_t inside = 0;
+        for (const auto fraction : {.25, .5, .75}) {
+            std::stop_source source;
+            TrackedFrequencySpan observed;
+            ReceiverSlotScore result;
+            std::exception_ptr failure;
+            std::atomic<bool> running = false;
+            std::thread owner([&] {
+                running = true;
+                try {
+                    score(observed, result, source.get_token());
+                } catch (...) {
+                    failure = std::current_exception();
+                }
+            });
+            while (!running) std::this_thread::yield();
+            std::this_thread::sleep_for(std::chrono::duration<double>(fraction * fastest));
+            source.request_stop();
+            owner.join();
+            if (!failure) {
+                check(varying_receipt(result, &observed) == exact, "an uncancelled varying batch must remain exact");
+                continue;
+            }
+            try {
+                std::rethrow_exception(failure);
+            } catch (const Error& error) {
+                check(std::string(error.what()).find("cancelled") != std::string::npos,
+                      "varying cancellation must surface as cancellation");
+            }
+            inside += std::ranges::any_of(observed.observation_energy, [](double energy) { return energy > 0; });
+        }
+        check(inside > 0, "an external stop must cancel a running varying batch inside its phases");
+        std::cerr << "varying cancellation: " << inside << " of 3 stops inside a " << fastest * 1e3
+                  << " ms whole-slot batch\n";
+        TrackedFrequencySpan after_span;
+        ReceiverSlotScore after;
+        score(after_span, after, {});
+        check(varying_receipt(after, &after_span) == exact,
+              "lanes released by a cancelled batch must score the same slot exactly");
+    }
+    ReceiverSlotScore after;
+    score_varying_fine(config, f.slot, f.key, whole, f.iq, f.coordinates, {}, 100, 12, wide, after, {}, lanes);
+    check(varying_receipt(after) == varying_receipt(reference),
+          "lanes released by a failed or cancelled batch must score the next slot exactly");
+}
+
+// The batch storage is charged for the whole scorer call, so where a
+// varying quote is the largest stage it raises the owner lease. At one lane
+// here the batch makes varying overtake the line drift quote that bounded
+// this lease before batching (about 46.1 MB before, 62.3 MB with the batch).
+// Drift admission keeps its plans' geometry. Ordinary drift lanes may widen
+// into the largest other stage of the lease, here the varying quote with
+// its batch, without raising the lease. Only an extension on the expanded
+// proposal path reads the lease; the long-calm plans pin that lease.
+void varying_batch_quote_keeps_drift_admission() {
+    const Fixture f(480);
+    auto config = f.config;
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = config.time_varying_atmospheric_hz = config.frequency_bound_hz = 12;
+    config.spread_delay_seconds = .004;
+    const auto input = f.iq.size() * (sizeof(Complex) + sizeof(std::uint8_t));
+    for (const unsigned workers : {1U, 24U}) {
+        const auto lease = receiver_slot_workspace(config, f.slot, workers);
+        const auto varying = varying_fine_plan(config, f.slot, workers);
+        const auto batch = varying.batch_blocks * varying.batch_block_bytes;
+        const auto ordinary = drift_plan(config, f.slot, workers);
+        const auto line = drift_plan(config, f.slot, workers, true);
+        const auto admission = receiver_drift_admission(config, f.slot, workers);
+        const auto stage = lease - input - 64 * 1024;
+        check(varying.block_rows && batch && stage >= varying.workspace_bytes && stage > line.workspace_bytes &&
+              (workers > 1 || varying.workspace_bytes - batch < line.workspace_bytes) &&
+              receiver_slot_overlap_workspace(config, f.slot, workers) == lease,
+              "the varying batch must be charged in the owner lease where varying is the largest stage");
+        // The base plans keep the former width; a widened plan stays within the stage.
+        const auto kept = [&](const DriftPlan& admitted, const DriftPlan& base) {
+            const bool widened = admitted.stage_workers > base.stage_workers;
+            return admitted.status == base.status && admitted.nfft == base.nfft &&
+                   admitted.stage_workers >= base.stage_workers && admitted.stage_workers <= workers &&
+                   (workers > 1 || !widened) &&
+                   (widened ? admitted.workspace_bytes >= base.workspace_bytes && admitted.workspace_bytes <= stage
+                            : admitted.workspace_bytes == base.workspace_bytes);
+        };
+        check(admission.workspace_bytes == lease && ordinary.workspace_bytes && line.workspace_bytes &&
+              kept(admission.ordinary, ordinary) && kept(admission.line, line),
+              "a varying batch charge must keep the admitted drift geometry within the owner lease");
+    }
+}
+
+// A device-free backend with the Vulkan varying selection policy on one
+// requested route: the pure stage_policy and reason names, where a shape
+// with neither fixed-affine states nor tracked atoms is unsupported. Like
+// the Vulkan factory, a factory call records its policy decline; it refuses
+// an accepted shape's lease, so no session opens. The receiver's own
+// reasons arrive through record_stage_native.
+class VaryingPolicyBackend final : public ReceiverBulkBackend {
+public:
+    explicit VaryingPolicyBackend(VulkanStageRoute route) : route_(route) {}
+    std::unique_ptr<FineBulk> make_fine(double, double) override { return {}; }
+    std::unique_ptr<CoarseBulk> make_coarse(double, double) override { return {}; }
+    std::size_t fine_host_bytes(std::size_t, std::size_t) const override { return 0; }
+    std::size_t coarse_host_bytes(std::size_t, std::size_t, std::size_t) const override { return 0; }
+    BulkReceipt receipt() const override { return {}; }
+    std::string_view stage_decline(const StageShape& shape, bool fp64_forced) const noexcept override {
+        const auto reason = policy(shape, fp64_forced);
+        return reason ? vulkan::stage_reason_text(stage_family(shape), *reason) : std::string_view{};
+    }
+    std::unique_ptr<VaryingBulk> make_varying(const VaryingBulkShape& shape, bool fp64_forced,
+                                              std::stop_token) override {
+        ++factories;
+        if (const auto reason = policy(StageShape{shape}, fp64_forced)) records.emplace_back(*reason, StageNative::decline);
+        else records.emplace_back(StageReason::workspace, StageNative::fallback);
+        return {};
+    }
+    void record_stage_native(StageFamily family, StageReason reason, StageNative kind) override {
+        check(family == StageFamily::varying, "the varying stage recorded another family");
+        records.emplace_back(reason, kind);
+    }
+    std::size_t factories = 0;
+    std::vector<std::pair<StageReason, StageNative>> records;
+
+private:
+    std::optional<StageReason> policy(const StageShape& shape, bool fp64_forced) const noexcept {
+        vulkan::StagePolicy input;
+        input.route = route_;
+        input.fp64_forced = fp64_forced;
+        input.implemented = true;
+        if (const auto* varying = std::get_if<VaryingBulkShape>(&shape))
+            input.shape_supported = varying->affine_states || varying->independent_atoms;
+        return vulkan::stage_policy(input);
+    }
+    VulkanStageRoute route_;
+};
+
+// Each varying stage records one reason per route and keeps native evidence
+// bit for bit. A coherent-gain plan has no device items: automatic selection
+// reports its shape, and an explicit device route the receiver's
+// coherent-gain reason. A line-conditioned stage reports line first. An
+// ordinary stage reaches the factory, whose refused lease falls back. An
+// explicit FP64 request precedes the receiver's reasons.
+void varying_device_declines_name_receiver_reasons() {
+    const Fixture f(480);
+    auto config = f.config;
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = config.time_varying_atmospheric_hz = 12;
+    config.spread_delay_seconds = .004;
+    auto coherent_config = config;
+    coherent_config.time_varying_atmospheric_hz = 6;
+    auto toned = f.iq;
+    for (std::size_t i = 0; i < toned.size(); ++i)
+        toned[i] += 2. * std::polar(1., 2 * std::numbers::pi * 13.37 * i / f.fs);
+    const auto line = find_varying_line(config, f.slot, toned, {}, 1.);
+    check(line.has_value(), "decline fixture must retain a public line atom");
+    ReceiverExecutor executor(2);
+    const auto run = [&](ReceiverConfig scored, bool with_line, bool coherent,
+                         std::shared_ptr<ReceiverBulkBackend> backend) {
+        const auto plan = varying_fine_plan(scored, f.slot, 2, with_line, coherent);
+        check(plan.block_rows && plan.coherent_gain_blocks == coherent, "decline fixture must plan every varying stage");
+        scored.bulk_backend = std::move(backend);
+        ReceiverSlotScore result;
+        score_varying_fine(scored, f.slot, f.key, plan, toned, f.coordinates, {}, 100, 12, 2, result, {}, executor,
+                           with_line ? &*line : nullptr);
+        return result;
+    };
+    using Route = VulkanStageRoute;
+    struct Case {
+        bool line, coherent;
+        StageReason automatic, device;
+    };
+    const std::array<Case, 4> cases{{
+        {false, false, StageReason::unqualified_device, StageReason::workspace},
+        {false, true, StageReason::unsupported_shape, StageReason::coherent_gain},
+        {true, false, StageReason::unqualified_device, StageReason::line},
+        {true, true, StageReason::unsupported_shape, StageReason::line}}};
+    for (const auto& stage : cases) {
+        const auto& scored = stage.coherent ? coherent_config : config;
+        const auto native = varying_receipt(run(scored, stage.line, stage.coherent, nullptr));
+        for (const auto route : {Route::automatic, Route::device, Route::native}) {
+            const auto backend = std::make_shared<VaryingPolicyBackend>(route);
+            const auto result = run(scored, stage.line, stage.coherent, backend);
+            const auto expected = route == Route::native ? StageReason::native_requested :
+                                  route == Route::automatic ? stage.automatic : stage.device;
+            // Policy declines and the refused lease are factory records.
+            const bool factory = route != Route::device || expected == StageReason::workspace;
+            const auto kind = expected == StageReason::workspace ? StageNative::fallback : StageNative::decline;
+            check(varying_receipt(result) == native && result.varying_fine_route == "native" &&
+                  backend->records.size() == 1 && backend->records[0].first == expected &&
+                  backend->records[0].second == kind && backend->factories == (factory ? 1U : 0U),
+                  "a varying stage must record its policy or receiver reason on every route and stay native");
+        }
+    }
+    auto precise = coherent_config;
+    precise.native_coarse_precision = NativeCoarsePrecision::fp64;
+    const auto backend = std::make_shared<VaryingPolicyBackend>(Route::device);
+    (void)run(precise, false, true, backend);
+    check(backend->records.size() == 1 && backend->records[0].first == StageReason::fp64_requested &&
+          backend->factories == 1, "an explicit FP64 request must precede the receiver's coherent-gain reason");
 }
 
 enum class IncompleteBulk { mapping_only, missing_counts, missing_statistics, nonzero_null };
@@ -2505,6 +3080,9 @@ int main() {
         signed_gain_retains_full_unselected_mass();
         projected_tracking_grid_preserves_the_rounded_edge();
         added_epoch_track_keeps_prior_mass_and_work();
+        varying_batches_match_block_serial_schedule();
+        varying_batch_quote_keeps_drift_admission();
+        varying_device_declines_name_receiver_reasons();
         incomplete_bulk_cannot_publish_quiet(FineLanes::fixed_affine);
         incomplete_bulk_cannot_publish_quiet(FineLanes::fixed_and_adaptive);
         host_mapped_projection_scheduler(false);
