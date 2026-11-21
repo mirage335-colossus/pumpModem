@@ -9,11 +9,14 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <mutex>
 #include <numbers>
+#include <random>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <tuple>
@@ -1116,6 +1119,46 @@ void overlapped_acquisition(const datapump::Crypto& crypto) {
     acquisition_failures(crypto, mapped, false);
 }
 
+// The chunked native observation filter equals the serial overlap-add bit
+// for bit on executor lanes and in shuffled order, with equal receipts.
+// The cases include rows that up to four chunks reach, chunk-boundary
+// totals and the matched slot geometry (decimation 25, 1,705 taps).
+void chunked_fir_matches_serial_filter() {
+    struct Case { std::size_t decimation, taps, total; };
+    constexpr Case cases[] = {{1, 3, 1}, {2, 4, 16'384}, {7, 1'705, 16'385}, {1, 16'384, 33'000},
+                              {64, 16'385, 70'000}, {25, 40'001, 50'000}, {25, 1'705, 1'215'321}};
+    std::mt19937_64 random(20261120);
+    std::normal_distribution<double> normal;
+    const auto identical = [](const std::vector<v::Complex>& a, const std::vector<v::Complex>& b) {
+        return a.size() == b.size() && !std::memcmp(a.data(), b.data(), a.size() * sizeof(v::Complex));
+    };
+    std::size_t staged = 0;
+    for (const auto& c : cases) {
+        std::vector<v::Complex> iq(c.total);
+        for (auto& value : iq) value = {normal(random), normal(random)};
+        const auto filtered = (c.total + c.taps - 1 + c.decimation - 1) / c.decimation;
+        for (int crop = 0; crop < 4; ++crop) {
+            std::size_t first = 0, rows = filtered;
+            if (crop == 1) rows = std::min(filtered, 16'384 / c.decimation + 1);
+            if (crop == 2) {
+                first = filtered - std::min<std::size_t>(filtered, 700);
+                rows = filtered - first;
+            }
+            if (crop == 3) {
+                first = random() % filtered;
+                rows = 1 + random() % (filtered - first);
+            }
+            const auto trial = r::coarse_fir_chunk_trial(iq, c.decimation, c.taps, first, rows, 5, random());
+            check(trial.chunks > 0 && trial.completions == 2 && trial.serial.size() == rows &&
+                  identical(trial.serial, trial.lanes) && identical(trial.serial, trial.shuffled) &&
+                  trial.operations[1] == trial.operations[0] && trial.operations[2] == trial.operations[0],
+                  "chunked coarse FIR must reproduce the serial overlap-add bit for bit");
+            staged += trial.staged_rows != 0;
+        }
+    }
+    check(staged > 0, "chunked coarse FIR cases must stage rows that several chunks reach");
+}
+
 void tied_arrival_frontier() {
     const auto endpoints = r::select_coarse_arrivals(std::array{0., 0., 1., 0., 0.}, 1);
     check(endpoints.count == 2 && endpoints.indices == std::array<std::size_t, 2>{4, 2},
@@ -1273,6 +1316,164 @@ void quarter_clocks_nominate_only_missing_public_cells() {
     check(r::nominate_quarter_clock_timing(config, slot, coarse).empty() &&
           r::prepare_short_tracking_timing(config, slot, coarse, ordinary.grid).empty(),
           "planned segmented work must suppress the rule even when no segmented coordinates survive");
+}
+
+enum class SegmentedMode { publish, decline, partial };
+
+// A compiled session without device FIR that scores only the changing-
+// channel segmented search: published planted ranks, a decline, or a
+// decline after reporting work. Its frequency search returns synthetic
+// complete scores; segmented coordinates never read them.
+class SegmentedOnlyTile final : public r::CoarseBulk {
+public:
+    SegmentedOnlyTile(SegmentedMode mode, std::vector<std::string>& calls, std::mutex& mutex)
+        : mode_(mode), calls_(calls), mutex_(mutex) {}
+
+    bool supports_fir() const noexcept override { return false; }
+    std::shared_ptr<const r::CoarseBulkFilter> prepare_filter(
+        std::span<const double>, std::size_t, r::CoarseBulkWork&, std::stop_token) override {
+        throw std::logic_error("device FIR requested from a session without it");
+    }
+    std::vector<v::Complex> project_fir(const r::CoarseBulkFilter&, const r::CoarseFirCrop&,
+        const r::CoarseFirSource&, r::CoarseBulkWork&, std::stop_token) override {
+        throw std::logic_error("device FIR requested from a session without it");
+    }
+    void plan_segmented(std::span<const r::CoarseSegmentedShape> shapes) override {
+        record("plan");
+        planned_.assign(shapes.begin(), shapes.end());
+    }
+    void begin_segmented(std::stop_token) override { record("begin"); }
+    void end_segmented() noexcept override {
+        try { record("end"); } catch (...) { ended_unrecorded_ = true; }
+    }
+    bool segmented_scores(const r::CoarseSegmentedShape& shape, std::span<const std::complex<float>> spectra,
+                          std::span<const v::Complex> column, double noise_power, std::span<double> fixed,
+                          std::span<double> smooth, r::CoarseBulkWork& work, std::stop_token) override {
+        record("score");
+        check(std::ranges::find(planned_, shape) != planned_.end() && fixed.size() == shape.arrivals &&
+              smooth.size() == (shape.tracking_hop ? shape.arrivals : 0) && column.size() == shape.kernel_rows &&
+              spectra.size() == shape.blocks * shape.phases * shape.fft_rows && noise_power > 0,
+              "receiver offered an unplanned or inconsistent segmented workspace");
+        if (mode_ == SegmentedMode::decline) return false;
+        ++work.inverse_ffts;
+        if (mode_ == SegmentedMode::partial) return false;
+        // One planted arrival at the first public lag in every workspace.
+        std::ranges::fill(fixed, 0.);
+        std::ranges::fill(smooth, 0.);
+        fixed[0] = 100.;
+        if (!smooth.empty()) smooth[0] = 50.;
+        return true;
+    }
+    void prepare(const r::CoarseBulkGeometry& geometry, std::span<const v::Complex>,
+                 std::span<const r::CoarseBulkWorkspace> bank, std::span<const r::CoarseZoomGroup>,
+                 r::CoarseBulkWork&, std::stop_token) override {
+        record("prepare");
+        workspaces_ = bank.size();
+        arrivals_ = geometry.lag_count;
+    }
+    void frequency_tile(std::span<const double> frequencies, const r::CoarseScoreSink& emit,
+                        r::CoarseBulkWork& work, std::stop_token) override {
+        std::vector<double> scores(workspaces_ * frequencies.size() * arrivals_);
+        for (std::size_t i = 0; i < scores.size(); ++i) scores[i] = -1. - static_cast<double>(i % 7);
+        emit(0, workspaces_, scores);
+        work.workspace_frequency_pairs = workspaces_ * frequencies.size();
+        work.score_rows = work.workspace_frequency_pairs * arrivals_;
+        receipt_.executed = true;
+        receipt_.score_rows += work.score_rows;
+    }
+    void lag_tile(std::size_t, std::size_t, const r::CoarseScoreSink&, r::CoarseBulkWork&, std::stop_token) override {
+        throw std::logic_error("unexpected lag route in the segmented session fixture");
+    }
+    r::BulkReceipt receipt() const override { return receipt_; }
+
+    bool ended_unrecorded_ = false;
+
+private:
+    void record(const char* call) {
+        std::lock_guard lock(mutex_);
+        calls_.emplace_back(call);
+    }
+
+    SegmentedMode mode_;
+    std::vector<std::string>& calls_;
+    std::mutex& mutex_;
+    std::vector<r::CoarseSegmentedShape> planned_;
+    r::BulkReceipt receipt_;
+    std::size_t workspaces_ = 0, arrivals_ = 0;
+};
+
+class SegmentedOnlyBackend final : public r::ReceiverBulkBackend {
+public:
+    explicit SegmentedOnlyBackend(SegmentedMode mode) : mode_(mode) {}
+    std::unique_ptr<r::FineBulk> make_fine(double, double) override { return {}; }
+    std::unique_ptr<r::CoarseBulk> make_coarse(double, double) override {
+        return std::make_unique<SegmentedOnlyTile>(mode_, calls, mutex);
+    }
+    std::size_t fine_host_bytes(std::size_t, std::size_t) const override { return 0; }
+    std::size_t coarse_host_bytes(std::size_t, std::size_t frequencies, std::size_t arrivals) const override {
+        return 78 * frequencies * arrivals * sizeof(double);
+    }
+    r::BulkReceipt receipt() const override { return {}; }
+
+    std::vector<std::string> calls;
+    std::mutex mutex;
+
+private:
+    SegmentedMode mode_;
+};
+
+// The receiver offers the segmented search to a session without device FIR,
+// after admission and before the frequency search, keeps FIR native, uses
+// published ranks, and keeps the native scorer for a declined workspace.
+void segmented_scores_reach_sessions_without_device_fir(const datapump::Crypto& crypto) {
+    auto f = capture(crypto, false, 0, 0);
+    f.config.helper_enabled = false;
+    f.config.time_varying_channel = true;
+    f.config.time_varying_common_doppler_hz = f.config.time_varying_atmospheric_hz = 5;
+    f.slot.source_start_seconds += 600;
+    f.slot.window_capture_lead_seconds -= 600;
+    // At least 32 public arrivals at the projected rate.
+    f.slot.arrival_lower_seconds = -.12;
+    f.slot.arrival_upper_seconds = .12;
+    const std::array intervals{r::FrequencyInterval{-.2, .2}};
+    constexpr unsigned workers = 2;
+    const auto run = [&](std::shared_ptr<r::ReceiverBulkBackend> backend) {
+        f.config.bulk_backend = std::move(backend);
+        const auto limit = r::coarse_workspace(f.config, f.slot, workers);
+        return r::score_coarse(f.config, f.slot, crypto, f.iq, intervals, workers, limit, {});
+    };
+    const auto native = run(nullptr);
+    check(native.work.segmented_timing_blocks > 0 && !native.segmented_timing_coordinates.empty(),
+          "segmented session fixture planned no changing-channel timing search");
+
+    const auto published = std::make_shared<SegmentedOnlyBackend>(SegmentedMode::publish);
+    const auto device = run(published);
+    const auto& calls = published->calls;
+    const auto first = [&](std::string_view call) {
+        return std::ranges::find(calls, call) - calls.begin();
+    };
+    const auto last = [&](std::string_view call) {
+        return calls.rend() - std::ranges::find(calls.rbegin(), calls.rend(), call) - 1;
+    };
+    const auto scores = std::ranges::count(calls, std::string("score"));
+    check(calls.size() >= 5 && calls[0] == "plan" && calls[1] == "begin" && scores > 0 &&
+          first("score") > 1 && first("end") > last("score") && first("prepare") > last("end"),
+          "receiver did not admit, score and end the segmented search before the frequency search");
+    check(!device.segmented_timing_coordinates.empty() &&
+          std::ranges::all_of(device.segmented_timing_coordinates, [&](const r::FineCoordinate& c) {
+              return c.arrival_seconds == f.slot.arrival_lower_seconds;
+          }) && device.work.segmented_timing_blocks == native.work.segmented_timing_blocks,
+          "receiver did not retain the session's published segmented ranks");
+
+    const auto declined = std::make_shared<SegmentedOnlyBackend>(SegmentedMode::decline);
+    const auto fallback = run(declined);
+    check(std::ranges::count(declined->calls, std::string("score")) == scores &&
+          fallback.segmented_timing_coordinates == native.segmented_timing_coordinates,
+          "a declined segmented workspace did not keep the native scorer's proposals");
+
+    rejects([&] { (void)run(std::make_shared<SegmentedOnlyBackend>(SegmentedMode::partial)); },
+            "a declined segmented workspace that reported work was accepted");
+    f.config.bulk_backend.reset();
 }
 
 void midpoint_lag_nominations_preserve_ordinary_search(const datapump::Crypto& crypto) {
@@ -1453,12 +1654,14 @@ int main(int argc, char** argv) try {
         midpoint_tiny_clock_bound_preserves_public_lags();
     }
     if (midpoint) return 0;
+    if (!overlap_failures) segmented_scores_reach_sessions_without_device_fir(crypto);
     tied_arrival_frontier();
     distinct_gain_frequency_ranks();
     if (overlap_failures) {
         acquisition_failures(crypto, capture(crypto, false), true);
         return 0;
     }
+    chunked_fir_matches_serial_filter();
     exact_two_ray(crypto);
     automatic_precision_qualification(crypto);
     frequency_continuation(crypto);

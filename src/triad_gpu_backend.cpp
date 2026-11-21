@@ -44,6 +44,9 @@ public:
         return backend_->make_coarse(rate, clock);
     }
     std::size_t persistent_host_workspace() const noexcept override { return backend_->persistent_host_workspace(); }
+    std::size_t segmented_host_bytes(std::span<const receiver_detail::CoarseSegmentedShape> shapes) const override {
+        return backend_->segmented_host_bytes(shapes);
+    }
     std::size_t fine_host_bytes(std::size_t rows, std::size_t taps) const override {
         return backend_->fine_host_bytes(rows, taps);
     }
@@ -86,6 +89,7 @@ std::shared_ptr<receiver_detail::ReceiverBulkBackend> make_gpu_receiver_backend(
         VulkanReceiverOptions vulkan;
         vulkan.coarse_precision = options.fp32_minimum ? VulkanCoarsePrecision::fp32 : VulkanCoarsePrecision::automatic;
         vulkan.prefer_native_exact_chirp_z = !options.fp32_minimum;
+        vulkan.opencl_coarse_one_ray = options.opencl_coarse_one_ray;
         auto backend = make_automatic_vulkan_receiver_backend(vulkan);
         const auto selected = backend->fine_maps_on_host()
             ? "automatic Vulkan receiver with OpenCL NVFP4 available"

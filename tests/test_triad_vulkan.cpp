@@ -1193,6 +1193,560 @@ void benchmark(const std::shared_ptr<r::ReceiverBulkBackend>& backend, std::stop
     }
 }
 
+// ---- Changing-channel segmented timing ----
+namespace nf = datapump::modem::detail::search_fft;
+
+struct SegmentedFixture {
+    r::CoarseSegmentedShape shape;
+    std::vector<Complex> column;
+    std::vector<std::complex<float>> spectra;
+    double noise_power = 1;
+};
+
+// Observation spectra as DifferentialSearch prepares them: each block's
+// rows plus arrival extension, rotated to its lattice phase, cast to FP32
+// and transformed with the native float FFT. Layout [block][phase][row].
+std::vector<std::complex<float>> segment_spectra(const r::CoarseSegmentedShape& shape,
+                                                 std::span<const Complex> input) {
+    const nf::FloatPlan fft(shape.fft_rows);
+    std::vector<std::complex<float>> spectra(shape.blocks * shape.phases * shape.fft_rows);
+    for (std::size_t block = 0; block < shape.blocks; ++block) {
+        const auto first = block * shape.kernel_rows / shape.blocks;
+        const auto rows = (block + 1) * shape.kernel_rows / shape.blocks - first + shape.arrivals - 1;
+        for (std::size_t phase = 0; phase < shape.phases; ++phase) {
+            auto target = std::span(spectra).subspan((block * shape.phases + phase) * shape.fft_rows, shape.fft_rows);
+            for (std::size_t i = 0; i < rows; ++i)
+                target[i] = static_cast<std::complex<float>>(input[first + i] *
+                    rotation(-static_cast<long double>(phase * i) / (shape.phases * shape.fft_rows)));
+            nf::fft(target, false, fft);
+        }
+    }
+    return spectra;
+}
+
+// The native receiver's FP32 scorer (DifferentialSearch::score_native_segments
+// for one ray), with the same transform calls and arithmetic types. With
+// T = double it is the reference for the same FP32 inputs: the FP32 template
+// cast and FP32 observation spectra, then FP64 products, transforms and
+// tracking states, so its distance measures each FP32 route's own rounding.
+template<class T, class Plan>
+void segmented_ranks_with(const SegmentedFixture& f, std::vector<double>& score, std::vector<double>& smooth) {
+    const auto& shape = f.shape;
+    const Plan fft(shape.fft_rows);
+    const auto arrivals = shape.arrivals, frequencies = 2 * shape.radius + 1, hop = shape.tracking_hop;
+    std::vector<std::complex<T>> column(shape.fft_rows), product(shape.fft_rows);
+    std::vector<double> block_score(arrivals);
+    std::vector<T> previous(hop ? frequencies * arrivals : 0), next(previous.size());
+    const auto hop_penalty = static_cast<T>(std::log(2.));
+    score.assign(arrivals, 0.);
+    smooth.assign(hop ? arrivals : 0, 0.);
+    const auto length = f.column.size();
+    for (std::size_t block = 0; block < shape.blocks; ++block) {
+        const auto first = block * length / shape.blocks;
+        const auto rows = (block + 1) * length / shape.blocks - first;
+        std::ranges::fill(block_score, 0.);
+        std::ranges::fill(column, std::complex<T>{});
+        double energy = 0;
+        for (std::size_t i = 0; i < rows; ++i) {
+            const auto value = f.column[first + i];
+            energy += std::norm(value);
+            column[i] = static_cast<std::complex<T>>(static_cast<std::complex<float>>(value));
+        }
+        if (!(energy > 0)) {
+            if (hop) next = previous;
+        } else {
+            nf::fft_prefix(column, false, fft, column.size());
+            for (std::size_t index = 0; index < frequencies; ++index) {
+                const auto frequency_index = (static_cast<std::int64_t>(index) - static_cast<std::int64_t>(shape.radius)) *
+                    static_cast<std::int64_t>(shape.bin_stride);
+                const auto phases = static_cast<std::int64_t>(shape.phases);
+                const auto phase_index = (frequency_index % phases + phases) % phases;
+                const auto shift = (frequency_index - phase_index) / phases;
+                const auto observation = std::span(f.spectra).subspan(
+                    (block * shape.phases + static_cast<std::size_t>(phase_index)) * shape.fft_rows, shape.fft_rows);
+                for (std::size_t i = 0; i < product.size(); ++i)
+                    product[i] = static_cast<std::complex<T>>(
+                        observation[(static_cast<std::uint64_t>(shift) + i) & (shape.fft_rows - 1)]) *
+                        std::conj(column[i]);
+                nf::fft_prefix(product, true, fft, arrivals);
+                for (std::size_t lag = 0; lag < arrivals; ++lag) {
+                    const auto value = std::norm(static_cast<Complex>(product[lag])) / energy;
+                    block_score[lag] = std::max(block_score[lag], value);
+                    if (hop) {
+                        const auto at = index * arrivals + lag;
+                        auto best = previous[at];
+                        for (std::size_t offset = 1; offset <= hop; ++offset) {
+                            if (index >= offset) best = std::max(best, previous[at - offset * arrivals] - hop_penalty);
+                            if (index + offset < frequencies)
+                                best = std::max(best, previous[at + offset * arrivals] - hop_penalty);
+                        }
+                        next[at] = static_cast<T>(value / f.noise_power) + best;
+                    }
+                }
+            }
+        }
+        for (std::size_t lag = 0; lag < arrivals; ++lag) score[lag] += block_score[lag];
+        if (hop) previous.swap(next);
+    }
+    if (hop)
+        for (std::size_t index = 0; index < frequencies; ++index)
+            for (std::size_t lag = 0; lag < arrivals; ++lag)
+                smooth[lag] = std::max<double>(smooth[lag], previous[index * arrivals + lag]);
+}
+
+void native_segmented_ranks(const SegmentedFixture& f, std::vector<double>& score, std::vector<double>& smooth) {
+    segmented_ranks_with<float, nf::FloatPlan>(f, score, smooth);
+}
+
+// A noisy observation that contains the template at one arrival with a
+// residual frequency on the search lattice, and one silent template block.
+SegmentedFixture representative_segments(const r::CoarseSegmentedShape& shape, std::uint64_t seed,
+                                         std::size_t arrival, std::int64_t residual) {
+    SegmentedFixture f{shape};
+    std::mt19937_64 generator(seed);
+    std::normal_distribution<double> gauss(0., std::sqrt(.5));
+    f.column.resize(shape.kernel_rows);
+    for (auto& value : f.column) value = {gauss(generator), gauss(generator)};
+    const auto silent = shape.blocks / 3;
+    std::fill(f.column.begin() + silent * shape.kernel_rows / shape.blocks,
+              f.column.begin() + (silent + 1) * shape.kernel_rows / shape.blocks, Complex{});
+    std::vector<Complex> input(shape.kernel_rows + shape.arrivals - 1);
+    for (auto& value : input) value = {4 * gauss(generator), 4 * gauss(generator)};
+    const auto cycles = static_cast<long double>(residual * static_cast<std::int64_t>(shape.bin_stride)) /
+        (shape.phases * shape.fft_rows);
+    for (std::size_t t = 0; t < shape.kernel_rows; ++t)
+        input[t + arrival] += .2 * f.column[t] * rotation(cycles * static_cast<long double>(t + arrival));
+    f.spectra = segment_spectra(shape, input);
+    // The projected noise energy per sample, as the receiver supplies it.
+    f.noise_power = 16.;
+    return f;
+}
+
+std::shared_ptr<r::ReceiverBulkBackend> segmented_backend(v::VulkanSegmentedTiming timing, bool automatic,
+                                                          std::size_t workspace = 512 * mib,
+                                                          v::VulkanCoarsePrecision precision = v::VulkanCoarsePrecision::fp32) {
+    v::VulkanReceiverOptions options{0, workspace, precision};
+    options.segmented_timing = timing;
+    return automatic ? v::make_automatic_vulkan_receiver_backend(options) : v::make_vulkan_receiver_backend(options);
+}
+
+r::CoarseBulkWork segmented_call(r::CoarseBulk& device, const SegmentedFixture& f, std::vector<double>& fixed,
+                                 std::vector<double>& smooth, std::stop_token stop = {}, bool* accepted = nullptr) {
+    fixed.assign(f.shape.arrivals, -1.);
+    smooth.assign(f.shape.tracking_hop ? f.shape.arrivals : 0, -1.);
+    r::CoarseBulkWork work;
+    const bool scored = device.segmented_scores(f.shape, f.spectra, f.column, f.noise_power, fixed, smooth, work, stop);
+    if (accepted) *accepted = scored;
+    else check(scored, "Vulkan segmented timing declined its admitted fixture");
+    return work;
+}
+
+std::size_t nonempty_blocks(const SegmentedFixture& f) {
+    std::size_t count = 0;
+    for (std::size_t block = 0; block < f.shape.blocks; ++block) {
+        double energy = 0;
+        for (auto i = block * f.shape.kernel_rows / f.shape.blocks; i < (block + 1) * f.shape.kernel_rows / f.shape.blocks; ++i)
+            energy += std::norm(f.column[i]);
+        count += energy > 0;
+    }
+    return count;
+}
+
+// The CUDA oracle fixture: an odd template and lag count exercise uneven
+// blocks and partial frequency tiles, against correlations evaluated in time.
+void segmented_time_domain_oracle() {
+    const auto backend = segmented_backend(v::VulkanSegmentedTiming::device, false, 64 * mib);
+    const auto initial_reserved = backend->receipt().reserved_bytes;
+    const r::CoarseSegmentedShape tracked{111, 15, 4, 64, 66, 3, 2, 2};
+    auto unlinked = tracked;
+    unlinked.radius = 11;
+    unlinked.tracking_hop = 0;
+    const std::array shapes{tracked, unlinked};
+    std::vector<Complex> column(tracked.kernel_rows), input(tracked.kernel_rows + tracked.arrivals - 1);
+    std::mt19937_64 generator(92861);
+    std::uniform_real_distribution<double> component(-1., 1.);
+    for (auto& value : input) value = {component(generator), component(generator)};
+    for (auto& value : column) value = {component(generator), component(generator)};
+    std::fill(column.begin() + column.size() / tracked.blocks,
+              column.begin() + 2 * column.size() / tracked.blocks, Complex{});
+    std::vector<std::complex<float>> spectra(tracked.blocks * tracked.phases * tracked.fft_rows);
+    for (std::size_t block = 0; block < tracked.blocks; ++block) {
+        const auto first = block * column.size() / tracked.blocks;
+        const auto rows = (block + 1) * column.size() / tracked.blocks - first + tracked.arrivals - 1;
+        for (std::size_t phase = 0; phase < tracked.phases; ++phase)
+            for (std::size_t bin = 0; bin < tracked.fft_rows; ++bin) {
+                const long double frequency = (bin + static_cast<long double>(phase) / tracked.phases) / tracked.fft_rows;
+                Complex spectrum{};
+                for (std::size_t t = 0; t < rows; ++t) spectrum += input[first + t] * rotation(-frequency * t);
+                spectra[(block * tracked.phases + phase) * tracked.fft_rows + bin] =
+                    static_cast<std::complex<float>>(spectrum);
+            }
+    }
+    auto device = backend->make_coarse(750., .0003);
+    device->plan_segmented(shapes);
+    device->begin_segmented({});
+    constexpr double noise_power = .4;
+    for (const auto& shape : shapes) {
+        const auto frequencies = 2 * shape.radius + 1;
+        std::vector<double> expected(shape.arrivals), tracked_expected(shape.arrivals);
+        std::vector<float> previous(frequencies * shape.arrivals), next(previous.size());
+        for (std::size_t block = 0; block < shape.blocks; ++block) {
+            const auto first = block * column.size() / shape.blocks;
+            const auto end = (block + 1) * column.size() / shape.blocks;
+            double energy = 0;
+            for (auto i = first; i < end; ++i) energy += std::norm(column[i]);
+            if (energy == 0) continue;
+            std::vector<double> block_best(shape.arrivals);
+            for (std::size_t f = 0; f < frequencies; ++f) {
+                const long double cycles = (static_cast<long double>(f) - shape.radius) * shape.bin_stride /
+                                           (shape.phases * shape.fft_rows);
+                for (std::size_t lag = 0; lag < shape.arrivals; ++lag) {
+                    Complex correlation{};
+                    for (auto i = first; i < end; ++i)
+                        correlation += input[i + lag] * std::conj(column[i]) * rotation(-cycles * (i - first + lag));
+                    const auto value = std::norm(correlation) / energy;
+                    block_best[lag] = std::max(block_best[lag], value);
+                    if (shape.tracking_hop) {
+                        const auto at = f * shape.arrivals + lag;
+                        auto best = previous[at];
+                        const auto low = f > shape.tracking_hop ? f - shape.tracking_hop : 0;
+                        const auto high = std::min(frequencies - 1, f + shape.tracking_hop);
+                        for (auto j = low; j <= high; ++j)
+                            if (j != f) best = std::max(best, previous[j * shape.arrivals + lag] - std::log(2.f));
+                        next[at] = best + static_cast<float>(value / noise_power);
+                    }
+                }
+            }
+            for (std::size_t lag = 0; lag < shape.arrivals; ++lag) expected[lag] += block_best[lag];
+            previous.swap(next);
+        }
+        for (std::size_t i = 0; i < previous.size(); ++i)
+            tracked_expected[i % shape.arrivals] =
+                std::max(tracked_expected[i % shape.arrivals], static_cast<double>(previous[i]));
+        const SegmentedFixture f{shape, column, spectra, noise_power};
+        const auto before = backend->receipt();
+        std::vector<double> fixed, smooth;
+        const auto work = segmented_call(*device, f, fixed, smooth);
+        for (std::size_t lag = 0; lag < shape.arrivals; ++lag) {
+            near(fixed[lag], expected[lag], 3e-5, "Vulkan segmented time-domain rank differs");
+            if (shape.tracking_hop) near(smooth[lag], tracked_expected[lag], 3e-5, "Vulkan segmented linked rank differs");
+        }
+        const auto same_arrivals = [&](const auto& actual, const auto& reference) {
+            const auto chosen = r::select_coarse_arrivals(actual, 2);
+            const auto oracle = r::select_coarse_arrivals(reference, 2);
+            return chosen.count == oracle.count && std::equal(chosen.indices.begin(),
+                chosen.indices.begin() + chosen.count, oracle.indices.begin());
+        };
+        check(same_arrivals(fixed, expected) && (!shape.tracking_hop || same_arrivals(smooth, tracked_expected)),
+              "Vulkan segmented timing changed the fixture's selected public arrivals");
+        const auto after = backend->receipt();
+        const auto nonempty = shape.blocks - 1;
+        const auto inverses = nonempty * frequencies;
+        const auto rows = inverses * shape.arrivals;
+        check(work.forward_ffts == nonempty && work.inverse_ffts == inverses && work.score_rows == rows &&
+              after.vulkan_segmented_sessions - before.vulkan_segmented_sessions == 1 &&
+              after.vulkan_segmented_forward_ffts - before.vulkan_segmented_forward_ffts == nonempty &&
+              after.vulkan_segmented_inverse_ffts - before.vulkan_segmented_inverse_ffts == inverses &&
+              after.vulkan_segmented_score_rows - before.vulkan_segmented_score_rows == rows &&
+              after.score_rows == before.score_rows && after.vulkan_segmented_native_fallbacks == 0 &&
+              after.vulkan_segmented_declined_calls == 0 && after.peak_reserved_bytes <= after.workspace_limit_bytes,
+              "Vulkan segmented timing lost completed work or credited ordinary score rows");
+        std::stop_source stopped;
+        stopped.request_stop();
+        bool cancelled = false;
+        r::CoarseBulkWork cancelled_work;
+        std::vector<double> untouched(shape.arrivals, -1.), untouched_smooth(shape.tracking_hop ? shape.arrivals : 0, -1.);
+        try {
+            (void)device->segmented_scores(shape, spectra, column, noise_power, untouched, untouched_smooth,
+                                           cancelled_work, stopped.get_token());
+        } catch (const datapump::Error& error) {
+            cancelled = std::string_view(error.what()).find("cancel") != std::string_view::npos;
+        }
+        check(cancelled && cancelled_work == r::CoarseBulkWork{} &&
+              backend->receipt().vulkan_segmented_sessions == after.vulkan_segmented_sessions &&
+              std::ranges::all_of(untouched, [](double value) { return value == -1.; }),
+              "pre-cancelled Vulkan segmented timing launched or published work");
+    }
+    {
+        // A workspace whose template blocks are all silent publishes zero
+        // ranks, as the native scorer does, without device work or credit.
+        const SegmentedFixture silent{tracked, std::vector<Complex>(tracked.kernel_rows), spectra, noise_power};
+        const auto before = backend->receipt();
+        std::vector<double> fixed, smooth;
+        const auto work = segmented_call(*device, silent, fixed, smooth);
+        const auto after = backend->receipt();
+        check(work == r::CoarseBulkWork{} && std::ranges::all_of(fixed, [](double x) { return x == 0.; }) &&
+              std::ranges::all_of(smooth, [](double x) { return x == 0.; }) &&
+              after.vulkan_segmented_sessions == before.vulkan_segmented_sessions &&
+              after.vulkan_dispatches == before.vulkan_dispatches && after.synchronizations == before.synchronizations,
+              "silent Vulkan segmented workspace launched or credited device work");
+    }
+    device->end_segmented();
+    device.reset();
+    // A tracker whose resident states exceed the explicit session ceiling
+    // keeps the native scorer, with outputs and work untouched.
+    const auto tight = segmented_backend(v::VulkanSegmentedTiming::device, false, 2 * mib);
+    auto oversized = tracked;
+    oversized.arrivals = 10553;
+    oversized.fft_rows = 16384;
+    oversized.radius = 1967;
+    oversized.kernel_rows = 4 * 4096;
+    auto small = tight->make_coarse(750., .0003);
+    small->plan_segmented(std::span(&oversized, 1));
+    small->begin_segmented({});
+    const SegmentedFixture big{oversized, std::vector<Complex>(oversized.kernel_rows, Complex{1}),
+        std::vector<std::complex<float>>(oversized.blocks * oversized.phases * oversized.fft_rows), noise_power};
+    std::vector<double> fixed, smooth;
+    bool accepted = true;
+    const auto declined = segmented_call(*small, big, fixed, smooth, {}, &accepted);
+    const auto receipt = tight->receipt();
+    check(!accepted && declined == r::CoarseBulkWork{} && receipt.vulkan_segmented_sessions == 0 &&
+          receipt.vulkan_segmented_native_fallbacks == 1 &&
+          receipt.vulkan_segmented_fallback_reason == "vulkan-segmented-workspace" &&
+          std::ranges::all_of(fixed, [](double value) { return value == -1.; }) &&
+          std::ranges::all_of(smooth, [](double value) { return value == -1.; }),
+          "unsupported segmented tracking workspace changed results or work");
+    small.reset();
+    check(backend->receipt().reserved_bytes == initial_reserved && tight->receipt().reserved_bytes == 0,
+          "Vulkan segmented owner leaked its device workspace");
+}
+
+struct RankAgreement {
+    double fixed = 0, smooth = 0;
+};
+
+// Root-mean-square distance relative to the largest reference rank, and
+// the largest relative distance among ranks within half of that peak,
+// where the arrival selection compares near-tied candidates.
+struct RankError {
+    double rms_over_peak = 0, max_near_peak_relative = 0;
+};
+
+RankError rank_error(std::span<const double> values, std::span<const double> reference) {
+    RankError result;
+    if (values.empty()) return result;
+    const auto peak = std::max(1e-300, *std::ranges::max_element(reference));
+    double sum = 0;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        const auto difference = values[i] - reference[i];
+        sum += difference * difference;
+        if (reference[i] >= peak / 2)
+            result.max_near_peak_relative = std::max(result.max_near_peak_relative, std::abs(difference) / reference[i]);
+    }
+    result.rms_over_peak = std::sqrt(sum / values.size()) / peak;
+    return result;
+}
+
+// Largest difference relative to the largest native rank of each family.
+RankAgreement rank_agreement(std::span<const double> a, std::span<const double> b,
+                             std::span<const double> sa, std::span<const double> sb) {
+    const auto scale = [](std::span<const double> values) {
+        return std::max(1e-300, *std::ranges::max_element(values));
+    };
+    RankAgreement result;
+    for (std::size_t i = 0; i < a.size(); ++i)
+        result.fixed = std::max(result.fixed, std::abs(a[i] - b[i]) / scale(b));
+    for (std::size_t i = 0; i < sa.size(); ++i)
+        result.smooth = std::max(result.smooth, std::abs(sa[i] - sb[i]) / scale(sb));
+    return result;
+}
+
+// Production-size shapes against the native FP32 scorer: 16k and 32k
+// transforms, at least 4,096 arrivals, 32 blocks and 257 frequencies, one
+// and two lattice phases, unlinked and linked ranks, partial tiles and a
+// silent block. The planted arrival must lead both rankings. FP32 FFT
+// rounding differs between VkFFT and the native transform, so ranks agree
+// within a small fraction of the strongest rank rather than bit for bit.
+void segmented_native_agreement(bool automatic, std::stop_token stop) {
+    const auto backend = segmented_backend(v::VulkanSegmentedTiming::device, automatic);
+    const auto receipt0 = backend->receipt();
+    check(receipt0.device_name.find("llvmpipe") == std::string::npos && receipt0.vulkan,
+          "Vulkan segmented timing must run on a physical GPU, not llvmpipe");
+    struct Case { r::CoarseSegmentedShape shape; std::size_t arrival; std::int64_t residual; };
+    const std::array cases{
+        Case{{32 * 12'000, 4'096, 32, 16'384, 128, 1, 1, 2}, 1'777, 41},
+        Case{{32 * 20'000, 4'500, 32, 32'768, 130, 2, 3, 0}, 3'333, -97},
+    };
+    std::vector<r::CoarseSegmentedShape> shapes;
+    for (const auto& c : cases) shapes.push_back(c.shape);
+    auto device = backend->make_coarse(750., .0003);
+    device->plan_segmented(shapes);
+    device->begin_segmented(stop);
+    if (automatic) {
+        const auto leased = backend->receipt();
+        check(leased.vulkan_leased_bytes > 0 && leased.vulkan_leased_bytes <= leased.vulkan_shared_workspace_limit_bytes / 4,
+              "automatic Vulkan segmented timing did not hold one bounded shared lease");
+    }
+    for (std::size_t index = 0; index < cases.size(); ++index) {
+        const auto& c = cases[index];
+        const auto f = representative_segments(c.shape, 731 + index, c.arrival, c.residual);
+        std::vector<double> native, native_smooth, fixed, smooth, reference, reference_smooth;
+        auto began = Clock::now();
+        native_segmented_ranks(f, native, native_smooth);
+        const auto native_seconds = std::chrono::duration<double>(Clock::now() - began).count();
+        segmented_ranks_with<double, nf::DoublePlan>(f, reference, reference_smooth);
+        const auto before = backend->receipt();
+        began = Clock::now();
+        const auto work = segmented_call(*device, f, fixed, smooth, stop);
+        const auto device_seconds = std::chrono::duration<double>(Clock::now() - began).count();
+        const auto after = backend->receipt();
+        const auto agreement = rank_agreement(fixed, native, smooth, native_smooth);
+        // Each FP32 route against the FP64 reference of the same inputs.
+        const auto vulkan_error = rank_agreement(fixed, reference, smooth, reference_smooth);
+        const auto native_error = rank_agreement(native, reference, native_smooth, reference_smooth);
+        const auto vulkan_fixed = rank_error(fixed, reference), native_fixed = rank_error(native, reference);
+        const auto vulkan_linked = rank_error(smooth, reference_smooth);
+        const auto native_linked = rank_error(native_smooth, reference_smooth);
+        const auto frequencies = 2 * c.shape.radius + 1, blocks = nonempty_blocks(f);
+        const auto separation = 8;
+        const auto chosen = r::select_coarse_arrivals(fixed, separation);
+        const auto oracle = r::select_coarse_arrivals(native, separation);
+        const auto strongest = [](const r::CoarseArrivalPeaks& peaks, std::span<const double> ranks) {
+            return ranks[peaks.indices[0]] >= ranks[peaks.indices[std::min<std::size_t>(1, peaks.count - 1)]]
+                ? peaks.indices[0] : peaks.indices[1];
+        };
+        output(j::object({{"schema", "datapump.triad.vulkan-segmented-agreement.v1"},
+            {"fft_rows", c.shape.fft_rows}, {"arrivals", c.shape.arrivals}, {"blocks", c.shape.blocks},
+            {"frequencies", frequencies}, {"phases", c.shape.phases}, {"tracking_hop", c.shape.tracking_hop},
+            {"automatic_workspace", automatic},
+            {"max_fixed_difference_over_peak", agreement.fixed}, {"max_linked_difference_over_peak", agreement.smooth},
+            {"fp64_reference", j::object({
+                {"vulkan_max_fixed_over_peak", vulkan_error.fixed}, {"native_max_fixed_over_peak", native_error.fixed},
+                {"vulkan_max_linked_over_peak", vulkan_error.smooth}, {"native_max_linked_over_peak", native_error.smooth},
+                {"vulkan_rms_fixed_over_peak", vulkan_fixed.rms_over_peak},
+                {"native_rms_fixed_over_peak", native_fixed.rms_over_peak},
+                {"vulkan_rms_linked_over_peak", vulkan_linked.rms_over_peak},
+                {"native_rms_linked_over_peak", native_linked.rms_over_peak},
+                {"vulkan_max_near_peak_fixed_relative", vulkan_fixed.max_near_peak_relative},
+                {"native_max_near_peak_fixed_relative", native_fixed.max_near_peak_relative}})},
+            {"native_seconds_one_thread", native_seconds}, {"vulkan_seconds", device_seconds},
+            {"native_peak_lag", strongest(oracle, native)}, {"vulkan_peak_lag", strongest(chosen, fixed)},
+            {"timing_note", "single noisy run on a shared host"}}));
+        check(agreement.fixed <= 1e-5 && agreement.smooth <= 1e-5,
+              "Vulkan segmented ranks differ from the native FP32 scorer beyond FP32 transform rounding");
+        check(strongest(chosen, fixed) == c.arrival && strongest(oracle, native) == c.arrival &&
+              chosen.count == oracle.count && std::equal(chosen.indices.begin(),
+                  chosen.indices.begin() + chosen.count, oracle.indices.begin()),
+              "Vulkan segmented timing changed the planted arrival or the selected public arrivals");
+        if (c.shape.tracking_hop) {
+            const auto linked = r::select_coarse_arrivals(smooth, separation);
+            const auto native_linked = r::select_coarse_arrivals(native_smooth, separation);
+            check(strongest(linked, smooth) == c.arrival && linked.count == native_linked.count &&
+                  std::equal(linked.indices.begin(), linked.indices.begin() + linked.count,
+                             native_linked.indices.begin()),
+                  "Vulkan segmented linked ranks changed the selected public arrivals");
+        }
+        check(work.forward_ffts == blocks && work.inverse_ffts == blocks * frequencies &&
+              work.score_rows == blocks * frequencies * c.shape.arrivals &&
+              after.vulkan_segmented_sessions - before.vulkan_segmented_sessions == 1 &&
+              after.vulkan_segmented_inverse_ffts - before.vulkan_segmented_inverse_ffts == blocks * frequencies &&
+              after.vulkan_segmented_native_fallbacks == 0 && after.vulkan_segmented_declined_calls == 0 &&
+              after.score_rows == before.score_rows,
+              "Vulkan segmented timing miscounted its production-size work");
+    }
+    device->end_segmented();
+    if (automatic) check(backend->receipt().vulkan_leased_bytes == 0, "Vulkan segmented lease outlived its stage");
+    device.reset();
+    {
+        // The next slot of the same geometry reuses every serialized
+        // transform: two shapes, each a forward, a tile and a tail plan.
+        const auto before = backend->receipt();
+        auto next = backend->make_coarse(750., .0003);
+        next->plan_segmented(shapes);
+        next->begin_segmented(stop);
+        next->end_segmented();
+        next.reset();
+        const auto after = backend->receipt();
+        check(after.vulkan_fft_cache_misses == before.vulkan_fft_cache_misses &&
+              after.vulkan_fft_cache_hits - before.vulkan_fft_cache_hits == 6 &&
+              after.reserved_bytes == before.reserved_bytes,
+              "a second Vulkan segmented session recompiled a transform or leaked its tables");
+    }
+    check_workspace_receipt(backend->receipt(), true);
+}
+
+// Automatic and native selection on this device. The automatic backend
+// identifies the GPU class whose CUDA segmented search was qualified; only
+// there does automatic selection score the broad shape on the device.
+void segmented_selection() {
+    // Inside the CUDA-qualified envelope, so a qualified device scores it:
+    // 32 blocks cover the 32,768-row span at a radius of 512.
+    const r::CoarseSegmentedShape broad{32 * 12'000, 4'096, 32, 16'384, 512, 1, 1, 2};
+    const auto f = representative_segments(broad, 99, 100, 0);
+    for (const auto timing : {v::VulkanSegmentedTiming::automatic, v::VulkanSegmentedTiming::native}) {
+        const bool automatic = timing == v::VulkanSegmentedTiming::automatic;
+        // The automatic receiver's own options, which open OpenCL NVFP4 on
+        // a matching Blackwell GPU in builds that include it.
+        const auto backend = automatic
+            ? segmented_backend(timing, true, 0, v::VulkanCoarsePrecision::automatic)
+            : segmented_backend(timing, false);
+        const auto receipt = backend->receipt();
+        check(!receipt.vulkan_segmented_qualified_device || receipt.vulkan_vendor_id == 0x10de,
+              "Vulkan segmented timing qualified a device outside the NVIDIA SM 12.0 class");
+        auto device = backend->make_coarse(750., .0003);
+        device->plan_segmented(std::span(&broad, 1));
+        device->begin_segmented({});
+        std::vector<double> fixed, smooth;
+        bool accepted = false;
+        const auto work = segmented_call(*device, f, fixed, smooth, {}, &accepted);
+        device->end_segmented();
+        const auto after = backend->receipt();
+        const bool expected = automatic && receipt.vulkan_segmented_qualified_device;
+        const auto reason = automatic ? "vulkan-segmented-unqualified-device" : "vulkan-segmented-native-requested";
+        check(after.vulkan_segmented_planned_shapes == 1 && after.vulkan_segmented_native_fallbacks == 0 &&
+              accepted == expected && (accepted ? after.vulkan_segmented_sessions == 1 :
+                  (work == r::CoarseBulkWork{} && after.vulkan_segmented_declined_calls == 1 &&
+                   after.vulkan_segmented_decline_reason == reason && !after.vulkan_segmented_sessions &&
+                   after.vulkan_dispatches == receipt.vulkan_dispatches)),
+              "Vulkan segmented selection differed from its device and option policy");
+        output(j::object({{"schema", "datapump.triad.vulkan-segmented-selection.v1"},
+            {"timing", automatic ? "automatic" : "native"}, {"device_name", receipt.device_name},
+            {"qualified_device", receipt.vulkan_segmented_qualified_device}, {"device_scored", accepted},
+            {"decline_reason", after.vulkan_segmented_decline_reason}}));
+    }
+}
+
+// Sustained throughput of one shape: device calls in sequence, as the
+// session serializes them, against the native scorer on every hardware
+// thread, as receiver lanes run independent workspaces.
+void segmented_benchmark(std::stop_token stop) {
+    const auto backend = segmented_backend(v::VulkanSegmentedTiming::device, false);
+    const auto threads = std::max(1u, std::thread::hardware_concurrency());
+    const std::array shapes{
+        r::CoarseSegmentedShape{32 * 12'000, 4'096, 32, 16'384, 128, 1, 1, 2},
+        r::CoarseSegmentedShape{40 * 5'000, 10'553, 40, 16'384, 257, 1, 1, 2},
+        r::CoarseSegmentedShape{32 * 20'000, 4'500, 32, 32'768, 130, 2, 3, 0},
+    };
+    for (const auto& shape : shapes) {
+        const auto f = representative_segments(shape, 5, shape.arrivals / 2, 3);
+        auto device = backend->make_coarse(750., .0003);
+        device->plan_segmented(std::span(&shape, 1));
+        device->begin_segmented(stop);
+        std::vector<double> fixed, smooth;
+        (void)segmented_call(*device, f, fixed, smooth, stop);
+        constexpr std::size_t calls = 3;
+        auto began = Clock::now();
+        for (std::size_t i = 0; i < calls; ++i) (void)segmented_call(*device, f, fixed, smooth, stop);
+        const auto device_seconds = std::chrono::duration<double>(Clock::now() - began).count() / calls;
+        device->end_segmented();
+        began = Clock::now();
+        {
+            std::vector<std::jthread> lanes;
+            for (unsigned lane = 0; lane < threads; ++lane)
+                lanes.emplace_back([&] { std::vector<double> a, b; native_segmented_ranks(f, a, b); });
+        }
+        const auto native_seconds = std::chrono::duration<double>(Clock::now() - began).count() / threads;
+        output(j::object({{"schema", "datapump.triad.vulkan-segmented-throughput.v1"},
+            {"fft_rows", shape.fft_rows}, {"arrivals", shape.arrivals}, {"blocks", shape.blocks},
+            {"frequencies", 2 * shape.radius + 1}, {"phases", shape.phases}, {"tracking_hop", shape.tracking_hop},
+            {"vulkan_seconds_per_workspace", device_seconds},
+            {"native_seconds_per_workspace_all_threads", native_seconds}, {"native_threads", threads},
+            {"device_name", backend->receipt().device_name},
+            {"timing_note", "short single run on a shared host; indicative only"}}));
+        check(!stop.stop_requested(), "Vulkan segmented benchmark exceeded its deadline");
+    }
+}
+
 void describe(const r::BulkReceipt& receipt, double creation_seconds) {
     const auto allocation = v::resolve_stream_receiver_resources();
     output(j::object({{"schema", "datapump.triad.vulkan-test-identity.v1"},
@@ -1226,12 +1780,26 @@ int main(int argc, char** argv) {
         const bool host_scoring = mode == "--host-scoring";
         const bool auto_workspace = mode == "--automatic-workspace";
         const bool workspace_admission = mode == "--workspace-admission";
+        const bool segmented = mode == "--segmented" || mode == "--segmented-benchmark";
         check(argc <= 2 && (mode.empty() || mode == "--plan" || mode == "--benchmark" || host_scoring ||
                            mode == "--plan-wide" || mode == "--benchmark-wide" || cpu_precision ||
-                           precision_diagnostic || auto_workspace || workspace_admission),
-              "expected test_triad_vulkan [--plan|--benchmark|--benchmark-cpu-precision|--host-scoring|--workspace-admission|--automatic-workspace], "
-              "with optional -wide suffix");
+                           precision_diagnostic || auto_workspace || workspace_admission || segmented),
+              "expected test_triad_vulkan [--plan|--benchmark|--benchmark-cpu-precision|--host-scoring|--workspace-admission|"
+              "--automatic-workspace|--segmented|--segmented-benchmark], with optional -wide suffix");
         const Deadline deadline;
+        if (segmented) {
+            if (mode == "--segmented-benchmark") segmented_benchmark(deadline.token());
+            else {
+                segmented_selection();
+                segmented_time_domain_oracle();
+                segmented_native_agreement(false, deadline.token());
+                segmented_native_agreement(true, deadline.token());
+                output(j::object({{"schema", "datapump.triad.vulkan-checks.v1"}, {"status", "checks_passed"},
+                    {"actual_gpu_work", true}, {"scope", "segmented_timing_oracle_native_agreement_and_selection"}}));
+            }
+            check(!deadline.token().stop_requested(), "Vulkan segmented checks exceeded the fixed invocation deadline");
+            return 0;
+        }
         if (auto_workspace || workspace_admission) {
             if (auto_workspace) automatic_workspace_capacity(deadline.token());
             automatic_workspace_admission(deadline.token());

@@ -72,14 +72,45 @@ workspace ceiling. Automatic mode scores each eligible frequency-tile search
 with the [dense FP4 coarse search](triad-gpu-optimization.md#dense-fp4-coarse-search-and-device-template-bank):
 E2M1 Tensor Core products choose the arrival frontier of every public
 workspace, frequency and arrival, and every retained arrival is rescored in
-FP32 with FP64 accumulation from the unquantized device template bank.
-Sessions outside its envelope keep the Vulkan FFT search: lag-group, mapped
-and varying-passband routes, searches with midpoint gain timing, fewer than
-16 arrivals, a single ray, a lease that does not fit, or a template bank
-whose smaller Gram eigenvalue is below one sixteenth of the larger. That
+FP32 with FP64 accumulation from the unquantized device template bank. An
+explicit FP32 partial-sum rescoring is built beside it
+(`--opencl-coarse-rescore fp32`, `VulkanReceiverOptions::opencl_coarse_fp32_rescore`):
+FP32 products in FP32 partial sums of 64 rows, each added in FP64, as the
+FIR sums its taps, with the FP64 correlations, inverse Gram and score
+unchanged. Its precision labels and reasons name `fp32_partial`, and
+receipts count rescored peaks of each accumulation. It rescores the same
+FP4 frontier by construction, since rescoring only replaces retained
+scores; in emulation its rescored scores were within 1.8e-7 of each row's
+best score of the FP64 accumulation on 14 synthesis geometries, and within
+the native search's tolerance in the coarse-session fixture. On a full RTX
+PRO 6000 it cut rescoring from 2.64 to 0.89 ms per matched slot, with
+equal decisions and bits in 34 paired captures, and it is now the automatic
+and explicit default; `--opencl-coarse-rescore fp64` keeps the FP64 control
+([qualification](validation.md#blackwell-qualification-of-the-offload-routes--20-november-2026)).
+Sessions outside its envelope keep the Vulkan FFT search, each for one of
+the [named fallback reasons](triad-gpu-optimization.md#dense-fp4-coarse-search-and-device-template-bank)
+that receipts count in `opencl_coarse_fallback_counts` beside the total
+`opencl_coarse_frequency_fallbacks`. One is a two-ray template bank whose
+smaller Gram eigenvalue is below one sixteenth of the larger. That
 conditioning guard is the canonical reduced-precision bound. In emulation the
 FP4 frontier kept a planted arrival down to a ratio near 3.5e-3 and lost it
-near 1e-4, so a measured FP4 bound could be lower. Automatic mode also
+near 1e-4, so a measured FP4 bound could be lower. One-ray sessions, which
+the GUI's default spread (None) gives, have a dense route: their Gram is a
+scalar, so the inverse never amplifies FP4 error, and four workspaces fill a
+bank tile. A full RTX PRO 6000 qualified it against the FFT session: on a
+36 Hz Spread None fixture the coarse stage fell from 0.19–0.42 s to
+0.012–0.013 s with equal decisions and bits in every pair, and the
+3,377-arrival GPSDO/IC-7100 plan from 94 s to 19–27 s
+([qualification](validation.md#blackwell-qualification-of-the-offload-routes--20-november-2026)). Automatic mode
+therefore scores them (`VulkanReceiverOptions::opencl_coarse_one_ray`, which
+the GUI's `GpuReceiverOptions` and the probe follow;
+`--opencl-coarse-one-ray off` with `--backend gpu` keeps the FFT session and
+counts `one-ray-unqualified`). Automatic selection also declines, as
+`dense-cost`, one-ray plans whose dense products per workspace and frequency
+exceed those of the device-measured matched search. An explicit
+`--vulkan-precision nvfp4` request always scores one-ray sessions. The
+matched fixture with Spread None stays on the native compact tight-clock
+route. Automatic mode also
 uses resident OpenCL NVFP4 for the qualified isolated 1,500-row, 47-mode,
 two-tap blocks at every worker allocation. It keeps the full receiver worker
 budget. The receiver uses native projection for nonmatching geometry or
@@ -123,7 +154,53 @@ the native renderer's operation order. That is a change of where the tile
 is computed, with no reduction of precision: on the device and in emulation
 rendered tiles match native ones within 2.5e-12 of the tile peak, and the
 FP64 mapper and the C64 lanes are unchanged. NVCC may fuse the envelope's
-multiply-adds, which moves a tile by about 1e-15 of its peak. `--opencl-fine-tiles native` uploads native tiles and
+multiply-adds, which moves a tile by about 1e-15 of its peak.
+
+The same module holds FP32 forms of both kernels
+(`VulkanReceiverOptions::opencl_fine_fp32`), the automatic and explicit
+default since a full RTX PRO 6000 qualified them: the mapping fell from
+24.3 to 5.1 ms and tile rendering from 6.0 to 2.5 ms per matched slot, FP32
+statistics agreed with the FP64 kernels within 2.1e-7 and evidence within
+5.5e-9, and 34 paired captures kept every decision and bit
+([qualification](validation.md#blackwell-qualification-of-the-offload-routes--20-november-2026)).
+`--opencl-fine-map fp64` keeps the FP64 control. The probe's unstated
+`--opencl-fine-map` and `--opencl-coarse-rescore` follow the
+`VulkanReceiverOptions` defaults where the route runs those kernels, and it
+holds every receipt to the kernels it reports. Mapped templates
+are divided by their lane peak and rounded to E2M1 next, whose steps are
+orders of magnitude above FP32 rounding, so FP64 per row buys nothing there
+at 1/64 of the FP32 rate. The FP32 renderer keeps the native renderer's
+FP64 time base, envelope, chip support and support-edge pulse offsets, and
+sums chips, interpolates the pulse and rotates the outer carriers in FP32
+from keyed chips and a pulse table rounded to FP32 on the host; tiles stay
+FP64 in the cache. The FP32 mapper reduces each row's stencil coordinate in
+64.64 fixed point and its phase as a 64-bit fraction of a turn, exactly but
+for bits below 2^-64, from descriptors decoded once per block, and weights,
+interpolates and rotates in FP32 with the
+[fp32-rn4-v1 rotation](#portable-fp32-mapping-arithmetic). It has no FP64
+arithmetic per row, but still narrows the 16 FP64 tile samples of a paired
+row and converts three 64-bit integers to FP32, which consumer-class SMs
+may run at the FP64 rate; FP32 tile storage would remove the narrowing but
+would also lose the C128 presence witness of samples below the FP32 range.
+Its witness of a nonzero template records a nonzero tile sample under a
+nonzero FP32 weight whose FP32 value is zero. The stencil fraction t and
+its complement 1 - t must each be carried to FP32 relative precision: a
+first form that converted only t and formed 1 - t in FP32 was wrong by the
+whole lane peak on a lane whose content lay under a vanishing end weight
+(fraction 1 - 2^-53, where t rounds to 1). In emulation, on 2,000
+randomized lanes with stencil-edge, fraction 0 and 1, phase-step-guard,
+tiny and empty cases, the FP32 mapper was within 2.5e-7 of each lane's peak
+at the 99th percentile and 9.1e-7 at worst of a long-double reference, and
+the FP64 mapper within 6.6e-7, set by its own phase rounding at the 2^30
+guard. The tile checks hold the FP32 renderer to a declared 4e-6 of the
+tile peak and the FFT route's statistics to 1e-5; in emulation the tiles
+were within 4.9e-7 to 7.5e-7 of native ones, FFT statistics within 3.5e-7
+of the FP64 kernels, and the complete fine-session fixture's evidence
+within 6e-9. Receipts count mapped columns and rendered tiles of each
+arithmetic. Device time and paired decisions of the FP32 kernels are not
+yet measured.
+
+`--opencl-fine-tiles native` uploads native tiles and
 `--opencl-fine-window 2` keeps one dispatch per batch. Together they are the
 control route. Windows are even numbers of blocks, and a stated tile source
 or window must be the one executed. With device tiles a batch submits the
@@ -299,6 +376,90 @@ SM120 devices and multi-slot service need separate throughput qualification.
 See the [paired full-slot trials](validation.md#blackwell-receiver-trials-at-2-mw)
 and [Tensor Core operator comparison](triad-gpu-optimization.md).
 
+The Vulkan coarse session runs the same segmented search with VkFFT FP32
+transforms and GLSL kernels that reproduce the CUDA kernel arithmetic: FP32
+products with separately rounded terms, FP64 lag ranks and FP32 tracking
+states. Its VkFFT plans use twiddle tables computed in FP64 and rounded once,
+as the native FP32 FFT does. It does not need device FIR, so the receiver
+offers segmented shapes to every compiled session. The Blackwell Vulkan and
+OpenCL route hands them to its FFT session whichever session scores the
+frequencies.
+
+This route changes values at the proposal level. Its FP32 transforms round
+differently from the native scorer's, so lag ranks differ by up to about 2e-7
+of the strongest rank. Selection can then reorder or replace near-tied
+proposals, such as the same arrival under neighboring clock hypotheses
+0.0003 ppm apart. On the Radeon it reproduced every native proposal of the
+72 Hz/5× control but changed two of eight on a 72 Hz/1× slot. Decisions,
+persistent state and likelihood arithmetic keep their qualified precision; a
+changed proposal changes which coordinates the fine stage evaluates. The CUDA
+route can change proposals the same way, although on the 72 Hz/5× control its
+downstream evidence matched the native route bit for bit. Without twiddle
+tables, VkFFT's rank error was several times larger; see the Radeon
+measurements.
+
+A session admits its segmented work once, on the owner thread, before any
+other device stage. The lease covers the resident observation spectra, a tile
+of up to 128 inverse transforms, tracker states, ranks and the VkFFT twiddle
+tables with their upload staging. It ends before the frequency search admits
+its own workspace, and also if the bank stage fails. Segmented timing exists
+only with a varying passband, which withholds the device-rendered template
+bank, so the dense session's blocking synthesis lease never waits while a
+segmented lease is held; keep that ordering if either condition changes. An automatic backend's
+lease is optional: at most a quarter of the shared device workspace, taken
+without waiting or passing a queued owner; otherwise the calls stay native.
+On an integrated device the receiver also charges it to host admission.
+VkFFT places the twiddle tables on the first device-local memory type,
+which need not be the leased heap; a table or staging allocation failure is
+the reported `workspace` fallback. The session's plans are rebuilt for each
+coarse session, and building a twiddle-table plan holds the shared queue
+lock for VkFFT's whole initialization, including pipeline creation (and
+compilation on a cold serialized cache), because VkFFT uploads the tables
+on that queue. Other owners' submissions wait meanwhile. Its cost under
+several owners is unmeasured; record the segmented sessions'
+`vulkan_fft_plan_seconds` in the multi-owner device check, and give the
+upload its own queue or keep the plans warm per shape if it matters.
+
+Automatic selection admits the CUDA envelope above only on the GPU that the
+OpenCL NVFP4 route matched by UUID, which requires NVIDIA SM 12.0: the GPU
+class whose CUDA segmented search was qualified. A full RTX PRO 6000
+Blackwell qualified this Vulkan form
+([qualification](validation.md#blackwell-qualification-of-the-offload-routes--20-november-2026)).
+On the 72 Hz/5× control the stage took 5.7–6.0 s against 45.7–46.3 s on
+the native scorer, with identical proposals, evidence and decisions, and
+the automatic slot took 18.4–20.5 s against 59.0 s; on the 72 Hz/1× slot
+it took 0.59 s against 4.58 s with the same decision. That slot's shapes lie
+outside the envelope, so automatic selection keeps them native
+(`unqualified-shape`). Other devices, including other NVIDIA generations
+and the Radeon, report `unqualified-device` and keep the native scorer
+until this route is measured on them.
+
+`--vulkan-segmented-timing device|native` with explicit `--backend vulkan`
+requests or disables the route. With `--require-accelerator on`, a device
+request must score every workspace of a geometry that has segmented shapes;
+the probe records `vulkan_segmented_requirement` as `required` or
+`not_applicable`. Receipts report:
+
+- `vulkan_segmented_planned_shapes`, the shapes offered to sessions;
+- `vulkan_segmented_sessions`, workspace calls that submitted device work,
+  with their forward and inverse FFTs and score rows;
+- `vulkan_segmented_declined_calls`, calls the policy left native, with
+  `vulkan_segmented_decline_reason`: `native-requested`,
+  `host-scoring-forced`, `shader-fp64-unavailable`, `unsupported-shape`,
+  `unqualified-device` or `unqualified-shape`;
+- `vulkan_segmented_native_fallbacks`, calls the device was selected for but
+  could not score, with `vulkan_segmented_fallback_reason`: `workspace`,
+  `unsupported-transform` or `nonfinite-energy`;
+- `vulkan_segmented_qualified_device`, whether automatic selection may admit
+  shapes on this GPU: true only on the OpenCL-identified SM 12.0 GPU.
+
+Each reason carries the `vulkan-segmented-` prefix. Only automatic selection
+may keep the native scorer for a transform VkFFT reports as unsupported.
+Cancellation, device loss and unusable memory throw. A call that starts device
+work publishes every rank or throws. A workspace whose template blocks are all
+silent publishes zero ranks without device work.
+[Radeon measurements](#vulkan-on-vega-integrated-graphics).
+
 The default compiled receiver uses automatic native CPU arithmetic and has no
 Torch runtime dependency. On qualified native exact single-ray AVX2 frequency
 searches not routed to chirp-Z, post-filter spectra use Q15 products and FP32
@@ -436,8 +597,42 @@ scoring. Other shapes can use qualified FP16 FFT storage with FP32 FFT arithmeti
 or FP32 storage. Native FIR keeps strong Helper energy out of this
 reduced-precision search. Helper acquisition, template generation, lag groups,
 the compact tight-clock FP64 class and fine processing stay on the canonical CPU
-path with explicit stage routing. A numerical or resource failure must not
-silently fall back. See the [native Vulkan scope](triad-performance.md#local-radeon-vulkan-processing)
+path with explicit stage routing. Automatic mode also keeps the changing-channel
+segmented timing search on the CPU here. A numerical or resource failure must not
+silently fall back.
+
+The explicit Vega segmented route was checked on 16k and 32k production
+shapes against an FP64 reference of the same FP32 inputs. Without twiddle
+tables, VkFFT evaluated FP32 sin/cos in the shader. Its rank error was then
+3.6–4.4× the native FP32 scorer's in RMS (1.3e-7 and 6.2e-8 of the strongest
+rank, against 2.9e-8 and 1.7e-8) and up to 11× at the maximum. With the
+tables it fell to 3.9e-8 and 3.4e-8 RMS, and to at most 2.6e-7. Ranks then
+agreed with the native scorer within 1.9e-7 of the strongest rank and
+selected the same arrivals. A time-domain oracle agreed within 3e-5.
+
+The tables also preserved the 72 Hz/5× +4 dB-Hz control (input
+`af364b67…`, 54 × 985 blocks × frequencies, 10,553 arrivals). Its device and
+native-scored slots matched in every proposal, evidence value and decision,
+as the CUDA route's downstream evidence did. Without the tables, a drift
+evidence value moved by 2.5e-7 relative. A 72 Hz/1× HF Worst slot (input `7e8ef8fa…`, 8,443 arrivals,
+17 × 275 and 48 × 99) kept its decision, but two of eight proposals changed:
+the same arrival under clock hypotheses 0.0003 ppm apart. Evidence then
+differed by at most 2.2e-8 relative. Each route repeated bit for bit.
+
+On an otherwise idle 5650U, two alternated pairs of the 72 Hz/1× slot took
+25.9–26.3 s on the device route against 23.7–23.8 s native. That is 22.2–22.5 s
+against 20.2–20.3 s in the varying coarse stage, with 29 against 258 s of
+process CPU. Earlier, on the shared host at load averages of 10–20, the 72 Hz/5×
+control's device route took 374 s against 330 s native and used 260 against
+2,860 CPU-s. On its own on the idle host, the stage took 0.22, 0.79 and
+0.76 s per workspace on the Vega against 0.20, 0.62 and 0.36 s on all twelve
+CPU threads, at the 16k/4,096-arrival, 16k/10,553-arrival and 32k shapes.
+The CPU is faster by the most at 32k transforms. The integrated GPU shares the package power and
+DDR4 bandwidth with the CPU.
+Reconsider automatic use on this class if the CPU is busy with other slots,
+or with a deterministic CPU/GPU split of each session's workspaces. Such a
+split could add the two rates. A timing-dependent split would make proposals
+depend on load. See the [native Vulkan scope](triad-performance.md#local-radeon-vulkan-processing)
 and [current qualification](validation.md#local-radeon-vulkan-backend).
 
 The automatic GUI's shared Vulkan admission was also checked on the physical
@@ -504,7 +699,9 @@ products with separate round-to-nearest rounding, then round the real subtractio
 and imaginary addition separately. The fused CUDA mapper and native ATen
 reference implement the same contract; their exact comparison and independent
 arithmetic goldens remain required. The component identity reports
-`mapping_fp32_arithmetic_contract`. FP64 mapping is unchanged.
+`mapping_fp32_arithmetic_contract`. FP64 mapping is unchanged. The OpenCL
+resident FP32 mapper rotates under the same contract, with its coordinate
+and phase reduced in fixed point rather than FP64.
 
 This is an explicit arithmetic revision, not a device-specific tolerance or an
 assumption that installed C10 complex multiplication chooses the same FMA

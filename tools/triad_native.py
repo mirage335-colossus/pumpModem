@@ -19,6 +19,14 @@ COMMANDS = frozenset(("describe", "plan", "slot", "continuation", "message", "ba
                       "regression", "codec"))
 STATUS_CODES = {"complete": 0, "incomplete": 2, "unavailable": 2, "error": 1}
 RECEIPT_LIMIT = 16 * 1024 * 1024
+# Why a dense OpenCL coarse session handed its search to the FFT session, as
+# opencl_coarse_fallback_reasons in src/triad_receiver_bulk.hpp lists them;
+# tests/test_triad_abbreviated.py compares the two lists.
+OPENCL_COARSE_FALLBACK_REASONS = frozenset((
+    "lag-group-route", "mapped-profile", "midpoint-gain", "varying-passband", "fine-cell-limit",
+    "description-storage", "device-templates-off", "few-arrivals", "one-ray-unqualified", "dense-cost",
+    "keyed-chip-limit", "kernel-extent", "workspace-lease", "host-allocation", "device-allocation",
+    "ill-conditioned-template", "unoffered"))
 
 
 class ProbeError(ValueError):
@@ -334,6 +342,37 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                     raise ProbeError("Vulkan receipt does not identify actual OpenCL dense coarse work")
                 if single + half + dense != total or (requested in ("fp32", "direct-fp32") and half):
                     raise ProbeError("Vulkan receipt does not partition actual work by storage precision")
+                # Receipts that name the rescoring accumulation partition the
+                # rescored peaks between FP32 partial sums and the FP64 control.
+                rescore_request = identity.get("requested_opencl_coarse_rescore", "fp64")
+                partial_rescore = False
+                if "opencl_coarse_rescore_fp32_partial_peaks" in bulk or "opencl_coarse_rescore_fp64_peaks" in bulk:
+                    partial = positive_int(bulk.get("opencl_coarse_rescore_fp32_partial_peaks", 0),
+                                           "OpenCL FP32 partial rescored peaks", allow_zero=True)
+                    control = positive_int(bulk.get("opencl_coarse_rescore_fp64_peaks", 0),
+                                           "OpenCL FP64 rescored peaks", allow_zero=True)
+                    if (partial + control != dense_rescored
+                            or (control if rescore_request == "fp32" else partial)):
+                        raise ProbeError("Vulkan receipt does not name the accumulation of its rescored peaks")
+                    partial_rescore = bool(partial) and not control
+                # FP32 partial sums are the explicit nvfp4 route's and the
+                # automatic route's default; other routes keep FP64.
+                if rescore_request not in ("fp32", "fp64") or (
+                        rescore_request == "fp32" and requested != "nvfp4" and backend != "gpu"):
+                    raise ProbeError("Invalid OpenCL coarse rescoring request")
+                # One-ray admission is a choice of automatic GPU selection.
+                one_ray_request = identity.get("requested_opencl_coarse_one_ray", False)
+                if type(one_ray_request) is not bool or (one_ray_request and backend != "gpu"):
+                    raise ProbeError("Invalid OpenCL coarse one-ray request")
+                # Receipts that name fallback reasons count each fallback once.
+                if "opencl_coarse_fallback_counts" in bulk:
+                    reasons = bulk["opencl_coarse_fallback_counts"]
+                    fallbacks = positive_int(bulk.get("opencl_coarse_frequency_fallbacks", 0),
+                                             "OpenCL dense coarse fallbacks", allow_zero=True)
+                    if (not isinstance(reasons, dict) or set(reasons) != OPENCL_COARSE_FALLBACK_REASONS
+                            or any(type(count) is not int or count < 0 for count in reasons.values())
+                            or sum(reasons.values()) != fallbacks):
+                        raise ProbeError("Vulkan receipt does not name the reasons of its dense coarse fallbacks")
                 direct_single = positive_int(bulk.get("vulkan_direct_fp32_score_rows", 0),
                                              "Vulkan FP32 direct rows", allow_zero=True)
                 direct_stored = positive_int(bulk.get("vulkan_direct_fp16_storage_score_rows", 0),
@@ -349,7 +388,9 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                         or (requested in ("fp32", "fp16-storage") and direct_total)
                         or (requested == "direct-fp16-storage" and direct_packed)):
                     raise ProbeError("Vulkan receipt does not identify actual direct-dot arithmetic")
-                actual = ("nvfp4_dense_coarse_fp32_rescored_peaks_native_fir_and_fine" if dense and dense == total else
+                actual = ("nvfp4_dense_coarse_fp32_partial_rescored_peaks_native_fir_and_fine"
+                          if dense and dense == total and partial_rescore else
+                          "nvfp4_dense_coarse_fp32_rescored_peaks_native_fir_and_fine" if dense and dense == total else
                           "mixed_nvfp4_dense_and_fft_coarse_native_fir_and_fine" if dense else
                           "fp32_direct_dot_fp64_scoring" if direct_single == total else
                           "fp16_storage_fp32_direct_dot_fp64_scoring" if direct_stored == total else
@@ -403,6 +444,23 @@ def validate_receipt(receipt, *, command, backend, returncode, expected_require_
                 reduced_windows = positive_int(bulk.get("opencl_resident_reduced_windows", 0),
                                                "OpenCL resident reduced windows", allow_zero=True)
                 fine_tiles = identity.get("requested_opencl_fine_tiles", "device")
+                # Receipts that name the tile and mapping arithmetic partition
+                # mapped columns and rendered tiles between the FP32 kernels
+                # and the FP64 control.
+                fine_map = identity.get("requested_opencl_fine_map", "fp64")
+                if fine_map not in ("fp32", "fp64") or (fine_map == "fp32" and backend != "gpu" and fine_request not in (
+                        "resident-nvfp4", "resident-fft")):
+                    raise ProbeError("Invalid OpenCL resident fine arithmetic request")
+                arithmetic_keys = ("opencl_resident_fp32_mapped_columns", "opencl_resident_fp64_mapped_columns",
+                                   "opencl_resident_fp32_rendered_tiles", "opencl_resident_fp64_rendered_tiles")
+                if any(key in bulk for key in arithmetic_keys):
+                    mapped32, mapped64, rendered32, rendered64 = (
+                        positive_int(bulk.get(key, 0), key.replace("_", " "), allow_zero=True)
+                        for key in arithmetic_keys)
+                    mapped_total = positive_int(bulk.get("mapped_columns", 0), "mapped columns", allow_zero=True)
+                    if (mapped32 + mapped64 != mapped_total or rendered32 + rendered64 != rendered_tiles
+                            or (mapped64 + rendered64 if fine_map == "fp32" else mapped32 + rendered32)):
+                        raise ProbeError("Vulkan receipt does not name its resident fine arithmetic")
                 fine_window = identity.get("requested_opencl_fine_window", 0)
                 fine_stream = identity.get("requested_opencl_fine_stream", 4)
                 # Only a stated "on" times the resident fine session.

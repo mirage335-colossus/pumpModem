@@ -62,9 +62,10 @@ geometry at every worker allocation. Fine processing was most of a slot
 after the dense search. [Device-rendered tiles and resident windows](#device-rendered-fine-tiles-and-resident-windows)
 removed its host tile rendering and most round trips, and the
 [exact speedups](validation.md#exact-receiver-and-simulator-speedups--20-november-2026)
-shortened template synthesis: the automatic slot now takes 0.15–0.20 s at 4 to
-24 workers, about 0.06 s in the coarse search and the rest in fine
-processing. A simulated slot still takes about four times as long. Start further work with the [remaining fine costs](#remaining-fine-costs)
+shortened template synthesis: the automatic slot took 0.15–0.20 s at 4 to
+24 workers. The [qualified offload routes](validation.md#blackwell-qualification-of-the-offload-routes--20-november-2026)
+then cut it on the same pod from 0.11–0.13 s to 0.06–0.07 s at 24 workers,
+about 0.02 s in the coarse search and 0.04 s in fine processing. A simulated slot still takes about four times as long. Start further work with the [remaining fine costs](#remaining-fine-costs)
 and the [ranked costs after the dense search](#remaining-costs-after-the-dense-search).
 The sections below record the earlier fine-projection work.
 [Precision policy](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling)
@@ -765,12 +766,25 @@ arrivals of the same packed stream. Block scales cover eight samples, so
 each frequency keeps eight packed variants and an arrival reads the one that
 matches it modulo eight. A template column is packed twice, as `[Re, Im]`
 and `[-Im, Re]`. The eight result columns are then the real and imaginary
-correlations of two workspaces and two rays. One block scores one frequency,
-one workspace pair and 512 arrivals. The FP32 quadratic score of every
-arrival is formed in the epilogue from each ray's partner lane. The exact
+correlations of four template columns: a bank tile of two workspaces of two
+rays, or of four workspaces of one ray. One block scores one frequency, one
+bank tile and 512 arrivals. The FP32 quadratic score of every arrival is
+formed in the epilogue, from each ray's partner lane for two rays, and for
+one ray as the scalar inverse Gram times the correlation's energy, with no
+partner lane. The exact
 arrival frontier of those scores is selected on the device, with the native
 separation rule. Each retained arrival is then rescored in FP32 with FP64
-accumulation from the unquantized resident bank. Rescoring reads one FP32
+accumulation from the unquantized resident bank. `--opencl-coarse-rescore fp32`
+instead adds FP32 products in FP32 partial sums of 64 rows, each added in
+FP64 as the FIR adds its taps, with an FP64 tree over the block; its
+precision labels and reasons say `fp32_partial`, and receipts count the
+peaks of each accumulation. Both rescore the same FP4 frontier by
+construction. In emulation the partial sums' scores were within 1.8e-7 of
+each row's best score of the FP64 accumulation on 14 synthesis geometries.
+On the device the partial sums cut rescoring from 2.64 to 0.89 ms per
+matched slot with equal decisions and bits, so they are the default
+([qualification](validation.md#blackwell-qualification-of-the-offload-routes--20-november-2026)); `--opencl-coarse-rescore fp64` keeps the control.
+Rescoring reads one FP32
 rotation of the observation per frequency of the tile, which the device
 writes once with the statements the rescoring loop formerly evaluated for
 every arrival and row. Only the 40-byte frontier of each workspace and
@@ -786,13 +800,46 @@ of each column's peak. Rendering the raster before the warp is necessary:
 evaluating the waveform directly at warped positions differed by 8.5e-4,
 because the native route interpolates a raster whose untapered pulse has
 small steps at its support edges. Synthesis covers the exact frequency-tile
-route with two rays. Lag-group, mapped, varying-passband and midpoint-gain
-sessions, fewer than 16 arrivals and leases that do not fit keep the Vulkan
-FFT session through the adapter's fallback.
+route with one or two rays; a one-ray bank renders, warps, filters and forms
+scalar Grams with the same kernels, and in emulation its columns are bit for
+bit the first-ray columns of the two-ray bank. Automatic selection admits
+one-ray sessions with `opencl_coarse_one_ray`, on since its device
+qualification; see [one-ray admission](#one-ray-admission-and-dense-cost).
+Lag-group, mapped, varying-passband and midpoint-gain sessions, fewer than
+16 arrivals and leases that do not fit keep the Vulkan FFT session through
+the adapter's fallback. The receiver states which of its conditions withheld
+the synthesis offer, the adapter adds its own reasons, and receipts count
+each fallback once in `opencl_coarse_fallback_counts`:
+
+| Reason | Withheld or declined by |
+| --- | --- |
+| `lag-group-route` | The lag-group route, or a route still open. Not reached through the Vulkan backend, which sends lag-group sessions to native search before a session exists and never opens a deferred route; kept for other callers. |
+| `mapped-profile` | A mapped source profile (source step above one). |
+| `midpoint-gain` | Midpoint gain timing, which implies a varying passband. |
+| `varying-passband` | The varying-passband differential search. |
+| `fine-cell-limit` | More than 100,000 fine cells. |
+| `description-storage` | Keyed coefficients that exceed the native bank storage they borrow. |
+| `device-templates-off` | `opencl_device_templates` off. |
+| `few-arrivals` | Fewer than 16 arrivals on an automatic route. |
+| `one-ray-unqualified` | A one-ray session on an automatic route without `opencl_coarse_one_ray`. |
+| `dense-cost` | A one-ray automatic session above the measured dense work per workspace and frequency. |
+| `keyed-chip-limit` | More than 64 MiB of keyed coefficients. |
+| `kernel-extent` | A shape outside the kernels' 32-bit extents, or not one or two rays. |
+| `workspace-lease` | A session lease above the device workspace limit. |
+| `host-allocation` | A host allocation failure while the session considered synthesis. |
+| `device-allocation` | A device that could not allocate the leased buffers. |
+| `ill-conditioned-template` | A two-ray Gram below the 1/16 guard. |
+| `unoffered` | Native columns with no stated reason. The receiver always states one, so only other callers reach it. |
+
+Compact tight-clock and lag-group sessions of the automatic Vulkan backend,
+and sessions whose Vulkan FFT plan does not fit, never reach the dense
+session; `native_coarse_precision_sessions`, `native_coarse_lag_sessions` and
+`native_coarse_workspace_sessions` count them.
 
 **Conditioning.** FP4 scores choose the arrivals that are rescored, and the
 quadratic form amplifies their error as a workspace's two rays approach
-collinearity. A session therefore leaves the dense route when any workspace's
+collinearity. A one-ray Gram is a scalar with ratio one, so the guard never
+declines it. A session therefore leaves the dense route when any workspace's
 smaller Gram eigenvalue is below one sixteenth of the larger, the canonical
 reduced-precision guard. The device returns the Grams with the synthesized
 bank, so the check costs one synthesis before the session prepares native
@@ -805,12 +852,80 @@ fixture's ratio is 0.999996. The guard and these trials were not run on a
 device, and a measured FP4 bound could be lower than 1/16.
 
 **Transfers.** With 24 workers a slot uploads 473,952 bytes and reads back
-49,920 in 13 blocking transfers, against 82,178,320 uploaded before. With
+49,920 in 13 blocking transfers, against 82,178,320 uploaded before. The
+warp sets add one transfer of 672 bytes, 42 sets of four column indices. With
 four workers the plan scores the 15 frequencies as four tiles of at most
 four: 474,048 bytes and 22 transfers. Scoring host-prepared
 columns with the same FP4 products left the coarse stage at 1.6–1.8 s with 24
 workers and 4.3–4.6 s with four: bank preparation on the host was the cost,
 not the FFT.
+
+### One-ray admission and dense cost
+
+The one-ray epilogue and session pass the kernel emulation and the device:
+columns within 3.9e-7 to 4.2e-7 of their peak against the native exact
+columns on the RTX PRO 6000, FP4 scores correlating at 0.9957 with FP64,
+every strong planted arrival kept, and complete one-ray sessions reaching
+the native search's winner. Against the FFT session it replaces, a 36 Hz
+Spread None fixture (423 arrivals, 641 rows, 3 frequencies) kept every
+decision and bit in seven seed pairs while its coarse stage fell from
+0.19–0.42 s to 0.012–0.013 s at 24 workers and from 0.34 s to 0.013 s at
+four. The 3,377-arrival GPSDO/IC-7100 3.6 Hz plan took 27 s on the dense
+route against 94 s on the FFT route, and 19 s with FP32 partial rescoring
+([qualification](validation.md#blackwell-qualification-of-the-offload-routes--20-november-2026)).
+Automatic mode therefore scores one-ray sessions (`opencl_coarse_one_ray`,
+on by default; `--opencl-coarse-one-ray off` with `--backend gpu` keeps the
+FFT route and counts `one-ray-unqualified`). An explicit `nvfp4` request
+always scores them.
+
+FP4 selection keeps the two best arrivals of each workspace and frequency,
+so its risk is a weak true arrival near the noise maximum. The component
+test's predeclared sweep plants one arrival per workspace in disjoint
+stretches of unit noise, 150 rows and 512 arrivals, at noiseless scores of
+24, 16, 12, 10 and 8, twenty trials per level and ray count. Its rule: FP4
+keeps every arrival that the exact FP64 frontier keeps at 24 and 16, and at
+least 90% over the sweep. In emulation FP4 kept 91 of the exact frontier's
+93 for one ray, losing one at 10 and one at 8, and 83 of 83 for two rays,
+and for each ray count kept one arrival that the exact frontier did not.
+A 512-arrival row's noise maximum is about 6.8 for one ray and 8.9 for two,
+and the matched search's about 16 and 18.5, so the sweep reaches below
+arrivals that could win a complete search. It is component evidence, not a
+receiver sensitivity or device result.
+
+Dense products grow with arrivals × template rows for each workspace and
+frequency, while the FFT route grows with (rows + arrivals) log(rows +
+arrivals) plus host bank preparation; both scale with workspaces and
+frequencies. With one-ray admission on, an automatic session also declines
+as `dense-cost` when 4 × arrivals × rows exceeds the dense products per
+workspace and frequency of the device-measured matched search, 8 × 3,377 ×
+44,971 = 1.21e9, where the dense route took a twentieth or less of the FFT
+session's coarse seconds. The bound is not a cost model: replacing it with a comparison
+against an FFT estimate from `correlation_fft_rows` needs one profiled slot of
+each route on a one-ray plan near it. The two-ray admission predates this
+bound and keeps its qualified envelope, which includes unmeasured larger
+plans such as HF Worst at 3.6 Hz, 7,036 arrivals and 93,614 rows. The dense
+session also inherits the frequency tile width of the Vulkan FFT plan, so a
+wide prior with a narrow tile is scored in many blocking rounds; a dense
+tile width chosen independently would change the receiver's host quote and
+needs the same measurement.
+
+One-ray plans of the GUI default spread show the range (CPU probe `plan`, HF
+case, 2 mW, broad timing, 78 workspaces):
+
+| Clocks, rate, RF | Projected rate | Arrivals | Rows | Frequencies | Automatic route with one-ray admission |
+| --- | ---: | ---: | ---: | ---: | --- |
+| GPSDO, 3.6 Hz, 30 MHz (the matched fixture with Spread None) | 3 Hz | 43 | 631 | 15 | Native compact tight-clock FP64; never reaches the dense session |
+| GPSDO, 36 Hz, 30 MHz | 30 Hz | 423 | 641 | 3 | Dense |
+| GPSDO, 72 Hz, 30 MHz | 60 Hz | 845 | 822 | 2 | Dense |
+| Crystal base, GPSDO shift, 3.6 Hz, 30 MHz | 5 Hz | 71 | 1,005 | 789 | Dense |
+| GPSDO base, IC-7100 shift, 3.6 Hz, 30 MHz | 240 Hz | 3,377 | 44,966 | 134,690 | Dense, about 6.4e15 useful multiply-adds per slot |
+| Crystal, 3.6 Hz, 1 MHz | 1 kHz | 14,071 | 187,194 | 449,761 | FFT (`dense-cost`); dense would issue about 3.7e17 |
+
+The matched fixture with Spread None stays on the native route, so the gain
+estimated for one-ray sessions does not occur there. The small plans have
+little host preparation to remove, and the IC-7100 plan's dense time,
+roughly ten seconds per slot at the measured product rate, and its FFT time
+are both unmeasured.
 
 ### FP4 product throughput
 
@@ -880,9 +995,17 @@ In measured order for the matched fixtures:
    [Mechanism](triad-performance.md#code-placement-and-x87-rounding-mode-switches).
    On the Ryzen 5 PRO 5650U the severe slot takes 0.56 s with twelve
    workers, against 1.06 s before and 5.0 s for `c02b726e`. The simulator
-   still takes about four times the automatic receiver slot. Which of its
-   stages bounds it now was not measured. The proposals that change sample
-   values are measured beside the channel contracts.
+   still takes about four times the automatic receiver slot. A section-timed
+   copy found the receiver oscillator chain bounding the stable and message
+   captures and the pass followed by a rows job bounding the severe one; the
+   staged oscillator and noise chains and the shared row pool remove those
+   dependencies without changing a sample. On the quiet 5650U they cut the
+   simulator phase about 10% on the severe capture at twelve workers and 7%
+   on the quiet capture, with no established gain on the stable capture or at
+   four workers; the pod's EPYC is not measured. For repeated receiver runs of one probe
+   binary, `--capture-cache` replaces the simulator by a verified read of the
+   same capture. The proposals that change sample values are measured beside
+   the channel contracts.
    [Channel contracts, changes and proposals](channel-models.md#stream-evaluation-workers-and-capture-identity) ·
    [earlier measurements](validation.md#simulator-throughput-and-capture-identity--20-november-2026).
 3. **The coarse stage: 0.06 s, of which device intervals are 22 ms.**
@@ -932,6 +1055,45 @@ In measured order for the matched fixtures:
    those flags needs the device comparison again. Near D = 47, compare the
    tiled and in-place FIRs before relying on the tiled route's narrow
    windows; a smaller stage with more resident blocks was not tried.
+
+   Both kernels then stopped repeating lane-independent FP64 work. A raster
+   group holds four lanes, two epochs, and one thread renders a sample of
+   all four: its time, envelope, chip support, pulse weights and carrier
+   rotation once, then each lane's FP32 chip sums in their own order. The
+   columns of a group that share a (clock, ray) map form sets of up to four.
+   A fused FIR block filters one tile of every column of a set: each thread
+   evaluates the FP64 position and echo terms of its staged rows once,
+   keeps them in registers and stages each column's span from them, and the
+   stored-raw route warps a set's columns from one evaluation the same way.
+   In emulation the banks, Grams, FP4 scores and rescored frontiers of 14
+   geometries were byte-identical to `b3c7c48f`: the fused, tiled and in-place
+   routes at D = 4, 25, 26, 27, 32, 47, 48 and 50, continuous, resampled,
+   gated and burst sources, three epochs, and shuffled columns with repeated
+   lanes and sets wider than four. The device test also requires a column
+   that shares its map with other lanes to filter to the same bits as when
+   it is alone with that map, fused and stored. The same FFMA assumption
+   applies. At the matched geometry the FP64 work of lane rendering and of
+   the warp falls to 7 of 26 lane renders and 42 of 156 column warps.
+   On the RTX PRO 6000 lane rendering fell from 6.9 to 1.9 ms and the warp
+   and FIR from 8.6 to 7.2 ms, with identical banks, evidence and decisions
+   against `b3c7c48f`; dispatches fell from 34 to 22 at 24 workers
+   ([qualification](validation.md#blackwell-qualification-of-the-offload-routes--20-november-2026)). The wider raster adds
+   18 MB to the session.
+
+   The stash holds 47 rows of three 32-bit terms per thread, about 141
+   registers beside the FIR's, and stays in registers only if the compiler
+   unrolls the staging loop and inlines it and the FIR; both are marked
+   `__forceinline__` with constant stash indices. A Clang 19 NVPTX build
+   kept it in registers that way, but put it in a local frame of about 600
+   bytes whenever the staging was not inlined, as a lambda or an unmarked
+   functor. Lane rendering's 17 pulse weights likewise left local memory
+   only once their loop had a constant trip count. NVCC 12.8's `ptxas` for
+   `sm_120a` gives `coarse_warp_fir` 235 registers and no spills, and
+   `coarse_fp4_scores` 106 registers and no spills. A global warp
+   table instead of the stash was tried in emulation and was also
+   byte-identical, but at the matched 1,122,562 raw rows it needs 18 MB per
+   (clock, ray) map, so a group's six maps need six table and FIR dispatch
+   pairs within a bounded table; reconsider it only if the stash spills.
 4. **Separate processes sharing the device.** Twelve simultaneous trials
    averaged 3.0 s per receiver slot against 0.45–0.81 s alone. Owners inside
    one process overlap on the device without that cost: the five-slot
@@ -949,14 +1111,104 @@ Sessions the dense search declines, the automatic plan's use of the FFT
 route's memory quote, RTX 5090, wider priors and sustained backlog remain
 unmeasured.
 
+### Where FP4 fits, and the larger levers
+
+A survey of receiver and simulator work on 20 November 2026 tested whether
+most numerical work could use the FP4 Tensor Cores
+([record](validation.md#gpu-offload-survey-and-gated-device-routes--20-november-2026)).
+It cannot.
+
+**Where block-scaled E2M1 fits.** Only large post-isolation contractions
+whose output just chooses candidates that are then rescored or tracked
+exactly. Both such contractions already run in NVFP4:
+- the coarse frontier products;
+- the fine 47-mode projection.
+
+Together they take 4.6 ms of the roughly 60 ms of device time in the
+matched slot.
+
+**What does not fit.** A low-precision matrix form would change correctness
+or receipts, or the work has no matrix to contract:
+- the simulator: draws, phases and samples in recurrences, with no
+  contraction;
+- raw-composite FIRs and projections before isolation;
+- template rendering, warp and mapping (elementwise, or a GEMV with N = 1);
+- rescoring;
+- Gaussian states and likelihoods;
+- the codec and decisions.
+
+**Device lever: FP32 per-row arithmetic.** About 44 ms per matched slot is
+FP64 SIMT, which runs at 1/64 rate on Blackwell and on the Ada targets:
+- fine mapping, 24.5 ms;
+- lane render, 7.0 ms;
+- fine tile render, 6.1 ms;
+- the warp's FP64 share, about 3.5 ms;
+- rescoring, 2.7 ms.
+
+The fix is FP32 per-row arithmetic with FP64 or integer coordinates, as the
+qualified CUDA `fp32-rn4-v1` mapper does. The FP32 mapper, renderer and
+partial rescoring now do this by default beside their FP64 controls: on the
+RTX PRO 6000 the mapping fell from 24.3 to 5.1 ms, tile rendering from 6.0
+to 2.5 ms and rescoring from 2.64 to 0.89 ms per matched slot
+([qualification](validation.md#blackwell-qualification-of-the-offload-routes--20-november-2026)). The FP64 that remains is
+mostly the coarse warp and lane render's time base and the fine renderer's
+support work. This
+also matters for the RTX 4090, 4090 Laptop and 4060 Ti, which have no FP4
+MMA.
+
+**Largest CPU costs.** They sit in challenging geometries, not the matched
+one, and all are FFT-structured native CPU work on every route:
+
+| Work | CPU per slot |
+| --- | --- |
+| Segmented timing, on the Vulkan/OpenCL route | 48–853 CPU-s |
+| Drift evidence | 8–110 s |
+| Varying fine tracking | 3.5–102 s |
+| Signed-lag gain ranks | 5.8–104 s |
+
+In order:
+1. Port these to FP32 device FFTs. The Vulkan segmented search is the first
+   such port; qualified on the RTX PRO 6000, it cut the 72 Hz/5× control's
+   segmented stage from 46 s to 6 s.
+2. Only after that, consider dense FP4 forms, and only for the parts that
+   just propose candidates. Their dense work is about 0.4·n/log2(n) times
+   the FFT's, about 140× at n = 4,096, which cancels FP4's advantage except
+   at small n.
+
+**Route selection.** Automatic GPU selection tries CUDA first where ATen is
+compiled. Such a build therefore never reaches the dense FP4 coarse search.
+The Vulkan/OpenCL route lacks CUDA's qualified segmented scoring. So
+neither automatic route is the fastest on every geometry. Unify their
+kernels or select per stage once both are qualified.
+
+**Remaining work, in order.** The Vulkan segmented search, the FP32 kernels
+and the one-ray dense route are qualified and on by default. Next:
+1. Device FP32 FFT ports of drift, varying fine and signed-lag ranks. They
+   are now the largest native CPU costs on the challenging geometries; the
+   72 Hz/5× control still spends 7.4–8.1 s in fine work and 5–7 s of coarse
+   stage outside the device segmented search.
+2. Fusing the fine map, peak and pack.
+3. Device synthesis for whitened two-ray, varying-passband and
+   FHSS-exact sessions.
+4. Gaussian state updates on the device, once the device's FP64 load falls.
+5. A new simulator realization with counter-based draws and scans. It would
+   change every capture hash, so schedule it only with another change that
+   invalidates captures. Until then, `--capture-cache` keeps the simulator
+   out of repeated receiver comparisons.
+
 ### Reproduce and extend the dense search
 
 Use the [matched procedure](#reproduce-the-matched-blackwell-runs) with the
 same fixture, launcher and stock worker environment.
 
 - `--backend gpu` runs automatic selection. Its receipt reports
-  `opencl_coarse_score_rows`, sessions, frequency fallbacks, rescored peaks
-  and transfer bytes, and a precision label naming the dense search.
+  `opencl_coarse_score_rows`, sessions, frequency fallbacks with their
+  reasons in `opencl_coarse_fallback_counts`, rescored peaks and transfer
+  bytes, and a precision label naming the dense search. `--spread-preset none`
+  gives one-ray sessions, which the dense search scores unless
+  `--opencl-coarse-one-ray off` keeps them on the FFT session as
+  `one-ray-unqualified`; a GPSDO clock at 3.6 Hz
+  projects to 3 Hz and stays on the compact tight-clock FP64 route instead.
 - `--backend vulkan --vulkan-precision nvfp4` requires the dense search,
   reports device event intervals in `opencl_coarse_*_seconds` and fails with
   a named reason when a session cannot be admitted. The synthesis and
@@ -974,9 +1226,18 @@ same fixture, launcher and stock worker environment.
   236,576,512 (226 MiB) at four. `7ed007dc` quotes the same. Every dense
   session now also leases the rotated observation, tile frequencies ×
   (kernel rows + arrivals − 1) × 8 bytes, and warping in the FIR drops this
-  geometry's 14-column raw batch of 125,726,976 bytes. The session quotes
-  139,018,496 bytes (133 MiB) and 112,396,800 (107 MiB), and the device
-  receipts report those leases.
+  geometry's 14-column raw batch of 125,726,976 bytes. `b3c7c48f` quotes
+  139,018,496 bytes (133 MiB) and 112,396,800 (107 MiB). The four-lane
+  raster and the warp sets raise that to 156,979,456 (150 MiB) and
+  130,357,760 (124 MiB), and the device receipts report the leases.
+- `--opencl-coarse-rescore fp32|fp64` with the explicit `nvfp4` search
+  states the rescoring accumulation, FP64 by default until the FP32 partial
+  sums are qualified, and the probe requires
+  `opencl_coarse_rescore_fp32_partial_peaks` or
+  `opencl_coarse_rescore_fp64_peaks` to hold every rescored peak. The
+  precision label is `nvfp4_dense_coarse_fp32_partial_rescored_peaks_native_fir_and_fine`
+  for FP32 partial sums and keeps `nvfp4_dense_coarse_fp32_rescored_peaks_native_fir_and_fine`
+  for FP64 accumulation.
 - The link of the matched fixture is far above threshold. For paired
   decisions near it, raise `--noise-dbm-hz` towards −82 on the stable
   channel. `--signal-gain-db` is accepted on the CPU backend only, and the
@@ -985,7 +1246,7 @@ same fixture, launcher and stock worker environment.
   changed files to the deployed tree, rebuild the two targets and record
   source and binary hashes with the results.
 - Check kernel changes first with `triad_opencl_nvfp4_emulated`,
-  `triad_opencl_coarse_session_emulated`,
+  `triad_opencl_coarse_session_emulated` and its one-ray variant,
   `triad_opencl_fine_session_emulated` and its deferred-execution variant.
   They caught every layout error before a device run, and the deferred one
   catches a host buffer changed under a pending write. They cannot reach the Vulkan backend's device host:
@@ -1015,17 +1276,24 @@ column's public tile address in place of host samples, and `MappedBasis`
 neither renders, pins nor caches that tile. The session uploads the pulse
 table, the public waveform parameters and each addressed lane's keyed
 coefficients once. A tile that its cache lacks costs one 16-byte request.
-The kernel renders in FP64, in the operation order of the native renderer,
-and the unchanged FP64 mapper interpolates the result. Rendered tiles match
-native tiles within 5.5e-14 to 2.5e-12 of the tile peak for continuous,
-resampled, hop-gated and burst waveforms. Columns that take the exact native
+The FP64 kernel renders in the operation order of the native renderer, and
+the FP64 mapper interpolates the result. Those tiles match native tiles
+within 5.5e-14 to 2.5e-12 of the tile peak for continuous, resampled,
+hop-gated and burst waveforms. `--opencl-fine-map fp32` instead runs FP32
+kernels, described in the
+[precision guide](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling),
+whose tiles are held to 4e-6 of the tile peak; they stay explicit until an
+NVCC build and the device comparison qualify them. Columns that take the exact native
 fallback are still uploaded as samples, and every other backend keeps native
 tiles. A source with more than 32,768 cells keeps native tiles.
 
 **Windows.** Ordinary fine scoring runs the fixed-affine lane, whose maps do
 not depend on earlier statistics. The session therefore submits a window of
-dispatches in one call: 16 blocks by default, 2 to 64 by option. A lane
-projects the next window's observations meanwhile. Each state then advances
+dispatches in one call: 16 blocks by default, 2 to 64 by option. Lanes
+project the next window's observations meanwhile, one leaf per dispatch on
+the OpenCL route, whose lanes own transform scratch. The owner places the
+window's blocks first and adds their mode and quiet-energy receipts in
+public order once all are projected. Each state then advances
 through the window's dispatches in public order as one leaf, while the owner
 already stages and submits the next window, and the owner closes the
 dispatches in order afterwards. Statistics, state updates and receipts equal
@@ -1179,8 +1447,9 @@ With windows and device tiles the owner computes tile addresses in
 0.11–0.19 s of processor time on the lanes beside that work. With 12 or 24
 software workers the owner then waits 0.002–0.004 s for them. With four,
 three lanes carry them and the owner waits about 0.02 s, which sets the
-slot time there. The observation projection takes 0.022–0.031 s on one
-lane. Windows of 32 blocks measured within 0.003 s of windows of 16.
+slot time there. The observation projection took 0.022–0.031 s on one
+lane before each dispatch became its own leaf. Windows of 32 blocks measured
+within 0.003 s of windows of 16.
 Before the state updates ran beside the next window, the same slots took
 0.08–0.09 s.
 
@@ -1206,10 +1475,17 @@ EPYC 9554 pod. Shortening the owner's addresses from 22.8 to 14.8 ms and
 its staging from 14.8 to 9.3 ms did not shorten the unprofiled stage, so the
 device and the window wait now bound it:
 
-1. **Device mapping: 24.7 ms.** The kernel maps 175 million samples in FP64
-   with one sine and cosine each. A phase recurrence per lane, or FP32 where
-   the FP4 quantization already dominates the error, needs the tile and
-   statistics checks of the device test.
+1. **Device mapping: 24.7 ms** with the FP64 mapper, which maps 175 million
+   samples with one FP64 sine and cosine each, about 130 FP64 operations per
+   paired row. The FP32 mapper (`--opencl-fine-map fp32`) has no FP64
+   arithmetic per row: fixed-point coordinate and phase from descriptors
+   decoded once per block, about 80 FP32 and 60 integer operations and an
+   FP32 `sincospif`. It still issues 16 FP64-to-FP32 narrowings of the tile
+   samples of a paired row and three 64-bit integer conversions, which
+   consumer-class SMs may run at the FP64 rate; that predicts about 3 to 4
+   ms, and about 1.5 ms, the 2.6 GB of float2 lanes written per slot, if
+   conversions run faster. Confirm the pipe split with Nsight `pipe_fp64`
+   or the SASS counts of `F2F.F32.F64` and `I2F.U64` before quoting a time.
 2. **The owner waits for each window: 14–15 ms**, down from 34 ms staged
    whole. What remains is each window's last four blocks and its packing,
    products and statistics. Overlapping across windows would need a second
@@ -1223,7 +1499,12 @@ device and the window wait now bound it:
 4. **Owner staging and submission: 9.3 and 9.8 ms.** Descriptors are 6.9 MB
    of the 7.6 MB uploaded, each with its affine map and phase in 40 bytes,
    and every four blocks add a flush.
-5. **Device rendering, packing, products and statistics: 13 ms.**
+5. **Device rendering, packing, products and statistics: 13 ms.** Rendering,
+   6.1 ms of it, ran in 188 small dispatches. The FP32 renderer keeps about
+   75 of the FP64 renderer's 300 to 400 FP64 operations per sample, all
+   outside the chip loop, which reads FP32 chips and pulse entries without
+   conversions, so the dispatches' fixed costs and low occupancy may now
+   bound it.
 6. **The native terminal block.** One enlarged block per slot keeps the
    native route, with two tile renders. The device kernels have one fixed
    block shape.
@@ -1231,6 +1512,18 @@ device and the window wait now bound it:
 Windows above 16 blocks did not help this slot, so the default stays at 16
 and a 74 MB lease per fine owner. Streaming every four blocks stays the
 default.
+
+Three exact host changes followed this split. The common null of each
+one-tap and persistent two-tap Gaussian update is skipped when its zero
+statistics, zero mean, bounded prior and decaying transitions prove that it
+keeps zero evidence; the additive slow pair still runs it. A quiet slot's
+varying re-projection of about 800 FP64 blocks runs on the slot's lanes and
+sums its mode terms in the original order. Memoizing the quiet threshold
+was not worth process-wide state: its root-find takes 0.08–0.10 ms per call
+on the 5650U. Receipts keep logical and executed work apart:
+`gaussian_updates` still counts all three hypotheses, and
+`gaussian_null_skips` counts the skipped nulls, so forecasts charge the
+difference. A slot's `varying_quiet_seconds` times the quiet re-projection.
 
 ### Measure the fine stage on the device
 
@@ -1248,10 +1541,22 @@ filtered "$candidate/build/lab/test_triad_opencl_nvfp4"
 filtered "$candidate/build/lab/test_triad_opencl_fine_session"
 ```
 
-The first must report rendered tiles within 1e-10 of native tiles and
-statistics within 2e-3 of the uploaded-tile session for FP4 and 1e-6 for the
-FFT. The second runs a complete fine session through every route. Then
-compare routes inside the candidate binary:
+The first runs both arithmetics. The FP64 kernels must report rendered
+tiles within 1e-10 of native tiles and statistics within 2e-3 of the
+uploaded-tile session for FP4 and 1e-6 for the FFT. The FP32 kernels must
+report tiles within 4e-6, FFT statistics within 1e-5 of the FP64 kernels
+and, in the pressure check, of the uploaded-tile session, and FP4
+statistics within 2e-3.
+Its coarse check holds FP32 partial rescoring within 1e-5 of the row's best
+score of the FP64 accumulation. Its synthesis checks include columns that
+share maps across lanes, which must filter to the same bits as alone. The
+second runs a complete fine session through every route, with FP32 and FP64
+evidence within 2e-3 of each other. Record each device test's duration
+against its 30 s limit. The coarse session test, which meets the native
+search with each rescoring and runs the one-ray sessions, has no device
+build: it runs only in the kernel emulation
+(`triad_opencl_coarse_session_emulated` and its `_one_ray` variant, 180 s),
+so its result is not device coverage. Then compare routes inside the candidate binary:
 
 ```bash
 route() {
@@ -1270,7 +1575,13 @@ route control-profiled slot native 2 on
 ```
 
 `--opencl-fine-tiles native --opencl-fine-window 2` is the control: uploaded
-tiles in single-dispatch batches. `--opencl-fine-stream 0` with device tiles
+tiles in single-dispatch batches. `--opencl-fine-map fp32` runs the FP32
+tile renderer and mapper, and the probe then requires
+`opencl_resident_fp32_mapped_columns` and
+`opencl_resident_fp32_rendered_tiles` to hold every mapped column and
+rendered tile; the default `fp64` requires their FP64 counterparts. Expect
+evidence equal within one arithmetic and FP4-rounding differences across
+the two. `--opencl-fine-stream 0` with device tiles
 stages each window before the device starts, the control for streamed
 mappings. Windows are even numbers of blocks. A
 stated tile source or window that did not execute fails the run, for
@@ -1281,7 +1592,11 @@ resident fine session is timed only with `--opencl-profile on`, which the
 identity records as `requested_opencl_profile`.
 
 The probe's `slot` command adds the fine session's own receipt in its
-`fine_work` phase, with per-state work timers. Its coarse stage scores
+`fine_work` phase, with per-state work timers. With windows,
+`times.observation_seconds` is only the owner's block placement and mode
+receipts. `times.worker_observation_seconds` sums the lanes' projection
+leaves, which overlap one another, and the owner's wait for them is in
+`dispatch_seconds`. The `slot` command's coarse stage scores
 host-prepared columns: about 41 s at 24 workers on the pod, and past a
 45 s deadline at four, so it states no template source. A profiled run
 adds `opencl_resident_host_*_seconds` for the mapping sources, staging,
@@ -1320,10 +1635,10 @@ leave that internal use unmeasured.
 | --- | --- |
 | Filtered DATA lag/frequency matrix correlation | [TensorCoarse](../src/triad_tensor_backend.cpp) groups the observations and templates. The [CUDA matrix kernel](../src/triad_tensor_matrix.cu) packs them and checks the cuBLASLt algorithm's numerical implementation flags. FP16 products accumulate into FP32 (HMMA), or INT8 into INT32 (IMMA), before FP64 reconstruction. Inspect `cuda_matrix_lt_hmma_calls`, `cuda_matrix_lt_imma_calls`, `cuda_matrix_unwitnessed_calls` and `matrix_fft_fallback_counts`. Only the first two count calls through a matching Tensor Core algorithm. |
 | Affine frequency search | The guarded CUDA route uses [half cuFFT](../src/triad_tensor_fft.cu) for eligible transforms or the applicable ordinary FFT route. Read `cuda_half_fft_inverse_ffts` and `half_fft_fallback_counts`. A half-FFT count measures half transforms. |
-| Broad changing-channel timing search | `TensorCoarse::plan_segmented` chooses shapes for FP32 cuFFT. The [CUDA scoring kernels](../src/triad_tensor_peaks.cu) track candidate motion and rank lags on device. Check `cuda_segmented_sessions`, `cuda_segmented_inverse_ffts`, `cuda_segmented_score_rows` and `cuda_segmented_native_fallbacks`. |
+| Broad changing-channel timing search | `TensorCoarse::plan_segmented` chooses shapes for FP32 cuFFT. The [CUDA scoring kernels](../src/triad_tensor_peaks.cu) track candidate motion and rank lags on device. Check `cuda_segmented_sessions`, `cuda_segmented_inverse_ffts`, `cuda_segmented_score_rows` and `cuda_segmented_native_fallbacks`. The [Vulkan session](../src/triad_vulkan_backend.cpp) runs the same kernel arithmetic with VkFFT FP32 transforms and GLSL kernels, also for the Blackwell Vulkan/OpenCL route. Automatic selection admits it on the OpenCL-identified SM 12.0 GPU since its [Blackwell qualification](validation.md#blackwell-qualification-of-the-offload-routes--20-november-2026). Check `vulkan_segmented_sessions`, `vulkan_segmented_declined_calls` with its reason, and `vulkan_segmented_native_fallbacks` with its reason. [Admission, proposal changes and Radeon results](gpu-precision-controls.md#current-implementation). |
 | Fine tracking and decisions | The CUDA `TensorFine` class accelerates eligible bulk basis mapping, Gram products and statistics. Check `mapped_values`, `statistics_blocks`, `cuda_direct_gram_values`, `cuda_bmm_gram_values` and `native_fine_sessions`. The native receiver owns chronological state, bit and quiet decisions, codec and completion. For simulator generation time, read the separate `simulator` phase. [Receiver interfaces](robust-current.md#native-interfaces-and-ownership). |
-| Filtered Blackwell fine projection | The [OpenCL route](../src/triad_opencl_nvfp4_projection.cpp) renders mapped tiles, projects DATA templates and returns sufficient statistics. `opencl_resident_nvfp4_modes` witnesses the Tensor Core projection and `opencl_resident_fft_modes` witnesses the alternate FFT. `opencl_resident_fine_pairs`, `opencl_resident_upload_bytes` and `opencl_resident_download_bytes` describe paired submissions and resident transfers. [Receiver timings and limits](validation.md#blackwell-resident-fine-processing--19-november-2026). |
-| Blackwell dense coarse search | The [OpenCL session](../src/triad_opencl_nvfp4_coarse.cpp) renders the template bank, scores every row with E2M1 Tensor Core products and rescores retained arrivals. `opencl_coarse_score_rows` witnesses the rows it scored, `opencl_coarse_rescored_peaks` the FP32 pass, `opencl_coarse_synthesized_columns` and `opencl_coarse_uploaded_columns` the template source, and `opencl_coarse_frequency_fallbacks` the sessions that kept the FFT route. `opencl_coarse_issued_products` and `opencl_coarse_useful_products` count real multiply-adds. Device intervals appear only on the explicit profiled route, with synthesis divided into render, filter and Gram parts and selection's rescoring part reported separately. [Receiver timings and limits](validation.md#blackwell-dense-fp4-coarse-search--20-november-2026). |
+| Filtered Blackwell fine projection | The [OpenCL route](../src/triad_opencl_nvfp4_projection.cpp) renders mapped tiles, projects DATA templates and returns sufficient statistics. `opencl_resident_nvfp4_modes` witnesses the Tensor Core projection and `opencl_resident_fft_modes` witnesses the alternate FFT. `opencl_resident_fp32_mapped_columns`, `opencl_resident_fp64_mapped_columns`, `opencl_resident_fp32_rendered_tiles` and `opencl_resident_fp64_rendered_tiles` name the tile and mapping arithmetic. `opencl_resident_fine_pairs`, `opencl_resident_upload_bytes` and `opencl_resident_download_bytes` describe paired submissions and resident transfers. [Receiver timings and limits](validation.md#blackwell-resident-fine-processing--19-november-2026). |
+| Blackwell dense coarse search | The [OpenCL session](../src/triad_opencl_nvfp4_coarse.cpp) renders the template bank, scores every row with E2M1 Tensor Core products and rescores retained arrivals. `opencl_coarse_score_rows` witnesses the rows it scored, `opencl_coarse_rescored_peaks` the FP32 pass, with `opencl_coarse_rescore_fp32_partial_peaks` and `opencl_coarse_rescore_fp64_peaks` naming its accumulation, `opencl_coarse_synthesized_columns` and `opencl_coarse_uploaded_columns` the template source, and `opencl_coarse_frequency_fallbacks` the sessions that kept the FFT route, with `opencl_coarse_fallback_counts` naming each one's reason. `opencl_coarse_issued_products` and `opencl_coarse_useful_products` count real multiply-adds. Device intervals appear only on the explicit profiled route, with synthesis divided into render, filter and Gram parts and selection's rescoring part reported separately. [Receiver timings and limits](validation.md#blackwell-dense-fp4-coarse-search--20-november-2026). |
 | Vulkan on integrated Radeon | The [Vulkan backend](../src/triad_vulkan_backend.cpp) runs supported frequency search via VkFFT or direct products. `vulkan_dispatches` and the per-route score-row counters identify actual work. The qualified Vega FP16 direct route uses packed vector arithmetic. VkFFT half storage still computes in FP32. Native CPU retains Helper, lag groups and fine processing. [Vulkan stage scope](gpu-precision-controls.md#vulkan-on-vega-integrated-graphics). |
 
 For example, the 2 mW, 72 Hz/5× severe Blackwell control (manifest

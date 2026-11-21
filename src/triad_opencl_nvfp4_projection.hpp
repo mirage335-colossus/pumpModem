@@ -17,6 +17,17 @@ struct OpenClNvfp4Workspace {
 
 enum class OpenClFineMethod { staged, resident_fp4, resident_fft };
 
+// Arithmetic of resident dense tile rendering and template mapping. FP32
+// keeps FP64 tiles, time base and support decisions, and reduces each row's
+// coordinate and phase exactly in fixed point; FP64 is the matched control
+// and the default until the FP32 kernels are device-qualified.
+enum class OpenClFineArithmetic { fp32, fp64 };
+
+// Accumulation of the coarse rescoring products: FP32 partial sums of 64
+// rows added in FP64, or every product in FP64, the matched control and the
+// default until the FP32 partial sums are device-qualified.
+enum class OpenClRescoreArithmetic { fp32_partial, fp64 };
+
 struct FineResidentBlock;
 
 struct OpenClResidentWork {
@@ -60,6 +71,8 @@ struct OpenClResidentOptions {
     // flush under cache pressure often; the request arena holds four times
     // this many entries.
     std::size_t cache_slots = 64;
+    // The kernels that render tiles and map columns.
+    OpenClFineArithmetic arithmetic = OpenClFineArithmetic::fp64;
 };
 
 class OpenClNvfp4Device;
@@ -128,7 +141,7 @@ public:
     // Empty when the device cannot hold the session within the limit. A
     // profiled session records device command intervals in its work.
     std::unique_ptr<OpenClNvfp4Coarse> make_coarse(const OpenClCoarseShape&, std::size_t workspace_limit,
-                                                   bool profile = false) const;
+        bool profile = false, OpenClRescoreArithmetic = OpenClRescoreArithmetic::fp64) const;
 
 private:
     struct Impl;

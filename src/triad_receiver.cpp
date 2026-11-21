@@ -122,7 +122,7 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
         if (midpoint_support.available) enable_midpoint_tracking(varying);
         const auto coarse = coarse_workspace(search, slot, workers, {}, midpoint);
         const auto fine = fine_workspace(config, slot, workers);
-        const auto varying_quiet = varying_quiet_workspace(config, slot);
+        const auto varying_quiet = varying_quiet_workspace(config, slot, workers);
         const auto line = search.time_varying_channel ? varying_line_workspace(config, slot) : 0;
         const auto line_varying = line ? varying_fine_plan(config, slot, workers, true) : VaryingFinePlan{};
         const auto line_drift = line_override ? *line_override :
@@ -611,11 +611,13 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         score.helper_overlapped = true;
         coarse = score_coarse(search, slot, key, iq,
             FrequencyAssistance{acquire, {workspace.helper, helper_widest_wave}},
-            workers, workspace.overlapped_coarse, stop, executor, midpoint_evaluation);
+            workers, workspace.overlapped_coarse, stop, executor, midpoint_evaluation,
+            CoarseInputCheck::already_finite);
     } else {
         const auto intervals = acquire(lanes, stop);
         began = Clock::now();
-        coarse = score_coarse(search, slot, key, iq, intervals, workers, workspace.coarse, stop, executor, midpoint_evaluation);
+        coarse = score_coarse(search, slot, key, iq, intervals, workers, workspace.coarse, stop, executor,
+                              midpoint_evaluation, CoarseInputCheck::already_finite);
     }
     score.coarse_seconds = elapsed(began);
     score.coarse_workspaces = coarse.workspaces;
@@ -635,6 +637,13 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     score.varying_timing_blocks = coarse.work.segmented_timing_blocks;
     score.varying_timing_frequencies = coarse.work.segmented_timing_frequencies;
     score.varying_timing_status = coarse.work.segmented_timing_status;
+    score.varying_timing_proposal_count =
+        std::min(coarse.segmented_timing_coordinates.size(), score.varying_timing_proposals.size());
+    for (std::size_t i = 0; i < score.varying_timing_proposal_count; ++i) {
+        const auto& proposal = coarse.segmented_timing_coordinates[i];
+        score.varying_timing_proposals[i] = {proposal.epoch_offset_seconds, proposal.arrival_seconds,
+                                             proposal.frequency_hz, proposal.clock_ppm};
+    }
     if (coarse.coordinates.empty()) {
         score.reason = std::move(coarse.reason);
         return score;
@@ -847,11 +856,11 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         else {
             score.decision = SlotDecision::ambiguous;
             score.reason = "coherent_line_in_public_data_aperture";
-            score_varying_quiet(config, slot, iq, score, stop);
+            score_varying_quiet(config, slot, iq, score, stop, workers, *executor);
         }
     }
     if (config.time_varying_channel && score.decision == SlotDecision::quiet) {
-        score_varying_quiet(config, slot, iq, score, stop);
+        score_varying_quiet(config, slot, iq, score, stop, workers, *executor);
         if (!score.varying_quiet_modes || score.varying_quiet_energy > score.varying_quiet_threshold) {
             score.decision = SlotDecision::ambiguous;
             score.reason = score.varying_quiet_status;

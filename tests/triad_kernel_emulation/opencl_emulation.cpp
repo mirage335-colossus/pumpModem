@@ -257,9 +257,11 @@ const std::vector<Entry>& registry() {
     static const std::vector<Entry> entries{
         describe("resident_fine_fft", resident_fine_fft),
         describe("resident_fine_map", resident_fine_map),
+        describe("resident_fine_map_fp32", resident_fine_map_fp32),
         describe("resident_fine_clear", resident_fine_clear),
         describe("resident_fine_absent", resident_fine_absent),
         describe("resident_fine_render_tiles", resident_fine_render_tiles),
+        describe("resident_fine_render_tiles_fp32", resident_fine_render_tiles_fp32),
         describe("resident_fine_peaks", resident_fine_peaks),
         describe("resident_fine_stats", resident_fine_stats),
         describe("nvfp4_pack_basis", nvfp4_pack_basis),
@@ -278,6 +280,7 @@ const std::vector<Entry>& registry() {
         describe("coarse_select_peaks", coarse_select_peaks),
         describe("coarse_rotate_observation", coarse_rotate_observation),
         describe("coarse_rescore_peaks", coarse_rescore_peaks),
+        describe("coarse_rescore_peaks_fp32", coarse_rescore_peaks_fp32),
     };
     return entries;
 }

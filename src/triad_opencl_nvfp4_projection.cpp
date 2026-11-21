@@ -28,9 +28,12 @@ constexpr std::size_t resident_cache_slots = 64, resident_tile_rows = 8192, resi
 constexpr std::size_t resident_request_arenas = 4;
 constexpr std::size_t resident_stat_values = 11;
 constexpr std::size_t resident_tile_bytes = resident_tile_rows * sizeof(Complex);
-// These mirror resident_fine_render_tiles in triad_opencl_nvfp4_kernels.cu.
+// These mirror resident_fine_render_tiles and its FP32 form in
+// triad_opencl_nvfp4_kernels.cu. The FP32 renderer reads the keyed chips
+// and the pulse table rounded to FP32 on the host.
 constexpr std::size_t tile_pulse_samples = 8 * 256 + 1, tile_source_parameters = 18;
 constexpr std::size_t tile_chip_bytes = 3 * sizeof(Complex);
+constexpr std::size_t tile_chip_bytes_fp32 = 3 * sizeof(std::complex<float>);
 constexpr auto unpaired_output = std::numeric_limits<std::uint16_t>::max();
 constexpr auto no_address = std::numeric_limits<std::uint64_t>::max();
 constexpr unsigned address_lane_shift = 40;
@@ -125,8 +128,8 @@ struct Shape {
             if (resident.tile_cells) {
                 // The kernel indexes cells in 32 bits.
                 sizes[tile_chips] = multiply(multiply(resident.tile_lanes, kernel_extent(resident.tile_cells)),
-                                             tile_chip_bytes);
-                sizes[tile_pulse] = tile_pulse_samples * sizeof(double);
+                                             chip_bytes());
+                sizes[tile_pulse] = tile_pulse_samples * (fp32() ? sizeof(float) : sizeof(double));
                 sizes[tile_source] = tile_source_parameters * sizeof(double);
                 // A flush renders each tile into a distinct protected slot.
                 sizes[tile_requests] = resident_cache_slots * sizeof(TileRequest);
@@ -135,6 +138,9 @@ struct Shape {
     }
 
     bool uses_resident() const { return method != OpenClFineMethod::staged; }
+    bool fp32() const { return resident.arithmetic == OpenClFineArithmetic::fp32; }
+    // The device bytes of one keyed cell, its three carrier coefficients.
+    std::size_t chip_bytes() const { return fp32() ? tile_chip_bytes_fp32 : tile_chip_bytes; }
     bool uses_fp4() const { return method != OpenClFineMethod::resident_fft; }
     std::size_t resident_candidates() const { return batch_capacity / resident_columns; }
 
@@ -175,6 +181,9 @@ struct ResidentScratch {
     // One byte per lane of the batch: whether a column supplied it.
     std::vector<std::uint8_t> present;
     std::vector<Complex> observed, tile_upload, downloaded, chips;
+    // The FP32 renderer's keyed lane and pulse table, rounded from FP64.
+    std::vector<std::complex<float>> chips_fp32;
+    std::vector<float> pulse_fp32;
     // Arenas for the batch: a flush writes the slice after the flushed
     // entries without waiting, so no entry changes until the queue has read it.
     std::vector<DeviceMapping> descriptors;
@@ -200,11 +209,15 @@ struct ResidentScratch {
         constexpr std::size_t tile_control_block_bound = 64;
         const auto retained_source = resident_cache_slots * (resident_tile_bytes + tile_control_block_bound);
         // Uploaded native tiles stage through the host. Rendered ones stage
-        // one lane of keyed coefficients, and a caller may still supply
+        // one lane of keyed coefficients, with its FP32 copy and the FP32
+        // pulse table for the FP32 renderer, and a caller may still supply
         // native leases to the same session.
+        const auto keyed_staging = shape.fp32()
+            ? add(multiply(shape.resident.tile_cells, tile_chip_bytes + tile_chip_bytes_fp32),
+                  tile_pulse_samples * sizeof(float))
+            : multiply(shape.resident.tile_cells, tile_chip_bytes);
         const auto tile_staging = add(add(retained_source, shape.sizes[raw_tiles]),
-            add(multiply(shape.resident.tile_cells, tile_chip_bytes),
-                resident_request_arenas * resident_cache_slots * sizeof(TileRequest)));
+            add(keyed_staging, resident_request_arenas * resident_cache_slots * sizeof(TileRequest)));
         return add(add(sizeof(ResidentScratch) + shape.sizes[resident_statistics] + shape.sizes[mapping_descriptors] +
                            shape.sizes[observed_modes] + shape.sizes[lane_presence] +
                            shape.resident_candidates() * sizeof(FineBulkStatistics),
@@ -370,12 +383,15 @@ struct OpenClNvfp4Projection::Impl {
             create_kernel(Kernel::project, "nvfp4_project");
         }
         if (shape.uses_resident()) {
-            create_kernel(map_resident, "resident_fine_map");
+            // The FP64 kernels are the matched control of the FP32 ones.
+            const bool fp32 = shape.resident.arithmetic == OpenClFineArithmetic::fp32;
+            create_kernel(map_resident, fp32 ? "resident_fine_map_fp32" : "resident_fine_map");
             create_kernel(measure_peaks, "resident_fine_peaks");
             create_kernel(collect_statistics, "resident_fine_stats");
             create_kernel(clear_lanes, "resident_fine_clear");
             create_kernel(absent_lanes, "resident_fine_absent");
-            if (shape.resident.tile_cells) create_kernel(render_tiles, "resident_fine_render_tiles");
+            if (shape.resident.tile_cells)
+                create_kernel(render_tiles, fp32 ? "resident_fine_render_tiles_fp32" : "resident_fine_render_tiles");
             if (!shape.uses_fp4()) create_kernel(project_fft, "resident_fine_fft");
             resident = std::make_unique<ResidentScratch>(shape, coefficients);
             // A driver may allocate a buffer at its first use. Touch each
@@ -518,7 +534,14 @@ struct OpenClNvfp4Projection::Impl {
             source->dense_samples > (std::uint64_t{1} << 52) ||
             (source->dense_samples - 1) / resident_tile_rows >= (std::uint64_t{1} << address_lane_shift))
             throw Error("Robust OpenCL resident fine tile source is invalid");
-        upload(tile_pulse, 0, source->pulse, work);
+        if (shape.fp32()) {
+            scratch.pulse_fp32.resize(source->pulse.size());
+            std::ranges::transform(source->pulse, scratch.pulse_fp32.begin(),
+                                   [](double value) { return static_cast<float>(value); });
+            upload(tile_pulse, 0, std::span<const float>(scratch.pulse_fp32), work);
+        } else {
+            upload(tile_pulse, 0, source->pulse, work);
+        }
         upload(tile_source, 0, std::span<const double>(parameters), work);
         scratch.source = source;
     }
@@ -688,7 +711,16 @@ struct OpenClNvfp4Projection::Impl {
             source.key_lane(address.lane, scratch.chips, stop);
             if (!std::ranges::all_of(scratch.chips, finite))
                 throw Error("Robust OpenCL resident fine source supplied nonfinite keyed coefficients");
-            upload(tile_chips, address.lane * source.cells * tile_chip_bytes, std::span<const Complex>(scratch.chips), work);
+            const auto offset = address.lane * source.cells * shape.chip_bytes();
+            if (shape.fp32()) {
+                scratch.chips_fp32.resize(scratch.chips.size());
+                std::ranges::transform(scratch.chips, scratch.chips_fp32.begin(), [](Complex value) {
+                    return std::complex<float>(static_cast<float>(value.real()), static_cast<float>(value.imag()));
+                });
+                upload(tile_chips, offset, std::span<const std::complex<float>>(scratch.chips_fp32), work);
+            } else {
+                upload(tile_chips, offset, std::span<const Complex>(scratch.chips), work);
+            }
             scratch.keyed[address.lane] = true;
             ++work.keyed_lanes;
         }

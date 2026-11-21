@@ -60,7 +60,10 @@ struct FineLaneWork {
     std::size_t peak_transition_targets = 0, pruning_events = 0, states_dropped = 0;
     std::uint64_t transition_edges = 0, merged_channel_components = 0;
     std::uint64_t basis_calls = 0, basis_rows = 0, positive_basis_blocks = 0;
-    std::uint64_t gaussian_updates = 0, projection_modes = 0;
+    // Logical public-hypothesis block updates: three per model, block and
+    // state. Executed updates exclude gaussian_null_skips, the common-null
+    // updates proven inert and skipped (see gaussian_signal_update).
+    std::uint64_t gaussian_updates = 0, gaussian_null_skips = 0, projection_modes = 0;
     long double projected_template_energy = 0;
     double retained_prior_mass = 0;
 };
@@ -70,10 +73,13 @@ struct FinePhaseTimes {
     // Native observation, transition and pruning overlap fixed-affine state
     // leaves; compiled statistics can overlap the next CPU observation.
     // Observation also runs inside dispatch. These intervals are not additive.
+    // With resident windows, observation_seconds is only the owner's block
+    // placement and receipts; the lanes' projection is the worker time below.
     double observation_seconds = 0, transition_seconds = 0, bulk_statistics_seconds = 0, dispatch_seconds = 0;
     double pruning_seconds = 0, finish_seconds = 0;
     // Worker elapsed times can overlap and are not CPU or service time.
-    double worker_basis_statistics_seconds = 0, worker_gaussian_seconds = 0;
+    // Observation is the summed projection leaves of resident windows.
+    double worker_basis_statistics_seconds = 0, worker_gaussian_seconds = 0, worker_observation_seconds = 0;
 };
 
 struct FineProgress {
@@ -208,9 +214,11 @@ void score_varying_fine(const ReceiverConfig&, const ReceiverSlotPlan&, const Cr
                         ReceiverSlotScore&, std::stop_token, ReceiverExecutor&, const LineAtom* = nullptr,
                         TrackedFrequencySpan* = nullptr, TrackedFrequencyClockShadow* = nullptr,
                         const MidpointTrackInput* = nullptr);
-std::size_t varying_quiet_workspace(const ReceiverConfig&, const ReceiverSlotPlan&);
+std::size_t varying_quiet_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers);
+// Quiet-aperture blocks project on the given lanes; their energy terms are
+// summed in public block order, so results do not depend on the lane count.
 void score_varying_quiet(const ReceiverConfig&, const ReceiverSlotPlan&, std::span<const Complex>,
-                         ReceiverSlotScore&, std::stop_token);
+                         ReceiverSlotScore&, std::stop_token, unsigned workers, ReceiverExecutor&);
 
 // A fixed finite bank of constant-frequency and linear-drift models. The
 // retained timing atoms select only which rows of its public prior to score.

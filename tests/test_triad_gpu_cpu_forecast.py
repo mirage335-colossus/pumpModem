@@ -140,6 +140,13 @@ class NativeForecastTests(unittest.TestCase):
         fine = measured["phases"]["fine"]
         self.assertIs(fine["geometry"][-1], False)
         self.assertEqual(len(fine["demand"]), 5)
+        # Executed Gaussian updates exclude the skipped inert common nulls.
+        self.assertEqual(fine["demand"][1], 12)
+        predating = deepcopy(receipt)
+        next(row for row in predating["phases"] if row["name"] == "fine_finish")["work"]["initial_affine"].pop(
+            "gaussian_null_skips")
+        with self.assertRaisesRegex(forecast.ProbeError, "predates executed Gaussian work"):
+            forecast.observation(predating, "active", measure_timing=False)
         legacy = deepcopy(receipt)
         next(row for row in legacy["phases"] if row["name"] == "fine_finish")["work"].pop("adaptive_diagnostics")
         with self.assertRaisesRegex(forecast.ProbeError, "fixed-affine operational"):

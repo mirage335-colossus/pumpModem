@@ -63,6 +63,10 @@ double fixed_gain_frequency_rank(std::span<const double> frequency_major_totals,
                                  std::size_t lags, std::size_t lag);
 
 enum class MidpointTimingEvaluation { off, short_tracking, verify };
+// Every coarse entry checks that its borrowed samples are finite. Only a
+// caller that has itself rejected every nonfinite sample of the same
+// immutable window, as the slot scorer does, may state that it did.
+enum class CoarseInputCheck { scan, already_finite };
 // Pure public support. Only the ordinary unprojected short tracker uses
 // these proposals. Realized clock, channel and samples never select the plan.
 struct CoarseMidpointSupport {
@@ -99,6 +103,7 @@ struct CoarseOperationCounts {
     std::uint64_t fir_input_rows = 0, fir_output_contributions = 0;
     std::uint64_t workspace_frequency_pairs = 0, score_rows = 0, singleton_dot_terms = 0;
     std::uint64_t retained_peaks = 0, selection_peak_rows = 0;
+    bool operator==(const CoarseOperationCounts&) const = default;
 };
 
 struct CoarsePhaseWork {
@@ -202,14 +207,16 @@ public:
     CoarseSession(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                   std::span<const Complex>, std::span<const FrequencyInterval>,
                   unsigned workers, std::size_t scratch_limit_bytes, std::stop_token = {},
-                  ReceiverExecutor* = nullptr, MidpointTimingEvaluation = MidpointTimingEvaluation::off);
+                  ReceiverExecutor* = nullptr, MidpointTimingEvaluation = MidpointTimingEvaluation::off,
+                  CoarseInputCheck = CoarseInputCheck::scan);
     // Acquisition runs beside the template bank and observation filter. This
     // requires coarse_defers_frequency_grid(). Results are identical to a
     // session given the acquired intervals.
     CoarseSession(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                   std::span<const Complex>, const FrequencyAssistance&,
                   unsigned workers, std::size_t scratch_limit_bytes, std::stop_token = {},
-                  ReceiverExecutor* = nullptr, MidpointTimingEvaluation = MidpointTimingEvaluation::off);
+                  ReceiverExecutor* = nullptr, MidpointTimingEvaluation = MidpointTimingEvaluation::off,
+                  CoarseInputCheck = CoarseInputCheck::scan);
     ~CoarseSession();
     CoarseSession(CoarseSession&&) noexcept;
     CoarseSession& operator=(CoarseSession&&) noexcept;
@@ -252,10 +259,26 @@ CoarseFineGeometry coarse_fine_geometry(const ReceiverConfig&, const ReceiverSlo
 CoarseResult score_coarse(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                           std::span<const Complex>, std::span<const FrequencyInterval>,
                           unsigned workers, std::size_t scratch_limit_bytes, std::stop_token,
-                          ReceiverExecutor* = nullptr, MidpointTimingEvaluation = MidpointTimingEvaluation::off);
+                          ReceiverExecutor* = nullptr, MidpointTimingEvaluation = MidpointTimingEvaluation::off,
+                          CoarseInputCheck = CoarseInputCheck::scan);
 CoarseResult score_coarse(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                           std::span<const Complex>, const FrequencyAssistance&,
                           unsigned workers, std::size_t scratch_limit_bytes, std::stop_token,
-                          ReceiverExecutor* = nullptr, MidpointTimingEvaluation = MidpointTimingEvaluation::off);
+                          ReceiverExecutor* = nullptr, MidpointTimingEvaluation = MidpointTimingEvaluation::off,
+                          CoarseInputCheck = CoarseInputCheck::scan);
+
+// Test-only check of the chunked native observation filter. A synthetic
+// Kaiser plan with `taps` taps and the given decimation filters `iq`
+// serially, as chunk jobs on an executor of `workers` lanes, and as chunk
+// jobs on one lane in an order shuffled by `seed`. Coarse preparation runs
+// the same chunk jobs and ordered combine.
+struct CoarseFirChunkTrial {
+    std::vector<Complex> serial, lanes, shuffled;
+    std::array<CoarseOperationCounts, 3> operations{};
+    std::size_t chunks = 0, staged_rows = 0, completions = 0;
+};
+CoarseFirChunkTrial coarse_fir_chunk_trial(std::span<const Complex> iq, std::size_t decimation, std::size_t taps,
+                                           std::size_t crop_first, std::size_t crop_rows, unsigned workers,
+                                           std::uint64_t seed);
 
 } // namespace datapump::triad::v3::receiver_detail

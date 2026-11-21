@@ -181,4 +181,145 @@ void main() {
 }
 )glsl";
 
+// Changing-channel segmented timing, the Vulkan form of the CUDA scorer in
+// triad_tensor_peaks.cu. A block's FP32 time column is copied into the
+// zero-padded forward FFT input, exactly as the native float cast pads it.
+inline constexpr std::string_view vulkan_segmented_column_shader = R"glsl(
+#version 450
+layout(local_size_x=256) in;
+layout(std430,set=0,binding=0) readonly buffer Source { vec2 source[]; };
+layout(std430,set=0,binding=1) writeonly buffer Column { vec2 column[]; };
+layout(push_constant) uniform Parameters { uint first; uint rows; uint nfft; uint unused; } p;
+void main() {
+    uint i=gl_GlobalInvocationID.x+gl_GlobalInvocationID.y*gl_NumWorkGroups.x*256u;
+    if(i>=p.nfft) return;
+    column[i]=i<p.rows?source[p.first+i]:vec2(0);
+}
+)glsl";
+
+// Products for a tile of residual frequencies. Each frequency is a whole-bin
+// shift of one lattice phase's observation spectrum, times the conjugated
+// template spectrum, with the two separately rounded products of the native
+// complex64 path. Spectra are [block][phase][row]; nfft is a power of two.
+inline constexpr std::string_view vulkan_segmented_product_shader = R"glsl(
+#version 450
+layout(local_size_x=256) in;
+layout(std430,set=0,binding=0) readonly buffer Observation { vec2 observation[]; };
+layout(std430,set=0,binding=1) readonly buffer Column { vec2 column[]; };
+layout(std430,set=0,binding=2) writeonly buffer Products { vec2 products[]; };
+layout(push_constant) uniform Parameters {
+    uint nfft; uint phases; uint radius; uint bin_stride; uint first_frequency; uint width; uint block_offset;
+    uint unused;
+} p;
+void main() {
+    uint i=gl_GlobalInvocationID.x+gl_GlobalInvocationID.y*gl_NumWorkGroups.x*256u;
+    if(i>=p.nfft*p.width) return;
+    uint row=i/p.nfft, j=i&(p.nfft-1u);
+    // Floor division of the signed bin offset, using nonnegative operands.
+    int frequency=(int(p.first_frequency+row)-int(p.radius))*int(p.bin_stride);
+    int phases=int(p.phases);
+    int shift=frequency>=0?frequency/phases:-((phases-1-frequency)/phases);
+    uint phase=uint(frequency-shift*phases);
+    vec2 a=observation[p.block_offset+phase*p.nfft+((uint(shift)+j)&(p.nfft-1u))];
+    vec2 b=column[j];
+    precise float real_value=a.x*b.x+a.y*b.y;
+    precise float imag_value=a.y*b.x-a.x*b.y;
+    products[i]=vec2(real_value,imag_value);
+}
+)glsl";
+
+// Ranks a tile of normalized inverse transforms. Each workgroup row owns a
+// residue class of the tile's frequencies and keeps their maximum per lag in
+// its own partial slot, so no atomics are needed and every slot has one
+// writer per dispatch. The tracking DP reads the previous block's states and
+// writes the next ones, in the CUDA kernel's FP64 rank and FP32 state
+// arithmetic. A nonfinite rank or state stores NaN, which the finish kernel
+// propagates into the published rank for host validation.
+inline constexpr std::string_view vulkan_segmented_ranks_shader = R"glsl(
+#version 450
+#extension GL_ARB_gpu_shader_fp64 : require
+layout(local_size_x=128) in;
+layout(std430,set=0,binding=0) readonly buffer Correlations { vec2 correlations[]; };
+layout(std430,set=0,binding=1) buffer Partial { double partial[]; };
+layout(std430,set=0,binding=2) buffer States { float states[]; };
+layout(push_constant) uniform Parameters {
+    uint nfft; uint arrivals; uint frequencies; uint first_frequency; uint width; uint hop;
+    uint previous; uint next; double energy; double noise_power;
+} p;
+// log(2) rounded to FP32, as the native and CUDA trackers use it.
+const float hop_penalty=0.693147182464599609375;
+void main() {
+    uint lag=gl_GlobalInvocationID.x;
+    if(lag>=p.arrivals) return;
+    uint group=gl_WorkGroupID.y, groups=gl_NumWorkGroups.y;
+    double maximum=0.0;
+    bool invalid=false;
+    for(uint row=group;row<p.width;row+=groups) {
+        vec2 c=correlations[row*p.nfft+lag];
+        double re=double(c.x), im=double(c.y);
+        precise double value=(re*re+im*im)/p.energy;
+        invalid=invalid||isnan(value)||isinf(value);
+        if(value>maximum) maximum=value;
+        if(p.hop==0u) continue;
+        uint index=p.first_frequency+row;
+        uint at=index*p.arrivals+lag;
+        float best=states[p.previous+at];
+        for(uint offset=1u;offset<=p.hop;++offset) {
+            if(index>=offset) {
+                precise float left=states[p.previous+at-offset*p.arrivals]-hop_penalty;
+                if(left>best) best=left;
+            }
+            if(offset<p.frequencies-index) {
+                precise float right=states[p.previous+at+offset*p.arrivals]-hop_penalty;
+                if(right>best) best=right;
+            }
+        }
+        precise float state=float(value/p.noise_power)+best;
+        invalid=invalid||isnan(state)||isinf(state);
+        states[p.next+at]=state;
+    }
+    uint slot=group*p.arrivals+lag;
+    double prior=partial[slot];
+    if(invalid||isnan(prior)) partial[slot]=packDouble2x32(uvec2(0u,0x7ff80000u));
+    else if(maximum>prior) partial[slot]=maximum;
+}
+)glsl";
+
+// Mode 1 adds each lag's block maximum over all partial slots to its fixed
+// rank, in block order, and clears the slots. Mode 2 writes the linked rank
+// from the final tracking states. Ranks are [fixed lag][linked lag].
+inline constexpr std::string_view vulkan_segmented_finish_shader = R"glsl(
+#version 450
+#extension GL_ARB_gpu_shader_fp64 : require
+layout(local_size_x=256) in;
+layout(std430,set=0,binding=0) buffer Partial { double partial[]; };
+layout(std430,set=0,binding=1) buffer Ranks { double ranks[]; };
+layout(std430,set=0,binding=2) readonly buffer States { float states[]; };
+layout(push_constant) uniform Parameters { uint arrivals; uint groups; uint frequencies; uint mode; uint state; } p;
+void main() {
+    uint lag=gl_GlobalInvocationID.x+gl_GlobalInvocationID.y*gl_NumWorkGroups.x*256u;
+    if(lag>=p.arrivals) return;
+    if((p.mode&1u)!=0u) {
+        double best=0.0;
+        bool invalid=false;
+        for(uint group=0u;group<p.groups;++group) {
+            double value=partial[group*p.arrivals+lag];
+            invalid=invalid||isnan(value);
+            if(value>best) best=value;
+            partial[group*p.arrivals+lag]=0.0;
+        }
+        precise double total=ranks[lag]+best;
+        ranks[lag]=invalid?packDouble2x32(uvec2(0u,0x7ff80000u)):total;
+    }
+    if((p.mode&2u)!=0u) {
+        double maximum=0.0;
+        for(uint index=0u;index<p.frequencies;++index) {
+            double state=double(states[p.state+index*p.arrivals+lag]);
+            if(state>maximum) maximum=state;
+        }
+        ranks[p.arrivals+lag]=maximum;
+    }
+}
+)glsl";
+
 } // namespace datapump::triad::v3::receiver_detail

@@ -47,6 +47,10 @@ target_link_libraries(test_triad_opencl_coarse_session_emulated PRIVATE
 add_test(NAME triad_opencl_coarse_session_emulated COMMAND test_triad_opencl_coarse_session_emulated)
 set_tests_properties(triad_opencl_coarse_session_emulated PROPERTIES LABELS "triad" TIMEOUT 180
   ENVIRONMENT "DATAPUMP_TRIAD_EMULATION_DEFER=0")
+# The one-ray session of the default spread and the named fallback reasons.
+add_test(NAME triad_opencl_coarse_session_emulated_one_ray COMMAND test_triad_opencl_coarse_session_emulated one-ray)
+set_tests_properties(triad_opencl_coarse_session_emulated_one_ray PROPERTIES LABELS "triad" TIMEOUT 180
+  ENVIRONMENT "DATAPUMP_TRIAD_EMULATION_DEFER=0")
 
 add_executable(test_triad_opencl_fine_session_emulated EXCLUDE_FROM_ALL
   tests/test_triad_opencl_fine_session.cpp src/host/sandbox.cpp)

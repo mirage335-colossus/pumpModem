@@ -1,6 +1,7 @@
 #include "datapump/triad_modem_v3.hpp"
 #include "datapump/triad_stream.hpp"
 #include "datapump/crypto.hpp"
+#include "../src/triad_gaussian_stream.hpp"
 #include "../src/triad_random_process.hpp"
 #include <algorithm>
 #include <atomic>
@@ -10,6 +11,7 @@
 #include <iostream>
 #include <limits>
 #include <numbers>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -508,6 +510,115 @@ void emission_sources_reproduce_the_lone_reader(){
         }
     }
 }
+void gaussian_stream_matches_the_distribution(){
+    // The staged draws equal std::normal_distribution's call for call: taken
+    // one at a time from an odd start, and accepted ahead in runs whose
+    // pairs are formed in another order through small rings. A one-off
+    // comparison of 10^8 draws for each of several seeds also matched.
+    // libstdc++ builds must keep the split, which its self-check selects.
+    namespace d=v::detail;
+#ifdef __GLIBCXX__
+    check(d::GaussianStream::split_supported(),"libstdc++ draws no longer split; review its normal_distribution");
+#endif
+    for(const std::uint64_t seed:{0x9e37a202ULL,0x3254494154415747ULL,1ULL,0xffffffffffffffffULL}){
+        std::mt19937_64 engine(seed);std::normal_distribution<double> normal{0,1};
+        const auto same=[](double a,double b){return std::bit_cast<std::uint64_t>(a)==std::bit_cast<std::uint64_t>(b);};
+        d::GaussianStream stream(seed);stream.open(4102,1027);
+        check(stream.split()==d::GaussianStream::split_supported(),"a staged draw stream ignored the split decision");
+        for(int i=0;i<3;++i)check(same(stream.next(),normal(engine)),"a staged draw differs from the distribution");
+        std::uint64_t read=stream.taken();
+        const auto last=read+400000;
+        for(std::uint64_t target=read+4097;target<last;target+=1031+(target%7)*512){
+            stream.accept(std::min(stream.pair_end(target),stream.accept_limit(read)));
+            const auto to=std::min(stream.accepted(),stream.finish_limit(read));
+            // Pairs in reverse order of 64-draw parts, as other jobs may form them.
+            const auto from=stream.finished();
+            for(auto part=to;part>from;){
+                const auto low=part-from>64?part-64:from;
+                stream.finish(low,part);part=low;
+            }
+            stream.finished_through(to);
+            for(;read<stream.finished();++read)
+                check(same(stream[read],normal(engine)),"a staged draw differs from the distribution");
+        }
+    }
+}
+// Oscillator spectra on both oscillators, thermal noise, FHSS hops and
+// small rings: a channel with lanes stages its receiver and transmit
+// oscillators and its noise, and reproduces the lone reader at every read
+// size, worker count and source path.
+void staged_chains_reproduce_the_lone_reader(){
+    auto base=settings();base.effects.tx.audio_ppm=3;base.effects.rx.audio_ppm=-2;
+    base.effects.spread_delay_ms=21;base.effects.spread_doppler_hz=9;
+    base.effects.noise_enabled=true;base.complex_noise_variance=.003;
+    base.effects.tx.phase_noise_rad_per_sqrt_second=.02;base.effects.rx.phase_noise_rad_per_sqrt_second=.03;
+    base.tx_spectrum={.white_fm_hz_sqrt_seconds=.002,.random_walk_fm_hz_per_sqrt_second=.001,.flicker_fm_rms_hz=.01,
+        .flicker_min_tau_seconds=.05,.flicker_max_tau_seconds=10,.flicker_bands=2,.white_pm_rms_radians=.01};
+    base.rx_spectrum={.white_fm_hz_sqrt_seconds=.003,.random_walk_fm_hz_per_sqrt_second=.002,.flicker_fm_rms_hz=.02,
+        .flicker_min_tau_seconds=.1,.flicker_max_tau_seconds=20,.flicker_bands=3,.white_pm_rms_radians=.02};
+    auto hops=base;hops.effects.fhss=true;hops.effects.hop_offsets_hz={0,2,-3};
+    hops.effects.rx.rf_drift_ppm_per_second=.01;hops.effects.tx.rf_ppm=.05;
+    auto plain=settings();plain.effects.noise_enabled=true;plain.complex_noise_variance=.002;
+    plain.rx_spectrum.white_pm_rms_radians=.03;
+    // A 0.1 Hz selective spacing gives a 3,413-row shortest lag, so the
+    // pool evaluates the filter's delayed branches for every lane count.
+    auto selective=base;selective.effects.perturbation_slow_depth=.25;selective.effects.perturbation_fast_depth=.65;
+    selective.selective_model.modulation_rate_hz=2;selective.selective_model.correlation_spacing_hz=.1;
+    auto random_selective=selective;
+    random_selective.selective_model.coefficient_law=v::SelectiveCoefficientLaw::GaussianErf;
+    for(const auto& cfg:{base,hops,plain,selective,random_selective}){
+        const auto alone=capture(cfg,4096);
+        check(same_bits(alone.samples,capture(cfg,1).samples),"single rows changed an oscillator spectrum");
+        for(const unsigned count:{2U,3U,32U})for(const std::size_t chunk:{std::size_t{1},std::size_t{97},std::size_t{4096}})
+            for(const bool with_readers:{false,true}){
+                auto shared=cfg;shared.lanes={count,threads};
+                auto readers=std::make_shared<ToneReaders>();
+                const auto out=with_readers?capture(shared,chunk,read_source(readers)):capture(shared,chunk);
+                check(same_bits(alone.samples,out.samples)&&alone.valid==out.valid&&
+                      std::bit_cast<std::uint64_t>(alone.report.signal_energy)==std::bit_cast<std::uint64_t>(out.report.signal_energy)&&
+                      std::bit_cast<std::uint64_t>(alone.report.observed_energy)==std::bit_cast<std::uint64_t>(out.report.observed_energy)&&
+                      alone.report.out_of_passband_samples==out.report.out_of_passband_samples,
+                      "staged oscillators or noise changed captured samples or energies");
+            }
+    }
+    // An oscillator whose frequency walk overflows fails at one row. With
+    // lanes its recurrence meets that row ahead of the pass, or ahead of
+    // the source range being generated; the read still delivers every
+    // earlier row and then reports the failure there. The receiver fails at
+    // row 354, inside the second block of two lanes; on a 6,000-sample
+    // source the transmitter fails at the source sample of row 3,783.
+    for(const bool receiver:{true,false})for(const bool with_readers:{false,true}){
+        auto cfg=settings();cfg.effects.noise_enabled=true;cfg.complex_noise_variance=.002;
+        if(receiver)cfg.rx_spectrum.random_walk_fm_hz_per_sqrt_second=3e307;
+        else{cfg.tx_spectrum.random_walk_fm_hz_per_sqrt_second=3e307;cfg.oscillator_seed=6;}
+        const auto emitted=[&](std::shared_ptr<ToneReaders> readers){
+            auto result=with_readers?read_source(readers):source();
+            if(!receiver)result.geometry.source_samples=6000;
+            return result;
+        };
+        const auto run=[&](v::StreamChannelConfig c,std::size_t chunk){
+            c.maximum_chunk_samples=chunk;
+            v::StreamingChannel channel(emitted(std::make_shared<ToneReaders>()),c);
+            std::vector<v::Complex> out(static_cast<std::size_t>(channel.total_samples()));
+            std::string reason;
+            while(channel.position()<channel.total_samples()){
+                const auto first=static_cast<std::size_t>(channel.position());
+                try{channel.read(std::span(out).subspan(first,std::min(chunk,out.size()-first)));}
+                catch(const std::exception& error){reason=error.what();break;}
+            }
+            out.resize(static_cast<std::size_t>(channel.position()));
+            return std::pair(out,reason);
+        };
+        const auto [expected,why]=run(cfg,1);
+        check(!why.empty()&&expected.size()==(receiver?354U:3783U),"the oscillator overflow fixture moved");
+        for(const unsigned count:{2U,3U})
+            for(const std::size_t chunk:{std::size_t{1},std::size_t{97},std::size_t{300},std::size_t{4096}}){
+                auto shared=cfg;shared.lanes={count,threads};
+                const auto [got,reason]=run(shared,chunk);
+                check(reason==why&&same_bits(got,expected),"a staged oscillator failure was reported at another row");
+            }
+    }
+}
 void coordinate_forms_match_the_standard_ones(){
     namespace d=v::detail;
     const auto same=[](long double a,long double b){return (a==b&&std::signbit(a)==std::signbit(b))||(std::isnan(a)&&std::isnan(b));};
@@ -569,4 +680,4 @@ void bounds(){
     rejects([&]{v::StreamingChannel channel(source(),cfg);});
 }
 }
-int main(){try{exact_bypass();chunk_state_and_tails();bounded_spread_evolves_and_streams();bounded_spread_fixed_powers();combined_doppler_reports_simultaneous_physical_trajectory();bounded_spread_phase_integrates_frequency();common_doppler_wander_is_bounded_and_continuous();effects_and_erasures();lanes_reproduce_the_lone_reader();source_failure_reaches_the_reader_in_order();readers_reproduce_the_lone_reader();emission_sources_reproduce_the_lone_reader();coordinate_forms_match_the_standard_ones();bounds();std::cout<<"triad streaming channel invariants passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){try{exact_bypass();chunk_state_and_tails();bounded_spread_evolves_and_streams();bounded_spread_fixed_powers();combined_doppler_reports_simultaneous_physical_trajectory();bounded_spread_phase_integrates_frequency();common_doppler_wander_is_bounded_and_continuous();effects_and_erasures();lanes_reproduce_the_lone_reader();source_failure_reaches_the_reader_in_order();readers_reproduce_the_lone_reader();emission_sources_reproduce_the_lone_reader();gaussian_stream_matches_the_distribution();staged_chains_reproduce_the_lone_reader();coordinate_forms_match_the_standard_ones();bounds();std::cout<<"triad streaming channel invariants passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

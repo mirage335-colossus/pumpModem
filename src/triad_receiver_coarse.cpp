@@ -217,6 +217,8 @@ struct Plan {
     std::size_t fs = 0, output_fs = 0, decimation = 0, taps = 0, filter_fft = 0;
     std::size_t source_step = 1, clock_count = 0, ray_count = 0;
     std::size_t fidelity_source_first = 0, fidelity_capture_rows = 0;
+    // The complete public window that the observation filter reads.
+    std::size_t capture_rows = 0;
     double source_rate = 0, pass_edge = 0, stop_edge = 0;
     double max_frequency_step = 0, separation = 0;
     bool varying_passband = false;
@@ -230,6 +232,28 @@ struct Plan {
         return (lane / 2 * clock_count + clock) * 2 + lane % 2;
     }
 };
+
+// Ends a session's segmented device admission on every exit. The bank
+// stage ends it explicitly on success, which makes this a no-op.
+class SegmentedAdmission {
+public:
+    explicit SegmentedAdmission(CoarseBulk* bulk) noexcept : bulk_(bulk) {}
+    SegmentedAdmission(const SegmentedAdmission&) = delete;
+    SegmentedAdmission& operator=(const SegmentedAdmission&) = delete;
+    ~SegmentedAdmission() { if (bulk_) bulk_->end_segmented(); }
+private:
+    CoarseBulk* bulk_;
+};
+
+// The changing-channel shapes a compiled session may score on its device.
+// Diffuse-Doppler and explicit FP64 searches keep the native scorer.
+std::vector<CoarseSegmentedShape> device_segmented_shapes(const Plan& plan, const ReceiverConfig& config) {
+    if (!plan.segmented_timing.blocks || config.random_doppler_width_hz != 0 ||
+        config.native_coarse_precision == NativeCoarsePrecision::fp64) return {};
+    std::vector shapes{segmented_shape(plan.layout, plan.segmented_timing)};
+    if (plan.faster_timing.blocks) shapes.push_back(segmented_shape(plan.layout, plan.faster_timing));
+    return shapes;
+}
 
 struct MidpointPlan {
     struct GainPlan {
@@ -555,6 +579,7 @@ Plan make_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
                    "invalid public coarse receiver geometry");
     Plan plan;
     plan.fs = static_cast<std::size_t>(config.sample_rate_hz);
+    plan.capture_rows = capture_rows;
     plan.source_geometry = geometry(slot.format);
     plan.source_rate = effective_sample_rate(slot.format);
     const auto source_rows = extent(std::ceil(static_cast<long double>(plan.source_geometry.source_samples) *
@@ -734,6 +759,53 @@ std::vector<double> fir_taps(const Plan& plan, std::stop_token stop) {
     return taps;
 }
 
+// One overlap-add chunk of the native observation filter: its input rows and
+// the output rows that its complete convolution tail reaches. Rows that no
+// other chunk reaches are its own. The others are staged, then added in
+// chunk order, which is the serial overlap-add's order for every row.
+struct FirChunk {
+    std::size_t first = 0, size = 0, output_first = 0, output_stop = 0;
+    std::size_t own_first = 0, own_stop = 0, staged = 0;
+
+    std::size_t head() const { return own_first - output_first; }
+    std::size_t tail() const { return output_stop - own_stop; }
+};
+
+// The chunks that contribute to the crop, in input order, and the staged
+// row count. Chunk input and output starts never decrease, so a row reached
+// by an earlier chunk lies below that chunk's stop, and one reached by a
+// later chunk lies at or above its first output.
+std::vector<FirChunk> fir_chunks(std::size_t total, std::size_t crop_first, std::size_t crop_rows,
+                                 std::size_t decimation, std::size_t taps, std::size_t& staged) {
+    require_coarse(decimation > 0 && taps > 0, "coarse FIR chunk geometry is invalid");
+    std::vector<FirChunk> chunks;
+    const auto crop_stop = add(crop_first, crop_rows);
+    for (std::size_t first = 0; first < total;) {
+        const auto size = std::min(chunk_samples, total - first);
+        const auto tail_stop = add(first, add(size, taps - 1));
+        const auto output_first = std::max(crop_first, ceil_div(first, decimation));
+        const auto output_stop = std::min(crop_stop, ceil_div(tail_stop, decimation));
+        if (output_first < output_stop) chunks.push_back({first, size, output_first, output_stop});
+        first += size;
+    }
+    std::size_t reached = 0;
+    for (auto& chunk : chunks) {
+        chunk.own_first = std::clamp(reached, chunk.output_first, chunk.output_stop);
+        reached = std::max(reached, chunk.output_stop);
+    }
+    auto later = SIZE_MAX;
+    for (auto chunk = chunks.rbegin(); chunk != chunks.rend(); ++chunk) {
+        chunk->own_stop = std::max(chunk->own_first, std::min(chunk->output_stop, later));
+        later = std::min(later, chunk->output_first);
+    }
+    staged = 0;
+    for (auto& chunk : chunks) {
+        chunk.staged = staged;
+        staged = add(staged, add(chunk.head(), chunk.tail()));
+    }
+    return chunks;
+}
+
 class Projection {
 public:
     Projection(const Plan& plan, const native_fft::DoublePlan* fft, CoarseBulk* bulk,
@@ -756,6 +828,8 @@ public:
     }
     std::span<const double> taps() const { return taps_; }
     CoarseBulk* bulk() const { return bulk_; }
+    std::size_t decimation() const { return plan_.decimation; }
+    std::size_t fft_rows() const { return plan_.filter_fft; }
 
     template<class Fill>
     std::vector<Complex> apply(std::size_t total, std::size_t crop_first, std::size_t crop_rows,
@@ -771,36 +845,120 @@ public:
         std::vector<Complex> out(crop_rows), scratch(plan_.filter_fft);
         // Overlap-add complete finite convolution tails onto phase zero.
         // Only rows outside the requested output crop can be discarded.
-        const auto crop_stop = add(crop_first, crop_rows);
-        for (std::size_t first = 0; first < total;) {
+        std::size_t staged = 0;
+        for (const auto& chunk : fir_chunks(total, crop_first, crop_rows, plan_.decimation, taps_.size(), staged)) {
             check_stop(stop);
-            const auto size = std::min(chunk_samples, total - first);
-            const auto tail_stop = add(first, add(size, taps_.size() - 1));
-            const auto output_first = std::max(crop_first, ceil_div(first, plan_.decimation));
-            const auto output_stop = std::min(crop_stop, ceil_div(tail_stop, plan_.decimation));
-            if (output_first < output_stop) {
-                fill(first, std::span(scratch).first(size));
-                std::fill(scratch.begin() + size, scratch.end(), Complex{});
-                tracked_fft(scratch, false, *fft_, work, stop);
-                for (std::size_t i = 0; i < scratch.size(); ++i) scratch[i] *= spectrum_[i];
-                tracked_fft(scratch, true, *fft_, work, stop);
-                for (auto row = output_first; row < output_stop; ++row)
-                    out[row - crop_first] += scratch[row * plan_.decimation - first];
-                note(work.fir_input_rows, size);
-                note(work.fir_output_contributions, output_stop - output_first);
-            }
-            first += size;
+            filter_chunk(chunk, scratch, fill, work, stop);
+            for (auto row = chunk.output_first; row < chunk.output_stop; ++row)
+                out[row - crop_first] += scratch[row * plan_.decimation - chunk.first];
         }
         return out;
     }
 
+    // One chunk of the native overlap-add on any lane, in that lane's
+    // FFT-sized scratch. Its own rows are added to the zeroed output, which
+    // no other chunk writes; its shared rows are staged for combine_chunks.
+    // Results equal apply() bit for bit.
+    template<class Fill>
+    void apply_chunk(const FirChunk& chunk, std::size_t crop_first, Fill fill, std::span<Complex> out,
+                     std::span<Complex> staging, std::span<Complex> scratch, CoarseOperationCounts& work,
+                     std::stop_token stop) const {
+        require_coarse(!bulk_ && scratch.size() == plan_.filter_fft,
+                       "a native coarse FIR chunk requires its transform scratch");
+        check_stop(stop);
+        filter_chunk(chunk, scratch, fill, work, stop);
+        const auto value = [&](std::size_t row) { return scratch[row * plan_.decimation - chunk.first]; };
+        auto staged = staging.begin() + static_cast<std::ptrdiff_t>(chunk.staged);
+        for (auto row = chunk.output_first; row < chunk.own_first; ++row) *staged++ = value(row);
+        for (auto row = chunk.own_first; row < chunk.own_stop; ++row) out[row - crop_first] += value(row);
+        for (auto row = chunk.own_stop; row < chunk.output_stop; ++row) *staged++ = value(row);
+    }
+
+    // Adds every staged contribution in chunk order after all chunks finish.
+    static void combine_chunks(std::span<const FirChunk> chunks, std::size_t crop_first,
+                               std::span<const Complex> staging, std::span<Complex> out) {
+        for (const auto& chunk : chunks) {
+            auto staged = staging.begin() + static_cast<std::ptrdiff_t>(chunk.staged);
+            for (auto row = chunk.output_first; row < chunk.own_first; ++row) out[row - crop_first] += *staged++;
+            for (auto row = chunk.own_stop; row < chunk.output_stop; ++row) out[row - crop_first] += *staged++;
+        }
+    }
+
 private:
+    template<class Fill>
+    void filter_chunk(const FirChunk& chunk, std::span<Complex> scratch, Fill& fill,
+                      CoarseOperationCounts& work, std::stop_token stop) const {
+        fill(chunk.first, scratch.first(chunk.size));
+        std::fill(scratch.begin() + static_cast<std::ptrdiff_t>(chunk.size), scratch.end(), Complex{});
+        tracked_fft(scratch, false, *fft_, work, stop);
+        for (std::size_t i = 0; i < scratch.size(); ++i) scratch[i] *= spectrum_[i];
+        tracked_fft(scratch, true, *fft_, work, stop);
+        note(work.fir_input_rows, chunk.size);
+        note(work.fir_output_contributions, chunk.output_stop - chunk.output_first);
+    }
+
     const Plan& plan_;
     const native_fft::DoublePlan* fft_;
     std::vector<double> taps_;
     std::vector<Complex> spectrum_;
     CoarseBulk* bulk_;
     std::shared_ptr<const CoarseBulkFilter> device_filter_;
+};
+
+// The native observation filter as one job per overlap-add chunk, on any
+// lanes in any order. A lane keeps one FFT-sized scratch across its chunk
+// jobs, within its preparation charge, until release(). The job that
+// finishes last adds the staged overlap rows in chunk order, so the output
+// equals Projection::apply bit for bit.
+class ChunkedFilter {
+public:
+    ChunkedFilter(const Projection& projection, std::span<const Complex> iq, std::size_t crop_first,
+                  std::size_t crop_rows, unsigned lanes)
+        : projection_(projection), iq_(iq), crop_first_(crop_first),
+          chunks_(fir_chunks(iq.size(), crop_first, crop_rows, projection.decimation(), projection.taps().size(),
+                             staged_rows_)),
+          staging_(staged_rows_), work_(chunks_.size()), scratch_(std::max(1U, lanes)),
+          unfiltered_(chunks_.size()) {
+        require_coarse(!projection.bulk() && !chunks_.empty(), "coarse observation crop has no native filter chunk");
+    }
+
+    std::size_t jobs() const noexcept { return chunks_.size(); }
+    std::size_t staged_rows() const noexcept { return staged_rows_; }
+
+    // Filters one chunk into the zeroed crop on a lane below the count given
+    // at construction. Returns true for the job that completed the output.
+    bool run(unsigned lane, std::size_t job, std::span<Complex> out, std::stop_token stop) {
+        auto& scratch = scratch_.at(lane);
+        if (scratch.empty()) scratch.resize(projection_.fft_rows());
+        projection_.apply_chunk(chunks_.at(job), crop_first_, [this](std::size_t first, std::span<Complex> values) {
+            std::copy_n(iq_.begin() + static_cast<std::ptrdiff_t>(first), values.size(), values.begin());
+        }, out, staging_, scratch, work_[job], stop);
+        if (unfiltered_.fetch_sub(1, std::memory_order_acq_rel) != 1) return false;
+        check_stop(stop);
+        Projection::combine_chunks(chunks_, crop_first_, staging_, out);
+        return true;
+    }
+
+    // Frees a lane's scratch before that lane runs other preparation work.
+    // Only that lane's own jobs use it, one at a time.
+    void release(unsigned lane) { std::vector<Complex>().swap(scratch_.at(lane)); }
+
+    // The chunks' summed receipts, once the output is complete.
+    CoarseOperationCounts operations() const {
+        CoarseOperationCounts total;
+        for (const auto& work : work_) combine(total, work);
+        return total;
+    }
+
+private:
+    const Projection& projection_;
+    std::span<const Complex> iq_;
+    std::size_t crop_first_ = 0, staged_rows_ = 0;
+    std::vector<FirChunk> chunks_;
+    std::vector<Complex> staging_;
+    std::vector<CoarseOperationCounts> work_;
+    std::vector<std::vector<Complex>> scratch_;
+    std::atomic<std::size_t> unfiltered_;
 };
 
 std::array<double, 4> cubic_weights(double u) {
@@ -1394,16 +1552,20 @@ struct TemplateSynthesis {
     std::vector<CoarseTemplateColumn> columns;
     CoarseTemplateSource source;
 
-    // The exact route only. The coefficients and maps borrow the admitted
-    // storage of the native columns that they replace.
-    static bool covers(const Plan& plan) {
-        if (plan.source_step != 1 || plan.source_geometry.fine_cells > maximum_cells) return false;
+    // The exact route only, which the caller has established. The
+    // coefficients and maps borrow the admitted storage of the native
+    // columns that they replace. Empty when they fit.
+    static std::optional<CoarseSynthesisWithheld> withheld(const Plan& plan) {
+        require_coarse(plan.source_step == 1, "coarse template synthesis requires the exact source route");
+        if (plan.source_geometry.fine_cells > maximum_cells) return CoarseSynthesisWithheld::fine_cell_limit;
         const auto columns = mul(plan.workspaces(), plan.ray_count);
         const auto keyed = mul(mul(lanes, static_cast<std::size_t>(plan.source_geometry.fine_cells)),
                                3 * sizeof(std::complex<float>));
         const auto description = add(mul(columns, sizeof(CoarseTemplateColumn) + sizeof(CoarseTemplateGram)),
                                      pulse_samples * sizeof(float));
-        return add(keyed, description) <= mul(mul(columns, plan.layout.nfft), sizeof(Complex));
+        if (add(keyed, description) > mul(mul(columns, plan.layout.nfft), sizeof(Complex)))
+            return CoarseSynthesisWithheld::description_storage;
+        return std::nullopt;
     }
 
     TemplateSynthesis(const Plan& plan, const ReceiverConfig& config, const ReceiverSlotPlan& slot,
@@ -1469,24 +1631,26 @@ struct TemplateSynthesis {
         std::vector<CoarseTemplateColumn>().swap(columns);
     }
 
-    // One keyed source per epoch and bit, as the native bank uses.
+    // One keyed source per epoch and bit, as the native bank uses. The
+    // lanes are independent and fill disjoint coefficients, one leaf each.
     void key_lanes(const ReceiverSlotPlan& slot, const Crypto& key, CoarseOperationCounts& work,
-                   std::stop_token stop) {
-        for (std::size_t lane = 0; lane < source.lanes; ++lane) {
-            check_stop(stop);
+                   std::stop_token stop, const LaneWave& wave) {
+        check_stop(stop);
+        wave(source.lanes, [&](std::size_t lane, std::stop_token job_stop) {
+            check_stop(job_stop);
             auto format = slot.format;
             format.epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(format.epoch) +
                                                       receiver_epoch_offsets[lane / 2]);
             PatternSource keyed(format, key, static_cast<std::uint8_t>(lane % 2));
             auto* destination = chips.data() + lane * source.cells * 3;
             for (std::size_t cell = 0; cell < source.cells; ++cell) {
-                if ((cell & 4095U) == 0) check_stop(stop);
+                if ((cell & 4095U) == 0) check_stop(job_stop);
                 const auto chip = keyed.pattern_coefficient_at(cell);
                 for (std::size_t carrier = 0; carrier < 3; ++carrier)
                     destination[cell * 3 + carrier] = static_cast<std::complex<float>>(chip[carrier]);
             }
-            note(work.source_render_calls, 1);
-        }
+        });
+        note(work.source_render_calls, source.lanes);
     }
 };
 
@@ -2675,7 +2839,16 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
     }
     // The observation filter is one more job beside the workspaces. Its
     // FFT-sized scratch likewise covers the compiled FIR's first host chunk.
-    const auto filter_job = storage(add(layout.crop_rows, plan.filter_fft));
+    // Native chunk jobs instead hold that scratch on the lanes charged
+    // below. Their staged overlap rows, chunk receipts and per-lane scratch
+    // handles take its place.
+    std::size_t staged_filter_rows = 0;
+    const auto filter_chunks = fir_chunks(plan.capture_rows, layout.crop_first, layout.crop_rows, plan.decimation,
+                                          plan.taps, staged_filter_rows).size();
+    auto chunk_state = add(storage(staged_filter_rows),
+                           mul(filter_chunks, sizeof(FirChunk) + sizeof(CoarseOperationCounts)));
+    chunk_state = add(chunk_state, add(sizeof(ChunkedFilter), mul(workers, sizeof(std::vector<Complex>))));
+    const auto filter_job = add(storage(layout.crop_rows), std::max(storage(plan.filter_fft), chunk_state));
     // The owner runs one serial chain and its waves. Beside the mapped
     // gate's epochs, an overlapped acquisition holds one lane of its own.
     const auto preparation_jobs = add(add(plan.workspaces(), 1), !phases ? overlapped.widest_wave :
@@ -2744,7 +2917,12 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
     const auto legacy = bulk_lag || (bulk_frequency && !frequency) ? config.bulk_backend->coarse_host_bytes(
         bulk_lag ? nfft : frequency_fft,
         std::max(bulk_frequency && !frequency ? tile : 0, bulk_lag ? lag_points : 0), layout.lag_count) : 0;
-    const auto bulk_host = add(persistent, std::max(legacy, frequency ? frequency->host_workspace_bytes : 0));
+    // A device segmented search holds its admission only before the
+    // frequency search admits its own.
+    const auto segmented_host = bulk_frequency ?
+        config.bulk_backend->segmented_host_bytes(device_segmented_shapes(plan, config)) : 0;
+    const auto bulk_host = add(persistent, std::max({legacy, frequency ? frequency->host_workspace_bytes : 0,
+                                                     segmented_host}));
     // Varying proposals borrow each already-isolated time-domain
     // template before the coherent search consumes it. Its own transform
     // and observation, and one private product/arrival row per live job,
@@ -3748,7 +3926,7 @@ struct CoarseSession::Impl {
          std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
          const FrequencyAssistance* assistance,
          unsigned workers, std::size_t limit, std::stop_token outer_stop, ReceiverExecutor* shared,
-         MidpointTimingEvaluation midpoint_evaluation)
+         MidpointTimingEvaluation midpoint_evaluation, CoarseInputCheck input_check)
         : config(config), slot(slot),
           owned_executor(shared ? nullptr : std::make_unique<ReceiverExecutor>(std::max(1U, workers))),
           executor(shared ? *shared : *owned_executor), external_stop(outer_stop, PropagateStop{cancellation}) {
@@ -3788,8 +3966,9 @@ struct CoarseSession::Impl {
         const bool route_open = overlapped && lag_group_limit(geometry, workspace.exact_chirp) != 0;
         bool lag = !overlapped && work.route == CoarseRoute::lag_groups;
 
-        // Check every borrowed sample, including those beyond the finite crop.
-        for (std::size_t i = 0; i < iq.size(); ++i) {
+        // Check every borrowed sample, including those beyond the finite crop,
+        // unless the caller has already rejected nonfinite input in it.
+        for (std::size_t i = 0; input_check == CoarseInputCheck::scan && i < iq.size(); ++i) {
             if ((i & (chunk_samples - 1)) == 0) check_stop(stop);
             require_coarse(std::isfinite(iq[i].real()) && std::isfinite(iq[i].imag()), "coarse receiver requires finite input");
         }
@@ -3838,18 +4017,26 @@ struct CoarseSession::Impl {
             if (!bulk || !bulk->supports_fir()) {
                 // A frequency route transforms at most layout.nfft rows. A
                 // transform's result does not depend on its plan's length.
-                const auto fft_rows = fused_float ? geometry.filter_fft :
+                // A compiled frequency search leaves only the native filter,
+                // and any declined bank's projections, on this plan.
+                const bool filter_only = fused_float ||
+                    (bulk && !lag && !route_open && geometry.source_step == 1);
+                const auto fft_rows = filter_only ? geometry.filter_fft :
                     std::max({layout.nfft, geometry.filter_fft, geometry.fidelity_layout.nfft,
                               overlapped ? 0 : work.correlation_fft_rows});
                 fft = std::make_unique<native_fft::DoublePlan>(fft_rows, stop);
             }
+            // Segmented scoring does not depend on device FIR. Its admission
+            // precedes every other device stage of the session, and the bank
+            // stage ends it. The guard also ends it if setup or the stage throws.
+            const auto segmented_shapes = bulk ? device_segmented_shapes(geometry, config)
+                                               : std::vector<CoarseSegmentedShape>{};
+            const SegmentedAdmission segmented_admission(segmented_shapes.empty() ? nullptr : bulk.get());
+            if (!segmented_shapes.empty()) {
+                bulk->plan_segmented(segmented_shapes);
+                bulk->begin_segmented(stop);
+            }
             if (bulk && bulk->supports_fir()) {
-                if (geometry.segmented_timing.blocks && config.random_doppler_width_hz == 0 &&
-                    config.native_coarse_precision != NativeCoarsePrecision::fp64) {
-                    const std::array shapes{segmented_shape(layout, geometry.segmented_timing),
-                                            segmented_shape(layout, geometry.faster_timing)};
-                    bulk->plan_segmented(std::span(shapes).first(geometry.faster_timing.blocks ? 2 : 1));
-                }
                 const auto mapped_filters = geometry.source_step > 1 ? MappedProjection::phase_count(geometry) : 0;
                 bulk->begin_fir_projection(geometry.filter_fft, 1 + mapped_filters, layout.crop_rows, stop);
             }
@@ -3863,13 +4050,20 @@ struct CoarseSession::Impl {
             receipt.filter_setup.wall_seconds += elapsed(setup);
             if (fused_float) float_fft = std::make_unique<native_fft::FloatPlan>(layout.nfft, stop);
             // A backend may render the exact bank from its keyed coefficients
-            // when no native stage reads the time-domain columns.
+            // when no native stage reads the time-domain columns. Otherwise
+            // it learns which condition withheld the offer.
             std::optional<TemplateSynthesis> synthesis;
-            if (bulk && !lag && !route_open && !mapped && !geometry.varying_passband && !midpoint_geometry &&
-                TemplateSynthesis::covers(geometry)) {
-                synthesis.emplace(geometry, config, slot, projection.taps());
-                if (!bulk->supports_template_synthesis(bulk_geometry(1), geometry.workspaces(), synthesis->source))
-                    synthesis.reset();
+            if (bulk) {
+                using enum CoarseSynthesisWithheld;
+                const auto withheld = lag || route_open ? std::optional(lag_group_route) :
+                    mapped ? std::optional(mapped_profile) : midpoint_geometry ? std::optional(midpoint_gain) :
+                    geometry.varying_passband ? std::optional(varying_passband) : TemplateSynthesis::withheld(geometry);
+                if (withheld) bulk->withhold_template_synthesis(*withheld);
+                else {
+                    synthesis.emplace(geometry, config, slot, projection.taps());
+                    if (!bulk->supports_template_synthesis(bulk_geometry(1), geometry.workspaces(), synthesis->source))
+                        synthesis.reset();
+                }
             }
             prepare(key, iq, projection, mapped ? &*mapped : nullptr,
                     !bulk && !lag && !split_bank && !fused_float && !route_open ? fft.get() : nullptr, workers, stop,
@@ -3954,7 +4148,8 @@ struct CoarseSession::Impl {
     // The owner has one serial chain. The gate's controls take it when there
     // is a gate, and acquisition then runs whole on a lane of its own.
     // Otherwise the owner acquires and its waves use these lanes.
-    // The filter stays one job: its large transforms do not scale with lanes.
+    // Beside a device-rendered bank the native filter's overlap-add chunks
+    // are independent jobs, and their ordered sum equals the serial filter.
     // A slot fails as the sequential order would whenever only acquisition
     // or only preparation fails. Should both fail, either can be reported.
     void prepare(const Crypto& key, std::span<const Complex> iq, const Projection& projection,
@@ -3986,14 +4181,35 @@ struct CoarseSession::Impl {
         PhaseSpan varying_span(origin);
         std::optional<DifferentialSearch> differential;
         if (geometry.varying_passband) differential.emplace(geometry, slot, config, varying_span, stop,
-            midpoint_geometry ? &*midpoint_geometry : nullptr, projection.bulk());
-        const auto filter = [&](std::stop_token job_stop) {
-            observation = projection.apply(iq.size(), layout.crop_first, layout.crop_rows,
-                [&](std::size_t first, std::span<Complex> values) {
-                    std::copy_n(iq.begin() + first, values.size(), values.begin());
-                }, receipt.observation.operations, job_stop);
+            midpoint_geometry ? &*midpoint_geometry : nullptr, bulk.get());
+        const auto copy = [&](std::size_t first, std::span<Complex> values) {
+            std::copy_n(iq.begin() + first, values.size(), values.begin());
+        };
+        const auto observed = [&](std::stop_token job_stop) {
             if (differential) differential->prepare(observation, projection.variance(config.noise_variance), job_stop);
         };
+        // Beside a device-rendered bank the lanes would otherwise idle, so
+        // the native filter is one job per overlap-add chunk there. The last
+        // chunk to finish adds the staged overlap rows in chunk order. Beside
+        // native bank jobs, which fill the lanes, it stays one job, as does a
+        // compiled FIR, whose device context serializes the chunks.
+        std::optional<ChunkedFilter> chunked;
+        if (device_bank && !projection.bulk()) {
+            chunked.emplace(projection, iq, layout.crop_first, layout.crop_rows, workers);
+            observation.assign(layout.crop_rows, Complex{});
+        }
+        const auto filter = [&](unsigned lane, std::size_t job, std::stop_token job_stop) {
+            if (!chunked) {
+                observation = projection.apply(iq.size(), layout.crop_first, layout.crop_rows, copy,
+                                               receipt.observation.operations, job_stop);
+                observed(job_stop);
+                return;
+            }
+            if (!chunked->run(lane, job, observation, job_stop)) return;
+            combine(receipt.observation.operations, chunked->operations());
+            observed(job_stop);
+        };
+        const auto filter_jobs = chunked ? chunked->jobs() : std::size_t{1};
         const bool retain_gain_columns = midpoint_geometry && midpoint_geometry->gain.block_rows;
         BankJobs bank_jobs(geometry, config, slot, key, projection, mapped, spectrum_fft,
                            float_fft.get(), q15_products, workers, differential ? &*differential : nullptr,
@@ -4004,11 +4220,14 @@ struct CoarseSession::Impl {
         const bool device_fir = projection.bulk() != nullptr;
         const bool fidelity = mapped && !bulk;
         const std::size_t acquisitions = acquisition && fidelity ? 1 : 0;
-        const auto serial = acquisitions + 1;
+        const auto serial = acquisitions + filter_jobs;
         const auto jobs = add(bank_jobs.size(), serial);
         const auto widest_wave = fidelity ? receiver_epoch_offsets.size() :
                                  acquisition ? acquisition->bound.widest_wave : 0;
-        const auto lane_limit = std::min<std::size_t>(workers, device_fir ? lanes : add(jobs, widest_wave));
+        // Filter chunks share the lanes that one filter job admitted, so
+        // the workspace quote's lane count is unchanged.
+        const auto lane_limit = std::min<std::size_t>(workers, device_fir ? lanes :
+            add(add(bank_jobs.size(), acquisitions + 1), widest_wave));
         PhaseSpan bank_span(origin), observation_span(origin);
         // The owner's waves are urgent leaves, indexed from each wave's first.
         const LaneJob* wave_job = nullptr;
@@ -4017,16 +4236,19 @@ struct CoarseSession::Impl {
         {
             ReceiverExecutor::Stage stage(executor, slot.index, static_cast<unsigned>(lane_limit), stop,
                 [&](unsigned, std::size_t index, std::stop_token job_stop) { (*wave_job)(index - posted, job_stop); },
-                [&](unsigned, std::size_t job, std::stop_token job_stop) {
+                [&](unsigned lane, std::size_t job, std::stop_token job_stop) {
                     if (job < acquisitions) {
                         acquired = acquisition->acquire({}, job_stop);
                         return;
                     }
                     if (job < serial) {
                         const PhaseSpan::Scope scope(observation_span);
-                        filter(job_stop);
+                        filter(lane, job - acquisitions, job_stop);
                         return;
                     }
+                    // A declined device bank's native jobs follow every
+                    // claimed chunk job and need this lane's whole charge.
+                    if (chunked) chunked->release(lane);
                     const PhaseSpan::Scope scope(bank_span);
                     bank_jobs.run(job - serial, job_stop);
                 });
@@ -4048,7 +4270,7 @@ struct CoarseSession::Impl {
                     bool retained = false;
                     {
                         const PhaseSpan::Scope scope(bank_span);
-                        device_bank->key_lanes(slot, key, receipt.template_bank.operations, stage_stop);
+                        device_bank->key_lanes(slot, key, receipt.template_bank.operations, stage_stop, wave);
                         retained = bulk->synthesize_templates(bulk_geometry(1), device_bank->source, grams,
                                                               operations, stage_stop);
                     }
@@ -4080,6 +4302,12 @@ struct CoarseSession::Impl {
             }
             stage.wait_background(released);
         }
+        // Every segmented call has returned. Its device admission ends
+        // before the frequency search admits its own.
+        if (bulk) bulk->end_segmented();
+        // The stage drained every chunk job. Free their lane scratch and
+        // staging before the work that follows preparation.
+        chunked.reset();
         if (acquisitions) plan_search(acquired);
         if (device_bank) {
             // The device retains the columns. Selection needs only each
@@ -4328,15 +4556,16 @@ struct CoarseSession::Impl {
 CoarseSession::CoarseSession(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                              std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
                              unsigned workers, std::size_t limit, std::stop_token stop, ReceiverExecutor* executor,
-                             MidpointTimingEvaluation midpoint_timing)
-    : impl_(std::make_unique<Impl>(config, slot, key, iq, intervals, nullptr, workers, limit, stop, executor, midpoint_timing)) {}
+                             MidpointTimingEvaluation midpoint_timing, CoarseInputCheck input_check)
+    : impl_(std::make_unique<Impl>(config, slot, key, iq, intervals, nullptr, workers, limit, stop, executor,
+                                   midpoint_timing, input_check)) {}
 
 CoarseSession::CoarseSession(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                              std::span<const Complex> iq, const FrequencyAssistance& assistance,
                              unsigned workers, std::size_t limit, std::stop_token stop, ReceiverExecutor* executor,
-                             MidpointTimingEvaluation midpoint_timing)
+                             MidpointTimingEvaluation midpoint_timing, CoarseInputCheck input_check)
     : impl_(std::make_unique<Impl>(config, slot, key, iq, std::span<const FrequencyInterval>{}, &assistance,
-                                   workers, limit, stop, executor, midpoint_timing)) {}
+                                   workers, limit, stop, executor, midpoint_timing, input_check)) {}
 
 CoarseSession::~CoarseSession() = default;
 CoarseSession::CoarseSession(CoarseSession&&) noexcept = default;
@@ -4480,15 +4709,62 @@ CoarseResult complete(CoarseSession session) {
 CoarseResult score_coarse(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                           std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
                           unsigned workers, std::size_t scratch_limit_bytes, std::stop_token stop,
-                          ReceiverExecutor* executor, MidpointTimingEvaluation midpoint_timing) {
-    return complete(CoarseSession(config, slot, key, iq, intervals, workers, scratch_limit_bytes, stop, executor, midpoint_timing));
+                          ReceiverExecutor* executor, MidpointTimingEvaluation midpoint_timing,
+                          CoarseInputCheck input_check) {
+    return complete(CoarseSession(config, slot, key, iq, intervals, workers, scratch_limit_bytes, stop, executor,
+                                  midpoint_timing, input_check));
 }
 
 CoarseResult score_coarse(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                           std::span<const Complex> iq, const FrequencyAssistance& assistance,
                           unsigned workers, std::size_t scratch_limit_bytes, std::stop_token stop,
-                          ReceiverExecutor* executor, MidpointTimingEvaluation midpoint_timing) {
-    return complete(CoarseSession(config, slot, key, iq, assistance, workers, scratch_limit_bytes, stop, executor, midpoint_timing));
+                          ReceiverExecutor* executor, MidpointTimingEvaluation midpoint_timing,
+                          CoarseInputCheck input_check) {
+    return complete(CoarseSession(config, slot, key, iq, assistance, workers, scratch_limit_bytes, stop, executor,
+                                  midpoint_timing, input_check));
+}
+
+CoarseFirChunkTrial coarse_fir_chunk_trial(std::span<const Complex> iq, std::size_t decimation, std::size_t taps,
+                                           std::size_t crop_first, std::size_t crop_rows, unsigned workers,
+                                           std::uint64_t seed) {
+    require_coarse(!iq.empty() && decimation && taps >= 3 && crop_rows && workers,
+                   "coarse FIR chunk trial geometry is invalid");
+    Plan plan;
+    plan.fs = 240 * decimation;
+    plan.decimation = decimation;
+    plan.taps = taps;
+    plan.pass_edge = 40;
+    plan.stop_edge = 80;
+    plan.filter_fft = std::bit_ceil(add(chunk_samples, taps - 1));
+    const native_fft::DoublePlan fft(plan.filter_fft);
+    CoarseOperationCounts setup;
+    const Projection projection(plan, &fft, nullptr, setup, {});
+    CoarseFirChunkTrial trial;
+    trial.serial = projection.apply(iq.size(), crop_first, crop_rows, [&](std::size_t first, std::span<Complex> values) {
+        std::copy_n(iq.begin() + static_cast<std::ptrdiff_t>(first), values.size(), values.begin());
+    }, trial.operations[0], {});
+    {
+        ChunkedFilter filter(projection, iq, crop_first, crop_rows, workers);
+        trial.chunks = filter.jobs();
+        trial.staged_rows = filter.staged_rows();
+        trial.lanes.assign(crop_rows, Complex{});
+        std::atomic<std::size_t> completions = 0;
+        ReceiverExecutor executor(workers);
+        executor.parallel(0, filter.jobs(), workers, {}, [&](unsigned lane, std::size_t job, std::stop_token stop) {
+            if (filter.run(lane, job, trial.lanes, stop)) ++completions;
+        });
+        trial.operations[1] = filter.operations();
+        trial.completions = completions;
+    }
+    ChunkedFilter filter(projection, iq, crop_first, crop_rows, 1);
+    std::vector<std::size_t> order(filter.jobs());
+    std::iota(order.begin(), order.end(), std::size_t{0});
+    std::mt19937_64 random(seed);
+    std::shuffle(order.begin(), order.end(), random);
+    trial.shuffled.assign(crop_rows, Complex{});
+    for (const auto job : order) trial.completions += filter.run(0, job, trial.shuffled, {}) ? 1 : 0;
+    trial.operations[2] = filter.operations();
+    return trial;
 }
 
 } // namespace datapump::triad::v3::receiver_detail

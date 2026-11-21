@@ -123,7 +123,10 @@ Current overlap, all on one admitted lane/scratch shape per owner:
   each target's frequency refinement and the branch filters. Every job records
   its own outcome, and the owner replays them in index order.
 - Coarse preparation runs the observation filter and the mapped-profile gate's
-  serial controls beside the template bank's per-workspace jobs.
+  serial controls beside the template bank's per-workspace jobs. Beside a
+  device-rendered bank, whose jobs leave the lanes idle, the native filter
+  runs as one job per overlap-add chunk, and the 26 keyed lanes of the
+  device bank's coefficients are an urgent wave instead of owner work.
 - A slot whose lease has room for both starts coarse preparation before the
   frequency grid is known and acquires beside it. The owner acquires and posts
   its waves on the preparation stage. Where the mapped-profile gate needs the
@@ -139,8 +142,11 @@ Current overlap, all on one admitted lane/scratch shape per owner:
   diagnostic overlap does not describe ordinary production service.
 - With compiled resident fine statistics the fixed-affine maps of a whole
   window of dispatches are known in advance. The owner submits the window as
-  one device call while a lane projects the next window's observations and
-  the lanes advance the states of the previous window. Each state advances
+  one device call while lanes project the next window's observations, one
+  leaf per dispatch where every lane owns transform scratch, and the lanes
+  advance the states of the previous window. The owner places that window's
+  blocks before release and adds their mode and quiet-energy receipts in
+  public order after. Each state advances
   through a window's dispatches in public order as one urgent leaf, and the
   owner then closes those dispatches in order. A native block inside the
   next window posts its leaves behind the running state leaves. The adaptive
@@ -156,13 +162,24 @@ Keep these properties when changing a stage:
 - Bound lookahead by memory and charge it. Observation runs one dispatch
   ahead. An admitted resident window holds three windows of observations
   and two of statistics: the states of one window advance while the owner
-  submits the next and a lane projects the one after.
+  submits the next and lanes project the one after.
   Tile fills run about two tiles ahead, and stay on demand for a fine bank of
   more than 16 coordinates, whose fills ahead could displace live tiles.
 - Do not spread one memory-bound serial job across lanes without a measurement.
-  Splitting the observation filter's large transforms into parallel chunks
-  raised CPU 70–95% with no elapsed gain under the earlier transform, so it
-  remains one overlapped job.
+  Beside native bank jobs, splitting the observation filter's large
+  transforms into parallel chunks raised CPU 70–95% with no elapsed gain
+  under the earlier transform, so there it remains one overlapped job.
+  Beside a device-rendered bank the other lanes idle, so that route now
+  splits it. The evidence is a CPU-route shadow replay on the 5650U, which
+  has no NVIDIA device: with the matched geometry (decimation 25, 1,705
+  taps, 74 used chunks of 16,384 rows) and the other lanes idle, 74 chunk
+  jobs with an ordered add took 10.3 ms at 24 workers and 13.8 ms at 4,
+  against 47–50 ms for the one job, with byte-identical output. The
+  elapsed gain on the dense device route itself stays unverified until a
+  matched Blackwell run. Reconsider the native-bank route only with a fresh
+  CPU-seconds and elapsed comparison under the current AVX2 transform.
+- An overlap-add row that several chunks reach is summed in chunk order:
+  the chunk staging it, never the lane finishing first, sets the order.
 - Keep a lock that a leaf takes per lookup shared. With `W=2*H` a holder is
   regularly preempted, and every lane then queues behind an exclusive one;
   this stalled up to 18 lanes on the mapped-basis tile cache.

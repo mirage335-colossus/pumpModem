@@ -137,6 +137,15 @@ struct ReceiverSlotScore {
     double varying_coarse_seconds = 0, varying_fine_seconds = 0;
     std::size_t varying_timing_blocks = 0, varying_timing_frequencies = 0;
     std::string varying_timing_status;
+    // The coarse search's raw changing-channel timing proposals, in their
+    // selection order before fine-grid snapping. A diagnostic receipt that
+    // lets equivalent coarse scorers be compared; the public cap is eight.
+    struct TimingProposal {
+        std::int64_t epoch_offset_seconds = 0;
+        double arrival_seconds = 0, frequency_hz = 0, clock_ppm = 0;
+    };
+    std::size_t varying_timing_proposal_count = 0;
+    std::array<TimingProposal, 8> varying_timing_proposals{};
     std::string midpoint_timing_status, midpoint_timing_precision;
     std::size_t midpoint_timing_lags = 0, midpoint_timing_candidates = 0, midpoint_timing_workspace_bytes = 0;
     std::uint64_t midpoint_timing_basis_rows = 0, midpoint_timing_widened_inverses = 0, midpoint_timing_scored_lags = 0;
@@ -177,6 +186,8 @@ struct ReceiverSlotScore {
     std::string coherent_gain_status;
     std::size_t varying_quiet_modes = 0;
     double varying_quiet_energy = 0, varying_quiet_threshold = 0;
+    // Elapsed time of the varying quiet-aperture re-projection on the slot's lanes.
+    double varying_quiet_seconds = 0;
     std::string varying_quiet_status;
     double varying_line_frequency_hz = 0, varying_line_log_evidence = 0;
     std::size_t drift_timing_atoms = 0, drift_slopes = 0, drift_frequency_bins = 0;

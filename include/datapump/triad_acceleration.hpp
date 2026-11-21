@@ -58,6 +58,11 @@ enum class VulkanCoarsePrecision {
 enum class VulkanFineProjection {
     automatic, native, opencl_nvfp4, opencl_resident_nvfp4, opencl_resident_fft
 };
+// The changing-channel segmented timing search. Automatic scores the shapes
+// qualified for the selected device class there; device scores every shape
+// the device and workspace admit, for qualification; native keeps the CPU
+// scorer. Unadmitted shapes stay native and are reported as fallbacks.
+enum class VulkanSegmentedTiming { automatic, device, native };
 
 struct VulkanReceiverOptions {
     unsigned device_index = 0;
@@ -73,6 +78,7 @@ struct VulkanReceiverOptions {
     // FP64. Otherwise selected automatically when FP64/INT64 is unavailable.
     bool force_host_scoring = false;
     VulkanFineProjection fine_projection = VulkanFineProjection::automatic;
+    VulkanSegmentedTiming segmented_timing = VulkanSegmentedTiming::automatic;
     // Record OpenCL device command intervals in the receipt. Developer
     // probes use this to separate Tensor Core time from complete service.
     bool profile_opencl = false;
@@ -93,6 +99,21 @@ struct VulkanReceiverOptions {
     // resident fine batch while staging the next ones, up to 64. Zero stages
     // a whole batch before the device starts, as a matched control.
     std::size_t opencl_fine_stream_blocks = 4;
+    // Render resident fine tiles and map their columns with FP32 arithmetic,
+    // keeping FP64 tiles, time base and support decisions and exact
+    // fixed-point coordinates and phase. Off runs the FP64 kernels of the
+    // same module as a control. Qualified on a full RTX PRO 6000.
+    bool opencl_fine_fp32 = true;
+    // Rescore the retained arrivals of the OpenCL coarse search with FP32
+    // partial sums of 64 rows added in FP64. Off accumulates every product
+    // in FP64 as a control. Qualified on the same device.
+    bool opencl_coarse_fp32_rescore = true;
+    // Let automatic selection score one-ray sessions (Spread None) with the
+    // dense FP4 search, within its measured cost bound. Off keeps their FFT
+    // sessions and counts them as one-ray-unqualified. Qualified on the same
+    // device against the FFT session. An explicit nvfp4 request always
+    // scores them.
+    bool opencl_coarse_one_ray = true;
 };
 
 // Optional Vulkan broad-frequency search and Blackwell OpenCL fine projection.
@@ -112,6 +133,10 @@ public:
 
 struct GpuReceiverOptions {
     bool fp32_minimum = false;
+    // VulkanReceiverOptions::opencl_coarse_one_ray for a selected Vulkan
+    // backend. The GUI and the probe take this default, so qualification
+    // flips the VulkanReceiverOptions default alone.
+    bool opencl_coarse_one_ray = VulkanReceiverOptions{}.opencl_coarse_one_ray;
 };
 
 // Shared GUI and probe entry point. Prefer native CUDA where compiled and

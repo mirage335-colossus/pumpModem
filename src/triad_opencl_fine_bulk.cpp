@@ -73,7 +73,9 @@ constexpr std::array fine_counters{
     &BulkReceipt::opencl_resident_dispatches, &BulkReceipt::opencl_resident_blocking_writes,
     &BulkReceipt::opencl_resident_async_writes,
     &BulkReceipt::opencl_resident_mapping_dispatches, &BulkReceipt::opencl_resident_rendered_tiles,
-    &BulkReceipt::opencl_resident_keyed_lanes, &BulkReceipt::opencl_resident_reduced_windows};
+    &BulkReceipt::opencl_resident_keyed_lanes, &BulkReceipt::opencl_resident_reduced_windows,
+    &BulkReceipt::opencl_resident_fp32_mapped_columns, &BulkReceipt::opencl_resident_fp64_mapped_columns,
+    &BulkReceipt::opencl_resident_fp32_rendered_tiles, &BulkReceipt::opencl_resident_fp64_rendered_tiles};
 constexpr std::array fine_intervals{
     &BulkReceipt::opencl_resident_host_source_seconds, &BulkReceipt::opencl_resident_host_staging_seconds,
     &BulkReceipt::opencl_resident_host_transfer_seconds, &BulkReceipt::opencl_resident_host_wait_seconds,
@@ -179,6 +181,15 @@ public:
         delta.tile_hits = total.tile_hits;
         delta.mapped_columns = total.mapped_columns;
         delta.mapped_values = total.mapped_columns * fine_rows;
+        // The session's kernels name the arithmetic of every mapped column
+        // and rendered tile.
+        if (options_.arithmetic == OpenClFineArithmetic::fp32) {
+            delta.opencl_resident_fp32_mapped_columns = total.mapped_columns;
+            delta.opencl_resident_fp32_rendered_tiles = total.rendered_tiles;
+        } else {
+            delta.opencl_resident_fp64_mapped_columns = total.mapped_columns;
+            delta.opencl_resident_fp64_rendered_tiles = total.rendered_tiles;
+        }
         delta.direct_values = total.direct_columns * fine_rows;
         if (options_.method == OpenClFineMethod::resident_fp4) {
             delta.opencl_resident_nvfp4_modes = modes;
@@ -327,7 +338,8 @@ private:
     // held; `leased` then tells a failed allocation from a refused lease.
     std::unique_ptr<OpenClNvfp4Projection> lease_projection(std::span<const std::size_t> bins, std::size_t blocks,
             std::size_t cells, std::size_t lanes, std::size_t& bytes, bool& leased) {
-        const OpenClResidentOptions shape{blocks, cells, lanes, options_.profile, stream_blocks(options_)};
+        OpenClResidentOptions shape{blocks, cells, lanes, options_.profile, stream_blocks(options_)};
+        shape.arithmetic = options_.arithmetic;
         bytes = OpenClNvfp4Projection::workspace(fine_rows, fine_modes, blocks * fine_lanes, options_.method,
                                                  shape).device_bytes;
         leased = host_->try_lease(bytes);
@@ -427,6 +439,7 @@ std::size_t opencl_fine_host_bytes(const OpenClFineOptions& options) {
         return staging + OpenClNvfp4Projection::workspace(fine_rows, fine_modes, fine_lanes).host_bytes;
     // The largest keyed source a session may render bounds its staging.
     OpenClResidentOptions shape{window_blocks(options), 0, 0, options.profile, stream_blocks(options)};
+    shape.arithmetic = options.arithmetic;
     if (options.device_tiles) {
         shape.tile_lanes = maximum_tile_lanes;
         shape.tile_cells = maximum_tile_cells;

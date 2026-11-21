@@ -30,6 +30,26 @@ inline constexpr std::array<std::string_view, 11> bulk_half_fft_fallback_reasons
     "plan-allocation", "allocator-limit"
 };
 
+// Receiver conditions that withhold template synthesis from a frequency-tile
+// session: its route may become lag groups, a mapped profile or a varying
+// passband reads the native columns, or the keyed description exceeds its
+// cell bound or the native bank storage that it borrows.
+enum class CoarseSynthesisWithheld : std::uint8_t {
+    lag_group_route, mapped_profile, midpoint_gain, varying_passband, fine_cell_limit, description_storage
+};
+
+// Why a dense OpenCL coarse session handed its search to the session it
+// wraps, one count per session. The withheld conditions come first, in
+// their enum order; the rest are the dense session's own admission, and
+// "unoffered" a session prepared with native columns and no stated reason.
+// tools/triad_native.py validates receipts against these names.
+inline constexpr std::array<std::string_view, 17> opencl_coarse_fallback_reasons{
+    "lag-group-route", "mapped-profile", "midpoint-gain", "varying-passband", "fine-cell-limit",
+    "description-storage", "device-templates-off", "few-arrivals", "one-ray-unqualified", "dense-cost",
+    "keyed-chip-limit", "kernel-extent", "workspace-lease", "host-allocation", "device-allocation",
+    "ill-conditioned-template", "unoffered"
+};
+
 struct BulkReceipt {
     std::string device, device_name, library_version, precision, requested_coarse_math;
     std::optional<std::array<std::uint8_t,16>> device_uuid;
@@ -62,6 +82,21 @@ struct BulkReceipt {
     std::uint64_t cuda_segmented_sessions = 0, cuda_segmented_forward_ffts = 0;
     std::uint64_t cuda_segmented_inverse_ffts = 0, cuda_segmented_score_rows = 0;
     std::uint64_t cuda_segmented_native_fallbacks = 0;
+    // The same grid on Vulkan: VkFFT FP32 transforms with FP32 twiddle
+    // tables, FP64 ranks and FP32 tracking states. Sessions count workspace
+    // calls that submitted device work, credited after validated readback.
+    // Planned shapes are those offered to the sessions. A declined call is a
+    // shape the selection policy left native (requested, unqualified device
+    // or shape, missing FP64 shaders); a native fallback is a call the device
+    // was selected for but could not score (workspace, unsupported transform
+    // configuration, nonfinite block energy). The first reason of each is kept.
+    std::uint64_t vulkan_segmented_sessions = 0, vulkan_segmented_forward_ffts = 0;
+    std::uint64_t vulkan_segmented_inverse_ffts = 0, vulkan_segmented_score_rows = 0;
+    std::uint64_t vulkan_segmented_planned_shapes = 0, vulkan_segmented_declined_calls = 0;
+    std::uint64_t vulkan_segmented_native_fallbacks = 0;
+    std::string vulkan_segmented_decline_reason, vulkan_segmented_fallback_reason;
+    // The device class on which automatic selection admits qualified shapes.
+    bool vulkan_segmented_qualified_device = false;
     // Physical cuFFT transforms include padded rows. Score rows count only
     // validated results on the public grid, with no padded hypotheses.
     std::uint64_t cuda_half_fft_forward_ffts = 0, cuda_half_fft_inverse_ffts = 0;
@@ -115,6 +150,11 @@ struct BulkReceipt {
     // that ran in smaller batches than their session admitted because the
     // device lease for the whole window was refused.
     std::uint64_t opencl_resident_window_blocks = 0, opencl_resident_reduced_windows = 0;
+    // Resident columns mapped and dense tiles rendered by the FP32 kernels,
+    // with fixed-point coordinates and phase and FP32 interpolation, sums and
+    // rotation, and by the FP64 control kernels.
+    std::uint64_t opencl_resident_fp32_mapped_columns = 0, opencl_resident_fp64_mapped_columns = 0;
+    std::uint64_t opencl_resident_fp32_rendered_tiles = 0, opencl_resident_fp64_rendered_tiles = 0;
     // Present for a profiled resident session. Host spans are elapsed on the
     // owning thread: the mapping source without its sink, the sink's staging,
     // transfers and enqueues, and the wait for the statistics. Device values
@@ -134,7 +174,13 @@ struct BulkReceipt {
     std::uint64_t opencl_coarse_synthesized_columns = 0, opencl_coarse_uploaded_columns = 0;
     std::uint64_t opencl_coarse_upload_bytes = 0, opencl_coarse_download_bytes = 0;
     std::uint64_t opencl_coarse_dispatches = 0, opencl_coarse_blocking_transfers = 0;
+    // Fallbacks are the sessions handed to the wrapped session, in total and
+    // by opencl_coarse_fallback_reasons. The counts sum to the total.
     std::uint64_t opencl_coarse_sessions = 0, opencl_coarse_frequency_fallbacks = 0;
+    std::array<std::uint64_t, opencl_coarse_fallback_reasons.size()> opencl_coarse_fallback_counts{};
+    // Retained arrivals rescored with FP32 partial sums of 64 rows added in
+    // FP64, and with every product accumulated in FP64, the matched control.
+    std::uint64_t opencl_coarse_rescore_fp32_partial_peaks = 0, opencl_coarse_rescore_fp64_peaks = 0;
     double opencl_coarse_product_seconds = 0, opencl_coarse_packing_seconds = 0;
     double opencl_coarse_selection_seconds = 0, opencl_coarse_synthesis_seconds = 0;
     // Parts of the synthesis and selection intervals: lane rendering, raw
@@ -434,14 +480,26 @@ public:
     // and the caller prepares its native columns instead.
     virtual bool synthesize_templates(const CoarseBulkGeometry&, const CoarseTemplateSource&,
         std::span<CoarseTemplateGram>, CoarseBulkWork&, std::stop_token) { return false; }
+    // The receiver condition that withholds template synthesis from this
+    // session, stated before it prepares native columns. Reporting only.
+    virtual void withhold_template_synthesis(CoarseSynthesisWithheld) noexcept {}
     // False keeps the canonical native FIR/channelizer before device upload.
     // It does not permit a fallback after any device operation has started.
     virtual bool supports_fir() const noexcept { return true; }
     // Supply the possible simultaneous FIR/segmented shapes before device
-    // admission. A declined shape keeps the native projected scorer.
+    // admission. A declined shape keeps the native projected scorer. The
+    // receiver offers them to every session, with or without device FIR.
     virtual void plan_segmented(std::span<const CoarseSegmentedShape>) {}
+    // Admits the device work of the planned shapes on the owning thread,
+    // before the first segmented call and before any other stage of the
+    // session holds device memory. A shape it cannot admit stays native.
+    virtual void begin_segmented(std::stop_token) {}
+    // Follows the last segmented call and releases what begin admitted.
+    virtual void end_segmented() noexcept {}
     // False must leave outputs and operation counts untouched. A device
     // operation that has started either publishes all ranks or throws.
+    // Workspaces call concurrently. Calls of one session that pass the same
+    // observation span pass the same immutable values.
     virtual bool segmented_scores(const CoarseSegmentedShape&,
         std::span<const std::complex<float>>, std::span<const Complex>, double,
         std::span<double>, std::span<double>, CoarseBulkWork&, std::stop_token) { return false; }
@@ -507,6 +565,11 @@ public:
     virtual std::unique_ptr<CoarseBulk> make_coarse(double projected_rate_hz, double clock_span_ppm) = 0;
     // Additional host reservation to include in public DSP preflight.
     virtual std::size_t persistent_host_workspace() const noexcept { return 0; }
+    // Host RAM that one coarse session's device segmented work can hold for
+    // these public shapes, where that device memory is host memory. It is
+    // live only before the frequency search admits its own workspace. It
+    // must not start device work.
+    virtual std::size_t segmented_host_bytes(std::span<const CoarseSegmentedShape>) const { return 0; }
     virtual std::size_t fine_host_bytes(std::size_t block_rows, std::size_t taps) const = 0;
     virtual std::size_t coarse_host_bytes(std::size_t maximum_fft_rows,
         std::size_t maximum_tile_frequencies, std::size_t arrivals) const = 0;

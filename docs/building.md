@@ -682,6 +682,11 @@ preflight registered as `triad_vulkan_plan` when the backend is built. Setting
 `DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON` also registers `triad_vulkan`, which
 requires an actual GPU, runs serially and has a 120-second timeout. A software
 Vulkan device does not satisfy it; missing device access is not a skipped pass.
+Its `triad_vulkan_segmented` sibling checks the device segmented timing search
+against a time-domain oracle, the native FP32 scorer and an FP64 reference of
+the same inputs. It also checks the workspace, transform-cache reuse and
+selection policy. `test_triad_vulkan --segmented-benchmark` prints an
+indicative per-workspace comparison with the native scorer on every thread.
 Only request that option on a runner with suitable render-device access.
 `--device-index` selects the enumerated physical device; probe receipts identify
 its actual vendor/device, driver and executed work.

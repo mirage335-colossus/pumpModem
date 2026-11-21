@@ -3,6 +3,7 @@
 #include "datapump/triad_stream_receiver.hpp"
 #include "datapump/tuning.hpp"
 #include "search_fft.hpp"
+#include "triad_probe_capture_cache.hpp"
 #include "triad_probe_json.hpp"
 #include "triad_probe_spool.hpp"
 #include "triad_receiver_coarse.hpp"
@@ -25,6 +26,9 @@
 #include <concepts>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -45,6 +49,12 @@
 #include <utility>
 #include <vector>
 
+#if defined(__linux__)
+#include <link.h>
+#endif
+#if defined(__GLIBC__)
+#include <gnu/libc-version.h>
+#endif
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -56,6 +66,9 @@ namespace {
 using namespace datapump;
 using namespace datapump::triad::v3;
 using namespace datapump::triad::v3::receiver_detail;
+using datapump::triad::probe::CaptureCacheReader;
+using datapump::triad::probe::CaptureCacheWriter;
+using datapump::triad::probe::CaptureRecord;
 using datapump::triad::probe::Json;
 using datapump::triad::probe::ObservationSpool;
 using datapump::triad::probe::object;
@@ -81,11 +94,20 @@ struct Options {
     std::string tensor_coarse_math = "fft", tensor_fine_projection = "fft";
     bool cuda_segmented_timing = false;
     std::string vulkan_precision = "automatic", vulkan_fine_projection = "automatic";
+    std::string vulkan_segmented_timing = "automatic";
     std::string opencl_coarse_templates = "device", opencl_fine_tiles = "device";
     bool opencl_coarse_templates_supplied = false, opencl_fine_tiles_supplied = false;
     std::size_t opencl_fine_window = 0, opencl_fine_stream = 4;
+    // Arithmetic of the resident fine tiles and mapping, and of the coarse
+    // rescoring. A stated choice must be the one executed. Unstated, they
+    // are the library's defaults where the route runs those kernels.
+    std::string opencl_fine_map = "fp64", opencl_coarse_rescore = "fp64";
+    bool opencl_fine_map_supplied = false, opencl_coarse_rescore_supplied = false;
     std::optional<bool> opencl_profile;
     bool gpu_fp32_minimum = false;
+    // Automatic Vulkan selection admits one-ray sessions to the dense search.
+    // Unstated, it is the library's automatic default.
+    bool opencl_coarse_one_ray = GpuReceiverOptions{}.opencl_coarse_one_ray;
     std::string native_coarse_precision = "automatic";
     std::string wrong_key_admission = "current";
     std::string base = "exact-fixture", shift = "exact-fixture";
@@ -114,7 +136,24 @@ struct Options {
     bool work_only = false;
     bool helper_overlap = true;
     FecMode fec = FecMode::off;
+    // --capture-cache: the directory of exact captures for later runs, and
+    // the given options that can change a capture, sorted by flag.
+    std::string capture_cache;
+    std::vector<std::pair<std::string, std::string>> capture_arguments;
 };
+
+// Options that select receiver arithmetic, backends, allocation, budgets or
+// deadlines. None of them changes a generated capture, so a capture cache key
+// leaves them out; every other given option is part of the key.
+constexpr std::array<std::string_view, 33> receiver_only_options{
+    "--backend", "--tensor-precision", "--tensor-coarse-math", "--tensor-fine-projection",
+    "--cuda-segmented-timing", "--vulkan-precision", "--vulkan-fine-projection", "--vulkan-segmented-timing",
+    "--opencl-coarse-templates", "--opencl-coarse-rescore", "--opencl-coarse-one-ray", "--opencl-fine-map",
+    "--opencl-fine-tiles", "--opencl-fine-window", "--opencl-fine-stream", "--opencl-profile",
+    "--gpu-fp32-minimum", "--native-coarse-precision", "--wrong-key-admission", "--require-accelerator",
+    "--device-index", "--device-memory-limit-bytes", "--workers", "--slot-owners", "--memory-limit-bytes",
+    "--max-samples", "--max-spool-bytes", "--deadline-ms", "--coarse-tiles", "--pilot-workers", "--units",
+    "--helper-overlap", "--capture-cache"};
 
 template<class T>
 T number(std::string_view text, std::string_view flag) {
@@ -149,6 +188,9 @@ Options parse(int argc, char** argv) {
         require(flag.starts_with("--") && i + 1 < argc, "Native probe options require a value");
         if (!values.emplace(flag, argv[++i]).second) throw Error("Duplicate option " + std::string(flag));
     }
+    for (const auto& [flag, value] : values)
+        if (std::ranges::find(receiver_only_options, flag) == receiver_only_options.end())
+            o.capture_arguments.emplace_back(flag, value);
     auto take = [&](std::string_view flag) -> std::optional<std::string_view> {
         const auto found = values.find(flag);
         if (found == values.end()) return {};
@@ -189,6 +231,7 @@ Options parse(int argc, char** argv) {
     assign("--cuda-segmented-timing", o.cuda_segmented_timing);
     assign("--vulkan-precision", o.vulkan_precision);
     assign("--vulkan-fine-projection", o.vulkan_fine_projection);
+    assign("--vulkan-segmented-timing", o.vulkan_segmented_timing);
     const bool coarse_templates_supplied = values.contains("--opencl-coarse-templates");
     assign("--opencl-coarse-templates", o.opencl_coarse_templates);
     o.opencl_coarse_templates_supplied = coarse_templates_supplied;
@@ -199,9 +242,15 @@ Options parse(int argc, char** argv) {
     assign("--opencl-fine-window", o.opencl_fine_window);
     const bool fine_stream_supplied = values.contains("--opencl-fine-stream");
     assign("--opencl-fine-stream", o.opencl_fine_stream);
+    o.opencl_fine_map_supplied = values.contains("--opencl-fine-map");
+    assign("--opencl-fine-map", o.opencl_fine_map);
+    o.opencl_coarse_rescore_supplied = values.contains("--opencl-coarse-rescore");
+    assign("--opencl-coarse-rescore", o.opencl_coarse_rescore);
     if (const auto profile = take("--opencl-profile")) o.opencl_profile = toggle(*profile, "--opencl-profile");
     const bool gpu_fp32_minimum_supplied = values.contains("--gpu-fp32-minimum");
     assign("--gpu-fp32-minimum", o.gpu_fp32_minimum);
+    const bool coarse_one_ray_supplied = values.contains("--opencl-coarse-one-ray");
+    assign("--opencl-coarse-one-ray", o.opencl_coarse_one_ray);
     assign("--native-coarse-precision", o.native_coarse_precision);
     assign("--wrong-key-admission", o.wrong_key_admission);
     (void)parse_wrong_key_admission(o.wrong_key_admission);
@@ -225,6 +274,7 @@ Options parse(int argc, char** argv) {
     assign("--stratum", o.stratum);
     assign("--work-only", o.work_only);
     assign("--helper-overlap", o.helper_overlap);
+    assign("--capture-cache", o.capture_cache);
     if (const auto pilot = take("--pilot-workers")) {
         auto remaining = *pilot;
         do {
@@ -298,6 +348,9 @@ Options parse(int argc, char** argv) {
                                        "direct-fp16-storage", "direct-fp16", "nvfp4"}) &&
             (o.backend == "vulkan" || o.backend == "gpu" || o.vulkan_precision == "automatic"),
             "Invalid Vulkan precision policy or backend");
+    require(one_of(o.vulkan_segmented_timing, {"automatic", "device", "native"}) &&
+            (o.backend == "vulkan" || o.vulkan_segmented_timing == "automatic"),
+            "--vulkan-segmented-timing expects automatic, device or native with explicit --backend vulkan");
     require(one_of(o.opencl_coarse_templates, {"device", "native"}) &&
             (!coarse_templates_supplied || (o.backend == "vulkan" && o.vulkan_precision == "nvfp4")),
             "--opencl-coarse-templates expects device or native with explicit Vulkan nvfp4 coarse search");
@@ -312,9 +365,25 @@ Options parse(int argc, char** argv) {
             "--opencl-fine-window expects an even number of 2 to 64 blocks with an explicit Vulkan resident fine projection");
     require(o.opencl_fine_stream <= 64 && (!fine_stream_supplied || resident_fine),
             "--opencl-fine-stream expects 0 to 64 blocks with an explicit Vulkan resident fine projection");
+    require(one_of(o.opencl_fine_map, {"fp32", "fp64"}) && (!o.opencl_fine_map_supplied || resident_fine),
+            "--opencl-fine-map expects fp32 or fp64 with an explicit Vulkan resident fine projection");
+    require(one_of(o.opencl_coarse_rescore, {"fp32", "fp64"}) &&
+            (!o.opencl_coarse_rescore_supplied || (o.backend == "vulkan" && o.vulkan_precision == "nvfp4")),
+            "--opencl-coarse-rescore expects fp32 or fp64 with explicit Vulkan nvfp4 coarse search");
     require(!o.opencl_profile || o.backend == "vulkan", "--opencl-profile is valid only with --backend vulkan");
     require(!gpu_fp32_minimum_supplied || o.backend == "gpu",
             "--gpu-fp32-minimum is valid only with --backend gpu");
+    {
+        const VulkanReceiverOptions library;
+        if (!o.opencl_fine_map_supplied && library.opencl_fine_fp32 && (o.backend == "gpu" || resident_fine))
+            o.opencl_fine_map = "fp32";
+        if (!o.opencl_coarse_rescore_supplied && library.opencl_coarse_fp32_rescore &&
+            (o.backend == "gpu" || (o.backend == "vulkan" && o.vulkan_precision == "nvfp4")))
+            o.opencl_coarse_rescore = "fp32";
+    }
+    // An explicit nvfp4 request always scores one-ray sessions.
+    require(!coarse_one_ray_supplied || o.backend == "gpu",
+            "--opencl-coarse-one-ray is valid only with --backend gpu");
     require(one_of(o.native_coarse_precision, {"automatic", "fp32", "fp64", "q15"}),
             "--native-coarse-precision expects automatic, fp32, fp64 or q15");
     require(one_of(o.stratum, {"active", "noise", "cold-maximum", "terminal", "erasure"}),
@@ -373,6 +442,8 @@ Options parse(int argc, char** argv) {
     require(!o.work_only || (o.command == "continuation" && o.stratum != "active"),
             "Work-only diagnostics require continuation and a nonnominal stratum");
     require(o.helper_overlap || o.command == "regression", "The Helper overlap lease applies only to regression");
+    require(o.capture_cache.empty() || !one_of(o.command, {"describe", "plan", "codec"}),
+            "--capture-cache applies to commands that generate a capture");
     require(o.pilot_workers.empty() || o.command == "backlog", "Worker pilots require backlog replay");
     require(o.pilot_workers.empty() || o.backend == "cpu", "Worker allocation pilots require the native CPU backend");
     require(o.backend != "vulkan" || o.tensor_precision == "automatic",
@@ -629,10 +700,140 @@ struct Capture {
     std::unique_ptr<ObservationSpool> spool;
     std::string digest;
     Timing generation, spool_write{0, 0};
+    // The channel report. A reused capture restores the fields that the
+    // receipts read: erased rows, workspace and both path realizations.
     StreamChannelReport channel;
+    bool selective_filter = false;
     std::size_t generation_reserved_bytes = 0, generation_read_rows = 0, generation_stack_bytes = 0;
     unsigned generation_helpers = 0;
+    struct Cache {
+        std::string key, file;
+        bool reused = false, stored = false;
+        std::uint64_t file_bytes = 0;
+        Timing write{0, 0};
+    };
+    std::optional<Cache> cache;
     std::uint64_t rows() const { return spool ? spool->rows() : iq.size(); }
+};
+
+std::array<std::uint8_t, 32> digest_bytes(std::string_view hex) {
+    std::array<std::uint8_t, 32> bytes{};
+    require(hex.size() == 64, "Capture digest is not a SHA-256");
+    const auto nibble = [](char c) -> std::uint8_t {
+        if (c >= '0' && c <= '9') return static_cast<std::uint8_t>(c - '0');
+        if (c >= 'a' && c <= 'f') return static_cast<std::uint8_t>(c - 'a' + 10);
+        throw Error("Capture digest is not lowercase hexadecimal");
+    };
+    for (std::size_t i = 0; i < bytes.size(); ++i)
+        bytes[i] = static_cast<std::uint8_t>(nibble(hex[2 * i]) << 4 | nibble(hex[2 * i + 1]));
+    return bytes;
+}
+
+std::string hex_bytes(std::span<const std::uint8_t> bytes) {
+    std::string result;
+    for (const auto byte : bytes) {
+        result += "0123456789abcdef"[byte >> 4];
+        result += "0123456789abcdef"[byte & 0x0f];
+    }
+    return result;
+}
+
+// What a cached capture is bound to besides its arguments: the running
+// probe executable and, on Linux, the loaded runtime libraries whose code
+// can change sample values (C, math, C++ and GCC runtimes and the dynamic
+// loader). Libraries loaded later, such as accelerator drivers, are not
+// part of it. Elsewhere only the executable is covered.
+struct CaptureBinaryIdentity {
+    std::string executable_sha256, libc_version;
+    // What selects glibc's libm variants at run time (ifunc): the x86 FMA,
+    // FMA4 and AVX2 features and GLIBC_TUNABLES. The same files can
+    // simulate different last bits on a CPU or mask without them.
+    std::string math_dispatch;
+    std::vector<std::pair<std::string, std::string>> runtime_libraries; // path, SHA-256
+    bool covers_runtime_libraries = false;
+};
+
+std::string file_sha256(const std::filesystem::path& path) {
+    struct CloseFile { void operator()(std::FILE* file) const noexcept { (void)std::fclose(file); } };
+#ifdef _WIN32
+    std::unique_ptr<std::FILE, CloseFile> file(_wfopen(path.c_str(), L"rb"));
+#else
+    std::unique_ptr<std::FILE, CloseFile> file(std::fopen(path.c_str(), "rb"));
+#endif
+    if (!file) throw Error("Cannot read " + path.string() + " for --capture-cache");
+    Digest digest;
+    std::vector<std::byte> chunk(64 * 1024);
+    for (;;) {
+        const auto count = std::fread(chunk.data(), 1, chunk.size(), file.get());
+        digest.add(std::span(chunk).first(count));
+        if (count < chunk.size()) break;
+    }
+    if (std::ferror(file.get())) throw Error("Cannot read " + path.string() + " for --capture-cache");
+    return digest.finish();
+}
+
+const CaptureBinaryIdentity& capture_binary_identity() {
+    static const CaptureBinaryIdentity value = [] {
+        CaptureBinaryIdentity identity;
+#if defined(__linux__)
+        identity.executable_sha256 = file_sha256("/proc/self/exe");
+        std::vector<std::string> paths;
+        dl_iterate_phdr([](dl_phdr_info* info, std::size_t, void* data) {
+            const std::string_view name = info->dlpi_name ? info->dlpi_name : "";
+            const auto base = name.substr(name.rfind('/') + 1);
+            for (const std::string_view prefix : {"libc.so", "libm.so", "libmvec.so", "libstdc++.so", "libgcc_s.so",
+                                                  "ld-linux"})
+                if (base.starts_with(prefix)) {
+                    static_cast<std::vector<std::string>*>(data)->emplace_back(name);
+                    break;
+                }
+            return 0;
+        }, &paths);
+        std::ranges::sort(paths);
+        paths.erase(std::ranges::unique(paths).begin(), paths.end());
+        for (const auto& path : paths) identity.runtime_libraries.emplace_back(path, file_sha256(path));
+        identity.covers_runtime_libraries = true;
+#if defined(__GLIBC__)
+        identity.libc_version = gnu_get_libc_version();
+#endif
+#if defined(__x86_64__) || defined(__i386__)
+        __builtin_cpu_init();
+        identity.math_dispatch = std::string("fma ") + (__builtin_cpu_supports("fma") ? "1" : "0") + " fma4 " +
+            (__builtin_cpu_supports("fma4") ? "1" : "0") + " avx2 " + (__builtin_cpu_supports("avx2") ? "1" : "0");
+#endif
+        const char* tunables = std::getenv("GLIBC_TUNABLES");
+        identity.math_dispatch += std::string(" tunables ") + (tunables ? hex_bytes(std::span(
+            reinterpret_cast<const std::uint8_t*>(tunables), std::strlen(tunables))) : "unset");
+#elif defined(_WIN32)
+        std::array<wchar_t, 32768> path{};
+        const auto length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+        if (length == 0 || length >= path.size()) throw Error("Cannot locate the probe executable for --capture-cache");
+        identity.executable_sha256 = file_sha256(std::filesystem::path(path.data()));
+#else
+        throw Unavailable("--capture-cache needs the running probe executable's identity on this platform");
+#endif
+        return identity;
+    }();
+    return value;
+}
+
+struct SecondaryEmission;
+
+// The key and file of one capture under --capture-cache: the binary
+// identity above, the command, every given option that can change a capture
+// and the generating call's extent, episodes and secondary emission.
+struct CaptureKey {
+    std::array<std::uint8_t, 32> key{};
+    std::string hex, path;
+
+    CaptureKey(const Options& o, std::span<const EmissionOptions> episodes, std::uint64_t first, std::uint64_t end,
+               bool spooled, const SecondaryEmission* secondary);
+    std::string temporary() const {
+        std::random_device entropy;
+        std::array<std::uint8_t, 8> nonce{};
+        for (auto& byte : nonce) byte = static_cast<std::uint8_t>(entropy());
+        return path + ".tmp-" + hex_bytes(nonce);
+    }
 };
 
 Json allocation(const StreamReceiverResources& resources) {
@@ -780,7 +981,7 @@ Json observation(const Capture& capture, std::uint64_t stop, const ReceiverSlotP
             {"bound_hz", r->bound_hz}, {"knot_seconds", r->knot_seconds},
             {"minimum_hz", r->minimum_hz}, {"maximum_hz", r->maximum_hz}});
     }
-    return object({{"input_sha256", capture.digest}, {"first_sample", capture.first}, {"stop_sample", stop},
+    auto result = object({{"input_sha256", capture.digest}, {"first_sample", capture.first}, {"stop_sample", stop},
                    {"input_hash_encoding", "sha256_of_iq_f64le_and_mask_sha256_hex"},
                    {"samples", capture.rows()}, {"generated_samples", capture.generated_samples},
                    {"retained_ram_rows", capture.iq.size()}, {"spool_bytes", capture.spool ? capture.spool->bytes() : 0},
@@ -789,10 +990,24 @@ Json observation(const Capture& capture, std::uint64_t stop, const ReceiverSlotP
                    {"spool_residency_reserved_bytes", capture.spool ? capture.spool->resident_reservation_bytes() : 0},
                    {"seed", o.seed}, {"public_slot", slot.index}, {"pattern_epoch", slot.format.epoch},
                    {"symbol_ordinal", slot.format.symbol_ordinal}, {"channel_erased_rows", capture.channel.erased_samples},
-                   {"channel_workspace_bytes", capture.channel.working_bytes},
+                   // A reused capture built no channel; the generating run's
+                   // workspace stays in the capture_reuse phase.
+                   {"channel_workspace_bytes", capture.cache && capture.cache->reused ? Json{} :
+                        Json(capture.channel.working_bytes)},
                    {"bounded_spread_realization", std::move(spread)},
                    {"common_doppler_realization", std::move(common)},
                    {"evaluator_bit", o.stratum == "noise" ? Json{} : Json(o.bit)}});
+    if (capture.cache) {
+        const auto& identity = capture_binary_identity();
+        Json::Array libraries;
+        for (const auto& [file, sha] : identity.runtime_libraries) libraries.push_back(file);
+        result["capture_cache"] = object({{"source", capture.cache->reused ? "reused" : "generated"},
+            {"key_sha256", capture.cache->key}, {"file", capture.cache->file}, {"file_bytes", capture.cache->file_bytes},
+            {"stored", capture.cache->stored}, {"verified_before_receiver", capture.cache->reused},
+            {"key_binds", identity.covers_runtime_libraries ? "executable_and_runtime_libraries" : "executable"},
+            {"key_runtime_libraries", std::move(libraries)}, {"key_math_dispatch", identity.math_dispatch}});
+    }
+    return result;
 }
 
 Json bulk_json(const BulkReceipt& r) {
@@ -805,6 +1020,9 @@ Json bulk_json(const BulkReceipt& r) {
     Json::Object matrix_fallbacks;
     for (std::size_t i = 0; i < r.matrix_fft_fallback_counts.size(); ++i)
         matrix_fallbacks.emplace(std::string(bulk_matrix_fallback_reasons[i]), r.matrix_fft_fallback_counts[i]);
+    Json::Object dense_coarse_fallbacks;
+    for (std::size_t i = 0; i < r.opencl_coarse_fallback_counts.size(); ++i)
+        dense_coarse_fallbacks.emplace(std::string(opencl_coarse_fallback_reasons[i]), r.opencl_coarse_fallback_counts[i]);
     return object({
         {"device", r.device}, {"device_name", r.device_name}, {"library_version", r.library_version},
         {"cuda_runtime_version", r.cuda_runtime_version}, {"cuda_driver_version", r.cuda_driver_version},
@@ -838,6 +1056,16 @@ Json bulk_json(const BulkReceipt& r) {
         {"cuda_segmented_inverse_ffts", r.cuda_segmented_inverse_ffts},
         {"cuda_segmented_score_rows", r.cuda_segmented_score_rows},
         {"cuda_segmented_native_fallbacks", r.cuda_segmented_native_fallbacks},
+        {"vulkan_segmented_sessions", r.vulkan_segmented_sessions},
+        {"vulkan_segmented_forward_ffts", r.vulkan_segmented_forward_ffts},
+        {"vulkan_segmented_inverse_ffts", r.vulkan_segmented_inverse_ffts},
+        {"vulkan_segmented_score_rows", r.vulkan_segmented_score_rows},
+        {"vulkan_segmented_qualified_device", r.vulkan_segmented_qualified_device},
+        {"vulkan_segmented_planned_shapes", r.vulkan_segmented_planned_shapes},
+        {"vulkan_segmented_declined_calls", r.vulkan_segmented_declined_calls},
+        {"vulkan_segmented_decline_reason", r.vulkan_segmented_decline_reason},
+        {"vulkan_segmented_native_fallbacks", r.vulkan_segmented_native_fallbacks},
+        {"vulkan_segmented_fallback_reason", r.vulkan_segmented_fallback_reason},
         {"cuda_half_fft_inverse_ffts", r.cuda_half_fft_inverse_ffts},
         {"cuda_half_fft_padded_ffts", r.cuda_half_fft_padded_ffts},
         {"cuda_half_fft_score_rows", r.cuda_half_fft_score_rows},
@@ -909,6 +1137,10 @@ Json bulk_json(const BulkReceipt& r) {
         {"opencl_resident_keyed_lanes", r.opencl_resident_keyed_lanes},
         {"opencl_resident_window_blocks", r.opencl_resident_window_blocks},
         {"opencl_resident_reduced_windows", r.opencl_resident_reduced_windows},
+        {"opencl_resident_fp32_mapped_columns", r.opencl_resident_fp32_mapped_columns},
+        {"opencl_resident_fp64_mapped_columns", r.opencl_resident_fp64_mapped_columns},
+        {"opencl_resident_fp32_rendered_tiles", r.opencl_resident_fp32_rendered_tiles},
+        {"opencl_resident_fp64_rendered_tiles", r.opencl_resident_fp64_rendered_tiles},
         {"opencl_resident_host_source_seconds", r.opencl_resident_host_source_seconds},
         {"opencl_resident_host_staging_seconds", r.opencl_resident_host_staging_seconds},
         {"opencl_resident_host_transfer_seconds", r.opencl_resident_host_transfer_seconds},
@@ -932,6 +1164,9 @@ Json bulk_json(const BulkReceipt& r) {
         {"opencl_coarse_blocking_transfers", r.opencl_coarse_blocking_transfers},
         {"opencl_coarse_sessions", r.opencl_coarse_sessions},
         {"opencl_coarse_frequency_fallbacks", r.opencl_coarse_frequency_fallbacks},
+        {"opencl_coarse_fallback_counts", std::move(dense_coarse_fallbacks)},
+        {"opencl_coarse_rescore_fp32_partial_peaks", r.opencl_coarse_rescore_fp32_partial_peaks},
+        {"opencl_coarse_rescore_fp64_peaks", r.opencl_coarse_rescore_fp64_peaks},
         {"opencl_coarse_product_seconds", r.opencl_coarse_product_seconds},
         {"opencl_coarse_packing_seconds", r.opencl_coarse_packing_seconds},
         {"opencl_coarse_selection_seconds", r.opencl_coarse_selection_seconds},
@@ -1002,12 +1237,16 @@ std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
             options.opencl_fine_device_tiles = o.opencl_fine_tiles == "device";
             options.opencl_fine_window_blocks = o.opencl_fine_window;
             options.opencl_fine_stream_blocks = o.opencl_fine_stream;
+            options.opencl_fine_fp32 = o.opencl_fine_map == "fp32";
+            options.opencl_coarse_fp32_rescore = o.opencl_coarse_rescore == "fp32";
             if (o.vulkan_fine_projection == "nvfp4") options.fine_projection = VulkanFineProjection::opencl_nvfp4;
             else if (o.vulkan_fine_projection == "resident-nvfp4")
                 options.fine_projection = VulkanFineProjection::opencl_resident_nvfp4;
             else if (o.vulkan_fine_projection == "resident-fft")
                 options.fine_projection = VulkanFineProjection::opencl_resident_fft;
             else if (o.vulkan_fine_projection == "native") options.fine_projection = VulkanFineProjection::native;
+            if (o.vulkan_segmented_timing == "device") options.segmented_timing = VulkanSegmentedTiming::device;
+            else if (o.vulkan_segmented_timing == "native") options.segmented_timing = VulkanSegmentedTiming::native;
             return make_vulkan_receiver_backend(options);
         } catch (const VulkanBackendUnavailable& error) {
             throw Unavailable(error.what());
@@ -1020,7 +1259,7 @@ std::shared_ptr<ReceiverBulkBackend> selected_backend(const Options& o) {
         if (o.require_accelerator && (o.command == "codec" || o.work_only))
             throw Unavailable("GPU accelerator qualification requires a complete coarse-search workload");
         try {
-            return make_gpu_receiver_backend({o.gpu_fp32_minimum});
+            return make_gpu_receiver_backend({o.gpu_fp32_minimum, o.opencl_coarse_one_ray});
         } catch (const GpuBackendUnavailable& error) {
             throw Unavailable(error.what());
         } catch (const TensorBackendUnavailable& error) {
@@ -1067,6 +1306,33 @@ struct SecondaryEmission {
     Complex gain;
     double frequency_offset_hz;
 };
+
+CaptureKey::CaptureKey(const Options& o, std::span<const EmissionOptions> episodes, std::uint64_t first,
+                       std::uint64_t end, bool spooled, const SecondaryEmission* secondary) {
+    const auto bits = [](double value) { return std::to_string(std::bit_cast<std::uint64_t>(value)); };
+    const auto& identity = capture_binary_identity();
+    std::string text = "datapump.triad.probe-capture-key.v3\nexecutable_sha256 " + identity.executable_sha256 +
+        "\nlibc_version " + identity.libc_version + "\nmath_dispatch " + identity.math_dispatch + "\n";
+    for (const auto& [file, sha] : identity.runtime_libraries)
+        text += "runtime_library " + std::filesystem::path(file).filename().string() + " " + sha + "\n";
+    text += "command " + o.command + "\n";
+    for (const auto& [flag, value] : o.capture_arguments) text += "argument " + flag + " " + value + "\n";
+    text += "extent " + std::to_string(first) + " " + std::to_string(end) + " spool " + (spooled ? "1" : "0") + "\n";
+    for (const auto& episode : episodes) {
+        text += "episode " + std::to_string(static_cast<int>(episode.mode)) + " " + std::to_string(episode.first_slot) +
+            " " + std::to_string(episode.slot_count) + " " + std::to_string(episode.source_first_sample) + " " +
+            (episode.bit_at ? "drafted" : "fixed") + " " + hex_bytes(episode.bits) + "\n";
+    }
+    if (secondary)
+        text += "secondary " + std::to_string(secondary->origin) + " " + bits(secondary->gain.real()) + " " +
+            bits(secondary->gain.imag()) + " " + bits(secondary->frequency_offset_hz) + " " +
+            hex_bytes(secondary->options.bits) + "\n";
+    Digest digest;
+    digest.add(std::as_bytes(std::span<const char>(text)));
+    hex = digest.finish();
+    key = digest_bytes(hex);
+    path = o.capture_cache + "/" + hex + ".capture";
+}
 
 // The largest channel read in rows, a power-of-two multiple of input_chunk.
 // A read prepares its first block, and passes its last block, alone; larger
@@ -1179,7 +1445,119 @@ private:
     std::size_t secondary_index_;
 };
 
-Capture simulate(const Profile& profile, std::span<const EmissionOptions> episodes,
+std::uint64_t maximum_spool_bytes(const Options& o);
+
+// The rows a capture cache file may hold: those of the spool budget for a
+// spooled capture, and of the sample budget for a capture held in RAM.
+std::uint64_t capture_cache_row_bytes(const Options& o, bool spooled) {
+    if (spooled) return maximum_spool_bytes(o);
+    return o.sample_limit > UINT64_MAX / ObservationSpool::row_bytes ? UINT64_MAX :
+        o.sample_limit * ObservationSpool::row_bytes;
+}
+
+// A capture that an earlier run of this binary stored under the same key:
+// its rows are read in order and hashed, and the run stops unless every
+// header field, every row and the SHA-256 equal what was generated. The
+// rows are delivered exactly as generation delivers them.
+Capture reuse_capture(CaptureCacheReader& reader, const CaptureKey& key, const Options& o, std::uint64_t first,
+                      std::uint64_t end, std::unique_ptr<ObservationSpool> spool, std::stop_token stop) {
+    const Timer timer;
+    const auto rows = end - first;
+    const auto& record = reader.header(key.key, first, rows,
+        CaptureRecord::header_bytes + std::min(capture_cache_row_bytes(o, spool != nullptr),
+                                               UINT64_MAX - CaptureRecord::header_bytes));
+    Capture capture;
+    capture.first = first;
+    capture.spool = std::move(spool);
+    if (!capture.spool) {
+        capture.iq.resize(static_cast<std::size_t>(rows));
+        capture.valid.resize(static_cast<std::size_t>(rows));
+    }
+    std::vector<Complex> iq(input_chunk);
+    Bytes valid(input_chunk);
+    CaptureHasher digest;
+    for (std::uint64_t at = 0; at < rows;) {
+        check_stop(stop);
+        const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(rows - at, input_chunk));
+        const auto samples = std::span(iq).first(n);
+        const auto mask = std::span(valid).first(n);
+        reader.read_rows(samples, mask);
+        digest.add(samples, mask);
+        if (capture.spool) {
+            const Timer io;
+            capture.spool->append(samples, mask);
+            add_time(capture.spool_write, io.elapsed());
+        } else {
+            std::ranges::copy(samples, capture.iq.begin() + static_cast<std::ptrdiff_t>(at));
+            std::ranges::copy(mask, capture.valid.begin() + static_cast<std::ptrdiff_t>(at));
+        }
+        at += n;
+    }
+    reader.finish();
+    if (capture.spool) {
+        const Timer io;
+        capture.spool->seal();
+        add_time(capture.spool_write, io.elapsed());
+    }
+    capture.digest = digest.finish();
+    if (digest_bytes(capture.digest) != record.digest)
+        throw Error("Capture cache rows differ from their stored SHA-256; remove " + key.path);
+    capture.generated_samples = end;
+    capture.channel.samples = end;
+    capture.channel.erased_samples = record.erased_samples;
+    capture.channel.working_bytes = static_cast<std::size_t>(record.working_bytes);
+    capture.selective_filter = record.selective_filter;
+    if (const auto& b = record.bounded_spread) {
+        auto& r = capture.channel.bounded_spread.emplace();
+        r.excess_delay_seconds = b->excess_delay_seconds;
+        r.knot_seconds = b->knot_seconds;
+        r.doppler_bound_hz = b->doppler_bound_hz;
+        r.minimum_echo_ratio = b->minimum_echo_ratio;
+        r.maximum_echo_ratio = b->maximum_echo_ratio;
+        r.fixed_direct_power_fraction = b->fixed_direct_power_fraction;
+        r.minimum_doppler_hz = b->minimum_doppler_hz;
+        r.maximum_doppler_hz = b->maximum_doppler_hz;
+        r.minimum_combined_physical_doppler_hz = b->minimum_combined_physical_doppler_hz;
+        r.maximum_combined_physical_doppler_hz = b->maximum_combined_physical_doppler_hz;
+        r.seed = b->seed;
+        r.processed_rows = b->processed_rows;
+    }
+    if (const auto& c = record.common_doppler) {
+        auto& r = capture.channel.common_doppler_wander.emplace();
+        r.bound_hz = c->bound_hz;
+        r.knot_seconds = c->knot_seconds;
+        r.minimum_hz = c->minimum_hz;
+        r.maximum_hz = c->maximum_hz;
+        r.seed = c->seed;
+        r.processed_rows = c->processed_rows;
+    }
+    capture.cache = Capture::Cache{key.hex, key.path, true, false, record.file_bytes(), {0, 0}};
+    capture.generation = timer.elapsed();
+    return capture;
+}
+
+CaptureRecord capture_record(const CaptureKey& key, const Capture& capture, std::uint64_t end) {
+    CaptureRecord record;
+    record.key = key.key;
+    record.digest = digest_bytes(capture.digest);
+    record.first = capture.first;
+    record.rows = end - capture.first;
+    record.generated = end;
+    record.erased_samples = capture.channel.erased_samples;
+    record.working_bytes = capture.channel.working_bytes;
+    record.selective_filter = capture.selective_filter;
+    if (const auto& r = capture.channel.bounded_spread)
+        record.bounded_spread = CaptureRecord::BoundedSpread{r->excess_delay_seconds, r->knot_seconds,
+            r->doppler_bound_hz, r->minimum_echo_ratio, r->maximum_echo_ratio, r->fixed_direct_power_fraction,
+            r->minimum_doppler_hz, r->maximum_doppler_hz, r->minimum_combined_physical_doppler_hz,
+            r->maximum_combined_physical_doppler_hz, r->seed, r->processed_rows};
+    if (const auto& r = capture.channel.common_doppler_wander)
+        record.common_doppler = CaptureRecord::CommonDoppler{r->bound_hz, r->knot_seconds, r->minimum_hz,
+            r->maximum_hz, r->seed, r->processed_rows};
+    return record;
+}
+
+Capture simulate(const Options& o, const Profile& profile, std::span<const EmissionOptions> episodes,
                  std::uint64_t first, std::uint64_t end, std::uint64_t& samples_left,
                  const StreamReceiverResources& resources, std::stop_token stop,
                  std::unique_ptr<ObservationSpool> spool = {}, const SecondaryEmission* secondary = nullptr) {
@@ -1191,7 +1569,10 @@ Capture simulate(const Profile& profile, std::span<const EmissionOptions> episod
         throw Incomplete("Canonical capture exceeds the declared probe sample budget");
     const auto rows = end - first;
     constexpr auto row_bytes = sizeof(Complex) + sizeof(std::uint8_t);
-    const auto stored_bytes = spool ? spool->working_bytes() + 4096 : static_cast<std::size_t>(rows) * row_bytes;
+    // A capture stored to --capture-cache also holds the writer's buffers;
+    // reuse reads through smaller buffers inside the unused channel reserve.
+    const auto stored_bytes = (spool ? spool->working_bytes() + 4096 : static_cast<std::size_t>(rows) * row_bytes) +
+        (o.capture_cache.empty() ? 0 : CaptureCacheWriter::buffer_bytes);
     const auto simultaneous_sources = std::max(std::size_t{1}, episodes.size() + (secondary != nullptr));
     const auto reserve = simultaneous_sources * channel_source_bound;
     const auto remaining = memory_remaining(resources);
@@ -1218,12 +1599,30 @@ Capture simulate(const Profile& profile, std::span<const EmissionOptions> episod
     while (read_rows < channel_chunk && 4 * read_rows * row_bytes <= read_room) read_rows *= 2;
     const auto capture_bytes = stored_bytes + 2 * read_rows * row_bytes;
     check_stop(stop);
+    // --capture-cache: an earlier capture of this binary and these arguments
+    // replaces generation; otherwise this one is stored as it is delivered.
+    std::optional<CaptureKey> key;
+    std::unique_ptr<CaptureCacheWriter> writer;
+    if (!o.capture_cache.empty()) {
+        key.emplace(o, episodes, first, end, spool != nullptr, secondary);
+        if (rows > capture_cache_row_bytes(o, spool != nullptr) / ObservationSpool::row_bytes)
+            throw Incomplete("Capture cache file exceeds the declared probe spool budget");
+        if (auto reader = CaptureCacheReader::open(key->path)) {
+            auto capture = reuse_capture(*reader, *key, o, first, end, std::move(spool), stop);
+            capture.generation_reserved_bytes = resources.memory_limit_bytes - remaining + reserve + capture_bytes;
+            if (capture.spool) capture.generation_reserved_bytes += capture.spool->resident_reservation_bytes();
+            samples_left -= end;
+            return capture;
+        }
+        writer = std::make_unique<CaptureCacheWriter>(key->temporary(), key->path, rows);
+    }
     const Timer timer;
     Capture capture;
     capture.generation_helpers = helpers;
     capture.generation_stack_bytes = stack;
     capture.generation_read_rows = read_rows;
     CaptureHasher digest;
+    Timing cache_write{0, 0};
     // The digest and the copy or spool of each read run in pieces in order,
     // one piece as an extra job of each lent block preparation of the next
     // read; this thread delivers what remains when that read returns.
@@ -1240,6 +1639,11 @@ Capture simulate(const Profile& profile, std::span<const EmissionOptions> episod
         const auto samples = delivery.iq.subspan(delivery.done, n);
         const auto mask = delivery.valid.subspan(delivery.done, n);
         digest.add(samples, mask);
+        if (writer) {
+            const Timer io;
+            writer->append(samples, mask);
+            add_time(cache_write, io.elapsed());
+        }
         if (capture.spool) {
             const Timer io;
             capture.spool->append(samples, mask);
@@ -1353,9 +1757,17 @@ Capture simulate(const Profile& profile, std::span<const EmissionOptions> episod
     }
     capture.generation = timer.elapsed();
     capture.channel = channel.report();
+    capture.selective_filter = capture.channel.selective_perturbation.has_value();
     capture.generated_samples = end;
     samples_left -= end;
     capture.digest = digest.finish();
+    if (writer) {
+        const Timer io;
+        const auto record = capture_record(*key, capture, end);
+        writer->commit(record);
+        add_time(cache_write, io.elapsed());
+        capture.cache = Capture::Cache{key->hex, key->path, false, true, record.file_bytes(), cache_write};
+    }
     return capture;
 }
 
@@ -1483,6 +1895,14 @@ Json score_json(const ReceiverSlotScore& score) {
         {"varying_timing_blocks", score.varying_timing_blocks},
         {"varying_timing_frequencies", score.varying_timing_frequencies},
         {"varying_timing_status", score.varying_timing_status},
+        {"varying_timing_proposals", [&] {
+            Json::Array proposals;
+            for (const auto& p : std::span(score.varying_timing_proposals).first(score.varying_timing_proposal_count))
+                proposals.push_back(object({{"epoch_offset_seconds", p.epoch_offset_seconds},
+                    {"arrival_seconds", p.arrival_seconds}, {"frequency_hz", p.frequency_hz},
+                    {"clock_ppm", p.clock_ppm}}));
+            return Json(std::move(proposals));
+        }()},
         {"midpoint_timing", object({{"status", score.midpoint_timing_status},
             {"precision", score.midpoint_timing_precision}, {"public_lags", score.midpoint_timing_lags},
             {"candidates", score.midpoint_timing_candidates}, {"workspace_bytes", score.midpoint_timing_workspace_bytes},
@@ -1520,6 +1940,7 @@ Json score_json(const ReceiverSlotScore& score) {
         {"varying_quiet_energy", score.varying_quiet_energy},
         {"varying_quiet_threshold", score.varying_quiet_threshold},
         {"varying_quiet_status", score.varying_quiet_status},
+        {"varying_quiet_seconds", score.varying_quiet_seconds},
         {"varying_line_frequency_hz", score.varying_line_frequency_hz},
         {"varying_line_log_evidence", score.varying_line_log_evidence},
         {"coherent_gain_candidates", score.coherent_gain_candidates},
@@ -1638,6 +2059,7 @@ Json fine_lane(const FineLaneWork& lane) {
         {"transition_edges", lane.transition_edges}, {"merged_channel_components", lane.merged_channel_components},
         {"basis_calls", lane.basis_calls}, {"basis_rows", lane.basis_rows}, {"positive_basis_blocks", lane.positive_basis_blocks},
         {"projection_modes", lane.projection_modes}, {"gaussian_updates", lane.gaussian_updates},
+        {"gaussian_null_skips", lane.gaussian_null_skips},
         {"projected_template_energy", static_cast<double>(lane.projected_template_energy)},
         {"retained_prior_mass", lane.retained_prior_mass}, {"bit_scores", scores(lane.bit_scores)}});
 }
@@ -1679,7 +2101,8 @@ Json fine_json(const FineProgress& p) {
             {"bulk_statistics_seconds", t.bulk_statistics_seconds},
             {"dispatch_seconds", t.dispatch_seconds}, {"pruning_seconds", t.pruning_seconds}, {"finish_seconds", t.finish_seconds},
             {"worker_basis_statistics_seconds", t.worker_basis_statistics_seconds},
-            {"worker_gaussian_seconds", t.worker_gaussian_seconds}})}});
+            {"worker_gaussian_seconds", t.worker_gaussian_seconds},
+            {"worker_observation_seconds", t.worker_observation_seconds}})}});
 }
 
 std::size_t standalone_scratch(const StreamReceiverResources& resources) {
@@ -1911,6 +2334,19 @@ void fine_run(Json& report, const Options& o, const Profile& profile, const Rece
 }
 
 void generation_phase(Json& report, const Profile& profile, const Capture& capture) {
+    if (capture.cache && capture.cache->reused) {
+        // No simulator ran: the rows came from the cache file and matched
+        // its SHA-256 before any receiver work.
+        phase(report, "capture_reuse", capture.generation, capture.generated_samples / profile.receiver.sample_rate_hz,
+            object({{"reused", true}, {"generated_rows", capture.generated_samples}, {"retained_rows", capture.rows()},
+                    {"retained_ram_rows", capture.iq.size()}, {"spool_bytes", capture.spool ? capture.spool->bytes() : 0},
+                    {"file_bytes", capture.cache->file_bytes}, {"key_sha256", capture.cache->key},
+                    {"verified_input_sha256", capture.digest},
+                    {"generation_preflight_reserved_bytes", capture.generation_reserved_bytes},
+                    {"stored_channel_workspace_bytes", capture.channel.working_bytes},
+                    {"has_selective_filter", capture.selective_filter}}), 0, "simulator_excluded");
+        return;
+    }
     phase(report, "simulator", capture.generation, capture.generated_samples / profile.receiver.sample_rate_hz,
         object({{"generated_rows", capture.generated_samples}, {"retained_rows", capture.rows()},
                 {"retained_ram_rows", capture.iq.size()}, {"spool_bytes", capture.spool ? capture.spool->bytes() : 0},
@@ -1919,7 +2355,11 @@ void generation_phase(Json& report, const Profile& profile, const Capture& captu
                 {"generation_stack_bytes_per_helper", capture.generation_stack_bytes},
                 {"generation_read_rows", capture.generation_read_rows},
                 {"channel_workspace_bytes", capture.channel.working_bytes},
-                {"has_selective_filter", capture.channel.selective_perturbation.has_value()}}), 0, "simulator_excluded");
+                {"has_selective_filter", capture.selective_filter}}), 0, "simulator_excluded");
+    if (capture.cache && capture.cache->stored)
+        phase(report, "capture_cache_write", capture.cache->write, capture.rows() / profile.receiver.sample_rate_hz,
+            object({{"rows", capture.rows()}, {"file_bytes", capture.cache->file_bytes},
+                    {"key_sha256", capture.cache->key}}), 0, "subset_of_excluded_simulator_wall");
     if (capture.spool) phase(report, "capture_spool_write", capture.spool_write,
         capture.rows() / profile.receiver.sample_rate_hz,
         object({{"rows", capture.rows()}, {"spool_bytes", capture.spool->bytes()},
@@ -1981,7 +2421,7 @@ void admission_run(Json& report, const Options& o, const Profile& profile, const
             std::span<const std::uint8_t>{}, .stop = stop}};
     const auto render = [&] {
         if (!o.interferer_cn0)
-            return simulate(profile, emissions, slot.first_sample, slot.stop_sample, samples_left, resources, stop);
+            return simulate(o, profile, emissions, slot.first_sample, slot.stop_sample, samples_left, resources, stop);
 
         const Timer began;
         const auto serpent = admission_digest(*o.interferer_seed, 0);
@@ -2068,7 +2508,7 @@ void admission_run(Json& report, const Options& o, const Profile& profile, const
         const std::array foreign_bit{static_cast<std::uint8_t>(*o.interferer_bit)};
         const SecondaryEmission secondary{tx.waveform, tx.key,
             {.bits = foreign_bit, .stop = stop}, first, std::polar(gain, phase_rad), frequency_offset};
-        auto capture = simulate(profile, emissions, slot.first_sample, slot.stop_sample, samples_left,
+        auto capture = simulate(o, profile, emissions, slot.first_sample, slot.stop_sample, samples_left,
                                 resources, stop, {}, &secondary);
         // The slope in nominal RX sample seconds on the direct path. Exclude
         // stochastic phase noise, FHSS and moving echo delay from this center.
@@ -2119,7 +2559,7 @@ void slot_run(Json& report, const Options& o, const Profile& profile, const Rece
     const std::array emissions{EmissionOptions{.mode = quiet ? EmissionMode::Quiet : EmissionMode::Message,
         .first_slot = slot.index, .bits = quiet ? std::span<const std::uint8_t>{} : std::span<const std::uint8_t>(bit),
         .stop = stop, .bit_at = {}}};
-    const auto capture = simulate(profile, emissions, slot.first_sample, slot.stop_sample, samples_left, resources, stop);
+    const auto capture = simulate(o, profile, emissions, slot.first_sample, slot.stop_sample, samples_left, resources, stop);
     report["observation"] = observation(capture, slot.stop_sample, slot, o);
     generation_phase(report, profile, capture);
     if (o.command == "regression") {
@@ -2168,7 +2608,7 @@ void diagnostic_fine(Json& report, const Options& o, const Profile& profile, con
     // A short native noise draw supplies this independently scoped work
     // probe. It carries no purported channel history from previous slots.
     const std::array emissions{EmissionOptions{.mode = EmissionMode::Quiet, .bits = {}, .stop = stop, .bit_at = {}}};
-    auto capture = simulate(profile, emissions, 0, extent.rows, samples_left, resources, stop);
+    auto capture = simulate(o, profile, emissions, 0, extent.rows, samples_left, resources, stop);
     capture.first = extent.first_sample;
     report["observation"] = observation(capture, extent.first_sample + extent.rows, slot, o);
     report["observation"]["channel_scope"] = "independently_seeded_native_thermal_noise_at_local_crop";
@@ -2494,7 +2934,7 @@ void stream_run(Json& report, const Options& o, const Profile& profile, const St
             .source_first_sample = source_first, .stop = stop,
             .bit_at = draft.bit_source(first, [&](std::uint64_t index) { return message_address(profile.waveform, index); })});
     }
-    const auto capture = simulate(profile, emissions, 0, last.stop_sample, samples_left, receiver_resources, stop,
+    const auto capture = simulate(o, profile, emissions, 0, last.stop_sample, samples_left, receiver_resources, stop,
                                   std::move(spool));
     const auto first = make_receiver_slot_plan(profile.waveform, profile.receiver, 0);
     report["observation"] = observation(capture, last.stop_sample, first, o);
@@ -2639,19 +3079,33 @@ void help() {
         "  --opencl-coarse-templates device|native (explicit Vulkan nvfp4 coarse search; device where the\n"
         "    session offers synthesis unless native is stated, and a stated source must be the one executed)\n"
         "  --vulkan-fine-projection automatic|native|nvfp4|resident-nvfp4|resident-fft (explicit Vulkan qualification)\n"
+        "  --vulkan-segmented-timing automatic|device|native (explicit Vulkan changing-channel timing search;\n"
+        "    device scores every admitted shape there and, with --require-accelerator on, every workspace\n"
+        "    of a geometry that has segmented shapes)\n"
         "  --opencl-fine-tiles device|native --opencl-fine-window 2..64, even (explicit resident fine projection;\n"
         "    native tiles in two-block batches reproduce the route before device tiles and windows; a stated\n"
         "    source or window must be the one executed)\n"
         "  --opencl-fine-stream 0..64 (blocks whose mappings device tiles submit while the next are staged;\n"
         "    default 4, 0 stages a whole batch first)\n"
+        "  --opencl-fine-map fp32|fp64 (explicit resident fine projection: FP32 tile rendering and mapping with\n"
+        "    FP64 tiles and exact fixed-point coordinates and phase, or the FP64 kernels, default until the FP32\n"
+        "    kernels are device-qualified)\n"
+        "  --opencl-coarse-rescore fp32|fp64 (explicit Vulkan nvfp4 coarse search: FP32 partial sums of 64 rows\n"
+        "    added in FP64, or every product in FP64, default; a stated choice must be the one executed)\n"
         "  --opencl-profile on|off (Vulkan: record OpenCL device command intervals, on by default for explicit\n"
         "    nvfp4 coarse search; on also times the resident fine session's host spans and commands)\n"
         "  --gpu-fp32-minimum on|off (automatic GPU arithmetic floor; GPU backend only)\n"
+        "  --opencl-coarse-one-ray on|off (GPU backend only: automatic Vulkan selection scores one-ray sessions\n"
+        "    with the dense FP4 search within its measured cost bound; off by default until device-qualified)\n"
         "  --device-index N --device-memory-limit-bytes N\n"
         "  --case hf|eme and the normalized manual-case options from triad_cases.py\n"
         "  --workers N --slot-owners N --memory-limit-bytes N --max-samples N --deadline-ms N\n"
         "    Deadlines default to 30000 ms. Maximum: 5400000 ms for admission, 3600000 ms otherwise.\n"
         "  --max-spool-bytes N --pilot-workers W1,W2,W3 (CPU backlog replays)\n"
+        "  --capture-cache DIR stores each generated capture in DIR, keyed by this executable's SHA-256, on\n"
+        "    Linux its runtime libraries', and every option that can change it; a later run with the same key\n"
+        "    reads and verifies it instead of simulating, and its observation and capture_reuse phase say so.\n"
+        "    Keep DIR private and temporary; the file is charged to the spool or sample budget.\n"
         "  --coarse-tiles N --seed N --slot-index N --stratum active|noise|cold-maximum|terminal|erasure\n"
         "  --work-only on uses a non-admitting local noise crop for nonnominal continuation strata\n"
         "  --helper-overlap off keeps regression in sequence: Helper, then coarse preparation\n"
@@ -2707,17 +3161,22 @@ void run(Json& report, const Options& o, std::stop_token stop) {
         : "native_automatic_q15_or_fp32_coarse_products_with_fp64_guards";
     report["identity"]["require_accelerator"] = o.require_accelerator;
     report["identity"]["requested_gpu_fp32_minimum"] = o.gpu_fp32_minimum;
+    // The choice exists only for automatic GPU selection.
+    report["identity"]["requested_opencl_coarse_one_ray"] = o.backend == "gpu" && o.opencl_coarse_one_ray;
     report["identity"]["requested_vulkan_precision"] = o.vulkan_precision;
     report["identity"]["requested_vulkan_fine_projection"] = o.vulkan_fine_projection;
     report["identity"]["requested_opencl_fine_tiles"] = o.opencl_fine_tiles;
     report["identity"]["requested_opencl_fine_window"] = o.opencl_fine_window;
     report["identity"]["requested_opencl_fine_stream"] = o.opencl_fine_stream;
+    report["identity"]["requested_opencl_fine_map"] = o.opencl_fine_map;
+    report["identity"]["requested_opencl_coarse_rescore"] = o.opencl_coarse_rescore;
     report["identity"]["requested_opencl_profile"] =
         o.opencl_profile ? (*o.opencl_profile ? "on" : "off") : "default";
     report["identity"]["requested_tensor_precision"] = o.tensor_precision;
     report["identity"]["requested_tensor_coarse_math"] = o.tensor_coarse_math;
     report["identity"]["requested_tensor_fine_projection"] = o.tensor_fine_projection;
     report["identity"]["requested_cuda_segmented_timing"] = o.cuda_segmented_timing;
+    report["identity"]["requested_vulkan_segmented_timing"] = o.vulkan_segmented_timing;
     report["identity"]["requested_native_coarse_precision"] = o.native_coarse_precision;
     const auto backend = selected_backend(o);
     const auto describe_backend = [&] {
@@ -2831,6 +3290,16 @@ void run(Json& report, const Options& o, std::stop_token stop) {
                 throw Incomplete("Requested device-rendered fine tiles did not execute: the session uploaded native tiles");
             if (o.opencl_fine_window && actual_backend.opencl_resident_reduced_windows)
                 throw Incomplete("Requested OpenCL resident fine window did not execute: its device lease was refused");
+            // Every mapped column and rendered tile names its kernels.
+            const bool fp32 = o.opencl_fine_map == "fp32";
+            const auto& a = actual_backend;
+            if ((fp32 ? a.opencl_resident_fp64_mapped_columns || a.opencl_resident_fp64_rendered_tiles ||
+                            a.opencl_resident_fp32_mapped_columns != a.mapped_columns ||
+                            a.opencl_resident_fp32_rendered_tiles != a.opencl_resident_rendered_tiles
+                      : a.opencl_resident_fp32_mapped_columns || a.opencl_resident_fp32_rendered_tiles ||
+                            a.opencl_resident_fp64_mapped_columns != a.mapped_columns ||
+                            a.opencl_resident_fp64_rendered_tiles != a.opencl_resident_rendered_tiles))
+                throw Incomplete("Requested OpenCL resident fine arithmetic differs from the kernels executed");
         }
         if (o.backend == "cuda" && o.command != "codec") {
             const auto& actual = actual_backend;
@@ -2866,6 +3335,11 @@ void run(Json& report, const Options& o, std::stop_token stop) {
         // automatic selection admitted.
         const bool dense_requested = o.vulkan_precision == "nvfp4";
         const auto dense_rows = actual_backend.opencl_coarse_score_rows;
+        // Every dense coarse fallback names one reason.
+        std::uint64_t named_fallbacks = 0;
+        for (const auto count : actual_backend.opencl_coarse_fallback_counts) named_fallbacks += count;
+        if (named_fallbacks != actual_backend.opencl_coarse_frequency_fallbacks)
+            throw Incomplete("OpenCL NVFP4 coarse fallback reasons do not cover every fallback");
         if ((dense_requested || dense_rows) && o.command != "codec" && !o.work_only) {
             // The search must have rescored its retained peaks. Automatic
             // selection renders its templates. A required session also
@@ -2889,6 +3363,12 @@ void run(Json& report, const Options& o, std::stop_token stop) {
                 (o.opencl_coarse_templates == "device" ? uploaded != 0 : synthesized != 0))
                 throw Incomplete("Requested OpenCL NVFP4 coarse template source differs from the one executed: "
                                  "device templates need the exact frequency-tile route");
+            // Every rescored peak names its accumulation.
+            const auto partial = actual.opencl_coarse_rescore_fp32_partial_peaks;
+            const auto control = actual.opencl_coarse_rescore_fp64_peaks;
+            if (partial + control != actual.opencl_coarse_rescored_peaks ||
+                (o.opencl_coarse_rescore == "fp32" ? control != 0 : partial != 0))
+                throw Incomplete("Requested OpenCL NVFP4 coarse rescoring differs from the accumulation executed");
         }
         if ((o.backend == "vulkan" || (o.backend == "gpu" && actual_backend.vulkan)) && !dense_requested &&
             o.require_accelerator && o.command != "codec") {
@@ -2928,6 +3408,19 @@ void run(Json& report, const Options& o, std::stop_token stop) {
                 actual.vulkan_peak_owner_bytes > actual.workspace_limit_bytes ||
                 actual.allocator_peak_reserved_bytes < actual.vulkan_peak_owner_bytes)
                 throw Incomplete("Vulkan receiver work did not execute bounded full-frequency scoring");
+        }
+        if (o.backend == "vulkan" && o.vulkan_segmented_timing == "device" && o.require_accelerator &&
+            o.command != "codec") {
+            // Only a geometry that offers changing-channel segmented shapes
+            // to its sessions has this work: not a fixed channel, diffuse
+            // Doppler or explicit FP64 coarse arithmetic.
+            const auto& actual = actual_backend;
+            const bool applicable = actual.vulkan_segmented_planned_shapes != 0;
+            report["identity"]["vulkan_segmented_requirement"] = applicable ? "required" : "not_applicable";
+            if (applicable && (!actual.vulkan_segmented_sessions || !actual.vulkan_segmented_inverse_ffts ||
+                    !actual.vulkan_segmented_score_rows || actual.vulkan_segmented_declined_calls ||
+                    actual.vulkan_segmented_native_fallbacks))
+                throw Incomplete("Requested Vulkan segmented timing did not score every changing-channel workspace on the device");
         }
         if (o.require_accelerator && o.command == "codec")
             throw Incomplete("Isolated codec work does not execute accelerator stages");

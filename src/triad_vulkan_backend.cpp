@@ -41,11 +41,14 @@ namespace {
 using Clock = std::chrono::steady_clock;
 constexpr std::size_t mib = 1024 * 1024;
 constexpr std::size_t plan_cache_limit = 4;
-constexpr std::size_t serialized_cache_entries = 8;
+// Up to eight frequency-search transforms and six segmented-timing plans
+// (two shapes, each a forward, a tile and a tail plan) stay warm across
+// slots. The byte limit bounds their host memory.
+constexpr std::size_t serialized_cache_entries = 16;
 constexpr std::size_t serialized_cache_limit = 8 * mib;
 constexpr std::size_t serialized_cache_metadata_bound = 64 * 1024;
-constexpr std::size_t shader_cache_entries = 16;
-constexpr std::size_t shader_cache_limit = 128 * 1024;
+constexpr std::size_t shader_cache_entries = 20;
+constexpr std::size_t shader_cache_limit = 160 * 1024;
 constexpr std::size_t shader_cache_metadata_bound = 8 * 1024;
 // Admit enough independent transforms to amortize submissions and feed the
 // compute units. Exact allocation checks halve this width when RAM is tighter.
@@ -106,7 +109,8 @@ VkDeviceSize device_local_bytes(const VkPhysicalDeviceMemoryProperties& memory) 
     return bytes;
 }
 
-using FftKey = std::tuple<std::size_t, std::size_t, bool, bool>;
+// Rows, batches, inverse, FP16 storage and FP32 twiddle tables.
+using FftKey = std::tuple<std::size_t, std::size_t, bool, bool, bool>;
 constexpr auto fp32_arithmetic = "fp32_fft_fp64_coordinates_and_scores_native_fir_and_fine";
 constexpr auto half_storage_arithmetic = "fp16_fft_storage_fp32_fft_and_products";
 constexpr auto fp32_direct_arithmetic = "fp32_direct_dot_fp64_scoring";
@@ -114,6 +118,10 @@ constexpr auto half_storage_direct_arithmetic = "fp16_storage_fp32_direct_dot_fp
 constexpr auto packed_direct_arithmetic = "packed_fp16_direct_dot_fp32_reduction_fp64_scoring";
 constexpr auto host_score_suffix = "_fixed_phase_host_fp64_scoring";
 constexpr auto dense_fp4_arithmetic = "nvfp4_dense_coarse_fp32_rescored_peaks_native_fir_and_fine";
+// The same with its retained arrivals rescored by FP32 partial sums of 64
+// rows added in FP64 rather than by FP64 accumulation.
+constexpr auto dense_fp4_partial_arithmetic =
+    "nvfp4_dense_coarse_fp32_partial_rescored_peaks_native_fir_and_fine";
 constexpr auto mixed_dense_fp4_arithmetic = "mixed_nvfp4_dense_and_fft_coarse_native_fir_and_fine";
 
 bool direct_request(VulkanCoarsePrecision precision) {
@@ -142,15 +150,19 @@ struct CachedFft {
     std::uint64_t age;
 };
 
-enum class ShaderKind { rotate, products, direct_dot, quadratic, peaks };
+enum class ShaderKind {
+    rotate, products, direct_dot, quadratic, peaks,
+    segmented_column, segmented_product, segmented_ranks, segmented_finish
+};
 using ShaderKey = std::tuple<ShaderKind, bool, bool, bool>;
 using Spirv = std::vector<unsigned int>;
 
 Spirv compile_spirv(const ShaderKey& key) {
     const auto [kind, half_storage, packed_direct, fixed_phase] = key;
-    constexpr std::array<std::string_view, 5> sources{
+    constexpr std::array<std::string_view, 9> sources{
         vulkan_rotate_shader, vulkan_products_shader, vulkan_direct_dot_shader,
-        vulkan_quadratic_shader, vulkan_coarse_peaks_shader};
+        vulkan_quadratic_shader, vulkan_coarse_peaks_shader, vulkan_segmented_column_shader,
+        vulkan_segmented_product_shader, vulkan_segmented_ranks_shader, vulkan_segmented_finish_shader};
     std::string code(sources[static_cast<std::size_t>(kind)]);
     if (half_storage || fixed_phase) {
         constexpr std::string_view version = "#version 450\n";
@@ -193,6 +205,9 @@ struct Shared {
     const bool automatic_workspace;
     bool automatic_half_device = false, automatic_direct_device = false;
     bool host_scoring = false;
+    // Set once by the backend before any session: the OpenCL NVFP4 route
+    // matched this GPU by UUID, which requires NVIDIA SM 12.0.
+    bool opencl_sm120 = false;
     VkInstance instance = VK_NULL_HANDLE;
     VkPhysicalDevice physical = VK_NULL_HANDLE;
     VkDevice device = VK_NULL_HANDLE;
@@ -408,7 +423,9 @@ struct Shared {
             requested == VulkanCoarsePrecision::direct_fp16 ? packed_direct_arithmetic :
             requested == VulkanCoarsePrecision::direct_fp16_storage ? half_storage_direct_arithmetic :
             requested == VulkanCoarsePrecision::direct_fp32 ? fp32_direct_arithmetic :
-            requested == VulkanCoarsePrecision::opencl_nvfp4 ? dense_fp4_arithmetic : fp32_arithmetic;
+            requested == VulkanCoarsePrecision::opencl_nvfp4
+                ? (options.opencl_coarse_fp32_rescore ? dense_fp4_partial_arithmetic : dense_fp4_arithmetic)
+                : fp32_arithmetic;
         total.requested_coarse_math = "fft";
         total.vulkan = true;
         total.vulkan_api_version = properties.apiVersion; total.vulkan_driver_version = properties.driverVersion;
@@ -534,6 +551,18 @@ struct Shared {
         }
         memory_ready.notify_all();
     }
+    // An optional lease that never waits. It declines while any owner is
+    // queued, so it never passes one.
+    bool try_acquire(std::size_t bytes) {
+        const auto limit = total.vulkan_shared_workspace_limit_bytes;
+        if (!bytes || bytes > limit) return false;
+        std::lock_guard lock(receipt_mutex);
+        if (first_waiter || bytes > limit - total.vulkan_leased_bytes) return false;
+        total.vulkan_leased_bytes += bytes;
+        total.vulkan_peak_leased_bytes = std::max(total.vulkan_peak_leased_bytes, total.vulkan_leased_bytes);
+        total.vulkan_peak_owner_lease_bytes = std::max(total.vulkan_peak_owner_lease_bytes, bytes);
+        return true;
+    }
 #ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
     bool try_fine_device_lease(std::size_t bytes) {
         std::lock_guard lock(receipt_mutex);
@@ -549,8 +578,10 @@ struct Shared {
         std::lock_guard lock(receipt_mutex);
         auto result = total;
         if (result.score_rows && result.opencl_coarse_score_rows) {
-            result.precision = result.opencl_coarse_score_rows == result.score_rows ? dense_fp4_arithmetic
-                                                                                    : mixed_dense_fp4_arithmetic;
+            const bool partial = result.opencl_coarse_rescore_fp32_partial_peaks &&
+                                 !result.opencl_coarse_rescore_fp64_peaks;
+            result.precision = result.opencl_coarse_score_rows != result.score_rows ? mixed_dense_fp4_arithmetic
+                : partial ? dense_fp4_partial_arithmetic : dense_fp4_arithmetic;
         } else if (result.score_rows) {
             if (result.vulkan_direct_fp32_score_rows == result.score_rows) result.precision = fp32_direct_arithmetic;
             else if (result.vulkan_direct_fp16_score_rows == result.score_rows) result.precision = packed_direct_arithmetic;
@@ -655,6 +686,10 @@ struct Shared {
         ADD_FIELD(vulkan_direct_fp16_storage_score_rows);
         ADD_FIELD(vulkan_fft_cache_hits); ADD_FIELD(vulkan_fft_cache_misses);
         ADD_FIELD(vulkan_shader_spirv_compiles); ADD_FIELD(vulkan_shader_spirv_cache_hits);
+        ADD_FIELD(vulkan_segmented_sessions); ADD_FIELD(vulkan_segmented_forward_ffts);
+        ADD_FIELD(vulkan_segmented_inverse_ffts); ADD_FIELD(vulkan_segmented_score_rows);
+        ADD_FIELD(vulkan_segmented_planned_shapes); ADD_FIELD(vulkan_segmented_declined_calls);
+        ADD_FIELD(vulkan_segmented_native_fallbacks);
 #undef ADD_FIELD
         total.executed |= delta.executed;
         total.wall_seconds += delta.wall_seconds;
@@ -662,6 +697,10 @@ struct Shared {
         total.vulkan_shader_compile_seconds += delta.vulkan_shader_compile_seconds;
         total.vulkan_device_command_seconds += delta.vulkan_device_command_seconds;
         total.vulkan_direct_dot_seconds += delta.vulkan_direct_dot_seconds;
+        if (total.vulkan_segmented_fallback_reason.empty())
+            total.vulkan_segmented_fallback_reason = delta.vulkan_segmented_fallback_reason;
+        if (total.vulkan_segmented_decline_reason.empty())
+            total.vulkan_segmented_decline_reason = delta.vulkan_segmented_decline_reason;
 #ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
         add_opencl_coarse_work(total, delta);
 #endif
@@ -786,6 +825,7 @@ struct Pipeline {
         if (descriptors) vkDestroyDescriptorSetLayout(device, descriptors, nullptr);
     }
 };
+struct Context;
 struct FftPlan {
     VkFFTApplication app{};
     // VkFFT retains these addresses, including the handle-array addresses.
@@ -794,8 +834,39 @@ struct FftPlan {
     unsigned handle_slot = 0;
     bool initialized = false;
     std::uint64_t age = 0;
-    ~FftPlan() { if (initialized) deleteVkFFT(&app); }
+    // The session reservation for VkFFT's own twiddle tables, held until
+    // the plan has freed them.
+    Context* lut_owner = nullptr;
+    std::size_t lut_charge = 0;
+    FftPlan() = default;
+    FftPlan(const FftPlan&) = delete;
+    ~FftPlan();
 };
+
+// A VkFFT status reporting that it does not implement this transform
+// configuration, before it records or allocates anything for it.
+class VkFftUnsupported : public Error {
+public:
+    using Error::Error;
+};
+
+// VkFFT's FP32 twiddle tables for one power-of-two plan of these rows. Each
+// of at most four axis uploads holds fewer than 2*rows complex entries: its
+// stage table is shorter than the upload's own length, and its four-step
+// table at most the whole transform. One same-size host-visible staging
+// copy is live while a table uploads. VkFFT places the tables on the first
+// device-local memory type, which need not be the heap this quote leases;
+// an allocation failure there becomes a workspace fallback (make_plan).
+constexpr std::size_t max_lut_uploads = 4;
+std::size_t lut_upload_bytes(std::size_t rows) {
+    return mul(2 * rows, sizeof(FloatComplex));
+}
+std::optional<std::size_t> lut_quote(const Shared& shared, std::size_t rows) {
+    const auto table = shared.quote_buffer(lut_upload_bytes(rows), false);
+    const auto staging = shared.quote_buffer(lut_upload_bytes(rows), true);
+    if (!table || !staging) return {};
+    return add(mul(max_lut_uploads, *table), *staging);
+}
 
 struct Context {
     enum TimingQuery : std::uint32_t {
@@ -815,6 +886,7 @@ struct Context {
     BulkReceipt local;
     std::map<FftKey, std::unique_ptr<FftPlan>> plans;
     std::unique_ptr<Pipeline> rotate, products, quadratic, peaks;
+    std::unique_ptr<Pipeline> segment_column, segment_product, segment_ranks, segment_finish;
     std::size_t fft_element_bytes() const { return half_storage ? sizeof(std::uint32_t) : sizeof(FloatComplex); }
 
     explicit Context(std::shared_ptr<Shared> owner)
@@ -828,9 +900,10 @@ struct Context {
             check(vkAllocateCommandBuffers(shared->device, &c, &command), "command buffer allocation");
             VkFenceCreateInfo f{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
             check(vkCreateFence(shared->device, &f, nullptr, &fence), "fence creation");
-            VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 16};
+            // Four frequency-search and four segmented-timing pipelines.
+            VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 32};
             VkDescriptorPoolCreateInfo d{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-            d.maxSets = 4; d.poolSizeCount = 1; d.pPoolSizes = &size;
+            d.maxSets = 8; d.poolSizeCount = 1; d.pPoolSizes = &size;
             check(vkCreateDescriptorPool(shared->device, &d, nullptr, &descriptors), "descriptor pool creation");
             if (shared->timestamp_bits && shared->properties.limits.timestampPeriod > 0) {
                 VkQueryPoolCreateInfo q{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
@@ -848,6 +921,7 @@ struct Context {
     ~Context() { release(); }
     void release() noexcept {
         plans.clear(); peaks.reset(); quadratic.reset(); products.reset(); rotate.reset();
+        segment_finish.reset(); segment_ranks.reset(); segment_product.reset(); segment_column.reset();
         if (timestamps) vkDestroyQueryPool(shared->device, timestamps, nullptr);
         timestamps = VK_NULL_HANDLE;
         if (descriptors) vkDestroyDescriptorPool(shared->device, descriptors, nullptr);
@@ -865,8 +939,37 @@ struct Context {
         }
     }
     void admit(std::size_t bytes, std::stop_token stop) {
+        require(!lease, "Robust Vulkan session already holds a device lease");
         shared->acquire(bytes, stop);
         allocation_limit = lease = bytes;
+    }
+    // Admits without waiting or queueing. False holds nothing.
+    bool try_admit(std::size_t bytes) {
+        require(!lease, "Robust Vulkan session already holds a device lease");
+        if (!shared->try_acquire(bytes)) return false;
+        allocation_limit = lease = bytes;
+        return true;
+    }
+    // Reserves memory that a library allocates itself, against this
+    // session's ceiling and the shared receipt, before it is allocated.
+    void charge_external(std::size_t bytes) {
+        if (bytes > shared->maximum_allocation_size ||
+            bytes > allocation_limit - std::min(allocated, allocation_limit))
+            throw ReceiverWorkspaceError("Robust Vulkan operation exceeds its session allocation ceiling");
+        const auto next_allocated = add(allocated, bytes);
+        const auto next_peak = std::max(peak_allocated, next_allocated);
+        shared->charge(bytes, next_peak);
+        allocated = next_allocated; peak_allocated = next_peak;
+    }
+    void uncharge_external(std::size_t bytes) noexcept {
+        allocated -= bytes;
+        shared->uncharge(bytes);
+    }
+    // Returns a lease whose buffers are all released, so the session can
+    // admit its next stage without holding two.
+    void release_admission() noexcept {
+        if (lease) shared->release_lease(std::exchange(lease, 0));
+        allocation_limit = shared->options.workspace_bytes;
     }
     void account(BulkReceipt delta) {
 #define ADD_FIELD(name) count(local.name, delta.name)
@@ -880,12 +983,20 @@ struct Context {
         ADD_FIELD(vulkan_direct_fp16_storage_score_rows);
         ADD_FIELD(vulkan_fft_cache_hits); ADD_FIELD(vulkan_fft_cache_misses);
         ADD_FIELD(vulkan_shader_spirv_compiles); ADD_FIELD(vulkan_shader_spirv_cache_hits);
+        ADD_FIELD(vulkan_segmented_sessions); ADD_FIELD(vulkan_segmented_forward_ffts);
+        ADD_FIELD(vulkan_segmented_inverse_ffts); ADD_FIELD(vulkan_segmented_score_rows);
+        ADD_FIELD(vulkan_segmented_planned_shapes); ADD_FIELD(vulkan_segmented_declined_calls);
+        ADD_FIELD(vulkan_segmented_native_fallbacks);
 #undef ADD_FIELD
         local.wall_seconds += delta.wall_seconds; local.executed |= delta.executed;
         local.vulkan_fft_plan_seconds += delta.vulkan_fft_plan_seconds;
         local.vulkan_shader_compile_seconds += delta.vulkan_shader_compile_seconds;
         local.vulkan_device_command_seconds += delta.vulkan_device_command_seconds;
         local.vulkan_direct_dot_seconds += delta.vulkan_direct_dot_seconds;
+        if (local.vulkan_segmented_fallback_reason.empty())
+            local.vulkan_segmented_fallback_reason = delta.vulkan_segmented_fallback_reason;
+        if (local.vulkan_segmented_decline_reason.empty())
+            local.vulkan_segmented_decline_reason = delta.vulkan_segmented_decline_reason;
         shared->accumulate(delta);
     }
     BulkReceipt receipt() const {
@@ -903,6 +1014,11 @@ struct Context {
         COPY_FIELD(vulkan_shader_spirv_compiles); COPY_FIELD(vulkan_shader_spirv_cache_hits);
         COPY_FIELD(vulkan_fft_plan_seconds); COPY_FIELD(vulkan_shader_compile_seconds);
         COPY_FIELD(vulkan_direct_dot_seconds);
+        COPY_FIELD(vulkan_segmented_sessions); COPY_FIELD(vulkan_segmented_forward_ffts);
+        COPY_FIELD(vulkan_segmented_inverse_ffts); COPY_FIELD(vulkan_segmented_score_rows);
+        COPY_FIELD(vulkan_segmented_planned_shapes); COPY_FIELD(vulkan_segmented_declined_calls);
+        COPY_FIELD(vulkan_segmented_decline_reason);
+        COPY_FIELD(vulkan_segmented_native_fallbacks); COPY_FIELD(vulkan_segmented_fallback_reason);
         COPY_FIELD(wall_seconds); COPY_FIELD(executed);
 #undef COPY_FIELD
         // Generic allocation fields retain the shared backend's aggregate.
@@ -1063,11 +1179,24 @@ struct Context {
         count(delta.vulkan_dispatches, 1);
         compute_barrier();
     }
+    // A shader that reads its workgroup row as a separate index.
+    template<class Push> void dispatch_rows(Pipeline& p, const Push& push, std::size_t x, std::size_t y,
+                                            BulkReceipt& delta) {
+        const auto& limits = shared->properties.limits.maxComputeWorkGroupCount;
+        require(sizeof(Push) == p.push_bytes && x && y && x <= limits[0] && y <= limits[1],
+                "Robust Vulkan dispatch exceeds public geometry or device bounds");
+        vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, p.pipeline);
+        vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE, p.layout, 0, 1, &p.set, 0, nullptr);
+        vkCmdPushConstants(command, p.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(Push), &push);
+        vkCmdDispatch(command, narrow(x), narrow(y), 1);
+        count(delta.vulkan_dispatches, 1);
+        compute_barrier();
+    }
     FftPlan& plan(std::size_t rows, std::size_t batches, bool inverse, Buffer& data, Buffer& temporary,
                   std::stop_token stop) {
         cancelled(stop);
         require(rows && std::has_single_bit(rows) && batches, "Robust Vulkan FFT requires bounded power-of-two rows");
-        const auto key = std::tuple(rows, batches, inverse, half_storage);
+        const auto key = std::tuple(rows, batches, inverse, half_storage, false);
         if (auto found = plans.find(key); found != plans.end()) {
             require(data.bytes >= found->second->data_bytes && temporary.bytes >= found->second->temporary_bytes,
                     "Robust Vulkan cached FFT buffers are smaller than their plan extents");
@@ -1079,7 +1208,30 @@ struct Context {
             });
             plans.erase(oldest);
         }
+        auto result = make_plan(rows, batches, inverse, data, temporary, stop);
+        result->age = ++age;
+        auto& value = *result;
+        plans.emplace(key, std::move(result));
+        return value;
+    }
+    // A plan bound to these buffers, outside the session's LRU cache. Its
+    // owner appends it only with the same buffers.
+    // With lut, VkFFT allocates and uploads its own twiddle tables. Their
+    // quoted extent is charged to this session before the plan exists.
+    std::unique_ptr<FftPlan> make_plan(std::size_t rows, std::size_t batches, bool inverse, Buffer& data,
+                                       Buffer& temporary, std::stop_token stop, bool lut = false) {
+        cancelled(stop);
+        require(rows && std::has_single_bit(rows) && batches, "Robust Vulkan FFT requires bounded power-of-two rows");
+        require(!lut || !half_storage, "Robust VkFFT twiddle tables serve FP32 storage only");
+        const auto key = std::tuple(rows, batches, inverse, half_storage, lut);
         auto result = std::make_unique<FftPlan>();
+        if (lut) {
+            const auto tables = lut_quote(*shared, rows);
+            if (!tables) throw ReceiverWorkspaceError("Robust VkFFT twiddle tables exceed device buffer bounds");
+            charge_external(*tables);
+            result->lut_owner = this;
+            result->lut_charge = *tables;
+        }
         VkFFTConfiguration config{};
         config.FFTdim = 1; config.size[0] = rows; config.numberBatches = batches;
         config.physicalDevice = &shared->physical; config.device = &shared->device;
@@ -1087,7 +1239,11 @@ struct Context {
         config.isCompilerInitialized = 1;
         config.makeForwardPlanOnly = inverse ? 0 : 1;
         config.makeInversePlanOnly = inverse ? 1 : 0;
-        config.normalize = 1; config.useLUT = -1; config.useLUT_4step = -1;
+        config.normalize = 1;
+        // Twiddle tables are computed in FP64 on the host and rounded once,
+        // as the native FloatPlan does. Without them VkFFT evaluates FP32
+        // sin/cos in the shader.
+        config.useLUT = config.useLUT_4step = lut ? 1 : -1;
         config.userTempBuffer = 1;
         config.halfPrecision = half_storage;
         result->data_bytes = mul(mul(rows, batches), fft_element_bytes());
@@ -1115,7 +1271,15 @@ struct Context {
         } else config.saveApplicationToString = 1;
         cancelled(stop);
         const auto began = Clock::now();
-        auto status = initializeVkFFT(&result->app, config);
+        VkFFTResult status;
+        if (lut) {
+            // VkFFT uploads the tables through this session's pool and fence
+            // on the shared queue, which Vulkan requires to be externally
+            // synchronized. No submission of this session is pending.
+            check(vkResetFences(shared->device, 1, &fence), "fence reset");
+            std::lock_guard lock(shared->queue_mutex);
+            status = initializeVkFFT(&result->app, config);
+        } else status = initializeVkFFT(&result->app, config);
         // VkFFT 1.3.4 power-of-two append/destruction do not use the borrowed
         // serialization. Detach it before releasing the immutable cache pin.
         result->app.configuration.loadApplicationString = nullptr;
@@ -1123,7 +1287,16 @@ struct Context {
         binary.reset();
         if (status != VKFFT_SUCCESS) {
             deleteVkFFT(&result->app);
-            throw Error(std::string("Robust VkFFT plan failed: ") + getVkFFTErrorString(status));
+            std::string message = std::string("Robust VkFFT plan failed: ") + getVkFFTErrorString(status);
+            if (status >= VKFFT_ERROR_UNSUPPORTED_RADIX && status <= VKFFT_ERROR_UNSUPPORTED_FFT_OMIT)
+                throw VkFftUnsupported(std::move(message));
+            // VkFFT allocates twiddle tables and their staging itself. Memory
+            // exhaustion there is a workspace shortfall, like Buffer's, so the
+            // segmented session takes its reported native fallback.
+            if (lut && (status == VKFFT_ERROR_FAILED_TO_ALLOCATE_MEMORY ||
+                        status == VKFFT_ERROR_FAILED_TO_CREATE_BUFFER || status == VKFFT_ERROR_MALLOC_FAILED))
+                throw ReceiverWorkspaceError(std::move(message));
+            throw Error(std::move(message));
         }
         result->initialized = true;
         BulkReceipt compiled;
@@ -1141,13 +1314,24 @@ struct Context {
             compile_lock.unlock();
         }
         account(compiled);
-        require(!result->app.configuration.allocateTempBuffer && result->app.configuration.useLUT != 1 &&
-                result->app.configuration.useLUT_4step != 1,
+        require(!result->app.configuration.allocateTempBuffer &&
+                (lut || (result->app.configuration.useLUT != 1 && result->app.configuration.useLUT_4step != 1)),
                 "Robust VkFFT allocated unreserved auxiliary storage");
-        result->age = ++age;
-        auto& value = *result;
-        plans.emplace(key, std::move(result));
-        return value;
+        if (lut) {
+            // The reservation covers every table VkFFT allocated.
+            std::size_t tables = 0;
+            for (const auto* plan : {result->app.localFFTPlan, result->app.localFFTPlan_inverse}) {
+                if (!plan) continue;
+                require(plan->numAxisUploads[0] <= max_lut_uploads, "Robust VkFFT exceeded its quoted table uploads");
+                for (pfUINT upload = 0; upload < plan->numAxisUploads[0]; ++upload) {
+                    const auto& axis = plan->axes[0][upload];
+                    require(axis.bufferLUTSize <= lut_upload_bytes(rows), "Robust VkFFT table exceeds its quote");
+                    if (!axis.referenceLUT) tables = add(tables, static_cast<std::size_t>(axis.bufferLUTSize));
+                }
+            }
+            require(tables <= mul(max_lut_uploads, lut_upload_bytes(rows)), "Robust VkFFT tables exceed their quote");
+        }
+        return result;
     }
     void fft(std::size_t rows, std::size_t batches, Buffer& data, Buffer& temporary,
              bool inverse, CoarseBulkWork& work, BulkReceipt& delta, std::stop_token stop) {
@@ -1157,6 +1341,12 @@ struct Context {
         p.handle_slot ^= 1;
         p.data_handles[p.handle_slot] = data.handle;
         p.temporary_handles[p.handle_slot] = temporary.handle;
+        append(p, rows, batches, inverse, work, delta);
+    }
+    // Appends a plan with the buffers it was created with. VkFFT then
+    // updates no descriptor, so one command buffer can hold many appends.
+    void append(FftPlan& p, std::size_t rows, std::size_t batches, bool inverse,
+                CoarseBulkWork& work, BulkReceipt& delta) {
         VkFFTLaunchParams launch{};
         launch.commandBuffer = &command;
         launch.buffer = launch.inputBuffer = launch.outputBuffer = &p.data_handles[p.handle_slot];
@@ -1170,6 +1360,11 @@ struct Context {
         count(delta.fft_calls, 1); count(delta.fft_rows, samples);
     }
 };
+
+FftPlan::~FftPlan() {
+    if (initialized) deleteVkFFT(&app);
+    if (lut_owner) lut_owner->uncharge_external(lut_charge);
+}
 
 Buffer::Buffer(Context& context, std::size_t size, bool host_reads) : owner(&context), bytes(size) {
     require(size, "Robust Vulkan buffer must be nonempty");
@@ -1341,6 +1536,167 @@ struct PeakPush { std::uint32_t arrivals, separation; };
 static_assert(sizeof(RotatePush) == 16 && sizeof(RotateFp64Push) == 24 &&
               sizeof(ProductPush) == 20 && sizeof(ScorePush) == 32 && sizeof(PeakPush) == 8);
 
+struct SegmentColumnPush { std::uint32_t first, rows, nfft, unused = 0; };
+struct SegmentProductPush {
+    std::uint32_t nfft, phases, radius, bin_stride, first_frequency, width, block_offset, unused = 0;
+};
+struct SegmentRanksPush {
+    std::uint32_t nfft, arrivals, frequencies, first_frequency, width, hop, previous, next;
+    double energy, noise_power;
+};
+struct SegmentFinishPush { std::uint32_t arrivals, groups, frequencies, mode, state; };
+static_assert(sizeof(SegmentColumnPush) == 16 && sizeof(SegmentProductPush) == 32 &&
+              sizeof(SegmentRanksPush) == 48 && sizeof(SegmentFinishPush) == 20);
+
+// Inverse transforms per batch, as on CUDA. The last tile of a block has
+// its own plan for the remaining frequencies.
+constexpr std::size_t segmented_tile_limit = 128;
+// A ranks workgroup row takes about eight frequencies of a tile.
+constexpr std::size_t segmented_rows_per_group = 8, segmented_group_limit = 64;
+// Inverse transform rows of one submission. It bounds the command a
+// cancellation or device watchdog waits for; a block is never split.
+constexpr std::size_t segmented_submission_rows = std::size_t{1} << 28;
+
+std::size_t ceil_div(std::size_t a, std::size_t b) { return a / b + (a % b != 0); }
+
+// Shapes the device kernels index with 32-bit integers, on the same public
+// geometry checks as the CUDA plan.
+bool segmented_shape_supported(const CoarseSegmentedShape& shape) {
+    constexpr std::size_t index_limit = UINT32_MAX;
+    if (!shape.blocks || shape.blocks > shape.kernel_rows || !shape.arrivals || !shape.phases ||
+        shape.fft_rows < 2 || !std::has_single_bit(shape.fft_rows) || shape.fft_rows > (std::size_t{1} << 22) ||
+        !shape.bin_stride || shape.arrivals > shape.fft_rows || shape.kernel_rows > index_limit ||
+        ceil_div(shape.kernel_rows, shape.blocks) > shape.fft_rows - shape.arrivals + 1 ||
+        shape.radius > (INT32_MAX / 2 - 1) / 2 || shape.bin_stride > INT32_MAX / 2 ||
+        (shape.radius && shape.bin_stride > (INT32_MAX / 2) / shape.radius) ||
+        shape.phases > INT32_MAX / 2 || shape.tracking_hop >= 2 * shape.radius + 1)
+        return false;
+    const auto frequencies = 2 * shape.radius + 1;
+    return shape.blocks <= index_limit / shape.phases / shape.fft_rows &&
+        frequencies <= index_limit / 2 / shape.arrivals;
+}
+
+// The shapes TensorCoarse::plan_segmented qualified for automatic CUDA on
+// the full RTX PRO 6000 Blackwell: broad 16k/32k transforms with many
+// arrivals, blocks and frequencies, up to two phases and four offsets.
+bool cuda_qualified_segmented_shape(const CoarseSegmentedShape& shape) {
+    return (shape.fft_rows == 16'384 || shape.fft_rows == 32'768) && shape.arrivals >= 4096 &&
+        shape.blocks >= 32 && shape.radius >= 128 && shape.phases <= 2 && shape.tracking_hop <= 4 &&
+        shape.blocks >= ceil_div(32'768, 2 * shape.radius + 1);
+}
+
+// Automatic selection admits the shapes qualified for automatic CUDA only on
+// the GPU class that qualification covered: NVIDIA SM 12.0, identified when
+// the OpenCL NVFP4 route matched this device by UUID. A full RTX PRO 6000
+// Blackwell qualified this Vulkan form on 20 November 2026
+// (docs/validation.md). Other NVIDIA generations have no measurement of this
+// route. On the measured 5650U Vega the native scorer on all CPU threads
+// kept the faster complete slot.
+constexpr bool automatic_segmented_qualified = true;
+
+// Empty selects the device for the shape; otherwise the policy reason it
+// stays native.
+std::string_view segmented_decline(const Shared& shared, const CoarseSegmentedShape& shape) {
+    const auto choice = shared.options.segmented_timing;
+    if (choice == VulkanSegmentedTiming::native) return "vulkan-segmented-native-requested";
+    // The FP64 rank shaders need the device features host scoring disables.
+    if (shared.options.force_host_scoring) return "vulkan-segmented-host-scoring-forced";
+    if (shared.host_scoring) return "vulkan-segmented-shader-fp64-unavailable";
+    if (!segmented_shape_supported(shape)) return "vulkan-segmented-unsupported-shape";
+    if (choice == VulkanSegmentedTiming::device) return {};
+    if (!automatic_segmented_qualified || !shared.opencl_sm120) return "vulkan-segmented-unqualified-device";
+    return cuda_qualified_segmented_shape(shape) ? std::string_view{} : "vulkan-segmented-unqualified-shape";
+}
+
+// Device buffers of one session's segmented work. Spectra stay resident
+// per shape for all of its workspaces; the other buffers serve each shape
+// in turn and are sized for the largest.
+struct SegmentLayout {
+    CoarseSegmentedShape shape;
+    std::size_t frequencies = 0, tile = 0, groups = 0;
+};
+struct SegmentAdmission {
+    std::vector<SegmentLayout> layouts;
+    std::size_t time_bytes = 0, column_bytes = 0, product_bytes = 0, temporary_bytes = 0;
+    std::size_t partial_bytes = 0, rank_bytes = 0, state_bytes = 0;
+    std::vector<std::size_t> spectra_bytes;
+    // VkFFT twiddle tables of every forward, tile and tail plan.
+    std::size_t table_bytes = 0;
+    std::size_t device_bytes = 0;
+};
+
+std::optional<SegmentAdmission> segment_admission(const Shared& shared, std::span<const CoarseSegmentedShape> shapes,
+                                                  std::size_t width, std::size_t limit) {
+    SegmentAdmission result;
+    for (const auto& shape : shapes) {
+        SegmentLayout layout{shape, 2 * shape.radius + 1};
+        layout.tile = std::min(width, layout.frequencies);
+        layout.groups = std::min(segmented_group_limit, ceil_div(layout.tile, segmented_rows_per_group));
+        const auto complex_bytes = sizeof(FloatComplex);
+        result.time_bytes = std::max(result.time_bytes, mul(shape.kernel_rows, complex_bytes));
+        result.column_bytes = std::max(result.column_bytes, mul(shape.fft_rows, complex_bytes));
+        result.product_bytes = std::max(result.product_bytes, mul(mul(layout.tile, shape.fft_rows), complex_bytes));
+        result.partial_bytes = std::max(result.partial_bytes, mul(mul(layout.groups, shape.arrivals), sizeof(double)));
+        result.rank_bytes = std::max(result.rank_bytes, mul(2 * shape.arrivals, sizeof(double)));
+        if (shape.tracking_hop)
+            result.state_bytes = std::max(result.state_bytes,
+                mul(mul(2 * layout.frequencies, shape.arrivals), sizeof(float)));
+        result.spectra_bytes.push_back(mul(mul(mul(shape.blocks, shape.phases), shape.fft_rows), complex_bytes));
+        result.layouts.push_back(layout);
+    }
+    result.temporary_bytes = std::max(result.product_bytes, result.column_bytes);
+    std::size_t bytes = 0;
+    const auto charge = [&](std::size_t payload, bool host_reads) {
+        if (!payload) return true;
+        if (payload > limit - bytes) return false;
+        const auto extent = shared.quote_buffer(payload, host_reads);
+        if (!extent || *extent > limit - bytes) return false;
+        bytes += *extent;
+        return true;
+    };
+    for (const auto payload : result.spectra_bytes)
+        if (!charge(payload, false)) return {};
+    if (!charge(result.time_bytes, false) || !charge(result.column_bytes, false) ||
+        !charge(result.product_bytes, false) || !charge(result.temporary_bytes, false) ||
+        !charge(result.partial_bytes, false) || !charge(result.rank_bytes, true) || !charge(result.state_bytes, false))
+        return {};
+    for (const auto& layout : result.layouts) {
+        const auto tables = lut_quote(shared, layout.shape.fft_rows);
+        const auto plans = layout.frequencies % layout.tile ? 3 : 2;
+        if (!tables || mul(plans, *tables) > limit - bytes) return {};
+        bytes += plans * *tables;
+        result.table_bytes += plans * *tables;
+    }
+    result.device_bytes = bytes;
+    return result;
+}
+
+// The session's segmented workspace bound. An automatic backend bounds
+// one owner's optional lease relative to the shared device workspace.
+std::size_t segmented_limit(const Shared& shared) {
+    return shared.automatic_workspace ? shared.total.vulkan_shared_workspace_limit_bytes / 4
+                                      : shared.options.workspace_bytes;
+}
+
+// Prefers the widest frequency batch for every planned shape, then each
+// shape alone in planning order. Empty means no shape fits.
+std::optional<SegmentAdmission> plan_segment_admission(const Shared& shared,
+        std::span<const CoarseSegmentedShape> shapes) {
+    if (shapes.empty()) return {};
+    const auto limit = segmented_limit(shared);
+    const auto widest = [&](std::span<const CoarseSegmentedShape> chosen) -> std::optional<SegmentAdmission> {
+        std::size_t frequencies = 0;
+        for (const auto& shape : chosen) frequencies = std::max(frequencies, 2 * shape.radius + 1);
+        for (auto width = std::min(segmented_tile_limit, frequencies); width; width /= 2)
+            if (auto admitted = segment_admission(shared, chosen, width, limit)) return admitted;
+        return {};
+    };
+    if (auto all = widest(shapes)) return all;
+    for (std::size_t i = 0; i < shapes.size() && shapes.size() > 1; ++i)
+        if (auto one = widest(shapes.subspan(i, 1))) return one;
+    return {};
+}
+
 class VulkanCoarse final : public CoarseBulk {
 public:
     explicit VulkanCoarse(std::shared_ptr<Shared> shared) : context_(std::move(shared)) {}
@@ -1354,10 +1710,122 @@ public:
         CoarseBulkWork&, std::stop_token) override {
         throw Error("Vulkan coarse search requires canonical native FIR channelization");
     }
+    void plan_segmented(std::span<const CoarseSegmentedShape> shapes) override {
+        std::lock_guard lock(segment_mutex_);
+        require(!started_ && !segment_begun_ && shapes.size() <= 2, "unexpected Robust Vulkan segmented timing families");
+        segment_candidates_.clear();
+        segment_declined_.clear();
+        for (const auto& shape : shapes) {
+            const auto reason = segmented_decline(*context_.shared, shape);
+            if (reason.empty()) segment_candidates_.push_back(shape);
+            else segment_declined_.push_back({shape, reason, false});
+        }
+        BulkReceipt planned;
+        planned.vulkan_segmented_planned_shapes = shapes.size();
+        context_.account(std::move(planned));
+    }
+    void begin_segmented(std::stop_token stop) override {
+        std::lock_guard lock(segment_mutex_);
+        require(!started_ && !segment_begun_ && !context_.half_storage,
+                "Robust Vulkan segmented timing must begin before the frequency search");
+        segment_begun_ = true;
+        if (segment_candidates_.empty()) return;
+        cancelled(stop);
+        const auto& shared = *context_.shared;
+        const auto admission = plan_segment_admission(shared, segment_candidates_);
+        const auto admitted = [&](const CoarseSegmentedShape& shape) {
+            return admission && std::ranges::any_of(admission->layouts,
+                [&](const auto& layout) { return layout.shape == shape; });
+        };
+        for (const auto& shape : segment_candidates_)
+            if (!admitted(shape)) segment_declined_.push_back({shape, "vulkan-segmented-workspace", true});
+        if (!admission) return;
+        // Nothing has been scored. Every admitted shape stays native.
+        const auto fall_back = [&](std::string_view reason) {
+            release_segments();
+            for (const auto& layout : admission->layouts) segment_declined_.push_back({layout.shape, reason, true});
+        };
+        try {
+            // An automatic lease is optional. It never waits for, or delays,
+            // another owner's frequency search or fine projection.
+            if (shared.automatic_workspace) {
+                if (!context_.try_admit(admission->device_bytes)) return fall_back("vulkan-segmented-workspace");
+                segment_leased_ = true;
+            }
+            allocate_segments(*admission, stop);
+        } catch (const ReceiverWorkspaceError&) {
+            fall_back("vulkan-segmented-workspace");
+        } catch (const VkFftUnsupported&) {
+            // A requested device route has no substitute for its transforms.
+            if (shared.options.segmented_timing == VulkanSegmentedTiming::device) {
+                release_segments();
+                throw;
+            }
+            fall_back("vulkan-segmented-unsupported-transform");
+        } catch (...) {
+            // Cancellation, device loss and unusable memory are not native
+            // fallbacks.
+            release_segments();
+            throw;
+        }
+    }
+    void end_segmented() noexcept override {
+        std::lock_guard lock(segment_mutex_);
+        release_segments();
+    }
+    bool segmented_scores(const CoarseSegmentedShape& shape, std::span<const std::complex<float>> spectra,
+                          std::span<const Complex> time_column, double noise_power,
+                          std::span<double> fixed_ranks, std::span<double> smooth_ranks,
+                          CoarseBulkWork& work, std::stop_token stop) override {
+        // Workspaces share this session's command buffer and device scratch.
+        std::lock_guard lock(segment_mutex_);
+        const auto plan = std::ranges::find(segment_plans_, shape, &SegmentPlan::shape);
+        if (plan == segment_plans_.end()) {
+            const auto declined = std::ranges::find(segment_declined_, shape, &DeclinedSegment::shape);
+            if (declined != segment_declined_.end()) record_segment_decline(declined->reason, declined->fallback);
+            return false;
+        }
+        cancelled(stop);
+        require(spectra.size() == mul(mul(shape.blocks, shape.phases), shape.fft_rows) &&
+                time_column.size() == shape.kernel_rows && fixed_ranks.size() == shape.arrivals &&
+                smooth_ranks.size() == (shape.tracking_hop ? shape.arrivals : 0) &&
+                noise_power > 0 && std::isfinite(noise_power),
+                "invalid Robust Vulkan segmented input");
+        // Block energies in the native order and FP64 arithmetic. A
+        // nonfinite one leaves the whole workspace to the native scorer,
+        // which defines that case, before any device work.
+        std::vector<std::pair<std::size_t, double>> blocks;
+        for (std::size_t block = 0; block < shape.blocks; ++block) {
+            const auto first = block * shape.kernel_rows / shape.blocks;
+            const auto last = (block + 1) * shape.kernel_rows / shape.blocks;
+            double energy = 0;
+            for (auto i = first; i < last; ++i) energy += std::norm(time_column[i]);
+            if (!std::isfinite(energy)) {
+                record_segment_decline("vulkan-segmented-nonfinite-energy", true);
+                return false;
+            }
+            if (energy > 0) blocks.emplace_back(block, energy);
+        }
+        if (blocks.empty()) {
+            // Without an emitting block every rank and tracking state stays
+            // zero, as in the native scorer. No device work is needed.
+            std::ranges::fill(fixed_ranks, 0.);
+            std::ranges::fill(smooth_ranks, 0.);
+            return true;
+        }
+        score_segments(*plan, spectra, time_column, noise_power, blocks, fixed_ranks, smooth_ranks, work, stop);
+        return true;
+    }
     void prepare(const CoarseBulkGeometry& geometry, std::span<const Complex> observation,
                  std::span<const CoarseBulkWorkspace> bank, std::span<const CoarseZoomGroup> groups,
                  CoarseBulkWork& work, std::stop_token stop) override {
         cancelled(stop);
+        {
+            // The segmented lease ends before this stage admits its own.
+            std::lock_guard lock(segment_mutex_);
+            release_segments();
+            segment_begun_ = true;
+        }
         require(!started_ && groups.empty() && !bank.empty() && geometry.taps && geometry.taps <= 2 &&
                 geometry.kernel_rows && geometry.lag_count && geometry.frequency_count &&
                 observation.size() == add(geometry.kernel_rows, geometry.lag_count - 1) &&
@@ -1501,6 +1969,193 @@ public:
     }
     BulkReceipt receipt() const override { return context_.receipt(); }
 private:
+    struct SegmentPlan {
+        CoarseSegmentedShape shape;
+        std::size_t frequencies = 0, tile = 0, groups = 0;
+        std::unique_ptr<Buffer> spectra;
+        // The observation span whose values the resident spectra hold.
+        const std::complex<float>* source = nullptr;
+        std::unique_ptr<FftPlan> forward, inverse, tail;
+    };
+    struct DeclinedSegment {
+        CoarseSegmentedShape shape;
+        std::string_view reason;
+        // The device was selected for this shape but could not score it.
+        bool fallback = false;
+    };
+
+    void record_segment_decline(std::string_view reason, bool fallback) {
+        BulkReceipt declined;
+        if (fallback) {
+            declined.vulkan_segmented_native_fallbacks = 1;
+            declined.vulkan_segmented_fallback_reason = reason;
+        } else {
+            declined.vulkan_segmented_declined_calls = 1;
+            declined.vulkan_segmented_decline_reason = reason;
+        }
+        context_.account(std::move(declined));
+    }
+
+    // Retains every buffer, pipeline and transform plan before any score,
+    // within the admitted lease or the explicit session ceiling.
+    void allocate_segments(const SegmentAdmission& admission, std::stop_token stop) {
+        for (std::size_t i = 0; i < admission.layouts.size(); ++i) {
+            const auto& layout = admission.layouts[i];
+            auto& plan = segment_plans_.emplace_back();
+            plan.shape = layout.shape;
+            plan.frequencies = layout.frequencies;
+            plan.tile = layout.tile;
+            plan.groups = layout.groups;
+            plan.spectra = std::make_unique<Buffer>(context_, admission.spectra_bytes[i]);
+        }
+        segment_time_ = std::make_unique<Buffer>(context_, admission.time_bytes);
+        segment_column_ = std::make_unique<Buffer>(context_, admission.column_bytes);
+        segment_product_ = std::make_unique<Buffer>(context_, admission.product_bytes);
+        segment_temporary_ = std::make_unique<Buffer>(context_, admission.temporary_bytes);
+        segment_partial_ = std::make_unique<Buffer>(context_, admission.partial_bytes);
+        segment_ranks_ = std::make_unique<Buffer>(context_, admission.rank_bytes, true);
+        if (admission.state_bytes) segment_states_ = std::make_unique<Buffer>(context_, admission.state_bytes);
+        context_.pipeline(context_.segment_column, ShaderKind::segmented_column, 2, sizeof(SegmentColumnPush), false);
+        context_.pipeline(context_.segment_product, ShaderKind::segmented_product, 3, sizeof(SegmentProductPush), false);
+        context_.pipeline(context_.segment_ranks, ShaderKind::segmented_ranks, 3, sizeof(SegmentRanksPush), false);
+        context_.pipeline(context_.segment_finish, ShaderKind::segmented_finish, 3, sizeof(SegmentFinishPush), false);
+        for (auto& plan : segment_plans_) {
+            const auto n = plan.shape.fft_rows;
+            plan.forward = context_.make_plan(n, 1, false, *segment_column_, *segment_temporary_, stop, true);
+            plan.inverse = context_.make_plan(n, plan.tile, true, *segment_product_, *segment_temporary_, stop, true);
+            if (const auto tail = plan.frequencies % plan.tile)
+                plan.tail = context_.make_plan(n, tail, true, *segment_product_, *segment_temporary_, stop, true);
+        }
+    }
+
+    void release_segments() noexcept {
+        // Every submission has completed before a call returns or throws.
+        segment_plans_.clear();
+        segment_states_.reset(); segment_ranks_.reset(); segment_partial_.reset();
+        segment_temporary_.reset(); segment_product_.reset(); segment_column_.reset(); segment_time_.reset();
+        if (segment_leased_) context_.release_admission();
+        segment_leased_ = false;
+    }
+
+    void score_segments(SegmentPlan& plan, std::span<const std::complex<float>> spectra,
+                        std::span<const Complex> time_column, double noise_power,
+                        std::span<const std::pair<std::size_t, double>> blocks,
+                        std::span<double> fixed_ranks, std::span<double> smooth_ranks,
+                        CoarseBulkWork& work, std::stop_token stop) {
+        const auto& shape = plan.shape;
+        const auto n = shape.fft_rows, arrivals = shape.arrivals;
+        const auto states = shape.tracking_hop ? mul(plan.frequencies, arrivals) : 0;
+        BulkReceipt copies;
+        if (plan.source != spectra.data()) {
+            // Immutable for the session; every workspace reuses the copy.
+            std::memcpy(plan.spectra->mapped, spectra.data(), spectra.size_bytes());
+            plan.source = spectra.data();
+            copies.upload_bytes = spectra.size_bytes();
+        }
+        // The native scorer casts each FP64 template sample to FP32 with
+        // round-to-nearest before its forward transform.
+        auto* time = static_cast<FloatComplex*>(segment_time_->mapped);
+        for (std::size_t i = 0; i < time_column.size(); ++i) {
+            if ((i & 65535u) == 0) cancelled(stop);
+            time[i] = {static_cast<float>(time_column[i].real()), static_cast<float>(time_column[i].imag())};
+        }
+        count(copies.upload_bytes, mul(time_column.size(), sizeof(FloatComplex)));
+        // Ranks start at zero and each emitting block adds its maximum. The
+        // device clears the larger tracker and partial state.
+        std::memset(segment_ranks_->mapped, 0, mul(2 * arrivals, sizeof(double)));
+        context_.account(copies);
+
+        auto& column = *context_.segment_column;
+        auto& product = *context_.segment_product;
+        auto& ranks = *context_.segment_ranks;
+        auto& finish = *context_.segment_finish;
+        // Descriptor writes precede recording; no submission is pending.
+        const std::array<Buffer*, 2> column_buffers{segment_time_.get(), segment_column_.get()};
+        const std::array<Buffer*, 3> product_buffers{plan.spectra.get(), segment_column_.get(), segment_product_.get()};
+        Buffer* const state_buffer = segment_states_ ? segment_states_.get() : segment_partial_.get();
+        const std::array<Buffer*, 3> rank_buffers{segment_product_.get(), segment_partial_.get(), state_buffer};
+        const std::array<Buffer*, 3> finish_buffers{segment_partial_.get(), segment_ranks_.get(), state_buffer};
+        context_.bind(column, column_buffers);
+        context_.bind(product, product_buffers);
+        context_.bind(ranks, rank_buffers);
+        context_.bind(finish, finish_buffers);
+
+        CoarseBulkWork completed;
+        std::uint64_t score_rows = 0;
+        std::size_t parity = 0, next = 0;
+        const auto inverse_rows = mul(plan.frequencies, n);
+        while (next < blocks.size()) {
+            const auto first_block = next;
+            std::size_t rows = 0;
+            do {
+                rows = add(rows, inverse_rows);
+                ++next;
+            } while (next < blocks.size() && add(rows, inverse_rows) <= segmented_submission_rows);
+            const bool last = next == blocks.size();
+            context_.run(stop, [&](BulkReceipt& delta) {
+                if (!first_block) {
+                    // The initial tracker states and the first block's
+                    // partial maxima, whatever an earlier call left.
+                    vkCmdFillBuffer(context_.command, segment_partial_->handle, 0,
+                                    mul(mul(plan.groups, arrivals), sizeof(double)), 0);
+                    if (states) vkCmdFillBuffer(context_.command, segment_states_->handle, 0,
+                                                mul(states, sizeof(float)), 0);
+                    context_.barrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+                                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                     VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+                }
+                for (auto index = first_block; index < next; ++index) {
+                    cancelled(stop);
+                    const auto [block, energy] = blocks[index];
+                    const auto first = block * shape.kernel_rows / shape.blocks;
+                    const auto block_rows = (block + 1) * shape.kernel_rows / shape.blocks - first;
+                    context_.dispatch(column, SegmentColumnPush{narrow(first), narrow(block_rows), narrow(n)},
+                                      ceil_div(n, 256), delta);
+                    context_.append(*plan.forward, n, 1, false, completed, delta);
+                    for (std::size_t frequency = 0; frequency < plan.frequencies; frequency += plan.tile) {
+                        const auto width = std::min(plan.tile, plan.frequencies - frequency);
+                        context_.dispatch(product, SegmentProductPush{narrow(n), narrow(shape.phases),
+                            narrow(shape.radius), narrow(shape.bin_stride), narrow(frequency), narrow(width),
+                            narrow(mul(mul(block, shape.phases), n))}, ceil_div(mul(width, n), 256), delta);
+                        context_.append(width == plan.tile ? *plan.inverse : *plan.tail, n, width, true,
+                                        completed, delta);
+                        const auto groups = std::min(segmented_group_limit, ceil_div(width, segmented_rows_per_group));
+                        context_.dispatch_rows(ranks, SegmentRanksPush{narrow(n), narrow(arrivals),
+                            narrow(plan.frequencies), narrow(frequency), narrow(width), narrow(shape.tracking_hop),
+                            narrow(parity * states), narrow((1 - parity) * states), energy, noise_power},
+                            ceil_div(arrivals, 128), groups, delta);
+                        score_rows += mul(width, arrivals);
+                    }
+                    context_.dispatch(finish, SegmentFinishPush{narrow(arrivals), narrow(plan.groups),
+                        narrow(plan.frequencies), 1, 0}, ceil_div(arrivals, 256), delta);
+                    if (states) parity ^= 1;
+                }
+                // The linked rank is the best final tracking state.
+                if (last && states)
+                    context_.dispatch(finish, SegmentFinishPush{narrow(arrivals), narrow(plan.groups),
+                        narrow(plan.frequencies), 2, narrow(parity * states)}, ceil_div(arrivals, 256), delta);
+            });
+        }
+        const auto* published = static_cast<const double*>(segment_ranks_->mapped);
+        std::copy_n(published, arrivals, fixed_ranks.begin());
+        if (states) std::copy_n(published + arrivals, arrivals, smooth_ranks.begin());
+        const auto finite = [](double x) { return std::isfinite(x); };
+        require(std::ranges::all_of(fixed_ranks, finite) && std::ranges::all_of(smooth_ranks, finite),
+                "nonfinite Robust Vulkan segmented rank");
+        credit_search_work(work, completed);
+        count(work.score_rows, score_rows);
+        // The caller supplies at least one emitting block, so every
+        // credited call submitted device work.
+        BulkReceipt done;
+        done.download_bytes = mul((states ? 2 : 1) * arrivals, sizeof(double));
+        done.vulkan_segmented_sessions = 1;
+        done.vulkan_segmented_forward_ffts = completed.forward_ffts;
+        done.vulkan_segmented_inverse_ffts = completed.inverse_ffts;
+        done.vulkan_segmented_score_rows = score_rows;
+        done.executed = true;
+        context_.account(done);
+    }
+
     Buffer& retain(std::unique_ptr<Buffer>& slot, std::size_t bytes, bool host_reads = false) {
         if (!slot || slot->bytes < bytes) {
             // Every previous submission has completed before this point. Drop
@@ -1717,6 +2372,15 @@ private:
         }
     }
     Context context_;
+    // Segmented buffers precede the session's frequency buffers, which are
+    // allocated only after these are released.
+    std::mutex segment_mutex_;
+    std::vector<CoarseSegmentedShape> segment_candidates_;
+    std::vector<DeclinedSegment> segment_declined_;
+    std::vector<SegmentPlan> segment_plans_;
+    std::unique_ptr<Buffer> segment_time_, segment_column_, segment_product_, segment_temporary_;
+    std::unique_ptr<Buffer> segment_partial_, segment_ranks_, segment_states_;
+    bool segment_begun_ = false, segment_leased_ = false;
     std::unique_ptr<Buffer> bank_, observation_, coefficients_;
     std::unique_ptr<Buffer> frequency_, spectra_, temporary_, product_, values_, frontier_;
     std::unique_ptr<double[]> host_values_;
@@ -1747,6 +2411,7 @@ OpenClFineOptions opencl_fine_options(const VulkanReceiverOptions& options) noex
     fine.device_tiles = options.opencl_fine_device_tiles;
     if (options.opencl_fine_window_blocks) fine.window_blocks = options.opencl_fine_window_blocks;
     fine.stream_blocks = options.opencl_fine_stream_blocks;
+    fine.arithmetic = options.opencl_fine_fp32 ? OpenClFineArithmetic::fp32 : OpenClFineArithmetic::fp64;
     return fine;
 }
 #endif
@@ -1822,6 +2487,10 @@ public:
             if (required && !opencl_) throw VulkanBackendUnavailable(std::move(reason));
         }
         if (required && !opencl_) throw VulkanBackendUnavailable("OpenCL NVFP4 needs the selected NVIDIA Blackwell GPU");
+        // Before any session reads it. Automatic segmented timing may admit
+        // its qualified shapes only on this GPU class, once qualified.
+        shared_->opencl_sm120 = static_cast<bool>(opencl_);
+        shared_->total.vulkan_segmented_qualified_device = automatic_segmented_qualified && shared_->opencl_sm120;
         // One device serves both stages. Each keeps its own selection.
         opencl_fine_ = opencl_ && (required_fine || automatic_fine);
         opencl_coarse_ = opencl_ && (required_coarse || automatic_coarse);
@@ -1950,14 +2619,17 @@ public:
                 "compact tight-clock Vulkan request must select native FP64 before preparation");
 #ifdef DATAPUMP_HAVE_TRIAD_OPENCL_NVFP4
         if (opencl_coarse_) {
-            // An explicit request has no other route. Automatic selection
-            // keeps the FFT session for geometry the dense search declines,
-            // including banks whose columns a native stage must read.
+            // An explicit request has no other frequency route. Automatic
+            // selection keeps the FFT session for geometry the dense search
+            // declines, including banks whose columns a native stage must
+            // read. Both use the FFT session for segmented timing.
             const bool required = shared_->options.coarse_precision == VulkanCoarsePrecision::opencl_nvfp4;
             const auto& options = shared_->options;
-            return make_opencl_coarse_bulk(coarse_host_, opencl_,
-                required ? nullptr : std::make_unique<VulkanCoarse>(shared_),
-                {required, options.profile_opencl, options.opencl_device_templates, required});
+            return make_opencl_coarse_bulk(coarse_host_, opencl_, std::make_unique<VulkanCoarse>(shared_),
+                {required, options.profile_opencl, options.opencl_device_templates, required,
+                 options.opencl_coarse_fp32_rescore ? OpenClRescoreArithmetic::fp32_partial
+                                                    : OpenClRescoreArithmetic::fp64,
+                 options.opencl_coarse_one_ray});
         }
 #endif
         return std::make_unique<VulkanCoarse>(shared_);
@@ -1967,6 +2639,16 @@ public:
         if (opencl_fine_) return opencl_fine_host_bytes(opencl_fine_options(shared_->options));
 #endif
         return 0;
+    }
+    std::size_t segmented_host_bytes(std::span<const CoarseSegmentedShape> shapes) const override {
+        // An explicit session's whole ceiling is already in coarse_host_bytes.
+        // An automatic lease is host RAM on an integrated device.
+        if (!shared_->automatic_workspace || !shared_->total.unified_memory) return 0;
+        std::vector<CoarseSegmentedShape> admitted;
+        for (const auto& shape : shapes)
+            if (segmented_decline(*shared_, shape).empty()) admitted.push_back(shape);
+        const auto plan = plan_segment_admission(*shared_, admitted);
+        return plan ? plan->device_bytes : 0;
     }
     std::size_t persistent_host_workspace() const noexcept override {
         return serialized_cache_limit + serialized_cache_metadata_bound +

@@ -46,7 +46,7 @@ def slot_receipt(backend="cuda", *, command="continuation", stratum="active"):
                   refined_coordinates_detail=[coordinate],
                   proposals_detail=[dict(coordinate=coordinate, bit=0, rank=0, score=2.)])
     lane = dict.fromkeys(workload.LANE_CAPS + workload.LANE_COUNTS, 20)
-    lane.update(states_sha256="2" * 64, bit_scores=[1., 0.])
+    lane.update(states_sha256="2" * 64, bit_scores=[1., 0.], gaussian_null_skips=8)
     fine = dict.fromkeys(workload.FINE_GEOMETRY, 1)
     fine.update(observation_complete=True, representative_work=True, input_sha256="3" * 64,
                 observation_first_sample=0, quiet_modes=10, initial_affine=lane,

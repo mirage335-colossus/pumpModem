@@ -4,7 +4,8 @@
 // kernels. Each logical thread runs as a fiber, and warp or block operations
 // rendezvous in the emulator. This checks kernel indexing, packing and host
 // orchestration on a machine without the device. It is not device evidence:
-// the instruction model's accumulation order and rounding are its own.
+// the instruction model's accumulation order and rounding are its own, and
+// the library compiles without multiply-add contraction while NVCC contracts.
 
 #include <cmath>
 #include <cstdint>
@@ -16,6 +17,7 @@
 #define __device__
 #define __host__
 #define __shared__ static
+#define __forceinline__ inline
 
 struct alignas(8) float2 { float x, y; };
 struct alignas(16) float4 { float x, y, z, w; };
@@ -82,7 +84,23 @@ inline double __ddiv_rn(double a, double b) { return a / b; }
 inline float __fadd_rn(float a, float b) { return a + b; }
 inline float __fsub_rn(float a, float b) { return a - b; }
 inline float __fmul_rn(float a, float b) { return a * b; }
+inline float __fmaf_rn(float a, float b, float c) { return std::fma(a, b, c); }
 inline float __double2float_rn(double value) { return static_cast<float>(value); }
+inline long long __double_as_longlong(double value) {
+    long long bits;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+inline unsigned long long __umul64hi(unsigned long long a, unsigned long long b) {
+    return static_cast<unsigned long long>((static_cast<unsigned __int128>(a) * b) >> 64);
+}
+// The device function is accurate to about one unit in the last place. Its
+// rounding is the device's own, so emulated values are not device evidence.
+inline void sincospif(float x, float* sine, float* cosine) {
+    constexpr double pi = 3.14159265358979323846;
+    *sine = static_cast<float>(std::sin(pi * x));
+    *cosine = static_cast<float>(std::cos(pi * x));
+}
 
 #define CUDART_INF_F (std::numeric_limits<float>::infinity())
 #define CUDART_NAN_F (std::numeric_limits<float>::quiet_NaN())

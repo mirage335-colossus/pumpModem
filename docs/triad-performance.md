@@ -172,6 +172,12 @@ frequency tracking on the device. Check the segmented session, inverse-FFT
 and resource-fallback counters in the native receipt. The transform sizes and
 workspace conditions for this route are documented in the
 [precision guide](gpu-precision-controls.md#current-implementation).
+The Vulkan form of this search (VkFFT, for the Blackwell Vulkan/OpenCL route)
+is qualified on a full RTX PRO 6000: automatic selection admits it only on
+the SM 12.0 GPU that the OpenCL NVFP4 route identifies, where it cut the
+72 Hz/5× control's segmented stage about eightfold
+([qualification](validation.md#blackwell-qualification-of-the-offload-routes--20-november-2026)).
+Other NVIDIA generations keep the native scorer.
 
 The current automatic GUI routes fine work to native CPU only for at most 1024
 public block rows, at most 40 projected modes, one tap, AVX2, and at least 26
@@ -256,7 +262,10 @@ distinguishes current matrix operations from prospective Tensor Core FFT work.
 VkFFT and glslang. It accelerates the complete filtered DATA frequency-search
 grid and exact arrival-peak selection. Native C++ retains FIR channel isolation,
 Helper acquisition, template generation, lag-group search, the compact
-tight-clock FP64 class and fine tracking. The public route chooser is unchanged;
+tight-clock FP64 class and fine tracking. Automatic mode on this device also
+keeps the changing-channel segmented timing search native. The probe's
+`--vulkan-segmented-timing device` runs it on the GPU for qualification.
+The public route chooser is unchanged;
 `native-lag-groups` and `compact-tight-clock-fp64` are explicit native routes.
 A GPU device or allocation failure is not permission to substitute CPU work.
 `--require-accelerator on` requires actual Vulkan search work, so an otherwise

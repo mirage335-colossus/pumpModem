@@ -1,5 +1,6 @@
 #pragma once
 
+#include "triad_opencl_nvfp4_projection.hpp"
 #include "triad_receiver_bulk.hpp"
 
 #include <memory>
@@ -31,13 +32,22 @@ struct OpenClCoarseOptions {
     bool synthesize = true;
     // Also score banks whose channelized columns the host prepared.
     bool uploaded_banks = true;
+    // Accumulation of the rescored retained arrivals.
+    OpenClRescoreArithmetic rescore = OpenClRescoreArithmetic::fp64;
+    // Admit one-ray sessions on an automatic route, within the measured
+    // dense cost bound. A required route always admits them. Off until an
+    // NVCC build and a full RTX PRO 6000 qualify the one-ray epilogue
+    // against the FFT session that it replaces.
+    bool one_ray = false;
 };
 
 // A frequency-tile session that scores every public workspace, frequency and
 // arrival on the FP4 Tensor Cores and returns exact arrival frontiers with
 // FP32 rescored peaks. Geometry outside its envelope, and a template bank
 // below the canonical 1/16 eigenvalue-ratio guard, go to the fallback before
-// any FP4 score is formed.
+// any FP4 score is formed. A required session never hands it frequencies.
+// Either way the fallback scores the changing-channel segmented search.
+// Receipts name each fallback's reason.
 std::unique_ptr<CoarseBulk> make_opencl_coarse_bulk(std::shared_ptr<OpenClCoarseHost>,
     std::shared_ptr<const OpenClNvfp4Device>, std::unique_ptr<CoarseBulk> fallback, const OpenClCoarseOptions&);
 

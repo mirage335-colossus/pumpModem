@@ -130,6 +130,16 @@ def _counts(data, keys):
     return values
 
 
+def _executed_gaussian_updates(lane):
+    # gaussian_updates counts every public hypothesis. CPU demand excludes the
+    # common-null updates that the native receiver proved inert and skipped.
+    require("gaussian_null_skips" in lane,
+            "Native receipt predates executed Gaussian work; refresh its fine calibration")
+    logical, skipped = _counts(lane, ("gaussian_updates", "gaussian_null_skips"))
+    require(skipped <= logical, "Malformed native Gaussian work counters")
+    return logical - skipped
+
+
 def _wall(receipt, name):
     wall = phase_once(receipt, name)["wall_seconds"]
     require(type(wall) in (int, float) and math.isfinite(wall) and wall > 0,
@@ -175,7 +185,8 @@ def observation(receipt, stratum, *, measure_timing=True):
                      + _select(fine["initial_affine"], LANE_CAPS) + (fine["adaptive_diagnostics"],))
     timed = {
         "fine": (_fine_cost(receipt, stratum, window) if measure_timing else 0., fine_geometry,
-                 _counts(fine["initial_affine"], ("basis_rows", "gaussian_updates"))
+                 _counts(fine["initial_affine"], ("basis_rows",))
+                 + (_executed_gaussian_updates(fine["initial_affine"]),)
                  + _counts(fine["cache"], ("cache_misses", "native_preparation_samples", "evictions"))),
     }
     if stratum in ACQUISITION_STRATA:

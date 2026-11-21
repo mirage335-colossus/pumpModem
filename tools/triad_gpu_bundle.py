@@ -35,7 +35,7 @@ _XZ_BUILD_METADATA = {
     "src/liblzma/liblzma_w32res.rc", "src/liblzma/validate_map.sh",
 }
 _PROBE_TOOLS = (
-    "triad-receiver-probe.cpp", "triad_probe_json.hpp", "triad_probe_spool.hpp",
+    "triad-receiver-probe.cpp", "triad_probe_capture_cache.hpp", "triad_probe_json.hpp", "triad_probe_spool.hpp",
     "triad-helper-export.cpp", "triad_fixture_key.hpp", "triad-audio-stream.cpp",
     "triad_native.py", "triad_cases.py", "triad_abbreviated.py", "triad_gpu_workload.py", "triad_gpu_bundle.py",
     "triad_gpu_cpu_forecast.py", "triad_case_metrics.py", "triad_case_capacity.py",

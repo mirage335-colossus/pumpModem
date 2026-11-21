@@ -286,15 +286,19 @@ struct SelectiveModelConfig {
 };
 // Optional workers for one channel's reads. A read prepares its rows in
 // blocks, and with lanes it hands run() the independent jobs of each block:
-// up to count jobs for the terms that depend on a row's index alone (the two
-// source interpolations and the fixed-time path and selective coefficients),
-// and one for each sequential state that never reads the signal (receiver
-// oscillator, thermal noise, the two bounded path trajectories, and the
-// source history of the read's next block). When the source offers readers
-// and no DAC or diagnostic I/Q noise reads its values, the TX oscillator has
-// a job of its own, the readers evaluate the next block's source on several
-// jobs, and the sequential pass over a block runs as one more job beside
-// the preparation of the next block of the same read. run() executes
+// up to count jobs that share the terms that depend on a row's index alone
+// (the two source interpolations, the fixed-time path and selective
+// coefficients and, where its lags allow, the selective filter's delayed
+// branches) with the parallel parts of the staged states below, and one for
+// each sequential part of a state that never reads the signal: the two
+// bounded path trajectories, the source history of the read's next block,
+// and the acceptance of the standard-normal draws and the recurrence of the
+// receiver oscillator, whose values are formed one block ahead of the
+// sequential pass, and the thermal noise. When the source offers readers and
+// no DAC or diagnostic I/Q noise reads its values, the TX oscillator is
+// staged the same way, the readers evaluate the next block's source on
+// several jobs, and the sequential pass over a block runs as one more job
+// beside the preparation of the next block of the same read. run() executes
 // job(0) ... job(jobs - 1), each once, on its caller and any idle workers,
 // and returns after the last has returned; an exception from run() fails
 // that read. Samples and reports are identical for every count, including

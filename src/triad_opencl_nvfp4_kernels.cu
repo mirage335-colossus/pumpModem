@@ -186,6 +186,153 @@ extern "C" __global__ void resident_fine_map(const double2* samples, const Devic
                         sine, cosine, lane(second), row, rows);
 }
 
+namespace {
+
+// The magnitude of a finite value below 2^63 in 64.64 fixed point: its
+// integer part, and its fraction in units of 2^-64. Bits below 2^-64 are
+// dropped. Only integer operations read the FP64 encoding.
+struct Fixed {
+    std::uint64_t whole, fraction;
+};
+
+__device__ Fixed fixed_point(double value) {
+    const auto bits = static_cast<std::uint64_t>(__double_as_longlong(value));
+    const auto exponent = static_cast<int>(bits >> 52 & 0x7ff);
+    if (!exponent) return {0, 0};
+    const auto mantissa = (bits & 0xfffffffffffffull) | 0x10000000000000ull;
+    // value * 2^64 = mantissa * 2^shift.
+    const auto shift = exponent - 1011;
+    if (shift >= 64) return {mantissa << (shift - 64), 0};
+    if (shift > 0) return {mantissa >> (64 - shift), mantissa << shift};
+    if (shift > -64) return {0, mantissa >> -shift};
+    return {0, 0};
+}
+
+// A finite value in turns, as a 64-bit fraction of a turn: whole turns vanish
+// exactly, and the bits below 2^-64 of a turn are dropped.
+__device__ std::uint64_t fixed_turns(double value) {
+    const auto magnitude = fixed_point(value).fraction;
+    return __double_as_longlong(value) < 0 ? 0 - magnitude : magnitude;
+}
+
+// A descriptor's stencil scale and fraction in 64.64 fixed point, and its
+// phase and phase step in turns, decoded once for the rows of a block.
+struct FixedMapping {
+    std::uint64_t scale_whole, scale_fraction, base_whole, base_fraction, phase, step;
+};
+
+__device__ FixedMapping fixed_mapping(const DeviceMapping& mapping) {
+    const auto scale = fixed_point(mapping.scale), base = fixed_point(mapping.fraction);
+    return {scale.whole, scale.fraction, base.whole, base.fraction, fixed_turns(mapping.phase),
+            fixed_turns(mapping.phase_step)};
+}
+
+__device__ float2 widen_to_float(double2 value) {
+    return make_float2(static_cast<float>(value.x), static_cast<float>(value.y));
+}
+
+// The four-point interpolation of one lane in FP32 from its FP64 tile
+// samples, and the fp32-rn4-v1 rotation of the CUDA mapper. The witness
+// records a lane that reads a nonzero sample under a nonzero weight while
+// its FP32 value is zero.
+__device__ void render_lane_row_fp32(const double2* samples, const std::uint8_t* tiles,
+                                     std::int64_t left, std::int64_t extent, const float (&weights)[4],
+                                     float sine, float cosine, float2* lane, unsigned row, unsigned rows) {
+    double2 stencil[4];
+    const auto local = static_cast<unsigned>(left) % source_tile_samples;
+    if (left >= 0 && local + 3 < source_tile_samples) {
+        const auto* tile = source_tile(samples, tiles, left / source_tile_samples) + local;
+        for (unsigned i = 0; i < 4; ++i) stencil[i] = tile[i];
+    } else {
+        for (unsigned i = 0; i < 4; ++i) stencil[i] = source_neighbor(samples, tiles, left + i, extent);
+    }
+    float real = 0, imag = 0;
+    for (unsigned i = 0; i < 4; ++i) {
+        const auto value = widen_to_float(stencil[i]);
+        real = i ? __fmaf_rn(weights[i], value.x, real) : __fmul_rn(weights[i], value.x);
+        imag = i ? __fmaf_rn(weights[i], value.y, imag) : __fmul_rn(weights[i], value.y);
+    }
+    const auto rotated = make_float2(__fsub_rn(__fmul_rn(real, cosine), __fmul_rn(imag, sine)),
+                                     __fadd_rn(__fmul_rn(real, sine), __fmul_rn(imag, cosine)));
+    lane[row] = rotated;
+    if (rotated.x != 0 || rotated.y != 0) return;
+    for (unsigned i = 0; i < 4; ++i)
+        if (weights[i] != 0 && (stencil[i].x != 0 || stencil[i].y != 0)) {
+            atomicOr(reinterpret_cast<unsigned*>(&lane[rows].y), __float_as_uint(1.f));
+            return;
+        }
+}
+
+} // namespace
+
+// The FP32 mapper. Each row's coordinate and phase are reduced exactly in
+// fixed point from the FP64 descriptor: the stencil coordinate as 64.64 and
+// the phase as a 64-bit fraction of a turn, both with errors below 2^-53 of
+// a sample or a turn over the block. A block decodes each of its at most
+// two descriptors once. Weights, interpolation, the sine and cosine of the
+// reduced angle and the rotation are FP32: no FP64 arithmetic remains per
+// row, only the narrowing of the FP64 tile samples it reads and three
+// 64-bit integer conversions. The FP64 resident_fine_map is the matched
+// control in the same module.
+extern "C" __global__ void resident_fine_map_fp32(const double2* samples, const DeviceMapping* descriptors,
+    float2* mapped, std::uint32_t rows, std::uint32_t mappings) {
+    using datapump::triad::v3::receiver_detail::opencl_fine_fft::fine_rows;
+    // Both conditions hold for the whole block, so every thread returns or
+    // reaches the barrier.
+    if (rows != fine_rows || blockDim.x > fine_rows) return;
+    __shared__ FixedMapping decoded[2];
+    const auto block_first = blockIdx.x * blockDim.x;
+    const auto first_descriptor = block_first / fine_rows;
+    if (threadIdx.x < 2 && first_descriptor + threadIdx.x < mappings)
+        decoded[threadIdx.x] = fixed_mapping(descriptors[first_descriptor + threadIdx.x]);
+    __syncthreads();
+    const auto index = block_first + threadIdx.x;
+    const auto descriptor = index / fine_rows;
+    if (descriptor >= mappings) return;
+    const auto row = index % fine_rows;
+    const auto& mapping = descriptors[descriptor];
+    const auto& fixed = decoded[descriptor - first_descriptor];
+    const auto extent = static_cast<std::int64_t>(mapping.tile_count) * source_tile_samples;
+    const auto lane = [&](unsigned output) { return mapped + static_cast<std::uint64_t>(output) * (fine_rows + 1); };
+    auto* first = lane(mapping.output);
+    const auto second = mapping.second_output;
+
+    // fraction + row * scale, exactly but for the dropped bits of the two
+    // operands. The session admits fractions in [0, 1], nonnegative scales
+    // and coordinates up to 2^31.
+    const std::uint64_t offset = row;
+    const auto product = offset * fixed.scale_fraction;
+    const auto fraction = product + fixed.base_fraction;
+    const auto whole = offset * fixed.scale_whole + __umul64hi(offset, fixed.scale_fraction) + fixed.base_whole +
+                       (fraction < product);
+    const auto left = mapping.origin + static_cast<std::int64_t>(whole) - 1;
+    if (left < -3 || left >= extent || !extent) {
+        first[row] = {};
+        if (second != unpaired_output) lane(second)[row] = {};
+        return;
+    }
+
+    // The stencil fraction t and its complement v = 1 - t, each to FP32
+    // relative precision, so the weights that vanish at either end of the
+    // stencil keep their own relative precision.
+    const auto t = static_cast<float>(fraction) * 0x1p-64f;
+    const auto v = fraction ? static_cast<float>(0 - fraction) * 0x1p-64f : 1.f;
+    const float more_t = 1 + t, more_v = 1 + v;
+    const float weights[4] = {-t * v * more_v * (1.f / 6.f), more_t * v * more_v * .5f,
+                              more_t * t * more_v * .5f, -more_t * t * v * (1.f / 6.f)};
+    // phase + row * phase_step modulo one turn, then the signed half turns
+    // of the reduced angle.
+    const auto turns = fixed.phase + offset * fixed.step;
+    float sine, cosine;
+    sincospif(static_cast<float>(static_cast<std::int64_t>(turns)) * 0x1p-63f, &sine, &cosine);
+    // One call site, so the compiler inlines it and keeps the weights in
+    // registers.
+    const unsigned outputs = second != unpaired_output ? 2 : 1;
+    for (unsigned output = 0; output < outputs; ++output)
+        render_lane_row_fp32(samples, mapping.tiles + output * mapping.tile_count, left, extent, weights,
+                             sine, cosine, output ? lane(second) : first, row, rows);
+}
+
 // Resets each lane's trailer before a batch is mapped: the peak, and the
 // presence witness that the mapper or a direct upload sets.
 extern "C" __global__ void resident_fine_clear(float2* mapped, std::uint32_t rows, std::uint32_t lanes) {
@@ -397,6 +544,8 @@ constexpr unsigned coarse_stream_slack = 4;
 static_assert(coarse_ring >= 2 * coarse_groups + 2 && coarse_scale_ring >= coarse_groups);
 constexpr unsigned pulse_resolution = 256;
 constexpr unsigned pulse_samples = 8 * pulse_resolution;
+// The chips of one sample's pulse support: 16 chip periods hold at most 17.
+constexpr unsigned render_support = 17;
 constexpr auto no_peak = ~std::uint64_t{0};
 // A block filters one tile of 128 output rows of a column. Its static stage
 // (47 KiB) holds a window of taps, two to a pair, and then the raw span
@@ -419,6 +568,13 @@ __device__ float quadratic_score(const double* inverse, float a_real, float a_im
     const auto imag_product = ar * inverse[3] - ai * inverse[2];
     return static_cast<float>(inverse[0] * (ar * ar + ai * ai) + inverse[1] * (br * br + bi * bi) +
                               2 * (real_product * br - imag_product * bi));
+}
+
+// A one-ray workspace's score: its scalar inverse Gram, with the operand
+// scales and the noise variance folded in, times the correlation's energy.
+__device__ float ray_score(const double* inverse, float real, float imag) {
+    const double r = real, i = imag;
+    return static_cast<float>(inverse[0] * (r * r + i * i));
 }
 
 __device__ bool better_peak(const float* scores, std::uint64_t a, std::uint64_t b) {
@@ -494,15 +650,21 @@ __device__ float pulse_at(const float* pulse, double chip_offset) {
 } // namespace
 
 // Renders the keyed source of whole lanes on the integer receive lattice,
-// as PatternSource::sample_at does for the native exact route.
+// as PatternSource::sample_at does for the native exact route. One thread
+// renders one sample of every lane of the group. Its time, envelope, chip
+// support, pulse weights and carrier rotation depend on the sample alone, so
+// they are evaluated once; each lane keeps the FP32 operations and order of
+// a lane rendered by itself, and the raster is unchanged.
 extern "C" __global__ void coarse_render_lanes(const float2* chips, const float* pulse, const double* source,
     float2* raster, std::uint32_t source_rows, std::uint32_t lane_count, std::uint32_t cells,
     std::uint32_t first_lane) {
-    const auto index = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    const auto lane_index = index / source_rows;
-    if (lane_index >= lane_count) return;
-    const auto position = static_cast<double>(index % source_rows) * source[0];
-    auto value = make_float2(0.f, 0.f);
+    const auto row = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (row >= source_rows) return;
+    const auto position = static_cast<double>(row) * source[0];
+    bool supported = false;
+    std::uint32_t first = 0, support = 0;
+    float weights[render_support];
+    float sine = 0, cosine = 0;
     if (position < source[2]) {
         const auto t = (position - source[1]) / source[3];
         const auto envelope = source_envelope(source, t);
@@ -511,27 +673,45 @@ extern "C" __global__ void coarse_render_lanes(const float2* chips, const float*
         const auto first_real = fmax(0., ceil(chip_time - (8 + offset)));
         const auto last_real = fmin(source[6] - 1, floor(chip_time + (8 - offset)));
         if (envelope != 0 && last_real >= first_real) {
-            const auto first = static_cast<std::uint32_t>(first_real), last = static_cast<std::uint32_t>(last_real);
-            const auto* lane = chips + (first_lane + lane_index) * cells * 3;
+            supported = true;
+            first = static_cast<std::uint32_t>(first_real);
+            // A support of at most 16 chip periods holds at most 17 chips.
+            support = static_cast<std::uint32_t>(last_real) - first + 1;
+            if (support > render_support) support = render_support;
             const auto gain = static_cast<float>(carrier_gain * envelope);
-            float2 carriers[3] = {make_float2(0.f, 0.f), make_float2(0.f, 0.f), make_float2(0.f, 0.f)};
-            for (auto fine = first; fine <= last; ++fine) {
-                const auto weight = gain * pulse_at(pulse, chip_time - (fine + offset));
-                const auto* chip = lane + static_cast<std::uint64_t>(fine) * 3;
-                for (unsigned carrier = 0; carrier < 3; ++carrier) {
-                    carriers[carrier].x += chip[carrier].x * weight;
-                    carriers[carrier].y += chip[carrier].y * weight;
-                }
-            }
+            // Whole unrolled loops keep the weights in registers.
+#pragma unroll
+            for (std::uint32_t chip = 0; chip < render_support; ++chip)
+                if (chip < support) weights[chip] = gain * pulse_at(pulse, chip_time - ((first + chip) + offset));
             // The outer carriers rotate by -/+ one carrier spacing.
             const auto cycles = source[7] * t;
-            float sine, cosine;
             __sincosf(static_cast<float>((cycles - floor(cycles)) * tau64), &sine, &cosine);
+        }
+    }
+    for (std::uint32_t lane_index = 0; lane_index < lane_count; ++lane_index) {
+        auto value = make_float2(0.f, 0.f);
+        if (supported) {
+            const auto* lane = chips + (static_cast<std::uint64_t>(first_lane) + lane_index) * cells * 3;
+            float2 carriers[3] = {make_float2(0.f, 0.f), make_float2(0.f, 0.f), make_float2(0.f, 0.f)};
+            // A constant trip count with predicated chips, rather than an
+            // early exit, lets the compiler unroll it and index the weights
+            // as registers.
+#pragma unroll
+            for (std::uint32_t chip_index = 0; chip_index < render_support; ++chip_index) {
+                if (chip_index < support) {
+                    const auto weight = weights[chip_index];
+                    const auto* chip = lane + (static_cast<std::uint64_t>(first) + chip_index) * 3;
+                    for (unsigned carrier = 0; carrier < 3; ++carrier) {
+                        carriers[carrier].x += chip[carrier].x * weight;
+                        carriers[carrier].y += chip[carrier].y * weight;
+                    }
+                }
+            }
             value.x = carriers[1].x + (carriers[0].x + carriers[2].x) * cosine + (carriers[0].y - carriers[2].y) * sine;
             value.y = carriers[1].y + (carriers[0].y + carriers[2].y) * cosine + (carriers[2].x - carriers[0].x) * sine;
         }
+        raster[static_cast<std::uint64_t>(lane_index) * source_rows + row] = value;
     }
-    raster[index] = value;
 }
 
 namespace {
@@ -609,46 +789,184 @@ extern "C" __global__ void resident_fine_render_tiles(const double2* chips, cons
 
 namespace {
 
-// Raw template row `row` of one column: the native four-point interpolation
-// of its resident lane rendering, and the echo rotation. A column descriptor
-// holds first position, clock scale, first echo cycles, echo cycle step and
-// lane. Every warped sample, stored or staged, comes from this expression.
-__device__ float2 warp_sample(const float2* lane, const double* map, double row, std::uint32_t source_rows) {
+// The tapered pulse in FP32 at a chip offset inside its support, which
+// keeps the table index below its last entry. The table holds the FP64
+// pulse rounded to FP32.
+__device__ float pulse_inside(const float* pulse, float chip_offset) {
+    const auto position = fabsf(chip_offset) * pulse_resolution;
+    const auto index = static_cast<std::uint32_t>(position);
+    const auto a = pulse[index], b = pulse[index + 1];
+    return __fmaf_rn(position - static_cast<float>(index), b - a, a);
+}
+
+// The same at a support edge, where the pulse table ends. The FP64 offset
+// decides the support exactly as pulse_value does.
+__device__ float pulse_edge(const float* pulse, double chip_offset) {
+    const auto position = fabs(chip_offset) * pulse_resolution;
+    if (!(position <= pulse_samples)) return 0;
+    const auto index = static_cast<std::uint32_t>(position);
+    if (index == pulse_samples) return pulse[pulse_samples];
+    const auto a = pulse[index], b = pulse[index + 1];
+    return __fmaf_rn(static_cast<float>(position - index), b - a, a);
+}
+
+} // namespace
+
+// The FP32 renderer of the same tiles. Each sample's time, envelope, chip
+// support and edge offsets keep the FP64 operations of
+// resident_fine_render_tiles, so the support and gating are the same. The
+// chip sums, pulse interpolation, sine and cosine of the reduced carrier
+// phase and the rotation are FP32. The keyed chips and the pulse table are
+// the FP64 ones rounded to FP32 on the host, as the FP32 arithmetic would
+// round them on use. Interior chip offsets step from the first chip's
+// offset by whole FP32 chips, exactly except after a first chip clamped to
+// the source start, where an offset rounds by at most 2^-22 chip. Values
+// are stored as FP64 tiles.
+extern "C" __global__ void resident_fine_render_tiles_fp32(const float2* chips, const float* pulse,
+    const double* source, const TileRequest* requests, double2* tiles, std::uint32_t cells,
+    std::uint32_t request_count) {
+    const auto index = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const auto request_index = index / source_tile_samples;
+    if (request_index >= request_count) return;
+    const auto& request = requests[request_index];
+    const auto within = index % source_tile_samples;
+    const auto dense = static_cast<double>(request.first + within);
+    auto value = make_double2(0., 0.);
+    const auto position = __dmul_rn(dense, source[0]);
+    if (dense < source[17] && position < source[2]) {
+        const auto t = __ddiv_rn(__dsub_rn(position, source[1]), source[3]);
+        const auto envelope = source_envelope(source, t);
+        const auto chip_time = __dmul_rn(t, source[4]);
+        const auto offset = source[5];
+        const auto first_real = fmax(0., ceil(__dsub_rn(chip_time, 8 + offset)));
+        const auto last_real = fmin(source[6] - 1, floor(__dadd_rn(chip_time, 8 - offset)));
+        if (envelope != 0 && last_real >= first_real) {
+            const auto first = static_cast<std::uint32_t>(first_real), last = static_cast<std::uint32_t>(last_real);
+            const auto* lane = chips + static_cast<std::uint64_t>(request.lane) * cells * 3;
+            const auto gain = static_cast<float>(__dmul_rn(carrier_gain, envelope));
+            const auto lead = __dsub_rn(chip_time, first + offset);
+            const auto lead_fp32 = static_cast<float>(lead);
+            float2 carriers[3] = {make_float2(0.f, 0.f), make_float2(0.f, 0.f), make_float2(0.f, 0.f)};
+            for (auto fine = first; fine <= last; ++fine) {
+                const auto shape = fine == first ? pulse_edge(pulse, lead)
+                    : fine == last ? pulse_edge(pulse, __dsub_rn(chip_time, fine + offset))
+                    : pulse_inside(pulse, lead_fp32 - static_cast<float>(fine - first));
+                const auto weight = __fmul_rn(gain, shape);
+                const auto* chip = lane + static_cast<std::uint64_t>(fine) * 3;
+                for (unsigned carrier = 0; carrier < 3; ++carrier) {
+                    carriers[carrier].x = __fmaf_rn(chip[carrier].x, weight, carriers[carrier].x);
+                    carriers[carrier].y = __fmaf_rn(chip[carrier].y, weight, carriers[carrier].y);
+                }
+            }
+            // The outer carriers rotate by -/+ one carrier spacing. The
+            // phase is reduced to half a turn exactly in FP64, as
+            // remainder(cycles, 1) without its general algorithm, then FP32.
+            const auto cycles = __dmul_rn(source[7], t);
+            float sine, cosine;
+            sincospif(static_cast<float>(2 * __dsub_rn(cycles, rint(cycles))), &sine, &cosine);
+            const auto scale = static_cast<float>(source[16]);
+            const auto real = __fmaf_rn(__fsub_rn(carriers[0].y, carriers[2].y), sine,
+                __fmaf_rn(__fadd_rn(carriers[0].x, carriers[2].x), cosine, carriers[1].x));
+            const auto imag = __fmaf_rn(__fsub_rn(carriers[2].x, carriers[0].x), sine,
+                __fmaf_rn(__fadd_rn(carriers[0].y, carriers[2].y), cosine, carriers[1].y));
+            value = make_double2(__fmul_rn(real, scale), __fmul_rn(imag, scale));
+        }
+    }
+    tiles[static_cast<std::uint64_t>(request.slot) * source_tile_samples + within] = value;
+}
+
+namespace {
+
+// The FP64 position and echo terms of raw template row `row` under one
+// column map: the stencil center of the native four-point interpolation,
+// its fraction and the echo angle. A column descriptor holds first position,
+// clock scale, first echo cycles, echo cycle step and lane, and the terms
+// depend on the first four only. A row outside the lane has no center.
+struct WarpRow {
+    std::int32_t center;
+    float u, angle;
+};
+constexpr std::int32_t outside_lane = -0x7fffffff - 1;
+// A thread's rows of the widest stage span, and the columns of one set
+// that share a map. Sets end early at no_column.
+constexpr unsigned warp_stash_rows = (fir_stage_pairs + threads - 1) / threads;
+constexpr unsigned coarse_set_columns = 4;
+constexpr std::uint32_t no_column = 0xffffffffu;
+
+__device__ WarpRow warp_row(const double* map, double row, std::uint32_t source_rows) {
     const auto position = map[0] + row * map[1];
-    auto value = make_float2(0.f, 0.f);
+    WarpRow result{outside_lane, 0.f, 0.f};
     if (position > -2 && position < static_cast<double>(source_rows) + 1) {
         const auto integral = floor(position);
-        const auto u = static_cast<float>(position - integral);
-        const float weights[4] = {-u * (u - 1) * (u - 2) / 6, (u + 1) * (u - 1) * (u - 2) / 2,
-                                  -(u + 1) * u * (u - 2) / 2, (u + 1) * u * (u - 1) / 6};
-        const auto center = static_cast<std::int64_t>(integral);
-        for (int i = 0; i < 4; ++i) {
-            const auto sample = center + i - 1;
-            if (sample < 0 || sample >= static_cast<std::int64_t>(source_rows)) continue;
-            value.x += weights[i] * lane[sample].x;
-            value.y += weights[i] * lane[sample].y;
-        }
+        result.center = static_cast<std::int32_t>(integral);
+        result.u = static_cast<float>(position - integral);
         if (map[2] != 0 || map[3] != 0) {
             const auto echo = map[2] + row * map[3];
-            float sine, cosine;
-            __sincosf(static_cast<float>((echo - floor(echo)) * tau64), &sine, &cosine);
-            value = make_float2(value.x * cosine - value.y * sine, value.y * cosine + value.x * sine);
+            result.angle = static_cast<float>((echo - floor(echo)) * tau64);
         }
+    }
+    return result;
+}
+
+// The warped sample of one lane at those terms: the interpolation of its
+// resident rendering and, for a map with an echo, the echo rotation. Every
+// warped sample, stored or staged, comes from these two functions.
+__device__ float2 warp_apply(const float2* lane, const WarpRow& warp, bool echo, std::uint32_t source_rows) {
+    auto value = make_float2(0.f, 0.f);
+    if (warp.center == outside_lane) return value;
+    const auto u = warp.u;
+    const float weights[4] = {-u * (u - 1) * (u - 2) / 6, (u + 1) * (u - 1) * (u - 2) / 2,
+                              -(u + 1) * u * (u - 2) / 2, (u + 1) * u * (u - 1) / 6};
+    const auto center = static_cast<std::int64_t>(warp.center);
+    for (int i = 0; i < 4; ++i) {
+        const auto sample = center + i - 1;
+        if (sample < 0 || sample >= static_cast<std::int64_t>(source_rows)) continue;
+        value.x += weights[i] * lane[sample].x;
+        value.y += weights[i] * lane[sample].y;
+    }
+    if (echo) {
+        float sine, cosine;
+        __sincosf(warp.angle, &sine, &cosine);
+        value = make_float2(value.x * cosine - value.y * sine, value.y * cosine + value.x * sine);
     }
     return value;
 }
 
-struct RawColumn {
+__device__ bool has_echo(const double* map) {
+    return map[2] != 0 || map[3] != 0;
+}
+
+// Stages raw rows [low, low + count) of a stored column: thread i of the
+// block the rows i, i + threads, ...
+struct RawStage {
     const float2* samples;
-    __device__ float2 operator()(std::uint64_t row) const { return samples[row]; }
+    __device__ void operator()(float2* span, std::uint64_t low, std::uint32_t count) const {
+        for (auto i = threadIdx.x; i < count; i += threads) span[i] = samples[low + i];
+    }
 };
 
-struct WarpedColumn {
-    const float2* lane;
+// Stages the same rows of a lane warped at the FP64 terms of a set's map.
+// The first column of the set evaluates them into the thread's stash, and
+// the later ones reuse it. A stage of one window spans at most
+// fir_stage_pairs rows, so the stash covers the thread's rows. The loop has
+// a constant trip count and constant stash indices, and it and filter_tile
+// are inlined, so the compiler can unroll it and keep the stash in
+// registers rather than in local memory.
+struct StashStage {
+    WarpRow* stash;
     const double* map;
+    const float2* lane;
+    bool echo, evaluate;
     std::uint32_t source_rows;
-    __device__ float2 operator()(std::uint64_t row) const {
-        return warp_sample(lane, map, static_cast<double>(row), source_rows);
+    __device__ __forceinline__ void operator()(float2* span, std::uint64_t low, std::uint32_t count) const {
+#pragma unroll
+        for (unsigned k = 0; k < warp_stash_rows; ++k) {
+            const auto i = threadIdx.x + k * threads;
+            if (i < count) {
+                if (evaluate) stash[k] = warp_row(map, static_cast<double>(low + i), source_rows);
+                span[i] = warp_apply(lane, stash[k], echo, source_rows);
+            }
+        }
     }
 };
 
@@ -666,9 +984,10 @@ __device__ std::uint32_t fir_window(std::uint32_t decimation, std::uint32_t tap_
 // the row's first tap, each added in FP64. The block stages the windows of
 // its taps in order, and every thread carries its row's sums across them,
 // so each row performs the same operations in the same order as it would
-// reading its raw rows in place. The window must not be zero.
-template<class Column>
-__device__ void filter_tile(const Column& input, const float* taps, float2* output, float2* stage,
+// reading its raw rows in place. `stage_span(span, low, count)` stages the
+// raw rows of one window. The window must not be zero.
+template<class Stage>
+__device__ __forceinline__ void filter_tile(const Stage& stage_span, const float* taps, float2* output, float2* stage,
     std::uint32_t raw_rows, std::uint32_t tap_count, std::uint32_t decimation, std::uint32_t rows,
     std::uint32_t tile, std::uint32_t window) {
     const auto first_row = static_cast<std::uint64_t>(tile) * threads;
@@ -698,7 +1017,7 @@ __device__ void filter_tile(const Column& input, const float* taps, float2* outp
         const auto high = last_newest - first < raw_rows - 1 ? last_newest - first : raw_rows - 1;
         const auto count = static_cast<std::uint32_t>(high + 1 - low);
         for (auto i = threadIdx.x; i < stop - first; i += threads) weights[i] = taps[first + i];
-        for (auto i = threadIdx.x; i < count; i += threads) span[i] = input(low + i);
+        stage_span(span, low, count);
         __syncthreads();
         const auto end = tap_stop < stop ? tap_stop : stop;
         const auto base = static_cast<std::uint32_t>(newest - low);
@@ -722,19 +1041,36 @@ __device__ void filter_tile(const Column& input, const float* taps, float2* outp
     if (active) output[row] = make_float2(static_cast<float>(real), static_cast<float>(imag));
 }
 
+__device__ void nonfinite_tile(float2* output, std::uint32_t rows, std::uint32_t tile) {
+    const auto row = static_cast<std::uint64_t>(tile) * threads + threadIdx.x;
+    if (row < rows) output[row] = make_float2(CUDART_NAN_F, CUDART_NAN_F);
+}
+
 } // namespace
 
 // Stores raw template columns for coarse_fir_tiles or coarse_fir_decimate,
-// for geometries whose taps need more than one stage window of a tile.
-extern "C" __global__ void coarse_warp_columns(const float2* raster, const double* columns, float2* raw,
-    std::uint32_t source_rows, std::uint32_t raw_rows, std::uint32_t column_count, std::uint32_t first_column,
-    std::uint32_t first_lane) {
+// for geometries whose taps need more than one stage window of a tile. A
+// set holds up to four columns of one map, which differ only in their lanes,
+// and a thread evaluates its row's FP64 terms once for all of them. Raw
+// columns are numbered from the batch's first column.
+extern "C" __global__ void coarse_warp_columns(const float2* raster, const double* columns, const std::uint32_t* sets,
+    float2* raw, std::uint32_t source_rows, std::uint32_t raw_rows, std::uint32_t set_count, std::uint32_t first_set,
+    std::uint32_t first_column, std::uint32_t first_lane) {
     const auto index = static_cast<std::uint64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-    const auto column = index / raw_rows;
-    if (column >= column_count) return;
-    const auto* map = columns + (first_column + column) * 5;
-    const auto* lane = raster + (static_cast<std::uint64_t>(map[4]) - first_lane) * source_rows;
-    raw[index] = warp_sample(lane, map, static_cast<double>(index % raw_rows), source_rows);
+    const auto set = index / raw_rows;
+    if (set >= set_count) return;
+    const auto row = index % raw_rows;
+    const auto* members = sets + (static_cast<std::uint64_t>(first_set) + set) * coarse_set_columns;
+    const auto* map = columns + static_cast<std::uint64_t>(members[0]) * 5;
+    const auto warp = warp_row(map, static_cast<double>(row), source_rows);
+    const bool echo = has_echo(map);
+    for (unsigned member = 0; member < coarse_set_columns && members[member] != no_column; ++member) {
+        const auto column = members[member];
+        const auto* lane = raster + (static_cast<std::uint64_t>(columns[static_cast<std::uint64_t>(column) * 5 + 4]) -
+                                     first_lane) * source_rows;
+        raw[static_cast<std::uint64_t>(column - first_column) * raw_rows + row] =
+            warp_apply(lane, warp, echo, source_rows);
+    }
 }
 
 // Filters stored raw columns into the resident bank, one tile of output rows
@@ -746,13 +1082,12 @@ extern "C" __global__ void coarse_fir_tiles(const float2* raw, const float* taps
     const auto tiles = (rows + threads - 1) / threads;
     const auto column = blockIdx.x / tiles, tile = blockIdx.x % tiles;
     if (column >= column_count) return;
-    const RawColumn input{raw + static_cast<std::uint64_t>(column) * raw_rows};
+    const RawStage input{raw + static_cast<std::uint64_t>(column) * raw_rows};
     auto* output = bank + (static_cast<std::uint64_t>(first_column) + column) * rows;
     const auto window = fir_window(decimation, tap_count);
     if (window) return filter_tile(input, taps, output, stage, raw_rows, tap_count, decimation, rows, tile, window);
     // No stage fits: a nonfinite bank, which the host rejects.
-    const auto row = static_cast<std::uint64_t>(tile) * threads + threadIdx.x;
-    if (row < rows) output[row] = make_float2(CUDART_NAN_F, CUDART_NAN_F);
+    nonfinite_tile(output, rows, tile);
 }
 
 // The canonical decimating FIR of stored raw columns, reading them in place:
@@ -785,28 +1120,39 @@ extern "C" __global__ void coarse_fir_decimate(const float2* raw, const float* t
     bank[(first_column + column) * rows + row] = make_float2(static_cast<float>(real), static_cast<float>(imag));
 }
 
-// Warps and filters raw columns without storing them: each block stages
-// the raw span of its tile from the resident lanes by warp_sample, as
-// coarse_warp_columns stores it, and filters it as coarse_fir_tiles does.
-// The host sends geometries whose taps fit one window, so a tile warps each
-// raw row of its span once.
-extern "C" __global__ void coarse_warp_fir(const float2* raster, const double* columns, const float* taps,
-    float2* bank, std::uint32_t source_rows, std::uint32_t raw_rows, std::uint32_t tap_count,
-    std::uint32_t decimation, std::uint32_t rows, std::uint32_t column_count, std::uint32_t first_column,
+// Warps and filters raw columns without storing them, when the taps fit one
+// stage window, as the host arranges. One block filters one tile of output
+// rows of every column of a set, whose columns share a map and differ only
+// in their lanes. Each thread evaluates the FP64 terms of its staged rows
+// once, keeps them, and stages each column's span from them; the columns
+// then filter in turn as coarse_fir_tiles does. Each warped sample and each
+// output row keeps the operations and order of a column warped and
+// filtered alone.
+extern "C" __global__ void coarse_warp_fir(const float2* raster, const double* columns, const std::uint32_t* sets,
+    const float* taps, float2* bank, std::uint32_t source_rows, std::uint32_t raw_rows, std::uint32_t tap_count,
+    std::uint32_t decimation, std::uint32_t rows, std::uint32_t set_count, std::uint32_t first_set,
     std::uint32_t first_lane) {
     __shared__ float2 stage[fir_stage_pairs];
     const auto tiles = (rows + threads - 1) / threads;
-    const auto column = blockIdx.x / tiles, tile = blockIdx.x % tiles;
-    if (column >= column_count) return;
-    const auto* map = columns + (static_cast<std::uint64_t>(first_column) + column) * 5;
-    const WarpedColumn input{raster + (static_cast<std::uint64_t>(map[4]) - first_lane) * source_rows, map,
-                             source_rows};
-    auto* output = bank + (static_cast<std::uint64_t>(first_column) + column) * rows;
-    const auto window = fir_window(decimation, tap_count);
-    if (window) return filter_tile(input, taps, output, stage, raw_rows, tap_count, decimation, rows, tile, window);
-    // No stage fits: a nonfinite bank, which the host rejects.
-    const auto row = static_cast<std::uint64_t>(tile) * threads + threadIdx.x;
-    if (row < rows) output[row] = make_float2(CUDART_NAN_F, CUDART_NAN_F);
+    const auto set = blockIdx.x / tiles, tile = blockIdx.x % tiles;
+    if (set >= set_count) return;
+    const auto* members = sets + (static_cast<std::uint64_t>(first_set) + set) * coarse_set_columns;
+    const auto* map = columns + static_cast<std::uint64_t>(members[0]) * 5;
+    // Several windows would restage the span. The host never dispatches
+    // them here; a nonfinite bank, which the host rejects, if it did.
+    const bool whole = fir_window(decimation, tap_count) == tap_count;
+    WarpRow stash[warp_stash_rows];
+    for (unsigned member = 0; member < coarse_set_columns && members[member] != no_column; ++member) {
+        const auto* column_map = columns + static_cast<std::uint64_t>(members[member]) * 5;
+        auto* output = bank + static_cast<std::uint64_t>(members[member]) * rows;
+        if (!whole) {
+            nonfinite_tile(output, rows, tile);
+            continue;
+        }
+        const auto* lane = raster + (static_cast<std::uint64_t>(column_map[4]) - first_lane) * source_rows;
+        const StashStage input{stash, map, lane, has_echo(map), member == 0, source_rows};
+        filter_tile(input, taps, output, stage, raw_rows, tap_count, decimation, rows, tile, tap_count);
+    }
 }
 
 // Per workspace: |x|^2, |y|^2 and conj(x) y of its one or two columns.
@@ -935,20 +1281,22 @@ extern "C" __global__ void coarse_pack_observation(const float2* observation, co
     }
 }
 
-// One block scores 512 arrivals of two workspaces at one frequency. Each warp
-// owns 128 arrivals as eight 16x8 result tiles and walks the whole inner
-// extent with three loads per slice: operand loads, not products, bound it.
+// One block scores 512 arrivals of one bank tile at one frequency: the four
+// template columns of two workspaces of two rays, or of four workspaces of
+// one ray. Each warp owns 128 arrivals as eight 16x8 result tiles and walks
+// the whole inner extent with three loads per slice: operand loads, not
+// products, bound it.
 extern "C" __global__ void coarse_fp4_scores(const uint4* packed_observation,
     const unsigned long long* observation_scales, const uint4* packed_bank, const double* coefficients,
     float* scores, std::uint32_t k, std::uint32_t stream_quads, std::uint32_t arrivals, std::uint32_t workspaces,
-    std::uint32_t frequencies) {
+    std::uint32_t frequencies, std::uint32_t taps) {
     const auto warp = threadIdx.x / warp_size;
     const auto lane = threadIdx.x % warp_size;
     const auto quad = lane / 4, slot = lane % 4;
     const auto arrival_blocks = (arrivals + coarse_block_arrivals - 1) / coarse_block_arrivals;
-    const auto pairs = (workspaces + 1) / 2;
-    const auto pair = blockIdx.x / arrival_blocks % pairs;
-    const auto frequency = blockIdx.x / arrival_blocks / pairs;
+    const auto bank_tiles = (workspaces * taps + 3) / 4;
+    const auto bank_tile = blockIdx.x / arrival_blocks % bank_tiles;
+    const auto frequency = blockIdx.x / arrival_blocks / bank_tiles;
     if (frequency >= frequencies) return;
     const auto first_arrival = blockIdx.x % arrival_blocks * coarse_block_arrivals + warp * coarse_warp_arrivals;
     // Rows quad and quad + 8 of every group are congruent to quad modulo 8.
@@ -957,7 +1305,7 @@ extern "C" __global__ void coarse_fp4_scores(const uint4* packed_observation,
     const auto* observation = packed_observation + (stream * 4 + slot) * stream_quads + first_arrival / 32;
     const auto* observation_scale = observation_scales + (stream * 2 + slot % 2) * stream_quads + first_arrival / 32;
     const auto tiles = k / tile_inner;
-    const auto* bank = packed_bank + (static_cast<std::uint64_t>(pair) * tile_columns + quad) * tiles * 4 + slot;
+    const auto* bank = packed_bank + (static_cast<std::uint64_t>(bank_tile) * tile_columns + quad) * tiles * 4 + slot;
 
     float4 accumulator[coarse_groups];
     for (unsigned group = 0; group < coarse_groups; ++group) accumulator[group] = make_float4(0.f, 0.f, 0.f, 0.f);
@@ -997,8 +1345,27 @@ extern "C" __global__ void coarse_fp4_scores(const uint4* packed_observation,
         }
     }
 
+    // Slot s holds result columns 2s and 2s + 1: the real and imaginary
+    // correlations of the tile's template column s.
+    if (taps == 1) {
+        // Each slot holds a whole workspace.
+        const auto workspace = bank_tile * 4 + slot;
+        if (workspace >= workspaces) return;
+        const auto* inverse = coefficients + static_cast<std::uint64_t>(workspace) * 4;
+        auto* output = scores + (static_cast<std::uint64_t>(frequency) * workspaces + workspace) * arrivals;
+        // Constant accumulator indices keep the accumulators in registers.
+#pragma unroll
+        for (unsigned group = 0; group < coarse_groups; ++group) {
+            const auto own = accumulator[group];
+            const auto arrival = first_arrival + group * tile_rows + quad;
+            if (arrival < arrivals) output[arrival] = ray_score(inverse, own.x, own.y);
+            if (arrival + tile_rows / 2 < arrivals)
+                output[arrival + tile_rows / 2] = ray_score(inverse, own.z, own.w);
+        }
+        return;
+    }
     // Even slots hold a workspace's first ray and their neighbor its second.
-    const auto workspace = pair * 2 + slot / 2;
+    const auto workspace = bank_tile * 2 + slot / 2;
     const auto* inverse = coefficients + static_cast<std::uint64_t>(workspace < workspaces ? workspace : 0) * 4;
     auto* output = scores + (static_cast<std::uint64_t>(frequency) * workspaces + workspace) * arrivals;
     for (unsigned group = 0; group < coarse_groups; ++group) {
@@ -1117,10 +1484,26 @@ extern "C" __global__ void coarse_rotate_observation(const float2* observation, 
     rotated[index] = make_float2(input.x * cosine - input.y * sine, input.y * cosine + input.x * sine);
 }
 
+namespace {
+
+// The quadratic score of one retained peak from its two correlations, with
+// the FP64 inverse Gram of its workspace, divided by the variance, as
+// coarse_rescore_peaks forms it.
+__device__ double rescored(const double (&sums)[4], const double* c, double variance) {
+    const auto real_product = sums[0] * c[2] + sums[1] * c[3];
+    const auto imag_product = sums[0] * c[3] - sums[1] * c[2];
+    const auto score = c[0] * (sums[0] * sums[0] + sums[1] * sums[1]) + c[1] * (sums[2] * sums[2] + sums[3] * sums[3]) +
+                       2 * (real_product * sums[2] - imag_product * sums[3]);
+    return score / variance;
+}
+
+} // namespace
+
 // Replaces the retained frontier scores with FP32 products accumulated in
 // FP64 from the unquantized resident bank and the rotated observation. One
 // block owns one retained peak. Parameters follow coarse_pack_observation,
-// with the variance in the place of the observation magnitude.
+// with the variance in the place of the observation magnitude. This is the
+// matched control of coarse_rescore_peaks_fp32.
 extern "C" __global__ void coarse_rescore_peaks(const float2* bank, const float2* rotated,
     const double* parameters, const double* inverse, CoarsePeakRow* peaks, std::uint32_t rows,
     std::uint32_t samples, std::uint32_t workspaces, std::uint32_t frequencies, std::uint32_t taps) {
@@ -1157,4 +1540,54 @@ extern "C" __global__ void coarse_rescore_peaks(const float2* bank, const float2
     const auto score = c[0] * (sums[0] * sums[0] + sums[1] * sums[1]) + c[1] * (sums[2] * sums[2] + sums[3] * sums[3]) +
                        2 * (real_product * sums[2] - imag_product * sums[3]);
     peaks[row_index].scores[entry] = score / parameters[frequencies + 1];
+}
+
+// The same scores with the FIR's partial-sum scheme: each thread sums the
+// FP32 products of 64 of its rows in FP32 with single-rounding multiply-adds
+// and adds each partial sum in FP64, and the block adds its threads' sums as
+// an FP64 tree. The correlations, Gram and score stay FP64.
+extern "C" __global__ void coarse_rescore_peaks_fp32(const float2* bank, const float2* rotated,
+    const double* parameters, const double* inverse, CoarsePeakRow* peaks, std::uint32_t rows,
+    std::uint32_t samples, std::uint32_t workspaces, std::uint32_t frequencies, std::uint32_t taps) {
+    __shared__ double partial[threads][4];
+    const auto row_index = blockIdx.x / 2, entry = blockIdx.x % 2;
+    const auto frequency = row_index / workspaces, workspace = row_index % workspaces;
+    if (frequency >= frequencies) return;
+    const auto count = peaks[row_index].count;
+    if (count > 2 || entry >= count) return;
+    const auto arrival = peaks[row_index].lags[entry];
+    const auto* first = bank + static_cast<std::uint64_t>(workspace) * taps * rows;
+    const auto* observation = rotated + static_cast<std::uint64_t>(frequency) * samples;
+    double sums[4] = {0, 0, 0, 0};
+    float chunk[4] = {0, 0, 0, 0};
+    unsigned products = 0;
+    for (std::uint64_t row = threadIdx.x; row < rows && row + arrival < samples; row += threads) {
+        const auto value = observation[row + arrival];
+        const auto x = first[row];
+        chunk[0] = __fmaf_rn(x.y, value.y, __fmaf_rn(x.x, value.x, chunk[0]));
+        chunk[1] = __fmaf_rn(-x.y, value.x, __fmaf_rn(x.x, value.y, chunk[1]));
+        if (taps == 2) {
+            const auto y = first[rows + row];
+            chunk[2] = __fmaf_rn(y.y, value.y, __fmaf_rn(y.x, value.x, chunk[2]));
+            chunk[3] = __fmaf_rn(-y.y, value.x, __fmaf_rn(y.x, value.y, chunk[3]));
+        }
+        if (++products == fir_chunk) {
+            for (unsigned i = 0; i < 4; ++i) {
+                sums[i] += chunk[i];
+                chunk[i] = 0;
+            }
+            products = 0;
+        }
+    }
+    for (unsigned i = 0; i < 4; ++i) partial[threadIdx.x][i] = sums[i] + chunk[i];
+    __syncthreads();
+    for (unsigned width = threads / 2; width; width /= 2) {
+        if (threadIdx.x < width)
+            for (unsigned i = 0; i < 4; ++i) partial[threadIdx.x][i] += partial[threadIdx.x + width][i];
+        __syncthreads();
+    }
+    if (threadIdx.x) return;
+    const double total[4] = {partial[0][0], partial[0][1], partial[0][2], partial[0][3]};
+    peaks[row_index].scores[entry] = rescored(total, inverse + static_cast<std::uint64_t>(workspace) * 4,
+                                              parameters[frequencies + 1]);
 }

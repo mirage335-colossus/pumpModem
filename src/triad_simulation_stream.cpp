@@ -4,6 +4,7 @@
 #include "channel_spread.hpp"
 #include "triad_coordinate.hpp"
 #include "triad_gaussian_fading.hpp"
+#include "triad_gaussian_stream.hpp"
 #include "triad_random_process.hpp"
 #include "datapump/types.hpp"
 
@@ -21,6 +22,7 @@
 namespace datapump::triad::v3 {
 namespace {
 using detail::floor_coordinate;
+using detail::GaussianStream;
 using detail::signed_index;
 using detail::unsigned_index;
 using modem::detail::DispersiveSelectivePerturbation;
@@ -285,7 +287,9 @@ void validate_spectrum(const OscillatorSpectrum& s) {
             "invalid finite-band oscillator spectrum");
 }
 
-void initialize_spectrum(OscillatorState& state, const OscillatorSpectrum& s, Rng& rng) {
+// gaussian() returns the oscillator's standard-normal draws in order.
+template<class Gaussian>
+void initialize_spectrum(OscillatorState& state, const OscillatorSpectrum& s, Gaussian&& gaussian) {
     if (s.flicker_fm_rms_hz == 0) return;
     const auto count = s.flicker_bands;
     state.taus.resize(count);
@@ -296,7 +300,7 @@ void initialize_spectrum(OscillatorState& state, const OscillatorSpectrum& s, Rn
     for (unsigned i = 0; i < count; ++i) {
         const double u = count == 1 ? .5 : static_cast<double>(i) / (count - 1);
         state.taus[i] = std::exp(lo + u * (hi - lo));
-        state.flicker[i] = component_rms * rng.gaussian();
+        state.flicker[i] = component_rms * gaussian();
     }
 }
 
@@ -320,20 +324,27 @@ void prepare_phase_step(OscillatorState& state, const Oscillator& base,
     }
 }
 
-double oscillator_phase_step(OscillatorState& state, const Oscillator& base, Rng& rng,
+// The standard-normal draws of one oscillator sample: its phase step's
+// white, random-walk, flicker and Wiener draws, then its white PM draw.
+std::uint64_t staged_draws(const OscillatorSpectrum& s) {
+    return 4 + (s.flicker_fm_rms_hz > 0 ? s.flicker_bands : 0);
+}
+
+template<class Gaussian>
+double oscillator_phase_step(OscillatorState& state, const Oscillator& base, Gaussian&& gaussian,
                              double rf_hz, double t, double dt) {
-    const double white_frequency = state.white_sigma * rng.gaussian();
-    state.rw_frequency += state.random_walk_step * rng.gaussian();
+    const double white_frequency = state.white_sigma * gaussian();
+    state.rw_frequency += state.random_walk_step * gaussian();
     double flicker_frequency = 0;
     for (std::size_t i = 0; i < state.flicker.size(); ++i) {
         state.flicker[i] = state.flicker_decay[i] * state.flicker[i] +
-            state.flicker_innovation[i] * rng.gaussian();
+            state.flicker_innovation[i] * gaussian();
         flicker_frequency += state.flicker[i];
     }
     const double offset = rf_hz * (base.rf_ppm + base.rf_drift_ppm_per_second * t) * 1e-6 +
         state.if_offset_hz + white_frequency + state.rw_frequency +
         flicker_frequency;
-    const double wiener = state.wiener_step * rng.gaussian();
+    const double wiener = state.wiener_step * gaussian();
     const double result = tau * offset * dt + wiener;
     require(std::isfinite(result), "oscillator phase increment is non-finite");
     return result;
@@ -479,6 +490,11 @@ struct StreamingChannel::Impl {
         std::vector<Excursions> excursion;
         // The moving echo delay of each row; others use the fixed delay.
         std::vector<long double> delay_seconds;
+        // With lanes: each row's physical time, and the selective filter's
+        // delayed branches when their shortest lag reaches back past the
+        // block that the pass beside this preparation filters.
+        std::vector<long double> physical_time;
+        std::vector<std::array<Complex, 2>> branches;
         // Rows [0, carried) hold their coordinates; the sequential pass
         // evaluates those of a later row itself, which reports their failure.
         std::size_t carried = 0;
@@ -498,14 +514,100 @@ struct StreamingChannel::Impl {
     // With lanes, the sequential states that never read the signal advance a
     // whole block ahead of the reader, each on a job of its own, and the next
     // block's source history is generated beside the rows of this one.
-    enum Chain : std::size_t { ahead_chain, receive_chain, thermal_chain, echo_chain, common_chain, chain_count };
+    enum Chain : std::size_t { ahead_chain, echo_chain, common_chain, chain_count };
     struct Chains {
-        std::vector<Complex> receive_rotation, thermal, echo_rotation, common_rotation;
+        std::vector<Complex> echo_rotation, common_rotation;
         std::vector<detail::BoundedRandomSpread::State> echo;
         std::vector<double> common_doppler_hz;
         std::array<Failure, chain_count> failures;
     };
     std::array<Chains, 2> chain_sets;
+    // With lanes, the receiver oscillator and the thermal noise of the rows,
+    // and with a split transmit path the transmit oscillator of the source
+    // samples, are staged. Their items take per_item draws each from one
+    // GaussianStream. Only accepting the draws and the oscillator's phase
+    // recurrence run in order, each as a job of its own; forming the draws
+    // and the oscillator's rotations are chunks that the pool jobs share.
+    // Every stage reads what the blocks before left, so a block's jobs form
+    // the rotations of its own items, carry the recurrence one lead further,
+    // form draws two leads and accept them three leads ahead. A chain that
+    // is behind catches up on the reader first. Items and their values are
+    // those of the unbatched reader; only where they are computed changes.
+    enum Staged : std::size_t { receive_staged, transmit_staged, thermal_staged, staged_count };
+    struct DrawChain {
+        explicit DrawChain(std::uint64_t seed) : stream(seed) {}
+        GaussianStream stream;
+        bool active = false, recurrence = false;
+        std::uint64_t per_item = 0, offset = 0, items = 0, lead = 0;
+        // Items [0, phased) passed the recurrence; values [formed - ring, formed) exist.
+        std::uint64_t phased = 0, formed = 0;
+        // The first item whose recurrence failed, and why. Its consumer
+        // reports it where the unbatched reader met it.
+        std::uint64_t failure = UINT64_MAX;
+        std::exception_ptr error;
+        std::vector<double> phase, white_pm;
+        std::vector<Complex> value;
+        // The receiver's dwell index of each row, which the pass reads too.
+        std::vector<std::int64_t> dwell;
+        std::uint64_t draw(std::uint64_t item) const { return offset + item * per_item; }
+        // The items whose draws are all formed.
+        std::uint64_t drawn() const {
+            const auto formed_draws = stream.finished();
+            return formed_draws <= offset ? 0 : (formed_draws - offset) / per_item;
+        }
+        static std::uint64_t draw_capacity(std::uint64_t lead, std::uint64_t per_item) { return 4 * lead * per_item + 4; }
+        static std::uint64_t pair_capacity(std::uint64_t lead, std::uint64_t per_item) { return lead * per_item + 2; }
+        static std::size_t bytes(std::uint64_t lead, std::uint64_t per_item, bool recurrence) {
+            return GaussianStream::bytes(static_cast<std::size_t>(draw_capacity(lead, per_item)),
+                                         static_cast<std::size_t>(pair_capacity(lead, per_item))) +
+                (recurrence ? static_cast<std::size_t>(3 * lead) * (3 * sizeof(double) + sizeof(Complex)) : 0);
+        }
+        Complex at(std::uint64_t item) const { return value[static_cast<std::size_t>(item % value.size())]; }
+    };
+    std::array<DrawChain, staged_count> staged;
+    // One block's stage ranges of a staged chain, fixed before its jobs run.
+    struct ChainRound {
+        std::uint64_t accept_to = 0, finish_from = 0, finish_to = 0;
+        std::uint64_t phase_from = 0, phase_to = 0, form_from = 0, form_to = 0;
+        // Where the recurrence job stopped, and why when an item failed. The
+        // reader records it in the chain after the jobs.
+        std::uint64_t phased = 0, failure = UINT64_MAX;
+        std::exception_ptr error;
+        bool phase_ran = false;
+    };
+    // The work of a block that any of its pool jobs claims: its rows in
+    // shrinking runs, then fixed chunks of the staged chains' formations.
+    struct Pool {
+        static constexpr std::size_t row_grain = 16, draw_grain = 512, item_grain = 256;
+        struct Segment {
+            Staged chain = receive_staged;
+            bool values = false;
+            std::uint64_t from = 0, to = 0;
+            std::size_t first_chunk = 0;
+        };
+        std::atomic<std::size_t> next_row{0}, next_chunk{0};
+        std::size_t rows = 0, jobs = 1, chunks = 0, segment_count = 0;
+        std::array<Segment, 2 * staged_count> segments{};
+        void add(Staged chain, bool values, std::uint64_t from, std::uint64_t to) {
+            if (from >= to) return;
+            const auto grain = values ? item_grain : draw_grain;
+            segments[segment_count++] = {chain, values, from, to, chunks};
+            chunks += static_cast<std::size_t>((to - from + grain - 1) / grain);
+        }
+        bool claim_rows(std::size_t& begin, std::size_t& end) {
+            auto current = next_row.load(std::memory_order_relaxed);
+            for (;;) {
+                if (current >= rows) return false;
+                const auto size = std::max(row_grain, (rows - current) / (2 * jobs));
+                const auto stop = std::min(rows, current + size);
+                if (next_row.compare_exchange_weak(current, stop, std::memory_order_relaxed)) {
+                    begin = current;
+                    end = stop;
+                    return true;
+                }
+            }
+        }
+    };
     // One block's sequential pass, delivered at offset of a read's output.
     struct Pass {
         std::span<Complex> output;
@@ -514,7 +616,7 @@ struct StreamingChannel::Impl {
         std::exception_ptr error;
         bool ran = false;
     };
-    bool chained = false;
+    bool chained = false, selective_ahead = false;
     // The source history that the unbatched reader had generated at the cursor.
     std::uint64_t reader_source_end = 0;
     // A source failure met while generating ahead. The reader reports it at
@@ -536,9 +638,10 @@ struct StreamingChannel::Impl {
     bool split_transmit = false;
     std::shared_ptr<EmittedSourceReaders> source_readers;
     std::size_t source_reader_count = 0;
-    std::vector<Complex> tx_rotation;
-    Stage oscillator_stage;
     std::vector<Stage> source_stages;
+    // Whether every planned transmit rotation of the range being generated
+    // was formed.
+    bool transmit_formed = false;
     // Every TX calendar coordinate of the source converts to a dwell index,
     // so a channel without FHSS need not form them.
     bool tx_calendar_bounded = false;
@@ -572,7 +675,13 @@ struct StreamingChannel::Impl {
     Impl(EmittedSource src, const StreamChannelConfig& cfg, bool explicit_source = true)
         : format(src.format), geometry(src.geometry), source_sample(std::move(src.sample_at)),
           config(checked_config(cfg, format)),
-          effects(config.effects), tx_rng(root_seed(cfg.oscillator_seed,cfg.effects.seed) ^ 0x3254494154545801ULL),
+          effects(config.effects),
+          // The staged chains draw the streams of rx_spectrum_rng,
+          // tx_spectrum_rng and thermal_rng, which they then replace.
+          staged{DrawChain(root_seed(cfg.oscillator_seed,cfg.effects.seed) ^ 0x9e37a202ULL),
+                 DrawChain(root_seed(cfg.oscillator_seed,cfg.effects.seed) ^ 0x9e37a201ULL),
+                 DrawChain(root_seed(cfg.noise_seed,cfg.effects.seed) ^ 0x3254494154415747ULL)},
+          tx_rng(root_seed(cfg.oscillator_seed,cfg.effects.seed) ^ 0x3254494154545801ULL),
           rx_rng(root_seed(cfg.oscillator_seed,cfg.effects.seed) ^ 0x3254494154525802ULL),
           thermal_rng(root_seed(cfg.noise_seed,cfg.effects.seed) ^ 0x3254494154415747ULL),
           tx_spectrum_rng(root_seed(cfg.oscillator_seed,cfg.effects.seed) ^ 0x9e37a201ULL),
@@ -824,17 +933,26 @@ struct StreamingChannel::Impl {
             source_reader_count = chained && value_free_transmit && with_readers && reads_source ?
                 std::min<std::size_t>(jobs, kSourceReaders) : 0;
             split_transmit = chained && value_free_transmit && (source_reader_count || !effects.signal_enabled);
-            const auto chain_row = !chained ? 0 : sizeof(Complex) + (effects.noise_enabled ? sizeof(Complex) : 0) +
+            const auto chain_row = !chained ? 0 :
                 (config.path_evolution.bounded_spread_knot_seconds > 0 ?
                     sizeof(detail::BoundedRandomSpread::State) + sizeof(Complex) : 0) +
                 (config.path_evolution.common_doppler_wander_hz > 0 ? sizeof(double) + sizeof(Complex) : 0);
+            const auto staged_bytes = !chained ? 0 :
+                DrawChain::bytes(block_rows, staged_draws(config.rx_spectrum), true) +
+                (effects.noise_enabled ? DrawChain::bytes(block_rows, 2, false) : 0) +
+                (split_transmit ? DrawChain::bytes(block_lookahead, staged_draws(config.tx_spectrum), true) : 0);
+            selective_ahead = chained && perturb_enabled &&
+                DispersiveSelectivePerturbation::minimum_lag(effects.sample_rate * rx_scale, selective_spacing) >=
+                    2 * block_rows;
+            const auto ahead_row = !chained ? 0 : sizeof(long double) +
+                (selective_ahead ? sizeof(std::array<Complex, 2>) : 0);
             return (chained ? 2 : 1) * block_lookahead * sizeof(Complex) + (split_transmit ? 2 : 1) * block_rows *
-                    (2 * sizeof(Complex) + chain_row + (reads_rays ? sizeof(std::array<Complex, 2>) : 0) +
+                    (2 * sizeof(Complex) + chain_row + ahead_row + (reads_rays ? sizeof(std::array<Complex, 2>) : 0) +
                      (reads_excursions ? sizeof(Excursions) : 0) + (moving_delay ? sizeof(long double) : 0)) +
                 jobs * sizeof(Failure) + (jobs - 1) * (sizeof(Reader) +
                     (reads_rays ? 2 * sizeof(detail::FixedGaussianRay) : 0) +
                     (reads_excursions ? DispersiveSelectivePerturbation::maximum_random_working_bytes() : 0)) +
-                (split_transmit ? block_lookahead * sizeof(Complex) + (source_reader_count + 1) * sizeof(Stage) : 0);
+                staged_bytes + (split_transmit ? source_reader_count * sizeof(Stage) : 0);
         };
         // All owned arrays are fixed-size; no deque growth or duration-sized
         // history is hidden from this pre-allocation bound. Fixed allowance
@@ -890,7 +1008,12 @@ struct StreamingChannel::Impl {
             source_readers->open(source_reader_count, block_lookahead);
             source_stages.resize(source_reader_count);
         }
-        if (split_transmit) tx_rotation.resize(block_lookahead);
+        if (chained) {
+            open_staged(receive_staged, true, block_rows, staged_draws(config.rx_spectrum), total);
+            if (effects.noise_enabled) open_staged(thermal_staged, false, block_rows, 2, total);
+        }
+        if (split_transmit)
+            open_staged(transmit_staged, true, block_lookahead, staged_draws(config.tx_spectrum), geometry.source_samples);
         {
             const long double extent = static_cast<long double>(geometry.source_samples) / tx_clock +
                 std::abs(hop_origin_seconds);
@@ -905,9 +1028,9 @@ struct StreamingChannel::Impl {
             if (reads_excursions) block.excursion.resize(block_rows);
             if (moving_delay) block.delay_seconds.resize(block_rows);
             if (!chained) continue;
+            block.physical_time.resize(block_rows);
+            if (selective_ahead) block.branches.resize(block_rows);
             auto& chains = chain_sets[slot];
-            chains.receive_rotation.resize(block_rows);
-            if (effects.noise_enabled) chains.thermal.resize(block_rows);
             if (config.path_evolution.bounded_spread_knot_seconds > 0) {
                 chains.echo.resize(block_rows);
                 chains.echo_rotation.resize(block_rows);
@@ -976,8 +1099,14 @@ struct StreamingChannel::Impl {
             diagnostic.seed = seed;
             diagnostic.decay_tail_samples = actual_perturb_tail;
         }
-        initialize_spectrum(tx_osc, config.tx_spectrum, tx_spectrum_rng);
-        initialize_spectrum(rx_osc, config.rx_spectrum, rx_spectrum_rng);
+        // A staged oscillator takes its initial flicker draws from its stream.
+        if (staged[transmit_staged].active)
+            initialize_spectrum(tx_osc, config.tx_spectrum, [this] { return staged[transmit_staged].stream.next(); });
+        else initialize_spectrum(tx_osc, config.tx_spectrum, [this] { return tx_spectrum_rng.gaussian(); });
+        if (staged[receive_staged].active)
+            initialize_spectrum(rx_osc, config.rx_spectrum, [this] { return staged[receive_staged].stream.next(); });
+        else initialize_spectrum(rx_osc, config.rx_spectrum, [this] { return rx_spectrum_rng.gaussian(); });
+        for (auto& chain : staged) chain.offset = chain.stream.taken();
         prepare_phase_step(tx_osc, effects.tx, config.tx_spectrum, effects.nominal_conversion_if_hz, tx_scale, dt_tx);
         prepare_phase_step(rx_osc, effects.rx, config.rx_spectrum, effects.nominal_conversion_if_hz, rx_scale, dt_rx);
         // Without retuning both rays keep the phase of equal hop calendars.
@@ -1031,7 +1160,7 @@ struct StreamingChannel::Impl {
         if (last >= max_end) last = max_end == 0 ? 0 : max_end - 1;
         if (geometry.source_samples == 0 || tx_next > last) return;
         while (tx_next <= last) {
-            advance_transmit_phase(tx_next);
+            advance_transmit_phase(tx_next, [this] { return tx_spectrum_rng.gaussian(); });
             auto value = effects.signal_enabled ? source_sample(tx_next) : Complex{};
             const double white_pm = transmit_white_pm();
             if (effects.signal_enabled && transmit_diagnostic_iq_noise) {
@@ -1073,10 +1202,11 @@ struct StreamingChannel::Impl {
         }
     }
 
-    // The TX oscillator's phase at source sample n. It advances the
-    // oscillator one sample; the fused loop then reads the source, and both
-    // loops draw the white phase modulation of the sample.
-    void advance_transmit_phase(std::uint64_t n) {
+    // The TX oscillator's phase at source sample n from its draws in order.
+    // It advances the oscillator one sample; the fused loop then reads the
+    // source, and both paths draw the white phase modulation of the sample.
+    template<class Gaussian>
+    void advance_transmit_phase(std::uint64_t n, Gaussian&& gaussian) {
         const double t = static_cast<double>(n) * dt_tx;
         double hop = 0;
         // Without FHSS the dwell index only checked a range that the bound
@@ -1093,7 +1223,7 @@ struct StreamingChannel::Impl {
             }
         }
         const double rf = effects.rf_hz + hop;
-        tx_osc.phase += oscillator_phase_step(tx_osc, effects.tx, tx_spectrum_rng, rf, t, dt_tx);
+        tx_osc.phase += oscillator_phase_step(tx_osc, effects.tx, gaussian, rf, t, dt_tx);
         // Keep the historical positive-RF arithmetic unchanged when this
         // supplemental emission-time slope is off.
         if (config.tx_frequency_drift_hz_per_second != 0)
@@ -1104,23 +1234,146 @@ struct StreamingChannel::Impl {
         return config.tx_spectrum.white_pm_rms_radians * tx_spectrum_rng.gaussian();
     }
 
-    // The split stages of source samples [first, end). The oscillator forms
-    // each factor exactly as the fused loop does.
-    void run_oscillator(std::uint64_t first, std::uint64_t end) noexcept {
-        auto& stage = oscillator_stage;
-        stage.ran = true;
-        auto n = first;
+    // A staged chain's items, rows or source samples, below items and
+    // without overflowing its draw indices.
+    void open_staged(Staged which, bool recurrence, std::uint64_t lead, std::uint64_t per_item, std::uint64_t items) {
+        auto& chain = staged[which];
+        chain.active = true;
+        chain.recurrence = recurrence;
+        chain.lead = lead;
+        chain.per_item = per_item;
+        chain.items = std::min(items, (UINT64_MAX / 4) / per_item);
+        chain.stream.open(static_cast<std::size_t>(DrawChain::draw_capacity(lead, per_item)),
+                          static_cast<std::size_t>(DrawChain::pair_capacity(lead, per_item)));
+        if (!recurrence) return;
+        chain.phase.resize(static_cast<std::size_t>(3 * lead));
+        chain.white_pm.resize(chain.phase.size());
+        chain.value.resize(chain.phase.size());
+        if (which == receive_staged) chain.dwell.resize(chain.phase.size());
+    }
+    // The recurrence of a staged oscillator through its items [phase_from,
+    // phase_to): the operations of the unbatched reader in its order, with
+    // each item's draws taken from the stream in order. It stops at the first
+    // item that fails and records it for the consumer.
+    void recur(Staged which, ChainRound& round) noexcept {
+        auto& chain = staged[which];
+        round.phase_ran = true;
+        auto n = round.phase_from;
         try {
-            for (; n < end; ++n) {
-                advance_transmit_phase(n);
-                const double white_pm = transmit_white_pm();
-                tx_rotation[static_cast<std::size_t>(n - first)] =
-                    config.signal_gain * std::polar(1.0, tx_osc.phase + white_pm);
+            for (; n < round.phase_to; ++n) {
+                auto j = chain.draw(n);
+                const auto gaussian = [&chain, &j] { return chain.stream[j++]; };
+                const auto slot = static_cast<std::size_t>(n % chain.phase.size());
+                if (which == receive_staged) {
+                    const auto physical_time = physical_time_at(n);
+                    const double receive_calendar = static_cast<double>(physical_time +
+                        effects.retune_offset_seconds - hop_origin_seconds);
+                    const double rx_hop = effects.fhss ? hop_at(effects, receive_calendar) : 0;
+                    const auto rx_dwell = dwell_index(receive_calendar, effects.dwell_seconds);
+                    chain.dwell[slot] = rx_dwell;
+                    chain.white_pm[slot] = advance_receive(static_cast<double>(physical_time), rx_hop, rx_dwell, gaussian);
+                    chain.phase[slot] = rx_osc.phase;
+                } else {
+                    advance_transmit_phase(n, gaussian);
+                    chain.white_pm[slot] = config.tx_spectrum.white_pm_rms_radians * gaussian();
+                    chain.phase[slot] = tx_osc.phase;
+                }
             }
         } catch (...) {
-            stage.index = n;
-            stage.error = std::current_exception();
+            round.failure = n;
+            round.error = std::current_exception();
         }
+        round.phased = n;
+    }
+    // The recurrence's end after its job, on the reader.
+    static void record_recurrence(DrawChain& chain, const ChainRound& round) {
+        chain.phased = round.phased;
+        if (round.error) {
+            chain.failure = round.failure;
+            chain.error = round.error;
+        }
+    }
+    // The rotations of a staged oscillator's items [from, to), formed from
+    // its recurrence as the unbatched reader forms them.
+    void form(Staged which, std::uint64_t from, std::uint64_t to) noexcept {
+        auto& chain = staged[which];
+        const auto size = chain.value.size();
+        for (auto n = from; n < to; ++n) {
+            const auto slot = static_cast<std::size_t>(n % size);
+            chain.value[slot] = which == receive_staged ?
+                std::polar(1.0, -chain.phase[slot] - chain.white_pm[slot]) :
+                config.signal_gain * std::polar(1.0, chain.phase[slot] + chain.white_pm[slot]);
+        }
+    }
+    // Brings a staged chain on the reader to where a block's jobs need it:
+    // an oscillator's recurrence through item need, or the noise's draws
+    // through those of item need. Its consumer reads from item oldest on.
+    void catch_up(DrawChain& chain, Staged which, std::uint64_t need, std::uint64_t oldest) {
+        require(need <= chain.items, "streaming channel staged chain index overflow");
+        auto& stream = chain.stream;
+        for (;;) {
+            const bool ready = chain.recurrence ? chain.failure != UINT64_MAX || chain.phased >= need :
+                stream.finished() >= chain.draw(need);
+            if (ready) return;
+            const auto before = std::tuple(stream.accepted(), stream.finished(), chain.phased);
+            const auto first_read = chain.draw(chain.recurrence ? chain.phased : oldest);
+            stream.accept(std::min(stream.pair_end(chain.draw(need)), stream.accept_limit(first_read)));
+            const auto finish_to = std::min(stream.accepted(), stream.finish_limit(first_read));
+            stream.finish(stream.finished(), finish_to);
+            stream.finished_through(finish_to);
+            if (chain.recurrence) {
+                ChainRound round;
+                round.phase_from = chain.phased;
+                round.phase_to = std::max(chain.phased, std::min({need, chain.drawn(),
+                    std::min(oldest, chain.formed) + chain.phase.size()}));
+                recur(which, round);
+                record_recurrence(chain, round);
+            }
+            require(before != std::tuple(stream.accepted(), stream.finished(), chain.phased),
+                    "streaming channel staged chain cannot advance");
+        }
+    }
+    // The ranges of a staged chain for one block's jobs. The jobs form the
+    // rotations of items [formed, need), which the chain must have carried
+    // through its recurrence, and its consumer reads values or draws from
+    // item oldest on. The other stages run as far ahead as the chain's lead
+    // and rings allow.
+    ChainRound plan_staged(Staged which, std::uint64_t need, std::uint64_t oldest) {
+        auto& chain = staged[which];
+        catch_up(chain, which, need, oldest);
+        auto& stream = chain.stream;
+        const auto ahead = [&](std::uint64_t leads) {
+            return std::min(chain.items, need + std::min(chain.items, leads * chain.lead));
+        };
+        ChainRound round;
+        if (chain.recurrence) {
+            round.form_from = chain.formed;
+            round.form_to = std::max(round.form_from, std::min(need, chain.phased));
+            require(round.form_to - std::min(oldest, round.form_from) <= chain.value.size(),
+                    "streaming channel staged chain outran its ring");
+            round.phase_from = round.phase_to = round.phased = chain.phased;
+            // The pass still reads the receiver's dwell indices from oldest.
+            if (chain.failure == UINT64_MAX)
+                round.phase_to = std::max(chain.phased, std::min({ahead(1), chain.drawn(),
+                    std::min(oldest, round.form_from) + chain.phase.size()}));
+        }
+        const auto first_read = chain.draw(chain.recurrence ? round.phase_from : oldest);
+        round.finish_from = stream.finished();
+        round.finish_to = std::max(round.finish_from, std::min({stream.accepted(), stream.finish_limit(first_read),
+            stream.pair_end(chain.draw(ahead(2)))}));
+        round.accept_to = std::max(stream.accepted(),
+            std::min(stream.pair_end(chain.draw(ahead(3))), stream.accept_limit(first_read)));
+        return round;
+    }
+    // After a block's jobs: the chain's stages reached the planned ends.
+    void advance_staged(Staged which, const ChainRound& round) {
+        auto& chain = staged[which];
+        require(chain.stream.accepted() >= round.accept_to && (round.phase_to == round.phase_from || round.phase_ran),
+                "streaming channel lanes did not run every job");
+        chain.stream.finished_through(round.finish_to);
+        if (!chain.recurrence) return;
+        record_recurrence(chain, round);
+        chain.formed = round.form_to;
     }
     // Part job of jobs of the range, evaluated on that reader into the ring.
     void run_source(std::size_t job, std::size_t jobs, std::uint64_t first, std::uint64_t end) noexcept {
@@ -1143,7 +1396,7 @@ struct StreamingChannel::Impl {
         return std::clamp<std::size_t>(static_cast<std::size_t>(count / 160), 1, source_reader_count);
     }
     void reset_stages(std::size_t jobs) {
-        oscillator_stage = {};
+        transmit_formed = false;
         for (std::size_t job = 0; job < jobs; ++job) source_stages[job] = {};
     }
     // After the stages of [first, end) ran: the source accounts the samples
@@ -1151,16 +1404,20 @@ struct StreamingChannel::Impl {
     // and the ring receives value times factor for each generated sample.
     // Returns the failure of the next sample, if any.
     std::exception_ptr finish_transmit(std::uint64_t first, std::uint64_t end, std::size_t jobs) {
-        require(oscillator_stage.ran, "streaming channel lanes did not run every job");
+        require(transmit_formed, "streaming channel lanes did not run every job");
         Stage source;
         for (std::size_t job = 0; job < jobs; ++job) {
             require(source_stages[job].ran, "streaming channel lanes did not run every job");
             if (source_stages[job].index < source.index) source = source_stages[job];
         }
         // The fused loop advances the oscillator before it reads the source.
-        const bool oscillator_first = oscillator_stage.index <= source.index;
-        auto good = std::min(end, oscillator_first ? oscillator_stage.index : source.index);
-        auto error = oscillator_first ? oscillator_stage.error : source.error;
+        // A staged recurrence that failed beyond this range has not been met.
+        const auto& oscillator = staged[transmit_staged];
+        const auto oscillator_index = oscillator.failure >= first && oscillator.failure < end ?
+            oscillator.failure : UINT64_MAX;
+        const bool oscillator_first = oscillator_index <= source.index;
+        auto good = std::min(end, oscillator_first ? oscillator_index : source.index);
+        auto error = oscillator_first ? (oscillator_index == UINT64_MAX ? nullptr : oscillator.error) : source.error;
         if (jobs) {
             std::exception_ptr check;
             const auto accepted = source_readers->accept(good - first, !oscillator_first, check);
@@ -1173,7 +1430,7 @@ struct StreamingChannel::Impl {
         for (auto n = first; n < good; ++n) {
             auto& slot = tx_history[static_cast<std::size_t>(n % size)];
             auto value = effects.signal_enabled ? slot : Complex{};
-            value *= tx_rotation[static_cast<std::size_t>(n - first)];
+            value *= oscillator.at(n);
             slot = value;
         }
         tx_next = good;
@@ -1192,19 +1449,25 @@ struct StreamingChannel::Impl {
     void generate_split(std::uint64_t needed) {
         const auto end = source_end(needed);
         if (!end) return;
+        auto& oscillator = staged[transmit_staged];
         while (tx_next < *end) {
             const auto first = tx_next;
-            const auto stop = std::min<std::uint64_t>(*end, first + tx_rotation.size());
+            const auto stop = std::min<std::uint64_t>(*end, first + block_lookahead);
             const auto jobs = source_jobs(stop - first);
             reset_stages(jobs);
             if (jobs) source_readers->plan(first, stop - first);
+            catch_up(oscillator, transmit_staged, stop, first);
+            const auto formed = std::min(stop, oscillator.phased);
             const auto run = [&](std::size_t job) {
-                if (job == 0) run_oscillator(first, stop);
-                else run_source(job - 1, jobs, first, stop);
+                if (job == 0) {
+                    form(transmit_staged, first, formed);
+                    transmit_formed = true;
+                } else run_source(job - 1, jobs, first, stop);
             };
             if (jobs == 0 || stop - first < 64) for (std::size_t job = 0; job <= jobs; ++job) run(job);
             else config.lanes.run(jobs + 1, run);
             if (auto error = finish_transmit(first, stop, jobs)) std::rethrow_exception(error);
+            oscillator.formed = tx_next;
         }
     }
 
@@ -1251,8 +1514,10 @@ struct StreamingChannel::Impl {
         return geometry.source_samples == 0 || path.needed < tx_next;
     }
 
-    // The receiver oscillator's rotation of the next row.
-    Complex receive_rotation(double t, double rx_hop, std::int64_t rx_dwell) {
+    // The receiver oscillator's phase at the next row from its draws in
+    // order; returns the row's white phase modulation.
+    template<class Gaussian>
+    double advance_receive(double t, double rx_hop, std::int64_t rx_dwell, Gaussian&& gaussian) {
         if (effects.fhss && rx_dwell != previous_rx_dwell) {
             rx_osc.phase += keyed_phase(root_seed(config.oscillator_seed,effects.seed) ^ 0x5258484f50504841ULL,
                                         rx_dwell, 0x5258504841534531ULL);
@@ -1261,15 +1526,27 @@ struct StreamingChannel::Impl {
         const double rf_error = (effects.rf_hz + rx_hop) *
             (effects.rx.rf_ppm + effects.rx.rf_drift_ppm_per_second * t) * 1e-6 -
             effects.static_doppler_hz;
-        rx_osc.phase += oscillator_phase_step(rx_osc, effects.rx, rx_spectrum_rng, 0, t, dt_rx) +
+        rx_osc.phase += oscillator_phase_step(rx_osc, effects.rx, gaussian, 0, t, dt_rx) +
             tau * rf_error * dt_rx;
         rx_osc.phase = std::remainder(rx_osc.phase, tau);
-        const double white_pm = config.rx_spectrum.white_pm_rms_radians * rx_spectrum_rng.gaussian();
+        return config.rx_spectrum.white_pm_rms_radians * gaussian();
+    }
+    // The receiver oscillator's rotation of the next row.
+    Complex receive_rotation(double t, double rx_hop, std::int64_t rx_dwell) {
+        const double white_pm = advance_receive(t, rx_hop, rx_dwell, [this] { return rx_spectrum_rng.gaussian(); });
         return std::polar(1.0, -rx_osc.phase - white_pm);
     }
+    double noise_sigma() const { return std::sqrt(config.complex_noise_variance * .5); }
     Complex thermal_noise() {
-        const double sigma = std::sqrt(config.complex_noise_variance * .5);
+        const double sigma = noise_sigma();
         return Complex{sigma * thermal_rng.gaussian(), sigma * thermal_rng.gaussian()};
+    }
+    // The staged thermal noise of row n, from the same draws.
+    Complex staged_thermal(std::uint64_t n) const {
+        const auto& chain = staged[thermal_staged];
+        const double sigma = noise_sigma();
+        const auto j = chain.draw(n);
+        return Complex{sigma * chain.stream[j], sigma * chain.stream[j + 1]};
     }
 
     // One sequential state through rows [0, rows) of the block, or the source
@@ -1287,15 +1564,7 @@ struct StreamingChannel::Impl {
             }
             for (; row < rows; ++row) {
                 const auto physical_time = physical_time_at(block.first + row);
-                if (chain == receive_chain) {
-                    const double receive_calendar = static_cast<double>(physical_time +
-                        effects.retune_offset_seconds - hop_origin_seconds);
-                    const double rx_hop = effects.fhss ? hop_at(effects, receive_calendar) : 0;
-                    const auto rx_dwell = dwell_index(receive_calendar, effects.dwell_seconds);
-                    chains.receive_rotation[row] = receive_rotation(static_cast<double>(physical_time), rx_hop, rx_dwell);
-                } else if (chain == thermal_chain) {
-                    chains.thermal[row] = thermal_noise();
-                } else if (chain == echo_chain) {
+                if (chain == echo_chain) {
                     chains.echo[row] = bounded_spread->at(physical_time);
                     chains.echo_rotation[row] = std::polar(1., chains.echo[row].phase_radians);
                 } else {
@@ -1312,13 +1581,14 @@ struct StreamingChannel::Impl {
         if (row == chains.failures[chain].row) std::rethrow_exception(chains.failures[chain].error);
     }
 
-    // Rows [begin, end) of the block on one job. A row reads the history its
-    // reader retained when the unbatched reader reached it, then the
-    // fixed-time values of the selected laws at its physical time.
+    // Rows [begin, end) of the block on one pool job. A row reads the
+    // history its reader retained when the unbatched reader reached it, then
+    // the fixed-time values of the selected laws at its physical time. A job
+    // keeps the first row of each kind of failure among the runs it claims;
+    // runs are claimed in order, so every earlier row is prepared.
     void prepare_rows(std::size_t job, std::size_t begin, std::size_t end) noexcept {
         auto& block = blocks[prepare_slot];
         auto& failure = job_failures[job];
-        failure.ran = true;
         auto* reader = job ? &readers[job - 1] : nullptr;
         // Only the bounded and the two-ray laws read the delayed ray.
         const bool delayed_read = spread || bounded_spread;
@@ -1328,11 +1598,15 @@ struct StreamingChannel::Impl {
             for (; row < end; ++row) {
                 const auto n = block.first + row;
                 const auto physical_time = physical_time_at(n);
+                if (!block.physical_time.empty()) block.physical_time[row] = physical_time;
                 in_path = false;
                 // The sequential pass repeats this row's coordinates and
                 // reports their failure itself, before it reads the row.
                 Path path;
-                try { path = path_at(n, physical_time); } catch (...) { failure.path_row = row; return; }
+                try { path = path_at(n, physical_time); } catch (...) {
+                    failure.path_row = std::min(failure.path_row, row);
+                    return;
+                }
                 if (!block.delay_seconds.empty()) block.delay_seconds[row] = path.delay_seconds;
                 const auto stop = geometry.source_samples ? std::max(block.source_begin, path.needed + 1) : 0;
                 const auto first = stop > retained_history ? stop - retained_history : 0;
@@ -1349,9 +1623,32 @@ struct StreamingChannel::Impl {
                 if (!block.excursion.empty())
                     block.excursion[row] = reader ? (*reader->excursions)(physical_time) :
                         dispersive_perturbation->random_excursions_at(physical_time);
+                if (!block.branches.empty()) block.branches[row] = dispersive_perturbation->delayed_branches(n);
             }
         } catch (...) {
-            failure = {row, in_path, true, std::current_exception()};
+            if (row < failure.row) {
+                failure.row = row;
+                failure.in_path = in_path;
+                failure.error = std::current_exception();
+            }
+        }
+    }
+    // One pool job: runs of rows while any remain, then the chunks of the
+    // staged chains' formations.
+    void run_pool(Pool& pool, std::size_t job) noexcept {
+        job_failures[job].ran = true;
+        for (std::size_t begin = 0, end = 0; pool.claim_rows(begin, end);) prepare_rows(job, begin, end);
+        for (;;) {
+            const auto chunk = pool.next_chunk.fetch_add(1, std::memory_order_relaxed);
+            if (chunk >= pool.chunks) return;
+            std::size_t segment = 0;
+            while (segment + 1 < pool.segment_count && pool.segments[segment + 1].first_chunk <= chunk) ++segment;
+            const auto& part = pool.segments[segment];
+            const auto grain = part.values ? Pool::item_grain : Pool::draw_grain;
+            const auto from = part.from + (chunk - part.first_chunk) * grain;
+            const auto to = std::min(part.to, from + grain);
+            if (part.values) form(part.chain, from, to);
+            else staged[part.chain].stream.finish(from, to);
         }
     }
 
@@ -1417,15 +1714,18 @@ struct StreamingChannel::Impl {
         reader_source_end = std::max(reader_source_end, std::min(last->needed + 1, tx_next));
 
         // The jobs of this block: the sequential states that run ahead, then
-        // its rows. The longest come first so that they start first.
-        enum class Kind : std::uint8_t { pass, chain, oscillator, source, rows };
+        // the pool of its rows and the staged chains' formations. The
+        // longest come first so that they start first.
+        enum class Kind : std::uint8_t { pass, chain, recurrence, accept, source, pool };
         struct Job { Kind kind; std::size_t index; };
-        std::array<Job, chain_count + kSourceReaders + 18> sequence{};
+        std::array<Job, 1 + chain_count + 2 * staged_count + kSourceReaders + 16> sequence{};
         std::size_t jobs = 0, source_count = 0;
         if (pass && !pass->ran) sequence[jobs++] = {Kind::pass, 0};
         std::uint64_t ahead_needed = 0, ahead_first = 0, ahead_end = 0;
         bool split_ahead = false;
         for (auto& failure : chains.failures) failure = {};
+        std::array<ChainRound, staged_count> rounds{};
+        Pool pool;
         if (chained) {
             if (following && !block.source_failure && !ahead_failure) {
                 try {
@@ -1434,7 +1734,7 @@ struct StreamingChannel::Impl {
                     if (ahead_needed >= tx_next && ahead_needed - reader_source_end < block_lookahead) {
                         const auto end = split_transmit ? source_end(ahead_needed) : std::nullopt;
                         if (!split_transmit) sequence[jobs++] = {Kind::chain, ahead_chain};
-                        else if (end && *end - tx_next <= tx_rotation.size()) {
+                        else if (end && *end - tx_next <= block_lookahead) {
                             split_ahead = true;
                             ahead_first = tx_next;
                             ahead_end = *end;
@@ -1446,27 +1746,40 @@ struct StreamingChannel::Impl {
                 source_count = source_jobs(ahead_end - ahead_first);
                 reset_stages(source_count);
                 if (source_count) source_readers->plan(ahead_first, ahead_end - ahead_first);
-                sequence[jobs++] = {Kind::oscillator, 0};
             }
-            sequence[jobs++] = {Kind::chain, receive_chain};
-            for (std::size_t job = 0; job < source_count; ++job) sequence[jobs++] = {Kind::source, job};
             if (bounded_spread) sequence[jobs++] = {Kind::chain, echo_chain};
             if (common_doppler_wander) sequence[jobs++] = {Kind::chain, common_chain};
-            if (effects.noise_enabled) sequence[jobs++] = {Kind::chain, thermal_chain};
+            // The rows' chains form this block's values while its pass
+            // waits; the transmit oscillator forms the range generated ahead.
+            for (std::size_t which = 0; which < staged_count; ++which) {
+                auto& chain = staged[which];
+                if (!chain.active) continue;
+                const bool transmit = which == transmit_staged;
+                if (transmit) chain.formed = tx_next;
+                auto& round = rounds[which] = plan_staged(static_cast<Staged>(which),
+                    transmit ? (split_ahead ? ahead_end : tx_next) : first + rows, transmit ? tx_next : cursor);
+                if (round.phase_to > round.phase_from) sequence[jobs++] = {Kind::recurrence, which};
+                if (round.accept_to > chain.stream.accepted()) sequence[jobs++] = {Kind::accept, which};
+                pool.add(static_cast<Staged>(which), false, round.finish_from, round.finish_to);
+                if (chain.recurrence) pool.add(static_cast<Staged>(which), true, round.form_from, round.form_to);
+            }
+            for (std::size_t job = 0; job < source_count; ++job) sequence[jobs++] = {Kind::source, job};
         }
-        const auto row_jobs = std::clamp<std::size_t>(ready / 64, 1, lane_jobs);
-        for (std::size_t job = 0; job < row_jobs; ++job) {
+        pool.rows = ready;
+        pool.jobs = std::clamp<std::size_t>(ready / 64 + pool.chunks / 2, 1, lane_jobs);
+        for (std::size_t job = 0; job < pool.jobs; ++job) {
             job_failures[job] = {};
-            sequence[jobs++] = {Kind::rows, job};
+            sequence[jobs++] = {Kind::pool, job};
         }
         const auto run = [&](std::size_t job) {
             const auto [kind, index] = sequence[job];
             switch (kind) {
             case Kind::pass: run_pass(*pass); break;
             case Kind::chain: run_chain(static_cast<Chain>(index), rows, ahead_needed); break;
-            case Kind::oscillator: run_oscillator(ahead_first, ahead_end); break;
+            case Kind::recurrence: recur(static_cast<Staged>(index), rounds[index]); break;
+            case Kind::accept: staged[index].stream.accept(rounds[index].accept_to); break;
             case Kind::source: run_source(index, source_count, ahead_first, ahead_end); break;
-            case Kind::rows: prepare_rows(index, ready * index / row_jobs, ready * (index + 1) / row_jobs); break;
+            case Kind::pool: run_pool(pool, index); break;
             }
         };
         // A short block does not repay handing its jobs to other workers.
@@ -1487,14 +1800,18 @@ struct StreamingChannel::Impl {
             const auto [kind, index] = sequence[job];
             if (kind == Kind::chain) require(chains.failures[index].ran, "streaming channel lanes did not run every job");
         }
-        for (std::size_t job = 0; job < row_jobs; ++job) {
+        for (std::size_t job = 0; job < pool.jobs; ++job) {
             require(job_failures[job].ran, "streaming channel lanes did not run every job");
             if (job_failures[job].error && job_failures[job].row < block.failure.row)
                 block.failure = job_failures[job];
             block.carried = std::min(block.carried, job_failures[job].path_row);
         }
+        for (std::size_t which = 0; which < staged_count; ++which)
+            if (staged[which].active) advance_staged(static_cast<Staged>(which), rounds[which]);
         if (split_ahead) {
+            transmit_formed = true;
             if (auto failure = finish_transmit(ahead_first, ahead_end, source_count)) ahead_failure = failure;
+            staged[transmit_staged].formed = tx_next;
         } else if (auto failure = std::exchange(chains.failures[ahead_chain].error, nullptr)) ahead_failure = failure;
         return rows;
     }
@@ -1502,7 +1819,9 @@ struct StreamingChannel::Impl {
     Complex process_one(std::uint64_t n, std::size_t row, bool& erased, std::size_t slot) {
         const auto& block = blocks[slot];
         const auto& chains = chain_sets[slot];
-        const long double physical_time = physical_time_at(n);
+        // A prepared row carries its physical time.
+        const long double physical_time = row < block.carried && !block.physical_time.empty() ?
+            block.physical_time[row] : physical_time_at(n);
         const double t = static_cast<double>(physical_time);
         if (chained && bounded_spread) chain_reached(chains, echo_chain, row);
         const auto bounded_state = !bounded_spread ? std::nullopt :
@@ -1642,20 +1961,25 @@ struct StreamingChannel::Impl {
         if (dispersive_perturbation) {
             auto& diagnostic = *stats.selective_perturbation;
             diagnostic.pre_selective_energy_samples += std::norm(propagated);
-            if (block.excursion.empty()) propagated = dispersive_perturbation->process(propagated,physical_time);
-            else {
-                if (row == block.failure.row) std::rethrow_exception(block.failure.error);
-                propagated = dispersive_perturbation->process(propagated,block.excursion[row]);
-            }
+            if (!block.excursion.empty() && row == block.failure.row) std::rethrow_exception(block.failure.error);
+            if (!block.branches.empty() && row < block.carried)
+                propagated = dispersive_perturbation->process(propagated, block.branches[row],
+                    block.excursion.empty() ? nullptr : &block.excursion[row]);
+            else if (block.excursion.empty()) propagated = dispersive_perturbation->process(propagated,physical_time);
+            else propagated = dispersive_perturbation->process(propagated,block.excursion[row]);
             diagnostic.post_selective_energy_samples += std::norm(propagated);
             ++diagnostic.processed_rows;
         }
 
-        if (chained) chain_reached(chains, receive_chain, row);
-        const auto rx_dwell = dwell_index(receive_calendar, effects.dwell_seconds);
-        propagated *= chained ? chains.receive_rotation[row] : receive_rotation(t, rx_hop, rx_dwell);
+        const auto& receiver = staged[receive_staged];
+        if (chained && n == receiver.failure) std::rethrow_exception(receiver.error);
+        // The staged receiver evaluated this row's dwell index, and would have
+        // failed above where it overflows.
+        const auto rx_dwell = chained ? receiver.dwell[static_cast<std::size_t>(n % receiver.dwell.size())] :
+            dwell_index(receive_calendar, effects.dwell_seconds);
+        propagated *= chained ? receiver.at(n) : receive_rotation(t, rx_hop, rx_dwell);
         stats.signal_energy += std::norm(propagated);
-        if (effects.noise_enabled) propagated += chained ? chains.thermal[row] : thermal_noise();
+        if (effects.noise_enabled) propagated += chained ? staged_thermal(n) : thermal_noise();
         const auto& front = config.frontend;
         if (front.tone_amplitude > 0) {
             const auto d = dwell_index(t, effects.dwell_seconds);
@@ -1725,8 +2049,10 @@ struct StreamingChannel::Impl {
     // Whether the preparation recorded no failure that the pass would meet.
     bool clean(const Pass& pass) const {
         const auto& block = blocks[pass.slot];
+        const auto receiver_failure = staged[receive_staged].failure;
         return !block.source_failure && !block.failure.error && block.carried >= pass.rows &&
-            std::ranges::none_of(chain_sets[pass.slot].failures, [](const Failure& f) { return static_cast<bool>(f.error); });
+            std::ranges::none_of(chain_sets[pass.slot].failures, [](const Failure& f) { return static_cast<bool>(f.error); }) &&
+            (receiver_failure < block.first || receiver_failure - block.first >= pass.rows);
     }
     void finish(Pass& pass) {
         if (!pass.ran) run_pass(pass);

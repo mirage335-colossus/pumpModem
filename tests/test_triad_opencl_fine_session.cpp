@@ -257,10 +257,27 @@ void check_slot(const std::shared_ptr<r::OpenClNvfp4Device>& device, const datap
     options.stream_blocks = 0;
     const auto unstreamed = run(f, key, device, options, whole);
     options.stream_blocks = r::opencl_fine_default_stream_blocks;
+    // The FP32 tile renderer and mapper, against the default FP64 kernels
+    // of the same module.
+    auto single = options;
+    single.arithmetic = r::OpenClFineArithmetic::fp32;
+    single.device_tiles = false;
+    single.window_blocks = 2;
+    const auto uploaded32 = run(f, key, device, single, whole);
+    single.device_tiles = true;
+    single.window_blocks = r::opencl_fine_default_window_blocks;
+    const auto wide32 = run(f, key, device, single, whole);
 
-    for (const auto* route : {&uploaded, &rendered, &window, &wide}) {
+    for (const auto* route : {&uploaded, &rendered, &window, &wide, &uploaded32, &wide32}) {
         same_public_work(*route, native, "a resident route changed the public fine work or quiet statistics");
         const auto& receipt = route->receipt;
+        // Every mapped column and rendered tile names the kernels that ran.
+        const bool fp32 = route == &uploaded32 || route == &wide32;
+        check(receipt.opencl_resident_fp32_mapped_columns == (fp32 ? receipt.mapped_columns : 0) &&
+              receipt.opencl_resident_fp64_mapped_columns == (fp32 ? 0 : receipt.mapped_columns) &&
+              receipt.opencl_resident_fp32_rendered_tiles == (fp32 ? receipt.opencl_resident_rendered_tiles : 0) &&
+              receipt.opencl_resident_fp64_rendered_tiles == (fp32 ? 0 : receipt.opencl_resident_rendered_tiles),
+              "a resident route did not name the arithmetic of its tiles and mapping");
         check(route->score.complete && route->work.bulk && receipt.executed &&
               receipt.opencl_resident_reduced_windows == 0 &&
               receipt.statistics_blocks == blocks * states &&
@@ -273,9 +290,15 @@ void check_slot(const std::shared_ptr<r::OpenClNvfp4Device>& device, const datap
               "a resident route did not credit every public block once");
     }
 
-    // Rendered tiles replace every uploaded one and leave the evidence.
+    // Rendered tiles replace every uploaded one. The FP64 renderer leaves
+    // the evidence. The FP32 renderer moves a tile by less than 4e-6 of its
+    // peak, which FP4 may round across an E2M1 boundary in a few elements.
     const auto tile_difference = relative(rendered.score.bit_evidence, uploaded.score.bit_evidence);
     check(tile_difference < 1e-6, "device-rendered tiles changed the fixed-affine evidence");
+    const auto fp32_tile_difference = relative(wide32.score.bit_evidence, uploaded32.score.bit_evidence);
+    const auto fp32_difference = relative(wide32.score.bit_evidence, wide.score.bit_evidence);
+    check(fp32_tile_difference < 2e-3 && fp32_difference < 2e-3,
+          "FP32 tile rendering and mapping left the evidence of the FP64 kernels");
     check(uploaded.receipt.uploaded_tiles > 0 && uploaded.receipt.opencl_resident_rendered_tiles == 0 &&
           uploaded.work.cache.native_preparation_calls > 0 && uploaded.work.cache.addressed_columns == 0,
           "the uploaded-tile route did not render its tiles natively");
@@ -380,8 +403,9 @@ void check_slot(const std::shared_ptr<r::OpenClNvfp4Device>& device, const datap
               << ", upload bytes "
               << uploaded.receipt.opencl_resident_upload_bytes << " -> " << wide.receipt.opencl_resident_upload_bytes
               << ", device lease " << rendered.peak_lease << " -> " << wide.peak_lease
-              << ". Evidence change from rendered tiles " << tile_difference << ", FP4 against native "
-              << fp4_difference << '\n';
+              << ". Evidence change from rendered tiles " << tile_difference << " (FP64 kernels), "
+              << fp32_tile_difference << " (FP32 kernels); FP32 against FP64 kernels " << fp32_difference
+              << ", FP4 against native " << fp4_difference << '\n';
 }
 
 // The adaptive lane's maps follow its pruning, so it keeps one dispatch a

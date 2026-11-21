@@ -3,6 +3,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -41,6 +42,7 @@ def main(executable):
     assert description["identity"]["requested_native_coarse_precision"] == "automatic"
     assert description["identity"]["requested_tensor_coarse_math"] == "fft"
     assert description["identity"]["requested_gpu_fp32_minimum"] is False
+    assert description["identity"]["requested_opencl_coarse_one_ray"] is False
     if description["identity"].get("configured_vulkan_backend") is True:
         # Vulkan describe serializes the shared BulkReceipt without doing DSP;
         # the CUDA matrix counters must therefore be present and zero.
@@ -90,6 +92,10 @@ def main(executable):
         parse_error="--gpu-fp32-minimum is valid only with --backend gpu")
     run("describe", "--backend", "gpu", "--gpu-fp32-minimum", "invalid", code=1,
         parse_error="--gpu-fp32-minimum expects on or off")
+    run("describe", "--backend", "vulkan", "--opencl-coarse-one-ray", "on", code=1,
+        parse_error="--opencl-coarse-one-ray is valid only with --backend gpu")
+    run("describe", "--backend", "gpu", "--opencl-coarse-one-ray", "invalid", code=1,
+        parse_error="--opencl-coarse-one-ray expects on or off")
     automatic_gpu_floor = subprocess.run(
         [str(executable), "describe", "--backend", "gpu", "--gpu-fp32-minimum", "on",
          "--workers", "1", "--slot-owners", "1", "--deadline-ms", "12000"],
@@ -456,6 +462,58 @@ def main(executable):
             assert unit["work_identity_sha256"] == slots[0]["work"]["work_identity_sha256"]
     run("slot", "--helper-overlap", "off", code=1,
         parse_error="The Helper overlap lease applies only to regression")
+
+    # Exact capture reuse: the second run reads, verifies and scores the
+    # first run's capture without a simulator; a changed row stops the run.
+    run("describe", "--capture-cache", ".", code=1,
+        parse_error="--capture-cache applies to commands that generate a capture")
+    with tempfile.TemporaryDirectory() as cache:
+        stored = run("regression", "--stratum", "noise", "--capture-cache", cache)
+        reused = run("regression", "--stratum", "noise", "--capture-cache", cache)
+        stored_cache, reused_cache = stored["observation"]["capture_cache"], reused["observation"]["capture_cache"]
+        assert stored_cache["source"] == "generated" and stored_cache["stored"]
+        assert reused_cache["source"] == "reused" and reused_cache["verified_before_receiver"]
+        assert reused_cache["key_sha256"] == stored_cache["key_sha256"]
+        assert reused["observation"]["input_sha256"] == stored["observation"]["input_sha256"]
+        names = [row["name"] for row in reused["phases"]]
+        assert "capture_reuse" in names and "simulator" not in names
+        assert "capture_cache_write" in [row["name"] for row in stored["phases"]]
+        first, second = (next(row["work"] for row in r["phases"] if row["name"] == "native_slot")
+                         for r in (stored, reused))
+        assert first["work_identity_sha256"] == second["work_identity_sha256"]
+        assert first["decision"] == second["decision"] == "quiet"
+        assert isinstance(stored["observation"]["channel_workspace_bytes"], int)
+        assert reused["observation"]["channel_workspace_bytes"] is None
+        assert reused_cache["key_binds"] in ("executable", "executable_and_runtime_libraries")
+        # Two workers lend the channel lanes; the capture and key are the
+        # same, and a one-worker run reuses it with the same receiver work.
+        with tempfile.TemporaryDirectory() as lanes_cache:
+            lanes = run("regression", "--stratum", "noise", "--workers", "2", "--slot-owners", "1",
+                        "--capture-cache", lanes_cache, default_allocation=True)
+            assert lanes["observation"]["capture_cache"]["source"] == "generated"
+            assert lanes["observation"]["capture_cache"]["key_sha256"] == stored_cache["key_sha256"]
+            assert lanes["observation"]["input_sha256"] == stored["observation"]["input_sha256"]
+            crossed = run("regression", "--stratum", "noise", "--capture-cache", lanes_cache)
+            assert crossed["observation"]["capture_cache"]["source"] == "reused"
+            third = next(row["work"] for row in crossed["phases"] if row["name"] == "native_slot")
+            assert third["work_identity_sha256"] == first["work_identity_sha256"]
+        # Another seed is another key and capture.
+        seeded = run("regression", "--stratum", "noise", "--seed", "74022", "--capture-cache", cache)
+        assert seeded["observation"]["capture_cache"]["source"] == "generated"
+        assert seeded["observation"]["capture_cache"]["key_sha256"] != stored_cache["key_sha256"]
+        assert seeded["observation"]["input_sha256"] != stored["observation"]["input_sha256"]
+        capture = Path(stored_cache["file"])
+        assert capture.stat().st_size == stored_cache["file_bytes"]
+        original = capture.read_bytes()
+        # A changed report field in the header (erased rows at offset 136),
+        # then a changed row, stop the run before any receiver work.
+        for offset, reason in ((136, "header differs from its SHA-256"), (-2, "SHA-256")):
+            data = bytearray(original)
+            data[offset] ^= 1
+            capture.write_bytes(bytes(data))
+            changed = run("regression", "--stratum", "noise", "--capture-cache", cache, code=1)
+            assert reason in changed["reason"], changed["reason"]
+            assert not any(row["name"] == "native_slot" for row in changed["phases"])
 
     codec = run("codec", "--encrypt", "on")
     assert codec["result"]["decoded_after_two_quiet"]

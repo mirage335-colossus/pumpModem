@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <complex>
 #include <iostream>
@@ -18,6 +19,7 @@
 #include <numbers>
 #include <numeric>
 #include <random>
+#include <sstream>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -250,17 +252,29 @@ void check_resident_projection(const OpenClNvfp4Device& device) {
         }
     }
 
-    for (const auto method : {OpenClFineMethod::resident_fp4, OpenClFineMethod::resident_fft}) {
-        const bool fp4 = method == OpenClFineMethod::resident_fp4;
+    // The FP4 method maps with the FP64 and the FP32 kernels, the FFT method
+    // with the FP32 kernels, whose FFT result the FP64 mapper repeated to the
+    // digit. The FP64 mapper agrees with the host mapping within 1e-12 of a
+    // lane's peak, so FP4 rounds the same elements. The FP32 mapper is
+    // within FP32 rounding of it, below 1e-6 of a lane's peak, which can move
+    // an element across an E2M1 boundary: one such element moves a statistic
+    // by less than 2e-3, the bound of the tile checks below.
+    for (const auto [method, arithmetic] : {std::pair{OpenClFineMethod::resident_fp4, OpenClFineArithmetic::fp64},
+                                            std::pair{OpenClFineMethod::resident_fp4, OpenClFineArithmetic::fp32},
+                                            std::pair{OpenClFineMethod::resident_fft, OpenClFineArithmetic::fp32}}) {
+        const bool fp4 = method == OpenClFineMethod::resident_fp4, fp32 = arithmetic == OpenClFineArithmetic::fp32;
         const auto& reference = fp4 ? fp4_reference : fft_reference;
-        const double tolerance = fp4 ? 3e-5 : 8e-6;
+        const double tolerance = fp4 ? (fp32 ? 2e-3 : 3e-5) : 8e-6;
+        double worst = 0;
         const auto check_block = [&](std::size_t b) {
             const auto near = [&](Reference actual, Reference expected) {
                 if (expected == Reference{}) {
                     require(actual == Reference{}, "Resident projection changed an exactly zero statistic");
                     return;
                 }
-                require(std::abs(actual - expected) <= tolerance * std::max(1., std::abs(expected)),
+                const auto difference = std::abs(actual - expected) / std::max(1., std::abs(expected));
+                worst = std::max(worst, difference);
+                require(difference <= tolerance,
                         fp4 ? "Resident FP4 statistics differ from staged NVFP4"
                             : "Resident FFT statistics differ from the independent complex DFT");
             };
@@ -291,10 +305,12 @@ void check_resident_projection(const OpenClNvfp4Device& device) {
                 }
             }
         };
-        const auto limit = OpenClNvfp4Projection::workspace(rows, modes, lanes, method).device_bytes;
-        require(limit > 0 && !device.make_projection(rows, bins, lanes, limit - 1, method),
+        OpenClResidentOptions options;
+        options.arithmetic = arithmetic;
+        const auto limit = OpenClNvfp4Projection::workspace(rows, modes, lanes, method, options).device_bytes;
+        require(limit > 0 && !device.make_projection(rows, bins, lanes, limit - 1, method, options),
                 "Resident projection exceeded its quoted workspace");
-        const auto resident = device.make_projection(rows, bins, lanes, limit, method);
+        const auto resident = device.make_projection(rows, bins, lanes, limit, method, options);
         OpenClResidentWork paired;
         require(resident && resident->project_resident(blocks, candidates, paired), "Paired resident projection failed");
         require(paired.uploaded_tiles == 4 && paired.tile_hits > 0 && paired.mapped_columns == 12 &&
@@ -396,7 +412,8 @@ void check_resident_projection(const OpenClNvfp4Device& device) {
                         std::ranges::all_of(result.gram, [](Reference z) { return z == Reference{}; }),
                     "Resident projection lost native basis presence below C64 range");
         }
-        std::cout << "OpenCL resident " << (fp4 ? "NVFP4" : "FFT") << " paired and single fine statistics verified\n";
+        std::cout << "OpenCL resident " << (fp4 ? "NVFP4" : "FFT") << (fp32 ? " FP32" : " FP64")
+                  << " mapping: paired and single fine statistics verified, worst difference " << worst << '\n';
     }
 }
 // A resident session that renders its dense source tiles from the keyed
@@ -468,11 +485,31 @@ void check_resident_tiles(const OpenClNvfp4Device& device, const datapump::triad
         return list;
     };
 
-    double worst_tile = 0, worst_statistic = 0;
-    for (const auto method : {OpenClFineMethod::resident_fp4, OpenClFineMethod::resident_fft}) {
-        const bool fp4 = method == OpenClFineMethod::resident_fp4;
+    // The FP64 renderer keeps the native renderer's operations, within
+    // 1e-10 of a tile's peak, and its statistics match the session that
+    // uploads native tiles. The FP32 renderer sums at most 17 chips of three
+    // carriers in FP32 from FP32 pulse and chip values, so each sample carries
+    // a few tens of FP32 roundings relative to its terms: a declared bound of
+    // 4e-6 of the tile peak. Mapped values then move by at most the sum of
+    // the absolute cubic weights, 1.25, times that, and statistics, bilinear
+    // in the templates, by at most twice their relative change: within 1e-5
+    // of the statistic scale for the FFT route. FP4 rounds the mapped values
+    // next, and one changed E2M1 element of a 3,000-element lane moves a
+    // statistic by less than 2e-3. Each FP32 session is compared with the
+    // native tiles and the FP64 session just before it.
+    std::map<OpenClFineArithmetic, double> worst_tiles, worst_statistics;
+    double fp32_fp4 = 0, fp32_fft = 0;
+    Statistics control(blocks);
+    OpenClResidentWork control_work;
+    for (const auto [method, arithmetic] : {std::pair{OpenClFineMethod::resident_fp4, OpenClFineArithmetic::fp64},
+                                            std::pair{OpenClFineMethod::resident_fp4, OpenClFineArithmetic::fp32},
+                                            std::pair{OpenClFineMethod::resident_fft, OpenClFineArithmetic::fp64},
+                                            std::pair{OpenClFineMethod::resident_fft, OpenClFineArithmetic::fp32}}) {
+        const bool fp4 = method == OpenClFineMethod::resident_fp4, fp32 = arithmetic == OpenClFineArithmetic::fp32;
         if (!fp4 && !compare_statistics) continue;
-        const OpenClResidentOptions rendering{blocks, source->cells, source->lanes};
+        auto& worst_tile = worst_tiles[arithmetic];
+        OpenClResidentOptions rendering{blocks, source->cells, source->lanes};
+        rendering.arithmetic = arithmetic;
         const auto limit = OpenClNvfp4Projection::workspace(rows, modes, blocks * lanes_per_block, method, rendering).device_bytes;
         require(!device.make_projection(rows, bins, blocks * lanes_per_block, limit - 1, method, rendering),
                 "Tile-rendering session exceeded its quoted workspace");
@@ -488,26 +525,40 @@ void check_resident_tiles(const OpenClNvfp4Device& device, const datapump::triad
                 work.direct_columns == 0 && work.mapped_columns == (blocks - 1) * lanes_per_block,
                 "Tile-rendering batch uploaded samples or lost a mapped column");
 
-        const OpenClResidentOptions uploading{blocks};
-        const auto reference = device.make_projection(rows, bins, blocks * lanes_per_block,
-            OpenClNvfp4Projection::workspace(rows, modes, blocks * lanes_per_block, method, uploading).device_bytes,
-            method, uploading);
-        OpenClResidentWork native_work;
-        {
-            const auto list = requests(false, uploaded);
-            require(reference && reference->project_resident(list, candidates, native_work),
-                    "Uploaded-tile resident batch failed");
+        if (!fp32) {
+            OpenClResidentOptions uploading{blocks};
+            uploading.arithmetic = arithmetic;
+            const auto reference = device.make_projection(rows, bins, blocks * lanes_per_block,
+                OpenClNvfp4Projection::workspace(rows, modes, blocks * lanes_per_block, method, uploading).device_bytes,
+                method, uploading);
+            OpenClResidentWork native_work;
+            native_tiles.clear();
+            {
+                const auto list = requests(false, uploaded);
+                require(reference && reference->project_resident(list, candidates, native_work),
+                        "Uploaded-tile resident batch failed");
+            }
+            // The rendering session uploads keyed coefficients, the pulse, the
+            // public parameters and one request per tile in place of the tiles.
+            const auto keyed_bytes = work.keyed_lanes * source->cells * 3 * sizeof(Reference) +
+                source->pulse.size() * sizeof(double) + 18 * sizeof(double) + work.rendered_tiles * 16;
+            require(native_work.uploaded_tiles == work.rendered_tiles && native_work.rendered_tiles == 0 &&
+                    native_work.mapped_columns == work.mapped_columns && native_work.tile_hits == work.tile_hits &&
+                    native_work.upload_bytes - native_work.uploaded_tiles * tile * sizeof(Reference) ==
+                        work.upload_bytes - keyed_bytes &&
+                    native_work.download_bytes == work.download_bytes,
+                    "Tile rendering did not replace exactly the uploaded tiles");
+            if (fp4) std::cout << "OpenCL resident tiles " << label << ": " << work.rendered_tiles << " rendered, "
+                               << work.upload_bytes << " bytes uploaded against " << native_work.upload_bytes << '\n';
+        } else {
+            // The FP32 renderer reads the keyed chips and the pulse rounded
+            // to FP32, half the bytes of the FP64 session before it.
+            const auto halved = work.keyed_lanes * source->cells * 3 * sizeof(std::complex<float>) +
+                source->pulse.size() * sizeof(float);
+            require(work.keyed_lanes == control_work.keyed_lanes && work.rendered_tiles == control_work.rendered_tiles &&
+                    work.upload_bytes + halved == control_work.upload_bytes,
+                    "FP32 tile rendering did not upload FP32 keyed chips and pulse");
         }
-        // The rendering session uploads keyed coefficients, the pulse, the
-        // public parameters and one request per tile in place of the tiles.
-        const auto keyed_bytes = work.keyed_lanes * source->cells * 3 * sizeof(Reference) +
-            source->pulse.size() * sizeof(double) + 18 * sizeof(double) + work.rendered_tiles * 16;
-        require(native_work.uploaded_tiles == work.rendered_tiles && native_work.rendered_tiles == 0 &&
-                native_work.mapped_columns == work.mapped_columns && native_work.tile_hits == work.tile_hits &&
-                native_work.upload_bytes - native_work.uploaded_tiles * tile * sizeof(Reference) ==
-                    work.upload_bytes - keyed_bytes &&
-                native_work.download_bytes == work.download_bytes,
-                "Tile rendering did not replace exactly the uploaded tiles");
 
         // Every tile the batch rendered is still resident and equals the
         // native rendering of the same address.
@@ -526,40 +577,43 @@ void check_resident_tiles(const OpenClNvfp4Device& device, const datapump::triad
         }
         require(compared == work.rendered_tiles && compared == native_tiles.size(),
                 "A rendered tile left the cache before it could be compared");
-        require(worst_tile < 1e-10, "Device-rendered dense tiles differ from the native tiles");
+        require(worst_tile < (fp32 ? 4e-6 : 1e-10), "Device-rendered dense tiles differ from the native tiles");
 
-        double scale = 0;
+        // FP64 against the uploaded-tile session, FP32 against FP64.
+        const auto& expected = fp32 ? control : uploaded;
+        double scale = 0, statistic = 0;
         std::size_t present = 0;
         for (std::size_t b = 0; b != blocks; ++b) {
             for (std::size_t c = 0; c != candidates; ++c) {
                 const auto& a = rendered[b][c];
-                const auto& e = uploaded[b][c];
+                const auto& e = expected[b][c];
                 // The source opens with a zero pulse halo and the last block lies past it.
                 require(a.nonzero_basis == e.nonzero_basis && (b + 1 != blocks || !a.nonzero_basis),
                         "Tile rendering changed the basis presence witness");
                 present += a.nonzero_basis;
                 for (std::size_t i = 0; i != a.correlations.size(); ++i) {
                     scale = std::max(scale, std::abs(e.correlations[i]));
-                    worst_statistic = std::max(worst_statistic, std::abs(a.correlations[i] - e.correlations[i]));
+                    statistic = std::max(statistic, std::abs(a.correlations[i] - e.correlations[i]));
                 }
                 for (std::size_t i = 0; i != a.gram.size(); ++i) {
                     scale = std::max(scale, std::abs(e.gram[i]));
-                    worst_statistic = std::max(worst_statistic, std::abs(a.gram[i] - e.gram[i]));
+                    statistic = std::max(statistic, std::abs(a.gram[i] - e.gram[i]));
                 }
             }
         }
         require(scale > 0 && present >= 2 * candidates, "Resident tile check produced no statistics");
-        worst_statistic /= scale;
-        // One changed E2M1 element of a 3,000-element lane moves a statistic
-        // by less than this. The FFT route has no such quantization.
-        require(worst_statistic < (fp4 ? 2e-3 : 1e-6), "Device-rendered tiles changed the resident statistics");
-
-        if (fp4) std::cout << "OpenCL resident tiles " << label << ": " << work.rendered_tiles << " rendered, "
-                           << work.upload_bytes << " bytes uploaded against " << native_work.upload_bytes
-                           << ". Worst tile error " << worst_tile;
-        native_tiles.clear();
-        if (!compare_statistics) continue;
-        // A second batch finds every tile resident and repeats its results.
+        statistic /= scale;
+        // The FFT route has no FP4 quantization.
+        require(statistic < (fp4 ? 2e-3 : fp32 ? 1e-5 : 1e-6), fp32
+                ? "FP32 tile rendering and mapping left their FP64 control"
+                : "Device-rendered tiles changed the resident statistics");
+        if (fp32) (fp4 ? fp32_fp4 : fp32_fft) = statistic;
+        else worst_statistics[arithmetic] = std::max(worst_statistics[arithmetic], statistic);
+        control = rendered;
+        control_work = work;
+        // The cache is arithmetic-independent: a second batch of the FP64
+        // session finds every tile resident and repeats its results.
+        if (!compare_statistics || fp32) continue;
         OpenClResidentWork warm;
         {
             const auto list = requests(true, repeated);
@@ -572,7 +626,13 @@ void check_resident_tiles(const OpenClNvfp4Device& device, const datapump::triad
                 require(repeated[b][c].correlations == rendered[b][c].correlations &&
                         repeated[b][c].gram == rendered[b][c].gram, "Cached rendered tiles changed the statistics");
     }
-    std::cout << ", worst statistic difference " << worst_statistic << '\n';
+    native_tiles.clear();
+    std::cout << "OpenCL resident tiles " << label << ": worst tile error, FP64 "
+              << worst_tiles[OpenClFineArithmetic::fp64] << ", FP32 " << worst_tiles[OpenClFineArithmetic::fp32]
+              << "; FP64 statistics against native tiles " << worst_statistics[OpenClFineArithmetic::fp64]
+              << "; FP32 against FP64 kernels, FP4 " << fp32_fp4;
+    if (compare_statistics) std::cout << ", FFT " << fp32_fft;
+    std::cout << '\n';
 }
 
 // One batch whose blocks address more dense tiles than the session caches.
@@ -634,6 +694,8 @@ void check_resident_pressure(const OpenClNvfp4Device& device) {
         auto options = rendered ? OpenClResidentOptions{blocks, source->cells, source->lanes}
                                 : OpenClResidentOptions{blocks};
         options.cache_slots = slots;
+        // The FP32 kernels, whose FP32 keyed uploads share the flushes.
+        options.arithmetic = OpenClFineArithmetic::fp32;
         const auto session = device.make_projection(rows, bins, blocks * lanes_per_block,
             OpenClNvfp4Projection::workspace(rows, modes, blocks * lanes_per_block, method, options).device_bytes,
             method, options);
@@ -655,7 +717,16 @@ void check_resident_pressure(const OpenClNvfp4Device& device) {
             work.rendered_tiles > 4 * 64 && work.rendered_tiles == native.uploaded_tiles &&
             work.mapped_columns == native.mapped_columns,
             "Pressure batch did not flush under pressure and synchronize its arenas");
+    // Flushes and arena waits change no arithmetic: the crowded batch repeats
+    // the rendered one exactly. Against native tiles the FP32 kernels keep
+    // the FFT route's FP32 bound of the tile checks.
     double scale = 0, worst = 0;
+    for (std::size_t b = 0; b != blocks; ++b)
+        for (std::size_t c = 0; c != candidates; ++c)
+            require(crowded[b][c].correlations == rendered[b][c].correlations &&
+                    crowded[b][c].gram == rendered[b][c].gram &&
+                    crowded[b][c].nonzero_basis == rendered[b][c].nonzero_basis,
+                    "Pressure flushes changed the resident statistics");
     for (const auto* route : {&rendered, &crowded})
         for (std::size_t b = 0; b != blocks; ++b)
             for (std::size_t c = 0; c != candidates; ++c) {
@@ -671,7 +742,7 @@ void check_resident_pressure(const OpenClNvfp4Device& device) {
                     worst = std::max(worst, std::abs(a.gram[i] - e.gram[i]));
                 }
             }
-    require(scale > 0 && worst / scale < 1e-6, "Pressure flushes changed the resident statistics");
+    require(scale > 0 && worst / scale < 1e-5, "Rendered pressure batch left the uploaded-tile statistics");
     std::cout << "OpenCL resident pressure: " << work.rendered_tiles << " rendered, " << work.mapping_dispatches
               << " mapping dispatches, " << work.arena_synchronizations << " arena waits; with 16 slots "
               << small.rendered_tiles << ", " << small.mapping_dispatches << " and " << small.arena_synchronizations
@@ -777,11 +848,13 @@ void check_coarse(const OpenClNvfp4Device& device) {
     };
 
     const OpenClCoarseShape shape{taps, rows, arrivals, workspaces, frequencies};
-    require(OpenClNvfp4Coarse::supports(shape) && !OpenClNvfp4Coarse::supports({1, rows, arrivals, workspaces, frequencies}),
+    require(OpenClNvfp4Coarse::supports(shape) && OpenClNvfp4Coarse::supports({1, rows, arrivals, workspaces, frequencies}) &&
+            !OpenClNvfp4Coarse::supports({3, rows, arrivals, workspaces, frequencies}) &&
+            !OpenClNvfp4Coarse::supports({0, rows, arrivals, workspaces, frequencies}),
             "Coarse FP4 geometry support changed");
     const auto limit = OpenClNvfp4Coarse::workspace(shape).device_bytes;
     require(!device.make_coarse(shape, limit - 1), "Coarse FP4 session exceeded its workspace limit");
-    const auto coarse = device.make_coarse(shape, limit, true);
+    const auto coarse = device.make_coarse(shape, limit, true, OpenClRescoreArithmetic::fp32_partial);
     require(static_cast<bool>(coarse), "Could not make the coarse FP4 session");
     const std::vector<std::span<const Reference>> columns(bank.begin(), bank.end());
     OpenClCoarseWork work;
@@ -832,6 +905,43 @@ void check_coarse(const OpenClNvfp4Device& device) {
     };
     const auto agreement = check_tile(grid, 0);
     require(agreement > .97, "Coarse FP4 scores are too far from the FP64 reference");
+
+    // This session rescores with FP32 partial sums of 64 rows added in FP64;
+    // the control accumulates every product in FP64. Both rescore the same
+    // FP4 frontier by construction: rescoring only replaces retained scores.
+    // A partial sum of 64 single-rounding multiply-adds is within 64 * 2^-24
+    // of the sum of its absolute products, so a correlation moves by at most
+    // 3.8e-6 of the product of its operand norms, and a score whose
+    // correlation coefficient is r by about 7.6e-6 / r of itself; random
+    // rounding gives far less. Declared bound: 1e-5 of the row's best exact
+    // score.
+    std::vector<CoarseBulkPeaks> partial_frontier(workspaces * frequencies), control_frontier(workspaces * frequencies);
+    double rescore_difference = 0;
+    {
+        const auto control = device.make_coarse(shape, limit, true, OpenClRescoreArithmetic::fp64);
+        require(static_cast<bool>(control), "Could not make the FP64 rescoring control session");
+        OpenClCoarseWork control_work, partial_work;
+        control->load_bank(columns, control_work);
+        control->prepare(observation, inverse, rate, variance, control_work);
+        control->peaks(grid, separation, control_frontier, control_work);
+        coarse->peaks(grid, separation, partial_frontier, partial_work);
+        require(control_work.rescored_peaks == partial_work.rescored_peaks,
+                "FP64 rescoring control retained different arrivals");
+        for (std::size_t row = 0; row != partial_frontier.size(); ++row) {
+            const auto& a = partial_frontier[row];
+            const auto& e = control_frontier[row];
+            require(a.count == e.count && a.lags[0] == e.lags[0] && a.lags[1] == e.lags[1],
+                    "The rescoring sessions retained different FP4 frontiers");
+            const auto workspace = row / frequencies, frequency = row % frequencies;
+            double best = 0;
+            for (std::size_t arrival = 0; arrival != arrivals; ++arrival)
+                best = std::max(best, reference(frequency, workspace, arrival));
+            for (std::size_t i = 0; i != a.count; ++i)
+                rescore_difference = std::max(rescore_difference,
+                    std::abs(a.scores[i] - e.scores[i]) / std::max(best, std::abs(e.scores[i])));
+        }
+    }
+    require(rescore_difference < 1e-5, "FP32 partial rescoring left its FP64-accumulating control");
     // A narrower tile reuses the resident bank and prepared observation.
     (void)check_tile(std::span(grid).subspan(2, 1), 2);
     require(work.rescored_peaks > 0 && work.dispatches > 0 && work.upload_bytes > 0 && work.download_bytes > 0,
@@ -865,7 +975,262 @@ void check_coarse(const OpenClNvfp4Device& device) {
         require(peaks.count == 2 && peaks.lags[0] == 0 && peaks.lags[1] == arrivals - 1 &&
                 peaks.scores[0] == 0 && peaks.scores[1] == 0, "Coarse FP4 quiet frontier changed");
     std::cout << "OpenCL NVFP4 coarse " << workspaces << " workspaces, " << frequencies << " frequencies, "
-              << arrivals << " arrivals. Score agreement " << agreement << '\n';
+              << arrivals << " arrivals. Score agreement " << agreement
+              << ", FP32 partial against FP64 rescoring " << rescore_difference << '\n';
+}
+
+// One ray: four workspaces fill a bank tile, and a score is the scalar
+// inverse Gram times the correlation's energy. Seven workspaces leave a
+// partial last tile and 700 arrivals a partial last block. Every workspace
+// holds its own planted arrival at the second frequency, at an exact score
+// near 60 in noise. The rescored FP4 frontier must keep the exact frontier's
+// best arrival of each of those rows.
+void check_coarse_one_ray(const OpenClNvfp4Device& device) {
+    constexpr std::size_t rows = 150, arrivals = 700, workspaces = 7, frequencies = 3, separation = 9;
+    constexpr double rate = 240, variance = .7;
+    const std::array<double, frequencies> grid{-.31, .17, .44};
+    std::mt19937 random(31337);
+    std::normal_distribution<double> noise(0, 1);
+    std::vector<std::vector<Reference>> bank(workspaces, std::vector<Reference>(rows));
+    std::vector<double> gains(workspaces);
+    std::vector<std::size_t> planted(workspaces);
+    for (std::size_t workspace = 0; workspace != workspaces; ++workspace) {
+        gains[workspace] = std::ldexp(1., 9 * (static_cast<int>(workspace % 7) - 3));
+        planted[workspace] = 40 + 93 * workspace;
+        for (std::size_t i = 0; i != rows; ++i) {
+            const auto envelope = .15 + std::pow(std::sin(std::numbers::pi * (i + .5) / rows), 2);
+            bank[workspace][i] = gains[workspace] * envelope * Reference(noise(random), noise(random));
+        }
+    }
+    const auto samples = rows + arrivals - 1;
+    std::vector<Reference> observation(samples);
+    for (auto& value : observation) value = .5 * Reference(noise(random), noise(random));
+    for (std::size_t workspace = 0; workspace != workspaces; ++workspace)
+        for (std::size_t i = 0; i != rows; ++i) {
+            const auto sample = planted[workspace] + i;
+            observation[sample] += Reference(.45, .25) * (bank[workspace][i] / gains[workspace]) *
+                                   turn(grid[1] * (static_cast<double>(sample) / rate));
+        }
+    // The receiver's one-ray inverse: 1 / a, and zero second-ray terms.
+    std::vector<std::array<double, 4>> inverse(workspaces);
+    for (std::size_t workspace = 0; workspace != workspaces; ++workspace) {
+        double a = 0;
+        for (const auto value : bank[workspace]) a += std::norm(value);
+        inverse[workspace] = {1 / a, 0, 0, 0};
+    }
+    const auto reference = [&](std::size_t frequency, std::size_t workspace, std::size_t arrival) {
+        Reference a{};
+        for (std::size_t i = 0; i != rows; ++i) {
+            const auto sample = arrival + i;
+            a += std::conj(bank[workspace][i]) * observation[sample] *
+                 turn(-grid[frequency] * (static_cast<double>(sample) / rate));
+        }
+        return inverse[workspace][0] * std::norm(a) / variance;
+    };
+
+    const OpenClCoarseShape shape{1, rows, arrivals, workspaces, frequencies};
+    const auto limit = OpenClNvfp4Coarse::workspace(shape).device_bytes;
+    require(limit < OpenClNvfp4Coarse::workspace({2, rows, arrivals, workspaces, frequencies}).device_bytes,
+            "One-ray coarse FP4 session leased a two-ray bank");
+    const std::vector<std::span<const Reference>> columns(bank.begin(), bank.end());
+    std::array<std::vector<CoarseBulkPeaks>, 2> frontiers;
+    std::vector<float> scores(frequencies * workspaces * arrivals);
+    OpenClCoarseWork work;
+    for (const auto arithmetic : {OpenClRescoreArithmetic::fp64, OpenClRescoreArithmetic::fp32_partial}) {
+        const auto coarse = device.make_coarse(shape, limit, true, arithmetic);
+        require(static_cast<bool>(coarse), "Could not make the one-ray coarse FP4 session");
+        OpenClCoarseWork session;
+        coarse->load_bank(columns, session);
+        auto wrong = inverse;
+        wrong[3][1] = inverse[3][0];
+        bool rejected = false;
+        try { coarse->prepare(observation, wrong, rate, variance, session); } catch (const datapump::Error&) { rejected = true; }
+        require(rejected, "One-ray coarse FP4 session accepted second-ray coefficients");
+        coarse->prepare(observation, inverse, rate, variance, session);
+        auto& frontier = frontiers[arithmetic == OpenClRescoreArithmetic::fp32_partial];
+        frontier.resize(workspaces * frequencies);
+        const auto before = session;
+        coarse->peaks(grid, separation, frontier, session);
+        require(session.score_rows - before.score_rows == frequencies * workspaces * arrivals &&
+                session.useful_products - before.useful_products == frequencies * workspaces * arrivals * 4 * rows &&
+                session.issued_products - before.issued_products >= session.useful_products - before.useful_products,
+                "One-ray coarse FP4 work receipt does not cover the public tile");
+        if (arithmetic == OpenClRescoreArithmetic::fp64) {
+            coarse->read_scores(scores);
+            work = session;
+        }
+    }
+
+    double product = 0, fp4_energy = 0, reference_energy = 0, rescore_difference = 0;
+    std::size_t same_frontiers = 0;
+    std::vector<double> row(arrivals), exact(arrivals);
+    for (std::size_t f = 0; f != frequencies; ++f) {
+        for (std::size_t workspace = 0; workspace != workspaces; ++workspace) {
+            double best = 0;
+            for (std::size_t arrival = 0; arrival != arrivals; ++arrival) {
+                row[arrival] = scores[(f * workspaces + workspace) * arrivals + arrival];
+                exact[arrival] = reference(f, workspace, arrival);
+                product += row[arrival] * exact[arrival];
+                fp4_energy += row[arrival] * row[arrival];
+                reference_energy += exact[arrival] * exact[arrival];
+                best = std::max(best, exact[arrival]);
+            }
+            // The device frontier is the native selection of its own FP4
+            // scores, and every retained score is recomputed.
+            const auto selected = select_coarse_arrivals(row, separation);
+            const auto& actual = frontiers[0][workspace * frequencies + f];
+            const auto& partial = frontiers[1][workspace * frequencies + f];
+            require(actual.count == selected.count && partial.count == actual.count,
+                    "One-ray coarse FP4 frontier count differs from native selection");
+            for (std::size_t i = 0; i != selected.count; ++i) {
+                require(actual.lags[i] == selected.indices[i] && partial.lags[i] == actual.lags[i],
+                        "One-ray coarse FP4 frontier arrival differs from native selection");
+                require(std::abs(actual.scores[i] - exact[actual.lags[i]]) <= 2e-5 * std::max(best, exact[actual.lags[i]]),
+                        "One-ray rescored peak differs from the FP64 reference");
+                rescore_difference = std::max(rescore_difference,
+                    std::abs(partial.scores[i] - actual.scores[i]) / std::max(best, std::abs(actual.scores[i])));
+            }
+            // The exact frontier of the FP64 scores, which the native FFT
+            // route would select.
+            const auto native = select_coarse_arrivals(exact, separation);
+            bool same = native.count == actual.count;
+            for (std::size_t i = 0; same && i != native.count; ++i) same = native.indices[i] == actual.lags[i];
+            same_frontiers += same;
+            if (f == 1) {
+                const auto strongest = static_cast<std::size_t>(std::max_element(exact.begin(), exact.end()) - exact.begin());
+                require(strongest == planted[workspace] && best > 30,
+                        "One-ray planted arrival is not the exact frontier's best");
+                require(actual.lags[0] == strongest || (actual.count == 2 && actual.lags[1] == strongest),
+                        "One-ray coarse FP4 frontier lost the planted arrival");
+            }
+        }
+    }
+    const auto agreement = product / std::sqrt(fp4_energy * reference_energy);
+    require(agreement > .97, "One-ray coarse FP4 scores are too far from the FP64 reference");
+    require(rescore_difference < 1e-5, "One-ray FP32 partial rescoring left its FP64-accumulating control");
+    require(work.rescored_peaks > 0 && work.rescore_seconds > 0 && !work.synthesis_seconds,
+            "One-ray coarse FP4 work receipt is incomplete");
+    std::cout << "OpenCL NVFP4 coarse one ray: " << workspaces << " workspaces, " << frequencies << " frequencies, "
+              << arrivals << " arrivals. Score agreement " << agreement << ", " << same_frontiers << " of "
+              << workspaces * frequencies << " frontiers equal to the exact frontier, " << workspaces
+              << " planted arrivals kept, FP32 partial against FP64 rescoring " << rescore_difference << '\n';
+}
+
+// Weak planted arrivals near the noise maximum, for one and two rays. The
+// FP4 frontier keeps the two best arrivals of a row by FP4 score, so a weak
+// true arrival can lose to noise peaks that exact scores rank below it.
+// Four workspaces of 150 rows each hold one planted arrival at the single
+// trial frequency, in disjoint stretches of one observation, at a noiseless
+// score of 24, 16, 12, 10 or 8 in unit noise; five noise realizations per
+// level give twenty trials per level and ray count. The noise-only maximum
+// of a 512-arrival row is about 6.8 for one ray and 8.9 for two, and of the
+// matched search's 3.95 million score rows about 16 and 18.5.
+// Predeclared rule: the FP4 frontier keeps every planted arrival that the
+// exact FP64 frontier keeps at levels 24 and 16, and at least 90% of them
+// over the sweep; the exact frontier keeps all of level 24. Component
+// evidence only, separate from receiver sensitivity and capacity.
+void check_coarse_weak_arrivals(const OpenClNvfp4Device& device) {
+    constexpr std::size_t rows = 150, arrivals = 512, workspaces = 4, separation = 9, realizations = 5;
+    constexpr std::size_t spacing = 165;
+    constexpr std::array<double, 5> levels{24, 16, 12, 10, 8};
+    constexpr double rate = 240, variance = 1;
+    const std::array<double, 1> grid{.17};
+    std::ostringstream report;
+    for (const std::size_t taps : {1, 2}) {
+        std::mt19937 random(4242 + static_cast<unsigned>(taps));
+        std::normal_distribution<double> noise(0, std::sqrt(.5));
+        std::uniform_real_distribution<double> phase(0, 1);
+        std::vector<std::vector<Reference>> bank(workspaces * taps, std::vector<Reference>(rows));
+        for (auto& column : bank)
+            for (std::size_t i = 0; i != rows; ++i) {
+                const auto envelope = .15 + std::pow(std::sin(std::numbers::pi * (i + .5) / rows), 2);
+                column[i] = envelope * Reference(noise(random), noise(random));
+            }
+        std::vector<std::array<double, 4>> inverse(workspaces);
+        for (std::size_t workspace = 0; workspace != workspaces; ++workspace) {
+            if (taps == 2) {
+                inverse[workspace] = inverse_gram(bank[2 * workspace], bank[2 * workspace + 1]);
+                continue;
+            }
+            double a = 0;
+            for (const auto value : bank[workspace]) a += std::norm(value);
+            inverse[workspace] = {1 / a, 0, 0, 0};
+        }
+        const OpenClCoarseShape shape{taps, rows, arrivals, workspaces, grid.size()};
+        const auto coarse = device.make_coarse(shape, OpenClNvfp4Coarse::workspace(shape).device_bytes);
+        require(static_cast<bool>(coarse), "Could not make the weak-arrival coarse FP4 session");
+        const std::vector<std::span<const Reference>> columns(bank.begin(), bank.end());
+        OpenClCoarseWork work;
+        coarse->load_bank(columns, work);
+        std::array<std::size_t, levels.size()> exact_kept{}, fp4_kept{}, fp4_only{};
+        std::vector<Reference> observation(rows + arrivals - 1);
+        std::vector<double> exact(arrivals);
+        std::vector<CoarseBulkPeaks> frontier(workspaces);
+        for (std::size_t level = 0; level != levels.size(); ++level)
+            for (std::size_t realization = 0; realization != realizations; ++realization) {
+                for (auto& value : observation) value = Reference(noise(random), noise(random));
+                for (std::size_t workspace = 0; workspace != workspaces; ++workspace) {
+                    // A random combination of the workspace's rays, scaled to
+                    // the level: a signal in the span scores its energy over
+                    // the variance.
+                    std::vector<Reference> signal(rows);
+                    const auto first = turn(phase(random)), second = .7 * turn(phase(random));
+                    double energy = 0;
+                    for (std::size_t i = 0; i != rows; ++i) {
+                        signal[i] = first * bank[workspace * taps][i] +
+                                    (taps == 2 ? second * bank[workspace * taps + 1][i] : Reference{});
+                        energy += std::norm(signal[i]);
+                    }
+                    const auto gain = std::sqrt(levels[level] * variance / energy);
+                    for (std::size_t i = 0; i != rows; ++i) {
+                        const auto sample = 5 + spacing * workspace + i;
+                        observation[sample] += gain * signal[i] *
+                                               turn(grid[0] * (static_cast<double>(sample) / rate));
+                    }
+                }
+                coarse->prepare(observation, inverse, rate, variance, work);
+                coarse->peaks(grid, separation, frontier, work);
+                for (std::size_t workspace = 0; workspace != workspaces; ++workspace) {
+                    for (std::size_t arrival = 0; arrival != arrivals; ++arrival) {
+                        if (taps == 2) {
+                            exact[arrival] = coarse_score(bank[2 * workspace], bank[2 * workspace + 1], observation,
+                                                          inverse[workspace], grid[0], rate, variance, arrival);
+                            continue;
+                        }
+                        Reference a{};
+                        for (std::size_t i = 0; i != rows; ++i) {
+                            const auto sample = arrival + i;
+                            a += std::conj(bank[workspace][i]) * observation[sample] *
+                                 turn(-grid[0] * (static_cast<double>(sample) / rate));
+                        }
+                        exact[arrival] = inverse[workspace][0] * std::norm(a) / variance;
+                    }
+                    const auto planted = 5 + spacing * workspace;
+                    const auto native = select_coarse_arrivals(exact, separation);
+                    const auto& actual = frontier[workspace];
+                    const bool by_exact = std::find(native.indices.begin(), native.indices.begin() + native.count,
+                                                    planted) != native.indices.begin() + native.count;
+                    const bool by_fp4 = std::find(actual.lags, actual.lags + actual.count, planted) !=
+                                        actual.lags + actual.count;
+                    exact_kept[level] += by_exact;
+                    fp4_kept[level] += by_exact && by_fp4;
+                    fp4_only[level] += by_fp4 && !by_exact;
+                }
+            }
+        const auto trials = realizations * workspaces;
+        const auto exact_total = std::accumulate(exact_kept.begin(), exact_kept.end(), std::size_t{0});
+        const auto fp4_total = std::accumulate(fp4_kept.begin(), fp4_kept.end(), std::size_t{0});
+        report << (taps == 1 ? "one ray" : "; two rays") << ", level";
+        for (std::size_t level = 0; level != levels.size(); ++level)
+            report << (level ? ", " : " ") << levels[level] << ": exact " << exact_kept[level] << '/' << trials
+                   << ", FP4 " << fp4_kept[level] << " of those (+" << fp4_only[level] << ')';
+        require(exact_kept[0] == trials, "The exact frontier lost a strong planted arrival");
+        require(fp4_kept[0] == exact_kept[0] && fp4_kept[1] == exact_kept[1],
+                "The coarse FP4 frontier lost a planted arrival that the exact frontier kept at a strong level");
+        require(10 * fp4_total >= 9 * exact_total,
+                "The coarse FP4 frontier kept fewer than 90% of the planted arrivals the exact frontier kept");
+    }
+    std::cout << "OpenCL NVFP4 coarse weak arrivals: " << report.str() << '\n';
 }
 
 // Lagrange interpolation of the native exact route, over a zero-extended
@@ -888,11 +1253,19 @@ Reference cubic_sample(std::span<const Reference> source, long double index) {
 // A decimation and tap count whose 128-row tiles fit one stage window warp
 // raw rows as the FIR stages them. Other geometries store raw columns first,
 // and their FIR stages several windows or, past the stage, reads in place.
+// With `shared`, columns of different lanes share maps, as the canonical
+// bank's bits and epochs share a clock and ray: sets of four, three, two and
+// one column. A column must then filter to the same bits as when it is the
+// only column of its map. With `one_ray`, a one-ray bank of the same
+// workspaces' first rays must equal those columns bit for bit, and its
+// scalar Grams their first entries.
 void check_coarse_synthesis(const OpenClNvfp4Device& device, const datapump::triad::v3::Format& format,
                             double receive_rate, const char* label, std::size_t decimation = 4,
-                            std::size_t tap_count = 97, bool fused = true) {
+                            std::size_t tap_count = 97, bool fused = true, bool shared = false,
+                            bool one_ray = false) {
     using namespace datapump::triad::v3;
-    constexpr std::size_t workspaces = 3, taps = 2, lanes = 4;
+    constexpr std::size_t taps = 2, lanes = 4;
+    const std::size_t workspaces = shared ? 5 : 3;
     constexpr double delay_seconds = .021, doppler_hz = 37.25, origin_seconds = -.35;
     std::array<std::uint8_t, 32> seed{};
     for (std::size_t i = 0; i != seed.size(); ++i) seed[i] = static_cast<std::uint8_t>(29 * i + 5);
@@ -934,12 +1307,17 @@ void check_coarse_synthesis(const OpenClNvfp4Device& device, const datapump::tri
     for (std::size_t i = 0; i != pulse.size(); ++i)
         pulse[i] = static_cast<float>(shaping_pulse(format.pulse_shape, static_cast<double>(i) / 256));
 
-    const std::array<double, workspaces> clocks{-20, 0, 35};
+    constexpr std::array<double, 3> clocks{-20, 0, 35};
+    // Shared: ray 0 has clocks 0, 0, 0, 0, 35 and ray 1 -20, -20, 0, 0, 0.
+    const auto clock = [&](std::size_t workspace, std::size_t ray) {
+        if (!shared) return clocks[workspace];
+        return ray ? (workspace < 2 ? clocks[0] : clocks[1]) : (workspace < 4 ? clocks[1] : clocks[2]);
+    };
     std::vector<CoarseTemplateColumn> columns(workspaces * taps);
     std::vector<std::vector<Reference>> expected(columns.size(), std::vector<Reference>(kernel_rows));
     for (std::size_t column = 0; column != columns.size(); ++column) {
         const auto workspace = column / taps, ray = column % taps;
-        const auto scale = 1 + clocks[workspace] * 1e-6;
+        const auto scale = 1 + clock(workspace, ray) * 1e-6;
         const auto delay = ray ? delay_seconds : 0., doppler = ray ? doppler_hz : 0.;
         auto& map = columns[column];
         map = {(origin_seconds - delay) * scale * receive_rate - 2.5, scale, origin_seconds * doppler,
@@ -1035,9 +1413,97 @@ void check_coarse_synthesis(const OpenClNvfp4Device& device, const datapump::tri
     require(work.render_seconds > 0 && work.filter_seconds > 0 && work.gram_seconds > 0 &&
             std::abs(parts - work.synthesis_seconds) <= 1e-6 * work.synthesis_seconds,
             "Device template synthesis intervals do not cover their parts");
+
+    std::size_t alone = 0;
+    if (shared) {
+        // The last column of each set keeps its map, and the others move by
+        // one unit in the last place, so it becomes the only column of its
+        // map. Its bank column must keep every bit, in this same build.
+        const auto same = [](const CoarseTemplateColumn& a, const CoarseTemplateColumn& b) {
+            return a.first_position == b.first_position && a.scale == b.scale &&
+                   a.first_cycles == b.first_cycles && a.cycle_step == b.cycle_step;
+        };
+        std::vector<bool> kept(columns.size());
+        std::size_t later_members = 0;
+        for (std::size_t column = 0; column != columns.size(); ++column) {
+            std::size_t members = 0, last = column;
+            for (std::size_t other = 0; other != columns.size(); ++other)
+                if (same(columns[other], columns[column])) {
+                    ++members;
+                    last = other;
+                }
+            kept[column] = last == column;
+            later_members += kept[column] && members > 1;
+        }
+        require(later_members == 3, "Shared synthesis check lost its sets of several columns");
+        auto moved = synthesis;
+        auto moved_columns = columns;
+        for (std::size_t column = 0; column != columns.size(); ++column)
+            if (!kept[column]) moved_columns[column].first_position =
+                std::nextafter(columns[column].first_position, std::numeric_limits<double>::infinity());
+        moved.columns = moved_columns;
+        const auto separate = device.make_coarse(shape, lease, true);
+        require(static_cast<bool>(separate), "Could not make the separate-map synthesis session");
+        OpenClCoarseWork separate_work;
+        std::vector<CoarseTemplateGram> separate_grams(workspaces);
+        separate->synthesize_bank(moved, separate_grams, separate_work);
+        std::vector<std::complex<float>> separated(columns.size() * kernel_rows);
+        separate->read_bank(separated);
+        for (std::size_t column = 0; column != columns.size(); ++column) {
+            if (!kept[column]) continue;
+            ++alone;
+            require(std::equal(resident.begin() + column * kernel_rows, resident.begin() + (column + 1) * kernel_rows,
+                               separated.begin() + column * kernel_rows, [](auto a, auto b) {
+                                   return std::bit_cast<std::uint64_t>(a) == std::bit_cast<std::uint64_t>(b);
+                               }),
+                    "A column shared with other lanes filtered differently from the same map alone");
+        }
+    }
+    double one_ray_worst = 0;
+    if (one_ray) {
+        std::vector<CoarseTemplateColumn> first_rays(workspaces);
+        for (std::size_t workspace = 0; workspace != workspaces; ++workspace)
+            first_rays[workspace] = columns[workspace * taps];
+        auto single = synthesis;
+        single.columns = first_rays;
+        auto single_shape = shape;
+        single_shape.taps = 1;
+        const auto single_lease = OpenClNvfp4Coarse::workspace(single_shape).device_bytes;
+        require(single_lease < lease, "One-ray synthesis leased a two-ray bank");
+        const auto single_coarse = device.make_coarse(single_shape, single_lease, true);
+        require(static_cast<bool>(single_coarse), "Could not make the one-ray synthesis session");
+        OpenClCoarseWork single_work;
+        std::vector<CoarseTemplateGram> single_grams(workspaces);
+        single_coarse->synthesize_bank(single, single_grams, single_work);
+        std::vector<std::complex<float>> single_bank(workspaces * kernel_rows);
+        single_coarse->read_bank(single_bank);
+        const auto bits = [](auto a, auto b) { return std::bit_cast<std::uint64_t>(a) == std::bit_cast<std::uint64_t>(b); };
+        for (std::size_t workspace = 0; workspace != workspaces; ++workspace) {
+            const auto* own = single_bank.data() + workspace * kernel_rows;
+            const auto* two = resident.data() + workspace * taps * kernel_rows;
+            require(std::equal(own, own + kernel_rows, two, bits),
+                    "A one-ray bank column differs from the first ray of the two-ray bank");
+            const auto& gram = single_grams[workspace];
+            require(std::bit_cast<std::uint64_t>(gram.a) == std::bit_cast<std::uint64_t>(grams[workspace].a) &&
+                    gram.d == 0 && gram.b == Reference{}, "A one-ray Gram is not the first ray's scalar Gram");
+            double peak = 0, error = 0;
+            for (std::size_t row = 0; row != kernel_rows; ++row) {
+                const auto& value = expected[workspace * taps][row];
+                peak = std::max(peak, std::abs(value));
+                error = std::max(error, std::abs(Reference(own[row]) - value));
+            }
+            one_ray_worst = std::max(one_ray_worst, error / peak);
+        }
+        require(single_work.warped_samples == workspaces * raw_rows && single_work.filtered_rows == workspaces * kernel_rows,
+                "One-ray synthesis receipt is incomplete");
+    }
     std::cout << "OpenCL coarse synthesis " << label << ": " << raw_rows << " raw rows, " << kernel_rows
               << " filtered rows, decimation " << decimation << ", " << tap_count << " taps"
-              << (fused ? ", warped in the FIR" : ", stored raw columns") << ". Worst column error " << worst << '\n';
+              << (fused ? ", warped in the FIR" : ", stored raw columns") << ". Worst column error " << worst;
+    if (shared) std::cout << "; " << alone << " columns identical when alone with their map";
+    if (one_ray)
+        std::cout << "; one-ray bank identical to the first rays, worst column error " << one_ray_worst;
+    std::cout << '\n';
 }
 
 void check_coarse_synthesis(const OpenClNvfp4Device& device) {
@@ -1047,7 +1513,7 @@ void check_coarse_synthesis(const OpenClNvfp4Device& device) {
     plain.added_symbols = 1;
     plain.sample_rate = 960;
     plain.bit_seconds = 16;
-    check_coarse_synthesis(device, plain, 960, "continuous");
+    check_coarse_synthesis(device, plain, 960, "continuous", 4, 97, true, false, true);
     // A receive rate above the source rate samples it between its integers.
     check_coarse_synthesis(device, plain, 1920, "resampled");
     auto hopped = plain;
@@ -1063,13 +1529,16 @@ void check_coarse_synthesis(const OpenClNvfp4Device& device) {
     // The matched coarse FIR: 1705 taps at decimation 25 fit one window of a
     // tile. Columns span several tiles, and the first and last tiles hold
     // rows whose taps start late or stop early.
-    check_coarse_synthesis(device, plain, 960, "matched", 25, 1705);
+    check_coarse_synthesis(device, plain, 960, "matched", 25, 1705, true, false, true);
     // The widest fused FIR of the canonical plan: 887 pairs of taps and a
     // raw span of 5075 fill 5962 of the 6016 stage pairs.
     check_coarse_synthesis(device, plain, 960, "stage limit", 26, 1773);
     // Stored raw columns: two stage windows of taps, then rows read in place.
-    check_coarse_synthesis(device, plain, 960, "windowed", 32, 2183, false);
+    check_coarse_synthesis(device, plain, 960, "windowed", 32, 2183, false, false, true);
     check_coarse_synthesis(device, plain, 960, "in place", 50, 3409, false);
+    // Lanes that share maps, through the warp table and the stored columns.
+    check_coarse_synthesis(device, plain, 960, "shared maps", 4, 97, true, true, true);
+    check_coarse_synthesis(device, plain, 960, "shared stored maps", 32, 2183, false, true);
 }
 
 // The synthesis route of the matched dense session's geometry across the
@@ -1097,6 +1566,18 @@ void check_coarse_fir_routes() {
         const auto stored_lease = OpenClNvfp4Coarse::workspace(stored).device_bytes;
         require(route.fused ? stored_lease >= lease + raw_rows * sizeof(std::complex<float>) : stored_lease == lease,
                 "Coarse synthesis chose the wrong FIR route for a canonical decimation");
+        // One ray halves the bank and its packed tiles, and keeps the route.
+        auto single = shape;
+        single.taps = 1;
+        auto single_stored = stored;
+        single_stored.taps = 1;
+        const auto single_lease = OpenClNvfp4Coarse::workspace(single).device_bytes;
+        const auto single_stored_lease = OpenClNvfp4Coarse::workspace(single_stored).device_bytes;
+        require(single_lease < lease && (route.fused ? single_stored_lease > single_lease : single_stored_lease == single_lease),
+                "One-ray coarse synthesis chose another FIR route or a larger lease");
+        if (route.decimation == 25)
+            std::cout << "OpenCL coarse matched-size lease at decimation 25: two rays " << lease << " bytes, one ray "
+                      << single_lease << " bytes\n";
     }
 }
 
@@ -1127,6 +1608,8 @@ int main(int argc, char** argv) {
         if (resident_only) return 0;
         check_coarse_fir_routes();
         check_coarse(*device);
+        check_coarse_one_ray(*device);
+        check_coarse_weak_arrivals(*device);
         check_coarse_synthesis(*device);
         return 0;
     } catch (const std::exception& error) {

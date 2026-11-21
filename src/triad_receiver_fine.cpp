@@ -8,6 +8,7 @@
 #include "datapump/execution.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <cmath>
@@ -886,17 +887,18 @@ MappedBasisRow mapped_row(const ReceiverConfig& config, const ReceiverSlotPlan& 
 }
 
 struct StateBlockWork {
-    std::uint64_t positive_basis_blocks = 0;
+    std::uint64_t positive_basis_blocks = 0, gaussian_null_skips = 0;
     long double template_energy = 0;
 };
 
+// Returns the common-null block updates that were provably inert and skipped.
 template <std::size_t Count, class GainState>
-void advance_gain(GainState& state, std::size_t tap_count, std::size_t block_count,
-                  const std::array<Complex, 2 * 3 * 2>& correlations,
-                  const std::array<Complex, 2 * 3 * 4>& grams, const std::array<unsigned, 2>& ranks,
-                  const std::array<double, 2>& powers,
-                  const std::array<double, 4 * 2 * Count>& transitions, const std::stop_token& stop,
-                  bool stationary_fading = false) {
+std::size_t advance_gain(GainState& state, std::size_t tap_count, std::size_t block_count,
+                         const std::array<Complex, 2 * 3 * 2>& correlations,
+                         const std::array<Complex, 2 * 3 * 4>& grams, const std::array<unsigned, 2>& ranks,
+                         const std::array<double, 2>& powers,
+                         const std::array<double, 4 * 2 * Count>& transitions, const std::stop_token& stop,
+                         bool stationary_fading = false) {
     const auto dimensions = stationary_fading ? 2 : tap_count;
     const auto state_square = dimensions * dimensions;
     std::array<Complex, Count * 3 * 2> means{};
@@ -920,16 +922,24 @@ void advance_gain(GainState& state, std::size_t tap_count, std::size_t block_cou
     }
 
     check_cancelled(stop);
-    const auto update = stationary_fading ? triad_gaussian_additive_update_v1 : triad_gaussian_update_v1;
+    // The common null's statistics, mean and evidence are zero, and only
+    // its evidence is read back. The one-tap and factor entries skip it when
+    // that provably holds through every block; the additive one runs it.
     const auto correlation_data = reinterpret_cast<const double*>(correlations.data());
     const auto gram_data = reinterpret_cast<const double*>(grams.data());
     const auto mean_data = reinterpret_cast<double*>(means.data());
     const auto uncertainty_data = reinterpret_cast<double*>(uncertainty.data());
+    bool null_skipped = false;
     const auto status = tap_count == 2 ?
-        triad_gaussian_factor2_update_v1(1, Count, block_count, 0, 1, correlation_data, gram_data,
-            ranks.data(), powers.data(), transitions.data(), mean_data, uncertainty_data, scores.data(), diagnostics.data()) :
-        update(tap_count, 1, Count, block_count, 0, 1, correlation_data, gram_data,
-            powers.data(), transitions.data(), mean_data, uncertainty_data, scores.data(), diagnostics.data());
+        gaussian_signal_factor2_update(1, Count, block_count, 0, 1, correlation_data, gram_data,
+            ranks.data(), powers.data(), transitions.data(), mean_data, uncertainty_data, scores.data(), diagnostics.data(),
+            null_skipped) :
+        stationary_fading ?
+        triad_gaussian_additive_update_v1(tap_count, 1, Count, block_count, 0, 1, correlation_data, gram_data,
+            powers.data(), transitions.data(), mean_data, uncertainty_data, scores.data(), diagnostics.data()) :
+        gaussian_signal_update(tap_count, 1, Count, block_count, 0, 1, correlation_data, gram_data,
+            powers.data(), transitions.data(), mean_data, uncertainty_data, scores.data(), diagnostics.data(),
+            null_skipped);
     if (status) throw Error("Robust fine Gaussian update failed (" + std::to_string(status) + ")");
 
     for (std::size_t model = 0; model < Count; ++model) {
@@ -945,6 +955,7 @@ void advance_gain(GainState& state, std::size_t tap_count, std::size_t block_cou
                 throw Error("Robust Gaussian likelihood evidence is nonfinite");
         }
     }
+    return null_skipped ? block_count * Count : 0;
 }
 
 void advance_state(State& state, const MappedBasisRow& row, MappedBasis& basis,
@@ -989,15 +1000,19 @@ void advance_state(State& state, const MappedBasisRow& row, MappedBasis& basis,
     if (work) scratch.basis_statistics_seconds += seconds_since(basis_began);
     const auto gaussian_began = work ? FineClock::now() : FineClock::time_point{};
 
-    advance_gain<models>(state, tap_count, blocks.size(), correlations, grams, ranks, powers, transitions, stop);
+    auto null_skips = advance_gain<models>(state, tap_count, blocks.size(), correlations, grams, ranks, powers,
+                                           transitions, stop);
     if (slow) {
         const std::array split_power{.5 * path_power, .5 * path_power};
         if (stationary_fading && tap_count == 2)
             pack_direct_gain_statistics(correlations, grams, ranks);
-        advance_gain<slow_models>(*slow, stationary_fading ? 1 : tap_count, blocks.size(), correlations, grams, ranks,
-            stationary_fading ? split_power : powers, slow_transitions, stop, stationary_fading);
+        null_skips += advance_gain<slow_models>(*slow, stationary_fading ? 1 : tap_count, blocks.size(), correlations,
+            grams, ranks, stationary_fading ? split_power : powers, slow_transitions, stop, stationary_fading);
     }
-    if (work) scratch.gaussian_seconds += seconds_since(gaussian_began);
+    if (work) {
+        work->gaussian_null_skips = null_skips;
+        scratch.gaussian_seconds += seconds_since(gaussian_began);
+    }
 }
 
 template <class GainState>
@@ -1342,6 +1357,11 @@ struct FineSession::Impl {
     std::unique_ptr<MappedBasis::Addresses> addresses;
     // Dispatches per resident window, or zero for single dispatches.
     std::size_t window_dispatches = 0;
+    // Lanes that own transform scratch project a window's dispatches as
+    // separate leaves. Otherwise one leaf projects the whole window. Their
+    // summed elapsed time is drained into worker_observation_seconds.
+    bool dispatch_observation = false;
+    std::atomic<std::int64_t> observation_nanoseconds{0};
     Window window;
     std::vector<std::array<std::size_t, 2>> windows;
     std::vector<FineResidentBlock> resident_requests;
@@ -1507,6 +1527,7 @@ struct FineSession::Impl {
         }
         for (unsigned worker = 0; worker < stage_workers; ++worker)
             scratch.emplace_back(!bulk || host_capacity ? max_rows : 0, !bulk || host_capacity ? fft_rows : 0);
+        dispatch_observation = window_dispatches && (!bulk || host_capacity);
         ring.resize(std::max<std::size_t>(2, 3 * window_dispatches));
         for (auto& pair : ring)
             for (auto& block : pair.blocks) block.projected.reserve(max_rows);
@@ -1574,7 +1595,9 @@ struct FineSession::Impl {
         return true;
     }
 
-    void prepare(ObservationBlock& block, std::size_t first, std::size_t rows, std::stop_token leaf_stop) {
+    // A block's public geometry, elapsed interval and erasure receipts, in
+    // chronological order. Only an observed block is then projected.
+    void place(ObservationBlock& block, std::size_t first, std::size_t rows, std::stop_token leaf_stop) {
         check_cancelled(leaf_stop);
         const auto projection = std::find_if(projections.begin(), projections.end(),
             [&](const Projection& candidate) { return candidate.rows() == rows; });
@@ -1593,19 +1616,68 @@ struct FineSession::Impl {
             ++erased_blocks;
             discarded_rows += rows - missing;
             block.projected.clear();
-            return;
         }
-        const auto raw = iq.subspan(first, rows);
+    }
+
+    // Independent of every other block: the caller owns the scratch.
+    void project(ObservationBlock& block, std::span<Complex> fft, std::span<FineFloatComplex> float_scratch,
+                 std::stop_token leaf_stop) const {
+        check_cancelled(leaf_stop);
+        const auto raw = iq.subspan(block.first, block.projection->rows());
         block.projected.assign(raw.begin(), raw.end());
-        projection->apply(block.projected, observation_scratch, leaf_stop, observation_float_scratch);
-        block.projected.resize(projection->modes());
-        observed_modes += projection->modes();
+        block.projection->apply(block.projected, fft, leaf_stop, float_scratch);
+        block.projected.resize(block.projection->modes());
+    }
+
+    // A projected block's mode and quiet-energy receipts, in chronological order.
+    void count(const ObservationBlock& block) {
+        const auto rows = block.projection->rows();
+        observed_modes += block.projection->modes();
         const auto quiet_first = plan.quiet_first_sample - plan.first_sample;
         const auto quiet_stop = plan.quiet_stop_sample - plan.first_sample;
-        if (quiet_first <= first && first + rows <= quiet_stop) {
-            quiet_modes += projection->modes();
+        if (quiet_first <= block.first && block.first + rows <= quiet_stop) {
+            quiet_modes += block.projection->modes();
             quiet_energy += finite_energy(block.projected) / config.noise_variance;
             if (!std::isfinite(quiet_energy)) throw Error("Robust quiet energy is nonfinite");
+        }
+    }
+
+    // Places one dispatch's blocks in chronological order, with their
+    // transitions and receipts, projecting them too unless deferred.
+    void open_dispatch(Pair& pair, const Extent& extent, bool project_now, std::stop_token leaf_stop) {
+        check_cancelled(leaf_stop);
+        auto first = extent.first;
+        pair.extent = &extent;
+        pair.observed_rows = pair.modes = pair.basis_calls = 0;
+        pair.transitions = {};
+        for (std::size_t i = 0; i < extent.count; ++i) {
+            auto& block = pair.blocks[i];
+            place(block, first, extent.lengths[i], leaf_stop);
+            if (project_now && block.observed) {
+                project(block, observation_scratch, observation_float_scratch, leaf_stop);
+                count(block);
+            }
+            first += extent.lengths[i];
+            // Elapsed intervals and channel models are common to all
+            // states, including for a missing block whose elapsed time
+            // still evolves the posterior.
+            const auto write_transitions = [&](const auto& coherence, auto& output) {
+                for (std::size_t model = 0; model < coherence.size(); ++model) {
+                    const auto offset = 4 * (i * coherence.size() + model);
+                    const auto exponent = -block.elapsed / coherence[model];
+                    const auto decay = std::exp(exponent);
+                    output[offset] = decay * decay;
+                    output[offset + 1] = -std::expm1(2 * exponent);
+                    output[offset + 2] = decay;
+                }
+            };
+            write_transitions(coherence_seconds, pair.transitions);
+            if (!slow_nominal.empty()) write_transitions(additional_gain.coherence, pair.slow_transitions);
+            if (!block.observed) continue;
+            const auto rows = block.projection->rows();
+            pair.observed_rows += rows;
+            pair.modes += block.projection->modes();
+            pair.basis_calls += 1 + (rows - 1) / maximum_basis_rows;
         }
     }
 
@@ -1614,36 +1686,7 @@ struct FineSession::Impl {
     // another observation starts or either ring entry is reused.
     void observe(Pair& pair, const Extent& extent, std::stop_token leaf_stop) {
         time(times.observation_seconds, [&] {
-            check_cancelled(leaf_stop);
-            auto first = extent.first;
-            pair.extent = &extent;
-            pair.observed_rows = pair.modes = pair.basis_calls = 0;
-            pair.transitions = {};
-            for (std::size_t i = 0; i < extent.count; ++i) {
-                auto& block = pair.blocks[i];
-                prepare(block, first, extent.lengths[i], leaf_stop);
-                first += extent.lengths[i];
-                // Elapsed intervals and channel models are common to all
-                // states, including for a missing block whose elapsed time
-                // still evolves the posterior.
-                const auto write_transitions = [&](const auto& coherence, auto& output) {
-                    for (std::size_t model = 0; model < coherence.size(); ++model) {
-                        const auto offset = 4 * (i * coherence.size() + model);
-                        const auto exponent = -block.elapsed / coherence[model];
-                        const auto decay = std::exp(exponent);
-                        output[offset] = decay * decay;
-                        output[offset + 1] = -std::expm1(2 * exponent);
-                        output[offset + 2] = decay;
-                    }
-                };
-                write_transitions(coherence_seconds, pair.transitions);
-                if (!slow_nominal.empty()) write_transitions(additional_gain.coherence, pair.slow_transitions);
-                if (!block.observed) continue;
-                const auto rows = block.projection->rows();
-                pair.observed_rows += rows;
-                pair.modes += block.projection->modes();
-                pair.basis_calls += 1 + (rows - 1) / maximum_basis_rows;
-            }
+            open_dispatch(pair, extent, true, leaf_stop);
             if (observation.observed) observation.observed(extent.first, leaf_stop);
             check_cancelled(leaf_stop);
         });
@@ -2127,13 +2170,56 @@ struct FineSession::Impl {
         }
     }
 
-    // Projects a window's dispatches in chronological order, into the ring
-    // group that the window three before it has released.
-    void observe_window(std::size_t index, const std::stop_token& leaf_stop) {
+    // A window's observation leaves: one per dispatch, or one for all.
+    std::size_t observation_begin(std::size_t index) const {
+        return dispatch_observation ? windows[index][0] : index;
+    }
+    std::size_t observation_end(std::size_t index) const {
+        return dispatch_observation ? windows[index][1] : index + 1;
+    }
+
+    // The owner places a window's blocks in chronological order, into the
+    // ring group that the window three before it has released, before any
+    // of its observation leaves can start.
+    void open_window(std::size_t index, std::stop_token stop) {
         const auto [begin, end] = windows[index];
         const auto base = window_base(index);
-        for (auto dispatch = begin; dispatch != end; ++dispatch)
-            observe(ring[base + dispatch - begin], extents[dispatch], leaf_stop);
+        time(times.observation_seconds, [&] {
+            for (auto dispatch = begin; dispatch != end; ++dispatch)
+                open_dispatch(ring[base + dispatch - begin], extents[dispatch], false, stop);
+        });
+    }
+
+    // Projects the observed blocks of one placed dispatch. Dispatches of a
+    // window are independent: each owns its ring entry, and the lane its
+    // scratch. Arithmetic is that of a serial observation.
+    void project_dispatch(std::size_t dispatch, std::span<Complex> fft, std::span<FineFloatComplex> float_scratch,
+                          const std::stop_token& leaf_stop) {
+        const auto began = observation.record_work ? FineClock::now() : FineClock::time_point{};
+        auto& pair = ring[window_base(dispatch / window_dispatches) + dispatch % window_dispatches];
+        for (auto& block : std::span(pair.blocks).first(pair.extent->count))
+            if (block.observed) project(block, fft, float_scratch, leaf_stop);
+        if (observation.record_work)
+            observation_nanoseconds += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                FineClock::now() - began).count();
+    }
+
+    // The window's mode and quiet-energy receipts and diagnostic witnesses,
+    // in chronological order, once every one of its dispatches is projected.
+    void close_observation(std::size_t index, std::stop_token stop) {
+        const auto [begin, end] = windows[index];
+        const auto base = window_base(index);
+        time(times.observation_seconds, [&] {
+            for (auto dispatch = begin; dispatch != end; ++dispatch) {
+                const auto& pair = ring[base + dispatch - begin];
+                for (const auto& block : pair.observations())
+                    if (block.observed) count(block);
+                if (observation.observed) observation.observed(pair.extent->first, stop);
+                check_cancelled(stop);
+            }
+        });
+        if (observation.record_work)
+            times.worker_observation_seconds += 1e-9 * static_cast<double>(observation_nanoseconds.exchange(0));
     }
 
     // Compiled work releases one independent observation. Native work is
@@ -2141,7 +2227,15 @@ struct FineSession::Impl {
     // The native owner waits only for the states.
     void background(unsigned lane, std::size_t leaf, const std::stop_token& leaf_stop) {
         if (window_dispatches) {
-            observe_window(leaf, leaf_stop);
+            if (dispatch_observation) {
+                const auto float_rows = observation_float_scratch.size();
+                project_dispatch(leaf, scratch[lane].fft,
+                                 std::span(worker_float_scratch).subspan(lane * float_rows, float_rows), leaf_stop);
+                return;
+            }
+            const auto [begin, end] = windows[leaf];
+            for (auto dispatch = begin; dispatch != end; ++dispatch)
+                project_dispatch(dispatch, observation_scratch, observation_float_scratch, leaf_stop);
             return;
         }
         if (bulk) {
@@ -2190,6 +2284,7 @@ struct FineSession::Impl {
         add_work(work.projection_modes, pair.modes * 2 * tap_count * size);
         add_work(work.gaussian_updates, pair.extent->count * size * 3 * model_count);
         for (const auto& state : states) {
+            add_work(work.gaussian_null_skips, state.gaussian_null_skips);
             add_work(work.positive_basis_blocks, state.positive_basis_blocks);
             work.projected_template_energy += state.template_energy;
         }
@@ -2204,10 +2299,14 @@ struct FineSession::Impl {
     // the next dispatch in the same two-pair ring.
     // Resident statistics for a window of dispatches at a time. The device
     // maps, projects and reduces every block of the window in one call while
-    // a lane observes the next window and the lanes advance the states of
-    // the previous one. Blocks outside the resident geometry follow once
-    // those states have advanced. Each state advances through a window's
-    // dispatches in public order, and the owner then closes them in order.
+    // the next window is observed and the lanes advance the states of the
+    // previous one. The owner places the next window's blocks before release,
+    // lanes project one dispatch each (or the whole window on one lane
+    // without per-lane transform scratch), and the owner adds their mode and
+    // quiet-energy receipts in public order. Blocks outside the resident
+    // geometry follow once those states have advanced. Each state advances
+    // through a window's dispatches in public order, and the owner then
+    // closes them in order.
     void run_windows() {
         windows.clear();
         for (std::size_t begin = 0; begin < extents.size(); begin += window_dispatches)
@@ -2224,25 +2323,43 @@ struct FineSession::Impl {
             window.active = false;
             close_window(index, nominal_models);
         };
+        // As for a single dispatch: keep a leaf's original failure.
+        const auto keep_leaf_failure = [&] {
+            if (stage.stop_token().stop_requested()) stage.wait_urgent();
+        };
+        // Places a window's blocks, then lets lanes project them.
+        const auto release = [&](std::size_t index) {
+            try {
+                open_window(index, stage.stop_token());
+            } catch (...) {
+                keep_leaf_failure();
+                throw;
+            }
+            stage.release(observation_end(index));
+        };
         // An observation is awaited while no state leaf is posted, so the
         // owner goes on to its own staging instead of taking state leaves.
         const auto observed = [&](std::size_t index) {
-            time(times.dispatch_seconds, [&] { stage.wait_background(index + 1, index); });
+            time(times.dispatch_seconds, [&] {
+                stage.wait_background(observation_end(index), observation_begin(index));
+            });
+            try {
+                close_observation(index, stage.stop_token());
+            } catch (...) {
+                keep_leaf_failure();
+                throw;
+            }
         };
-        stage.release(1);
+        release(0);
         observed(0);
         for (std::size_t index = 0; index < windows.size(); ++index) {
             const bool more = index + 1 < windows.size();
             // The window three before the next one has released its group.
-            if (more) stage.release(index + 2);
+            if (more) release(index + 1);
             if (!index) {
                 open_segment(extents.front());
                 fixed_affine_rows();
             }
-            // As for a single dispatch: keep a leaf's original failure.
-            const auto keep_leaf_failure = [&] {
-                if (stage.stop_token().stop_requested()) stage.wait_urgent();
-            };
             try {
                 window_statistics(index, stage.stop_token());
             } catch (...) {
@@ -3706,14 +3823,63 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
     score.varying_fine_seconds = seconds_since(began);
 }
 
-std::size_t varying_quiet_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
+namespace {
+// The first rows of the whole public blocks of one length that lie inside the
+// quiet aperture, in calendar order: segment, then block.
+std::vector<std::size_t> varying_quiet_blocks(const BlockCalendar& calendar, const ReceiverSlotPlan& slot,
+                                              std::size_t rows, std::stop_token stop) {
+    const auto quiet_first = slot.quiet_first_sample - slot.first_sample;
+    const auto quiet_stop = slot.quiet_stop_sample - slot.first_sample;
+    std::vector<std::size_t> blocks;
+    for (std::size_t segment_first = 0; segment_first < quiet_stop;) {
+        check_cancelled(stop);
+        const auto segment = calendar.segment_length(segment_first);
+        auto first = segment_first;
+        for (std::size_t block = 0; block < calendar.block_count(segment); ++block) {
+            const auto length = calendar.block_length(segment, block);
+            if (length == rows && quiet_first <= first && first + rows <= quiet_stop) blocks.push_back(first);
+            first += length;
+        }
+        segment_first += segment;
+    }
+    return blocks;
+}
+} // namespace
+
+std::size_t varying_quiet_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers) {
     if (!config.time_varying_channel) return 0;
     const BlockCalendar calendar(config, slot);
     const auto lengths = calendar.lengths();
     const auto maximum = *std::ranges::max_element(lengths);
-    return checked_add(DftPlan::workspace_bytes(maximum),
-        checked_add(checked_multiply(maximum, sizeof(std::size_t)),
-                    checked_multiply(maximum + DftPlan::scratch_samples(maximum), sizeof(Complex))));
+    auto bytes = checked_add(DftPlan::workspace_bytes(maximum), checked_multiply(maximum, sizeof(std::size_t)));
+    std::optional<ProjectionBands> bands;
+    try {
+        bands.emplace(config, slot, ProjectionBands::Policy::separable_varying);
+    } catch (const Error&) {
+        return bytes;
+    }
+    // One length at a time: each lane's block and transform scratch, the
+    // block list, and every projected mode's term until its ordered sum.
+    // Disjoint whole blocks inside the aperture bound the block count.
+    const auto quiet_rows = slot.quiet_stop_sample > slot.quiet_first_sample ?
+        static_cast<std::size_t>(slot.quiet_stop_sample - slot.quiet_first_sample) : std::size_t{0};
+    std::size_t length_bytes = 0;
+    for (const auto rows : lengths) {
+        if (!rows || !projected_block_supported(rows, *bands)) continue;
+        const auto blocks = quiet_rows / rows;
+        if (!blocks) continue;
+        std::size_t modes = rows;
+        try {
+            modes = visit_projection_modes(rows, *bands, {}, [](std::size_t) {});
+        } catch (const Error&) {
+        }
+        const auto lanes = std::min<std::size_t>(std::max(1U, workers), blocks);
+        auto stage = checked_multiply(lanes, checked_multiply(rows + DftPlan::scratch_samples(rows), sizeof(Complex)));
+        stage = checked_add(stage, checked_multiply(blocks, sizeof(std::size_t)));
+        stage = checked_add(stage, checked_multiply(checked_multiply(blocks, modes), sizeof(double)));
+        length_bytes = std::max(length_bytes, stage);
+    }
+    return checked_add(bytes, length_bytes);
 }
 
 namespace {
@@ -3829,8 +3995,10 @@ std::optional<LineAtom> find_varying_line(const ReceiverConfig& config, const Re
     return LineAtom{first, stop_row, center * spacing, log_weighted};
 }
 
-void score_varying_quiet(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
-                         std::span<const Complex> iq, ReceiverSlotScore& score, std::stop_token stop) {
+namespace {
+void project_varying_quiet(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                           std::span<const Complex> iq, ReceiverSlotScore& score, std::stop_token stop,
+                           unsigned workers, ReceiverExecutor& executor) {
     if (!config.time_varying_channel || iq.size() != slot.stop_sample - slot.first_sample)
         throw Error("Robust varying quiet requires its complete public observation");
     std::optional<ProjectionBands> bands;
@@ -3841,31 +4009,38 @@ void score_varying_quiet(const ReceiverConfig& config, const ReceiverSlotPlan& s
         return;
     }
     const BlockCalendar calendar(config, slot);
-    const auto quiet_first = slot.quiet_first_sample - slot.first_sample;
-    const auto quiet_stop = slot.quiet_stop_sample - slot.first_sample;
     // The legacy calendar fixes the physical aperture. This extra test uses
     // the same whole, disjoint blocks and only changes public frequency bins.
     // Candidate scores, confidence and retained models never choose a bin.
+    // Blocks project independently on the slot's lanes. Their mode terms
+    // are then summed in the original length, block and mode order.
     for (const auto rows : calendar.lengths()) {
         if (!rows || !projected_block_supported(rows, *bands)) continue;
         Projection projection(rows, *bands, stop);
-        std::vector<Complex> projected(rows), scratch(DftPlan::scratch_samples(rows));
-        for (std::size_t segment_first = 0; segment_first < quiet_stop;) {
-            check_cancelled(stop);
-            const auto segment = calendar.segment_length(segment_first);
-            auto first = segment_first;
-            for (std::size_t block = 0; block < calendar.block_count(segment); ++block) {
-                const auto length = calendar.block_length(segment, block);
-                if (length == rows && quiet_first <= first && first + rows <= quiet_stop) {
-                    std::ranges::copy(iq.subspan(first, rows), projected.begin());
-                    projection.apply(projected, scratch, stop);
-                    score.varying_quiet_modes = checked_add(score.varying_quiet_modes, projection.modes());
-                    for (const auto value : std::span(projected).first(projection.modes()))
-                        score.varying_quiet_energy += std::norm(value) / config.noise_variance;
+        const auto blocks = varying_quiet_blocks(calendar, slot, rows, stop);
+        if (blocks.empty()) continue;
+        const auto modes = projection.modes();
+        const auto lanes = std::min<std::size_t>(std::max(1U, workers), blocks.size());
+        std::vector<std::vector<Complex>> projected(lanes), scratch(lanes);
+        std::vector<double> terms(checked_multiply(blocks.size(), modes));
+        executor.parallel(slot.index, blocks.size(), static_cast<unsigned>(lanes), stop,
+            [&](unsigned lane, std::size_t index, std::stop_token job_stop) {
+                check_cancelled(job_stop);
+                auto& values = projected[lane];
+                if (values.empty()) {
+                    values.resize(rows);
+                    scratch[lane].resize(DftPlan::scratch_samples(rows));
                 }
-                first += length;
-            }
-            segment_first += segment;
+                std::ranges::copy(iq.subspan(blocks[index], rows), values.begin());
+                projection.apply(values, scratch[lane], job_stop);
+                auto term = terms.begin() + static_cast<std::ptrdiff_t>(index * modes);
+                for (const auto value : std::span(values).first(modes))
+                    *term++ = std::norm(value) / config.noise_variance;
+            });
+        for (std::size_t block = 0; block < blocks.size(); ++block) {
+            score.varying_quiet_modes = checked_add(score.varying_quiet_modes, modes);
+            for (const auto term : std::span(terms).subspan(block * modes, modes))
+                score.varying_quiet_energy += term;
         }
     }
     if (!score.varying_quiet_modes) {
@@ -3877,6 +4052,15 @@ void score_varying_quiet(const ReceiverConfig& config, const ReceiverSlotPlan& s
     score.varying_quiet_threshold = quiet_noise_threshold(score.varying_quiet_modes);
     score.varying_quiet_status = score.varying_quiet_energy <= score.varying_quiet_threshold ?
         "scored_public_varying_quiet_aperture" : "energy_in_public_varying_quiet_aperture";
+}
+} // namespace
+
+void score_varying_quiet(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                         std::span<const Complex> iq, ReceiverSlotScore& score, std::stop_token stop,
+                         unsigned workers, ReceiverExecutor& executor) {
+    const auto began = FineClock::now();
+    project_varying_quiet(config, slot, iq, score, stop, workers, executor);
+    score.varying_quiet_seconds = seconds_since(began);
 }
 
 namespace {

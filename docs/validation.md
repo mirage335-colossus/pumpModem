@@ -1890,6 +1890,368 @@ Limits:
   holds the local timing rows and test logs. They support this record. Remove
   them when a later device comparison supersedes these timings.
 
+### GPU offload survey and gated device routes — 20 November 2026
+
+**Question.** Which receiver and simulator CPU work can move to the GPU,
+and how much of it fits the FP4 Tensor Core path? The survey measured the
+matched slot on the 5650U and in the earlier Blackwell receipts.
+
+- **Where FP4 fits.** FP4 fits only large post-isolation contractions whose
+  output only chooses candidates. Those are the coarse frontier products
+  and the fine 47-mode projection, and both already run in NVFP4: 4.6 ms of
+  the device's roughly 60 ms per matched slot.
+- **The largest device cost.** About 44 ms per slot is FP64 SIMT work, which
+  runs at 1/64 rate on Blackwell and Ada:
+  - fine mapping, 24.5 ms;
+  - coarse lane render, 7.0 ms;
+  - fine tile render, 6.1 ms;
+  - the warp's FP64 share, about 3.5 ms;
+  - rescoring, 2.7 ms.
+  The lever there is FP32 per-row arithmetic with FP64 or integer
+  coordinates, as in the CUDA `fp32-rn4-v1` mapper.
+- **The largest CPU costs.** These are on challenging geometries and run as
+  native CPU work on every route:
+  - segmented timing, 48–853 CPU-s per slot on the OpenCL route, because only
+    CUDA scored it on the device;
+  - drift evidence, 8–110 s;
+  - varying fine tracking, 3.5–102 s;
+  - signed-lag gain ranks, 5.8–104 s.
+  All four are FFT-structured, so FP32 device FFTs come before any dense FP4
+  form.
+- **The simulator has no contraction.** A GPU realization would change
+  every capture hash.
+
+**Changes.** Source `b3c7c48f`. Each item lists its default:
+
+- **Vulkan segmented timing search.**
+  - VkFFT FP32 with FP64-generated twiddle tables. GLSL rank, tracking and
+    finish kernels reproduce the CUDA arithmetic.
+  - Offered to every compiled coarse session, the OpenCL dense route
+    included. The adapter forwards it to its Vulkan FFT session.
+  - Controlled by `--vulkan-segmented-timing automatic|device|native`, with
+    receipts that split policy declines from resource fallbacks.
+  - Default: automatic declines on every device (`unqualified-device`) until
+    a Blackwell qualification sets `automatic_segmented_qualified`.
+- **OpenCL NVFP4 kernels.**
+  - Exact restructures, always on: 4-lane raster groups, shared-map warp
+    sets with a register stash, `coarse_warp_columns`.
+  - FP32 mapper, tile renderer and partial rescoring, each beside its
+    unchanged FP64 kernel. Default: off (`--opencl-fine-map`,
+    `--opencl-coarse-rescore`).
+- **One-ray dense FP4 coarse route** (Spread None, the GUI default), plus 17
+  named dense-coarse fallback reasons that sum to
+  `opencl_coarse_frequency_fallbacks`. Default: automatic off
+  (`opencl_coarse_one_ray`, counted as `one-ray-unqualified`). An explicit
+  `nvfp4` request scores it.
+- **Bit-identical CPU restructures.**
+  - A chunk-parallel observation FIR beside a device-rendered bank.
+  - `key_lanes` as an urgent wave.
+  - One finiteness scan instead of two.
+  - The coarse DoublePlan trimmed to the filter length on compiled frequency
+    routes.
+  - Per-dispatch resident-window fine observation.
+  - Lane-parallel varying quiet re-projection.
+  - A common-null Gaussian skip, reported as `gaussian_null_skips`, which the
+    CPU forecast now charges as executed work.
+- **Exact simulator chain staging.**
+  - Receiver, noise and transmit oscillator chains split into accept,
+    recurrence and finish stages, through a libstdc++-mirroring
+    `GaussianStream` that checks itself at run time.
+  - An opt-in probe `--capture-cache DIR`, file format v2 with a header
+    SHA-256. Its key binds the executable, the runtime libraries, and the
+    x86 FMA/FMA4/AVX2 features and `GLIBC_TUNABLES` that select glibc's
+    math variants.
+
+An independent read-only review of the combined change found no must-fix
+defect. Its should-fix and optional findings were fixed:
+- VkFFT table-allocation failures now take the `workspace` fallback;
+- the one-ray switch follows the library default through the GUI and the
+  probe;
+- the capture writer's buffers are charged in the generation preflight;
+- the capture key binds the math dispatch;
+- the dense session's receipt takes its FFT session's plan and cache
+  figures;
+- the device-test procedure no longer claims a device coarse-session test.
+
+**Local checks.** Ryzen 5 PRO 5650U, Radeon RADV RENOIR 1002:1638, Mesa
+25.0.7, no NVCC:
+
+| Check | Outcome |
+| --- | --- |
+| `./build.sh test triad` and `./build.sh test fast` on the shared checkout (`build/dev`) | 51 of 51 and 72 of 72, both before and after the review fixes. |
+| Device-enabled tree (`-DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON`): triad label, fast label, `gui_robust_gpu*` | Before the gate and the review fixes: 55 of 55, 72 of 72 and 4 of 4. The triad label includes the six emulated OpenCL tests (two deferred) and `triad_vulkan_segmented`. With the gate: `triad_vulkan*` and `gui_robust_gpu*`, 9 of 9. After the review fixes: the triad label 55 of 55 and `gui_robust_gpu*` 4 of 4, and a `--capture-cache` store-and-reuse round trip of the severe capture reported `key_math_dispatch`. A syntax-only compile of the OpenCL NVFP4 branch of the Vulkan backend, which no local build compiles, passed. |
+| CPU admissions against `b3c7c48f`: severe `b4d8fa5a…` at 24 and 4 workers, quiet `2b9ca9df…` and stable `eaa4ae2a…` at 24 | Every result, decision, policy and slot-work field identical. Differences only in RAM-sized limits, source identity, `channel_workspace_bytes` (+1.2 MB with lanes) and new keys. |
+| Automatic Vulkan slot on the Radeon against `b3c7c48f` | Every proposal, evidence value and decision identical. 156 segmented calls declined as `unqualified-device`. Coarse `retained_bytes` 2,179,592 → 607,384 (DoublePlan trim). Slot quote +32,768 B (larger shader cache). |
+| Explicit `--vulkan-segmented-timing device` on the Radeon | 72 Hz/5× control `af364b67…`: 0 differing fields against native, 8,075,106 inverse FFTs (the CUDA pod's grid). 72 Hz/1× HF Worst `7e8ef8fa…`: two of eight near-tied proposals changed (clock siblings 0.0003 ppm apart), evidence within 2.2e-8, same decision. FP64-reference rank error 3.4–3.9e-8 RMS against native 1.7–2.9e-8. |
+| Emulation | Coarse synthesis byte-identical on 14 geometries. FP32 mapper within 9.1e-7 of a lane's peak. FP32 tiles within 7.5e-7. FP32 partial rescoring within 1.8e-7. One-ray columns equal to the two-ray bank's first-ray columns. Weak-arrival FP4 frontier: 91 of 93 kept for one ray, 83 of 83 for two. |
+| Simulator | 4,000 configuration-variant digests byte-identical to `b3c7c48f`, including the forced library-sampler path. ThreadSanitizer clean. |
+
+**Local timing.** Each cell is three alternated pairs on the 5650U, each run
+started only below 0.75 CPUs of other work.
+- Reference `b3c7c48f`: probe `00f76284…`.
+- Candidate: the combined tree before the review fixes, probe `ce435097…`. The
+  review fixes touch none of the timed paths.
+
+Times are in seconds, reference → candidate:
+
+| Capture, workers | Simulator | Coarse | Fine | Slot |
+| --- | --- | --- | --- | --- |
+| Severe, 24 † | 0.691–0.783 → 0.632–0.678 | 4.909–4.950 → 4.926–5.185 | 2.978–3.017 → 2.986–3.047 | 7.897–7.940 → 7.916–8.237 |
+| Stable, 24 † | 0.363–0.399 → 0.376–0.419 | 4.851–5.004 → 4.857–5.198 | 2.838–2.871 → 2.802–2.911 | 7.725–7.845 → 7.772–8.056 |
+| Quiet, 24 | 0.327–0.343 → 0.303–0.318 | 4.878–4.921 → 4.916–4.976 | 2.900–2.986 → 2.859–2.969 | 7.786–7.875 → 7.793–7.888 |
+| Severe, 12 | 0.579–0.587 → 0.522–0.531 | 4.625–4.766 → 4.576–4.655 | 2.854–2.899 → 2.881–2.904 | 7.482–7.638 → 7.484–7.539 |
+| Stable, 12 | 0.303–0.311 → 0.295–0.303 | 4.586–4.623 → 4.519–4.541 | 2.708–2.892 → 2.722–2.741 | 7.297–7.509 → 7.263–7.280 |
+| Severe, 4 | 0.843–0.907 → 0.856–0.870 | 6.520–6.764 → 6.465–6.611 | 3.732–3.774 → 3.892–3.907 | 10.297–10.499 → 10.367–10.524 |
+
+† Some runs in these cells had up to one CPU of other work; treat them as
+indicative.
+
+Predeclared rule: a change counts as established only if all three pairs agree
+in direction and the median moves by more than 3%.
+
+**Simulator.** The staged chains cut the simulator phase on the severe
+capture by 10% at 12 workers (pairs 0.89–0.92) and on the quiet capture by
+7% at 24 (0.90–0.96). At 24 workers on the severe capture the drop was
+2–19%, median 8%. The stable capture gained 1–5% at 12 workers, which does
+not meet the rule. Four workers were unchanged.
+
+**Receiver.** The CPU route changed no slot time by the rule, at any worker
+count. That was expected: the large CPU restructures act beside a device
+bank or on device routes.
+
+At four workers the fine stage was 3.1–4.7% slower in all three pairs. Coarse
+was 1.4% faster, and the complete slot moved +0.2% to +1.6%, which does not
+meet the rule. A predeclared bisect at four workers found:
+- The CPU-restructure track alone reproduced it: fine 4–6% slower, slot 0.7–1.5%.
+- Without the Gaussian null skip, timing was the same as the candidate.
+- A placebo function in the fine source moved fine by 0.2–1.5%.
+- `b3c7c48f` plus only the track's fine-stage files kept the old fine time.
+
+So the shift follows the track's coarse-side change. On the CPU route that
+change is the skipped second finiteness scan and the shared serial filter
+code; it was not split further. The
+Gaussian skip gave no measurable fine gain on this capture. Complete slots at
+four workers were 0.2–1.6% slower in 9 of 9 pairs across the three
+comparisons. That is below the threshold and is left unattributed. Recheck it
+in the backlog-interval measurement.
+
+**Radeon, explicit Vulkan segmented route.** The 72 Hz/1× HF Worst slot took
+25.9–26.3 s against 23.7–23.8 s native over two alternated pairs. The
+varying coarse stage took 22.2–22.5 s against 20.2–20.3 s, using 29 CPU-s
+against 258. There were 156 device sessions, with no declines and no
+fallbacks.
+
+Per workspace, the stage took 0.22, 0.79 and 0.76 s on the Vega against 0.20,
+0.62 and 0.36 s on twelve CPU threads, for the 16k/4,096-arrival,
+16k/10,553-arrival and 32k shapes.
+
+**Open gates, all on one full RTX PRO 6000 Blackwell with MIG off:**
+- NVCC/`ptxas` with no spills in `coarse_warp_fir`.
+- The device component tests.
+- Defaults identical to `b3c7c48f`.
+- Vulkan segmented speed and agreement against native on the 72 Hz/5× and
+  60 Hz/1× controls, before `automatic_segmented_qualified` is set.
+- FP32-kernel speed and paired decisions, before their defaults flip.
+- One-ray dense against FFT cost.
+- The backlog-interval throughput check of the CPU restructures.
+- Multi-owner behaviour of the segmented lease and its plan-time queue lock.
+
+The same day, the [Blackwell qualification](#blackwell-qualification-of-the-offload-routes--20-november-2026)
+closed the compile, component, defaults, segmented, FP32 and one-ray gates
+and turned those routes on, and a 12-slot pod backlog measured the CPU
+restructures' service gain. The multi-owner lease behaviour and a local
+backlog-interval check remain open.
+
+On the Radeon, the explicit segmented route needs about a ninth of the
+process CPU at a 10% slower single slot: 29 against 258 CPU-s on the idle
+host's 72 Hz/1× slot, and 260 against 2,860 CPU-s on the loaded host's
+72 Hz/5× control. Automatic mode keeps the native scorer there because a
+single slot is faster. Under the complete-service objective, a multi-owner
+backlog measurement should decide whether the freed CPU serves other slots
+better.
+
+**Evidence.** `local-evidence/gpu-offload-20261120/` holds:
+- the Radeon segmented receipts, with their argument files for the device
+  steps;
+- the timing rows, their predeclared plan and the bisect;
+- the probe hashes;
+- the test outcomes.
+
+Remove it when the Blackwell checks above are recorded.
+
+### Blackwell qualification of the offload routes — 20 November 2026
+
+**Device.** One full RTX PRO 6000 Blackwell Server Edition: 97,887 MiB,
+compute capability 12.0, driver 595.112.07, MIG disabled. The host was an
+AMD EPYC 9335 with a 13.6-CPU quota, GNU 13.3.0 and NVCC 12.8. The pod built
+both trees with the same toolchain:
+- the reference `b3c7c48f`, probe `6b106c3e…`, from `git archive`;
+- the candidate, the working tree of the
+  [GPU offload survey](#gpu-offload-survey-and-gated-device-routes--20-november-2026),
+  probe `5fbbc77e…`, with the three gated routes off;
+- the final tree, with those routes on, probe `6cbe459f…`.
+
+The predeclared plan set a pass rule for each default.
+
+**Compile and component gates.**
+- NVCC built all 26 OpenCL NVFP4 entries.
+- `ptxas` for `sm_120a`:
+  - `coarse_warp_fir`: 235 registers, no spills.
+  - `coarse_fp4_scores`: 106 registers, no spills.
+  - Every kernel ran without spills.
+- `test_triad_opencl_nvfp4`, `test_triad_opencl_fine_session`, and
+  `test_triad_vulkan` in its default, `--segmented`, `--workspace-admission`
+  and `--host-scoring` modes all passed on the device.
+- The coarse session leases were 156,979,456 and 115,196,416 bytes for two
+  rays and one.
+- Both shared-map synthesis lines reported their four columns identical
+  when alone with their map.
+- Synthesis worst-column errors were 3.9e-7 to 9.1e-7, and one-ray banks
+  matched the two-ray first rays.
+- FP32 tiles were within 7.5e-7 of native. FP32 statistics were within
+  4.2e-6 of the FP64 kernels for FP4 and 1.8e-7 for the FFT, and pressure
+  within 2.1e-7.
+- FP32 partial rescoring was within 4.4e-8.
+- FP32 fine evidence was within 5.5e-9 of the FP64 kernels.
+- Weak-arrival frontiers kept 91 of 93 arrivals for one ray and 83 of 83
+  for two, as in emulation.
+- Segmented ranks agreed with the native scorer within 1.9e-7 of the peak.
+- The selection test's broad shape lay outside the qualified envelope, so a
+  qualified device declined it and the test failed. The test now uses a
+  radius of 512. With admission on, it reported a qualified device that
+  scored on the device; with admission off, it declined as before.
+
+**Defaults unchanged, reference against candidate.** 36 automatic and 9
+explicit dense-route admissions:
+- severe, quiet and stable at 24 workers in both orders;
+- 4 workers;
+- severe and stable at 12 and 1 workers.
+
+They had identical bit evidence, decisions and capture hashes
+(`b4d8fa5a…`, `2b9ca9df…`, `eaa4ae2a…`). The restructured kernels and host
+stages cut the automatic coarse stage from 0.052–0.064 s (one run 0.125 s)
+to 0.021–0.031 s.
+The slot went from 0.108–0.21 s to 0.077–0.107 s at 24 workers and from
+0.126–0.152 s to 0.089–0.097 s at four. On the explicit route with device
+intervals:
+- lane rendering: 6.9 → 1.9 ms;
+- warp and FIR: 8.6 → 7.2 ms;
+- dispatches: 34 → 22.
+
+The simulator was within run-to-run noise, 0.19–0.33 s at 24 workers on
+both trees.
+
+A 12-slot backlog (`6295fc3d…`) completed every slot in both trees.
+Receiver service went from 0.831–0.835 s to 0.706–0.708 s at 24 workers and
+from 1.286 to 1.094 s at four, with no backpressure retries.
+
+**Vulkan segmented timing.**
+- Explicit device route against native, same candidate binary:
+  - 72 Hz/5× control (`af364b67…`): the varying coarse stage took 5.7 s
+    against 46.3 s. The slot took 20.7 s against 59.9 s. Proposals,
+    evidence and the quiet decision were identical.
+  - 72 Hz/1× HF Worst (`7e8ef8fa…`): 0.59 s against 4.58 s, with the same
+    decision. Some proposals changed, the same near-tied clock siblings as
+    on the Radeon, and evidence moved by at most 2.2e-8 relative.
+- With automatic admission on, `--backend gpu` on the 72 Hz/5× control:
+  - 156 device sessions, no declines and no fallbacks.
+  - Slots of 18.4 and 20.5 s against 59.0 s with admission off, and
+    evidence identical.
+  - The 72 Hz/1× slot's shapes lie outside the CUDA-qualified envelope, so
+    all 156 calls stayed native as `unqualified-shape`.
+  - The matched fixtures were unchanged.
+
+**FP32 kernels.** Same candidate binary, explicit route, FP64 against FP32
+kernels:
+- Device mapping: 24.3 → 5.1 ms.
+- Tile rendering: 6.0 → 2.5 ms.
+- Fine device span: 46.0 → 34.7 ms.
+- Rescoring: 2.64 → 0.89 ms.
+- Slot: 0.080–0.081 s → 0.061–0.063 s.
+
+Thirty-four paired admissions on identical cached captures had no changed
+decision or bit: the 12 severe seeds 950201–950212, 20 stable inputs at −88
+to −76 dBm/Hz, and the quiet slot. The five-slot message verified its
+message and physical quiet under both kernels.
+
+**One-ray dense route.**
+- A 36 Hz Spread None fixture (423 arrivals, 641 rows, 3 frequencies):
+  - The candidate's FFT route took 0.21–0.33 s in coarse and the reference
+    0.42 s, against 0.012–0.013 s dense at 24 workers.
+  - At four workers: 0.34 s against 0.013 s.
+  - Seven seed pairs kept every decision and bit.
+- The GPSDO/IC-7100 3.6 Hz plan (3,377 arrivals, 35,478,154,140 dense rows)
+  took 27.1 s dense against 93.7 s on the reference FFT route, with the same
+  decision. FP4 products took 11.3 s and FP64 rescoring 12.7 s of it.
+
+All three rules held. The defaults changed:
+- `automatic_segmented_qualified`;
+- `VulkanReceiverOptions::opencl_fine_fp32`;
+- `opencl_coarse_fp32_rescore`;
+- `opencl_coarse_one_ray`.
+
+The probe's unstated `--opencl-fine-map` and `--opencl-coarse-rescore` now
+follow those defaults where the route runs the kernels, and
+`tools/triad_native.py` accepts them on the automatic route.
+
+**Final tree against the reference, automatic route.** 43 paired
+admissions:
+- the matched severe, quiet and stable fixtures at 24 workers in both
+  orders, and severe and stable at four;
+- the 12 severe seeds;
+- the 20 stable edge inputs;
+- three one-ray seeds.
+
+They had equal decisions, bits and capture hashes. Slot times, reference →
+final:
+
+| Capture | Slot (s) |
+| --- | --- |
+| Severe, 24 workers | 0.109–0.114 → 0.060–0.068 |
+| Quiet, 24 workers | 0.132–0.133 → 0.066–0.067 |
+| Stable, 24 workers | 0.106–0.111 → 0.061–0.064 |
+| Severe, 4 workers | 0.131 → 0.091 |
+| Stable, 4 workers | 0.131 → 0.082 |
+| One-ray 36 Hz, 24 workers | 0.231–0.257 → 0.053–0.060 |
+
+The five-slot message's receiver service took 0.393 s against 0.213 s and
+verified message and physical quiet in both. Under automatic selection:
+- the 72 Hz/5× control took 19.7 s;
+- the IC-7100 plan took 19.2 s in coarse, with FP32 partial rescoring;
+- the matched fixtures used FP32 mapping on 215,832 columns and FP32 partial
+  rescoring on all peaks.
+
+The final tree's device tests passed again. Locally with the flipped
+defaults, `./build.sh test triad` and `./build.sh test fast` passed 51 of 51
+and 72 of 72. On the Radeon, `triad_vulkan*`, `gui_robust_gpu*` and
+`triad_receiver_probe` passed 10 of 10. There, automatic segmented
+selection still declines as `unqualified-device`, and the FP32 and one-ray
+routes are OpenCL-only.
+
+**Limits.**
+- One pod, one or two runs per timing cell. The host differs from earlier
+  records, so compare within this record.
+- RTX 5090, RTX 4090-class and other generations remain unmeasured. They
+  keep the native segmented scorer, and have no FP4 dense or resident
+  route.
+- The multi-owner cost of the segmented plan-time queue lock and the
+  non-blocking lease is unmeasured.
+- Proposal changes at near-ties remain possible on explicit `device`
+  segmented runs outside the envelope.
+- The IC-7100 plan's FP64 rescoring was half its dense time. FP32 partial
+  rescoring cut the coarse stage from 27 s to 19 s.
+
+**Evidence.** The pod ran 0.47 h, was terminated and was verified absent.
+`local-evidence/gpu-offload-20261120/blackwell/` holds:
+- the plan;
+- the device test outputs;
+- the `ptxas` and SASS counts;
+- the phase logs;
+- the binary hashes.
+
+Remove it with the rest of that directory when a later device comparison
+supersedes these results.
+
 ## Bounded 2 mW HF-FHSS investigation — 18 November 2026
 
 The [HF operating results](indexes/robust.md#low-power-hf-alarm-results)

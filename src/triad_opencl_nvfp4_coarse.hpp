@@ -29,9 +29,10 @@ struct OpenClCoarseShape {
 
 struct OpenClCoarseWork {
     std::uint64_t upload_bytes = 0, download_bytes = 0, dispatches = 0, blocking_transfers = 0;
-    // Issued real multiply-adds include the padded inner extent and the
-    // arrivals beyond the public window in the last block. Useful ones are
-    // the public score rows times their eight real products per sample.
+    // Issued real multiply-adds include the padded inner extent, the
+    // arrivals beyond the public window in the last block and the unused
+    // columns of a last bank tile. Useful ones are the public score rows
+    // times their four real products per ray and sample.
     std::uint64_t issued_products = 0, useful_products = 0;
     std::uint64_t score_rows = 0, rescored_peaks = 0;
     std::uint64_t rendered_samples = 0, warped_samples = 0, filtered_rows = 0;
@@ -62,7 +63,8 @@ public:
     void synthesize_bank(const CoarseTemplateSource&, std::span<CoarseTemplateGram>, OpenClCoarseWork&,
                          std::stop_token = {});
     // Inverse holds the first, second and complex cross coefficients of each
-    // workspace's quadratic form. Variance divides every score.
+    // workspace's quadratic form. A one-ray form has the first alone and the
+    // others zero. Variance divides every score.
     void prepare(std::span<const std::complex<double>> observation, std::span<const std::array<double, 4>> inverse,
                  double projected_rate_hz, double variance, OpenClCoarseWork&, std::stop_token = {});
     // Output is [workspace][frequency]. Scores are the FP32 rescored values

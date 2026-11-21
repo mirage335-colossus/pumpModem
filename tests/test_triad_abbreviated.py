@@ -4,6 +4,7 @@ import copy
 import contextlib
 import io
 import json
+import re
 import subprocess
 import tempfile
 import sys
@@ -14,7 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/"tools"))
 import triad_abbreviated as abbreviated
 from triad_abbreviated import (analyze, log_interval, policy, validate_baseline, stream_unit,
                               stream_batch, regression_batch_list, KERNELS, SCHEMA)
-from triad_native import NativeProbe, ProbeError, runtime_identity, validate_receipt
+from triad_native import (NativeProbe, OPENCL_COARSE_FALLBACK_REASONS, ProbeError, runtime_identity,
+                          validate_receipt)
 
 
 def device_receipt():
@@ -680,6 +682,30 @@ class AbbreviatedTests(unittest.TestCase):
                     precision="fp32_fft_fp64_coordinates_and_scores_native_fir_"
                               "opencl_resident_nvfp4_fine_mixed_native_fine")
         validate_receipt(receipt, command="message", backend="vulkan", returncode=0)
+        # The default FP64 kernels map every column and render every tile;
+        # the FP32 kernels are stated and named the same way.
+        named = copy.deepcopy(receipt)
+        named["identity"]["backend_receipt"].update(mapped_columns=states * 4,
+                                                    opencl_resident_fp64_mapped_columns=states * 4,
+                                                    opencl_resident_fp64_rendered_tiles=12)
+        validate_receipt(named, command="message", backend="vulkan", returncode=0)
+        single = copy.deepcopy(receipt)
+        single["identity"]["requested_opencl_fine_map"] = "fp32"
+        single["identity"]["backend_receipt"].update(mapped_columns=states * 4,
+                                                     opencl_resident_fp32_mapped_columns=states * 4,
+                                                     opencl_resident_fp32_rendered_tiles=12)
+        validate_receipt(single, command="message", backend="vulkan", returncode=0)
+        for source, patch, identity in ((named, {"opencl_resident_fp64_mapped_columns": 1}, {}),
+                                        (named, {"opencl_resident_fp32_rendered_tiles": 1}, {}),
+                                        (named, {}, {"requested_opencl_fine_map": "fp32"}),
+                                        (single, {}, {"requested_opencl_fine_map": "fp64"}),
+                                        (single, {}, {"requested_vulkan_fine_projection": "automatic"}),
+                                        (named, {}, {"requested_opencl_fine_map": "fp16"})):
+            wrong = copy.deepcopy(source)
+            wrong["identity"]["backend_receipt"].update(patch)
+            wrong["identity"].update(identity)
+            with self.subTest(arithmetic=(patch, identity)), self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="message", backend="vulkan", returncode=0)
         for corrupt in ({"opencl_resident_fine_blocks": 1}, {"opencl_resident_fine_blocks": 33},
                         {"opencl_resident_fine_blocks": 129}, {"opencl_resident_keyed_lanes": 0},
                         {"opencl_resident_keyed_lanes": 13}, {"opencl_resident_rendered_tiles": 0},
@@ -721,6 +747,18 @@ class AbbreviatedTests(unittest.TestCase):
             opencl_resident_window_blocks=2, opencl_resident_reduced_windows=2)
         validate_receipt(reduced, command="message", backend="vulkan", returncode=0)
 
+    def test_opencl_coarse_fallback_reasons_match_native_receipt(self):
+        # The validator's names are the native receipt's, which a new reason
+        # would otherwise make every Vulkan receipt fail.
+        header = (Path(__file__).resolve().parents[1] / "src/triad_receiver_bulk.hpp").read_text()
+        match = re.search(r"std::array<std::string_view, (\d+)> opencl_coarse_fallback_reasons\{(.*?)\};",
+                          header, re.S)
+        self.assertIsNotNone(match)
+        names = re.findall(r'"([^"]+)"', match.group(2))
+        self.assertEqual(len(names), int(match.group(1)))
+        self.assertEqual(len(set(names)), len(names))
+        self.assertEqual(set(names), OPENCL_COARSE_FALLBACK_REASONS)
+
     def test_vulkan_dense_coarse_receipt_partitions_rows_and_bounds_leases(self):
         dense_only = dict(vulkan_vendor_id=0x10de, vulkan_fp32_score_rows=0, vulkan_dispatches=0,
                           vulkan_arrival_peak_rows=0, vulkan_arrival_peak_values=0, fft_calls=0,
@@ -744,6 +782,37 @@ class AbbreviatedTests(unittest.TestCase):
                                         work={"route": "frequency_tiles", "native_fallback_reason": ""})
             validate_receipt(receipt, command="continuation", backend=backend, returncode=0,
                              expected_require_accelerator=True)
+            # Named rescoring accumulations partition the rescored peaks. FP64
+            # accumulation is the control; FP32 partial sums, the default of
+            # the explicit nvfp4 and automatic routes, carry their own label.
+            named = copy.deepcopy(receipt)
+            named["identity"]["backend_receipt"]["opencl_coarse_rescore_fp64_peaks"] = 4
+            validate_receipt(named, command="continuation", backend=backend, returncode=0,
+                             expected_require_accelerator=True)
+            partial = copy.deepcopy(receipt)
+            partial["identity"]["requested_opencl_coarse_rescore"] = "fp32"
+            partial["identity"]["backend_receipt"].update(
+                opencl_coarse_rescore_fp32_partial_peaks=4,
+                precision="nvfp4_dense_coarse_fp32_partial_rescored_peaks_native_fir_and_fine")
+            wrongs = [(named, {"opencl_coarse_rescore_fp32_partial_peaks": 1}, {}),
+                      (named, {}, {"requested_opencl_coarse_rescore": "fp32"}),
+                      (named, {"opencl_coarse_rescore_fp64_peaks": 3}, {}),
+                      (partial, {"precision": "nvfp4_dense_coarse_fp32_rescored_peaks_native_fir_and_fine"}, {}),
+                      (partial, {"opencl_coarse_rescore_fp64_peaks": 1}, {})]
+            validate_receipt(partial, command="continuation", backend=backend, returncode=0,
+                             expected_require_accelerator=True)
+            wrongs.append((named, {"precision": "nvfp4_dense_coarse_fp32_partial_rescored_peaks_native_fir_and_fine"},
+                           {}))
+            if not automatic:
+                # An explicit request always admits one-ray sessions.
+                wrongs.append((named, {}, {"requested_opencl_coarse_one_ray": True}))
+            for source, patch, identity in wrongs:
+                wrong = copy.deepcopy(source)
+                wrong["identity"]["backend_receipt"].update(patch)
+                wrong["identity"].update(identity)
+                with self.subTest(backend=backend, rescore=(patch, identity)), self.assertRaises(ProbeError):
+                    validate_receipt(wrong, command="continuation", backend=backend, returncode=0,
+                                     expected_require_accelerator=True)
             wrong_patches = [{"opencl_coarse_rescored_peaks": 0}, {"opencl_coarse_useful_products": 1200},
                              {"opencl_coarse_score_rows": 9}, {"vulkan_peak_owner_lease_bytes": 0},
                              {"vulkan_peak_owner_lease_bytes": (4 << 30) + 1}, {"opencl_coarse_dispatches": 0},
@@ -785,6 +854,33 @@ class AbbreviatedTests(unittest.TestCase):
                                  selected_accelerator_backend="vulkan")
         mixed["phases"][0].update(name="coarse_tiles", work={"route": "frequency_tiles", "native_fallback_reason": ""})
         validate_receipt(mixed, command="continuation", backend="gpu", returncode=0, expected_require_accelerator=True)
+        # Each fallback names one reason.
+        reasons = {key: 0 for key in OPENCL_COARSE_FALLBACK_REASONS}
+        named = copy.deepcopy(mixed)
+        named["identity"]["backend_receipt"]["opencl_coarse_fallback_counts"] = dict(
+            reasons, **{"one-ray-unqualified": 1})
+        validate_receipt(named, command="continuation", backend="gpu", returncode=0, expected_require_accelerator=True)
+        # One-ray admission is a choice of automatic GPU selection only.
+        admitted = copy.deepcopy(named)
+        admitted["identity"]["requested_opencl_coarse_one_ray"] = True
+        admitted["identity"]["backend_receipt"]["opencl_coarse_fallback_counts"] = dict(reasons, **{"dense-cost": 1})
+        validate_receipt(admitted, command="continuation", backend="gpu", returncode=0,
+                         expected_require_accelerator=True)
+        for request in ("on", 1):
+            wrong = copy.deepcopy(admitted)
+            wrong["identity"]["requested_opencl_coarse_one_ray"] = request
+            with self.subTest(one_ray=request), self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="continuation", backend="gpu", returncode=0,
+                                 expected_require_accelerator=True)
+        missing = dict(reasons)
+        del missing["unoffered"]
+        for counts in (reasons, dict(reasons, **{"one-ray-unqualified": 2}), dict(reasons, **{"one-ray": 1}),
+                       dict(reasons, **{"few-arrivals": -1, "kernel-extent": 2}), missing):
+            wrong = copy.deepcopy(named)
+            wrong["identity"]["backend_receipt"]["opencl_coarse_fallback_counts"] = counts
+            with self.subTest(fallback_counts=counts), self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="continuation", backend="gpu", returncode=0,
+                                 expected_require_accelerator=True)
         for patch in ({"vulkan_fp32_score_rows": 16}, {"vulkan_dispatches": 0}, {"vulkan_arrival_peak_rows": 0},
                       {"vulkan_peak_owner_bytes": 0},
                       {"precision": "nvfp4_dense_coarse_fp32_rescored_peaks_native_fir_and_fine"}):

@@ -15,7 +15,9 @@
 #include <numeric>
 #include <random>
 #include <stdexcept>
+#include <span>
 #include <thread>
+#include <tuple>
 
 namespace {
 using namespace datapump;
@@ -819,6 +821,12 @@ void cold_maximum_states() {
           work.initial_affine.gaussian_updates == work.blocks * 256 * 3 * receiver_coherence_count &&
           work.cache.native_preparation_calls > 0 && !score.complete && !score.bit,
           "cold ceiling must execute actual capped emission and posterior transitions without admission");
+    // Production common nulls start at zero and stay inert, so every one is
+    // skipped and the receipt keeps the logical and executed counts apart.
+    check(work.initial_affine.gaussian_null_skips == work.blocks * 256 * receiver_coherence_count &&
+          work.adaptive.gaussian_updates > 0 &&
+          3 * work.adaptive.gaussian_null_skips == work.adaptive.gaussian_updates,
+          "fine receipts must report the skipped inert common-null updates");
 
     auto fixed_extent = extent;
     fixed_extent.lanes = FineLanes::fixed_affine;
@@ -920,6 +928,13 @@ void slow_gain_coherence_is_bounded_and_normalized() {
           new_lane.positive_basis_blocks == old_lane.positive_basis_blocks &&
           new_lane.gaussian_updates == old_lane.gaussian_updates +
               slow_serial.progress.blocks * old_lane.initial_states * 3 * 2 &&
+          3 * old_lane.gaussian_null_skips == old_lane.gaussian_updates &&
+          // The additive stationary-fading pair still runs its null.
+          new_lane.gaussian_null_skips == old_lane.gaussian_null_skips +
+              (slow_serial.score.affine_stationary_fading_gain ? 0 :
+                  slow_serial.progress.blocks * old_lane.initial_states * 2) &&
+          3 * slow_comparator.progress.initial_affine.gaussian_null_skips ==
+              slow_comparator.progress.initial_affine.gaussian_updates &&
           slow_serial.progress.adaptive.transition_edges == static_result.progress.adaptive.transition_edges &&
           slow_serial.progress.adaptive.basis_rows == static_result.progress.adaptive.basis_rows,
           "slow gain work must reuse affine basis statistics without expanding adaptive search");
@@ -1442,6 +1457,134 @@ void two_tap_factor_matches_moderate_dense_likelihood() {
               std::abs(means[2] - m0) < 1e-13 && std::abs(means[3] - m1) < 1e-13,
               "native factor and legacy dense interfaces must agree with a separate full-rank proper-complex solve");
     }
+}
+
+// The receiver's entries skip a provably inert common null. Signal
+// hypotheses, statuses and the zero null evidence must equal the exported
+// entries bit for bit, and any input outside the proof runs the null.
+// Inside the proof the null must actually be skipped: its mean and prior
+// stay as passed while the exported entry still predicts them.
+void inert_null_skip_matches_exported_updates() {
+    using C = Complex;
+    std::mt19937_64 random(20261120);
+    std::normal_distribution<double> normal;
+    std::uniform_real_distribution<double> unit(0., 1.);
+    const auto same = [](const auto& a, const auto& b) {
+        return std::equal(a.begin(), a.end(), b.begin(), b.end(), [](double x, double y) {
+            return std::bit_cast<std::uint64_t>(x) == std::bit_cast<std::uint64_t>(y);
+        });
+    };
+    const auto values = [](const std::vector<C>& data, std::size_t first, std::size_t count) {
+        return std::span(reinterpret_cast<const double*>(data.data() + first), 2 * count);
+    };
+    std::size_t skipped_trials = 0, predicted_nulls = 0;
+    for (std::size_t trial = 0; trial < 400; ++trial) {
+        const bool factor = trial % 2;
+        const std::size_t taps = factor ? 2 : 1, models = 1 + trial % 5, blocks = 1 + trial / 2 % 2;
+        // Every fourth trial perturbs one input outside the inert proof.
+        const auto outside = trial % 4 == 3 ? trial / 4 % 7 : 7;
+        std::vector<C> r(blocks * 3 * taps), g(blocks * 3 * taps * taps);
+        for (std::size_t block = 0; block < blocks; ++block) {
+            for (std::size_t h = 1; h < 3; ++h) {
+                std::vector<C> basis(2 * taps);
+                for (auto& value : basis) value = {normal(random), normal(random)};
+                for (std::size_t row = 0; row < taps; ++row) {
+                    r[(block * 3 + h) * taps + row] = {normal(random) * 3, normal(random) * 3};
+                    for (std::size_t col = 0; col < taps; ++col)
+                        g[((block * 3 + h) * taps + row) * taps + col] = (trial % 8 == 5 && row != col) ? C{} :
+                            std::conj(basis[2 * row]) * basis[2 * col] +
+                            std::conj(basis[2 * row + 1]) * basis[2 * col + 1];
+                }
+            }
+        }
+        std::vector<double> transitions(4 * blocks * models);
+        for (std::size_t i = 0; i < blocks * models; ++i) {
+            const auto decay = trial % 16 == 1 ? 1. : std::exp(-unit(random) * 3);
+            transitions[4 * i] = decay * decay;
+            transitions[4 * i + 1] = -std::expm1(2 * std::log(decay));
+            transitions[4 * i + 2] = decay;
+        }
+        std::array<double, 2> power{1. / static_cast<double>(taps), 1. / static_cast<double>(taps)};
+        std::vector<C> means(models * 3 * taps), state(models * 3 * taps * taps);
+        std::vector<double> scores(models * 3), diagnostics(2 * models);
+        for (std::size_t model = 0; model < models; ++model) {
+            for (std::size_t h = 0; h < 3; ++h) {
+                for (std::size_t tap = 0; tap < taps; ++tap) {
+                    state[(model * 3 + h) * taps * taps + tap * taps + tap] =
+                        taps == 2 ? std::sqrt(power[tap]) : power[tap];
+                    if (h) means[(model * 3 + h) * taps + tap] = {normal(random), normal(random)};
+                }
+                if (h) scores[model * 3 + h] = normal(random);
+            }
+        }
+        switch (outside) {
+        case 0: r[taps - 1] = {1e-300, 0.}; break;
+        case 1: g[0] = -1e-300; break;
+        case 2: means[0] = {0., 1e-300}; break;
+        case 3: transitions[1] = 1. + 1e-15; break;
+        case 4: transitions[2] = std::numeric_limits<double>::infinity(); break;
+        case 5: scores[0] = -0.; break;
+        case 6: state[0] = taps == 2 ? C{1e200, 0.} : C{-1e-300, 0.}; break;
+        default: break;
+        }
+        std::vector<unsigned> ranks(blocks);
+        for (auto& rank : ranks) rank = static_cast<unsigned>(trial % 3);
+        const auto run = [&](bool receiver) {
+            auto m = means, p = state;
+            auto score = scores, diagnostic = diagnostics;
+            bool skipped = false;
+            const auto in_r = reinterpret_cast<const double*>(r.data());
+            const auto in_g = reinterpret_cast<const double*>(g.data());
+            const auto out_m = reinterpret_cast<double*>(m.data());
+            const auto out_p = reinterpret_cast<double*>(p.data());
+            int status = 0;
+            if (factor) {
+                status = receiver ?
+                    gaussian_signal_factor2_update(1, models, blocks, 0, 1, in_r, in_g, ranks.data(), power.data(),
+                        transitions.data(), out_m, out_p, score.data(), diagnostic.data(), skipped) :
+                    triad_gaussian_factor2_update_v1(1, models, blocks, 0, 1, in_r, in_g, ranks.data(), power.data(),
+                        transitions.data(), out_m, out_p, score.data(), diagnostic.data());
+            } else {
+                status = receiver ?
+                    gaussian_signal_update(1, 1, models, blocks, 0, 1, in_r, in_g, power.data(), transitions.data(),
+                        out_m, out_p, score.data(), diagnostic.data(), skipped) :
+                    triad_gaussian_update_v1(1, 1, models, blocks, 0, 1, in_r, in_g, power.data(), transitions.data(),
+                        out_m, out_p, score.data(), diagnostic.data());
+            }
+            return std::tuple{status, m, p, score, diagnostic, skipped};
+        };
+        const auto [status, m, p, score, diagnostic, exported_skipped] = run(false);
+        const auto [skip_status, skip_m, skip_p, skip_score, skip_diagnostic, skipped] = run(true);
+        check(status == skip_status && !exported_skipped, "inert-null entries changed a Gaussian update status");
+        if (status) continue;
+        // Every perturbation lies outside the proof; every other trial inside.
+        check(skipped == (outside == 7), "the inert-null proof accepted or rejected the wrong inputs");
+        skipped_trials += skipped;
+        for (std::size_t model = 0; model < models; ++model) {
+            if (skipped) {
+                const auto at = model * 3;
+                check(same(values(skip_m, at * taps, taps), values(means, at * taps, taps)) &&
+                      same(values(skip_p, at * taps * taps, taps * taps), values(state, at * taps * taps, taps * taps)),
+                      "a skipped common null must leave its mean and prior as passed");
+                predicted_nulls += !same(values(p, at * taps * taps, taps * taps),
+                                         values(state, at * taps * taps, taps * taps));
+            }
+            for (std::size_t h = outside == 7 ? 1 : 0; h < 3; ++h) {
+                const auto at = model * 3 + h;
+                check(same(values(m, at * taps, taps), values(skip_m, at * taps, taps)) &&
+                      same(values(p, at * taps * taps, taps * taps), values(skip_p, at * taps * taps, taps * taps)) &&
+                      same(std::span(score).subspan(at, 1), std::span(skip_score).subspan(at, 1)),
+                      "inert-null entries changed a hypothesis posterior or its evidence");
+            }
+            check(outside != 7 || (score[model * 3] == 0. && skip_score[model * 3] == 0. &&
+                                   !std::signbit(skip_score[model * 3])),
+                  "an inert common null must keep exactly zero evidence");
+        }
+        if (outside != 7) check(same(diagnostic, skip_diagnostic), "a null outside the proof must run in full");
+    }
+    // The exported entry advances these nulls, so equal signal results
+    // above are not an artefact of an unexercised skip.
+    check(skipped_trials > 0 && predicted_nulls > 0, "the inert-null skip was not exercised");
 }
 
 void two_tap_native_dc_projection_preserves_complete_scores() {
@@ -2355,6 +2498,7 @@ int main() {
         two_tap_factor_preserves_large_gram_precision();
         projected_rank_one_preserves_phased_orthogonality();
         two_tap_factor_matches_moderate_dense_likelihood();
+        inert_null_skip_matches_exported_updates();
         two_tap_native_dc_projection_preserves_complete_scores();
         tracked_span_matches_signed_correlation_without_changing_evidence();
         independent_gain_keeps_full_public_prior_and_bounded_work();

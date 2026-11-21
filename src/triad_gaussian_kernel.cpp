@@ -365,9 +365,10 @@ template<std::size_t K, bool additive=false, bool persistent_factor=false>
 Status batch(std::size_t candidates, std::size_t models, std::size_t blocks,
              std::size_t first, std::size_t stop, const double* r, const double* g,
              const double* power, const double* transitions, double* m, double* p,
-             double* scores, double* diagnostics, const unsigned* ranks = nullptr) {
+             double* scores, double* diagnostics, const unsigned* ranks = nullptr,
+             std::size_t first_hypothesis = 0) {
     constexpr bool two_tap = K == 2 && !additive;
-    for (std::size_t h = 0; h < 3; ++h) {
+    for (std::size_t h = first_hypothesis; h < 3; ++h) {
         for (std::size_t c = first; c < stop; ++c) {
             std::array<Vector<K>, 2> observations{};
             std::array<Matrix<K>, 2> grams{};
@@ -432,7 +433,76 @@ Status batch(std::size_t candidates, std::size_t models, std::size_t blocks,
     }
     return success;
 }
+// Whether every candidate's common null provably completes with success and
+// unchanged zero evidence: zero statistics, a zero mean, a bounded prior
+// that a one-tap covariance keeps nonnegative, and transitions and powers
+// in the range a decaying public channel model produces. Prediction then
+// stays finite and the observation step adds nothing, through two blocks.
+// The one-tap update and the persistent two-tap factor only.
+template<std::size_t K>
+bool inert_null(std::size_t candidates, std::size_t models, std::size_t blocks, std::size_t first,
+                std::size_t stop, const double* r, const double* g, const double* power,
+                const double* transitions, const double* m, const double* p, const double* scores) {
+    constexpr double bound = 1e100;
+    const auto bounded = [](double value) { return std::isfinite(value) && std::abs(value) <= bound; };
+    for (std::size_t i = 0; i < K; ++i)
+        if (!(power[i] >= 0. && power[i] <= bound)) return false;
+    for (std::size_t i = 0; i < 4 * blocks * models; i += 4) {
+        const auto* t = transitions + i;
+        if (!(t[0] >= 0. && t[0] <= 1. && t[1] >= 0. && t[1] <= 1. &&
+              std::abs(t[2]) <= 1. && std::abs(t[3]) <= 1.)) return false;
+    }
+    for (std::size_t c = first; c < stop; ++c) {
+        for (std::size_t block = 0; block < blocks; ++block) {
+            const std::size_t at = (block*3)*candidates+c;
+            if (!std::all_of(r+2*at*K, r+2*(at+1)*K, [](double x) { return x == 0.; }) ||
+                !std::all_of(g+2*at*K*K, g+2*(at+1)*K*K, [](double x) { return x == 0.; })) return false;
+        }
+        for (std::size_t model = 0; model < models; ++model) {
+            const std::size_t at = (model*3)*candidates+c;
+            if (scores[at] != 0. || std::signbit(scores[at]) ||
+                !std::all_of(m+2*at*K, m+2*(at+1)*K, [](double x) { return x == 0.; }) ||
+                !std::all_of(p+2*at*K*K, p+2*(at+1)*K*K, bounded) || (K == 1 && !(p[2*at] >= 0.)))
+                return false;
+        }
+    }
+    return true;
+}
 } // namespace
+
+namespace datapump::triad::v3::receiver_detail {
+
+int gaussian_signal_update(std::size_t taps, std::size_t candidates, std::size_t models, std::size_t blocks,
+                           std::size_t first, std::size_t stop, const double* r, const double* g,
+                           const double* power, const double* transitions, double* m, double* p,
+                           double* scores, double* diagnostics, bool& null_skipped) noexcept {
+    null_skipped = false;
+    if (taps != 1 || candidates == 0 || candidates > 4096 || models == 0 || models > 64 ||
+        blocks == 0 || blocks > 2 || first >= stop || stop > candidates)
+        return triad_gaussian_update_v1(taps, candidates, models, blocks, first, stop, r, g, power,
+                                        transitions, m, p, scores, diagnostics);
+    null_skipped = inert_null<1>(candidates, models, blocks, first, stop, r, g, power, transitions, m, p, scores);
+    return batch<1>(candidates, models, blocks, first, stop, r, g, power, transitions, m, p, scores,
+                    diagnostics, nullptr, null_skipped ? 1 : 0);
+}
+
+int gaussian_signal_factor2_update(std::size_t candidates, std::size_t models, std::size_t blocks,
+                                   std::size_t first, std::size_t stop, const double* r, const double* g,
+                                   const unsigned* ranks, const double* power, const double* transitions,
+                                   double* m, double* p, double* scores, double* diagnostics,
+                                   bool& null_skipped) noexcept {
+    null_skipped = false;
+    if (candidates == 0 || candidates > 4096 || models == 0 || models > 64 ||
+        blocks == 0 || blocks > 2 || first >= stop || stop > candidates ||
+        !ranks || std::any_of(ranks, ranks + blocks, [](unsigned rank) { return rank > 2; }))
+        return triad_gaussian_factor2_update_v1(candidates, models, blocks, first, stop, r, g, ranks, power,
+                                                transitions, m, p, scores, diagnostics);
+    null_skipped = inert_null<2>(candidates, models, blocks, first, stop, r, g, power, transitions, m, p, scores);
+    return batch<2, false, true>(candidates, models, blocks, first, stop, r, g, power, transitions, m, p, scores,
+                                 diagnostics, ranks, null_skipped ? 1 : 0);
+}
+
+} // namespace datapump::triad::v3::receiver_detail
 
 // Complex128 arrays are passed as interleaved real/imaginary doubles. Inputs
 // are immutable; output arrays belong to an uncommitted batch. On error they

@@ -42,7 +42,7 @@ LANE_COUNTS = (
     "states", "last_emission_states", "peak_emission_states", "peak_retained_states",
     "peak_transition_targets", "pruning_events", "states_dropped", "transition_edges",
     "merged_channel_components", "basis_calls", "basis_rows", "positive_basis_blocks",
-    "projection_modes", "gaussian_updates",
+    "projection_modes", "gaussian_updates", "gaussian_null_skips",
 )
 CACHE_GEOMETRY = ("tile_samples", "cache_limit_bytes", "dense_factor", "dense_sample_rate_hz",
                   "oversampling_ratio", "fallback_reason")

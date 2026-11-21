@@ -42,6 +42,9 @@ struct OpenClFineOptions {
     // With device tiles, submit the mappings of every this many blocks while
     // staging the next ones. Zero stages a whole batch first.
     std::size_t stream_blocks = opencl_fine_default_stream_blocks;
+    // Resident tile rendering and template mapping: the FP64 kernels, or
+    // the FP32 kernels of the same module once they are device-qualified.
+    OpenClFineArithmetic arithmetic = OpenClFineArithmetic::fp64;
 };
 
 // Fine statistics of the isolated 1500-row, 47-mode, two-path DATA geometry

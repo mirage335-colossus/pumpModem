@@ -75,8 +75,9 @@ if(BUILD_TESTING)
     add_test(NAME triad_vulkan COMMAND test_triad_vulkan)
     add_test(NAME triad_vulkan_host_scoring COMMAND test_triad_vulkan --host-scoring)
     add_test(NAME triad_vulkan_workspace_admission COMMAND test_triad_vulkan --workspace-admission)
+    add_test(NAME triad_vulkan_segmented COMMAND test_triad_vulkan --segmented)
     add_custom_target(test_triad_vulkan_host_scoring DEPENDS test_triad_vulkan)
-    set_tests_properties(triad_vulkan triad_vulkan_host_scoring triad_vulkan_workspace_admission
+    set_tests_properties(triad_vulkan triad_vulkan_host_scoring triad_vulkan_workspace_admission triad_vulkan_segmented
       PROPERTIES LABELS "triad_gpu" TIMEOUT 120 RUN_SERIAL TRUE)
   endif()
 endif()

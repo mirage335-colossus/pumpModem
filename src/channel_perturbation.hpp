@@ -77,6 +77,10 @@ public:
     static std::uint64_t memory_samples(double sample_rate,double spacing) {
         return tail_samples(sample_rate,spacing)+1;
     }
+    // The shortest lag of either delayed branch, floor(d)-1.
+    static std::uint64_t minimum_lag(double sample_rate,double spacing) {
+        return static_cast<std::uint64_t>(std::floor(lag_samples(sample_rate,spacing)))-1;
+    }
     static constexpr std::size_t maximum_random_working_bytes() {
         return 6*sizeof(triad::v3::detail::FixedGaussianProcess);
     }
@@ -174,6 +178,29 @@ public:
     }
     // The random law with excursions a reader evaluated for this sample's time.
     Complex process(Complex input,const Excursions& excursion) {return filter(input,&excursion);}
+    // The two delayed branches of the sample this filter's index-th call
+    // reads, from its history alone, as that call would form them. Another
+    // thread may evaluate them once every sample they read was filtered and
+    // while no later call overwrites one: an index below the filter's calls
+    // plus minimum_lag(), and at most the history's length ahead of the
+    // oldest one being read.
+    std::array<Complex,2> delayed_branches(std::uint64_t index) const {
+        const auto cursor=static_cast<std::size_t>(index%history_.size());
+        std::array<Complex,2> delayed{};
+        for(std::size_t m=0;m<2;++m)for(std::size_t tap=0;tap<4;++tap) {
+            const auto coefficient=delays_[m].coefficient[tap];
+            if(coefficient==Complex{})continue;
+            const auto lag=static_cast<std::size_t>(delays_[m].lag[tap]);
+            const auto at=cursor>=lag?cursor-lag:history_.size()-(lag-cursor);
+            delayed[m]+=coefficient*history_[at];
+        }
+        return delayed;
+    }
+    // The next call with its delayed branches evaluated ahead.
+    Complex process(Complex input,const std::array<Complex,2>& branches,const Excursions* excursion) {
+        history_[cursor_]=input;
+        return combine(input,{input,branches[0],branches[1]},excursion);
+    }
 private:
     Complex filter(Complex input,const Excursions* random) {
         history_[cursor_]=input;
@@ -185,6 +212,9 @@ private:
             const auto index=cursor_>=lag?cursor_-lag:history_.size()-(lag-cursor_);
             delayed[m+1]+=coefficient*history_[index];
         }
+        return combine(input,delayed,random);
+    }
+    Complex combine(Complex input,const std::array<Complex,3>& delayed,const Excursions* random) {
         // The unity path is exact; depths zero never introduce a numerical
         // filter or latency. All added paths and their complex phase remain.
         Complex output=input;

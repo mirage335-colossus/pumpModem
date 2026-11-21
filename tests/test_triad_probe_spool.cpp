@@ -1,13 +1,20 @@
+#include "triad_probe_capture_cache.hpp"
 #include "triad_probe_spool.hpp"
 
 #include <bit>
 #include <chrono>
 #include <filesystem>
+#include <cmath>
+#include <cstring>
 #include <fstream>
+#include <iterator>
 #include <iostream>
 #include <vector>
 
 namespace {
+using datapump::triad::probe::CaptureCacheReader;
+using datapump::triad::probe::CaptureCacheWriter;
+using datapump::triad::probe::CaptureRecord;
 using datapump::triad::probe::ObservationSpool;
 using Complex = ObservationSpool::Complex;
 
@@ -132,6 +139,114 @@ void retain_complete_capture() {
     rejects<std::invalid_argument>([&] { ObservationSpool long_file(1, bytes, partial_path, read_only); });
 }
 
+// A capture cache file round-trips its header and rows bit for bit, and a
+// reader rejects every changed header byte, size or validity byte, and a
+// resealed header that is not canonical.
+void capture_cache_file() {
+    namespace fs = std::filesystem;
+    struct TemporaryDirectory {
+        fs::path path = fs::temp_directory_path() / ("datapump-capture-cache-test-" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+        TemporaryDirectory() { check(fs::create_directory(path), "could not create cache test directory"); }
+        ~TemporaryDirectory() { std::error_code error; fs::remove_all(path, error); }
+    } directory;
+    constexpr std::uint64_t rows = ObservationSpool::maximum_chunk_rows + 5;
+    std::vector<Complex> samples(rows);
+    std::vector<std::uint8_t> mask(rows);
+    for (std::uint64_t i = 0; i < rows; ++i) {
+        samples[i] = std::bit_cast<Complex>(std::array<std::uint64_t, 2>{0x8000000000000000ULL + i, 0x7ff8000000000001ULL + i});
+        mask[i] = static_cast<std::uint8_t>(i % 3 != 0);
+    }
+    CaptureRecord record;
+    for (std::size_t i = 0; i < 32; ++i) { record.key[i] = static_cast<std::uint8_t>(i); record.digest[i] = static_cast<std::uint8_t>(255 - i); }
+    record.first = 7;
+    record.rows = rows;
+    record.generated = 7 + rows;
+    record.erased_samples = 3;
+    record.working_bytes = 123456;
+    record.selective_filter = true;
+    record.bounded_spread = CaptureRecord::BoundedSpread{.01, 1, 90, .5, std::nullopt, .25, -89, 88, -150, 140, 99, rows};
+    record.common_doppler = CaptureRecord::CommonDoppler{90, 1, -0.0, 89.5, 7, rows};
+    const auto encoded = record.encode();
+    const auto decoded = CaptureRecord::decode(encoded);
+    check(decoded.encode() == encoded && decoded.bounded_spread && !decoded.bounded_spread->maximum_echo_ratio &&
+          std::signbit(decoded.common_doppler->minimum_hz) && decoded.erased_samples == 3 &&
+          decoded.working_bytes == 123456, "capture cache header did not round-trip exactly");
+    // An absent value with a valid header SHA-256 is still rejected: offset
+    // 192 holds the absent maximum echo ratio.
+    {
+        auto resealed = encoded;
+        resealed[192] = 1;
+        CaptureRecord::seal(resealed);
+        rejects<std::invalid_argument>([&]{ (void)CaptureRecord::decode(resealed); });
+    }
+    const auto path = (directory.path / "a.capture").string();
+    {
+        CaptureCacheWriter writer(path + ".tmp", path, rows);
+        rejects<std::logic_error>([&]{ writer.commit(record); });
+        writer.append(std::span(samples).first(ObservationSpool::maximum_chunk_rows),
+                      std::span(mask).first(ObservationSpool::maximum_chunk_rows));
+        writer.append(std::span(samples).subspan(ObservationSpool::maximum_chunk_rows),
+                      std::span(mask).subspan(ObservationSpool::maximum_chunk_rows));
+        rejects<std::invalid_argument>([&]{ writer.append(std::span(samples).first(1), std::span(mask).first(1)); });
+        writer.commit(record);
+    }
+    check(fs::file_size(path) == record.file_bytes() && !fs::exists(path + ".tmp"), "capture cache file has another size");
+    {
+        // An abandoned writer leaves no file behind.
+        CaptureCacheWriter abandoned(path + ".tmp2", path + ".never", rows);
+    }
+    check(!fs::exists(path + ".tmp2") && !fs::exists(path + ".never"), "an incomplete capture cache file remained");
+    const auto limit = record.file_bytes();
+    const auto read_all = [&](const std::string& file, std::uint64_t byte_limit) {
+        auto reader = CaptureCacheReader::open(file);
+        check(reader.has_value(), "capture cache file did not open");
+        reader->header(record.key, record.first, rows, byte_limit);
+        std::vector<Complex> iq(rows);
+        std::vector<std::uint8_t> valid(rows);
+        for (std::uint64_t at = 0; at < rows;) {
+            const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(rows - at, ObservationSpool::maximum_chunk_rows));
+            reader->read_rows(std::span(iq).subspan(at, n), std::span(valid).subspan(at, n));
+            at += n;
+        }
+        reader->finish();
+        check(valid == mask && std::memcmp(iq.data(), samples.data(), rows * sizeof(Complex)) == 0,
+              "capture cache rows did not round-trip exactly");
+    };
+    read_all(path, limit);
+    check(!CaptureCacheReader::open(path + ".missing"), "a missing capture cache file opened");
+    rejects<std::invalid_argument>([&]{ read_all(path, limit - 1); });
+    rejects<std::invalid_argument>([&]{
+        auto reader = CaptureCacheReader::open(path);
+        auto other = record.key; other[0] ^= 1;
+        reader->header(other, record.first, rows, limit);
+    });
+    rejects<std::invalid_argument>([&]{ CaptureCacheReader::open(path)->header(record.key, record.first + 1, rows, limit); });
+    rejects<std::invalid_argument>([&]{ CaptureCacheReader::open(path)->header(record.key, record.first, rows - 1, limit); });
+    const auto original = [&] {
+        std::ifstream in(path, std::ios::binary);
+        return std::vector<char>(std::istreambuf_iterator<char>(in), {});
+    }();
+    const auto variant = [&](auto change) {
+        auto bytes = original;
+        change(bytes);
+        const auto file = (directory.path / "variant.capture").string();
+        std::ofstream(file, std::ios::binary | std::ios::trunc).write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        return file;
+    };
+    // Every header byte, among them the report fields that only the header's
+    // SHA-256 protects (erased rows at 136, workspace at 144, excess delay at
+    // 160); then a validity byte, a missing row byte and a trailing byte.
+    for (std::size_t at = 0; at < CaptureRecord::header_bytes; ++at)
+        for (const std::uint8_t bit : {std::uint8_t{0x01}, std::uint8_t{0x80}})
+            rejects<std::invalid_argument>([&]{ read_all(variant([&](auto& b){ b[at] ^= static_cast<char>(bit); }), limit); });
+    rejects<std::invalid_argument>([&]{
+        read_all(variant([&](auto& b){ b[CaptureRecord::header_bytes + 2 * CaptureRecord::row_bytes - 1] = 2; }), limit); });
+    rejects<std::invalid_argument>([&]{ read_all(variant([](auto& b){ b.pop_back(); }), limit); });
+    rejects<std::invalid_argument>([&]{ read_all(variant([](auto& b){ b.push_back(0); }), limit + 1); });
+    rejects<std::invalid_argument>([&]{ read_all(variant([](auto& b){ b.resize(100); }), limit); });
+}
+
 #ifdef DATAPUMP_TEST_SPOOL_IO_WRAPPERS
 enum class Fault { none, write, read, flush, seek };
 Fault pending = Fault::none;
@@ -203,6 +318,7 @@ int main() {
     try {
         roundtrip_and_limits();
         retain_complete_capture();
+        capture_cache_file();
 #ifdef DATAPUMP_TEST_SPOOL_IO_WRAPPERS
         short_io_is_terminal();
 #endif

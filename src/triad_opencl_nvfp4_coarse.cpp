@@ -4,8 +4,10 @@
 #include "triad_receiver_bulk.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <complex>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -21,8 +23,16 @@ constexpr std::size_t ring_tiles = 5, stream_slack = 4;
 constexpr std::size_t tile_products = 16 * 8 * tile_inner, block_warps = local_size / 32;
 constexpr std::size_t pulse_samples = 8 * 256 + 1, source_parameters = 16, column_parameters = 5;
 // One epoch of the canonical bank has two lanes and their clock and ray
-// columns. Larger staging only lets more of them share a dispatch.
-constexpr std::size_t maximum_raw_batch_bytes = std::size_t{128} << 20, maximum_raster_lanes = 2;
+// columns. A raster group of four lanes holds two epochs: their columns share
+// a dispatch, a sample's lane-independent terms are rendered once for the
+// four lanes, and each map's FP64 warp terms serve up to four columns.
+// Larger staging only lets more of them share a dispatch.
+constexpr std::size_t maximum_raw_batch_bytes = std::size_t{128} << 20, maximum_raster_lanes = 4;
+// The columns of one map in a warp set, as coarse_set_columns in the kernels.
+constexpr std::size_t set_columns = 4;
+constexpr std::uint32_t no_column = std::numeric_limits<std::uint32_t>::max();
+// The warp keeps a sample's stencil center in 32 bits.
+constexpr std::size_t maximum_source_rows = std::size_t{std::numeric_limits<std::int32_t>::max()} - 2;
 // The FIR stage of one tile of output rows, in complex pairs.
 constexpr std::size_t fir_stage_pairs = 6016;
 constexpr double normalized_max = 6. * 448.;
@@ -33,7 +43,7 @@ static_assert(sizeof(CoarseBulkPeaks) == 40);
 
 enum Buffer { bank, bank_peaks, packed_bank, observation, packed_observation, observation_scales,
               pack_parameters, score_parameters, coefficients, inverse, scores, frontier, rotated,
-              chips, pulse, source, columns, raster, raw, taps, gram, buffer_count };
+              chips, pulse, source, columns, sets, raster, raw, taps, gram, buffer_count };
 enum Kernel { column_peaks, pack_bank, pack_observation, fp4_scores, select_peaks, rotate_observation,
               rescore_peaks, render_lanes, warp_columns, fir_tiles, fir_decimate, warp_fir, bank_gram, kernel_count };
 
@@ -49,9 +59,44 @@ bool finite(std::complex<double> value) {
     return std::isfinite(value.real()) && std::isfinite(value.imag());
 }
 
+bool same_map(const CoarseTemplateColumn& a, const CoarseTemplateColumn& b) {
+    const auto same = [](double x, double y) {
+        return std::bit_cast<std::uint64_t>(x) == std::bit_cast<std::uint64_t>(y);
+    };
+    return same(a.first_position, b.first_position) && same(a.scale, b.scale) &&
+           same(a.first_cycles, b.first_cycles) && same(a.cycle_step, b.cycle_step);
+}
+
+// Consecutive columns that share a dispatch: their lanes fit the resident
+// renderings, and their warp sets follow first_set.
+struct SynthesisGroup {
+    std::size_t first, count, low, lanes, first_set, set_count;
+};
+
+// Appends the warp sets of columns [first, first + count): up to four
+// columns whose maps are equal bit for bit, each set in column order.
+void append_sets(std::span<const CoarseTemplateColumn> columns, std::size_t first, std::size_t count,
+                 std::vector<std::uint32_t>& sets) {
+    std::vector<bool> placed(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        if (placed[i]) continue;
+        const auto start = sets.size();
+        sets.resize(start + set_columns, no_column);
+        std::size_t members = 0;
+        for (std::size_t j = i; j < count && members < set_columns; ++j) {
+            if (placed[j] || !same_map(columns[first + i], columns[first + j])) continue;
+            placed[j] = true;
+            sets[start + members++] = static_cast<std::uint32_t>(first + j);
+        }
+    }
+}
+
 struct Geometry {
     OpenClCoarseShape shape;
-    std::size_t columns = 0, k = 0, tiles = 0, packed_rows = 0, arrival_blocks = 0, pairs = 0;
+    // A bank tile is the eight result columns of one product: the real and
+    // imaginary correlations of four template columns, which are two
+    // workspaces of two rays or four workspaces of one ray.
+    std::size_t columns = 0, k = 0, tiles = 0, packed_rows = 0, arrival_blocks = 0, bank_tiles = 0;
     std::size_t samples = 0, variant_samples = 0, stream_quads = 0, raw_batch = 0, raster_lanes = 0;
     // Output row tiles per column, and the taps of one stage window of a
     // tile. When they are all of its taps, the FIR warps the raw rows that a
@@ -66,8 +111,8 @@ struct Geometry {
         columns = multiply(shape.workspaces, shape.taps);
         k = align(multiply(shape.kernel_rows, 2), tile_inner * ring_tiles);
         tiles = k / tile_inner;
-        pairs = (shape.workspaces + 1) / 2;
-        packed_rows = multiply(pairs, 8);
+        bank_tiles = (columns + 3) / 4;
+        packed_rows = multiply(bank_tiles, 8);
         arrival_blocks = (shape.arrivals - 1) / block_arrivals + 1;
         samples = add(shape.kernel_rows, shape.arrivals - 1);
         // The last warp of the last block reads its whole inner extent.
@@ -82,7 +127,7 @@ struct Geometry {
         (void)kernel_extent(multiply(packed_rows, k));
         (void)kernel_extent(multiply(streams, multiply(variant_samples, 2)));
         (void)kernel_extent(stream_quads);
-        (void)kernel_extent(multiply(multiply(frequencies, pairs), arrival_blocks));
+        (void)kernel_extent(multiply(multiply(frequencies, bank_tiles), arrival_blocks));
         (void)kernel_extent(multiply(rows, 2));
         (void)kernel_extent(samples);
         (void)kernel_extent(multiply(frequencies, samples));
@@ -114,6 +159,8 @@ struct Geometry {
             sizes[pulse] = pulse_samples * sizeof(float);
             sizes[source] = source_parameters * sizeof(double);
             sizes[Buffer::columns] = multiply(columns, column_parameters * sizeof(double));
+            // At most one set per column.
+            sizes[sets] = multiply(columns, set_columns * sizeof(std::uint32_t));
             sizes[raw] = fused ? 0 : multiply(raw_batch, column_bytes);
             sizes[taps] = multiply(shape.synthesis_taps, sizeof(float));
             sizes[gram] = multiply(shape.workspaces, 4 * sizeof(double));
@@ -130,9 +177,12 @@ struct Geometry {
 
     std::size_t host_bytes() const {
         const auto rows = shape.tile_frequencies * shape.workspaces;
+        // Per column: its peak, Gram entries, descriptor, warp set entries,
+        // set placement flag and at most one dispatch group.
+        const auto column_bytes = sizeof(float) + 4 * sizeof(double) + column_parameters * sizeof(double) +
+                                  set_columns * sizeof(std::uint32_t) + 1 + sizeof(SynthesisGroup);
         return add(multiply(staging_samples(), sizeof(std::complex<float>)),
-                   add(multiply(rows, sizeof(CoarseBulkPeaks)),
-                       multiply(columns, sizeof(float) + 4 * sizeof(double) + column_parameters * sizeof(double))));
+                   add(multiply(rows, sizeof(CoarseBulkPeaks)), multiply(columns, column_bytes)));
     }
 };
 
@@ -159,10 +209,12 @@ struct OpenClNvfp4Coarse::Impl {
     std::vector<float> peaks;
     std::vector<CoarseBulkPeaks> downloaded;
     double rate = 0, variance = 0, reciprocal_observation = 0;
+    OpenClRescoreArithmetic rescore;
     bool profile = false, pending = false, bank_ready = false, prepared = false;
 
-    Impl(std::shared_ptr<OpenClNvfp4Device::Impl> device, const Geometry& shape, bool timed)
-        : owner(std::move(device)), geometry(shape), profile(timed) {}
+    Impl(std::shared_ptr<OpenClNvfp4Device::Impl> device, const Geometry& shape, bool timed,
+         OpenClRescoreArithmetic arithmetic)
+        : owner(std::move(device)), geometry(shape), rescore(arithmetic), profile(timed) {}
 
     ~Impl() {
         drain();
@@ -208,7 +260,9 @@ struct OpenClNvfp4Coarse::Impl {
         };
         for (std::size_t i = 0; i < kernels.size(); ++i) {
             if (!used(i)) continue;
-            kernels[i] = owner->api.CreateKernel(owner->program, names[i], &status);
+            const auto* name = i == rescore_peaks && rescore == OpenClRescoreArithmetic::fp32_partial
+                ? "coarse_rescore_peaks_fp32" : names[i];
+            kernels[i] = owner->api.CreateKernel(owner->program, name, &status);
             check(status, "create coarse kernel");
         }
         staging.resize(geometry.staging_samples());
@@ -336,16 +390,14 @@ struct OpenClNvfp4Coarse::Impl {
             input.tile_seconds, input.tile_count, input.dwell_seconds, input.quiet_seconds, input.ramp_seconds};
         std::vector<float> filter(input.taps.size());
         std::ranges::transform(input.taps, filter.begin(), [](double tap) { return static_cast<float>(tap); });
-        upload(chips, 0, input.chips, work);
-        upload(pulse, 0, input.pulse, work);
-        upload(source, 0, std::span<const double>(parameters), work);
-        upload(Buffer::columns, 0, std::span<const double>(descriptors), work);
-        upload(taps, 0, std::span<const float>(filter), work);
-        const auto rows = shape.kernel_rows, source_rows = shape.synthesis_source_rows;
+        // Consecutive columns share a dispatch while their lanes fit the
+        // resident renderings. A lane can be rendered again later. Within a
+        // dispatch, columns of one map form warp sets.
+        std::vector<SynthesisGroup> groups;
+        std::vector<std::uint32_t> warp_sets;
+        groups.reserve(geometry.columns);
+        warp_sets.reserve(geometry.columns * set_columns);
         for (std::size_t first = 0; first < geometry.columns;) {
-            cancelled(stop);
-            // Consecutive columns share a dispatch while their lanes fit
-            // the resident renderings. A lane can be rendered again later.
             auto low = input.columns[first].lane, high = low;
             std::size_t count = 1;
             for (; first + count < geometry.columns && count < geometry.raw_batch; ++count) {
@@ -354,30 +406,47 @@ struct OpenClNvfp4Coarse::Impl {
                 low = std::min(low, lane);
                 high = std::max(high, lane);
             }
-            const auto lanes = high - low + 1;
-            dispatch(render_lanes, lanes * source_rows, {&OpenClCoarseWork::synthesis_seconds,
+            const auto first_set = warp_sets.size() / set_columns;
+            append_sets(input.columns, first, count, warp_sets);
+            groups.push_back({first, count, low, high - low + 1, first_set, warp_sets.size() / set_columns - first_set});
+            first += count;
+        }
+        upload(chips, 0, input.chips, work);
+        upload(pulse, 0, input.pulse, work);
+        upload(source, 0, std::span<const double>(parameters), work);
+        upload(Buffer::columns, 0, std::span<const double>(descriptors), work);
+        upload(sets, 0, std::span<const std::uint32_t>(warp_sets), work);
+        upload(taps, 0, std::span<const float>(filter), work);
+        const auto rows = shape.kernel_rows, source_rows = shape.synthesis_source_rows;
+        for (const auto& group : groups) {
+            cancelled(stop);
+            // One thread renders one sample of every lane of the group.
+            dispatch(render_lanes, source_rows, {&OpenClCoarseWork::synthesis_seconds,
                      &OpenClCoarseWork::render_seconds}, work,
                      buffers[chips], buffers[pulse], buffers[source], buffers[raster], kernel_extent(source_rows),
-                     kernel_extent(lanes), kernel_extent(shape.synthesis_cells), kernel_extent(low));
-            // A tiled FIR block filters one tile of output rows of one column.
-            const auto tile_threads = count * geometry.row_tiles * local_size;
+                     kernel_extent(group.lanes), kernel_extent(shape.synthesis_cells), kernel_extent(group.low));
             const Charge filtering{&OpenClCoarseWork::synthesis_seconds, &OpenClCoarseWork::filter_seconds};
+            const auto set_count = kernel_extent(group.set_count), first_set = kernel_extent(group.first_set);
             if (geometry.fused) {
-                dispatch(warp_fir, tile_threads, filtering, work, buffers[raster], buffers[Buffer::columns], buffers[taps],
-                         buffers[bank], kernel_extent(source_rows), kernel_extent(raw_rows),
-                         kernel_extent(shape.synthesis_taps), kernel_extent(input.decimation), kernel_extent(rows),
-                         kernel_extent(count), kernel_extent(first), kernel_extent(low));
+                // A block filters one tile of output rows of every column of a set.
+                dispatch(warp_fir, group.set_count * geometry.row_tiles * local_size, filtering, work, buffers[raster],
+                         buffers[Buffer::columns], buffers[sets], buffers[taps], buffers[bank],
+                         kernel_extent(source_rows), kernel_extent(raw_rows), kernel_extent(shape.synthesis_taps),
+                         kernel_extent(input.decimation), kernel_extent(rows), set_count, first_set,
+                         kernel_extent(group.low));
             } else {
-                dispatch(warp_columns, count * raw_rows, filtering, work,
-                         buffers[raster], buffers[Buffer::columns], buffers[raw], kernel_extent(source_rows),
-                         kernel_extent(raw_rows), kernel_extent(count), kernel_extent(first), kernel_extent(low));
-                dispatch(geometry.window ? fir_tiles : fir_decimate, geometry.window ? tile_threads : count * rows,
+                dispatch(warp_columns, group.set_count * raw_rows, filtering, work,
+                         buffers[raster], buffers[Buffer::columns], buffers[sets], buffers[raw],
+                         kernel_extent(source_rows), kernel_extent(raw_rows), set_count, first_set,
+                         kernel_extent(group.first), kernel_extent(group.low));
+                // A tiled FIR block filters one tile of output rows of one column.
+                dispatch(geometry.window ? fir_tiles : fir_decimate,
+                         geometry.window ? group.count * geometry.row_tiles * local_size : group.count * rows,
                          filtering, work, buffers[raw], buffers[taps], buffers[bank], kernel_extent(raw_rows),
                          kernel_extent(shape.synthesis_taps), kernel_extent(input.decimation), kernel_extent(rows),
-                         kernel_extent(count), kernel_extent(first));
+                         kernel_extent(group.count), kernel_extent(group.first));
             }
-            work.rendered_samples += lanes * source_rows;
-            first += count;
+            work.rendered_samples += group.lanes * source_rows;
         }
         dispatch(bank_gram, shape.workspaces * local_size, {&OpenClCoarseWork::synthesis_seconds,
                  &OpenClCoarseWork::gram_seconds}, work,
@@ -417,10 +486,15 @@ struct OpenClNvfp4Coarse::Impl {
             const auto& entry = matrix[workspace];
             if (!std::ranges::all_of(entry, [](double value) { return std::isfinite(value); }))
                 throw Error("Robust OpenCL NVFP4 coarse inverse coefficients are nonfinite");
+            // A one-ray Gram is a scalar: its form has the first
+            // coefficient alone.
+            if (shape.taps == 1 && !(entry[1] == 0 && entry[2] == 0 && entry[3] == 0))
+                throw Error("Robust OpenCL NVFP4 one-ray coarse form has second-ray coefficients");
             // The packed operands carry their peaks and the full E2M1 and
             // block-scale range. Fold those and the variance into the form.
             const auto unit = static_cast<double>(peak) / (normalized_max * normalized_max);
-            const auto first = peaks[workspace * shape.taps] * unit, second = peaks[workspace * shape.taps + 1] * unit;
+            const auto first = peaks[workspace * shape.taps] * unit;
+            const auto second = shape.taps == 2 ? peaks[workspace * shape.taps + 1] * unit : 0.;
             const std::array values{entry[0] * first * first / variance, entry[1] * second * second / variance,
                                     entry[2] * first * second / variance, entry[3] * first * second / variance};
             if (!std::ranges::all_of(values, [](double value) { return std::isfinite(value); }))
@@ -455,11 +529,12 @@ struct OpenClNvfp4Coarse::Impl {
         dispatch(pack_observation, count * variants * geometry.variant_samples * 2, {&OpenClCoarseWork::packing_seconds},
                  work, buffers[observation], buffers[pack_parameters], buffers[packed_observation],
                  buffers[observation_scales], samples, kernel_extent(geometry.variant_samples), frequency_count);
-        const auto blocks = count * geometry.pairs * geometry.arrival_blocks;
+        const auto blocks = count * geometry.bank_tiles * geometry.arrival_blocks;
         dispatch(fp4_scores, blocks * local_size, {&OpenClCoarseWork::product_seconds}, work,
                  buffers[packed_observation], buffers[observation_scales], buffers[packed_bank],
                  buffers[coefficients], buffers[scores], kernel_extent(geometry.k),
-                 kernel_extent(geometry.stream_quads), arrivals, workspaces, frequency_count);
+                 kernel_extent(geometry.stream_quads), arrivals, workspaces, frequency_count,
+                 kernel_extent(shape.taps));
         dispatch(select_peaks, rows * local_size, {&OpenClCoarseWork::selection_seconds}, work,
                  buffers[scores], buffers[frontier], arrivals, kernel_extent(separation));
         // Retained arrivals share one rotation of the observation per frequency.
@@ -487,7 +562,7 @@ struct OpenClNvfp4Coarse::Impl {
             }
         }
         work.issued_products += blocks * block_warps * groups * geometry.tiles * tile_products;
-        work.useful_products += rows * shape.arrivals * 8 * shape.kernel_rows;
+        work.useful_products += rows * shape.arrivals * 4 * shape.taps * shape.kernel_rows;
         work.score_rows += rows * shape.arrivals;
         work.rescored_peaks += retained;
     }
@@ -497,14 +572,17 @@ OpenClNvfp4Coarse::OpenClNvfp4Coarse(std::unique_ptr<Impl> impl) : impl_(std::mo
 OpenClNvfp4Coarse::~OpenClNvfp4Coarse() = default;
 
 bool OpenClNvfp4Coarse::supports(const OpenClCoarseShape& shape) noexcept {
-    // Two rays fill the eight result columns of one tile with two workspaces.
+    // The eight result columns of one tile hold two workspaces of two rays
+    // or four workspaces of one ray.
     const bool synthesis = shape.synthesis_raw_rows || shape.synthesis_source_rows || shape.synthesis_lanes ||
                            shape.synthesis_cells || shape.synthesis_taps || shape.synthesis_decimation;
-    return shape.taps == 2 && shape.kernel_rows && shape.arrivals && shape.workspaces && shape.tile_frequencies &&
+    return (shape.taps == 1 || shape.taps == 2) && shape.kernel_rows && shape.arrivals && shape.workspaces &&
+           shape.tile_frequencies &&
            shape.kernel_rows <= std::numeric_limits<std::uint32_t>::max() / 4 &&
            shape.arrivals <= std::numeric_limits<std::uint32_t>::max() / 4 &&
            (!synthesis || (shape.synthesis_raw_rows && shape.synthesis_source_rows && shape.synthesis_lanes &&
-                           shape.synthesis_cells && shape.synthesis_taps && shape.synthesis_decimation));
+                           shape.synthesis_cells && shape.synthesis_taps && shape.synthesis_decimation &&
+                           shape.synthesis_source_rows <= maximum_source_rows));
 }
 
 OpenClNvfp4Workspace OpenClNvfp4Coarse::workspace(const OpenClCoarseShape& shape) {
@@ -561,14 +639,14 @@ void OpenClNvfp4Coarse::read_scores(std::span<float> values) {
 }
 
 std::unique_ptr<OpenClNvfp4Coarse> OpenClNvfp4Device::make_coarse(const OpenClCoarseShape& shape,
-        std::size_t workspace_limit, bool profile) const {
+        std::size_t workspace_limit, bool profile, OpenClRescoreArithmetic rescore) const {
     if (!OpenClNvfp4Coarse::supports(shape)) return {};
     const Geometry geometry(shape);
     const auto bytes = geometry.device_bytes();
     if (bytes > workspace_limit || bytes > impl_->global_memory ||
         *std::ranges::max_element(geometry.sizes) > impl_->maximum_allocation) return {};
     try {
-        auto coarse = std::make_unique<OpenClNvfp4Coarse::Impl>(impl_, geometry, profile);
+        auto coarse = std::make_unique<OpenClNvfp4Coarse::Impl>(impl_, geometry, profile, rescore);
         coarse->initialize();
         return std::unique_ptr<OpenClNvfp4Coarse>(new OpenClNvfp4Coarse(std::move(coarse)));
     } catch (const OpenClError& error) {

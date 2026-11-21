@@ -1053,6 +1053,22 @@ void varying_quiet_band(double line_amplitude, bool half_bin, bool calendar_boun
           expanded.reason == "coherent_line_in_public_data_aperture" &&
           std::abs(expanded.varying_line_frequency_hz - frequency) < .01,
           "energy in the declared varying DATA band became a scored quiet slot");
+    // Quiet-aperture blocks project on any number of lanes. Their mode terms
+    // are summed in public order, so every lane count reports the same bits.
+    if (!calendar_bound) {
+        std::array<ReceiverSlotScore, 3> lanes;
+        for (std::size_t i = 0; i < lanes.size(); ++i) {
+            const unsigned workers = i ? 3 * static_cast<unsigned>(i) : 1;
+            receiver_detail::ReceiverExecutor executor(workers);
+            receiver_detail::score_varying_quiet(input.config, input.slot, input.iq, lanes[i], {}, workers, executor);
+            check(lanes[i].varying_quiet_modes == expanded.varying_quiet_modes &&
+                  std::bit_cast<std::uint64_t>(lanes[i].varying_quiet_energy) ==
+                      std::bit_cast<std::uint64_t>(expanded.varying_quiet_energy) &&
+                  lanes[i].varying_quiet_threshold == expanded.varying_quiet_threshold &&
+                  lanes[i].varying_quiet_status == expanded.varying_quiet_status,
+                  "varying quiet energy changed with its projection lanes");
+        }
+    }
 
     // A keyed, independently drifting DATA carrier can coexist with the
     // same off-lattice line. Suppressing every supplemental decision on

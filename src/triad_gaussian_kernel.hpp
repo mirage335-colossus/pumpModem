@@ -82,6 +82,24 @@ inline void append_gaussian_root_column(GaussianRoot2& root,
     root[3] = std::hypot(root[3].real(), std::abs(residual));
 }
 
+// The native receiver's one-tap and persistent two-tap entries, with the
+// arguments and results of triad_gaussian_update_v1 (taps 1) and
+// triad_gaussian_factor2_update_v1 for the two signal hypotheses, and the
+// same status. When the common null provably completes with unchanged zero
+// evidence (see inert_null), its update is skipped and null_skipped is set:
+// its mean, prior and evidence are left as passed, and it adds nothing to
+// the diagnostics. The receiver discards all three and requires zero null
+// evidence. null_skipped reports executed work, never a result.
+int gaussian_signal_update(std::size_t taps, std::size_t candidates, std::size_t models, std::size_t blocks,
+                           std::size_t first, std::size_t stop, const double* correlations, const double* grams,
+                           const double* power, const double* transitions, double* mean, double* covariance,
+                           double* scores, double* diagnostics, bool& null_skipped) noexcept;
+int gaussian_signal_factor2_update(std::size_t candidates, std::size_t models, std::size_t blocks,
+                                   std::size_t first, std::size_t stop, const double* correlations,
+                                   const double* grams, const unsigned* ranks, const double* power,
+                                   const double* transitions, double* mean, double* factors,
+                                   double* scores, double* diagnostics, bool& null_skipped) noexcept;
+
 } // namespace datapump::triad::v3::receiver_detail
 
 extern "C" DATAPUMP_TRIAD_GAUSSIAN_DECL int triad_gaussian_update_v1(

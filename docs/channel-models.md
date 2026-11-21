@@ -146,18 +146,48 @@ GUI session relies on when it reports transmit progress after each read.
   index is skipped when a bound found at construction proves that every
   transmit calendar coordinate converts.
 
-`StreamChannelConfig::lanes` lends a channel the caller's workers. The rows
-of a block are split among up to sixteen jobs. One further job each advances
-the receiver oscillator, the thermal noise and the two bounded path
-trajectories through the block. None of those states reads the signal, so
-their values depend on the row alone. The next block's source history is
-generated on one of two paths:
+`StreamChannelConfig::lanes` lends a channel the caller's workers. Up to
+sixteen pool jobs claim a block's rows in shrinking runs from one counter,
+then fixed chunks of the staged chains below, so a job that starts late,
+such as the one after the pass, takes only what is left. Rows can be
+prepared in any order and by any reader copy; runs are claimed in order, so
+every row before a recorded failure is prepared. One further job each
+advances the two bounded path trajectories through the block. None of these
+states reads the signal, so their values depend on the row alone.
+
+The receiver oscillator, the thermal noise and, on the split path below,
+the transmit oscillator are staged. Each draws its standard normals from one
+`std::mt19937_64` through `std::normal_distribution`, which libstdc++
+evaluates by the polar method in pairs. Only the acceptance loop over the
+engine's canonical uniforms depends on earlier draws. A pair's two values,
+`y*m` and `x*m` with `m = sqrt(-2 log r2 / r2)`, depend on that pair alone.
+[`GaussianStream`](../src/triad_gaussian_stream.hpp) runs the loop in order
+and forms accepted pairs anywhere, with the library's operations in its
+order. One job per chain accepts the draws, and one job per oscillator runs
+its recurrence: the FHSS dwell phase, the white, random-walk and flicker
+frequency, the Wiener step and the `remainder` of the phase, then the white
+PM draw. The pool jobs form the draws and the rotations. Every stage reads
+what the blocks before left: a block's jobs form the rotations of its own
+items, carry the recurrence one block further, and form and accept draws two
+and three blocks ahead, in rings charged to `channel_workspace_bytes`. A
+chain that is behind catches up on the reader first. An oscillator item that
+fails in its recurrence is recorded and reported where the unbatched reader
+meets it. Draw for draw, the stream equals the distribution: the channel test
+checks about 400,000 draws on each of four seeds with pairs formed out of
+order, and a one-off check matched 10^8 draws on each of seven seeds. The
+split is used only with libstdc++, and only after the first 1,024 draws of
+three seeds, formed this way, equal the compiled distribution's at first use;
+the channel test fails if a libstdc++ build no longer selects it. Otherwise,
+as with other standard libraries, the acceptance job runs the distribution
+whole, which stays exact but sequential.
+
+The next block's source history is generated on one of two paths:
 
 - **Split.** When the source offers `EmittedSource::readers` and neither a
   converter nor diagnostic I/Q noise reads source values, or when the signal
-  is disabled, the transmit oscillator is a job of its own. It forms
-  `signal_gain * polar(phase + white_pm)` for each sample with the same
-  operations and random-number order. Up to eight readers evaluate disjoint
+  is disabled, the transmit oscillator is staged. Its rotations,
+  `signal_gain * polar(phase + white_pm)`, have the same operations and
+  random-number order. Up to eight readers evaluate disjoint
   parts of the source range at once. The owner then accounts the samples in
   order exactly as `sample_at` would: forward cursor, stop checks every 256
   samples, slot transitions and the DATA and Helper energy sums. The
@@ -192,15 +222,89 @@ piece as an extra job of each lent preparation. The workspace grows with
 workers: at 16 workers `channel_workspace_bytes` rose from 314,897 to
 1,640,313 on the stable capture and from 3,281,961 to 26,279,953 on the FHSS
 capture, whose readers copy the pattern-source caches, all inside the 65 MiB
-channel bound. The GUI simulation keeps a lone reader, because its receiver
-is using those workers.
+channel bound. The staged chains' rings take about
+`lead × (56 × draws + 120)` bytes per oscillator chain and
+`lead × 2 × 56` bytes for the thermal noise, where `draws` is four plus the
+oscillator's flicker bands and `lead` is the block of up to 1,024 rows, or
+the 2,064-row transmit lookahead on the split path. On the matched captures
+that added about 1.1 MB at 12 workers: 1,639,865 → 2,759,425 bytes on the
+stable capture and 26,241,105 → 27,360,665 on the FHSS capture. With 64
+flicker bands on both oscillators and the split transmit path it is about
+12 MB, so a large selective or FHSS-reader channel that no longer fits in
+the 65 MiB bound drops its source readers, then its lanes, with the same
+values. A
+lone reader carries 8,176 more bytes, the idle chain objects. The GUI
+simulation keeps a lone reader, because its receiver is using those workers.
 
-The Gaussian FIR path law, the Ornstein–Uhlenbeck ray gains, the sinusoidal
-selective law and the sampled front end remain in the sequential pass. With
-twelve workers on the Ryzen 5 PRO 5650U the severe slot took 0.56 s against
-1.06 s before the readers and the overlapped pass, and twenty-four workers
-were no faster. Which stage now bounds it was not measured.
-[Measurements](validation.md#exact-receiver-and-simulator-speedups--20-november-2026).
+`triad_receiver_probe --capture-cache DIR` skips the simulator on repeated
+receiver runs of one probe binary, such as backend, precision or worker
+comparisons on the same capture. The first run stores each capture as
+`DIR/<key>.capture`, created privately on POSIX systems (on Windows it
+inherits the directory's access control) and renamed into place when
+complete. The key is the SHA-256 of the executable's own SHA-256, on Linux
+the glibc version and the SHA-256 of each loaded C, math, C++ and GCC
+runtime library and the dynamic loader, the CPU features and
+`GLIBC_TUNABLES` value that select glibc's math variants (on x86, FMA, FMA4
+and AVX2; receipt `key_math_dispatch`), the command, every given option
+except those that select receiver arithmetic, backends, allocation, budgets
+or deadlines, and the generating call's extent, episodes and interferer.
+Receipts name the covered libraries under `key_runtime_libraries`; on other
+systems `key_binds` says only the executable is covered, so remove `DIR`
+after any runtime library update there. A later run with the same key reads
+the file instead of simulating. Before any receiver work it checks the
+magic, version and header size, the header's own SHA-256 (taken with that
+field zeroed, so it covers the capture SHA-256 and every report field), the
+canonical encoding, key, extent, exact length, each validity byte and the
+rows' SHA-256, and it fails on any difference. The capture keeps the same
+budgets, memory preflight and spool path; the file is charged to the spool
+budget for a spooled capture and to the sample budget for one held in RAM.
+Reports say `"source": "reused"` under `observation.capture_cache`, keep
+`observation.input_sha256`, report `observation.channel_workspace_bytes` as
+null because no channel ran, and replace the `simulator` phase by
+`capture_reuse`, which keeps the generating run's workspace as
+`stored_channel_workspace_bytes`. A rebuilt probe has another key and never
+reuses a capture. The file proves integrity, not provenance, so keep `DIR`
+private, for example under ignored `local-evidence/`, and remove it when its
+comparison ends. A killed run can leave a `<key>.capture.tmp-*` file, which
+no run reads; delete those when no probe is writing. On the 5650U the severe
+capture's 20.7 MB file was read and verified in 0.03 s and the five-slot
+message's 106 MB in 0.27 s, and the receiver receipts equaled those of the
+run that generated them apart from timings and run-dependent memory fields.
+
+With lanes, prepared rows also carry their physical time into the pass,
+which reads the receiver's dwell index from its staged recurrence. When the
+selective filter's shortest lag reaches back past two blocks, which holds
+for the matched captures (2,666 rows at 0.75 Hz spacing and 6 kHz against two
+1,024-row blocks), the pool also evaluates its two delayed branches, an
+eight-tap FIR over rows that earlier passes filtered, with the filter's
+operations in their order. The pass keeps the branch combine, the report
+sums and every recurrence: the Gaussian FIR path law, the
+Ornstein–Uhlenbeck ray gains, the sinusoidal selective phases, the bounded
+path trajectories' diagnostics and the sampled front end.
+
+Before the staged chains, with twelve workers on the Ryzen 5 PRO 5650U the
+severe slot took 0.56–0.63 s against 1.06 s before the readers and the
+overlapped pass, and twenty-four workers were no faster
+([measurements](validation.md#exact-receiver-and-simulator-speedups--20-november-2026)).
+A section-timed copy then showed that the receiver oscillator chain bounded
+the stable and five-slot message captures, 212 µs of each 244–247 µs block,
+and that on the severe capture the busiest lane ran the 276 µs pass and then
+a 237 µs rows job. Larger blocks did not help. The staged chains and the
+pool remove those dependencies without changing a sample. On the 5650U with
+no other agents running, three alternated pairs per cell, the `simulator`
+phase fell by about 10% on the severe capture at twelve workers
+(0.579–0.587 s to 0.522–0.531 s) and 7% on the quiet capture at
+twenty-four, in every pair, and by 2–19% (median 8%) on the severe capture at
+twenty-four. The stable capture, which the receiver chain bounds, gained
+1–5% at twelve workers, below the predeclared 3% median threshold, and ran
+2–13% slower at twenty-four. Those two twenty-four-worker cells had up to
+one CPU of other load in some runs, so they are indicative. Four workers were
+unchanged
+([measurements](validation.md#gpu-offload-survey-and-gated-device-routes--20-november-2026)).
+The Blackwell host's EPYC is not yet measured. On the severe capture the
+pass and the two bounded path trajectory jobs, about 150 µs each, are the
+likely next bound; moving the pre-selective products out of the pass would
+need those trajectories staged a block ahead too.
 
 Proposals that change sample values, measured and not adopted:
 
