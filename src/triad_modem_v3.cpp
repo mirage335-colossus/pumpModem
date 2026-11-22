@@ -419,14 +419,15 @@ void PatternSource::render_bank_impl(std::span<PatternSource* const> sources,
     require(output.size()==sources.size()*count,"triad v3 render bank output extent mismatch");
     for(auto* source:sources)require(source&&source->impl_,"triad v3 render bank has an empty source");
     if(sources.empty()||!count)return;
-    // Deliberately compare all geometry inputs, not key-dependent controls.
-    // A conservative mismatch is an error rather than a silently wrong basis.
+    // Shared pulse weights and rotations require matching waveform geometry.
+    // Different floors are compatible if the effective spacing is identical.
     const auto geometry_inputs=[](const Format& f){return std::tie(f.inner_rate_hz,
         f.added_symbols,f.sample_rate,f.sample_rate_denominator,f.bit_seconds,
         f.minimum_inner_coefficients,f.fhss,f.fhss_center_aligned,f.dwell_seconds,
         f.quiet_seconds,f.ramp_seconds,f.margin_seconds,f.burst_wait_tiles,f.pulse_shape);};
     const auto& ref=*sources.front()->impl_;const auto& g=ref.geom;
-    for(auto* source:sources)require(geometry_inputs(source->impl_->format)==geometry_inputs(ref.format),
+    for(auto* source:sources)require(geometry_inputs(source->impl_->format)==geometry_inputs(ref.format)&&
+            source->impl_->geom.carrier_spacing_hz==g.carrier_spacing_hz,
             "triad v3 render bank geometry differs");
     struct Point {
         std::uint64_t first=0;

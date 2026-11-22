@@ -179,6 +179,74 @@ The leakage calculation bounds the whole contiguous DATA span, including
 the spaces between carriers. Per-carrier leakage, physical RF distortion
 and reception with the relaxed bounds remain unmeasured.
 
+### Receiver preservation review
+
+The review compared the spacing commits `7ea323f8` and `57622a9f` with
+`b87240c4`. Coarse and fine projections and source templates use the actual
+carrier geometry. The public frequency step still comes from waveform
+duration. Selective-channel correlation, the extra fine delay anchor and
+capture tails still use the pulse bandwidth. The review corrected a shared
+render-bank guard that let sources with different actual spacings share the
+first source's carrier rotations. Sources with identical actual spacings
+remain compatible even when their configured floors differ. The regression
+test failed before the guard and passed after it.
+
+One matched native replay per setting used Rate 120 Hz / 1×, 2,000 samples/s,
+500 Hz IF, seed 37, epoch 1793850000, initial ordinal 7000037, and an 80 dB-Hz
+target and simulated link. HF Worst, Each 65%, and an 8 Hz Doppler declaration
+were enabled, with exact oscillators and Helper and FHSS off. The two DATA
+slots decoded `01` and the following noise window scored quiet at both the
+25 Hz natural spacing and the 265 Hz floor. Short-block frequency tracking
+ran in every slot and the drift ridge ran on the quiet window. Each slot used
+718 coarse frequency points. The contiguous coarse projection rose from
+400 to 1,000 samples/s. The initial 1,500 samples/s, 375 Hz IF control fitted
+the original spacing, while the 265 Hz arm failed the guarded audio-band
+check before scoring. Both arms used the revised IF and sample rate.
+
+A second matched replay used the native Helper composite fixture at
+Rate 120 Hz / 1× and 6,000 samples/s, with 4 W DATA, 8 W Helper and seed 37.
+At both 25 and 265 Hz actual spacing the receiver acquired the Helper,
+narrowed the DATA frequency search and decoded bit 1. It restored the full
+136-point search and scored quiet in the following noise window without
+Helper. Both CPU precision paths in the fixture agreed on the decisions.
+
+The delayed-Helper fixture exercised the fallback with Helper tones present
+but insufficient acquisition support. At Rate 120 Hz / 1×, seed 62033, a
+100 ppm actual clock offset within a ±300 ppm prior and a declared 7 ms
+delay, the original 1,500 samples/s direct-I/Q setup returned correct bits
+and quiet at floors 0 and 125 Hz. Its High pilot was above real-audio
+Nyquist. At 265 Hz its required DATA projection overlapped the Helper
+exclusions, and Helper-only input produced a false DATA decision.
+A new matched pair at 3,000 samples/s used a 650 Hz DATA IF and Helper tones
+at 175, 1,250 and 1,350 Hz. The guarded DATA and Helper bands were separated.
+Both 0 and 265 Hz arms decoded both bits and classified Helper-only input
+as quiet. Both ran midpoint timing and two independent delay candidates
+with 19 frequency states under the same workspace lease.
+
+For Rate 3.6 Hz / 1× at 1,500 samples/s and 300 Hz IF, six fixed-slot checks
+compared bit 0, bit 1 and noise separately at the natural 0.75 Hz spacing
+and at 3.5 Hz. The native admission harness used seed 950101, slot 0 at
+initial epoch 1793850000 and ordinal 7000037, 80 dB-Hz target and simulated
+link, HF Worst, Each 65%, a 1 Hz Doppler declaration and Helper off. Both
+settings decoded bit 0 and scored noise quiet. The natural spacing decoded
+the transmitted 1 as 0, and the 3.5 Hz setting decoded it as 1. The 160.4 s
+bit geometry was too slow for the short-block and coherent-gain families at
+both spacings.
+
+The zero-floor bit 0 replay against the pre-spacing executable
+(`435f827a`, with only documentation changes through `b87240c4`) gave
+the same IQ hash and receiver receipts after excluding timing and build
+identity. Channel workspace reporting grew by 48 bytes. A broader Rate
+36 Hz / 30× HF comparison at 6,000 samples/s with seed 581231 matched
+the plan and the 289,737-sample IQ hash. Both executables reached the
+deadline before returning a receiver decision.
+
+All 17 focused native receiver, source, stream, channel, Helper and GUI
+checks passed. The main native receiver test timed out in the parallel
+batch and passed on an isolated rerun. These deterministic CPU checks
+cover selected modeled channels. Sensitivity, physical RF, device
+acceleration and sustained receiver capacity remain unqualified.
+
 ## Exact 3.6 Hz GUI simulation throughput — 22 November 2026
 
 The native GUI worker loaded the supplied launcher through Link Planner

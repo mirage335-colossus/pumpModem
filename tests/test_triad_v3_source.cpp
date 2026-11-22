@@ -345,6 +345,25 @@ void shared_geometry_bank_checks() {
     std::array<PatternSource*,2> mismatch{&a,&b};std::array<Complex,2> output{};
     bool rejected=false;try{PatternSource::render_bank(mismatch,0,1,1,output);}catch(const std::exception&){rejected=true;}
     check(rejected,"shared pulse bank accepted different geometry");
+    Format spaced;
+    spaced.minimum_carrier_spacing_hz = 265;
+    PatternSource wider(spaced, key, 1);
+    const std::array<PatternSource*, 2> different_spacing{&a, &wider};
+    const auto first = a.geometry().calendar_origin_sample + a.geometry().source_samples / 4;
+    const std::array offsets{.375};
+    rejected = false;
+    try {
+        PatternSource::render_bank(different_spacing, first, offsets, output);
+    } catch (const std::exception&) {
+        rejected = true;
+    }
+    check(rejected, "shared pulse bank accepted different carrier rotations");
+    spaced.minimum_carrier_spacing_hz = 3.5;
+    PatternSource inactive_floor(spaced, key, 1);
+    const std::array<PatternSource*, 2> same_spacing{&a, &inactive_floor};
+    PatternSource::render_bank(same_spacing, first, offsets, output);
+    check(output[1] == inactive_floor.sample_at(static_cast<long double>(first) + offsets[0]),
+          "inactive spacing floor changed the shared pulse bank");
     for(long double step:{0.L,-1.L,std::numeric_limits<long double>::infinity()}){
         rejected=false;try{PatternSource::render_bank(mismatch,0,step,1,output);}catch(const std::exception&){rejected=true;}
         check(rejected,"shared pulse bank accepted invalid step");
