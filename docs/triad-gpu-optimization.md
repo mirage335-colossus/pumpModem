@@ -570,10 +570,15 @@ for segmented timing, with exact matched output. The layout remains
 experimental. The sampled command intervals favor investigating rank cost
 at the targeted tracked geometry, including work beyond repeat loads.
 [Matched candidate](validation.md#segmented-tracking-rank-reuse--22-november-2026).
-Guarded reciprocal normalization then reduced segmented wall time by about
-22% on matched 72 Hz/5× active and noise slots. It changes the rounding of a
-proposal score and still needs qualification on the tracked wide geometry.
-[Normalization diagnostic](validation.md#segmented-rank-normalization-diagnostic).
+Guarded reciprocal normalization reduced segmented wall time by about
+22% on the earlier 72 Hz/5× active and noise slots. A later pair on the
+tracked 32,768-row holdout reduced the segmented span by 18.7% and the
+complete slot by 10.1% while preserving the tested public work and
+outputs. The matching command prefix showed a 6.7% rank reduction.
+The changed quotient rounding leaves near-tie and sensitivity
+qualification open.
+[Original normalization diagnostic](validation.md#segmented-rank-normalization-diagnostic),
+[tracked wide comparison](validation.md#guarded-reciprocal-on-the-tracked-wide-rank).
 If the inverse dominates at the target size, count FFT passes and test
 product/load fusion or an output-limited last pass that still publishes
 every scored lag. The Vulkan profile leaves little unassigned command time
@@ -633,10 +638,14 @@ lost to cuFFT by 1.87–4.01×. [VkFFT paper](https://ieeexplore.ieee.org/abstra
     <common and slot arguments> --backend gpu
   nsys stats <dir>/automatic.nsys-rep
   ```
-- Hardware counters: Tensor pipe duty and `pipe_fp64`. Earlier CUDA counter
-  requests returned `ERR_NVGPUCTRPERM`, and no permission bypass was
-  attempted; on an owned host an administrator can allow counters
-  ([NVIDIA](https://developer.nvidia.com/nvidia-development-tools-solutions-err_nvgpuctrperm-permission-issue-performance-counters)).
+- Per-kernel arithmetic counters. Earlier CUDA counter requests returned
+  `ERR_NVGPUCTRPERM`. On an owned host an administrator can allow counters.
+  Device-level NVML GPM succeeded on the later Blackwell RunPod run and
+  recorded [activity during complete native slots](validation.md#blackwell-arithmetic-and-receiver-residency--22-november-2026).
+  The FP64 calibration reported 1% in its GPM field while issuing
+  1.49 TFLOP/s. Use per-kernel timing and verified arithmetic before
+  attributing the rank cost to FP64 capacity.
+  [NVIDIA counter permissions](https://developer.nvidia.com/nvidia-development-tools-solutions-err-nvgpuctrperm-permission-issue-performance-counters).
   What has worked without counters: OpenCL event intervals, CUPTI resource
   callbacks naming the loaded kernels, and static opcode counts from
   `cuobjdump -sass`. Issued-equivalent Tensor throughput is
@@ -967,6 +976,69 @@ dependencies and unaffected costs. Reassess those quantities when a proposed
 implementation changes them. Bounded experiments can support a practical
 choice and a stopping decision while the potential for further improvement
 remains open.
+
+### When waveform and channel synthesis dominate
+
+For the GPSDO/GPSDO, 3.6 Hz, HF Worst / Each 65% GUI preset at Target 32,
+the native Blackwell simulation spent 91–92% of compute wall time
+generating waveform and channel samples. The receiver already ran GPU
+search and FP4 fine work. Whole-capture staging with the shared native
+executor cut time by 11–18% by fixture medians, with matching input
+hashes and receiver outcomes. It added about 108–109 MB for the short
+draft. Receiver-only speed or Tensor Core availability cannot predict
+this phase split for another profile. Compare compute, paced playback
+and the full pipeline separately.
+[Exact GUI preset experiments](validation.md#exact-36-hz-gui-simulation-throughput--22-november-2026).
+
+### Blackwell residency experiment
+
+On the full RTX PRO 6000 Blackwell Server Edition, explicit FP32 FFMA and
+packed-FP16 HFMA2 controls sustained 115 and 113 TFLOP/s respectively.
+The [matched correlation component](validation.md#blackwell-arithmetic-and-receiver-residency--22-november-2026)
+shows why assigning a complete sum to each thread can still hurt service.
+For 1.35 million frequency/arrival hypotheses, the direct implementation
+reported about five times the nominal FP32 rate of the FFT and took 42
+times as long. Reusing transforms across hypotheses reduced the arithmetic
+count by about 208 times. The experiment covers regularly spaced frequencies
+and one correlation atom. It leaves the segmented rank and general
+time-varying receiver work as separate optimization problems.
+[GPU FFT architecture and fusion measurements](https://arxiv.org/abs/2412.05824).
+
+Placement of the real receiver producers had a separate effect. Moving
+the broad one-ray FP4 bank onto the device cut logical upload from
+30.77 MB to 2.79 MB and CPU cost from about 49 to 39 CPU-s. Complete slot time
+changed by about half a second because FP4 products and FP32 rescoring already
+dominated. The device-template product events achieved 1.22–1.23 PFLOP/s,
+and the same issued-equivalent work averaged 0.47 PFLOP/s over the full slot.
+GPU telemetry showed about 95% busy SMs and 25–26% Tensor Core activity in
+the coarse span. Dense FP4 is most useful when a qualified geometry can
+consume real batches at this scale. The changing-channel slot's public
+coarse path currently executes no FP4 contractions.
+[Native control and product counts](validation.md#dense-fp4-producer-placement).
+
+For a separate changing-channel path, moving the native varying template
+interpolation and rotation ahead of the existing GPU projection avoided
+about 90% of the logical uploads. On the 72 Hz/5× fixture the service time
+stayed near 11.4 s. In the 36 Hz/10× holdout this cut transfers from
+36.91 to 3.81 GB and reduced CPU demand by about 19 CPU-s. Device commands
+and varying phase time increased. The complete slot took roughly 167 s in
+both arms. Remaining CPU source generation, descriptor preparation,
+recursions and reductions still matter.
+Measure useful complete work per second, including
+all required states and physical completion.
+
+When proposing more residency, time the real producer through its consumer,
+compare application staging bytes with PCIe telemetry and retain the original
+numerical decisions. Check whether reduced precision has a credible new
+contract before replacing the sensitive phase or rank calculations. Even as
+intermediate arithmetic moves to the GPU, shape, state reuse and kernel
+layout still determine whether it can keep many arithmetic units issuing.
+A recent same-SKU optimized dense GEMM reached 1.666 PFLOP/s at a 16k shape
+with newer CUDA and a different quoted dense peak. Its TMA load/store
+pipeline, shared-memory layout and scheduling results establish alternatives
+for eligible dense work. They give no rate for the modem's segmented or narrow
+fine stages.
+[SM120 block-scaled GEMM experiments](https://research.colfax-intl.com/optimizing-an-nvfp4-blockscaled-gemm-on-rtx-pro-6000-blackwell-gpu-sm120/).
 
 ## FP4 utilization headroom on RTX PRO 6000 Blackwell
 
@@ -2186,6 +2258,137 @@ same fixture, launcher and stock worker environment.
   the pinned backend's missing lease budget appeared only on the device.
   They also do not compile the kernels with NVCC. A new kernel entry needs
   its row in the [PTX embedding table](../tools/triad_opencl_embed_ptx.py).
+
+### Whole-waveform banks and weak-signal coverage
+
+A matrix of expected received waveforms is a deterministic matched-filter
+bank. It can evaluate the exact linear correlations for a finite set of
+hypotheses without training. In a whitened least-squares fit with constant
+unknown complex gain, normalized correlation energy profiles out amplitude
+and phase. Multiple linear rays use the correlations and a Gram solve or a
+projection onto the same subspace. Arrival, frequency, clock warp and epoch
+still change the basis. Helper acquisition has its own observation and
+scoring. Fine timing, common-frequency evolution, drift, varying gain and
+physical-null decisions use dependent state and likelihoods. Enumerating
+whole trajectories would repeat those state updates across combinations and
+would require preserving their weights as well as their best scores.
+[Configured receiver model](robust-current.md#configured-calendar-reception).
+
+For one observation, `M` distinct templates of `N` complex samples need
+about `8*M*N` real FLOPs for complex dot products, counting a multiply and
+add as two FLOPs. A materialized complex FP16 bank uses `4*M*N` bytes. At
+one observation per bank its nominal intensity is two FLOPs per bank byte.
+`B` observations with the same bank can raise that to `2*B` before other
+traffic. Live keyed slots use different banks. Repeated simulation seeds can
+share an ordinal and bank if only the received observation changes. That
+requires an execution path that shares the bank and keeps each scored stream
+and its receiver state distinct.
+
+| Native planned geometry | Distinct full templates if all shifts and rotations are stored | FP16 bank | Dense real FLOPs |
+| --- | ---: | ---: | ---: |
+| Matched 3.6 Hz, 78 workspaces, 15 frequencies, 3,377 arrivals, 2 rays, 44,971 projected rows | 7.90 million | 1.42 TB | 2.84 trillion |
+| GPSDO / IC-7100 3.6 Hz, 78 workspaces, 134,690 frequencies, 3,377 arrivals, 1 ray, 44,966 projected rows | 35.48 billion | 6.38 PB | 12.76 quadrillion |
+| Crystal 1 MHz, 78 workspaces, 449,761 frequencies, 14,071 arrivals, 1 ray, 187,194 projected rows | 493.63 billion | 370 PB | 739 quadrillion |
+
+These are decimal units and assume isolated, projected complex baseband.
+The 1.42 TB example alone needs at least 0.89 s for one scan at the
+Blackwell Server Edition's advertised 1.6 TB/s. The current tiled dense
+route computes that case's products in about 2.6 ms by reusing shifted
+observation rows and synthesizing only the shared bank columns. At the
+rounded 2 PFLOP/s optimistic dense FP4 rate, the last row's arithmetic
+alone takes about 370 s before packing, rescoring and service. These are optimistic
+single-device bounds for the specified implementations. FFTs share the
+arrival-lag work and chirp-Z shares regularly spaced frequencies on the
+guarded one-arrival path. With a fixed projected sample rate and search
+band, direct frequency work grows roughly as the square of the coherent
+interval. A fixed physical drift range adds another grid size that can
+grow quadratically with that interval.
+[Device specifications](https://www.nvidia.com/en-us/data-center/rtx-pro-6000-blackwell-server-edition/),
+[measured Blackwell products](validation.md#blackwell-dense-fp4-coarse-search--20-november-2026),
+[chirp-Z qualification](validation.md#exact-one-arrival-chirp-z-follow-through).
+
+For a fixed whitened waveform and coherent model, the normalized overlap
+with the nearest template, squared, is the fraction of matched-filter SNR
+retained. This gives an explicit mismatch budget for a grid or reduced basis.
+Locally, phase accrued by a frequency error grows with interval length and
+phase accrued by a constant frequency-slope error grows with its square.
+An offset in arrival changes the envelope across its occupied bandwidth.
+A constant clock-rate error accumulates such an offset over the interval.
+Covering more independent dimensions multiplies the number of cells. Tie
+delay and carrier phase where the same physical path determines both. A
+population-averaged bank design can improve typical capture and still leave
+holes in the least favorable geometry. More cells can also raise the
+noise-maximum threshold. For normalized single-ray noise scores with unit
+exponential marginals, the upper tail of the maximum is bounded by
+`M * exp(-threshold)` even for correlated cells. Actual receiver scores
+include different likelihood families with different null distributions.
+Use the native public search and null calibration for decisions.
+[Template-bank mismatch](https://arxiv.org/abs/2102.11254),
+[physical channel and simulation methods](../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/60-simulation-methods-and-validation.md).
+
+Under an ideal coherent model at a fixed detection threshold, useful energy
+scales as `(C/N0)*T`. Losing 3 dB of `C/N0` therefore takes about twice the
+airtime. For a simple sum of independent squared matched-filter outputs with
+unknown phase per fixed coherence block, weak per-block signals add energy
+linearly while noise fluctuations scale with the square root of the number
+of blocks. In that limit the same loss can require about four times the
+airtime. Both are illustrative slopes for fixed error targets. Range,
+interference, multiplicity, coherence estimates and physical outages change
+the actual detection curve. The HF appraisal contains an off-grid miss
+whose winning sinusoid retained 20.54% of clean signal energy. The known
+physical waveform scored 150.65 nats against 35.17 nats. A broader staged
+phase fit recovered 96.83% on that capture. Its first proposal method still
+failed on a different long weak capture. After the staged-coherence repair,
+the appraisal completed the constructed off-grid message at 6 dB lower
+`C/N0` with 3.75 times the airtime and within 0.26 dB of the short reference's
+modeled energy. Its finite paired evidence establishes a possible trend
+for that trajectory. A finer scan of the original waveform family cannot
+recover the energy it cannot represent.
+[HF phase refinement](../_appraisal/highFidelity-triple_Robust_Modem/hf-phase-refinement.md),
+[channel evidence](../_appraisal/highFidelity-triple_Robust_Modem/hf-research.md).
+
+Carry the same coverage and decisions into accelerators. An approximate
+proposal with exact rescoring can still exclude a true peak earlier. A
+reduced basis can bound linear correlation error by the norm of the
+discarded component times the observation norm. Near threshold that bound
+can be loose, which calls for additional precision or work. Test noise and
+incorrect addresses alongside low-margin bits. Retain failed acquisition,
+reacquisition and both physical quiet slots in complete receiver service.
+Ranked proposals, adaptive tracking and device placement must preserve the
+documented scope for configured calendars and keyed ordinals.
+
+Research supports both sides of the performance comparison. Radio array
+correlation uses reusable antenna-pair structure to obtain large Tensor Core
+gains. FlashFFTConv instead factors and fuses an FFT to retain its asymptotic
+cost. A November 2026 preprint fuses spectral products and peak reduction
+and screens on low-frequency energy under a specified miss probability for
+its source and noise law. Robust would need a separate bound for its signal
+energy, colored and impulsive noise, and proposals. OFDM over-the-air
+learning results support diverse training in their measured small-cell
+setup. Receiver adaptation work shows why model drift deserves its own
+checks. These mechanisms inform local tests and do not supply performance
+or sensitivity margins for changing HF or EME.
+[Tensor-Core Correlator](https://doi.org/10.1051/0004-6361/202141896),
+[FlashFFTConv](https://proceedings.iclr.cc/paper_files/paper/2024/hash/281190d87732639e63bc19dedd7d711b-Abstract-Conference.html),
+[Fused matched filtering preprint](https://arxiv.org/abs/2611.17229),
+[OFDM over-the-air results](https://arxiv.org/abs/2408.04182),
+[Receiver drift and adaptation](https://arxiv.org/abs/2407.09134).
+
+The whole-slot ceiling follows from the time that the proposed contraction
+can replace. On the older 3,707 s wide CUDA receipt, the entire 208 s of
+unattributed coarse time was at most 5.6% of service and contained the
+affine FFT. Even removing all 208 s would give at most 1.06× receiver
+speed and 1.05× for the serial sum with that run's 404 s simulator. The
+1,626 s segmented search and the costly native fine families need their own
+redesigns. At the other extreme, the tuned matched 3.6 Hz severe slot takes
+60–68 ms and capture generation takes 190–350 ms. Accelerating just its
+roughly 4.6 ms of measured coarse and fine FP4 products again can improve
+receiver service by at most about 8% at those times. These stage-share
+estimates apply to the recorded source and shapes. Faster generation,
+shared native bank batches and parallel independent seeds can improve
+offline throughput under their own data-reuse and resource conditions.
+[Stage breakdown and timing scopes](#where-the-time-goes),
+[current same-binary pilot](validation.md#dense-template-banks-and-receiver-service--22-november-2026).
 
 ## Device-rendered fine tiles and resident windows
 
