@@ -50,8 +50,10 @@ the [cost model of the CPU families](validation.md#cost-model-of-the-cpu-familie
 which records the inputs of its receipt splits, scenarios, arithmetic and
 rates. The levers' other modeled figures (the drift and varying redesign
 chains, the template upload, the gain-rank traffic and the FP32 AVX2
-estimate) are rough estimates whose inputs were not kept: they order the
-work and qualify nothing. Hosts differ between entries, so compare only
+estimate) are rough estimates: the receipt shapes behind them are in the
+family subsections ([ports](#fine-stage-device-ports)), but their unit
+costs and device rates are assumed. They order the work and qualify
+nothing. Hosts differ between entries, so compare only
 within one entry.
 [Find and qualify a GPU improvement](#find-and-qualify-a-gpu-improvement)
 gives the method.
@@ -132,8 +134,12 @@ Reading the table:
   phase barriers of varying fine (projection, statistics and recursion
   waves per batch of up to 256 blocks) under a CPU quota with twofold
   oversubscription, and contention when the workers fill a whole quota
-  rather than an affinity-restricted allocation inside it. Investigate it
-  as serialization; do not lower `W = 2*H`.
+  rather than an affinity-restricted allocation inside it. For varying
+  fine also, every `MappedBasis` pin takes the basis's one
+  `std::shared_mutex` in shared mode, and a tile miss serializes on its
+  epoch's source mutex ([basis](../src/triad_receiver_basis.cpp); code,
+  contention unmeasured). Investigate it as serialization; do not lower
+  `W = 2*H`.
 
 ### What bounds the challenging slots
 
@@ -276,7 +282,9 @@ GPU utilization or CPU capacity without them
    serialization: per-lane command buffers and staging slots with shared
    plans, or an asynchronous submission that batches independent rank-pass
    atoms across lanes, 40–48 per sign on HF receipts. Per-lane contexts would
-   multiply twiddle tables, about 270.5 MB per 2^25-point plan. Render the
+   multiply twiddle tables, about 270.5 MB per 2^25-point plan. At HF the
+   2^28-row submission cap fits two slopes per transform, but the batch
+   halves from the budget of 3 to 1; try 2. Render the
    rank-pass products on the device with FP32 per-row arithmetic and FP64 or
    integer coordinates, as `fp32-rn4-v1` does (proposal-only; planned, not
    built), and upload the observation once per slot, 827 MB in FP32 at HF.
@@ -291,12 +299,12 @@ GPU utilization or CPU capacity without them
    receipt's drift seconds divided by a modeled load count with the ridge
    share assumed at 85–95%, not timed; the former loop ran 5–12 ns on the
    Xeon. The HF host was an EPYC 9555; time the [ridge benchmark](#drift-proposals)
-   on that CPU class to test it: `local-evidence/fine-stage-offload-20261121/ridgebench/ridgebench.cpp`,
+   on that CPU class to test it:
+   [`tools/triad_drift_ridge_bench.cpp`](../tools/triad_drift_ridge_bench.cpp),
    built with `g++ -std=c++20 -O3 -DNDEBUG -ffp-contract=off -fno-fast-math -pthread`
-   and run as `ridgebench 1762 16384 1967 4 <threads> 4 64 16`, the HF
+   and run as `triad_drift_ridge_bench 1762 16384 1967 4 <threads> 4 64 16`, the HF
    segments, bins, radius and stride, then the thread count, the slopes of
-   the former and current loops and the slope block; move it in-tree as a
-   test tool if it must outlive that directory) → 60–90 s with device
+   the former and current loops and the slope block) → 60–90 s with device
    proposals → 20–40 s with device
    rendering, after which the exact FP64 survivors bound it. Qualify at
    proposal level on the holdout and the 72 Hz/5× control. Reconsider the
@@ -484,7 +492,10 @@ GPU utilization or CPU capacity without them
     requires host-visible, coherent memory and prefers device-local memory,
     so a discrete GPU without resizable BAR may expose only a small
     host-visible device-local heap and get a small automatic workspace
-    (unmeasured). The [per-GPU guidance](gpu-strategy-playbook.md#per-gpu-guidance)
+    (unmeasured). VkFFT allocates its twiddle tables itself, on the first
+    device-local memory type, which need not be the leased heap; the lease
+    still charges them, and a failed allocation there becomes a
+    `workspace` fallback (from the code). The [per-GPU guidance](gpu-strategy-playbook.md#per-gpu-guidance)
     ranks first experiments for each target.
 
 ### Rejected and conditional approaches
@@ -2680,6 +2691,45 @@ The device always tiles: T is 256 on HF and 1,024 at 60 Hz/1×. The
 observation and columns are packed with power-of-two scales, taken over the
 whole request and folded into g. Audit blocks write their own rows.
 
+**Native shapes (stored CUDA receipts; public geometry).**
+- The block is B = 32 rows at the 750 Hz output rate (HF, the holdout
+  input, the 72 Hz/5× control) and 128 at 500 Hz (60 Hz/1×). Lags: 10,553
+  (7,036 at 60 Hz). Whole-span transforms: 16,384 points (8,192).
+- The fixed rank scores F = 17 frequencies (49 at 60 Hz, stride 2) on 256
+  sampled blocks (200). The direct rank widens its radius by |spread
+  Doppler|, 90 Hz here, to Fd = 33 (95).
+- The native direct rank tiles only where a tile saves at least 15% of the
+  whole-span stages. At HF that is T = 256 with C = 225 outputs per chunk:
+  47 chunks and 3,151 transforms per unsampled block (2 template, 47 window
+  and 3,102 inverse), which reproduce the receipt's `fft_row_stages` exactly
+  ([cost model](validation.md#cost-model-of-the-cpu-families)). The device
+  uses the same tile and chunk capacity at HF (from the code). At 60 Hz/1×
+  no tile qualifies (17.6 M against 0.85 × 20.55 M stages per block), so
+  native runs 190 inverse 8,192-point transforms per block where the
+  device tiles at 1,024.
+- The fixed rank is 0.24% of HF's FFT stages, 0.34% at 36 Hz/10× −21 and
+  1.06% at 60 Hz/1×, against 25.6% on the 72 Hz/5× control.
+- Per HF block the native rank spends about 12 CPU-ms (385.8 s × 13 CPUs
+  over 403,266 blocks). Modeled split: about 3 ms in the 3,151 FP64
+  256-point transforms, 1 ms in the 3,102 × 256 products and 7 ms in the
+  696,498 score cells, each a complex divide, a norm and one `exp`.
+- The native quote is 124.9 MB on HF at W = 26: about 75 MB of fixed-lane
+  FP64 totals and 33 MB of rank-lane rows.
+- FP64 rescoring costs about 1 CPU-s per frontier lag at HF (403,010
+  blocks × 32 products and one 64-point transform, *modeled*), so a
+  16-lag frontier adds about 16 CPU-s across the lanes. It has been timed
+  only on the small slots.
+- The fine stage's signed-lag atoms are evidence and stay native FP64.
+  They are small: 2.35% of HF's varying basis rows, 3.66% on the holdout
+  input and 4.55% on the 72 Hz/5× control, about 9 s of HF's 401 s varying
+  fine by basis rows (*modeled*). They need no device port.
+- Considered, not built: chunks on a global hop that is a multiple of B
+  (224 at HF) would let every block share one resident bank of observation
+  spectra, about 57,700 × 256 points or 118 MB in FP32 at HF, as segmented
+  timing does. It removes only the 47 window transforms per block, 1.5% of
+  the transforms, and changes the FP32 partition, which certification
+  would absorb. Too small to build alone.
+
 **Staged inputs (instead of resident whole-request copies).** Each
 submission packs only its own inputs: its blocks' observation spans, merged
 while consecutive spans overlap, each block's two template columns in a
@@ -2919,7 +2969,13 @@ and the rank runs natively; the slot then ends `incomplete` because the
 coarse frequency search's own session exceeds that ceiling. There is no
 timing claim. The unfused form is memory-bound on Vega: an indication of about 2 ms per HF
 oracle block on the shared host. The 72 Hz/5× and HF shapes need a fused LDS rank kernel
-before a Radeon class could qualify.
+before a Radeon class could qualify. By a traffic model the unfused kernels
+move about 25 MB per HF block: the product kernel writes 47 chunks × 2 bits
+× 33 frequencies × 256 FP32 complex values (6.35 MB), and the inverse
+transform and the rank kernel read and write them again. A fused kernel
+would run one workgroup per block and chunk, hold the window spectrum and
+both template spectra in about 12 KB of local memory, and write only the
+chunk's 2 × 225 log-means (*modeled*, not built).
 
 **Limitations.** Ranks without sampled blocks
 (`signed_gain_full_direct_without_fixed`, the wide-span late-calendar
@@ -3013,6 +3069,50 @@ causes, so they are inferred:
 The route was never timed at the holdout or HF shape. The holdout's native
 drift took 50–61 s, and HF evaluations have 2^25-point slope transforms and 7,048
 ridge FFTs. The redesign is [lever 2](#next-levers-in-order).
+
+**Shapes of the stored receipts** (18 November CUDA receipts, rebuilt from
+the drift plan and counters; public geometry):
+
+| | HF −22.5 | Holdout input | 72 Hz/5× control |
+| --- | --- | --- | --- |
+| Raw rows, stride, proposal rows | 103,319,752, 8, 12,914,969 | 10,871,752, 8, 1,358,969 | 858,952, 7, 122,708 |
+| Slope transform; bins | 2^25; 8,053,871 | 2^22; 1,006,735 | 2^18; 55,057 |
+| Slope budget | 3 | 3 | 8, with a slow ridge |
+| Ridge segments × points | 1,762 × 16,384 | 574 × 8,192 | 170 × 2,048, slow 60 × 4,096 |
+| Rank-pass atoms per sign; survivors and scored slopes, both signs | 45; 19; 57 | 44; 19; 57 | 43; 19; 151 |
+
+- Across the 20 heaviest receipts the stride is 8, capped by public
+  bandwidth, so the preferred 262,144-point plan gives way to 2^21- to
+  2^25-point slope transforms with a budget of 3.
+- At HF each of the 109 evaluations renders four FP64 template columns
+  over 103.3 M raw rows and runs 7,048 ridge transforms (115 M points). The
+  former ridge loop made 0.89 G loads per evaluation (257 slopes × 984
+  centers × 1,762 segments × 2 bits).
+- Per HF slot that is 512 slope transforms of 2^25 points (17.18 G rows),
+  52.9 G rendered template column-rows and 31.4 G exact FP64 peak-rows
+  (16 peaks × raw rows × survivors). Survivors render twice: for their
+  products and, because the stride exceeds one, for their exact pass.
+- The native render evaluates one FP64 `std::cos` and `std::sin` per raw
+  row and tap, shared by the two bits, after the cubic interpolation
+  ([kernel](../src/triad_mapped_kernel.cpp)): about 26 G pairs per HF slot
+  (13.2 G paired rows × 2 taps, *derived*).
+- A `FloatPlan` 2^25-point transform finishes its stages up to 8,192
+  points in 64 KiB blocks. Its other 12 stages are whole-array passes over
+  256 MiB, plus a strided bit reversal: about 6 GiB of memory traffic per
+  transform and 3 TiB per HF slot (*derived from the code*).
+- `drift_coherent_timing_fft_rows` is zero for a sign with at most eight
+  timing atoms, which has no rank pass.
+
+**Modeled device budget at HF** (RTX PRO 6000, pre-port inputs, not
+timed): about 20–40 ms per rank-pass atom and 5–8 ms per extra survivor
+slope, about 3–5 s per slot. Per atom: 8–16 ms to upload its 413 MB of
+FP32 products, about 3 ms of ridge transforms and power, 3–15 ms of ridge
+search, and 4–8 ms for the zero-slope dechirp, four 2^25-point transforms
+and peaks. The host's render and products (about 30–55 s) and exact FP64
+survivors (about 25–40 s on eight lanes, about 15 s on ten, which removes
+the second survivor round) would then bound the stage, which is why
+lever 2 adds device rendering.
+
 Receipts: `vulkan_drift_*`, with `ridge_cells` and `slope_ffts`. Slot fields:
 `drift_proposal_route` (`vulkan_fp32_fft_fp64_ridge`, with
 `_with_native_atoms` when an evaluation fell back), `drift_device_atoms`
@@ -3114,9 +3214,14 @@ refinement, slope list and peak merge.
   `nonfinite-device` fallbacks and no session credited.
 - Twiddle tables settled at 2,048 to 2^25 rows within the bound: about
   8.1 bytes per row from 2^18 (2^25: 270.5 MB settled, bound 536.9 MB,
-  `lut_quote` 2.68 GB). At HF (2^25, slope budget 3) the three slope plans
-  (3, 2 and 1) lease about 3.8 GB of tables, against 5.4 GB for the former
-  two plans at the full quote (*est.*).
+  `lut_quote` 2.68 GB). At HF (2^25, slope budget 3) a four-column slope
+  transform has 2^27 rows, so the 2^28-row submission cap admits at most
+  two slopes per transform. The session halves its batch from 3 straight
+  to 1, so an HF session holds one 2^25-point slope plan, and the full
+  quote it builds under (2.68 GB) bounds its table lease (*derived from the
+  code*; no HF session has run). A batch of 2 would also fit and would
+  halve the survivors' nonzero-slope transforms and dispatches; the oracle
+  already requires batch invariance.
 
 **Complete slot (72 Hz/1×, RADV, W24, 21 Nov 2026).** Device against native
 on one binary: the same decision and slot result, 19 timing atoms, 592
@@ -3143,7 +3248,11 @@ Vega (single runs on a loaded shared host, not a timing result), so the
 Radeon stays declined. No single-family Radeon drift run of the 72 Hz/5×
 control was made; all three routes together were, above. An FP64 tie guard
 at the eighth rank and at the nominations would make selection follow FP64
-at exactly these near ties. A drift qualification that reports selection
+at exactly these near ties. Triggered when the eighth and ninth ranks, or
+two nominations, lie within 1e-5 relative, it would score each tied bin by
+a direct FP64 DFT of the FP64 dechirped products: 4 × proposal rows
+complex multiply-adds per candidate, about 52 M at HF (*modeled*, not
+built). A drift qualification that reports selection
 against FP64 needs that scratch build's FP64 drift instantiation exposed as
 a qualification hook; the Blackwell run had no FP64 drift control.
 
@@ -3203,7 +3312,13 @@ The 63 ns per load derived from the HF receipt (its drift seconds divided
 by a modeled load count, ridge share assumed 85–95%, not timed), which ran
 on an EPYC 9555 pod restricted to 13 CPUs by affinity, was not reproduced on the Xeon,
 where the former loop ran at 5–12 ns. Time the benchmark on an EPYC
-9555-class CPU to test it. A complete HF slot remains unmeasured, and so do
+9555-class CPU to test it. Three 13-CPU receipts give the same 63–64 ns
+while their FFT and render rows scale differently, which supports the
+assumed share without timing it
+([cost model](validation.md#cost-model-of-the-cpu-families)). The former
+loop walked segments innermost over the `[bit][segment][16,384-bin]` FP64
+table, so consecutive loads were one 128 KiB row apart, which defeats
+caches, the TLB and prefetchers. A complete HF slot remains unmeasured, and so do
 drift lane counts at W = 80 on an HF-shape (extended-plan) slot; the 72 Hz
 slots ran 43–48 of 58 planned lanes. At HF a drift lane quotes about
 2.20 GiB (products 0.83 GB, columns 1.07 GB, power table 0.46 GB), so an
@@ -3259,19 +3374,48 @@ fixed cost, not arithmetic (modeled and inferred):
 
 The redesign is [lever 3](#next-levers-in-order).
 
-**CPU cost split (modeled from the HF receipt's counters, inputs not
-kept).** At assumed unit costs of 1.25 ns per FP64 AVX2 FFT row-stage,
-2.5 ns per rendered basis row and 80 ns per Markov chain-state, FFTs are
+**CPU cost split (modeled from the HF receipt's counters; shapes
+below).** At assumed unit costs of 1.25 ns per FP64 AVX2 FFT row-stage,
+2.5 ns per rendered basis row, 80 ns per Markov chain-state (4,536 per HF
+block) and 2 µs per Gaussian state update, FFTs are
 84–93% of the executed varying CPU. By lane: the fixed-affine states 65%
 (54 states × 4 template columns per HF block, Bluestein 512-point pairs),
 the raw-composite tracker 23% (17 lattice bins of 512 read), the independent
 gain atoms 11% (full DFTs); by operation besides FFTs, 7–16% in all, which
-at the 84% end is Markov updates 9%, rendering 4%, Gaussian updates 3%. The fixed-affine projection that a
+at the 84% end is Markov updates 9%, rendering 4%, Gaussian updates 3%.
+The 2.5 ns per basis row is probably low: the render kernel evaluates one
+FP64 `std::cos` and `std::sin` per row and tap for each pair of bits, so
+rendering may be several times its modeled share and the FFT share lower
+(*inferred* from the [kernel](../src/triad_mapped_kernel.cpp), not timed). The fixed-affine projection that a
 DFT-to-modes contraction would replace is about 5.9e12 flops per HF slot,
 about 0.05 s at the FP32 SIMT peak, so the levers are device calls that
 batch hundreds of blocks, device rendering and the host recursions, not
 matrix arithmetic
 ([walk-through](gpu-strategy-playbook.md#worked-eligibility-walk-throughs)).
+
+**Shapes of the stored receipts** (18 November CUDA receipts; public
+geometry; the tracking-coordinate count is recovered from
+`varying_basis_rows`):
+- HF: 516,614 blocks of 200 rows (239 in the final block), 512-point
+  transforms. Per block 54 fixed-affine states (18 candidates × 3 models),
+  27 tracking coordinates and 4 gain atoms (2 nominal, 2 signed-lag): 85
+  leaves and 604 FP64 transforms (432 affine, 108 tracker, 64 gain), so
+  1.44e12 row-stages per slot.
+- Holdout input: 54,374 blocks of 200 rows, 48 states, 29 coordinates and
+  5 atoms: 580 transforms per block, 1.45e11 row-stages.
+- 60 Hz/1× −19: 36,561 blocks of 1,200 rows (1,505 final) with 4,096-point
+  transforms, 48 states, 30 coordinates and 5 atoms, and 63 tracker and 75
+  gain lattice states (17 and 27 at 200 rows): 1.05e12 row-stages.
+
+In the same model's absolute terms at HF, moving the projections to the
+device leaves Markov updates at about 187 CPU-s, rendering 88, Gaussian
+updates 56 and observation projections 5. That is about 336 CPU-s, 26 s at
+13 CPUs: the floor of a device-statistics route that keeps host rendering
+and log-domain Markov updates. On the receipts' source, one barrier per
+block, the 200-row stages kept at most about 6 of 13 CPUs busy
+([cost model](validation.md#cost-model-of-the-cpu-families)). The batch
+phases now in the tree target that idle time; their HF effect is
+unmeasured.
 
 How it runs ([`triad_vulkan_varying.cpp`](../src/triad_vulkan_varying.cpp),
 kernels in [`triad_vulkan_varying_shaders.hpp`](../src/triad_vulkan_varying_shaders.hpp)):

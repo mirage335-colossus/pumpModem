@@ -2120,10 +2120,35 @@ equals the receipt's `workspace_limit_bytes` (initial free memory less a
 2 GiB headroom), which the leases reach by design, while the allocator
 peaked at 38,633,734,144 B reserved and 31,470,426,624 B live.
 
-- **Work.** Signed-lag FFT row-stages are counted. Total drift FFT work is
-  rebuilt from the drift plan and counters, because the receipt counts only
-  rank-pass zero-slope dechirps. Varying fine projections are modeled from
-  the block shapes.
+- **Work.** Signed-lag FFT row-stages are counted, and a per-block count
+  reproduces the HF receipt's 2,606,889,103,360 exactly: 403,010 unsampled
+  blocks × 3,151 tiled 256-point transforms × 2,048 row-stages, plus 256
+  sampled blocks × 105 whole-span 16,384-point transforms × 229,376
+  ([shapes](triad-gpu-optimization.md#signed-lag-ranks)). Total drift FFT
+  work is rebuilt from the drift plan and counters, because the receipt
+  counts only rank-pass zero-slope dechirps; the rank-pass atom count,
+  `drift_coherent_timing_fft_rows` ÷ (4 × nfft), is an exact integer on
+  every receipt (90 at HF).
+  Varying fine projections are modeled from the block shapes; the
+  tracking-coordinate count recovered from `varying_basis_rows` is an exact
+  integer on every receipt (27 at HF), which checks the reconstruction
+  ([shapes](triad-gpu-optimization.md#varying-statistics)).
+- **All 88 receipts with family time, by route.** Shares of summed slot
+  wall, three families against segmented timing: RTX PRO 6000 with CUDA
+  segmented timing (20 receipts) 47% against 44%; RTX PRO 6000 with native
+  segmented timing (7) 24% against 73%; RTX PRO 4500 with CUDA segmented
+  timing (9) 38% against 58%; CPU-only runs (48, most on 12 hardware
+  threads) 9% against 88%; the Radeon's four 20 November receipts, native
+  or Vulkan segmented, 10–11% against 86–88%. Where segmented timing runs
+  natively it, not the three families, is the CPU lever. Process CPU-s over
+  wall were 3.2–9.5 busy CPUs on the CUDA-segmented RTX PRO 6000 receipts
+  and 11.9–21.0 on the native-segmented ones.
+- **Other HF work.** The HF receipt's backend counters also record
+  16,208,035,723 FIR input rows and 249 GB of uploads in coarse, and
+  29,732,292,000 CUDA fused mapped values over 4,959,432 statistics blocks
+  in fine. No timer splits the 207.9 s and 185.6 s "other" parts among
+  them. Coherent gain ran on none of the reference receipts
+  (`coherent_gain_center_grid_exceeds_work_limit`).
 - **Scenarios.** Moving only the FFTs transfers 95% of the signed-lag
   stage, 15–30% of drift and 25–60% of varying fine to the device.
   Whole-family fused ports leave 3%, 5–10% and 5–10% on the CPU. Device
@@ -2149,11 +2174,26 @@ peaked at 38,633,734,144 B reserved and 31,470,426,624 B live.
   pod, and 0.9–1.2e8 on 27-CPU quotas; the two 8,192-point ranks ran 1.2e9
   on a 13-CPU allocation and 6.2e8 on a 27-CPU quota. Varying fine took
   0.6–0.8 ms per 200-row block on 13-CPU allocations and 1.1–1.9 ms on
-  27-CPU quotas. Drift used about 4.9–5.0 of 13 CPUs: the CPU-second
-  difference of two pairs of equal-geometry slots with and without drift,
-  over the drift seconds. On a 27-CPU RTX PRO 4500 pair the same method
+  27-CPU quotas, and 3.47 ms per 1,200-row block on the 13-CPU 60 Hz/1×
+  −19 receipt. That receipt bounds the FP64 FFT cost at 1.48 ns per
+  row-stage even if all 13 CPUs were busy (127.0 s × 13 over 36,561 blocks
+  of 28.7 M modeled row-stages and about 2.6 ms of other modeled work
+  each). So on the receipts' source, one barrier per block, the 200-row
+  stages kept at most about 6.1 (HF) and 5.8 (36 Hz/10× −21) of 13 CPUs
+  busy, against about 85% at 1,200 rows. Drift used about 4.9–5.0 of 13
+  CPUs: the CPU-second difference of two pairs of equal-geometry slots with
+  and without drift, over the drift seconds. On a 27-CPU RTX PRO 4500 pair the same method
   gives 8.3–8.7, above the 8-lane cap (6.9–7.7 over the wall difference),
   so that pair, which also differs in seed and decision, is not clean.
+  Drift seconds tracked the former ridge loop's loads on the lane critical
+  path. On the three 13-CPU RTX PRO 6000 receipts with 2^24- and
+  2^25-point slope transforms (HF, 36 Hz/10× −21, 60 Hz/1× −19), 899.5,
+  659.3 and 593.4 s over 14.3, 10.5 and 9.3 G loads (rank and survivor
+  rounds of eight lanes × 0.89, 0.75 and 0.58 G loads per evaluation) give
+  63.1, 63.0 and 63.8 ns per load. Large-FFT rows (17.2, 16.1 and 9.1 G)
+  and rendered template column-rows (52.9, 34.8 and 23.9 G) do not scale with
+  drift time. This consistency supports the assumed 85–95% ridge share; it
+  is not a timer.
   CUDA segmented timing ran 3.9–5.2e11 row-stages/s at N = 32,768 on the
   RTX PRO 6000 and 0.7–1.4e11 on the RTX PRO 4500.
 - **Weakest input.** The FFT shares of drift and varying fine CPU time set
@@ -2509,7 +2549,7 @@ cells) gave the same picture:
   drift seconds and a modeled load count (ridge share assumed 85–95%), not
   timed. That latency is not reproduced here, so the HF gain is still
   unmeasured. Time the same shape on the host that runs the HF slots: the
-  source is `ridgebench/ridgebench.cpp` in the evidence directory below,
+  source is [`tools/triad_drift_ridge_bench.cpp`](../tools/triad_drift_ridge_bench.cpp),
   built with `g++ -std=c++20 -O3 -DNDEBUG -ffp-contract=off -fno-fast-math -pthread`
   and run with the arguments `1762 16384 1967 4 <threads> 4 64 16`
   (segments, bins, radius, stride, threads, former-loop slopes,
