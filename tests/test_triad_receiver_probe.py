@@ -153,6 +153,29 @@ def main(executable):
         assert prior["workspaces"] == 78 and prior["rays"] == rays
         assert prior["frequency_points"] * prior["arrival_points"] * prior["workspaces"] == score_rows
 
+    # Probe geometry defaults to the historical spacing floor. The explicit
+    # GUI-supported 265 Hz floor must flow through the canonical profile and
+    # widen both its projected observation bandwidth and arrival grid.
+    spacing_base = run("plan", *low_rate_options, "--spread-preset", "hf-worst",
+                       "--selective-perturbation", "each-65", "--target-cn0", "32",
+                       "--doppler-hz", "0")["configuration"]
+    assert spacing_base["minimum_carrier_spacing_hz"] == 0
+    assert spacing_base["effective_carrier_spacing_hz"] == .75
+    spacing_wide = run("plan", *low_rate_options, "--spread-preset", "hf-worst",
+                       "--selective-perturbation", "each-65", "--target-cn0", "32",
+                       "--doppler-hz", "0", "--minimum-carrier-spacing", "265")["configuration"]
+    assert spacing_wide["minimum_carrier_spacing_hz"] == 265
+    assert spacing_wide["effective_carrier_spacing_hz"] == 265
+    assert spacing_wide["coarse_full_prior"]["projected_sample_rate_hz"] > \
+        spacing_base["coarse_full_prior"]["projected_sample_rate_hz"]
+    assert spacing_wide["coarse_full_prior"]["arrival_points"] > \
+        spacing_base["coarse_full_prior"]["arrival_points"]
+    for spacing in ("0", "3.5", "125", "265"):
+        assert run("plan", *low_rate_options, "--minimum-carrier-spacing", spacing)["configuration"][
+            "minimum_carrier_spacing_hz"] == float(spacing)
+    run("plan", *low_rate_options, "--minimum-carrier-spacing", "12", code=1,
+        parse_error="--minimum-carrier-spacing expects 0, 3.5, 125 or 265 Hz")
+
     contrast_options = ("--spread-preset", "hf-worst", "--selective-perturbation", "each-65",
                         "--data-if", "497", "--target-cn0", "16", "--cn0", "16", "--seconds", "8")
     full_stress = run("plan", *contrast_options, "--signal-gain-db", "0")["configuration"]

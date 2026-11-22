@@ -394,7 +394,7 @@ void PatternSource::render_bank(std::span<PatternSource* const> sources,
             "triad v3 bank requires a finite positive sample lattice");
     require(!count||std::isfinite(first_sample+(count-1)*sample_step),
             "triad v3 render bank coordinate overflow");
-    render_bank_impl(sources,first_sample,sample_step,count,{},output);
+    render_bank_impl(sources,first_sample,sample_step,count,{},{},output);
 }
 void PatternSource::render_bank(std::span<PatternSource* const> sources,
         std::uint64_t first_sample,std::span<const double> offsets,
@@ -409,11 +409,16 @@ void PatternSource::render_bank(std::span<PatternSource* const> sources,
                 offset>previous,"triad v3 render bank has invalid mapped coordinates");
         previous=offset;
     }
-    render_bank_impl(sources,first,1,offsets.size(),offsets,output);
+    render_bank_impl(sources,first,1,offsets.size(),offsets,{},output);
+}
+void PatternSource::render_bank(std::span<PatternSource* const> sources,
+        std::span<const long double> positions,std::span<Complex> output){
+    render_bank_impl(sources,0,1,positions.size(),{},positions,output);
 }
 void PatternSource::render_bank_impl(std::span<PatternSource* const> sources,
         long double first_sample,long double sample_step,std::size_t count,
-        std::span<const double> offsets,std::span<Complex> output){
+        std::span<const double> offsets,std::span<const long double> positions,
+        std::span<Complex> output){
     require(!count||sources.size()<=std::numeric_limits<std::size_t>::max()/count,
             "triad v3 render bank extent overflow");
     require(output.size()==sources.size()*count,"triad v3 render bank output extent mismatch");
@@ -444,8 +449,9 @@ void PatternSource::render_bank_impl(std::span<PatternSource* const> sources,
         std::uint64_t minimum=UINT64_MAX,maximum=0;
         for(std::size_t i=0;i<n;++i){
             auto& point=points[i];point.length=0;
-            const auto sample=first_sample+(offsets.empty()?(begin+i)*sample_step:offsets[begin+i]);
-            if(sample<0||sample>=g.source_samples)continue;
+            const auto sample=!positions.empty()?positions[begin+i]:
+                first_sample+(offsets.empty()?(begin+i)*sample_step:offsets[begin+i]);
+            if(!(sample>=0&&sample<g.source_samples))continue;
             const long double t=(sample-ref.halo)/ref.sample_rate;
             const auto envelope=ref.envelope(t);if(envelope==0)continue;
             const auto offset=ref.center_offset();

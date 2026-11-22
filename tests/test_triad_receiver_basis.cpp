@@ -191,6 +191,79 @@ void fallback_and_validation(const datapump::Crypto& crypto) {
     fallback.render_pair(row, taps, 6000, offsets, output);
 }
 
+bool same_value_bits(std::span<const v::Complex> left, std::span<const v::Complex> right) {
+    if (left.size() != right.size()) return false;
+    for (std::size_t i = 0; i != left.size(); ++i)
+        if (std::bit_cast<std::uint64_t>(left[i].real()) != std::bit_cast<std::uint64_t>(right[i].real()) ||
+            std::bit_cast<std::uint64_t>(left[i].imag()) != std::bit_cast<std::uint64_t>(right[i].imag()))
+            return false;
+    return true;
+}
+
+void concurrent_direct_pairs(const datapump::Crypto& crypto) {
+    const auto settings = config();
+    auto plan = slot();
+    plan.format.pulse_shape = v::PulseShape::Rrc;
+    plan.format.minimum_carrier_spacing_hz = 265;
+    const auto offsets = positions(401);
+    const std::array<v::Tap, 2> taps{{{0, .2}, {.007, -.4}}};
+    // All rows use one epoch, while timing, sample-rate error, and carrier
+    // frequency vary on a waveform with 265 Hz carrier spacing.
+    const std::array<r::MappedBasisRow, 4> rows{{
+        {0, .011, -1.25, -265.}, {0, .017, -.25, 0.},
+        {0, .023, .75, 265.}, {0, .029, 1.75, 530.}}};
+    constexpr std::uint64_t first = 25000;
+    r::MappedBasis basis(settings, plan, crypto, offsets.size(), rows.size());
+    std::array<std::vector<v::Complex>, rows.size()> serial;
+    for (std::size_t i = 0; i != rows.size(); ++i) {
+        serial[i].resize(2*taps.size()*offsets.size());
+        basis.render_pair(rows[i], taps, first, offsets, serial[i]);
+        check(std::ranges::any_of(serial[i], [](auto value) { return value != v::Complex{}; }),
+              "concurrent RRC fixture omitted active waveform support");
+        check(same_value_bits(serial[i], direct(settings, plan, crypto, rows[i], taps, first, offsets)),
+              "serial RRC direct rendering changed native samples");
+    }
+
+    std::array<std::future<std::vector<v::Complex>>, rows.size()> work;
+    std::promise<void> start;
+    const auto ready = start.get_future().share();
+    try {
+        for (std::size_t i = 0; i != rows.size(); ++i) {
+            work[i] = std::async(std::launch::async, [&, i, ready] {
+                std::vector<v::Complex> result(2*taps.size()*offsets.size());
+                ready.get();
+                basis.render_pair(rows[i], taps, first, offsets, result);
+                return result;
+            });
+        }
+    } catch (...) {
+        start.set_exception(std::current_exception());
+        throw;
+    }
+    start.set_value();
+    for (std::size_t i = 0; i != rows.size(); ++i) {
+        const auto concurrent = work[i].get();
+        check(same_value_bits(concurrent, serial[i]),
+              "concurrent same-epoch RRC rendering differs from serial samples");
+    }
+    const auto report = basis.report();
+    check(report.calls == 2*rows.size() && report.direct_rows == 2*report.calls*taps.size() &&
+          !report.interpolated_rows && report.fallback_reason == "unsupported-or-abrupt-pulse",
+          "concurrent direct RRC work lost its receipts or fallback reason");
+
+    std::vector<v::Complex> reused(serial.front().size());
+    for (const auto epoch : v::receiver_epoch_offsets) {
+        auto row = rows.front();
+        row.epoch_offset_seconds = epoch;
+        basis.render_pair(row, taps, first, offsets, reused);
+        check(same_value_bits(reused, direct(settings, plan, crypto, row, taps, first, offsets)),
+              "exact source reuse retained the wrong keyed epoch");
+    }
+    basis.render_pair(rows.front(), taps, 0, offsets, reused);
+    check(same_value_bits(reused, direct(settings, plan, crypto, rows.front(), taps, 0, offsets)),
+          "paired exact rendering changed zeros at the source boundary");
+}
+
 struct ViewResult {
     std::vector<v::Complex> values;
     std::weak_ptr<const void> first_tile;
@@ -595,6 +668,7 @@ int main() {
         concurrent_pairs(crypto);
         dense_and_gated(crypto);
         fallback_and_validation(crypto);
+        concurrent_direct_pairs(crypto);
         prepared_views(crypto);
         unit_remainders();
         addressed_maps(crypto);

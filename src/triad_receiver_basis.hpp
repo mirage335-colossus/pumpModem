@@ -50,7 +50,8 @@ private:
 
 // A slot's shared bounded cache of unwarped keyed DATA. The caller owns the
 // aggregate worker budget. At most `workers` concurrent render_pair calls may
-// read immutable pinned tiles; preparation alone locks a source's mutable cache.
+// read immutable pinned tiles. If the shape always renders directly, eligible
+// lanes borrow private keyed sources within the existing workspace.
 // Output is [bit][tap][sample], has exactly 2*taps.size()*offsets.size() entries,
 // and is written only by this call. The same native cubic kernel serves Python.
 class MappedBasis {

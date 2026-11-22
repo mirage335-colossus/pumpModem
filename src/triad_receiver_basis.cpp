@@ -13,6 +13,7 @@
 #include <shared_mutex>
 #include <numbers>
 #include <numeric>
+#include <optional>
 #include <tuple>
 
 namespace datapump::triad::v3::receiver_detail {
@@ -70,9 +71,15 @@ struct MappedBasis::Impl {
         // Filled ahead of its first request, which then accounts as the fill.
         std::atomic<bool> ahead{false};
     };
+    using SourcePair = std::array<std::unique_ptr<PatternSource>, 2>;
     struct Sources {
         std::mutex mutex;
-        std::array<std::unique_ptr<PatternSource>, 2> bits;
+        SourcePair bits;
+    };
+    struct ExactSources {
+        SourcePair bits;
+        std::optional<unsigned> epoch;
+        bool busy = false;
     };
 
     ReceiverConfig config;
@@ -85,6 +92,8 @@ struct MappedBasis::Impl {
     std::uint64_t dense_samples;
     unsigned dense_factor = 1;
     std::array<Sources, owner_count> sources;
+    std::mutex exact_mutex;
+    std::vector<ExactSources> exact_sources;
     mutable std::shared_mutex mutex;
     std::map<Key, Entry> cache;
     MappedBasisReport statistics;
@@ -138,6 +147,15 @@ struct MappedBasis::Impl {
         statistics.oversampling_ratio = config.sample_rate_hz*dense_factor/width;
         statistics.interpolation_amplitude_proxy = (3./128)*
             std::pow(std::numbers::pi/statistics.oversampling_ratio, 4);
+        if (!statistics.fallback_reason.empty() && workers > 1) {
+            // This geometry never populates the dense cache or its source
+            // pairs. Reuse their admitted bytes for private exact renderers.
+            const auto pair_bytes = multiply(2, source_geometry.source_workspace_bytes);
+            const auto allowance = add(cache_limit, multiply(owner_count, pair_bytes));
+            const auto count = std::max<std::size_t>(workers, owner_count);
+            if (count <= allowance / add(pair_bytes, sizeof(ExactSources)))
+                exact_sources.resize(count);
+        }
     }
 
     // Source samples per dense sample.
@@ -214,19 +232,22 @@ struct MappedBasis::Impl {
         return static_cast<unsigned>(epoch+6);
     }
 
-    void prepare_sources(unsigned epoch) {
-        // Caller holds this epoch's lock. All other epochs remain independent.
-        auto& pair = sources[epoch].bits;
-        if (pair[0]) return;
+    SourcePair make_sources(unsigned epoch) {
         auto format = slot.format;
         format.epoch = epoch < 6 ? format.epoch-(6-epoch) : format.epoch+(epoch-6);
-        std::array<std::unique_ptr<PatternSource>, 2> prepared{
+        SourcePair prepared{
             std::make_unique<PatternSource>(format, key, 0),
             std::make_unique<PatternSource>(format, key, 1)};
         require(prepared[0]->working_bytes() <= source_geometry.source_workspace_bytes &&
                 prepared[1]->working_bytes() <= source_geometry.source_workspace_bytes,
                 "mapped basis source exceeds public workspace bound");
-        pair = std::move(prepared);
+        return prepared;
+    }
+
+    void prepare_sources(unsigned epoch) {
+        // Caller holds this epoch's lock. All other epochs remain independent.
+        auto& pair = sources[epoch].bits;
+        if (!pair[0]) pair = make_sources(epoch);
     }
 
     std::uint64_t stamp() { return recency.fetch_add(1, std::memory_order_relaxed)+1; }
@@ -360,25 +381,74 @@ struct MappedBasis::Impl {
         (void)fill(bit, epoch, index, true, stop);
     }
 
-    void direct(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
-                std::span<const double> offsets, std::span<Complex> output, const std::stop_token& stop) {
-        const auto epoch = source_index(row.epoch_offset_seconds);
-        std::lock_guard source_lock(sources[epoch].mutex);
+    ExactSources& lease_exact_sources(unsigned epoch) {
+        std::lock_guard lock(exact_mutex);
+        ExactSources* available = nullptr;
+        for (auto& pair : exact_sources) {
+            if (pair.busy) continue;
+            if (pair.epoch == epoch) {
+                available = &pair;
+                break;
+            }
+            if (!available || (available->epoch && !pair.epoch)) available = &pair;
+        }
+        require(available, "mapped basis exact source pool exceeds admitted workers");
+        available->busy = true;
+        return *available;
+    }
+
+    void render_exact(SourcePair& pair, const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
+                      std::span<const double> offsets, std::span<Complex> output, const std::stop_token& stop) {
         cancelled(stop);
-        prepare_sources(epoch);
         Candidate candidate;
         candidate.epoch_offset_seconds = row.epoch_offset_seconds;
         candidate.arrival_seconds = row.arrival_seconds;
         candidate.frequency_hz = row.frequency_hz;
         candidate.clock_ppm = row.clock_ppm;
         candidate.channel.taps.assign(taps.begin(), taps.end());
+        if (!exact_sources.empty()) {
+            shaped_basis_mapped_pair(*pair[0], *pair[1], candidate, config.sample_rate_hz,
+                                     first, offsets, output, config.data_if_hz, stop);
+            for (auto& value : output) value *= config.data_basis_gain;
+            cancelled(stop);
+            return;
+        }
         for (unsigned bit = 0; bit != 2; ++bit) {
             candidate.source_bit = static_cast<std::uint8_t>(bit);
             auto destination = output.subspan(bit*taps.size()*offsets.size(), taps.size()*offsets.size());
-            shaped_basis_mapped(*sources[epoch].bits[bit], candidate, config.sample_rate_hz,
+            shaped_basis_mapped(*pair[bit], candidate, config.sample_rate_hz,
                                 first, offsets, destination, config.data_if_hz);
             for (auto& value : destination) value *= config.data_basis_gain;
             cancelled(stop);
+        }
+    }
+
+    void direct(const MappedBasisRow& row, std::span<const Tap> taps, std::uint64_t first,
+                std::span<const double> offsets, std::span<Complex> output, const std::stop_token& stop) {
+        const auto epoch = source_index(row.epoch_offset_seconds);
+        if (exact_sources.empty()) {
+            std::lock_guard source_lock(sources[epoch].mutex);
+            cancelled(stop);
+            prepare_sources(epoch);
+            render_exact(sources[epoch].bits, row, taps, first, offsets, output, stop);
+        } else {
+            auto& pair = lease_exact_sources(epoch);
+            struct Release {
+                std::mutex& mutex;
+                ExactSources& pair;
+                ~Release() {
+                    std::lock_guard lock(mutex);
+                    pair.busy = false;
+                }
+            } release{exact_mutex, pair};
+            cancelled(stop);
+            if (pair.epoch != epoch) {
+                pair.bits = {};
+                pair.epoch.reset();
+                pair.bits = make_sources(epoch);
+                pair.epoch = epoch;
+            }
+            render_exact(pair.bits, row, taps, first, offsets, output, stop);
         }
         std::lock_guard lock(mutex);
         statistics.direct_rows += 2*taps.size();
@@ -763,6 +833,8 @@ std::size_t MappedBasis::workspace_bytes(const ReceiverConfig& config, const Rec
     // fixed cache entry count; no received-content-sized descriptors exist.
     total = add(total, 64U*1024U);
     auto per_worker = multiply(maximum_pins+4, tile_bytes);
+    // The always-direct pool uses the shared cache/source allowance.
+    // Its paired renderer uses 12 KiB of this idle per-lane pin allowance.
     per_worker = add(per_worker, PatternSource::render_bank_scratch_bytes);
     per_worker = add(per_worker, multiply(2*maximum_taps*rows, sizeof(Complex)));
     per_worker = add(per_worker, multiply(2*rows, sizeof(Complex))); // direct fallback pair

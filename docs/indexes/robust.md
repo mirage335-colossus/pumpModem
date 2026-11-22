@@ -25,8 +25,15 @@ single-carrier width.
 Wider spacing may change Helper placement and the cost of the receiver's
 contiguous DATA projection. When replaying earlier low-rate GUI launch commands,
 include `--minimum-carrier-spacing 0` to reproduce their geometry, especially
-with a custom Carrier or a closely spaced Helper. Severe-channel reliability gains
-and sustained receiver cost at the new spacings remain unqualified. See the
+with a custom Carrier or a closely spaced Helper. On the local Ryzen 5650U and
+Radeon, that setting finished a five-slot 3.6 Hz simulation in 44.2 s, with
+a decoded mismatch. The same launcher at the fresh 265 Hz default reached
+a 70 s deadline before the GUI published a slot decision. It used a wider public
+arrival grid and an unaccelerated 179-mode fine shape. The older 47-mode
+Blackwell result applies to natural spacing. See the
+[measured throughput and limits](../validation.md#follow-through-at-the-265-hz-startup-spacing).
+Severe-channel reliability gains and sustained receiver cost at the new
+spacings remain unqualified. See the
 [shared settings contract](../gui-contract.md#modems-and-current-availability)
 and [functional checks](../validation.md#robust-minimum-carrier-spacing--22-november-2026).
 For 100 W Helper at low DATA power, see the
@@ -125,6 +132,23 @@ large residual. This separates a public inference problem from loss of the
 transmitted distinction on these specific captures. A large bit separation
 on its own was also observed under pure noise, so retain the physical-null
 comparison. [Exact-channel checks](../validation.md#exact-channel-witness-for-severe-low-rate-bit-errors--21-november-2026).
+
+Smooth energy and local estimation bounds are useful once timing and
+frequency are in the correct ambiguity peak. Weak-signal acquisition can
+switch to a competing peak. Global bounds then depend on the full delay
+and frequency priors. Evaluate the transition with retained public
+hypotheses, captured timing errors, wrong-bit decisions and physical quiet
+outcomes. The delay and GNSS examples establish the threshold mechanism
+under their own priors. They supply no sensitivity margin for this modem.
+[Weiss and Weinstein's delay bound](https://cris.tau.ac.il/en/publications/fundamental-limitations-in-passive-time-delay-estimation-part-i-n/),
+[Zhang et al.'s 2024 frequency bound](https://www.ion.org/publications/abstract.cfm?articleID=103098).
+The 2026 Alaska beacon measurements give field evidence of range and Doppler
+spreading for selected 2.9 and 3.4 MHz paths. Their 10 s coherent processing
+and one-minute spectral averages cannot calibrate the modem's quarter-second
+fine blocks at 30 MHz. Keep their observing geometry and the synthetic
+receiver results attached to their respective claims.
+[Alaska field study, §2](https://www.frontiersin.org/journals/astronomy-and-space-sciences/articles/10.3389/fspas.2026.1848834/full),
+[HF research reconciliation](../../_appraisal/highFidelity-triple_Robust_Modem/hf-public-search.md#research-reconciliation-and-limits).
 
 | 2 mW waveform | Shorter stable miss | Shortest stable bit received | Modeled bit-0 energy | Longest completed severe GUI miss |
 | --- | ---: | --- | ---: | ---: |

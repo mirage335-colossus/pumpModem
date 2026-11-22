@@ -358,6 +358,115 @@ options and support repeatable decisions about channel scheduling until
 new same-preset measurements supersede them. The pod was terminated
 and the provider pod, queue and persistent-volume inventories were empty.
 
+### Follow-through at the 265 Hz startup spacing
+
+The earlier Blackwell result used the natural 0.75 Hz carrier spacing. The
+same launcher text omits a spacing override, so a fresh current GUI run
+uses 265 Hz. At Rate 3.6 Hz / 1× this raises the nominal triplet span from
+2.25 to 530.75 Hz. Target 32 dB-Hz sets planning geometry. The simulation's
+link arithmetic is +77 dB-Hz from +3 dBm, 90 dB path loss and −164 dBm/Hz.
+The observation here concerns throughput and strong-signal modeled fading.
+
+The Release worker at `f07eddd1` used the shared Link Planner Load and
+Transmit actions with Simulation explicitly selected and draft `e`. The
+local Ryzen 5 PRO 5650U supplied 12 logical CPUs and 24 automatic workers.
+The configured 0.6 budget field did not cap worker or CPU use.
+Vulkan ran on the integrated AMD Radeon (RADV RENOIR, Mesa 25.0.7).
+Fresh starts used the ordinary GUI's UTC and random channel seeds. Every
+attempt retained the three DATA slots and two physical quiet slots.
+
+| Run | Native result |
+| --- | --- |
+| Original renderer, explicit 0 Hz floor | 44.2 s compute and 47.26 s Transmit-to-idle for 1,065.6 s modeled input. All five slots scored, including both quiet slots. The receiver decoded `o` from `e`. |
+| Original renderer, 265 Hz floor | 70 s deadline, 613.7 of 1,053.6 modeled seconds submitted, no published slot decision. 270.57 process CPU-seconds (32.2% of 12 logical CPUs). Vulkan scored 32,926,140 rows and spent 5.961 s in GPU commands. |
+| Private exact-renderer pool, 265 Hz floor | 105 s deadline after submitting all 1,050.6 modeled seconds, no published slot decision. 1,101.32 process CPU-seconds (87.4% of 12 logical CPUs). Vulkan scored 49,389,210 rows and spent 9.279 s in GPU commands. |
+| Private pool with paired exact templates, 265 Hz floor | 115.5 s compute and 118.60 s Transmit-to-idle for 1,067.6 s modeled input. The receiver decoded `e` from `001` followed by two scored quiet slots. 1,226.32 process CPU-seconds (88.5%). Vulkan scored all 82,315,350 rows and spent 18.221 s in GPU commands. |
+
+The original-spacing run scored 19,755,450 public coarse rows at 240
+projected Hz and 3,377 arrivals per slot. The 265 Hz run used 1,000
+projected Hz and 14,071 arrivals per slot, with the same 15 frequencies
+and 78 workspaces. The GPU figures cover device commands only. In the
+completed 265 Hz replay, coarse phases took 8.51–26.83 s and native fine
+phases took 18.12–29.74 s. Owners overlap, so those per-slot times do not add
+to the wall clock. The reported 2,290 MiB owner lease and 3,667 MiB shared
+Vulkan limit admit only one such coarse device session at a time.
+The 265 Hz stage trace measured 179 retained
+fine modes per 1,500-row block, against 47 at natural spacing. Its first
+slot had 72 affine states over 417 dispatches, 24 permitted workers and
+zero mapped tile hits. It used the exact point renderer for the default
+untapered RRC pulse. That route previously held a per-epoch source lock
+across rendering both bits and both taps. The trace reached just 96
+dispatches after 28.9 s of fine work. A separate stage trace completed the
+first two coarse phases in 8.34 and 16.24 s and did not finish their
+affine phase before 55 s.
+
+The private source pool uses the existing owner lease on always-direct
+geometries. The renderer may use that allowance because there is no
+mapped sample cache or mapped-source allocation on these routes. Both
+keyed bits share the pulse weights and phase calculation at each sample
+and retain the existing arithmetic order per template. The same-epoch
+concurrent basis test matches every component bit-for-bit.
+The measurements above indicate that source serialization depressed CPU
+usage. They are independent channel realizations with unequal stopping
+points and cannot establish a complete-service speedup. The old local
+CPU-only 120 s timeouts also predate the spacing change. An earlier matched
+elapsed result on this device would be required to quantify a revision-only
+regression at fixed geometry.
+
+A separate fixed-seed active-slot comparison isolates the renderer. Both
+arms used the local Radeon, 24 workers, the full public 265 Hz search,
+seed 950101, 1,215,321 input samples and I/Q-plus-validity digest
+`26f92233591c…6a2ee8`. Both executed 16,463,070 Vulkan FP32 coarse rows
+and routed fine tracking to the CPU. The patched arm took 25.35 s process
+wall time, including 24.35 s native receiver service (7.69 s coarse,
+16.66 s fine), and returned the correct bit 0. A control relinked with the
+original `f07eddd1` basis object exceeded the 80 s end-to-end deadline.
+It returned no decision. The completed arm reported 350,012,448 template
+samples evaluated and 144,632 quiet modes. This comparison establishes a
+greater than 3.15× elapsed improvement for the one active slot. It cannot
+compare completed source-version decisions, estimate the message speedup
+or supply a communication probability. The complete 265 Hz GUI replay
+above includes the required quiet slots.
+
+Compact local receipts in `local-evidence/gui-wide-throughput-20261122/`
+support the renderer comparison and recorded timeout until a matched
+complete-service study supersedes them. Release timing, probe bounds and
+GPU identities apply only to these fixtures.
+
+#### Current built receiver on a full Blackwell
+
+The RunPod rerun used one full RTX PRO 6000 Blackwell Server Edition
+(97,887 MiB visible, MIG disabled), with an AMD EPYC 9355, a 13.6-CPU
+cgroup quota and 26 automatic workers. A 2.4 MB native source closure
+(`30a40f60…48e9`) was built on the pod. The resulting binary
+(`296b5f57…b5b1`) was used for both spacing arms. The
+shared GUI worker received the same launcher and one-character draft as
+the local trials. It used Vulkan and the available OpenCL fine backend.
+The spacing comparison used the same built worker and fresh GUI channel
+and calendar realizations.
+
+| Carrier spacing floor | Compute / Transmit-to-idle | Executed work | Outcome |
+| --- | --- | --- | --- |
+| 265 Hz | 30.8 s / 33.90 s | 82,315,350 Vulkan coarse rows and native CPU fine tracking | `o` from bits `100` |
+| 265 Hz, separate fresh start | 36.1 s / 39.29 s | 82,315,350 Vulkan coarse rows and native CPU fine tracking | `e` from bits `001` |
+| 0 Hz | 2.0 s / 5.10 s | 19,755,450 Vulkan coarse rows and 56,269,152 OpenCL NVFP4 fine modes | `a` from bits `011` |
+
+All three starts scored five complete public slots and both physical
+quiet slots. The legacy spacing used the 47-mode fine path qualified for
+NVFP4. At 265 Hz the session used 179 modes and routed this work to the
+CPU. The declared carrier spacing changes the transmitted waveform as
+well as the receiver work. The elapsed measurements establish a
+large width-dependent cost on one device. The different epochs and
+channel draws leave a spacing-dependent sensitivity comparison unresolved.
+The two task pods were terminated and absence was verified in the
+provider control plane. The compact technical receipts above include
+the same-worker pair.
+
+The Release build passed all 53 Triad tests and all 32 GUI tests. After
+rebuilding the strengthened concurrent basis test and the spacing probe,
+both focused checks passed again. The rebuilt FLTK application passed
+its shared GUI self-check.
+
 ## Blackwell arithmetic and receiver residency — 22 November 2026
 
 The same full RTX PRO 6000 Blackwell Server Edition ran the vector and

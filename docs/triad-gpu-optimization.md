@@ -980,7 +980,7 @@ remains open.
 ### When waveform and channel synthesis dominate
 
 For the GPSDO/GPSDO, 3.6 Hz, HF Worst / Each 65% GUI preset at Target 32,
-the native Blackwell simulation spent 91–92% of compute wall time
+the native Blackwell simulation with natural carrier spacing spent 91–92% of compute wall time
 generating waveform and channel samples. The receiver already ran GPU
 search and FP4 fine work. Whole-capture staging with the shared native
 executor cut time by 11–18% by fixture medians, with matching input
@@ -989,6 +989,22 @@ draft. Receiver-only speed or Tensor Core availability cannot predict
 this phase split for another profile. Compare compute, paced playback
 and the full pipeline separately.
 [Exact GUI preset experiments](validation.md#exact-36-hz-gui-simulation-throughput--22-november-2026).
+
+The 265 Hz startup floor expands that GUI profile from 47 to 179 fine
+projection modes. The wider shape falls outside the resident fine route's
+47-mode qualification. The local Radeon run executes the wider coarse
+search on the GPU, and its native exact basis rendering and fine scoring
+remain material. Timing or precision results for the 47-mode shape do not
+qualify the 179-mode shape. Preserve the actual retained DFT modes when
+testing batched or partial transforms. A band-split statistic also needs
+to account for finite-template leakage and shared timing across carriers.
+The 179 outputs are about 12% of each 1,500-row block. A fast full FFT
+remains a necessary timing control at that fraction. The published
+partial-transform approximation has its own error bound, which would
+need a score and decision comparison at weak-signal operating points.
+[265 Hz measurements](validation.md#follow-through-at-the-265-hz-startup-spacing),
+[Park et al.'s bounded partial Fourier method](https://doi.org/10.1145/3447548.3467293),
+[FFTW's pruning evidence](https://www.fftw.org/pruned.html).
 
 ### Blackwell residency experiment
 

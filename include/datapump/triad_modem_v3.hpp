@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <vector>
 
 namespace datapump::triad::v3 {
@@ -112,6 +113,10 @@ public:
     static void render_bank(std::span<PatternSource* const> sources,
                             std::uint64_t first_sample, std::span<const double> offsets,
                             std::span<Complex> output);
+    // Same exact renderer for an already computed absolute sample lattice.
+    static void render_bank(std::span<PatternSource* const> sources,
+                            std::span<const long double> positions,
+                            std::span<Complex> output);
     static constexpr std::size_t render_bank_scratch_bytes =
         256 * 256 + 4096 * 3 * sizeof(Complex) + 4096;
     std::size_t working_bytes() const;
@@ -119,6 +124,7 @@ private:
     static void render_bank_impl(std::span<PatternSource* const> sources,
                                  long double first_sample, long double sample_step,
                                  std::size_t count, std::span<const double> offsets,
+                                 std::span<const long double> positions,
                                  std::span<Complex> output);
     struct Impl;
     std::unique_ptr<Impl> impl_;
@@ -496,4 +502,14 @@ void shaped_basis_mapped(PatternSource&, const Candidate&, double sample_rate,
                          std::span<const double> sample_offsets,
                          std::span<Complex> column_major_output,
                          double audio_center_hz = 0);
+// Paired exact mapped basis, with shared pulse/coordinate work for two keyed
+// alternatives. Output is [bit][tap/gain column][row]. Uses fixed 256-row
+// scratch and checks cancellation between chunks.
+void shaped_basis_mapped_pair(PatternSource& bit0, PatternSource& bit1,
+                         const Candidate&, double sample_rate,
+                         std::uint64_t first_sample,
+                         std::span<const double> sample_offsets,
+                         std::span<Complex> column_major_output,
+                         double audio_center_hz = 0,
+                         std::stop_token stop = {});
 } // namespace datapump::triad::v3

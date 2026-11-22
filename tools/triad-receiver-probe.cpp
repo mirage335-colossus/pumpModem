@@ -126,6 +126,7 @@ struct Options {
     unsigned units = 1, sample_rate = 1500, added_symbols = 1, waits = 0;
     unsigned slots = 10, bit = 0, device_index = 0;
     double data_if_hz = 500, rate_hz = 120, rf_hz = 0, margin = 1, doppler_hz = 0;
+    double minimum_carrier_spacing_hz = 0;
     double data_w = .1, helper_w = 0, loss_db = 114, noise_dbm_hz = -174;
     std::optional<double> target_cn0, active_seconds, observed_cn0;
     std::optional<double> signal_gain_db, channel_severity;
@@ -298,6 +299,7 @@ Options parse(int argc, char** argv) {
     assign("--sample-rate", o.sample_rate);
     assign("--data-if", o.data_if_hz);
     assign("--rate", o.rate_hz);
+    assign("--minimum-carrier-spacing", o.minimum_carrier_spacing_hz);
     assign("--rf-hz", o.rf_hz);
     assign("--doppler-hz", o.doppler_hz);
     assign("--margin", o.margin);
@@ -488,6 +490,8 @@ Options parse(int argc, char** argv) {
             o.tensor_coarse_math == "fft"), "CUDA segmented timing requires explicit CUDA and automatic FFT precision");
     require(o.native_coarse_precision == "automatic" || o.backend == "cpu",
             "Native coarse precision overrides require --backend cpu");
+    require(tuning::valid_robust_minimum_carrier_spacing(o.minimum_carrier_spacing_hz),
+            "--minimum-carrier-spacing expects 0, 3.5, 125 or 265 Hz");
     return o;
 }
 
@@ -512,6 +516,7 @@ live::Settings settings_for(const Options& o, std::size_t memory_limit) {
     s.transfer.modem.sample_rate = o.sample_rate;
     s.transfer.modem.carrier_hz = o.data_if_hz;
     s.transfer.modem.bandwidth_hz = o.rate_hz;
+    s.minimum_carrier_spacing_hz = o.minimum_carrier_spacing_hz;
     modem::OscillatorSearchConfig oscillator;
     oscillator.rf_shift_hz = o.rf_hz;
     oscillator.margin = o.margin;
@@ -908,6 +913,8 @@ Json profile_json(const Options& o, const Profile& profile, const ReceiverSlotPl
         {"scenario", o.scenario.empty() ? "bounded-native-fixture-v1" : o.scenario},
         {"sample_rate_hz", config.sample_rate_hz}, {"data_if_hz", config.data_if_hz},
         {"rf_hz", o.rf_hz}, {"inner_rate_hz", o.rate_hz}, {"data_power_w", o.data_w},
+        {"minimum_carrier_spacing_hz", o.minimum_carrier_spacing_hz},
+        {"effective_carrier_spacing_hz", geometry.carrier_spacing_hz},
         {"declared_doppler_hz", o.doppler_hz},
         {"requested_helper_power_w", o.helper_w}, {"effective_helper_power_w", config.helper.effective_power_w},
         {"path_loss_db", o.loss_db}, {"case_noise_dbm_hz", o.noise_dbm_hz},
@@ -3236,6 +3243,7 @@ void help() {
         "    --interferer-seed N --interferer-bit 0|1 [--interferer-rate HZ --interferer-frequency-offset-hz HZ]\n"
         "    [--interferer-offset-seconds SECONDS | --interferer-uniform-window on]\n"
         "  --slots N --units 1|2|4 --bit 0|1 --sample-rate HZ --data-if HZ\n"
+        "  --minimum-carrier-spacing 0|3.5|125|265 (Hz, default 0)\n"
         "  --doppler-hz HZ (bounded common wander; selected spread adds atmospheric support)\n"
         "  --target-cn0 DB_HZ --cn0 DB_HZ --seconds FIXED_ACTIVE_SECONDS --fec off|rs20|rs60\n"
         "  --signal-gain-db DB shifts actual C/N0 relative to --cn0 with fixed receiver gain and noise\n"

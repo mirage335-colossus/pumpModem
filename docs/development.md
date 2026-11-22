@@ -185,6 +185,12 @@ Keep these properties when changing a stage:
 - Keep a lock that a leaf takes per lookup shared. With `W=2*H` a holder is
   regularly preempted, and every lane then queues behind an exclusive one;
   this stalled up to 18 lanes on the mapped-basis tile cache.
+- When a geometry always uses exact basis rendering, eligible lanes borrow
+  private keyed sources from the existing workspace. Both bits share
+  pulse weights and the per-tap coordinate and phase calculations. Their
+  ordered sums and projection modes stay the same. If a full private pool
+  exceeds the allowance, the exact per-epoch sources remain available.
+  [Measured 265 Hz case](validation.md#follow-through-at-the-265-hz-startup-spacing).
 - Logical-CPU busy time is not throughput. Check elapsed service and CPU
   seconds for identical work together; see the
   [measured limits](validation.md#receiver-overlap-and-transform-order-follow-through).
