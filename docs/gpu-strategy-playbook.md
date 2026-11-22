@@ -1092,7 +1092,8 @@ calendar and keyed ordinals, physical quiet-slot completion, `W = 2*H`, a
 charged lease for every byte of device and host memory, explicit fallback
 reporting, and the [exactness classes](#exactness-classes).
 
-**Where to start.**
+**Where to start.** The ordered, bounded steps are in the
+[implementation plan](gpu-pipeline-plan.md). In short:
 1. Measure first: per-family device time and upload bytes, CPU busy
    fraction, `varying_coarse_seconds` on the holdout
    ([lever 1](triad-gpu-optimization.md#next-levers-in-order)).

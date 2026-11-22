@@ -322,6 +322,8 @@ limits, the ranked next levers and the measurement method are in
 To choose, derive or test a GPU or Tensor Core strategy, use the
 [strategy playbook](../gpu-strategy-playbook.md): eligibility rules with
 formulas, vendor peaks per target, every strategy's status and a test recipe.
+The ordered work to move more of the pipeline onto the GPU is in the
+[implementation plan](../gpu-pipeline-plan.md).
 
 | Work shape | Current path or useful alternative | Finding and boundary |
 | --- | --- | --- |

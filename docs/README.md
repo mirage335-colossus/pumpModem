@@ -28,6 +28,10 @@ to the native code. The
 and [GPU operation counters](triad-gpu-optimization.md#which-arithmetic-ran-in-a-remote-simulation)
 cover the measured compute paths.
 
+To continue moving the receiver pipeline onto the GPU, follow the
+[implementation plan](gpu-pipeline-plan.md): ordered phases with commands,
+gates, stop rules and rented-GPU checkpoints.
+
 For GPU performance work, start with the
 [GPU and Tensor Core strategy playbook](gpu-strategy-playbook.md), whose
 [Start here](gpu-strategy-playbook.md#start-here), common mistakes and fact
