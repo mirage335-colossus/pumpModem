@@ -556,6 +556,10 @@ void simulation_launch_defaults() {
           simulation.field(F::planner_command).text.find("--audio-error 70ms")!=std::string::npos);
     simulation.edit(F::audio_error,"Default");
     check(simulation.field(F::planner_command).text.find("--audio-error default")!=std::string::npos);
+    check(simulation.settings().minimum_carrier_spacing_hz==265);
+    simulation.edit(F::helper_power,"4 W");
+    check(simulation.field(F::status).text.find("Minimum carrier spacing")!=std::string::npos);
+    simulation.select(F::minimum_carrier_spacing,"0");
     simulation.edit(F::helper_power,"4 W");
     check(std::abs(simulation.settings().helper.power_w-4)<1e-12 &&
           std::any_of(simulation.field(F::carrier).options.begin(),simulation.field(F::carrier).options.end(),

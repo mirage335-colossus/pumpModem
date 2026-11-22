@@ -55,6 +55,9 @@ struct Format {
     // DATA-only pulse selection. Both retain rolloff .25, full +/-8-cell
     // support and unit pulse energy; the default preserves existing samples.
     PulseShape pulse_shape = PulseShape::Rrc;
+    // Minimum center-to-center spacing between adjacent DATA carriers. Zero
+    // keeps the pulse-derived spacing used by the original waveform.
+    unsigned minimum_carrier_spacing_hz = 0;
 };
 double effective_sample_rate(const Format&);
 struct Geometry {
@@ -69,6 +72,7 @@ struct Geometry {
     double tile_seconds = 0;
     std::uint64_t tile_count = 0, payload_fine_cells_per_tile = 0;
     std::size_t source_workspace_bytes = 0;
+    double nominal_carrier_bandwidth_hz = 0;
 };
 Geometry geometry(const Format&);
 // Contract for each source instance, including crypto and physical-cell caches.
@@ -276,8 +280,9 @@ struct SelectiveModelConfig {
     // Explicit zero disables added modulation even with nonzero ray Doppler.
     // This stress control is not scaled by spread margin again.
     std::optional<double> modulation_rate_hz;
-    // Zero uses the public transmitted carrier spacing. Positive values fix
-    // the selectivity scale in Hz independently of waveform rate. This is a
+    // Zero uses the nominal pulse bandwidth, or the public carrier spacing
+    // for an explicit source without a pulse bandwidth. Positive values fix
+    // the selectivity scale in Hz independently of the waveform. This is a
     // synthetic dispersive stress law, not the millisecond ray excess delay.
     double correlation_spacing_hz = 0;
     // Channel center in the nominal pre-RX-oscillator baseband frame. Actual

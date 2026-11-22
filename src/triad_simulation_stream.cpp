@@ -769,8 +769,10 @@ struct StreamingChannel::Impl {
         const double selective_capture_allowance = random_selective ? 10*selective_sideband :
             config.selective_model.modulation_rate_hz ?
             selective_sideband : (perturb_enabled ? effects.spread_doppler_hz : 0);
+        const double pulse_spacing = geometry.nominal_carrier_bandwidth_hz > 0 ?
+            geometry.nominal_carrier_bandwidth_hz : geometry.carrier_spacing_hz;
         const double selective_spacing = config.selective_model.correlation_spacing_hz > 0 ?
-            config.selective_model.correlation_spacing_hz : geometry.carrier_spacing_hz;
+            config.selective_model.correlation_spacing_hz : pulse_spacing;
         const auto actual_perturb_tail = perturb_enabled ?
             DispersiveSelectivePerturbation::tail_samples(effects.sample_rate * rx_scale, selective_spacing) : 0;
         const long double selective_floor_real = std::ceil(

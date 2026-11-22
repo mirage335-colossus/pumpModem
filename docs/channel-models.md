@@ -376,6 +376,12 @@ ten-width-per-edge capture convention without enlarging the GUI's declared
 audio passband. That convention is an allowance for spectral tails, not a
 hard bandlimit. Off retains exact bypass.
 
+Robust Setup's minimum DATA carrier spacing changes where the waveform samples
+this response in frequency. The GUI's synthetic selective correlation scale
+continues to follow the nominal single-carrier pulse width, so changing the
+minimum alone does not retune the filter taps. Receiver delay hypotheses and
+capture tail bounds use the same pulse-derived scale.
+
 Low-level `StreamingChannel` defaults retain the fixed two-ray diagnostic
 control; `PathEvolutionConfig` explicitly enables bounded echo variation and
 common wander. A single channel instance processes the entire emitted composite,

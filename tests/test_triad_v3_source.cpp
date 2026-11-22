@@ -364,6 +364,9 @@ void geometry_checks() {
           "Added Symbols split an inner-symbol boundary");
     check(std::abs(g.occupied_bandwidth_hz - 225) < 1e-10,
           "Rate36 v3 carrier spacing changed");
+    check(std::abs(g.nominal_carrier_bandwidth_hz - 75) < 1e-10 &&
+          std::abs(g.carrier_spacing_hz - 75) < 1e-10,
+          "default carrier spacing no longer follows the shaped chip rate");
     f.bit_seconds = 8;
     f.inner_rate_hz = 360;
     f.sample_rate = 9600;
@@ -381,6 +384,54 @@ void geometry_checks() {
     bool rejected = false;
     try { (void)geometry(f); } catch (const std::exception&) { rejected = true; }
     check(rejected, "FHSS geometry accepted ramps with no active pattern cells");
+}
+
+void minimum_carrier_spacing_checks() {
+    Format low_rate;
+    low_rate.inner_rate_hz = 3.6;
+    low_rate.added_symbols = 1;
+    low_rate.sample_rate = 960;
+
+    const auto natural = geometry(low_rate);
+    check(std::abs(natural.nominal_carrier_bandwidth_hz - .75) < 1e-12 &&
+          std::abs(natural.carrier_spacing_hz - .75) < 1e-12 &&
+          std::abs(natural.occupied_bandwidth_hz - 2.25) < 1e-12,
+          "zero minimum changed the low-rate natural carrier spacing");
+
+    low_rate.minimum_carrier_spacing_hz = 125;
+    const auto medium_floor = geometry(low_rate);
+    check(std::abs(medium_floor.carrier_spacing_hz - 125) < 1e-12 &&
+          std::abs(medium_floor.occupied_bandwidth_hz - 250.75) < 1e-12,
+          "125 Hz minimum did not preserve pulse bandwidth between carrier centers");
+
+    low_rate.minimum_carrier_spacing_hz = 265;
+    const auto wide_floor = geometry(low_rate);
+    check(std::abs(wide_floor.carrier_spacing_hz - 265) < 1e-12 &&
+          std::abs(wide_floor.occupied_bandwidth_hz - 530.75) < 1e-12,
+          "265 Hz minimum did not preserve pulse bandwidth between carrier centers");
+    check(natural.source_samples == medium_floor.source_samples &&
+          natural.source_samples == wide_floor.source_samples &&
+          natural.fine_chip_rate_hz == medium_floor.fine_chip_rate_hz &&
+          natural.fine_chip_rate_hz == wide_floor.fine_chip_rate_hz,
+          "carrier spacing floor changed waveform timing or pulse rate");
+
+    Format already_wide;
+    already_wide.inner_rate_hz = 144;
+    already_wide.sample_rate = 1500;
+    already_wide.minimum_carrier_spacing_hz = 265;
+    const auto existing_spacing = geometry(already_wide);
+    check(existing_spacing.carrier_spacing_hz == existing_spacing.nominal_carrier_bandwidth_hz &&
+          existing_spacing.occupied_bandwidth_hz == 3 * existing_spacing.nominal_carrier_bandwidth_hz,
+          "minimum spacing changed a naturally wider waveform");
+
+    low_rate.sample_rate = 500;
+    bool rejected = false;
+    try {
+        (void)geometry(low_rate);
+    } catch (const std::exception&) {
+        rejected = true;
+    }
+    check(rejected, "sample rate accepted a carrier-spacing floor wider than its Nyquist budget");
 }
 
 void random_access_and_chunk_checks() {
@@ -695,7 +746,7 @@ int main() {
         independent_patterns_and_apsk();
         revision_random_access_checks();
         shared_geometry_bank_checks();
-        geometry_checks();
+        geometry_checks();minimum_carrier_spacing_checks();
         random_access_and_chunk_checks();
         protected_waveform_checks();
         center_aligned_fhss_checks();

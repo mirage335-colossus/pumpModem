@@ -263,7 +263,7 @@ std::uint64_t PublicProfile::capture_stop(long double source_end_seconds) const 
 
 long double PublicProfile::capture_end_offset(long double rate) const {
     const auto tail = config_.spread_delay_ms * .001 + config_.delay_excursion_seconds +
-        2 / (3 * geometry_.carrier_spacing_hz) + 32. / rate;
+        2 / (3 * geometry_.nominal_carrier_bandwidth_hz) + 32. / rate;
     return static_cast<long double>(config_.capture_lead_seconds) + config_.arrival_high_seconds +
         config_.capture_trail_seconds + tail;
 }
@@ -333,7 +333,7 @@ std::uint64_t PublicProfile::signal_stop(long double source_end_seconds, bool se
     const auto endpoint = search ? receive_endpoint_ : nominal_endpoint_;
     const auto tx_min = 1 - endpoint, rx_max = 1 + endpoint;
     const auto tail = config_.signal_delay_ms.value_or(config_.spread_delay_ms) * .001 + config_.delay_excursion_seconds +
-        (config_.selective_signal_tail ? 2 / (3 * geometry_.carrier_spacing_hz) : 0.) + 32. / rate;
+        (config_.selective_signal_tail ? 2 / (3 * geometry_.nominal_carrier_bandwidth_hz) : 0.) + 32. / rate;
     const auto offset = static_cast<long double>(config_.capture_lead_seconds) + config_.arrival_high_seconds + tail;
     auto end = rx_max * (source_end_seconds / tx_min + offset);
     if (search) end = std::max(end, source_end_seconds / affine_min_scale_ + offset);

@@ -152,7 +152,12 @@ Geometry geometry(const Format& f){
         std::isfinite(f.margin_seconds)&&f.margin_seconds>=.001&&f.burst_wait_tiles<=1000,"triad v3 invalid margins/burst");
     Geometry g;g.inner_chip_rate_hz=f.inner_rate_hz/6;g.fine_chip_rate_hz=g.inner_chip_rate_hz*f.added_symbols;
     if(f.fhss_center_aligned)(void)aligned_dwell_cells(f,g.fine_chip_rate_hz);
-    g.carrier_spacing_hz=(1+rrc_rolloff)*g.fine_chip_rate_hz;g.occupied_bandwidth_hz=3*g.carrier_spacing_hz;
+    g.nominal_carrier_bandwidth_hz=(1+rrc_rolloff)*g.fine_chip_rate_hz;
+    g.carrier_spacing_hz=std::max(g.nominal_carrier_bandwidth_hz,
+                                  static_cast<double>(f.minimum_carrier_spacing_hz));
+    // Preserve the historical arithmetic exactly when the floor is inactive.
+    g.occupied_bandwidth_hz=g.carrier_spacing_hz==g.nominal_carrier_bandwidth_hz?
+        3*g.nominal_carrier_bandwidth_hz:2*g.carrier_spacing_hz+g.nominal_carrier_bandwidth_hz;
     require(sample_rate>=4*g.fine_chip_rate_hz&&sample_rate>1.1*g.occupied_bandwidth_hz,
             "triad v3 sample rate cannot contain shaped adjacent carriers");
     require(f.minimum_inner_coefficients<=maximum_tile_cells/f.added_symbols,"triad v3 tile complexity exceeds workspace cap");

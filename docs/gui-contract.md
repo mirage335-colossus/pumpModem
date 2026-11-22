@@ -18,7 +18,8 @@ without starting a session with a different key.
 
 Robust live operation requires both peers to configure the same public calendar
 anchor, initial waveform ordinal, key and waveform/FEC settings. **Robust setup**
-exposes the calendar and a declared local live input-noise density in dBFS/Hz.
+exposes the calendar, minimum DATA carrier spacing, and a declared local live
+input-noise density in dBFS/Hz.
 An unconfigured calendar or noise model keeps the affected live action unavailable
 with an explanation. Simulation uses its own agreed local calendar. These
 settings do not implement unknown-start acquisition or measure the audio device.
@@ -132,7 +133,8 @@ Display timing never controls receiver decisions or completion.
 | Base/Shift oscillator, Margin | Always-active declared oscillator bounds and public receiver search multiplier; synthetic effects are injected only in Simulation and explicit loopback. |
 | Doppler/delay spread, selective amplitude | Declared receiver assumptions in every mode; synthetic effects are injected only in Simulation and explicit loopback. Off remains explicit. |
 | Rate, Carrier, Shift | Rate is the native inner rate. Carrier accepts a custom absolute frequency or a computed preset. Bare numbers are Hz. The baseband frequency is Carrier minus Shift. Configuration edits preserve a valid baseband frequency, including custom values, and translate it back to an absolute Carrier. Runtime FHSS hops keep the same baseband plan. |
-| Additional Symbols, Spreading | Off uses one lane; Interleave with `N×` selects `N` native added-symbol lanes. Nominal occupied DATA bandwidth is `0.625 × Rate × N`. |
+| Additional Symbols, Spreading | Off uses a factor of 1. Interleave uses the selected `N×` factor. The nominal bandwidth of each DATA carrier is `1.25 × Rate × N / 6`. |
+| Minimum carrier spacing | Robust setup offers 0, 125, and 265 Hz, with 265 Hz as the startup default. Adjacent centers use the greater of the selected minimum and the nominal single-carrier bandwidth. The triplet spans twice the center spacing plus one carrier bandwidth before shaping allowances. Select 0 Hz to use the original rate-derived spacing. Both peers must use matching spacing. The launch option is `--minimum-carrier-spacing 0`, `125`, or `265`. |
 | Symbol burst, Random extra | Shared whole-bit calendar waits; see [burst scheduling](symbol-burst.md). |
 | Wrong Key Admission | Reversible Robust history/browser filter. Unfiltered shows the baseline; stronger choices hide completed records when fewer than half their admitted DATA bits pass. Pattern evidence marks the selected filter's pass/reject results for rated slots. The original likelihoods, decisions and decoded content are retained. The dB labels are approximate HF reference visibility losses. Strong wanted signals can also be hidden. |
 | FHSS | Canonical envelope and illustrative frequency schedule; no external radio retuning. |

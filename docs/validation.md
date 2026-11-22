@@ -45,6 +45,31 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Robust minimum carrier spacing — 22 November 2026
+
+Robust Setup defaults to a 265 Hz minimum and also offers 0 and 125 Hz.
+The Rate 3.6 Hz / 1× profile produces nominal spans of 2.25, 250.75 and
+530.75 Hz, respectively. The profile preserves the pulse-derived selective
+filter scale as the carrier centers move. Launch settings round-trip all
+three choices, including explicit zero.
+
+The bounded native simulation at 1,500 samples/s used a 375 Hz IF, Rate
+120 Hz, a 265 Hz floor, and Helper, FHSS and varying effects off. It returned
+the sent `1`, `0` and `010`, with two scored quiet slots for each transmission.
+In the separate 6 kHz Rate 3.6 Hz, HF Worst, Each 65%, 3× margin fixture,
+the existing Helper placement guard found no preset at 4 W with the 265 Hz
+floor. Selecting 0 Hz restored a compatible Carrier preset at the same power.
+These checks cover functional reception and placement. Severe-channel bit
+error rates, physical audio and sustained service at the new floor remain
+unqualified. The earlier 3.6 Hz results below used the original rate-derived
+spacing.
+
+On the `b87240c4` base with this change, all 53 tests in `./build.sh test triad`
+passed. The initial GUI group passed 31 of 32; the 265 Hz session fixture's
+original 500 Hz IF exceeded the shaped passband at 1,500 samples/s. It passed
+in the final `triad` run at 375 Hz. The rebuilt FLTK application passed its
+self-check and the shared GUI policy, launch command and mode-isolation tests.
+
 ## Exact 3.6 Hz GUI simulation throughput — 22 November 2026
 
 The native GUI worker loaded the supplied launcher through Link Planner

@@ -396,6 +396,8 @@ struct Controller::Impl {
             f(UiField::audio_error).options.push_back({value,value});
         f(UiField::dsss_factor).options={{"10","10x"},{"100","100x"},{"1000","1000x"}};
         f(UiField::dsss_factor).selected="10";
+        f(UiField::minimum_carrier_spacing).options={{"0","0 Hz"},{"125","125 Hz"},{"265","265 Hz"}};
+        f(UiField::minimum_carrier_spacing).selected="265";
         f(UiField::dsss_version).options={{"off","Off"},{"interleave","Interleave"}};
         f(UiField::dsss_version).selected="off";
         f(UiField::search_arithmetic).options={{"default","Default (fastest)"},
@@ -658,6 +660,8 @@ struct Controller::Impl {
             if(load->doppler)f(UiField::doppler).text=*load->doppler;
             if(load->dsss_mode)f(UiField::dsss_version).selected=*load->dsss_mode;
             if(load->dsss_factor)f(UiField::dsss_factor).selected=std::to_string(*load->dsss_factor);
+            if(load->minimum_carrier_spacing_hz)
+                f(UiField::minimum_carrier_spacing).selected=std::to_string(*load->minimum_carrier_spacing_hz);
             if(load->symbol_burst)f(UiField::symbol_burst).selected=*load->symbol_burst?std::to_string(*load->symbol_burst):"off";
             if(load->symbol_burst_random)f(UiField::symbol_burst_random).selected=std::to_string(*load->symbol_burst_random);
             if(load->helper_power_w)f(UiField::helper_power).selected=f(UiField::helper_power).text=planner_number(*load->helper_power_w);
@@ -714,6 +718,8 @@ struct Controller::Impl {
         settings.selective_perturbation=f(UiField::selective_perturbation).selected;
         settings.added_interleave=f(UiField::dsss_version).selected=="interleave";
         settings.added_symbols=settings.added_interleave?static_cast<unsigned>(number(f(UiField::dsss_factor).selected,"Spreading")):1;
+        settings.minimum_carrier_spacing_hz=static_cast<unsigned>(number(
+            f(UiField::minimum_carrier_spacing).selected,"Minimum carrier spacing"));
         settings.symbol_burst_wait=modem::parse_symbol_burst_wait(f(UiField::symbol_burst).selected);
         settings.symbol_burst_random=modem::parse_symbol_burst_random(f(UiField::symbol_burst_random).selected);
         settings.fhss_profile=f(UiField::fhss).selected;settings.fhss_frequencies_hz=fhss_list;
@@ -782,8 +788,8 @@ struct Controller::Impl {
         } else {
             if (band.helper_enabled)
                 throw Error("No Carrier preset fits the "+frequency_text(band.sample_rate)+
-                            " sampled band at this Helper power and Rate. Try lowering Helper Carrier Power, "
-                            "the Helper Carrier Ratio Limit, or Rate.");
+                            " sampled band with these settings. Try lowering Helper Carrier Power, "
+                            "the Helper Carrier Ratio Limit, Rate, or Minimum carrier spacing.");
             throw Error("No Carrier recommendation fits the current Rate, Shift, Helper and sampled band. "
                         "Adjust the settings or enter a valid custom Carrier.");
         }
@@ -860,6 +866,7 @@ struct Controller::Impl {
         values.audio_timing_default=clock_sync::is_default(f(UiField::audio_error).text);
         values.audio_timing_error_seconds=settings.transfer.audio_timing_error_seconds;
         values.dsss_factor=static_cast<unsigned>(number(f(UiField::dsss_factor).selected,"DSSS factor"));
+        values.minimum_carrier_spacing_hz=settings.minimum_carrier_spacing_hz;
         if(f(UiField::dsss_version).selected!="legacy")values.dsss_mode=f(UiField::dsss_version).selected;
         values.dsss_version=f(UiField::dsss_version).selected=="legacy"?"legacy":"interleave";
         values.search_arithmetic=f(UiField::search_arithmetic).selected;
@@ -1184,6 +1191,7 @@ struct Controller::Impl {
             UiField::simulation,UiField::link_power,UiField::link_loss,UiField::link_noise,
             UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error,
             UiField::calendar_epoch,UiField::calendar_ordinal,UiField::live_noise_dbfs_hz,
+            UiField::minimum_carrier_spacing,
             UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::carrier,
             UiField::bandwidth,UiField::doppler,UiField::spread_preset,UiField::selective_perturbation,
             UiField::search_margin,UiField::dsss_factor,UiField::dsss_version,UiField::fhss,
@@ -1968,6 +1976,7 @@ void Controller::select(UiField field,std::string id) {
         else if(field==UiField::selective_perturbation) p.configure();
         else if(field==UiField::helper_power||field==UiField::helper_ratio_limit||field==UiField::simulation||field==UiField::simulation_oscillator||field==UiField::rf_oscillator||
             field==UiField::fec||field==UiField::dsp_workspace||field==UiField::fhss||
+            field==UiField::minimum_carrier_spacing||
             field==UiField::symbol_burst||field==UiField::symbol_burst_random||
             field==UiField::dsss_version||field==UiField::search_arithmetic||field==UiField::receiver_strategy) p.configure();
         else if(field==UiField::dsss_factor) {

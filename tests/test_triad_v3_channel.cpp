@@ -84,6 +84,23 @@ void chunk_state_and_tails(){
     const auto retained=capture(echo,19);
     check(std::abs(retained.samples[390])>0,"source quiet interval gated away a delayed echo");
 }
+void spacing_floor_keeps_the_selective_channel(){
+    auto cfg=settings();
+    cfg.effects.perturbation_fast_depth=.65;
+    cfg.selective_model.modulation_rate_hz=2;
+    const auto natural=capture(cfg,37);
+    auto spaced=source();
+    spaced.format.minimum_carrier_spacing_hz=265;
+    spaced.geometry=v::geometry(spaced.format);
+    spaced.geometry.source_samples=source_samples;
+    spaced.geometry.calendar_origin_sample=0;
+    cfg.effects.occupied_bandwidth_hz=spaced.geometry.occupied_bandwidth_hz;
+    const auto widened=capture(cfg,37,std::move(spaced));
+    check(natural.report.selective_perturbation && widened.report.selective_perturbation &&
+          widened.report.selective_perturbation->correlation_spacing_hz==75 &&
+          natural.report.tail_samples==widened.report.tail_samples && natural.samples==widened.samples,
+          "a carrier spacing floor changed the selective filter or its tail for a fixed source");
+}
 void bounded_spread_evolves_and_streams(){
     auto cfg=settings();cfg.effects.spread_delay_ms=21;cfg.effects.spread_doppler_hz=9;
     cfg.path_evolution.bounded_spread_knot_seconds=.13;
@@ -680,4 +697,4 @@ void bounds(){
     rejects([&]{v::StreamingChannel channel(source(),cfg);});
 }
 }
-int main(){try{exact_bypass();chunk_state_and_tails();bounded_spread_evolves_and_streams();bounded_spread_fixed_powers();combined_doppler_reports_simultaneous_physical_trajectory();bounded_spread_phase_integrates_frequency();common_doppler_wander_is_bounded_and_continuous();effects_and_erasures();lanes_reproduce_the_lone_reader();source_failure_reaches_the_reader_in_order();readers_reproduce_the_lone_reader();emission_sources_reproduce_the_lone_reader();gaussian_stream_matches_the_distribution();staged_chains_reproduce_the_lone_reader();coordinate_forms_match_the_standard_ones();bounds();std::cout<<"triad streaming channel invariants passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){try{exact_bypass();chunk_state_and_tails();spacing_floor_keeps_the_selective_channel();bounded_spread_evolves_and_streams();bounded_spread_fixed_powers();combined_doppler_reports_simultaneous_physical_trajectory();bounded_spread_phase_integrates_frequency();common_doppler_wander_is_bounded_and_continuous();effects_and_erasures();lanes_reproduce_the_lone_reader();source_failure_reaches_the_reader_in_order();readers_reproduce_the_lone_reader();emission_sources_reproduce_the_lone_reader();gaussian_stream_matches_the_distribution();staged_chains_reproduce_the_lone_reader();coordinate_forms_match_the_standard_ones();bounds();std::cout<<"triad streaming channel invariants passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

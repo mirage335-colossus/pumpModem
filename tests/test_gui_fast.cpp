@@ -1044,6 +1044,14 @@ void robust_boundary_keeps_polling() {
 void robust_native_settings() {
     using F=ui::Field;
     Controller controller({.simulation=true});
+    const auto& spacing_options=controller.field(F::minimum_carrier_spacing).options;
+    const std::vector<ui::Option> expected_spacing{{"0","0 Hz"},{"125","125 Hz"},{"265","265 Hz"}};
+    check(controller.field(F::minimum_carrier_spacing).selected=="265"&&
+          std::equal(spacing_options.begin(),spacing_options.end(),expected_spacing.begin(),expected_spacing.end(),
+                     [](const auto& a,const auto& b){return a.id==b.id&&a.label==b.label&&a.enabled==b.enabled;})&&
+          control(F::minimum_carrier_spacing).page==ui::Page::robust_setup&&
+          std::string_view(control(F::minimum_carrier_spacing).label)=="Minimum carrier spacing",
+          "Robust setup must expose the three spacing floors with 265 Hz as default");
     check(controller.settings().transfer.fec==FecMode::off&&!controller.settings().receiver_memory_limit&&
           controller.settings().transfer.content_limit==1024*1024,
           "Robust must preserve FEC Off, automatic receiver headroom, and the local decoded-byte quota");
@@ -1057,12 +1065,15 @@ void robust_native_settings() {
     controller.edit(F::helper_callsign,"K1ABC");
     controller.edit(F::calendar_epoch,"1793850000");controller.edit(F::calendar_ordinal,"12");
     controller.edit(F::live_noise_dbfs_hz,"-92.25");
+    controller.select(F::minimum_carrier_spacing,"125");
     const auto& s=controller.settings();
     check(s.tx_dbm==30&&s.path_loss_db==90&&s.noise_dbm_hz==-164&&s.target_cn0_db_hz==20,
           "Robust link/target edits did not reach the session");
     check(s.added_interleave&&s.added_symbols==10&&s.transfer.modem.bandwidth_hz==36&&
           s.symbol_burst_wait==2&&s.symbol_burst_random==3&&s.fhss_profile=="fake-fcc",
           "Robust waveform controls remained saved-only preferences");
+    check(s.minimum_carrier_spacing_hz==125,
+          "Selected minimum carrier spacing did not reach native settings");
     check(s.helper.power_w==.1&&s.helper.ratio_limit_db==20&&s.helper.callsign=="K1ABC"&&
           s.transfer.fec==FecMode::rs20&&s.calendar&&s.calendar->epoch==1793850000&&
           s.calendar->initial_ordinal==12&&s.live_noise_dbfs_hz==-92.25&&s.wrong_key_admission=="strict",
@@ -1070,8 +1081,14 @@ void robust_native_settings() {
     const auto exported=launch_command::parse(controller.field(F::planner_command).text);
     check(exported.calendar_epoch==1793850000ULL&&exported.calendar_ordinal==12&&
           exported.live_noise_dbfs_hz==-92.25&&exported.fec=="rs20"&&exported.workspace_percent==0&&
-          exported.wrong_key_admission=="strict",
+          exported.wrong_key_admission=="strict"&&exported.minimum_carrier_spacing_hz==125,
           "Native receiver settings were lost from saved launch parameters");
+    launch_command::Patch explicit_zero;explicit_zero.minimum_carrier_spacing_hz=0;
+    Controller zero({.simulation=true,.launch_settings=explicit_zero});
+    check(zero.field(F::minimum_carrier_spacing).selected=="0"&&
+          zero.settings().minimum_carrier_spacing_hz==0&&
+          launch_command::parse(zero.field(F::planner_command).text).minimum_carrier_spacing_hz==0,
+          "Explicit zero carrier spacing floor was not loaded and retained");
     controller.edit(F::short_bits,"001");
     check(controller.field(F::fec).selected=="rs20"&&controller.field(F::fec).display_text=="Off (exact raw bits)",
           "Raw transmission must retain the FEC preference while reporting its effective bypass");

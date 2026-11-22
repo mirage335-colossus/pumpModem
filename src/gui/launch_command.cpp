@@ -169,7 +169,8 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             flag=="--keyfile"||flag=="--keyset"||flag=="--key-name"||flag=="--tx-key"||
             flag=="--symbol-burst"||flag=="--symbol-burst-random"||
             flag=="--helper-power"||flag=="--helper-ratio-limit"||flag=="--helper-callsign"||
-            flag=="--calendar-epoch"||flag=="--calendar-ordinal"||flag=="--live-noise-dbfs-hz"||flag=="--fec"||flag=="--wrong-key-admission";
+            flag=="--calendar-epoch"||flag=="--calendar-ordinal"||flag=="--live-noise-dbfs-hz"||
+            flag=="--minimum-carrier-spacing"||flag=="--fec"||flag=="--wrong-key-admission";
         if(!known)invalid("Unknown launch option: "+std::string(flag));
         std::string_view value;
         if(equal!=std::string_view::npos)value=argument.substr(equal+1);
@@ -199,6 +200,12 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             result.clear_live_noise=value=="unspecified";
             result.live_noise_dbfs_hz.reset();
             if(!result.clear_live_noise)result.live_noise_dbfs_hz=number(value,flag,-250,0);
+        }
+        else if(flag=="--minimum-carrier-spacing") {
+            const auto spacing=number(value,flag,0,265);
+            if(spacing!=0&&spacing!=125&&spacing!=265)
+                invalid("--minimum-carrier-spacing must be 0, 125, or 265 Hz.");
+            result.minimum_carrier_spacing_hz=static_cast<unsigned>(spacing);
         }
         else if(flag=="--fec") {
             if(value!="off"&&value!="rs20"&&value!="rs60")invalid("--fec must be off, rs20 or rs60.");
@@ -366,6 +373,12 @@ std::string format(const Patch& settings) {
     else if(settings.audio_timing_error_seconds)add("--audio-error",clock_sync::duration_text(*settings.audio_timing_error_seconds));
     if(settings.dsss_mode)add("--dsss-mode",*settings.dsss_mode);
     if(settings.dsss_factor)add("--dsss-factor",std::to_string(*settings.dsss_factor));
+    if(settings.minimum_carrier_spacing_hz) {
+        if(*settings.minimum_carrier_spacing_hz!=0&&*settings.minimum_carrier_spacing_hz!=125&&
+           *settings.minimum_carrier_spacing_hz!=265)
+            invalid("Minimum carrier spacing must be 0, 125, or 265 Hz.");
+        add("--minimum-carrier-spacing",std::to_string(*settings.minimum_carrier_spacing_hz));
+    }
     if(settings.dsss_version)add("--dsss-version",std::string(tuning::outer_dsss_version_id(tuning::parse_outer_dsss_version(*settings.dsss_version))));
     if(settings.search_arithmetic)add("--search-arithmetic",std::string(tuning::search_arithmetic_id(tuning::parse_search_arithmetic(*settings.search_arithmetic))));
     if(settings.receiver_strategy)add("--receiver-strategy",std::string(tuning::receiver_strategy_id(tuning::parse_receiver_strategy(*settings.receiver_strategy))));

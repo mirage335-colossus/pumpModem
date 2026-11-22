@@ -184,6 +184,10 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.purpose=ControlPurpose::setup;
         control.help="Declared one-sided audio input noise density in dBFS/Hz, using normalized PCM squared per hertz. A finite conservative model is required for live likelihoods; this setting is not an automatic calibration or physical-noise qualification. Unspecified keeps live reception unconfigured.";
     }
+    if(control.field==Field::minimum_carrier_spacing) {
+        control.purpose=ControlPurpose::setup;
+        control.help="Minimum center-to-center spacing between adjacent Robust DATA carriers. The native waveform uses the larger of this setting and its rate-derived spacing. Both peers must use the same setting.";
+    }
     if(slot==Slot::diagnostics)control.help="Actual session diagnostics. Functional reception and modeled duration do not establish physical sensitivity or sustained CPU capacity.";
     if(slot==Slot::waterfall) {control.footer_height=24;control.click=Command::toggle_waterfall_expanded;control.right_click=Command::toggle_helper_waterfall_expanded;control.help="With Helper Carrier enabled, right-click to zoom in on the low pilot, auxiliary and high pilot tones. Click for the fullscreen configured search band and a little surrounding spectrum with adjacent amplitude/phase columns. Phase brightness follows amplitude; quiet noise stays dim. Escape or another click restores this environmental view. Clear waterfall clears history separately. Simulation uses a fixed 40 dB range; hardware spans the captured sample rate, including surrounding interference.";}
     if(slot==Slot::waveform) {
@@ -253,13 +257,14 @@ const std::vector<Control>& console_screen() {
         placed({Kind::text,Field::calendar_epoch,Command::none,Bitmap::none,Page::robust_setup,1,"Calendar anchor (UTC seconds)",2,false,32}, Slot::none),
         placed({Kind::text,Field::calendar_ordinal,Command::none,Bitmap::none,Page::robust_setup,1,"Initial waveform ordinal",2,false,32}, Slot::none),
         placed({Kind::text,Field::live_noise_dbfs_hz,Command::none,Bitmap::none,Page::robust_setup,2,"Live input noise (dBFS/Hz)",2,false,64}, Slot::none),
-        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,3,"Live reception uses a declared local noise model. Simulation uses the sampled channel noise."}, Slot::none),
-        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,4,"Unknown transmission starts are not acquired. Message completion requires two scored quiet slots."}, Slot::none),
-        {.kind=Kind::bitmap,.bitmap=Bitmap::cpu_utilization,.page=Page::robust_setup,.row=5,.label="CPU utilization",.unslotted_height=86},
-        {.kind=Kind::bitmap,.bitmap=Bitmap::ram_usage,.page=Page::robust_setup,.row=5,.label="RAM usage",.unslotted_height=86},
-        {.kind=Kind::bitmap,.bitmap=Bitmap::gpu_utilization,.page=Page::robust_setup,.row=7,.label="GPU utilization",.unslotted_height=86},
-        {.kind=Kind::bitmap,.bitmap=Bitmap::vram_usage,.page=Page::robust_setup,.row=7,.label="VRAM usage",.unslotted_height=86},
-        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,9,"Compute host · last 60 seconds · each lane spans 0–100% · GPUs listed top to bottom"}, Slot::none),
+        placed({Kind::choice,Field::minimum_carrier_spacing,Command::none,Bitmap::none,Page::robust_setup,3,"Minimum carrier spacing"}, Slot::none),
+        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,4,"Live reception uses a declared local noise model. Simulation uses the sampled channel noise."}, Slot::none),
+        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,5,"Unknown transmission starts are not acquired. Message completion requires two scored quiet slots."}, Slot::none),
+        {.kind=Kind::bitmap,.bitmap=Bitmap::cpu_utilization,.page=Page::robust_setup,.row=6,.label="CPU utilization",.unslotted_height=86},
+        {.kind=Kind::bitmap,.bitmap=Bitmap::ram_usage,.page=Page::robust_setup,.row=6,.label="RAM usage",.unslotted_height=86},
+        {.kind=Kind::bitmap,.bitmap=Bitmap::gpu_utilization,.page=Page::robust_setup,.row=8,.label="GPU utilization",.unslotted_height=86},
+        {.kind=Kind::bitmap,.bitmap=Bitmap::vram_usage,.page=Page::robust_setup,.row=8,.label="VRAM usage",.unslotted_height=86},
+        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,10,"Compute host · last 60 seconds · each lane spans 0–100% · GPUs listed top to bottom"}, Slot::none),
         placed({Kind::action,Field::count,Command::open_keyfile,Bitmap::none,Page::console,2,"Open keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::generate_keyfile,Bitmap::none,Page::console,2,"Generate keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::load_amateur,Bitmap::none,Page::console,2,"WARNING - Load Amateur"}, Slot::key_actions, Menu::keyfile),

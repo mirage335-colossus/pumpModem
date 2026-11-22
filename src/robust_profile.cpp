@@ -24,6 +24,10 @@ bool in_range(double value, double low, double high) {
     return std::isfinite(value) && value >= low && value <= high;
 }
 
+void validate_minimum_spacing(unsigned hz) {
+    check(hz == 0 || hz == 125 || hz == 265, "Robust Minimum carrier spacing must be 0, 125, or 265 Hz");
+}
+
 std::array<double, 2> selective_depths(std::string_view value) {
     if (value == "off") return {};
     const auto separator = value.find('-');
@@ -66,6 +70,7 @@ ShapingPlan minimum_shaping(const Settings& settings) {
     struct Shape {
         double rate;
         unsigned added_symbols;
+        unsigned minimum_carrier_spacing_hz;
         std::uint32_t sample_rate;
         bool fhss;
         bool operator==(const Shape&) const = default;
@@ -73,11 +78,14 @@ ShapingPlan minimum_shaping(const Settings& settings) {
     using Entry = std::pair<Shape, ShapingPlan>;
     thread_local std::optional<Entry> last;
     const auto& modem = settings.transfer.modem;
-    const Shape shape{modem.bandwidth_hz, settings.added_symbols, modem.sample_rate, settings.fhss_profile != "off"};
+    const Shape shape{modem.bandwidth_hz, settings.added_symbols, settings.minimum_carrier_spacing_hz,
+                      modem.sample_rate, settings.fhss_profile != "off"};
+    validate_minimum_spacing(shape.minimum_carrier_spacing_hz);
     if (!last || last->first != shape) {
         Format format;
         format.inner_rate_hz = shape.rate;
         format.added_symbols = shape.added_symbols;
+        format.minimum_carrier_spacing_hz = shape.minimum_carrier_spacing_hz;
         format.sample_rate = shape.sample_rate;
         format.bit_seconds = .001;
         format.fhss = shape.fhss;
@@ -115,7 +123,7 @@ helper::MonoPassband guarded_audio_band(helper::MonoPassband data_band, double h
     data_band.lower_hz -= allowance_hz;
     data_band.upper_hz += allowance_hz;
     check(data_band.lower_hz > 0 && data_band.upper_hz < sample_rate / 2.,
-          "Robust audio band including oscillator/channel allowance exceeds DC or Nyquist; adjust Rate, Spreading, Carrier, Shift, or Helper power");
+          "Robust audio band including oscillator/channel allowance exceeds DC or Nyquist; adjust Rate, Spreading, Minimum carrier spacing, Carrier, Shift, or Helper power");
     return data_band;
 }
 
@@ -221,6 +229,7 @@ void validate_settings(const Settings& s) {
     check(s.transfer.content_limit > 0, "Robust content quota must be positive");
     check(s.added_symbols > 0 && s.added_symbols <= 1000,
           "Robust Added Symbols must be between 1 and 1000");
+    validate_minimum_spacing(s.minimum_carrier_spacing_hz);
     check(s.symbol_burst_wait == 0 || s.symbol_burst_wait == 1 || s.symbol_burst_wait == 2 ||
           s.symbol_burst_wait == 3 || s.symbol_burst_wait == 5 || s.symbol_burst_wait == 10,
           "Invalid Robust Symbol_Burst minimum wait");
@@ -317,7 +326,8 @@ double CarrierBand::minimum_carrier_hz(double lower_edge_hz) const {
 void CarrierBand::validate(double carrier_hz) const {
     check(std::isfinite(carrier_hz) && carrier_hz > 0 && carrier_hz < sample_rate / 2.,
           "Robust DATA audio frequency must be positive and below Nyquist");
-    check(carrier_hz >= nominal_bandwidth_hz_ / 2, "Robust shaped DATA band crosses DC; raise the Carrier");
+    check(carrier_hz >= nominal_bandwidth_hz_ / 2,
+          "Robust shaped DATA band crosses DC; raise Carrier or lower Minimum carrier spacing");
     const helper::PlacementBand placement{carrier_hz, nominal_bandwidth_hz_,
         waveform_bandwidth_hz - nominal_bandwidth_hz_, pilot_dwell_gating_};
     const auto data = helper::mono_passband(placement);
@@ -467,7 +477,8 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     // rather than silently multiplying the GUI's required audio passband.
     channel.selective_model.coefficient_law = SelectiveCoefficientLaw::GaussianErf;
     channel.selective_model.modulation_rate_hz = rx.selective_modulation_rate_hz / 10;
-    channel.selective_model.correlation_spacing_hz = geometry.carrier_spacing_hz;
+    // The carrier spacing control moves the waveform through the same channel.
+    channel.selective_model.correlation_spacing_hz = geometry.nominal_carrier_bandwidth_hz;
     channel.maximum_chunk_samples = 4096;
     if (s.simulation) {
         effects.seed = options.simulation_seed ? *options.simulation_seed : simulation_seed();

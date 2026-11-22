@@ -3340,7 +3340,7 @@ std::array<VaryingBasis, 3> varying_bases(const ReceiverConfig& config, const Re
     if (delay || spread) append(delay * .5, 0);
     if (config.selective_modulation_rate_hz > 0 &&
         (config.selective_slow_depth || config.selective_fast_depth))
-        append(1 / (3 * geometry(slot.format).carrier_spacing_hz), 0);
+        append(1 / (3 * geometry(slot.format).nominal_carrier_bandwidth_hz), 0);
     return result;
 }
 

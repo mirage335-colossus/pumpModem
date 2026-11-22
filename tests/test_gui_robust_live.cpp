@@ -261,6 +261,31 @@ void carrier_band_matches_profile() {
     check(rejects([&] { low.validate(.25); }) && rejects([&] { low.validate(2999.99); }),
           "Carrier preview accepted shaped DATA across DC or Nyquist");
 
+    modem.bandwidth_hz = 3.6;
+    const auto no_floor = live::detail::plan_carrier_band(s);
+    s.minimum_carrier_spacing_hz = 125;
+    const auto medium_floor = live::detail::plan_carrier_band(s);
+    s.minimum_carrier_spacing_hz = 265;
+    const auto wide_floor = live::detail::plan_carrier_band(s);
+    check(near(no_floor.waveform_bandwidth_hz, 2.25) &&
+          near(medium_floor.waveform_bandwidth_hz, 250.75) &&
+          near(wide_floor.waveform_bandwidth_hz, 530.75) &&
+          rejects([&] { wide_floor.validate(265); }),
+          "Carrier placement did not refresh for the new spacing floor or accepted a DC crossing");
+    s.selective_perturbation = "each-65";
+    const auto spaced = live::detail::prepare_profile(s, *s.calendar, {});
+    const auto& spaced_geometry = spaced.waveform.geometry();
+    const auto first_slot = spaced.waveform.slot(0);
+    check(near(spaced_geometry.carrier_spacing_hz, 265) &&
+          near(spaced.waveform.placement().waveform_bandwidth_hz, 530.75) &&
+          spaced.waveform.basis_format(first_slot).minimum_carrier_spacing_hz == 265 &&
+          near(spaced.channel.effects.occupied_bandwidth_hz, 530.75) &&
+          near(spaced.channel.selective_model.correlation_spacing_hz, .75),
+          "Native profile did not use the wider waveform with the original selective channel scale");
+    s.minimum_carrier_spacing_hz = 126;
+    check(rejects([&] { live::validate_settings(s); }), "Robust accepted an unsupported spacing setting");
+    s.minimum_carrier_spacing_hz = 0;
+
     modem.bandwidth_hz = 120;
     modem.carrier_hz = 1775;
     modem.oscillator_search = modem::OscillatorSearchConfig{
@@ -1305,7 +1330,9 @@ void dated_live_data_then_eof(std::optional<int> fixed_link_gain_db = {}, bool b
 void raw_bit_session_transmission_and_ordinal() {
     auto simulated = settings(true);
     simulated.transfer.modem.sample_rate = 1500;
-    simulated.transfer.modem.carrier_hz = 500;
+    // Center the widened DATA band within this fixture's real-audio passband.
+    simulated.transfer.modem.carrier_hz = 375;
+    simulated.minimum_carrier_spacing_hz = 265;
     live::Session session;
     session.start(simulated);
     const auto prepared = ready(session);
