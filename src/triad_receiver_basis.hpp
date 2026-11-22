@@ -30,7 +30,7 @@ struct MappedBasisReport {
     std::uint64_t large_phase_fallback_rows = 0, staging_fallback_rows = 0;
     std::size_t cache_bytes = 0, peak_cache_bytes = 0, peak_pinned_tiles = 0;
     std::size_t tile_samples = 0, cache_limit_bytes = 0;
-    unsigned dense_factor = 1;
+    unsigned dense_factor = 1, exact_source_slots = 0;
     double dense_sample_rate_hz = 0;
     double oversampling_ratio = 0, interpolation_amplitude_proxy = 0;
     std::string fallback_reason;
@@ -51,7 +51,9 @@ private:
 // A slot's shared bounded cache of unwarped keyed DATA. The caller owns the
 // aggregate worker budget. At most `workers` concurrent render_pair calls may
 // read immutable pinned tiles. If the shape always renders directly, eligible
-// lanes borrow private keyed sources within the existing workspace.
+// lanes borrow private keyed sources within the existing workspace. An
+// over-capacity direct shape uses the admitted bounded source pool and waits
+// cancellation-safely when all private sources are leased.
 // Output is [bit][tap][sample], has exactly 2*taps.size()*offsets.size() entries,
 // and is written only by this call. The same native cubic kernel serves Python.
 class MappedBasis {

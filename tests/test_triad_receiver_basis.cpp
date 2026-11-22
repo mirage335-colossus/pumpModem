@@ -200,10 +200,13 @@ bool same_value_bits(std::span<const v::Complex> left, std::span<const v::Comple
     return true;
 }
 
-void concurrent_direct_pairs(const datapump::Crypto& crypto) {
+void concurrent_direct_pairs(const datapump::Crypto& crypto, unsigned workers) {
     const auto settings = config();
     auto plan = slot();
+    plan.format.inner_rate_hz = 3.6;
+    plan.format.bit_seconds = 160.4;
     plan.format.pulse_shape = v::PulseShape::Rrc;
+    plan.format.minimum_inner_coefficients = 64;
     plan.format.minimum_carrier_spacing_hz = 265;
     const auto offsets = positions(401);
     const std::array<v::Tap, 2> taps{{{0, .2}, {.007, -.4}}};
@@ -212,8 +215,13 @@ void concurrent_direct_pairs(const datapump::Crypto& crypto) {
     const std::array<r::MappedBasisRow, 4> rows{{
         {0, .011, -1.25, -265.}, {0, .017, -.25, 0.},
         {0, .023, .75, 265.}, {0, .029, 1.75, 530.}}};
-    constexpr std::uint64_t first = 25000;
-    r::MappedBasis basis(settings, plan, crypto, offsets.size(), rows.size());
+    constexpr std::uint64_t first = 250000;
+    // This is the 265 Hz, 3.6 Hz startup geometry with a 160.4 s DATA slot.
+    // W=126 crossed the former all-or-none exact-source admission boundary.
+    r::MappedBasis basis(settings, plan, crypto, offsets.size(), workers);
+    const auto expected_sources = std::max<std::size_t>(workers, v::receiver_epoch_offsets.size());
+    check(basis.report().exact_source_slots == expected_sources,
+          "direct geometry did not admit its exact source pool");
     std::array<std::vector<v::Complex>, rows.size()> serial;
     for (std::size_t i = 0; i != rows.size(); ++i) {
         serial[i].resize(2*taps.size()*offsets.size());
@@ -248,7 +256,8 @@ void concurrent_direct_pairs(const datapump::Crypto& crypto) {
     }
     const auto report = basis.report();
     check(report.calls == 2*rows.size() && report.direct_rows == 2*report.calls*taps.size() &&
-          !report.interpolated_rows && report.fallback_reason == "unsupported-or-abrupt-pulse",
+          !report.interpolated_rows && report.fallback_reason == "unsupported-or-abrupt-pulse" &&
+          report.exact_source_slots == expected_sources,
           "concurrent direct RRC work lost its receipts or fallback reason");
 
     std::vector<v::Complex> reused(serial.front().size());
@@ -262,6 +271,21 @@ void concurrent_direct_pairs(const datapump::Crypto& crypto) {
     basis.render_pair(rows.front(), taps, 0, offsets, reused);
     check(same_value_bits(reused, direct(settings, plan, crypto, rows.front(), taps, 0, offsets)),
           "paired exact rendering changed zeros at the source boundary");
+}
+
+void partial_exact_source_pool(const datapump::Crypto& crypto) {
+    auto plan = slot();
+    plan.format.inner_rate_hz = 3.6;
+    plan.format.bit_seconds = 160.4;
+    plan.format.minimum_inner_coefficients = 900'000;
+    plan.format.pulse_shape = v::PulseShape::Rrc;
+    plan.format.minimum_carrier_spacing_hz = 265;
+    r::MappedBasis basis(config(), plan, crypto, 401, 32);
+    const auto report = basis.report();
+    check(report.exact_source_slots >= 13 && report.exact_source_slots < 32,
+          "large direct geometry did not retain a bounded partial exact source pool");
+    check(r::MappedBasis::workspace_bytes(config(), plan, 401, 32) > 2U*1024*1024*1024,
+          "large direct geometry test does not exercise a bounded partial pool");
 }
 
 struct ViewResult {
@@ -668,7 +692,9 @@ int main() {
         concurrent_pairs(crypto);
         dense_and_gated(crypto);
         fallback_and_validation(crypto);
-        concurrent_direct_pairs(crypto);
+        concurrent_direct_pairs(crypto, 4);
+        concurrent_direct_pairs(crypto, 126);
+        partial_exact_source_pool(crypto);
         prepared_views(crypto);
         unit_remainders();
         addressed_maps(crypto);

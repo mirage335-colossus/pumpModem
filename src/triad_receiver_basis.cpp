@@ -1,6 +1,7 @@
 #include "triad_receiver_basis.hpp"
 #include "triad_coordinate.hpp"
 #include "triad_mapped_kernel.hpp"
+#include "datapump/execution.hpp"
 #include "datapump/triad_shaping.hpp"
 
 #include <algorithm>
@@ -25,6 +26,9 @@ constexpr std::size_t maximum_pins = 32;
 constexpr std::size_t maximum_samples = 16384;
 constexpr std::size_t maximum_taps = 2;
 constexpr std::size_t owner_count = receiver_epoch_offsets.size();
+constexpr std::size_t paired_render_scratch_bytes =
+    256 * (sizeof(long double) + 2 * sizeof(Complex));
+constexpr std::size_t per_worker_tile_allowance = (maximum_pins + 4) * tile_bytes;
 
 void require(bool condition, const char* message) {
     if (!condition) throw Error(message);
@@ -92,7 +96,8 @@ struct MappedBasis::Impl {
     std::uint64_t dense_samples;
     unsigned dense_factor = 1;
     std::array<Sources, owner_count> sources;
-    std::mutex exact_mutex;
+    execution::Mutex exact_mutex;
+    execution::StopCondition exact_available;
     std::vector<ExactSources> exact_sources;
     mutable std::shared_mutex mutex;
     std::map<Key, Entry> cache;
@@ -151,10 +156,16 @@ struct MappedBasis::Impl {
             // This geometry never populates the dense cache or its source
             // pairs. Reuse their admitted bytes for private exact renderers.
             const auto pair_bytes = multiply(2, source_geometry.source_workspace_bytes);
-            const auto allowance = add(cache_limit, multiply(owner_count, pair_bytes));
-            const auto count = std::max<std::size_t>(workers, owner_count);
-            if (count <= allowance / add(pair_bytes, sizeof(ExactSources)))
-                exact_sources.resize(count);
+            require(per_worker_tile_allowance > paired_render_scratch_bytes,
+                    "mapped basis exact renderer scratch exceeds the pin allowance");
+            const auto allowance = add(add(cache_limit, multiply(owner_count, pair_bytes)),
+                multiply(workers, per_worker_tile_allowance-paired_render_scratch_bytes));
+            const auto requested = std::max<std::size_t>(workers, owner_count);
+            const auto capacity = allowance / add(pair_bytes, sizeof(ExactSources));
+            const auto count = std::min(requested, capacity);
+            require(count, "mapped basis cannot admit its minimum exact source pool");
+            exact_sources.resize(count);
+            statistics.exact_source_slots = static_cast<unsigned>(count);
         }
     }
 
@@ -381,18 +392,27 @@ struct MappedBasis::Impl {
         (void)fill(bit, epoch, index, true, stop);
     }
 
-    ExactSources& lease_exact_sources(unsigned epoch) {
-        std::lock_guard lock(exact_mutex);
+    ExactSources* available_exact_sources(unsigned epoch) {
         ExactSources* available = nullptr;
         for (auto& pair : exact_sources) {
             if (pair.busy) continue;
-            if (pair.epoch == epoch) {
-                available = &pair;
-                break;
-            }
+            if (pair.epoch == epoch) return &pair;
             if (!available || (available->epoch && !pair.epoch)) available = &pair;
         }
-        require(available, "mapped basis exact source pool exceeds admitted workers");
+        return available;
+    }
+
+    ExactSources& lease_exact_sources(unsigned epoch, std::stop_token stop) {
+        std::unique_lock lock(exact_mutex);
+        auto available = available_exact_sources(epoch);
+        if (!available) {
+            const auto acquired = exact_available.wait(lock, stop, [&] {
+                available = available_exact_sources(epoch);
+                return available != nullptr;
+            });
+            if (!acquired || !available)
+                throw Error("Robust receive cancelled while waiting for an exact basis source");
+        }
         available->busy = true;
         return *available;
     }
@@ -432,15 +452,20 @@ struct MappedBasis::Impl {
             prepare_sources(epoch);
             render_exact(sources[epoch].bits, row, taps, first, offsets, output, stop);
         } else {
-            auto& pair = lease_exact_sources(epoch);
+            auto& pair = lease_exact_sources(epoch, stop);
             struct Release {
-                std::mutex& mutex;
+                execution::Mutex& mutex;
+                execution::StopCondition& available;
                 ExactSources& pair;
+                bool notify_waiter;
                 ~Release() {
-                    std::lock_guard lock(mutex);
-                    pair.busy = false;
+                    {
+                        std::lock_guard lock(mutex);
+                        pair.busy = false;
+                    }
+                    if (notify_waiter) available.notify_one();
                 }
-            } release{exact_mutex, pair};
+            } release{exact_mutex, exact_available, pair, exact_sources.size() < workers};
             cancelled(stop);
             if (pair.epoch != epoch) {
                 pair.bits = {};
@@ -832,9 +857,9 @@ std::size_t MappedBasis::workspace_bytes(const ReceiverConfig& config, const Rec
     // LRU/map metadata, epoch locks and owner bookkeeping are bounded by the
     // fixed cache entry count; no received-content-sized descriptors exist.
     total = add(total, 64U*1024U);
-    auto per_worker = multiply(maximum_pins+4, tile_bytes);
-    // The always-direct pool uses the shared cache/source allowance.
-    // Its paired renderer uses 12 KiB of this idle per-lane pin allowance.
+    auto per_worker = per_worker_tile_allowance;
+    // The always-direct pool uses the shared cache/source allowance and the
+    // unused per-lane tile allowance. Its paired renderer reserves 12 KiB.
     per_worker = add(per_worker, PatternSource::render_bank_scratch_bytes);
     per_worker = add(per_worker, multiply(2*maximum_taps*rows, sizeof(Complex)));
     per_worker = add(per_worker, multiply(2*rows, sizeof(Complex))); // direct fallback pair

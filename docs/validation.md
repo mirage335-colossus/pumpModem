@@ -467,6 +467,110 @@ rebuilding the strengthened concurrent basis test and the spacing probe,
 both focused checks passed again. The rebuilt FLTK application passed
 its shared GUI self-check.
 
+#### zLab `fox` presentation traffic
+
+The same launcher text loaded into a fresh worker resolved to 265 Hz
+spacing. The GUI encoded `fox` as 22 DATA slots plus two scored quiet
+slots, against three DATA and two quiet slots for `e`. The 2× RTX 5090
+run reported at 406 s was no longer available for inspection. RunPod
+reported no matching stock in either tier when checked for a reproduction.
+One receiver session selects one GPU. The earlier five-slot timings and
+the active-slot renderer improvement do not measure the `fox` workload
+on a 5090 or establish its end-to-end speed change.
+
+A bounded local presentation check on the Ryzen 5 PRO 5650U and Vulkan
+Radeon used the exact launcher and ordinary Transmit action. The inherited
+pipe worker was the post-renderer development build
+(`1473f0da51c5…1f8b`) at its default 1,000 × 760 viewport. Over
+12.005 s it sent 112 DPW1 GUI snapshots
+totaling 21,400,435 bytes, including headers. The mean was 1.78 MB/s
+and the largest one-second bucket was 2.03 MB. The preceding 3 s idle
+interval sent two snapshots totaling 271,876 bytes. Encoded pixels were
+43.4% of the active byte count. The active interval reached 473.8 of
+5,032.6 modeled receiver seconds and reported 16,463,070 Vulkan search
+rows with native CPU tracking. The test stopped at the interval boundary
+without measuring message completion.
+
+zLab sends these snapshots from the pod over SSH and forwards them to
+the local browser. The local pipe measurement identifies a source for
+download traffic of the reported order. It does not measure pod network
+traffic, SSH overhead or the effect of browser transport on modem compute.
+
+#### High-worker exact rendering
+
+The same 3.6 Hz, 265 Hz geometry reserves 148,672 bytes per source.
+The former private-pair guard could fit 125 source pairs in the shared
+32 MiB cache and 13 epoch reserves. At 126 admitted lanes it discarded
+the pool and used the per-epoch lock. With the whole budget available to
+the slot, 63 logical CPUs are enough to cross this boundary. The departed
+2× RTX 5090 run has no CPU allocation or slot timing receipt, so this
+finding does not identify its bottleneck.
+
+Always-direct slots now repurpose the unused dense tile and pin allowances
+for private sources. A large source can fill only part of that pool and
+additional callers wait for an exact-source lease with cancellation.
+The workspace quote, public hypotheses and global worker budget remain
+the same. Mapped slots retain their tile and pin allocations.
+
+A local six-thread component check submitted eight requests per thread
+at one epoch, with 4,096 rows and two taps per request. It used the
+3.6 Hz, 160.4 s, 265 Hz RRC source at 6,000 samples/s. Two trials per
+cell were interleaved across the original and repaired renderer.
+
+| Admitted lanes | Original wall time / busy CPU equivalents | Repaired wall time / busy CPU equivalents | Basis workspace quote |
+| --- | --- | --- | ---: |
+| 125 | 57–63 ms / 5.09–5.31 | 57–58 ms / 5.12–5.27 | 711,789,440 B |
+| 126 | 382–393 ms / 0.99–1.00 | 53–56 ms / 5.05–5.35 | 717,183,872 B |
+
+All arms produced 48 requests and 192 direct columns with the same
+sample digest `692692ce18515716`. The regression checks bitwise parity
+with the direct reference at four and 126 admitted lanes. A large
+geometry check verifies that admission retains a partial pool without
+constructing its keyed tiles. A separate bounded concurrency check
+held all 23 source pairs admitted at 32 lanes for a 50,000-coefficient
+format. Two callers entered the source wait. One stopped while the pairs
+were held and the other proceeded after release. Subsequent calls
+rendered all 13 epochs, with exact zeros outside source support. The
+barriers used to hold the leases were temporary. This checks lease
+contention and reuse without allocating a waveform tile. The component
+checks do not measure complete `fox` service or RTX 5090 throughput.
+
+The Vulkan build passed all 61 Triad checks across the initial suite and
+serial reruns. The sandbox initially hid the physical Vulkan device from
+eight checks, and two native checks exceeded their budgets with other
+tests active. All ten passed in isolation with the Radeon available.
+The 32 GUI and 32 browser bridge checks passed. The rebuilt local zLab
+worker decoded the short CPU relay fixture in 54.5 s and scored both
+quiet slots. The distinct Radeon relay fixture, which uses four logical
+CPUs and a crystal oscillator, reached its 120 s deadline in receiver
+scoring after submitting the full input, without a published decision.
+
+#### Bounded Blackwell `fox` replay
+
+After the exact-source repair, a fresh zLab deployment built the 2.40 MB
+allowlisted source archive (`7c5134a4…e5c3cd`) into a Vulkan worker
+(`03a21552…d8e18`). The pod had two full RTX PRO 6000 Blackwell Server
+Edition GPUs with 97,887 MiB each and MIG disabled. An EPYC 9554 provided
+256 visible logical affinity CPUs with a 54.4-core cgroup quota. That
+limits the automatic receiver budget to 108 workers, below the old
+125-pair boundary.
+
+The shared GUI received the same launcher and `fox` draft at 265 Hz.
+The compute phase ended at 78.0 s after 5,049.6 modeled receiver seconds.
+The worker reported 395,113,680 Vulkan search rows, matching the coarse
+grid for 24 slots, and reported CPU fine tracking. The result was
+**no decoded text**. The observer continued to its 180 s deadline
+because it did not recognize that label as terminal. The final Pattern
+steps were not retained, so the timing does not establish physical
+quiet-slot completion or successful service. This placement did not
+exercise the high-worker boundary, and the result does not qualify
+RTX 5090 throughput or sensitivity.
+
+In its initial 12 s measurement interval, the SSH relay returned
+22,146,374 DPW1 application bytes in 114 frames, about 1.85 MB/s.
+This corroborates the local presentation measurement. TCP byte counts
+and the effect of transport on receiver compute remain unmeasured.
+
 ## Blackwell arithmetic and receiver residency — 22 November 2026
 
 The same full RTX PRO 6000 Blackwell Server Edition ran the vector and
