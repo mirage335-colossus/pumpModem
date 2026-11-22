@@ -44,7 +44,7 @@ struct Settings {
     std::string fhss_profile="off";
     std::vector<double> fhss_frequencies_hz;
     // Adjacent DATA carrier centers are separated by at least this many Hz.
-    unsigned minimum_carrier_spacing_hz=0;
+    double minimum_carrier_spacing_hz=0;
 };
 void validate_settings(const Settings&);
 // Compile-time capability only. Device initialization stays on the session

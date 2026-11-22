@@ -57,7 +57,7 @@ struct Format {
     PulseShape pulse_shape = PulseShape::Rrc;
     // Minimum center-to-center spacing between adjacent DATA carriers. Zero
     // keeps the pulse-derived spacing used by the original waveform.
-    unsigned minimum_carrier_spacing_hz = 0;
+    double minimum_carrier_spacing_hz = 0;
 };
 double effective_sample_rate(const Format&);
 struct Geometry {

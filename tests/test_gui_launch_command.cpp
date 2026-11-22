@@ -44,12 +44,17 @@ void parsing_and_formatting() {
     check(unconfigured.calendar_epoch==0&&unconfigured.clear_live_noise&&!unconfigured.live_noise_dbfs_hz&&
           launch_command::parse(launch_command::format(unconfigured))==unconfigured,
           "Explicit calendar/noise clearing must survive launch round trip");
-    for(const auto spacing:{0U,125U,265U}) {
+    for(const auto spacing:{0.0,3.5,125.0,265.0}) {
         const auto patch=launch_command::parse("--minimum-carrier-spacing "+std::to_string(spacing));
         check(patch.minimum_carrier_spacing_hz==spacing&&
               launch_command::parse(launch_command::format(patch))==patch,
               "Minimum carrier spacing choices must survive launch round trips");
     }
+    const auto three_point_five=launch_command::parse("--minimum-carrier-spacing 3.5");
+    const auto formatted_three_point_five=launch_command::format(three_point_five);
+    check(formatted_three_point_five.find("--minimum-carrier-spacing 3.5")!=std::string::npos&&
+          formatted_three_point_five.find("3.500000")==std::string::npos,
+          "Minimum carrier spacing must use canonical compact decimal formatting");
     check(!launch_command::parse("--rate 1200").calendar_epoch&&
           !launch_command::parse("--rate 1200").clear_live_noise,
           "Older partial commands must preserve configured calendar/noise");
@@ -58,8 +63,9 @@ void parsing_and_formatting() {
     for(const auto* bad:{"--calendar-epoch 5","--calendar-epoch 4294967290","--calendar-epoch -1",
         "--calendar-epoch 1.5","--calendar-ordinal -1","--calendar-ordinal 18446744073709551616",
         "--live-noise-dbfs-hz nan","--live-noise-dbfs-hz -251","--live-noise-dbfs-hz 1",
-        "--minimum-carrier-spacing -1","--minimum-carrier-spacing 1","--minimum-carrier-spacing 124",
-        "--minimum-carrier-spacing 125.5","--minimum-carrier-spacing 266","--fec rs40"})
+        "--minimum-carrier-spacing -1","--minimum-carrier-spacing 1","--minimum-carrier-spacing 3.4",
+        "--minimum-carrier-spacing 3.6","--minimum-carrier-spacing 124","--minimum-carrier-spacing 125.5",
+        "--minimum-carrier-spacing 266","--minimum-carrier-spacing nan","--minimum-carrier-spacing inf","--fec rs40"})
         rejects([&]{launch_command::parse(bad);},"Invalid native receiver profile accepted");
     for(const auto* wait:{"off","1","2","3","5","10"})for(const auto* random:{"0","1","2","3"}) {
         const auto patch=launch_command::parse(std::string("--symbol-burst ")+wait+" --symbol-burst-random "+random);
@@ -81,6 +87,10 @@ void parsing_and_formatting() {
     rejects([&]{launch_command::format(bad_burst);},"Invalid programmatic random wait export accepted");
     launch_command::Patch bad_spacing;bad_spacing.minimum_carrier_spacing_hz=100;
     rejects([&]{launch_command::format(bad_spacing);},"Invalid programmatic minimum carrier spacing export accepted");
+    bad_spacing.minimum_carrier_spacing_hz=3.4;
+    rejects([&]{launch_command::format(bad_spacing);},"Invalid fractional minimum carrier spacing export accepted");
+    bad_spacing.minimum_carrier_spacing_hz=std::numeric_limits<double>::infinity();
+    rejects([&]{launch_command::format(bad_spacing);},"Non-finite minimum carrier spacing export accepted");
     for(const auto* retired:{"--sched-hop 3","--sched-hop-dilution 3","--sched-frequency-search 8"})
         rejects([&]{launch_command::parse(retired);},"Retired scheduled option accepted");
     for(const auto* strategy:{"auto","existing","complex","amplitude"}) {

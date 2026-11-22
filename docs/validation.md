@@ -47,7 +47,8 @@ already overlap, so Helper overlap is inapplicable to that profile.
 
 ## Robust minimum carrier spacing — 22 November 2026
 
-Robust Setup defaults to a 265 Hz minimum and also offers 0 and 125 Hz.
+The initial Robust Setup control defaulted to a 265 Hz minimum and also
+offered 0 and 125 Hz.
 The Rate 3.6 Hz / 1× profile produces nominal spans of 2.25, 250.75 and
 530.75 Hz, respectively. The profile preserves the pulse-derived selective
 filter scale as the carrier centers move. Launch settings round-trip all
@@ -69,6 +70,114 @@ passed. The initial GUI group passed 31 of 32; the 265 Hz session fixture's
 original 500 Hz IF exceeded the shaped passband at 1,500 samples/s. It passed
 in the final `triad` run at 375 Hz. The rebuilt FLTK application passed its
 self-check and the shared GUI policy, launch command and mode-isolation tests.
+
+### 100 W Helper placement at 125 Hz spacing
+
+A native plan-only check at `7ea323f8` used Rate 3.6 Hz / 1×, a 6 kHz sample
+rate, FHSS off, independent GPSDO XO models, 30 MHz Shift, zero configured
+Doppler and a 90 dB Helper ratio limit. At +3 dBm DATA (about 2 mW), the
+100 W Helper was 47 dB stronger. With 125 Hz spacing and its 250.75 Hz shaped
+DATA span, the low tones failed the leakage guard at 1,725 Hz IF. A 0.1 Hz
+placement sweep found no valid IF in the 6 kHz plan, including with channel
+effects off. With the same shaped waveform and only the placement guard's
+sample-rate limit relaxed to 12 kHz, the lowest High tone found was about
+3,367 Hz. Its guarded clean TX band reached about 3,467 Hz.
+
+Full profile preparation at 1,725 Hz IF accepted all 100 W in the cases below.
+The RX bounds include HF Worst, Each 65% and 3× margin. TX guard edges include
+the 100 Hz allowance around the outer Helper pilots.
+
+| Minimum spacing | DATA power | High pilot | Guarded TX audio | Guarded RX audio |
+| --- | ---: | ---: | ---: | ---: |
+| 0 Hz | About 2 mW | 2,400 Hz | 450–2,500 Hz | About 180–2,770 Hz |
+| 125 Hz | 100 mW | 2,500 Hz | 450–2,600 Hz | About 180–2,870 Hz |
+| 125 Hz | 1 W | 2,400 Hz | 450–2,500 Hz | About 180–2,770 Hz |
+
+With 100 mW DATA at 1,800 Hz IF, the first eligible recommendation in the
+same severe profile, the High pilot moved to 2,550 Hz and the guarded RX
+edge reached about 2,920 Hz. Compare the actual TX and RX filter endpoints
+with the planned edges. The Kenwood TS-590SG specifies 300–2,700 Hz default
+SSB-DATA TX cutoffs. The Yaesu FT-710 offers 100–2,900 Hz as a wider TX
+setting. These are placement checks with native production planners,
+without simulated reception or physical-radio qualification.
+[Kenwood TS-590SG manual](https://www.kenwood.com/usa/Support/pdf/B5A-0180-00.pdf),
+[Yaesu FT-710 manual](https://public2024.yaesu.com/FileLibraryF/4CB893D7-1018-01AF-FA97E9E9AD48B50C/FT-710_OM_ENG_EH080H201_2307N-GS.pdf)
+
+### Hypothetical 35 Hz spacing with 100 W Helper
+
+The same plan-only geometry was evaluated using a temporary build of the
+native profile code that admitted additional spacing choices for the probe.
+At 35 Hz spacing, the shaped DATA span was 70.75 Hz. At +3 dBm DATA and
+100 W Helper, fixed-low-tone leakage rejected 1,725 Hz IF. The 0.1 Hz IF
+sweep found no valid 6 kHz placement, including with channel effects off.
+Relaxing just the placement guard's sample-rate limit on the same shaped
+waveform found a High pilot near 2,990 Hz at about 1,955 Hz IF. The guarded
+TX band was approximately 450–3,090 Hz, and the severe RX band was about
+180–3,360 Hz.
+
+Full profile checks at 1,725 Hz IF admitted the entire 100 W Helper at 35 Hz
+spacing with +13, +14 and +15 dBm DATA. Under the same severe profile,
+approximately 20 mW DATA needed RX coverage up to 2,920 Hz. Approximately
+25 mW fit guarded TX 450–2,600 Hz and RX 180–2,870 Hz. Approximately 32 mW
+fit TX 450–2,550 Hz and RX 180–2,820 Hz. In a separate 2 mW DATA contrast,
+5 Hz spacing admitted 100 W Helper at 1,725 Hz IF with guarded TX
+450–2,700 Hz and RX 180–2,970 Hz. The 10 and 15 Hz contrasts had no valid
+6 kHz placement under the severe profile. The shipping control at the time
+offered 0, 125 and 265 Hz. These results cover frequency planning for the selected
+geometry. Reception and real-radio filter response remain unmeasured.
+
+### Hypothetical 3.5 Hz minimum spacing with 100 W Helper
+
+With the same 3.6 Hz / 1× and 6 kHz geometry, the exact fractional spacing
+gave a 7.75 Hz DATA span. A temporary native build applied the 3.5 Hz floor
+in waveform geometry and retained the production placement and profile
+calculations. At 1,725 Hz IF and +3 dBm DATA, the full 100 W Helper fit with
+a 2,550 Hz High pilot and guarded TX 450–2,650 Hz. Under HF Worst,
+Each 65% and 3× margin, guarded RX was about 180–2,920 Hz. A 0.1 Hz IF
+sweep found no lower High pilot for that power ratio. At +4 dBm DATA
+(about 2.51 mW), the 1,725 Hz profile used a 2,500 Hz High pilot and
+guarded RX about 180–2,870 Hz. The 0 and 5 Hz contrast plans reproduced
+their earlier results. The probe predates the addition of the 3.5 Hz choice
+to the GUI and CLI.
+
+The added choice now reaches the native waveform and the receiver basis as
+3.5 Hz and round-trips through launch settings. A production profile check
+reproduced the 7.75 Hz span and the 100 W, +3 dBm Helper placement above.
+All 12 focused native and GUI regression checks passed on the `7ea323f8`
+base with this change. The new profile check covers planning geometry.
+
+### Modeled Helper leakage allowance at 265 Hz spacing
+
+A temporary native check on the `7ea323f8` base with the 3.5 Hz control
+change used the same 6 kHz, Rate 3.6 Hz / 1×, GPSDO XO, HF Worst, Each 65%
+and 3× margin settings with exactly 2 mW DATA and 100 W Helper. The shaped
+DATA span was 530.75 Hz and the guarded RX allowance was about 270.009 Hz
+per edge. The existing aggregate leakage limit is 0.1% of DATA reference
+power, equivalent to 2 µW at the configured DATA level.
+
+The check measured the production leakage expression at its highest pilot
+candidate inside each pair of passbands. The optimized custom IFs came from
+a 0.01 Hz grid over the feasible interval. For each result, a limit just
+below the bound rejected at that IF within the selected caps. A limit just
+above it admitted the full 100 W in native profile preparation. The source
+threshold remains 0.1%.
+
+| TX / RX upper cutoff | Custom DATA IF | High pilot | Required bound relative to DATA | Increase over the existing bound |
+| --- | ---: | ---: | ---: | ---: |
+| 2,700 / 2,900 Hz | 1,725 Hz | 2,490.375 Hz | 27.55% | 275.5× |
+| 2,700 / 2,900 Hz | 1,714.61 Hz | 2,529.985 Hz | 20.30% | 203.0× |
+| 2,700 / 3,000 Hz | 1,725 Hz | 2,590.375 Hz | 14.00% | 140.0× |
+| 2,700 / 3,000 Hz | 1,784.62 Hz | 2,599.995 Hz | 12.75% | 127.5× |
+| 2,900 / 3,000 Hz | 1,764.61 Hz | 2,629.985 Hz | 10.22% | 102.2× |
+
+Guarded TX and RX lower edges were approximately 450 and 180 Hz. Under
+these declarations, the 1,400 Hz guarded DATA lower edge for a GUI
+recommendation forces the High pilot to at least 2,650.759 Hz and the
+guarded RX upper edge to at least 3,020.768 Hz. A leakage-only change cannot
+produce a recommended 6 kHz preset. The accepted contrasts used custom IFs.
+The leakage calculation bounds the whole contiguous DATA span, including
+the spaces between carriers. Per-carrier leakage, physical RF distortion
+and reception with the relaxed bounds remain unmeasured.
 
 ## Exact 3.6 Hz GUI simulation throughput — 22 November 2026
 

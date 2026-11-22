@@ -19,8 +19,9 @@ For live reception, first match the peers' public calendar epoch, initial keyed
 ordinal, waveform profile, encryption/key, FEC, compression and burst schedule.
 Both peers also need the same effective DATA carrier spacing. Robust Setup
 defaults to a 265 Hz minimum. Select 0 Hz for a peer using the original
-rate-derived spacing, or 125 Hz for a shared intermediate floor. A floor changes
-the full DATA passband only when it exceeds the nominal single-carrier width.
+rate-derived spacing. The 3.5 and 125 Hz options provide smaller shared floors.
+A floor changes the full DATA passband only when it exceeds the nominal
+single-carrier width.
 Wider spacing may change Helper placement and the cost of the receiver's
 contiguous DATA projection. When replaying earlier low-rate GUI launch commands,
 include `--minimum-carrier-spacing 0` to reproduce their geometry, especially
@@ -28,6 +29,8 @@ with a custom Carrier or a closely spaced Helper. Severe-channel reliability gai
 and sustained receiver cost at the new spacings remain unqualified. See the
 [shared settings contract](../gui-contract.md#modems-and-current-availability)
 and [functional checks](../validation.md#robust-minimum-carrier-spacing--22-november-2026).
+For 100 W Helper at low DATA power, see the
+[3.5 Hz passband check](../validation.md#hypothetical-35-hz-minimum-spacing-with-100-w-helper).
 Configure the receiver's local input noise model and use the actual audio-device
 timestamps where available. The receiver continuously scores DATA or null at
 the configured addresses. It does not currently acquire an arbitrary start

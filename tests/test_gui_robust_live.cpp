@@ -335,6 +335,34 @@ void carrier_band_matches_profile() {
           "Carrier preview dropped the canonical gate allowance when spectral certification could not narrow it");
 }
 
+void fractional_spacing_helper_profile() {
+    auto s = settings(true);
+    s.minimum_carrier_spacing_hz = 3.5;
+    s.transfer.modem.bandwidth_hz = 3.6;
+    s.transfer.modem.oscillator_search = modem::OscillatorSearchConfig{
+        .lf = {.0001, .5}, .rf = {.0001, .5}, .rf_shift_hz = 30'000'000, .margin = 3};
+    s.calendar = live::Calendar{1793850000, 7000037};
+    s.target_cn0_db_hz = 32;
+    s.tx_dbm = 3;
+    s.path_loss_db = 90;
+    s.noise_dbm_hz = -164;
+    s.spread_preset = "hf-worst";
+    s.selective_perturbation = "each-65";
+    s.helper.power_w = 100;
+    const auto preview = live::detail::plan_carrier_band(s);
+    preview.validate(s.transfer.modem.carrier_hz);
+
+    const auto profile = live::detail::prepare_profile(s, *s.calendar, {}, {.simulation_seed = 950101});
+    const auto& waveform = profile.waveform;
+    check(waveform.basis_format(waveform.slot(0)).minimum_carrier_spacing_hz == 3.5 &&
+          waveform.geometry().carrier_spacing_hz == 3.5 &&
+          waveform.geometry().occupied_bandwidth_hz == 7.75 && preview.waveform_bandwidth_hz == 7.75,
+          "Robust fractional spacing was lost between the preview, waveform, and receiver template");
+    check(std::abs(profile.receiver.helper.effective_power_w - 100) < 1e-9 &&
+          profile.receiver.helper.frequency_hz == 2550 && std::abs(profile.maximum_audio_hz - 2920) < .02,
+          "Robust fractional spacing changed the verified 100 W Helper placement");
+}
+
 void native_precision_profile_policy() {
     auto s = settings(true);
     const auto automatic = live::detail::prepare_profile(s, *s.calendar, {});
@@ -1815,6 +1843,7 @@ int main(int argc, char** argv) {
     try {
         if (argc == 2 && std::string_view(argv[1]) == "--carrier-band") {
             carrier_band_matches_profile();
+            fractional_spacing_helper_profile();
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--gpu") {
@@ -1872,6 +1901,7 @@ int main(int argc, char** argv) {
         }
         check(argc == 1, "Unexpected Robust session test argument");
         carrier_band_matches_profile();
+        fractional_spacing_helper_profile();
         native_precision_profile_policy();
         configured_physical_carrier_context();
         if (!live::gpu_receiver_available()) unavailable_gpu();

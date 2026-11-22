@@ -10,6 +10,11 @@ namespace datapump::tuning {
 // Results are integration estimates, not empirical sensitivity guarantees.
 inline constexpr double minimum_bandwidth_hz = modem::minimum_bandwidth_hz;
 inline constexpr double maximum_bandwidth_hz = modem::maximum_bandwidth_hz;
+// GUI and native Robust controls intentionally expose a small set of
+// interoperable DATA-carrier spacing floors.
+constexpr bool valid_robust_minimum_carrier_spacing(double hz) noexcept {
+    return hz == 0 || hz == 3.5 || hz == 125 || hz == 265;
+}
 // Ideal AWGN Shannon-Hartley channel capacity in bits/s. The target is C/N0
 // in dB-Hz, so in-band linear SNR is 10^(target_snr_db_hz/10)/bandwidth_hz.
 // This theoretical ceiling is independent of modem framing and coding.

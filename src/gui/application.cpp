@@ -671,7 +671,7 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
                     <<"--rate HZ --carrier HZ --shift HZ --target-snr DB-Hz --helper-power WATTS.\n"
                     <<"Robust receive setup: --calendar-epoch UTC --calendar-ordinal N\n"
                     <<"--live-noise-dbfs-hz DBFS/Hz; configure the local audio noise model explicitly. --gpu yes|no selects GPU acceleration (default no).\n"
-                    <<"--minimum-carrier-spacing 0|125|265 sets the adjacent Robust carrier spacing floor in Hz (default 265).\n"
+                    <<"--minimum-carrier-spacing 0|3.5|125|265 sets the adjacent Robust carrier spacing floor in Hz (default 265).\n"
                     <<"--wrong-key-admission current|guarded|strict|very-strict|extreme|maximum\n"
                     <<"selects a browser filter (default Unfiltered).\n"
                     <<"Developer trace: --verbose [--verbose-file NEW-PATH]\n"

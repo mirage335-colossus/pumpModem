@@ -145,6 +145,8 @@ Geometry geometry(const Format& f){
             "triad v3 invalid Added Symbols or minimum complexity");
     require(std::isfinite(f.configured_carrier_hz)&&f.configured_carrier_hz>=0,
             "triad v3 configured carrier must be finite and nonnegative");
+    require(std::isfinite(f.minimum_carrier_spacing_hz)&&f.minimum_carrier_spacing_hz>=0,
+            "triad v3 minimum carrier spacing must be finite and nonnegative");
     require(std::isfinite(f.bit_seconds)&&f.bit_seconds>0,"triad v3 invalid duration/sample rate");
     require(sample_rate>=64||!f.fhss,"triad v3 sub-64-Hz source requires FHSS off");
     require(std::isfinite(f.dwell_seconds)&&std::abs(f.dwell_seconds-.4)<1e-12,"triad v3 dwell must be400ms");
@@ -153,8 +155,7 @@ Geometry geometry(const Format& f){
     Geometry g;g.inner_chip_rate_hz=f.inner_rate_hz/6;g.fine_chip_rate_hz=g.inner_chip_rate_hz*f.added_symbols;
     if(f.fhss_center_aligned)(void)aligned_dwell_cells(f,g.fine_chip_rate_hz);
     g.nominal_carrier_bandwidth_hz=(1+rrc_rolloff)*g.fine_chip_rate_hz;
-    g.carrier_spacing_hz=std::max(g.nominal_carrier_bandwidth_hz,
-                                  static_cast<double>(f.minimum_carrier_spacing_hz));
+    g.carrier_spacing_hz=std::max(g.nominal_carrier_bandwidth_hz,f.minimum_carrier_spacing_hz);
     // Preserve the historical arithmetic exactly when the floor is inactive.
     g.occupied_bandwidth_hz=g.carrier_spacing_hz==g.nominal_carrier_bandwidth_hz?
         3*g.nominal_carrier_bandwidth_hz:2*g.carrier_spacing_hz+g.nominal_carrier_bandwidth_hz;

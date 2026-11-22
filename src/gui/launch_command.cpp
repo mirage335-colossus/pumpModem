@@ -203,9 +203,9 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         }
         else if(flag=="--minimum-carrier-spacing") {
             const auto spacing=number(value,flag,0,265);
-            if(spacing!=0&&spacing!=125&&spacing!=265)
-                invalid("--minimum-carrier-spacing must be 0, 125, or 265 Hz.");
-            result.minimum_carrier_spacing_hz=static_cast<unsigned>(spacing);
+            if(!tuning::valid_robust_minimum_carrier_spacing(spacing))
+                invalid("--minimum-carrier-spacing must be 0, 3.5, 125, or 265 Hz.");
+            result.minimum_carrier_spacing_hz=spacing;
         }
         else if(flag=="--fec") {
             if(value!="off"&&value!="rs20"&&value!="rs60")invalid("--fec must be off, rs20 or rs60.");
@@ -374,10 +374,9 @@ std::string format(const Patch& settings) {
     if(settings.dsss_mode)add("--dsss-mode",*settings.dsss_mode);
     if(settings.dsss_factor)add("--dsss-factor",std::to_string(*settings.dsss_factor));
     if(settings.minimum_carrier_spacing_hz) {
-        if(*settings.minimum_carrier_spacing_hz!=0&&*settings.minimum_carrier_spacing_hz!=125&&
-           *settings.minimum_carrier_spacing_hz!=265)
-            invalid("Minimum carrier spacing must be 0, 125, or 265 Hz.");
-        add("--minimum-carrier-spacing",std::to_string(*settings.minimum_carrier_spacing_hz));
+        if(!tuning::valid_robust_minimum_carrier_spacing(*settings.minimum_carrier_spacing_hz))
+            invalid("Minimum carrier spacing must be 0, 3.5, 125, or 265 Hz.");
+        add("--minimum-carrier-spacing",numeric(*settings.minimum_carrier_spacing_hz));
     }
     if(settings.dsss_version)add("--dsss-version",std::string(tuning::outer_dsss_version_id(tuning::parse_outer_dsss_version(*settings.dsss_version))));
     if(settings.search_arithmetic)add("--search-arithmetic",std::string(tuning::search_arithmetic_id(tuning::parse_search_arithmetic(*settings.search_arithmetic))));

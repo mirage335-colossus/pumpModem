@@ -1045,7 +1045,7 @@ void robust_native_settings() {
     using F=ui::Field;
     Controller controller({.simulation=true});
     const auto& spacing_options=controller.field(F::minimum_carrier_spacing).options;
-    const std::vector<ui::Option> expected_spacing{{"0","0 Hz"},{"125","125 Hz"},{"265","265 Hz"}};
+    const std::vector<ui::Option> expected_spacing{{"0","0 Hz"},{"3.5","3.5 Hz"},{"125","125 Hz"},{"265","265 Hz"}};
     check(controller.field(F::minimum_carrier_spacing).selected=="265"&&
           std::equal(spacing_options.begin(),spacing_options.end(),expected_spacing.begin(),expected_spacing.end(),
                      [](const auto& a,const auto& b){return a.id==b.id&&a.label==b.label&&a.enabled==b.enabled;})&&
@@ -1083,6 +1083,16 @@ void robust_native_settings() {
           exported.live_noise_dbfs_hz==-92.25&&exported.fec=="rs20"&&exported.workspace_percent==0&&
           exported.wrong_key_admission=="strict"&&exported.minimum_carrier_spacing_hz==125,
           "Native receiver settings were lost from saved launch parameters");
+    controller.select(F::minimum_carrier_spacing,"3.5");
+    const auto three_point_five_command=controller.field(F::planner_command).text;
+    const auto three_point_five_patch=launch_command::parse(three_point_five_command);
+    Controller reloaded_spacing({.simulation=true,.launch_settings=three_point_five_patch});
+    check(controller.settings().minimum_carrier_spacing_hz==3.5&&
+          three_point_five_patch.minimum_carrier_spacing_hz==3.5&&
+          three_point_five_command.find("--minimum-carrier-spacing 3.5")!=std::string::npos&&
+          reloaded_spacing.field(F::minimum_carrier_spacing).selected=="3.5"&&
+          reloaded_spacing.settings().minimum_carrier_spacing_hz==3.5,
+          "3.5 Hz carrier spacing must reach native settings and survive canonical launch reload");
     launch_command::Patch explicit_zero;explicit_zero.minimum_carrier_spacing_hz=0;
     Controller zero({.simulation=true,.launch_settings=explicit_zero});
     check(zero.field(F::minimum_carrier_spacing).selected=="0"&&

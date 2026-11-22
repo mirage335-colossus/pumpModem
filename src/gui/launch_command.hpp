@@ -38,7 +38,7 @@ struct Patch {
     std::optional<bool> full_duplex;
     std::optional<bool> gpu;
     std::optional<unsigned> dsss_factor;
-    std::optional<unsigned> minimum_carrier_spacing_hz;
+    std::optional<double> minimum_carrier_spacing_hz;
     std::optional<unsigned> workspace_percent; // 0 selects automatic headroom.
     bool operator==(const Patch&) const=default;
 };

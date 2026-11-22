@@ -642,7 +642,7 @@ The shared profile maps encryption, Helper power/ratio/callsign, DATA transmit
 power, path loss, clock policy, oscillator models, spreading, burst waits, FHSS
 and channel controls to the native components. Rate is the native inner rate;
 Added Symbols and Interleave select native lanes and spreading. Robust Setup
-applies the selected minimum of 0, 125, or 265 Hz to adjacent DATA carrier
+applies the selected minimum of 0, 3.5, 125, or 265 Hz to adjacent DATA carrier
 centers, defaulting to 265 Hz. The nominal span includes the two center gaps
 and one pulse bandwidth. Both peers need the same effective spacing. Invalid audio
 bandwidth or fixed Helper placement fails configuration explicitly. None/Off

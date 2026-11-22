@@ -24,8 +24,9 @@ bool in_range(double value, double low, double high) {
     return std::isfinite(value) && value >= low && value <= high;
 }
 
-void validate_minimum_spacing(unsigned hz) {
-    check(hz == 0 || hz == 125 || hz == 265, "Robust Minimum carrier spacing must be 0, 125, or 265 Hz");
+void validate_minimum_spacing(double hz) {
+    check(tuning::valid_robust_minimum_carrier_spacing(hz),
+          "Robust Minimum carrier spacing must be 0, 3.5, 125, or 265 Hz");
 }
 
 std::array<double, 2> selective_depths(std::string_view value) {
@@ -70,7 +71,7 @@ ShapingPlan minimum_shaping(const Settings& settings) {
     struct Shape {
         double rate;
         unsigned added_symbols;
-        unsigned minimum_carrier_spacing_hz;
+        double minimum_carrier_spacing_hz;
         std::uint32_t sample_rate;
         bool fhss;
         bool operator==(const Shape&) const = default;

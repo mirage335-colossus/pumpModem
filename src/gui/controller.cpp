@@ -396,7 +396,7 @@ struct Controller::Impl {
             f(UiField::audio_error).options.push_back({value,value});
         f(UiField::dsss_factor).options={{"10","10x"},{"100","100x"},{"1000","1000x"}};
         f(UiField::dsss_factor).selected="10";
-        f(UiField::minimum_carrier_spacing).options={{"0","0 Hz"},{"125","125 Hz"},{"265","265 Hz"}};
+        f(UiField::minimum_carrier_spacing).options={{"0","0 Hz"},{"3.5","3.5 Hz"},{"125","125 Hz"},{"265","265 Hz"}};
         f(UiField::minimum_carrier_spacing).selected="265";
         f(UiField::dsss_version).options={{"off","Off"},{"interleave","Interleave"}};
         f(UiField::dsss_version).selected="off";
@@ -660,8 +660,12 @@ struct Controller::Impl {
             if(load->doppler)f(UiField::doppler).text=*load->doppler;
             if(load->dsss_mode)f(UiField::dsss_version).selected=*load->dsss_mode;
             if(load->dsss_factor)f(UiField::dsss_factor).selected=std::to_string(*load->dsss_factor);
-            if(load->minimum_carrier_spacing_hz)
-                f(UiField::minimum_carrier_spacing).selected=std::to_string(*load->minimum_carrier_spacing_hz);
+            if(load->minimum_carrier_spacing_hz) {
+                const auto spacing=*load->minimum_carrier_spacing_hz;
+                if(!tuning::valid_robust_minimum_carrier_spacing(spacing))
+                    throw Error("Minimum carrier spacing must be 0, 3.5, 125, or 265 Hz");
+                f(UiField::minimum_carrier_spacing).selected=planner_number(std::abs(spacing));
+            }
             if(load->symbol_burst)f(UiField::symbol_burst).selected=*load->symbol_burst?std::to_string(*load->symbol_burst):"off";
             if(load->symbol_burst_random)f(UiField::symbol_burst_random).selected=std::to_string(*load->symbol_burst_random);
             if(load->helper_power_w)f(UiField::helper_power).selected=f(UiField::helper_power).text=planner_number(*load->helper_power_w);
@@ -718,8 +722,8 @@ struct Controller::Impl {
         settings.selective_perturbation=f(UiField::selective_perturbation).selected;
         settings.added_interleave=f(UiField::dsss_version).selected=="interleave";
         settings.added_symbols=settings.added_interleave?static_cast<unsigned>(number(f(UiField::dsss_factor).selected,"Spreading")):1;
-        settings.minimum_carrier_spacing_hz=static_cast<unsigned>(number(
-            f(UiField::minimum_carrier_spacing).selected,"Minimum carrier spacing"));
+        settings.minimum_carrier_spacing_hz=number(
+            f(UiField::minimum_carrier_spacing).selected,"Minimum carrier spacing");
         settings.symbol_burst_wait=modem::parse_symbol_burst_wait(f(UiField::symbol_burst).selected);
         settings.symbol_burst_random=modem::parse_symbol_burst_random(f(UiField::symbol_burst_random).selected);
         settings.fhss_profile=f(UiField::fhss).selected;settings.fhss_frequencies_hz=fhss_list;

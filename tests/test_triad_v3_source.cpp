@@ -398,6 +398,14 @@ void minimum_carrier_spacing_checks() {
           std::abs(natural.occupied_bandwidth_hz - 2.25) < 1e-12,
           "zero minimum changed the low-rate natural carrier spacing");
 
+    low_rate.minimum_carrier_spacing_hz = 3.5;
+    const auto narrow_floor = geometry(low_rate);
+    check(std::abs(narrow_floor.carrier_spacing_hz - 3.5) < 1e-12 &&
+          std::abs(narrow_floor.occupied_bandwidth_hz - 7.75) < 1e-12 &&
+          narrow_floor.source_samples == natural.source_samples &&
+          narrow_floor.fine_chip_rate_hz == natural.fine_chip_rate_hz,
+          "3.5 Hz minimum changed low-rate carrier spacing or waveform timing");
+
     low_rate.minimum_carrier_spacing_hz = 125;
     const auto medium_floor = geometry(low_rate);
     check(std::abs(medium_floor.carrier_spacing_hz - 125) < 1e-12 &&
@@ -432,6 +440,18 @@ void minimum_carrier_spacing_checks() {
         rejected = true;
     }
     check(rejected, "sample rate accepted a carrier-spacing floor wider than its Nyquist budget");
+
+    for (const auto invalid_spacing : {-1., std::numeric_limits<double>::infinity(),
+                                       std::numeric_limits<double>::quiet_NaN()}) {
+        low_rate.minimum_carrier_spacing_hz = invalid_spacing;
+        rejected = false;
+        try {
+            (void)geometry(low_rate);
+        } catch (const std::exception&) {
+            rejected = true;
+        }
+        check(rejected, "geometry accepted a non-finite or negative minimum carrier spacing");
+    }
 }
 
 void random_access_and_chunk_checks() {
