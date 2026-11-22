@@ -10,10 +10,11 @@ through internal interfaces and shared buffers. There is no operating Python
 receiver, receiver subprocess or receiver IPC. Python tools orchestrate native
 tests/benchmarks and analyze their returned statistics; receiver DSP and state
 belong to the compiled implementation. The default application requires neither
-Python nor Torch. Optional compiled ATen and Vulkan backends can supply bulk
-operations inside the same receiver control path. The shared GUI GPU selector
-prefers a usable compiled CUDA receiver and then a compatible physical Vulkan
-receiver; it never reports native CPU execution as GPU work. CUDA covers coarse
+Python nor Torch. The portable Linux and Windows build recipes include Vulkan.
+Optional compiled ATen support can also supply bulk operations inside the same
+receiver control path. The shared GUI GPU selector prefers a usable compiled
+CUDA receiver and then a compatible physical Vulkan receiver. It reports actual
+GPU work separately from CPU work. CUDA covers coarse
 and eligible fine bulk stages, while Vulkan accelerates GPU search and retains
 native fine processing. On an NVIDIA Blackwell device with the OpenCL module,
 the Vulkan receiver scores eligible searches with the
@@ -182,7 +183,9 @@ use shared host RAM; the bounded device workspace, staging and persistent
 VkFFT program cache are charged through their ownership lifetimes.
 
 The shared GUI's **GPU** checkbox selects the generic native receiver factory
-for live reception and simulation. If compiled and usable, CUDA is preferred
+for live reception and simulation. Clearing it selects the CPU receiver in the
+same program. CPU operation works without the system Vulkan loader.
+If compiled and usable, CUDA is preferred
 and executes GPU coarse/fine bulk work; otherwise the selector tries a
 compatible physical Vulkan backend, which executes GPU search and native fine
 processing, or the Blackwell OpenCL FP4 search and fine statistics where that

@@ -174,7 +174,11 @@ class Tests(unittest.TestCase):
             self.assertIn(str(identity), cmd)
             self.assertNotIn('unsafe', cmd)
             self.assertNotIn('--require-gpu', cmd[-1])
+            self.assertNotIn('--prefer-gpu', cmd[-1])
             self.assertIn('--require-gpu', ssh_command(pod, str(known), str(identity), True)[-1])
+            preferred = ssh_command(pod, str(known), str(identity), prefer_gpu=True)[-1]
+            self.assertIn('--prefer-gpu', preferred)
+            self.assertNotIn('--require-gpu', preferred)
             self.assertIn('--file-channel', ssh_command(pod, str(known), file_channel=True)[-1])
             live_ssh = ssh_command(pod, str(known), require_gpu=True, live=True)[-1]
             self.assertIn('--live', live_ssh)

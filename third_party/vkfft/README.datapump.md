@@ -13,14 +13,13 @@ omitted. There are no local patches. The optional `DATAPUMP_TRIAD_VULKAN` target
 checks the inventory during configuration and includes these files in the native
 probe's source identity. Ordinary builds do not download dependencies.
 
-Vulkan headers/loader and glslang/SPIR-V development libraries are explicit host
-dependencies. GLSL compilation runs in the native process; no Python runtime,
+Vulkan headers and glslang/SPIR-V development libraries are explicit build
+dependencies. The host Vulkan loader is opened at runtime on GPU selection.
+GLSL compilation runs in the native process; no Python runtime,
 external shader-compiler process or ROCm installation is required. On Debian 13,
 the development packages are `libvulkan-dev`, `glslang-dev`, `glslang-tools`, and
 `spirv-tools`. A verified unprivileged extraction can instead be supplied through
-`CMAKE_PREFIX_PATH`, with `Vulkan_LIBRARY` pointing to the matching installed
-loader if its development symlink is not present in that prefix. GPU drivers
-remain supplied by the operating system.
+`CMAKE_PREFIX_PATH`. GPU drivers remain supplied by the operating system.
 
 VkFFT's half mode stores FP16 but computes in FP32; it is not evidence of packed
 FP16 arithmetic or matrix instructions. Backend precision and execution must be

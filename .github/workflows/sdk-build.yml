@@ -148,7 +148,7 @@ jobs:
             tree="build/sdk-base-$backend"
             ./build.sh --sdk "$sdk" --backend "$backend" --tui --fb \
               --build-dir "$tree" --jobs 1 --build-jobs "$(python3 -B tools/build_capacity.py)" -- \
-              -DDATAPUMP_PORTABLE=ON -DDATAPUMP_TEST_NATIVE_GUI=ON
+              -DDATAPUMP_PORTABLE=ON -DDATAPUMP_TRIAD_VULKAN=ON -DDATAPUMP_TEST_NATIVE_GUI=ON
             "$sdk/bin/cmake" --build "$tree" --config Release \
               --target datapump-tests-native --parallel "$(python3 -B tools/build_capacity.py)"
             xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
@@ -162,7 +162,7 @@ jobs:
           done
           ./build.sh test frontends --sdk "$sdk" --backend fltk --tui --fb \
             --build-dir build/sdk-base-fltk --jobs 1 --build-jobs "$(python3 -B tools/build_capacity.py)" -- \
-            -DDATAPUMP_PORTABLE=ON -DDATAPUMP_TEST_NATIVE_GUI=ON
+            -DDATAPUMP_PORTABLE=ON -DDATAPUMP_TRIAD_VULKAN=ON -DDATAPUMP_TEST_NATIVE_GUI=ON
           SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy \
             xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
             timeout 30s build/sdk-base-fltk/datapump-fb --simulation --frames 3

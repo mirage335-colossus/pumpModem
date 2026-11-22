@@ -142,8 +142,8 @@ Display timing never controls receiver decisions or completion.
 | Live input noise dBFS/Hz | Local receiver noise-model reference, separate from link-budget noise in dBm/Hz. At fixed Target SNR, changing it scales receiver variance and reference DATA amplitude together; correlated or impulsive noise is not qualified by mean power alone. See the [calibration scope](robust-current.md#configured-calendar-reception). |
 | Error correction | Configured Off, RS20 or RS60 native short/long text profiles. Raw bits bypass text coding and FEC exactly. |
 | Search arithmetic | Default (fastest) selects the fastest supported complete receiver route for the hardware and workload. FP32 minimum selects FP32 products/FFT with higher-precision guards. FP64 force selects its native CPU reference policy. Sensitive stages retain higher precision. |
-| GPU | Optional native CUDA or Vulkan DATA processing, shared by live reception and simulation; the compiled selector prefers usable CUDA, then a compatible physical Vulkan device. GPU remains off by default. |
-| Simulation | The native emitted waveform runs through the continuous sampled channel and complete receiver without real-time pacing. The console shows modeled receiver-input time and compute wall time. The waterfall, waveform and I/Q preview the newest accepted post-channel samples. A three-second excerpt of signal activity replays at its original rate after finite processing. Live audio follows the device clock. |
+| GPU | Runtime choice for native CUDA or Vulkan DATA processing, shared by live reception and simulation. The selector prefers usable CUDA when included, then a compatible physical Vulkan device. It starts off on the desktop and selected on a zLab GPU allocation. |
+| Simulation | The native emitted waveform runs through the continuous sampled channel and complete receiver without real-time pacing. The console shows modeled receiver-input time and compute wall time. The waterfall, waveform and I/Q preview the newest accepted post-channel samples. The preview stops when input ends. The receiver can still be finishing queued scoring and quiet slots, as shown by the status. A three-second excerpt of signal activity replays at its original rate after finite processing. Live audio follows the device clock. |
 | Audio device, channel routing, Live/duplex, TX volume, Exclusive | Existing native device service, selected channel layout, capture/playback policy and output gain. |
 | Waterfall, Waveform, Receiver input I/Q | Bounded actual session observations; receiver I/Q is not a substitute TX trace. |
 | Pattern evidence, Pattern steps | Native public-slot classifications, scores, completeness, resource and stage diagnostics. |
@@ -195,15 +195,16 @@ is used if it fits. The half-rate preset is the fallback when it is the only
 recommendation that fits.
 
 The shared **GPU** checkbox sits immediately left of **Developer**. It defaults
-off, persists with the launch settings as `--gpu yes|no`, and is disabled with
+off on the desktop, persists with the launch settings as `--gpu yes|no`, and is disabled with
 an explanation outside Robust mode, while busy or closing, or when the build
 has no native CUDA or Vulkan receiver backend. Enabling it initializes the
 selected physical GPU on the native session manager, away from the UI thread.
 The selector tries usable CUDA first when compiled, then a compatible physical
 Vulkan device. A requested-device failure is reported and prevents that session
 from starting; there is no CPU-as-GPU fallback. The selected device and bounded
-selection/fallback reason are exposed in diagnostics. Turning GPU off explicitly
-returns to the native CPU path.
+selection/fallback reason are exposed in diagnostics. Clear **GPU** between
+runs to use the native CPU path in the same application, including after a
+loader or driver error.
 
 The [Search arithmetic preference](search-arithmetic.md) persists as
 `--search-arithmetic default|fp32-min|fp64-force`. Automatic native CPU processing

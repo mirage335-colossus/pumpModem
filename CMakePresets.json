@@ -30,7 +30,8 @@
       "inherits": "defaults",
       "binaryDir": "${sourceDir}/build/release",
       "cacheVariables": {
-        "BUILD_TESTING": "OFF", "DATAPUMP_PORTABLE": "ON", "OPENSSL_USE_STATIC_LIBS": "ON"
+        "BUILD_TESTING": "OFF", "DATAPUMP_PORTABLE": "ON", "OPENSSL_USE_STATIC_LIBS": "ON",
+        "DATAPUMP_TRIAD_VULKAN": "ON"
       }
     },
     {

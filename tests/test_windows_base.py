@@ -51,7 +51,9 @@ class WindowsBaseTests(unittest.TestCase):
         self.fetched = self.root / 'fetched'
         self.provenance_path = self.root / 'provenance.json'
         self.recipe = {'schema': 1, 'vcpkg_ref': '9e593bb18ea69cc5095e012465dcd675a822ed0d',
-                       'triplet': 'x64-windows-static', 'ports': ['openssl', 'glew', 'freetype[core]', 'sdl2[core]'],
+                       'triplet': 'x64-windows-static',
+                       'ports': ['openssl', 'glew', 'freetype[core]', 'sdl2[core]', 'vulkan-headers',
+                                 'glslang[opt]', 'spirv-tools'],
                        'toolset': 'v143', 'configurations': ['Debug', 'Release'],
                        'crt_linkage': 'static', 'library_linkage': 'static', 'lto': False}
         self.recipe_files = {'tools/windows-base.py': b'preserved helper\n',
@@ -69,13 +71,18 @@ class WindowsBaseTests(unittest.TestCase):
         self.sources.mkdir()
         files = {base.TOOLCHAIN: b'# relocatable vcpkg toolchain\n', '.vcpkg-root': b'',
                  'installed/x64-windows-static/lib/libcrypto.lib': b'static library'}
+        ports = ('openssl', 'glew', 'freetype', 'sdl2', 'vulkan-headers', 'glslang', 'spirv-tools')
         files.update({f'installed/x64-windows-static/share/{port}/copyright': b'license'
-                      for port in ('openssl', 'glew', 'freetype', 'sdl2')})
+                      for port in ports})
         files.update({f'installed/vcpkg/info/{port}_1.0_x64-windows-static.list': b'fixture export list'
-                      for port in ('openssl', 'glew', 'freetype', 'sdl2')})
+                      for port in ports})
         files.update({f'installed/x64-windows-static/{name}': b'fixture SDL dependency'
                       for name in ('include/SDL2/SDL.h', 'lib/SDL2-static.lib', 'debug/lib/SDL2-staticd.lib',
-                                   'share/sdl2/SDL2Config.cmake')})
+                                   'share/sdl2/SDL2Config.cmake', 'include/vulkan/vulkan.h',
+                                   'share/glslang/glslang-config.cmake',
+                                   'share/spirv-tools/SPIRV-ToolsConfig.cmake',
+                                   'share/spirv-tools-opt/SPIRV-Tools-optConfig.cmake',
+                                   'share/spirv-tools-link/SPIRV-Tools-linkConfig.cmake')})
         for name, data in files.items():
             path = self.export / name
             path.parent.mkdir(parents=True, exist_ok=True)

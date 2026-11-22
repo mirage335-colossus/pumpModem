@@ -1,0 +1,9 @@
+config BR2_PACKAGE_DATAPUMP_GLSLANG
+	bool "glslang"
+	depends on BR2_INSTALL_LIBSTDCPP
+	select BR2_PACKAGE_SPIRV_HEADERS
+	select BR2_PACKAGE_SPIRV_TOOLS
+	help
+	  Build the Khronos glslang shader compiler libraries for the native
+	  DataPump Vulkan backend. This project-local Buildroot package uses the
+	  pinned Khronos release and the matching Buildroot SPIRV-Tools package.

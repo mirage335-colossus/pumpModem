@@ -2,6 +2,9 @@
 # The exported SDK must have its own consistent CMake/Ninja/pkg-config tools.
 PACKAGES += host-cmake host-ninja host-pkgconf
 
+# Project-local packages required by the relocatable native SDK.
+include $(sort $(wildcard $(BR2_EXTERNAL_DATAPUMP_PATH)/package/*/*.mk))
+
 # SDK Python serves Meson, wheel tooling and Rev resource preparation. These
 # optional modules otherwise probe arbitrary host headers/libraries, adding
 # dependencies absent from the SDK source closure. Keep its bundled decimal,

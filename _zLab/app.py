@@ -854,13 +854,17 @@ def file_root(value):
     return path
 
 
-def ssh_command(pod, known_hosts, identity=None, require_gpu=False, file_channel=False, live=False):
+def ssh_command(pod, known_hosts, identity=None, require_gpu=False, file_channel=False, live=False,
+                prefer_gpu=False):
     from deploy import _connection
     direct = (pod.get('ssh') or {}).get('direct') or {}
     port = direct.get('port')
     host, user, options = _connection(direct.get('host'), direct.get('username'),
                                       port, known_hosts, identity or None)
-    flag = (' --require-gpu' if require_gpu else '') + (' --file-channel' if file_channel or live else '') + (' --live' if live else '')
+    flag = ((' --require-gpu' if require_gpu else '') +
+            (' --prefer-gpu' if prefer_gpu and not require_gpu else '') +
+            (' --file-channel' if file_channel or live else '') +
+            (' --live' if live else ''))
     worker = 'datapump-lab-worker' if live else 'datapump-worker'
     remote_dir = '/workspace/pump-lab-live' if live else '/workspace/pump-lab'
     return ['ssh', '-F', '/dev/null', '-T', '-p', str(port), '-l', user, *options, host,
@@ -1767,8 +1771,14 @@ class App:
                                               on_progress=set_progress, cancelled=cancelled)
                     if not cancelled.is_set():
                         set_progress('Starting the simulation worker…')
-                        command = ssh_command(pod, pin, identity, simulation_gpu(current, pod),
-                                              files is not None, live=profile == 'live')
+                        # A GPU allocation selects a GPU-capable worker build,
+                        # but GPU use is a runtime choice in the shared GUI.
+                        # Keep the relay's strict --require-gpu mode for
+                        # explicit qualification runs only.
+                        command = ssh_command(pod, pin, identity,
+                                              file_channel=files is not None,
+                                              live=profile == 'live',
+                                              prefer_gpu=simulation_gpu(current, pod))
                         if profile == 'live':
                             command = live_command(command, *audio)
                         from browser_bridge import start

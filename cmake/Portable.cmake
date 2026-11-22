@@ -24,11 +24,28 @@ function(datapump_install_native)
   set(DATAPUMP_EXECUTABLE_NAMES "")
   set(DATAPUMP_SEARCH_DIRS "${DATAPUMP_RUNTIME_DIRS}")
   set(DATAPUMP_NOTICE_INPUTS "${OPENSSL_CRYPTO_LIBRARY}")
+  set(DATAPUMP_NOTICE_FILES "${DATAPUMP_EXTRA_LICENSES}")
   if(DATAPUMP_BUILD_TUI AND DATAPUMP_TUI_BACKEND STREQUAL "ncurses")
     list(APPEND DATAPUMP_NOTICE_INPUTS ${CURSES_LIBRARIES})
   endif()
   if(DATAPUMP_BUILD_FB)
     list(APPEND DATAPUMP_NOTICE_INPUTS "$<TARGET_FILE:${DATAPUMP_SDL2_TARGET}>")
+  endif()
+  if(DATAPUMP_TRIAD_VULKAN_ENABLED)
+    # The SDK copies its full license inventory. On distro builds, include the
+    # Vulkan headers so dpkg can map their copyright notice to libvulkan-dev.
+    list(APPEND DATAPUMP_NOTICE_INPUTS "${DATAPUMP_VULKAN_INCLUDE_DIR}/vulkan/vulkan.h")
+    if(NOT DATAPUMP_SDK_ROOT AND NOT WIN32)
+      # Local extracted dependency prefixes are not registered with dpkg-query;
+      # preserve their package notices explicitly in the portable archive.
+      get_filename_component(_triad_vulkan_prefix "${DATAPUMP_VULKAN_INCLUDE_DIR}" DIRECTORY)
+      foreach(package glslang-dev spirv-tools libvulkan-dev)
+        set(candidate "${_triad_vulkan_prefix}/share/doc/${package}/copyright")
+        if(EXISTS "${candidate}")
+          list(APPEND DATAPUMP_NOTICE_FILES "${candidate}")
+        endif()
+      endforeach()
+    endif()
   endif()
   set(DATAPUMP_SDK_EXTERNAL_LIBRARIES "")
   if(DATAPUMP_SDK_ROOT)
@@ -44,7 +61,17 @@ function(datapump_install_native)
       datapump_sdk_validate_path("${source}" "${DATAPUMP_PACKAGE_SYSROOT}")
       list(APPEND DATAPUMP_SDK_EXTERNAL_LIBRARIES "${source}")
     endforeach()
-    foreach(external_target OpenSSL::Crypto ZLIB::ZLIB ${DATAPUMP_SDL2_TARGET})
+    set(DATAPUMP_SDK_EXTERNAL_TARGETS OpenSSL::Crypto ZLIB::ZLIB ${DATAPUMP_SDL2_TARGET})
+    if(DATAPUMP_TRIAD_VULKAN_ENABLED)
+      # Validate the complete imported compiler stack, including static
+      # transitive glslang archives and SPIRV-Tools targets, before packaging.
+      list(APPEND DATAPUMP_SDK_EXTERNAL_TARGETS
+        glslang::glslang glslang::SPIRV glslang::glslang-default-resource-limits
+        glslang::MachineIndependent glslang::OSDependent glslang::OGLCompiler
+        glslang::GenericCodeGen glslang::SPVRemapper
+        SPIRV-Tools SPIRV-Tools-static SPIRV-Tools-opt SPIRV-Tools-link)
+    endif()
+    foreach(external_target IN LISTS DATAPUMP_SDK_EXTERNAL_TARGETS)
       if(NOT TARGET "${external_target}")
         continue()
       endif()
@@ -79,6 +106,16 @@ function(datapump_install_native)
   if(TARGET ZLIB::ZLIB)
     list(APPEND DATAPUMP_NOTICE_INPUTS "$<TARGET_FILE:ZLIB::ZLIB>")
   endif()
+  if(DATAPUMP_TRIAD_VULKAN_ENABLED)
+    foreach(target glslang::glslang glslang::SPIRV glslang::glslang-default-resource-limits
+        glslang::MachineIndependent glslang::OSDependent glslang::OGLCompiler
+        glslang::GenericCodeGen glslang::SPVRemapper
+        SPIRV-Tools SPIRV-Tools-static SPIRV-Tools-opt SPIRV-Tools-link)
+      if(TARGET "${target}")
+        list(APPEND DATAPUMP_NOTICE_INPUTS "$<TARGET_FILE:${target}>")
+      endif()
+    endforeach()
+  endif()
   if(NOT DATAPUMP_SDK_ROOT AND DATAPUMP_STATIC_GNU_RUNTIME)
     foreach(archive libstdc++.a libgcc.a libgcc_eh.a)
       execute_process(COMMAND "${CMAKE_CXX_COMPILER}" "-print-file-name=${archive}"
@@ -88,7 +125,6 @@ function(datapump_install_native)
       endif()
     endforeach()
   endif()
-  set(DATAPUMP_NOTICE_FILES "${DATAPUMP_EXTRA_LICENSES}")
   if(NOT DATAPUMP_SDK_ROOT)
     foreach(candidate
       "${OPENSSL_INCLUDE_DIR}/../share/openssl/copyright"
@@ -121,6 +157,19 @@ function(datapump_install_native)
           list(APPEND DATAPUMP_NOTICE_FILES "${candidate}")
           break()
         endif()
+      endforeach()
+    endif()
+    if(DATAPUMP_TRIAD_VULKAN_ENABLED)
+      # The shader compiler and SPIR-V libraries are linked statically into
+      # the application but still require their vcpkg notices in the bundle.
+      foreach(port vulkan-headers glslang spirv-tools spirv-headers)
+        foreach(prefix "${VCPKG_INSTALLED_DIR}" "${_VCPKG_INSTALLED_DIR}")
+          set(candidate "${prefix}/${VCPKG_TARGET_TRIPLET}/share/${port}/copyright")
+          if(prefix AND EXISTS "${candidate}")
+            list(APPEND DATAPUMP_NOTICE_FILES "${candidate}")
+            break()
+          endif()
+        endforeach()
       endforeach()
     endif()
   endif()

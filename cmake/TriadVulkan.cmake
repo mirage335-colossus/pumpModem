@@ -1,29 +1,160 @@
-option(DATAPUMP_TRIAD_VULKAN "Build the optional native Vulkan receiver backend" OFF)
+set(DATAPUMP_TRIAD_VULKAN "AUTO" CACHE STRING
+  "Build the native Vulkan receiver backend when its SDK is available (AUTO, ON, OFF)")
+set_property(CACHE DATAPUMP_TRIAD_VULKAN PROPERTY STRINGS AUTO ON OFF)
+if(NOT DATAPUMP_TRIAD_VULKAN MATCHES "^(AUTO|ON|OFF)$")
+  message(FATAL_ERROR "DATAPUMP_TRIAD_VULKAN must be AUTO, ON, or OFF (got '${DATAPUMP_TRIAD_VULKAN}')")
+endif()
 option(DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE "Require actual GPU execution in the Vulkan receiver check" OFF)
 
-if(DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE AND NOT DATAPUMP_TRIAD_VULKAN)
+if(DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE AND DATAPUMP_TRIAD_VULKAN STREQUAL "OFF")
   message(FATAL_ERROR "DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE requires DATAPUMP_TRIAD_VULKAN")
 endif()
-if(NOT DATAPUMP_TRIAD_VULKAN)
+if(DATAPUMP_BUILD_WASM OR NOT CMAKE_SYSTEM_NAME MATCHES "^(Linux|Windows)$")
+  if(DATAPUMP_TRIAD_VULKAN STREQUAL "ON" OR DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE)
+    message(FATAL_ERROR "DATAPUMP_TRIAD_VULKAN=ON requires a supported native Linux or Windows build; browser Wasm and this target platform cannot load the native Vulkan backend")
+  endif()
+  set(DATAPUMP_TRIAD_VULKAN_ENABLED OFF)
   return()
 endif()
-if(DATAPUMP_BUILD_WASM)
-  message(FATAL_ERROR "The Vulkan receiver backend requires a native build")
+if(DATAPUMP_TRIAD_VULKAN STREQUAL "OFF")
+  set(DATAPUMP_TRIAD_VULKAN_ENABLED OFF)
+  return()
 endif()
 
 # Development packages are supplied explicitly. Configuration never downloads
 # shaders, drivers or libraries, and the operating path compiles GLSL in-process.
-find_package(Vulkan REQUIRED)
-find_package(SPIRV-Tools CONFIG REQUIRED)
-find_package(SPIRV-Tools-opt CONFIG REQUIRED)
-find_package(SPIRV-Tools-link CONFIG REQUIRED)
+set(_triad_saved_cmake_prefix_path "${CMAKE_PREFIX_PATH}")
+set(_triad_vulkan_default_sysroot
+  "${PROJECT_SOURCE_DIR}/third_party/build-support/cache/sysroot/usr")
+if(NOT DATAPUMP_SDK_ROOT AND NOT CMAKE_CROSSCOMPILING
+    AND CMAKE_SYSTEM_NAME STREQUAL "Linux"
+    AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$"
+    AND (NOT DATAPUMP_DEPENDENCY_PREFIX OR DATAPUMP_DEPENDENCY_PREFIX STREQUAL _triad_vulkan_default_sysroot))
+  # Native x86_64 diagnostics may use the already prepared host prefix. Never
+  # apply its libraries to Windows, another architecture, a cross build or SDK.
+  set(_triad_vulkan_local_prefix
+    "${PROJECT_SOURCE_DIR}/third_party/build-support/cache/vulkan-native/usr-prefix/usr")
+  if(EXISTS "${_triad_vulkan_local_prefix}/include/vulkan/vulkan.h")
+    # Append after caller-provided CMAKE_PREFIX_PATH entries so explicit
+    # dependency choices take precedence over this optional local fallback.
+    list(APPEND CMAKE_PREFIX_PATH "${_triad_vulkan_local_prefix}")
+  endif()
+endif()
+if(NOT DATAPUMP_SDK_ROOT AND NOT CMAKE_CROSSCOMPILING)
+  # Do not use an environment Vulkan SDK to populate a cross or relocatable
+  # source-SDK build. Native local installations may provide their own prefix.
+  set(_triad_vulkan_header_env_hints "$ENV{VULKAN_SDK}" "$ENV{VULKAN_SDK}/Include")
+else()
+  set(_triad_vulkan_header_env_hints "")
+endif()
+set(_triad_vulkan_header_paths "")
+if(DATAPUMP_DEPENDENCY_PREFIX)
+  list(APPEND _triad_vulkan_header_paths "${DATAPUMP_DEPENDENCY_PREFIX}")
+endif()
+if(_triad_vulkan_local_prefix)
+  list(APPEND _triad_vulkan_header_paths "${_triad_vulkan_local_prefix}")
+endif()
+find_path(DATAPUMP_VULKAN_INCLUDE_DIR NAMES vulkan/vulkan.h
+  HINTS ${_triad_vulkan_header_env_hints}
+  PATHS ${_triad_vulkan_header_paths} PATH_SUFFIXES include Include)
+set(DATAPUMP_VULKAN_HEADERS_VERSION "unknown")
+if(DATAPUMP_VULKAN_INCLUDE_DIR AND EXISTS "${DATAPUMP_VULKAN_INCLUDE_DIR}/vulkan/vulkan_core.h")
+  file(STRINGS "${DATAPUMP_VULKAN_INCLUDE_DIR}/vulkan/vulkan_core.h"
+    _triad_vulkan_header_version REGEX "^#define VK_HEADER_VERSION ")
+  if(_triad_vulkan_header_version MATCHES "VK_HEADER_VERSION ([0-9]+)")
+    set(DATAPUMP_VULKAN_HEADERS_VERSION "${CMAKE_MATCH_1}")
+  endif()
+endif()
+find_package(SPIRV-Tools CONFIG QUIET)
+find_package(SPIRV-Tools-opt CONFIG QUIET)
+find_package(SPIRV-Tools-link CONFIG QUIET)
+find_package(glslang CONFIG QUIET)
+# Ubuntu 22.04 ships glslang 11.8 as generated target exports without a
+# package config file. Load those exports directly when they are discoverable
+# under the selected native dependency prefix or the system multiarch path.
+if(NOT glslang_FOUND AND NOT TARGET glslang::glslang
+    AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_CROSSCOMPILING
+    AND NOT DATAPUMP_SDK_ROOT)
+  set(_triad_glslang_cmake_paths "${DATAPUMP_DEPENDENCY_PREFIX}")
+  if(_triad_vulkan_local_prefix)
+    list(APPEND _triad_glslang_cmake_paths "${_triad_vulkan_local_prefix}")
+  endif()
+  list(APPEND _triad_glslang_cmake_paths "${CMAKE_PREFIX_PATH}" /usr)
+  find_path(_triad_glslang_targets_dir NAMES glslangTargets.cmake
+    PATHS ${_triad_glslang_cmake_paths}
+    PATH_SUFFIXES lib/${CMAKE_LIBRARY_ARCHITECTURE}/cmake lib64/cmake lib/cmake)
+  if(_triad_glslang_targets_dir)
+    foreach(_legacy_export OSDependentTargets.cmake OGLCompilerTargets.cmake
+        glslangTargets.cmake SPIRVTargets.cmake
+        glslang-default-resource-limitsTargets.cmake)
+      if(NOT EXISTS "${_triad_glslang_targets_dir}/${_legacy_export}")
+        set(_triad_glslang_targets_dir "")
+        break()
+      endif()
+    endforeach()
+  endif()
+  if(_triad_glslang_targets_dir)
+    include("${_triad_glslang_targets_dir}/OSDependentTargets.cmake")
+    include("${_triad_glslang_targets_dir}/OGLCompilerTargets.cmake")
+    include("${_triad_glslang_targets_dir}/glslangTargets.cmake")
+    include("${_triad_glslang_targets_dir}/SPIRVTargets.cmake")
+    include("${_triad_glslang_targets_dir}/glslang-default-resource-limitsTargets.cmake")
+    foreach(_legacy_target glslang SPIRV glslang-default-resource-limits
+        MachineIndependent OSDependent OGLCompiler GenericCodeGen SPVRemapper)
+      if(TARGET "${_legacy_target}" AND NOT TARGET "glslang::${_legacy_target}")
+        add_library("glslang::${_legacy_target}" ALIAS "${_legacy_target}")
+      endif()
+    endforeach()
+    set(glslang_FOUND TRUE)
+  endif()
+endif()
+set(CMAKE_PREFIX_PATH "${_triad_saved_cmake_prefix_path}")
+set(_triad_glslang_include_hints "")
+if(TARGET glslang::glslang)
+  get_target_property(_triad_glslang_include_hints glslang::glslang INTERFACE_INCLUDE_DIRECTORIES)
+endif()
+find_path(DATAPUMP_GLSLANG_C_INCLUDE_DIR glslang_c_interface.h
+  HINTS ${_triad_glslang_include_hints}
+  PATHS ${_triad_vulkan_header_paths} PATH_SUFFIXES glslang/Include)
+set(_triad_vulkan_missing "")
+if(NOT DATAPUMP_VULKAN_INCLUDE_DIR)
+  list(APPEND _triad_vulkan_missing "Vulkan headers (vulkan/vulkan.h)")
+endif()
+foreach(_package SPIRV-Tools SPIRV-Tools-opt SPIRV-Tools-link glslang)
+  if(NOT ${_package}_FOUND)
+    list(APPEND _triad_vulkan_missing "${_package} CMake package")
+  endif()
+endforeach()
+if(NOT DATAPUMP_GLSLANG_C_INCLUDE_DIR)
+  list(APPEND _triad_vulkan_missing "glslang_c_interface.h")
+endif()
+if(_triad_vulkan_missing)
+  if(DATAPUMP_TRIAD_VULKAN STREQUAL "ON" OR DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE)
+    message(FATAL_ERROR "DATAPUMP_TRIAD_VULKAN=ON requires ${_triad_vulkan_missing}; install the matching Vulkan headers, glslang and SPIRV-Tools development packages")
+  endif()
+  set(DATAPUMP_TRIAD_VULKAN_ENABLED OFF)
+  message(STATUS "Vulkan receiver backend disabled; missing build dependencies: ${_triad_vulkan_missing}. Configure with DATAPUMP_TRIAD_VULKAN=ON to require them or OFF for an explicit CPU-only build.")
+  return()
+endif()
 # Debian's static package exports this name while glslang refers to SPIRV-Tools.
 if(NOT TARGET SPIRV-Tools AND TARGET SPIRV-Tools-static)
   add_library(SPIRV-Tools ALIAS SPIRV-Tools-static)
 endif()
-find_package(glslang CONFIG REQUIRED)
-find_path(DATAPUMP_GLSLANG_C_INCLUDE_DIR glslang_c_interface.h
-  PATH_SUFFIXES glslang/Include REQUIRED)
+foreach(_target glslang::glslang glslang::SPIRV glslang::glslang-default-resource-limits
+    SPIRV-Tools SPIRV-Tools-opt SPIRV-Tools-link)
+  if(NOT TARGET ${_target})
+    list(APPEND _triad_vulkan_missing "imported target ${_target}")
+  endif()
+endforeach()
+if(_triad_vulkan_missing)
+  if(DATAPUMP_TRIAD_VULKAN STREQUAL "ON" OR DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE)
+    message(FATAL_ERROR "DATAPUMP_TRIAD_VULKAN=ON requires ${_triad_vulkan_missing}; install compatible glslang and SPIRV-Tools development packages")
+  endif()
+  set(DATAPUMP_TRIAD_VULKAN_ENABLED OFF)
+  message(STATUS "Vulkan receiver backend disabled; missing ${_triad_vulkan_missing}")
+  return()
+endif()
+set(DATAPUMP_TRIAD_VULKAN_ENABLED ON)
 
 set(_triad_vkfft_root "${PROJECT_SOURCE_DIR}/third_party/vkfft")
 file(STRINGS "${_triad_vkfft_root}/UPSTREAM.sha256" _triad_vkfft_inventory)
@@ -49,15 +180,19 @@ endforeach()
 
 # The backend, its shared device core and the fine-stage device sessions.
 add_library(datapump_triad_vulkan STATIC src/triad_vulkan_backend.cpp src/triad_vulkan_core.cpp
+  src/triad_vulkan_loader.cpp
   src/triad_vulkan_gain.cpp src/triad_vulkan_drift.cpp src/triad_vulkan_varying.cpp)
 target_include_directories(datapump_triad_vulkan PUBLIC include PRIVATE src)
 target_include_directories(datapump_triad_vulkan SYSTEM PRIVATE
-  "${_triad_vkfft_root}/vkFFT" "${DATAPUMP_GLSLANG_C_INCLUDE_DIR}")
+  "${_triad_vkfft_root}/vkFFT" "${DATAPUMP_GLSLANG_C_INCLUDE_DIR}" "${DATAPUMP_VULKAN_INCLUDE_DIR}")
 target_compile_features(datapump_triad_vulkan PUBLIC cxx_std_20)
 target_compile_definitions(datapump_triad_vulkan PRIVATE VKFFT_BACKEND=0)
 include(cmake/TriadOpenClNvfp4.cmake)
-target_link_libraries(datapump_triad_vulkan PRIVATE Vulkan::Vulkan
+target_link_libraries(datapump_triad_vulkan PRIVATE
   glslang::glslang glslang::SPIRV glslang::glslang-default-resource-limits)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_libraries(datapump_triad_vulkan PRIVATE ${CMAKE_DL_LIBS})
+endif()
 target_link_libraries(datapump_triad_receiver PRIVATE datapump_triad_vulkan)
 target_compile_definitions(datapump_triad_receiver PUBLIC DATAPUMP_HAVE_TRIAD_VULKAN=1)
 if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")

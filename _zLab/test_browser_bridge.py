@@ -724,6 +724,21 @@ os._exit(0)
             browser_bridge.start([])
 
 
+class GpuStartupReadinessTests(unittest.TestCase):
+    def test_unavailable_preferred_gpu_requires_enabled_gpu_toggle(self):
+        self.assertTrue(browser_bridge._gpu_unavailable_toggle([
+            {'kind': 'label', 'text': 'GPU reception unavailable'},
+            {'kind': 'toggle', 'label': 'GPU', 'enabled': True, 'checked': True},
+        ]))
+        for controls in (
+                [{'kind': 'toggle', 'label': 'GPU', 'enabled': False, 'checked': True}],
+                [{'kind': 'toggle', 'label': 'GPU acceleration', 'enabled': True}],
+                [{'kind': 'toggle', 'label': 'Audio', 'enabled': True}],
+                [{'kind': 'label', 'text': 'GPU reception unavailable'}]):
+            with self.subTest(controls=controls):
+                self.assertFalse(browser_bridge._gpu_unavailable_toggle(controls))
+
+
 class ManagedBrowserTests(unittest.TestCase):
     client = 'a' * 64
 

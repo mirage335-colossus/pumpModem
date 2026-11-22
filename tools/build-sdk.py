@@ -225,6 +225,8 @@ def prepare(cache, manifest, identity, download, jobs):
     run(command + ['datapump_defconfig'])
     config = (output / '.config').read_text()
     for option in ('BR2_GCC_VERSION_15_X=y', 'BR2_PACKAGE_LIBGLEW=y',
+                   'BR2_PACKAGE_VULKAN_HEADERS=y', 'BR2_PACKAGE_DATAPUMP_GLSLANG=y',
+                   'BR2_PACKAGE_SPIRV_TOOLS=y',
                    'BR2_PACKAGE_XLIB_LIBXFT=y', 'BR2_PACKAGE_LIBOPENSSL=y',
                    'BR2_PACKAGE_NCURSES=y', 'BR2_PACKAGE_NCURSES_WCHAR=y',
                    'BR2_PACKAGE_SDL2=y', 'BR2_PACKAGE_SDL2_X11=y',

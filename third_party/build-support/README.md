@@ -26,7 +26,12 @@ or replace a base asset.
 
 The opt-in [source SDK recipe](source-sdk/manifest.json) uses Buildroot 2026.08
 to build an x86_64 Linux compiler, target sysroot, CMake, Ninja and the development
-libraries needed by FLTK, Rev, the ncurses TUI and SDL2 framebuffer host. It pins a maintained upstream glibc 2.36
+libraries needed by FLTK, Rev, the ncurses TUI and SDL2 framebuffer host. It also
+builds Vulkan headers, SPIRV-Tools and the project-local pinned glslang package
+for native portable binaries. Buildroot 2026.08 has no target glslang CMake
+library package, so the external recipe pins the Khronos `vulkan-sdk-1.4.350.0`
+glslang source alongside Buildroot's matching SPIR-V headers/tools. It disables
+external dependency downloads. The SDK pins a maintained upstream glibc 2.36
 snapshot and GCC 15; it does not reconstruct a Debian installation or download
 old Debian development packages. The manifest identifies source locations,
 versions, commits and SHA-256 hashes. Buildroot's pinned package recipes retain

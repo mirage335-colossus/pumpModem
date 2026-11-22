@@ -7,7 +7,13 @@
 
 #include <glslang_c_interface.h>
 #include <glslang/build_info.h>
+#if __has_include(<glslang/Public/resource_limits_c.h>)
 #include <glslang/Public/resource_limits_c.h>
+#else
+// glslang 11.8 (Ubuntu 22.04) installs the resource-limits library
+// but leaves this C declaration in its StandAlone source directory.
+extern "C" const glslang_resource_t* glslang_default_resource();
+#endif
 
 #include <complex>
 #include <cstdlib>
@@ -83,22 +89,27 @@ Spirv compile_spirv(const ShaderKey& key) {
 }
 
 void Shared::initialize(bool automatic_device) {
-    static std::once_flag compiler;
-    std::call_once(compiler, [] {
-        require(glslang_initialize_process() != 0, "Robust Vulkan GLSL compiler initialization failed");
-    });
+    loader::initialize();
+    static const bool compiler_ready = glslang_initialize_process() != 0;
+    if (!compiler_ready)
+        throw VulkanBackendUnavailable("Vulkan GLSL compiler initialization failed");
     VkApplicationInfo application{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     application.pApplicationName = "datapump-native-receiver";
     application.apiVersion = VK_API_VERSION_1_2;
     VkInstanceCreateInfo create{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     create.pApplicationInfo = &application;
-    auto status = vkCreateInstance(&create, nullptr, &instance);
-    if (status != VK_SUCCESS) throw VulkanBackendUnavailable("Vulkan 1.2 runtime is unavailable");
+    const auto status = vkCreateInstance(&create, nullptr, &instance);
+    if (status != VK_SUCCESS)
+        throw VulkanBackendUnavailable("Vulkan 1.2 instance initialization failed (" + std::to_string(status) + ")");
     std::uint32_t devices = 0;
-    check(vkEnumeratePhysicalDevices(instance, &devices, nullptr), "device enumeration");
+    const auto enumerate = [&](VkPhysicalDevice* output) {
+        const auto result = vkEnumeratePhysicalDevices(instance, &devices, output);
+        if (result != VK_SUCCESS)
+            throw VulkanBackendUnavailable("Vulkan device enumeration failed (" + std::to_string(result) + ")");
+    };
+    enumerate(nullptr);
     std::vector<VkPhysicalDevice> available(devices);
-    if (devices)
-        check(vkEnumeratePhysicalDevices(instance, &devices, available.data()), "device enumeration");
+    if (devices) enumerate(available.data());
     if (!automatic_device) {
         if (options.device_index >= devices)
             throw VulkanBackendUnavailable("requested Vulkan physical device is unavailable");
@@ -237,10 +248,8 @@ void Shared::initialize_device(VkPhysicalDevice selected) {
     }
     VkDevice created = VK_NULL_HANDLE;
     const auto status = vkCreateDevice(physical, &info, nullptr, &created);
-    if (status == VK_ERROR_DEVICE_LOST || status == VK_ERROR_EXTENSION_NOT_PRESENT ||
-        status == VK_ERROR_FEATURE_NOT_PRESENT || status == VK_ERROR_INITIALIZATION_FAILED)
-        throw VulkanBackendUnavailable("Robust Vulkan device initialization unavailable (" + std::to_string(status) + ")");
-    check(status, "device creation");
+    if (status != VK_SUCCESS)
+        throw VulkanBackendUnavailable("Vulkan device initialization failed (" + std::to_string(status) + ")");
     device = created;
     vkGetDeviceQueue(device, family, 0, &queue);
     total.device = "vulkan:" + std::to_string(options.device_index);

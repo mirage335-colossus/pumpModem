@@ -144,6 +144,8 @@ class SourceSdkTests(unittest.TestCase):
             output.mkdir(parents=True, exist_ok=True)
             (output / '.config').write_text('\n'.join([
                 'BR2_GCC_VERSION_15_X=y', 'BR2_PACKAGE_LIBGLEW=y',
+                'BR2_PACKAGE_VULKAN_HEADERS=y', 'BR2_PACKAGE_DATAPUMP_GLSLANG=y',
+                'BR2_PACKAGE_SPIRV_TOOLS=y',
                 'BR2_PACKAGE_XLIB_LIBXFT=y', 'BR2_PACKAGE_LIBOPENSSL=y',
                 'BR2_PACKAGE_NCURSES=y', 'BR2_PACKAGE_NCURSES_WCHAR=y',
                 'BR2_PACKAGE_SDL2=y', 'BR2_PACKAGE_SDL2_X11=y',
@@ -156,7 +158,8 @@ class SourceSdkTests(unittest.TestCase):
                 patch.object(sdk, 'patch_buildroot'), patch.object(sdk, 'run', side_effect=configure), \
                 patch.object(sdk.urllib.request, 'urlopen', side_effect=AssertionError('network')):
             command, _ = sdk.prepare(self.cache, manifest, 'fixture-id', False, 2)
-            for missing_feature in ('BR2_PACKAGE_NCURSES=y', 'BR2_PACKAGE_NCURSES_WCHAR=y',
+            for missing_feature in ('BR2_PACKAGE_VULKAN_HEADERS=y', 'BR2_PACKAGE_DATAPUMP_GLSLANG=y',
+                                    'BR2_PACKAGE_SPIRV_TOOLS=y', 'BR2_PACKAGE_NCURSES=y', 'BR2_PACKAGE_NCURSES_WCHAR=y',
                                     'BR2_PACKAGE_SDL2=y', 'BR2_PACKAGE_SDL2_X11=y'):
                 with self.subTest(missing_feature=missing_feature), self.assertRaisesRegex(
                         ValueError, missing_feature):

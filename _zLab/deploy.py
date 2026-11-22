@@ -55,6 +55,7 @@ _STAGE_MESSAGES = {
 REMOTE_BUILD = r'''set -eu
 mode=$2
 profile=$3
+unset requested_mode PUMP_LAB_OPTIONAL_NVIDIA_ICD
 case "$mode" in cpu|cuda|vulkan|gpu) ;; *) exit 2 ;; esac
 case "$profile" in
   simulation) directory=/workspace/pump-lab ;;
@@ -122,7 +123,15 @@ if [ "$mode" = cuda ]; then
     "-DCMAKE_CUDA_COMPILER=$nvcc" "-DCUDAToolkit_ROOT=$cuda_root" "-DCUDA_TOOLKIT_ROOT_DIR=$cuda_root" \
     "-DCMAKE_PREFIX_PATH=$torch_prefix" "-DCMAKE_CUDA_ARCHITECTURES=$native_sm"
 elif [ "$mode" = vulkan ]; then
+  # Only automatic GPU mode may lack a host NVIDIA driver: the compiled
+  # Vulkan backend remains optional at runtime and other GPUs may be visible.
+  # Explicit Vulkan mode still requires the NVIDIA headless manifest.
+  unset PUMP_LAB_OPTIONAL_NVIDIA_ICD
+  if [ "${requested_mode:-}" = gpu ]; then
+    export PUMP_LAB_OPTIONAL_NVIDIA_ICD=1
+  fi
   timeout -k 10 480 sh _zLab/prepare_vulkan.sh
+  unset PUMP_LAB_OPTIONAL_NVIDIA_ICD
   set -- "$@" -DDATAPUMP_TRIAD_TENSOR=OFF -DDATAPUMP_TRIAD_VULKAN=ON -DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON
   opencl_loader=/usr/lib/x86_64-linux-gnu/libOpenCL.so.1
   if [ ! -r "$opencl_loader" ] || [ "$(dpkg-query -W -f='${db:Status-Status}' ocl-icd-libopencl1:amd64 2>/dev/null || true)" != installed ]; then

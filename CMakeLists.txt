@@ -398,7 +398,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_test(NAME gui_robust_stronger_than_target COMMAND test_gui_robust_live --fixed-receiver-link 30)
   set_tests_properties(gui_robust_fixed_target gui_robust_stronger_than_target
     PROPERTIES LABELS "gui" TIMEOUT 55 RUN_SERIAL TRUE)
-  if(DATAPUMP_TRIAD_VULKAN OR (DATAPUMP_TRIAD_TENSOR AND CAFFE2_USE_CUDA AND NOT CAFFE2_USE_ROCM))
+  if(DATAPUMP_TRIAD_VULKAN_ENABLED OR (DATAPUMP_TRIAD_TENSOR AND CAFFE2_USE_CUDA AND NOT CAFFE2_USE_ROCM))
     add_test(NAME gui_robust_gpu_unavailable COMMAND test_gui_robust_live --gpu-unavailable)
     set_tests_properties(gui_robust_gpu_unavailable PROPERTIES LABELS "gui" TIMEOUT 30
       ENVIRONMENT "CUDA_VISIBLE_DEVICES=-1;VK_DRIVER_FILES=${CMAKE_CURRENT_BINARY_DIR}/no-such-vulkan-icd.json;VK_ICD_FILENAMES=${CMAKE_CURRENT_BINARY_DIR}/no-such-vulkan-icd.json")

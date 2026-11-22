@@ -45,6 +45,39 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Optional GPU runtime in native and zLab packages — 22 November 2026
+
+On the `ad09fe13` base with this change, the default package command built Linux
+x86-64 FLTK portable archives with Vulkan enabled. Both formats passed
+inventory, dependency and startup checks. A missing shader dependency failed
+release configuration unless the build explicitly disabled Vulkan. The relocated worker
+started with the Vulkan loader hidden and reported the missing loader on GPU
+selection. Clearing GPU in the same process returned to simulation readiness.
+The 120 Hz strong-link CPU replay through the relocated worker and relay also
+decoded `e` and scored both quiet slots with the loader hidden. Four focused
+native tests passed, and the zLab suite ran 188 tests with the two opt-in
+simulations skipped.
+
+The physical Ryzen 5 PRO 5650U Radeon (RADV Renoir) decoded the bounded native
+GUI fixture with 130 GPU-scored rows and passed the device compute oracle. The
+same oracle passed with the binary linked against the extracted Ubuntu 22.04
+Vulkan headers and static glslang/SPIR-V libraries. On RunPod, a full RTX PRO
+6000 Blackwell Server Edition with NVIDIA driver 595.112.07 ran the earlier
+healthy-driver build of the runtime toggle (worker SHA-256 prefix `ea0cf0f1`).
+The zLab worker reported positive
+Vulkan scoring, decoded `e` at 3.6 Hz, and scored the two quiet slots. Clearing
+the checkbox in that worker completed the same fixture on CPU. Both results
+covered three DATA slots and two quiet slots. The pod was terminated.
+
+The release recipes require Vulkan for both Linux architectures and Windows
+x64. This check resolved the source SDK package graph and checked the Windows
+dependency-base recipe. The local archives require glibc 2.39. Cold source SDK
+builds, a Windows application build, and device runs on Intel or the other
+NVIDIA GPU models remain unqualified. The same three workflow-test mismatches
+reproduced on the unchanged baseline.
+The short, strong-link fixtures qualify functional selection and completion.
+They do not measure severe-channel sensitivity or sustained service.
+
 ## Robust minimum carrier spacing — 22 November 2026
 
 The initial Robust Setup control defaulted to a 265 Hz minimum and also

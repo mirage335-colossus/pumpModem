@@ -1,3 +1,5 @@
+source "$BR2_EXTERNAL_DATAPUMP_PATH/package/datapump-glslang/Config.in"
+
 config BR2_PACKAGE_DATAPUMP_SDK
 	bool "DataPump desktop SDK"
 	select BR2_PACKAGE_LIBGLVND

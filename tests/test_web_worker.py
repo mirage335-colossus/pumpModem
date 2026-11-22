@@ -58,6 +58,8 @@ try:
     assert kind == 101
     snapshot = json.loads(value)
     assert isinstance(snapshot, dict)
+    gpu_capable = any(item.get("label") == "GPU" and item.get("kind") == "toggle"
+                      and item.get("enabled") for item in snapshot["controls"])
     # Fragments are accepted without losing the framing boundary.
     ping = frame(15, struct.pack("<Qd", 7, 123.5))
     for part in [ping[:1], ping[1:7], ping[7:13], ping[13:]]:
@@ -94,6 +96,58 @@ finally:
 def string(value):
     data = value.encode("utf-8")
     return struct.pack("<I", len(data)) + data
+
+
+if gpu_capable:
+    # A broken loader at the search path's first entry exercises a loader
+    # failure even on a host with a working Vulkan driver and GPU.
+    with tempfile.TemporaryDirectory(prefix="datapump-vulkan-unavailable-") as directory:
+        (Path(directory) / "libvulkan.so.1").touch()
+        environment = os.environ.copy()
+        previous = environment.get("LD_LIBRARY_PATH")
+        environment["LD_LIBRARY_PATH"] = f"{directory}:{previous}" if previous else directory
+        environment["CUDA_VISIBLE_DEVICES"] = ""
+        process = subprocess.Popen([worker, "--simulation-only", "--prefer-gpu"],
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, bufsize=0, env=environment)
+        try:
+            def wait_for_gpu_probe(predicate):
+                end = time.monotonic() + 15
+                while time.monotonic() < end:
+                    kind, payload = read_frame(process, end - time.monotonic())
+                    assert kind != 103, payload
+                    if kind == 101:
+                        state = json.loads(payload)
+                        if predicate(state):
+                            return state
+                raise AssertionError("GPU preference recovery deadline")
+
+            def status_contains(state, text):
+                return any(text in item.get("text", "") for item in state["controls"]
+                           if item.get("kind") == "label")
+
+            unavailable = wait_for_gpu_probe(lambda state: status_contains(state, "GPU reception unavailable"))
+            toggle = next(item for item in unavailable["controls"] if item["label"] == "GPU")
+            assert toggle["kind"] == "toggle" and toggle["enabled"] and toggle["checked"]
+            sequence = int(unavailable["ack"]) + 1
+            event = (struct.pack("<IQQQIII", 1, int(unavailable["generation"]), sequence,
+                                 int(toggle["id"]), 3, 0, 0) + string("") + string(""))
+            process.stdin.write(frame(2, event))
+            cpu = wait_for_gpu_probe(lambda state: int(state["ack"]) >= sequence and
+                                     status_contains(state, "Robust simulation ready"))
+            assert not next(item for item in cpu["controls"] if item["label"] == "GPU")["checked"]
+            assert not status_contains(cpu, "GPU reception unavailable")
+            process.stdin.close()
+            while process.poll() is None:
+                try:
+                    read_frame(process)
+                except AssertionError:
+                    break
+            assert process.wait(timeout=10) == 0, process.stderr.read()
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
 
 with tempfile.TemporaryDirectory(prefix="datapump-file-contract-") as directory:
     fixture = bytes([0, 1, 2, 3, 255, 192, 128, 68, 97, 116, 97, 80, 117, 109, 112, 10])
@@ -153,7 +207,12 @@ with tempfile.TemporaryDirectory(prefix="datapump-file-contract-") as directory:
                              for item in snapshot["controls"]))
         assert not control("Attach file")["enabled"], "Robust text profile accepted attachments"
         assert not control("Transmit")["enabled"], "empty Robust draft enabled transmission"
-        assert any(tab["label"] == "Robust setup" for tab in snapshot["tabs"]), "configured-calendar setup missing"
+        setup = next(tab for tab in snapshot["tabs"] if tab["label"] == "Robust setup")
+        event(11, setup["id"])
+        # The carrier checks below exercise the rate-derived narrow span.
+        event(2, control("Minimum carrier spacing")["id"], "0")
+        console = next(tab for tab in snapshot["tabs"] if tab["label"] == "Console")
+        event(11, console["id"])
         message = next(item for item in snapshot["controls"]
                        if item["kind"] == "text" and item.get("byteLimit") == 4 * 1024 * 1024)
         event(1, message["id"], "Carrier check")

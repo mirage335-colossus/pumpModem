@@ -110,6 +110,17 @@ void shared_gpu_toggle() {
         app.toggle(F::gpu,false);
         check(!app.field(F::gpu).checked&&app.field(F::planner_command).text.find("--gpu no")!=std::string::npos);
     }
+    gui::Launch preferred{.simulation_only=true,.prefer_gpu=true};
+    gui::Application lab(preferred);
+    check(lab.field(F::gpu).checked==live::gpu_receiver_available());
+    check(lab.control(*gpu).enabled==live::gpu_receiver_available());
+    lab.toggle(F::gpu,false);
+    lab.edit(F::link_power,"1 W");
+    check(!lab.field(F::gpu).checked&&lab.field(F::planner_command).text.find("--gpu no")!=std::string::npos);
+    preferred.settings=gui::launch_command::Patch{};
+    preferred.settings->gpu=false;
+    gui::Application saved_cpu(preferred);
+    check(!saved_cpu.field(F::gpu).checked);
     gui::Launch configured{.simulation=true};
     configured.settings=gui::launch_command::Patch{};
     configured.settings->gpu=true;

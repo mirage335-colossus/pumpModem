@@ -37,6 +37,15 @@ _BROWSER_LEASE = 90
 _CLIENT_ID = re.compile(r'[a-f0-9]{64}')
 
 
+def _gpu_unavailable_toggle(controls):
+    """Whether an unavailable preferred GPU still has an enabled CPU opt-out."""
+    return any(
+        isinstance(candidate, dict) and candidate.get('kind') == 'toggle'
+        and candidate.get('enabled') is True
+        and str(candidate.get('label', '')).strip().lower() == 'gpu'
+        for candidate in controls)
+
+
 class ErrorRetainingQueue(_preview.OutputQueue):
     def close(self, error):
         with self.condition:
@@ -234,6 +243,12 @@ class SimulationWorker(_preview.Worker):
                     continue
                 value = control.get('text')
                 if isinstance(value, str) and value.startswith(('GPU reception unavailable', 'GPU reception is unavailable')):
+                    # A preferred GPU backend can fail to initialize while the
+                    # shared GUI still offers an enabled GPU toggle. That is a
+                    # usable runtime CPU choice; a strict worker still exits
+                    # through the normal startup failure path.
+                    if _gpu_unavailable_toggle(snapshot['controls']):
+                        return True
                     self.startup_error = 'GPU reception is unavailable on this pod.'
                     return True
                 if value == 'Robust simulation ready':

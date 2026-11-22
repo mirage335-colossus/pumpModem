@@ -178,8 +178,8 @@ jobs:
       if: inputs.scope == 'tests'
       run: |
         {
-          ./build.sh test build --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON
-          ./build.sh test packaging --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON
+          ./build.sh test build --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON -DDATAPUMP_TRIAD_VULKAN=ON
+          ./build.sh test packaging --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON -DDATAPUMP_TRIAD_VULKAN=ON
         } 2>&1 | tee "$SDK_LOG_DIR/build-packaging-tests.log"
     - name: Check retained shared contracts with the SDK
       if: inputs.scope == 'tests' && inputs.backend == 'fltk'

@@ -27,7 +27,7 @@ jobs:
       - name: Build only the affected package in its Ubuntu 22.04 baseline
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace -e DEBIAN_FRONTEND=noninteractive ubuntu:22.04 sh -ec '
-            sh /workspace/tools/ci-apt.sh install ca-certificates curl git python3 file binutils make cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libgl1 libopengl0
+            sh /workspace/tools/ci-apt.sh install ca-certificates curl git python3 file binutils make cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libgl1 libopengl0 libvulkan-dev glslang-dev glslang-tools spirv-tools
             git config --global --add safe.directory /workspace
             sh tools/install-release-cmake.sh /workspace/build/ci-cmake
             python3 tools/install-release-rev.py /workspace/build/ci-rev-tools

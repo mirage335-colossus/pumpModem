@@ -659,10 +659,14 @@ provenance, limitations and cleanup reason. Do not accumulate historical runs.
 
 ### Vulkan and OpenCL GPU builds
 
-The optional `DATAPUMP_TRIAD_VULKAN` build links the native Vulkan/VkFFT coarse
-backend without Torch or a Python runtime. VkFFT 1.3.4 is pinned in
-[`third_party/vkfft`](../third_party/vkfft/README.datapump.md); Vulkan and glslang
-are native development dependencies. On Debian, the relevant packages are
+Native Linux and Windows builds include the Vulkan/VkFFT receiver backend
+by default when its development dependencies are available. VkFFT 1.3.4
+is pinned in [`third_party/vkfft`](../third_party/vkfft/README.datapump.md).
+The portable release preset and release workflows require this backend by
+default. They build against Vulkan
+headers and link the glslang/SPIR-V shader compiler. The application opens
+the host Vulkan loader only when a GPU receiver is requested. A CPU session
+can run without a Vulkan loader or graphics driver. On Debian, the build packages are
 `libvulkan-dev`, `glslang-dev`, `glslang-tools` and `spirv-tools`. Normal configure
 and build commands never install packages, replace drivers or download sources.
 
@@ -677,7 +681,10 @@ ctest --test-dir build/dev-vulkan --output-on-failure \
 ./build/dev-vulkan/triad_receiver_probe describe --backend vulkan
 ```
 
-Both options default to `OFF`. `test_triad_vulkan --plan` is a CPU-only geometry
+`DATAPUMP_TRIAD_VULKAN` defaults to `AUTO`. Set it to `ON` to require
+the build dependencies or to `OFF` for a developer CPU-only build.
+`DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE` defaults to `OFF`.
+`test_triad_vulkan --plan` is a CPU-only geometry
 preflight registered as `triad_vulkan_plan` when the backend is built. Setting
 `DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON` also registers `triad_vulkan`, which
 requires an actual GPU, runs serially and has a 120-second timeout. A software
@@ -796,16 +803,16 @@ kernels. [Kernel emulation](../tests/triad_kernel_emulation/) ·
 [resident fine windows](triad-gpu-optimization.md#device-rendered-fine-tiles-and-resident-windows).
 
 Select Robust Modem and use the **GPU** checkbox immediately left of Developer.
-It defaults off and persists as `--gpu yes|no`; builds with neither CUDA nor
-Vulkan keep the control disabled with an explanation. Requested GPU
-initialization failures are reported without silently starting a CPU session.
+It defaults off on the desktop and persists as `--gpu yes|no`. A zLab GPU
+allocation starts with it selected. Clear it between runs to select the CPU
+in the same application. Requested GPU initialization failures appear in
+the receiver status, where the control remains available to select CPU.
 The generic selector tries usable CUDA first, then compatible physical Vulkan.
 Search arithmetic Default selects qualified automatic CPU/GPU routing, including
 the scoped Vulkan GUI native chirp-Z crossover; FP32 minimum selects FP32 CUDA
 bulk work or the FP32 Vulkan search route, and GPU plus FP64 force is rejected. The compiled
 `test_triad_vulkan` also supports a [CPU-only precision comparison](triad-performance.md#native-cpu-arithmetic-comparison)
-that does not create a Vulkan device, although building this target still needs
-the optional Vulkan development dependencies.
+that does not create a Vulkan device.
 
 Vulkan builds also register `gui_robust_gpu_unavailable`, which uses an invalid
 ICD path to check the missing-device failure and return to CPU. With
@@ -818,11 +825,10 @@ evidence of a passed run or sustained receiver capacity.
 
 The local dependency preparation uses verified Debian archives extracted
 without system installation into
-`third_party/build-support/cache/vulkan-native/usr-prefix/usr`. When reusing that
-current cache, pass its absolute path as `CMAKE_PREFIX_PATH`; its linker setup
-also uses `-DVulkan_LIBRARY=/usr/lib/x86_64-linux-gnu/libvulkan.so.1` for the
-already-installed host loader. This is a local development recipe, not a portable
-binary or driver bundle. Keep the cache while the Vulkan build uses it.
+`third_party/build-support/cache/vulkan-native/usr-prefix/usr`. Native x86_64
+development builds can find this prepared cache. An explicit
+`CMAKE_PREFIX_PATH` can select an alternate matching SDK. GPU runs use the host
+loader and driver. Keep the cache while a local Vulkan build uses it.
 
 Run numerical/device checks before the
 [bounded CPU/Vulkan comparison](triad-performance.md#local-radeon-vulkan-processing).

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "triad_vulkan_loader.hpp"
+
 // The Vulkan device core shared by the frequency search, the segmented
 // timing search and the fine-stage device sessions: the backend-wide device,
 // leases, caches and receipt (Shared), and one owner's command buffer,
@@ -15,7 +17,6 @@
 #include "triad_opencl_coarse_bulk.hpp"
 #endif
 
-#include <vulkan/vulkan.h>
 #include <vkFFT.h>
 
 #include <algorithm>

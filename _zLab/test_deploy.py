@@ -202,9 +202,11 @@ echo PUMP_LAB_MODE=cpu
         # checks branching/arguments, not CUDA availability or a real build.
         cases = itertools.product(('cpu', 'cuda', 'vulkan', 'gpu'), ('simulation', 'live'),
                                   ('ninja', 'make', 'existing-make'))
-        for requested, profile, generator_case in (*cases, ('cuda-unavailable', 'simulation', 'ninja')):
+        for requested, profile, generator_case in (*cases, ('cuda-unavailable', 'simulation', 'ninja'),
+                                                    ('gpu-no-icd', 'simulation', 'ninja')):
             cuda_unavailable = requested == 'cuda-unavailable'
-            mode = 'cuda' if cuda_unavailable else requested
+            no_nvidia_icd = requested == 'gpu-no-icd'
+            mode = 'cuda' if cuda_unavailable else 'gpu' if no_nvidia_icd else requested
             with self.subTest(mode=requested, profile=profile, generator=generator_case):
                 home = self.root / (requested + '-' + profile + '-' + generator_case)
                 home.mkdir(mode=0o700)
@@ -319,11 +321,15 @@ fi
                     env['PROBE_STATUS'] = '2' if cuda_probe_unavailable or cuda_unavailable else '0'
                 if vulkan:
                     source = home / 'nvidia_icd.json'
-                    source.write_text(json.dumps({'ICD': {'library_path': 'libGLX_nvidia.so.0',
-                                                            'api_version': '1.4.312'}}))
+                    alternate_source = home / 'nvidia_icd_alternate.json'
+                    if not no_nvidia_icd:
+                        source.write_text(json.dumps({'ICD': {'library_path': 'libGLX_nvidia.so.0',
+                                                                'api_version': '1.4.312'}}))
                     prepare = (Path(deploy.__file__).parent / 'prepare_vulkan.sh').read_text()
                     prepare = prepare.replace('/etc/os-release', '/dev/null')
-                    prepare = prepare.replace('/etc/vulkan/icd.d/nvidia_icd.json', str(source))
+                    prepare = prepare.replace(
+                        "sources = (Path('/etc/vulkan/icd.d/nvidia_icd.json'), Path('/usr/share/vulkan/icd.d/nvidia_icd.json'))",
+                        f'sources = (Path({str(source)!r}), Path({str(alternate_source)!r}))')
                     (home / '_zLab').mkdir()
                     (home / '_zLab/prepare_vulkan.sh').write_text(prepare)
                     loader = home / 'libOpenCL.so.1'
@@ -435,26 +441,38 @@ for arg do package=$arg; done
                     expected_loader = str(loader) if generator_case == 'ninja' else ''
                     self.assertIn('-DDATAPUMP_TRIAD_OPENCL_LOADER_PATH=' + expected_loader + ' ', flags)
                     manifest = home / 'build/lab/nvidia-headless-icd.json'
-                    self.assertEqual(manifest.stat().st_mode & 0o777, 0o600)
-                    self.assertEqual(json.loads(manifest.read_text())['ICD'],
-                                     {'library_path': 'libEGL_nvidia.so.0', 'api_version': '1.4.312'})
                     vendors = manifest.parent / 'nvidia-opencl-vendors'
-                    self.assertEqual(vendors.stat().st_mode & 0o777, 0o700)
-                    self.assertEqual((vendors / 'nvidia.icd').read_text(), 'libnvidia-opencl.so.1\n')
-                    self.assertEqual((vendors / 'nvidia.icd').stat().st_mode & 0o777, 0o600)
-                    original = manifest.read_bytes()
-                    resumed = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
-                                             capture_output=True, timeout=5)
-                    self.assertEqual(resumed.returncode, 0, resumed.stderr)
-                    self.assertEqual(manifest.read_bytes(), original)
-                    source.write_text(json.dumps({'ICD': {'library_path': 'libGLX_nvidia.so.0',
-                                                            'api_version': '1.4.313'}}))
-                    incompatible = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
-                                                  capture_output=True, timeout=5)
-                    self.assertNotEqual(incompatible.returncode, 0)
-                    self.assertIn(b'manifest does not match', incompatible.stderr)
-                    self.assertEqual(manifest.read_bytes(), original)
-                    self.assertEqual(list(manifest.parent.glob('.icd-*')), [])
+                    if no_nvidia_icd:
+                        self.assertFalse(manifest.exists())
+                        self.assertFalse(vendors.exists())
+                        strict = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
+                                                 capture_output=True, timeout=5)
+                        self.assertNotEqual(strict.returncode, 0)
+                        self.assertIn(b'Missing NVIDIA Vulkan ICD manifest', strict.stderr)
+                        optional_env = dict(env, PUMP_LAB_OPTIONAL_NVIDIA_ICD='1')
+                        optional = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home,
+                                                  env=optional_env, capture_output=True, timeout=5)
+                        self.assertEqual(optional.returncode, 0, optional.stderr)
+                    else:
+                        self.assertEqual(manifest.stat().st_mode & 0o777, 0o600)
+                        self.assertEqual(json.loads(manifest.read_text())['ICD'],
+                                         {'library_path': 'libEGL_nvidia.so.0', 'api_version': '1.4.312'})
+                        self.assertEqual(vendors.stat().st_mode & 0o777, 0o700)
+                        self.assertEqual((vendors / 'nvidia.icd').read_text(), 'libnvidia-opencl.so.1\n')
+                        self.assertEqual((vendors / 'nvidia.icd').stat().st_mode & 0o777, 0o600)
+                        original = manifest.read_bytes()
+                        resumed = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
+                                                 capture_output=True, timeout=5)
+                        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+                        self.assertEqual(manifest.read_bytes(), original)
+                        source.write_text(json.dumps({'ICD': {'library_path': 'libGLX_nvidia.so.0',
+                                                                'api_version': '1.4.313'}}))
+                        incompatible = subprocess.run(['sh', '_zLab/prepare_vulkan.sh'], cwd=home, env=env,
+                                                      capture_output=True, timeout=5)
+                        self.assertNotEqual(incompatible.returncode, 0)
+                        self.assertIn(b'manifest does not match', incompatible.stderr)
+                        self.assertEqual(manifest.read_bytes(), original)
+                        self.assertEqual(list(manifest.parent.glob('.icd-*')), [])
                 else:
                     self.assertIn('PUMP_LAB_DEVICE=CPU (processor not identified)', output)
                     self.assertIn('PUMP_LAB_GPU_SCOPE=not requested', output)
@@ -488,6 +506,42 @@ for arg do package=$arg; done
         for directory in (group, group / 'parent', child):
             (directory / 'memory.max').write_text('max')
         self.assertEqual(namespace['cgroup_limit'](proc, 'memory'), 'unlimited')
+
+    def test_vulkan_system_icd_lookup_follows_regular_symlinks_and_skips_nonregular_paths(self):
+        original = (Path(deploy.__file__).parent / 'prepare_vulkan.sh').read_text()
+        source_pair = "sources = (Path('/etc/vulkan/icd.d/nvidia_icd.json'), Path('/usr/share/vulkan/icd.d/nvidia_icd.json'))"
+        optional_env = dict(os.environ, PUMP_LAB_OPTIONAL_NVIDIA_ICD='1')
+        content = json.dumps({'ICD': {'library_path': 'libGLX_nvidia.so.0',
+                                      'api_version': '1.4.312'}})
+
+        for name in ('regular-symlink', 'nonregular-alternate', 'only-nonregular'):
+            with self.subTest(case=name):
+                root = self.root / name
+                root.mkdir()
+                first, second = root / 'system-first.json', root / 'system-second.json'
+                source = original.replace('/etc/os-release', '/dev/null')
+                source = source.replace(source_pair,
+                                        f'sources = (Path({str(first)!r}), Path({str(second)!r}))')
+                script = root / 'prepare_vulkan.sh'
+                script.write_text(source)
+                if name == 'regular-symlink':
+                    target = root / 'installed-driver-manifest.json'
+                    target.write_text(content)
+                    first.symlink_to(target)
+                else:
+                    first.mkdir()
+                    if name == 'nonregular-alternate':
+                        second.write_text(content)
+
+                result = subprocess.run(['sh', str(script)], cwd=root, env=optional_env,
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
+                if name == 'only-nonregular':
+                    self.assertNotEqual(result.returncode, 0, result.stdout.decode())
+                    self.assertIn(b'Unsafe or unreadable NVIDIA Vulkan ICD manifest', result.stdout)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stdout.decode())
+                    manifest = root / 'build/lab/nvidia-headless-icd.json'
+                    self.assertEqual(json.loads(manifest.read_text())['ICD']['api_version'], '1.4.312')
 
     def test_vulkan_packages_use_signed_indices_with_base_universe_as_fallback(self):
         os_release = self.root / 'os-release'
@@ -536,7 +590,9 @@ fi
         (bin_dir / 'python3').symlink_to(sys.executable)
         script = (Path(deploy.__file__).parent / 'prepare_vulkan.sh').read_text()
         script = script.replace('/etc/os-release', shlex.quote(str(os_release)))
-        script = script.replace("Path('/etc/vulkan/icd.d/nvidia_icd.json')", f'Path({str(icd)!r})')
+        script = script.replace(
+            "sources = (Path('/etc/vulkan/icd.d/nvidia_icd.json'), Path('/usr/share/vulkan/icd.d/nvidia_icd.json'))",
+            f'sources = (Path({str(icd)!r}), Path({str(self.root / "alternate_nvidia_icd.json")!r}))')
         signed_source = ('deb [arch=amd64 target=Packages signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] '
                          'https://archive.ubuntu.com/ubuntu ')
         fast_sources = [signed_source + suite for suite in

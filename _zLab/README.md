@@ -165,7 +165,11 @@ For a GPU job, the GUI requests `--mode gpu`. The deployer checks whether
 CUDA can discover the device inside the worker's socket restrictions. With
 compatible CUDA and LibTorch prerequisites and a passing probe it builds the
 CUDA worker. If CUDA is unavailable there, it builds the native Vulkan worker
-and configures a private NVIDIA EGL driver manifest for headless operation.
+and configures a private NVIDIA EGL driver manifest for headless operation when
+the host exposes an NVIDIA Vulkan ICD. Generic `--mode gpu` builds may omit that
+NVIDIA manifest and leave accelerator discovery optional at runtime, so the GUI
+can still run the CPU path. Explicit `--mode vulkan` remains strict and requires
+the NVIDIA manifest.
 On the supported Ubuntu 24.04 amd64 image the deployer installs missing
 Vulkan build dependencies from signed Ubuntu packages. If the main archive
 cannot supply its indices, deployment tries the signed Ubuntu security archive.
@@ -188,8 +192,11 @@ Vulkan for the sessions that search declines. It uses OpenCL for qualified
 NVFP4 template projection at every worker allocation. CUDA discovery and Vulkan's
 CUDA import extensions fail with the socket filter active on that driver. See the
 [matched runtime checks](../docs/validation.md#blackwell-nvfp4-fine-projection--19-november-2026).
-GPU sessions enforce `--require-gpu`. Check the receiver's backend, scored
-rows and stage counters to see where GPU work ran. Reopening a managed deployment
+GPU allocations deploy a GPU-capable worker with GPU preferred through
+`--prefer-gpu`, while ordinary simulation and live sessions leave GPU use as a
+runtime GUI choice. The GPU preference can be turned off to run the CPU path.
+Use the relay's explicit `--require-gpu` option only for strict GPU qualification.
+Check the receiver's backend, scored rows and stage counters to see where GPU work ran. Reopening a managed deployment
 checks the source, build settings and worker hash before reuse. An interrupted
 matching build can resume. A different source or an unmanaged directory requires
 a fresh pod. A timeout or lost SSH connection may leave remote work active.

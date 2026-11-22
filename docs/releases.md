@@ -24,6 +24,12 @@ be copied into the system `/lib` directory. Linux uses `.tar.gz`; Windows uses
 `datapump-worker` and its inherited-pipe browser adapters; Windows uses the
 standalone browser page for HTML operation.
 
+The native release workflow requires the Robust Vulkan receiver in all six bundles. The **GPU**
+checkbox selects it at runtime on a compatible physical device. The host
+supplies the Vulkan loader and device driver. CPU operation uses the same
+bundle and does not require them. Shader compiler build dependencies are
+part of the native Linux and Windows build recipes.
+
 Publication and extensive testing are separate operations. Publication checks
 build success, both package formats, checksums, relocation, CLI/self-check
 operation, dependency closure and the Linux ABI ceiling. It then publishes the

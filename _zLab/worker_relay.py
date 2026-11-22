@@ -6,8 +6,9 @@ For SSH use a non-PTY channel (for example ``ssh -T``) and connect the local
 client's binary input and output to this process. Standard error is diagnostic;
 standard output contains only DPW1 frames. The worker is always started in
 simulation mode unless ``--live`` is explicitly supplied; the host file-service
-pipe is opt-in. Pass ``--require-gpu`` to require the native worker's GPU
-receiver policy; omit it for CPU jobs. This is a transport adapter, not
+pipe is opt-in. Pass ``--prefer-gpu`` to start with GPU selected while leaving
+it available as a runtime choice, or ``--require-gpu`` for strict qualification.
+Omit both for CPU jobs. This is a transport adapter, not
 authentication or a provider launcher. A separate local adapter is required for
 physical audio and its dated sample transport.
 Each direction accepts one frame of at most 8 MiB at a time and propagates
@@ -224,13 +225,17 @@ def gpu_environment(worker, live):
     return dict(environment, OPENCL_VENDOR_PATH=str(vendors), OCL_ICD_VENDORS=str(vendors))
 
 
-def relay(worker, stop_requested=lambda: False, require_gpu=False, file_channel=False, live=False):
+def relay(worker, stop_requested=lambda: False, require_gpu=False, file_channel=False, live=False,
+          prefer_gpu=False):
     # Explicit pipes ensure the worker's no-socket/anonymous-pipe checks remain
     # meaningful even when this relay's own stdio is an SSH channel.
     command = [worker] + ([] if live else ["--simulation-only"])
     environment = None
     if require_gpu:
         command.append("--require-gpu")
+    elif prefer_gpu:
+        command.append("--prefer-gpu")
+    if require_gpu or prefer_gpu:
         environment = gpu_environment(worker, live)
     file_read = file_write = None
     if file_channel:
@@ -314,6 +319,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--require-gpu", action="store_true",
                         help="require the native GPU receiver policy")
+    parser.add_argument("--prefer-gpu", action="store_true",
+                        help="start with GPU selected while allowing runtime opt-out")
     parser.add_argument("--live", action="store_true",
                         help="start the worker for live audio, not simulation")
     parser.add_argument("--file-channel", action="store_true",
@@ -330,8 +337,10 @@ def main():
     signal.signal(signal.SIGTERM, terminate)
     signal.signal(signal.SIGINT, terminate)
     try:
+        if args.require_gpu and args.prefer_gpu:
+            parser.error("--require-gpu and --prefer-gpu are mutually exclusive")
         relay(args.worker, lambda: stopping, require_gpu=args.require_gpu,
-              file_channel=args.file_channel, live=args.live)
+              file_channel=args.file_channel, live=args.live, prefer_gpu=args.prefer_gpu)
     except (RelayError, OSError) as exc:
         print(f"worker relay: {exc}", file=sys.stderr)
         return 1

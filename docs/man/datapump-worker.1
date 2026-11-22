@@ -16,6 +16,15 @@ and provides no HTTP server, URL, listening port or network fallback.
 Standard input and output carry the versioned binary host protocol. Diagnostics
 use standard error. Socket-backed descriptors and unqualified containment
 platforms are rejected. Do not invoke the protocol interactively in a terminal.
+.SH OPTIONS
+.TP
+.B \-\-prefer\-gpu
+Initially select the Robust GPU receiver when the worker includes one.
+The shared GPU checkbox can still select CPU processing in this worker.
+.TP
+.B \-\-require\-gpu
+Require GPU processing for Robust settings. Use this for GPU qualification,
+where a missing device is a failure.
 .SH SECURITY
 The embedding application must supply only the documented pipe endpoints and
 approved file streams. Received data is never an executable command or a host

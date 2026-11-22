@@ -465,6 +465,7 @@ struct Controller::Impl {
         f(UiField::live_noise_dbfs_hz).text="unspecified";
         f(UiField::live_noise_dbfs_hz).options={{"unspecified","Unspecified"}};
         f(UiField::message_label).text="Message"; f(UiField::binary_label).text="Binary / first 16 bytes";
+        f(UiField::gpu).checked=options.prefer_gpu&&live::gpu_receiver_available();
         f(UiField::compression_codes).text=compression_reference();
         f(UiField::mode).text="Starting continuous reception";
         if(options.launch_settings&&(options.launch_settings->keyfile||options.launch_settings->keyset||options.launch_settings->fhss_list_file)) {

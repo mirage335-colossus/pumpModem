@@ -88,7 +88,11 @@ class RelayTests(unittest.TestCase):
         self.worker = Path(self.tmp.name) / "fake_worker"
         self.worker.write_text('''#!/usr/bin/env python3
 import os, stat, struct, sys
-expected = ([] if os.environ.get("EXPECT_LIVE") else ["--simulation-only"]) + (["--require-gpu"] if os.environ.get("EXPECT_GPU") else [])
+expected = ([] if os.environ.get("EXPECT_LIVE") else ["--simulation-only"])
+if os.environ.get("EXPECT_GPU"):
+    expected += ["--require-gpu"]
+elif os.environ.get("EXPECT_PREFER_GPU"):
+    expected += ["--prefer-gpu"]
 if os.environ.get("EXPECT_FILES"):
     expected += ["--file-events-fd", sys.argv[-1]]
     assert stat.S_ISFIFO(os.fstat(int(sys.argv[-1])).st_mode)
@@ -145,6 +149,13 @@ while True:
         self.assertEqual(p.returncode, 0, err.decode())
         self.assertEqual(out, frame(2, b"test"))
         self.assertFalse(marker.exists())
+
+    def test_gpu_preference_is_runtime_choice_and_worker_path_is_not_shell_code(self):
+        p = self.launch(env=dict(os.environ, EXPECT_PREFER_GPU="1"),
+                        relay_options=("--prefer-gpu",))
+        out, err = p.communicate(frame(2, b"test"), timeout=15)
+        self.assertEqual(p.returncode, 0, err.decode())
+        self.assertEqual(out, frame(2, b"test"))
 
     def test_live_mode_permits_only_dated_audio_protocol(self):
         env = dict(os.environ, EXPECT_LIVE='1', EXPECT_GPU='1')

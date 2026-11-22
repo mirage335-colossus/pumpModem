@@ -68,12 +68,46 @@ import re
 import stat
 import tempfile
 sources = (Path('/etc/vulkan/icd.d/nvidia_icd.json'), Path('/usr/share/vulkan/icd.d/nvidia_icd.json'))
-source = next((p for p in sources if p.is_file()), None)
+source = None
+invalid_sources = []
+for candidate in sources:
+    try:
+        info = candidate.stat()
+    except FileNotFoundError:
+        # A dangling symlink is an existing broken driver manifest, not an
+        # absent installation. Keep looking for the alternate fixed path.
+        try:
+            candidate.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            pass
+        invalid_sources.append(candidate)
+        continue
+    except OSError:
+        invalid_sources.append(candidate)
+        continue
+    if not stat.S_ISREG(info.st_mode):
+        invalid_sources.append(candidate)
+        continue
+    source = candidate
+    break
 if source is None:
+    if invalid_sources:
+        raise SystemExit('Unsafe or unreadable NVIDIA Vulkan ICD manifest')
+    if os.environ.get('PUMP_LAB_OPTIONAL_NVIDIA_ICD') == '1':
+        print('NVIDIA Vulkan ICD absent; leaving runtime GPU discovery optional')
+        raise SystemExit(0)
     raise SystemExit('Missing NVIDIA Vulkan ICD manifest')
-driver = json.loads(source.read_text())['ICD']
-version = driver['api_version']
-if (driver['library_path'] not in ('libGLX_nvidia.so.0', 'libEGL_nvidia.so.0')
+try:
+    document = json.loads(source.read_text())
+    driver = document['ICD']
+except (OSError, ValueError, KeyError, TypeError) as error:
+    raise SystemExit('Invalid NVIDIA Vulkan ICD manifest') from error
+if not isinstance(driver, dict):
+    raise SystemExit('Invalid NVIDIA Vulkan ICD manifest')
+version = driver.get('api_version')
+if (driver.get('library_path') not in ('libGLX_nvidia.so.0', 'libEGL_nvidia.so.0')
         or not isinstance(version, str) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version)):
     raise SystemExit('Unsupported NVIDIA Vulkan ICD manifest')
 manifest = {'file_format_version': '1.0.0', 'ICD': {'library_path': 'libEGL_nvidia.so.0', 'api_version': version}}

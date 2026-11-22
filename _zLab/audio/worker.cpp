@@ -24,7 +24,7 @@ namespace hp=datapump::host::protocol;
 struct Workspace {std::filesystem::path path;~Workspace(){std::error_code error;if(!path.empty())std::filesystem::remove_all(path,error);}};
 #if defined(__linux__)
 void nonblocking(int fd){const auto flags=fcntl(fd,F_GETFL);if(flags<0 || fcntl(fd,F_SETFL,flags|O_NONBLOCK)<0)throw Error("lab worker pipe setup failed");}
-int run(int trusted,bool require_gpu){
+int run(int trusted,bool require_gpu,bool prefer_gpu){
     host::verify_anonymous_pipe(STDIN_FILENO,true);host::verify_anonymous_pipe(STDOUT_FILENO,false);
     if(trusted>=0)host::verify_anonymous_pipe(trusted,true);
     nonblocking(STDIN_FILENO);nonblocking(STDOUT_FILENO);if(trusted>=0)nonblocking(trusted);
@@ -32,7 +32,7 @@ int run(int trusted,bool require_gpu){
     std::copy(pattern.begin(),pattern.end(),name.begin());auto* path=mkdtemp(name.data());
     if(!path)throw Error("cannot create lab worker workspace");
     Workspace workspace{path};
-    host::Runtime runtime(workspace.path,false,require_gpu,true);hp::Decoder in,files;
+    host::Runtime runtime(workspace.path,false,require_gpu,true,false,prefer_gpu);hp::Decoder in,files;
     std::deque<std::vector<std::byte>> audio;std::size_t audio_bytes=0,audio_at=0;
     bool main_open=true,files_open=trusted>=0,runtime_in_progress=false;
     unsigned clock_burst=0;
@@ -102,17 +102,19 @@ int run(int trusted,bool require_gpu){
 }
 int main(int argc,char** argv){
     try{
-        int fd=-1;bool gpu=false,check=false;
+        int fd=-1;bool require_gpu=false,prefer_gpu=false,check=false;
         for(int i=1;i<argc;++i){const std::string_view arg(argv[i]);
-            if(arg=="--require-gpu")gpu=true;
+            if(arg=="--require-gpu")require_gpu=true;
+            else if(arg=="--prefer-gpu")prefer_gpu=true;
             else if(arg=="--self-check")check=true;
             else if(arg=="--file-events-fd" && i+1<argc){const std::string_view value(argv[++i]);const auto result=std::from_chars(value.data(),value.data()+value.size(),fd);if(result.ec!=std::errc{} || result.ptr!=value.data()+value.size() || fd<3)throw Error("invalid lab trusted file descriptor");}
             else throw Error("unknown lab worker argument");}
+        if(require_gpu&&prefer_gpu)throw Error("Choose either --require-gpu or --prefer-gpu");
         std::vector<int> retained{0,1,2};if(fd>=0)retained.push_back(fd);
         host::restrict_descriptors(retained);host::install_no_socket_boundary();
         if(check){std::cout<<"Lab no-socket worker boundary active\n";return 0;}
 #if defined(__linux__)
-        std::signal(SIGPIPE,SIG_IGN);return run(fd,gpu);
+        std::signal(SIGPIPE,SIG_IGN);return run(fd,require_gpu,prefer_gpu);
 #else
         throw Error("lab worker requires Linux no-socket support");
 #endif

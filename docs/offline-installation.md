@@ -35,9 +35,11 @@ cmake --install build/release --prefix "$PWD/build/DataPump-portable"
 ./build/DataPump-portable/bin/datapump-gui
 ```
 
-The package command uses a separate portable Release tree, builds only application
-prerequisites, and verifies both TGZ and ZIP archives with the existing inventory,
-relocation and ABI checks. It does not require Python for FLTK. To demonstrate
+The package command uses a separate portable Release tree, requires Vulkan
+development dependencies, and verifies both TGZ and ZIP archives. The packaged
+CPU receiver runs without a Vulkan loader. See the
+[Vulkan build dependencies](building.md#vulkan-and-opencl-gpu-builds).
+The package command does not require Python for FLTK. To demonstrate
 that explicitly, append `-- -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE`.
 
 For direct CMake use, configure `cmake --preset release`, build with
