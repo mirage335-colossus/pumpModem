@@ -33,6 +33,36 @@ struct FinePreparation {
 // supply candidates to an operational fine session.
 FinePreparation prepare_fine_coordinates(const ReceiverConfig&, const ReceiverSlotPlan&, const CoarseResult&);
 
+inline constexpr std::size_t maximum_fine_coordinates = 64;
+
+// A failed ordinary admission can retain this fixed-size descriptor while
+// waiting for its chronological predecessor. All masses are set by the
+// original public model. No predecessor likelihood or gain enters it.
+struct AffineContinuationContext {
+    bool eligible = false, check_line = false;
+    // Sequential affine/line scratch. The caller holds the input and original
+    // receipt separately and uses the same worker shape as ordinary scoring.
+    std::size_t scratch_bytes = 0, ordinary_count = 0;
+    std::array<FineCoordinate, maximum_fine_coordinates> ordinary{};
+    std::optional<AdmissionGrid> grid;
+    double projected_sample_rate_hz = 0, coarse_clock_gap_ppm = 0, atom_log_mass = 0;
+};
+
+ReceiverSlotScore score_slot_for_continuation(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
+    std::span<const Complex>, std::span<const std::uint8_t>, unsigned, std::size_t, std::stop_token,
+    ReceiverExecutor*, AffineContinuationContext&);
+ReceiverSlotScore continue_affine_slot(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
+    std::span<const Complex>, unsigned, std::size_t, std::stop_token, ReceiverExecutor*,
+    const AffineContinuationContext&, const ReceiverSlotScore::TimingProposal&, ReceiverSlotScore);
+
+// Packed-calendar qualification only. The public observation supplies coarse
+// proposals and full validity. Admitting statistics use only the declared
+// neighbor-free interval, with the original model-family weights.
+std::size_t protected_slot_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned);
+ReceiverSlotScore score_protected_slot(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
+    std::span<const Complex>, std::span<const std::uint8_t>, unsigned, std::size_t, std::stop_token,
+    ReceiverExecutor*);
+
 // Extra raw short-track timing cells on the prepared public grid, available
 // only when the coarse plan did not reserve segmented timing.
 std::vector<FineCoordinate> prepare_quarter_clock_timing(const ReceiverConfig&, const ReceiverSlotPlan&,

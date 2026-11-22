@@ -583,6 +583,16 @@ def main(executable):
     assert overhead["work"]["may_overlap_slot_dsp"]
     assert overhead["work"]["spool_read_and_verification_seconds"] > 0
 
+    packed = run("message", "--continuous-data", "on", "--protected-packed", "on",
+                 "--rate", "120", "--target-cn0", "80", "--max-samples", "150000")
+    packed_result = packed["result"]
+    assert packed["configuration"]["protected_packed"]
+    assert packed_result["message_and_physical_quiet_verified"] and packed_result["eof_control_verified"]
+    packed_rows = packed_result["stream"]["slots"]
+    assert [row["decision"] for row in packed_rows] == ["data"] * 3 + ["quiet"] * 2
+    assert [row["bit"] for row in packed_rows[:3]] == [0, 0, 1]
+    assert all(row["coarse_arrival_points"] > 0 for row in packed_rows)
+
 
 if __name__ == "__main__":
     main(Path(sys.argv[1]).resolve())

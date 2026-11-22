@@ -45,6 +45,33 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Robust DATA cadence and cross-slot timing — 22 November 2026
+
+The native receiver on the `11dabf96` base with this change retains an
+affine coordinate from the preceding accepted DATA slot. The next valid
+slot runs its full search, and the receiver can add one previously omitted
+coordinate using only the current observation and the original grid mass.
+The bounded native regression recovered an intentionally omitted coordinate.
+Matched compact HF Worst and Each 65% replays at 15, 11 and 8 dB-Hz showed
+the same decoded decisions with and without retention. The 15 dB-Hz replay
+completed the message with two scored quiet slots.
+
+The experimental packed calendar reduced the Rate 3.6 Hz interval from
+210 s to 160.400167 s. At 6 kHz, 265 Hz carrier spacing and the reported HF
+channel settings, the packed protected receiver missed `e` with DATA
+decisions `100`. The existing schedule missed it with `101`. Both verified
+the two quiet slots. The captures differ by schedule and keyed address.
+These results do not isolate a sensitivity difference. A compact packed
+control completed `e` at 15 dB-Hz, but the matched absent-slot and boundary
+controls identified a wider risk from adjacent DATA at broad HF settings.
+The GUI keeps the existing cadence.
+
+The [packed-cadence and boundary findings](symbol-burst.md#native-packed-data-checks)
+give geometry, timing and channel provenance. The
+[timing-state checks](triad-continuous.md#timing-and-frequency-between-slots)
+record the paired floor controls and their limits. The fixtures provide
+neither hardware qualification nor a complete service-capacity result.
+
 ## Optional GPU runtime in native and zLab packages — 22 November 2026
 
 On the `ad09fe13` base with this change, the default package command built Linux

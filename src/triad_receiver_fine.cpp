@@ -2082,6 +2082,44 @@ struct FineSession::Impl {
         return scores;
     }
 
+    void retain_affine_coordinates(ReceiverSlotScore& score) const {
+        const auto per_bit = [](const auto& weights, std::size_t bit) {
+            auto result = -infinity;
+            for (std::size_t model = 0; model < weights.size() / 2; ++model)
+                result = log_add(result, weights[model * 2 + bit]);
+            return result;
+        };
+        const auto ordinary_weight = std::log1p(-slow_model_weight);
+        const auto slow_weight = std::log(slow_model_weight);
+        std::array<double, 2> best{-infinity, -infinity};
+        // The fixed lane keeps its residual timing states in group order.
+        // Weight a public coordinate by the sum over its entire group.
+        for (std::size_t i = 0; i < nominal.size();) {
+            const auto group = nominal[i].key.group;
+            std::array<double, 2> group_evidence{-infinity, -infinity};
+            bool nonzero_basis = false;
+            for (; i < nominal.size() && nominal[i].key.group == group; ++i) {
+                const auto& state = nominal[i];
+                nonzero_basis |= state.nonzero_basis;
+                for (std::size_t bit = 0; bit < group_evidence.size(); ++bit) {
+                    auto evidence = per_bit(state.weights, bit);
+                    if (!slow_nominal.empty())
+                        evidence = log_add(evidence + ordinary_weight,
+                            per_bit(slow_nominal[i].weights, bit) + slow_weight);
+                    group_evidence[bit] = log_add(group_evidence[bit], evidence);
+                }
+            }
+            if (!nonzero_basis) continue;
+            const auto& coordinate = coordinates[group];
+            for (std::size_t bit = 0; bit < best.size(); ++bit) {
+                if (group_evidence[bit] <= best[bit]) continue;
+                best[bit] = group_evidence[bit];
+                score.affine_tracking[bit] = ReceiverSlotScore::TimingProposal{coordinate.epoch_offset_seconds,
+                    coordinate.arrival_seconds, coordinate.frequency_hz, coordinate.clock_ppm};
+            }
+        }
+    }
+
     void update(State& state, const MappedBasisRow& row, const Pair& pair,
                 const std::array<const FineBulkStatistics*, 2>& prepared, unsigned lane,
                 StateBlockWork* work, const std::stop_token& leaf_stop, SlowGainState* slow = nullptr) {
@@ -2605,6 +2643,8 @@ void FineSession::finish(ReceiverSlotScore& score) {
             score.zero_h0_verified = p.scored_blocks != 0;
             score.noise_statistics_valid = score.complete && score.all_valid && p.quiet_modes;
             score.bit_evidence = nominal;
+            score.affine_tracking = {};
+            if (score.complete && score.all_valid) p.retain_affine_coordinates(score);
             score.slow_gain_coherence_seconds = p.additional_gain.coherence;
             score.affine_stationary_fading_gain = p.additional_gain.stationary_fading;
             score.adaptive_diagnostics = p.adaptive_enabled() && p.scored_blocks;
@@ -4755,7 +4795,8 @@ struct DriftProjection {
         const ProjectionBands bands(config, slot, ProjectionBands::Policy::separable_varying);
         small.emplace(small_rows, bands, stop);
         if (large_blocks) large.emplace(small_rows + 1, bands, stop);
-        std::vector<Complex> scratch(DftPlan::scratch_samples(max_rows()));
+        std::vector<Complex> scratch(plan.projection_scratch_rows ? plan.projection_scratch_rows :
+                                     DftPlan::scratch_samples(max_rows()));
         if (line) line_storage.resize(input.size());
         for (std::size_t block = 0, first = 0; block < blocks; ++block) {
             const auto& transform = at(block);
@@ -5323,7 +5364,7 @@ std::unique_ptr<DriftBulk> open_drift_device(const ReceiverConfig& config, const
 
 DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
                      bool project_line_atom, std::size_t preserved_workspace_bytes,
-                     std::size_t ordinary_headroom_bytes) {
+                     std::size_t ordinary_headroom_bytes, const DriftPlan* public_lattice) {
     if (!config.time_varying_channel || !(config.time_varying_common_doppler_hz > 0)) return {};
     const auto fs = config.sample_rate_hz;
     const auto source_geometry = geometry(slot.format);
@@ -5343,8 +5384,12 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
     DriftPlan result;
     result.first = start_row;
     result.raw_rows = stop_row - start_row;
-    result.sample_stride = 1 + (result.raw_rows - 1) / (preferred_drift_fft_rows / 2);
-    bool extended = false;
+    if (public_lattice && (!public_lattice->workspace_bytes || !public_lattice->stage_workers ||
+                          !public_lattice->sample_stride || !preserved_workspace_bytes))
+        return {.status = "protected_drift_public_lattice_unavailable"};
+    result.sample_stride = public_lattice ? public_lattice->sample_stride :
+        1 + (result.raw_rows - 1) / (preferred_drift_fft_rows / 2);
+    bool extended = public_lattice != nullptr;
     const auto center_bound = config.frequency_bound_hz + config.time_varying_atmospheric_hz;
     const auto edge_bound = center_bound + config.time_varying_common_doppler_hz *
         ((stop - first) / duration);
@@ -5352,7 +5397,7 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
     // edge its coherent gain stays above sinc(pi/4) even in the wide
     // two-scale bank. Exact likelihoods still use every raw sample.
     const auto wide_frequency = wide_varying_frequency_support(config, duration);
-    if (result.sample_stride > 1) {
+    if (!public_lattice && result.sample_stride > 1) {
         const auto largest_stride = std::min<double>(result.raw_rows / 2048,
             fs / ((wide_frequency ? 4 : 8) * edge_bound));
         if (largest_stride < result.sample_stride) {
@@ -5368,7 +5413,7 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
     const auto proposal_rate = fs / result.sample_stride;
     result.project_data = config.helper_enabled || project_line_atom;
     const auto render_rows = std::min(maximum_basis_rows, result.raw_rows);
-    std::size_t projection_rows = 0;
+    std::size_t projection_rows = 0, protected_projection_workspace = 0;
     if (result.project_data) {
         result.projection_blocks = result.sample_stride == 1 && !project_line_atom ?
             1 : 1 + (result.raw_rows - 1) / std::min(render_rows, round_rows(.25, fs));
@@ -5378,6 +5423,16 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
             const ProjectionBands bands(config, slot, ProjectionBands::Policy::separable_varying);
             if (!projected_block_supported(min_rows, bands) || !projected_block_supported(projection_rows, bands))
                 return {.status = "drift_data_and_helper_bands_not_separable"};
+            if (public_lattice) {
+                // When the larger block is a power of two, only the
+                // smaller block may need Bluestein's longer scratch.
+                result.projection_scratch_rows = std::max(DftPlan::scratch_samples(min_rows),
+                    DftPlan::scratch_samples(projection_rows));
+                protected_projection_workspace = DftPlan::workspace_bytes(min_rows);
+                if (projection_rows != min_rows)
+                    protected_projection_workspace = checked_add(protected_projection_workspace,
+                        DftPlan::workspace_bytes(projection_rows));
+            }
         } catch (const Error&) {
             return {.status = "drift_data_and_helper_bands_not_separable"};
         }
@@ -5385,32 +5440,68 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
     constexpr auto largest_fft = std::size_t{1} << (std::numeric_limits<std::size_t>::digits - 1);
     if (result.rows > largest_fft / 2)
         return {.status = "drift_proposal_transform_shape_overflow"};
-    result.nfft = std::bit_ceil(2 * result.rows);
-    result.frequency_step = proposal_rate / result.nfft;
-    result.frequency_radius = static_cast<std::int64_t>(std::ceil(std::min(fs * .499,
-        config.frequency_bound_hz + config.time_varying_atmospheric_hz) / result.frequency_step));
-    result.frequency_radius = std::min(result.frequency_radius, static_cast<std::int64_t>(result.nfft / 2 - 1));
-    const auto public_radius = std::ceil(2 * config.time_varying_common_doppler_hz * duration);
-    if (!std::isfinite(public_radius) || public_radius >= (1ULL << 40))
-        return {.status = "drift_public_slope_bound_overflow"};
-    result.slope_radius = static_cast<std::int64_t>(public_radius);
-    result.slope_budget = std::min<std::size_t>(64,
-        std::max<std::size_t>(3, target_drift_fft_rows_per_atom / result.nfft));
-    // For a centered quadratic, half-step mismatch at a waveform edge
-    // is at most pi/8 radians at this nominal slope spacing.
-    result.slope_step = 1 / (duration * duration);
-    result.slope_reference_seconds = first + (stop - first) * .5L;
-    // Keep within-segment quadratic phase departure bounded as the
-    // public aperture grows. A single fixed eight-block transform loses
-    // coherence on long windows even for moderate edge frequencies.
-    const auto segments = [&](double radius) {
-        return std::max(minimum_drift_segments, static_cast<std::size_t>(std::min<double>(result.rows,
-            std::ceil(std::sqrt(radius * result.slope_step) * (stop - first)))));
-    };
-    result.ridge_segments = segments(result.slope_radius);
-    if (result.slope_budget >= 8 && wide_frequency) {
-        const auto slow_segments = segments(result.slope_radius / 8.);
-        if (slow_segments < result.ridge_segments) result.slow_ridge_segments = slow_segments;
+    if (public_lattice) {
+        const auto& original = *public_lattice;
+        if (result.rows < minimum_drift_segments || !original.raw_rows || !original.rows ||
+            !std::has_single_bit(original.nfft) || original.nfft < 2 * result.rows ||
+            original.frequency_step != proposal_rate / original.nfft || original.frequency_radius < 0 ||
+            original.frequency_radius >= static_cast<std::int64_t>(original.nfft / 2) ||
+            original.slope_radius < 1 || original.slope_radius >= (1LL << 40) ||
+            !std::isfinite(original.slope_step) || original.slope_step <= 0 ||
+            !std::isfinite(original.slope_reference_seconds) || original.slope_budget < 3 || original.slope_budget > 64 ||
+            original.ridge_segments < minimum_drift_segments || original.ridge_segments > original.rows ||
+            (original.slow_ridge_segments && (original.slow_ridge_segments < minimum_drift_segments ||
+                                             original.slow_ridge_segments >= original.ridge_segments)))
+            return {.status = "protected_drift_public_lattice_unavailable"};
+        result.nfft = original.nfft;
+        result.frequency_step = original.frequency_step;
+        result.frequency_radius = original.frequency_radius;
+        result.slope_step = original.slope_step;
+        result.slope_radius = original.slope_radius;
+        result.slope_budget = original.slope_budget;
+        result.slope_reference_seconds = original.slope_reference_seconds;
+        // Keep approximately the original proposal segment duration. The
+        // exact candidate FFT still uses the full original lattice, with
+        // only the cropped products and its usual transform zero padding.
+        const auto cropped_segments = [&](std::size_t count) {
+            const auto scaled = std::ceil(static_cast<long double>(count) *
+                std::min(result.raw_rows, original.raw_rows) / original.raw_rows);
+            return std::min(result.rows, std::max(minimum_drift_segments, static_cast<std::size_t>(scaled)));
+        };
+        result.ridge_segments = cropped_segments(original.ridge_segments);
+        if (original.slow_ridge_segments) {
+            result.slow_ridge_segments = cropped_segments(original.slow_ridge_segments);
+            result.ridge_segments = std::min(result.rows,
+                std::max(result.ridge_segments, result.slow_ridge_segments + 1));
+        }
+    } else {
+        result.nfft = std::bit_ceil(2 * result.rows);
+        result.frequency_step = proposal_rate / result.nfft;
+        result.frequency_radius = static_cast<std::int64_t>(std::ceil(std::min(fs * .499,
+            config.frequency_bound_hz + config.time_varying_atmospheric_hz) / result.frequency_step));
+        result.frequency_radius = std::min(result.frequency_radius, static_cast<std::int64_t>(result.nfft / 2 - 1));
+        const auto public_radius = std::ceil(2 * config.time_varying_common_doppler_hz * duration);
+        if (!std::isfinite(public_radius) || public_radius >= (1ULL << 40))
+            return {.status = "drift_public_slope_bound_overflow"};
+        result.slope_radius = static_cast<std::int64_t>(public_radius);
+        result.slope_budget = std::min<std::size_t>(64,
+            std::max<std::size_t>(3, target_drift_fft_rows_per_atom / result.nfft));
+        // For a centered quadratic, half-step mismatch at a waveform edge
+        // is at most pi/8 radians at this nominal slope spacing.
+        result.slope_step = 1 / (duration * duration);
+        result.slope_reference_seconds = first + (stop - first) * .5L;
+        // Keep within-segment quadratic phase departure bounded as the
+        // public aperture grows. A single fixed eight-block transform loses
+        // coherence on long windows even for moderate edge frequencies.
+        const auto segments = [&](double radius) {
+            return std::max(minimum_drift_segments, static_cast<std::size_t>(std::min<double>(result.rows,
+                std::ceil(std::sqrt(radius * result.slope_step) * (stop - first)))));
+        };
+        result.ridge_segments = segments(result.slope_radius);
+        if (result.slope_budget >= 8 && wide_frequency) {
+            const auto slow_segments = segments(result.slope_radius / 8.);
+            if (slow_segments < result.ridge_segments) result.slow_ridge_segments = slow_segments;
+        }
     }
     result.status = 2 * result.slope_radius + 1 > static_cast<std::int64_t>(result.slope_budget) ?
         "linear_drift_ridge_proposals" : "linear_drift";
@@ -5437,8 +5528,9 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
         bytes = checked_add(bytes, checked_multiply(active, checked_add(per_lane, ridge_metadata)));
         bytes = checked_add(bytes, MappedBasis::workspace_bytes(config, slot, render_rows, static_cast<unsigned>(active)));
         if (result.project_data) {
-            const auto scratch = DftPlan::scratch_samples(projection_rows);
-            bytes = checked_add(bytes, checked_multiply(2, DftPlan::workspace_bytes(projection_rows)));
+            const auto scratch = public_lattice ? result.projection_scratch_rows : DftPlan::scratch_samples(projection_rows);
+            bytes = checked_add(bytes, public_lattice ? protected_projection_workspace :
+                checked_multiply(2, DftPlan::workspace_bytes(projection_rows)));
             bytes = checked_add(bytes, checked_multiply(checked_multiply(2, projection_rows), sizeof(std::size_t)));
             const auto observation = checked_add(checked_multiply(2, result.raw_rows), scratch);
             bytes = checked_add(bytes, checked_multiply(observation, sizeof(Complex)));
@@ -5451,11 +5543,14 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
         if (config.spread_doppler_hz != 0) bytes = checked_add(bytes, sizeof(ReceiverSlotScore));
         return checked_add(bytes, drift_metadata_bytes(active, result.slope_budget));
     };
-    const auto widest = static_cast<unsigned>(std::min<std::size_t>(workers, maximum_drift_stage_workers));
+    const auto widest = static_cast<unsigned>(std::min<std::size_t>({workers, maximum_drift_stage_workers,
+        public_lattice ? public_lattice->stage_workers : maximum_drift_stage_workers}));
     const auto admit = [&](unsigned active, std::size_t bytes) {
         result.workspace_bytes = bytes;
         result.stage_workers = active;
-        result.device_envelope_bytes = std::max(bytes, extended ? preserved_workspace_bytes : ordinary_headroom_bytes);
+        const auto envelope = public_lattice ? std::min(public_lattice->device_envelope_bytes, preserved_workspace_bytes) :
+            (extended ? preserved_workspace_bytes : ordinary_headroom_bytes);
+        result.device_envelope_bytes = std::max(bytes, envelope);
         return result;
     };
     if (!extended && widest) {
@@ -5479,7 +5574,8 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
         try {
             const auto bytes = quote(active);
             if (bytes <= preserved_workspace_bytes) {
-                result.status = "linear_drift_ridge_proposals_within_preserved_owner_lease";
+                result.status = public_lattice ? "protected_drift_public_lattice" :
+                    "linear_drift_ridge_proposals_within_preserved_owner_lease";
                 return admit(active, bytes);
             }
         } catch (const Error& error) {
@@ -5487,6 +5583,8 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
             unsupported = true;
         }
     }
+    if (public_lattice) return {.status = unsupported ? "protected_drift_workspace_shape_unavailable" :
+                                                      "protected_drift_exceeds_preserved_owner_lease"};
     return {.status = unsupported ? "drift_extension_workspace_shape_unavailable" :
                                    "drift_extension_exceeds_preserved_owner_lease"};
 }
@@ -5885,7 +5983,8 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
                 own.rendered.resize(2 * taps * max_rows);
                 if (projection) {
                     own.projected_columns.resize(taps * max_rows);
-                    own.projection_scratch.resize(DftPlan::scratch_samples(max_rows));
+                    own.projection_scratch.resize(plan.projection_scratch_rows ? plan.projection_scratch_rows :
+                                                  DftPlan::scratch_samples(max_rows));
                 }
                 for (std::size_t block = 0, first = 0; block < blocks; ++block) {
                     const auto* transform = projection ? &projection->at(block) : nullptr;

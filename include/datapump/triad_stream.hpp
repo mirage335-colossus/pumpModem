@@ -56,6 +56,9 @@ struct PublicProfileConfig {
     std::optional<double> signal_delay_ms; // Defaults to the declared spread bound.
     double delay_excursion_seconds = 0;
     bool selective_signal_tail = false;
+    // Explicit qualification cadence shared by both endpoints. Requires
+    // Helper and whole-bit waits off. The first slot retains its UTC anchor.
+    bool continuous_data = false;
 };
 
 // Public whole-bit recurrence. An epoch is the configured anchor; neither an

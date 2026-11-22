@@ -76,6 +76,28 @@ physical stress remain unqualified. See the [scoped acoustic results](fast-acous
 and [validation record](validation.md).
 See [Fast mode](fast-mode.md#fast-simulation) for the test workflow and limits.
 
+## Robust simulator boundary
+
+Robust prepares the shared transmit waveform and public receiver bounds from
+local settings before drawing the simulation's oscillator errors and arrival
+offset. The sampled channel draws the echo delay after it receives the
+transmitter's source. It applies delay, Doppler and the other selected effects
+to that source on its way to the receiver. The transmit calendar and DATA
+samples use only the agreed profile. The configured simulation gives the
+receiver the agreed calendar and the expected noise variance from the link
+budget. Exact simulated arrival and sample-clock values also position the
+display replay. [Profile preparation](../src/robust_profile.cpp)
+· [Simulation and replay](../src/live.cpp)
+
+A native regression uses the 6 kHz, 3.6 Hz Helper-off profile with HF Worst,
+Each 65%, 30 MHz shift and GPSDO XO. Two seeds vary both endpoint clocks, the
+arrival and the realized echo delay. With the thermal noise seed held fixed,
+the receiver I/Q differs. Both simulations agree with live preparation on
+the first two transmit slot coordinates and all 192,000 checked pre-channel
+samples through the first DATA onset. The check covers waveform provenance
+and uses no receiver scoring. [Native regression](../tests/test_gui_robust_live.cpp)
+· [Cause of the inter-bit gap](symbol-burst.md#baseline-timing-with-helper-off)
+
 ## Baseline and channel stages
 
 `StreamChannelConfig::effects` selects the shared synthetic impairments.

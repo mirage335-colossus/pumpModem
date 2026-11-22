@@ -250,14 +250,19 @@ struct DriftPlan {
     // into, or an extended plan's preserved stage. A device proposal route
     // holds its own host memory only in the difference.
     std::size_t device_envelope_bytes = 0;
+    // Protected projections may need the smaller block's Bluestein scratch.
+    std::size_t projection_scratch_rows = 0;
 };
 // A positive allowance permits a bandwidth-faithful larger proposal only
 // inside a stage envelope already admitted by the complete receiver.
 // An ordinary (unextended) plan keeps the former width of at most eight
 // lanes; it widens toward the worker budget only while its quote stays
 // within the headroom, the largest other stage of the same owner lease.
+// A protected observation may retain its original public lattice, quote
+// only its cropped input, and remap the original slope reference to that input.
 DriftPlan drift_plan(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers, bool project_line = false,
-                     std::size_t preserved_workspace_bytes = 0, std::size_t ordinary_headroom_bytes = 0);
+                     std::size_t preserved_workspace_bytes = 0, std::size_t ordinary_headroom_bytes = 0,
+                     const DriftPlan* public_lattice = nullptr);
 
 // Proposal-only linear-ridge search over short coherent segment spectra (one
 // fast or slow segment count). The grid, its native coarse slope order and

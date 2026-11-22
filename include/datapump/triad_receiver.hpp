@@ -156,6 +156,10 @@ struct ReceiverSlotScore {
         std::int64_t epoch_offset_seconds = 0;
         double arrival_seconds = 0, frequency_hz = 0, clock_ppm = 0;
     };
+    // Best fixed-affine coordinates for the individual bits. Ordered stream
+    // commit can transfer the admitted bit's coordinate as a nomination.
+    std::array<std::optional<TimingProposal>, 2> affine_tracking{};
+    bool affine_continuation_attempted = false, affine_continuation_admitted = false;
     std::size_t varying_timing_proposal_count = 0;
     std::array<TimingProposal, 8> varying_timing_proposals{};
     std::string midpoint_timing_status, midpoint_timing_precision;

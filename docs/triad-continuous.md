@@ -60,6 +60,36 @@ accepted work. A standalone slot, coarse session or fine session owns a
 private instance of that executor, so its timings alone do not qualify shared-pool throughput. Its
 current scope and checks are in [validation](validation.md#native-codec-and-measurement-migration).
 
+### Timing and frequency between slots
+
+An accepted DATA decision can nominate its strongest affine timing, frequency
+and clock coordinate for the immediately following public slot. The following
+slot still runs its ordinary full search. If that search produces a valid
+non-DATA decision, the stream receiver can score one additional public affine
+coordinate, deduplicated against the ordinary fine shortlist. Both bit
+alternatives use the current slot's samples and the coordinate's original
+full-grid probability mass. The receiver carries no channel gain or accumulated
+likelihood between slots. A quiet or undecided slot and recovery clear the
+hint. This optional work uses the same receiver workers and workspace limits.
+Quota or allocation failure in the optional pass preserves the ordinary
+slot decision.
+
+The native regression recovers a deliberately omitted genuine coordinate using
+the previous bit. It also checks ordinary DATA, a duplicate and an out-of-range
+hint, and thermal noise. The deliberately restricted shortlist isolates the
+mechanism. It provides no estimate of sensitivity gain with the ordinary bank.
+
+Paired native `message` replays used one fixed capture per level at
+1,500 samples/s, 500 Hz DATA IF, Rate 120, Target 32 dB-Hz, HF Worst,
+Each 65% and 8 Hz Doppler, with Helper Off and the fixture timing policy.
+At observed 15 dB-Hz both modes verified `e` and both quiet slots. With the
+hint enabled, the first quiet slot scored one extra coordinate and stayed
+quiet. At 11 dB-Hz both modes received the first bit only, and the extra
+coordinate did not recover the next bit. At 8 dB-Hz neither mode received a
+bit or had a predecessor to carry. The paired observations had identical
+input hashes at each level. These placements show current behavior at reduced
+energy, with no demonstrated sensitivity gain or capacity conclusion.
+
 The historical [continuous record](validation-data/triad-v3/2026-11-06-continuous/README.md)
 and [CPU follow-up](validation-data/triad-v3/2026-11-06-cpu-default/README.md)
 retain dated outcomes. They do not mandate full/sustained runs; use

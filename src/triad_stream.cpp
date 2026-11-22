@@ -38,14 +38,33 @@ std::uint64_t receive_coordinate(long double value, bool clamp_before_origin) {
     return value > 0 ? static_cast<std::uint64_t>(value) : 0;
 }
 
+std::uint64_t packed_bit_samples(double seconds, std::uint32_t sample_rate) {
+    const double rounded = seconds * sample_rate;
+    require(std::isfinite(rounded) && rounded > 0 && rounded < std::ldexp(1., 64),
+        "invalid continuous Robust DATA extent");
+    const auto integral = std::ceil(rounded);
+    const auto rows = static_cast<std::uint64_t>(integral);
+    if (rounded != integral) return rows;
+    // The binary64 product can round to an integer on either side of the
+    // exact boundary. Its fused residual restores the outward-rounded sample
+    // address without relying on the platform's long double precision.
+    const auto correction = std::ceil(std::fma(seconds, static_cast<double>(sample_rate), -rounded));
+    return correction < 0 ? rows - static_cast<std::uint64_t>(-correction) :
+                            add(rows, static_cast<std::uint64_t>(correction));
+}
+
 HelperBurstConfig burst_config(const PublicProfileConfig& config, const Geometry& geometry) {
     require(config.format.sample_rate_denominator == 1,
         "whole-bit Robust stream requires an integer sample rate");
-    const auto count = std::round(static_cast<long double>(geometry.bit_seconds) * config.format.sample_rate);
-    require(count >= 1 && count < std::ldexp(1.L, 64), "whole-bit logical calendar extent overflow");
-    return {config.format.sample_rate, static_cast<std::uint64_t>(count), geometry.source_samples,
+    const auto rounded = std::round(static_cast<long double>(geometry.bit_seconds) * config.format.sample_rate);
+    require(rounded >= 1 && rounded < std::ldexp(1.L, 64), "whole-bit logical calendar extent overflow");
+    // PatternSource admits integer samples strictly before bit_seconds. In
+    // a packed stream the last such sample belongs to the preceding bit.
+    const auto count = config.continuous_data ? packed_bit_samples(geometry.bit_seconds, config.format.sample_rate) :
+                                                 static_cast<std::uint64_t>(rounded);
+    return {config.format.sample_rate, count, geometry.source_samples,
         geometry.calendar_origin_sample, config.wait_bits, config.helper_enabled, 0,
-        config.random_extra_bits, config.format.epoch, config.format.symbol_ordinal};
+        config.random_extra_bits, config.format.epoch, config.format.symbol_ordinal, config.continuous_data};
 }
 
 std::uint64_t mix64(std::uint64_t value) {
@@ -242,8 +261,8 @@ std::uint64_t PublicProfile::first_slot_not_before(HelperBurstCoordinate earlies
 
 std::uint64_t PublicProfile::last_slot() const {
     const auto first = transmit_slot(0);
-    // Every recurrence advances at least 60 seconds, including random waits.
-    auto high = std::min((last_pattern_epoch - first.pattern_begin.epoch) / 60,
+    const auto latest_pattern = HelperBurstCoordinate{last_pattern_epoch, config_.format.sample_rate - 1};
+    auto high = std::min(calendar_.distance(first.pattern_begin, latest_pattern) / calendar_.minimum_stride_samples(),
         max_coordinate - config_.format.symbol_ordinal);
     std::uint64_t low = 0;
     const auto first_support = calendar_.add(origin(), *config_.lead_samples);
@@ -269,7 +288,7 @@ long double PublicProfile::capture_end_offset(long double rate) const {
 }
 
 std::uint32_t PublicProfile::bound_slot_opportunities_per_day() const {
-    // Helper-end times translate with the support grid. The ready time is
+    // Endpoints translate by at least the minimum stride. The ready time is
     // the maximum of two fixed affine maps of that clock, both with slope
     // at least one, followed by upward rounding and an additive sample tail.
     // Bound the loss from floating evaluation and rounding between the two
@@ -280,7 +299,7 @@ std::uint32_t PublicProfile::bound_slot_opportunities_per_day() const {
     const auto magnitude = 2 * rate * ((source_span + 2 / rate) / shortest_scale + std::abs(capture_end_offset(rate)));
     const auto roundoff_rows = std::ceil(1 + 32 * std::numeric_limits<long double>::epsilon() * magnitude);
     try {
-        const auto stride_rows = calendar_.minimum_stride_seconds() * rate;
+        const auto stride_rows = calendar_.minimum_stride_samples();
         const auto count = std::floor((86'400 * rate + roundoff_rows) / stride_rows) + 1;
         if (std::isfinite(count) && count >= 1 && count <= UINT32_MAX)
             return static_cast<std::uint32_t>(count);
@@ -351,10 +370,16 @@ PublicSlot PublicProfile::slot(std::uint64_t index) const {
     const SampleRange nominal_observation{capture_first(begin, false), capture_stop(end, false) - halo};
     require(observation.stop > observation.first && nominal_observation.stop > nominal_observation.first,
         "public receive window is empty");
-    const SampleRange data{signal_first(seconds(tx.support_begin), false),
-        signal_stop(seconds(tx.support_end), false)};
-    const auto previous_stop = index ? add(signal_stop(seconds(transmit_slot(index - 1).helper_end), true), halo) : 0;
-    const auto next_first = earlier(signal_first(seconds(next.helper_begin), true));
+    // Packed DATA has zero envelope in the reference halos. Only the
+    // active gates, their channel tails and the receive filter can intrude
+    // on a neighboring quiet aperture. Retain both padded observation edges.
+    const SampleRange data{signal_first(seconds(config_.continuous_data ? tx.pattern_begin : tx.support_begin), false),
+        signal_stop(seconds(config_.continuous_data ? tx.pattern_end : tx.support_end), false)};
+    const auto previous_end = [&](const HelperBurstSlot& previous) {
+        return config_.continuous_data ? previous.pattern_end : previous.helper_end;
+    };
+    const auto previous_stop = index ? add(signal_stop(seconds(previous_end(transmit_slot(index - 1))), true), halo) : 0;
+    const auto next_first = earlier(signal_first(seconds(config_.continuous_data ? next.pattern_begin : next.helper_begin), true));
     // Larger clock support and the filter halo cannot extend the quiet
     // aperture. Their adjacent signal exclusions can only narrow it.
     const auto quiet_first = std::min(nominal_observation.stop,
@@ -389,10 +414,11 @@ struct Emission::Impl {
     std::unique_ptr<helper::Generator> helper;
     std::optional<HelperBurstSlot> current;
     std::uint64_t first_slot = 0, last_slot = 0, source_first = 0, source_stop = 0, data_first = 0;
-    std::uint64_t active_helper_first = 0, active_helper_stop = 0;
+    std::uint64_t active_helper_first = 0, active_slot_stop = 0;
+    std::uint64_t data_begin_offset = 0, data_end_offset = 0;
     long double active_helper_begin_seconds = 0, active_helper_end_seconds = 0;
     bool data_enabled = false, helper_enabled = false;
-    bool noise = false;
+    bool noise = false, packed = false;
     std::uint8_t isolated_bit = 0;
     // The bit of the current slot's DATA source once it is resolved.
     std::optional<std::uint8_t> slot_bit;
@@ -403,7 +429,7 @@ struct Emission::Impl {
     struct Span {
         std::uint64_t begin = 0; // First local sample of this slot state.
         std::optional<HelperBurstSlot> slot;
-        std::uint64_t data_first = 0, helper_stop = 0;
+        std::uint64_t data_first = 0, slot_stop = 0;
         long double helper_begin_seconds = 0, helper_end_seconds = 0;
         std::optional<std::uint8_t> bit;
     };
@@ -434,6 +460,12 @@ struct Emission::Impl {
             require(helper_enabled && profile.helper_plan().effective_power_w > 0, "Helper-only transmission requires enabled Helper power");
         const auto rate = format.sample_rate;
         const auto& geometry = profile.geometry();
+        packed = profile.config().continuous_data && !isolated;
+        data_end_offset = geometry.source_samples;
+        if (packed) {
+            data_begin_offset = geometry.calendar_origin_sample;
+            data_end_offset = data_begin_offset + profile.calendar().config().bit_samples;
+        }
         if (isolated) {
             isolated_bit = isolated->first;
             require(isolated_bit <= 1 && rate % 5 == 0, "invalid isolated Robust fixture geometry");
@@ -444,7 +476,7 @@ struct Emission::Impl {
             data_first = helper_enabled ? lead - geometry.calendar_origin_sample : 0;
             const auto data_stop = add(data_first, geometry.source_samples);
             source_stop = add(data_stop, dwell_samples - 1) / dwell_samples * dwell_samples;
-            active_helper_stop = source_stop;
+            active_slot_stop = source_stop;
             active_helper_end_seconds = static_cast<long double>(source_stop) / rate;
             require(!helper_enabled || static_cast<long double>(format.epoch) + std::ceil(active_helper_end_seconds) < helper_epoch_limit,
                 "source endpoint exceeds Helper32-bit epoch calendar");
@@ -466,6 +498,10 @@ struct Emission::Impl {
         prepare_power(options.lanes);
     }
 
+    std::uint64_t slot_stop(const HelperBurstSlot& slot) const {
+        return profile.calendar().distance(profile.origin(), packed ? slot.pattern_end : slot.helper_end);
+    }
+
     void set_slot(const HelperBurstSlot& slot) {
         current = slot;
         data.reset();
@@ -474,7 +510,7 @@ struct Emission::Impl {
         const auto origin = profile.origin();
         data_first = calendar.distance(origin, slot.support_begin);
         active_helper_first = calendar.distance(origin, slot.helper_begin);
-        active_helper_stop = calendar.distance(origin, slot.helper_end);
+        active_slot_stop = slot_stop(slot);
         active_helper_begin_seconds = calendar.relative_seconds(origin, slot.helper_begin);
         active_helper_end_seconds = calendar.relative_seconds(origin, slot.helper_end);
     }
@@ -557,7 +593,8 @@ struct Emission::Impl {
         return std::make_unique<PatternSource>(addressed_format, keys.data, bit);
     }
     bool in_data(std::uint64_t index, std::uint64_t first) const {
-        return data_enabled && index >= first && index - first < profile.geometry().source_samples;
+        return data_enabled && index >= first && index - first >= data_begin_offset &&
+            index - first < data_end_offset;
     }
 
     struct Value {
@@ -586,7 +623,7 @@ struct Emission::Impl {
             "Robust emitted source requires one forward reader");
         if ((local_index & 255) == 0) check_stop(stop);
         const auto index = source_first + local_index;
-        if (current && current->index < last_slot && index >= active_helper_stop)
+        if (current && current->index < last_slot && index >= active_slot_stop)
             set_slot(profile.calendar().successor(*current));
         PatternSource* source = nullptr;
         if (in_data(index, data_first)) {
@@ -605,25 +642,33 @@ struct Emission::Impl {
         return value.sample;
     }
 
+    std::size_t span_capacity(std::uint64_t plan) const {
+        if (!packed) return 16;
+        const auto interior_boundaries = plan / profile.calendar().config().bit_samples;
+        require(interior_boundaries <= std::numeric_limits<std::size_t>::max() / sizeof(Span) - 2,
+            "Robust emitted span bound overflow");
+        return static_cast<std::size_t>(interior_boundaries) + 2;
+    }
+
     std::size_t reader_bytes(std::size_t count, std::uint64_t plan) const {
         return count * (sizeof(Reader) + (data_enabled ? profile.geometry().source_workspace_bytes : 0) +
             (helper ? sizeof(helper::Generator) : 0)) + static_cast<std::size_t>(plan) * sizeof(norms[0]) +
-            16 * sizeof(Span);
+            span_capacity(plan) * sizeof(Span);
     }
     void open(std::size_t count, std::uint64_t plan) {
         readers.resize(count);
         norms.resize(static_cast<std::size_t>(plan));
-        spans.reserve(16);
+        spans.reserve(span_capacity(plan));
     }
     Span current_span(std::uint64_t begin) const {
-        return {begin, current, data_first, active_helper_stop, active_helper_begin_seconds,
+        return {begin, current, data_first, active_slot_stop, active_helper_begin_seconds,
             active_helper_end_seconds, slot_bit};
     }
     Span successor_span(const Span& span, std::uint64_t begin) const {
         const auto slot = profile.calendar().successor(*span.slot);
         const auto& calendar = profile.calendar();
         const auto origin = profile.origin();
-        return {begin, slot, calendar.distance(origin, slot.support_begin), calendar.distance(origin, slot.helper_end),
+        return {begin, slot, calendar.distance(origin, slot.support_begin), slot_stop(slot),
             calendar.relative_seconds(origin, slot.helper_begin), calendar.relative_seconds(origin, slot.helper_end), {}};
     }
     // The slot states of local samples [first, first + count) and the bits
@@ -631,11 +676,11 @@ struct Emission::Impl {
     void plan(std::uint64_t first, std::uint64_t count) {
         require(first == report.generated_samples && count <= source_stop - source_first - first,
             "Robust emitted source requires one forward reader");
+        require(count <= norms.size(), "Robust emitted source plan exceeds its admitted sample count");
         plan_first = first;
         plan_count = count;
         plan_error_index = UINT64_MAX;
         plan_error = nullptr;
-        if (norms.size() < count) norms.resize(static_cast<std::size_t>(count));
         spans.clear();
         const auto end = first + count;
         auto span = current_span(first);
@@ -643,10 +688,10 @@ struct Emission::Impl {
             // next() moves to the following slot at most once per sample.
             auto stop = end;
             if (span.slot && span.slot->index < last_slot)
-                stop = std::min(end, std::max(earliest, span.helper_stop > source_first ? span.helper_stop - source_first : 0));
+                stop = std::min(end, std::max(earliest, span.slot_stop > source_first ? span.slot_stop - source_first : 0));
             if (!span.bit && data_enabled) {
-                const auto lo = std::max(source_first + span.begin, span.data_first);
-                const auto hi = std::min(source_first + stop, span.data_first + profile.geometry().source_samples);
+                const auto lo = std::max(source_first + span.begin, span.data_first + data_begin_offset);
+                const auto hi = std::min(source_first + stop, span.data_first + data_end_offset);
                 if (lo < hi) {
                     try {
                         span.bit = slot_data_bit(span.slot);
@@ -710,7 +755,7 @@ struct Emission::Impl {
             data.reset();
             data_first = next_span.data_first;
             active_helper_first = profile.calendar().distance(profile.origin(), next_span.slot->helper_begin);
-            active_helper_stop = next_span.helper_stop;
+            active_slot_stop = next_span.slot_stop;
             active_helper_begin_seconds = next_span.helper_begin_seconds;
             active_helper_end_seconds = next_span.helper_end_seconds;
             slot_bit.reset();

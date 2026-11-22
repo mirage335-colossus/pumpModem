@@ -1165,6 +1165,88 @@ void nonstationary_channel_profile() {
           "Off must bypass all dynamic path and selective channel effects");
 }
 
+void simulation_transmit_ignores_realized_channel() {
+    using namespace triad::v3;
+    auto s = settings(true);
+    s.calendar = live::Calendar{1800000000, 7000037};
+    s.transfer.modem.bandwidth_hz = 3.6;
+    const modem::OscillatorModel gpsdo_xo{.0001, .5};
+    s.transfer.modem.oscillator_search =
+        modem::OscillatorSearchConfig{.lf = gpsdo_xo, .rf = gpsdo_xo, .rf_shift_hz = 30e6, .margin = 3};
+    s.transfer.clock_sync.reset();
+    s.transfer.audio_timing_error_seconds = clock_sync::default_audio_error_seconds;
+    s.minimum_carrier_spacing_hz = 265;
+    s.spread_preset = "hf-worst";
+    s.selective_perturbation = "each-65";
+    s.target_cn0_db_hz = 32;
+    s.tx_dbm = 3;
+    s.path_loss_db = 90;
+    s.noise_dbm_hz = -164;
+    const auto first = live::detail::prepare_profile(s, *s.calendar, {}, {.simulation_seed = 6091});
+    const auto second = live::detail::prepare_profile(s, *s.calendar, {}, {.simulation_seed = 6092});
+    s.simulation = false;
+    const auto live_profile = live::detail::prepare_profile(s, *s.calendar, {});
+    for (const auto* profile : {&second, &live_profile}) {
+        const auto& geometry = profile->waveform.geometry();
+        check(geometry.source_samples == first.waveform.geometry().source_samples &&
+              geometry.calendar_origin_sample == first.waveform.geometry().calendar_origin_sample &&
+              geometry.bit_seconds == first.waveform.geometry().bit_seconds &&
+              profile->waveform.transmit_slot(0) == first.waveform.transmit_slot(0) &&
+              profile->waveform.transmit_slot(1) == first.waveform.transmit_slot(1),
+              "A channel realization changed the public transmit geometry");
+    }
+    const auto& effects_a = first.channel.effects;
+    const auto& effects_b = second.channel.effects;
+    check(effects_a.tx.audio_ppm != effects_b.tx.audio_ppm &&
+          effects_a.rx.audio_ppm != effects_b.rx.audio_ppm &&
+          effects_a.timing_offset_seconds != effects_b.timing_offset_seconds,
+          "The fixture did not draw different clock and arrival errors");
+
+    const std::array<std::uint8_t, 2> bits{0, 1};
+    EmissionOptions options;
+    options.bits = bits;
+    // The first DATA pattern starts after its leading halo. Allow its modeled
+    // arrival to move within the default timing prior while keeping the test
+    // to a prefix without receiver scoring.
+    const auto rows = 32U * s.transfer.modem.sample_rate;
+    constexpr std::size_t chunk_rows = 1000;
+    std::array<Complex, chunk_rows> a{}, b{}, live_samples{};
+    {
+        Emission tx_a(first.waveform, first.key, options);
+        Emission tx_b(second.waveform, second.key, options);
+        Emission tx_live(live_profile.waveform, live_profile.key, options);
+        for (std::size_t offset = 0; offset < rows; offset += chunk_rows) {
+            const auto count = std::min(chunk_rows, rows - offset);
+            const auto block_a = std::span(a).first(count);
+            const auto block_b = std::span(b).first(count);
+            const auto block_live = std::span(live_samples).first(count);
+            check(tx_a.read(block_a) == count && tx_b.read(block_b) == count && tx_live.read(block_live) == count &&
+                  std::ranges::equal(block_a, block_b) && std::ranges::equal(block_a, block_live),
+                  "A channel realization changed the emitted DATA samples");
+        }
+        check(tx_a.report().data_energy > 0, "The fixture did not reach active DATA");
+    }
+
+    Emission tx_a(first.waveform, first.key, options);
+    Emission tx_b(second.waveform, second.key, options);
+    auto config_a = first.channel;
+    auto config_b = second.channel;
+    config_a.noise_seed = config_b.noise_seed = 17;
+    StreamingChannel channel_a(tx_a.source(), config_a);
+    StreamingChannel channel_b(tx_b.source(), config_b);
+    for (std::size_t offset = 0; offset < rows; offset += chunk_rows) {
+        const auto count = std::min(chunk_rows, rows - offset);
+        check(channel_a.read(std::span(a).first(count)) == count &&
+              channel_b.read(std::span(b).first(count)) == count, "The channel fixture ended before active DATA");
+    }
+    const auto& report_a = channel_a.report();
+    const auto& report_b = channel_b.report();
+    check(report_a.bounded_spread && report_b.bounded_spread &&
+          report_a.bounded_spread->excess_delay_seconds != report_b.bounded_spread->excess_delay_seconds &&
+          report_a.signal_energy > 0 && report_b.signal_energy > 0 && a != b,
+          "The fixture did not realize different echo delays and received samples");
+}
+
 void late_affine_clock_support() {
     using namespace triad::v3;
     const auto check_support = [](const PublicProfile& waveform, const ReceiverConfig& receiver, std::uint64_t index) {
@@ -1868,6 +1950,10 @@ int main(int argc, char** argv) {
             complete_native_simulation(false, false, true);
             return 0;
         }
+        if (argc == 2 && std::string_view(argv[1]) == "--simulation-authority") {
+            simulation_transmit_ignores_realized_channel();
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--simulation-rx-preview") {
             complete_native_simulation();
             return 0;
@@ -1915,6 +2001,7 @@ int main(int argc, char** argv) {
         long_live_prefix_and_cancel(true);
         full_duplex_reserves_long_preparation();
         nonstationary_channel_profile();
+        simulation_transmit_ignores_realized_channel();
         late_affine_clock_support();
         simulation_cancel_is_not_completion();
         std::cout << "Native Robust lifecycle, duplex routing, and cancellation passed\n" << std::flush;

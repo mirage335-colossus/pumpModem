@@ -51,6 +51,7 @@ StreamReceiverOptions options() {
     o.workers = 4;
     o.slot_owners = 2;
     o.memory_limit_bytes = 256*1024*1024;
+    o.affine_continuation = false;
     return o;
 }
 
@@ -192,10 +193,11 @@ void overlap_lease_uses_only_spare_memory() {
     };
     struct Admitted { std::array<std::size_t, 2> lease; std::array<unsigned, 2> workers; std::size_t reserved; };
     const auto admit = [&](std::size_t limit, unsigned owners, const StreamWorkspace& quote,
-                           bool together = true) {
+                           bool together = true, bool affine_continuation = false) {
         auto o = options();
         o.memory_limit_bytes = limit;
         o.slot_owners = owners;
+        o.affine_continuation = affine_continuation;
         std::array<std::atomic<std::size_t>, 2> lease{};
         std::array<std::atomic<unsigned>, 2> share{};
         std::atomic<bool> release = false;
@@ -257,6 +259,9 @@ void overlap_lease_uses_only_spare_memory() {
           "memory for one overlap lease was not given to the oldest ready slot alone");
     const auto none = admit(group + extra - 2*mib, 2, sequential);
     check(none.lease==narrow, "an overlap lease exceeded the memory available to the ready group");
+    const auto tracked = admit(group + 1, 2, sequential, true, true);
+    check(tracked.lease==narrow && tracked.workers==std::array{4U, 4U},
+          "optional affine state narrowed an ordinary ready group at the memory cap");
 
     const auto single = admit(256*mib, 1, sequential);
     const auto tight_single = admit(single.reserved + 2*mib, 1, sequential);

@@ -173,6 +173,165 @@ void complete_data() {
           "same-window evidence must match under independent worker shares");
 }
 
+void protected_observation_validity() {
+    using namespace receiver_detail;
+    auto noise = fixture(std::nullopt, false, false);
+    const auto score = [&](const ReceiverSlotPlan& slot) {
+        const auto quote = protected_slot_workspace(noise.config, slot, 1);
+        return score_protected_slot(noise.config, slot, noise.key, noise.iq, noise.valid,
+                                    1, quote, {}, nullptr);
+    };
+    auto empty = noise.slot;
+    empty.quiet_stop_sample = empty.quiet_first_sample;
+    const auto missing = score(empty);
+    check(missing.all_valid && !missing.complete && !missing.zero_h0_verified &&
+          missing.decision == SlotDecision::ambiguous && !missing.coarse_workspaces,
+          "an empty protected aperture must stay unresolved");
+    check(noise.slot.quiet_first_sample > noise.slot.first_sample,
+          "protected validity fixture requires a sample outside the aperture");
+    noise.valid.front() = 0;
+    const auto invalid = score(noise.slot);
+    check(!invalid.all_valid && !invalid.complete && !invalid.zero_h0_verified &&
+          invalid.decision == SlotDecision::ambiguous && !invalid.coarse_workspaces,
+          "protected scoring must still reject an invalid sample outside the aperture");
+}
+
+void protected_drift_lattice() {
+    using namespace receiver_detail;
+    auto noise = fixture(std::nullopt, false, false);
+    noise.config.time_varying_channel = true;
+    noise.config.time_varying_common_doppler_hz = .75;
+    noise.config.time_varying_atmospheric_hz = .75;
+    const auto whole = drift_plan(noise.config, noise.slot, 1);
+    check(whole.workspace_bytes && whole.raw_rows >= 128, "protected drift fixture needs a full public lattice");
+    auto aperture = noise.slot;
+    const auto crop = whole.first + whole.raw_rows / 4;
+    aperture.first_sample += crop;
+    aperture.stop_sample = aperture.first_sample + whole.raw_rows / 4;
+    aperture.quiet_first_sample = aperture.first_sample;
+    aperture.quiet_stop_sample = aperture.stop_sample;
+    aperture.window_capture_lead_seconds -= static_cast<long double>(crop) / noise.config.sample_rate_hz;
+
+    const auto replanned = drift_plan(noise.config, aperture, 1);
+    const auto retained = drift_plan(noise.config, aperture, 1, false, whole.workspace_bytes, 0, &whole);
+    check(replanned.workspace_bytes && replanned.frequency_step != whole.frequency_step,
+          "protected drift fixture must change the local FFT lattice when replanned");
+    check(retained.workspace_bytes && retained.workspace_bytes <= whole.workspace_bytes &&
+          retained.raw_rows == aperture.stop_sample - aperture.first_sample && retained.raw_rows < whole.raw_rows &&
+          retained.nfft == whole.nfft && retained.sample_stride == whole.sample_stride &&
+          retained.frequency_step == whole.frequency_step && retained.frequency_radius == whole.frequency_radius &&
+          retained.slope_step == whole.slope_step && retained.slope_radius == whole.slope_radius &&
+          retained.slope_reference_seconds == whole.slope_reference_seconds && retained.slope_budget == whole.slope_budget,
+          "protected drift must quote only the cropped samples on the original public lattice");
+}
+
+void affine_continuation() {
+    using namespace receiver_detail;
+    const auto signal = fixture(0, false, false);
+    const auto ordinary = score(signal);
+    AffineContinuationContext accepted_context;
+    const auto accepted = score_slot_for_continuation(signal.config, signal.slot, signal.key, signal.iq,
+        signal.valid, 1, workspace_limit, {}, nullptr, accepted_context);
+    check(ordinary.decision == SlotDecision::data && ordinary.bit == 0 &&
+          accepted.decision == ordinary.decision && accepted.bit == ordinary.bit &&
+          accepted.complete && accepted.all_valid && accepted.affine_tracking[0] && !accepted_context.eligible &&
+          ordinary.bit_evidence == accepted.bit_evidence &&
+          ordinary.operational_bit_evidence == accepted.operational_bit_evidence &&
+          ordinary.operational_threshold == accepted.operational_threshold &&
+          ordinary.coarse_workspaces == accepted.coarse_workspaces &&
+          ordinary.coarse_frequency_points == accepted.coarse_frequency_points &&
+          ordinary.coarse_arrival_points == accepted.coarse_arrival_points &&
+          ordinary.basis_rows == accepted.basis_rows &&
+          ordinary.workspace_peak_bytes == accepted.workspace_peak_bytes,
+          "recording continuation state must preserve the canonical DATA decision and work");
+
+    const auto noise = fixture(std::nullopt, false, false);
+    AffineContinuationContext quiet_context;
+    const auto quiet = score_slot_for_continuation(noise.config, noise.slot, noise.key, noise.iq,
+        noise.valid, 1, workspace_limit, {}, nullptr, quiet_context);
+    check(quiet.decision == SlotDecision::quiet && quiet.complete && quiet.all_valid && quiet_context.eligible &&
+          quiet_context.grid && quiet_context.ordinary_count && !quiet_context.check_line,
+          "continuation control must retain the fixed-grid description of a physically scored quiet slot");
+    const auto& first = quiet_context.ordinary.front();
+    const ReceiverSlotScore::TimingProposal duplicate{first.epoch_offset_seconds, first.arrival_seconds,
+        first.frequency_hz, first.clock_ppm};
+    auto outside = duplicate;
+    outside.epoch_offset_seconds = receiver_epoch_offsets.back() + 1;
+    auto unsupported_clock = duplicate;
+    unsupported_clock.clock_ppm = 100;
+    for (const auto& hint : {duplicate, outside, unsupported_clock}) {
+        const auto unchanged = continue_affine_slot(noise.config, noise.slot, noise.key, noise.iq,
+            1, quiet_context.scratch_bytes, {}, nullptr, quiet_context, hint, quiet);
+        check(unchanged.decision == SlotDecision::quiet && unchanged.reason == quiet.reason &&
+              unchanged.operational_bit_evidence == quiet.operational_bit_evidence &&
+              unchanged.selected_prior_mass == quiet.selected_prior_mass &&
+              unchanged.basis_rows == quiet.basis_rows && !unchanged.affine_continuation_attempted,
+              "duplicate or out-of-prior timing state must leave quiet and its evidence unchanged");
+    }
+
+    // Exercise the continuation primitive with a deliberately restricted
+    // baseline bank. Both likelihoods are actually scored on identical IQ.
+    // This fixture does not assume that the production coarse search misses
+    // the planted coordinate, or measure the rate of recovery at low SNR.
+    auto input = signal;
+    for (std::size_t i = 0; i < input.iq.size(); ++i)
+        input.iq[i] = noise.iq[i] + .2 * (signal.iq[i] - noise.iq[i]);
+    auto context = quiet_context;
+    context.ordinary_count = 1;
+    context.ordinary.front() = {receiver_epoch_offsets.front(), 0, 0, 0};
+    const auto effective_prior = -context.grid->log_count();
+    check(context.atom_log_mass == effective_prior,
+          "the affine continuation fixture must retain the original full-grid mass");
+    const auto fine = [&](const Fixture& input, FineCoordinate coordinate) {
+        ReceiverSlotScore score;
+        score_fine(input.config, input.slot, input.key, input.iq, std::span(&coordinate, 1),
+            context.projected_sample_rate_hz, context.coarse_clock_gap_ppm, 1, score,
+            context.scratch_bytes, {});
+        classify_fine_slot(score, *context.grid);
+        return score;
+    };
+    const auto predecessor = *accepted.affine_tracking[0];
+    const auto baseline = fine(input, context.ordinary.front());
+    const auto omitted = fine(input, {predecessor.epoch_offset_seconds, predecessor.arrival_seconds,
+        predecessor.frequency_hz, predecessor.clock_ppm});
+    check(baseline.complete && baseline.decision != SlotDecision::data &&
+          omitted.complete && omitted.decision == SlotDecision::data && omitted.bit == 0,
+          "the controlled ordinary cell must miss and the omitted cell must admit the planted DATA");
+    const auto can_not_fit = continue_affine_slot(input.config, input.slot, input.key, input.iq,
+        1, context.scratch_bytes - 1, {}, nullptr, context, predecessor, baseline);
+    check(can_not_fit.operational_bit_evidence == baseline.operational_bit_evidence &&
+          can_not_fit.basis_rows == baseline.basis_rows && !can_not_fit.affine_continuation_attempted,
+          "insufficient continuation scratch must leave the ordinary decision and work intact");
+
+    const auto quiet_baseline = fine(noise, context.ordinary.front());
+    const auto continued_quiet = continue_affine_slot(noise.config, noise.slot, noise.key, noise.iq,
+        1, context.scratch_bytes, {}, nullptr, context, predecessor, quiet_baseline);
+    check(quiet_baseline.decision == SlotDecision::quiet && continued_quiet.decision == SlotDecision::quiet &&
+          continued_quiet.operational_bit_evidence == quiet_baseline.operational_bit_evidence &&
+          continued_quiet.affine_continuation_attempted && !continued_quiet.affine_continuation_admitted,
+          "a strong earlier coordinate cannot turn freshly scored noise into DATA");
+
+    const auto continued = continue_affine_slot(input.config, input.slot, input.key, input.iq,
+        1, context.scratch_bytes, {}, nullptr, context, predecessor, baseline);
+    check(continued.decision == SlotDecision::data && continued.bit == 0 && continued.all_valid &&
+          continued.affine_continuation_attempted && continued.affine_continuation_admitted &&
+          continued.operational_threshold == baseline.operational_threshold &&
+          continued.fine_candidates == 2 && continued.basis_rows == baseline.basis_rows + omitted.basis_rows &&
+          std::abs(continued.selected_prior_mass - 2 * std::exp(effective_prior)) < 1e-12,
+          "ordered continuation must score one omitted affine cell with the original prior");
+    for (std::size_t bit = 0; bit < continued.bit_evidence.size(); ++bit) {
+        const auto a = baseline.operational_bit_evidence[bit], b = omitted.operational_bit_evidence[bit];
+        const auto expected = std::max(a, b) + std::log1p(std::exp(-std::abs(a - b)));
+        check(std::abs(continued.operational_bit_evidence[bit] - expected) < 1e-12,
+              "continuation must sum fresh per-cell likelihoods exactly once");
+    }
+    const auto repeated = continue_affine_slot(input.config, input.slot, input.key, input.iq,
+        1, context.scratch_bytes, {}, nullptr, context, predecessor, continued);
+    check(repeated.operational_bit_evidence == continued.operational_bit_evidence &&
+          repeated.fine_candidates == continued.fine_candidates && repeated.basis_rows == continued.basis_rows,
+          "a repeated hint must not add evidence to an already admitted DATA slot");
+}
+
 void configured_carrier_reception() {
     const auto encrypted = fixture(1, true, true, 37, 12, 24, 1737);
     const auto result = score(encrypted);
@@ -3440,6 +3599,11 @@ int main(int argc, char** argv) {
         if (argc == 2) {
             const std::string_view part = argv[1];
             if (part == "carrier") configured_carrier_reception();
+            else if (part == "affine-continuation") affine_continuation();
+            else if (part == "protected-observation") {
+                protected_observation_validity();
+                protected_drift_lattice();
+            }
             else if (part == "short-drift") {
                 drift_ridge_interchange_oracle();
                 drift_device_mirror();
@@ -3473,6 +3637,9 @@ int main(int argc, char** argv) {
         }
         check(argc == 1, "unexpected native receiver test arguments");
         complete_data();
+        affine_continuation();
+        protected_observation_validity();
+        protected_drift_lattice();
         wrong_key_policy_boundaries();
         large_aperture_supplemental_plans();
         broad_frequency_timing_plan();

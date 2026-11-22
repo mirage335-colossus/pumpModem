@@ -23,6 +23,8 @@ struct StreamReceiverOptions {
     std::size_t maximum_pending_messages = 16;
     std::size_t recent_slot_receipts = 32;
     bool record_commit_timing = false; // Optional native measurement receipt.
+    // Compare against independent slot scoring on the same samples when off.
+    bool affine_continuation = true;
 };
 
 struct StreamReceiverResources {

@@ -33,6 +33,9 @@ struct HelperBurstConfig {
     // The calendar's configured anchor and ordinal separate its key domain.
     unsigned random_extra_bits = 0;
     std::uint64_t random_anchor_epoch = 0, random_initial_ordinal = 0;
+    // In a Helper-free stream with no selected waits, place consecutive DATA
+    // gates together on the sample grid. Padded template supports may overlap.
+    bool continuous_data = false;
 };
 
 struct HelperBurstSlot {
@@ -54,6 +57,8 @@ public:
             throw Error("invalid whole-bit Helper burst geometry");
         if(!config_.helper_enabled && config_.helper_tail_samples)
             throw Error("Helper tail requires Helper-enabled burst geometry");
+        if(config_.continuous_data && (config_.helper_enabled || config_.wait_bits || config_.random_extra_bits))
+            throw Error("Continuous Robust DATA requires Helper and symbol waits off");
         // Validate recurring fixed work before any emission/allocation.
         (void)multiply(config_.wait_bits,config_.bit_samples);
         (void)add_checked(config_.support_samples,config_.helper_tail_samples);
@@ -85,18 +90,22 @@ public:
         return make_slot(add_checked(current.index,1),next_support(current,extra));
     }
 
-    std::uint64_t minimum_stride_seconds() const {
-        // The UTC30 support grid preserves Helper's modulo2 tail phase.
+    std::uint64_t minimum_stride_samples() const {
         // Random whole-bit waits can only extend the fixed-wait recurrence.
         const auto reference=make_slot(0,{60,0});
-        return next_support(reference,0).epoch-reference.support_begin.epoch;
+        return distance(reference.support_begin,next_support(reference,0));
     }
 
-    // Every support starts on the UTC30-second grid. Translating by one
-    // recurrence therefore preserves both sample phase and Helper's modulo2
-    // punctuation phase, including fractional halos and multi-day bits.
+    // Whole-second lower bound for callers that only report scheduled slots.
+    // Packed calendar arithmetic uses minimum_stride_samples().
+    std::uint64_t minimum_stride_seconds() const {
+        return minimum_stride_samples()/config_.sample_rate;
+    }
+
     // Compute a distant public slot without walking all its predecessors. An
     // equal-count permutation keeps each random cycle's total stride fixed.
+    // Scheduled Helper slots preserve the UTC30 grid and punctuation phase.
+    // Continuous DATA retains the fractional sample phase of every slot.
     HelperBurstSlot slot_at(HelperBurstCoordinate earliest_support,std::uint64_t index) const {
         const auto first=first_slot(earliest_support);
         if(!index)return first;
@@ -111,9 +120,8 @@ public:
             }
             return make_slot(index,{add_checked(first.support_begin.epoch,elapsed),0});
         }
-        const auto next=successor(first);
-        const auto stride=next.support_begin.epoch-first.support_begin.epoch;
-        return make_slot(index,{add_checked(first.support_begin.epoch,multiply(index,stride)),0});
+        const auto stride=distance(first.support_begin,next_support(first,0));
+        return make_slot(index,add(first.support_begin,multiply(index,stride)));
     }
 
     HelperBurstCoordinate add(HelperBurstCoordinate value,std::uint64_t samples) const {
@@ -172,6 +180,7 @@ private:
     }
 
     HelperBurstCoordinate next_support(const HelperBurstSlot& current,unsigned extra_wait) const {
+        if(config_.continuous_data)return add(current.support_begin,config_.bit_samples);
         const auto wait=multiply(add_checked(config_.wait_bits,extra_wait),config_.bit_samples);
         auto earliest=add(current.helper_end,wait);
         if(config_.helper_enabled)earliest=add(earliest,multiply(38,config_.sample_rate));
@@ -217,7 +226,8 @@ private:
     }
     HelperBurstSlot make_slot(std::uint64_t index,HelperBurstCoordinate support) const {
         check_phase(support);
-        if(support.phase || support.epoch%30 || (config_.helper_enabled && support.epoch<38))
+        if((!config_.continuous_data && (support.phase || support.epoch%30)) ||
+                (config_.helper_enabled && support.epoch<38))
             throw Error("invalid whole-bit Helper burst support boundary");
         const auto pattern=add(support,config_.leading_halo_samples);
         const auto end=add(support,config_.support_samples);

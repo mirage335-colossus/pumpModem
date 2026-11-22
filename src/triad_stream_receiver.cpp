@@ -4,6 +4,7 @@
 #include "datapump/execution_resources.hpp"
 #include "triad_receiver_executor.hpp"
 #include "triad_receiver_bulk.hpp"
+#include "triad_receiver_driver.hpp"
 #include "triad_stream_backend.hpp"
 #include "triad_stream_resources.hpp"
 
@@ -19,10 +20,12 @@ namespace datapump::triad::v3 {
 namespace {
 using namespace detail;
 using receiver_detail::ReceiverExecutor;
+using receiver_detail::AffineContinuationContext;
 constexpr std::size_t sample_bytes = sizeof(Complex)+sizeof(std::uint8_t);
 constexpr std::size_t input_overhead = 4096;
 constexpr std::size_t raw_block_overhead = 512;
 constexpr std::size_t slot_receipt_bytes = 4096;
+constexpr std::size_t continuation_context_bytes = sizeof(AffineContinuationContext) + 256;
 constexpr std::size_t maximum_chunk = 16384;
 // Four bounded local diagnostic strings, including the executed coarse policy.
 static_assert(sizeof(StreamSlotReceipt) + 4 * 256 < slot_receipt_bytes);
@@ -80,20 +83,16 @@ struct SlotWake {
 
 class SlotTask {
 public:
-    SlotTask(ReceiverExecutor& executor, SlotWake& wake, const ReceiverConfig& config, const Crypto& key,
-             const StreamExecutorScorer& scorer,
-             const ReceiverSlotPlan& plan, std::shared_ptr<const StreamWindow> input,
-             unsigned workers, std::size_t workspace, std::stop_token stop)
+    template<class Score>
+    SlotTask(ReceiverExecutor& executor, SlotWake& wake, Score score)
         : result_(std::make_shared<Result>()) {
-        executor.submit([result = result_, &executor, &config, &key, &scorer, plan,
-                         input = std::move(input), workers, workspace, stop]() mutable {
+        executor.submit([result = result_, score = std::optional<Score>(std::move(score))]() mutable {
             try {
-                result->score = scorer(config, plan, key, input->iq, input->valid,
-                    workers, workspace, stop, &executor);
+                result->score = (*score)();
             } catch (...) {
                 result->failure = std::current_exception();
             }
-            input.reset();
+            score.reset();
         }, [result = result_, &wake] {
             {
                 std::lock_guard lock(wake.mutex);
@@ -143,6 +142,8 @@ struct Job {
     std::unique_ptr<SlotTask> task;
     std::optional<ReceiverSlotScore> score;
     bool valid_observation = false, valid_interval = false;
+    std::shared_ptr<AffineContinuationContext> continuation;
+    std::size_t continuation_scratch = 0;
 };
 
 } // namespace
@@ -234,6 +235,7 @@ struct CompleteStreamReceiver::Impl {
     StreamReceiverResources resources;
     StreamWorkspace workspace, overlap_workspace;
     StreamExecutorScorer scorer;
+    const bool native_scorer;
     StreamFootprint footprint;
     ContinuousMessageReceiver codec;
     std::stop_source stop;
@@ -251,16 +253,19 @@ struct CompleteStreamReceiver::Impl {
     ReceiverExecutor executor;
     std::deque<Job> jobs;
     std::deque<StreamSlotReceipt> receipts;
+    // Only the immediately preceding committed DATA can supply a coordinate.
+    std::optional<ReceiverSlotScore::TimingProposal> tracking;
     const Clock::time_point commit_origin = options.record_commit_timing ? Clock::now() : Clock::time_point{};
     double controller_wait_seconds = 0;
 
     Impl(PublicProfile profile_value, ReceiverConfig config_value, Crypto key_value,
          StreamReceiverOptions stream, MessageDecoder decoder, MessageReceiverOptions message,
          StreamWorkspace workspace_fn, StreamExecutorScorer score_fn, StreamFootprint footprint_fn,
-         StreamWorkspace overlap_fn)
+         StreamWorkspace overlap_fn, bool native_score)
         : profile(std::move(profile_value)), config(std::move(config_value)), key(std::move(key_value)),
           options(stream), resources(resolve_stream_receiver_resources(options)),
           workspace(std::move(workspace_fn)), overlap_workspace(std::move(overlap_fn)), scorer(std::move(score_fn)),
+          native_scorer(native_score),
           footprint(footprint_fn ? std::move(footprint_fn) : StreamFootprint(stream_controller_footprint_bytes)),
           codec(std::move(decoder), with_public_message_address(message, profile),
               options.first_slot, options.maximum_pending_messages),
@@ -322,10 +327,15 @@ struct CompleteStreamReceiver::Impl {
         auto initialized = raw_initialized;
         auto prospective = add(fixed_reservation, raw_bytes-raw_initialized);
         unsigned lanes = 0;
-        for (const auto& job : jobs) if (job.task) {
-            initialized = add(initialized, job.work.input);
-            prospective = add(prospective, job.work.reserved-job.work.input);
-            lanes += std::min(resources.workers-lanes, job.work.workers);
+        for (const auto& job : jobs) {
+            if (job.input) initialized = add(initialized, job.work.input);
+            if (job.continuation || (job.task && job.continuation_scratch))
+                prospective = add(prospective, continuation_context_bytes);
+            if (job.task) {
+                prospective = add(prospective, job.continuation_scratch ?
+                    add(input_overhead, job.continuation_scratch) : job.work.reserved-job.work.input);
+                lanes += std::min(resources.workers-lanes, job.work.workers);
+            }
         }
         // The raw and window payloads are already initialized and visible in
         // this process, with an explicit ownership floor. Whole-process growth
@@ -512,7 +522,7 @@ struct CompleteStreamReceiver::Impl {
         return work;
     }
 
-    void submit(const Work& work) {
+    void submit(const Work& work, std::size_t admitted, bool continuation_fits) {
         // The assembled arrays become the owner's immutable lease. No second
         // input allocation is needed when the scorer takes its spans.
         auto values = assemble(work.plan);
@@ -521,21 +531,60 @@ struct CompleteStreamReceiver::Impl {
         if (bytes>add(window_bytes(window_samples(work.plan)), input_overhead))
             throw ReceiverWorkspaceError("Robust assembled input exceeded its admitted lease");
         auto input = std::make_shared<const StreamWindow>(std::move(values));
-        jobs.push_back({work, std::move(input), {}, {}, valid, interval_valid});
+        jobs.push_back({work, std::move(input), {}, {}, valid, interval_valid, {}, 0});
         auto& job = jobs.back();
-        job.task = std::make_unique<SlotTask>(executor, wake, config, key, scorer, work.plan, job.input,
-            work.workers, work.dsp, stop.get_token());
+        if (continuation_fits && valid && interval_valid) {
+            try {
+                job.continuation = std::make_shared<AffineContinuationContext>();
+                peak_reserved = std::max(peak_reserved, admitted + continuation_context_bytes);
+            } catch (const std::bad_alloc&) {
+                // Retaining one more coordinate must not bar ordinary search.
+            }
+        }
+        job.task = std::make_unique<SlotTask>(executor, wake,
+            [this, work, input = job.input, context = job.continuation] {
+                const auto token = stop.get_token();
+                if (context && native_scorer)
+                    return receiver_detail::score_slot_for_continuation(config, work.plan, key, input->iq,
+                        input->valid, work.workers, work.dsp, token, &executor, *context);
+                return scorer(config, work.plan, key, input->iq, input->valid,
+                              work.workers, work.dsp, token, &executor);
+            });
         advance(work.plan);
+    }
+
+    bool release_waiting_continuations() {
+        bool released = false;
+        for (auto& job : jobs) {
+            if (job.task || !job.input) continue;
+            job.continuation.reset();
+            job.input.reset();
+            released = true;
+        }
+        return released;
     }
 
     void dispatch() {
         if (!ready() || backpressured() || active()>=resources.slot_owners ||
             jobs.size()>=stream_uncommitted_slot_limit(resources.slot_owners)) return;
-        const auto work = choose();
+        auto work = choose();
+        const auto owners = active();
+        const auto capacity = std::min<std::size_t>({resources.slot_owners-owners,
+            resources.workers-owners, stream_uncommitted_slot_limit(resources.slot_owners)-jobs.size()});
+        if (work.size()<capacity && (work.empty() || (work.back().plan.index<last_public_slot &&
+                input_stop>=plan(work.back().plan.index+1).stop_sample)) && release_waiting_continuations())
+            work = choose();
         if (work.empty() && !active())
             throw ReceiverWorkspaceError("Robust public window exceeds the admitted workspace");
+        std::size_t remaining_bytes = 0, remaining_lanes = 0;
+        for (const auto& item : work) {
+            remaining_bytes = add(remaining_bytes, item.reserved);
+            remaining_lanes += item.workers;
+        }
         for (auto item : work) {
             if (stop.stop_requested()) break;
+            remaining_bytes -= item.reserved;
+            remaining_lanes -= item.workers;
             auto admitted = add(reserved(item.workers), item.reserved);
             if (admitted>resources.memory_limit_bytes && item.overlap) {
                 // The process grew since the group was chosen. The slot
@@ -545,12 +594,25 @@ struct CompleteStreamReceiver::Impl {
                 item.overlap = 0;
                 admitted = add(reserved(item.workers), item.reserved);
             }
+            if (admitted>resources.memory_limit_bytes && release_waiting_continuations())
+                admitted = add(reserved(item.workers), item.reserved);
             if (admitted>resources.memory_limit_bytes) {
                 if (active()) return;
                 throw ReceiverWorkspaceError("Robust process growth exhausted the local workspace");
             }
             peak_reserved = std::max(peak_reserved, admitted);
-            submit(item);
+            // An optional context cannot spend the ordinary DSP or stacks
+            // already quoted for later jobs in the same ready prefix.
+            bool continuation_fits = false;
+            if (options.affine_continuation) {
+                const auto lanes = static_cast<unsigned>(std::min<std::size_t>(resources.workers,
+                    remaining_lanes + item.workers));
+                const auto prefix = add(add(reserved(lanes), item.reserved), remaining_bytes);
+                continuation_fits = prefix<=resources.memory_limit_bytes &&
+                    continuation_context_bytes<=resources.memory_limit_bytes-prefix &&
+                    continuation_context_bytes<=resources.memory_limit_bytes-admitted;
+            }
+            submit(item, admitted, continuation_fits);
         }
     }
 
@@ -567,7 +629,10 @@ struct CompleteStreamReceiver::Impl {
         score.decision = QuietSlotMessageReceiver::classification(score);
         if (score.decision!=SlotDecision::data) score.bit.reset();
         job.score = std::move(score);
-        job.input.reset();
+        if (!job.continuation || !job.continuation->eligible || job.score->decision==SlotDecision::data) {
+            job.continuation.reset();
+            job.input.reset();
+        }
     }
 
     bool collect() {
@@ -582,11 +647,46 @@ struct CompleteStreamReceiver::Impl {
         return completed;
     }
 
+    bool start_continuation(Job& job) {
+        if (!tracking || !job.continuation || !job.continuation->eligible ||
+            job.score->decision == SlotDecision::data || codec.recovering()) return false;
+        if (active() >= resources.slot_owners) return true;
+        const auto scratch = job.continuation->scratch_bytes;
+        const auto admitted = add(reserved(job.work.workers), add(input_overhead, scratch));
+        if (admitted > resources.memory_limit_bytes)
+            return active() != 0;
+        try {
+            job.task = std::make_unique<SlotTask>(executor, wake,
+                [this, work = job.work, input = job.input, context = job.continuation,
+                 hint = *tracking, baseline = *job.score, scratch]() mutable {
+                    try {
+                        return receiver_detail::continue_affine_slot(config, work.plan, key, input->iq,
+                            work.workers, scratch, stop.get_token(), &executor, *context, hint, baseline);
+                    } catch (const ReceiverWorkspaceError&) {
+                        return std::move(baseline);
+                    } catch (const std::bad_alloc&) {
+                        return std::move(baseline);
+                    }
+                });
+        } catch (const std::bad_alloc&) {
+            // Submission leaves the original receipt available for commit.
+            job.continuation.reset();
+            job.input.reset();
+            return false;
+        }
+        peak_reserved = std::max(peak_reserved, admitted);
+        job.continuation_scratch = scratch;
+        job.continuation.reset();
+        job.score.reset();
+        return true;
+    }
+
     void commit() {
         while (!jobs.empty() && jobs.front().score && !backpressured() && !stop.stop_requested()) {
             auto& job = jobs.front();
             if (!job.valid_observation || !job.valid_interval)
                 codec.invalidate_episode("physical_input_was_incomplete");
+            if (start_continuation(job)) return;
             // The one source decoder workspace is reserved alongside all
             // active DSP owners. Recheck the footprint before materializing
             // that workspace so intervening application growth cannot spend it.
@@ -598,6 +698,8 @@ struct CompleteStreamReceiver::Impl {
                 peak_reserved = std::max(peak_reserved, admitted);
             }
             if (!codec.consume(*job.score) || codec.stopped()) throw Error("Robust public slot commit failed");
+            tracking = job.score->decision == SlotDecision::data && job.score->bit && !codec.recovering() ?
+                job.score->affine_tracking[*job.score->bit] : std::nullopt;
             if (receipts.size()==options.recent_slot_receipts) receipts.pop_front();
             receipts.push_back({std::move(*job.score), job.work.plan.format.epoch,
                 job.work.plan.format.symbol_ordinal, job.work.workers, {}});
@@ -671,7 +773,9 @@ struct CompleteStreamReceiver::Impl {
             return StreamPushResult::backpressured;
         if (count) {
             const auto required = add(raw_block_overhead, window_bytes(count));
-            const auto admitted = add(reserved(), required);
+            auto admitted = add(reserved(), required);
+            if (admitted>resources.memory_limit_bytes && release_waiting_continuations())
+                admitted = add(reserved(), required);
             if (admitted>resources.memory_limit_bytes) {
                 if (active()) return StreamPushResult::backpressured;
                 throw ReceiverWorkspaceError("Robust captured input exceeds bounded backlog memory");
@@ -734,7 +838,7 @@ CompleteStreamReceiver::CompleteStreamReceiver(PublicProfile profile, ReceiverCo
     StreamReceiverOptions options, MessageDecoder decoder, MessageReceiverOptions message)
     : impl_(std::make_unique<Impl>(std::move(profile), std::move(config), std::move(key), options,
         std::move(decoder), message, receiver_slot_workspace, receiver_detail::score_slot, StreamFootprint{},
-        receiver_slot_overlap_workspace)) {}
+        receiver_slot_overlap_workspace, true)) {}
 CompleteStreamReceiver::CompleteStreamReceiver(PublicProfile profile, ReceiverConfig config, Crypto key,
     StreamReceiverOptions options, NativeMessageProfile message)
     : CompleteStreamReceiver(std::move(profile), std::move(config), std::move(key), options,
@@ -796,7 +900,7 @@ CompleteStreamReceiver detail::StreamReceiverFixture::make_with_executor(PublicP
     StreamWorkspace overlap_workspace) {
     return CompleteStreamReceiver(std::make_unique<CompleteStreamReceiver::Impl>(std::move(profile),
         std::move(config), std::move(key), options, std::move(decoder), message,
-        std::move(workspace), std::move(scorer), std::move(footprint), std::move(overlap_workspace)));
+        std::move(workspace), std::move(scorer), std::move(footprint), std::move(overlap_workspace), false));
 }
 
 } // namespace datapump::triad::v3

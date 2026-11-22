@@ -6,6 +6,7 @@
 #include "triad_receiver_helper.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <numbers>
@@ -15,7 +16,6 @@ namespace {
 using namespace receiver_detail;
 using Clock = std::chrono::steady_clock;
 constexpr std::size_t receipts_bytes = 64 * 1024;
-constexpr std::size_t maximum_fine_coordinates = 64;
 constexpr std::size_t maximum_helper_intervals = 64;
 
 void require(bool valid, const char* reason) {
@@ -85,9 +85,50 @@ struct StageWorkspace {
     bool helper_transfer_full_prior;
 };
 
+bool uses_varying_coarse(const StageWorkspace& workspace) {
+    return workspace.varying.block_rows || workspace.drift.workspace_bytes || workspace.coherent_gain.block_rows;
+}
+
 StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
-                              bool quote_overlap, const SlotEvidenceSupplement* supplement = nullptr) {
+                              bool quote_overlap, const SlotEvidenceSupplement* supplement = nullptr,
+                              const ReceiverSlotPlan* protected_plan = nullptr,
+                              const StageWorkspace* public_workspace = nullptr) {
     const auto rows = validate(config, slot, workers);
+    const auto& inference = protected_plan ? *protected_plan : slot;
+    const auto varying_plan = [&](bool line, bool coherent_gain) {
+        if (!public_workspace) return varying_fine_plan(config, inference, workers, line, coherent_gain);
+        const auto& original = line ? (coherent_gain ? public_workspace->line_coherent_gain :
+                                                      public_workspace->line_varying) :
+            (coherent_gain ? public_workspace->coherent_gain : public_workspace->varying);
+        if (!original.block_rows) return original;
+        const auto planned = varying_fine_plan(config, inference, workers, line, coherent_gain);
+        if (!planned.block_rows) return planned;
+        if (planned.block_rows != original.block_rows || planned.track_frequency != original.track_frequency ||
+            planned.nominal_independent_gain_candidates != original.nominal_independent_gain_candidates)
+            return VaryingFinePlan{0, 0, "protected_varying_model_grid_unavailable"};
+        if (planned.track_frequency && !line) {
+            // Helper-off tracking bins are tied to the power-of-two maximum
+            // block transform. A changed tail must preserve that lattice.
+            const auto span = inference.stop_sample - inference.first_sample;
+            const auto block = original.block_rows;
+            const auto multiplier = coherent_gain ? 4 : 2;
+            if (std::bit_ceil(multiplier * (block + rows % block)) !=
+                std::bit_ceil(multiplier * (block + span % block)))
+                return VaryingFinePlan{0, 0, "protected_varying_frequency_grid_unavailable"};
+        }
+        return planned;
+    };
+    const auto drift_shape = [&](bool line, std::size_t preserved, std::size_t headroom) {
+        if (!public_workspace) return drift_plan(config, inference, workers, line, preserved, headroom);
+        const auto& original = line ? public_workspace->line_drift : public_workspace->drift;
+        if (!original.workspace_bytes) return original;
+        const auto original_envelope = public_workspace->drift_envelope - public_workspace->input - receipts_bytes;
+        auto planned = drift_plan(config, inference, workers, line, original_envelope, headroom, &original);
+        if (!planned.workspace_bytes) return planned;
+        planned.slope_reference_seconds = original.slope_reference_seconds -
+            static_cast<long double>(inference.first_sample - slot.first_sample) / config.sample_rate_hz;
+        return planned;
+    };
     std::size_t evidence_supplement = 0;
     if (supplement) {
         require(std::isfinite(supplement->fixed_weight) && supplement->fixed_weight >= 0 &&
@@ -112,22 +153,27 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
         const auto input = checked_multiply(rows, sizeof(Complex) + sizeof(std::uint8_t));
         const bool helper_transfer_full_prior = helper_transfer_requires_full_prior(config, slot);
         const auto helper = helper_transfer_full_prior ? 0 : helper_workspace(config, slot);
-        auto varying = varying_fine_plan(config, slot, workers);
-        const auto coherent_gain = varying_fine_plan(config, slot, workers, false, true);
+        auto varying = varying_plan(false, false);
+        const auto coherent_gain = varying_plan(false, true);
         auto search = config;
-        search.time_varying_channel = varying.block_rows || planned.workspace_bytes || coherent_gain.block_rows;
-        const auto midpoint_support = varying.track_frequency ?
-            coarse_midpoint_timing_support(search, slot) : CoarseMidpointSupport{false, "short_tracking_unavailable"};
+        search.time_varying_channel = public_workspace ? uses_varying_coarse(*public_workspace) :
+            varying.block_rows || planned.workspace_bytes || coherent_gain.block_rows;
+        const auto midpoint_support = public_workspace ? CoarseMidpointSupport{
+            .available = public_workspace->varying.midpoint_tracking, .status = public_workspace->midpoint_timing_status,
+            .gain_frequency_status = {}} : (varying.track_frequency ?
+            coarse_midpoint_timing_support(search, slot) : CoarseMidpointSupport{false, "short_tracking_unavailable"});
         const auto midpoint = midpoint_support.available ?
             MidpointTimingEvaluation::short_tracking : MidpointTimingEvaluation::off;
-        if (midpoint_support.available) enable_midpoint_tracking(varying);
+        if (midpoint_support.available && varying.track_frequency) enable_midpoint_tracking(varying);
         const auto coarse = coarse_workspace_bounds(search, slot, workers, {}, midpoint);
-        const auto fine = fine_workspace(config, slot, workers);
-        const auto varying_quiet = varying_quiet_workspace(config, slot, workers);
-        const auto line = search.time_varying_channel ? varying_line_workspace(config, slot) : 0;
-        const auto line_varying = line ? varying_fine_plan(config, slot, workers, true) : VaryingFinePlan{};
-        const auto line_coherent_gain = line && coherent_gain.block_rows ?
-            varying_fine_plan(config, slot, workers, true, true) : VaryingFinePlan{};
+        const auto fine = fine_workspace(config, inference, workers);
+        const auto varying_quiet = varying_quiet_workspace(config, inference, workers);
+        const auto line = search.time_varying_channel && (!public_workspace || public_workspace->line) ?
+            varying_line_workspace(config, inference) : 0;
+        const auto line_varying = line ? varying_plan(true, false) : VaryingFinePlan{};
+        const auto line_coherent_gain = line &&
+                (public_workspace ? public_workspace->line_coherent_gain.block_rows : coherent_gain.block_rows) ?
+            varying_plan(true, true) : VaryingFinePlan{};
         // One lane runs acquisition and preparation in turn: nothing coexists.
         const bool overlap_shape = workers > 1 && helper && coarse_defers_frequency_grid(config, slot);
         const bool overlappable = quote_overlap && overlap_shape;
@@ -141,9 +187,10 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
             varying.workspace_bytes, coherent_gain.workspace_bytes, varying_quiet, line,
             line_varying.workspace_bytes, line_coherent_gain.workspace_bytes, evidence_supplement});
         auto drift = line_override || !planned.workspace_bytes ? planned :
-            drift_plan(config, slot, workers, false, 0, drift_headroom);
+            drift_shape(false, 0, drift_headroom);
         auto line_drift = line_override ? *line_override :
-            (line && drift.workspace_bytes ? drift_plan(config, slot, workers, true, 0, drift_headroom) : DriftPlan{});
+            (line && (public_workspace ? public_workspace->line_drift.workspace_bytes : drift.workspace_bytes) ?
+             drift_shape(true, 0, drift_headroom) : DriftPlan{});
         const auto supplemental = std::max({varying.workspace_bytes, drift.workspace_bytes,
             coherent_gain.workspace_bytes, varying_quiet, line, line_varying.workspace_bytes,
             line_drift.workspace_bytes, line_coherent_gain.workspace_bytes, evidence_supplement});
@@ -170,8 +217,9 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
                 varying, drift, coherent_gain, line, line_varying, line_drift, line_coherent_gain,
                 evidence_supplement, midpoint_support.status, helper_transfer_full_prior};
     };
-    auto baseline = build(drift_plan(config, slot, workers));
-    if (baseline.drift.status != "drift_public_bandwidth_exceeds_reduced_proposal_limit") return baseline;
+    auto baseline = build(drift_shape(false, 0, 0));
+    if (public_workspace || baseline.drift.status != "drift_public_bandwidth_exceeds_reduced_proposal_limit")
+        return baseline;
     const auto original = baseline;
     try {
         // Quote and execution callers must choose the same optional family,
@@ -216,6 +264,31 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
         preserved.drift.status = "drift_extension_shape_unavailable";
         return preserved;
     }
+}
+
+struct ProtectedScoringPlan {
+    ReceiverSlotPlan aperture;
+    StageWorkspace original, restricted;
+};
+
+ProtectedScoringPlan plan_protected_observation(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                                                 unsigned workers) {
+    const auto rows = validate(config, slot, workers);
+    require(!config.helper_enabled && !config.physical_rf_retuning && !config.bulk_backend,
+            "Protected Robust qualification requires Helper off and native CPU scoring without physical retuning");
+    ProtectedScoringPlan result{slot, {}, {}};
+    result.aperture.first_sample = slot.quiet_first_sample;
+    result.aperture.stop_sample = slot.quiet_stop_sample;
+    result.aperture.window_capture_lead_seconds -=
+        static_cast<long double>(slot.quiet_first_sample - slot.first_sample) / config.sample_rate_hz;
+    if (result.aperture.first_sample == result.aperture.stop_sample) {
+        result.restricted.input = checked_multiply(rows, sizeof(Complex) + sizeof(std::uint8_t));
+        result.restricted.total = checked_add(result.restricted.input, receipts_bytes);
+        return result;
+    }
+    result.original = plan_workspace(config, slot, workers, false);
+    result.restricted = plan_workspace(config, slot, workers, false, nullptr, &result.aperture, &result.original);
+    return result;
 }
 
 double round_even(double value) {
@@ -538,6 +611,11 @@ std::size_t receiver_slot_workspace(const ReceiverConfig& config, const Receiver
     return plan_workspace(config, slot, workers, false).total;
 }
 
+std::size_t receiver_detail::protected_slot_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                                                       unsigned workers) {
+    return plan_protected_observation(config, slot, workers).restricted.total;
+}
+
 receiver_detail::ReceiverDriftAdmission receiver_detail::receiver_drift_admission(
         const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers, bool overlap) {
     const auto plan = plan_workspace(config, slot, workers, overlap);
@@ -565,9 +643,13 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
                                std::size_t memory_limit_bytes, std::stop_token stop, ReceiverExecutor* shared,
                                bool may_overlap, const SlotEvidenceSupplement* supplement = nullptr,
                                EvidenceEvaluation evaluation = EvidenceEvaluation::bounded_competition,
-                               AffineGainEvaluation gain = AffineGainEvaluation::operational) {
+                               AffineGainEvaluation gain = AffineGainEvaluation::operational,
+                               AffineContinuationContext* continuation = nullptr,
+                               const ProtectedScoringPlan* protection = nullptr) {
     check_cancelled(stop);
-    const auto workspace = plan_workspace(config, slot, workers, may_overlap, supplement);
+    const auto workspace = protection ? protection->restricted : plan_workspace(config, slot, workers, may_overlap, supplement);
+    const auto& public_workspace = protection ? protection->original : workspace;
+    const auto& likelihood_slot = protection ? protection->aperture : slot;
     require(iq.size() == slot.stop_sample - slot.first_sample &&
         (valid.empty() || valid.size() == iq.size()), "Robust input differs from the full public observation");
     if (workspace.total > memory_limit_bytes)
@@ -599,6 +681,10 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     const bool overlap = may_overlap && score.all_valid && workspace.overlappable &&
                          workspace.overlapped_total <= memory_limit_bytes;
     score.workspace_peak_bytes = overlap ? workspace.overlapped_total : workspace.total;
+    if (likelihood_slot.first_sample == likelihood_slot.stop_sample) {
+        score.reason = "protected_observation_has_no_samples";
+        return score;
+    }
     // A standalone slot owns one pool for all of its stages.
     const auto owned = shared ? nullptr : std::make_unique<ReceiverExecutor>(std::max(1U, workers));
     const auto executor = shared ? shared : owned.get();
@@ -629,9 +715,8 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     auto began = Clock::now();
     CoarseResult coarse;
     auto search = config;
-    search.time_varying_channel = workspace.varying.block_rows || workspace.drift.workspace_bytes ||
-        workspace.coherent_gain.block_rows;
-    const auto midpoint_evaluation = workspace.varying.midpoint_tracking ?
+    search.time_varying_channel = uses_varying_coarse(public_workspace);
+    const auto midpoint_evaluation = public_workspace.varying.midpoint_tracking ?
         MidpointTimingEvaluation::short_tracking : MidpointTimingEvaluation::off;
     if (overlap) {
         score.helper_overlapped = true;
@@ -675,10 +760,22 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         return score;
     }
     const auto fine = prepare_fine_coordinates(config, slot, coarse);
+    // Full-window proposal selection can favor a strong neighbor. Its values
+    // contribute no likelihood. Every admitting statistic observes this
+    // fixed interval only, with whole transforms on its actual samples.
+    const auto likelihood_iq = iq.subspan(likelihood_slot.first_sample - slot.first_sample,
+                                          likelihood_slot.stop_sample - likelihood_slot.first_sample);
 
     began = Clock::now();
-    score_fine(config, slot, key, iq, fine.coordinates, coarse.projected_sample_rate_hz,
+    score_fine(config, likelihood_slot, key, likelihood_iq, fine.coordinates, coarse.projected_sample_rate_hz,
                coarse.clock_gap_ppm, workers, score, workspace.fine, stop, executor, gain);
+    if (protection) {
+        score.first_sample = slot.first_sample;
+        score.stop_sample = slot.stop_sample;
+        // The full coarse pass consumed the entire observation. Fine
+        // completion still requires scoring all of the protected aperture.
+        if (score.complete && score.consumed_samples == likelihood_iq.size()) score.consumed_samples = iq.size();
+    }
     const bool varying = workspace.varying.block_rows != 0;
     const auto drift = workspace.drift.workspace_bytes ? &workspace.drift : nullptr;
     const auto separation = config.time_varying_channel ? config.time_varying_minimum_bit_log_separation : 0.;
@@ -732,15 +829,16 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     }
     const auto selected = fine.varying_coordinates.empty() ? std::span(fine.coordinates) :
                                                             std::span(fine.varying_coordinates);
-    const auto varying_prior = varying ? &varying_grid : nullptr;
-    const auto coherent_gain_prior = workspace.coherent_gain.block_rows ? &varying_grid : nullptr;
+    const auto varying_prior = public_workspace.varying.block_rows ? &varying_grid : nullptr;
+    const auto coherent_gain_prior = public_workspace.coherent_gain.block_rows ? &varying_grid : nullptr;
+    const auto drift_prior = public_workspace.drift.workspace_bytes ? &public_workspace.drift : nullptr;
     const bool has_supplement = workspace.evidence_supplement != 0;
     std::array<double, 2> supplement_evidence{
         -std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()};
     // The weight is reserved from the first classifier onward. Skipping a
     // branch after a sufficient earlier result never restores that mass.
     const auto ordinary_scores = [&](const ReceiverSlotScore& target) {
-        auto ordinary = varying_operational_scores(target, fine.grid, varying_prior, drift,
+        auto ordinary = varying_operational_scores(target, fine.grid, varying_prior, drift_prior,
                                                    true, coherent_gain_prior);
         if (has_supplement) {
             const auto old_weight = std::log1p(-supplement->fixed_weight);
@@ -754,7 +852,7 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     const auto add_line_branch = [&](ReceiverSlotScore& target, const ReceiverSlotScore& residual,
                                      double line_log_evidence) {
         const auto ordinary = ordinary_scores(target);
-        auto residual_score = varying_operational_scores(residual, fine.grid, varying_prior, drift,
+        auto residual_score = varying_operational_scores(residual, fine.grid, varying_prior, drift_prior,
                                                           false, coherent_gain_prior);
         // The extension is not qualified under a retained coherent-line
         // nuisance. Its reserved mass stays absent, on both old branches.
@@ -774,10 +872,10 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         classify_operational_scores(target, combined, separation);
     };
     const auto classify_supplement = [&] {
-        if (workspace.line) add_line_branch(score, score, -std::numeric_limits<double>::infinity());
+        if (public_workspace.line) add_line_branch(score, score, -std::numeric_limits<double>::infinity());
         else if (has_supplement || coherent_gain_prior)
             classify_operational_scores(score, ordinary_scores(score), separation);
-        else classify_varying_slot(score, fine.grid, varying_prior, drift, separation);
+        else classify_varying_slot(score, fine.grid, varying_prior, drift_prior, separation);
     };
     // The slot's varying batch receipts cover its ordinary, coherent-gain
     // and line-conditioned varying stages: phase seconds and batches add,
@@ -795,7 +893,7 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     const auto score_coherent_gain = [&](const VaryingFinePlan& plan, ReceiverSlotScore& target,
                                          const LineAtom* line) {
         ReceiverSlotScore coherent;
-        score_varying_fine(config, slot, key, plan, iq, selected, fine.segmented_timing_coordinates,
+        score_varying_fine(config, likelihood_slot, key, plan, likelihood_iq, selected, fine.segmented_timing_coordinates,
             coarse.projected_sample_rate_hz, coarse.clock_gap_ppm, workers, coherent, stop, *executor, line);
         add_varying_batches(coherent);
         target.coherent_gain_candidates = coherent.varying_candidates;
@@ -817,18 +915,18 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         const auto raw_timing = workspace.varying.track_frequency ?
             prepare_short_tracking_timing(config, slot, coarse, fine.grid) : std::vector<FineCoordinate>{};
         const auto timing = raw_timing.empty() ? std::span(fine.segmented_timing_coordinates) : std::span(raw_timing);
-        score_varying_fine(config, slot, key, workspace.varying, iq, selected,
+        score_varying_fine(config, likelihood_slot, key, workspace.varying, likelihood_iq, selected,
                            timing,
                            coarse.projected_sample_rate_hz, coarse.clock_gap_ppm, workers, score, stop, *executor,
                            nullptr, nullptr, nullptr, midpoint ? &*midpoint : nullptr);
         classify_supplement();
     }
-    if (coherent_gain_prior && (compare_all || score.decision != SlotDecision::data)) {
+    if (workspace.coherent_gain.block_rows && (compare_all || score.decision != SlotDecision::data)) {
         score_coherent_gain(workspace.coherent_gain, score, nullptr);
         classify_supplement();
-    } else if (coherent_gain_prior) score.coherent_gain_status = "earlier_evidence_sufficient";
+    } else if (workspace.coherent_gain.block_rows) score.coherent_gain_status = "earlier_evidence_sufficient";
     if (drift && (compare_all || score.decision != SlotDecision::data)) {
-        score_drift_fine(config, slot, key, *drift, iq, selected, fine.epoch_timing_coordinates,
+        score_drift_fine(config, likelihood_slot, key, *drift, likelihood_iq, selected, fine.epoch_timing_coordinates,
                          workers, score, stop, *executor);
         classify_supplement();
     } else if (drift) score.drift_status = "earlier_evidence_sufficient";
@@ -862,13 +960,13 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         // limit in both phases of line selection.
         const auto line_threshold = score.operational_passes_conditional_bound ?
             receiver_operational_threshold() : final_threshold;
-        if (const auto line = find_varying_line(config, slot, iq, stop, line_threshold)) {
+        if (const auto line = find_varying_line(config, likelihood_slot, likelihood_iq, stop, line_threshold)) {
             if (has_supplement)
                 supplement_evidence.fill(-std::numeric_limits<double>::infinity());
             ReceiverSlotScore residual;
             residual.fine_candidates = score.fine_candidates;
             if (workspace.line_varying.block_rows) {
-                score_varying_fine(config, slot, key, workspace.line_varying, iq, selected,
+                score_varying_fine(config, likelihood_slot, key, workspace.line_varying, likelihood_iq, selected,
                     fine.segmented_timing_coordinates,
                     coarse.projected_sample_rate_hz, coarse.clock_gap_ppm, workers, residual, stop, *executor, &*line);
                 add_varying_batches(residual);
@@ -879,7 +977,7 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
                 add_line_branch(score, residual, line->log_weighted_evidence);
             }
             if (workspace.line_drift.workspace_bytes && (compare_all || score.decision != SlotDecision::data)) {
-                score_drift_fine(config, slot, key, workspace.line_drift, iq, selected, fine.epoch_timing_coordinates,
+                score_drift_fine(config, likelihood_slot, key, workspace.line_drift, likelihood_iq, selected, fine.epoch_timing_coordinates,
                     workers, residual, stop, *executor, &*line);
                 score.drift_line_status = workspace.line_drift.status;
                 score.drift_line_stage_workers = residual.drift_stage_workers;
@@ -912,17 +1010,34 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         else {
             score.decision = SlotDecision::ambiguous;
             score.reason = "coherent_line_in_public_data_aperture";
-            score_varying_quiet(config, slot, iq, score, stop, workers, *executor);
+            score_varying_quiet(config, likelihood_slot, likelihood_iq, score, stop, workers, *executor);
         }
     }
     if (config.time_varying_channel && score.decision == SlotDecision::quiet) {
-        score_varying_quiet(config, slot, iq, score, stop, workers, *executor);
+        score_varying_quiet(config, likelihood_slot, likelihood_iq, score, stop, workers, *executor);
         if (!score.varying_quiet_modes || score.varying_quiet_energy > score.varying_quiet_threshold) {
             score.decision = SlotDecision::ambiguous;
             score.reason = score.varying_quiet_status;
         }
     }
     apply_wrong_key_admission(score, config.wrong_key_admission);
+    if (continuation && score.decision != SlotDecision::data && score.complete && score.all_valid &&
+        score.zero_h0_verified && !score.wrong_key_rejected && !retained_line && !has_supplement &&
+        fine.coordinates.size() < maximum_fine_coordinates) {
+        continuation->eligible = true;
+        continuation->check_line = workspace.line != 0;
+        continuation->scratch_bytes = std::max(workspace.fine, workspace.line);
+        continuation->ordinary_count = fine.coordinates.size();
+        std::ranges::copy(fine.coordinates, continuation->ordinary.begin());
+        continuation->grid = fine.grid;
+        continuation->projected_sample_rate_hz = coarse.projected_sample_rate_hz;
+        continuation->coarse_clock_gap_ppm = coarse.clock_gap_ppm;
+        // Match the fixed family mixture and the absent-line branch of
+        // ordinary admission. Preserve the full affine grid's atom mass.
+        continuation->atom_log_mass = -fine.grid.log_count() -
+            std::log(1. + (varying_prior != nullptr) + (drift != nullptr) + (coherent_gain_prior != nullptr)) -
+            (workspace.line ? std::numbers::ln2 : 0.);
+    }
     score.fine_seconds = elapsed(began);
     check_cancelled(stop);
     return score;
@@ -933,6 +1048,96 @@ ReceiverSlotScore receiver_detail::score_slot(const ReceiverConfig& config, cons
         const Crypto& key, std::span<const Complex> iq, std::span<const std::uint8_t> valid, unsigned workers,
         std::size_t memory_limit_bytes, std::stop_token stop, ReceiverExecutor* shared) {
     return score_stages(config, slot, key, iq, valid, workers, memory_limit_bytes, stop, shared, true);
+}
+
+ReceiverSlotScore receiver_detail::score_protected_slot(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+        const Crypto& key, std::span<const Complex> iq, std::span<const std::uint8_t> valid, unsigned workers,
+        std::size_t memory_limit_bytes, std::stop_token stop, ReceiverExecutor* executor) {
+    check_cancelled(stop);
+    const auto plan = plan_protected_observation(config, slot, workers);
+    return score_stages(config, slot, key, iq, valid, workers, memory_limit_bytes, stop, executor, false,
+                        nullptr, EvidenceEvaluation::bounded_competition, AffineGainEvaluation::operational,
+                        nullptr, &plan);
+}
+
+ReceiverSlotScore receiver_detail::score_slot_for_continuation(const ReceiverConfig& config,
+        const ReceiverSlotPlan& slot, const Crypto& key, std::span<const Complex> iq,
+        std::span<const std::uint8_t> valid, unsigned workers, std::size_t memory_limit_bytes,
+        std::stop_token stop, ReceiverExecutor* executor, AffineContinuationContext& continuation) {
+    continuation = {};
+    return score_stages(config, slot, key, iq, valid, workers, memory_limit_bytes, stop, executor, true,
+                        nullptr, EvidenceEvaluation::bounded_competition, AffineGainEvaluation::operational,
+                        &continuation);
+}
+
+ReceiverSlotScore receiver_detail::continue_affine_slot(const ReceiverConfig& config,
+        const ReceiverSlotPlan& slot, const Crypto& key, std::span<const Complex> iq,
+        unsigned workers, std::size_t scratch_limit_bytes, std::stop_token stop, ReceiverExecutor* executor,
+        const AffineContinuationContext& context, const ReceiverSlotScore::TimingProposal& predecessor,
+        ReceiverSlotScore baseline) {
+    check_cancelled(stop);
+    if (!context.eligible || scratch_limit_bytes < context.scratch_bytes || baseline.decision == SlotDecision::data ||
+        baseline.wrong_key_rejected || !baseline.complete || !baseline.all_valid || !baseline.zero_h0_verified)
+        return baseline;
+    require(context.grid && context.ordinary_count == baseline.fine_candidates &&
+        context.ordinary_count < maximum_fine_coordinates && baseline.index == slot.index &&
+        baseline.first_sample == slot.first_sample && baseline.stop_sample == slot.stop_sample &&
+        iq.size() == slot.stop_sample - slot.first_sample, "invalid Robust affine continuation context");
+    const auto& grid = *context.grid;
+    const auto frequency_limit = grid.frequency_radius * grid.frequency_step;
+    if (!(predecessor.arrival_seconds >= grid.lower && predecessor.arrival_seconds <= grid.upper &&
+          std::abs(predecessor.frequency_hz) <= frequency_limit &&
+          std::abs(predecessor.clock_ppm) <= grid.clock_bound) ||
+        std::ranges::find(receiver_epoch_offsets, predecessor.epoch_offset_seconds) == receiver_epoch_offsets.end())
+        return baseline;
+    const auto coordinate = snap({predecessor.epoch_offset_seconds, predecessor.arrival_seconds,
+        predecessor.frequency_hz, predecessor.clock_ppm}, grid);
+    const auto ordinary = std::span(context.ordinary).first(context.ordinary_count);
+    if (std::ranges::find(ordinary, coordinate) != ordinary.end()) return baseline;
+
+    // Selection by a predecessor is allowed even if the raw windows overlap:
+    // only the nominated index is reused. Fresh likelihood at this unique
+    // cell belongs to the same fixed full-grid mixture as the ordinary bank.
+    const auto began = Clock::now();
+    ReceiverSlotScore atom;
+    score_fine(config, slot, key, iq, std::span(&coordinate, 1), context.projected_sample_rate_hz,
+               context.coarse_clock_gap_ppm, workers, atom, context.scratch_bytes, stop, executor);
+    baseline.affine_continuation_attempted = true;
+    baseline.basis_rows = checked_add(baseline.basis_rows, atom.basis_rows);
+    const auto finish = [&](ReceiverSlotScore score) {
+        score.fine_seconds += elapsed(began);
+        check_cancelled(stop);
+        return score;
+    };
+    if (!atom.complete || !atom.all_valid || !atom.zero_h0_verified) return finish(std::move(baseline));
+    ReceiverSlotScore candidate = baseline;
+    std::array<double, 2> operational{};
+    for (std::size_t bit = 0; bit < operational.size(); ++bit)
+        operational[bit] = log_add(baseline.operational_bit_evidence[bit], atom.bit_evidence[bit] + context.atom_log_mass);
+    classify_operational_scores(candidate, operational, baseline.operational_minimum_bit_log_separation,
+                                std::nullopt, baseline.operational_threshold);
+    if (candidate.decision != SlotDecision::data) return finish(std::move(baseline));
+    if (context.check_line) {
+        // A previously weak slot need not have run nuisance selection. If
+        // this nomination reveals a line, leave the canonical answer intact.
+        const auto threshold = candidate.operational_log_e >= receiver_operational_threshold() ?
+            receiver_operational_threshold() : baseline.operational_threshold;
+        if (find_varying_line(config, slot, iq, stop, threshold)) return finish(std::move(baseline));
+    }
+    apply_wrong_key_admission(candidate, config.wrong_key_admission);
+    if (candidate.decision != SlotDecision::data) return finish(std::move(baseline));
+    const auto old_count = std::log(static_cast<double>(candidate.fine_candidates));
+    const auto new_count = std::log(static_cast<double>(++candidate.fine_candidates));
+    for (std::size_t bit = 0; bit < operational.size(); ++bit) {
+        const auto old_total = candidate.bit_evidence[bit] + old_count;
+        if (atom.bit_evidence[bit] > old_total || !candidate.affine_tracking[bit])
+            candidate.affine_tracking[bit] = atom.affine_tracking[bit];
+        candidate.bit_evidence[bit] = log_add(old_total, atom.bit_evidence[bit]) - new_count;
+    }
+    candidate.selected_prior_mass = std::exp(new_count - grid.log_count());
+    candidate.affine_continuation_admitted = true;
+    candidate.reason = "continued_public_affine_coordinate";
+    return finish(std::move(candidate));
 }
 
 ReceiverSlotScore receiver_detail::score_slot_with_supplement(

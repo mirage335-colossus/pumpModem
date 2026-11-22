@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <exception>
 #include <iostream>
 #include <limits>
 #include <stop_token>
@@ -141,6 +142,157 @@ void indexed_public_calendar() {
             "indexed public calendar multiplication overflow accepted");
     rejects([&]{p.slot_at({std::numeric_limits<std::uint64_t>::max()-100,0},2);},
             "indexed public calendar addition overflow accepted");
+}
+
+void continuous_data_calendar() {
+    auto packed=config(8,0,false);
+    packed.bit_samples+=371;
+    packed.support_samples+=371;
+    packed.continuous_data=true;
+    const HelperBurstPlan plan(packed);
+    const HelperBurstCoordinate earliest{epoch+1,73};
+    const auto first=plan.first_slot(earliest);
+    check(first.support_begin==HelperBurstCoordinate{epoch+30,0},
+          "continuous DATA changed the first UTC anchor");
+    check(plan.minimum_stride_samples()==packed.bit_samples,
+          "continuous DATA stride changed the active sample count");
+    auto current=first;
+    for(std::uint64_t i=0;i<128;++i) {
+        check(plan.slot_at(earliest,i)==current,"continuous indexing lost the sample phase");
+        const auto next=plan.successor(current);
+        check(current.pattern_end==next.pattern_begin && current.support_end>next.support_begin,
+              "continuous DATA inserted a gap or discarded padded template support");
+        current=next;
+    }
+    constexpr std::uint64_t far_index=1'000'003;
+    const auto far=plan.slot_at(earliest,far_index);
+    check(plan.distance(first.pattern_begin,far.pattern_begin)==far_index*packed.bit_samples &&
+          plan.successor(far)==plan.slot_at(earliest,far_index+1),
+          "continuous DATA lost exact spacing at a distant ordinal");
+    rejects([&]{plan.slot_at(earliest,std::numeric_limits<std::uint64_t>::max());},
+            "continuous DATA accepted a source sample overflow");
+    packed.helper_enabled=true;
+    rejects([&]{HelperBurstPlan invalid(packed);},"continuous DATA bypassed Helper lead constraints");
+    packed.helper_enabled=false;
+    packed.wait_bits=1;
+    rejects([&]{HelperBurstPlan invalid(packed);},"continuous DATA discarded a fixed wait");
+    packed.wait_bits=0;
+    packed.random_extra_bits=1;
+    rejects([&]{HelperBurstPlan invalid(packed);},"continuous DATA discarded a random wait");
+
+    PublicProfileConfig profile;
+    profile.format.sample_rate=6000;
+    profile.format.epoch=epoch;
+    profile.format.symbol_ordinal=std::numeric_limits<std::uint64_t>::max()-3;
+    profile.continuous_data=true;
+    profile.capture_lead_seconds=2;
+    const PublicProfile clear(profile);
+    check(clear.last_slot()==3 && clear.slot(3).symbol_ordinal==std::numeric_limits<std::uint64_t>::max(),
+          "continuous DATA ignored public ordinal exhaustion");
+    const auto boundary=clear.transmit_slot(2).helper_begin;
+    check(clear.first_slot_not_before(boundary)==2 &&
+          clear.first_slot_not_before(clear.calendar().add(boundary,1))==3,
+          "continuous start lookup rounded off the sample grid");
+    check(clear.maximum_slot_opportunities_per_day()>1441,
+          "daily presence accounting kept the scheduled minimum stride");
+    auto fractional_profile=profile;
+    fractional_profile.format.inner_rate_hz=3.6;
+    fractional_profile.format.added_symbols=1;
+    fractional_profile.format.bit_seconds=160.4;
+    const PublicProfile fractional(fractional_profile);
+    const double seconds=fractional.geometry().bit_seconds;
+    const double binary64_rows=seconds*6000.;
+    check(binary64_rows==962400. && std::fma(seconds,6000.,-binary64_rows)>0 &&
+          fractional.calendar().minimum_stride_samples()==962401,
+          "continuous DATA rounded a fractional tail sample into the neighboring slot");
+    profile.arrival_low_seconds=-.5;
+    profile.arrival_high_seconds=.5;
+    profile.receiver_filter_halo_samples=17;
+    const PublicProfile wide(profile);
+    const auto stationary=clear.slot(1),crowded=wide.slot(1);
+    check(crowded.observation.first<stationary.observation.first &&
+          crowded.observation.stop>stationary.observation.stop &&
+          crowded.quiet_aperture.size()<stationary.quiet_aperture.size(),
+          "continuous receive window or quiet aperture ignored adjacent signal uncertainty");
+    check(crowded.quiet_aperture.first==crowded.previous_signal_stop &&
+          crowded.quiet_aperture.stop==crowded.next_signal_first,
+          "continuous quiet aperture extended into a modeled neighboring DATA tail");
+    profile.format.epoch=(std::uint64_t{1}<<32)-500;
+    profile.format.symbol_ordinal=0;
+    const PublicProfile near_end(profile);
+    const auto last=near_end.last_slot();
+    (void)near_end.transmit_slot(last);
+    rejects([&]{near_end.transmit_slot(last+1);},"continuous recurrence exceeded the keyed epoch limit");
+}
+
+void continuous_emission_boundaries() {
+    PublicProfileConfig config;
+    config.format.sample_rate=1500;
+    config.format.epoch=epoch;
+    config.format.inner_rate_hz=120;
+    config.format.bit_seconds=1.2;
+    config.data_if_hz=375;
+    config.continuous_data=true;
+    const PublicProfile profile(config);
+    const auto key=datapump::Crypto::amateur();
+    const auto offset=[&](HelperBurstCoordinate point) {
+        return profile.calendar().distance(profile.origin(),point);
+    };
+    const auto first=profile.slot(0),second=profile.slot(1);
+    const auto start=offset(first.tx.pattern_begin),boundary=offset(second.tx.pattern_begin);
+    const auto stop=offset(second.tx.pattern_end),end=offset(second.tx.support_end);
+    check(boundary==offset(first.tx.pattern_end) && boundary-start==stop-boundary,
+          "continuous emitter fixture has an inter-bit gap");
+    check(end<65536,"continuous emitter fixture exceeds its sample budget");
+    constexpr std::size_t chunks=997;
+    for(std::uint8_t a:{0,1})for(std::uint8_t b:{0,1}) {
+        const std::array bits{a,b};
+        Emission direct(profile,key,EmissionOptions{.bits=bits});
+        std::array<unsigned,2> resolved{};
+        Emission staged(profile,key,EmissionOptions{.slot_count=2,.bit_at=[&](auto i) {
+            ++resolved.at(i);
+            return bits.at(i);
+        }});
+        auto source=staged.source();
+        check(source.geometry.source_samples==end,"continuous DATA source retained intra-message padding");
+        std::vector<Complex> block(end);
+        for(std::size_t i=0;i<block.size();) {
+            const auto count=std::min(chunks,block.size()-i);
+            check(direct.read(std::span(block).subspan(i,count))==count,
+                  "continuous DATA ended before its final support");
+            i+=count;
+        }
+        PatternSource first_pattern(profile.basis_format(first),key,a);
+        PatternSource second_pattern(profile.basis_format(second),key,b);
+        const auto gain=direct.report().data_gain;
+        for(std::uint64_t i=0;i<end;++i) {
+            Complex expected{};
+            if(i>=start && i<boundary)expected=first_pattern.sample_at(i-offset(first.tx.support_begin))*gain;
+            if(i>=boundary && i<stop)expected=second_pattern.sample_at(i-offset(second.tx.support_begin))*gain;
+            check(std::abs(block[i]-expected)<1e-14,
+                  "continuous DATA changed the addressed waveform, taper, or edge silence");
+        }
+        check(direct.report().data_energy>0 && block[boundary]==Complex{},
+              "continuous DATA lost its intended boundary taper or active energy");
+        source.readers->open(2,chunks);
+        rejects([&]{source.readers->plan(0,chunks+1);},"staged DATA exceeded its admitted sample count");
+        std::exception_ptr error;
+        for(std::uint64_t i=0;i<end;) {
+            const auto count=std::min<std::uint64_t>(chunks,end-i);
+            source.readers->plan(i,count);
+            for(std::uint64_t j=0;j<count;++j)
+                check(source.readers->evaluate(j%2,i+j)==block[i+j],
+                      "staged continuous source changed samples across a slot transition");
+            check(source.readers->accept(count,false,error)==count && !error,
+                  "staged continuous source rejected valid samples");
+            i+=count;
+        }
+        check(resolved==std::array<unsigned,2>{1,1},
+              "staged continuous source resolved a DATA bit once per halo instead of once per slot");
+        check(staged.report().data_energy==direct.report().data_energy &&
+              staged.report().generated_samples==direct.report().generated_samples,
+              "staged continuous source changed energy or cursor accounting");
+    }
 }
 
 void random_extra_waits() {
@@ -342,7 +494,8 @@ void rejection_boundaries() {
 int main() {
     try {
         grid_and_geometry();waits_and_quiet_intervals();protected_tail();
-        indexed_public_calendar();random_extra_waits();public_epoch_and_ordinal_boundaries();
+        indexed_public_calendar();continuous_data_calendar();continuous_emission_boundaries();
+        random_extra_waits();public_epoch_and_ordinal_boundaries();
         emission_modes_and_cancellation();centered_receiver_filter_support();rejection_boundaries();
         std::cout<<"triad Helper whole-bit calendar checks passed\n";
     } catch(const std::exception& e) {
