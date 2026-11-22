@@ -16,6 +16,7 @@ struct OpenClNvfp4Workspace {
 };
 
 enum class OpenClFineMethod { staged, resident_fp4, resident_fft };
+enum class OpenClCoarseFrontier { expanded, compact };
 
 // Arithmetic of resident dense tile rendering and template mapping. FP32
 // keeps FP64 tiles, time base and support decisions, and reduces each row's

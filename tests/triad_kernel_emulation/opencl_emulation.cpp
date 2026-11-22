@@ -281,6 +281,7 @@ const std::vector<Entry>& registry() {
         describe("coarse_rotate_observation", coarse_rotate_observation),
         describe("coarse_rescore_peaks", coarse_rescore_peaks),
         describe("coarse_rescore_peaks_fp32", coarse_rescore_peaks_fp32),
+        describe("coarse_finalize_peaks", coarse_finalize_peaks),
     };
     return entries;
 }

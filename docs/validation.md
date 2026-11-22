@@ -45,6 +45,115 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Review of changes since `e76fc90` — 21 November 2026
+
+The review covered the twelve commits through `d1d3b2a7`, including coarse
+and fine DSP, native CUDA/OpenCL and Vulkan stage routing, simulation, build
+and probe tooling, and the maintained experimental record. The original 20
+November dense-coarse batch receipts confirm a wrong-bit change for seed
+950206. Later runs reported agreement because both routes returned the wrong
+bit on that input. These observations are source- and route-specific.
+
+The issue reproduced with the same capture on one `d1d3b2a7` probe build
+on a full RTX PRO 6000 Blackwell Server Edition (97,887 MiB, SM 12.0,
+MIG disabled, driver 595.112.07). At 24 software workers, the explicit
+Vulkan FP32 FFT route returned the transmitted zero, while the automatic and
+explicit dense routes returned one. The explicit comparison used the same
+resident NVFP4 fine route. Replacing device-synthesized templates with
+native templates and replacing FP32 partial rescoring with FP64 accumulation
+each preserved the wrong dense-route bit. The test used seed 950206 and IQ
+SHA-256 `6e6f96ed7d3a36c0662af132906500dea8970847810157c1d4b7d7fb042d929b`.
+The probe was built with GCC 13.3.0 and NVCC 12.8.93 on EPYC 9554. The host
+reported 27 effective hardware threads and the default 54 receiver workers.
+
+The first fix kept eight FP4 interior maxima, the former separated picks,
+both endpoints and their two-lag neighborhoods until rescoring. It recovered
+the correct zero at the same 3,951,090 public score rows. On that automatic
+slot, rescored lags rose from 2,340 to 48,389 and coarse wall time from 24.1
+to 42.0 ms. On a broad 3.6 Hz one-ray GPSDO/IC-7100 holdout at 24 workers,
+the same expansion over 10,505,820 workspace-frequency pairs increased
+coarse time from 19.40 to 128.17 s. The matched one-ray FFT control took
+89.30 s. All three returned the correct zero. This ruled out unconditional
+expansion on the wider shape.
+
+The final route uses the radius-two shortlist through `2^30` template rows
+summed over all workspace-frequency pairs, then switches to at most eight
+rescored centers per pair. The cap is a conservative work bound chosen after
+the wide case above. No crossover timing was measured. The final build's
+native source manifest is `7b98f3d7c0746dcaf0285dad4e0d06b7dca80b1fb08b221cd83a0ae089608ded`.
+It decoded zero on the reproduced failure using both dense and automatic
+routing, with automatic coarse time 41.4 ms and slot time 122.6 ms versus
+24.1 and 103.4 ms on the original dense route. The final wide route scored
+the same 35,478,154,140 public rows and decoded zero in 28.48 s, including
+28.00 s coarse. It rescored 56,942,742 centers, compared with 21,011,640 in
+the original two-entry route and 479,163,475 with unconditional expansion.
+The wide device lease increased from 136,974,080 to 138,816,000 bytes.
+The wide fixture uses the [3.6 Hz matched recipe](triad-gpu-optimization.md#reproduce-the-matched-blackwell-runs)
+with `--data-power-w .002 --shift-oscillator ic-7100 --spread-preset none
+--selective-perturbation off --seed 950225 --workers 24 --deadline-ms 170000`.
+Use `--backend gpu` and add `--opencl-coarse-one-ray off` for the FFT
+comparison. The input hash begins `72a30d2f5280fc6b` on all three routes.
+
+A private discriminator forced the compact selector on the original 950206
+capture. It decoded zero with all 3,951,090 public score rows, 6,954 lags
+rescored and 25.54 ms coarse time. The production cutoff stayed unchanged.
+A natural two-ray control at 36 Hz and 3.6 MHz with GPSDO/IC-7100 clocks,
+HF Worst and seed 950228 planned 1,482,111,306 template rows over its
+workspace-frequency pairs. Both automatic builds reported `varying-passband`
+and scored 1,085,955,546 rows on Vulkan FFT, decoding zero. This verifies the
+existing fallback for that geometry. The forced matched pair and component
+sweep supply two-ray compact evidence.
+
+The bounded comparison used two historical severe seeds, two further
+seeds replayed as active and noise, a diffuse-channel input, an unsuccessful
+Helper acquisition, and a five-slot configured-calendar message with
+scored quiet and an EOF control. The wide one-ray test was one matched slot
+per route. These checks compare route behavior, work and observed elapsed
+time on the declared inputs. The seeds do not establish rare-event rates
+or sustained receiver service. The diffuse-channel input yielded the same
+wrong bit under Current with the original dense, expanded dense and native
+CPU scorers on matching IQ. On severe seed 950211, Current kept the correct
+bit with both dense scorers. Guarded changed from DATA to ambiguous with
+expansion, matching the explicit FFT control on that capture.
+The diffuse wrong bit is present before this repair. Older revisions record
+misses in the broader failure family on other Gaussian and severe GUI inputs.
+The provenance of this exact diffuse seed is limited to the matched builds
+in this review. [Earlier Gaussian holdout](#cpu-only-cloud-trials-at-2-mw).
+
+The final active and noise holdouts matched the FFT route's Current
+decisions. A 36 Hz one-ray noise slot spent about 43 ms attempting Helper
+and returned `no_coarse_pilot` on both builds. It retained all 98,982 public
+coarse rows and scored quiet. That complete slot took 0.283 s on the original
+and 0.282 s on the final route. The five-slot message and quiet/EOF controls
+passed with all 54 receiver workers on both builds. Elapsed receiver stream
+service was 0.347 s on the original and 0.408 s on the final route. These are
+individual observations, with channel simulation time recorded separately.
+
+The final Blackwell NVFP4 component test and host emulation each retained
+all 93 one-ray and all 83 two-ray planted arrivals that the higher-precision
+control selected, with both shortlist widths. This fixed seeded sweep
+includes noiseless scores 24, 16, 12, 10 and 8. The complete native lab
+worker also built and passed its no-socket protocol self-check on the pod.
+
+Local CPU/CLI `./build.sh test triad` passed 46 of 46 in a serial run with
+the system Python interpreter. Four native receiver tests timed out in a
+prior six-job run and passed individually in a serial rerun. The GUI group
+passed 32 of 32. The receipt comparator now distinguishes missing fields,
+empty containers and keys that look like path separators, with five focused
+Python checks in the triad group.
+
+This entry retains the technical evidence needed to reproduce the matched
+cases and understand the rejected unconditional expansion. The uploaded
+source closure was 2.3 MiB. The case summaries supersede the temporary build
+archives and duplicate working receipts.
+
+The [operating guide](indexes/robust.md#how-to-read-the-evidence) connects
+these checks to the local resilience studies and appraisal. The severe
+synthetic channel is one family of realizations. Low-SNR acquisition,
+interference and off-grid timing require their own qualification. Finite
+candidate pools need weak-arrival and complete-service checks even when
+their aggregate numerical error is small.
+
 ## Native finite-duplex and RunPod lab — 18 November 2026
 
 This checkpoint uses working-tree changes over baseline
@@ -11972,8 +12081,10 @@ products with FP64 reconstruction and doubled packing were fully charged.
 Three-pair active fresh-owner means were 4.482 ms versus FFT 12.183 ms for the
 769-sample shape, and 3.534 ms versus 8.480 ms for the 2,048-sample shape. Those
 favorable active costs do not fix the noise failure or demonstrate an advantage
-over qualified INT8. There is no current FP4 option. The successful historical
-NVFP4 results remain applicable to their original implementation and workload.
+over qualified INT8. The cuBLASLt coarse correlation no longer offers FP4.
+The later [dense OpenCL NVFP4 search](#blackwell-dense-fp4-coarse-search--20-november-2026)
+uses a different implementation and qualification. The historical NVFP4
+results apply to their original implementation and workload.
 
 An intervening FP4 retry is invalid
 as patched-source evidence: a timestamp-preserving bundle overlay left changed

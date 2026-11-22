@@ -1459,10 +1459,10 @@ rays, or of four workspaces of one ray. One block scores one frequency, one
 bank tile and 512 arrivals. The FP32 quadratic score of every arrival is
 formed in the epilogue, from each ray's partner lane for two rays, and for
 one ray as the scalar inverse Gram times the correlation's energy, with no
-partner lane. The exact
-arrival frontier of those scores is selected on the device, with the native
-separation rule. Each retained arrival is then rescored in FP32 with FP64
-accumulation from the unquantized resident bank. `--opencl-coarse-rescore fp32`
+partner lane. The device selects a shortlist of FP4 peaks and rescores its
+lags from the unquantized resident bank. It then applies the native
+separation and ranking rule to the eligible rescored peaks and publishes
+up to two arrivals per workspace and frequency. `--opencl-coarse-rescore fp32`
 instead adds FP32 products in FP32 partial sums of 64 rows, each added in
 FP64 as the FIR adds its taps, with an FP64 tree over the block; its
 precision labels and reasons say `fp32_partial`, and receipts count the
@@ -1472,12 +1472,21 @@ each row's best score of the FP64 accumulation on 14 synthesis geometries.
 On the device the partial sums cut rescoring from 2.64 to 0.89 ms per
 matched slot with equal decisions and bits, so they are the default
 ([qualification](validation.md#blackwell-qualification-of-the-offload-routes--20-november-2026)); `--opencl-coarse-rescore fp64` keeps the control.
-Rescoring reads one FP32
-rotation of the observation per frequency of the tile, which the device
-writes once with the statements the rescoring loop formerly evaluated for
-every arrival and row. Only the 40-byte frontier of each workspace and
-frequency is read back. FP4 therefore decides
-which arrivals are kept. It never supplies a score the receiver uses.
+Rescoring reads one FP32 rotation of the observation per frequency of the
+tile. The device writes it once. It returns a 48-byte record per workspace
+and frequency with the two-arrival frontier and the number of lags rescored.
+The fine receiver receives scores computed from the unquantized bank. A peak
+outside the shortlist or its sampled neighborhoods can still be missed.
+
+When workspaces × frequencies × template rows is at most `2^30`, the
+shortlist includes eight FP4 interior maxima, the original separated picks,
+both endpoints and unique samples within two lags of each proposal. Above
+that work bound it keeps four interior maxima, the original separated picks
+and endpoints eligible under FP4. The larger search rescores centers only,
+up to eight per workspace and frequency. It still scores every public row.
+This work bound keeps the finite-neighborhood search from multiplying
+rescoring across a very wide prior. Timing and retention at the boundary
+are separate from the evidence for the two measured shapes.
 
 **Device template bank.** The exact route's bank is a function of the keyed
 chip coefficients, the pulse table and public geometry. The session uploads
@@ -1599,9 +1608,9 @@ on by default; `--opencl-coarse-one-ray off` with `--backend gpu` keeps the
 FFT route and counts `one-ray-unqualified`). An explicit `nvfp4` request
 always scores them.
 
-FP4 selection keeps the two best arrivals of each workspace and frequency,
-so its risk is a weak true arrival near the noise maximum. The component
-test's predeclared sweep plants one arrival per workspace in disjoint
+The original two-arrival FP4 shortlist could lose a weak true arrival near
+the noise maximum. The component test's predeclared sweep plants one arrival
+per workspace in disjoint
 stretches of unit noise, 150 rows and 512 arrivals, at noiseless scores of
 24, 16, 12, 10 and 8, twenty trials per level and ray count. Its rule: FP4
 keeps every arrival that the exact FP64 frontier keeps at 24 and 16, and at
@@ -1842,12 +1851,12 @@ for the matched fixtures:
    averaged 3.0 s per receiver slot against 0.45–0.81 s alone. Owners inside
    one process overlap on the device without that cost: the five-slot
    message took 1.05–1.17 s.
-5. **The arrival frontier.** Two arrivals per row are retained by FP4 score
-   before rescoring. On twelve severe seeds that changed one policy outcome
-   on each of two inputs, one of them to the wrong bit under the current
-   policy. Retaining more arrivals before the FP32 pass would cost little,
-   would bring the retained set close to that of exact scores, and may let
-   the conditioning guard relax. It needs device requalification.
+5. **The arrival frontier.** The original two-arrival shortlist changed
+   a policy outcome on each of two severe inputs in the twelve-seed batch,
+   including one wrong bit under Current. Rescoring more lags has a cost that
+   grows with workspace-frequency pairs, even when FP4 products still
+   dominate the arithmetic count. See the measured wrong-bit correction and
+   wide-search timing in the [21 November review](validation.md#review-of-changes-since-e76fc90--21-november-2026).
 6. **The product kernel.** Three loads per slice remain. Two workspace pairs
    per block would share the observation loads. That matters on large
    plans, not here: the products take 2.6 ms of this slot but 11.35 s on the
@@ -1869,6 +1878,16 @@ priors, longer and challenging-case backlog and multi-owner device behaviour
 remain unmeasured.
 
 ### Where FP4 fits, and the larger levers
+
+The [21 November review](validation.md#review-of-changes-since-e76fc90--21-november-2026)
+reproduced a dense-coarse wrong bit with the original two-arrival shortlist.
+Both device and native template banks reproduced it, as did the FP64
+accumulation control. The result gives a concrete case for checking arrival
+rank before blaming template synthesis or changing the receiver's admission
+threshold. Retain the full timing search and test weaker arrivals, quiet
+holds and complete messages when changing the shortlist. A larger shortlist
+also multiplies the rescoring work across workspace-frequency pairs. Check a
+wide prior where this cost can compete with the FFT route.
 
 A survey of receiver and simulator work on 20 November 2026 tested whether
 most numerical work could use the FP4 Tensor Cores

@@ -24,6 +24,7 @@ struct OpenClCoarseShape {
     std::size_t taps = 0, kernel_rows = 0, arrivals = 0, workspaces = 0, tile_frequencies = 0;
     std::size_t synthesis_raw_rows = 0, synthesis_source_rows = 0;
     std::size_t synthesis_lanes = 0, synthesis_cells = 0, synthesis_taps = 0, synthesis_decimation = 0;
+    OpenClCoarseFrontier frontier = OpenClCoarseFrontier::expanded;
     bool operator==(const OpenClCoarseShape&) const = default;
 };
 
@@ -44,8 +45,8 @@ struct OpenClCoarseWork {
 };
 
 // One device-resident frequency-tile search: FP4 Tensor Core scores for every
-// public workspace, frequency and arrival, the exact arrival frontier of
-// those scores, and FP32 rescoring of each retained arrival.
+// public workspace, frequency and arrival, a wider proposal shortlist, and
+// exact rescoring before publishing the two-arrival frontier.
 class OpenClNvfp4Coarse {
 public:
     ~OpenClNvfp4Coarse();
@@ -68,7 +69,7 @@ public:
     void prepare(std::span<const std::complex<double>> observation, std::span<const std::array<double, 4>> inverse,
                  double projected_rate_hz, double variance, OpenClCoarseWork&, std::stop_token = {});
     // Output is [workspace][frequency]. Scores are the FP32 rescored values
-    // of the arrivals that the FP4 frontier retained.
+    // of arrivals selected from the exact-scored proposal neighborhoods.
     void peaks(std::span<const double> frequencies, std::size_t separation, std::span<CoarseBulkPeaks> output,
                OpenClCoarseWork&, std::stop_token = {});
     // Validation access to the resident channelized bank and to the FP4

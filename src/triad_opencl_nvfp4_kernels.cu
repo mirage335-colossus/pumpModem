@@ -553,12 +553,31 @@ constexpr auto no_peak = ~std::uint64_t{0};
 constexpr unsigned fir_stage_pairs = 6016;
 constexpr unsigned fir_chunk = 64;
 
-struct CoarsePeakRow {
+constexpr unsigned coarse_rescore_interior_candidates = 8;
+constexpr unsigned coarse_compact_interior_candidates = 4;
+constexpr unsigned coarse_rescore_legacy_candidates = 2;
+constexpr unsigned coarse_rescore_endpoints = 2;
+constexpr unsigned coarse_rescore_candidates = coarse_rescore_interior_candidates +
+    coarse_rescore_legacy_candidates + coarse_rescore_endpoints;
+constexpr unsigned coarse_rescore_radius = 2;
+constexpr unsigned coarse_rescore_scores = (2 * coarse_rescore_radius + 1) * coarse_rescore_candidates;
+constexpr unsigned coarse_compact_rescore_scores = coarse_compact_interior_candidates +
+    coarse_rescore_legacy_candidates + coarse_rescore_endpoints;
+struct CoarseCandidateRow {
+    std::uint64_t lags[coarse_rescore_scores];
+    double scores[coarse_rescore_scores];
+    std::uint64_t centers;
+    std::uint64_t count;
+};
+static_assert(sizeof(CoarseCandidateRow) == 976 && alignof(CoarseCandidateRow) == 8);
+
+struct CoarsePublishedRow {
     double scores[2];
     std::uint64_t lags[2];
     std::uint64_t count;
+    std::uint64_t rescored;
 };
-static_assert(sizeof(CoarsePeakRow) == 40 && alignof(CoarsePeakRow) == 8);
+static_assert(sizeof(CoarsePublishedRow) == 48 && alignof(CoarsePublishedRow) == 8);
 
 __device__ float quadratic_score(const double* inverse, float a_real, float a_imag, float b_real, float b_imag) {
     // The host folds both operand scales and the noise variance into the
@@ -1380,93 +1399,100 @@ extern "C" __global__ void coarse_fp4_scores(const uint4* packed_observation,
     }
 }
 
-// The exact bounded arrival frontier of triad_tensor_peaks.cu, over FP32
-// scores. One block owns one [frequency][workspace] row.
-extern "C" __global__ void coarse_select_peaks(const float* input, CoarsePeakRow* output,
-    std::uint32_t arrivals, std::uint32_t separation) {
+// Retain distinct FP4 interior maxima without minimum-distance suppression,
+// then include the legacy separated pair and both endpoints. Exact rescoring
+// checks each proposal's radius-two neighborhood before final selection.
+extern "C" __global__ void coarse_select_peaks(const float* input, CoarseCandidateRow* output,
+    std::uint32_t arrivals, std::uint32_t separation, std::uint32_t compact) {
     __shared__ std::uint64_t candidates[threads];
     const auto row_index = static_cast<std::uint64_t>(blockIdx.x);
     const auto* scores = input + row_index * arrivals;
     auto& result = output[row_index];
-
-    std::uint64_t local = no_peak;
     bool invalid = false;
-    for (auto i = threadIdx.x; i < arrivals; i += threads) {
-        invalid |= !isfinite(scores[i]);
-        const auto peak = interior_peak(scores, i, arrivals);
-        if (better_peak(scores, peak, local)) local = peak;
-    }
+    for (auto i = threadIdx.x; i < arrivals; i += threads) invalid |= !isfinite(scores[i]);
     if (__syncthreads_or(invalid)) {
         if (!threadIdx.x) {
-            result.scores[0] = result.scores[1] = 0;
-            result.lags[0] = result.lags[1] = 0;
+            result.centers = 0;
             result.count = no_peak;
         }
         return;
     }
+    if (threadIdx.x == 0) {
+        result.centers = 0;
+        result.count = 0;
+    }
+    __syncthreads();
     if (arrivals == 1) {
-        if (!threadIdx.x) {
-            result.scores[0] = scores[0];
-            result.scores[1] = 0;
-            result.lags[0] = result.lags[1] = 0;
-            result.count = 1;
+        if (threadIdx.x == 0) {
+            result.lags[result.count++] = 0;
+            result.centers = 1;
         }
         return;
     }
-    const auto first = reduce_peak(scores, local, candidates);
-    std::uint64_t second = no_peak;
-    if (first != no_peak) {
-        local = no_peak;
-        for (auto i = threadIdx.x + 1; i + 1 < arrivals; i += threads) {
-            const auto peak = interior_peak(scores, i, arrivals);
+    const auto interior_limit = compact ? coarse_compact_interior_candidates : coarse_rescore_interior_candidates;
+    for (unsigned selected = 0; selected < interior_limit; ++selected) {
+        std::uint64_t local = no_peak;
+        for (std::uint32_t lag = threadIdx.x + 1; lag + 1 < arrivals; lag += threads) {
+            const auto peak = interior_peak(scores, lag, arrivals);
+            if (peak == no_peak) continue;
+            bool available = true;
+            for (unsigned prior = 0; prior < result.centers; ++prior)
+                if (peak == result.lags[prior]) available = false;
+            if (available && better_peak(scores, peak, local)) local = peak;
+        }
+        const auto best = reduce_peak(scores, local, candidates);
+        if (best == no_peak) break;
+        if (threadIdx.x == 0) result.lags[result.centers++] = best;
+        __syncthreads();
+    }
+    // The first shortlist entry is also the first separated pick. Reuse it
+    // and search only for the second pick outside its exclusion distance.
+    if (result.centers) {
+        const auto first = result.lags[0];
+        std::uint64_t local = no_peak;
+        for (std::uint32_t lag = threadIdx.x + 1; lag + 1 < arrivals; lag += threads) {
+            const auto peak = interior_peak(scores, lag, arrivals);
             if (peak != no_peak && separated(peak, first, separation) && better_peak(scores, peak, local))
                 local = peak;
         }
-        second = reduce_peak(scores, local, candidates);
+        const auto second = reduce_peak(scores, local, candidates);
+        if (second != no_peak && threadIdx.x == 0) {
+            bool present = false;
+            for (unsigned prior = 0; prior < result.centers; ++prior)
+                if (result.lags[prior] == second) present = true;
+            if (!present && result.centers < coarse_rescore_candidates) result.lags[result.centers++] = second;
+        }
     }
-    const bool left = scores[0] >= scores[1];
-    const bool right = scores[arrivals - 1] >= scores[arrivals - 2];
-    const unsigned interiors = static_cast<unsigned>(first != no_peak) + static_cast<unsigned>(second != no_peak);
-    const unsigned count = interiors + static_cast<unsigned>(left) + static_cast<unsigned>(right);
-    bool clipped = count > 2;
-    if (count == 2 && interiors == 2) {
-        bool third = false;
-        for (auto i = threadIdx.x + 1; i + 1 < arrivals; i += threads) {
-            const auto peak = interior_peak(scores, i, arrivals);
-            if (peak != no_peak && separated(peak, first, separation) && separated(peak, second, separation)) {
-                third = true;
-                break;
+    if (threadIdx.x == 0) {
+        if (compact) {
+            if (scores[0] >= scores[1] && result.centers < coarse_rescore_candidates)
+                result.lags[result.centers++] = 0;
+            if (scores[arrivals - 1] >= scores[arrivals - 2] && result.centers < coarse_rescore_candidates)
+                result.lags[result.centers++] = arrivals - 1;
+        } else {
+            if (result.centers < coarse_rescore_candidates) result.lags[result.centers++] = 0;
+            if (result.centers < coarse_rescore_candidates) result.lags[result.centers++] = arrivals - 1;
+        }
+    }
+    __syncthreads();
+    // Center proposals precede their unique neighboring score samples. The
+    // fixed bound is five samples for each interior or endpoint proposal.
+    if (threadIdx.x == 0) {
+        result.count = result.centers;
+        if (!compact) {
+            for (unsigned center = 0; center < result.centers; ++center) {
+                const auto lag = result.lags[center];
+                const auto first = lag > coarse_rescore_radius ? lag - coarse_rescore_radius : 0;
+                const auto last = lag + coarse_rescore_radius < arrivals ? lag + coarse_rescore_radius : arrivals - 1;
+                for (auto neighbor = first; neighbor <= last; ++neighbor) {
+                    bool present = false;
+                    for (unsigned i = 0; i < result.count; ++i)
+                        if (result.lags[i] == neighbor) present = true;
+                    if (!present && result.count < coarse_rescore_scores) result.lags[result.count++] = neighbor;
+                }
             }
         }
-        clipped = __syncthreads_or(third);
     }
-    if (threadIdx.x) return;
-
-    std::uint64_t choices[4] = {0, 0, 0, 0};
-    unsigned used = 0;
-    if (first != no_peak) choices[used++] = first;
-    if (second != no_peak) choices[used++] = second;
-    if (left) choices[used++] = 0;
-    if (right) choices[used++] = arrivals - 1;
-    for (unsigned i = 1; i < used; ++i) {
-        for (auto j = i; j && (clipped ? better_peak(scores, choices[j], choices[j - 1]) :
-                                       choices[j] < choices[j - 1]); --j) {
-            const auto temporary = choices[j];
-            choices[j] = choices[j - 1];
-            choices[j - 1] = temporary;
-        }
-    }
-    result.scores[0] = result.scores[1] = 0;
-    result.lags[0] = result.lags[1] = 0;
-    if (clipped) {
-        result.count = 2;
-        result.lags[0] = choices[1];
-        result.lags[1] = choices[0];
-    } else {
-        result.count = used;
-        for (unsigned i = 0; i < used; ++i) result.lags[i] = choices[i];
-    }
-    for (unsigned i = 0; i < result.count; ++i) result.scores[i] = scores[result.lags[i]];
 }
 
 // The FP32 observation rotated to each frequency of the tile, as
@@ -1497,6 +1523,160 @@ __device__ double rescored(const double (&sums)[4], const double* c, double vari
     return score / variance;
 }
 
+__device__ bool exact_candidate_score(const CoarseCandidateRow& row, std::uint64_t lag, double& score) {
+    for (unsigned i = 0; i < row.count; ++i) {
+        if (row.lags[i] == lag) {
+            score = row.scores[i];
+            return true;
+        }
+    }
+    return false;
+}
+
+__device__ bool better_exact_peak(const CoarseCandidateRow& row, std::uint64_t a, std::uint64_t b) {
+    if (a == no_peak) return false;
+    if (b == no_peak) return true;
+    double a_score = 0, b_score = 0;
+    if (!exact_candidate_score(row, a, a_score) || !exact_candidate_score(row, b, b_score)) return false;
+    return a_score == b_score ? a > b : a_score > b_score;
+}
+
+// Finish the native exact-score selection policy on the wider rescored set.
+// The public device frontier remains the existing two-arrival structure.
+extern "C" __global__ void coarse_finalize_peaks(const CoarseCandidateRow* candidates, CoarsePublishedRow* output,
+    std::uint32_t arrivals, std::uint32_t separation, std::uint32_t compact) {
+    const auto row_index = static_cast<std::uint64_t>(blockIdx.x);
+    const auto& row = candidates[row_index];
+    auto& result = output[row_index];
+    if (threadIdx.x) return;
+    result.scores[0] = result.scores[1] = 0;
+    result.lags[0] = result.lags[1] = 0;
+    result.count = 0;
+    result.rescored = row.count;
+    const auto limit = compact ? coarse_compact_rescore_scores : coarse_rescore_scores;
+    if (!row.count || row.count > limit) {
+        result.count = no_peak;
+        result.rescored = no_peak;
+        return;
+    }
+    for (unsigned i = 0; i < row.count; ++i) {
+        if (!isfinite(row.scores[i])) {
+            result.count = no_peak;
+            result.rescored = no_peak;
+            return;
+        }
+    }
+    if (arrivals == 1) {
+        double score = 0;
+        if (!exact_candidate_score(row, 0, score)) result.count = no_peak;
+        else {
+            result.scores[0] = score;
+            result.count = 1;
+        }
+        return;
+    }
+
+    const auto is_eligible_peak = [&](std::uint64_t lag) {
+        if (!lag || lag + 1 >= arrivals) return false;
+        if (compact) return true;
+        double score = 0;
+        if (!exact_candidate_score(row, lag, score)) return false;
+        auto first = lag;
+        auto last = lag;
+        double neighbor = 0;
+        while (first && exact_candidate_score(row, first - 1, neighbor) && neighbor == score) --first;
+        if (!first && exact_candidate_score(row, 0, neighbor) && neighbor == score) return false;
+        if (first && !exact_candidate_score(row, first - 1, neighbor)) return false;
+        if (!(neighbor < score)) return false;
+        while (last + 1 < arrivals && exact_candidate_score(row, last + 1, neighbor) && neighbor == score) ++last;
+        if (last + 1 >= arrivals || !exact_candidate_score(row, last + 1, neighbor) || !(neighbor < score)) return false;
+        return lag == first + (last - first) / 2;
+    };
+
+    std::uint64_t interiors[2] = {no_peak, no_peak};
+    unsigned interior_count = 0;
+    for (unsigned i = 0; i < row.count; ++i) {
+        const auto lag = row.lags[i];
+        if (is_eligible_peak(lag) && better_exact_peak(row, lag, interiors[0])) interiors[0] = lag;
+    }
+    if (interiors[0] != no_peak) {
+        interior_count = 1;
+        for (unsigned i = 0; i < row.count; ++i) {
+            const auto lag = row.lags[i];
+            if (is_eligible_peak(lag) && separated(lag, interiors[0], separation) &&
+                better_exact_peak(row, lag, interiors[1])) interiors[1] = lag;
+        }
+        if (interiors[1] != no_peak) interior_count = 2;
+    }
+
+    std::uint64_t choices[4] = {interiors[0], interiors[1], no_peak, no_peak};
+    unsigned used = interior_count;
+    if (compact) {
+        double score = 0;
+        if (exact_candidate_score(row, 0, score)) choices[used++] = 0;
+        if (exact_candidate_score(row, arrivals - 1, score)) choices[used++] = arrivals - 1;
+    } else {
+        double left = 0, left_neighbor = 0, right = 0, right_neighbor = 0;
+        if (!exact_candidate_score(row, 0, left) || !exact_candidate_score(row, 1, left_neighbor) ||
+            !exact_candidate_score(row, arrivals - 1, right) ||
+            !exact_candidate_score(row, arrivals - 2, right_neighbor)) {
+            result.count = no_peak;
+            return;
+        }
+        if (left >= left_neighbor) choices[used++] = 0;
+        if (right >= right_neighbor) choices[used++] = arrivals - 1;
+    }
+    bool clipped = used > 2;
+    if (used == 2 && interior_count == 2) {
+        for (unsigned i = 0; i < row.count; ++i) {
+            const auto lag = row.lags[i];
+            if (!separated(lag, interiors[0], separation) || !separated(lag, interiors[1], separation)) continue;
+            if (is_eligible_peak(lag)) {
+                clipped = true;
+                break;
+            }
+        }
+    }
+    if (clipped) {
+        for (unsigned i = 1; i < used; ++i)
+            for (auto j = i; j && better_exact_peak(row, choices[j], choices[j - 1]); --j) {
+                const auto temporary = choices[j];
+                choices[j] = choices[j - 1];
+                choices[j - 1] = temporary;
+            }
+        result.count = 2;
+        result.lags[0] = choices[1];
+        result.lags[1] = choices[0];
+    } else {
+        for (unsigned i = 1; i < used; ++i)
+            for (auto j = i; j && choices[j] < choices[j - 1]; --j) {
+                const auto temporary = choices[j];
+                choices[j] = choices[j - 1];
+                choices[j - 1] = temporary;
+            }
+        result.count = used;
+        for (unsigned i = 0; i < used; ++i) result.lags[i] = choices[i];
+    }
+    if (!result.count) {
+        // The exact peak can move beyond the immediate neighborhood of every
+        // FP4 proposal. Preserve a finite, deterministic candidate in that
+        // case instead of silently publishing no arrival.
+        std::uint64_t best = no_peak;
+        for (unsigned i = 0; i < row.count; ++i)
+            if (better_exact_peak(row, row.lags[i], best)) best = row.lags[i];
+        if (best == no_peak || !exact_candidate_score(row, best, result.scores[0])) result.count = no_peak;
+        else {
+            result.lags[0] = best;
+            result.count = 1;
+        }
+    }
+    for (unsigned i = 0; i < result.count; ++i)
+        if (!exact_candidate_score(row, result.lags[i], result.scores[i])) {
+            result.count = no_peak;
+            return;
+        }
+}
+
 } // namespace
 
 // Replaces the retained frontier scores with FP32 products accumulated in
@@ -1505,14 +1685,15 @@ __device__ double rescored(const double (&sums)[4], const double* c, double vari
 // with the variance in the place of the observation magnitude. This is the
 // matched control of coarse_rescore_peaks_fp32.
 extern "C" __global__ void coarse_rescore_peaks(const float2* bank, const float2* rotated,
-    const double* parameters, const double* inverse, CoarsePeakRow* peaks, std::uint32_t rows,
-    std::uint32_t samples, std::uint32_t workspaces, std::uint32_t frequencies, std::uint32_t taps) {
+    const double* parameters, const double* inverse, CoarseCandidateRow* peaks, std::uint32_t rows,
+    std::uint32_t samples, std::uint32_t workspaces, std::uint32_t frequencies, std::uint32_t taps,
+    std::uint32_t stride) {
     __shared__ double partial[threads][4];
-    const auto row_index = blockIdx.x / 2, entry = blockIdx.x % 2;
+    const auto row_index = blockIdx.x / stride, entry = blockIdx.x % stride;
     const auto frequency = row_index / workspaces, workspace = row_index % workspaces;
     if (frequency >= frequencies) return;
     const auto count = peaks[row_index].count;
-    if (count > 2 || entry >= count) return;
+    if (count == no_peak || count > stride || entry >= count) return;
     const auto arrival = peaks[row_index].lags[entry];
     const auto* first = bank + static_cast<std::uint64_t>(workspace) * taps * rows;
     const auto* observation = rotated + static_cast<std::uint64_t>(frequency) * samples;
@@ -1547,14 +1728,15 @@ extern "C" __global__ void coarse_rescore_peaks(const float2* bank, const float2
 // and adds each partial sum in FP64, and the block adds its threads' sums as
 // an FP64 tree. The correlations, Gram and score stay FP64.
 extern "C" __global__ void coarse_rescore_peaks_fp32(const float2* bank, const float2* rotated,
-    const double* parameters, const double* inverse, CoarsePeakRow* peaks, std::uint32_t rows,
-    std::uint32_t samples, std::uint32_t workspaces, std::uint32_t frequencies, std::uint32_t taps) {
+    const double* parameters, const double* inverse, CoarseCandidateRow* peaks, std::uint32_t rows,
+    std::uint32_t samples, std::uint32_t workspaces, std::uint32_t frequencies, std::uint32_t taps,
+    std::uint32_t stride) {
     __shared__ double partial[threads][4];
-    const auto row_index = blockIdx.x / 2, entry = blockIdx.x % 2;
+    const auto row_index = blockIdx.x / stride, entry = blockIdx.x % stride;
     const auto frequency = row_index / workspaces, workspace = row_index % workspaces;
     if (frequency >= frequencies) return;
     const auto count = peaks[row_index].count;
-    if (count > 2 || entry >= count) return;
+    if (count == no_peak || count > stride || entry >= count) return;
     const auto arrival = peaks[row_index].lags[entry];
     const auto* first = bank + static_cast<std::uint64_t>(workspace) * taps * rows;
     const auto* observation = rotated + static_cast<std::uint64_t>(frequency) * samples;

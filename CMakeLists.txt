@@ -702,7 +702,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
     set_tests_properties(triad_abbreviated PROPERTIES LABELS "triad" TIMEOUT 30)
     add_test(NAME triad_cases COMMAND ${Python3_EXECUTABLE} -m unittest
       tests.test_triad_cases tests.test_triad_case_metrics tests.test_triad_case_suite
-      tests.test_triad_case_capacity tests.test_triad_cpu)
+      tests.test_triad_case_capacity tests.test_triad_cpu tests.test_triad_receipt_compare)
     set_tests_properties(triad_cases PROPERTIES LABELS "triad" TIMEOUT 60
       WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
       ENVIRONMENT "OPENBLAS_NUM_THREADS=1;OMP_NUM_THREADS=1;MKL_NUM_THREADS=1")

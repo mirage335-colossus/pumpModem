@@ -4,7 +4,7 @@
 Usage: triad_receipt_compare.py A.json B.json [--scope all|slot] [--rtol X] [--show-timing]
                   [--show-info]
 
-Every scalar is flattened to a path.  Phase lists are keyed by phase name
+Scalars and empty containers are flattened to paths.  Phase lists are keyed by phase name
 (/phases{native_slot}/work/...), other lists by index.  Each path falls in
 exactly one class:
 
@@ -53,31 +53,62 @@ ENVIRONMENT_LEAVES = {
 
 
 def flatten(value, path, out):
+    """Flatten JSON without collapsing empty containers or path components."""
     if isinstance(value, dict):
+        if not value:
+            out[path + (("empty", "object"),)] = None
         for key, item in value.items():
-            flatten(item, path + "/" + key, out)
+            flatten(item, path + (("key", key),), out)
     elif isinstance(value, list):
-        named = all(isinstance(item, dict) and isinstance(item.get("name"), str)
-                    for item in value) and value
+        if not value:
+            out[path + (("empty", "array"),)] = None
+            return out
+        named = path == (("key", "phases"),) and all(
+            isinstance(item, dict) and isinstance(item.get("name"), str) for item in value
+        )
+        seen = set()
         for index, item in enumerate(value):
-            if named and path.endswith("/phases"):
-                label = "{%s}" % item["name"]
-                if any(other["name"] == item["name"] for other in value[:index]):
-                    label = "{%s#%d}" % (item["name"], index)
-                flatten(item, path + label, out)
+            if named:
+                name = item["name"]
+                flatten(item, path + (("phase", name, index if name in seen else None),), out)
+                seen.add(name)
             else:
-                flatten(item, path + "[%d]" % index, out)
+                flatten(item, path + (("index", index),), out)
     else:
         out[path] = value
     return out
 
 
-def components(path):
-    return [re.sub(r"[\[{].*$", "", part) for part in path.split("/") if part]
+def path_components(path):
+    return [segment[1] for segment in path if segment[0] in ("key", "phase")]
+
+
+def render_path(path):
+    def escape_segment(value):
+        for character, replacement in (("~", "~0"), ("/", "~1"), ("[", "~2"),
+                                      ("]", "~3"), ("{", "~4"), ("}", "~5"),
+                                      ("<", "~6"), (">", "~7"), ("#", "~8")):
+            value = value.replace(character, replacement)
+        return value
+
+    rendered = []
+    for segment in path:
+        if segment[0] == "key":
+            rendered.append("/" + escape_segment(segment[1]))
+        elif segment[0] == "index":
+            rendered.append("[%d]" % segment[1])
+        elif segment[0] == "phase":
+            suffix = "#%d" % segment[2] if segment[2] is not None else ""
+            rendered.append("{%s%s}" % (escape_segment(segment[1]), suffix))
+        else:
+            rendered.append("<empty %s>" % segment[1])
+    return "".join(rendered) or "/"
 
 
 def classify(path):
-    parts = components(path)
+    if path and path[-1][0] == "empty":
+        return "compared"
+    parts = path_components(path)
     leaf = parts[-1] if parts else ""
     if leaf in ENVIRONMENT_LEAVES:
         return "environment"
@@ -94,9 +125,13 @@ def scoped(flat, scope):
         return flat
     keep = {}
     for path, value in flat.items():
-        if (path.startswith("/phases{native_slot}/work/") or
-                path.startswith("/result/") or
-                path == "/observation/input_sha256" or path == "/status"):
+        slot_work = (len(path) >= 3 and path[0] == ("key", "phases") and
+                     path[1][0] == "phase" and path[1][1] == "native_slot" and
+                     path[2] == ("key", "work"))
+        result = path and path[0] == ("key", "result")
+        input_hash = path == (("key", "observation"), ("key", "input_sha256"))
+        status = path == (("key", "status"),)
+        if slot_work or result or input_hash or status:
             keep[path] = value
     return keep
 
@@ -142,13 +177,13 @@ def main(argv):
         print(__doc__, file=sys.stderr)
         return 2
     with open(args[0]) as handle:
-        a = scoped(flatten(json.load(handle), "", {}), scope)
+        a = scoped(flatten(json.load(handle), (), {}), scope)
     with open(args[1]) as handle:
-        b = scoped(flatten(json.load(handle), "", {}), scope)
+        b = scoped(flatten(json.load(handle), (), {}), scope)
     missing = object()
     buckets = {"compared": [], "stripped": [], "measured": [], "environment": []}
     tolerated = []
-    for path in sorted(set(a) | set(b)):
+    for path in sorted(set(a) | set(b), key=render_path):
         u, v = a.get(path, missing), b.get(path, missing)
         if u is not missing and v is not missing and type(u) == type(v) and u == v:
             continue
@@ -160,9 +195,9 @@ def main(argv):
         if (kind in ("compared", "stripped") and rtol > 0 and u is not missing
                 and v is not missing and numeric(u) and numeric(v)
                 and relative(u, v) <= rtol):
-            tolerated.append((path, u, v))
+            tolerated.append((render_path(path), u, v))
             continue
-        buckets[kind].append((path, u, v))
+        buckets[kind].append((render_path(path), u, v))
 
     def show(rows):
         for path, u, v in rows:

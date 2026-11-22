@@ -873,21 +873,23 @@ void check_coarse(const OpenClNvfp4Device& device) {
         std::vector<float> scores(count * workspaces * arrivals);
         coarse->read_scores(scores);
         double product = 0, fp4_energy = 0, reference_energy = 0;
-        std::vector<double> row(arrivals);
+        std::vector<double> row(arrivals), exact_row(arrivals);
         for (std::size_t f = 0; f != count; ++f) {
             for (std::size_t workspace = 0; workspace != workspaces; ++workspace) {
                 double best = 0;
                 for (std::size_t arrival = 0; arrival != arrivals; ++arrival) {
                     row[arrival] = scores[(f * workspaces + workspace) * arrivals + arrival];
                     const auto expected = reference(first_frequency + f, workspace, arrival);
+                    exact_row[arrival] = expected;
                     product += row[arrival] * expected;
                     fp4_energy += row[arrival] * row[arrival];
                     reference_energy += expected * expected;
                     best = std::max(best, expected);
                 }
-                // The device frontier is the native selection of its own
-                // FP4 scores, and every retained score is recomputed.
-                const auto expected = select_coarse_arrivals(row, separation);
+                // The widened FP4 shortlist is finalized with exact rescored
+                // values, so compare the public frontier to the native exact
+                // score selector across every public arrival.
+                const auto expected = select_coarse_arrivals(exact_row, separation);
                 const auto& actual = frontier[workspace * count + f];
                 require(actual.count == expected.count, "Coarse FP4 frontier count differs from native selection");
                 for (std::size_t i = 0; i != expected.count; ++i) {
@@ -906,9 +908,36 @@ void check_coarse(const OpenClNvfp4Device& device) {
     const auto agreement = check_tile(grid, 0);
     require(agreement > .97, "Coarse FP4 scores are too far from the FP64 reference");
 
+    auto compact_shape = shape;
+    compact_shape.frontier = OpenClCoarseFrontier::compact;
+    const auto compact_quote = OpenClNvfp4Coarse::workspace(compact_shape);
+    require(compact_quote.device_bytes <= limit && compact_quote.host_bytes <= OpenClNvfp4Coarse::workspace(shape).host_bytes,
+            "Compact coarse frontier increased its workspace quote");
+    const auto compact = device.make_coarse(compact_shape, compact_quote.device_bytes, true,
+                                             OpenClRescoreArithmetic::fp64);
+    require(static_cast<bool>(compact), "Could not make the compact coarse FP4 session");
+    OpenClCoarseWork compact_work;
+    compact->load_bank(columns, compact_work);
+    compact->prepare(observation, inverse, rate, variance, compact_work);
+    std::vector<CoarseBulkPeaks> compact_frontier(workspaces * frequencies);
+    compact->peaks(grid, separation, compact_frontier, compact_work);
+    require(compact_work.rescored_peaks > 0 && compact_work.rescored_peaks <= workspaces * frequencies * 8,
+            "Compact coarse frontier exceeded its eight-score-per-row rescore bound");
+    for (std::size_t f = 0; f < frequencies; ++f)
+        for (std::size_t workspace = 0; workspace < workspaces; ++workspace) {
+            const auto& row = compact_frontier[workspace * frequencies + f];
+            require(row.count > 0 && row.count <= 2, "Compact coarse frontier published an invalid count");
+            for (std::size_t i = 0; i < row.count; ++i) {
+                require(row.lags[i] < arrivals, "Compact coarse frontier published an invalid lag");
+                const auto exact = reference(f, workspace, row.lags[i]);
+                require(std::abs(row.scores[i] - exact) <= 2e-5 * std::max(exact, 1e-12),
+                        "Compact coarse frontier score is not the exact rescore");
+            }
+        }
+
     // This session rescores with FP32 partial sums of 64 rows added in FP64;
-    // the control accumulates every product in FP64. Both rescore the same
-    // FP4 frontier by construction: rescoring only replaces retained scores.
+    // the control accumulates every product in FP64. Both routes use the same
+    // wider FP4 proposals and apply the final exact-score selection policy.
     // A partial sum of 64 single-rounding multiply-adds is within 64 * 2^-24
     // of the sum of its absolute products, so a correlation moves by at most
     // 3.8e-6 of the product of its operand norms, and a score whose
@@ -1075,9 +1104,8 @@ void check_coarse_one_ray(const OpenClNvfp4Device& device) {
                 reference_energy += exact[arrival] * exact[arrival];
                 best = std::max(best, exact[arrival]);
             }
-            // The device frontier is the native selection of its own FP4
-            // scores, and every retained score is recomputed.
-            const auto selected = select_coarse_arrivals(row, separation);
+            // Both rescore modes must publish the exact-score selection.
+            const auto selected = select_coarse_arrivals(exact, separation);
             const auto& actual = frontiers[0][workspace * frequencies + f];
             const auto& partial = frontiers[1][workspace * frequencies + f];
             require(actual.count == selected.count && partial.count == actual.count,
@@ -1117,8 +1145,9 @@ void check_coarse_one_ray(const OpenClNvfp4Device& device) {
 }
 
 // Weak planted arrivals near the noise maximum, for one and two rays. The
-// FP4 frontier keeps the two best arrivals of a row by FP4 score, so a weak
-// true arrival can lose to noise peaks that exact scores rank below it.
+// wider FP4 proposal set is checked against exact-score peak selection, so a
+// weak true arrival can be recovered when its FP4 rank falls below the old
+// two-arrival frontier.
 // Four workspaces of 150 rows each hold one planted arrival at the single
 // trial frequency, in disjoint stretches of one observation, at a noiseless
 // score of 24, 16, 12, 10 or 8 in unit noise; five noise realizations per
@@ -1129,7 +1158,7 @@ void check_coarse_one_ray(const OpenClNvfp4Device& device) {
 // exact FP64 frontier keeps at levels 24 and 16, and at least 90% of them
 // over the sweep; the exact frontier keeps all of level 24. Component
 // evidence only, separate from receiver sensitivity and capacity.
-void check_coarse_weak_arrivals(const OpenClNvfp4Device& device) {
+void check_coarse_weak_arrivals(const OpenClNvfp4Device& device, OpenClCoarseFrontier mode) {
     constexpr std::size_t rows = 150, arrivals = 512, workspaces = 4, separation = 9, realizations = 5;
     constexpr std::size_t spacing = 165;
     constexpr std::array<double, 5> levels{24, 16, 12, 10, 8};
@@ -1156,7 +1185,8 @@ void check_coarse_weak_arrivals(const OpenClNvfp4Device& device) {
             for (const auto value : bank[workspace]) a += std::norm(value);
             inverse[workspace] = {1 / a, 0, 0, 0};
         }
-        const OpenClCoarseShape shape{taps, rows, arrivals, workspaces, grid.size()};
+        OpenClCoarseShape shape{taps, rows, arrivals, workspaces, grid.size()};
+        shape.frontier = mode;
         const auto coarse = device.make_coarse(shape, OpenClNvfp4Coarse::workspace(shape).device_bytes);
         require(static_cast<bool>(coarse), "Could not make the weak-arrival coarse FP4 session");
         const std::vector<std::span<const Reference>> columns(bank.begin(), bank.end());
@@ -1230,7 +1260,9 @@ void check_coarse_weak_arrivals(const OpenClNvfp4Device& device) {
         require(10 * fp4_total >= 9 * exact_total,
                 "The coarse FP4 frontier kept fewer than 90% of the planted arrivals the exact frontier kept");
     }
-    std::cout << "OpenCL NVFP4 coarse weak arrivals: " << report.str() << '\n';
+    std::cout << (mode == OpenClCoarseFrontier::expanded ? "OpenCL NVFP4 coarse weak arrivals: "
+                                                         : "OpenCL NVFP4 compact coarse weak arrivals: ")
+              << report.str() << '\n';
 }
 
 // Lagrange interpolation of the native exact route, over a zero-extended
@@ -1586,6 +1618,7 @@ void check_coarse_fir_routes() {
 int main(int argc, char** argv) {
     try {
         const bool resident_only = argc > 1 && std::string_view(argv[1]) == "resident";
+        const bool weak_only = argc > 1 && std::string_view(argv[1]) == "weak";
         constexpr std::array descriptors{0, 1, 2};
         datapump::host::restrict_descriptors(descriptors);
         datapump::host::install_no_socket_boundary();
@@ -1598,6 +1631,11 @@ int main(int argc, char** argv) {
         const std::array<std::byte, 16> any_uuid{};
         const auto device = OpenClNvfp4Device::open(any_uuid, ptx, &reason);
         if (!device) throw std::runtime_error(reason);
+        if (weak_only) {
+            check_coarse_weak_arrivals(*device, OpenClCoarseFrontier::expanded);
+            check_coarse_weak_arrivals(*device, OpenClCoarseFrontier::compact);
+            return 0;
+        }
         if (!resident_only) {
             check_projection(*device, 1500, 47, 33);
             check_projection(*device, 223, 67, 129);
@@ -1609,7 +1647,8 @@ int main(int argc, char** argv) {
         check_coarse_fir_routes();
         check_coarse(*device);
         check_coarse_one_ray(*device);
-        check_coarse_weak_arrivals(*device);
+        check_coarse_weak_arrivals(*device, OpenClCoarseFrontier::expanded);
+        check_coarse_weak_arrivals(*device, OpenClCoarseFrontier::compact);
         check_coarse_synthesis(*device);
         return 0;
     } catch (const std::exception& error) {

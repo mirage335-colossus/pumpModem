@@ -34,6 +34,39 @@ namespace opencl_nvfp4 {
 inline constexpr cl_uint nvidia_vendor = 0x10de;
 inline constexpr std::size_t local_size = 128;
 inline constexpr std::size_t allocation_alignment = 256;
+// Keep a wider shortlist of FP4 local maxima without minimum-distance
+// suppression, alongside the two legacy separated picks and both endpoints.
+// Proposals and their radius-two neighborhoods are scored from unquantized
+// operands before the unchanged two-arrival receiver interface is filled.
+inline constexpr std::size_t coarse_rescore_interior_candidates = 8;
+inline constexpr std::size_t coarse_compact_interior_candidates = 4;
+inline constexpr std::size_t coarse_rescore_legacy_candidates = 2;
+inline constexpr std::size_t coarse_rescore_endpoints = 2;
+inline constexpr std::size_t coarse_rescore_candidates =
+    coarse_rescore_interior_candidates + coarse_rescore_legacy_candidates + coarse_rescore_endpoints;
+inline constexpr std::size_t coarse_rescore_radius = 2;
+inline constexpr std::size_t coarse_rescore_scores =
+    (2 * coarse_rescore_radius + 1) * coarse_rescore_candidates;
+inline constexpr std::size_t coarse_compact_rescore_scores = coarse_compact_interior_candidates +
+    coarse_rescore_legacy_candidates + coarse_rescore_endpoints;
+inline constexpr std::size_t coarse_rescore_scores_for(OpenClCoarseFrontier mode) {
+    return mode == OpenClCoarseFrontier::compact ? coarse_compact_rescore_scores : coarse_rescore_scores;
+}
+struct CoarseCandidateRow {
+    std::uint64_t lags[coarse_rescore_scores];
+    double scores[coarse_rescore_scores];
+    std::uint64_t centers = 0;
+    std::uint64_t count = 0;
+};
+static_assert(sizeof(CoarseCandidateRow) == coarse_rescore_scores * (sizeof(std::uint64_t) + sizeof(double)) +
+              2 * sizeof(std::uint64_t));
+struct CoarsePublishedRow {
+    double scores[2];
+    std::uint64_t lags[2];
+    std::uint64_t count;
+    std::uint64_t rescored;
+};
+static_assert(sizeof(CoarsePublishedRow) == 48);
 static_assert(sizeof(cl_int) == sizeof(std::int32_t));
 static_assert(sizeof(cl_long) == sizeof(std::int64_t));
 

@@ -42,10 +42,11 @@ static_assert(sizeof(std::complex<double>) == 2 * sizeof(double));
 static_assert(sizeof(CoarseBulkPeaks) == 40);
 
 enum Buffer { bank, bank_peaks, packed_bank, observation, packed_observation, observation_scales,
-              pack_parameters, score_parameters, coefficients, inverse, scores, frontier, rotated,
+              pack_parameters, score_parameters, coefficients, inverse, scores, candidates, frontier, rotated,
               chips, pulse, source, columns, sets, raster, raw, taps, gram, buffer_count };
 enum Kernel { column_peaks, pack_bank, pack_observation, fp4_scores, select_peaks, rotate_observation,
-              rescore_peaks, render_lanes, warp_columns, fir_tiles, fir_decimate, warp_fir, bank_gram, kernel_count };
+              rescore_peaks, finalize_peaks, render_lanes, warp_columns, fir_tiles, fir_decimate, warp_fir,
+              bank_gram, kernel_count };
 
 // The taps that one stage window of a tile holds beside the raw span of its
 // rows, as fir_window in the kernels computes it. Zero when none fits.
@@ -128,7 +129,7 @@ struct Geometry {
         (void)kernel_extent(multiply(streams, multiply(variant_samples, 2)));
         (void)kernel_extent(stream_quads);
         (void)kernel_extent(multiply(multiply(frequencies, bank_tiles), arrival_blocks));
-        (void)kernel_extent(multiply(rows, 2));
+        (void)kernel_extent(multiply(rows, coarse_rescore_scores_for(shape.frontier)));
         (void)kernel_extent(samples);
         (void)kernel_extent(multiply(frequencies, samples));
         sizes[bank] = multiply(multiply(columns, shape.kernel_rows), sizeof(std::complex<float>));
@@ -141,7 +142,8 @@ struct Geometry {
         sizes[pack_parameters] = sizes[score_parameters] = multiply(frequencies + 2, sizeof(double));
         sizes[coefficients] = sizes[inverse] = multiply(shape.workspaces, 4 * sizeof(double));
         sizes[scores] = multiply(multiply(rows, shape.arrivals), sizeof(float));
-        sizes[frontier] = multiply(rows, sizeof(CoarseBulkPeaks));
+        sizes[candidates] = multiply(rows, sizeof(CoarseCandidateRow));
+        sizes[frontier] = multiply(rows, sizeof(CoarsePublishedRow));
         sizes[rotated] = multiply(multiply(frequencies, samples), sizeof(std::complex<float>));
         if (shape.synthesis_raw_rows) {
             const auto column_bytes = multiply(shape.synthesis_raw_rows, sizeof(std::complex<float>));
@@ -182,7 +184,8 @@ struct Geometry {
         const auto column_bytes = sizeof(float) + 4 * sizeof(double) + column_parameters * sizeof(double) +
                                   set_columns * sizeof(std::uint32_t) + 1 + sizeof(SynthesisGroup);
         return add(multiply(staging_samples(), sizeof(std::complex<float>)),
-                   add(multiply(rows, sizeof(CoarseBulkPeaks)), multiply(columns, column_bytes)));
+                   add(multiply(rows, sizeof(CoarsePublishedRow)),
+                       multiply(columns, column_bytes)));
     }
 };
 
@@ -207,7 +210,7 @@ struct OpenClNvfp4Coarse::Impl {
     std::vector<Timed> events;
     std::vector<std::complex<float>> staging;
     std::vector<float> peaks;
-    std::vector<CoarseBulkPeaks> downloaded;
+    std::vector<CoarsePublishedRow> downloaded;
     double rate = 0, variance = 0, reciprocal_observation = 0;
     OpenClRescoreArithmetic rescore;
     bool profile = false, pending = false, bank_ready = false, prepared = false;
@@ -244,8 +247,9 @@ struct OpenClNvfp4Coarse::Impl {
         }
         constexpr std::array<const char*, kernel_count> names{
             "coarse_column_peaks", "coarse_pack_bank", "coarse_pack_observation", "coarse_fp4_scores",
-            "coarse_select_peaks", "coarse_rotate_observation", "coarse_rescore_peaks", "coarse_render_lanes",
-            "coarse_warp_columns", "coarse_fir_tiles", "coarse_fir_decimate", "coarse_warp_fir", "coarse_bank_gram"};
+            "coarse_select_peaks", "coarse_rotate_observation", "coarse_rescore_peaks", "coarse_finalize_peaks",
+            "coarse_render_lanes", "coarse_warp_columns", "coarse_fir_tiles", "coarse_fir_decimate",
+            "coarse_warp_fir", "coarse_bank_gram"};
         // Each synthesis route creates the kernels that it dispatches.
         const auto used = [&](std::size_t kernel) {
             if (kernel < render_lanes) return true;
@@ -536,14 +540,19 @@ struct OpenClNvfp4Coarse::Impl {
                  kernel_extent(geometry.stream_quads), arrivals, workspaces, frequency_count,
                  kernel_extent(shape.taps));
         dispatch(select_peaks, rows * local_size, {&OpenClCoarseWork::selection_seconds}, work,
-                 buffers[scores], buffers[frontier], arrivals, kernel_extent(separation));
+                 buffers[scores], buffers[candidates], arrivals, kernel_extent(separation),
+                 kernel_extent(shape.frontier == OpenClCoarseFrontier::compact));
+        const auto rescore_stride = coarse_rescore_scores_for(shape.frontier);
         // Retained arrivals share one rotation of the observation per frequency.
         const Charge rescoring{&OpenClCoarseWork::selection_seconds, &OpenClCoarseWork::rescore_seconds};
         dispatch(rotate_observation, count * geometry.samples, rescoring, work, buffers[observation],
                  buffers[score_parameters], buffers[rotated], samples, frequency_count);
-        dispatch(rescore_peaks, rows * 2 * local_size, rescoring, work,
-                 buffers[bank], buffers[rotated], buffers[score_parameters], buffers[inverse], buffers[frontier],
-                 kernel_rows, samples, workspaces, frequency_count, kernel_extent(shape.taps));
+        dispatch(rescore_peaks, rows * rescore_stride * local_size, rescoring, work,
+                 buffers[bank], buffers[rotated], buffers[score_parameters], buffers[inverse], buffers[candidates],
+                 kernel_rows, samples, workspaces, frequency_count, kernel_extent(shape.taps),
+                 kernel_extent(rescore_stride));
+        dispatch(finalize_peaks, rows * local_size, rescoring, work, buffers[candidates], buffers[frontier], arrivals,
+                 kernel_extent(separation), kernel_extent(shape.frontier == OpenClCoarseFrontier::compact));
         const auto results = std::span(downloaded).first(rows);
         download(frontier, results, work);
         cancelled(stop);
@@ -551,14 +560,29 @@ struct OpenClNvfp4Coarse::Impl {
         for (std::size_t frequency = 0; frequency < count; ++frequency) {
             for (std::size_t workspace = 0; workspace < shape.workspaces; ++workspace) {
                 const auto& row = results[frequency * shape.workspaces + workspace];
-                if (row.count == no_peak) throw Error("Robust OpenCL NVFP4 coarse score is nonfinite");
+                if (row.count == no_peak || row.rescored == no_peak)
+                    throw Error("Robust OpenCL NVFP4 coarse score is nonfinite");
                 if (!row.count || row.count > 2 || (row.count == 2 && row.lags[0] == row.lags[1]))
                     throw Error("Robust OpenCL NVFP4 coarse frontier is invalid");
                 for (std::size_t i = 0; i < row.count; ++i)
                     if (row.lags[i] >= shape.arrivals || !std::isfinite(row.scores[i]))
                         throw Error("Robust OpenCL NVFP4 coarse frontier arrival or score is invalid");
-                retained += row.count;
-                output[workspace * count + frequency] = row;
+                if (row.rescored > rescore_stride)
+                    throw Error("Robust OpenCL NVFP4 coarse rescore count is invalid");
+                retained += row.rescored;
+            }
+        }
+        // Validate the complete device batch before publishing any row, so a
+        // bad later row cannot leave callers with a partially updated result.
+        for (std::size_t frequency = 0; frequency < count; ++frequency) {
+            for (std::size_t workspace = 0; workspace < shape.workspaces; ++workspace) {
+                const auto& row = results[frequency * shape.workspaces + workspace];
+                auto& published = output[workspace * count + frequency];
+                published.count = row.count;
+                for (std::size_t i = 0; i < 2; ++i) {
+                    published.lags[i] = row.lags[i];
+                    published.scores[i] = row.scores[i];
+                }
             }
         }
         work.issued_products += blocks * block_warps * groups * geometry.tiles * tile_products;

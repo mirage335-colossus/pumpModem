@@ -386,6 +386,48 @@ Use the evidence that matches the question:
   records. Those records are historical research and should not be silently
   promoted into current sensitivity, capacity or physical-radio claims.
 
+Near the sensitivity floor, compare configured-calendar acquisition,
+tracking after acquisition, and physical completion on the same route. An
+off-grid delay or Doppler shift can remove coherent projection energy, and
+path cancellation can make a channel inside the declared delay/Doppler bounds
+harder than the corner preset. A smooth coherent-link curve is therefore a
+reference for detecting avoidable loss. A finite search over timing, frequency
+and keyed waveforms has its own detection threshold. The earlier resilience
+study gives paired checks for interior and fractional offsets, changing paths
+and interference. Its fixed-ray description applies to the version inspected.
+The current GUI draws an interior echo delay and evolves bounded echo power
+and phase continuously. Diffuse and site-specific channels still need
+independent evidence.
+[Resilience review](../../_ref/resilience-triple_Robust_Modem/Astra-6/report.md#minimum-discriminating-channel-matrix),
+[current channel realization](../channel-models.md#robust-gui-changing-channel-realization).
+
+In a 2024 analysis of pilot-assisted short packets, dependence between timing
+errors across observations changes reliability. Its timing model and
+reliability bounds apply to that link. Robust needs its own acquisition
+controls. [Timing-synchronization study](https://doi.org/10.1109/TWC.2024.3458090).
+
+When a proposal uses reduced precision, measure which weak arrivals survive
+higher-precision rescoring as well as agreement between score arrays. One
+lost arrival can change a complete bit decision even when average agreement
+is high. Include a quiet or interferer control for changes to the admission
+statistic. A continuous search changes the false-alarm law of a normalized
+matched filter under the studied Gaussian model. Robust's calendar bound
+accounts for repeated slots under its specified conditional null. A hard
+directional veto can lose even strong wanted data when the realized channel
+lies largely outside the assumed waveform subspace.
+[Off-grid matched-filter study](https://doi.org/10.1109/TSP.2024.3358621),
+[Robust calendar bound](../triad-stochastic.md),
+[wrong-key appraisal](../../_appraisal/highFidelity-triple_Robust_Modem/hf-normalized-null.md).
+
+A 2026 FP4 matrix-multiplication preprint reports exact integer products
+after shared-exponent conversion and a speed
+advantage over its FP8 comparison at a 16,384-square size on Blackwell. Its
+conversion still loses small terms when exponents differ within a row, and
+maintaining exact products requires bounded inner dimensions and multiple
+products. A receiver trial would need to charge packing and reconstruction
+and verify arrival rank for its much thinner contractions.
+[FP4 matrix-multiplication preprint](https://arxiv.org/abs/2608.06812).
+
 The current CPU and receiver have not passed an absolute all-configuration
 capacity claim. Actual-device Radeon and NVIDIA checks are narrower than a
 hardware-family guarantee. Unknown-start acquisition, broad physical channel

@@ -94,11 +94,26 @@ struct Admission {
     std::size_t device_bytes = 0;
 };
 
+bool use_compact_frontier(std::size_t workspaces, std::size_t frequencies, std::size_t kernel_rows) {
+    constexpr auto maximum_template_rows = std::size_t{1} << 30;
+    std::size_t rows = 1;
+    for (const auto factor : {workspaces, frequencies, kernel_rows}) {
+        if (!factor) return false;
+        if (rows > maximum_template_rows / factor) return true;
+        rows *= factor;
+    }
+    return rows > maximum_template_rows;
+}
+
 std::optional<Admission> public_shape(const CoarseBulkGeometry& geometry, std::size_t workspaces,
                                       const CoarseTemplateSource* source, std::size_t& decline) {
     OpenClCoarseShape shape{geometry.taps, geometry.kernel_rows, geometry.lag_count, workspaces,
         geometry.frequency_tile_width ? std::min(geometry.frequency_tile_width, geometry.frequency_count)
                                       : std::min(default_tile_frequencies, geometry.frequency_count)};
+    // Large full-search geometries use a bounded eight-center compact path;
+    // direct component sessions retain the expanded radius-two default.
+    if (use_compact_frontier(workspaces, geometry.frequency_count, geometry.kernel_rows))
+        shape.frontier = OpenClCoarseFrontier::compact;
     if (source) {
         if (source->chips.size_bytes() > maximum_chip_bytes) {
             decline = keyed_chip_limit;

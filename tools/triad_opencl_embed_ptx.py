@@ -32,10 +32,11 @@ SIGNATURES = {
     "coarse_pack_bank": (8, 4, 4, 0, 0, 0, 0),
     "coarse_pack_observation": (8, 8, 4, 4, 0, 0, 0),
     "coarse_fp4_scores": (16, 8, 16, 8, 4, 0, 0, 0, 0, 0, 0),
-    "coarse_select_peaks": (4, 8, 0, 0),
+    "coarse_select_peaks": (4, 8, 0, 0, 0),
     "coarse_rotate_observation": (8, 8, 8, 0, 0),
-    "coarse_rescore_peaks": (8, 8, 8, 8, 8, 0, 0, 0, 0, 0),
-    "coarse_rescore_peaks_fp32": (8, 8, 8, 8, 8, 0, 0, 0, 0, 0),
+    "coarse_rescore_peaks": (8, 8, 8, 8, 8, 0, 0, 0, 0, 0, 0),
+    "coarse_rescore_peaks_fp32": (8, 8, 8, 8, 8, 0, 0, 0, 0, 0, 0),
+    "coarse_finalize_peaks": (8, 8, 0, 0, 0),
 }
 
 
