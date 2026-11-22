@@ -313,6 +313,104 @@ The candidate remains experimental. Reconsider the layout when wider
 evidence identifies a removable rank cost. Both pods used for this layout
 evaluation were terminated, with empty queued-job and volume inventories.
 
+## Host CPU allocation with a fixed Blackwell GPU — 22 November 2026
+
+One pod ran the stock native probe `8c80986a…3c82` from `ba911bdf` (native
+manifest `97f87801…9455`). Its full RTX PRO 6000 Blackwell Server Edition
+reported 97,887 MiB, SM 12.0, MIG disabled and driver 595.112.07. The EPYC
+9554 host had a 27.2-CPU quota and a 125 GB memory cap. The reduced
+allocation restricted affinity to one thread on each of eight distinct
+physical cores. The receiver resolved H = 8 and W = 16 there, and H = 27
+and W = 54 under the full quota. No software worker override was used.
+
+The bounded comparison replayed the [72 Hz/5× control and 36 Hz/10× holdout](triad-gpu-optimization.md#qualification-slots)
+with the no-socket launcher. All runs used device segmented search and gain
+rank, and the same 100 GB host cap. Device limits were 4 GiB for the control
+and 48 GiB for the holdout. Both cases had the Helper disabled. Each route
+had one look per allocation. Source and capture identities, public work,
+discard or decision, fallback counts, and receiver CPU and wall time were
+compared. The optional fine routes accelerate drift proposals and varying
+statistics. They retain host template rendering and native receiver state.
+
+| Capture and allocation | Drift and varying placement | Slot wall | Process CPU | Drift | Varying |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 72 Hz/5×, H = 8 | Native | 16.22 s | 69.54 CPU-s | 4.16 s | 1.76 s |
+| Same | Vulkan | 15.46 s | 62.68 CPU-s | 4.56 s | 2.43 s |
+| 36 Hz/10×, H = 8 | Native | 217.35 s | 1,006.46 CPU-s | 67.46 s | 25.62 s |
+| Same | Vulkan | 224.57 s | 936.70 CPU-s | 72.88 s | 27.82 s |
+| 36 Hz/10×, H = 27 | Native | 196.31 s | 1,602.45 CPU-s | 64.37 s | 21.31 s |
+
+The control pairs shared `af364b67…`, and the wide runs shared `8a6c8ab2…`.
+All three wide runs performed 1,269,245,464,578 segmented rows and
+107,830,554 coarse frequency rows. Decisions, signed lags and retained drift
+digests matched within each capture. All scored the active inputs as quiet
+(erasures). The 8-core wide device run differed in route witnesses and by at
+most 4.3e-14 nats in operational bit evidence. There were zero declines or
+fallbacks on the requested device families. Both dense FP4 coarse rows and
+resident fine FP4 modes were zero on these geometries.
+
+The eight-core native-fine wide run took 10.7% longer than the full-quota
+reference with 37% less process CPU time. With both fine offloads it used
+another 6.9% less process CPU time and took 3.3% longer. The control's lower
+total service on the device route came with a shorter coarse span in the
+same pair. Both measured fine stages took longer individually. These
+comparisons give CPU-demand and service observations on one host, with
+inadequate replication for small timing effects. The host remained an EPYC
+server with a discrete GPU. The wide H = 8 receiver workspace quote was
+69.1 GB, and charged Vulkan allocations peaked at 9.13 GB. The quote is
+not a process RSS measurement.
+
+The explicit wide drift route staged 4.65 GB of host-built inputs and
+recorded 8.14 s of device commands across 214 submissions. Session lock
+wait summed to 27.6 lane-seconds. The wide varying route staged 36.91 GB,
+read back 1.36 GB and recorded 1.42 s of commands in 317 submissions. The
+drift render timer still attributed hundreds of aggregate lane-seconds
+to host rendering. These scopes direct host-CPU work toward resident
+observation and template generation, batched drift proposals, and compact
+readback. GPU command time elsewhere remains important. Coarse device
+commands totaled 81.39–81.96 s across all three wide runs. A wide isolated
+slot consumed 0.108–0.124 s of receiver service per captured second. The
+test did not exercise continuous backlog, message completion, Helper
+acquisition, or a population of channel/noise realizations.
+
+### Segmented rank normalization diagnostic
+
+The same Blackwell host then ran a temporary same-binary comparison of the
+canonical Vulkan segmented rank shader. Every score divides by block energy
+in FP64. Tracking-enabled rows divide by noise power again before the FP32
+state update. Both inputs stay constant throughout a submitted block. The
+stock GLSL produced per-row FP64 `OpFDiv` in SPIR-V. The driver’s native
+instruction lowering was not inspected. The alternate shader used host
+reciprocals and FP64 multiplies for positive normal inputs and reciprocals,
+and retained the original division otherwise. Both shaders compiled and
+passed Vulkan 1.2 SPIR-V validation. The candidate changes quotient
+rounding and was selected only in the diagnostic build.
+
+Component executable `9777c26d…c83e`, probe `2bb31aaf…36f5`, native
+manifest `7317f680…` and overlay `30055d27…8520` retained the same public
+search and tracking state. Both variants passed `test_triad_vulkan
+--segmented`, including the time-domain oracle, rank agreement and selected
+peaks. Warm component timings alternated stock, candidate, candidate,
+stock. The 16,384-row, 10,553-arrival tracked component improved from
+16.32–16.36 ms to 11.92–11.98 ms per workspace, about 27%. The
+4,096-arrival tracked component improved from 6.25–6.29 to 5.69–5.73 ms.
+The 32,768-row component with tracking off improved from 7.64–7.67 to
+7.24–7.28 ms.
+
+The full H = 27 allocation replayed the 72 Hz/5× active control and one
+noise-only slot in opposite stock/candidate order. The matched non-timing
+slot receipts were identical for both pairs, including the decisions,
+evidence, signed lags and 85,216,593,618 segmented score rows. Active
+segmented time fell from 6.138 to 4.808 s, and whole-slot service from
+12.991 to 11.576 s. Noise-only segmented time fell from 6.114 to 4.746 s,
+and whole-slot service from 12.938 to 11.197 s. Both slots scored quiet.
+These results isolate a practical arithmetic opportunity on the tested
+geometry. The tracked 32,768-row wide slot, low-margin candidates and
+sustained service still need qualification before using this arithmetic
+in the operating receiver. Default and operating shader code stayed
+unchanged. The pod was terminated and the pod, queue and volume inventories
+were empty.
+
 ## Exact-channel witness for severe low-rate bit errors — 21 November 2026
 
 A bounded native diagnostic replayed two severe active captures, a stable

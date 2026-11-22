@@ -33,10 +33,48 @@ page when no phase is left.
   Separate rank arithmetic and traffic at the target geometry before a new
   layout or FFT change. [Command profile](validation.md#inside-vulkan-segmented-timing),
   [paired layout check](validation.md#segmented-tracking-rank-reuse--22-november-2026).
+- Guarded reciprocal normalization of the rank shader reduced segmented
+  wall time by about 22% on a matched 72 Hz/5× active and noise pair. Its
+  generated code retains division outside the normal reciprocal range, and
+  its changed rounding still needs wider qualification. This is a separate
+  device arithmetic opportunity from moving host preparation.
+  [Normalization diagnostic](validation.md#segmented-rank-normalization-diagnostic).
 - The input is a low-rate baseband stream, tens of MB per slot. The data
   derived from it and moved between host and device is hundreds of GB on the
   HF slot. Generating derived data on the device removes that traffic and the
   per-call round trips.
+
+### GPU work distribution and host CPU demand
+
+Assign workgroups batches of public frequency, timing and drift hypotheses.
+Share channelized observations, keyed source tiles and spectra across the
+batch. Keep the intermediates and bounded tracking state on the device, and
+advance each recurrence in block order. Independent hypotheses and ready
+slots supply parallel work. Thin host control still handles audio, ordered
+commits and codec work. A persistent device work queue may help if dependency
+or dispatch gaps remain after ordinary batching. Workgroups running different
+whole receivers can duplicate transforms and carry large private state. GPU
+thread, register and shared-memory limits affect the number of ready groups.
+[Blackwell tuning guide](https://docs.nvidia.com/cuda/blackwell-tuning-guide/),
+[device-side task-graph study](https://hpcrl.github.io/ICS2025-webpage/program/Proceedings_ICS25/ics25-66.pdf).
+
+In the earlier matched wide pair, moving varying statistics to Vulkan reduced
+receiver process CPU from 1,863 to 1,367 CPU-seconds, about 27%, while total
+slot service stayed near 193 s. The device route still staged 36.91 GB of
+logical templates for an input of 10.87 million samples (174 MB as complex
+FP64). It still rendered those templates on the host. Measure smaller CPU
+allocations with the same public work, memory caps and GPU. Keep the default
+`W = 2*H` at each allocation. Those isolated slots can identify host demand;
+an ordered backlog test on the same stream determines sustainable service.
+[Matched wide pair](validation.md#vulkan-fine-stage-attribution-and-staging--21-november-2026).
+
+On one fixed Blackwell host the wide slot finished in 217.35 s with eight
+physical cores available and 196.31 s under the 27-CPU quota. Explicit drift
+and varying work on the eight-core run reduced process CPU by another 6.9%
+and took 224.57 s. Both fine families still depend on host-built products or
+templates. Transition the producer and its inputs to device ownership along
+with the kernels, and measure the effect at the smaller host allocation.
+[Same-host CPU allocation measurements](validation.md#host-cpu-allocation-with-a-fixed-blackwell-gpu--22-november-2026).
 
 ## Read first
 
@@ -68,10 +106,9 @@ page when no phase is left.
   RTX PRO 6000 qualification passes. Never flip a default from local results.
 - **Keep the native stage.** It is the reference and the fallback. Do not
   delete or weaken it.
-- **Spending.** A rented GPU needs the user's explicit approval and a cost
-  cap, every time. Without approval, do the local parts and stop at the
-  checkpoint. Keep prices, provider identifiers, pod names, UUIDs and private
-  paths out of the repository.
+- **Spending.** Confirm that existing user authorization covers the planned
+  rental and cost cap. Ask before exceeding its scope. Keep prices, provider
+  identifiers, pod names, UUIDs and private paths out of the repository.
 - **Git.** Work on `main`. No branches or worktrees. Commit and push only
   when the user asks.
 - **Timing.** Never time beside a build, a test run or another agent. Use
@@ -355,7 +392,7 @@ together with another hash-changing change. Until then use
 
 ## Checkpoints on a rented RTX PRO 6000
 
-Ask for approval and a cap first. Follow
+Verify the applicable user authorization and cap before provisioning. Follow
 [Run a bounded device qualification](triad-gpu-optimization.md#run-a-bounded-device-qualification)
 and the playbook's [test recipe](gpu-strategy-playbook.md#test-recipe),
 including [memory sizing](gpu-strategy-playbook.md#size-memory-on-a-pod).
