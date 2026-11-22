@@ -1,5 +1,10 @@
 # Robust GPU performance and retained lessons
 
+To choose, derive or test a GPU or Tensor Core strategy, start with the
+[strategy playbook](gpu-strategy-playbook.md): it holds the eligibility
+rules, formulas, hardware peaks, the status of every strategy and a test
+recipe, and links back here for detail.
+
 This page holds the current GPU limits and ranked next steps, the method to
 find and qualify a GPU improvement, the measured history of each GPU route,
 and the retained historical Tensor Core lessons with their
@@ -60,8 +65,8 @@ runs depends on the build and the device:
 | --- | --- | --- |
 | Vulkan build with the OpenCL NVFP4 module (`-DDATAPUMP_TRIAD_TENSOR=OFF -DDATAPUMP_TRIAD_VULKAN=ON`, `DATAPUMP_TRIAD_OPENCL_NVFP4` compiled; the lab's `--mode gpu` deployment when it reports `PUMP_LAB_MODE=vulkan`) on the **SM 12.0 class**: an NVIDIA GPU that OpenCL reports as compute capability 12.0, with the Vulkan device's UUID. The RTX PRO 6000 Blackwell is qualified. An RTX 5090 is in the same class and would receive these routes unmeasured. | The [dense FP4 search](#dense-fp4-coarse-search-and-device-template-bank) for eligible frequency-tile sessions, two-ray and one-ray within the `dense-cost` bound, with the device template bank and FP32 partial rescoring; the Vulkan FFT search for sessions it declines. Vulkan segmented timing inside the [CUDA-qualified envelope](gpu-precision-controls.md#current-implementation). The [signed-lag gain direct rank](#signed-lag-ranks), which publishes only certified nominations equal to native. Resident FP4 fine statistics for the isolated 1,500-row, 47-mode, two-path DATA geometry, with [device tiles, windows of 16 and FP32 mapping and rendering](#device-rendered-fine-tiles-and-resident-windows). | Helper; lag-group and compact tight-clock coarse sessions (`native_coarse_lag_sessions`, `native_coarse_precision_sessions`); segmented shapes outside the envelope (`vulkan-segmented-unqualified-shape`, for example every call of the 72 Hz/1× slot); drift proposals and varying statistics (`vulkan-drift-unqualified-device`, `vulkan-varying-unqualified-device`); fine shapes outside the resident geometry; Gaussian states, recursions, decisions and codec. Check that `vulkan_segmented_qualified_device` and `vulkan_gain_rank_qualified_device` are true, and read `opencl_coarse_score_rows`, `opencl_resident_nvfp4_modes`, `vulkan_segmented_sessions`, `vulkan_gain_rank_sessions` and `signed_lag_gain.proposal_route` (`fp32_fft_direct_rank_fp64_accumulation_fp64_rescored_frontier`). This route holds the larger plan and shader caches, 59,088,896 B more per owner, and the device rank adds 6.8–72 MB of host quote per owner (6.8 MB on the 72 Hz/1× slot, 68.7 MB on the 72 Hz/5× control, 71.6 MB on the holdout). |
 | The same build and device with FP32 minimum (the GUI's FP32 minimum, `--gpu-fp32-minimum on`) | The Vulkan FP32 FFT search. The factory sets FP32 coarse precision and drops the chirp-Z preference. The backend opens OpenCL automatically only with automatic coarse precision, so the SM 12.0 class is not identified (from the code; unmeasured). | No dense FP4 search, resident fine route, automatic segmented timing or gain rank. |
-| The same build on any other Vulkan GPU: other NVIDIA generations, Radeon, Intel | Vulkan FFT frequency search; on the Radeon its qualified packed-FP16 direct route within its envelope; the [host-scoring compatibility route](gpu-precision-controls.md#gui-automatic-gpu-selection) where shader FP64 or INT64 is missing. | Segmented timing and every fine-stage family decline as `unqualified-device` (`vulkan-segmented-shader-fp64-unavailable` and `vulkan-<family>-shader-fp64-unavailable` on the host-scoring route). The explicit `--vulkan-gain-rank`, `--vulkan-drift` and `--vulkan-varying-fine` `device` routes run on RADV and are exact within their classes. Single loaded Radeon runs of drift and varying looked slower than native; the gain rank has no gated Radeon timing ([rejected approaches](#rejected-and-conditional-approaches)). |
-| CUDA build (`-DDATAPUMP_TRIAD_TENSOR=ON`; the [RunPod simulation build](triad-performance.md#run-a-native-simulation-on-runpod) also sets `-DDATAPUMP_TRIAD_VULKAN=OFF`). A build with both backends tries CUDA first. | FP32 cuFFT segmented timing on SM120; guarded half cuFFT for SM89 and SM120 broad searches; the bounded FP16/INT8 lag matrix; CUDA fine processing (`TensorFine`: cuFFT projection, NVFP4 on SM120 where cuFFT cannot plan). | Never the dense FP4 search, the OpenCL resident fine route, the FP32 OpenCL kernels, Vulkan segmented timing or any fine-stage family: the CUDA backend keeps the null stage factories of [the bulk interface](../src/triad_receiver_bulk.hpp). With automatic precision other than FP64, single-tap fine shapes of at most 1024 rows and 40 projection modes run on the CPU with at least 26 workers on an AVX2 host. The stored HF receipts and the 36 Hz/10× −18 and −21 receipts ran this automatic route; the other stored 36 Hz receipts, including the holdout input's −12.9897, and the 60 Hz receipts ran explicit `--backend cuda`, most with CUDA segmented timing requested. Check the [CUDA counters](#which-arithmetic-ran-in-a-remote-simulation). |
+| The same build on any other Vulkan GPU: other NVIDIA generations, Radeon, Intel | Vulkan FFT frequency search; on the Radeon its qualified packed-FP16 direct route within its envelope; the [host-scoring compatibility route](gpu-precision-controls.md#gui-automatic-gpu-selection) where shader FP64 or INT64 is missing. The OpenCL module is fixed `sm_120a` PTX ([device module](../src/triad_opencl_nvfp4_device.hpp)), so no other GPU gets the dense search, the FP32 per-row kernels or the resident fine route. | Segmented timing and every fine-stage family decline as `unqualified-device` (`vulkan-segmented-shader-fp64-unavailable` and `vulkan-<family>-shader-fp64-unavailable` on the host-scoring route). The explicit `--vulkan-gain-rank`, `--vulkan-drift` and `--vulkan-varying-fine` `device` routes run on RADV and are exact within their classes. Single loaded Radeon runs of drift and varying looked slower than native; the gain rank has no gated Radeon timing ([rejected approaches](#rejected-and-conditional-approaches)). |
+| CUDA build (`-DDATAPUMP_TRIAD_TENSOR=ON`; the [RunPod simulation build](triad-performance.md#run-a-native-simulation-on-runpod) also sets `-DDATAPUMP_TRIAD_VULKAN=OFF`). A build with both backends tries CUDA first. | FP32 cuFFT segmented timing on SM120 only: its automatic gate requires compute capability 12.0, so SM89 keeps the native scorer unless `--cuda-segmented-timing on` requests it (unqualified there). Guarded half cuFFT for SM89 and SM120 broad searches; the bounded FP16/INT8 lag matrix; CUDA fine processing (`TensorFine`: on SM120 an owned cuFFT plan with a fused retained-bin gather, NVFP4 where it cannot plan; on SM89 the ATen FFT and an index gather). | Never the dense FP4 search, the OpenCL resident fine route, the FP32 OpenCL kernels, Vulkan segmented timing or any fine-stage family: the CUDA backend keeps the null stage factories of [the bulk interface](../src/triad_receiver_bulk.hpp). With automatic precision other than FP64, single-tap fine shapes of at most 1024 rows and 40 projection modes run on the CPU with at least 26 workers on an AVX2 host. The stored HF receipts and the 36 Hz/10× −18 and −21 receipts ran this automatic route; the other stored 36 Hz receipts, including the holdout input's −12.9897, and the 60 Hz receipts ran explicit `--backend cuda`, most with CUDA segmented timing requested. Check the [CUDA counters](#which-arithmetic-ran-in-a-remote-simulation). |
 | Developer `--backend vulkan` (not automatic) | Without an OpenCL request the class is not identified, so automatic segmented timing and the gain rank decline as `unqualified-device`. `--vulkan-precision nvfp4`, or `--vulkan-fine-projection` `nvfp4`, `resident-nvfp4` or `resident-fft`, identifies it. With `--vulkan-precision nvfp4` the dense search is required for every session and always scores one-ray sessions. With only a `--vulkan-fine-projection` request the coarse search stays on the Vulkan FFT route. Either way the route differs from automatic selection: each coarse session has its own workspace (256 MiB by default) and the chirp-Z preference is off. | Use it to attribute time and to compare a stage against native; decide defaults on unprofiled automatic runs of the flipped and unflipped builds ([Compare routes](#compare-routes)). |
 | CPU (`--backend cpu`) | None. | Every stage. |
 
@@ -87,7 +92,7 @@ Slot and stage times are wall seconds of one slot:
 | 72 Hz/5× control, 2 mW (`af364b67…`) | Same | 17.75–19.76 s; 38.4–55.5 s in three runs before the flip (43.7 and 55.5 s in the two flip pairs) | Coarse 9.36–11.2 s: signed-lag 1.34–1.47 s and 8.0–9.7 s of other coarse work, including the device segmented stage; the retained summaries omit its `varying_coarse_seconds`. Fine 8.38–8.55 s: drift 2.18–2.22 s and varying fine 5.32–5.47 s. | The unsplit coarse remainder, then varying fine and drift. |
 | 36 Hz/10× 100 mW holdout, Target −12.9897, 1,797.6 s bit (`8a6c8ab2…`) | Same | 281 s and 4,919 CPU-s; 688 s and 21,689 CPU-s before the flip | Coarse 113.3 s, of which signed-lag 3.05 s; fine 167.6 s, of which drift 60.9 s and varying fine 89.9 s | Native drift and varying fine, 151 s or 54% of the slot, then about 110 s of coarse work outside the rank, not split. About 17.5 of 40.8 CPUs were busy on average. |
 | Same input | Explicit `--backend cuda` with CUDA segmented timing, 13-CPU allocation, W = 26, earlier source ([18 Nov](validation.md#blackwell-receiver-trials-at-2-mw)) | 401 s and 2,257 CPU-s | Coarse 218 s: CUDA segmented 133 s and signed-lag 81 s. Fine 183 s: drift 128 s and varying fine 38 s. | Native signed-lag and drift on that source; the CUDA route has no fine-stage device route. |
-| HF 100 mW 36 Hz/10× Target −22.5, 17,205.6 s bit: the hardest stored receipt | CUDA automatic, 13-CPU affinity on an EPYC 9555 pod with a 27.2-CPU quota, W = 26 ([18 Nov](validation.md#blackwell-receiver-trials-at-2-mw)) | 3,707 s and 14,050 CPU-s, 3.8 CPUs busy on average | Coarse 2,220 s: CUDA segmented 1,626 s, signed-lag 386 s, other 208 s. Fine 1,487 s: drift 899 s, varying fine 401 s, other 186 s. The simulator took 404 s. | CUDA segmented timing, 44% of the slot, and the three CPU families, 46%. Device memory was nearly full (`peak_reserved_bytes` 99,243,065,344 of 101,975,851,008). The other 208 s of coarse work include the affine frequency search, whose half cuFFT declined the shape (`cuda-fp16-fft-unqualified-shape`), and the slot uploaded 249 GB. |
+| HF 100 mW 36 Hz/10× Target −22.5, 17,205.6 s bit: the hardest stored receipt | CUDA automatic, 13-CPU affinity on an EPYC 9555 pod with a 27.2-CPU quota, W = 26 ([18 Nov](validation.md#blackwell-receiver-trials-at-2-mw)) | 3,707 s and 14,050 CPU-s, 3.8 CPUs busy on average | Coarse 2,220 s: CUDA segmented 1,626 s, signed-lag 386 s, other 208 s. Fine 1,487 s: drift 899 s, varying fine 401 s, other 186 s. The simulator took 404 s. | CUDA segmented timing, 44% of the slot, and the three CPU families, 46%. `peak_reserved_bytes` 99,243,065,344 of 101,975,851,008 is lease accounting that reached `workspace_limit_bytes` by design; the allocator peaked at 38,633,734,144 B reserved and 31,470,426,624 B live. The other 208 s of coarse work include the affine frequency search, whose half cuFFT declined the shape (`cuda-fp16-fft-unqualified-shape`; `plan` `correlation_fft_rows` 16,777,216). The slot-wide `upload_bytes` was 249 GB, about 94 GB of it segmented per-block copies (*derived*). |
 | 72 Hz/1× slot and 72 Hz/5× control | Radeon Vega Vulkan build, Ryzen 5 PRO 5650U, 24 workers, native segmented timing ([21 Nov](validation.md#fine-stage-device-routes-and-exact-cpu-stages--21-november-2026)) | 22.9–23.9 s and 250.9–251.6 s | Coarse 20.7–21.7 s and 240 s; fine 2.20–2.24 s and 10.9–11.0 s | Native segmented timing. The explicit device segmented route made the 72 Hz/1× slot about 10% slower, 25.7–26.1 against 23.5–23.6 s (process wall 25.9–26.3 against 23.7–23.8 s), with 29 against 258 process CPU-s ([20 Nov](validation.md#gpu-offload-survey-and-gated-device-routes--20-november-2026)). |
 
 The 21 November stage split of the Blackwell rows is tabled in its
@@ -98,6 +103,15 @@ Reading the table:
   plus fine. The segmented span and the signed-lag stage lie inside coarse,
   drift and varying fine inside fine
   ([Attribute the time](#attribute-the-time)).
+- **The challenging slots do almost no Tensor Core work.** On the CUDA rows
+  drift, varying fine and the signed-lag ranks ran native on the CPU, and the
+  dense FP4 search and resident fine route do not exist on CUDA builds. On
+  the Vulkan/OpenCL 72 Hz/5× control the automatic runs scored
+  `opencl_coarse_score_rows` 0 with one frequency fallback: segmented timing
+  exists only with a varying passband, which withholds the device bank. More
+  Tensor Core use there needs a new eligible contraction or FFT-structured
+  work moved to the device, not faster FP4 kernels
+  ([playbook](gpu-strategy-playbook.md#where-the-time-goes-now)).
 - **Native stages scaled inversely on the large-quota pod; the cause is
   unmeasured.** On the 72 Hz/5× control the native signed-lag stage took
   20.3–38.2 s across nine runs of one binary on the Xeon at W = 80, against
@@ -151,8 +165,16 @@ it is measured, modeled from stored receipts or inferred from the code.
    the CUDA route spent 133 s in segmented timing on the holdout input.
    `admission` reports that span as `varying_coarse_seconds`, but the
    21 November summaries did not keep it, so the next automatic run splits
-   these remainders without new instrumentation. Then the segmented
-   efficiency and per-stage selection [levers](#next-levers-in-order) apply.
+   these remainders without new instrumentation. Within the 20 November
+   record, before the gain-rank flip, the 72 Hz/5× automatic segmented span
+   was 5.97–5.99 s of 11.06–12.93 s coarse. Besides the segmented span and
+   the rank, `coarse_seconds` holds bank and observation preparation, the
+   FIR and warp, the frequency search of every session (the Vulkan FFT
+   search for varying-passband sessions), selection and midpoint timing;
+   drift and varying fine lie in `fine_seconds`, so a CPU-family lever does
+   not touch this remainder. If the segmented span dominates it, the
+   segmented [levers](#next-levers-in-order) apply; otherwise split it with
+   the `slot` command's `coarse_json` sub-phases.
 3. **The segmented search at HF scale (measured rates, modeled share).** It
    took 1,626 s of the 3,707 s HF slot on the CUDA route. With the three CPU
    families ported whole it would be 71–92% of the slot across the 18
@@ -193,10 +215,11 @@ it is measured, modeled from stored receipts or inferred from the code.
    with a 4 GiB explicit workspace and device segmented timing. Candidates
    are a narrower batch under the automatic optional lease, at most a quarter
    of the shared workspace, and queue contention with the OpenCL and segmented
-   sessions. The gain-rank receipt records no batch width; add it with
-   [the first lever](#next-levers-in-order) and compare it with
-   `vulkan_gain_rank_upload_bytes` and `vulkan_peak_leased_bytes` on the next
-   device run.
+   sessions. The code makes a batch halved by contention, or queue
+   contention, likelier than the quarter bound itself ([lever 9](#next-levers-in-order)). The gain-rank receipt records no
+   batch width; add it with [the first lever](#next-levers-in-order) and
+   compare it with `vulkan_gain_rank_upload_bytes` and
+   `vulkan_peak_leased_bytes` on the next device run.
 7. **Admission charges that cap owners (code; effect unmeasured).** The
    backend-wide VkFFT and SPIR-V cache bound is charged in the stream
    reservation and again in each owner's lease. On the SM 12.0 automatic
@@ -224,18 +247,31 @@ it is measured, modeled from stored receipts or inferred from the code.
 
 ### Next levers, in order
 
-Ordered by expected challenging-case effect per cost. Expected effects marked
+The numbers are stable identifiers that the other guides cite; the list was
+ordered by expected challenging-case effect per cost when written. For the
+current order on the RTX PRO 6000 use the playbook's
+[per-GPU list](gpu-strategy-playbook.md#rtx-pro-6000-blackwell), which puts
+lever 7 third. Expected effects marked
 modeled come from fixed-geometry cost models of the stored receipts, not
-measurements.
+measurements. Only levers 3 (its dense DFT-to-modes step), 11, 12 (its
+device synthesis of varying-passband banks, which would let those sessions
+reach the dense FP4 search) and 13 involve matrix units; the others raise
+GPU utilization or CPU capacity without them
+([playbook catalog](gpu-strategy-playbook.md#proposed-and-untried)).
 
-1. **Attribute the fine-stage device routes (instrumentation, first).** Add
-   per-family device intervals (stage contexts create no timestamp query pool
-   today), device-call counts, download bytes, the gain-rank batch width and
-   the session-mutex wait to the family receipts, and record plan and
-   compilation seconds per family. Until then the causes in
-   [item 1 above](#what-bounds-the-challenging-slots) are inferred. Results do
-   not change, so the identity gate and the receipt checks of
-   `tools/triad_native.py` qualify it.
+1. **Attribute the fine-stage device routes (instrumentation, first).** Two
+   parts. Already emitted, so only keep them in run summaries:
+   `varying_coarse_seconds`, `varying_{projection,statistics,recursion,wait}_seconds`,
+   `varying_batches`, `varying_batch_blocks`,
+   `drift_{render,ridge,ridge_search,slope,exact}_seconds`,
+   `vulkan_fft_plan_seconds`, `vulkan_shader_compile_seconds` and the coarse
+   `vulkan_device_command_seconds`. Needs code: per-family device intervals
+   (stage contexts create no timestamp query pool today), device-call and
+   download counts, the gain-rank batch width and the session-mutex wait in
+   the family receipts, and plan and compilation seconds per family. Until
+   then the causes in [item 1 above](#what-bounds-the-challenging-slots) are
+   inferred. Results do not change, so the identity gate and the receipt
+   checks of `tools/triad_native.py` qualify it.
 2. **Redesign the drift device route.** Remove the session-wide
    serialization: per-lane command buffers and staging slots with shared
    plans, or an asynchronous submission that batches independent rank-pass
@@ -248,10 +284,20 @@ measurements.
    slope lists (19 of 109 HF evaluations re-render and rerun both ridges),
    share the direct-path render and products between the two signs, which are
    equal up to a power of two, and run both signs' survivor passes
-   concurrently. Expected at HF (modeled): 899 s → about 100–150 s with the
-   slope-blocked ridge, if its 63 ns per load reflects the HF host (an
-   EPYC 9555; time the [ridge benchmark](#drift-proposals) on that CPU
-   class to test it) → 60–90 s with device proposals → 20–40 s with device
+   concurrently; these three are not built yet. The slope-blocked ridge
+   (blocks of 16) is in the tree since 21 November, the only native ridge.
+   Expected at HF (modeled, unmeasured): 899 s → about 100–150 s with that
+   ridge, if its 63 ns per load reflects the HF host. That figure is the
+   receipt's drift seconds divided by a modeled load count with the ridge
+   share assumed at 85–95%, not timed; the former loop ran 5–12 ns on the
+   Xeon. The HF host was an EPYC 9555; time the [ridge benchmark](#drift-proposals)
+   on that CPU class to test it: `local-evidence/fine-stage-offload-20261121/ridgebench/ridgebench.cpp`,
+   built with `g++ -std=c++20 -O3 -DNDEBUG -ffp-contract=off -fno-fast-math -pthread`
+   and run as `ridgebench 1762 16384 1967 4 <threads> 4 64 16`, the HF
+   segments, bins, radius and stride, then the thread count, the slopes of
+   the former and current loops and the slope block; move it in-tree as a
+   test tool if it must outlive that directory) → 60–90 s with device
+   proposals → 20–40 s with device
    rendering, after which the exact FP64 survivors bound it. Qualify at
    proposal level on the holdout and the 72 Hz/5× control. Reconsider the
    present verdict once the route is timed at the holdout or HF shape.
@@ -299,24 +345,60 @@ measurements.
    72 Hz/1× proposals on the Radeon, clock siblings 0.0003 ppm apart), so
    qualify decisions and evidence on the strata
    ([segmented route](gpu-precision-controls.md#current-implementation)).
+   Measure the gain on the 72 Hz/1× slot. The 72 Hz/5× control already runs
+   device segmented timing (156 sessions) and the holdout's shapes lie inside
+   the envelope, so they serve as no-change checks. This is FP32 VkFFT work, not Tensor
+   Core work.
 6. **Segmented efficiency at HF scale, on both routes.** First measure the
    Vulkan rate at N = 32,768: `test_triad_vulkan --segmented-benchmark` on
    the device covers a 32,768-row shape (4,500 arrivals) and a 16,384-row
-   shape with 10,553 arrivals; then read `varying_coarse_seconds` and the
+   shape with 10,553 arrivals. That benchmark is Vulkan-only and has run
+   only on the Radeon; CUDA has the `test_triad_tensor --cuda --segmented-only`
+   oracle and slot pairs. Then read `varying_coarse_seconds` and the
    `vulkan_segmented_*` declines and fallbacks of an automatic holdout run
-   for its share of the slot. The rate is bandwidth-bound, so cut traffic:
-   fuse the shifted spectral product into the FFT load; prune the inverse
-   output, since only 10,553 of 32,768 lags are read at HF; and share column
-   spectra across the 15,733 frequency shifts. Segmented timing has no
-   half-storage form. The factored HMMA inverse was 1.87–4.01× slower than
-   FP32 cuFFT ([dispatch](#hardware-and-library-dispatch)).
+   for its share of the slot. If the kernel trace or a cold-buffer timing
+   shows the FFT kernels DRAM-bound (the pass count is unverified, and the
+   kernels may be only about 400 s of HF's 1,626 s), cut traffic: fuse the
+   shifted spectral product into the FFT load; prune the inverse output,
+   since only 10,553 of 32,768 lags are read at HF; and share column
+   spectra across a block's frequency shifts (15,733 in HF's widest family,
+   about 7,019 per block on average). If the kernels are under half the
+   span, per-call levers rank first. No half-storage form of
+   segmented timing is implemented on either backend; nothing refuses one
+   (the `require` at the start of the Vulkan `begin_segmented` is an ordering
+   assertion: segmented work must begin before the frequency search sets its
+   own half storage). Its outputs are proposal-level (FP32 products, FP64 lag
+   ranks; E3), so FP16 storage of the spectra is eligible in principle; it
+   would need power-of-two scaling, a range guard, a nonfinite fallback and
+   receipt counters of its own, and at most halves the traffic of a
+   bandwidth-bound stage (*inferred*). The factored HMMA inverse was
+   1.87–4.01× slower than FP32 cuFFT ([dispatch](#hardware-and-library-dispatch)).
 7. **CUDA parity or per-stage selection.** Add cuFFT forms of the three
    families for CUDA builds, or a build that selects CUDA or Vulkan per stage.
+   Scope on the HF receipt: drift 899 s, varying fine 401 s and signed-lag
+   386 s ran on the CPU, 1,686 s or 46% of the slot (ceiling 1.83×), plus
+   the 208 s of other coarse work below. The Vulkan/OpenCL route would bring
+   the device gain rank, but its segmented rate at 32,768 points is
+   unmeasured in a slot (CUDA 3.9–5.2e11 row-stages/s there, Vulkan 3.2e11
+   at 16,384 points on the 72 Hz/5× control), so moving HF to that route
+   needs the comparison first (its 99.2 GB CUDA `peak_reserved_bytes` is a
+   lease counter at its limit; the allocator peaked at 38.6 GB)
+   ([worked example](gpu-strategy-playbook.md#worked-examples)).
    First compare the two automatic routes on one pod, from one source, on the
    [qualification slots](#qualification-slots). For the HF slot's other
    208 s of CUDA coarse work, qualify the affine frequency search's half
    cuFFT for that shape, which declined it
-   (`cuda-fp16-fft-unqualified-shape`), and cut its 249 GB of upload.
+   (`cuda-fp16-fft-unqualified-shape`). The slot-wide `upload_bytes` was
+   249 GB, about 94 GB of it segmented per-block copies (*derived*,
+   [shapes](gpu-strategy-playbook.md#worked-examples)). The
+   automatic gate rejects transforms outside 4,096–2^20 rows or below its
+   work volume ([backend](../src/triad_tensor_backend.cpp), `HalfFftFallback`):
+   at 2^20 rows FP16 subnormal rounding is bounded by about 0.14% of a row's
+   L2 norm. The HF `plan` receipt records the transform length:
+   `coarse_full_prior.correlation_fft_rows` is 16,777,216 (2^24), and the
+   holdout plan's 2,097,152 (2^21) is above the gate too. A longer transform would need
+   its own scaling, such as block-floating scales per segment, and receiver
+   evidence on the strata.
 8. **Overlap.** Run ready fine-family work beside the device segmented stage
    within the bounded executor and ordered commits, and measure it with
    backlog intervals ([Compare routes](#compare-routes)).
@@ -325,8 +407,20 @@ measurements.
    smaller compilation bound; reconcile the explicit-workspace rules; and
    size the VkFFT temporary buffer from VkFFT's requirement, which would
    roughly double the admitted gain-rank batch. Each raises admitted owners or
-   batches under a binding memory limit, and no result changes.
-10. **Gain rank.** Explain item 6 of the bounds above. Then a fused
+   batches under a binding memory limit, and no result changes. Optional
+   leases must still never wait. For bounds item 6 (code, effect
+   unmeasured): an automatic gain-rank session takes the widest batch, at
+   most 64 blocks, under a quarter of the shared workspace (tens of GB on
+   the 96 GB card, *inferred*), then halves while `Shared::try_acquire`
+   refuses, which it does whenever any owner is queued or the workspace is
+   full; an explicit-workspace session admits without a shared lease
+   ([gain rank](../src/triad_vulkan_gain.cpp)). Contention halving or queue
+   contention is therefore likelier than the quarter bound; build the fix
+   with lever 1's batch-width field.
+10. **Gain rank.** On the Vulkan route the stage is 1% of the holdout and
+    7% of the 72 Hz/5× control, so on Blackwell it is a prerequisite item:
+    use the NVIDIA per-block figures (0.07 ms in the slot, 0.22 ms in the
+    oracle), not the Radeon's 2 ms. Explain item 6 of the bounds above. Then a fused
     local-memory rank kernel: by a traffic model the unfused four-kernel
     form moves about 10 TB on the HF slot, about 6 s at 1.6 TB/s on the
     RTX PRO 6000, against an estimated 0.6 s fused. Scaling the holdout's
@@ -342,23 +436,56 @@ measurements.
     CPU-only targets, an FP32 AVX2 FFT with a vectorized two-pass
     log-mean-exp certified by the same FP64 frontier (estimated 3–5×; the
     epilogue is about 7 of 12 CPU-ms per HF block).
-11. **Matched-fixture levers.** Fuse the fine map, peak and pack; synthesize
+11. **Large dense plans (Tensor Core).** On the 3,377-arrival GPSDO/IC-7100
+    one-ray plan the FP4 products took 11.35 s in a profiled run with FP64
+    rescoring (coarse 26.97 s), about 59% of the unprofiled FP32-partial
+    run's 19.16 s coarse stage (inferred across the two runs), and about
+    3 s went to host work and round trips over 28,082 dispatches. In
+    order: let two workspace pairs of a block share the observation loads
+    (the ring layout issues 1.14–1.16 PFLOP/s in the receiver against
+    1.73–1.76 with every load hoisted, so up to about 4 s there, *modeled*);
+    pipeline the dense tiles (non-blocking parameter uploads, double-buffered
+    frontier readbacks) or choose the dense tile width independently of the
+    Vulkan FFT plan ([one-ray admission](#one-ray-admission-and-dense-cost));
+    measure the admitted but unmeasured HF Worst 3.6 Hz two-ray plan (7,036
+    arrivals × 93,614 rows); widen the arrival frontier beyond two per row
+    before the FP32 pass, and measure the 1/16 conditioning guard on the
+    device, which could widen FP4 admission
+    ([Remaining costs after the dense search](#remaining-costs-after-the-dense-search)).
+    Qualify at E3 with the planted-arrival sweep on the device.
+12. **Matched-fixture levers.** Fuse the fine map, peak and pack; synthesize
     whitened two-ray, varying-passband, midpoint-gain and FHSS-exact sessions
-    on the device; move Gaussian updates to the device once its FP64 load
+    on the device (varying-passband and midpoint-gain synthesis is also the
+    only path by which the dense FP4 search could reach the challenging
+    slots, whose segmented sessions withhold the bank; measure the frequency
+    search's share of their coarse remainder first, as the
+    [opportunity map](gpu-strategy-playbook.md#tensor-core-opportunity-map-for-the-challenging-slots)
+    says. The dense geometry admits the holdout plan, but HF's 12,904,486-row
+    bank exceeds its 32-bit kernel extents (*inferred* from `Geometry` in the
+    [dense session](../src/triad_opencl_nvfp4_coarse.cpp)), and HF reaches
+    the route only after lever 7. An explicit `--vulkan-precision nvfp4
+    --opencl-profile on` holdout run, which scores host-prepared columns of
+    the same sessions, could estimate the product time without code: a
+    feasibility figure, not attribution); move Gaussian updates to the device once its FP64 load
     falls; adopt a counter-based simulator when another change already
     alters every capture hash (`--capture-cache` keeps the simulator out of
-    repeated comparisons meanwhile); widen the arrival frontier; and cut the
-    product kernel's loads
+    repeated comparisons meanwhile)
     ([Remaining costs after the dense search](#remaining-costs-after-the-dense-search)).
-12. **Other generations.** Measure an RTX 5090 first: it inherits the SM 12.0
+13. **Other generations.** Measure an RTX 5090 first: it inherits the SM 12.0
     qualifications unmeasured, and a desktop host with fewer CPUs is the case
     most likely to differ. The RTX 4090, 4090 Laptop and 4060 Ti 16 GB have
-    no FP4 matrix instructions, so the FP32 per-row kernels matter there;
-    FP64 runs at about 1/64 rate on these NVIDIA parts and about 1/16 on
-    Vega. Every Vulkan buffer requires host-visible, coherent memory and
-    prefers device-local memory, so a discrete GPU without resizable BAR may
-    expose only a small host-visible device-local heap and get a small
-    automatic workspace (unmeasured).
+    no FP4 matrix instructions; they have FP8, FP16, BF16, TF32 and INT8
+    Tensor arithmetic, INT8 at 8× their FP32 SIMT rate. On a CUDA build they
+    keep native segmented timing (its automatic gate needs compute
+    capability 12.0); on a Vulkan build the `sm_120a` OpenCL module cannot
+    load, so they get none of the FP32 per-row kernels, dense search or
+    resident fine route until those are ported. FP64 runs at about 1/64 rate
+    on these NVIDIA parts; Vega's FP64 rate has no exact-device source. Every Vulkan buffer
+    requires host-visible, coherent memory and prefers device-local memory,
+    so a discrete GPU without resizable BAR may expose only a small
+    host-visible device-local heap and get a small automatic workspace
+    (unmeasured). The [per-GPU guidance](gpu-strategy-playbook.md#per-gpu-guidance)
+    ranks first experiments for each target.
 
 ### Rejected and conditional approaches
 
@@ -368,8 +495,13 @@ measurements.
 | Varying device route, FP64 | Slower than native at both 72 Hz shapes on the 40.8-CPU Blackwell host (two alternated pairs). On the Radeon single loaded 72 Hz/1× runs looked slower (indicative) | After lever 3 | [Varying statistics](#varying-statistics) |
 | Gain rank on the Radeon | Declined; no gated Radeon timing. The unfused form is memory-bound on Vega, about 2 ms per HF oracle block (indicative) | After a fused local-memory kernel: a complete-slot win on the challenging 72 Hz/5× control at full `W` and no slower complete service; the 72 Hz/1× slot is a regression check, not a veto | [Signed-lag ranks](#signed-lag-ranks) |
 | Similar-lag (proposal-qualified) gain ranks instead of exact publication | Rejected: on the HF −22.5 and 36 Hz/10× −21 receipts the bit separation equals one direct-rank map's evidence difference to about 1e-13, so similar lags do not preserve decisions | Not at those shapes | [Signed-lag ranks](#signed-lag-ranks) |
-| Dense FP4 forms of FFT-structured stages | Dense work is about 0.4·n/log2(n) times the FFT's, about 140× at n = 4,096, which cancels FP4's advantage | Only for small n and proposal-only parts | [Where FP4 fits](#where-fp4-fits-and-the-larger-levers) |
-| Tensor Core (FP16, BF16, TF32) DFT form of the direct rank | About 4× the FFT's operations, bounded by the per-cell exp epilogue, 2.8e11 cells at HF; on Vega, which has no matrix cores, the FP32 FFT wins | Measure against a fused FP32 FFT first | Modeled, not built |
+| Dense FP4 forms of FFT-structured stages | A dense DFT to m retained outputs of an n-point transform does 1.6·m/log2(n) times the FFT's real flops, about 550× at n = m = 4,096, against an achieved FP4-to-FP32-cuFFT rate ratio of about 440–580 on the RTX PRO 6000 | Only for small n or few retained outputs, and proposal-only parts ([break-even rule](gpu-strategy-playbook.md#eligibility-procedure)) | [Where FP4 fits](#where-fp4-fits-and-the-larger-levers) |
+| Tensor Core (FP16, BF16, TF32) DFT form of the direct rank | A 64-point DFT at 33 bins per lag is about 9–17× the FFT's real flops, bounded by the per-cell exp epilogue, 2.8e11 cells at HF; FP16 error would widen the certification band, and split precision barely beats FP32 SIMT peaks (TF32×3 not at all, BF16×3 about 1.3× on the PRO 6000); on Vega, which has no matrix cores, the FP32 FFT wins | Measure against a fused FP32 FFT first | Modeled, not built |
+| TF32×3 and rounded-TF32 lag-domain DFTs (Triton, RTX PRO 6000) | Isolated transforms 0.78× and 1.08× of ZoomFFT; the whole trace 1.89% slower, DATA acquisition 0.935–0.939 → 1.23–1.26 s | Fewer retained outputs, or a fused design | [Lag-search conclusion](validation.md#tensor-core-lag-search-conclusion) |
+| Scaled FP16 lag-domain DFT | Isolated transforms 1.33–1.88× faster; acquisition 3.543 → 4.103 s | Surrounding costs measured first | [Precision lessons](gpu-precision-controls.md#retained-lessons) |
+| cuBLASLt FP4 coarse lag-matrix analogue (CUDA) | Removed: 5.03% score error against a 1% gate; four-product and residual-scale repairs changed a unique noise peak | A design whose FP4 output only proposes, as the dense search's does | [Disposition](#native-disposition-of-the-historical-techniques) |
+| FP16 Gram for small fine Grams | 184 µs against 119 µs batched FP64 and 33 µs direct FP64; stopped. Grams and correlations were about 0.3% of native fine worker time | Large batched Grams only | [Precision guide](gpu-precision-controls.md#existing-qualification-and-remaining-limits) |
+| Small-shape FP16 GEMM (historical, RTX 4090) | 4096×256×512 FP16 slower than FP32 (0.0636 ms cached, 0.1802 ms with packing, against 0.0512 ms); batch-8 replay 23.5% below batch 1 | Shapes with more multiply-adds per packed element | [Playbook shape rules](gpu-strategy-playbook.md#eligibility-procedure) |
 | FP4 for rendering, warp, mapping, rescoring, Gaussian states and the simulator | No contraction whose output only chooses candidates | — | [Where FP4 fits](#where-fp4-fits-and-the-larger-levers) |
 | Factored HMMA inverse FFT on SM120 | 1.87–4.01× slower than FP32 cuFFT | A new factorization or fusion | [Dispatch](#hardware-and-library-dispatch) |
 | Separate processes sharing one device | 3.0 s against 0.45–0.81 s per slot | Never for one receiver | [Remaining costs](#remaining-costs-after-the-dense-search) |
@@ -378,7 +510,7 @@ measurements.
 | Resident copies of signed-lag inputs | Host packing not measurable; 0.3 GB more at every width | If packing shows up on a fast device | [Signed-lag ranks](#signed-lag-ranks) |
 | FP32 fine tile storage | Would lose the C128 presence witness of samples below the FP32 range | — | [Precision guide](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling) |
 | Native fine processing on CPU-rich hosts | Resident fine was faster on the 20 November host; the 24-worker single-slot order reversed between hosts | On a CPU-rich host with a matched comparison | [Precision guide](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling) |
-| GPU simulator | Changes every capture hash | With another capture-changing change | [Lever 11](#next-levers-in-order); [survey](validation.md#gpu-offload-survey-and-gated-device-routes--20-november-2026) |
+| GPU simulator | Changes every capture hash | With another capture-changing change | [Lever 12](#next-levers-in-order); [survey](validation.md#gpu-offload-survey-and-gated-device-routes--20-november-2026) |
 | Historical RTX 4090 FP16 replay; FP8 observation quantization | Slower than FP32; FP8 added misses. Counterexamples only | — | [What to measure separately](#what-to-measure-separately) |
 
 ### Open measurements
@@ -394,19 +526,48 @@ measurements.
   `varying_coarse_seconds`, `vulkan_segmented_sessions` and the segmented
   declines and fallbacks on the next automatic holdout run.
 - Explicit family routes at the holdout: no configuration has fit. A 4 GiB
-  device workspace was too small for its coarse session, and 48 GiB
-  explicit plus per-owner leases exceeded a 64 GB host limit at 80 owners
-  ("Native full-slot probe exceeds its local memory lease"). Try a host
-  limit near the cgroup (188 GB on that host), an explicit `--slot-owners`
-  count and a device workspace sized for its coarse session.
+  device workspace was too small for its coarse session. With 48 GiB of
+  device workspace and a 64 GB host limit at W = 80 the probe's host
+  slot-workspace check refused the slot ("Native full-slot probe exceeds its
+  local memory lease") with every family native as well as with the gain
+  rank on the device. That check also charges the explicit coarse session's
+  whole device ceiling plus its 128 MiB compilation bound
+  (`coarse_host_bytes`), so the 48 GiB ceiling and the W = 80 CPU quote
+  were both inside it and the refusal does not separate them; the W = 80
+  quote was not kept. Omit the host limit (the cgroup-aware default; the
+  Xeon 6952P pod's `memory.max` was 187,999,997,952 B), size the device
+  workspace for the coarse session and count it in the host quote
+  (`--slot-owners` does not affect `admission`)
+  ([memory sizing](gpu-strategy-playbook.md#size-memory-on-a-pod)).
 - An API and GPU-workload trace (for example Nsight Systems) of an
   unprofiled `--backend gpu` run, which could give fine-stage device
   intervals on the automatic route without code changes. Untested on the
-  pod, which may not grant the permissions it needs.
+  pod, which may not grant the permissions it needs. Export the relay's
+  `gpu_environment()` (`OPENCL_VENDOR_PATH` and the private Vulkan
+  manifest) first, or a plain SSH shell can select the GLX ICD and fail
+  Vulkan initialization. The `filtered` launcher's no-socket filter cannot
+  wrap `nsys`, so a trace run is a diagnostic outside the worker boundary
+  and its timings are not qualification timings. A starting command
+  (untested; check `nsys profile --help` for the installed version's trace
+  list, and whether OpenCL kernels appear):
+
+  ```sh
+  nsys profile --trace=vulkan,cuda,osrt --sample=none --cpuctxsw=none \
+    --output=<dir>/automatic build/lab/triad_receiver_probe admission \
+    <common and slot arguments> --backend gpu
+  nsys stats <dir>/automatic.nsys-rep
+  ```
 - Hardware counters: Tensor pipe duty and `pipe_fp64`. Earlier CUDA counter
-  requests returned `ERR_NVGPUCTRPERM`. The FP32 mapper's dynamic FP64-pipe
-  use is open; its static SASS has no `DFMA`, `DADD` or `DMUL`, 8
-  `F2F.F32.F64` and 3 `I2F`.
+  requests returned `ERR_NVGPUCTRPERM`, and no permission bypass was
+  attempted; on an owned host an administrator can allow counters
+  ([NVIDIA](https://developer.nvidia.com/nvidia-development-tools-solutions-err_nvgpuctrperm-permission-issue-performance-counters)).
+  What has worked without counters: OpenCL event intervals, CUPTI resource
+  callbacks naming the loaded kernels, and static opcode counts from
+  `cuobjdump -sass`. Issued-equivalent Tensor throughput is
+  2 × `opencl_coarse_issued_products` over the profiled product interval
+  ([playbook](gpu-strategy-playbook.md#test-recipe)). The FP32 mapper's
+  dynamic FP64-pipe use is open; its static SASS has no `DFMA`, `DADD` or
+  `DMUL`, 8 `F2F.F32.F64` and 3 `I2F`.
 - CUDA device time: the CUDA backend records host `wall_seconds` only, so the
   HF receipts cannot split device from host time.
 - A current per-slot device total on the matched slot.
@@ -453,9 +614,10 @@ measurements.
 `log`: reduce the argument in FP64 or fixed point and evaluate in FP32, as
 `drift_dechirp` does. Vulkan bounds FP32 `exp` only to 3 + 2·|x| ULP, so keep
 its arguments at or below zero, as the gain rank's two-pass log-mean-exp
-does. FP64 runs at about 1/64 rate on the NVIDIA parts and about 1/16 on
-Vega, so FP64 kernels pay off only where they remove round trips, barriers
-or host passes. A new shader takes an index in its family's kind range of
+does. FP64 runs at about 1/64 rate on the NVIDIA parts, and Vega's rate has
+no exact-device source ([ceilings](triad-performance.md#radeon-arithmetic-ceilings)),
+so FP64 kernels pay off only where they remove round trips, barriers or host
+passes. A new shader takes an index in its family's kind range of
 the core's registry ([device core](#fine-stage-device-ports)).
 
 ## Find and qualify a GPU improvement
@@ -478,7 +640,10 @@ synchronization, as the
 [precision rules](gpu-precision-controls.md#automatic-mode-prioritizes-computational-ceiling)
 require, before declaring a hardware ceiling. Generic timing rules are in
 [Paired timing and load gating](triad-performance.md#paired-timing-and-load-gating);
-this section adds the GPU-specific ones.
+this section adds the GPU-specific ones. Before building, estimate the
+candidate with the playbook's
+[eligibility procedure](gpu-strategy-playbook.md#eligibility-procedure), and
+copy its [pass-rule template](gpu-strategy-playbook.md#test-recipe).
 
 ### Attribute the time
 
@@ -493,9 +658,9 @@ this section adds the GPU-specific ones.
 | OpenCL device intervals | `--opencl-profile on` with explicit `--backend vulkan`: `opencl_coarse_{product,packing,selection,synthesis,render,filter,gram,rescore}_seconds`, on by default for an explicit `nvfp4` coarse search; `opencl_resident_host_{source,staging,transfer,wait}_seconds`; `opencl_resident_device_{transfer,render,map,pack,product,statistics,span}_seconds` | Render, filter and Gram make up synthesis; rescoring is part of selection. Profiling cost about 9 ms of an 82 ms fine session. Not available on `--backend gpu`. |
 | Vulkan device intervals | An always-on timestamp pair per coarse command buffer (`vulkan_timed_submissions`, `vulkan_device_command_seconds`); host `wall_seconds` from the submit lock to the fence, summed over owners; `vulkan_fft_plan_seconds`, `vulkan_shader_compile_seconds`, `vulkan_fft_cache_{hits,misses}`, `vulkan_shader_spirv_{compiles,cache_hits}` | Fine-stage contexts record no device time. The only family time is the host `vulkan_gain_rank_rescore_seconds`. |
 | CUDA | Host `wall_seconds`, the HMMA and IMMA witnesses and the half-FFT counters | No device intervals. |
-| Component rates | `test_triad_vulkan --segmented-benchmark` (`datapump.triad.vulkan-segmented-throughput.v1`, three fixed shapes, indicative), `--gain-rank` (per fixture `device_call_seconds`, band and frontier statistics), `--benchmark` and `--benchmark-cpu-precision`; `test_triad_opencl_nvfp4` | Fixed shapes, not complete service ([GPU builds](building.md#vulkan-and-opencl-gpu-builds)). |
+| Component rates | `test_triad_vulkan --segmented-benchmark` (`datapump.triad.vulkan-segmented-throughput.v1`, three fixed shapes with 257, 515 and 261 frequencies, one session, per-workspace seconds only, indicative), `--gain-rank` (per fixture `device_call_seconds`, band and frontier statistics), `--benchmark` and `--benchmark-cpu-precision`; `test_triad_opencl_nvfp4` | Fixed shapes, not complete service ([GPU builds](building.md#vulkan-and-opencl-gpu-builds)). The segmented benchmark has run only on the Radeon, shows no multi-owner L2 or queue contention, and a tile sweep needs source edits in both backends. |
 | Kernel resources | The build writes `<build>/generated/triad_opencl_nvfp4/triad_opencl_nvfp4.ptx` for `sm_120a`. `ptxas -v -arch=sm_120a` on it gives registers and spills; record them per qualification (`coarse_warp_fir` 235 and `coarse_fp4_scores` 106 registers, no spills). For FP64-pipe questions, assemble a cubin with `ptxas -arch=sm_120a -o kernels.cubin triad_opencl_nvfp4.ptx` and count `DFMA`, `DADD`, `DMUL`, `F2F.F32.F64` and `I2F` in `cuobjdump -sass kernels.cubin`. | Static counts, not dynamic issue. A new kernel entry needs its row in the [PTX embedding table](../tools/triad_opencl_embed_ptx.py). The build has no query for GLSL kernel resources. |
-| Memory | `workspace_peak_bytes`; `configuration.receiver_slot_workspace_bytes` from `plan`; `peak_reserved_bytes`; the host cgroup | `workspace_peak_bytes` is the admitted lease quote, not a measured peak. The `plan` quote is the CPU route's and omits device-route host quotes: gain-rank certification, the larger caches and OpenCL leases. The probe reports no RSS. |
+| Memory | `workspace_peak_bytes`; `configuration.receiver_slot_workspace_bytes` from `plan`; `peak_reserved_bytes`, `allocator_peak_{reserved,live}_bytes`, `vulkan_peak_leased_bytes`; the host cgroup | `workspace_peak_bytes` is the admitted lease quote, not a measured peak. `peak_reserved_bytes` is a lease counter on CUDA and the charged Vulkan allocation peak on Vulkan ([per-backend fields](gpu-strategy-playbook.md#size-memory-on-a-pod)). The `plan` quote is the CPU route's and omits device-route host quotes: gain-rank certification, the larger caches and OpenCL leases. The probe reports no RSS. |
 | Shapes no local slot reaches | A microbenchmark at production geometry ([method](triad-performance.md#paired-timing-and-load-gating)) | Like the HF ridge benchmark of the [21 November record](validation.md#fine-stage-device-routes-and-exact-cpu-stages--21-november-2026). |
 
 **The automatic route cannot be profiled directly.** `--backend gpu` rejects
@@ -505,7 +670,13 @@ explicit reproduction (`--backend vulkan --vulkan-precision nvfp4
 --opencl-profile on`, with `--vulkan-fine-projection resident-nvfp4` for the
 fine stage), which differs from the automatic route
 ([route table](#what-automatic-selection-runs)), and decide on unprofiled
-automatic runs. `tools/triad_native.py` cannot launch `admission` through
+automatic runs. Use that reproduction only for dense or resident sessions
+(the matched fixture, the IC-7100 plan): `nvfp4` makes the dense search
+mandatory, so on the challenging slots varying-passband sessions take a
+different coarse route or fail, and its intervals do not cover segmented or
+family work. There use unprofiled `--backend gpu` receipts, explicit
+`device` stage routes or a kernel trace
+([playbook](gpu-strategy-playbook.md#test-recipe)). `tools/triad_native.py` cannot launch `admission` through
 `NativeProbe`, but `validate_receipt(command="admission", ...)` checks a
 saved receipt.
 
@@ -550,10 +721,11 @@ uses:
 | Slot | Role | Further arguments | Input SHA-256 | Memory |
 | --- | --- | --- | --- | --- |
 | Matched 3.6 Hz severe, quiet, stable and five-slot message | Easy: identity, regression and the defaults-unchanged gate | The fixtures of [Reproduce the matched Blackwell runs](#reproduce-the-matched-blackwell-runs) | `b4d8fa5a…`, `2b9ca9df…`, `eaa4ae2a…`, `4a3603c8…` | Defaults |
+| GPSDO base, `ic-7100` shift, 3.6 Hz one-ray plan | Large dense plan: FP4 products and rescoring dominate (lever 11) | Not the common arguments: the HF-case, 30 MHz, 2 mW, broad-timing, Spread None plan of [one-ray admission](#one-ray-admission-and-dense-cost) with a GPSDO base and the `ic-7100` shift preset (3,377 arrivals, 44,966 rows, 134,690 frequencies); the exact command was not kept | `8e38aa8c…` | 136,974,080-byte dense session lease and 28,082 dispatches on the 20 November host |
 | 72 Hz/1× HF Worst | Easy for the families; segmented shapes outside the envelope; near-tie proposal check | `--data-power-w .2 --fhss off --rate 72 --added-symbols 1 --max-samples 40000000 --deadline-ms 900000` | `7e8ef8fa…` | Size it with `plan` at the pod's `W` |
 | 72 Hz/5× control | Challenging; device segmented timing; rank-dominated before the gain-rank flip | `--data-power-w .002 --fhss on --rate 72 --added-symbols 5 --added-interleave on --target-cn0 4 --max-samples 40000000 --deadline-ms 1800000` | `af364b67…` | A 9 GB `--memory-limit-bytes` refused the slot at W = 80 and 64 GB worked. Explicit device runs used `--device-memory-limit-bytes 4294967296`. |
-| 36 Hz/10× 100 mW holdout, Target −12.9897 | Challenging holdout; drift and varying dominate after the flip | `--data-power-w .1 --fhss on --rate 36 --added-symbols 10 --added-interleave on --target-cn0 -12.9897 --max-samples 26000000 --deadline-ms 1800000` | `8a6c8ab2…` | About 21.5 GB of receiver workspace per owner (`receiver_slot_workspace_bytes` 21,475,814,336 at W = 26). Its coarse session exceeds a 4 GiB explicit device workspace, and 48 GiB explicit plus per-owner leases exceeded a 64 GB host limit at 80 owners, so only `--backend gpu` has completed it ([open measurements](#open-measurements)). |
-| HF 100 mW 36 Hz/10× Target −22.5 | Extrapolation shape only: a 3,707 s slot | The [HF recipe](validation.md#reproducing-the-stable-alarm-and-severe-bit-tests) | — | A 144.37 GB host quote at W = 26; 204.57 GB at W = 54 exceeded a 188 GB cgroup |
+| 36 Hz/10× 100 mW holdout, Target −12.9897 | Challenging holdout; drift and varying dominate after the flip | `--data-power-w .1 --fhss on --rate 36 --added-symbols 10 --added-interleave on --target-cn0 -12.9897 --max-samples 26000000 --deadline-ms 1800000` | `8a6c8ab2…` | About 21.5 GB of receiver workspace per owner (`receiver_slot_workspace_bytes` 21,475,814,336 at W = 26). Its coarse session exceeds a 4 GiB explicit device workspace, and at W = 80 a 64 GB host limit with a 48 GiB explicit device workspace (which that check also charges) failed the probe's host slot-workspace check whatever the family routes, so only `--backend gpu` has completed it; the automatic runs' `peak_reserved_bytes` reached 51.8 GB, which on Vulkan is the peak of charged Vulkan allocations (equal to the allocator fields; OpenCL buffers are leased, not charged); `vulkan_peak_leased_bytes` was not kept ([open measurements](#open-measurements), [memory fields](gpu-strategy-playbook.md#size-memory-on-a-pod)). |
+| HF 100 mW 36 Hz/10× Target −22.5 | Extrapolation shape only: a 3,707 s slot | The [HF recipe](validation.md#reproducing-the-stable-alarm-and-severe-bit-tests) | — | A 144.37 GB host quote at W = 26; 204.57 GB at W = 54 exceeded the EPYC 9555 pod's 188 GB cgroup |
 
 An easy row cannot veto a challenging-row gain. Do not rerun the HF row
 routinely: extrapolate by fixed geometry from the holdout's measured stage
@@ -596,7 +768,7 @@ for the pod's `W`.
    --no-same-permissions` and keep the deployment directory at mode 700, or
    the relay refuses with "Unsafe deployment Vulkan directory". Follow [Reproduce the matched Blackwell runs](#reproduce-the-matched-blackwell-runs)
    for the launcher and filter.
-5. **Identity gate:** `test_triad_opencl_nvfp4`,
+5. **Identity gate (device tests):** `test_triad_opencl_nvfp4`,
    `test_triad_opencl_fine_session`, and `test_triad_vulkan` in its default,
    `--segmented`, `--workspace-admission`, `--host-scoring`, `--core`,
    `--gain-rank`, `--drift` and `--varying` modes, plus `ptxas` registers and
@@ -647,7 +819,10 @@ Pitfalls:
   its own identification and qualification.
 - Record in [validation](validation.md): the device, host CPU, quota, memory,
   `W`, toolchain, hashes, predeclared rules, deviations, tables and limits,
-  and the evidence directory with its purpose and cleanup trigger.
+  and the evidence directory with its purpose and cleanup trigger. A pod
+  that flips nothing still records its new splits and updates
+  [Where the time goes](#where-the-time-goes), [Open measurements](#open-measurements)
+  and the playbook's [opportunity map](gpu-strategy-playbook.md#tensor-core-opportunity-map-for-the-challenging-slots).
 - Update in the same change: the [route table](#what-automatic-selection-runs)
   and [Where the time goes](#where-the-time-goes); the precision guide's
   route sections; the probe's help text; the receipt rules of
@@ -752,8 +927,11 @@ pipe activity, instruction issue and cache traffic requires counters.
 [Kernel](../src/triad_opencl_nvfp4_kernels.cu) ·
 [Blackwell tuning guide](https://docs.nvidia.com/cuda/blackwell-tuning-guide/#occupancy).
 
-Use approximately **1.9–2.0 PFLOP/s dense** as the theoretical reference, with
-clock and edition stated. The Server Edition publishes 4 PFLOP/s of FP4 AI
+For a percentage of peak on the measured Server Edition, divide by
+**1.87 PFLOP/s dense** (*derived*: the Workstation table's 2,015.2 TFLOP/s
+scaled from 2,617 to the reported 2,430 MHz), with clock and edition
+stated; the older tables on this page divide by a rounded 2 PFLOP/s, which
+reads about 7% lower. The Server Edition publishes 4 PFLOP/s of FP4 AI
 performance. NVIDIA's GB202 Workstation Edition architecture table separates
 about 2.02 PFLOP/s dense with FP32 accumulation from 4.03 PFLOP/s with
 structured sparsity. The receiver uses arbitrary dense templates. Report
@@ -1336,6 +1514,16 @@ and sessions whose Vulkan FFT plan does not fit, never reach the dense
 session; `native_coarse_precision_sessions`, `native_coarse_lag_sessions` and
 `native_coarse_workspace_sessions` count them.
 
+**Reuse scope.** The bank holds 26 keyed lanes, 13 epoch offsets (−6 to +6)
+by two bits. Workspaces are lanes × clock hypotheses (78 = 26 × 3 in the
+matched search), and columns are workspaces × rays. Every lane's keyed
+coefficients bind the pattern epoch and the slot's symbol ordinal
+(`child_id` in [the modem](../src/triad_modem_v3.cpp)), so no two calendar
+slots share a bank. A session synthesizes its bank once and reuses it for
+every frequency tile. Cross-slot bank or template caching therefore cannot
+hit in reception; only slot-invariant descriptors (pulse table, FIR taps,
+column maps, warp sets) and plans repeat, and they are already small.
+
 **Conditioning.** FP4 scores choose the arrivals that are rescored, and the
 quadratic form amplifies their error as a workspace's two rays approach
 collinearity. A one-ray Gram is a scalar with ratio one, so the guard never
@@ -1349,7 +1537,29 @@ frontier kept it in 24 of 24 trials at a ratio of 0.27 and of 3.5e-3, in 22
 of 24 at 5.5e-4 and in 1 of 24 at 1.4e-4, and a complete session with a
 5 µs, 0.001 Hz spread lost a signal the FFT session found. The matched
 fixture's ratio is 0.999996. The guard and these trials were not run on a
-device, and a measured FP4 bound could be lower than 1/16.
+device, and a measured FP4 bound could be lower than 1/16. The FP4 error
+mainly inflates noise-row scores rather than the planted arrival. The RMS
+FP4-minus-exact score error grew as the ratio fell: about 0.4 at a ratio
+of 0.2, 0.6 at 0.03, 2.6 at 3.4e-3, 12–14 at 5.0e-4–5.8e-4 and 44–86 at
+1.3e-4–1.5e-4, and the FP4 noise maximum stayed near the exact 8–19 down
+to 0.03, then rose to 17–29, 62–108 and 220–635 at the three smaller
+ratios. The loss depends on SNR: at about 1.4e-4 FP4 kept
+3 of 16 planted arrivals at noiseless targets 30 and 60, 5 of 16 at 120 and
+16 of 16 at 240 and above, while the exact frontier kept all. In the
+ill-conditioned complete session (5 µs, 0.001 Hz) both FP4 modes found the
+true winner in 1 of 6 trials, the Vulkan FFT routes in 6 of 6; at +12 dB
+FP4 found 2 of 2. These come from a scratch harness kept with the 19
+November evidence
+(`local-evidence/blackwell-fp4-coarse-20261119/conditioning-emulation/`,
+`frontier.cpp` and `session.cpp` with their logs); the repository's
+component test sweeps SNR only, at one geometry. Distill
+them and remove that directory once a device measurement of the guard
+replaces them. The `slot` command's coarse JSON reports
+`minimum_eigenvalue_ratio`; `admission` receipts do not. An orthonormalized
+bank (`Ψ = Φ·G^(-1/2)`, for which the score is `‖Ψ^H y‖²`) would make the
+FP4 error independent of the ratio; untried, and it needs the FP32 partial
+rescoring qualified at low ratios
+([playbook](gpu-strategy-playbook.md#proposed-and-untried)).
 
 **Transfers.** With 24 workers a slot uploads 473,952 bytes and reads back
 49,920 in 13 blocking transfers, against 82,178,320 uploaded before. The
@@ -1395,12 +1605,15 @@ receiver sensitivity or device result.
 Dense products grow with arrivals × template rows for each workspace and
 frequency, while the FFT route grows with (rows + arrivals) log(rows +
 arrivals) plus host bank preparation; both scale with workspaces and
-frequencies. With one-ray admission on, an automatic session also declines
-as `dense-cost` when 4 × arrivals × rows exceeds the dense products per
-workspace and frequency of the device-measured matched search, 8 × 3,377 ×
-44,971 = 1.21e9, where the dense route took a twentieth or less of the FFT
-session's coarse seconds. The bound is not a cost model: replacing it with a comparison
-against an FFT estimate from `correlation_fft_rows` needs one profiled slot of
+frequencies. A session issues 4 × rays × arrivals × rows real products per
+workspace and frequency ([adapter](../src/triad_opencl_coarse_bulk.cpp)).
+With one-ray admission on, an automatic session also declines as
+`dense-cost` when its 4 × arrivals × rows exceeds the dense products per
+workspace and frequency of the device-measured two-ray matched search,
+8 × 3,377 × 44,971 = 1.21e9 (equal to 1.42e12 ÷ (78 × 15)), where the dense
+route took a twentieth or less of the FFT session's coarse seconds. The
+bound is not a cost model: replacing it with a comparison against an FFT
+estimate from `correlation_fft_rows` needs one profiled slot of
 each route on a one-ray plan near it. The two-ray admission predates this
 bound and keeps its qualified envelope, which includes unmeasured larger
 plans such as HF Worst at 3.6 Hz, 7,036 arrivals and 93,614 rows. The dense
@@ -1433,8 +1646,8 @@ so rescoring is the lever for large one-ray plans
 ### FP4 product throughput
 
 Device event intervals on a full RTX PRO 6000 Blackwell Server Edition, with
-a multiply-add counted as two operations and the rounded 1.9–2.0 PFLOP/s
-dense reference:
+a multiply-add counted as two operations; percentages of peak use the
+derived 1.87 PFLOP/s ([headroom](#fp4-utilization-headroom-on-rtx-pro-6000-blackwell)):
 
 | Product kernel and shape | Issued throughput | Interval |
 | --- | ---: | ---: |
@@ -1469,7 +1682,7 @@ the padded inner extent and the arrivals of the last block.
 
 The earlier fine projection's matrix-only control was 36.9 TFLOP/s and the
 large cuBLASLt multiplication 1.309 PFLOP/s. The dense search runs real
-receiver work at about 60% of the dense reference during its product
+receiver work at about 61–62% of the derived 1.87 PFLOP/s peak during its product
 interval, and about two thirds of what the same block issues with no loads.
 That interval is 2.6 ms of a slot. About 3.0e12 issued operations per
 matched slot, 2.6 ms of products at 1.14–1.16 PFLOP/s, over the
@@ -1561,9 +1774,11 @@ for the matched fixtures:
    route still took 8.7 ms against 55.9 ms for the stored warp and scalar
    FIR. The matched slot's dispatches fell from 46 to 34 with 24 workers
    and from 58 to 49 with four: 13 raster groups lose their separate warp,
-   and each frequency tile adds one rotation. Rescoring reads that rotation
-   instead of evaluating a sine and cosine per arrival and row, and
-   selection fell from 4.7 to 2.7 ms. Evidence and decisions on the device
+   and each frequency tile adds one rotation (the lane-independent
+   restructure below then brought them to 22 and 37). Rescoring reads that
+   rotation instead of evaluating a sine and cosine per arrival and row, and
+   selection, which includes the rotation and rescoring, fell from 4.7 to
+   2.7 ms, before FP32 partial rescoring. Evidence and decisions on the device
    were identical to `7ed007dc`. In emulation the banks, Grams, FP4 scores
    and rescored frontiers of fourteen synthesis geometries were
    byte-identical too, covering all three routes and their limits at
@@ -1623,7 +1838,18 @@ for the matched fixtures:
    would bring the retained set close to that of exact scores, and may let
    the conditioning guard relax. It needs device requalification.
 6. **The product kernel.** Three loads per slice remain. Two workspace pairs
-   per block would share the observation loads.
+   per block would share the observation loads. That matters on large
+   plans, not here: the products take 2.6 ms of this slot but 11.35 s on the
+   IC-7100 plan, about 59% of its 19.16 s coarse stage (inferred across two
+   runs; [lever 11](#next-levers-in-order)).
+
+Rescoring has no shared operand to reuse across peaks. `coarse_rescore_peaks`
+runs one 128-thread block per retained peak; its `taps` argument is the ray
+count, and a peak reads about (rays + 1) × rows × 8 bytes of bank and rotated
+observation. Blocking across frequencies cannot reuse the observation half,
+which differs per frequency. The one-ray IC-7100 bank, about 28 MB, fits in
+the GB202's 128 MB L2 (Workstation Edition figure), so rescoring there is
+more likely latency- or occupancy-bound than DRAM-bound (*inferred*).
 
 A 12-slot matched backlog was measured on 20 November: receiver service
 fell from 0.831–0.835 to 0.706–0.708 s at 24 workers. Sessions the dense search declines,
@@ -1638,11 +1864,34 @@ most numerical work could use the FP4 Tensor Cores
 ([record](validation.md#gpu-offload-survey-and-gated-device-routes--20-november-2026)).
 It cannot.
 
-**Where block-scaled E2M1 fits.** Only large post-isolation contractions
-whose output just chooses candidates that are then rescored or tracked
-exactly. Both such contractions already run in NVFP4:
-- the coarse frontier products;
-- the fine 47-mode projection.
+**Where block-scaled E2M1 fits.** Large post-isolation contractions, in two
+classes. Both qualifying contractions already run in NVFP4:
+- output that only chooses candidates, which are then rescored exactly
+  (E3): the coarse frontier products, whose retained arrivals are rescored
+  from the unquantized bank;
+- output that feeds evidence through FP64-accumulated sufficient statistics
+  under a predeclared evidence and decision budget (E4 in the
+  [playbook](gpu-strategy-playbook.md#exactness-classes)): the fine 47-mode
+  projection. Its projected modes carry large per-lane errors (worst
+  relative RMS 0.148 across sampled DFT lanes in the
+  [same-card controls](#same-card-resident-and-staged-controls)), yet the
+  device fine-session check kept evidence within 0.1% of native and the
+  matched captures kept every admission-policy disposition.
+
+Output that updates state or decisions directly (Gaussian updates,
+recursions) stays at native precision. For varying-fine blocks (200 or 239
+rows, 27–33 modes) NVFP4 or FP16 projection would be the E4 class, judged
+by the playbook's [E4 screen](gpu-strategy-playbook.md#eligibility-procedure)
+on each challenging slot's own magnitude and binding margin, not on a
+component fixture's evidence. On HF −22.5 (net evidence about 182 nats,
+separation margin 1.225 nats) NVFP4 at the fine projection's 0.1% and FP16
+are not excluded by that lower-bound screen; on the quiet holdout the
+varying quiet energy sits 0.215% below its threshold, and a quarter of
+that (0.054%) is below a 0.1% error and about FP16's unit roundoff before
+squaring doubles it. FP32 templates
+remain the first candidate, and no screen counts as a pass until receipts
+record the size of the per-block terms before cancellation
+([varying](#varying-statistics)).
 
 Together they took 4.6 ms of the roughly 60 ms of device time in the
 matched slot when surveyed, before the FP32 kernels and the
@@ -1682,9 +1931,15 @@ and the fine renderer's support work. This also matters for the RTX 4090,
 **The larger costs are on challenging geometries**, where the survey found
 FFT-structured native CPU work on every route
 ([survey figures](validation.md#gpu-offload-survey-and-gated-device-routes--20-november-2026)).
-Dense forms of that work do about 0.4·n/log2(n) times the FFT's
-operations, about 140× at n = 4,096, which cancels FP4's advantage except
-at small n, and then only for parts that just propose candidates. Their
+A dense DFT to m retained outputs of an n-point transform does n·m complex
+multiply-adds, 8 real flops each, against about 5·n·log2(n) for a radix-2
+FFT: 1.6·m/log2(n) times the FFT's flops, about 550× at n = m = 4,096. The
+earlier figure of 0.4·n/log2(n), about 140×, corresponds to counting a
+complex multiply-add as two operations. Either way the ratio cancels FP4's
+advantage (achieved FP4 products run about 440–580 times faster than FP32
+cuFFT on the RTX PRO 6000) except at small n or with few retained outputs,
+and then only for parts that just propose candidates
+([break-even rule](gpu-strategy-playbook.md#eligibility-procedure)). Their
 current state and the ranked levers are in
 [What bounds the challenging slots](#what-bounds-the-challenging-slots),
 [Next levers](#next-levers-in-order) and
@@ -2944,8 +3199,9 @@ the segment tables about 8 % (noisy shares). On the Blackwell pod's Xeon
 per thread than the former loop at 8 and 16 lanes (12–23× across threads),
 and blocks of 32 stayed within the run-to-run spread of 16, so 16 stays
 ([validation](validation.md#blackwell-qualification-of-the-fine-stage-device-routes--21-november-2026)).
-The 63 ns per load derived from the HF receipt, which ran on an EPYC 9555
-pod restricted to 13 CPUs by affinity, was not reproduced on the Xeon,
+The 63 ns per load derived from the HF receipt (its drift seconds divided
+by a modeled load count, ridge share assumed 85–95%, not timed), which ran
+on an EPYC 9555 pod restricted to 13 CPUs by affinity, was not reproduced on the Xeon,
 where the former loop ran at 5–12 ns. Time the benchmark on an EPYC
 9555-class CPU to test it. A complete HF slot remains unmeasured, and so do
 drift lane counts at W = 80 on an HF-shape (extended-plan) slot; the 72 Hz
@@ -2991,8 +3247,9 @@ fixed cost, not arithmetic (modeled and inferred):
   `varying_batch_blocks`, the varying phase timers and the plan and
   compilation seconds, which the probe emitted; the raw receipts were not
   kept, so the loss is unattributed there. The native 72 Hz/5× host batch
-  is 172 blocks × 26 batches; at about 23.1 MB per block a 4 GiB explicit
-  workspace may have halved the device batch.
+  is 172 blocks × 26 batches; at the 72 Hz/1× shape's 23.1 MB per block (the
+  72 Hz/5× per-block lease was not measured) a 4 GiB explicit workspace may
+  have halved the device batch.
 - The affine gather runs one 64-lane workgroup per block and item over 27–33
   retained modes, then a six-step FP64 shared-memory reduction of 20 sums,
   so low occupancy per call is plausible.
@@ -3001,6 +3258,20 @@ fixed cost, not arithmetic (modeled and inferred):
   calls reuse them.
 
 The redesign is [lever 3](#next-levers-in-order).
+
+**CPU cost split (modeled from the HF receipt's counters, inputs not
+kept).** At assumed unit costs of 1.25 ns per FP64 AVX2 FFT row-stage,
+2.5 ns per rendered basis row and 80 ns per Markov chain-state, FFTs are
+84–93% of the executed varying CPU. By lane: the fixed-affine states 65%
+(54 states × 4 template columns per HF block, Bluestein 512-point pairs),
+the raw-composite tracker 23% (17 lattice bins of 512 read), the independent
+gain atoms 11% (full DFTs); by operation besides FFTs, 7–16% in all, which
+at the 84% end is Markov updates 9%, rendering 4%, Gaussian updates 3%. The fixed-affine projection that a
+DFT-to-modes contraction would replace is about 5.9e12 flops per HF slot,
+about 0.05 s at the FP32 SIMT peak, so the levers are device calls that
+batch hundreds of blocks, device rendering and the host recursions, not
+matrix arithmetic
+([walk-through](gpu-strategy-playbook.md#worked-eligibility-walk-throughs)).
 
 How it runs ([`triad_vulkan_varying.cpp`](../src/triad_vulkan_varying.cpp),
 kernels in [`triad_vulkan_varying_shaders.hpp`](../src/triad_vulkan_varying_shaders.hpp)):
@@ -3189,7 +3460,10 @@ open. Scope any incompatibility claim to a demonstrated constraint on the
 device, data type, library, formulation or required numerical behavior.
 Keep the untested alternatives explicit.
 
-The HMMA/IMMA counters below cover the explicit coarse lag-matrix calls.
+The HMMA/IMMA counters below cover the explicit coarse lag-matrix calls and
+exist only on CUDA builds. On a Vulkan/OpenCL build their zero means
+nothing; the Tensor Core witnesses there are `opencl_coarse_score_rows` and
+`opencl_resident_nvfp4_modes`.
 Other library operations, including fine-stage Gram products, have separate
 instrumentation. Zero counts establish zero credited calls through those
 lag-matrix paths. Tensor Core use inside other library kernels requires
@@ -3283,10 +3557,10 @@ complete-receiver timing as distinct evidence.
 
 | Device family | Relevant implementation boundary |
 | --- | --- |
-| GeForce RTX 4090 and RTX 4060 Ti 16 GB | Ada, compute capability 8.9. The existing native FP16/INT8 lag-matrix path is eligible for Tensor Core library dispatch when geometry, workspace and implementation flags permit. Eligibility is not a claim that every call used Tensor Cores or that matrix work beats FFT search. Laptop RTX 4090 allocation and power configuration require separate measurement. |
+| GeForce RTX 4090 and RTX 4060 Ti 16 GB | Ada, compute capability 8.9. NVIDIA lists FP8, FP16, BF16, TF32, INT8 and INT4 Tensor rates for the RTX 4090 and no FP4; with FP32 accumulation GeForce Ada runs FP16 and FP8 at half their FP16-accumulate rates, BF16 matching FP16 ([vendor peaks](gpu-strategy-playbook.md#hardware-facts-for-decisions)). The existing native FP16/INT8 lag-matrix path is eligible for Tensor Core library dispatch when geometry, workspace and implementation flags permit. Eligibility is not a claim that every call used Tensor Cores or that matrix work beats FFT search. A CUDA build keeps native segmented timing on SM89 and uses the ATen FFT for fine projection; a Vulkan build cannot load the `sm_120a` OpenCL module. A Vulkan cooperative-matrix route is unqualified; query its shapes on the device. Laptop RTX 4090 allocation and power configuration require separate measurement. |
 | GeForce RTX 5090 and full RTX PRO 6000 Blackwell | Blackwell, compute capability 12.0 for these devices. Confirm the exact full device and compiled architecture at runtime; do not transfer an SM100-specific path or an earlier GPU's shape results to SM120 by product name. Recheck library heuristic choices and actual receiver costs on both consumer and workstation devices. Automatic selection treats every NVIDIA device that OpenCL reports as compute capability 12.0 with a matching UUID as the qualified class, so an RTX 5090 inherits the RTX PRO 6000's routes unmeasured; an RTX 5090 run is the check. |
 | Ryzen 5 PRO 5650U Radeon Vega iGPU | The locally observed Vulkan device is gfx90c. Its supported packed FP16 vector route is not matrix Tensor Core hardware. Half-storage in an FP32 VkFFT path is a workspace reduction, not packed-FP16 computation. Qualify actual arithmetic and memory use through the native Vulkan route. |
-| Ryzen 7 8840U Radeon 780M | Identify the actual GPU architecture/runtime. A published rocWMMA support list that omits gfx1103 does not prove the hardware cannot run matrix operations, nor does a compatible build prove that it did. Require a working native library/kernel route and device evidence before reporting or dispatching one. |
+| Ryzen 7 8840U Radeon 780M | Identify the actual GPU architecture/runtime. RDNA 3 has WMMA instructions for FP16 and BF16 (FP32 or same-type accumulation) and INT8 and INT4 (INT32) at 16×16×16 ([GPUOpen](https://gpuopen.com/learn/wmma_on_rdna3/)). A published rocWMMA support list that omits gfx1103 does not prove the hardware cannot run matrix operations, nor does a compatible build prove that it did. Require a working native library/kernel route, such as Vulkan cooperative matrices under RADV, and device evidence before reporting or dispatching one. The packed direct route's PCI gate admits only the 5650U's `1002:1638`. |
 | Intel i9-9900K UHD 630 | This Coffee Lake iGPU predates Intel XMX hardware. Do not assign an XMX path based on a generic Intel GPU label. The project has no actual UHD 630 test host, so its native GPU path remains unmeasured. |
 
 cuFFT's half mode is a real half-precision FFT implementation, with documented
@@ -3312,9 +3586,24 @@ normalization folded into lag scoring. The factored timing included packing,
 twiddles and reordering. All 384 strongest arrival lags matched, including
 the noise-only rows. This demonstrates a working Tensor Core formulation of
 these inverses. FP32 cuFFT was faster for the tested implementations and
-batches on this SM120 device. The measurements leave the performance of other
-factorizations, fused layouts and batch shapes open. A follow-up should include
-the actual full and tail batches and all preparation costs. Moving the complete
+batches on this SM120 device. The factorization, its pass count and whether
+the 33- and 95-transform batches were tails were not recorded. The isolated
+cuFFT times imply about 0.14 µs per 16,384-point and 0.30 µs per
+32,768-point transform at full batches. One read and one write of a
+128 × 32,768 batch (33.5 MB) in 38.88 µs would be 1.73 TB/s, about the DRAM
+peak, but the batch fits in the presumed 128 MB L2 and repeated isolated
+batches may have stayed there, so the baseline's DRAM pass count is not
+established (inferred); a cold-buffer timing or a kernel trace decides it.
+A factored form whose stages each round-trip global memory is unlikely to
+beat it, and dense stage matrices cost about `8·Σn_i·n` flops against
+`5·n·log2 n`.
+In production the segmented stage costs 3–4× the isolated figure per
+transform, which a kernel trace must attribute first
+([playbook](gpu-strategy-playbook.md#worked-examples)). The measurements
+leave the performance of other factorizations, fused layouts and batch
+shapes open: a fused shared-memory factorization that removes passes stays a
+candidate. A follow-up should include the actual full and tail batches and
+all preparation costs. Moving the complete
 segmented search onto the same GPU gave a 2.38×
 and 3.74× full-slot improvement in two paired severe-channel receiver trials.
 [Matched receiver trials](validation.md#blackwell-receiver-trials-at-2-mw).

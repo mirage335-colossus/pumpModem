@@ -1899,7 +1899,10 @@ matched slot on the 5650U and in the earlier Blackwell receipts.
 - **Where FP4 fits.** FP4 fits only large post-isolation contractions whose
   output only chooses candidates. Those are the coarse frontier products
   and the fine 47-mode projection, and both already run in NVFP4: 4.6 ms of
-  the device's roughly 60 ms per matched slot.
+  the device's roughly 60 ms per matched slot. The fine projection's output
+  feeds evidence through FP64 sufficient statistics rather than only
+  choosing candidates; the GPU guide states the
+  [rule as two classes](triad-gpu-optimization.md#where-fp4-fits-and-the-larger-levers).
 - **The largest device cost.** About 44 ms per slot is FP64 SIMT work, which
   runs at 1/64 rate on Blackwell and Ada:
   - fine mapping, 24.5 ms;
@@ -2109,8 +2112,13 @@ quote. Nothing was rerun. Its inputs:
 | [HF 100 mW 36 Hz/10× Target −22.5](../local-evidence/hf-100mw-extended-20261118/admission-active-940600-0-target--22.5.json) | EPYC 9555 pod, 27.2-CPU quota, 13-CPU affinity, W = 26 | 3,706.8 | 2,220.0: 1,626.3 / 385.8 / 207.9 | 1,486.5: 899.5 / 401.4 / 185.6 | 14,050 |
 | [36 Hz/10× 100 mW Target −12.9897](../local-evidence/lowrate-2mw-runpod/100mw-36hz10x-target-m12p9897-seed940600-bit0.json) | 13-CPU allocation, W = 26 | 400.9 | 218.3: 133.2 / 81.2 / 3.8 | 182.6: 128.5 / 37.6 / 16.5 | 2,257 |
 
-The HF receipt also uploaded 249 GB and reserved 99,243,065,344 of
-101,975,851,008 device bytes.
+The HF receipt's slot-wide `upload_bytes` was 249 GB, of which the
+segmented per-block copies are about 94 GB (derived from its segmented
+counts and plan; [shapes](gpu-strategy-playbook.md#worked-examples)). It reserved 99,243,065,344 of
+101,975,851,008 device bytes. That reservation is lease accounting: it
+equals the receipt's `workspace_limit_bytes` (initial free memory less a
+2 GiB headroom), which the leases reach by design, while the allocator
+peaked at 38,633,734,144 B reserved and 31,470,426,624 B live.
 
 - **Work.** Signed-lag FFT row-stages are counted. Total drift FFT work is
   rebuilt from the drift plan and counters, because the receipt counts only
@@ -2500,7 +2508,12 @@ cells) gave the same picture:
   implies about 63 ns per critical-path load, derived from the receipt's
   drift seconds and a modeled load count (ridge share assumed 85–95%), not
   timed. That latency is not reproduced here, so the HF gain is still
-  unmeasured. Time the same shape on the host that runs the HF slots.
+  unmeasured. Time the same shape on the host that runs the HF slots: the
+  source is `ridgebench/ridgebench.cpp` in the evidence directory below,
+  built with `g++ -std=c++20 -O3 -DNDEBUG -ffp-contract=off -fno-fast-math -pthread`
+  and run with the arguments `1762 16384 1967 4 <threads> 4 64 16`
+  (segments, bins, radius, stride, threads, former-loop slopes,
+  current-loop slopes, slope block).
 
 **Limits.**
 - One local host and two slots exercise the drift, varying and signed-lag
@@ -2568,6 +2581,8 @@ was verified absent afterwards.
 - Drift transforms are batch-invariant on NVIDIA too: 0 of 1,138,688 bits
   and 0 of 336 rows differ.
 - Varying statistics were within 5.5e-10 nats.
+- The `test_triad_vulkan` identity reported `vulkan_integer_dot8_accelerated`
+  true.
 
 **Defaults unchanged, reference against candidate.** On the automatic route
 (Vulkan with OpenCL NVFP4) every existing receipt value was identical:
@@ -2685,7 +2700,17 @@ on that CPU class to test it. The HF slot itself was not rerun.
   hypothesis for stages that scale, such as drift.
 - The explicit-workspace holdout runs failed their memory ceilings: 4 GiB
   of device workspace, then 48 GiB against a 64 GB host limit at 80
-  owners. Only the automatic pair completed.
+  owners. The second failure was the probe's host slot-workspace check
+  ("Native full-slot probe exceeds its local memory lease"), which refused
+  the run with every family native as well as with the gain rank on the
+  device. That check also charges the explicit coarse session's whole
+  device ceiling plus its 128 MiB compilation bound on the host
+  (`coarse_host_bytes`), so the 48 GiB ceiling and the 80-worker CPU quote
+  were both inside the refused check, and the run does not separate them;
+  the 80-worker quote was not kept. Only the automatic pair completed;
+  their `peak_reserved_bytes` was 51.8 GB, which on Vulkan is the peak of
+  charged Vulkan allocations and equals the allocator fields (OpenCL
+  buffers are leased, not charged); the lease peak was not kept. The pod's `memory.max` was 187,999,997,952 B.
 - RTX 5090, RTX 4090-class and other generations remain unqualified for
   every family.
 - CUDA-routed builds have no equivalent yet.
@@ -12077,7 +12102,6 @@ rows. Both receipts had zero half-FFT fallbacks, matching decisions between
 the FP32 and half CUDA routes on identical inputs, and complete work evidence.
 Raw inputs, commands and receipts are retained under
 `local-evidence/tensor-auto-policy/half-scope/`.
-`local-evidence/tensor-auto-policy/half-scope/`.
 
 The 262144 transform has mixed active/noise timing, while both geometries cut
 the charged workspace substantially. These are paired observations, not a
@@ -12105,8 +12129,9 @@ instructions. These are static opcodes in captured executing functions, not
 dynamic instruction counts, utilization, or a claim of Tensor Core execution.
 Hardware counter collection remains unavailable under the provider's
 `ERR_NVGPUCTRPERM` restriction; no permission bypass was attempted. The
-evidence and exact commands are retained in
-`local-evidence/tensor-auto-policy/cuda-half-instructions.txt`.
+captured symbols, module hashes and opcode counts are retained in
+`local-evidence/tensor-auto-policy/cuda-half-instructions.txt`; the capture
+commands were not kept ([procedure](gpu-strategy-playbook.md#test-recipe), step 9).
 
 On a full RTX PRO 6000 Blackwell, a matched 63 MiB-admission broad coarse case
 scored all 98,465,484 public scores and completed every physical quiet slot.
@@ -12186,6 +12211,21 @@ interval improved 11.55376→11.47646 s. Summed coarse-stage time improved
 IF450/F192 holdout improved 8.31166→8.237773 s and 7.687852→7.527696 s,
 respectively. These brief measurements show a real coarse-stage benefit but no
 uniform whole-stream gain; the 4090 backlog regression must remain visible.
+
+An explicit `--backend cuda --tensor-coarse-math int8` five-slot `message`
+on the RTX 4090 (rate 1, Spread None, seed 74021, three slot owners;
+`local-evidence/tensor-auto-policy/4090-holdout/matrix-message-*.json`; a
+message run, not a holdout run, despite the directory name) took 35.28 s of
+stream wall against 32.99 s with the FFT. The summed backend `wall_seconds`
+were 98.2 and 91.8 s. The INT8 run made 216 IMMA calls, none unwitnessed, with
+91,955,920,896 padded real multiply-adds, 221,773,824 packed values and
+per-dimension maxima of 1664 rows, 2713 inner and 213 columns (independent
+fields, not necessarily one call); FFT calls fell from 3,918 to 1,110 and
+`peak_reserved_bytes` rose from 80.8 to 438.3 MB. At the RTX 4090's
+660.6 TOPS dense INT8 peak those multiply-adds take about 0.3 ms, so the
+2.3 s loss lies in packing, launches and workspace rather than in matrix
+arithmetic (inferred). One pair; keep these receipts with the other
+retained receipts below.
 
 Matrix workspace is a material cost, not a saving against FFT. With three
 owners, reserved/live peaks were 533/364 MB versus 107/20 MB for FFT on the

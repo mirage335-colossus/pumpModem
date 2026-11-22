@@ -106,7 +106,14 @@ Keep target requirements, actual device receipts and validation outcomes separat
 | AMD Ryzen 7 8840U with Radeon Graphics | Zen 4 CPU, eight cores/sixteen threads and Radeon 780M graphics with twelve graphics cores. Its separate NPU is not a substitute for a qualified graphics or CPU backend. Record actual host/shared memory and CPU features. [AMD specifications](https://www.amd.com/en/products/processors/laptop/ryzen/8000-series/amd-ryzen-7-8840u.html) |
 
 All three GeForce targets use Ada's fourth-generation Tensor Cores and compute
-capability 8.9. Ada supports FP16 and INT8 Tensor Core arithmetic; hardware
+capability 8.9. NVIDIA's Ada table lists FP8, FP16, BF16, TF32, INT8 and INT4
+Tensor rates for the RTX 4090 and no FP4; with FP32 accumulation GeForce Ada
+runs FP16 and FP8 at half their FP16-accumulate rates (BF16 matches FP16),
+so INT4 has its highest peak (16× FP32 SIMT, INT32 accumulation, software
+scales) and INT8 its highest 8-bit peak (8×); both are candidates for
+proposal-only work. The
+[strategy playbook](gpu-strategy-playbook.md#hardware-facts-for-decisions)
+tabulates these peaks and ratios for every target. Hardware
 support does not prove that a particular library operation used it. Build for
 the actual architecture and retain execution evidence alongside the arithmetic
 counters. See the [Ada architecture](https://images.nvidia.com/aem-dam/Solutions/geforce/ada/nvidia-ada-gpu-architecture.pdf)

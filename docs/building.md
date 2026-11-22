@@ -709,7 +709,13 @@ declines there. The device-free `triad_vulkan_stage_policy` is in every
 build, with or without Vulkan. It checks the selection order, the reason
 names, the `SelectedGpu` forwarding and the host-RAM part of a session's
 host quote. `test_triad_vulkan --segmented-benchmark` prints an indicative
-per-workspace comparison with the native scorer on every thread. Unregistered
+per-workspace comparison with the native scorer on every thread: one session,
+three fixed shapes (16,384 points with 257 and 515 frequencies, 32,768 with
+261), per-workspace seconds only and no receipts, so it shows neither
+multi-owner contention nor production rates. It is Vulkan-only and has run
+only on the Radeon; on CUDA builds `test_triad_tensor --cuda --segmented-only`
+checks segmented correctness against a time-domain oracle and has no
+benchmark mode. Unregistered
 modes: `--automatic-workspace` also checks that the automatic workspace admits
 a broad full-prior geometry above the former 256 MiB device ceiling before the
 admission checks, and `--precision-fp32`, `--precision-fp16-storage`,

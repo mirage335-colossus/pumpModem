@@ -28,7 +28,12 @@ to the native code. The
 and [GPU operation counters](triad-gpu-optimization.md#which-arithmetic-ran-in-a-remote-simulation)
 cover the measured compute paths.
 
-For GPU performance work, start with
+For GPU performance work, start with the
+[GPU and Tensor Core strategy playbook](gpu-strategy-playbook.md), whose
+[Start here](gpu-strategy-playbook.md#start-here), common mistakes and fact
+lookup come first: the eligibility rules and formulas, vendor peaks per target GPU, the status of
+every strategy tried or proposed, how to derive a new one and how to test
+it. Then use
 [current GPU limits and next steps](triad-gpu-optimization.md#current-gpu-limits-and-next-steps):
 what automatic selection runs on each build and device, where the time goes
 on the qualification slots, and the ranked levers. The
@@ -112,7 +117,7 @@ the [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-cap
 | Development and delivery | [Development contract](development.md), [build and test guide](building.md), [release procedures](releases.md), [offline installation](offline-installation.md) |
 | Helper Carrier | Native generation and acquisition share the [Robust stack](robust-current.md); historical measurements retain their original scope |
 | Simulation channels | [Doppler, delay spread, selective amplitude and FHSS tails](channel-models.md) |
-| GPU hardware and precision | [GPU selection contract](triad-performance.md#gpu-selection-for-accelerated-development): prefer a full RTX PRO 6000 Blackwell or a demonstrably more suitable modern accelerator; [representative receiver targets](triad-performance.md#representative-receiver-hardware) and [precision guidance](gpu-precision-controls.md) define qualification; the [GPU performance guide](triad-gpu-optimization.md) holds current limits, levers and method |
+| GPU hardware and precision | [GPU selection contract](triad-performance.md#gpu-selection-for-accelerated-development): prefer a full RTX PRO 6000 Blackwell or a demonstrably more suitable modern accelerator; [representative receiver targets](triad-performance.md#representative-receiver-hardware) and [precision guidance](gpu-precision-controls.md) define qualification; the [strategy playbook](gpu-strategy-playbook.md) says what to try next and how to test it; the [GPU performance guide](triad-gpu-optimization.md) holds current limits, levers and method |
 | Fast Modem | [Fast topic index](indexes/fast.md) |
 | Legacy Modem | [Legacy reference](legacy-modem.md) and retained interoperability fixtures |
 | GUI and frontends | [Interfaces index](indexes/interfaces.md), [GUI contract](gui-contract.md), [frontend interfaces](frontend-interfaces.md) |

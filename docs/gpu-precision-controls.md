@@ -28,6 +28,9 @@ effective sparse rates require supported structured sparsity. These figures
 motivate measuring the dominant receiver stages with large enough tiles to
 make use of the hardware.
 [NVIDIA Blackwell architecture white paper](https://images.nvidia.com/aem-dam/Solutions/geforce/blackwell/nvidia-rtx-blackwell-gpu-architecture.pdf#page=47).
+The [strategy playbook](gpu-strategy-playbook.md#hardware-facts-for-decisions)
+tabulates the vendor peaks of every format on each target GPU, the format
+ratios and ridge points, and the achieved rates measured here.
 Select using the runtime GPU, driver, geometry and qualified receiver results.
 FP32-minimum and FP64-force overrides serve exceptional precision needs; their
 availability makes conservative precision an inappropriate automatic-mode goal.
@@ -325,7 +328,10 @@ decisions rather than reducing required work to obtain a favorable timing.
 Use the [representative hardware contract](triad-performance.md#representative-receiver-hardware)
 for Ada desktop/laptop GPUs and Ryzen CPU/integrated-graphics targets. A device's
 low-precision capability is useful only through an implemented, measured native
-path. Qualify the numerical stage and the processing hardware separately.
+path. Qualify the numerical stage and the processing hardware separately. The
+[playbook's stage table](gpu-strategy-playbook.md#the-procedure-applied-to-each-stage)
+gives, per receiver stage, the route that runs it, its exactness class, which
+formats have been tried with what result, and the next candidate.
 
 | Stage | Precision and performance-test boundary |
 | --- | --- |
@@ -389,6 +395,20 @@ offers segmented shapes to every compiled session. The Blackwell Vulkan and
 OpenCL route hands them to its FFT session whichever session scores the
 frequencies.
 
+Shape terms (`make_segmented` in the [coarse receiver](../src/triad_receiver_coarse.cpp)):
+a family splits the projected template rows into `blocks` of `r` rows; the
+transform length is `n = bit_ceil(r + A − 1)` for `A` arrivals, and
+`phases = max(1, ceil(2r/n))`, which is at most two. Phase `p` evaluates the
+block's observation spectrum at (bin + p/P)/n of the sample rate. A block
+scores `2·radius + 1` frequencies; frequency index `f` maps to
+`(f − radius)·bin_stride`, whose residue modulo `P` picks the phase and
+whose quotient is the bin shift. Ranks are the squared correlation magnitude
+over the template energy, so the correlation's phase does not matter. Each
+nonempty block runs one forward transform (`*_segmented_forward_ffts`) and
+one inverse per frequency. HF's two families are 623 blocks × 15,733
+frequencies with P = 2 and about 1,760 × 3,935 with P = 1
+([derived shapes](gpu-strategy-playbook.md#worked-examples)).
+
 This route changes values at the proposal level. Its FP32 transforms round
 differently from the native scorer's, so lag ranks differ by up to about 2e-7
 of the strongest rank. Selection can then reorder or replace near-tied
@@ -405,7 +425,11 @@ measurements.
 A session admits its segmented work once, on the owner thread, before any
 other device stage. The lease covers the resident observation spectra, a tile
 of up to 128 inverse transforms, tracker states, ranks and the VkFFT twiddle
-tables with their upload staging. It ends before the frequency search admits
+tables with their upload staging. Both backends run, per block, one forward
+transform and, per tile of frequencies, a product kernel, the inverse
+transforms and a ranks kernel; the CUDA plan halves its tile until it fits
+and records no tile width
+([kernel sequence and costs](gpu-strategy-playbook.md#worked-examples)). It ends before the frequency search admits
 its own workspace, and also if the bank stage fails. Segmented timing exists
 only with a varying passband, which withholds the device-rendered template
 bank, so the dense session's blocking synthesis lease never waits while a
@@ -667,7 +691,8 @@ OpenCL and runs none of those routes. See
 Automatic CUDA uses the guarded native half-cuFFT route for broad frequency
 search on exact SM89 or SM120 devices when NFFT is 4096–2^20, there are at least
 two arrivals, the measured double-precision Gram minimum-eigenvalue ratio is at
-least 1/16, and `NFFT × admitted_frequency_tile × min(W, 8) × taps ≥ 2^19`.
+least 1/16, and `NFFT × admitted_frequency_tile × min(workspaces, 8) × taps ≥ 2^19`,
+where `workspaces` is the template-bank workspace count, not the worker budget `W`.
 This work-volume gate replaces the earlier fixture-only NFFT=131072/F≥32 caps.
 It power-of-two scales and packs isolated post-channelization spectra/templates,
 charges workspace, and preserves FP64 scoring/state. Before batch commitment, a failed guard, plan, or full
@@ -930,6 +955,11 @@ Select a matrix default only from qualified, complete-cost measurements covering
 the hardest applicable shapes. A narrow GEMM win or an unfavorable tiny Gram
 measurement cannot decide the broad-search default. Tensor Core FFT factorization
 would be a distinct algorithm to implement and qualify, not an INT8 cuFFT switch.
+Lag-group sessions are the exception: inside its gate automatic CUDA selects
+the INT8 matrix on SM89 and SM120
+([automatic gate](#gui-automatic-gpu-selection)); the RTX 4090 25-slot
+backlog was 3.47% slower with it, a regression the
+[playbook](gpu-strategy-playbook.md#worked-examples) analyses.
 
 The CUDA frequency-tile route now implements exact arrival-peak selection on
 the device, returning a fixed 40-byte frontier per workspace/frequency instead

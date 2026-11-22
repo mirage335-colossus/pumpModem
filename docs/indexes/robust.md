@@ -319,6 +319,9 @@ arithmetic and fallback reason. Do not infer whole-receiver speed from bit
 width, theoretical peaks, storage size or a component kernel. Current GPU
 limits, the ranked next levers and the measurement method are in
 [Current GPU limits](../triad-gpu-optimization.md#current-gpu-limits-and-next-steps).
+To choose, derive or test a GPU or Tensor Core strategy, use the
+[strategy playbook](../gpu-strategy-playbook.md): eligibility rules with
+formulas, vendor peaks per target, every strategy's status and a test recipe.
 
 | Work shape | Current path or useful alternative | Finding and boundary |
 | --- | --- | --- |
