@@ -103,6 +103,15 @@ calendar and keyed sequence, 180 dB loss and −164 dBm/Hz white noise. The
 nominal received C/N₀ was −12.99 dB-Hz at 2 mW and +4 dB-Hz at 100 mW.
 [Channel assumptions and site-specific noise limits](../channel-models.md#noise-and-frequency-assumptions-in-the-2-mw-hf-tests).
 
+On separate strong 3.6 and 1.8 Hz severe captures, the operational receiver
+selected the wrong bit. Both carried strong bit separation when the
+diagnostic supplied the exact propagation and clock histories. A simplified
+channel preserving that motion still preferred the correct bit despite a
+large residual. This separates a public inference problem from loss of the
+transmitted distinction on these specific captures. A large bit separation
+on its own was also observed under pure noise, so retain the physical-null
+comparison. [Exact-channel checks](../validation.md#exact-channel-witness-for-severe-low-rate-bit-errors--21-november-2026).
+
 | 2 mW waveform | Shorter stable miss | Shortest stable bit received | Modeled bit-0 energy | Longest completed severe GUI miss |
 | --- | ---: | --- | ---: | ---: |
 | 36 Hz, 10× interleaved DSSS, Fake FCC | 1,540.8 s | 1,797.6 s at Target −12.99 | 2.571 J | 5,906.4 s at Target −18 |
@@ -336,7 +345,7 @@ The ordered work to move more of the pipeline onto the GPU is in the
 | Blackwell fine statistics of the isolated 1,500-row, 47-mode, two-path DATA geometry | Resident FP4 batches render their dense source tiles on the device from keyed coefficients and hold a window of 16 fixed-affine blocks, in automatic selection and the GUI's Default (fastest). Uploaded native tiles in two-block batches remain as the control route, and the adaptive diagnostic lane keeps one dispatch per batch. | On one RTX PRO 6000 Blackwell the matched fine stage fell from 0.55–0.60 s on the control route to 0.08–0.11 s at 4 and 24 workers, and with streamed mappings to 0.06–0.10 s, and the automatic slot from 0.89–1.04 s to 0.14–0.18 s with equal decisions. Every resident route gave identical evidence and rendered tiles matched native ones within 2.5e-12 of the peak. Uploads fell from 92 MB to 7.6 MB and submissions from 405 to 51 per slot. Streamed mappings cut the owner's wait for the device from 34 to 14 ms per slot. The FP32 mapper and tile renderer, now the defaults, cut mapping to 5.1 ms and tile rendering to 2.5 ms, so the owner's window wait, addresses and staging bound the stage. Windows of 32 and 64 did not help this slot. RTX 5090, other hosts and backlog are unmeasured. See [device tiles and windows](../triad-gpu-optimization.md#device-rendered-fine-tiles-and-resident-windows), the [validation record](../validation.md#resident-fine-tiles-and-windows--20-november-2026) and the [offload qualification](../validation.md#blackwell-qualification-of-the-offload-routes--20-november-2026). |
 | Broad changing-channel timing search on a GPU | CUDA on SM120, and Vulkan on the OpenCL-identified SM 12.0 class, score the segmented search on the device; automatic Vulkan admits only shapes inside the CUDA-qualified envelope. | On one RTX PRO 6000 the 72 Hz/5× control's stage fell from 46.3 to 5.7 s with identical proposals and decisions. The 72 Hz/1× shapes lie outside the envelope and stay native, although the explicit route took 0.59 s against 4.58 s. On the Radeon the explicit route was slower per single slot. See [segmented route](../gpu-precision-controls.md#current-implementation) and [next levers](../triad-gpu-optimization.md#next-levers-in-order). |
 | Signed-lag gain ranks on a GPU | The Vulkan device direct rank is automatic on the SM 12.0 class and publishes only certified nominations equal to native. | On the 40.8-CPU Xeon host at W = 80, where the native rank ran 2.4–4.6× slower than on the 5650U, the 72 Hz/5× slot fell from 38.4–55.5 to 17.8–19.8 s and a 36 Hz/10× holdout from 688 to 281 s, with identical lags and evidence; the easy 72 Hz/1× slot stayed within noise. Device margins are host-specific. The Radeon stays declined, and CUDA builds have no equivalent. See [signed-lag ranks](../triad-gpu-optimization.md#signed-lag-ranks). |
-| Drift proposals and varying statistics on a GPU | Explicit Vulkan device routes only; automatic selection keeps both native. | Both were slower than native at both 72 Hz shapes on the 40.8-CPU Blackwell host (two alternated pairs each); single loaded Radeon runs looked slower (indicative). Likely causes are serialized lanes and per-call cost. Levers and reconsider conditions are in [next levers](../triad-gpu-optimization.md#next-levers-in-order). |
+| Drift proposals and varying statistics on a GPU | Explicit Vulkan device routes. Automatic selection keeps both native. | Earlier device routes lost on the 40.8-CPU Blackwell host. Per-family timestamps later showed that the varying-stage loss came from reading its own templates out of mapped staging. Using cached host scratch reduced the 72 Hz/5× device stage from 27.14–27.47 s to 2.05–2.31 s on the 15.3-CPU Blackwell host, near its 2.49 s native stage. The separate drift stage still has session-lock wait and host work. [Attribution and paired measurements](../validation.md#vulkan-fine-stage-attribution-and-staging--21-november-2026). |
 | Suitably batched, reusable correlation or phase-state contractions | FP16/INT8 or mixed-precision matrix work may fit Tensor Core shapes; historical NVFP4, split-BF16 and TF32x3 techniques show what to investigate. | Git history contains real Tensor Core wins, including packing-inclusive large correlation on PRO 6000 and phase-state work on RTX 5090. Other shapes, including complete RTX 5090 receiver and PRO 6000 receiver stages, favored FP32 or showed acquisition slowdown. These Python/Triton or retired-waveform results are research candidates, not native receiver qualification. See [full Tensor/GPU history](../triad-gpu-optimization.md#verified-git-history-inventory). |
 | Long repeated work with identical geometry | Consider cached plans, resident coefficients/buffers, fusion or CUDA graphs when setup amortizes across enough batches. | Historical fixed-shape graph and cache gains were large in some studies; a warm CPU single-use cache was slower, and one lag transform sped up while acquisition became slower. Data generation, packing, transfers, resets and end-to-end stages decide the result. See [GPU optimization lessons](../triad-gpu-optimization.md#what-to-measure-separately). |
 | CPU utilization or GPU batch preparation limits service | Overlap independent preparation/lookahead with an owner; retain ordered commits and actual W=2*H work limits. | Current native CPU and GPU pipelines use bounded owner/workspace shapes. Recent tests confirmed preserved work and outcomes; backlog results were mixed and remain non-capacity evidence. More workers, owners or streams are not automatically faster. See [overlap contract](../development.md#overlap-within-a-slot) and [current qualification](../validation.md#current-receiver-overlap-qualification). |
@@ -402,9 +411,29 @@ independent evidence.
 [current channel realization](../channel-models.md#robust-gui-changing-channel-realization).
 
 In a 2024 analysis of pilot-assisted short packets, dependence between timing
-errors across observations changes reliability. Its timing model and
-reliability bounds apply to that link. Robust needs its own acquisition
-controls. [Timing-synchronization study](https://doi.org/10.1109/TWC.2024.3458090).
+errors across observations changes reliability. A common delay allows joint
+estimation across fading blocks, while independent delays make timing the
+bottleneck in the studied receiver. For Robust, preserve the shared state
+where the channel supports it and keep independent timing and off-grid
+changing-channel controls. A constant-gain projection with residual
+frequency error `δf` over `T` seconds has relative magnitude
+`|sin(π δf T)/(π δf T)|` in the rectangular coherent idealization. Additional
+time increases matched energy and narrows the tolerable residual frequency
+error. Evaluate duration, synchronization and receiver service together.
+[Timing-synchronization study](https://arxiv.org/abs/2401.09089),
+[model mismatch in the resilience review](../../_ref/resilience-triple_Robust_Modem/Astra-6/report.md#two-useful-deductions-about-model-mismatch).
+
+Gaussian gain-state statistics already summarize earlier observations under
+the chosen transition law. This avoids enumerating gain histories while
+preserving their uncertainty. If measured off-grid Doppler mismatch becomes
+dominant, a small temporal basis is worth comparing against shorter coherence
+blocks and the current state model. A recent delay-Doppler study derives
+off-grid approximation bounds using discrete prolate spheroidal sequences
+under double sparsity. It also finds a finite-SNR cost from estimating more
+coefficients. For Robust, require gains on held-out fractional offsets and
+changing paths, with quiet and wrong-key controls for extra fit freedom.
+[Gaussian sufficient statistics](../../_ref/resilience-triple_Robust_Modem/Astra-6/report.md#gaussian-integration-summarizes-channel-history),
+[Benzine et al., IEEE Transactions on Wireless Communications](https://www.eurecom.fr/en/publication/8552).
 
 When a proposal uses reduced precision, measure which weak arrivals survive
 higher-precision rescoring as well as agreement between score arrays. One

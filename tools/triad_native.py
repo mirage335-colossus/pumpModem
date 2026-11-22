@@ -266,15 +266,42 @@ def _validate_vulkan_stages(bulk, identity):
     meets a required device route."""
     counters = ("sessions", "forward_ffts", "inverse_ffts", "fft_row_stages", "score_rows",
                 "planned_calls", "declined_calls", "native_fallbacks", "upload_bytes")
+    attribution_counters = ("device_calls", "download_bytes", "submissions", "timed_submissions", "batch_width")
+    attribution_durations = ("mutex_wait_seconds", "submission_seconds", "device_seconds",
+                             "plan_seconds", "shader_seconds")
+    attribution_names = attribution_counters + attribution_durations
     for family in VULKAN_STAGE_FAMILIES:
         prefix = "vulkan_" + family + "_"
         requirement = identity.get(prefix + "requirement")
+        present_attribution = [prefix + name in bulk for name in attribution_names]
         if prefix + "planned_calls" not in bulk:
+            if any(present_attribution):
+                raise ProbeError(f"Vulkan {family} attribution lacks its stage receipt")
             if requirement is not None:
                 raise ProbeError("Vulkan receipt lacks the fine-stage work of a required route")
             continue  # a receipt from before the fine-stage routes
         counts = {name: positive_int(bulk.get(prefix + name), f"Vulkan {family} {name}", allow_zero=True)
                   for name in counters}
+        if any(present_attribution):
+            if not all(present_attribution):
+                raise ProbeError(f"Incomplete Vulkan {family} attribution receipt")
+            attribution = {
+                name: positive_int(bulk[prefix + name], f"Vulkan {family} {name}", allow_zero=True)
+                for name in attribution_counters
+            }
+            attribution.update({
+                name: finite_number(bulk[prefix + name], f"Vulkan {family} {name}", nonnegative=True)
+                for name in attribution_durations
+            })
+            calls = attribution["device_calls"]
+            submissions = attribution["submissions"]
+            timed = attribution["timed_submissions"]
+            if (timed > submissions or calls > submissions or counts["sessions"] > calls
+                    or (calls and not counts["sessions"])
+                    or (not calls and (attribution["download_bytes"] or attribution["batch_width"]))
+                    or (not submissions and attribution["submission_seconds"])
+                    or (not timed and attribution["device_seconds"])):
+                raise ProbeError(f"Invalid Vulkan {family} attribution totals")
         declines, fallbacks = vulkan_stage_reasons(family)
         decline = bulk.get(prefix + "decline_reason")
         fallback = bulk.get(prefix + "fallback_reason")

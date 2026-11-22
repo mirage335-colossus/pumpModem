@@ -430,6 +430,9 @@ struct StreamChannelReport {
 };
 class StreamingChannel {
 public:
+    // Bound includes the emitted source and its optional readers.
+    static constexpr std::size_t maximum_working_bytes = 65 * 1024 * 1024;
+
     StreamingChannel(PatternSource&, const StreamChannelConfig&);
     StreamingChannel(EmittedSource, const StreamChannelConfig&);
     ~StreamingChannel();

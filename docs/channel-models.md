@@ -232,9 +232,21 @@ stable capture and 26,241,105 → 27,360,665 on the FHSS capture. With 64
 flicker bands on both oscillators and the split transmit path it is about
 12 MB, so a large selective or FHSS-reader channel that no longer fits in
 the 65 MiB bound drops its source readers, then its lanes, with the same
-values. A
-lone reader carries 8,176 more bytes, the idle chain objects. The GUI
-simulation keeps a lone reader, because its receiver is using those workers.
+values. A lone reader carries 8,176 more bytes, the idle chain objects.
+Finite GUI and lab simulations can stage channel preparation with the same
+native receiver executor. A wave borrows helpers only while no receive slot
+is ready or in flight. Once a slot is ready, the simulation controller
+prepares its samples serially and the full receiver worker budget is available.
+The staged channel and started worker stacks are accounted in the receiver's
+memory admission. Before allocating the staged channel, the simulator quotes
+each public receive window through the second quiet slot at full worker width.
+It checks the endpoints first to catch clock growth quickly, then checks the
+interior because the DSP plan can change discretely. The startup planning
+budget is 100 ms, checked between quotes. A tight memory limit, cancellation or
+an unfinished scan keeps the lone reader. This protects the first preview on
+long messages. Reconsider the startup budget using complete simulation time
+if these planning calls regularly prevent a useful staging gain. Paced
+open-ended noise uses the lone reader.
 
 `triad_receiver_probe --capture-cache DIR` skips the simulator on repeated
 receiver runs of one probe binary, such as backend, precision or worker

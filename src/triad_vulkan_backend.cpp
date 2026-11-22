@@ -91,6 +91,16 @@ struct TileBufferLayout {
     std::size_t product_rows, score_rows;
 };
 
+constexpr bool tile_index_extents_fit(std::uint64_t product_rows, std::uint64_t score_rows) noexcept {
+    return product_rows <= UINT32_MAX && score_rows <= UINT32_MAX;
+}
+static_assert(tile_index_extents_fit(UINT32_MAX, UINT32_MAX));
+static_assert(!tile_index_extents_fit(std::uint64_t{UINT32_MAX} + 1, UINT32_MAX));
+static_assert(!tile_index_extents_fit(UINT32_MAX, std::uint64_t{UINT32_MAX} + 1));
+// The wide 36 Hz holdout overflows at 64 workspaces but fits at 32.
+static_assert(!tile_index_extents_fit(64ull * 30 * 2 * 2'097'152, 64ull * 30 * 10'553));
+static_assert(tile_index_extents_fit(32ull * 30 * 2 * 2'097'152, 32ull * 30 * 10'553));
+
 TileBufferLayout tile_buffers(const CoarseBulkGeometry& geometry, bool direct, bool host_scoring,
                               std::size_t element_bytes, std::size_t frequencies, std::size_t batch, bool frontier) {
     const auto rows = direct ? geometry.kernel_rows : geometry.correlation_fft_rows;
@@ -143,6 +153,13 @@ CoarseFrequencyPlan automatic_frequency_plan(const Shared& shared, const CoarseB
     }
     // Prefer the full admitted public frequency tile, then the largest useful
     // workspace batch that fits. The public grid is independent of both.
+    // A discrete device with only device-local heaps in its automatic lease
+    // maps its buffers directly. They must fit the device budget, but do not
+    // reserve a second copy of that space in the receiver's host budget.
+    bool shares_host_memory = shared.total.unified_memory;
+    for (std::uint32_t heap = 0; heap < shared.memory.memoryHeapCount; ++heap)
+        shares_host_memory |= shared.allowed_heaps[heap] &&
+            !(shared.memory.memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT);
     for (auto width = geometry.frequency_tile_width; width; --width) {
         for (auto batch = std::min(maximum_batch, workspaces); batch; batch /= 2) {
             std::size_t peak = 0;
@@ -150,7 +167,7 @@ CoarseFrequencyPlan automatic_frequency_plan(const Shared& shared, const CoarseB
             for (unsigned mode = 0; mode < modes && fits; ++mode) {
                 const auto tile = tile_buffers(geometry, direct, shared.host_scoring, element_sizes[mode],
                                                width, batch, true);
-                if (tile.product_rows > UINT32_MAX || tile.score_rows > UINT32_MAX) {
+                if (!tile_index_extents_fit(tile.product_rows, tile.score_rows)) {
                     fits = false;
                     break;
                 }
@@ -162,9 +179,9 @@ CoarseFrequencyPlan automatic_frequency_plan(const Shared& shared, const CoarseB
             }
             if (fits) {
                 const auto host_scores = mul(mul(mul(batch, width), geometry.lag_count), sizeof(double));
-                const auto host = add(peak, add(compiler_host_bound,
+                const auto host = add(shares_host_memory ? peak : 0, add(compiler_host_bound,
                     add(mul(maximum_fft_rows, sizeof(Complex)), host_scores)));
-                return {width, batch, peak, host, {}};
+                return {width, batch, peak, host, {}, shares_host_memory ? 0 : peak};
             }
         }
     }
@@ -833,7 +850,12 @@ private:
             try {
                 const auto tile = tile_buffers(geometry_, context_.direct_dot, context_.shared->host_scoring,
                                                context_.fft_element_bytes(), frequencies, width, frontier);
-                narrow(tile.product_rows); narrow(tile.score_rows);
+                if (!tile_index_extents_fit(tile.product_rows, tile.score_rows)) {
+                    if (width == 1)
+                        throw ReceiverWorkspaceError("Robust Vulkan coarse frequency tile exceeds uint32 index extent");
+                    width /= 2;
+                    continue;
+                }
                 retain(frequency_, tile.frequency);
                 retain(spectra_, tile.spectra);
                 retain(product_, tile.products, context_.shared->host_scoring);
@@ -1254,7 +1276,12 @@ public:
         return std::max<std::size_t>(1, std::min(width, budget / bytes_per_frequency));
     }
     std::string_view coarse_fallback_reason(double rate, double clock, CoarseRoute route) const noexcept override {
-        if (rate <= 10 && clock > 0 && clock <= .001) return "compact-tight-clock-fp64";
+        // Keep the qualified compact route in application selection. A
+        // device probe that requests specific arithmetic must be able to
+        // measure the same low-rate, tight-clock frequency search on Vulkan.
+        if ((shared_->automatic_workspace || shared_->options.coarse_precision == VulkanCoarsePrecision::automatic) &&
+            rate <= 10 && clock > 0 && clock <= .001)
+            return "compact-tight-clock-fp64";
         if (route == CoarseRoute::lag_groups) return "native-lag-groups";
         return {};
     }

@@ -383,7 +383,9 @@ public:
 
     bool ridge(const DriftAtomRequest& request, DriftAtomResult& result, StageDeviceWork& work,
                std::stop_token stop) override {
+        const auto lock_started = Clock::now();
         std::lock_guard lock(mutex_);
+        pending_mutex_wait_seconds_ += std::chrono::duration<double>(Clock::now() - lock_started).count();
         cancelled(stop);
         require(request.lane < shape_.lanes, "Robust Vulkan drift ridge lane is outside its session");
         const std::array<const DriftRidgeGeometry*, 2> geometry{&request.fast, &request.slow};
@@ -481,7 +483,9 @@ public:
 
     bool slopes(const DriftAtomRequest& request, DriftAtomResult& result, StageDeviceWork& work,
                 std::stop_token stop) override {
+        const auto lock_started = Clock::now();
         std::lock_guard lock(mutex_);
+        pending_mutex_wait_seconds_ += std::chrono::duration<double>(Clock::now() - lock_started).count();
         cancelled(stop);
         const auto total = request.slopes.size();
         require(request.lane < shape_.lanes && total <= shape_.slope_budget &&
@@ -495,6 +499,7 @@ public:
                                              -std::numeric_limits<double>::infinity()};
         if (!total) {
             result.nomination = none;
+            flush_mutex_wait();
             return true;
         }
         StageDeviceWork done;
@@ -583,8 +588,20 @@ private:
     void clear_flag() noexcept { *static_cast<std::uint32_t*>(flag_->mapped) = 0; }
     bool flagged() const noexcept { return *static_cast<const std::uint32_t*>(flag_->mapped) != 0; }
     bool fall_back(StageReason reason) {
-        context_.shared->record_stage_fallback(StageFamily::drift, reason, false);
+        BulkReceipt delta;
+        delta.vulkan_drift.native_fallbacks = 1;
+        delta.vulkan_drift.fallback_reason = stage_reason_text(StageFamily::drift, reason);
+        delta.vulkan_drift.mutex_wait_seconds = pending_mutex_wait_seconds_;
+        pending_mutex_wait_seconds_ = 0;
+        context_.account(std::move(delta));
         return false;
+    }
+    void flush_mutex_wait() {
+        if (!pending_mutex_wait_seconds_) return;
+        BulkReceipt delta;
+        vulkan_stage_receipt(delta, StageFamily::drift).mutex_wait_seconds = pending_mutex_wait_seconds_;
+        pending_mutex_wait_seconds_ = 0;
+        context_.account(std::move(delta));
     }
     void credit(const StageDeviceWork& done, std::uint64_t cells, std::uint64_t slope_ffts, StageDeviceWork& work) {
         BulkReceipt delta;
@@ -594,6 +611,10 @@ private:
         stage.forward_ffts = done.forward_ffts; stage.inverse_ffts = done.inverse_ffts;
         stage.fft_row_stages = done.fft_row_stages; stage.score_rows = done.score_rows;
         stage.upload_bytes = done.upload_bytes;
+        stage.device_calls = 1;
+        stage.download_bytes = done.download_bytes;
+        stage.mutex_wait_seconds = pending_mutex_wait_seconds_;
+        pending_mutex_wait_seconds_ = 0;
         delta.vulkan_drift_ridge_cells = cells;
         delta.vulkan_drift_slope_ffts = slope_ffts;
         context_.account(std::move(delta));
@@ -607,6 +628,7 @@ private:
     std::mutex mutex_;
     std::vector<std::uint8_t> dirty_;
     bool credited_ = false;
+    double pending_mutex_wait_seconds_ = 0;
     std::vector<std::unique_ptr<Buffer>> staging_;
     std::unique_ptr<Buffer> ridge_data_, ridge_temporary_, slope_data_, slope_temporary_, partial_, frontier_;
     std::unique_ptr<Buffer> rates_, flag_;

@@ -4038,22 +4038,25 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
             check_cancelled(leaf_stop);
             const auto [block_first, rows] = block_extent(render_first + index);
             const auto out = std::span(templates + index * device.layout.block_values + column * rows, columns * rows);
+            auto host_templates = std::span(lane_scratch.raw).first(columns * rows);
             bool nonzero = false;
             if (item < states.size()) {
                 const auto& paths = bases[item % model_count];
                 render_templates_into(basis, mapped[item / model_count], std::span(paths.taps).first(paths.count),
-                                      block_first, rows, out, lane_scratch, leaf_stop);
+                                      block_first, rows, host_templates, lane_scratch, leaf_stop);
             } else if (item < affine_items) {
                 render_templates_into(basis, independent_maps[item - states.size()], independent_paths, block_first,
-                                      rows, out, lane_scratch, leaf_stop);
+                                      rows, host_templates, lane_scratch, leaf_stop);
             } else {
                 basis.render_pair(independent_maps[item - affine_items], independent_paths, block_first,
-                    std::span(lane_scratch.offsets).first(rows), out, leaf_stop);
-                nonzero = std::ranges::any_of(out, [](auto value) { return value != Complex{}; });
+                    std::span(lane_scratch.offsets).first(rows), host_templates, leaf_stop);
+                nonzero = std::ranges::any_of(host_templates, [](auto value) { return value != Complex{}; });
             }
             // Required for a complete receipt even on slots that contain only noise.
             for (std::size_t c = 0; item < affine_items && c < columns && !nonzero; ++c)
-                nonzero = finite_energy(out.subspan(c * rows, rows)) > 0;
+                nonzero = finite_energy(host_templates.subspan(c * rows, rows)) > 0;
+            // Read the witness from cached host scratch; mapped device-local reads are costly.
+            std::ranges::copy(host_templates, out.begin());
             flags[index * device.layout.items + item] = nonzero;
         }
     };
@@ -4796,16 +4799,16 @@ struct DriftProjection {
     std::vector<Complex> ranking, observed, line_storage;
 };
 
-struct DriftZeroSlopeCache {
+struct DriftTimingCache {
     std::array<std::array<DriftPeak, retained_drift_per_bit>, 2> peaks{};
     std::array<double, 2> nomination{-infinity, -infinity};
+    std::size_t slope_count = 0;
     int exponent = 0;
     bool ready = false;
 };
-// This small cache occupies the existing metadata reservation, not a
-// candidate-wide transform or template bank. Include the timing vectors,
-// the first eight lane owners/frontiers/statistics and fixed controls in the
-// same bound. Each wider lane adds its own bounded lane reservation.
+// Include the rank-pass caches, timing vectors, the first eight lane
+// owners/frontiers/statistics and fixed controls in the metadata quote. Each
+// wider lane adds its own bounded lane reservation.
 constexpr std::size_t drift_metadata_reservation = 64 * 1024;
 constexpr std::size_t drift_reserved_metadata_lanes = 8;
 constexpr std::size_t drift_lane_metadata_reservation = 2 * 1024;
@@ -4815,16 +4818,19 @@ constexpr auto drift_lane_metadata_bound = sizeof(DriftScratch<double>) +
 static_assert(sizeof(DriftScratch<double>) >= sizeof(DriftScratch<float>) &&
               drift_lane_metadata_bound <= drift_lane_metadata_reservation);
 constexpr auto drift_metadata_bound = maximum_drift_public_timing_atoms *
-    (sizeof(DriftZeroSlopeCache) + sizeof(FineCoordinate) + sizeof(std::array<double, 2>) +
+    (sizeof(DriftTimingCache) + sizeof(FineCoordinate) + sizeof(std::array<double, 2>) +
      2 * sizeof(std::size_t) + sizeof(double) + 2 * sizeof(std::uint64_t)) +
     drift_reserved_metadata_lanes * drift_lane_metadata_bound +
-    sizeof(DriftProjection) + 6 * sizeof(std::vector<std::size_t>) + 4096;
+    sizeof(DriftProjection) + 6 * sizeof(std::vector<std::size_t>) + sizeof(std::vector<std::int64_t>) + 4096;
 static_assert(drift_metadata_bound <= drift_metadata_reservation);
 
 static_assert(drift_frontier_ranks == retained_drift_per_bit);
 
-std::size_t drift_metadata_bytes(std::size_t lanes) {
-    return checked_add(drift_metadata_reservation, checked_multiply(
+std::size_t drift_metadata_bytes(std::size_t lanes, std::size_t slope_budget) {
+    const auto slope_table = checked_multiply(slope_budget,
+        maximum_drift_public_timing_atoms * sizeof(std::int64_t));
+    const auto base = std::max(drift_metadata_reservation, checked_add(drift_metadata_bound, slope_table));
+    return checked_add(base, checked_multiply(
         lanes - std::min(lanes, drift_reserved_metadata_lanes), drift_lane_metadata_reservation));
 }
 
@@ -5443,7 +5449,7 @@ DriftPlan drift_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                 checked_multiply(checked_add(checked_multiply(2, projection_rows), scratch), sizeof(Complex))));
         }
         if (config.spread_doppler_hz != 0) bytes = checked_add(bytes, sizeof(ReceiverSlotScore));
-        return checked_add(bytes, drift_metadata_bytes(active));
+        return checked_add(bytes, drift_metadata_bytes(active, result.slope_budget));
     };
     const auto widest = static_cast<unsigned>(std::min<std::size_t>(workers, maximum_drift_stage_workers));
     const auto admit = [&](unsigned active, std::size_t bytes) {
@@ -5502,7 +5508,12 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
     const auto timing = drift_timing_atoms(selected, epoch_timing);
     const auto active = std::min<std::size_t>(plan.stage_workers, timing.size());
     const bool rank_timing = timing.size() > retained_drift_ridge_timing_atoms;
-    std::vector<DriftZeroSlopeCache> zero(rank_timing ? timing.size() : 0);
+    const bool reuse_timing = rank_timing && zero_evaluation == DriftZeroSlopeEvaluation::reuse;
+    std::vector<DriftTimingCache> timing_cache(rank_timing ? timing.size() : 0);
+    // One bounded list per timing atom, local to this relative-Doppler sign.
+    // Leave device evaluations to their existing per-call fallback policy.
+    std::vector<std::int64_t> ranked_slopes(reuse_timing && !device ?
+        checked_multiply(timing.size(), plan.slope_budget) : 0);
     const auto tile = std::min(maximum_basis_rows, plan.raw_rows);
     const auto count = static_cast<std::size_t>(2 * plan.frequency_radius + 1);
     const auto public_slopes = 2 * plan.slope_radius + 1;
@@ -5762,43 +5773,57 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
             const auto device_ridge = [&](const std::optional<DriftDeviceRidge>& ridge) {
                 return ridge ? &*ridge : nullptr;
             };
-            auto slopes = ridge_proposals(segment_fft, device ? device_ridge(device->fast) : nullptr,
-                                          plan.ridge_segments, fast_budget, false);
-            if (slow_fft) {
-                const auto slow = ridge_proposals(*slow_fft, device ? device_ridge(device->slow) : nullptr,
-                    plan.slow_ridge_segments, plan.slope_budget - fast_budget + 1, true);
-                slopes.rank = std::max(slopes.rank, slow.rank);
-                for (const auto slope : slow.slopes)
-                    if (std::ranges::find(slopes.slopes, slope) == slopes.slopes.end())
-                        slopes.slopes.push_back(slope);
-                lap(drift_ridge_search);
-            }
+            const auto find_slopes = [&] {
+                auto proposals = ridge_proposals(segment_fft, device ? device_ridge(device->fast) : nullptr,
+                                                 plan.ridge_segments, fast_budget, false);
+                if (slow_fft) {
+                    const auto slow = ridge_proposals(*slow_fft, device ? device_ridge(device->slow) : nullptr,
+                        plan.slow_ridge_segments, plan.slope_budget - fast_budget + 1, true);
+                    proposals.rank = std::max(proposals.rank, slow.rank);
+                    for (const auto slope : slow.slopes)
+                        if (std::ranges::find(proposals.slopes, slope) == proposals.slopes.end())
+                            proposals.slopes.push_back(slope);
+                    lap(drift_ridge_search);
+                }
+                return proposals;
+            };
+            const auto* cached = reuse_timing && timing_cache[index].ready && timing_cache[index].exponent == exponent ?
+                &timing_cache[index] : nullptr;
+            const bool reuse_slopes = cached && cached->slope_count;
+            const auto proposals = reuse_slopes ? DriftProposals{} : find_slopes();
+            const auto slope_offset = index * plan.slope_budget;
+            auto slopes = reuse_slopes ? std::span<const std::int64_t>(ranked_slopes).subspan(slope_offset, cached->slope_count) :
+                std::span<const std::int64_t>(proposals.slopes);
             if (rank_only) {
-                auto& cached = zero[index];
+                auto& entry = timing_cache[index];
+                if (!ranked_slopes.empty()) {
+                    if (slopes.size() > plan.slope_budget) throw Error("Robust ranked drift slopes exceed their budget");
+                    std::ranges::copy(slopes, std::span(ranked_slopes).subspan(slope_offset, plan.slope_budget).begin());
+                    entry.slope_count = slopes.size();
+                }
                 constexpr std::array<std::int64_t, 1> zero_slope{0};
-                if (!on_device || !device_slopes(zero_slope, cached.peaks, &cached.nomination))
-                    score_slope(0, cached.peaks, &cached.nomination);
+                if (!on_device || !device_slopes(zero_slope, entry.peaks, &entry.nomination))
+                    score_slope(0, entry.peaks, &entry.nomination);
                 lap(drift_slope);
                 count_evaluation();
-                for (auto& rank : cached.nomination)
+                for (auto& rank : entry.nomination)
                     rank = rank > 0 ? std::log(rank) + 2 * exponent * std::numbers::ln2 - std::log(variance) : -infinity;
-                cached.exponent = exponent;
-                cached.ready = true;
+                entry.exponent = exponent;
+                entry.ready = true;
                 // All atoms use the same physical variance. Undo scaling to
                 // make matched-product ranks comparable between atoms.
-                ranks[index] = std::scalbn(slopes.rank, 2 * exponent);
+                ranks[index] = std::scalbn(proposals.rank, 2 * exponent);
                 return;
             }
             std::array<std::array<DriftPeak, retained_drift_per_bit>, 2> peaks{};
-            scored_slopes[index] = slopes.slopes.size();
-            const auto cached = zero_evaluation == DriftZeroSlopeEvaluation::reuse && rank_timing &&
-                zero[index].ready && zero[index].exponent == exponent;
+            scored_slopes[index] = slopes.size();
             if (cached) {
-                peaks = zero[index].peaks;
-                std::erase(slopes.slopes, 0);
+                peaks = cached->peaks;
+                // Both ridge lists start with zero and the merge deduplicates it.
+                if (!slopes.empty() && slopes.front() == 0) slopes = slopes.subspan(1);
             }
-            if (!on_device || !device_slopes(slopes.slopes, peaks, nullptr))
-                for (const auto slope : slopes.slopes) score_slope(slope, peaks, nullptr);
+            if (!on_device || !device_slopes(slopes, peaks, nullptr))
+                for (const auto slope : slopes) score_slope(slope, peaks, nullptr);
             lap(drift_slope);
             count_evaluation();
             // The atom's timing and exactly scored (bit, slope, bin) set, in a
@@ -5938,9 +5963,9 @@ void score_drift_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot
         // full public timing prior in the exact likelihood below.
         for (std::size_t bit = 0; bit < 2; ++bit) {
             std::size_t best = 0;
-            for (std::size_t i = 1; i < zero.size(); ++i)
-                if (zero[i].nomination[bit] > zero[best].nomination[bit]) best = i;
-            if (std::isfinite(zero[best].nomination[bit]) &&
+            for (std::size_t i = 1; i < timing_cache.size(); ++i)
+                if (timing_cache[i].nomination[bit] > timing_cache[best].nomination[bit]) best = i;
+            if (std::isfinite(timing_cache[best].nomination[bit]) &&
                 std::ranges::find(survivors, best) == survivors.end()) survivors.push_back(best);
         }
         std::ranges::sort(survivors);

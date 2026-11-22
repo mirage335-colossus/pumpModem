@@ -433,6 +433,11 @@ private:
 std::size_t coarse_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers,
                              AssistanceBound overlapped = {},
                              MidpointTimingEvaluation = MidpointTimingEvaluation::off);
+struct CoarseWorkspace {
+    std::size_t host_bytes, drift_envelope_bytes;
+};
+CoarseWorkspace coarse_workspace_bounds(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers,
+    AssistanceBound overlapped, MidpointTimingEvaluation);
 // Public geometry alone decides whether preparation can precede the grid.
 bool coarse_defers_frequency_grid(const ReceiverConfig&, const ReceiverSlotPlan&);
 // Geometry and workspace quote from the same planner as a scoring session.

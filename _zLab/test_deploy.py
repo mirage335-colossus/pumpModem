@@ -54,12 +54,13 @@ class DeployTests(unittest.TestCase):
         self.assertEqual(self.calls[0][1]['input'], b'test archive')
 
     def test_live_profile_command_and_path(self):
-        with patch.object(deploy.bundle, 'create_bundle', side_effect=self.bundle):
-            result = deploy.deploy('pod.example.com', 'root', 22, self.known,
-                                   mode='cuda', profile='live', runner=self.runner)
-        self.assertEqual(result, '/workspace/pump-lab-live/build/lab/datapump-lab-worker')
         digest = hashlib.sha256(b'test archive').hexdigest()
-        self.assertEqual(shlex.split(self.calls[-1][0][-1])[-4:], [digest, 'cuda', 'live', '12'])
+        for mode in ('cuda', 'vulkan'):
+            with self.subTest(mode=mode), patch.object(deploy.bundle, 'create_bundle', side_effect=self.bundle):
+                result = deploy.deploy('pod.example.com', 'root', 22, self.known,
+                                       mode=mode, profile='live', runner=self.runner)
+                self.assertEqual(result, '/workspace/pump-lab-live/build/lab/datapump-lab-worker')
+                self.assertEqual(shlex.split(self.calls[-1][0][-1])[-4:], [digest, mode, 'live', '12'])
 
     def test_invalid_connection_and_mode_never_execute(self):
         for host in ('-oProxyCommand=evil', 'bad;touch', 'a/b', 'bad:22', 'foo\nbar'):
@@ -196,10 +197,10 @@ echo PUMP_LAB_MODE=cpu
             deploy.deploy('pod.example.com', 'root', 22, self.known, runner=self.runner, timeout=10)
         self.assertEqual(len(self.calls), 0)
 
-    def test_remote_cpu_and_cuda_branches_execute_correct_flags(self):
+    def test_remote_build_modes_execute_correct_flags(self):
         # Exercise the actual POSIX script with fake CMake and fake Torch. This
         # checks branching/arguments, not CUDA availability or a real build.
-        cases = itertools.product(('cpu', 'cuda', 'gpu'), ('simulation', 'live'),
+        cases = itertools.product(('cpu', 'cuda', 'vulkan', 'gpu'), ('simulation', 'live'),
                                   ('ninja', 'make', 'existing-make'))
         for requested, profile, generator_case in (*cases, ('cuda-unavailable', 'simulation', 'ninja')):
             cuda_unavailable = requested == 'cuda-unavailable'
@@ -298,12 +299,15 @@ fi
                 nvcc = toolkit / 'bin' / 'nvcc'
                 for key in ('CUDACXX', 'CUDA_HOME', 'CUDA_PATH', 'CUDAToolkit_ROOT'):
                     env.pop(key, None)
-                if mode != 'cpu':
+                # Explicit Vulkan also works without a CUDA toolkit. The
+                # remaining Vulkan cases make CUDA discovery viable.
+                if mode != 'cpu' and not (mode == 'vulkan' and generator_case == 'make'):
                     nvcc.parent.mkdir(parents=True)
                     nvcc.touch(mode=0o755)
                     if profile == 'live':
                         env['CUDACXX'] = str(nvcc)
-                vulkan = mode == 'gpu' and profile == 'simulation'
+                cuda_probe_unavailable = mode == 'gpu' and profile == 'simulation'
+                vulkan = mode == 'vulkan' or cuda_probe_unavailable
                 if mode != 'cpu':
                     # Stand in for the compiled CUDA probe. Its discovery result
                     # decides the branch; building the worker is still simulated.
@@ -312,7 +316,7 @@ fi
                                         "printf '#!/bin/sh\\nexit %d\\n' \"$PROBE_STATUS\" > \"$output\"\n"
                                         'chmod +x "$output"\n')
                     compiler.chmod(0o755)
-                    env['PROBE_STATUS'] = '2' if vulkan or cuda_unavailable else '0'
+                    env['PROBE_STATUS'] = '2' if cuda_probe_unavailable or cuda_unavailable else '0'
                 if vulkan:
                     source = home / 'nvidia_icd.json'
                     source.write_text(json.dumps({'ICD': {'library_path': 'libGLX_nvidia.so.0',
@@ -385,6 +389,10 @@ for arg do package=$arg; done
                     self.assertRegex(metric, r'wall_seconds=[0-9.]+ child_user_cpu_seconds=[0-9.]+ '
                                      r'child_system_cpu_seconds=[0-9.]+ child_peak_rss_bytes=[0-9]+')
                 receipt = json.loads((home / '.worker-receipt.json').read_text())
+                self.assertEqual(receipt['request']['mode'], mode)
+                self.assertEqual(receipt['backend'], backend)
+                if mode == 'vulkan':
+                    self.assertFalse((home / 'build/lab/probe-cuda-worker').exists())
                 self.assertIn(f'PUMP_LAB_BUILD_JOBS={jobs}', receipt['text'].splitlines())
                 self.assertIn(f'PUMP_LAB_BUILD_GENERATOR={selected_generator}', receipt['text'].splitlines())
                 self.assertTrue(any(line.startswith('PUMP_LAB_MEASURE=configure ')
@@ -635,14 +643,16 @@ sha256sum build/lab/datapump-worker | cut -d ' ' -f 1
         # existing CMake cache and selected generator.
         deployment = destination / '.deployment.json'
         current_request = json.loads(deployment.read_text())
-        deployment.write_text(json.dumps({**current_request,
-                                          'builder': '7c4ac0b50ceca91390fc881c428d3838310dac6c247dd561f2ec12163c901cd5'}))
-        migrated = invoke()
-        self.assertEqual(migrated.returncode, 0, migrated.stdout)
-        self.assertEqual(json.loads(deployment.read_text()), current_request)
+        for builder in ('7c4ac0b50ceca91390fc881c428d3838310dac6c247dd561f2ec12163c901cd5',
+                        '200bce2484affd29702fe15275135bdbe5b196e7458830204c05604505eacdfc'):
+            deployment.write_text(json.dumps({**current_request, 'builder': builder}))
+            migrated = invoke()
+            self.assertEqual(migrated.returncode, 0, migrated.stdout)
+            self.assertEqual(json.loads(deployment.read_text()), current_request)
         self.assertEqual((destination / 'attempts').read_text(), 'build\n')
 
         self.assertNotEqual(invoke(mode='gpu').returncode, 0)
+        self.assertNotEqual(invoke(mode='vulkan').returncode, 0)
         self.assertNotEqual(invoke(checksum='0' * 64).returncode, 0)
         self.assertEqual((destination / 'attempts').read_text(), 'build\n')
 

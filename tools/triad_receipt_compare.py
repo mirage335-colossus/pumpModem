@@ -50,6 +50,10 @@ ENVIRONMENT_LEAVES = {
     "source_commit_at_configure", "source_manifest_sha256",
     "build_options_sha256",
 }
+VULKAN_STAGE_ATTRIBUTION_FIELDS = (
+    "device_calls", "download_bytes", "submissions", "timed_submissions", "batch_width",
+    "mutex_wait_seconds", "submission_seconds", "device_seconds", "plan_seconds", "shader_seconds",
+)
 
 
 def flatten(value, path, out):
@@ -140,6 +144,35 @@ def numeric(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def _stage_attribution_state(receipt, family):
+    """Return legacy, complete, partial, or absent for one fine-stage group."""
+    identity = receipt.get("identity")
+    bulk = identity.get("backend_receipt") if isinstance(identity, dict) else None
+    if not isinstance(bulk, dict) or f"vulkan_{family}_planned_calls" not in bulk:
+        return "absent"
+    present = [f"vulkan_{family}_{name}" in bulk for name in VULKAN_STAGE_ATTRIBUTION_FIELDS]
+    if not any(present):
+        return "legacy"
+    if all(present):
+        return "complete"
+    return "partial"
+
+
+def _missing_attribution_field(path, a_receipt, b_receipt):
+    """Classify an omitted attribution field when the path belongs to a stage."""
+    components = path_components(path)
+    if (len(components) != 3 or components[:2] != ["identity", "backend_receipt"]):
+        return None
+    field = components[-1]
+    for family in ("gain_rank", "drift", "varying"):
+        prefix = f"vulkan_{family}_"
+        if not field.startswith(prefix) or field[len(prefix):] not in VULKAN_STAGE_ATTRIBUTION_FIELDS:
+            continue
+        states = (_stage_attribution_state(a_receipt, family), _stage_attribution_state(b_receipt, family))
+        return "environment" if sorted(states) == ["complete", "legacy"] else "compared"
+    return None
+
+
 def relative(a, b):
     if a == b:
         return 0.0
@@ -177,9 +210,11 @@ def main(argv):
         print(__doc__, file=sys.stderr)
         return 2
     with open(args[0]) as handle:
-        a = scoped(flatten(json.load(handle), (), {}), scope)
+        a_receipt = json.load(handle)
     with open(args[1]) as handle:
-        b = scoped(flatten(json.load(handle), (), {}), scope)
+        b_receipt = json.load(handle)
+    a = scoped(flatten(a_receipt, (), {}), scope)
+    b = scoped(flatten(b_receipt, (), {}), scope)
     missing = object()
     buckets = {"compared": [], "stripped": [], "measured": [], "environment": []}
     tolerated = []
@@ -191,7 +226,9 @@ def main(argv):
                 and isinstance(u, float) and isinstance(v, float)
                 and math.isnan(u) and math.isnan(v)):
             continue
-        kind = classify(path)
+        omission = (_missing_attribution_field(path, a_receipt, b_receipt)
+                    if u is missing or v is missing else None)
+        kind = omission or classify(path)
         if (kind in ("compared", "stripped") and rtol > 0 and u is not missing
                 and v is not missing and numeric(u) and numeric(v)
                 and relative(u, v) <= rtol):

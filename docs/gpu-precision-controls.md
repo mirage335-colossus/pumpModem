@@ -568,9 +568,12 @@ Current routes:
   earlier source and the rank native, that automatic slot already took
   18.4–20.5 s
   ([where the time goes](triad-gpu-optimization.md#where-the-time-goes)).
-  Drift proposals and varying statistics were slower on the device than
-  native on the Xeon host and stay native. Every other device keeps all
-  three stages native. Qualifying the gain rank also
+  Drift proposals and varying statistics stay native in automatic mode.
+  The [staging repair](validation.md#vulkan-fine-stage-attribution-and-staging--21-november-2026)
+  brought explicit Vulkan varying service close to native on the 72 Hz/5×
+  control at W = 30. Automatic qualification still needs suitable wider
+  service and workspace evidence. Every other device keeps all three stages
+  native. Qualifying the gain rank also
   gives that class the larger plan and shader caches, 59,088,896 B more
   per owner. The class is identified only when the backend opens the
   OpenCL device of a build with the OpenCL NVFP4 projection. The automatic
@@ -687,6 +690,25 @@ selects CUDA. On the SM 12.0 class, FP32
 minimum sets FP32 Vulkan coarse precision, so the backend does not open
 OpenCL and runs none of those routes. See
 [What automatic selection runs](triad-gpu-optimization.md#what-automatic-selection-runs).
+
+Automatic Vulkan admits the full frequency plan against its device lease.
+The corresponding host quote includes compiler memory, native scratch and
+score staging. Integrated devices and automatic leases that can use a
+system-memory heap also charge the mapped device allocations to host RAM.
+On a discrete device whose buffers are confined to device-local heaps,
+those mapped allocations consume the device budget. Explicit workspace
+controls retain their existing bounds. The receiver retains the combined
+geometry envelope for previously admitted drift families and lane widths.
+Its host reservation charges the actual peak of the sequential stages,
+including native drift scratch. Optional device drift staging is limited to
+the resulting host lease.
+
+An explicit `--backend vulkan --vulkan-precision fp32` or `nvfp4` can
+exercise a supported tight-clock frequency search at or below 10 Hz projected
+rate. This provides a comparison against the native FP64 and chirp-Z
+searches used by automatic selection in this regime. A lag-group session
+keeps its native route. Compare actual work and observation hashes because
+the available backend can change which complete search algorithm is chosen.
 
 Automatic CUDA uses the guarded native half-cuFFT route for broad frequency
 search on exact SM89 or SM120 devices when NFFT is 4096–2^20, there are at least

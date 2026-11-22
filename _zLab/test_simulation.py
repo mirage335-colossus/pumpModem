@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Opt-in, bounded real native simulation through the lab's pipe relay.
+"""Opt-in functional message tests through the lab's native pipe relay.
 
-This is a functional one-message CPU stratum, not a GPU, capacity, or
-sensitivity qualification. Run with LAB_RUN_SIMULATION=1; it can take 90 s.
+Set LAB_RUN_SIMULATION=1 for the 120 Hz CPU replay or
+LAB_RUN_LOW_RATE_SIMULATION=1 for the 3.6 Hz message. Each has a 120 s deadline.
+LAB_SIMULATION_WORKER selects the absolute path of an existing worker binary.
+The low-rate CPU case uses a GPSDO. LAB_SIMULATION_REQUIRE_GPU=1 uses the
+crystal preset with the required GPU policy and checks that GPU search ran.
+These strong-link cases check functional completion. Sensitivity and
+sustained capacity require separate measurements.
 """
 import base64
 import json
@@ -16,7 +21,7 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
-WORKER = ROOT / "build/dev-cli-web/datapump-worker"
+DEFAULT_WORKER = ROOT / "build/dev-cli-web/datapump-worker"
 RELAY = ROOT / "_zLab/worker_relay.py"
 
 
@@ -31,25 +36,54 @@ def string(value):
 
 class SimulationTest(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("LAB_RUN_SIMULATION") == "1", "explicit opt-in for bounded DSP work")
-    @unittest.skipUnless(WORKER.is_file(), "build the native pipe worker first")
     def test_complete_message_via_relay(self):
-        # Restrict the fixture to at most four available hardware threads. The
-        # native receiver still resolves its normal 2*H software-worker budget.
+        self.run_message("120 Hz", "gpsdo-ocxo", check_replay=True)
+
+    @unittest.skipUnless(os.environ.get("LAB_RUN_LOW_RATE_SIMULATION") == "1",
+                         "explicit opt-in for the 3.6 Hz message")
+    def test_low_rate_message_via_relay(self):
+        require_gpu = os.environ.get("LAB_SIMULATION_REQUIRE_GPU") == "1"
+        # The crystal preset offers the GPU a public frequency search. The
+        # compact GPSDO plan reduces CPU work for the functional smoke case.
+        self.run_message("3.6 Hz", "crystal" if require_gpu else "gpsdo-ocxo", require_gpu=require_gpu)
+
+    def run_message(self, rate, base_oscillator, *, check_replay=False, require_gpu=False):
+        worker = DEFAULT_WORKER
+        if selected := os.environ.get("LAB_SIMULATION_WORKER"):
+            worker = Path(selected)
+            self.assertTrue(worker.is_absolute() and worker.is_file(),
+                            "LAB_SIMULATION_WORKER must name an existing absolute worker path")
+        elif not worker.is_file():
+            if require_gpu:
+                self.fail("Set LAB_SIMULATION_WORKER to the deployed GPU worker")
+            self.skipTest("build the native pipe worker first")
+        command = [sys.executable, str(RELAY)]
+        if require_gpu:
+            command.append("--require-gpu")
+        command.append(str(worker))
+        # Preserve the historical smoke allocation and the matched GPU
+        # fixture. The low-rate CPU test uses the full available allocation.
         available = sorted(os.sched_getaffinity(0))
         def restrict():
             os.sched_setaffinity(0, available[:4])
-        proc = subprocess.Popen([sys.executable, str(RELAY), str(WORKER)], stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
-                                preexec_fn=restrict)
+        proc = subprocess.Popen(command, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, bufsize=0,
+                                preexec_fn=restrict if check_replay or require_gpu else None)
         snapshot = None
         end = time.monotonic() + 120
+
+        def simulation_status():
+            for item in (snapshot or {}).get("controls", ()):
+                if "s modeled RX" in item["text"]:
+                    return item["text"]
+            return "no simulation progress shown"
 
         def exact(size):
             out = bytearray()
             while len(out) < size:
                 remaining = end - time.monotonic()
-                self.assertGreater(remaining, 0, "simulation fixture deadline")
-                self.assertTrue(select.select([proc.stdout], [], [], remaining)[0], "worker output stalled")
+                if remaining <= 0 or not select.select([proc.stdout], [], [], remaining)[0]:
+                    self.fail(f"simulation fixture deadline reached ({simulation_status()})")
                 part = os.read(proc.stdout.fileno(), size - len(out))
                 self.assertTrue(part, "relay output closed")
                 out.extend(part)
@@ -90,11 +124,13 @@ class SimulationTest(unittest.TestCase):
             for label, value in (("Transmit power", "100 mW"), ("Path loss", "114 dB"),
                                  ("Noise (dBm/Hz)", "-174 dBm/Hz"), ("Clock sync", "1ms"),
                                  ("Region", "1ms"), ("Offset", "0ms"), ("Audio error", "0ms"),
-                                 ("Margin", "1x"), ("Rate", "120 Hz"), ("Carrier", "1725 Hz"),
+                                 ("Margin", "1x"), ("Rate", rate), ("Carrier", "1725 Hz"),
                                  ("Target SNR (dB-Hz)", "80")):
                 event(1, control(label)["id"], value)
-            for label, value in (("Baseband Osc", "gpsdo-ocxo"), ("Shift Osc", "gpsdo-ocxo")):
+            for label, value in (("Baseband Osc", base_oscillator), ("Shift Osc", "gpsdo-ocxo")):
                 event(2, control(label)["id"], value)
+            self.assertEqual(control("Rate")["text"], rate)
+            self.assertEqual(control("Baseband Osc")["selected"], base_oscillator)
             self.assertIn("Budget target 80", control("Target SNR (dB-Hz)")["label"])
             message = next(item for item in snapshot["controls"]
                            if item["kind"] == "text" and item.get("byteLimit") == 4 * 1024 * 1024)
@@ -122,9 +158,21 @@ class SimulationTest(unittest.TestCase):
             for index, decision in enumerate(("DATA 0", "DATA 0", "DATA 1", "QUIET", "QUIET")):
                 self.assertIn(f"Slot {index} ·", descriptions[index])
                 self.assertIn(f"· {decision} ·", descriptions[index])
+                self.assertNotIn("incomplete evidence", descriptions[index])
+            for description in descriptions[-2:]:
+                self.assertRegex(description, r" · quiet [^·]+ \([1-9]\d* modes\)")
             rendered = [[cell.get("text", "") for cell in signal["cells"]] for signal in signals]
             self.assertTrue(any("decoded" in cells and "e" in cells for cells in rendered),
                             f"expected decoded message missing: {rendered!r}")
+            if require_gpu:
+                diagnostics = "\n".join(item["text"] for item in snapshot["controls"]
+                                        if item["kind"] == "label" and "GPU" in item["text"])
+                self.assertRegex(diagnostics, r"\bGPU search(?: \+ CPU tracking)? · [1-9]\d* rows\b",
+                                 "no executed GPU search rows in worker diagnostics")
+                print(diagnostics, flush=True)
+            if not check_replay:
+                print(f"{rate} {base_oscillator}: {simulation_status()}", flush=True)
+                return
             for label in ("Spectrum", "Waveform", "Receiver input I/Q", "Pattern evidence"):
                 self.assertEqual(control(label)["kind"], "bitmap", label)
             pattern = control("Pattern evidence")
@@ -178,7 +226,6 @@ class SimulationTest(unittest.TestCase):
                     proc.kill()
                     proc.wait()
             proc.stdout.close()
-            proc.stderr.close()
 
 
 if __name__ == "__main__":

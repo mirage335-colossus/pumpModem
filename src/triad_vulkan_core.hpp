@@ -195,6 +195,14 @@ inline void add_stage_work(StageDeviceReceipt& to, const StageDeviceReceipt& fro
     count(to.score_rows, from.score_rows); count(to.planned_calls, from.planned_calls);
     count(to.declined_calls, from.declined_calls); count(to.native_fallbacks, from.native_fallbacks);
     count(to.upload_bytes, from.upload_bytes);
+    count(to.device_calls, from.device_calls); count(to.download_bytes, from.download_bytes);
+    count(to.submissions, from.submissions); count(to.timed_submissions, from.timed_submissions);
+    to.batch_width = std::max(to.batch_width, from.batch_width);
+    to.mutex_wait_seconds += from.mutex_wait_seconds;
+    to.submission_seconds += from.submission_seconds;
+    to.device_seconds += from.device_seconds;
+    to.plan_seconds += from.plan_seconds;
+    to.shader_seconds += from.shader_seconds;
     if (to.decline_reason.empty()) to.decline_reason = from.decline_reason;
     if (to.fallback_reason.empty()) to.fallback_reason = from.fallback_reason;
 }
@@ -674,15 +682,12 @@ inline std::size_t stage_session_host_bytes(const Shared& shared, std::size_t de
 // One owner's device context. A fine-stage session owns its own: never the
 // frequency search's, which holds one lease and may switch to half storage,
 // which twiddle-table plans reject.
-// A fine-stage session's context names its family. Its transforms, dispatches
-// and submissions then credit none of the coarse search's counters, which
-// receipts use as proof of coarse device work and as coarse throughput:
-// fft_calls, fft_rows, vulkan_dispatches, synchronizations, executed,
-// wall_seconds, vulkan_timed_submissions and the device command seconds (it
-// records no timestamps). Its transforms count into the session's
-// StageDeviceWork instead, which the family credits to its own receipt after
-// validated readback. Allocation, leases, the plan and shader caches and
-// their compilation times stay backend-wide.
+// A fine-stage session's context names its family. Device submissions and
+// timestamps are attributed to that family's receipt, while coarse counters
+// remain reserved for frequency-search work. Stage durations sum across calls
+// and may overlap across owners, so they are not exclusive wall time or GPU
+// utilization. Allocation and leases stay backend-wide. The plan and shader
+// caches stay shared, with build times attributed to the context that builds.
 struct Context {
     enum TimingQuery : std::uint32_t {
         command_start_query, command_end_query, dot_start_query, dot_end_query, timing_query_count
@@ -724,7 +729,7 @@ struct Context {
             VkDescriptorPoolCreateInfo d{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
             d.maxSets = pool_shape.sets; d.poolSizeCount = 1; d.pPoolSizes = &size;
             check(vkCreateDescriptorPool(shared->device, &d, nullptr, &descriptors), "descriptor pool creation");
-            if (!stage && shared->timestamp_bits && shared->properties.limits.timestampPeriod > 0) {
+            if (shared->timestamp_bits && shared->properties.limits.timestampPeriod > 0) {
                 VkQueryPoolCreateInfo q{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
                 q.queryType = VK_QUERY_TYPE_TIMESTAMP; q.queryCount = timing_query_count;
                 VkQueryPool created = VK_NULL_HANDLE;
@@ -889,12 +894,18 @@ struct Context {
             return ((results[last].tick - results[first].tick) & mask) *
                 static_cast<double>(shared->properties.limits.timestampPeriod) * 1e-9;
         };
-        if (results[command_start_query].available && results[command_end_query].available) {
+        const bool command_timed = results[command_start_query].available && results[command_end_query].available;
+        if (command_timed && !stage) {
             delta.vulkan_timed_submissions = 1;
             delta.vulkan_device_command_seconds = elapsed(command_start_query, command_end_query);
         }
         if (timed_direct && results[dot_start_query].available && results[dot_end_query].available)
             delta.vulkan_direct_dot_seconds = elapsed(dot_start_query, dot_end_query);
+        if (stage && command_timed) {
+            auto& receipt = vulkan_stage_receipt(delta, *stage);
+            receipt.timed_submissions = 1;
+            receipt.device_seconds = elapsed(command_start_query, command_end_query);
+        }
     }
     void drain_submission() {
         // An OOM/unknown wait error says nothing about pending GPU work. Keep
@@ -949,6 +960,11 @@ struct Context {
         while (waited == VK_TIMEOUT);
         if (waited != VK_SUCCESS && waited != VK_ERROR_DEVICE_LOST) drain_submission();
         check(waited, "fence wait");
+        if (stage) {
+            auto& receipt = vulkan_stage_receipt(delta, *stage);
+            receipt.submissions = 1;
+            receipt.submission_seconds = std::chrono::duration<double>(Clock::now() - began).count();
+        }
         if (!stage) {
             delta.synchronizations = 1; delta.executed = true;
             delta.wall_seconds = std::chrono::duration<double>(Clock::now() - began).count();
@@ -972,6 +988,7 @@ struct Context {
             else compiled.vulkan_shader_spirv_compiles = 1;
             // Includes any GLSL/SPIR-V compilation and private driver pipeline construction.
             compiled.vulkan_shader_compile_seconds = std::chrono::duration<double>(Clock::now() - began).count();
+            if (stage) vulkan_stage_receipt(compiled, *stage).shader_seconds = compiled.vulkan_shader_compile_seconds;
             account(compiled);
         }
         return *slot;

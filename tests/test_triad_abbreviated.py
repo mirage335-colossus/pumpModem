@@ -805,6 +805,9 @@ class AbbreviatedTests(unittest.TestCase):
             bulk.update({f"vulkan_{family}_{name}": 0 for name in (
                 "sessions", "forward_ffts", "inverse_ffts", "fft_row_stages", "score_rows", "planned_calls",
                 "declined_calls", "native_fallbacks", "upload_bytes")})
+            bulk.update({f"vulkan_{family}_{name}": 0 for name in (
+                "device_calls", "download_bytes", "submissions", "timed_submissions", "batch_width",
+                "mutex_wait_seconds", "submission_seconds", "device_seconds", "plan_seconds", "shader_seconds")})
             bulk.update({f"vulkan_{family}_decline_reason": "", f"vulkan_{family}_fallback_reason": "",
                          f"vulkan_{family}_qualified_device": False})
         # Automatic selection declines an unqualified family; the receiver
@@ -820,6 +823,36 @@ class AbbreviatedTests(unittest.TestCase):
                                    vulkan_varying_route_decline="vulkan-varying-native-requested")
         validate_receipt(receipt, command="continuation", backend="vulkan", returncode=0,
                          expected_require_accelerator=True)
+        # All attribution fields are optional as a complete group for older
+        # receipts. Current receipts validate their counters and timings.
+        legacy = copy.deepcopy(receipt)
+        for family in triad_native.VULKAN_STAGE_FAMILIES:
+            for name in ("device_calls", "download_bytes", "submissions", "timed_submissions", "batch_width",
+                         "mutex_wait_seconds", "submission_seconds", "device_seconds", "plan_seconds", "shader_seconds"):
+                legacy["identity"]["backend_receipt"].pop(f"vulkan_{family}_{name}")
+        validate_receipt(legacy, command="continuation", backend="vulkan", returncode=0,
+                         expected_require_accelerator=True)
+        for patch in ({"vulkan_drift_device_calls": -1},
+                      {"vulkan_drift_timed_submissions": 1},
+                      {"vulkan_drift_device_seconds": float("nan")},
+                      {"vulkan_drift_plan_seconds": -0.1},
+                      {"vulkan_drift_download_bytes": 12},
+                      {"vulkan_drift_device_calls": 2, "vulkan_drift_sessions": 1,
+                       "vulkan_drift_submissions": 1},
+                      {"vulkan_drift_device_calls": 1, "vulkan_drift_sessions": 0},
+                      {"vulkan_drift_device_calls": 0, "vulkan_drift_batch_width": 1},
+                      {"vulkan_varying_device_calls": 1}):
+            wrong = copy.deepcopy(receipt)
+            wrong["identity"]["backend_receipt"].update(patch)
+            with self.subTest(attribution=patch), self.assertRaises(ProbeError):
+                validate_receipt(wrong, command="continuation", backend="vulkan", returncode=0,
+                                 expected_require_accelerator=True)
+        for missing in ("vulkan_gain_rank_device_calls", "vulkan_gain_rank_planned_calls"):
+            incomplete = copy.deepcopy(receipt)
+            incomplete["identity"]["backend_receipt"].pop(missing)
+            with self.subTest(missing=missing), self.assertRaises(ProbeError):
+                validate_receipt(incomplete, command="continuation", backend="vulkan", returncode=0,
+                                 expected_require_accelerator=True)
         for patch in ({"vulkan_drift_decline_reason": "vulkan-gain-rank-unqualified-device"},
                       {"vulkan_drift_decline_reason": "vulkan-drift-verify-mode"},
                       {"vulkan_drift_decline_reason": ""},
@@ -877,7 +910,10 @@ class AbbreviatedTests(unittest.TestCase):
                                   vulkan_gain_rank_requirement="not_applicable")
         served["identity"]["backend_receipt"].update(
             vulkan_varying_planned_calls=1, vulkan_varying_sessions=1, vulkan_varying_score_rows=8,
-            vulkan_varying_forward_ffts=2, vulkan_gain_rank_planned_calls=0, vulkan_gain_rank_declined_calls=0,
+            vulkan_varying_forward_ffts=2, vulkan_varying_device_calls=1,
+            vulkan_varying_download_bytes=64, vulkan_varying_submissions=1,
+            vulkan_varying_timed_submissions=1, vulkan_varying_batch_width=4,
+            vulkan_varying_device_seconds=0.25, vulkan_gain_rank_planned_calls=0, vulkan_gain_rank_declined_calls=0,
             vulkan_gain_rank_decline_reason="", vulkan_gain_rank_native_fallbacks=0,
             vulkan_gain_rank_fallback_reason="")
         validate_receipt(served, command="continuation", backend="vulkan", returncode=0,

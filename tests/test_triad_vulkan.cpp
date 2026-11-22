@@ -1,4 +1,5 @@
 #include "datapump/triad_acceleration.hpp"
+#include "datapump/execution_resources.hpp"
 #include "datapump/triad_receiver.hpp"
 #include "datapump/triad_stream_receiver.hpp"
 #include "search_fft.hpp"
@@ -548,6 +549,10 @@ void fallback_boundaries(const std::shared_ptr<r::ReceiverBulkBackend>& backend,
           backend->coarse_fallback_reason(10, 0, r::CoarseRoute::frequency_tiles).empty() &&
           backend->coarse_fallback_reason(10.001, .001, r::CoarseRoute::frequency_tiles).empty(),
           "Vulkan coarse fallback policy crossed its declared route/precision boundary");
+    const auto fp32 = v::make_vulkan_receiver_backend({0, device_workspace, v::VulkanCoarsePrecision::fp32});
+    check(fp32->coarse_fallback_reason(8, .001, r::CoarseRoute::frequency_tiles).empty() &&
+          fp32->coarse_fallback_reason(8, .001, r::CoarseRoute::lag_groups) == "native-lag-groups",
+          "explicit Vulkan FP32 did not admit a low-rate, tight-clock frequency search");
     const auto key = datapump::Crypto::amateur();
     auto f = coarse_capture(key, true);
     const auto native_quote = r::coarse_workspace(f.config, f.slot, 1);
@@ -763,7 +768,8 @@ void automatic_workspace_capacity(std::stop_token stop) {
     const r::CoarseBulkGeometry full{2, kernel, rows, arrivals, 35, fs, 1, 24};
     const auto plan = backend->frequency_plan(full, workspaces, rows);
     check(plan && plan->native_fallback_reason.empty() && plan->tile_width &&
-          plan->device_workspace_bytes > 256 * mib && plan->host_workspace_bytes > plan->device_workspace_bytes,
+          plan->device_workspace_bytes > 256 * mib && plan->host_workspace_bytes > 0 &&
+          (!backend->receipt().unified_memory || plan->host_workspace_bytes > plan->device_workspace_bytes),
           "automatic Vulkan did not admit the broad geometry above the previous device ceiling");
     const auto unsupported = backend->frequency_plan({1, 1, std::size_t{1} << 30, 1, 1, fs, 1, 1}, 1, rows);
     check(unsupported && unsupported->native_fallback_reason == "native-vulkan-workspace" &&
@@ -812,6 +818,7 @@ void automatic_workspace_capacity(std::stop_token stop) {
         {"shared_limit_bytes", long_receipt.vulkan_shared_workspace_limit_bytes},
         {"full_prior_frequencies", full.frequency_count}, {"full_prior_tile_width", plan->tile_width},
         {"full_prior_batch", plan->workspace_batch}, {"full_prior_lease_bytes", plan->device_workspace_bytes},
+        {"full_prior_host_bytes", plan->host_workspace_bytes},
         {"fixture_peak_bytes", long_receipt.vulkan_peak_owner_bytes}, {"fixture_score_rows", long_receipt.score_rows}}));
 }
 
@@ -1755,11 +1762,11 @@ void segmented_selection() {
 }
 
 // Sustained throughput of one shape: device calls in sequence, as the
-// session serializes them, against the native scorer on every hardware
-// thread, as receiver lanes run independent workspaces.
+// session serializes them, against independent native workspaces on the
+// effective hardware-thread allocation.
 void segmented_benchmark(std::stop_token stop) {
     const auto backend = segmented_backend(v::VulkanSegmentedTiming::device, false);
-    const auto threads = std::max(1u, std::thread::hardware_concurrency());
+    const auto threads = datapump::execution::host_resources(false).hardware_threads;
     const std::array shapes{
         r::CoarseSegmentedShape{32 * 12'000, 4'096, 32, 16'384, 128, 1, 1, 2},
         r::CoarseSegmentedShape{40 * 5'000, 10'553, 40, 16'384, 257, 1, 1, 2},

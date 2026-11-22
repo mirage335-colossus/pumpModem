@@ -72,6 +72,7 @@ struct StageWorkspace {
     std::size_t input, helper, coarse, fine, total;
     bool overlappable;
     std::size_t overlapped_coarse, overlapped_total;
+    std::size_t drift_envelope, overlapped_drift_envelope;
     VaryingFinePlan varying;
     DriftPlan drift;
     VaryingFinePlan coherent_gain;
@@ -103,9 +104,9 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
             }
         }
     }
-    // Freeze the original family membership and complete owner envelope
-    // before considering a larger coherent proposal. This optional route
-    // never raises a quote or reduces the ready prefix admitted by callers.
+    // Freeze the baseline family membership and complete geometry envelope
+    // before considering a larger coherent proposal. Charge actual native
+    // scratch for each admitted family and keep the previous owner bound.
     bool inspect_full_overlap = quote_overlap;
     const auto build = [&](const DriftPlan& planned, std::optional<DriftPlan> line_override = std::nullopt) {
         const auto input = checked_multiply(rows, sizeof(Complex) + sizeof(std::uint8_t));
@@ -120,7 +121,7 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
         const auto midpoint = midpoint_support.available ?
             MidpointTimingEvaluation::short_tracking : MidpointTimingEvaluation::off;
         if (midpoint_support.available) enable_midpoint_tracking(varying);
-        const auto coarse = coarse_workspace(search, slot, workers, {}, midpoint);
+        const auto coarse = coarse_workspace_bounds(search, slot, workers, {}, midpoint);
         const auto fine = fine_workspace(config, slot, workers);
         const auto varying_quiet = varying_quiet_workspace(config, slot, workers);
         const auto line = search.time_varying_channel ? varying_line_workspace(config, slot) : 0;
@@ -131,15 +132,17 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
         const bool overlap_shape = workers > 1 && helper && coarse_defers_frequency_grid(config, slot);
         const bool overlappable = quote_overlap && overlap_shape;
         const auto overlapped_coarse = inspect_full_overlap && overlap_shape ?
-            coarse_workspace(search, slot, workers, {helper, helper_widest_wave}, midpoint) : coarse;
+            coarse_workspace_bounds(search, slot, workers, {helper, helper_widest_wave}, midpoint) : coarse;
         // Ordinary drift lanes widen only into the largest other stage of
-        // both orchestration leases, so neither lease grows.
-        const auto drift_headroom = std::max({helper, std::min(coarse, overlapped_coarse), fine,
+        // both orchestration envelopes. A corrected discrete GPU quote can
+        // make room for more owners without losing previously admitted drift.
+        const auto drift_headroom = std::max({helper,
+            std::min(coarse.drift_envelope_bytes, overlapped_coarse.drift_envelope_bytes), fine,
             varying.workspace_bytes, coherent_gain.workspace_bytes, varying_quiet, line,
             line_varying.workspace_bytes, line_coherent_gain.workspace_bytes, evidence_supplement});
-        const auto drift = line_override || !planned.workspace_bytes ? planned :
+        auto drift = line_override || !planned.workspace_bytes ? planned :
             drift_plan(config, slot, workers, false, 0, drift_headroom);
-        const auto line_drift = line_override ? *line_override :
+        auto line_drift = line_override ? *line_override :
             (line && drift.workspace_bytes ? drift_plan(config, slot, workers, true, 0, drift_headroom) : DriftPlan{});
         const auto supplemental = std::max({varying.workspace_bytes, drift.workspace_bytes,
             coherent_gain.workspace_bytes, varying_quiet, line, line_varying.workspace_bytes,
@@ -148,11 +151,22 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
         // unified-memory lease) share this stage, beside the native quote,
         // and never raise it.
         varying.device_envelope_bytes = supplemental - varying.workspace_bytes;
+        const auto host_stage = std::max({helper, coarse.host_bytes, fine, supplemental});
+        const auto overlap_host_stage = std::max({helper, overlapped_coarse.host_bytes, fine, supplemental});
+        if (coarse.drift_envelope_bytes > coarse.host_bytes) {
+            // The geometry envelope preserved native scratch. Additional
+            // device host buffers still need room in the actual lease.
+            const auto device_host_limit = std::min(host_stage, overlap_host_stage);
+            drift.device_envelope_bytes = std::min(drift.device_envelope_bytes, device_host_limit);
+            line_drift.device_envelope_bytes = std::min(line_drift.device_envelope_bytes, device_host_limit);
+        }
         const auto lease = [&](std::size_t stage) { return checked_add(checked_add(input, receipts_bytes), stage); };
-        return StageWorkspace{input, helper, coarse, fine,
-                lease(std::max({helper, coarse, fine, supplemental})),
-                overlappable, overlapped_coarse,
-                lease(std::max({helper, overlapped_coarse, fine, supplemental})),
+        return StageWorkspace{input, helper, coarse.host_bytes, fine,
+                lease(host_stage),
+                overlappable, overlapped_coarse.host_bytes,
+                lease(overlap_host_stage),
+                lease(std::max({helper, coarse.drift_envelope_bytes, fine, supplemental})),
+                lease(std::max({helper, overlapped_coarse.drift_envelope_bytes, fine, supplemental})),
                 varying, drift, coherent_gain, line, line_varying, line_drift, line_coherent_gain,
                 evidence_supplement, midpoint_support.status, helper_transfer_full_prior};
     };
@@ -168,7 +182,7 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
             inspect_full_overlap = true;
             baseline = build(baseline.drift);
         }
-        const auto preserved_stage = baseline.total - baseline.input - receipts_bytes;
+        const auto preserved_stage = baseline.drift_envelope - baseline.input - receipts_bytes;
         const auto expanded = drift_plan(config, slot, workers, false, preserved_stage);
         if (!expanded.workspace_bytes) {
             baseline.drift.status = expanded.status;
@@ -188,9 +202,10 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
         // A newly available varying family can also alter coarse or line
         // preparation. Check the complete shape, for both orchestration
         // modes, rather than just the additional scorer's scratch.
-        if (candidate.total <= baseline.total && candidate.overlapped_total <= baseline.overlapped_total) {
-            candidate.total = baseline.total;
-            candidate.overlapped_total = baseline.overlapped_total;
+        if (candidate.drift_envelope <= baseline.drift_envelope &&
+            candidate.overlapped_drift_envelope <= baseline.overlapped_drift_envelope) {
+            candidate.total = std::max(candidate.total, baseline.total);
+            candidate.overlapped_total = std::max(candidate.overlapped_total, baseline.overlapped_total);
             return candidate;
         }
         baseline.drift.status = "drift_extension_exceeds_preserved_owner_lease";

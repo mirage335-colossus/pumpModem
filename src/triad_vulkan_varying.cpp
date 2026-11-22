@@ -253,7 +253,9 @@ public:
 
     bool statistics(const VaryingBatch& batch, VaryingBatchOutput& output, StageDeviceWork& work,
                     std::stop_token stop) override {
+        const auto lock_started = Clock::now();
         std::lock_guard lock(mutex_);
+        pending_mutex_wait_seconds_ += std::chrono::duration<double>(Clock::now() - lock_started).count();
         cancelled(stop);
         validate(batch, output);
         const auto blocks = batch.blocks;
@@ -311,6 +313,11 @@ public:
         stage.forward_ffts = call.forward_ffts; stage.inverse_ffts = call.inverse_ffts;
         stage.fft_row_stages = call.fft_row_stages; stage.score_rows = call.score_rows;
         stage.upload_bytes = call.upload_bytes;
+        stage.device_calls = 1;
+        stage.download_bytes = call.download_bytes;
+        stage.batch_width = blocks;
+        stage.mutex_wait_seconds = pending_mutex_wait_seconds_;
+        pending_mutex_wait_seconds_ = 0;
         credited.vulkan_varying_blocks = blocks;
         credited.vulkan_varying_batches = 1;
         context.account(credited);
@@ -328,10 +335,11 @@ private:
         BulkReceipt fallback;
         fallback.vulkan_varying.native_fallbacks = 1;
         fallback.vulkan_varying.fallback_reason = stage_reason_text(StageFamily::varying, reason);
+        fallback.vulkan_varying.mutex_wait_seconds = pending_mutex_wait_seconds_;
+        pending_mutex_wait_seconds_ = 0;
         context_->account(fallback);
         return false;
     }
-
     // A malformed call is a receiver defect, never a native fallback.
     void validate(const VaryingBatch& batch, const VaryingBatchOutput& output) const {
         const auto blocks = batch.blocks;
@@ -548,6 +556,7 @@ private:
     std::unique_ptr<Pipeline> pack_, kernel_, affine_, independent_;
     std::mutex mutex_;
     bool uploaded_ = false, credited_session_ = false;
+    double pending_mutex_wait_seconds_ = 0;
     std::size_t pending_upload_ = 0;
     std::array<VaryingProjectionTables, 2> tables_seen_{};
     std::span<const std::uint32_t> taps_seen_;

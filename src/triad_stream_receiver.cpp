@@ -56,6 +56,12 @@ std::size_t receipt_reservation(const StreamReceiverOptions& stream, const Messa
         add(times(slot_receipt_bytes, slot_records), times(64, stream.maximum_input_chunk_samples)));
 }
 
+std::size_t controller_reservation(const StreamReceiverOptions& stream, const MessageReceiverOptions& message,
+    const ReceiverConfig& config, unsigned owners) {
+    return add(receipt_reservation(stream, message, owners),
+        config.bulk_backend ? config.bulk_backend->persistent_host_workspace() : 0);
+}
+
 MessageReceiverOptions with_public_message_address(MessageReceiverOptions message, const PublicProfile& profile) {
     if (message.native_profile)
         message.address = [&profile](std::uint64_t index) { return message_address(profile, index); };
@@ -145,6 +151,43 @@ std::optional<double> detail::stream_process_cpu_seconds() {
     return execution::process_cpu_seconds();
 }
 
+bool detail::stream_simulation_workspace_fits(const PublicProfile& profile, const ReceiverConfig& config,
+    const StreamReceiverOptions& options, const NativeMessageProfile& message, std::uint64_t last_slot,
+    std::size_t resident_growth, std::chrono::steady_clock::time_point deadline, std::stop_token stop) {
+    const auto within_budget = [&] {
+        return !stop.stop_requested() && std::chrono::steady_clock::now() < deadline;
+    };
+    if (last_slot < options.first_slot || !within_budget()) return false;
+    const auto chunk = options.maximum_input_chunk_samples;
+    const auto limit = *options.memory_limit_bytes;
+    const auto fixed = controller_reservation(options, message_receiver_options(message), config, *options.slot_owners);
+    const auto stacks = times(*options.workers, add(stream_worker_stack_bytes(), 1024));
+    // Initialized channel and replay pages also contribute to the observed
+    // process footprint during admission, after their external reservation.
+    const auto resident = add(stream_controller_footprint_bytes(), resident_growth);
+    const auto reserved = add(add(resident, fixed), add(stacks, input_overhead));
+    if (reserved >= limit) return false;
+    const auto available = limit - reserved;
+    const auto fits = [&](std::uint64_t index) {
+        if (!within_budget()) return false;
+        const auto plan = make_receiver_slot_plan(profile, config, index);
+        const auto rows = window_samples(plan);
+        if (rows > limit / 4 / sample_bytes) return false;
+        // The raw queue may hold the window and one chunk during assembly.
+        const auto raw = add(window_bytes(add(rows, chunk)), times(add(rows/chunk, 3), raw_block_overhead));
+        return raw < available && receiver_slot_workspace(config, plan, *options.workers) <= available - raw &&
+            within_budget();
+    };
+    // Clock growth can make the last window fail quickly. A middle window
+    // can also require more scratch when the native or device plan changes.
+    if (!fits(options.first_slot)) return false;
+    if (last_slot == options.first_slot) return true;
+    if (!fits(last_slot)) return false;
+    for (auto index = options.first_slot + 1; index < last_slot; ++index)
+        if (!fits(index)) return false;
+    return true;
+}
+
 ReceiverSlotPlan make_receiver_slot_plan(const PublicProfile& profile, const ReceiverConfig& config,
                                          std::uint64_t index) {
     const auto& declared = profile.config();
@@ -223,8 +266,7 @@ struct CompleteStreamReceiver::Impl {
               options.first_slot, options.maximum_pending_messages),
           last_public_slot(profile.last_slot()), initial_footprint(footprint()),
           stack_bytes(add(stream_worker_stack_bytes(), 1024)),
-          fixed_reservation(add(receipt_reservation(options, message, resources.slot_owners),
-              config.bulk_backend ? config.bulk_backend->persistent_host_workspace() : 0)),
+          fixed_reservation(controller_reservation(options, message, config, resources.slot_owners)),
           maximum_buffer(options.maximum_buffer_samples.value_or(resources.memory_limit_bytes/4/sample_bytes)),
           input_stop(options.first_input_sample.value_or(0)), dispatched_stop(0), executor(resources.workers) {
         if (!workspace || !scorer || !options.maximum_input_chunk_samples || options.maximum_input_chunk_samples>maximum_chunk ||
@@ -303,6 +345,23 @@ struct CompleteStreamReceiver::Impl {
 
     std::size_t reserved(unsigned additional_lanes = 0) const {
         return reserved(reservation(), additional_lanes);
+    }
+
+    bool try_simulation_jobs(std::size_t count, const std::function<void(std::size_t)>& job) {
+        if (closed || state != StreamReceiverState::receiving || !jobs.empty() || ready() || backpressured())
+            return false;
+        const auto lanes = static_cast<unsigned>(std::min<std::size_t>(count, resources.workers));
+        if (lanes < 2) return false;
+        // This caller owns lane zero. Started helpers keep their stack leases
+        // after the wave. Existing helpers need no new reservation.
+        if (lanes - 1 > executor.started_workers()) {
+            const auto bytes = reserved(lanes - 1);
+            if (bytes > resources.memory_limit_bytes) return false;
+            peak_reserved = std::max(peak_reserved, bytes);
+        }
+        executor.parallel(next ? next->index : last_public_slot, count, lanes, stop.get_token(),
+            [&](unsigned, std::size_t index, std::stop_token) { job(index); });
+        return true;
     }
 
     bool full_coverage(std::uint64_t first, std::uint64_t last) const {
@@ -682,6 +741,10 @@ CompleteStreamReceiver::CompleteStreamReceiver(PublicProfile profile, ReceiverCo
         message_decoder(message.fec), message_receiver_options(message)) {}
 CompleteStreamReceiver::CompleteStreamReceiver(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 CompleteStreamReceiver::~CompleteStreamReceiver() = default;
+
+bool CompleteStreamReceiver::try_simulation_jobs(std::size_t count, const std::function<void(std::size_t)>& job) {
+    return impl_->try_simulation_jobs(count, job);
+}
 
 StreamPushResult CompleteStreamReceiver::push(std::uint64_t first, std::span<const Complex> iq,
     std::span<const std::uint8_t> valid) { return impl_->push(first, iq, valid); }

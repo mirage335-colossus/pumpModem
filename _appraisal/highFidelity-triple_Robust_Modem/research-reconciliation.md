@@ -1052,3 +1052,65 @@ Factorization cannot reconstruct information already lost in forming a Gram:
 an exactly one-bin observation can supply an explicit rank bound, while genuinely
 multidimensional observations must retain their supported modes. Numerical
 robustness, receiver sensitivity and real-time service remain separate claims.
+
+## Low-rate bit identification and acquisition
+
+The severe 3.6 and 1.8 Hz GUI captures reproduced wrong bits across dense
+NVFP4 and FP32 FFT search. On the original 3.6 Hz input, evaluating a private
+correct timing and frequency still lost to the strongest ordinary wrong-bit
+fit. Removing only injected selective modulation recovered the bit. The
+selected simulator applies a three-branch, time-varying dispersive filter
+after propagation, adding delays of 0, 0.444 and 0.889 seconds in that case.
+The direct and moving echo can therefore produce up to six delayed terms.
+A two-ray phase-only witness omits the identified stress. The earlier
+appraisal phase filter also assumes a narrower timing and frequency search.
+[Matched receiver evidence and model admission](../../docs/validation.md#low-rate-simulator-and-blackwell-follow-through--21-november-2026),
+[selective filter](../../src/channel_perturbation.hpp),
+[appraisal geometry](src/hf_public_diagnostic.cpp).
+
+An exact-channel pair-distance check can establish whether the synthesized
+observation distinguishes the two keyed bits with phase and delay histories
+supplied to the evaluator. Public reception still has to infer those histories.
+For a candidate public model, constrain time evolution and cross-carrier
+structure, then check both bit hypotheses on equal public prior mass. If every
+fine cell gets an independent complex gain per coefficient, the opposite bit
+can absorb the coefficient ratio and reproduce the same noiseless samples.
+Shared structure may preserve bit separation, but only over its supported
+delay and coherence range. Check search support, residuals, both bit margins,
+quiet and wrong-key responses, and complete receiver cost before widening a
+model. Earlier exact current-aperture timing nomination recovered a different
+wrong-bit case without adding channel freedom. That result keeps timing
+omission and overlapping channel models as separate causes to check.
+[Independent model review](../../_ref/resilience-triple_Robust_Modem/Astra-6/report.md#two-useful-deductions-about-model-mismatch),
+[current-aperture experiment](../../docs/validation.md#ordinary-duration-and-weak-channel-follow-through).
+
+Recent HF ranging measurements show that residual multipath can dominate
+timing error at high SNR. Their 2.4 kHz waveform and identifiable arrivals
+give a mechanism comparison for the present failure. A September 2026 HF
+multicarrier study reports a benefit from sparse delay–Doppler estimation
+with a pilot dictionary and adequate observation aperture, while a 2026
+fractional-delay/Doppler study finds that fitting the pilot locations can
+still leave phase errors at data positions. These results motivate checking
+identifiability on the data waveform, including unresolved close arrivals.
+Prolate bases can reduce Fourier truncation error for an adopted Doppler
+spectrum. They still incur a bias–variance trade-off in basis dimension.
+[Ji and Wu (2026)](https://pmc.ncbi.nlm.nih.gov/articles/PMC12986613/),
+[pilot-assisted HF study (2026, abstract)](https://ieeexplore.ieee.org/abstract/document/11709487/),
+[fractional-delay/Doppler study (2026)](https://www.nature.com/articles/s44459-026-00055-w),
+[Zemen and Mecklenbräuker (2005)](https://thomaszemen.org/papers/Zemen05-IEEETrSignalProcessing.pdf).
+
+Coherent integration trades a narrower frequency cell for more search cells
+as the aperture grows. Adjacent cells can carry signal energy together, and
+their noise statistics depend on the grid and estimator. A known-channel
+duration curve is a reference for that model. Construct a bounded energy
+ladder on a fixed geometry with matched physical histories and independently
+identified noise. Then vary aperture or geometry separately to see where
+longer integration loses coherence or expands the search. The public curve
+also records whole-search false accepts, missed acquisition, wrong bits,
+quiet completion, work and memory. The configured calendar supplies timing
+and ordinal constraints. Reuse across UTC apertures requires an identity of
+the keyed signal and its nuisance geometry. An unknown-start comparison has
+additional hypotheses and its own full-search false-accept budget.
+[GNSS acquisition study (2013 revision)](https://arxiv.org/abs/1107.1972),
+[coherence calculations](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/86-statistics-and-calculation-checks.md),
+[calendar contract](../../docs/robust-current.md#configured-calendar-reception).

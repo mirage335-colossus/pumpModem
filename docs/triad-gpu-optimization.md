@@ -146,18 +146,19 @@ Reading the table:
 Ranked by their share of the challenging slots above. Each item says whether
 it is measured, modeled from stored receipts or inferred from the code.
 
-1. **Native drift and varying fine (measured share, inferred causes).** They
+1. **Native drift and varying fine (measured share).** They
    took 151 s of the 281 s holdout and 7.5–7.7 s of the 72 Hz/5× slot on the
    Blackwell automatic route. Explicit device routes exist but were slower on
    the 40.8-CPU host: drift 0.81–1.65 against 0.36 s on the 72 Hz/1× slot and
    2.96–3.28 against 2.23–2.26 s on the 72 Hz/5× control; varying statistics
-   3.16–3.60 against 0.18–0.30 s and 13.2 against 4.97–5.23 s. Likely causes:
-   the drift session serializes every lane's device calls, the host still
-   renders and uploads the drift products, and both families make many small
-   calls whose fixed cost exceeds their transform work at these shapes
-   ([drift](#drift-proposals), [varying](#varying-statistics)). Neither route
-   was timed at the holdout or HF shape; no explicit configuration has fit
-   the holdout yet ([open measurements](#open-measurements)).
+   3.16–3.60 against 0.18–0.30 s and 13.2 against 4.97–5.23 s. In the
+   later 13.6-CPU control, drift recorded substantial lane lock wait and
+   about 14–17 ms total host submission time outside device commands.
+   The varying loss was much larger, and it came from host staging. On a
+   15.3-CPU matched host, checking template energy in cached CPU scratch
+   cut explicit varying from 27.14–27.47 s to 2.05–2.31 s, close to the
+   2.49 s native control on that host.
+   [New measurements](validation.md#vulkan-fine-stage-attribution-and-staging--21-november-2026).
 2. **The coarse search outside the signed-lag rank (measured share,
    unmeasured split).** The 72 Hz/1× slot keeps native segmented timing,
    because its shapes lie outside the CUDA-qualified envelope. The explicit
@@ -265,19 +266,12 @@ reach the dense FP4 search) and 13 involve matrix units; the others raise
 GPU utilization or CPU capacity without them
 ([playbook catalog](gpu-strategy-playbook.md#proposed-and-untried)).
 
-1. **Attribute the fine-stage device routes (instrumentation, first).** Two
-   parts. Already emitted, so only keep them in run summaries:
-   `varying_coarse_seconds`, `varying_{projection,statistics,recursion,wait}_seconds`,
-   `varying_batches`, `varying_batch_blocks`,
-   `drift_{render,ridge,ridge_search,slope,exact}_seconds`,
-   `vulkan_fft_plan_seconds`, `vulkan_shader_compile_seconds` and the coarse
-   `vulkan_device_command_seconds`. Needs code: per-family device intervals
-   (stage contexts create no timestamp query pool today), device-call and
-   download counts, the gain-rank batch width and the session-mutex wait in
-   the family receipts, and plan and compilation seconds per family. Until
-   then the causes in [item 1 above](#what-bounds-the-challenging-slots) are
-   inferred. Results do not change, so the identity gate and the receipt
-   checks of `tools/triad_native.py` qualify it.
+1. **Attribute the fine-stage device routes.** The
+   [family receipts](#fine-family-device-attribution) are implemented and
+   measured on Blackwell. Use their intervals, payloads and batch sizes
+   beside the existing host sub-timers. Revisit finer tracing where the
+   remaining render, packing, readback or queue cost could change the
+   next design decision.
 2. **Redesign the drift device route.** Remove the session-wide
    serialization: per-lane command buffers and staging slots with shared
    plans, or an asynchronous submission that batches independent rank-pass
@@ -288,11 +282,13 @@ GPU utilization or CPU capacity without them
    rank-pass products on the device with FP32 per-row arithmetic and FP64 or
    integer coordinates, as `fp32-rn4-v1` does (proposal-only; planned, not
    built), and upload the observation once per slot, 827 MB in FP32 at HF.
-   Exact CPU changes that also shorten the device route: cache the survivor
-   slope lists (19 of 109 HF evaluations re-render and rerun both ridges),
-   share the direct-path render and products between the two signs, which are
-   equal up to a power of two, and run both signs' survivor passes
-   concurrently; these three are not built yet. The slope-blocked ridge
+   The native route reuses the rank-pass slope list when a timing atom
+   survives. The older HF receipt reran both ridges on 19 of 109 evaluations.
+   This reuse also applies to a GPU receiver when its drift work stays native.
+   An opened device proposal session retains its per-call fallback behavior.
+   Further exact changes to compare include sharing the direct-path render
+   and products between the two signs and running their survivor passes
+   concurrently. The slope-blocked ridge
    (blocks of 16) is in the tree since 21 November, the only native ridge.
    Expected at HF (modeled, unmeasured): 899 s → about 100–150 s with that
    ridge, if its 63 ns per load reflects the HF host. That figure is the
@@ -309,13 +305,16 @@ GPU utilization or CPU capacity without them
    rendering, after which the exact FP64 survivors bound it. Qualify at
    proposal level on the holdout and the 72 Hz/5× control. Reconsider the
    present verdict once the route is timed at the holdout or HF shape.
-3. **Redesign the varying device route.** In order: split one host batch
-   into several device calls instead of shrinking the host batch; FP32
+3. **Redesign the varying device route.** Cached host staging removed a
+   large CPU penalty on unchanged FP64 statistics. Investigate rendering
+   templates on the device to remove the remaining host preparation and
+   template upload. This needs a varying shape because the OpenCL renderer
+   is fixed at 1,500 rows × 47 modes. Split one host batch into multiple
+   device calls when the admitted width measurably shrinks. Evaluate FP32
    template arithmetic (`fp32-template`, no kernels yet), which halves the
    template upload (modeled: about 562 GB in FP64 against 281 GB in FP32 per
-   HF slot); move the raw-composite tracker to the device; render templates
-   on the device, which needs a varying shape because the OpenCL renderer is
-   fixed at 1,500 rows × 47 modes; widen the gather kernels; and try a dense
+   HF slot). Consider moving the raw-composite tracker to the device,
+   widening the gather kernels, and a dense
    DFT-to-modes contraction for 200- and 239-row blocks (27–33 modes), which
    reads each template once, against chirp-Z on bandwidth-bound Vega. Qualify
    `fp32-template` at the evidence level with per-block FP64 fallbacks for
@@ -357,21 +356,20 @@ GPU utilization or CPU capacity without them
    device segmented timing (156 sessions) and the holdout's shapes lie inside
    the envelope, so they serve as no-change checks. This is FP32 VkFFT work, not Tensor
    Core work.
-6. **Segmented efficiency at HF scale, on both routes.** First measure the
-   Vulkan rate at N = 32,768: `test_triad_vulkan --segmented-benchmark` on
-   the device covers a 32,768-row shape (4,500 arrivals) and a 16,384-row
-   shape with 10,553 arrivals. That benchmark is Vulkan-only and has run
-   only on the Radeon; CUDA has the `test_triad_tensor --cuda --segmented-only`
-   oracle and slot pairs. Then read `varying_coarse_seconds` and the
-   `vulkan_segmented_*` declines and fallbacks of an automatic holdout run
-   for its share of the slot. If the kernel trace or a cold-buffer timing
-   shows the FFT kernels DRAM-bound (the pass count is unverified, and the
-   kernels may be only about 400 s of HF's 1,626 s), cut traffic: fuse the
+6. **Segmented efficiency at HF scale, on both routes.** The [Blackwell
+   command profile](#segmented-command-profiling) puts rank first on the
+   broad 16,384-row samples and the 32,768-row holdout prefix. The 32,768-row
+   component with tracking off has a larger FFT share. Investigate the
+   broad rank or inverse path with representative
+   full and tail tiles and fixed geometry. CUDA has the `test_triad_tensor
+   --cuda --segmented-only` oracle and slot pairs. Use `varying_coarse_seconds`
+   and the `vulkan_segmented_*` declines and fallbacks to measure holdout
+   service. If a trace or cold-buffer timing shows the FFT kernels
+   DRAM-bound, cut traffic: fuse the
    shifted spectral product into the FFT load; prune the inverse output,
    since only 10,553 of 32,768 lags are read at HF; and share column
    spectra across a block's frequency shifts (15,733 in HF's widest family,
-   about 7,019 per block on average). If the kernels are under half the
-   span, per-call levers rank first. No half-storage form of
+   about 7,019 per block on average). No half-storage form of
    segmented timing is implemented on either backend; nothing refuses one
    (the `require` at the start of the Vulkan `begin_segmented` is an ordering
    assertion: segmented work must begin before the frequency search sets its
@@ -524,32 +522,95 @@ GPU utilization or CPU capacity without them
 | GPU simulator | Changes every capture hash | With another capture-changing change | [Lever 12](#next-levers-in-order); [survey](validation.md#gpu-offload-survey-and-gated-device-routes--20-november-2026) |
 | Historical RTX 4090 FP16 replay; FP8 observation quantization | Slower than FP32; FP8 added misses. Counterexamples only | — | [What to measure separately](#what-to-measure-separately) |
 
+### Fine-family device attribution
+
+Probe `identity.backend_receipt` includes the following fields for
+`vulkan_gain_rank_`, `vulkan_drift_` and `vulkan_varying_`.
+
+| Fields | Scope |
+| --- | --- |
+| `device_calls`, `upload_bytes`, `download_bytes` | Completed operations and logical payload bytes counted after family readback. These include mapped memory access. The signed-lag certificate can reject nominations after this work. |
+| `batch_width` | Largest Vulkan gain-rank FFT batch in blocks, or largest varying-statistics batch. Drift uses different geometries and leaves this field zero. |
+| `submissions`, `submission_seconds` | Completed submissions and total host time from before queue submission to fence completion, including waits on the shared queue. Results later rejected still contribute. |
+| `timed_submissions`, `device_seconds` | Submissions with available Vulkan timestamps and the sum of their device command spans. A zero timed count means the device span is unavailable for this receipt. |
+| `mutex_wait_seconds` | Time awaiting that family's session lock, summed across callers. A single serialized device command can cause several lanes to wait. |
+| `plan_seconds`, `shader_seconds` | VkFFT initialization, including cached plan load and any twiddle-table upload, and shader pipeline setup, including cache lookup and driver pipeline construction. |
+
+Use one slot per process for attribution. Process receipts aggregate sessions
+across slots. Compare command spans against submission/fence time and compare
+call and payload counts at matching geometry and batching. The stages can
+overlap across host lanes and slot owners. The device span sits inside the
+submission interval. Use slot wall time for service, hardware counters for
+traffic and utilization, and a targeted trace when host render, pack, readback
+or recursion needs finer attribution.
+
+### Segmented command profiling
+
+On the RTX PRO 6000 Blackwell, rank took 42–59% of sampled commands for the
+72 Hz/5× slot's two 16,384-row and 10,553-arrival shapes. Inverse VkFFT took
+25–31%. The first 16 commands of the 36 Hz/10× slot used 32,768 rows and
+10,553 arrivals. They spent 69% on rank and 21% on inverse. A distinct
+32,768-row component with 4,500 arrivals and tracking disabled spent 48% on
+the inverse and 23% on rank. Narrow FFT tails reduced elapsed
+time but had lower throughput per transform. There was about 1% or less
+unassigned device command time on those shapes. The segmented benchmark
+compares device calls with native workspaces limited to the effective host
+CPU count. Its times remain component measurements. [Validation and
+instrumentation limits](validation.md#inside-vulkan-segmented-timing).
+
+For broad ranks, vary tracking at fixed transform, arrivals and tile width
+before attributing cost to FP64 normalization or prior-state traffic. The
+dependency on earlier block state is ordered. A layout can change how
+threads read that state while preserving every lag, tracked frequency and
+ranking operation. Contiguous hop-2 rank groups with a rolling state window
+preserved rank digests and improved the broad component by 2.8% and the
+72 Hz/5× segmented stage by 2.1–3.0%. The original expansion gate was
+missed. A separate wide pair measured 98.42 s current and 100.29 s candidate
+for segmented timing, with exact matched output. The layout remains
+experimental. The sampled command intervals favor investigating rank cost
+at the targeted tracked geometry, including work beyond repeat loads.
+[Matched candidate](validation.md#segmented-tracking-rank-reuse--22-november-2026).
+If the inverse dominates at the target size, count FFT passes and test
+product/load fusion or an output-limited last pass that still publishes
+every scored lag. The Vulkan profile leaves little unassigned command time
+on these samples. It does not measure L2 or DRAM traffic and does not qualify
+an expanded automatic envelope.
+
+VkFFT's published A100 and MI250 results show distinct dispatch, cache and
+off-chip regimes. SSFFT (2025) similarly reported batch-dependent gains on
+Jetson Orin. At 16k they attributed improvements chiefly to thread placement
+even with a substantially higher L2 hit rate. Neither platform predicts the
+Blackwell rank or FFT cost here. cuFFTDx supports fusing CUDA block FFTs and
+adjacent operations, with eligible C2C size, registers and shared memory
+depending on the SM and descriptor. cuFFTDx 1.8 requires CUDA 13 or newer
+and lists an SM 12.0 single-precision C2C block limit of 24,389. Its 32k
+entry applies to folded real transforms. A complex 32k candidate needs a
+different configuration or decomposition. Any CUDA fusion
+requires a same-geometry comparison against FP32 VkFFT/cuFFT with complete
+product, inverse and rank work. The earlier unfused HMMA factorization
+lost to cuFFT by 1.87–4.01×. [VkFFT paper](https://ieeexplore.ieee.org/abstract/document/10036080),
+[SSFFT](https://junsu-kim0807.github.io/assets/pdf/ssfft_lctes2025.pdf),
+[cuFFTDx requirements](https://docs.nvidia.com/cuda/cufftdx/1.8.0/requirements_func.html),
+[prior receiver FFT comparison](#hardware-and-library-dispatch).
+
 ### Open measurements
 
-- Per-family device time, call counts and mutex wait ([lever 1](#next-levers-in-order)).
-- The varying phase split, `varying_batches`, `varying_batch_blocks`, the
-  drift section split, the segmented span (`varying_coarse_seconds`) and the
-  plan and compilation seconds on the Blackwell challenging slots. The probe
-  emitted them, but the retained 21 November summaries omit them and the
-  raw receipts were not kept; [step 10](#run-a-bounded-device-qualification)
-  now lists them.
-- The split of the holdout's coarse remainder, about 110 s:
-  `varying_coarse_seconds`, `vulkan_segmented_sessions` and the segmented
-  declines and fallbacks on the next automatic holdout run.
-- Explicit family routes at the holdout: no configuration has fit. A 4 GiB
-  device workspace was too small for its coarse session. With 48 GiB of
-  device workspace and a 64 GB host limit at W = 80 the probe's host
-  slot-workspace check refused the slot ("Native full-slot probe exceeds its
-  local memory lease") with every family native as well as with the gain
-  rank on the device. That check also charges the explicit coarse session's
-  whole device ceiling plus its 128 MiB compilation bound
-  (`coarse_host_bytes`), so the 48 GiB ceiling and the W = 80 CPU quote
-  were both inside it and the refusal does not separate them; the W = 80
-  quote was not kept. Omit the host limit (the cgroup-aware default; the
-  Xeon 6952P pod's `memory.max` was 187,999,997,952 B), size the device
-  workspace for the coarse session and count it in the host quote
-  (`--slot-owners` does not affect `admission`)
-  ([memory sizing](gpu-strategy-playbook.md#size-memory-on-a-pod)).
+- The CUDA and large-quota Vulkan holdout splits remain open. The later
+  13.6-CPU Blackwell Vulkan run measured 88.89 s of segmented timing out of
+  169.48 s, with no segmented declines or fallbacks. That timing has its
+  own [source and host scope](validation.md#vulkan-fine-stage-attribution-and-staging--21-november-2026).
+  A later [wide prefix](validation.md#segmented-tracking-rank-reuse--22-november-2026)
+  profiles 16 commands of this holdout's first geometry. The whole-stage
+  mix and CUDA command timing remain open.
+- Explicit drift at the holdout and backlog with explicit varying. The
+  explicit varying holdout now completes with 48 GiB device workspace and
+  a 100 GB host limit at W = 54. The coarse frequency stage needed the
+  batch index guard documented in the
+  [validation entry](validation.md#vulkan-fine-stage-attribution-and-staging--21-november-2026).
+  Earlier 4 GiB device and 64 GB host limits at W = 80 refused the coarse
+  session or full slot. The explicit host quote includes the coarse
+  ceiling and compilation bound.
+  [Memory sizing](gpu-strategy-playbook.md#size-memory-on-a-pod).
 - An API and GPU-workload trace (for example Nsight Systems) of an
   unprofiled `--backend gpu` run, which could give fine-stage device
   intervals on the automatic route without code changes. Untested on the
@@ -618,7 +679,7 @@ GPU utilization or CPU capacity without them
 | Drift and varying fine | `score_drift_fine` and `score_varying_fine` in [fine processing](../src/triad_receiver_fine.cpp); the device sessions in [`triad_vulkan_drift.cpp`](../src/triad_vulkan_drift.cpp) and [`triad_vulkan_varying.cpp`](../src/triad_vulkan_varying.cpp). |
 | Fine source and ownership | `FineSession` in [fine processing](../src/triad_receiver_fine.cpp) prepares receiver observations and advances tracking and likelihood state. [MappedBasis](../src/triad_receiver_basis.cpp) exports the native mappings. For a backend that renders tiles it supplies each column's public tile address and the keyed coefficients of a lane; for every other consumer it produces and pins immutable keyed source tiles. The session submits a window of ready fixed-affine dispatches and advances each state through them in public order. Candidate sets larger than one GPU submission retain every candidate. |
 | OpenCL resident work | The [fine adapter](../src/triad_opencl_fine_bulk.cpp) leases the session and credits its receipt. [Host projection and staging](../src/triad_opencl_nvfp4_projection.cpp) owns the queue, tile cache, tile requests, descriptor flush, uploads and readback. [Device kernels](../src/triad_opencl_nvfp4_kernels.cu) render dense tiles and map them in FP32 arithmetic with an FP64 time base and fixed-point coordinates by default; tiles stay FP64 in the cache, and `--opencl-fine-map fp64` runs the FP64 control. The FP4 path packs templates and coefficients and runs block-scaled E2M1 Tensor Core projection with FP32 accumulation. The [resident FFT](../src/triad_opencl_fine_fft.cuh) uses FP32 arithmetic and gathers the same bins. Both compute FP64 sufficient statistics on the device. The receiver reads those statistics and applies native state updates. |
-| Device core | [The Vulkan core](../src/triad_vulkan_core.hpp) and [its implementation](../src/triad_vulkan_core.cpp) hold the shared device leases and receipt, the plan and shader caches and the one compute queue. Only coarse contexts record timestamps. |
+| Device core | [The Vulkan core](../src/triad_vulkan_core.hpp) and [its implementation](../src/triad_vulkan_core.cpp) hold the shared device leases and receipt, the plan and shader caches and the one compute queue. Coarse and fine-family timing have separate receipt scopes. |
 | Fallback and receipts | [Vulkan routing](../src/triad_vulkan_backend.cpp) defines public geometry and native terminal, Helper-taper or workspace fallback. [Bulk work](../src/triad_receiver_bulk.hpp) defines what the counters cover. The distinct native CUDA path lives in [the CUDA backend](../src/triad_tensor_backend.cpp) and supports direct cuFFT and NVFP4 controls. Its results qualify that backend and runtime. |
 
 **Writing a Vulkan kernel.** GLSL FP64 has no `sin`, `cos`, `exp` or
@@ -667,9 +728,9 @@ copy its [pass-rule template](gpu-strategy-playbook.md#test-recipe).
 | Stage shares | Slot fields: `helper_seconds`; `coarse_seconds`, which contains Helper when `helper_overlapped`; `varying_coarse_seconds`, the segmented span from first to last call, which can overlap bank and observation preparation; `signed_lag_gain.proposal_seconds`, after the segmented stage drains and disjoint from it; `fine_seconds` with `drift_seconds`, `varying_fine_seconds`, `coherent_gain_seconds` and `varying_quiet_seconds` | The drift and varying sub-timers (`drift_{render,ridge,ridge_search,slope,exact}_seconds`, `varying_{projection,statistics,recursion}_seconds`, `varying_wait_seconds`) are lane-summed, inflated when lanes share hardware threads, and include mutex waits. Busy over busy-plus-wait is lane utilization. Fine `times.*` owner spans do not add. Use shares; decide on slot totals. |
 | Work done | Backend counters (`vulkan_<family>_*`, `vulkan_segmented_*`, `opencl_coarse_*`, `opencl_resident_*`, `cuda_*`) and slot counters | `drift_coherent_timing_fft_rows` counts only rank-pass zero-slope dechirps, 12.08 G of 17.18 G large-FFT rows on the HF receipt. Varying fine has no FFT counter. Rebuild totals from plan geometry. |
 | OpenCL device intervals | `--opencl-profile on` with explicit `--backend vulkan`: `opencl_coarse_{product,packing,selection,synthesis,render,filter,gram,rescore}_seconds`, on by default for an explicit `nvfp4` coarse search; `opencl_resident_host_{source,staging,transfer,wait}_seconds`; `opencl_resident_device_{transfer,render,map,pack,product,statistics,span}_seconds` | Render, filter and Gram make up synthesis; rescoring is part of selection. Profiling cost about 9 ms of an 82 ms fine session. Not available on `--backend gpu`. |
-| Vulkan device intervals | An always-on timestamp pair per coarse command buffer (`vulkan_timed_submissions`, `vulkan_device_command_seconds`); host `wall_seconds` from the submit lock to the fence, summed over owners; `vulkan_fft_plan_seconds`, `vulkan_shader_compile_seconds`, `vulkan_fft_cache_{hits,misses}`, `vulkan_shader_spirv_{compiles,cache_hits}` | Fine-stage contexts record no device time. The only family time is the host `vulkan_gain_rank_rescore_seconds`. |
+| Vulkan device intervals | A timestamp pair per coarse command buffer when supported (`vulkan_timed_submissions`, `vulkan_device_command_seconds`); host `wall_seconds` from the submit lock to the fence, summed over owners; `vulkan_fft_plan_seconds`, `vulkan_shader_compile_seconds`, `vulkan_fft_cache_{hits,misses}`, `vulkan_shader_spirv_{compiles,cache_hits}` | Fine-stage command times are credited only to their [family attribution](#fine-family-device-attribution). The gain-rank certificate keeps its separate host rescore timing. |
 | CUDA | Host `wall_seconds`, the HMMA and IMMA witnesses and the half-FFT counters | No device intervals. |
-| Component rates | `test_triad_vulkan --segmented-benchmark` (`datapump.triad.vulkan-segmented-throughput.v1`, three fixed shapes with 257, 515 and 261 frequencies, one session, per-workspace seconds only, indicative), `--gain-rank` (per fixture `device_call_seconds`, band and frontier statistics), `--benchmark` and `--benchmark-cpu-precision`; `test_triad_opencl_nvfp4` | Fixed shapes, not complete service ([GPU builds](building.md#vulkan-and-opencl-gpu-builds)). The segmented benchmark has run only on the Radeon, shows no multi-owner L2 or queue contention, and a tile sweep needs source edits in both backends. |
+| Component rates | `test_triad_vulkan --segmented-benchmark` (`datapump.triad.vulkan-segmented-throughput.v1`, three fixed shapes with 257, 515 and 261 frequencies, one session, per-workspace seconds only, indicative), `--gain-rank` (per fixture `device_call_seconds`, band and frontier statistics), `--benchmark` and `--benchmark-cpu-precision`; `test_triad_opencl_nvfp4` | Fixed shapes, not complete service ([GPU builds](building.md#vulkan-and-opencl-gpu-builds)). The [segmented benchmark](#segmented-command-profiling) covers Radeon and Blackwell. It cannot measure multi-owner L2 or queue contention, and a tile sweep needs source edits in both backends. |
 | Kernel resources | The build writes `<build>/generated/triad_opencl_nvfp4/triad_opencl_nvfp4.ptx` for `sm_120a`. `ptxas -v -arch=sm_120a` on it gives registers and spills; record them per qualification (`coarse_warp_fir` 235 and `coarse_fp4_scores` 106 registers, no spills). For FP64-pipe questions, assemble a cubin with `ptxas -arch=sm_120a -o kernels.cubin triad_opencl_nvfp4.ptx` and count `DFMA`, `DADD`, `DMUL`, `F2F.F32.F64` and `I2F` in `cuobjdump -sass kernels.cubin`. | Static counts, not dynamic issue. A new kernel entry needs its row in the [PTX embedding table](../tools/triad_opencl_embed_ptx.py). The build has no query for GLSL kernel resources. |
 | Memory | `workspace_peak_bytes`; `configuration.receiver_slot_workspace_bytes` from `plan`; `peak_reserved_bytes`, `allocator_peak_{reserved,live}_bytes`, `vulkan_peak_leased_bytes`; the host cgroup | `workspace_peak_bytes` is the admitted lease quote, not a measured peak. `peak_reserved_bytes` is a lease counter on CUDA and the charged Vulkan allocation peak on Vulkan ([per-backend fields](gpu-strategy-playbook.md#size-memory-on-a-pod)). The `plan` quote is the CPU route's and omits device-route host quotes: gain-rank certification, the larger caches and OpenCL leases. The probe reports no RSS. |
 | Shapes no local slot reaches | A microbenchmark at production geometry ([method](triad-performance.md#paired-timing-and-load-gating)) | Like the HF ridge benchmark of the [21 November record](validation.md#fine-stage-device-routes-and-exact-cpu-stages--21-november-2026). |

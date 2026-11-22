@@ -176,8 +176,11 @@ CUDA toolkit loader. The worker uses a deployment-private NVIDIA ICD and checks
 the selected accelerator before any FP4 work.
 The standalone CLI
 defaults to `--mode cpu`. Use `--mode gpu` for automatic GPU selection or
-`--mode cuda` to require CUDA. A required CUDA build ends at the discovery
-check if the expected device cannot initialize.
+`--mode cuda` to require CUDA. Use `--mode vulkan` to build the Vulkan worker
+directly, including the Blackwell OpenCL module when its build prerequisites
+are present. This lets a CUDA-capable host run the Vulkan/OpenCL route for a
+matched comparison. A required CUDA build ends at the discovery check if
+the expected device cannot initialize.
 The CUDA build can use the Blackwell NVFP4 fine projection when its driver
 initializes in that environment. The tested stock RTX PRO 6000 worker scores
 eligible broad coarse searches with the OpenCL dense FP4 search and keeps
@@ -212,6 +215,16 @@ Vulkan. The remote worker performed 780 GPU coarse-search rows and decoded
 console-verified SSH key. A Secure Cloud RTX 5090 with the default image also
 completed this fixture with 780 Vulkan search rows, DATA 0, 0, 1 and two
 scored QUIET slots. [RTX 5090 validation](../docs/validation.md#rtx-5090-pod-creation-and-simulation--19-november-2026)
+
+Run the bounded 3.6 Hz shared-GUI check through the anonymous-pipe relay.
+Set `LAB_SIMULATION_WORKER` to the built native worker if it is outside the
+default CLI worker build. On a managed GPU deployment, also set
+`LAB_SIMULATION_REQUIRE_GPU=1` to require positive executed GPU search rows.
+The fixture checks three DATA slots, two scored QUIET slots and decoded text.
+
+```sh
+LAB_RUN_LOW_RATE_SIMULATION=1 python3 -B _zLab/test_simulation.py -v
+```
 
 The experimental `live` profile deploys a separate lab worker under
 `/workspace/pump-lab-live`; it can coexist with a simulation deployment. The

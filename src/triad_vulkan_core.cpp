@@ -363,6 +363,7 @@ std::unique_ptr<FftPlan> Context::make_plan(std::size_t rows, std::size_t batche
     result->initialized = true;
     BulkReceipt compiled;
     compiled.vulkan_fft_plan_seconds = std::chrono::duration<double>(Clock::now() - began).count();
+    if (stage) vulkan_stage_receipt(compiled, *stage).plan_seconds = compiled.vulkan_fft_plan_seconds;
     if (cache_hit) compiled.vulkan_fft_cache_hits = 1;
     else {
         compiled.vulkan_fft_cache_misses = 1;
@@ -676,6 +677,21 @@ VulkanCoreCheck vulkan_core_self_check(const VulkanReceiverOptions& options, std
         }
         require(std::isfinite(result.product_error) && result.product_error <= 1e-6,
                 "Robust Vulkan six-binding pipeline output differs from its host arithmetic");
+        BulkReceipt validated;
+        auto& varying = vulkan_stage_receipt(validated, StageFamily::varying);
+        varying.device_calls = 1;
+        varying.download_bytes = rows * sizeof(FloatComplex);
+        varying.batch_width = 1;
+        context.account(validated);
+        const auto family = vulkan_stage_receipt(context.receipt(), StageFamily::varying);
+        require(family.device_calls == 1 && family.download_bytes == varying.download_bytes &&
+                family.batch_width == 1 && family.submissions == 1 &&
+                family.timed_submissions == (context.timestamps ? 1u : 0u) &&
+                std::isfinite(family.submission_seconds) && family.submission_seconds >= 0 &&
+                std::isfinite(family.device_seconds) && family.device_seconds >= 0,
+                "Robust Vulkan stage receipt omitted validated work or submission timing");
+        require(coarse_counters() == initial,
+                "Robust Vulkan fine-stage timing polluted frequency-search counters");
         result.pipelines = pipelines; result.bindings = maximum_bindings; result.product_rows = rows;
     }
 

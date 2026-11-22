@@ -45,6 +45,464 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Vulkan fine-stage attribution and staging — 21 November 2026
+
+The new fine-family receipts expose completed calls, logical uploads and
+downloads, batch width, submission and device intervals, session lock waits,
+and plan and shader setup. The existing coarse metrics retain their scope.
+The [receipt definitions](triad-gpu-optimization.md#fine-family-device-attribution)
+explain the effects of overlap and mapped memory on these measurements.
+
+The first Blackwell run used a full RTX PRO 6000 Server Edition, 97,887 MiB,
+SM 12.0, MIG disabled, driver 595.112.07, CUDA 12.8.93 and GCC 13.3. The
+EPYC 9355 allocation had a 13.6-CPU quota and a 188.0 GB memory cap, yielding
+26 receiver workers. Probe `09e229cd…3531` used native manifest
+`1356cf72…2e52f`. The socket-free launcher passed the Vulkan core, gain
+rank, drift and varying checks, plus the OpenCL NVFP4 and resident-fine
+checks. The fixed IQ slots and options follow the
+[qualification recipes](triad-gpu-optimization.md#qualification-slots).
+
+The initial diagnostic used one explicit all-device 72 Hz/1× slot, then two
+alternating looks at native versus all three device families on the 72 Hz/5×
+control with device segmented timing on every route. It ended with one
+automatic 36 Hz/10× holdout. Admission, deadlines, matching capture hashes,
+identical public work and stable operational decisions were the checks. The
+two control routes both scored the active input as quiet (an erasure). Both
+preserved its operational evidence and drift digest, with no decline or
+fallback on the explicit device families. These are single-slot diagnostics.
+
+| 72 Hz/5× quantity | All three families native | All three families on device |
+| --- | ---: | ---: |
+| Total receiver service | 17.01–17.60 s | 38.47–39.13 s |
+| Varying fine stage | 1.87–2.00 s | 29.28–29.52 s |
+| Drift stage | 2.08–2.09 s | 2.09–2.41 s |
+| Segmented coarse stage | 5.76 s | 5.78–5.82 s |
+
+The 172-block varying batches made 26 submissions in either device look.
+Their fence intervals totaled 0.085–0.086 s, of which 0.082 s was device
+command span. The logical payload was 2.264 GB up and 99.3 MB down. Device
+drift made 315 submissions and recorded about 0.49 s of device commands,
+4.21–4.32 accumulated lane-seconds of session-lock wait and 1.00 GB of
+returned logical payload. Its wall time stayed near the native result. The
+gain-rank batch width was 64, with ten submissions and about 0.062 s on the
+device. These scopes leave very little submission overhead to save by
+combining commands on this fixture. Varying host preparation is the much
+larger observed opportunity.
+
+The automatic holdout retained IQ `8a6c8ab2…ac64`, scored quiet and took
+169.48 s. Segmented coarse timing accounted for 88.89 s, with 156 sessions,
+1.269 trillion score rows and zero segmented declines and fallbacks. Native
+drift took 32.18 s and native varying fine took 32.77 s. Gain rank used
+0.759 s of device commands. Dense NVFP4 scored zero rows on this geometry.
+The roughly 52% segmented share and 38% combined native drift/varying share
+are specific to this host, capture and automatic route. They support further
+segmented and fine-stage work, with continuous backlog capacity still open.
+
+The staging repair renders each Vulkan varying-template item into its
+existing cached lane scratch, runs the same nonzero check there, then copies
+the item contiguously into mapped staging. It preserves FP64 statistics,
+public hypotheses, batching and owner admission. The earlier code checked
+template energy after writing to a mapping that favors device-local coherent
+memory. CPU reads from uncached mapped allocations can be costly.
+[Vulkan host memory properties](https://docs.vulkan.org/spec/latest/chapters/memory.html#memory-device).
+
+On a second full RTX PRO 6000 Server Edition with the same driver and
+toolkit, the EPYC 9535 allocation had a 15.3-CPU quota, 161.0 GB memory and
+30 receiver workers. Candidate probe `59882dd9…82d4`, manifest
+`07ef837e…`, differed from reference `09e229cd…3531` only in staging source.
+The 72 Hz/5× control used two alternating before/after pairs with device
+segmented timing, device gain rank, native drift and explicit device varying.
+The 72 Hz/1× active guard used one pair. The IQ digests, public work,
+operational evidence, decisions, dispatch counters, transfer payload, batch
+width and workspace matched exactly between binaries. Capture-cache keys
+are binary-specific and were excluded from the receipt comparison.
+
+| Explicit route | Earlier varying stage | Cached host staging | Earlier whole slot | Cached host staging |
+| --- | ---: | ---: | ---: | ---: |
+| 72 Hz/5× control | 27.14–27.47 s | 2.05–2.31 s | 36.48–37.49 s | 11.34–12.36 s |
+| 72 Hz/1× active guard | 8.33 s | 0.92 s | 11.74 s | 4.30 s |
+
+The 72 Hz/5× comparison attributes the large loss to the mapped staging
+path. Its logical traffic and 26 submissions stayed fixed. A separate
+candidate-native varying look took 2.49 s for that stage and 11.84 s for
+the slot, within the repaired device-route service range. These results
+establish a large improvement to the explicit path and a comparable native
+route on this control.
+
+The local Ryzen 5 PRO 5650U used 24 workers and its Radeon was verified
+through RADV Renoir (Mesa 25.0.7). The 72 Hz/1× CPU and native-family
+Vulkan receipts matched their frozen starting-tree references. The explicit
+device gain, drift and varying replays matched the native decision with
+zero declines or fallbacks. Gain returned lags 1213, 1708, 2572 and 3084.
+The drift digest changed from `a626c2e80c62feef` to `eb829892ab5ca438`, as
+in the earlier comparison. Varying operating evidence matched exactly.
+The 61-test Triad run after instrumentation passed 60. The probe test
+reached its 50 s limit beside other tests. After finalizing the staging
+repair it passed in 25.09 s in isolation, alongside passing native
+receiver, Radeon core and Radeon varying checks.
+The final serial Triad selection (`-L '^triad$' -LE native_gui`) passed all
+61 tests, with the probe finishing in 24.91 s. It included the eight local
+Radeon Vulkan checks and the live Robust GUI check.
+The Fast group passed all 72 tests, including GUI loopback.
+The focused Python receipt, comparison and bundle suite passed all 66.
+
+The first explicit 36 Hz/10× look failed before varying fine. With a 48 GiB
+device limit, 30 frequencies, two taps and 2,097,152 FFT rows, the attempted
+64-workspace batch would index 8,053,063,680 product rows. The receipt
+records complete segmented timing and gain rank, then `Robust Vulkan index
+extent exceeds uint32` with zero coarse frequency score rows. Automatic
+planning already screened that extent. The explicit path now halves the
+workspace batch before allocating when either index extent exceeds 32 bits.
+It retains the input frequency tile and public hypothesis grid. The two
+planned noise controls in the staging comparison also stopped before scoring
+because `--stratum` appeared twice. Both setup failures remain distinct from
+the successful active and native-control pairs.
+
+The wide retry used the same full Blackwell SKU with an EPYC 9555 host,
+27.2-CPU quota, 188.0 GB memory cap and 54 receiver workers. Probe
+`27512834…82e3` (manifest `68162155…5aae`) completed the failed capture
+with the 48 GiB device and 100 GB host limits. It executed all 107,830,554
+coarse frequency rows, 1,269,245,464,578 segmented rows and the explicit
+varying route without a family decline or fallback. The result remained an
+erasure on the active input. Device allocation peaked at 9.13 GB. Varying
+fine took 32.32 s of 192.44 s service, with 317 submissions, 2.57 s of
+device commands and 36.91 GB of logical staged input. Segmented timing
+took 92.45 s and native drift took 50.96 s. The corrected 72 Hz/1× noise
+control scored quiet with four varying submissions. The final local
+source preserves the workspace retry around checked layout arithmetic,
+including a `size_t` overflow. Its six focused Radeon Vulkan tests passed.
+
+On the same pod and capture, native varying took 37.11 s and total service
+193.04 s. Both routes executed the same coarse and segmented row counts,
+retained the same signed lags and drift digest, and matched decisions. The
+largest operational evidence difference was 4.3e-14 nats. This single
+pair measured a varying-stage gain and nearly equal total service. It
+supports keeping explicit FP64 varying available for this geometry. A
+reproducible complete-service gain and bounded backlog and memory evidence
+remain prerequisites for automatic selection. Segmented timing is the
+largest measured share on this shape, and the 36.91 GB of logical template
+traffic remains an opportunity for device synthesis. The completed pair
+recorded 82.13–82.33 s of coarse device commands inside 83.15–83.28 s of
+submit-to-fence intervals. The earlier failed explicit probe already
+recorded 80.20 s of coarse commands with the same segmented work and zero
+published frequency rows. This directs further segmented attribution
+toward time inside command buffers. Timestamps alone cannot distinguish
+transforms, memory traffic, barriers and other idle time. All three rented pods
+were terminated after receipts were retrieved, with no jobs queued or
+network volumes left in the inventory.
+
+### Inside Vulkan segmented timing
+
+A fourth full RTX PRO 6000 Blackwell Server Edition (97,887 MiB, SM 12.0,
+MIG disabled, driver 595.112.07) on EPYC 9355 used a 13.6-CPU quota,
+188.0 GB memory cap and 26 receiver workers. A temporary diagnostic build
+(`2457cd18…35be`, manifest `5fa70408…b7a1`, markers `2c14b387…3c51`)
+ran the canonical shader and VkFFT commands. Timestamp pairs bracketed
+column preparation, forward FFT, product, inverse FFT, rank and finish,
+with full and tail frequency tiles credited separately. Query results were
+read after the existing fence. Every selected interval was available and the
+query budget covered every marked command. These are elapsed command regions
+with their scheduling and synchronization effects. They give no measurement
+of memory bandwidth, register pressure or hardware utilization.
+[Vulkan timestamp semantics](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdWriteTimestamp.html).
+
+The bounded component test ran one warm-up call and three measured calls
+per shape. The same binary ran with markers off, on, and off. The profiler
+record includes the warm-up call. Added markers increased warm component
+wall time by about 7–15% against the range of the off runs. The rank agreement
+check passed. In the native comparison the benchmark used 13 hardware threads
+under the quota. A separate RADV Renoir test restricted affinity to two CPUs
+and reported two native threads for each shape.
+
+| Geometry (FFT rows / arrivals / frequencies) | Rank share | Inverse share | Product share | Column, forward and finish | Residual |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Component 16,384 / 4,096 / 257, hop 2 | 32.5% | 36.0% | 13.8% | 16.7% | 1.1% |
+| Component 16,384 / 10,553 / 515, hop 2 | 55.2% | 26.1% | 10.7% | 7.3% | 0.8% |
+| Component 32,768 / 4,500 / 261, hop 0 | 22.5% | 47.9% | 19.1% | 9.4% | 1.0% |
+| 72 Hz/5× slot 16,384 / 10,553 / 985 | 59.3% | 24.8% | 11.0% | 4.3% | 0.6% |
+| Same slot 16,384 / 10,553 / 329 | 42.5% | 30.8% | 12.5% | 13.4% | 0.8% |
+
+The component rows cover four, eight and four submissions respectively.
+The 72 Hz/5× rows cover the first 16 submissions (315 of 16,146 emitting
+blocks over 0.148 s of device command time), split as 12 and 4 submissions.
+Both slot runs completed with exactly matching work and operational
+receipts, including 156 segmented sessions, 8,075,106 inverse FFTs and
+85,216,593,618 segmented rows. Whole-slot service was 12.60 s off and
+11.25 s on. The coarse device command totals were 4.999 s and 5.017 s.
+One whole-slot pair gives insufficient precision to estimate system overhead.
+At 16,384 rows, a full 128-frequency inverse averaged 22.4 µs. One- and
+three-transform component tails still took 18.3 µs. The production tails of
+73 and 89 frequencies took about 20.2 µs. At 32,768 rows, the 128-transform
+batch took 40.5 µs and the five-transform tail took 10.1 µs. The smaller
+tails save elapsed time while costing more time per transform. The fourth
+pod was terminated, with no queued jobs or network volumes left.
+
+Rank dominates the wider 16,384-row samples, while inverse FFT has the
+largest share in the 32,768-row component. Shape, arrival count and tracking
+all differ. The later [wide prefix](#segmented-tracking-rank-reuse--22-november-2026)
+also used 32,768 rows and spent the largest share on ranking.
+Use a fixed-geometry tracking comparison or GPU resource counters before
+attributing rank time to state traffic, FP64 arithmetic or occupancy. Test
+any tile changes with the same public rows and all partial widths. The
+[GPU guide](triad-gpu-optimization.md#segmented-command-profiling) describes
+where FFT fusion and launch or layout changes may help.
+
+### Segmented tracking rank reuse — 22 November 2026
+
+One bounded candidate assigned each hop-2 rank group up to eight contiguous
+frequencies and kept a rolling window of five previous-block states. The
+current strided group reloads up to 40 prior values for eight outputs. The
+candidate needs up to 12, including halo values from adjacent groups and
+tiles. It preserved each output's FP64 score and FP32 tracking operations,
+comparison order, invalid propagation and all public rank rows. Other hops
+used the current layout. Both shaders passed GLSL and SPIR-V validation.
+A C++ mirror matched 293,280 states and 4,576 finished ranks bitwise,
+including public boundaries, small tails, nonfinite values and extreme
+normalization.
+
+The paired run used another full RTX PRO 6000 Blackwell Server Edition with
+the same memory and driver, EPYC 9554, a 27.2-CPU quota, 188.0 GB memory
+cap and 54 receiver workers. One diagnostic executable selected the two
+shader sources (probe `f2d8c4d3…0a67f`, native manifest `9ad46a28…1f12`).
+The device rank checks passed in both modes. The component and 72 Hz/5×
+slot timings each alternated reference, candidate, candidate, reference,
+with the inserted command markers disabled. The paired fixed and linked
+rank digests agreed on all three component inputs.
+
+| Quantity | Current strided layout | Contiguous rank reuse |
+| --- | ---: | ---: |
+| 16,384 rows, 4,096 arrivals, hop 2 | 6.21–6.23 ms | 5.91–5.93 ms |
+| 16,384 rows, 10,553 arrivals, hop 2 | 16.16–16.29 ms | 15.72–15.83 ms |
+| 32,768 rows, 4,500 arrivals, hop 0 | 7.56–7.59 ms | 7.55–7.60 ms |
+| 72 Hz/5× segmented stage | 6.048–6.052 s | 5.870–5.921 s |
+| 72 Hz/5× whole-slot service | 13.13–14.93 s | 13.00–13.03 s |
+
+The component values are per workspace. On capture `af364b67…`, both
+matched pairs had identical non-timing slot receipts and scored an erasure
+after all 85,216,593,618 segmented rows. The broad component gain was
+2.8%, and the segmented stage gained 2.1–3.0% across the two pairs. The
+larger service difference in the first pair did not recur in the second.
+The predeclared expansion gate was at least 10% on the broad component
+and 5% on both segmented slot pairs with whole-slot service no more than
+2% slower. The measured stage gains fell below the gate. The original
+confirmation was skipped and the pod was terminated.
+
+A separate, single wide pair checked whether the modest control gain
+carried into the 36 Hz/10× holdout. A full Blackwell Server Edition with
+the same memory and driver ran on a Xeon 6960P allocation with a 30.6-CPU
+quota and 188.0 GB memory cap. It used 60 workers and explicit limits of
+100 GB host and 48 GiB device workspace. Probe `640a6090…804f`, manifest
+`277432be…a1a0`, recorded which shader it loaded. The two runs shared the IQ
+digest `8a6c8ab2…ac64` and exactly matched non-timing slot receipts. Each
+executed 107,830,554 coarse frequency rows and 1,269,245,464,578 segmented
+rows, then scored an erasure. Segmented time was 98.42 s with the current
+layout and 100.29 s with the candidate. Coarse device command totals were
+82.61 and 83.64 s, and whole-slot service was 218.57 and 221.57 s. These
+single-pair differences provide insufficient evidence of a general regression
+or of a transferable gain.
+
+Each wide run marked the same initial 16 submissions and 32 of 60,138
+emitting blocks. These commands used 32,768 FFT rows, 10,553 arrivals, 202
+blocks in the shape, 3,935 frequencies, and tiles of 128 with a tail of 95.
+At baseline their device time was 0.254 s, approximately 69.0% rank and
+21.3% inverse. The candidate took 0.253 s, with 67.8% rank and 22.2% inverse.
+All timestamp intervals were available. This prefix identifies a rank-heavy
+32,768-row shape and resolves neither the full holdout mix nor the allocation
+of rank time between state traffic, register pressure and arithmetic.
+The candidate remains experimental. Reconsider the layout when wider
+evidence identifies a removable rank cost. Both pods used for this layout
+evaluation were terminated, with empty queued-job and volume inventories.
+
+## Exact-channel witness for severe low-rate bit errors — 21 November 2026
+
+A bounded native diagnostic replayed two severe active captures, a stable
+active control and a noise-only control. The diagnostic reused `Emission`
+and `StreamChannel`, their physical seeds and full public extents. It
+synthesized both noiseless bit references with the exact Doppler, echo,
+clock and selective-filter histories, plus an independent wrong-key pair.
+The observations matched their retained hashes. For active captures the
+correct reference left within 0.10% of the declared complex noise power.
+With bit 0 sent, fixed-template log likelihood separation is the bit-1
+residual minus the bit-0 residual, divided by complex noise variance.
+
+| Active capture | Samples | Correct residual / declared noise | Exact bit-0 advantage |
+| --- | ---: | ---: | ---: |
+| Severe 3.6 Hz, `b4d8fa5a…8bf8` | 1,215,321 | 1.00098 | 16.58 billion nats |
+| Severe 1.8 Hz, `37eef1ed…f83e0` | 2,340,654 | 0.99942 | 28.39 billion nats |
+| Stable 3.6 Hz, `eaa4ae2a…` | 1,215,321 | 1.00098 | 12.75 billion nats |
+
+Both severe captures retain distinguishable data under exact channel
+knowledge even though the operational receiver selected the wrong bit. In a
+matched partial-knowledge check, both templates retained the exact motion
+and echo, disabled only selective modulation, and fitted one global complex
+gain per bit. The bit-0 advantage after the fit was 7.54 and 15.02 billion
+nats at 3.6 and 1.8 Hz respectively, against 9.76 and 19.00 billion with
+the full filter. The winning partial model still left roughly 1,866 and
+1,946 times the full-channel residual. Exact motion can preserve the bit
+preference on these inputs even with a poor selective fit. Its required
+phase and delay histories are supplied to the diagnostic.
+
+On the matched noise-only capture `2b9ca9df…a28c8`, both active templates
+are strongly disfavored relative to the physical null. Their unequal
+energies still give a large bit-to-bit ratio. The wrong-key template pairs
+also have large bit-to-bit ratios and large residuals on the active captures.
+This is why an inferred channel model must check presence against its full
+public noise reference as well as bit separation. The result addresses an
+information and model-mismatch question on two strong simulated inputs. A
+public channel estimator, its low-SNR and wrong-key false-accept behavior,
+and complete service remain unqualified.
+[Literature and model reconciliation](../_appraisal/highFidelity-triple_Robust_Modem/research-reconciliation.md#low-rate-bit-identification-and-acquisition).
+
+## Low-rate simulator and Blackwell follow-through — 21 November 2026
+
+The starting tree was `cbc9c79f`. The ordinary lab worker build carries the
+native simulator and receiver changes since `e76fc90`, including the
+Vulkan/OpenCL dense search and resident fine statistics. The lab deployment
+also offers explicit Vulkan selection for hosts where CUDA initializes first.
+The shared-GUI simulation now lends channel preparation work to the idle
+receiver executor, within the same worker bound. Each ready or running score
+slot keeps priority. Workspace screening checks the entire finite calendar,
+including the quiet tail and possible interior peaks. A 100 ms startup
+planning budget bounds the optional scan, with the lone reader as fallback.
+Two local five-slot dry plans at 3.6 and 1.8 Hz admitted all slots in under
+1 ms each (6,000 samples/s, 100.005 ppm clock bound, 24 workers, 8 GiB).
+The native stream regression rejects an oversized interior slot even when
+both endpoints fit, and it rejects an expired scan budget.
+The native drift scorer reuses the ordered slope list
+from the rank pass for surviving timing atoms of that sign and exponent.
+An opened device drift proposal session retains its per-call fallback.
+
+The bounded device comparison used one full RTX PRO 6000 Blackwell Server
+Edition (SM 12.0, 97,887 MiB, MIG disabled, NVIDIA 595.112.07), with an
+EPYC 9554, 27.2-CPU quota, 125 GB cgroup memory and 54 automatic receiver
+workers. GCC 13.3 and CUDA 12.8 built the 2.3 MiB source closure. The stock
+lab worker reported Vulkan through its no-socket boundary. The actual
+OpenCL NVFP4, resident fine and Vulkan segmented component checks passed.
+The baseline probe manifest was `7b98f3d7…608ded`. The paired looks used the
+[matched 3.6 Hz recipe](triad-gpu-optimization.md#reproduce-the-matched-blackwell-runs),
+an independent 1.8 Hz geometry, an 8 Hz projected tight-clock search at
+3.6 Hz Rate, its 6 Hz projected 1.8 Hz holdout, and a complete five-slot
+message. Plan/sample/deadline limits applied before capture and scoring.
+
+On the starting tree, the 3.6 Hz severe slot took 0.134 s automatic and
+1.872 s with explicit Vulkan FP32 FFT coarse. The isolated noise slot took
+0.117 and 1.471 s and both scored quiet. Each pair scored 3,951,090 public
+coarse rows on matching IQ. Automatic used dense NVFP4, and both routes used
+resident NVFP4 fine operations. Both severe routes selected the wrong bit
+on `b4d8fa5a…`. The complete stable message took 0.451 s of receiver service
+automatic and 4.792 s with FFT coarse. Both decoded the expected output
+through two scored quiet slots and produced no message on the EOF control.
+The simulator took 3.002 and 2.501 s for the matched message captures,
+respectively. These single-pair times are directional observations.
+
+The 3.6 Hz shared-GUI lab replay passed on the stock and updated GPU workers.
+The updated worker (`9f39f086…90b9`) delivered `e` through slots `001` and
+two scored quiet slots. It executed 101,400 Vulkan FP32 search rows and
+reported 54.3 s of compute for 1,028.6 s of modeled input. Both runs used
+four hardware threads and eight receiver workers. Elapsed test times of
+69.683 and 68.946 s include GUI setup, output and replay. The single looks
+qualify the path and completion sequence. This worker used endpoint workspace
+screening. The subsequent full-calendar change has separate local coverage.
+Cloud source and build artifacts were removed with the pod. Its absence and
+the absence of additional persistent volumes were checked in the provider
+inventory.
+
+The local 3.6 Hz GPSDO CPU replay reached the same 120 s functional deadline
+on `cbc9c79f` and the candidate with endpoint screening, on a Ryzen 5 PRO
+5650U with 12 logical CPUs and 24 receiver workers. Both finished synthesis
+and were scoring the receiver with no confirmed pattern row at the deadline.
+The independent GUI starts generated 1,051.5 and 1,045.5 s of modeled input,
+respectively. This checks whether the timeout predates the change. Elapsed
+receiver throughput and sensitivity require matched inputs and completed work.
+
+The CLI/web Triad group passed all 46 tests. The full-calendar build passed
+the focused stream and channel tests, all three Robust GUI tests and the
+worker no-socket self-check. The deploy and pipe-relay suites passed all 18
+and 15 checks, respectively. The Vulkan plan and stage-policy checks both
+passed. The GUI group passed 29 of 30 checks. Fast loopback reported an
+audio capture FIFO overflow during the concurrent baseline CPU replay.
+An isolated retry of the same binary passed in 112.42 s.
+
+The 1.8 Hz severe holdout used 2,340,654 samples and IQ `37eef1ed…f83e0`.
+Automatic Vulkan initially refused the slot with a 4 GiB host limit. At
+16 GiB it took 0.259 s, compared with 4.934 s for the explicit FP32 FFT
+control. The device-local memory correction let automatic selection execute
+that same slot at 4 GiB in 0.257 s. The operational scores were identical
+to the 16 GiB automatic run, including the pre-existing wrong bit. Both
+automatic runs scored 7,375,368 dense NVFP4 rows and used 21,102,624 resident
+NVFP4 fine modes. Actual host slot reservation fell from 9.63 to 1.87 GB.
+The full-prior device lease was 7.95 GB and the measured peak device lease
+was 346 MB in both runs. The full-prior host quote for that device plan
+fell from 8.14 GB to 189 MB. The workspace component also kept its device
+lease, matched 156 score rows, and passed on both builds.
+
+The receiver's previous coarse quote could also widen its native drift
+stage or admit an extended drift geometry. The corrected planner retains
+that geometry envelope while reserving the actual sequential host peak.
+The separate native planning regression compares the same device lease
+as shared memory and as device-local memory, requiring equal ordinary and
+line drift geometry and an adequate smaller host reservation. Actual-device
+dry plans at 72 Hz/1× and 5×, 36 Hz/10×, and the tight-clock 3.6 and 1.8 Hz
+settings checked which families and lane widths remained available.
+The combined receiver build (`543000c1…a0ff`) repeated the 1.8 Hz capture
+at 4 GiB in 0.265 s with the same decisions, evidence and host reservation.
+It also repeated the 3.6 Hz tight quiet and 72 Hz/1× rows with their drift
+digests, lane widths and operational evidence intact.
+
+The tight-clock contrast held Rate at 3.6 Hz while the projected rate fell
+to 8 Hz and the complete score grid grew to 54,047,448 rows. The explicit
+Vulkan precision control now reaches the frequency search. Seed 950101
+decoded zero in 7.519 s with automatic native chirp-Z, 20.488 s with explicit
+FP32 and 7.330 s with explicit NVFP4. The dense control uploaded 78 native
+template columns. It spent just 8.8 ms in Tensor Core products and about
+3.34 s in native segmented timing. The second active seed and quiet control
+also favored native over FP32. For the 1.8 Hz tight-clock holdout the same
+comparison took 9.145 s native and 27.267 s FP32, with matching evidence and
+55,566,030 GPU score rows on the explicit route. The automatic compact
+fallback remains appropriate on these measured shapes. A matched broad
+speedup would justify reconsidering the rule using complete search costs.
+An explicit segmented run on the tight 3.6 Hz FP4 route processed 34,903,440
+segmented rows across 78 device calls without fallback. It reduced the
+segmented span from 3.322 to 2.759 s and the slot from 7.257 to 6.913 s, with
+equal evidence. Two retained timing coordinates changed their near-tie
+clock values. One matched look leaves automatic dispatch unqualified.
+
+The native drift rank-list reuse retained the drift digests, all scored
+slopes and operational decisions in two 72 Hz/1× active pairs. Drift time
+fell 0.463 → 0.393 s and 0.466 → 0.438 s, and whole slots 6.584 → 6.349 s
+and 5.580 → 5.487 s. The 3.6 Hz tight-clock quiet pair retained its 10
+timing atoms and 640 slopes, matching evidence and retained digest. Drift
+fell 4.830 → 4.212 s, and the complete slot 11.911 → 10.691 s. These
+measurements use native drift inside the Vulkan receiver and exclude
+independently opened device proposal sessions.
+
+Both severe HF Worst misses occurred at nominal actual C/N0 about +77 dB-Hz
+with no varying or drift evidence in the decision. A scratch probe invoked
+the existing compare-admitted scorer on the same severe captures and one
+quiet control. It ran zero additional models. The varying and coherent-gain
+plans reported `fine_cells_too_slow_for_short_block`, and drift reported
+`drift_extension_exceeds_preserved_owner_lease`. Both wrong bits and the
+quiet decision reproduced. The configured model geometry was unavailable
+before the evidence decision. Relaxing the short-block guard alone would
+allow unconstrained fits within a single fine cell, where the two bit
+families can become indistinguishable. For nonzero keyed coefficients
+`a0[k]` and `a1[k]`, independent gains `h[k]` can map `a0[k]` to the same
+received vector as `h[k]·a0[k]/a1[k]` acting on `a1[k]`. The earlier broader
+Helper-off proposal corrected one bit and still missed another. The separate
+one-cell projection passed clean synchronized and wrong-key controls. A
+constrained phase or gain model with too little freedom to erase the bit
+distinction remains a candidate. It needs matched public search, quiet and
+wrong-key controls, and complete service evidence.
+[Broader Helper-off trial](#runpod-startup-build-stages-and-simulation-presentation--19-november-2026),
+[One-cell projection controls](#receive-previews-and-clean-low-rate-admission--19-november-2026),
+[low-energy operating evidence](indexes/robust.md#low-power-hf-alarm-results).
+
+The technical receipts in ignored `local-evidence/robust-low-rate-blackwell-20261121/`
+support the unresolved model-geometry diagnosis and the exact device lease
+comparison. Keep the compact findings here and remove redundant raw receipts
+once those questions are resolved. No sustained backlog or lower sensitivity
+floor has been qualified by this bounded campaign.
+
 ## Review of changes since `e76fc90` — 21 November 2026
 
 The review covered the twelve commits through `d1d3b2a7`, including coarse

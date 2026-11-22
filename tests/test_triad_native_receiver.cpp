@@ -851,11 +851,13 @@ void drift_device_mirror() {
     std::vector<FineCoordinate> timings;
     for (std::int64_t epoch = -5; epoch < 5; ++epoch) timings.push_back({epoch, .002 * (epoch % 3), 0, 0});
     ReceiverExecutor executor(workers);
-    const auto run = [&](std::shared_ptr<ReceiverBulkBackend> backend) {
+    const auto run = [&](std::shared_ptr<ReceiverBulkBackend> backend,
+                         DriftZeroSlopeEvaluation evaluation = DriftZeroSlopeEvaluation::reuse) {
         auto config = input.config;
         config.bulk_backend = std::move(backend);
         ReceiverSlotScore result;
-        score_drift_fine(config, input.slot, input.key, plan, input.iq, timings, {}, workers, result, {}, executor);
+        score_drift_fine(config, input.slot, input.key, plan, input.iq, timings, {}, workers, result, {}, executor,
+            nullptr, evaluation);
         return result;
     };
     const auto same_bits = [](double a, double b) { return std::bit_cast<std::uint64_t>(a) == std::bit_cast<std::uint64_t>(b); };
@@ -869,6 +871,8 @@ void drift_device_mirror() {
     const auto native = run(nullptr);
     check(native.drift_timing_atoms > 0 && native.drift_relative_doppler_models == 2 && native.drift_proposal_route.empty() &&
           !native.drift_device_atoms && native.drift_retained_digest, "native drift lost its two signs or its digest");
+    check(identical(native, run(nullptr, DriftZeroSlopeEvaluation::recompute)),
+          "reusing native drift slopes must preserve both signs' exact evidence and retained proposals");
     using Mode = MirrorDriftBackend::Mode;
     const auto exact = std::make_shared<MirrorDriftBackend>(Mode::exact_ridge);
     const auto ridged = run(exact);
@@ -1482,6 +1486,40 @@ void long_calm_drift_owner_lease(bool active = true, std::uint8_t bit = 0, bool 
     backend_config.bulk_backend = std::make_shared<PlanningErrorBackend>(2, false, true);
     rejects<Error>([&] { receiver_drift_admission(backend_config, backend_slot, workers); },
         "cancellation must not be reclassified as an optional unsupported shape");
+    class FrequencyWorkspaceBackend final : public ReceiverBulkBackend {
+    public:
+        explicit FrequencyWorkspaceBackend(bool device_local) : device_local_(device_local) {}
+        std::unique_ptr<FineBulk> make_fine(double, double) override { return {}; }
+        std::unique_ptr<CoarseBulk> make_coarse(double, double) override { return {}; }
+        std::size_t fine_host_bytes(std::size_t, std::size_t) const override { return 0; }
+        std::size_t coarse_host_bytes(std::size_t, std::size_t, std::size_t) const override { return 0; }
+        std::optional<CoarseFrequencyPlan> frequency_plan(const CoarseBulkGeometry& geometry,
+                std::size_t workspaces, std::size_t) const override {
+            constexpr std::size_t device_lease = std::size_t{2} << 30;
+            return CoarseFrequencyPlan{geometry.frequency_tile_width, workspaces, device_lease,
+                device_local_ ? 0 : device_lease, {}, device_local_ ? device_lease : 0};
+        }
+        BulkReceipt receipt() const override { return {}; }
+    private:
+        bool device_local_;
+    };
+    backend_config.bulk_backend = std::make_shared<FrequencyWorkspaceBackend>(false);
+    const auto shared_memory = receiver_drift_admission(backend_config, backend_slot, workers);
+    backend_config.bulk_backend = std::make_shared<FrequencyWorkspaceBackend>(true);
+    const auto device_memory = receiver_drift_admission(backend_config, backend_slot, workers);
+    const auto same_drift_geometry = [](const DriftPlan& a, const DriftPlan& b) {
+        return a.workspace_bytes && a.workspace_bytes == b.workspace_bytes && a.stage_workers == b.stage_workers &&
+            a.sample_stride == b.sample_stride && a.nfft == b.nfft && a.slope_budget == b.slope_budget &&
+            a.frequency_radius == b.frequency_radius && a.slope_radius == b.slope_radius && a.status == b.status;
+    };
+    check(same_drift_geometry(shared_memory.ordinary, device_memory.ordinary) &&
+          same_drift_geometry(shared_memory.line, device_memory.line) &&
+          device_memory.workspace_bytes < shared_memory.workspace_bytes &&
+          device_memory.workspace_bytes > device_memory.ordinary.workspace_bytes &&
+          device_memory.workspace_bytes > device_memory.line.workspace_bytes &&
+          device_memory.ordinary.device_envelope_bytes <= device_memory.workspace_bytes &&
+          device_memory.line.device_envelope_bytes <= device_memory.workspace_bytes,
+          "device-local accounting reduced admissible drift or recharged the device lease to host memory");
     if (!active) return;
     const auto& config = profile.receiver;
     const auto slot = make_receiver_slot_plan(profile.waveform, config, 12);
@@ -1513,8 +1551,10 @@ void long_calm_drift_owner_lease(bool active = true, std::uint8_t bit = 0, bool 
         const auto difference = std::max(std::abs(cached.drift_bit_evidence[0] - recomputed.drift_bit_evidence[0]),
             std::abs(cached.drift_bit_evidence[1] - recomputed.drift_bit_evidence[1]));
         check(difference < 1e-9 && cached.drift_timing_atoms == recomputed.drift_timing_atoms &&
-              cached.drift_slopes == recomputed.drift_slopes && cached.drift_coherent_timing_fft_rows > 0,
-              "cached zero-slope frontiers must preserve recomputed native likelihood and selected public atoms");
+              cached.drift_slopes == recomputed.drift_slopes && cached.drift_retained_digest == recomputed.drift_retained_digest &&
+              cached.drift_coherent_timing_fft_rows > 0 &&
+              cached.drift_coherent_timing_fft_rows == recomputed.drift_coherent_timing_fft_rows,
+              "cached drift rank work must preserve recomputed native likelihood, proposals and selected public atoms");
         check(cached.drift_render_seconds > 0 && cached.drift_ridge_seconds > 0 &&
               cached.drift_ridge_search_seconds > 0 && cached.drift_slope_seconds > 0 &&
               cached.drift_exact_seconds > 0, "every executed drift phase must report its lane-summed time");

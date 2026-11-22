@@ -977,7 +977,7 @@ struct StreamingChannel::Impl {
                 (random_selective ? DispersiveSelectivePerturbation::maximum_random_working_bytes() : 0) : 0);
         // Lanes never decide whether a channel fits: one that only fits
         // without their rows and process copies keeps its reader alone.
-        constexpr std::size_t workspace_limit = kHistoryLimitBytes + 1024 * 1024;
+        constexpr auto workspace_limit = StreamingChannel::maximum_working_bytes;
         const auto source_bytes = explicit_source ? src.working_bytes : 0;
         const auto fits = [&](std::size_t block, std::size_t readers) {
             return fixed_bytes <= workspace_limit && block <= workspace_limit - fixed_bytes &&

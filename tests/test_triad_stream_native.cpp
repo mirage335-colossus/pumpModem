@@ -1,5 +1,6 @@
 #include "triad_stream_backend.hpp"
 #include "triad_stream_resources.hpp"
+#include "triad_receiver_bulk.hpp"
 #include "triad_receiver_executor.hpp"
 
 #include <algorithm>
@@ -704,6 +705,85 @@ void idle_pool_stacks_remain_reserved() {
     check(stream.push(next, extra)==StreamPushResult::accepted, "restored memory did not admit the unchanged input");
 }
 
+void simulation_borrows_only_idle_helpers() {
+    constexpr std::size_t mib = 1024*1024;
+    const auto p = profile();
+    const auto o = options();
+    std::size_t footprint = 8*mib;
+    std::atomic<bool> release = false;
+    std::atomic<unsigned> jobs = 0, scorer_lanes = 0;
+    auto score = [&](const ReceiverConfig& c, const ReceiverSlotPlan& plan, const Crypto&,
+        auto, auto, unsigned workers, std::size_t, std::stop_token stop,
+        receiver_detail::ReceiverExecutor* executor) {
+        scorer_lanes = workers;
+        while (!release && !stop.stop_requested()) std::this_thread::sleep_for(1ms);
+        executor->parallel(plan.index, workers, workers, stop, [](unsigned, std::size_t, std::stop_token) {});
+        return row(c, plan, SlotDecision::quiet);
+    };
+    auto stream = StreamReceiverFixture::make_with_executor(p, receiver(p), Crypto::amateur(), o, workspace, score,
+        decode_short_message, {}, [&] { return footprint; });
+    const auto initial = stream.report().peak_reserved_bytes;
+    const auto stack = stream_worker_stack_bytes()+1024;
+    footprint = *o.memory_limit_bytes-(initial-footprint)-stack;
+    const auto job = [&](std::size_t) { ++jobs; };
+    check(!stream.try_simulation_jobs(*o.workers, job) && !jobs && !stream.report().peak_executor_workers,
+          "simulation started unadmitted helper stacks");
+    footprint = 8*mib;
+    check(stream.try_simulation_jobs(*o.workers, job) && jobs==*o.workers,
+          "idle simulation wave did not finish every job");
+    const auto lent = stream.report();
+    check(lent.peak_executor_workers==*o.workers-1 && lent.peak_reserved_bytes==initial+(*o.workers-1)*stack,
+          "simulation helpers did not share the receiver's bound or reserve their stacks");
+
+    feed(stream, p.slot(0).observation.stop);
+    check(stream.report().active_owners==1 && !stream.try_simulation_jobs(*o.workers, job) && jobs==*o.workers,
+          "simulation borrowed workers while a slot owned DSP work");
+    release = true;
+    const auto scored = stream.resume(true);
+    check(scored.next_public_slot==1 && scorer_lanes==*o.workers && scored.peak_executor_workers==*o.workers,
+          "simulation borrowing reduced the receiver's full worker budget");
+}
+
+void simulation_workspace_checks_all_windows() {
+    auto config = profile().config();
+    config.clock_bound_ppm = 5'000;
+    config.capture_lead_seconds = .25;
+    config.capture_trail_seconds = .5;
+    const PublicProfile p(config);
+    auto c = receiver(p);
+    c.clock_bound_ppm = config.clock_bound_ppm;
+    auto o = options();
+    o.memory_limit_bytes = 512U * 1024 * 1024;
+    o.maximum_pending_messages = 1;
+    const auto growth = StreamingChannel::maximum_working_bytes;
+    check(stream_simulation_workspace_fits(p, c, o, NativeMessageProfile{}, 0, growth),
+          "simulation workspace fixture's first public window was not admitted");
+    check(!stream_simulation_workspace_fits(p, c, o, NativeMessageProfile{}, 10'000'000, growth),
+          "simulation workspace ignored late-calendar observation growth");
+    check(!stream_simulation_workspace_fits(p, c, o, NativeMessageProfile{}, 0, growth,
+              std::chrono::steady_clock::time_point::min()),
+          "simulation workspace ignored an expired optional planning budget");
+    check(stream_simulation_workspace_fits(p, c, o, NativeMessageProfile{}, 2, growth),
+          "simulation workspace fixture's three public windows did not fit");
+
+    class InteriorWorkspaceBackend final : public receiver_detail::ReceiverBulkBackend {
+    public:
+        std::unique_ptr<receiver_detail::FineBulk> make_fine(double, double) override { return {}; }
+        std::unique_ptr<receiver_detail::CoarseBulk> make_coarse(double, double) override { return {}; }
+        std::size_t fine_host_bytes(std::size_t, std::size_t) const override { return 0; }
+        std::size_t coarse_host_bytes(std::size_t, std::size_t, std::size_t) const override {
+            // The preflight checks the endpoints, then the interior window.
+            return ++quotes == 3 ? std::size_t{1} << 30 : 0;
+        }
+        receiver_detail::BulkReceipt receipt() const override { return {}; }
+        mutable unsigned quotes = 0;
+    };
+    auto backend = std::make_shared<InteriorWorkspaceBackend>();
+    c.bulk_backend = backend;
+    check(!stream_simulation_workspace_fits(p, c, o, NativeMessageProfile{}, 2, growth) && backend->quotes == 3,
+          "simulation workspace ignored an interior peak above the endpoint quotes");
+}
+
 void inter_window_gap_and_rearm() {
     const auto p = profile();
     const auto score = [](const ReceiverConfig& c, const ReceiverSlotPlan& plan, const Crypto&,
@@ -954,6 +1034,8 @@ int main() {
         stage_background_overlaps_urgent_leaf();
         stage_urgent_priority_and_failure();
         idle_pool_stacks_remain_reserved();
+        simulation_borrows_only_idle_helpers();
+        simulation_workspace_checks_all_windows();
         inter_window_gap_and_rearm();
         rejected_episode_requires_two_contiguous_quiet_slots();
         application_growth_keeps_live_dsp_reservations();

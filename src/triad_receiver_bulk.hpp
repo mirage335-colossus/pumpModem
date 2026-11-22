@@ -149,6 +149,12 @@ enum class StageNative : std::uint8_t {
 struct StageDeviceReceipt {
     std::uint64_t sessions = 0, forward_ffts = 0, inverse_ffts = 0, fft_row_stages = 0, score_rows = 0;
     std::uint64_t planned_calls = 0, declined_calls = 0, native_fallbacks = 0, upload_bytes = 0;
+    // Successful calls count only after validated host readback. Submission
+    // timings describe submitted work, including results later rejected.
+    std::uint64_t device_calls = 0, download_bytes = 0, submissions = 0, timed_submissions = 0;
+    std::uint64_t batch_width = 0;
+    double mutex_wait_seconds = 0, submission_seconds = 0, device_seconds = 0;
+    double plan_seconds = 0, shader_seconds = 0;
     std::string decline_reason, fallback_reason;
     // The device class on which automatic selection admits this family.
     bool qualified_device = false;
@@ -559,6 +565,10 @@ struct CoarseBulkGeometry {
 struct CoarseFrequencyPlan {
     std::size_t tile_width = 0, workspace_batch = 0, device_workspace_bytes = 0, host_workspace_bytes = 0;
     std::string_view native_fallback_reason;
+    // Device-local bytes formerly included in the host envelope. Native
+    // drift may still use the scratch its geometry admitted under that
+    // envelope. The stage reserves only the host memory it actually needs.
+    std::size_t device_only_workspace_bytes = 0;
 };
 
 // Public changing-channel frequency/lag geometry. The observation spectra

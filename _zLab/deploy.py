@@ -36,6 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent
 REMOTE_DIR = '/workspace/pump-lab'
 LIVE_REMOTE_DIR = '/workspace/pump-lab-live'
 DEFAULT_TIMEOUT = 3600
+BUILD_MODES = ('cpu', 'cuda', 'vulkan', 'gpu')
 _STAGE_MESSAGES = {
     b'upload': 'Uploading the source bundle to RunPod…',
     b'unpack': 'Verifying and unpacking the RunPod source bundle…',
@@ -54,7 +55,7 @@ _STAGE_MESSAGES = {
 REMOTE_BUILD = r'''set -eu
 mode=$2
 profile=$3
-case "$mode" in cpu|cuda|gpu) ;; *) exit 2 ;; esac
+case "$mode" in cpu|cuda|vulkan|gpu) ;; *) exit 2 ;; esac
 case "$profile" in
   simulation) directory=/workspace/pump-lab ;;
   live) directory=/workspace/pump-lab-live ;;
@@ -68,7 +69,8 @@ set -- -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DDATAPUMP_BUILD_GUI=OFF \
   -DDATAPUMP_COMPILER_CACHE=ON -DDATAPUMP_TRIAD_VULKAN=OFF
 if [ "$mode" != cpu ]; then
   # A noninteractive SSH shell can omit the image's CUDA bin directory.
-  # Use one toolkit for nvcc, Torch's FindCUDA and CMake's CUDA language.
+  # CUDA uses this toolkit for Torch and CMake. Vulkan can use nvcc to
+  # embed the optional Blackwell OpenCL program without loading Torch.
   cuda_root=${CUDAToolkit_ROOT:-${CUDA_HOME:-${CUDA_PATH:-}}}
   if [ -n "${CUDACXX:-}" ]; then
     nvcc=$(command -v "$CUDACXX" || true)
@@ -86,6 +88,8 @@ if [ "$mode" != cpu ]; then
     echo "CUDA build requires nvcc. Set CUDACXX or CUDA_HOME to the installed toolkit." >&2
     exit 78
   fi
+fi
+if [ "$mode" = cuda ] || [ "$mode" = gpu ]; then
   requested_mode=$mode
   mode=vulkan
   if [ -x "$nvcc" ] && python3 -c 'import torch; assert torch.cuda.is_available() and torch.compiled_with_cxx11_abi()'; then
@@ -98,7 +102,7 @@ if [ "$mode" != cpu ]; then
       echo "CUDA worker discovery failed unexpectedly." >&2
       exit 1
     elif [ "$requested_mode" = cuda ]; then
-      echo "CUDA device discovery failed inside the worker's no-socket boundary. Use --mode gpu for a new deployment to allow Vulkan." >&2
+      echo "CUDA device discovery failed inside the worker's no-socket boundary. Use --mode gpu or --mode vulkan for a new Vulkan-capable deployment." >&2
       exit 78
     fi
   elif [ "$requested_mode" = cuda ]; then
@@ -388,7 +392,7 @@ REMOTE_DEPLOY = r'''import fcntl, hashlib, json, os, re, stat, subprocess, sys, 
 from pathlib import Path
 
 digest, mode, profile, size_text = sys.argv[1:]
-if not re.fullmatch('[a-f0-9]{64}', digest) or mode not in ('cpu','cuda','gpu') or profile not in ('simulation','live'):
+if not re.fullmatch('[a-f0-9]{64}', digest) or mode not in ('cpu','cuda','vulkan','gpu') or profile not in ('simulation','live'):
     raise SystemExit('Invalid deployment request')
 size = int(size_text)
 if not 0 < size <= 256 * 1024 * 1024:
@@ -443,9 +447,14 @@ else:
         previous = read_json('.deployment.json')
     except FileNotFoundError:
         raise SystemExit('Existing deployment directory is unmanaged. Use a fresh pod for automatic deployment.')
-    legacy_builder = '7c4ac0b50ceca91390fc881c428d3838310dac6c247dd561f2ec12163c901cd5'
-    legacy_request = (previous.get('source') == digest and previous.get('mode') == mode and
-                      previous.get('profile') == profile and previous.get('builder') == legacy_builder)
+    # These builders can resume their existing modes with the same source
+    # and profile. Neither could produce an explicit Vulkan deployment.
+    legacy_builders = (
+        '7c4ac0b50ceca91390fc881c428d3838310dac6c247dd561f2ec12163c901cd5',
+        '200bce2484affd29702fe15275135bdbe5b196e7458830204c05604505eacdfc',
+    )
+    legacy_request = (mode != 'vulkan' and previous.get('source') == digest and previous.get('mode') == mode and
+                      previous.get('profile') == profile and previous.get('builder') in legacy_builders)
     if previous != request and not legacy_request:
         raise SystemExit('Existing deployment uses different source or build settings. Use a fresh pod.')
     if legacy_request:
@@ -749,8 +758,8 @@ def deploy(host, user, port, known_hosts, *, mode='cpu', profile='simulation', i
     still owns termination of the pod.
     """
     host, user, options = _connection(host, user, port, known_hosts, identity)
-    if mode not in ('cpu', 'cuda', 'gpu'):
-        raise ValueError('Build mode must be cpu, cuda or gpu')
+    if mode not in BUILD_MODES:
+        raise ValueError('Build mode must be cpu, cuda, vulkan or gpu')
     if profile not in ('simulation', 'live'):
         raise ValueError('Build profile must be simulation or live')
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
@@ -798,8 +807,8 @@ def main(argv=None):
     parser.add_argument('--port', type=int, required=True)
     parser.add_argument('--known-hosts', required=True, help='file containing the independently verified SSH host key')
     parser.add_argument('--identity', help='optional local SSH private-key path')
-    parser.add_argument('--mode', choices=('cpu', 'cuda', 'gpu'), default='cpu',
-                        help='gpu selects a backend compatible with the native worker sandbox')
+    parser.add_argument('--mode', choices=BUILD_MODES, default='cpu',
+                        help='gpu selects a compatible backend. cuda and vulkan require their named backend')
     parser.add_argument('--profile', choices=('simulation', 'live'), default='simulation',
                         help='worker profile; live audio is experimental and separately unqualified')
     parser.add_argument('--timeout', type=float, default=DEFAULT_TIMEOUT,

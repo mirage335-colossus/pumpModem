@@ -3,6 +3,7 @@
 #include "datapump/triad_message_receiver.hpp"
 #include "datapump/triad_stream.hpp"
 
+#include <functional>
 #include <memory>
 #include <optional>
 
@@ -91,6 +92,11 @@ public:
     ~CompleteStreamReceiver();
     CompleteStreamReceiver(const CompleteStreamReceiver&) = delete;
     CompleteStreamReceiver& operator=(const CompleteStreamReceiver&) = delete;
+
+    // Borrow idle executor helpers for a simulation wave on the control thread.
+    // False leaves every job to the caller. A started wave runs to completion
+    // or propagates the first failure after its running jobs have stopped.
+    bool try_simulation_jobs(std::size_t count, const std::function<void(std::size_t)>& job);
 
     // Retry the unchanged chunk after backpressure. An empty mask means all
     // supplied samples are valid. A bounded coordinate gap is marked erased.

@@ -214,7 +214,9 @@ public:
 
     bool direct_ranks(const GainRankRequest& request, std::span<double> direct_totals, std::span<float> audit,
                       StageDeviceWork& work, std::stop_token stop) override {
+        const auto lock_started = Clock::now();
         std::lock_guard lock(mutex_);
+        pending_mutex_wait_seconds_ += std::chrono::duration<double>(Clock::now() - lock_started).count();
         require(!released_, "a released Robust Vulkan gain rank session has no device work");
         const auto lags = shape_.lags, cells = 2 * lags, block_rows = shape_.block_rows;
         require(direct_totals.size() == cells && audit.size() % cells == 0 &&
@@ -264,7 +266,12 @@ public:
         const auto y_max = largest(request.observation);
         const std::array t_max{largest(request.direct_columns[0]), largest(request.direct_columns[1])};
         const auto fallback = [&](StageReason reason) {
-            context_.shared->record_stage_fallback(StageFamily::gain_rank, reason, false);
+            BulkReceipt delta;
+            delta.vulkan_gain_rank.native_fallbacks = 1;
+            delta.vulkan_gain_rank.fallback_reason = stage_reason_text(StageFamily::gain_rank, reason);
+            delta.vulkan_gain_rank.mutex_wait_seconds = pending_mutex_wait_seconds_;
+            pending_mutex_wait_seconds_ = 0;
+            context_.account(std::move(delta));
             return false;
         };
         if (!y_max || !t_max[0] || !t_max[1]) return fallback(StageReason::nonfinite_input);
@@ -407,6 +414,11 @@ public:
         stage_receipt.fft_row_stages = done.fft_row_stages;
         stage_receipt.score_rows = done.score_rows;
         stage_receipt.upload_bytes = done.upload_bytes;
+        stage_receipt.device_calls = 1;
+        stage_receipt.download_bytes = done.download_bytes;
+        stage_receipt.batch_width = layout_.batch;
+        stage_receipt.mutex_wait_seconds = pending_mutex_wait_seconds_;
+        pending_mutex_wait_seconds_ = 0;
         context_.account(credited);
         credited_ = true;
         count(work.forward_ffts, done.forward_ffts); count(work.inverse_ffts, done.inverse_ffts);
@@ -462,6 +474,7 @@ private:
     std::unique_ptr<Buffer> observation_, columns_, table_, shifts_, window_, products_, temporary_, partials_, totals_;
     std::unique_ptr<Pipeline> columns_kernel_, product_kernel_, rank_kernel_, finish_kernel_;
     std::unique_ptr<FftPlan> forward_, inverse_;
+    double pending_mutex_wait_seconds_ = 0;
     bool credited_ = false, released_ = false;
 };
 

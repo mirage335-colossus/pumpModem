@@ -1246,6 +1246,16 @@ Json bulk_json(const BulkReceipt& r) {
         result[prefix + "declined_calls"] = stage.declined_calls;
         result[prefix + "native_fallbacks"] = stage.native_fallbacks;
         result[prefix + "upload_bytes"] = stage.upload_bytes;
+        result[prefix + "device_calls"] = stage.device_calls;
+        result[prefix + "download_bytes"] = stage.download_bytes;
+        result[prefix + "submissions"] = stage.submissions;
+        result[prefix + "timed_submissions"] = stage.timed_submissions;
+        result[prefix + "batch_width"] = stage.batch_width;
+        result[prefix + "mutex_wait_seconds"] = stage.mutex_wait_seconds;
+        result[prefix + "submission_seconds"] = stage.submission_seconds;
+        result[prefix + "device_seconds"] = stage.device_seconds;
+        result[prefix + "plan_seconds"] = stage.plan_seconds;
+        result[prefix + "shader_seconds"] = stage.shader_seconds;
         result[prefix + "decline_reason"] = stage.decline_reason;
         result[prefix + "fallback_reason"] = stage.fallback_reason;
         result[prefix + "qualified_device"] = stage.qualified_device;

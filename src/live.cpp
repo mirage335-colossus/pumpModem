@@ -10,6 +10,7 @@
 #include "live_finite_plan.hpp"
 #include "search_fft.hpp"
 #include "triad_receiver_bulk.hpp"
+#include "triad_stream_resources.hpp"
 
 #include <algorithm>
 #include <array>
@@ -35,8 +36,12 @@ using KeyTag = std::array<std::uint8_t, 32>;
 constexpr std::size_t audio_chunk = 4096, plot_size = 1024, history_size = 32;
 constexpr std::size_t simulation_waveform_size = 2048;
 constexpr auto simulation_preview_period = std::chrono::milliseconds(45);
+constexpr auto simulation_workspace_preflight_budget = std::chrono::milliseconds(100);
 constexpr auto simulation_replay_duration = std::chrono::seconds(3);
 constexpr auto simulation_replay_period = std::chrono::milliseconds(50);
+constexpr std::uint64_t simulation_replay_rows(std::uint32_t rate) {
+    return static_cast<std::uint64_t>(simulation_replay_duration.count()) * rate + simulation_waveform_size - 1;
+}
 // Binding can briefly hold two interval readers. Playback's native provider
 // allowance covers its converter, PCM blocks, and the dated PipeWire ring.
 constexpr std::size_t lazy_bit_workspace = 64 * 1024U;
@@ -273,8 +278,7 @@ struct SimulationReplay {
             lead * rate) * rx_scale);
         first = static_cast<std::uint64_t>(std::clamp(received, 0.L, static_cast<long double>(input_total)));
         // One waveform window of lookahead keeps the last replay frame usable.
-        limit = static_cast<std::size_t>(std::min<std::uint64_t>(input_total - first,
-            static_cast<std::uint64_t>(simulation_replay_duration.count()) * rate + simulation_waveform_size - 1));
+        limit = static_cast<std::size_t>(std::min(input_total - first, simulation_replay_rows(rate)));
     }
 
     std::size_t working_bytes() const {
@@ -375,13 +379,12 @@ std::string message_id(Message& message, std::uint64_t id) {
     return result;
 }
 
-StreamReceiverOptions stream_options(const Settings& settings, std::size_t external_memory) {
+StreamReceiverOptions stream_options(const NativeMessageProfile& message, const StreamReceiverResources& resources,
+                                     std::size_t external_memory) {
     StreamReceiverOptions options;
-    options.memory_limit_bytes = settings.receiver_memory_limit;
-    const auto resources = resolve_stream_receiver_resources(options);
     // Keep one bounded completed GUI receipt outside the stream's own result
     // queue. Capture backpressure resumes when the UI consumes that receipt.
-    const auto presentation = message_profile(settings).content_limit + 64 * 1024U;
+    const auto presentation = message.content_limit + 64 * 1024U;
     if (external_memory > SIZE_MAX - presentation)
         throw Error("Robust presentation workspace exceeds its address range");
     external_memory += presentation;
@@ -393,6 +396,12 @@ StreamReceiverOptions stream_options(const Settings& settings, std::size_t exter
     options.maximum_input_chunk_samples = audio_chunk;
     options.maximum_pending_messages = 1;
     return options;
+}
+
+StreamReceiverOptions stream_options(const Settings& settings, std::size_t external_memory) {
+    StreamReceiverOptions options;
+    options.memory_limit_bytes = settings.receiver_memory_limit;
+    return stream_options(message_profile(settings), resolve_stream_receiver_resources(options), external_memory);
 }
 
 void receiver_ok(const StreamReceiverReport& report) {
@@ -1026,12 +1035,45 @@ struct Session::Impl {
             throw Error("The configured Robust calendar has no room for the draft and two quiet slots");
         auto emission = make_emission(send, prepared, 0, slots, 0, owner, stop);
         auto config = prepared.channel;
-        if (!noise) config.minimum_capture_samples = calendar.slot(end_slot).observation.stop;
+        std::unique_ptr<CompleteStreamReceiver> receiver;
+        std::optional<StreamReceiverResources> resources;
+        std::optional<NativeMessageProfile> message;
+        std::size_t fixed_workspace = 0;
+        if (!noise) {
+            config.minimum_capture_samples = calendar.slot(end_slot).observation.stop;
+            message = message_profile(s);
+            StreamReceiverOptions limits;
+            limits.memory_limit_bytes = s.receiver_memory_limit;
+            resources = resolve_stream_receiver_resources(limits);
+            fixed_workspace = checked_workspace(retained_request_workspace(send), checked_workspace(
+                retained_replay ? retained_replay->working_bytes() : 0, 2 * 1024 * 1024U));
+            if (resources->workers > 1) {
+                try {
+                    const auto optional_workspace = checked_workspace(StreamingChannel::maximum_working_bytes,
+                        simulation_replay_rows(rate) * sizeof(Complex));
+                    const auto options = stream_options(*message, *resources,
+                        checked_workspace(fixed_workspace, optional_workspace));
+                    if (triad::v3::detail::stream_simulation_workspace_fits(calendar, prepared.receiver,
+                            options, *message, end_slot, optional_workspace,
+                            Clock::now() + simulation_workspace_preflight_budget, stop)) {
+                        config.lanes = {resources->workers, [&receiver, stop](std::size_t count, const auto& job) {
+                            if (receiver && receiver->try_simulation_jobs(count, job)) return;
+                            for (std::size_t i = 0; i < count; ++i) {
+                                cancelled(stop);
+                                job(i);
+                            }
+                        }};
+                    }
+                } catch (const Error&) {
+                    // The optional channel bound is conservative. The direct
+                    // reader still gets admission with its actual workspace.
+                }
+            }
+        }
         const auto source = emission.source();
         const auto source_stop = source.geometry.source_samples;
         StreamingChannel channel(source, config);
         std::optional<SimulationReplay> replay;
-        std::unique_ptr<CompleteStreamReceiver> receiver;
         auto tx_slot = calendar.transmit_slot(0);
         const auto segment = new_plot_segment();
         if (!noise) {
@@ -1048,13 +1090,9 @@ struct Session::Impl {
             // Channel working bytes include the waveform source but exclude
             // the prepared text shared by its lazy interval reader and the
             // new presentation slice and retained excerpt beside the receiver.
-            const auto display_workspace = checked_workspace(replay->working_bytes(),
-                retained_replay ? retained_replay->working_bytes() : 0);
-            const auto options = stream_options(s, checked_workspace(channel.report().working_bytes,
-                checked_workspace(retained_request_workspace(send),
-                    checked_workspace(display_workspace, 2 * 1024 * 1024U))));
-            receiver = std::make_unique<CompleteStreamReceiver>(calendar, prepared.receiver,
-                prepared.key, options, message_profile(s));
+            const auto options = stream_options(*message, *resources, checked_workspace(fixed_workspace,
+                checked_workspace(channel.report().working_bytes, replay->working_bytes())));
+            receiver = std::make_unique<CompleteStreamReceiver>(calendar, prepared.receiver, prepared.key, options, *message);
             replay->allocate();
             publish(owner, stop, [&](Snapshot& out) { out.receiver_workers = receiver->report().resources.workers; });
         }

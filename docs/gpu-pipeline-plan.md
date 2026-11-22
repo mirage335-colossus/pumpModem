@@ -23,6 +23,16 @@ page when no phase is left.
   would give at most 2.2×. On the hardest HF receipt the three CPU families
   take 1,687 s of 3,707 s
   ([where the time goes](triad-gpu-optimization.md#where-the-time-goes)).
+  A later automatic Vulkan run on a 13.6-CPU Blackwell host measured
+  88.89 s in segmented timing and 64.96 s in native drift and varying out
+  of 169.48 s. [Bounded attribution](validation.md#vulkan-fine-stage-attribution-and-staging--21-november-2026).
+- A Blackwell command sample puts segmented rank at 42–59% on the 72 Hz/5×
+  geometry and inverse VkFFT at 25–31%. Ranking also takes 69% of the
+  sampled 32,768-row holdout commands. A contiguous tracking layout
+  helped the control by 2–3%, with no measured wide gain in one pair.
+  Separate rank arithmetic and traffic at the target geometry before a new
+  layout or FFT change. [Command profile](validation.md#inside-vulkan-segmented-timing),
+  [paired layout check](validation.md#segmented-tracking-rank-reuse--22-november-2026).
 - The input is a low-rate baseband stream, tens of MB per slot. The data
   derived from it and moved between host and device is hundreds of GB on the
   HF slot. Generating derived data on the device removes that traffic and the
@@ -186,28 +196,6 @@ reorder.
 **Done when** the known answers reproduce. If they do not, stop and report:
 the tree or the device differs from the recorded state.
 
-### Phase 1: measure the device routes (no result changes)
-
-**Why.** The causes of the drift and varying device losses are inferred, not
-measured ([bounds](triad-gpu-optimization.md#what-bounds-the-challenging-slots),
-item 1). Every later phase needs this attribution.
-
-**Steps.**
-1. Add to each family's receipt: device calls, download bytes, seconds
-   waiting on the session mutex, and seconds inside device submissions. For
-   the gain rank add the batch width.
-2. Give stage contexts device timestamps. Only coarse contexts create a
-   timestamp query pool today (`triad_vulkan_core.hpp`). Record device
-   seconds per family.
-3. Record plan-build and shader-compile seconds per family.
-4. Emit all of it from the probe and extend `tools/triad_native.py`.
-
-**Checks.** The gate. New fields are zero on native routes.
-
-**Done when** a 72 Hz/1× device receipt on the Radeon splits each family's
-stage seconds into host render and staging, upload, device time, mutex wait
-and download, within 10% of the stage total.
-
 ### Phase 2: native stages at a large worker count (CPU only)
 
 **Why.** On the 40.8-CPU pod at W = 80 the native signed-lag stage of the
@@ -254,10 +242,11 @@ Take the sub-steps in this order. Run the gate after each.
   `cos`, `exp` or `log`: reduce the argument in FP64 or fixed point and
   evaluate in FP32, as `drift_dechirp` does. Proposal-level only; the exact
   FP64 survivor pass stays on the host.
-- **3d. Exact CPU changes that also help the device route:** cache the
-  survivor slope lists, share the direct-path render between the two
-  Doppler signs, and run both signs' survivor passes concurrently. Each must
-  be bit-identical.
+- **3d. Exact CPU changes:** compare sharing the direct-path render between
+  the two Doppler signs and running both signs' survivor passes concurrently.
+  Each must preserve the exact evidence. The native route already reuses the
+  rank-pass slope lists for surviving timing atoms. An opened device
+  proposal session still evaluates its existing per-call fallback policy.
 - **3e. Optional: the exact FP64 pass on the device.** Only if Phase 1 shows
   the host pass bounds the stage after 3c.
 
@@ -274,9 +263,11 @@ before 3c and record the finding.
 **Why.** Varying fine is 89.9 s of the holdout and 401 s of the HF slot. The
 device route lost: 3.2–3.6 s against 0.18–0.30 s, and 13.2 s against 5.0–5.2 s.
 
-- **4a. Split one host batch into several device calls.** Today a narrow
-  device lease shrinks the host batch, which multiplies executor phases.
-  Keep the host batch and loop device calls inside it.
+- **4a. Split one host batch into several device calls when workspace is
+  binding.** A narrow device lease shrinks the host batch, which multiplies
+  executor phases. Keep the host batch and loop device calls inside it.
+  The measured 72 Hz/5× control used the same 172-block width on both paths.
+  Reserve this change for shapes where a narrower device lease is measured.
 - **4b. Render templates on the device** instead of uploading FP64 templates
   (about 562 GB per HF slot, modeled).
 - **4c. `fp32-template` arithmetic.** It has no kernels and declines as
@@ -372,7 +363,7 @@ Write the plan and pass rules before renting.
 
 | Checkpoint | After | Measure |
 | --- | --- | --- |
-| A | Phases 1 and 2 | Attribution of all three device routes on the 72 Hz/5× control and the holdout, with the new fields. The holdout's coarse remainder (`varying_coarse_seconds`). The large-`W` scaling experiment. Device against native segmented timing on the 72 Hz/1×-class shapes, which could widen the qualified envelope without new code. |
+| A | Phase 2 | The large-`W` scaling experiment and remaining holdout measurements. The [first attribution run](validation.md#vulkan-fine-stage-attribution-and-staging--21-november-2026) resolved the control's major cost and measured the automatic holdout's segmented span. Compare device against native segmented timing on the 72 Hz/1×-class shapes where the additional envelope is useful. |
 | B | Phase 3 | Drift device against native, two alternated pairs, on the 72 Hz/5× control and the holdout. Flip only by the predeclared rule. |
 | C | Phase 4 | The same for varying. |
 | D | Phases 5 and 6 | All routes together; multi-owner backlog; FP4 reach. |
@@ -383,7 +374,10 @@ identical to the reference build, and keep the sanitized summaries under
 
 ## Decision points
 
-- **After checkpoint A,** reorder Phases 3 to 6 by the measured shares:
+- **Use checkpoint A and subsequent traces** to reorder Phases 3 to 6 by the
+  measured shares. The [family receipts](triad-gpu-optimization.md#fine-family-device-attribution)
+  contain overlapping intervals and logical payload counts. An exclusive wall
+  split or bus bandwidth claim needs a trace that observes it.
   - mutex wait dominates → 3a first;
   - upload dominates → 3b, 3c and 4b first;
   - host render dominates → 3c and 4b first;
@@ -391,7 +385,7 @@ identical to the reference build, and keep the sanitized summaries under
     ([levers 5 and 6](triad-gpu-optimization.md#next-levers-in-order)).
 - **If Phase 2 finds a serialization fix,** rerun the device-against-native
   comparison: a faster native stage raises the bar for every device route.
-- **No approval for a pod:** continue the phases that check locally (1, 2,
+- **No approval for a pod:** continue the phases that check locally (2,
   3a, 3b, 3d, 4a, 5, 8), keep automatic selection declined, and list what is
   waiting for a checkpoint.
 - **A phase fails its stop rule:** record the negative finding with numbers,

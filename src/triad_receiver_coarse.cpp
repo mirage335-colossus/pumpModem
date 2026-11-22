@@ -2583,7 +2583,7 @@ constexpr double matched_direct_terms = 26. * 1750 * 1794;
 constexpr double matched_chirp_workers = 24.;
 
 struct WorkspaceQuote {
-    std::size_t total = 0, bulk_host = 0, echo_phase_rows = 0;
+    std::size_t total = 0, bulk_host = 0, excluded_device = 0, echo_phase_rows = 0;
     std::optional<CoarseFrequencyPlan> frequency;
     std::string_view frequency_fallback, lag_fallback;
     bool native_only = false, exact_chirp = false, exact_multi_lag_admitted = false;
@@ -2929,8 +2929,11 @@ WorkspaceQuote scratch_workspace(const Plan& plan, const ReceiverConfig& config,
     // frequency search admits its own.
     const auto segmented_host = bulk_frequency ?
         config.bulk_backend->segmented_host_bytes(device_segmented_shapes(plan, config)) : 0;
-    const auto bulk_host = add(persistent, std::max({legacy, frequency ? frequency->host_workspace_bytes : 0,
-                                                     segmented_host}));
+    const auto device_host = std::max({legacy, frequency ? frequency->host_workspace_bytes : 0, segmented_host});
+    const auto bulk_host = add(persistent, device_host);
+    if (frequency && frequency->device_only_workspace_bytes)
+        quote.excluded_device = std::max(device_host,
+            add(frequency->host_workspace_bytes, frequency->device_only_workspace_bytes)) - device_host;
     // Varying proposals borrow each already-isolated time-domain
     // template before the coherent search consumes it. Its own transform
     // and observation, and one private product/arrival row per live job,
@@ -3430,15 +3433,21 @@ CoarseArrivalPeaks select_coarse_arrivals(std::span<const double> scores, std::s
 
 std::size_t coarse_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
                               AssistanceBound overlapped, MidpointTimingEvaluation midpoint_timing) {
+    return coarse_workspace_bounds(config, slot, workers, overlapped, midpoint_timing).host_bytes;
+}
+
+CoarseWorkspace coarse_workspace_bounds(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
+                                        AssistanceBound overlapped, MidpointTimingEvaluation midpoint_timing) {
     const auto plan = make_plan(config, slot);
     require_coarse(!overlapped.workspace_bytes || defers_frequency_grid(plan, config),
                    "coarse preparation cannot overlap frequency acquisition for this profile");
     const auto quote = scratch_workspace(plan, config, frequency_bound(plan, config), workers, overlapped);
-    if (midpoint_timing == MidpointTimingEvaluation::off) return quote.total;
+    if (midpoint_timing == MidpointTimingEvaluation::off) return {quote.total, add(quote.total, quote.excluded_device)};
     const auto midpoint = midpoint_plan(plan, config, slot, workers, midpoint_timing);
     require_coarse(midpoint.lag_count, "Robust midpoint timing plan is outside supported public geometry");
-    return add(add(quote.total, midpoint.extra_workspace_bytes),
-               gain_device_charge(plan, config, slot, midpoint, quote, workers));
+    const auto host = add(add(quote.total, midpoint.extra_workspace_bytes),
+                          gain_device_charge(plan, config, slot, midpoint, quote, workers));
+    return {host, add(host, quote.excluded_device)};
 }
 
 CoarseMidpointSupport coarse_midpoint_timing_support(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
