@@ -19,7 +19,9 @@ from single or loaded runs; they order work and qualify nothing. Compare
 times only within one record. Then read the [orientation](#orientation),
 [catalog](#strategy-catalog), [eligibility procedure](#eligibility-procedure),
 [strategy generation](#generating-new-strategies), [test recipe](#test-recipe)
-and [per-GPU guidance](#per-gpu-guidance).
+and [per-GPU guidance](#per-gpu-guidance). Untried rearrangements that move
+more of the pipeline onto the GPU are in
+[Concepts to try later](#concepts-to-try-later-move-the-pipeline-onto-the-gpu).
 
 ### Ten facts not to get wrong
 
@@ -981,6 +983,117 @@ code for an unimplemented route (`fp32-template`).
 | GPU whole-grid innovation likelihoods | G | All | Open experiment | State class: FP64 | — |
 | Deterministic CPU/GPU workspace split on Vega | G | Vega slots | Adds the two rates (untried) | Decisions independent of load | Stop if the slot is not faster in all three local pairs |
 | Linear-domain scaled HMM recursion | C | All | About 4× on the Markov part (*modeled*) | Own qualification | — |
+
+## Concepts to try later: move the pipeline onto the GPU
+
+Untried rearrangements, recorded for later work. None is measured as a
+whole. Each must still pass the [eligibility procedure](#eligibility-procedure)
+and the [test recipe](#test-recipe).
+
+**Why consider it.** Several conditions point the same way:
+
+- **Spare SIMT throughput.** The RTX PRO 6000, RTX 5090 and similar parts
+  have about 100–126 TFLOP/s of FP32 and non-Tensor FP16 vector arithmetic
+  ([hardware facts](#hardware-facts-for-decisions); the L40 is also in this
+  class, but check its vendor datasheet before quoting a figure). That
+  capacity is largely idle today: Tensor Core work on the challenging slots
+  is about zero.
+- **The CPU families are slow on the hard slots.** They run at about
+  1.7e10 FLOP/s on the HF slot and leave CPUs idle during device stages:
+  about 3.8 of 13 CPUs were busy on the HF slot.
+- **Transfers dwarf the input.** The receiver's input is a low-rate
+  baseband stream: the 36 Hz/10× holdout is about 10.9 million samples at
+  6 kHz over 1,812 s, tens of MB
+  (`local-evidence/lowrate-2mw-runpod/100mw-36hz10x-target-m12p9897-seed940600-bit0.json`).
+  The work derived from it is far larger:
+  - the HF slot uploaded 249 GB of banks and templates;
+  - a device varying route at HF would upload about 562 GB of FP64
+    templates (*modeled*);
+  - on the Radeon's 72 Hz/1× slot, the explicit drift route uploaded
+    117.7 MB of host-rendered products and the varying route 564 MB.
+
+Generating derived data where it is consumed removes most of this traffic,
+along with the per-call round trips that made the drift and varying device
+routes lose.
+
+**Concepts:**
+
+1. **A device-resident slot context.** Upload the raw input once per slot,
+   or stream it as it arrives. Keep these on the device across the coarse
+   and fine stages: channelized and whitened series, keyed template banks,
+   spectra, power tables and intermediate frontiers. The host keeps
+   scheduling, ordered commits, the codec and physical completion.
+
+   Today each family session uploads its own inputs:
+   - `src/triad_vulkan_core.*` holds the shared device and leases;
+   - `src/triad_vulkan_{gain,drift,varying}.cpp` hold the families;
+   - the OpenCL route is in `src/triad_opencl_*`;
+   - the CUDA route is `TensorCoarse` and `TensorFine` in
+     `src/triad_tensor_*`.
+
+   A context needs one lease covering its lifetime and an explicit
+   multi-owner policy, because several slot owners share one device.
+2. **Generate derived data on the device.** Candidates:
+   - keyed template bank synthesis, which already exists for the dense FP4
+     coarse search; extend it to varying-passband and midpoint-gain banks,
+     the only path by which the existing FP4 kernel can reach a challenging
+     slot ([opportunity map](#tensor-core-opportunity-map-for-the-challenging-slots));
+   - drift template rendering and products;
+   - varying template rendering;
+   - cubic warps, Doppler rotations and observation channelization.
+
+   Use FP32 per-row arithmetic with FP64 or integer phase and coordinates,
+   as the `fp32-rn4-v1` mapper does.
+3. **Device stage graphs instead of host calls.** Submit one batched or
+   persistent workload per stage, with device-side work queues over atoms,
+   blocks and lanes, instead of one host call per atom or block batch. The
+   drift session serializes every lane's calls, and the varying route
+   multiplies small batches; both are per-call overhead.
+4. **Use SIMT and Tensor units at the same time.** Run FFTs, rendering,
+   ridge sums and per-row math in FP32 or FP16 SIMT, and contractions such
+   as frontier products and small-n DFT-to-modes GEMMs on Tensor Cores. Put
+   them on separate queues or streams so they overlap. Today the Vulkan core
+   has one compute queue with global barriers.
+5. **Keep the exact parts on the device too.** FP64 runs at 1/64 rate,
+   about 1.8–2 TFLOP/s on the RTX PRO 6000. That still covers the three CPU
+   families' FP64 arithmetic at HF in roughly 15–30 s (*modeled*), and it
+   removes the round trips for certification, rescoring and evidence.
+   Exactness classes still apply: the gain rank stays E1.
+6. **Produce analysis data on the device.** Compute diagnostics on the
+   device and transfer summaries rather than raw intermediates:
+   - evidence components, per-block statistics, spectra, histograms and
+     ridge maps.
+
+   Full dumps, if wanted, go behind an explicit option with charged
+   workspace.
+7. **A GPU simulator for backlog and test throughput.** The CPU simulator
+   took 404 s of the HF run. A counter-based generator such as Philox for
+   noise and the channel model on the device would cut that. It changes
+   every capture hash, so do it together with another hash-changing change.
+   Keep the native simulator as the reference with a statistical
+   cross-check, and use `--capture-cache` meanwhile.
+8. **Overlap CPU and GPU work.** Run ready fine-family CPU work beside the
+   device segmented stage, within the bounded executor and ordered commits,
+   so CPUs are not idle while the device works and the device is not idle
+   while the CPU works.
+9. **One kernel set, chosen per stage.** CUDA and Vulkan/OpenCL builds
+   currently get different stage sets
+   ([what automatic runs](triad-gpu-optimization.md#what-automatic-selection-runs)).
+   Unify the kernels, or select a backend per stage.
+
+**Constraints that do not change.** Every public hypothesis, the configured
+calendar and keyed ordinals, physical quiet-slot completion, `W = 2*H`, a
+charged lease for every byte of device and host memory, explicit fallback
+reporting, and the [exactness classes](#exactness-classes).
+
+**Where to start.**
+1. Measure first: per-family device time and upload bytes, CPU busy
+   fraction, `varying_coarse_seconds` on the holdout
+   ([lever 1](triad-gpu-optimization.md#next-levers-in-order)).
+2. Prototype the slot context on one family. Drift is the obvious one:
+   render, products, ridge and slopes on the device, with FP64 evidence.
+3. Time it on the 36 Hz/10× holdout and the 72 Hz/5× control against the
+   native stage, in one binary.
 
 ## Generating new strategies
 
