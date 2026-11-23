@@ -197,6 +197,7 @@ std::vector<std::string> scenario_names() {
             "vlf-varying-clean", "vlf-phase-wander-hour", "groundwave-1mhz",
             "groundwave-1mhz-sea", "groundwave-1mhz-night", "groundwave-30mhz",
             "groundwave-30mhz-land", "hf-quiet", "hf-disturbed", "hf-transition", "hf-nvis-disturbed", "hf-drm6",
+            "hf-midlatitude-moderate", "hf-atlantic-eastbound", "hf-atlantic-westbound",
             "hf-watterson-i1", "hf-watterson-i3", "hf-ox-split", "hf-ox-cancellation", "hf-trough-static", "hf-trough-phase",
             "hf-mode-transition", "hf-vertical-eikonal-static", "hf-vertical-eikonal-motion", "hf-vertical-eikonal-holdout",
             "hf-eikonal-holdout-a", "hf-eikonal-holdout-b", "hf-eikonal-compound", "hf-eikonal-cfo-edge",
@@ -410,6 +411,13 @@ Scenario make_scenario(const std::string& id) {
         return ground(id, 30e6, id == "groundwave-30mhz");
     if (id == "hf-quiet") return hf(id, .0005, .1);
     if (id == "hf-disturbed") return hf(id, .007, 30.);
+    if (id == "hf-midlatitude-moderate") {
+        auto s = hf(id, .001, .5);
+        s.evidence = "standard statistical comparison from ITU-R F.1487 Annex 3 midlatitude moderate; native finite Gaussian approximation";
+        s.provenance = "ITU-R F.1487 Annex 3 midlatitude moderate profile; Fable-5.2/83 section 3; canonical fixed-grid-gaussian-v1";
+        s.assumptions = "10 MHz carrier; two independent equal-power zero-mean proper-complex Gaussian taps at 0 and 1 ms. Each tap has a Gaussian Doppler power-spectrum 2-sigma width D=0.5 Hz and zero residual centroid, matching the selected Annex 3 midlatitude-moderate parameters. This width is not a deterministic frequency bound. Continuous finite-FIR native realization is a statistical approximation, not a field capture or conformance test. Conditional skywave C/N0 is 20 dB-Hz before fading; no per-record signal-power normalization. No natural occurrence probability or long-episode empirical stationarity is implied.";
+        return s;
+    }
     if (id == "hf-transition") {
         auto s = hf(id, .002, 1.);
         s.channel.fade = {.first_seconds = 120, .stop_seconds = 240,

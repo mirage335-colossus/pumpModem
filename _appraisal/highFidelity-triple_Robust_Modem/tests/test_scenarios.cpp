@@ -519,6 +519,17 @@ int main() {
         }
         near(appraisal::make_scenario("hf-disturbed").channel.paths[1].delay_seconds, .007, 0., "HF delay");
         near(appraisal::make_scenario("hf-disturbed").channel.paths[0].gaussian_width_2sigma_hz, 30., 0., "HF2sigma");
+        const auto hf_moderate = appraisal::make_scenario("hf-midlatitude-moderate");
+        require(hf_moderate.channel.paths.size() == 2, "midlatitude moderate F.1487 path count");
+        near(hf_moderate.channel.paths[0].delay_seconds, 0., 0., "midlatitude moderate first delay");
+        near(hf_moderate.channel.paths[1].delay_seconds, .001, 0., "midlatitude moderate second delay");
+        near(hf_moderate.channel.paths[0].power, .5, 0., "midlatitude moderate first power");
+        near(hf_moderate.channel.paths[1].power, .5, 0., "midlatitude moderate second power");
+        near(hf_moderate.channel.paths[0].gaussian_width_2sigma_hz, .5, 0., "midlatitude moderate first width");
+        near(hf_moderate.channel.paths[1].gaussian_width_2sigma_hz, .5, 0., "midlatitude moderate second width");
+        near(hf_moderate.reference_cn0_db_hz, 20., 0., "midlatitude moderate conditional reference C/N0");
+        require(hf_moderate.evidence.find("F.1487 Annex 3 midlatitude moderate") != std::string::npos,
+                "midlatitude moderate fixture retains its standard-profile attribution");
         require(appraisal::make_scenario("hf-transition").channel.fade.stop_seconds >
                 appraisal::make_scenario("hf-transition").channel.fade.first_seconds, "HF transition missing");
         gaussian_covariance_checks(.1);

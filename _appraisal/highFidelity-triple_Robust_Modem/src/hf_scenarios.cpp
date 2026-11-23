@@ -65,6 +65,62 @@ Scenario nvis_disturbed() {
     return scenario;
 }
 
+Scenario atlantic_route(const std::string& id) {
+    const bool eastbound = id == "hf-atlantic-eastbound";
+    auto scenario = base_hf(id);
+    scenario.channel.rf_hz = 12e6;
+    scenario.channel.paths.reserve(3);
+
+    // A deliberately compact synthetic tapped link, not a ray trace: the
+    // same three path powers, delays and Doppler widths are used in both
+    // directions. Only endpoint residual-reference and noise assumptions
+    // differ by direction.
+    constexpr std::array<double, 3> relative_delay_seconds{0., .001, .003};
+    constexpr std::array<double, 3> power{.55, .30, .15};
+    constexpr std::array<double, 3> doppler_2sigma_hz{.5, .75, 1.};
+    constexpr double bulk_geometric_delay_seconds = .0178;
+    const double endpoint_residual_hz = eastbound ? .15 : -.15;
+    for (std::size_t i = 0; i < power.size(); ++i) {
+        Path path;
+        path.power = power[i];
+        path.delay_seconds = bulk_geometric_delay_seconds + relative_delay_seconds[i];
+        path.residual_doppler_hz = endpoint_residual_hz;
+        path.gaussian_width_2sigma_hz = doppler_2sigma_hz[i];
+        scenario.channel.paths.push_back(path);
+    }
+
+    scenario.bounds.arrival_low_seconds = .017;
+    scenario.bounds.arrival_high_seconds = .022;
+    scenario.bounds.spread_seconds = .003;
+    scenario.bounds.doppler_width_hz = 1.;
+    scenario.bounds.atmospheric_hz = std::abs(endpoint_residual_hz) + 3.;
+    // These C/N0 references are independent-noise test settings, not a
+    // geographic link-budget prediction. The runner supplies independent
+    // white receiver noise at the corresponding reference level.
+    scenario.reference_cn0_db_hz = eastbound ? 18. : 16.;
+    scenario.evidence = "synthetic reciprocal multi-hop HF appraisal fixture; engineering assumptions only";
+    scenario.provenance = "Spherical-Earth virtual-height sketch and ITU-R P.533-14 §5.2 as propagation context; no route measurement or P.533 channel realization";
+    scenario.assumptions =
+        "12 MHz design carrier; synthetic Boston Logan (KBOS) to Plymouth, southwest England (EGHD) route, "
+        "approximately 5,100 km great-circle distance. Two- and three-F-layer-hop geometries are represented "
+        "only by an assumed 17.8 ms bulk vacuum-like arrival anchor, with 0/1/3 ms excess-delay taps and "
+        "normalized powers .55/.30/.15; a spherical Earth of radius 6,371 km and 250-300 km virtual reflection "
+        "heights motivate this rough scale, not the exact tap set. The reciprocal direction reuses those exact "
+        "path powers, delays, and Gaussian Doppler widths (.5/.75/1.0 Hz 2-sigma); a common endpoint residual "
+        "reference offset/C/N0 pair of +0.15 Hz / 18 dB-Hz eastbound and -0.15 Hz / 16 dB-Hz westbound "
+        "are separately declared engineering test conditions, not measured direction asymmetries. The receiver "
+        "arrival search interval is 17-22 ms and the maximum excess-delay allowance is 3 ms. Three times the "
+        "largest Gaussian 2-sigma width plus the residual offset gives the 3.15 Hz atmospheric search allowance; "
+        "this is not a hard spectral-support claim. Noise is independent white receiver noise at the selected "
+        "reference C/N0; no colored/line noise, real route link budget, measured ionosphere, seasonal/time-of-day "
+        "condition, endpoint oscillator, occurrence probability, or route validation is implied. The scenario "
+        "keeps the canonical IndependentApskV2, FEC-off 36 Hz / 16 s / 1920 sample/s reference waveform; "
+        "exercise payload candidates HELLO or A at rate=36/default through the caller. Real propagation direction, "
+        "activity, season, hour, endpoint "
+        "equipment and noise remain unknown.";
+    return scenario;
+}
+
 Scenario drm6() {
     auto scenario = base_hf("hf-drm6");
     constexpr double unnormalized_power_sum = 1.31640625;
@@ -921,6 +977,8 @@ Scenario native_vector_two_hop_chain(const std::string& id) {
 } // namespace
 
 std::optional<Scenario> make_additional_hf_scenario(const std::string& id) {
+    if (id == "hf-atlantic-eastbound" || id == "hf-atlantic-westbound")
+        return atlantic_route(id);
     if (id == "hf-gannon-1700" || id == "hf-gannon-2000" || id == "hf-gannon-2000-late")
         return gannon_observed_voltage(id);
     if (id == "hf-fullwave-reflection") return fullwave_reflection();

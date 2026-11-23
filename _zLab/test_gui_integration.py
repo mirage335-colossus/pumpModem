@@ -465,18 +465,23 @@ class TkControllerIntegration(unittest.TestCase):
         self.assertEqual(self.provider.created[0]['cloud'], 'COMMUNITY')
         self.assertEqual(self.controller.state.read()[0]['cloud'], 'COMMUNITY')
 
-    def test_default_cpu_selection_requotes_and_creates_the_largest_count(self):
-        cpu = {'id': 'large-cpu', 'vcpu': {'min': 2, 'max': 64}, 'ramGbPerVcpu': 4,
-               'price': {'securePerVcpu': 0.0625}}
-        self.provider.cpus = [cpu]
-        self.provider.cpus_by_count = {32: [dict(cpu, availability='HIGH')],
-                                       64: [dict(cpu, availability='LOW')]}
+    def test_default_cpu_selection_prefers_cpu5_and_creates_with_36_hour_deadline(self):
+        cpu5 = {'id': 'cpu5g', 'vcpu': {'min': 2, 'max': 32}, 'ramGbPerVcpu': 4,
+                'price': {'securePerVcpu': 0.10}}
+        cpu3 = {'id': 'cpu3g', 'vcpu': {'min': 2, 'max': 64}, 'ramGbPerVcpu': 4,
+                'price': {'securePerVcpu': 0.0625}}
+        self.provider.cpus = [cpu3, cpu5]
+        self.provider.cpus_by_count = {
+            32: [dict(cpu3, availability='HIGH'), dict(cpu5, availability='LOW')],
+            64: [dict(cpu3, availability='LOW')],
+        }
         self.load_catalog()
         self.assertIsNone(self.provider.cpu_counts[0])
         self.assertCountEqual(self.provider.cpu_counts[1:], [32, 64])
         cpu_label = self.controller.compute.get()
-        self.assertIn('64 vCPU / 256 GB · stock low · $4/hr', cpu_label)
-        self.assertTrue(any('32 vCPU' in label for label in self.controller.dropdown['values']))
+        self.assertIn('CPU: cpu5g, 32 vCPU / 128 GB · stock low · $3.2/hr', cpu_label)
+        self.assertTrue(any('CPU: cpu3g, 64 vCPU' in label for label in self.controller.dropdown['values']))
+        self.assertEqual(self.controller.deadline_minutes.get(), '2160')
         gpu_label = next(label for label in self.controller.dropdown['values'] if 'RTX 4090' in label)
         self.controller.dropdown.set(gpu_label)
         self.controller.compute_selected()
@@ -485,15 +490,21 @@ class TkControllerIntegration(unittest.TestCase):
 
         self.controller.dropdown.set(cpu_label)
         self.controller.compute_selected()
-        self.provider.cpus_by_count[64][0]['price'] = {'securePerVcpu': 0.078125}
+        self.provider.cpus_by_count[32][1]['price'] = {'securePerVcpu': 0.125}
+        started = time.time()
         with patch.object(messagebox, 'askyesno', return_value=True) as ask:
             self.execute(self.button('Start simulation').invoke,
                          lambda: not self.controller.busy and self.controller.setting_up)
-        self.assertEqual(self.provider.cpu_counts[-1], 64)
-        self.assertIn('64 vCPU / 256 GB · stock low · $5/hr on Secure Cloud', ask.call_args.args[1])
+        self.assertEqual(self.provider.cpu_counts[-1], 32)
+        self.assertIn('CPU: cpu5g, 32 vCPU / 128 GB · stock low · $4/hr on Secure Cloud',
+                      ask.call_args.args[1])
+        self.assertIn('36-hour deadline', ask.call_args.args[1])
         self.assertEqual(len(self.provider.created), 1)
-        self.assertEqual(self.provider.created[0]['cpu'], {'id': 'large-cpu', 'vcpuCount': 64})
-        self.assertEqual(self.controller.state.read()[0]['requested_vcpu'], 64)
+        self.assertEqual(self.provider.created[0]['cpu'], {'id': 'cpu5g', 'vcpuCount': 32})
+        record = self.controller.state.read()[0]
+        self.assertEqual(record['requested_vcpu'], 32)
+        self.assertGreaterEqual(record['deadline'], started + 129600)
+        self.assertLess(record['deadline'], time.time() + 129600)
 
     def test_refresh_updates_default_until_user_selects_and_creates_exact_count(self):
         pro = {'id': lab.RTX_PRO_6000, 'availability': 'HIGH', 'price': {'secure': 2.09},

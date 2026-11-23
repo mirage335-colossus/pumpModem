@@ -428,7 +428,11 @@ Case case_for(const Options& o) {
     if (!std::isfinite(result.data_w + result.helper_w))
         throw std::invalid_argument("combined requested power exceeds numeric range");
     if (o.spread_margin) result.margin = *o.spread_margin;
-    if (o.spread_preset) result.spread = tuning::parse_spread_preset(*o.spread_preset);
+    if (o.spread_preset) {
+        result.spread = tuning::parse_spread_preset(*o.spread_preset);
+        if (result.spread.doppler_law != tuning::SpreadPreset::DopplerLaw::bounded)
+            throw std::invalid_argument("Helper fixture export supports bounded Doppler spread presets only");
+    }
     if (o.timing_policy == "bounded") {
         // Dated-capture coordinate: TX causal lag midpoint +35 ms;
         // two 10-ms station bounds, total 1-ms region, and both 35-ms

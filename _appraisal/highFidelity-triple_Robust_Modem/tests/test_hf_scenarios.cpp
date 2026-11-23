@@ -108,6 +108,41 @@ void nvis() {
     check(rms(whole) > 0., "NVIS channel retains nonzero source response");
 }
 
+void atlantic_routes() {
+    const auto east = make_additional_hf_scenario("hf-atlantic-eastbound");
+    const auto west = make_additional_hf_scenario("hf-atlantic-westbound");
+    check(east && west, "both synthetic Atlantic directions are available");
+    check(east->channel.paths.size() == 3 && west->channel.paths.size() == 3,
+          "Atlantic route has three scalar path taps");
+    near(east->channel.rf_hz, 12e6, 0., "Atlantic design carrier");
+    near(east->reference_cn0_db_hz, 18., 0., "eastbound receiver noise reference");
+    near(west->reference_cn0_db_hz, 16., 0., "westbound receiver noise reference");
+    near(east->bounds.arrival_low_seconds, .017, 0., "Atlantic public arrival lower bound");
+    near(east->bounds.arrival_high_seconds, .022, 0., "Atlantic public arrival upper bound");
+    near(east->bounds.spread_seconds, .003, 0., "Atlantic maximum excess delay");
+    near(east->bounds.doppler_width_hz, 1., 0., "Atlantic maximum tap 2-sigma width");
+    near(east->bounds.atmospheric_hz, 3.15, 0., "eastbound residual plus Doppler search allowance");
+    near(west->bounds.atmospheric_hz, 3.15, 0., "westbound residual plus Doppler search allowance");
+    for (std::size_t i = 0; i < east->channel.paths.size(); ++i) {
+        const auto& e = east->channel.paths[i];
+        const auto& w = west->channel.paths[i];
+        near(e.power, w.power, 0., "reciprocal Atlantic path power");
+        near(e.delay_seconds, w.delay_seconds, 0., "reciprocal Atlantic path delay");
+        near(e.gaussian_width_2sigma_hz, w.gaussian_width_2sigma_hz, 0.,
+             "reciprocal Atlantic Gaussian Doppler width");
+        near(e.residual_doppler_hz, .15, 0., "eastbound residual reference offset");
+        near(w.residual_doppler_hz, -.15, 0., "westbound residual reference offset");
+    }
+    check(east->assumptions.find("not measured direction asymmetries") != std::string::npos &&
+          east->assumptions.find("HELLO or A") != std::string::npos &&
+          east->assumptions.find("Real propagation direction") != std::string::npos,
+          "Atlantic scenario discloses synthetic scope, candidates and unknown route conditions");
+    const auto names = scenario_names();
+    check(std::ranges::find(names, "hf-atlantic-eastbound") != names.end() &&
+          std::ranges::find(names, "hf-atlantic-westbound") != names.end(),
+          "Atlantic routes appear in public scenario catalogue");
+}
+
 void drm6() {
     const auto maybe = make_additional_hf_scenario("hf-drm6");
     check(maybe.has_value(), "DRM-6 scenario is available");
@@ -634,6 +669,7 @@ int main() {
         check(!make_additional_hf_scenario("groundwave-1mhz").has_value(),
               "provider leaves existing catalogue IDs to the owning factory");
         nvis();
+        atlantic_routes();
         drm6();
         eikonal_holdout();
         eikonal_refinement_controls();

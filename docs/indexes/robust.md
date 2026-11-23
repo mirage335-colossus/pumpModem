@@ -15,6 +15,20 @@ Robust is one compiled C++ DATA, Helper, receiver, channel-simulation and audio
 stack linked into the GUI. In-process owners share immutable buffers and a
 bounded executor; Python only orchestrates native testing and analysis.
 
+For a configured-calendar midlatitude HF path with moderate delay and
+Doppler spread, Robust Setup offers **HF midlatitude moderate 0.5 Hz
+1 ms**. The receiver checks used Search Margin 3 and Selective Perturbation
+Off. The appraisal includes continental US and
+both Atlantic directions with independent wanted and absence controls.
+Apply the preset when its nominal path support is a reasonable match to
+the intended operating conditions. [Channel assumptions](../channel-models.md#midlatitude-moderate-hf)
+[Regional HF results](../../_appraisal/highFidelity-triple_Robust_Modem/hf-validation.md#moderate-continental-and-atlantic-hf)
+
+For longer messages with isolated fades, select **RS20** on both peers if the
+added airtime fits. At 8 dB-Hz on one quiet-HF realization, RS20 recovered
+`HELLO` through three erasures. The uncoded 65-bit transmission failed and
+the 136-bit coded transmission completed. [Coding and fade evidence](../../_appraisal/highFidelity-triple_Robust_Modem/hf-validation.md#moderate-continental-and-atlantic-hf)
+
 For live reception, first match the peers' public calendar epoch, initial keyed
 ordinal, waveform profile, encryption/key, FEC, compression and DATA cadence.
 **Robust Setup → DATA cadence → Scheduled + gap fill** keeps the Scheduled

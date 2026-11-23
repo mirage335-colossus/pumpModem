@@ -24,7 +24,7 @@ namespace hp=datapump::host::protocol;
 struct Workspace {std::filesystem::path path;~Workspace(){std::error_code error;if(!path.empty())std::filesystem::remove_all(path,error);}};
 #if defined(__linux__)
 void nonblocking(int fd){const auto flags=fcntl(fd,F_GETFL);if(flags<0 || fcntl(fd,F_SETFL,flags|O_NONBLOCK)<0)throw Error("lab worker pipe setup failed");}
-int run(int trusted,bool require_gpu,bool prefer_gpu){
+int run(int trusted,bool require_gpu){
     host::verify_anonymous_pipe(STDIN_FILENO,true);host::verify_anonymous_pipe(STDOUT_FILENO,false);
     if(trusted>=0)host::verify_anonymous_pipe(trusted,true);
     nonblocking(STDIN_FILENO);nonblocking(STDOUT_FILENO);if(trusted>=0)nonblocking(trusted);
@@ -32,7 +32,7 @@ int run(int trusted,bool require_gpu,bool prefer_gpu){
     std::copy(pattern.begin(),pattern.end(),name.begin());auto* path=mkdtemp(name.data());
     if(!path)throw Error("cannot create lab worker workspace");
     Workspace workspace{path};
-    host::Runtime runtime(workspace.path,false,require_gpu,true,false,prefer_gpu);hp::Decoder in,files;
+    host::Runtime runtime(workspace.path,false,require_gpu,true,false);hp::Decoder in,files;
     std::deque<std::vector<std::byte>> audio;std::size_t audio_bytes=0,audio_at=0;
     bool main_open=true,files_open=trusted>=0,runtime_in_progress=false;
     unsigned clock_burst=0;
@@ -114,7 +114,7 @@ int main(int argc,char** argv){
         host::restrict_descriptors(retained);host::install_no_socket_boundary();
         if(check){std::cout<<"Lab no-socket worker boundary active\n";return 0;}
 #if defined(__linux__)
-        std::signal(SIGPIPE,SIG_IGN);return run(fd,require_gpu,prefer_gpu);
+        std::signal(SIGPIPE,SIG_IGN);return run(fd,require_gpu);
 #else
         throw Error("lab worker requires Linux no-socket support");
 #endif

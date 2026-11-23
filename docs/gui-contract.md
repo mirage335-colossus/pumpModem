@@ -143,7 +143,7 @@ Display timing never controls receiver decisions or completion.
 | Live input noise dBFS/Hz | Local receiver noise-model reference, separate from link-budget noise in dBm/Hz. At fixed Target SNR, changing it scales receiver variance and reference DATA amplitude together; correlated or impulsive noise is not qualified by mean power alone. See the [calibration scope](robust-current.md#configured-calendar-reception). |
 | Error correction | Configured Off, RS20 or RS60 native short/long text profiles. Raw bits bypass text coding and FEC exactly. |
 | Search arithmetic | Default (fastest) selects the fastest supported complete receiver route for the hardware and workload. FP32 minimum selects FP32 products/FFT with higher-precision guards. FP64 force selects its native CPU reference policy. Sensitive stages retain higher precision. |
-| GPU | Runtime choice for native CUDA or Vulkan DATA processing, shared by live reception and simulation. The selector prefers usable CUDA when included, then a compatible physical Vulkan device. The checkbox starts disabled during device discovery and stays off by default on desktop and zLab CPU allocations. zLab GPU allocations prefer GPU. When no device can initialize, ordinary sessions keep the control off and disabled, select CPU, and show the reason in receiver diagnostics. |
+| GPU | Runtime choice for native CUDA or Vulkan DATA processing, shared by live reception and simulation. The selector prefers usable CUDA when included, then a compatible physical Vulkan device. The checkbox is off and disabled during discovery, and defaults to checked when a compatible physical GPU initializes on the receiver machine. Without a usable device, it stays off and disabled and diagnostics explain CPU use. Desktop and zLab workers share this default. |
 | Simulation | The native emitted waveform runs through the continuous sampled channel and complete receiver without real-time pacing. The console shows modeled receiver-input time and compute wall time. Waveform, I/Q and spectrum details preview the newest accepted post-channel samples. The preview stops when input ends. The receiver can still be finishing queued scoring and quiet slots, as shown by the status. A three-second excerpt of signal activity replays at its original rate after finite processing. Live audio follows the device clock. |
 | Audio device, channel routing, Live/duplex, TX volume, Exclusive | Existing native device service, selected channel layout, capture/playback policy and output gain. |
 | Waterfall, Waveform, Receiver input I/Q | Bounded actual session observations; receiver I/Q is not a substitute TX trace. |
@@ -211,17 +211,22 @@ When the current baseband frequency becomes invalid, the higher recommendation
 is used if it fits. The half-rate preset is the fallback when it is the only
 recommendation that fits.
 
-The shared **GPU** checkbox sits immediately left of **Developer**. It defaults
-off on the desktop, persists with the launch settings as `--gpu yes|no`, and is disabled with
-an explanation outside Robust mode, while busy or closing, or when the build
-has no native CUDA or Vulkan receiver backend. Enabling it initializes the
-selected physical GPU on the native session manager, away from the UI thread.
-The selector tries usable CUDA first when compiled, then a compatible physical
-Vulkan device. A requested-device failure is reported and prevents that session
-from starting; there is no CPU-as-GPU fallback. The selected device and bounded
-selection/fallback reason are exposed in diagnostics. Clear **GPU** between
-runs to use the native CPU path in the same application, including after a
-loader or driver error.
+The shared **GPU** checkbox sits immediately left of **Developer**. It remains
+off and disabled during startup discovery. When no explicit `--gpu` preference
+is loaded, it defaults on if a compatible physical GPU initializes on the
+machine running that receiver. Without one, it stays off and disabled, the
+receiver uses CPU processing, and diagnostics show the discovery reason. The
+same rule applies to desktop and zLab workers using the devices they can
+initialize. Explicit launch settings `--gpu yes|no` and manual changes remain
+preferences. Generated launch commands omit `--gpu` in automatic mode so they
+use device discovery when run on another host. `--require-gpu` requires GPU
+initialization and reports failure if it cannot initialize.
+Enabling GPU initializes the selected physical device on the native session
+manager, away from the UI thread. The selector tries usable CUDA first when
+compiled, then a compatible physical Vulkan device. FP64 force uses CPU when
+GPU selection is automatic. An explicit GPU request with FP64 force is invalid.
+The selected device and selection or fallback reason appear in diagnostics.
+Clear **GPU** between runs to use the native CPU path in the same application.
 
 The [Search arithmetic preference](search-arithmetic.md) persists as
 `--search-arithmetic default|fp32-min|fp64-force`. Automatic native CPU processing

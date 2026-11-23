@@ -43,11 +43,12 @@ void retain_affine_atoms(FinePreparation&, ReceiverSlotScore&, const ReceiverSlo
 
 inline constexpr std::size_t maximum_fine_coordinates = 64;
 
-// A failed ordinary admission can retain this fixed-size descriptor while
-// waiting for its chronological predecessor. All masses are set by the
-// original public model. No predecessor likelihood or gain enters it.
+// A failed ordinary admission or diffuse-drift admission can retain this
+// fixed-size descriptor while waiting for its chronological predecessor.
+// All masses are set by the original public model. No predecessor likelihood
+// or gain enters it.
 struct AffineContinuationContext {
-    bool eligible = false, check_line = false;
+    bool eligible = false, refine_admitted = false, check_line = false;
     // Sequential affine/line scratch. The caller holds the input and original
     // receipt separately and uses the same worker shape as ordinary scoring.
     std::size_t scratch_bytes = 0, ordinary_count = 0;

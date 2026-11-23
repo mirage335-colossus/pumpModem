@@ -97,6 +97,8 @@ void shared_gpu_toggle() {
     const auto developer=std::find_if(declarations.begin(),declarations.end(),[](const auto& control){return control.field==F::developer_mode;});
     check(gpu!=declarations.end()&&developer!=declarations.end()&&gpu<developer);
     check(gpu->slot==S::gpu&&gpu->persistent&&gpu->scope==gui::ui::ScreenScope::shared);
+    const bool compiled=live::gpu_receiver_available();
+    const auto* explicit_command=compiled?"--gpu yes":"--gpu no";
     gui::Application app({.simulation=true});
     check(!app.field(F::developer_mode).checked&&app.control(*gpu).visible);
     check(!app.field(F::gpu).checked&&!app.control(*gpu).enabled);
@@ -105,20 +107,20 @@ void shared_gpu_toggle() {
     app.select(F::fast_mode,"robust");
     check(!app.control(*gpu).enabled);
     app.toggle(F::gpu,true);
-    check(!app.field(F::gpu).checked&&app.field(F::planner_command).text.find("--gpu no")!=std::string::npos);
+    check(!app.field(F::gpu).checked&&app.field(F::planner_command).text.find("--gpu ")==std::string::npos);
 
-    const bool compiled=live::gpu_receiver_available();
-    const auto* preferred_command=compiled?"--gpu yes":"--gpu no";
-    gui::Launch preferred{.simulation_only=true,.prefer_gpu=true};
-    gui::Application lab(preferred);
+    gui::Launch simulation{.simulation_only=true};
+    gui::Application lab(simulation);
     check(!lab.field(F::gpu).checked&&!lab.control(*gpu).enabled);
     lab.toggle(F::gpu,false);
     lab.edit(F::link_power,"1 W");
-    check(!lab.field(F::gpu).checked&&lab.field(F::planner_command).text.find(preferred_command)!=std::string::npos);
+    check(!lab.field(F::gpu).checked&&lab.field(F::planner_command).text.find("--gpu ")==std::string::npos);
+    gui::Controller automatic({.simulation_only=true});
+    check(automatic.settings().gpu==compiled);
 
-    preferred.settings=gui::launch_command::Patch{};
-    preferred.settings->gpu=false;
-    gui::Application saved_cpu(preferred);
+    simulation.settings=gui::launch_command::Patch{};
+    simulation.settings->gpu=false;
+    gui::Application saved_cpu(simulation);
     check(!saved_cpu.field(F::gpu).checked&&!saved_cpu.control(*gpu).enabled&&
           saved_cpu.field(F::planner_command).text.find("--gpu no")!=std::string::npos);
 
@@ -127,7 +129,12 @@ void shared_gpu_toggle() {
     gui::Controller from_command({.simulation=true,.launch_settings=requested_gpu});
     check(!from_command.field(F::gpu).checked&&!from_command.field(F::gpu).enabled);
     check(from_command.settings().gpu==compiled&&
-          from_command.field(F::planner_command).text.find(preferred_command)!=std::string::npos);
+          from_command.field(F::planner_command).text.find(explicit_command)!=std::string::npos);
+
+    gui::launch_command::Patch fp64;
+    fp64.search_arithmetic="fp64-force";
+    gui::Controller cpu_precision({.simulation=true,.launch_settings=fp64});
+    check(!cpu_precision.settings().gpu&&cpu_precision.field(F::search_arithmetic).selected=="fp64-force");
 }
 void gpu_route_diagnostics() {
     live::Snapshot snapshot;

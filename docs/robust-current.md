@@ -340,6 +340,13 @@ properly weighted likelihood alternatives: shorter gain-coherence models, a
 chronological common-frequency mixture, medium-duration coherent Gaussian-gain
 models (independent and causal AR), and coherent linear-drift matching.
 The original coherent search and its public hypotheses remain available.
+When diffuse drift first admits DATA, ordered continuation can still score
+one unused public affine coordinate from the preceding slot. Its likelihood
+is evaluated on fresh samples at the original atom weight. It must independently
+support the already admitted bit under the applicable threshold and wrong-key
+policy before it can refine tracking. This uses the existing charged
+continuation input and workspace. [Moderate HF replay](../_appraisal/highFidelity-triple_Robust_Modem/hf-validation.md#moderate-continental-and-atlantic-hf)
+
 For public variable-channel settings where two fine cells span at least one
 second, the fixed-affine lane also includes two slow complex-Gaussian gain
 alternatives when a positive excursion/diffusion scale is declared. The

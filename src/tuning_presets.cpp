@@ -24,6 +24,8 @@ constexpr std::array spread_models{
     SpreadPreset{"sub9-worst","Sub9 worst 0.05Hz 5ms",5,.05,false},
     SpreadPreset{"hf-best","HF best 0.1Hz 0.5ms",.5,.1,true},
     SpreadPreset{"hf-moderate","HF moderate 10Hz 6ms",6,10,true},
+    SpreadPreset{"hf-midlatitude-moderate","HF midlatitude moderate 0.5 Hz 1 ms",1,.5,false,
+        SpreadPreset::DopplerLaw::gaussian_rays},
     SpreadPreset{"hf-worst","HF worst 30Hz 7ms",7,30,true},
     SpreadPreset{"aurora-best","Aurora best 10Hz 3ms",3,10,true},
     SpreadPreset{"aurora-worst","Aurora worst 55Hz 11ms",11,55,true},

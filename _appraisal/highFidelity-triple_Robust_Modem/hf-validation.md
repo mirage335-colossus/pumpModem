@@ -10,6 +10,166 @@ from a worldwide ionospheric population. See [models and scope](hf-experiments.m
 [primary research reconciliation](hf-research.md), and the
 [actual upstream codec comparison](competitor/README.md).
 
+## Scheduled receiver under selected HF appraisal conditions
+
+The continuation at `9199554e` ran the canonical receiver after the Scheduled
+carrier-beat and grouped CPU changes. The bounded selection used existing
+physical scenarios and a native statistical replay with the same margin,
+cadence and carrier geometry as the earlier synthetic repair. Each wanted
+episode had to deliver exact bytes with two scored quiet slots, no wrong
+bits and no early completion. The wrong-key and noise controls had to
+produce zero false DATA and zero accepted content. A completed execution
+can fail either requirement. Policy replays, bits within one episode and
+two placements from the same receiver and storm day are dependent.
+
+The [HF model study](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/33-hf-channel-models-and-simulators.md)
+and its [statistical protocol](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/86-statistics-and-calculation-checks.md)
+motivate separate reporting of standard statistical fading, coupled
+ionosphere calculations and measured-voltage replays. The latter apply the
+recorded voltage, including its measurement noise, to a synthetic modem
+signal. The records provide no calibrated broadband impulse response or
+on-air modem message. See the [fixture provenance](fixtures/hf-gannon-2024/README.md),
+[HamSCI dataset](https://zenodo.org/records/20466479), and
+[ITU-R F.1487](https://www.itu.int/rec/R-REC-F.1487-0-200005-I/en).
+
+### Complete native appraisal observations
+
+| Channel and incident C/N0 | Wanted result | Negative control |
+| --- | --- | --- |
+| Watterson I3 measured-summary model, +20 dB-Hz, bridge | `e`, `001` and two quiet slots | Zero false DATA and no content with the foreign key or with noise alone |
+| Severe statistical 7 ms / 30 Hz, +32 dB-Hz, bridge | `e`, `001` and two quiet slots | Foreign key produced `100` and accepted unauthenticated `o` under Current. All three false bits failed the Guarded and higher score checks. Noise produced five quiet slots. |
+| Gannon 17:00 and 20:00 recorded voltages, +20 dB-Hz | Both delivered `A` and two quiet slots | The 20:00 foreign key produced zero DATA and no content |
+| Coupled oblique primary and holdout, +20 dB-Hz | Primary missed three wanted slots and had one premature physical completion. Independent field/payload `B` delivered cleanly. | Primary foreign key produced two false DATA slots through Strict and no accepted content |
+
+The I3 and severe statistical rows used the ordinary Scheduled receiver
+with short transitions. Direct physical profiles do not declare the GUI's
+selective amplitude perturbation. They exercise the existing varying-channel
+families without invoking the new Scheduled carrier-beat path. The wanted
+severe statistical `e` cleared all three DATA bits through Extreme and
+none through Maximum. The wanted I3 `e` cleared all three through Maximum.
+The updated carrier-bound waveform rendered different IQ from the historical
+Gannon 20:00 miss. The current complete delivery cannot be attributed to
+the carrier-beat change or used as a matched repair of that archived miss.
+
+The complete native library identity was `af01ecf2…0166`. The first five
+strictly validated complete physical rows used existing campaign definitions
+for `gannon-1700-20`, `gannon-2000-20`, `primary-A-20`,
+`primary-A-20-wrong-key` and `holdout-B-20`. Their aggregate wall time was
+96.05 s with 24 software workers. The wanted oblique IQ digest was
+`f67fe879…7dba`, foreign `ab89baaf…3910` and held-out field `4d52b4f6…7b7b`.
+The frozen selections, source identities and complete receipts are under
+ignored `local-evidence/hf-scheduled-severe-0CjdZD/`. Retain the compact
+receipts while the oblique and wrong-key requirements are unresolved.
+Replace them with a newer matched qualification when available.
+
+### Same-IQ qualification of the Scheduled carrier-beat path
+
+The native `triad_receiver_probe message` ran the previous encrypted
+3.6 Hz, 265 Hz spacing, +77/+32 dB-Hz actual/target, 30 MHz GPSDO, Margin 3
+short-transition setup at seed 74022, epoch 1793850000 and ordinal 7000037.
+`--channel-model itu-disturbed` replaces the synthetic bounded ray and
+common wander with independent equal-power 0/7 ms Gaussian taps at 30 Hz
+full 2σ Doppler width. It retains Each 65% as an explicit additional
+synthetic perturbation and keeps the same public receiver declarations.
+
+The wanted and foreign receiver-key tests both hashed the same 6,255,321
+IQ/validity rows (`220a1b58…dc02`). The wanted slot 0 provisionally favored
+1. The beat scan nominated and the native full-window score admitted 0.
+Slot 1 retained its correct 0 with an added affine atom and cleared the
+Guarded margin. Slot 2 and both quiet slots used the ordinary decisions.
+The receiver delivered exact `e`, `001` followed by two scored quiet slots,
+with all three wanted bits passing Guarded, Strict and Very Strict. Its
+foreign-key twin searched 741 beat coordinates on each active slot and
+produced zero qualified nominations. Current admitted three false DATA bits
+(`010`) and decoded unwanted unauthenticated content. The existing score
+filter excluded all three from Guarded through Maximum. Both arms withheld
+message completion on the incomplete-EOF control. The CPU replays took
+124.48 and 124.98 s. These are results for one matched channel episode and
+its control, without a field-reliability or real-time capacity claim.
+
+At 0.1 Hz the ITU renderer preserves the receiver's declared geometry. The
+plan-only check quoted 47,059,953,884 bytes for the ordinary first slot and
+6,315,406,100 bytes for the grouped CPU slot, with 24 workers and 40,601,988
+public samples. This confirms the alternate workspace quote for the same
+geometry. Full scoring and decoding at 0.1 Hz remain untested on this path.
+
+### Held-out prediction on the false-DATA case
+
+A temporary native diagnostic split the public DATA-band modes within each
+short varying-channel block into alternating DFT bins. It nominated public
+epoch/arrival/frequency cells using only reconstructed training IQ, zero
+outside the complete blocks. On the untouched bins it evaluated the
+conditional probability of the keyed waveform relative to declared white
+noise. The statistic subtracts the training log likelihood from the joint
+one after integrating the same per-block gain across both subsets. Its
+finite power mixture and public coordinate weights were fixed before the
+comparison. The check follows the split-likelihood principle of
+[Wasserman, Ramdas and Balakrishnan](https://pmc.ncbi.nlm.nih.gov/articles/PMC7382245/).
+The white-noise denominator needs its own physical justification for a
+foreign-key waveform.
+
+| Selected complete observation | Ordinary decision | Held-out known-white log ratios, bit 0 / bit 1 |
+| --- | --- | ---: |
+| Coupled oblique wanted, +20 dB-Hz, slot 11 | Correct DATA 0 | 2305.50 / 33.80 |
+| Coupled oblique foreign, +20 dB-Hz, slot 11 | False DATA 0, passes Strict | 45.76 / 30.28 |
+| Coupled oblique wanted, +10 dB-Hz, slot 11 | Correct DATA 0 | 26.65 / −12.11 |
+| Coupled oblique wanted, +0 dB-Hz, slot 11 | Correct DATA 0, passes Maximum | −12.48 / −13.42 |
+| Severe statistical bridge wanted, +32 dB-Hz, slot 0 | Correct DATA 0 | 8410.54 / −98.21 |
+| Severe statistical bridge foreign, +32 dB-Hz, slot 0 | False DATA 1 under Current | −68.96 / −127.81 |
+| Severe statistical bridge noise, slot 0 | Physical quiet | −104.22 / −117.51 |
+
+The oblique wrong key predicts some untouched modes. Its strongest log
+ratio exceeds that of the weaker wanted slot, so a scalar threshold on
+that statistic cannot reject this foreign case and preserve that wanted
+decision. The held-out bit gap separates the foreign slot (15.49 nats)
+from wanted at +10 (38.76 nats), but it also ranks above the correctly
+received +0 dB-Hz slot (0.95 nats). The +0 row met the fixed stopping
+criterion, so the conditional +30 foreign comparison did not run. The
+severe statistical case separates at the selected slot.
+Five previously run captures matched complete IQ/validity digests, all
+bit and quiet scores and public work counts exactly. The orthogonality
+check found leaked energy below `1.56e-31` relative to the training energy.
+The native diagnostic stages took 0.47–0.94 s per selected aperture with 24
+configured workers. These are abbreviated diagnostics of named channels.
+The experimental scorer was removed after this failed transfer check.
+
+The existing Very Strict comparison already rejects both oblique false
+DATA decisions and preserves the ten +20 and four +10 wanted DATA
+decisions the native receiver makes. It leaves the unobserved wanted bits
+and premature completion unresolved. This is a retrospective policy result
+on these captures. The earlier [protected-oblique control](hf-current-admission.md#coupled-physical-protected-message-recovery)
+still supplies a separate false-DATA failure at Maximum.
+
+For the first missed oblique wanted slot (5), the existing evaluator used
+an identical full IQ/validity digest and three matched physical templates
+with the same propagation table. The native receiver scored the correct
+bit higher, `16.704 / −7.130` nats, and classified the slot as quiet. The
+equal-bit prior brought native presence to `16.0109` nats against `16.0783`
+required. The three missed slots already ran short varying, coherent-gain
+and drift alternatives. Given the exact propagated waveform and timing,
+the evaluator obtained `35.658` nats for wanted versus absent and `74.756`
+for correct bit versus opposite. The squared template separations divided
+by declared noise variance were `33.130` and `65.887`. The correct bit
+and presence therefore leave evidence when conditioned on the known
+channel. The receiver cannot use the evaluator's channel or transmitted
+bits, and this diagnostic gives no blind sensitivity or recovery guarantee.
+
+Appraisal slot receipts now expose each native policy result even when
+the codec rejects the payload. They also include any planned Scheduled
+carrier-beat aperture, search count, nomination and polarity correction.
+These per-slot decisions and prospective score checks are separate from
+GUI history visibility and message completion.
+
+The final appraisal build passed six focused software checks, including
+native integration, runner, policy replay and qualification. It repeated
+the complete oblique foreign capture under the same IQ digest and matched
+all 15 ordered decisions, bit scores, quiet statistics and public work
+counts. The new per-slot records confirm `2/2/2/0/0/0` false DATA through
+the six policy checks and no Scheduled beat work. The final appraisal
+source is `aa0a67f2…bf38` and the binary is `95aed076…48fa6`. Its
+whole-tree native manifest `29aba356…f11e1` also includes concurrent
+changes outside the receiver DSP tested here.
+
 ## Current receiver and physical-approximation investigation
 
 The [intrinsic evolving-vector investigation](hf-vector-evolving.md) adds two
@@ -930,6 +1090,184 @@ passes both polarizations at +30 dB-Hz. This contradictory control prevents
 attributing every O/X loss to a special phase-processing weakness. FT8 and WSPR
 already use phase/coherent-block processing and FEC; they are not amplitude-only
 QRSS baselines. No orders-of-magnitude Robust advantage has been established.
+
+## Moderate continental and Atlantic HF
+
+The midlatitude moderate Robust setting uses 0/1 ms equal-power diffuse
+paths at 0.5 Hz full 2σ Doppler width. `hf-midlatitude-moderate` exercises that
+standard law independently of GUI channel preparation. At Margin 3 the native
+preset also offers up to 0.25 Hz of receiver-only linear drift within the
+existing public center-frequency allowance. The simulator's Gaussian rays
+stay centered with zero explicit Doppler. The continental
+`hf-watterson-i1` and `hf-watterson-i3` traces are stochastic realizations
+from published daytime and nighttime component summaries for Long Branch,
+Illinois to Boulder, Colorado, about 1,294 km. The daytime case uses 9.259 MHz
+and the nighttime case uses 5.864 MHz. The component measurements do not
+contain captured Robust modem traffic.
+[ITU-R F.1487 Annex 3](https://www.itu.int/dms_pubrec/itu-r/rec/f/R-REC-F.1487-0-200005-I!!PDF-E.pdf)
+[Watterson's sounding report](https://archive.org/details/DTIC_AD0699486)
+
+The Atlantic cases assume a usable 12 MHz Boston–Plymouth path with a
+17.8 ms bulk arrival. They use independent realizations of the same
+reciprocal three-ray ensemble at 0/1/3 ms, relative powers 0.55/0.30/0.15
+and 0.5/0.75/1 Hz Gaussian widths. They include ±0.15 Hz receiver residuals.
+The delays, powers, widths and C/N0 are engineering inputs. ITU-R P.533
+provides HF path prediction methods. The Needham–Slough–Dourbes experiment
+provides an example of bidirectional Atlantic sounding on a different path.
+[ITU-R P.533](https://www.itu.int/dms_pubrec/itu-r/rec/p/R-REC-P.533-14-201908-I!!PDF-E.pdf)
+[Ahmed et al. sounding abstract](https://sites.nationalacademies.org/cs/groups/pgasite/documents/webpage/pga_183540.pdf)
+
+These are fixed-seed complete-receiver tests with Helper and FEC off,
+configured public calendars, 36 Hz RATE and the full native 24-worker
+allocation. Each wanted pass decoded the exact text and scored both
+transmitted quiet slots. The regional A/B fixtures have 13 wire bits.
+Selected continental tests use 34.8-second waveform intervals per bit.
+The standard midlatitude and Atlantic tests use 23.2-second intervals.
+C/N0 refers to the ensemble power before fading.
+
+| Model | Seeds | Complete receptions | Weaker outcome |
+| --- | --- | --- | --- |
+| Continental daytime and nighttime | 10101 and 10102 | `A` at 7.5 and 10 dB-Hz for each | Four misses per case at 5 dB-Hz |
+| Standard midlatitude moderate | 21921 / noise 31921 | `A` at 10 dB-Hz | — |
+| Boston to Plymouth | 22401 / noise 32401 | `A` at 10 and 18 dB-Hz | At 8 dB-Hz, first bit scored quiet and `g e` was accepted in place of `A` |
+| Plymouth to Boston | 22402 / noise 32402 | `B` at 8.5, 9 and 16 dB-Hz | — |
+
+The regional results in the table use each appraisal case's declared
+receiver bounds. Same-capture replays took the receive delay, relative
+Doppler, diffuse width, varying-channel selection and common wander from
+the native GUI preset. The eastbound 10 dB-Hz and westbound 8.5 dB-Hz
+replays kept their original 17–22 ms arrival bounds, ±3.15 Hz atmospheric
+center allowance and configured calendar. Both decoded all 13 bits and
+scored the two quiet slots, with all 1,658,457 I/Q and validity rows verified
+against their original captures. At those points the narrow Gaussian model
+also worked on the wider three-ray links. Both 7.5 dB-Hz continental
+replays decoded `A` and scored the quiet pair, with 1,680,702 I/Q and validity
+rows per matched capture. The replays kept each continental path's public
+search and limited the new drift allowance to its declared center bound.
+
+At 8 dB-Hz in the matched eastbound replay, the first active slot scored
+quiet. The receiver collected the twelve remaining DATA bits and decoded
+them as the unauthenticated text `g e` instead of `A`. The complete-message
+endpoint failed despite zero inverted DATA decisions and zero false DATA
+slots. This is a leading-slot loss and wrong-payload acceptance in the
+uncoded short-message profile.
+
+The zero-common-drift trial missed the first two I3 DATA slots at 7.5 dB-Hz.
+The bounded drift allowance recovered both. On the westbound holdout the
+same allowance first admitted slot 2 through drift, bypassing the previous
+ordered affine rescore. Its successor then missed DATA. Keeping that
+rescore eligible after a drift admission restored the westbound payload.
+The fresh public affine cell independently corroborated the already-admitted
+bit in slot 2 and restored the timing used for slot 3. The captured samples
+and public atom weights stayed fixed throughout this comparison.
+
+The eastbound independent-key and westbound noise controls at the 16 dB-Hz
+reference setting produced zero false DATA slots and zero accepted text under
+Current. The same-capture controls with the new model and continuation
+also admitted zero DATA in all 15 slots. The eastbound foreign key produced
+13 ambiguous slots then two quiet slots, and the westbound noise control
+produced 15 quiet slots.
+
+A separate native GUI-law replay used an identical 530,082-row capture at
+10 dB-Hz for the new receive settings and a receive-only substitution of
+the old bounded 10 Hz / 6 ms assumptions. Both decoded `e` as `001QQ` and
+verified physical completion and the EOF control. The new settings reduced
+the coarse projected rate from 192 to 40 Hz. This single comparison on a
+Ryzen 5 PRO 5650U with 24 workers took 4.44 versus 7.39 seconds of receiver
+wall time and 44.10 versus 68.31 seconds of process CPU time. Peak total
+reservation was 2.17 versus 2.10 GB. The receiver tried the new fallback on
+the two quiet slots. All three DATA slots had enough earlier evidence.
+The actual executable also ran the same captured samples under Guarded.
+The wanted key delivered all three DATA
+bits and both quiet slots. An independent receive key yielded three
+ambiguous slots and two quiet slots, with zero admitted DATA or decoded
+messages. All four runs verified I/Q and validity digest `7a74443f…5df2531`.
+The standalone probe also decoded `001QQ` under Guarded at 10 dB-Hz with
+265 Hz DATA carrier spacing and a −7 to +7.07 second public arrival window.
+It verified all 557,086 input rows (`888a0665…d42`), the two scored quiet
+slots and the EOF control. This used the scheduled DATA calendar and the
+same fading seed with the two wider public geometry settings.
+
+A continental quiet-HF holdout at 6 dB-Hz passed a short `B` message,
+but a separate 65-wire-bit `HELLO` at 8 dB-Hz missed DATA in slots 37, 44 and
+56. With RS20 at the same 8 dB-Hz and same path/noise seed, the native decoder
+recovered `HELLO`, repairing two erased data bytes and one erased parity
+byte. It scored the trailing quiet pair and admitted zero false DATA.
+Coding changed the waveform and increased the wire length from 65 to 136
+bits. The full capture spans about 3,984 and 8,244 simulated seconds,
+respectively.
+
+A slower diffuse-gain covariance improved one miss score, and changing
+the coherent fallback's correlation timescale improved it further.
+Neither experimental variant recovered the message or changed any
+complete-message outcome. The second variant also reduced the decision
+margin on a passing westbound capture. The operating receiver retains its
+existing hypothesis scoring within the new preset's narrower calibrated
+search. The tested samples give conditional sensitivity points. Long
+messages, availability at a given hour or frequency, and on-air reception
+probabilities require additional data.
+
+The affected native build passed six GUI and receiver CTest checks and the
+Helper fixture export stream check. The native receiver check timed out
+when other DSP work was running and passed in 38.71 seconds on its isolated
+rerun under the same 60-second limit. The appraisal build passed five
+scenario, integration, runner and qualification checks. The manual-case
+parser passed 16 tests. The compact receipts in ignored
+`local-evidence/moderate-hf-8am4y5m2` preserve the commands, input fingerprints,
+bounded comparison and failure evidence. Record any superseding matched
+result before removing those receipts.
+
+### Current-source severe statistical and coupled-oblique replays
+
+The receiver with the moderate-HF continuation change also repeated two
+coupled-oblique and three severe statistical short-transition runs on the
+original case settings. Each arm verified its earlier I/Q and validity
+digest and all scored slot boundaries with 24 native workers. The native
+manifest is `9275a1f6…27ad` and the appraisal binary is
+`5aa9b0c4…a6a5`. The coupled-oblique case declares zero diffuse Doppler
+width in its receiver model, outside the new diffuse-drift continuation
+condition.
+
+| Condition | Wanted delivery | Independent-key and noise controls |
+| --- | --- | --- |
+| 7 ms / 30 Hz statistical fading, 32 dB-Hz | Exact `e` and two scored quiet slots | Current admitted three false DATA slots and the unauthenticated text `o`. All three false bits failed the per-slot Guarded and stronger policy checks. The noise control scored five quiet slots. |
+| Coupled-oblique primary, 20 dB-Hz | Slots 5–7 scored quiet, triggering one premature completion. No accepted wanted text. | Two false DATA slots passed Current, Guarded and Strict. Zero passed Very Strict and stronger. The decoder accepted no text. |
+
+All five arms matched the earlier ordered slot decisions, bit scores and
+quiet energy measurements exactly.
+The policy columns for stronger settings are per-slot score checks from the
+Current run. The compact receipts and original hash comparisons are under
+`local-evidence/hf-effectiveness-oblique-3banqotw`. Keep them while the
+severe communication and wrong-key outcomes remain unresolved, then replace
+them with newer matched evidence.
+
+### Recorded 10 MHz replay before the Gannon storm onset
+
+The moderate regional cases above reconstruct measured sounding summaries
+or use engineering path models. The retained raw Gannon fixtures cover
+17:00 and 20:00 UTC on 10 May 2024. The earlier full `A` test beginning
+at 17:00 spans about 22 minutes, which crosses the documented sudden
+commencement. The independent storm analysis reports an abrupt geomagnetic
+increase from 17:05 to 17:07 UTC. [Fixture provenance](fixtures/hf-gannon-2024/README.md)
+[Storm chronology](https://gc.copernicus.org/articles/7/297/2024/#sec2)
+
+A current-source three-bit `e` test fit the entire five-slot observation
+within the first 506,414 samples at 1,920 Hz, ending at approximately
+17:04:24 UTC. The native receiver used the original case's 5 Hz frequency
+allowance, the recorded 10 MHz complex voltage with its fixed two-hour
+normalization, and separate synthetic receiver noise at the 20 dB-Hz
+incident reference. It recovered `001` and scored the two quiet slots.
+The independent transmit key produced three ambiguous slots and two quiet
+slots with zero admitted DATA or text. Noise alone produced five quiet
+slots. All three arms used 24 workers and verified complete, valid input.
+
+This checks one pre-onset voltage excerpt. The source voltage includes
+receiver noise and interference, and the recording supplies a scalar
+narrowband multiplier. Its calibrated modem-band delay/Doppler response and
+independent moderate-channel classification remain unestablished. The
+receipts and frozen commands under `local-evidence/hf-recorded-pre-onset-dn1tbb8x`
+bind the result to native source `9275a1f6…27ad`. Retain them until newer
+recording-based results preserve the applicable provenance and scope.
 
 ## Original expansion software assurance and evidence lifecycle
 

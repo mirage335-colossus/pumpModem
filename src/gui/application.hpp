@@ -22,7 +22,6 @@ struct Launch {
     bool require_gpu=false; // Embedding policy, independent of user settings.
     bool finite_duplex=false; // Lab embedding: one physical-audio episode.
     bool simulation_only=false; // Lab embedding: no physical-audio mode.
-    bool prefer_gpu=false; // Initial selection for an accelerator-equipped host.
 };
 struct WindowSizing {
     int width=ui::default_width,height=ui::default_height;

@@ -26,7 +26,7 @@ struct Workspace {
 void nonblocking(int fd) {
     const int flags=fcntl(fd,F_GETFL);if(flags<0 || fcntl(fd,F_SETFL,flags|O_NONBLOCK)<0)throw datapump::Error("cannot make worker pipe nonblocking");
 }
-int run(int file_fd,bool simulation,bool require_gpu,bool simulation_only,bool prefer_gpu) {
+int run(int file_fd,bool simulation,bool require_gpu,bool simulation_only) {
     using namespace datapump;using namespace datapump::host;
     verify_anonymous_pipe(STDIN_FILENO,true);verify_anonymous_pipe(STDOUT_FILENO,false);
     if(file_fd>=0)verify_anonymous_pipe(file_fd,true);
@@ -35,7 +35,7 @@ int run(int file_fd,bool simulation,bool require_gpu,bool simulation_only,bool p
     // may instead complete file selectors using its separate capability pipe.
     std::array<char,40> name{};const std::string pattern="/tmp/datapump-worker-XXXXXX";std::copy(pattern.begin(),pattern.end(),name.begin());
     auto* created=mkdtemp(name.data());if(!created)throw Error("cannot create private worker file workspace");Workspace workspace{created};
-    Runtime runtime(workspace.path,simulation,require_gpu,false,simulation_only,prefer_gpu);protocol::Decoder input,files;
+    Runtime runtime(workspace.path,simulation,require_gpu,false,simulation_only);protocol::Decoder input,files;
     bool input_open=true,files_open=file_fd>=0;auto output_progress=std::chrono::steady_clock::now();
     std::array<std::byte,65536> bytes{};
     while(!runtime.finished()) {
@@ -87,10 +87,10 @@ int main(int argc,char** argv) {
         datapump::host::install_no_socket_boundary();
         if(version){std::cout<<"Data Pump " DATAPUMP_VERSION " (pipe worker, protocol 1)\n";return 0;}
         if(check){std::cout<<"No-socket worker boundary active; protocol 1\n";return 0;}
-        if(help){std::cout<<"Data Pump pipe worker\n  --file-events-fd N  trusted anonymous pipe for host-selected file services\n  --simulation       start in shared application simulation mode\n  --simulation-only  restrict the worker to Robust simulation\n  --prefer-gpu       start Robust on a usable GPU, otherwise use the CPU\n  --require-gpu      require a GPU receiver for Robust settings\n  --self-check --version\nThe existing host owns HTTP and file selection. stdin/stdout must be anonymous pipes.\n";return 0;}
+        if(help){std::cout<<"Data Pump pipe worker\n  --file-events-fd N  trusted anonymous pipe for host-selected file services\n  --simulation       start in shared application simulation mode\n  --simulation-only  restrict the worker to Robust simulation\n  --prefer-gpu       accepted as a compatibility alias; GPU use is selected automatically when usable\n  --require-gpu      require a GPU receiver for Robust settings\n  --self-check --version\nThe existing host owns HTTP and file selection. stdin/stdout must be anonymous pipes.\n";return 0;}
 #if defined(__linux__)
         std::signal(SIGPIPE,SIG_IGN);
-        return run(file_fd,simulation,require_gpu,simulation_only,prefer_gpu);
+        return run(file_fd,simulation,require_gpu,simulation_only);
 #else
         throw datapump::Error("no-socket worker is not qualified for this platform");
 #endif

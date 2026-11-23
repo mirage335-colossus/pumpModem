@@ -1143,10 +1143,15 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         score_coherent_gain(workspace.coherent_gain, score, nullptr);
         classify_supplement();
     } else if (workspace.coherent_gain.block_rows) score.coherent_gain_status = "earlier_evidence_sufficient";
+    std::optional<std::uint8_t> drift_admitted_bit;
     if (drift && (compare_all || score.decision != SlotDecision::data)) {
+        const bool needs_drift = score.decision != SlotDecision::data;
         score_drift_fine(config, likelihood_slot, key, *drift, likelihood_iq, selected, fine.epoch_timing_coordinates,
                          workers, score, stop, *executor);
         classify_supplement();
+        if (continuation && needs_drift && config.random_doppler_width_hz > 0 && config.spread_doppler_hz == 0 &&
+            score.drift_timing_atoms && score.drift_slopes && score.decision == SlotDecision::data)
+            drift_admitted_bit = score.bit;
     } else if (drift) score.drift_status = "earlier_evidence_sufficient";
     if (has_supplement && score.decision != SlotDecision::data) {
         check_cancelled(stop);
@@ -1393,10 +1398,14 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
             // Optional scoring leaves the ordinary result intact.
         }
     }
-    if (continuation && score.decision != SlotDecision::data && score.complete && score.all_valid &&
+    const bool refine_admitted = drift_admitted_bit && score.decision == SlotDecision::data &&
+        score.bit == drift_admitted_bit && score.operational_passes_conditional_bound &&
+        score.operational_log_e >= score.operational_threshold;
+    if (continuation && (score.decision != SlotDecision::data || refine_admitted) && score.complete && score.all_valid &&
         score.zero_h0_verified && !score.wrong_key_rejected && !retained_line && !has_supplement &&
         fine.coordinates.size() < maximum_fine_coordinates) {
         continuation->eligible = true;
+        continuation->refine_admitted = refine_admitted;
         continuation->check_line = workspace.line != 0;
         continuation->scratch_bytes = std::max(workspace.fine, workspace.line);
         continuation->ordinary_count = fine.coordinates.size();
@@ -1494,7 +1503,9 @@ ReceiverSlotScore receiver_detail::continue_affine_slot(const ReceiverConfig& co
         const AffineContinuationContext& context, const ReceiverSlotScore::TimingProposal& predecessor,
         ReceiverSlotScore baseline, bool protected_data) {
     check_cancelled(stop);
-    if (!context.eligible || scratch_limit_bytes < context.scratch_bytes || baseline.decision == SlotDecision::data ||
+    const bool already_admitted = baseline.decision == SlotDecision::data;
+    if (!context.eligible || scratch_limit_bytes < context.scratch_bytes ||
+        (already_admitted && (!context.refine_admitted || !baseline.bit)) ||
         baseline.wrong_key_rejected || !baseline.complete || !baseline.all_valid || !baseline.zero_h0_verified)
         return baseline;
     require(context.grid && context.ordinary_count == baseline.fine_candidates &&
@@ -1531,13 +1542,26 @@ ReceiverSlotScore receiver_detail::continue_affine_slot(const ReceiverConfig& co
         return score;
     };
     if (!atom.complete || !atom.all_valid || !atom.zero_h0_verified) return finish(std::move(baseline));
+    std::array<double, 2> weighted_atom{};
+    for (std::size_t bit = 0; bit < weighted_atom.size(); ++bit)
+        weighted_atom[bit] = atom.bit_evidence[bit] + context.atom_log_mass;
+    if (already_admitted) {
+        // A drift admission keeps its bit. The fresh affine cell must
+        // corroborate it independently before entering the merged bank.
+        atom.calendar_opportunities_per_day = baseline.calendar_opportunities_per_day;
+        classify_operational_scores(atom, weighted_atom, baseline.operational_minimum_bit_log_separation,
+                                    std::nullopt, baseline.operational_threshold);
+        if (atom.bit != baseline.bit || !wrong_key_admission_passes(atom, config.wrong_key_admission))
+            return finish(std::move(baseline));
+    }
     ReceiverSlotScore candidate = baseline;
     std::array<double, 2> operational{};
     for (std::size_t bit = 0; bit < operational.size(); ++bit)
-        operational[bit] = log_add(baseline.operational_bit_evidence[bit], atom.bit_evidence[bit] + context.atom_log_mass);
+        operational[bit] = log_add(baseline.operational_bit_evidence[bit], weighted_atom[bit]);
     classify_operational_scores(candidate, operational, baseline.operational_minimum_bit_log_separation,
                                 std::nullopt, baseline.operational_threshold);
-    if (candidate.decision != SlotDecision::data) return finish(std::move(baseline));
+    if (candidate.decision != SlotDecision::data || (already_admitted && candidate.bit != baseline.bit))
+        return finish(std::move(baseline));
     if (context.check_line) {
         // A previously weak slot need not have run nuisance selection. If
         // this nomination reveals a line, leave the canonical answer intact.

@@ -292,10 +292,11 @@ A GPU device or allocation failure is not permission to substitute CPU work.
 valid CPU-only route cannot become a GPU result. The shared native automatic
 factory, headless probe and GUI's **GPU** checkbox expose the same selection for
 live reception and simulation: CUDA is tried first when compiled and usable,
-then a compatible physical Vulkan device. The GUI defaults to CPU, saves
-`--gpu yes|no`, initializes the selected device off the UI thread and retains
-one backend/cache per settings generation across transmissions. Requested
-device failure remains explicit; device readiness alone is not proof of
+then a compatible physical Vulkan device. The GUI defaults to GPU when the
+selected device initializes and saves explicit settings as `--gpu yes|no`.
+It initializes the device off the UI thread and retains one backend/cache per
+settings generation across transmissions. Device failures appear in diagnostics,
+and confirmed readiness is distinct from executed
 accelerated search work. See the [shared control contract](gui-contract.md).
 
 Use the [Vulkan build and test recipe](building.md#vulkan-and-opencl-gpu-builds)

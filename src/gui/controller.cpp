@@ -273,6 +273,7 @@ struct Controller::Impl {
     live::Session session;
     live::Settings settings;
     live::Snapshot snapshot;
+    std::optional<bool> gpu_preference;
     Inbox inbox;
     Signals signals;
     std::size_t hidden_signals=0,hidden_files=0;
@@ -470,7 +471,7 @@ struct Controller::Impl {
         f(UiField::live_noise_dbfs_hz).text="unspecified";
         f(UiField::live_noise_dbfs_hz).options={{"unspecified","Unspecified"}};
         f(UiField::message_label).text="Message"; f(UiField::binary_label).text="Binary / first 16 bytes";
-        settings.gpu=options.prefer_gpu&&live::gpu_receiver_available();
+        if(options.launch_settings)gpu_preference=options.launch_settings->gpu;
         f(UiField::compression_codes).text=compression_reference();
         f(UiField::mode).text="Starting continuous reception";
         if(options.launch_settings&&(options.launch_settings->keyfile||options.launch_settings->keyset||options.launch_settings->fhss_list_file)) {
@@ -640,6 +641,7 @@ struct Controller::Impl {
         const auto previous_planner=planner_inputs;const auto previous_target_valid=planner_target_valid;
         const auto previous_workspace_percent=dsp_workspace_percent;
         const auto previous_valid=settings_valid;
+        const auto previous_gpu_preference=gpu_preference;
         std::vector<ui::Option> carrier_presets;
         try {
         if(loaded_keys) {
@@ -698,7 +700,7 @@ struct Controller::Impl {
             if(load->live_noise_dbfs_hz)f(UiField::live_noise_dbfs_hz).text=planner_number(*load->live_noise_dbfs_hz);
             if(load->fec)f(UiField::fec).selected=*load->fec;
             if(load->full_duplex)f(UiField::live_duplex).checked=*load->full_duplex;
-            if(load->gpu)settings.gpu=*load->gpu;
+            if(load->gpu)gpu_preference=load->gpu;
             if(load->workspace_percent) {dsp_workspace_percent=*load->workspace_percent;f(UiField::dsp_workspace).selected=*load->workspace_percent?"ram-"+std::to_string(*load->workspace_percent):"auto";}
             if(load->fhss_list){fhss_list=fhss::parse_list(*load->fhss_list);f(UiField::fhss_list).text=fhss::list_text(fhss_list,'\n');}
             if(load->tx_key=="none")f(UiField::key).selected="none";
@@ -706,10 +708,6 @@ struct Controller::Impl {
             if(simulation_off&&!options.simulation_only)f(UiField::simulation).selected="no";
             sync_link_fields();
         }
-        // Enforce the embedding policy after every loaded patch, including
-        // saved settings that previously selected CPU execution.
-        if(options.require_gpu)settings.gpu=true;
-        else if(!live::gpu_receiver_available()||!snapshot.gpu_unavailable_reason.empty())settings.gpu=false;
         if(options.simulation_only) {
             f(UiField::simulation).selected="yes";
             f(UiField::live_duplex).checked=false;
@@ -761,6 +759,10 @@ struct Controller::Impl {
         settings.transfer.modem.receiver_cpu_budget=number(f(UiField::receiver_cpu_budget).text,"Receiver budget");
         settings.transfer.modem.receiver_strategy=tuning::parse_receiver_strategy(f(UiField::receiver_strategy).selected);
         settings.transfer.modem.search_arithmetic=tuning::parse_search_arithmetic(f(UiField::search_arithmetic).selected);
+        // A GPU-capable build can request a device, but the Session manager
+        // must initialize it before the checkbox shows it as selected.
+        settings.gpu=options.require_gpu||(live::gpu_receiver_available()&&snapshot.gpu_unavailable_reason.empty()&&
+            gpu_preference.value_or(modem.search_arithmetic!=modem::SearchArithmetic::fp64));
         settings.wrong_key_admission=f(UiField::wrong_key_admission).selected;
         settings.transfer.key=selected_key()?std::optional<Crypto>(selected_key()->key):std::nullopt;
         settings.transfer.clock_sync=clock_policy();
@@ -831,6 +833,7 @@ struct Controller::Impl {
             fields=previous_fields;settings=previous_settings;keys=previous_keys;key_origin=previous_key_origin;
             key_path=previous_key_path;fhss_list=previous_fhss_list;planner_inputs=previous_planner;
             planner_target_valid=previous_target_valid;dsp_workspace_percent=previous_workspace_percent;
+            gpu_preference=previous_gpu_preference;
             settings_valid=load?previous_valid:false;settings_error=error.what();
             if(!load) {
                 f(UiField::carrier).options=std::move(carrier_presets);
@@ -892,7 +895,7 @@ struct Controller::Impl {
         values.receiver_strategy=tuning::receiver_strategy_id(settings.transfer.modem.receiver_strategy);
         values.receiver_cpu_budget=settings.transfer.modem.receiver_cpu_budget;
         values.full_duplex=settings.full_duplex;
-        values.gpu=settings.gpu;
+        if(options.require_gpu||gpu_preference)values.gpu=settings.gpu;
         values.fhss=f(UiField::fhss).selected;
         values.symbol_burst=modem::parse_symbol_burst_wait(f(UiField::symbol_burst).selected);
         values.symbol_burst_random=modem::parse_symbol_burst_random(f(UiField::symbol_burst_random).selected);
@@ -2030,11 +2033,11 @@ void Controller::toggle(UiField field,bool value) {
             p.f(field).checked=value;p.configure();
         }
         else if(field==UiField::gpu) {
-            const bool previous=p.settings.gpu;
-            p.settings.gpu=value;
+            const auto previous=p.gpu_preference;
+            p.gpu_preference=value;
             try {p.configure();}
             catch(const std::exception& error) {
-                p.settings.gpu=previous;
+                p.gpu_preference=previous;
                 p.notice(error.what(),10);
             }
         }

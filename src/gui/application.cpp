@@ -29,7 +29,7 @@
 namespace datapump::gui {
 using Clock=std::chrono::steady_clock;
 struct Application::Impl {
-    explicit Impl(const Launch& launch):controller({launch.simulation||launch.smoke,launch.smoke,launch.settings,launch.require_gpu,launch.finite_duplex,launch.simulation_only,launch.prefer_gpu}),
+    explicit Impl(const Launch& launch):controller({launch.simulation||launch.smoke,launch.smoke,launch.settings,launch.require_gpu,launch.finite_duplex,launch.simulation_only}),
         fast_controller([this] {
             if(legacy_controller.active())return false;
             // The first attempt can initiate asynchronous device closure.
@@ -673,7 +673,7 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
                     <<"Saved settings: --keyfile PATH | --keyset amateur|none, --key-name NAME,\n"
                     <<"--rate HZ --carrier HZ --shift HZ --target-snr DB-Hz --helper-power WATTS.\n"
                     <<"Robust receive setup: --calendar-epoch UTC --calendar-ordinal N\n"
-                    <<"--live-noise-dbfs-hz DBFS/Hz; configure the local audio noise model explicitly. --gpu yes|no selects GPU acceleration (default no).\n"
+                    <<"--live-noise-dbfs-hz DBFS/Hz; configure the local audio noise model explicitly. --gpu yes|no overrides automatic GPU selection.\n"
                     <<"--minimum-carrier-spacing 0|3.5|125|265 sets the adjacent Robust carrier spacing floor in Hz (default 265).\n"
                     <<"--data-cadence scheduled|scheduled-fill|scheduled-bridge|continuous selects the shared Robust cadence.\n"
                     <<"  The startup selection is scheduled-bridge. The legacy default value is an alias for scheduled-bridge.\n"

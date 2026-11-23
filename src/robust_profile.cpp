@@ -318,14 +318,23 @@ CarrierBand plan_carrier_band(const Settings& settings, std::optional<double> do
         const auto reference = public_helper_reference(format);
         result.helper_guard_.emplace(helper_options_for_band, format.fhss, &reference);
     }
+    const auto spread = tuning::parse_spread_preset(settings.spread_preset);
     const auto relative_doppler = doppler_ratio ? std::abs(*doppler_ratio - 1) : 0.;
     const auto fixed_doppler = doppler_ratio ? relative_doppler * osc.rf_shift_hz :
         std::abs(settings.doppler_shift_hz);
-    const auto spread_hz = tuning::parse_spread_preset(settings.spread_preset).doppler_hz * osc.margin;
+    const auto spread_hz = spread.doppler_hz * osc.margin;
+    const bool gaussian_rays = spread.doppler_law == tuning::SpreadPreset::DopplerLaw::gaussian_rays;
     const auto modulation_hz = modulation_allowance(selective_depths(settings.selective_perturbation), spread_hz);
     const auto scale = allowance_scale(osc);
-    result.fixed_allowance_hz_ = osc.rf_shift_hz * shift_accuracy(osc) * scale +
-        fixed_doppler + std::abs(spread_hz) + spread_hz + modulation_hz;
+    if (gaussian_rays) {
+        result.fixed_allowance_hz_ = osc.rf_shift_hz * shift_accuracy(osc) * scale +
+            fixed_doppler + 3 * spread_hz + modulation_hz;
+    } else {
+        // Preserve the historical bounded preset arithmetic and its capture
+        // hashes; Gaussian tails use their distinct 3D-per-edge support.
+        result.fixed_allowance_hz_ = osc.rf_shift_hz * shift_accuracy(osc) * scale +
+            fixed_doppler + std::abs(spread_hz) + spread_hz + modulation_hz;
+    }
     result.proportional_allowance_ = osc.lf.accuracy_ppm * scale + relative_doppler;
     return result;
 }
@@ -396,23 +405,41 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     // Actual radial motion is an impairment, not a silent TX retune. The
     // public search includes either direction within the declared magnitude.
     rx.frequency_bound_hz += std::abs(s.doppler_shift_hz);
-    rx.spread_delay_seconds = spread.delay_ms * .001 * osc.margin;
-    rx.spread_doppler_hz = spread.doppler_hz * osc.margin;
+    const bool gaussian_rays = spread.doppler_law == tuning::SpreadPreset::DopplerLaw::gaussian_rays;
+    // The receiver models the nominal two-ray geometry. Margin enlarges the
+    // public delay and spectral search support below, not the physical rays.
+    rx.spread_delay_seconds = spread.delay_ms * .001 * (gaussian_rays ? 1 : osc.margin);
+    rx.spread_doppler_hz = gaussian_rays ? 0 : spread.doppler_hz * osc.margin;
+    rx.random_doppler_width_hz = gaussian_rays ? spread.doppler_hz : 0;
     rx.relative_phase_diffusion_rad_sqrt_s = shifted && !shared
         ? std::hypot(base_diffusion, shift_diffusion) : base_diffusion;
     rx.selective_slow_depth = slow_depth;
     rx.selective_fast_depth = fast_depth;
     // Explicit amplitude modulation with no ray spread still has a separate
     // synthetic rate. Off bypasses the stage even when ray Doppler is present.
-    rx.selective_modulation_rate_hz = modulation_allowance({slow_depth, fast_depth}, rx.spread_doppler_hz);
+    rx.selective_modulation_rate_hz = modulation_allowance({slow_depth, fast_depth},
+        gaussian_rays ? spread.doppler_hz * osc.margin : rx.spread_doppler_hz);
     rx.time_varying_channel = rx.spread_delay_seconds > 0 || rx.spread_doppler_hz != 0 ||
-        rx.selective_modulation_rate_hz > 0 || s.doppler_shift_hz != 0;
+        rx.random_doppler_width_hz > 0 || rx.selective_modulation_rate_hz > 0 || s.doppler_shift_hz != 0;
     // A selected atmospheric spread must also allow the whole signal to move,
     // including with GPS-disciplined oscillators and the explicit Doppler at
     // zero. Keep this allowance outside the legacy constant-oscillator grid;
     // the bounded changing-channel proposal searches its public support.
-    rx.time_varying_atmospheric_hz = std::abs(rx.spread_doppler_hz);
-    rx.time_varying_common_doppler_hz = std::abs(s.doppler_shift_hz) + rx.time_varying_atmospheric_hz;
+    // For the Gaussian law, one edge receives 3D: D is the full 2-sigma
+    // width, so this is six sigma per edge. The intrinsic 3D core is already
+    // accounted for by ReceiverConfig.random_doppler_width_hz.
+    rx.time_varying_atmospheric_hz = gaussian_rays
+        ? 3 * rx.random_doppler_width_hz * (osc.margin - 1)
+        : std::abs(rx.spread_doppler_hz);
+    const auto simulated_common_doppler_hz = std::abs(s.doppler_shift_hz) +
+        (gaussian_rays ? 0 : rx.time_varying_atmospheric_hz);
+    rx.time_varying_common_doppler_hz = simulated_common_doppler_hz;
+    if (gaussian_rays) {
+        // Offer a narrow linear-drift fallback within the already reserved
+        // public center allowance. Keep the standard simulated rays centered.
+        rx.time_varying_common_doppler_hz += std::min(rx.time_varying_atmospheric_hz,
+            .5 * rx.random_doppler_width_hz);
+    }
     rx.helper_enabled = helper_enabled;
 
     auto minimum = minimum_shaping(s);
@@ -455,14 +482,16 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     configuration.audio_pair_ppm = 2 * nominal_endpoint_ppm;
     configuration.clock_bound_ppm = rx.clock_bound_ppm;
     configuration.cfo_bound_hz = rx.frequency_bound_hz + rx.time_varying_atmospheric_hz;
-    configuration.spread_delay_ms = 1000 * rx.spread_delay_seconds;
+    configuration.spread_delay_ms = gaussian_rays ? spread.delay_ms * osc.margin :
+        1000 * rx.spread_delay_seconds;
     configuration.spread_doppler_hz = rx.spread_doppler_hz;
     configuration.selective_signal_tail = rx.selective_modulation_rate_hz > 0;
     rx.source_spectral_skirt_allowance_hz = configuration.gate_bandwidth_hz / 2;
     const auto data_passband = helper::mono_passband({configuration.data_if_hz,
         geometry.occupied_bandwidth_hz, configuration.gate_bandwidth_hz, configuration.format.fhss});
-    const double skirts = rx.frequency_bound_hz + rx.time_varying_atmospheric_hz +
-        rx.spread_doppler_hz + rx.selective_modulation_rate_hz;
+    double skirts = rx.frequency_bound_hz + rx.time_varying_atmospheric_hz;
+    if (gaussian_rays) skirts += 3 * rx.random_doppler_width_hz;
+    skirts += rx.spread_doppler_hz + rx.selective_modulation_rate_hz;
     if (configuration.scheduled_gap_fill) {
         // Reserve the audio projection and both endpoint transport filters in
         // the shared source guard. The simulator captures complex I/Q directly.
@@ -493,15 +522,16 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     // Common atmospheric shift evolves independently of the echo trajectory;
     // its fixed diagnostic counterpart remains available in StreamingChannel.
     effects.static_doppler_hz = 0;
-    channel.path_evolution.common_doppler_wander_hz = rx.time_varying_common_doppler_hz;
+    channel.path_evolution.common_doppler_wander_hz = simulated_common_doppler_hz;
     const auto knot_seconds = [](double bound) {
         return std::max(1., 1. / std::max(bound, 1. / 3600.));
     };
-    channel.path_evolution.common_doppler_knot_seconds = knot_seconds(rx.time_varying_common_doppler_hz);
-    effects.spread_delay_ms = waveform.config().spread_delay_ms;
+    channel.path_evolution.common_doppler_knot_seconds = knot_seconds(simulated_common_doppler_hz);
+    effects.spread_delay_ms = gaussian_rays ? spread.delay_ms : waveform.config().spread_delay_ms;
     effects.spread_doppler_hz = rx.spread_doppler_hz;
-    if (rx.spread_delay_seconds > 0 || rx.spread_doppler_hz != 0)
+    if (!gaussian_rays && (rx.spread_delay_seconds > 0 || rx.spread_doppler_hz != 0))
         channel.path_evolution.bounded_spread_knot_seconds = knot_seconds(std::abs(rx.spread_doppler_hz));
+    channel.path_evolution.random_doppler_width_hz = rx.random_doppler_width_hz;
     effects.perturbation_slow_depth = slow_depth;
     effects.perturbation_fast_depth = fast_depth;
     // Gaussian-erf coefficients renew randomly. The native channel admits ten
@@ -560,8 +590,10 @@ Profile with_capture_uncertainty(const Profile& input, double provider_seconds, 
     if (config.scheduled_gap_fill || config.scheduled_gap_bridge)
         config.gap_fill_transport_halo_samples = audio::native_roundtrip_filter_halo_samples(config.format.sample_rate);
     Profile result = input;
+    const auto settling_delay_seconds = result.receiver.random_doppler_width_hz > 0
+        ? .001 * config.spread_delay_ms : result.receiver.spread_delay_seconds;
     result.receiver.capture_tail_bound_seconds = std::max(result.receiver.capture_tail_bound_seconds,
-        result.receiver.spread_delay_seconds + static_cast<double>(filter_halo_samples) /
+        settling_delay_seconds + static_cast<double>(filter_halo_samples) /
             input.waveform.effective_sample_rate());
     result.waveform = triad::v3::PublicProfile(std::move(config),
         input.waveform.config().format.encrypt ? std::optional<Crypto>{input.key} : std::nullopt);

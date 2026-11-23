@@ -163,9 +163,10 @@ retain that limitation rather than being attributed solely to a physical floor.
 
 ## HF standard and nonstationary controls
 
-`hf-quiet` uses two independent equal-power zero-mean proper-complex Gaussian
-taps at0/.5ms with **D=.1Hz**, and `hf-disturbed` uses0/7ms with **D=30Hz**.
-These are the midlatitude-quiet and high-latitude-disturbed comparisons in
+`hf-quiet`, `hf-midlatitude-moderate` and `hf-disturbed` use two independent
+equal-power zero-mean proper-complex Gaussian taps. Their excess delays and
+widths are 0.5 ms / 0.1 Hz, 1 ms / 0.5 Hz and 7 ms / 30 Hz, respectively.
+These are the midlatitude quiet, midlatitude moderate and high-latitude disturbed comparisons in
 [ITU-R F.1487 Annex3](https://www.itu.int/dms_pubrec/itu-r/rec/f/R-REC-F.1487-0-200005-I!!PDF-E.pdf).
 D is the full **2σ power-spectrum width of each tap**. The ideal covariance is
 `exp(-pi²*D²*lag²/2)` and ensemble power sums to1. The channel reuses the
@@ -204,6 +205,12 @@ measured ionospheric event or a population of blackout lengths. Standard
 stationarity is a comparator; it does not qualify arbitrary disturbed or
 long-duration skywave behavior. See the more detailed
 [HF scenario evidence](../../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/83-scenarios-skywave.md).
+
+`hf-atlantic-eastbound` and `hf-atlantic-westbound` model opposite directions
+of a usable 12 MHz Boston–Plymouth path with engineering values for bulk
+arrival, fading and clock residuals. Both declare the same three-ray
+delay/Doppler support and ensemble powers. The seeds generate independent
+realizations. [Inputs and reception results](hf-validation.md#moderate-continental-and-atlantic-hf)
 
 ## Coupled and measured HF extensions
 

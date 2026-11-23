@@ -52,15 +52,13 @@ struct Runtime::Impl {
     std::string last_snapshot;
     int width=1000,height=760;
     bool force_snapshot=true,closed_sent=false;
-    explicit Impl(std::filesystem::path path,bool simulation,bool require_gpu,bool finite_duplex,bool simulation_only,
-                  bool prefer_gpu)
+    explicit Impl(std::filesystem::path path,bool simulation,bool require_gpu,bool finite_duplex,bool simulation_only)
         :application([&] {
             gui::Launch launch;
             launch.simulation=simulation||simulation_only;
             launch.require_gpu=require_gpu;
             launch.finite_duplex=finite_duplex;
             launch.simulation_only=simulation_only;
-            launch.prefer_gpu=prefer_gpu;
             return launch;
         }()),bridge(application),workspace(std::move(path)) {application.start();}
     void send(Type type,Writer body={}) {send_frame({type,std::move(body.bytes)});}
@@ -130,9 +128,8 @@ struct Runtime::Impl {
         }
     }
 };
-Runtime::Runtime(std::filesystem::path workspace,bool simulation,bool require_gpu,bool finite_duplex,bool simulation_only,
-                 bool prefer_gpu)
-    :impl_(std::make_unique<Impl>(std::move(workspace),simulation,require_gpu,finite_duplex,simulation_only,prefer_gpu)){}
+Runtime::Runtime(std::filesystem::path workspace,bool simulation,bool require_gpu,bool finite_duplex,bool simulation_only)
+    :impl_(std::make_unique<Impl>(std::move(workspace),simulation,require_gpu,finite_duplex,simulation_only)){}
 Runtime::~Runtime(){audio_endpoint().close();impl_->application.close();}
 void Runtime::accept(const Frame& frame,bool file_authority) {
     auto& p=*impl_;Reader in(frame.payload);

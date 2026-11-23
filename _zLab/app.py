@@ -20,6 +20,7 @@ import time
 from runpod import RunPodClient, RunPodError
 
 IMAGE = 'runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404'
+POD_DEADLINE_LIMIT_MINUTES = 36 * 60
 MIN_CPU_VCPUS = 32
 MIN_CPU_MEMORY_GB = 128
 GPU_MODELS = ('RTX PRO 6000', 'RTX 5090', 'RTX 4090')
@@ -200,7 +201,8 @@ def options(gpus, cpus, cloud='SECURE', *, multi_gpu=None):
         _, compute, stock, price = offer
         if 'cpu' in compute:
             cpu = compute['cpu']
-            return stock == 'UNKNOWN', 0, -cpu['vcpuCount'], price if price is not None else math.inf, cpu['id']
+            return (stock == 'UNKNOWN', 0, not cpu['id'].startswith('cpu5'), -cpu['vcpuCount'],
+                    price if price is not None else math.inf, cpu['id'])
         gpu = compute['gpu']
         identity = gpu['id']
         preference = PREFERRED_GPUS.get((identity, gpu['count']), len(PREFERRED_GPUS))
@@ -1086,7 +1088,7 @@ class App:
         self.compute = tk.StringVar()
         self.cloud = tk.StringVar(value='SECURE')
         self.image = tk.StringVar(value=IMAGE)
-        self.deadline_minutes = tk.StringVar(value='60')
+        self.deadline_minutes = tk.StringVar(value=str(POD_DEADLINE_LIMIT_MINUTES))
         self.known_hosts = tk.StringVar()
         self.identity = tk.StringVar()
         self.files = tk.StringVar()
@@ -1550,10 +1552,10 @@ class App:
         deadline_text = self.deadline_minutes.get()
         try:
             minutes = int(deadline_text)
-            if not 1 <= minutes <= 1440:
+            if not 1 <= minutes <= POD_DEADLINE_LIMIT_MINUTES:
                 raise ValueError()
         except ValueError:
-            self.status.set('Deadline must be 1–1440 minutes.')
+            self.status.set(f'Deadline must be 1–{POD_DEADLINE_LIMIT_MINUTES} minutes.')
             return
         key = self.key.get().strip()
         close_generation = self.close_generation
@@ -1571,10 +1573,11 @@ class App:
             if settings_changed():
                 self.status.set('The pod settings changed. Review the selection and start again.')
                 return
+            duration = f'{minutes // 60}-hour' if minutes % 60 == 0 else f'{minutes}-minute'
             prompt = (f'{quote} on {selected["cloud"].title()} Cloud\n'
                       'The hourly rate is the catalog compute list price. Storage may add to the charge.\n'
                       f'Image: {image}\n'
-                      f'Create one pod with a {minutes}-minute deadline? '
+                      f'Create one pod with a {duration} deadline? '
                       'Automatic termination works only while this app is open with the API key entered. '
                       'Charges can continue after it closes.')
             count = selected.get('gpu', {}).get('count', 1)

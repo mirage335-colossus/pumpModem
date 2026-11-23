@@ -324,6 +324,14 @@ void parsing_and_formatting() {
         auto model=settings;model.spread_preset=spread.id;model.selective_perturbation="fast-25";
         check(launch_command::parse(launch_command::format(model))==model,"spread and perturbation must round-trip");
     }
+    const auto historical_hf=datapump::tuning::parse_spread_preset("hf-moderate");
+    const auto midlatitude=datapump::tuning::parse_spread_preset("hf-midlatitude-moderate");
+    check(historical_hf.delay_ms==6&&historical_hf.doppler_hz==10&&historical_hf.default_perturbation&&
+          historical_hf.doppler_law==datapump::tuning::SpreadPreset::DopplerLaw::bounded,
+          "the historical HF moderate preset must retain its bounded 10 Hz / 6 ms model");
+    check(midlatitude.delay_ms==1&&midlatitude.doppler_hz==.5&&!midlatitude.default_perturbation&&
+          midlatitude.doppler_law==datapump::tuning::SpreadPreset::DopplerLaw::gaussian_rays,
+          "the midlatitude HF preset must declare 0.5 Hz Gaussian rays, 1 ms, and perturbation off");
     rejects([]{launch_command::parse("--selective-perturbation each-2");},"invalid perturbation selection accepted");
     const auto windows=launch_command::parse(R"("C:\Program Files\Data Pump\datapump-gui.exe" --rate "3.6 kHz"
         --carrier=1.5kHz --oscillator "GPSDO: OCXO" --target-snr=+23)");

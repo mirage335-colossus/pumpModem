@@ -806,14 +806,16 @@ kernels. [Kernel emulation](../tests/triad_kernel_emulation/) ·
 [resident fine windows](triad-gpu-optimization.md#device-rendered-fine-tiles-and-resident-windows).
 
 Select Robust Modem and use the **GPU** checkbox immediately left of Developer.
-It defaults off on the desktop and on zLab CPU allocations, and persists as
-`--gpu yes|no`. The session checks device initialization before enabling the
-checkbox. A zLab GPU allocation starts with GPU preferred. When initialization
-finds no usable GPU, ordinary sessions run on CPU with the checkbox off and
-disabled. Receiver diagnostics show the reason. The session retains this result
-across settings changes, including settings loaded with `--gpu yes`. Start a
-new session after changing the device or driver environment. A strict worker
-started with `--require-gpu` reports an initialization failure.
+The checkbox starts off and disabled during device discovery. When no explicit
+`--gpu` preference is loaded, it starts checked if the receiver machine
+initializes a compatible physical GPU. Without a usable device it remains off
+and disabled, processing uses the CPU, and receiver diagnostics report the
+reason. This applies to desktop and zLab workers regardless of whether RunPod
+labels the allocation as CPU or GPU. Explicit launch settings and manual changes
+remain preferences, persisted as `--gpu yes|no`. The session retains its
+discovery result across settings changes. Start a new session after changing
+the device or driver environment. A strict worker started with `--require-gpu`
+reports an initialization failure.
 Clear an enabled GPU checkbox between runs to select CPU in the same application.
 The generic selector tries usable CUDA first, then compatible physical Vulkan.
 Search arithmetic Default selects qualified automatic CPU/GPU routing, including

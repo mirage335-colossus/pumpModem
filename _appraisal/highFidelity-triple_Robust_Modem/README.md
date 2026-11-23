@@ -19,7 +19,13 @@ Failure guides, source and campaign definitions are versioned; links into
 ignored `local-evidence/` refer to retained local receipts, which a fresh
 checkout does not include.
 
-The latest ordinary-receiver work is recorded in the
+The [Scheduled receiver continuation](hf-validation.md#scheduled-receiver-under-selected-hf-appraisal-conditions)
+exercises the carrier-beat correction on a matched severe diffuse capture
+and records the remaining false DATA and premature completion in coupled
+oblique propagation. Current slot receipts include the six native admission
+checks independently of whether the codec accepts a payload.
+
+The earlier ordinary-receiver work is recorded in the
 [17 November continuation](../../docs/validation.md#persistent-channel-and-calendar-age-follow-through--17-november-2026)
 and its [preceding weak-signal repairs](../../docs/validation.md#ordinary-reception-with-conservative-settings--17-november-2026).
 It uses ordinary bit decisions and physical quiet completion; the dedicated

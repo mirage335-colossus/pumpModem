@@ -2396,6 +2396,14 @@ Json score_json(const StreamSlotReceipt& receipt) {
                 {"prior",receiver_detail::independent_gain_power_priors[i]},
                 {"bit_evidence_before_power_and_public_priors",Json::Array{evidence[0],evidence[1]}}}));
         }
+    const bool raw_data_candidate = r.decision == SlotDecision::data || r.wrong_key_rejected;
+    auto admission_candidate = r;
+    if (r.wrong_key_rejected) admission_candidate.decision = SlotDecision::data;
+    Json::Array admission_tiers;
+    for (const auto policy : wrong_key_admission_policies) {
+        admission_tiers.push_back(object({{"policy", wrong_key_admission_name(policy)},
+            {"passes", raw_data_candidate && wrong_key_admission_passes(admission_candidate, policy)}}));
+    }
     return object({{"index",r.index},{"pattern_epoch",receipt.pattern_epoch},{"symbol_ordinal",receipt.symbol_ordinal},{"workers",receipt.workers},
         {"decision",r.decision==SlotDecision::data?"data":r.decision==SlotDecision::quiet?"quiet":"ambiguous"},
         {"bit",r.bit?Json(*r.bit):Json{}},{"complete",r.complete},{"all_valid",r.all_valid},
@@ -2406,6 +2414,18 @@ Json score_json(const StreamSlotReceipt& receipt) {
             r.calendar_opportunities_per_day:receiver_reference_opportunities_per_day},
         {"bit_evidence",Json::Array{r.operational_bit_evidence[0],r.operational_bit_evidence[1]}},
         {"bit_separation",r.operational_bit_log_separation},{"quiet_energy",r.quiet_energy},{"quiet_threshold",r.quiet_threshold},
+        {"wrong_key_admission",object({{"raw_data_candidate",raw_data_candidate},
+            {"configured_policy",wrong_key_admission_name(r.wrong_key_admission)},
+            {"configured_policy_rejected",r.wrong_key_rejected},
+            {"native_policy_passes",std::move(admission_tiers)}})},
+        {"carrier_beat_search_coordinates",r.protected_carrier_beat_search_coordinates},
+        {"carrier_beat_nomination",r.protected_carrier_beat ? object({
+            {"epoch_offset_seconds",r.protected_carrier_beat->epoch_offset_seconds},
+            {"arrival_seconds",r.protected_carrier_beat->arrival_seconds},
+            {"clock_ppm",r.protected_carrier_beat->clock_ppm},
+            {"ordinary_bit",r.protected_carrier_beat->ordinary_bit},
+            {"predicted_bit",r.protected_carrier_beat->predicted_bit}}) : Json{}},
+        {"carrier_beat_corrected_polarity",r.protected_carrier_beat_corrected_polarity},
         {"noise_statistics_valid",r.noise_statistics_valid},{"helper_status",r.helper_status},{"helper_seconds",r.helper_seconds},
         {"coarse_seconds",r.coarse_seconds},{"fine_seconds",r.fine_seconds},{"helper_overlapped",r.helper_overlapped},
         {"coarse_frequency_points",r.coarse_frequency_points},{"coarse_arrival_points",r.coarse_arrival_points},
@@ -4680,6 +4700,13 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
                 else {++ambiguous;++episode_ambiguous[*episode];}
             }
             auto row=score_json(receipt);
+            const auto receiver_slot=make_receiver_slot_plan(s.profile,s.receiver,r.index);
+            const auto beat_aperture=receiver_slot.carrier_beat_stop_sample>
+                receiver_slot.carrier_beat_first_sample;
+            row["scheduled_carrier_beat_aperture"]=beat_aperture ? object({
+                {"first_sample",receiver_slot.carrier_beat_first_sample},
+                {"stop_sample",receiver_slot.carrier_beat_stop_sample},
+                {"sample_count",receiver_slot.carrier_beat_stop_sample-receiver_slot.carrier_beat_first_sample}}) : Json{};
             if((o.mode=="receive"&&s.scenario.id=="hf-vector-two-hop")||(o.repeat_bit&&!s.native_channel)||
                 o.hf_nominal_gain_witness||o.hf_live_gain_contrast||o.repeat_selected_attempt)
                 row["likelihood_components"]=slot_likelihood_components(r);
@@ -4688,7 +4715,7 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
                 row["consumed_samples"]=r.consumed_samples;
             }
             if(o.repeat_bit) {
-                const auto plan=make_receiver_slot_plan(s.profile,s.receiver,r.index);
+                const auto& plan=receiver_slot;
                 const bool scored=r.complete&&r.all_valid&&r.zero_h0_verified&&
                     r.index==receive_first_slot+slots.size()&&r.index<receive_stop_slot&&
                     receipt.pattern_epoch==plan.format.epoch&&receipt.symbol_ordinal==plan.format.symbol_ordinal&&

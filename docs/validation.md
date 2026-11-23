@@ -28,6 +28,12 @@ forecasts remain unresolved. The earlier migration checkpoint remains the
 baseline. Historical measurements retain their original source/runtime.
 None is release certification.
 
+The [moderate continental and Atlantic HF results](../_appraisal/highFidelity-triple_Robust_Modem/hf-validation.md#moderate-continental-and-atlantic-hf)
+record complete native reception on the standard midlatitude profile,
+continental measured-summary cases and engineered Boston–Plymouth cases
+in both directions. They also record the weak eastbound and long
+continental failures and the scoped admission controls.
+
 The historical cleanup checkpoint was based on
 `357a50970a0c6214eeaade7c5704bbc39abd4b79` and committed as
 `419e6bae8c4fe3b0f59be23a6dfb3b69fbaed80e`. Its concise outcomes and limitations
@@ -1707,6 +1713,11 @@ throughput measurement.
 The decomposition and bounded trials remain
 in ignored `local-evidence/robust-0p1hz-workspace-decomposition/` until a
 measured low-memory search and complete-service comparison supersede them.
+
+The [high-fidelity continuation](../_appraisal/highFidelity-triple_Robust_Modem/hf-validation.md#scheduled-receiver-under-selected-hf-appraisal-conditions)
+exercises the same native implementation in severe statistical fading,
+coupled oblique propagation and Gannon storm voltage replays. Its wanted,
+wrong-key and physical completion results delimit the synthetic repair.
 
 ## Blackwell arithmetic and receiver residency — 22 November 2026
 

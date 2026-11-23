@@ -783,6 +783,47 @@ void affine_continuation() {
           continued.fine_candidates == 2 && continued.basis_rows == baseline.basis_rows + omitted.basis_rows &&
           std::abs(continued.selected_prior_mass - 2 * std::exp(effective_prior)) < 1e-12,
           "ordered continuation must score one omitted affine cell with the original prior");
+
+    // Model a DATA decision supplied by the drift branch while the existing
+    // affine cell misses. The chronological candidate must corroborate the
+    // admitted bit on fresh samples before it can refresh tracking.
+    auto drift_context = context;
+    drift_context.refine_admitted = true;
+    auto drift_data = baseline;
+    drift_data.decision = SlotDecision::data;
+    drift_data.bit = 0;
+    drift_data.operational_passes_conditional_bound = true;
+    const auto threshold = drift_data.operational_threshold;
+    drift_data.operational_bit_evidence = {threshold + 5, threshold - 10};
+    drift_data.operational_log_e = threshold + 5 - std::numbers::ln2;
+    drift_data.operational_bit_log_separation = 15;
+    const auto refreshed = continue_affine_slot(input.config, input.slot, input.key, input.iq,
+        1, drift_context.scratch_bytes, {}, nullptr, drift_context, predecessor, drift_data);
+    check(refreshed.decision == SlotDecision::data && refreshed.bit == 0 &&
+          refreshed.affine_continuation_attempted && refreshed.affine_continuation_admitted &&
+          refreshed.fine_candidates == 2 && refreshed.affine_tracking[0] &&
+          refreshed.affine_tracking[0]->epoch_offset_seconds == predecessor.epoch_offset_seconds,
+          "a corroborated affine atom must refresh tracking for DATA recovered by drift");
+
+    auto opposite = drift_data;
+    opposite.bit = 1;
+    std::swap(opposite.operational_bit_evidence[0], opposite.operational_bit_evidence[1]);
+    const auto disagreed = continue_affine_slot(input.config, input.slot, input.key, input.iq,
+        1, drift_context.scratch_bytes, {}, nullptr, drift_context, predecessor, opposite);
+    check(disagreed.decision == SlotDecision::data && disagreed.bit == opposite.bit &&
+          disagreed.affine_continuation_attempted && !disagreed.affine_continuation_admitted &&
+          disagreed.operational_bit_evidence == opposite.operational_bit_evidence &&
+          disagreed.fine_candidates == opposite.fine_candidates,
+          "a tracking refresh must preserve the admitted bit when fresh evidence favors its opposite");
+
+    const auto weak = continue_affine_slot(noise.config, noise.slot, noise.key, noise.iq,
+        1, drift_context.scratch_bytes, {}, nullptr, drift_context, predecessor, drift_data);
+    check(weak.decision == SlotDecision::data && weak.bit == drift_data.bit &&
+          weak.affine_continuation_attempted && !weak.affine_continuation_admitted &&
+          weak.operational_bit_evidence == drift_data.operational_bit_evidence &&
+          weak.fine_candidates == drift_data.fine_candidates,
+          "an admitted drift score alone must not let weak fresh evidence refresh tracking");
+
     for (std::size_t bit = 0; bit < continued.bit_evidence.size(); ++bit) {
         const auto a = baseline.operational_bit_evidence[bit], b = omitted.operational_bit_evidence[bit];
         const auto expected = std::max(a, b) + std::log1p(std::exp(-std::abs(a - b)));

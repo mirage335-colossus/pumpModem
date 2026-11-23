@@ -81,10 +81,10 @@ the window offers to close while keeping the saved cleanup record.
 
 Secure Cloud is the default. zLab prefers CPU pods with reported stock, at
 least 32 vCPUs, and at least 128 GB of RAM. It checks the supported power-of-two
-sizes separately, selects the largest available vCPU count, and uses the lower
-hourly price to break ties. The catalog reports vCPU allocations and flavor
-metadata. Actual processor speed depends on the host and workload. The hourly
-compute list price covers the entire selected allocation.
+sizes separately and prefers RunPod's faster CPU5 flavors when available. Within
+that ranking, larger vCPU counts come first and lower hourly prices break ties.
+Actual processor speed depends on the host and workload. The hourly compute
+list price covers the entire selected allocation.
 
 This default follows the operator's observation that GPU acceleration usually
 added little value for the cost in their zLab experiments with a 32-core CPU.
@@ -131,9 +131,10 @@ GUI uses SSH for both deployment and simulation.
 
 The controller records its owned pod and queue requests under
 `${XDG_STATE_HOME:-$HOME/.local/state}/pumpModem/runpod-lab/jobs.json`.
-The controller reconciles requests after a lost response or restart. Each
-creation requires a deadline. While open, the lab checks for expiration and
-requests termination or queue cancellation. RunPod confirms termination
+The controller reconciles requests after a lost response or restart. New pods
+default to a 36-hour deadline (2,160 minutes). Set a shorter deadline in
+**Advanced**. While open with the API key entered, the lab checks for expiration
+and requests termination or queue cancellation. RunPod confirms termination
 before the lab removes the row. Pending requests are saved locally
 so the controller can check them again after a restart.
 
@@ -210,12 +211,13 @@ Vulkan for the sessions that search declines. It uses OpenCL for qualified
 NVFP4 template projection at every worker allocation. CUDA discovery and Vulkan's
 CUDA import extensions fail with the socket filter active on that driver. See the
 [matched runtime checks](../docs/validation.md#blackwell-nvfp4-fine-projection--19-november-2026).
-CPU allocations start with **GPU** off. GPU allocations start with GPU preferred
-through `--prefer-gpu`. The worker checks runtime availability before enabling
-**GPU**. If neither CUDA nor a physical Vulkan device can initialize, **GPU**
-stays off and disabled and the worker runs on CPU. Receiver diagnostics show
-the reason. The result lasts for the worker session. Use the relay's
-`--require-gpu` option for strict GPU qualification.
+The worker checks the machine running the receiver for a usable physical GPU.
+**GPU** starts off and disabled during discovery, then starts checked when CUDA
+or a physical Vulkan device initializes. Without one it stays off and disabled,
+and the worker runs on CPU with the reason in receiver diagnostics. The same
+runtime rule applies regardless of the RunPod allocation label. The checkbox
+selection lasts for the worker session. Use the relay's `--require-gpu` option
+for strict GPU qualification.
 Check the receiver's backend, scored rows and stage counters to see where GPU work ran. Reopening a managed deployment
 checks the source, build settings and worker hash before reuse. An interrupted
 matching build can resume. A different source or an unmanaged directory requires
@@ -513,9 +515,9 @@ The controller persists a unique job name and returned pod or queue ID in
 private user state. If creation times out, reconcile that name before retrying.
 After a crash, cancellation or transport loss, reopen the owned job, recover
 output when possible, and confirm termination. The deadline is enforced only
-while the local controller runs with an API key, and automatic restart
-reconciliation remains unimplemented. The v2 creation schema does not supply
-an automatic termination deadline. Report any still-billable resource
+while the local controller runs with an API key. The controller resumes checks
+on startup once the API key is available. The v2 creation schema does not
+supply an automatic termination deadline. Report any still-billable resource
 and separately owned cache volume. Read current spending authorization before
 launch. Closeout receipts of earlier campaigns, with instance counts, elapsed
 and summed compute time, charges and deletion confirmations, are kept

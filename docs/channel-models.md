@@ -436,6 +436,35 @@ without claiming that a selected power ratio, seeded delay or motion law is a
 calibrated channel replay. See the
 [measured motivation and limits](../_appraisal/highFidelity-triple_Robust_Modem/research-reconciliation.md#persistent-path-ordering-clock-age-and-noise).
 
+### Midlatitude moderate HF
+
+The Robust spread preset **HF midlatitude moderate 0.5 Hz 1 ms**
+(`hf-midlatitude-moderate`) uses two independent, equal-mean-power Gaussian
+fading paths at 0 and 1 ms. Each path has a 0.5 Hz full 2σ Doppler
+power-spectrum width. This is the midlatitude moderate test law in
+[ITU-R F.1487 Annex 3](https://www.itu.int/dms_pubrec/itu-r/rec/f/R-REC-F.1487-0-200005-I!!PDF-E.pdf).
+The separate **HF moderate 10 Hz 6 ms** preset retains its bounded echo and
+common wander. The new preset starts with selective amplitude perturbation
+Off. An explicit selection still applies, as does any explicit Doppler.
+
+The receiver scores the nominal 1 ms path spacing with time-varying gain.
+Search Margin expands the public delay support and spectral allowance
+while preserving the two physical ray delays and their fading widths.
+At Margin 3 the receiver reserves 3 ms of excess delay, up to an additional
+±3 Hz for the search center and ±4.5 Hz total for the atmospheric
+spectrum on each side before oscillator, explicit Doppler and optional
+selective-modulation terms. The receiver can use up to 0.25 Hz of the
+existing center allowance for a linear-drift fallback. Margin 1 supplies no
+extra drift allowance. The Gaussian simulator remains centered unless
+explicit Doppler is set. A different actual tap spacing can require its
+own channel calibration.
+
+The high-fidelity appraisal also provides continental models derived from
+measured delay/Doppler summaries and eastbound and westbound Atlantic
+engineering cases with independent realizations. The Atlantic cases
+assume a usable 12 MHz path and share a reciprocal multipath model.
+[Regional HF validation](../_appraisal/highFidelity-triple_Robust_Modem/hf-validation.md#moderate-continental-and-atlantic-hf)
+
 ### Distinguish HF stress profiles
 
 GUI **HF Worst** and appraisal `hf-disturbed` share nominal 7 ms / 30 Hz

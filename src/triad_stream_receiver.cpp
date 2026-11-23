@@ -714,7 +714,8 @@ struct CompleteStreamReceiver::Impl {
         score.decision = QuietSlotMessageReceiver::classification(score);
         if (score.decision!=SlotDecision::data) score.bit.reset();
         job.score = std::move(score);
-        if (!job.continuation || !job.continuation->eligible || job.score->decision==SlotDecision::data) {
+        if (!job.continuation || !job.continuation->eligible ||
+            (job.score->decision==SlotDecision::data && !job.continuation->refine_admitted)) {
             job.continuation.reset();
             job.input.reset();
         }
@@ -734,7 +735,8 @@ struct CompleteStreamReceiver::Impl {
 
     bool start_continuation(Job& job) {
         if (!tracking || !job.continuation || !job.continuation->eligible ||
-            job.score->decision == SlotDecision::data || codec.recovering()) return false;
+            (job.score->decision==SlotDecision::data && !job.continuation->refine_admitted) ||
+            codec.recovering()) return false;
         if (active() >= resources.slot_owners) return true;
         const auto scratch = job.continuation->scratch_bytes;
         const auto admitted = add(reserved(job.work.workers), add(input_overhead, scratch));

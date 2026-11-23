@@ -532,6 +532,19 @@ def main() -> None:
     assert wanted["outcomes"]["premature_completions"] == 0, wanted
     assert wanted["outcomes"]["wrong_bits"] == 0, wanted
     assert wanted["outcomes"]["actual_scored_slots"] >= 5, wanted
+    policies = ["current", "guarded", "strict", "very-strict", "extreme", "maximum"]
+    for slot in wanted["slots"]:
+        admission = slot["wrong_key_admission"]
+        assert admission["raw_data_candidate"] is (slot["decision"] == "data"), slot
+        assert admission["configured_policy"] == "current" and not admission["configured_policy_rejected"], slot
+        tiers = admission["native_policy_passes"]
+        assert [tier["policy"] for tier in tiers] == policies, slot
+        passes = [tier["passes"] for tier in tiers]
+        assert all(isinstance(value, bool) for value in passes), slot
+        assert passes == sorted(passes, reverse=True) and passes[0] is admission["raw_data_candidate"], slot
+        assert slot["scheduled_carrier_beat_aperture"] is None, slot
+        assert slot["carrier_beat_search_coordinates"] == 0 and slot["carrier_beat_nomination"] is None, slot
+        assert slot["carrier_beat_corrected_polarity"] is False, slot
     assert wanted["channel"]["selected_observation_sha256"] == search["channel"]["selected_observation_sha256"], (wanted, search)
     assert wanted["channel"]["selected_observation_complete"], wanted
     assert wanted["channel"]["selected_observation_hashed_samples"] == observation["stop"] - observation["first"], wanted

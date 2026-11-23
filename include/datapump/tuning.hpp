@@ -74,6 +74,9 @@ struct SpreadPreset {
     std::string_view id, name;
     double delay_ms, doppler_hz;
     bool default_perturbation;
+    // Bounded selections interpret doppler_hz as their deterministic limit;
+    // Gaussian rays interpret it as the full 2-sigma spectral width.
+    enum class DopplerLaw { bounded, gaussian_rays } doppler_law = DopplerLaw::bounded;
 };
 std::span<const SpreadPreset> spread_presets();
 SpreadPreset parse_spread_preset(std::string_view name);

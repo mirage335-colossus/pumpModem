@@ -150,7 +150,8 @@ struct Controller::Impl {
         f(F::fast_sim_shift_oscillator).options.insert(f(F::fast_sim_shift_oscillator).options.begin(),
             {"baseband-clock","Same Baseband reference"});
         for(const auto& preset:tuning::spread_presets())
-            f(F::fast_sim_spread).options.push_back({std::string(preset.id),std::string(preset.name)});
+            if(preset.doppler_law==tuning::SpreadPreset::DopplerLaw::bounded)
+                f(F::fast_sim_spread).options.push_back({std::string(preset.id),std::string(preset.name)});
         f(F::fast_sim_selective).options.push_back({"off","Off"});
         for(const auto* kind:{"slow","fast","each"}) for(const auto depth:{1,5,10,25,65}) {
             const std::string prefix=kind;

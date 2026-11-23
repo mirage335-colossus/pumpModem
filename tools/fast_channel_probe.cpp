@@ -56,6 +56,13 @@ constexpr std::string_view filename = "fast-test.bin";
 constexpr std::size_t block_samples = 4096;
 constexpr std::size_t retained_capture_samples = 75*48000;
 
+tuning::SpreadPreset fast_spread(std::string_view id) {
+    const auto spread = tuning::parse_spread_preset(id);
+    if (spread.doppler_law != tuning::SpreadPreset::DopplerLaw::bounded)
+        throw Error("Fast channel probe supports bounded Doppler spread presets only");
+    return spread;
+}
+
 struct Options {
     Profile profile = capacity_profile(Channel::ssb);
     SimulationSettings channel;
@@ -367,7 +374,7 @@ Options parse(int argc, char** argv) {
             a->shift_ppm=shift.clock_error_ppm;
             a->shift_phase_rad_sqrt_s=shift.phase_noise_degrees_per_sqrt_second*radians;
         }
-        const auto spread=tuning::parse_spread_preset(assume_spread);
+        const auto spread=fast_spread(assume_spread);
         a->delay_ms=spread.delay_ms;
         a->doppler_hz=spread.doppler_hz;
     }
@@ -413,7 +420,7 @@ Options parse(int argc, char** argv) {
         o.channel.shift_phase_rad_sqrt_s = shift.phase_noise_degrees_per_sqrt_second * radians;
         o.shift_oscillator = shift.id;
     }
-    const auto spread = tuning::parse_spread_preset(o.spread);
+    const auto spread = fast_spread(o.spread);
     o.spread = spread.id;
     o.channel.doppler_hz = spread.doppler_hz;
     o.channel.delay_ms = spread.delay_ms;

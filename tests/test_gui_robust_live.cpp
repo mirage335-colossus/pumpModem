@@ -6,6 +6,7 @@
 #include "datapump/triad_shaping.hpp"
 #include "../src/live_capture_queue.hpp"
 #include "../src/live_finite_plan.hpp"
+#include "../src/triad_receiver_fine.hpp"
 #include "../src/triad_stream_resources.hpp"
 
 #include <algorithm>
@@ -1367,6 +1368,78 @@ void nonstationary_channel_profile() {
           "Off must bypass all dynamic path and selective channel effects");
 }
 
+void midlatitude_hf_profile_uses_nominal_gaussian_rays() {
+    auto s = settings(true);
+    s.spread_preset = "hf-midlatitude-moderate";
+    s.selective_perturbation = "off";
+    s.doppler_shift_hz = 0;
+    auto oscillator = *s.transfer.modem.oscillator_search;
+    oscillator.margin = 3;
+    s.transfer.modem.oscillator_search = oscillator;
+
+    const auto band = live::detail::plan_carrier_band(s);
+    const auto profile = live::detail::prepare_profile(s, *s.calendar, {}, {.simulation_seed = 37});
+    const auto carrier = s.transfer.modem.carrier_hz;
+    const auto guarded = band.data_passband(carrier);
+    const auto slot = triad::v3::make_receiver_slot_plan(profile.waveform, profile.receiver, 0);
+    check(std::abs(profile.receiver.spread_delay_seconds - .001) < 1e-12 &&
+          profile.receiver.spread_doppler_hz == 0 &&
+          std::abs(profile.receiver.random_doppler_width_hz - .5) < 1e-12 &&
+          std::abs(profile.receiver.time_varying_atmospheric_hz - 3.) < 1e-12 &&
+          profile.receiver.time_varying_common_doppler_hz == .25 &&
+          profile.receiver.time_varying_channel,
+          "Midlatitude HF receiver did not retain nominal 1 ms Gaussian rays and the Margin-3 public support");
+    const auto drift = triad::v3::receiver_detail::drift_plan(profile.receiver, slot, 2);
+    check(drift.workspace_bytes > 0 && drift.slope_radius > 0,
+          "Midlatitude HF did not quote the bounded drift fallback when simulated common wander was zero");
+    check(profile.waveform.config().spread_delay_ms == 3 &&
+          profile.waveform.config().spread_doppler_hz == 0 &&
+          std::abs(profile.waveform.config().cfo_bound_hz - 3.) < 1e-12 &&
+          profile.channel.effects.spread_delay_ms == 1 &&
+          profile.channel.effects.spread_doppler_hz == 0 &&
+          std::abs(profile.channel.path_evolution.random_doppler_width_hz - .5) < 1e-12 &&
+          profile.channel.path_evolution.bounded_spread_knot_seconds == 0 &&
+          profile.channel.path_evolution.common_doppler_wander_hz == 0,
+          "Margin changed the physical Gaussian rays or added a bounded echo/common wander");
+    auto nominal_settings = s;
+    oscillator.margin = 1;
+    nominal_settings.transfer.modem.oscillator_search = oscillator;
+    const auto nominal = live::detail::prepare_profile(nominal_settings, *s.calendar, {},
+        {.simulation_seed = 37});
+    const auto nominal_slot = triad::v3::make_receiver_slot_plan(nominal.waveform, nominal.receiver, 0);
+    check(nominal.receiver.time_varying_atmospheric_hz == 0 &&
+          nominal.receiver.time_varying_common_doppler_hz == 0 &&
+          nominal.channel.path_evolution.common_doppler_wander_hz == 0 &&
+          triad::v3::receiver_detail::drift_plan(nominal.receiver, nominal_slot, 2).workspace_bytes == 0,
+          "Nominal Gaussian support added a drift proposal beyond the public center allowance");
+    const auto capture_adjusted = live::detail::with_capture_uncertainty(profile, 0, 0, 100);
+    check(capture_adjusted.receiver.capture_tail_bound_seconds >= .003 +
+              100. / profile.waveform.effective_sample_rate(),
+          "Capture settling omitted the Margin-expanded public 3 ms delay bound");
+    check(std::abs(profile.minimum_data_hz - guarded.lower_hz) < 1e-9 &&
+          std::abs(profile.maximum_data_hz - guarded.upper_hz) < 1e-9,
+          "CarrierBand and receiver audio guard reserved different Gaussian-ray support");
+    auto unspread_settings = s;
+    unspread_settings.spread_preset = "none";
+    const auto unspread = live::detail::plan_carrier_band(unspread_settings).data_passband(carrier);
+    check(std::abs((unspread.lower_hz - guarded.lower_hz) - 4.5) < 1e-9 &&
+          std::abs((guarded.upper_hz - unspread.upper_hz) - 4.5) < 1e-9 &&
+          std::abs((unspread.lower_hz - profile.minimum_data_hz) - 4.5) < 1e-9 &&
+          std::abs((profile.maximum_data_hz - unspread.upper_hz) - 4.5) < 1e-9,
+          "Margin-3 Gaussian full skirts did not retain 3D times Margin per edge");
+    auto perturbed_settings = s;
+    perturbed_settings.selective_perturbation = "each-65";
+    const auto perturbed = live::detail::prepare_profile(perturbed_settings, *s.calendar, {},
+        {.simulation_seed = 37});
+    const auto perturbed_band = live::detail::plan_carrier_band(perturbed_settings).data_passband(carrier);
+    check(std::abs(perturbed.receiver.selective_modulation_rate_hz - 1.5) < 1e-12 &&
+          perturbed.receiver.selective_slow_depth == .65 && perturbed.receiver.selective_fast_depth == .65 &&
+          std::abs(perturbed.channel.selective_model.modulation_rate_hz.value_or(0.) - .15) < 1e-12 &&
+          std::abs((guarded.lower_hz - perturbed_band.lower_hz) - 1.5) < 1e-9 &&
+          std::abs((perturbed_band.upper_hz - guarded.upper_hz) - 1.5) < 1e-9,
+          "Explicit selective perturbation no longer adds the Gaussian-width modulation allowance");
+}
+
 void simulation_transmit_ignores_realized_channel() {
     using namespace triad::v3;
     auto s = settings(true);
@@ -2343,6 +2416,7 @@ int main(int argc, char** argv) {
         long_live_prefix_and_cancel(true);
         full_duplex_reserves_long_preparation();
         nonstationary_channel_profile();
+        midlatitude_hf_profile_uses_nominal_gaussian_rays();
         simulation_transmit_ignores_realized_channel();
         late_affine_clock_support();
         simulation_cancel_is_not_completion();
