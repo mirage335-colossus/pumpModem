@@ -45,6 +45,251 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Continuous DATA in simulation and live audio — 22 November 2026
+
+The shared GUI runs Continuous DATA through the canonical native stream
+receiver. The ordinary simulation fixture decoded `e`, received DATA `001`
+and confirmed two physically scored quiet slots. The paired native waveform
+check put the terminating bit at declared opposed clock endpoints. Its newly
+retained samples had wanted energy. A capture with only preceding DATA had
+zero energy there. Both possible neighbors still constrain interior support.
+Quiet statistics retain the previous physical bounds and whole-block
+calendar. [Implementation and limits](symbol-burst.md#boundary-model-findings)
+
+The local finite-duplex test used the connected Realtek ALC257 analog cable,
+48 kHz hardware, 6 kHz logical audio, crystal oscillator, 120 Hz Rate,
+1,725 Hz IF, 265 Hz spacing, Helper/FHSS/waits Off and 24 CPU workers. A
+12-second microphone-only Hann-Welch check measured approximately −127.75,
+−128.69 and −128.80 dBFS/Hz around the three carriers. The operator model
+used −126 dBFS/Hz and Target 80 dB-Hz. The strong 5% transmit-gain trial
+decoded `e` with `001QQ` in 98.66 s. At 0.1% gain, 34 dB lower, the same
+configured link decoded `e` with `001QQ` in 107.79 s. Both runs confirmed
+physical playback drain, finite capture end and empty transport queues.
+The same wanted record was visible under all six GUI admission filters.
+The filter rereads reused that capture. Independent-key trials are reported below.
+
+The first launch reached the packed profile but stopped before opening
+playback because the 500 ms audio error budget was exhausted by the 50 ms
+relative and provisional 200 ms UTC bounds. The successful runs used
+750 ms, leaving 125 ms for transmit-provider timing. Worker SHA-256
+`f07c889c6d521f1459c683f00fe48d63fe64c93fb16338dd424d63eb698d43a1`
+and native companion SHA-256
+`6c332b0be8d0aec307d984be420d0336fe6b17a91e1e52e7c9283ec0447b1e2f`
+identify the cable executables. Both endpoints used one host and distinct
+playback and capture streams. The low-level tone preflight recovered 0.01%
+gain, but native DATA reconstruction predicted about 38–41 dB loss of
+correlated power from S16 truncation at that setting. The physical DATA
+trials therefore used 0.1% and 5%. The lower-gain evidence stayed well
+above admission. Calibration of the physical sensitivity floor and a
+stationary Gaussian hardware covariance bound remain open.
+
+On the Ryzen 5 PRO 5650U integrated Radeon, the first bounded Vulkan
+replay scored all three DATA bits and failed before quiet completion. The
+restricted coarse proposal pass still rejected a bulk backend, and the
+chunked host FIR copied unmasked input on one device-template route. After
+the shared input copy fix, the same local native replay scored `001QQ`,
+decoded `e`, passed its separate EOF control, and reported 208 Vulkan
+FP16-storage coarse score rows on `AMD Radeon Graphics (RADV RENOIR)`.
+Its 1,500-sample/s Rate 120, 500 Hz IF and 80 dB-Hz geometry is a functional
+GPU check. Throughput and other-device qualification remain open.
+
+The colored Gaussian component checks passed on real PCM with native
+analytic projection and a stationary capped MA(1) noise model. A matched
+noise-only capture and independent-key control exercised the same scorer and
+gain as the wanted control. Zero and constant-power samples retained only the
+finite-dictionary baseline. The physical cable used the ordinary production
+likelihood. The new signed likelihood requires a stationary, zero-mean
+Gaussian input and a joint spectral covariance cap. It remains opt-in in the
+native qualification path. [Assumptions and exact prior](symbol-burst.md#stationary-colored-gaussian-pcm-qualification)
+
+The frozen 6 kHz, Rate 3.6 Hz, HF Worst plus Each 65% wanted slot at
+20 dB-Hz recovered bit `0` with 33.956 nats total evidence and 54.907 nats
+separation under the signed bound. Its input hash `b7f038…daf6` matches
+the previously successful conditional white comparison. This route used
+raw simulator IQ. In the shorter
+1,500-sample/s broad timing fixture, the strong adjacent `0` and `1`
+still left an empty center physically quiet. The 15 dB-Hz wanted fixture
+with quiet neighbors still yielded an erasure. Broad interior losses and the
+weak-signal floor therefore remain open.
+
+A separately keyed 6 kHz wanted capture at seed 74022 and 20 dB-Hz
+(`5e7471…1041`) gave an erasure with the original conservative quadratic
+penalty and with the conditional white likelihood. Tightening the Gaussian
+penalty to each fixed atom's analytic radius recovered bit `0` at 26.405
+nats on the same IQ, above the 15.500-nat calendar threshold. All six
+admission policies kept that bit. The canonical production stream separately
+decoded `e` with `001QQ` and passed its EOF control on the encrypted, nominal
+77 dB-Hz severe case, seed 74021 and capture `6ec898…99bd`. It scored all
+5,064,925 samples with 24 workers across 12 logical CPUs. Its 199.00 s
+receiver-service observation overlapped other validation jobs and does not
+establish throughput or capacity.
+
+The PCM qualification probe converted the raw wanted capture to real audio,
+applied a contractive MA(1) filter and ran the production analytic projector.
+At 6 kHz, Rate 3.6 Hz, 265 Hz spacing, seed 74022 and the tight ±2.5 ms arrival
+prior, all 1,130,997 rows were valid and the decoded IQ/mask hash
+`80937773…6017` matched across arms. The nominal 26.5 dB-Hz before the filter
+corresponds to approximately 20.0 dB-Hz at the center carrier relative to
+the declared upper bound, before Hilbert response effects. The original
+likelihood erased the wanted bit at −25.567 nats. The signed colored
+supplement recovered bit `0` at 42.741 nats. The matched noise-only control
+was physically quiet at −21.13 nats. The independently keyed control used
+the separate capture seed 74101 and was quiet at −20.72 nats.
+Under the broad −7/+7.07 s timing bounds, the same seed and prefilter level
+retained 1,215,387 valid projected rows and identical IQ/mask hash
+`a8483b36…06e5` with the supplement Off and On. The baseline classified
+the wanted slot as quiet at −29.208 nats. The signed likelihood recovered
+bit `0` at 31.091 nats above its 15.500-nat threshold. All six admission
+policies retained the wanted bit in the broad and tight runs. These are
+controlled synthetic PCM cases using a known Gaussian noise law. The broad
+pair exercises wide timing on the wanted signal. The projected quiet and
+foreign-key controls used the tighter arrival bounds.
+
+Fresh direct HF appraisal replays at +20 dB-Hz reproduced `001QQ` and
+exact `e` in the Watterson I3 seed 10102 and moving eikonal seed 10105
+wanted cases. The I3 independent-key replay again scored `A1AQQ`, with one
+false DATA decision and zero accepted messages. These repeats preserve the
+earlier holdouts and the counterexample. They do not qualify a population
+false-admission rate. Scheduled remains the shared default.
+
+On the full appraisal group, 46 of 48 tests passed on the first invocation.
+The Lunar spectral test timed out with other workloads active. The native
+supplement fixture's strong 0.5 line invoked the supplement once before the
+line veto, despite the intended zero-call control. The 0.6 line preserved
+the original zero-call and physical quiet-veto assertions, while the 0.1
+control kept its required one call. The corrected supplement test and the
+separate Lunar spectral rerun both passed.
+
+Keep only the two physical transport receipts and the matched numerical
+receipts in the ignored `local-evidence/packed-physical.tupBtD6A`,
+`local-evidence/packed-weak.pXlpWq0B` and
+`local-evidence/packed-live-qualification.YbG0UOwg` directories while
+qualifying default cadence. Discard them once a new qualification supersedes
+these cases. The physical preflights retained no raw PCM.
+
+## Packed Robust reception at 3.6 Hz — 22 November 2026
+
+The Helper-off CPU probe replayed the same 5,064,925 packed samples at
+6 kHz, 265 Hz minimum carrier spacing, 3.6 Hz Rate, nominal 77 dB-Hz
+and Target 32, using HF Worst, Each 65%, both GPSDO XO and 3× search
+margin. Seed 74021 and I/Q hash `99f35296…e82c` matched the previous
+protected trial. The original Current decisions were `100QQ` and missed
+`e`. The new native nominee path with Guarded received `001QQ`,
+decoded `e`, and passed the separate incomplete-input control. It added
+one distinct affine atom in each of the previously inverted slots.
+The corrected native margins were 20.875 and 23.780 million nats,
+against Guarded requirements of 18.544 and 14.231 million. Receiver
+service took 109.29 s with 24 workers on 12 visible logical CPUs.
+
+On a fresh matched active window with seed 74022 and the same high
+C/N0 geometry, 741 beat coordinates found the omitted epoch-0 arrival
+near −4.965 s. The I/Q hash `2305e187…c3be` matched the failed initial
+nomination path. The native mixture recovered bit 0, with evidence
+203.504 and 126.221 million nats. Current, Guarded and Strict all kept
+that bit. A separate strong foreign waveform, input hash `d21d61b9…d5`,
+produced no qualifying beat nomination on the full scan. The paired
+ordinary and modified scores were identical. Both retained one
+false DATA under Current and rejected it under Guarded. This is one
+foreign-key comparison, with no false-acceptance probability estimate.
+
+The same seed and geometry at 32 dB-Hz, with fixed Target 32, used a
+second identical-I/Q pair `2b946ad9…8036`. The ordinary score made
+the same inversion with Current and Guarded. The modified score
+recovered bit 0 at the same −4.965 s nomination. The direct and
+dispersive fits explained 0.680 and 0.689 of the beat energy. The
+native mixture gave 3,567.87 versus 1,751.31 nats and retained the
+correct bit under both policies. This lower-power contrast is still a
+single active slot.
+
+A 20 dB-Hz pair at the same geometry remained an erasure. Removing the
+absolute fit and admission prerequisites exposed a correct beat preference,
+but the freshly scored cell stayed far below the native DATA threshold.
+An evaluator-only rescore at the −4.965 s alignment still gave −34.35 nats
+on the identical 20 dB-Hz I/Q. See the
+[scope of the retired weak proposal](symbol-burst.md#protected-discovery-and-polarity).
+
+The separate `--white-beat-evidence on` route recovered the same
+20 dB-Hz bit from identical raw I/Q `b7f038…daf6`, with native total
+log evidence 26.057 and bit separation 43.578 nats. Current, Guarded and
+Strict kept it. The matched absent center `298ad9ac…b2d7` stayed quiet
+at −15.393 nats. An independently keyed 20 dB-Hz interferer
+`2d20200c…1541` stayed ambiguous at −14.247 nats. The strong independent
+key `d21d61b9…d5` retained its Current false DATA and Guarded rejection.
+This option assumes independent proper-complex thermal noise at the raw
+simulator input. It does not qualify the real audio covariance or a
+population wrong-key rate. [Likelihood and native mixture](symbol-burst.md#weak-beat-evidence-on-raw-simulator-input).
+
+A complete packed probe at the same 20 dB-Hz setting and seed 74022 used
+both beat options and Guarded. It decoded `e` with `001QQ`, I/Q hash
+`3ee668a0…8e3f`, and passed the separate incomplete-input check.
+The first and third slots used supplemental evidence. Their total log
+evidence was 26.057 and 22.687 nats. The middle slot used native evidence
+at 19.962 nats. The full native stream used 109.83 s of CPU receiver
+service on the same 24-worker allocation. This is one completed message
+under the declared raw simulator noise model.
+
+Enabling both options on the matched first strong slot preserved the
+correct Guarded bit. Relative to affine nomination alone, both native
+bit scores and the newly scored affine contribution each declined by
+`ln(2)` within 1e−7 nats. This confirms the reserved half native-family
+mass also applies to atoms discovered after the ordinary search.
+
+The compact 15 dB-Hz HF/Each 65% replay at Rate 120 retained the full
+`001QQ` message, I/Q hash `68605aa1…10c8`, and its ordinary
+likelihoods. The changes remain opt-in in the native probe. The default
+GUI and live timing still use the scheduled calendar. These observations
+preserve the scoped weak control and recover selected strong inversions.
+Boundary-dependent reception, broader weak-signal performance,
+independent-key admission rates and complete real-time capacity remain
+unqualified. [Mechanism, fixed priors and boundary counterexamples](symbol-burst.md#protected-discovery-and-polarity).
+
+The scoped receipts in ignored `local-evidence/packed-improvement.UGf75Mj8`
+retain matched corrections, short-duration controls, foreign-key scores
+and the failed weak probes for comparison with a future complete receiver.
+Remove superseded receipts after recording that comparison.
+
+## Packed DATA under physical HF models — 22 November 2026
+
+The native appraisal can run its direct HF reference renderer with the
+sample-grid packed calendar and protected scoring. The two layouts have
+different addresses and waveforms. A common path/noise seed pairs their
+declared conditions, not their I/Q. The `750fb0a8` base plus these changes
+was tested on 12 visible logical CPUs with the full 24-worker allocation.
+
+| Path and control at +20 dB-Hz | Calendar | Native slots | Outcome |
+| --- | --- | --- | --- |
+| Watterson I3, 10102, wanted | Packed | `001QQ` | Exact `e`, two scored quiet slots |
+| Moving parabolic-layer eikonal, 10105, wanted | Packed | `001QQ` | Exact `e`, two scored quiet slots |
+| Watterson I3, 10102, independent transmit key | Packed | `A1AQQ` | One false DATA, native integrity rejected content |
+| Watterson I3, 10102, independent transmit key | Scheduled | `AAAQQ` | Zero false DATA, zero accepted content |
+
+`A` is ambiguous and `Q` is physical quiet. The packed I3 runs used
+223,810 captured samples. Three gates of 44,545 samples each were adjacent.
+The moving eikonal holdout completed over 223,798 samples. These finite replays
+demonstrate both successful continuous reception and an admission problem.
+Watterson I3 models six sampled complex Gaussian components in three delay
+groups fitted to a particular historical sounding summary. The eikonal path
+is a separate synthetic model. [Watterson's model](https://its.ntia.gov/publications/details?pub=3106)
+· [Appraisal provenance](../_appraisal/highFidelity-triple_Robust_Modem/research-reconciliation.md).
+
+The packed wrong-key bit's score gap was 9.0741 nats. At this operating point,
+the existing Guarded rule retains it and Strict rejects it. The wanted gaps
+were 1,454.11, 3,389.96 and 1,511.56 nats, so Strict preserves these three
+bits. This favorable policy contrast applies to that strong I3 placement.
+It does not counter the previously observed loss of wanted reception under
+combined HF Worst and Each 65%.
+
+Enabling `--protected-discovery` reproduced the wanted and packed
+independent-key captures and native scores exactly. All three wanted slots
+skipped discovery after ordinary DATA admission. The two wanted quiet slots
+and four unresolved or quiet independent-key slots found no additional cells.
+This qualifies preservation on these I/Q pairs. It does not demonstrate
+correction of the independent-key admission.
+
+The receipts in ignored `local-evidence/packed-appraisal.h8J0rgSw` record
+these finite controls for comparison with a subsequent packed candidate.
+Remove them after that qualification has recorded the applicable results.
+
 ## Robust DATA cadence and cross-slot timing — 22 November 2026
 
 The native receiver on the `11dabf96` base with this change retains an

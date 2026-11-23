@@ -394,6 +394,8 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   set_tests_properties(gui_fast_keygen PROPERTIES LABELS "gui;fast" TIMEOUT 90)
   add_test(NAME gui_robust_live COMMAND test_gui_robust_live)
   set_tests_properties(gui_robust_live PROPERTIES LABELS "gui;triad" TIMEOUT 120)
+  add_test(NAME gui_robust_continuous_data COMMAND test_gui_robust_live --continuous-data)
+  set_tests_properties(gui_robust_continuous_data PROPERTIES LABELS "gui" TIMEOUT 95)
   add_test(NAME gui_robust_fixed_target COMMAND test_gui_robust_live --fixed-receiver-link 0)
   add_test(NAME gui_robust_stronger_than_target COMMAND test_gui_robust_live --fixed-receiver-link 30)
   set_tests_properties(gui_robust_fixed_target gui_robust_stronger_than_target

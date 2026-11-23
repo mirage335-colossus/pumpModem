@@ -373,8 +373,9 @@ PublicSlot PublicProfile::slot(std::uint64_t index) const {
     // Packed DATA has zero envelope in the reference halos. Only the
     // active gates, their channel tails and the receive filter can intrude
     // on a neighboring quiet aperture. Retain both padded observation edges.
-    const SampleRange data{signal_first(seconds(config_.continuous_data ? tx.pattern_begin : tx.support_begin), false),
-        signal_stop(seconds(config_.continuous_data ? tx.pattern_end : tx.support_end), false)};
+    const auto data_begin = seconds(config_.continuous_data ? tx.pattern_begin : tx.support_begin);
+    const auto data_end = seconds(config_.continuous_data ? tx.pattern_end : tx.support_end);
+    const SampleRange data{signal_first(data_begin, false), signal_stop(data_end, false)};
     const auto previous_end = [&](const HelperBurstSlot& previous) {
         return config_.continuous_data ? previous.pattern_end : previous.helper_end;
     };
@@ -385,8 +386,21 @@ PublicSlot PublicProfile::slot(std::uint64_t index) const {
     const auto quiet_first = std::min(nominal_observation.stop,
         std::max({nominal_observation.first, data.first, previous_stop}));
     const auto quiet_stop = std::max(quiet_first, std::min({nominal_observation.stop, data.stop, next_first}));
+    SampleRange protected_data;
+    if (config_.continuous_data) {
+        // Keep the nominal quiet aperture and the reachable DATA in the
+        // affine clock and filter margins. Exclude both neighboring signals.
+        const auto wanted_first = earlier(signal_first(data_begin, true));
+        const auto wanted_stop = add(signal_stop(data_end, true), halo);
+        const auto first = std::clamp(std::max(previous_stop, wanted_first), observation.first, observation.stop);
+        const bool next_is_public = index < max_coordinate - config_.format.symbol_ordinal &&
+            next.pattern_begin.epoch <= last_pattern_epoch && next.helper_end.epoch < helper_epoch_limit;
+        const auto stop = std::clamp(next_is_public ? std::min(next_first, wanted_stop) : wanted_stop,
+            first, observation.stop);
+        protected_data = {first, stop};
+    }
     return {index, tx.pattern_begin.epoch, config_.format.symbol_ordinal + index, tx,
-        observation, data, {quiet_first, quiet_stop}, previous_stop, next_first};
+        observation, data, {quiet_first, quiet_stop}, previous_stop, next_first, protected_data};
 }
 
 Format PublicProfile::basis_format(const PublicSlot& slot) const {

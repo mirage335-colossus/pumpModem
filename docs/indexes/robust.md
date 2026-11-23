@@ -16,7 +16,12 @@ stack linked into the GUI. In-process owners share immutable buffers and a
 bounded executor; Python only orchestrates native testing and analysis.
 
 For live reception, first match the peers' public calendar epoch, initial keyed
-ordinal, waveform profile, encryption/key, FEC, compression and burst schedule.
+ordinal, waveform profile, encryption/key, FEC, compression and DATA cadence.
+**Robust setup → DATA cadence → Continuous DATA** removes the scheduled silence
+between successive DATA gates. Both peers need Helper, both burst waits and
+FHSS Off for this cadence. Scheduled remains the default because broad timing
+still excludes neighbor-ambiguous interior energy and because the weak colored
+live likelihood needs field qualification. [Cadence and validation](../symbol-burst.md#native-packed-data-checks)
 Both peers also need the same effective DATA carrier spacing. Robust Setup
 defaults to a 265 Hz minimum. Select 0 Hz for a peer using the original
 rate-derived spacing. The 3.5 and 125 Hz options provide smaller shared floors.

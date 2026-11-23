@@ -1284,6 +1284,533 @@ std::size_t fine_workspace(const ReceiverConfig& config, const ReceiverSlotPlan&
     return fine_workspace(config, slot, whole_slot(slot), workers);
 }
 
+namespace {
+
+using BeatCoefficients = std::array<double, 4>;
+using BeatProducts = std::array<BeatCoefficients, BeatCoefficients{}.size()>;
+
+struct ColoredBeatScore {
+    BeatCoefficients power{};
+    BeatProducts gram{};
+
+    void add(const std::array<Complex, 2>& harmonics, const std::array<Complex, 2>& rotations,
+             const BeatCoefficients& moments, const BeatProducts& basis_gram) {
+        BeatProducts columns{};
+        for (std::size_t h = 0; h < harmonics.size(); ++h) {
+            const auto predicted = harmonics[h] * rotations[h];
+            columns[2 * h][2 * h] = predicted.real();
+            columns[2 * h][2 * h + 1] = -predicted.imag();
+            columns[2 * h + 1][2 * h] = -predicted.imag();
+            columns[2 * h + 1][2 * h + 1] = -predicted.real();
+        }
+        for (std::size_t j = 0; j < power.size(); ++j) {
+            for (std::size_t row = 0; row < moments.size(); ++row)
+                power[j] += columns[j][row] * moments[row];
+            BeatCoefficients transformed{};
+            for (std::size_t row = 0; row < moments.size(); ++row)
+                for (std::size_t col = 0; col < moments.size(); ++col)
+                    transformed[row] += basis_gram[row][col] * columns[j][col];
+            for (std::size_t k = 0; k <= j; ++k)
+                for (std::size_t row = 0; row < transformed.size(); ++row)
+                    gram[j][k] += columns[k][row] * transformed[row];
+        }
+    }
+
+    double log_evidence() const {
+        constexpr std::array grid{-.125, -.064, -.032, -.016, -.008, -.004, -.002, -.001, -.0005,
+                                    0.,  .0005, .001, .002, .004, .008, .016, .032, .064, .125};
+        // The normalized first and second harmonics have magnitudes at most
+        // 1/sqrt(2) and 1/2. Centering the complex basis doubles its bound.
+        // With each real gain component in [-1/8, 1/8], every |a_i| is < 1/2.
+        constexpr double radius = .5;
+        const double search_penalty = (-std::log1p(-radius) - radius) / (radius * radius);
+        BeatCoefficients gain{};
+        for (unsigned sweep = 0; sweep < 4; ++sweep)
+            for (std::size_t j = 0; j < gain.size(); ++j) {
+                if (!(gram[j][j] > 0)) continue;
+                double slope = power[j];
+                for (std::size_t k = 0; k < gain.size(); ++k)
+                    if (k != j)
+                        slope -= 2 * search_penalty * gain[k] * gram[std::max(j, k)][std::min(j, k)];
+                const auto target = std::clamp(slope / (2 * search_penalty * gram[j][j]), grid.front(), grid.back());
+                if (!std::isfinite(target)) throw Error("Nonfinite Robust colored power gain");
+                const auto upper = std::ranges::lower_bound(grid, target);
+                gain[j] = upper == grid.begin() || *upper - target < target - *(upper - 1) ? *upper : *(upper - 1);
+            }
+        // Stationary real Gaussian PCM gives constant E|IQ_i|^2 for the
+        // complete FIR supports. Centering makes tr(B) = 0 for
+        // B = 2 Sigma^(1/2) diag(a_i, a_i) Sigma^(1/2) / noise_variance.
+        // The joint covariance cap gives tr(B^2) <= 2 sum(a_i^2).
+        // The signed Gaussian log-MGF is thus at most penalty * sum(a_i^2)
+        // by -log(1-lambda) - lambda <= penalty * lambda^2 for lambda <= rho.
+        // Each fixed gain atom can use its own deterministic radius.
+        const auto rho = std::numbers::sqrt2 * std::hypot(gain[0], gain[1]) + std::hypot(gain[2], gain[3]);
+        const auto penalty = rho > 0 ? (-std::log1p(-rho) - rho) / (rho * rho) : .5;
+        double evidence = 0;
+        for (std::size_t j = 0; j < gain.size(); ++j) {
+            evidence += gain[j] * (power[j] - penalty * gain[j] * gram[j][j]);
+            for (std::size_t k = 0; k < j; ++k)
+                evidence -= 2 * penalty * gain[j] * gain[k] * gram[j][k];
+        }
+        if (!std::isfinite(evidence)) throw Error("Nonfinite Robust colored power evidence");
+        // Retain one atom from the full fixed gain prior. The search may use
+        // the complete observation, including when it selects the zero atom.
+        return std::max(0., evidence) - gain.size() * std::log(static_cast<double>(grid.size()));
+    }
+};
+
+double carrier_beat_prediction_strength(const CarrierBeatReceipt& evidence, std::uint8_t bit) {
+    double weakest = infinity;
+    for (const auto& profile : evidence.profiles) {
+        for (std::size_t half = 0; half < 2; ++half) {
+            const auto held = profile.held_out_explained_fraction[bit][half];
+            const auto competing = profile.held_out_explained_fraction[1 - bit][half];
+            if (!(held > std::max(0., competing))) return 0;
+            weakest = std::min(weakest, held);
+        }
+    }
+    return weakest;
+}
+
+CarrierBeatReceipt carrier_beat_impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+        const Crypto& key, std::span<const Complex> iq, std::span<const std::uint8_t> valid,
+        const FineCoordinate& coordinate, bool protected_only, std::size_t scratch_limit,
+        CarrierBeatScanReceipt* scan, std::stop_token stop, bool compare_white_power = false,
+        bool exploratory = false, bool compare_colored_power = false) {
+    check_cancelled(stop);
+    CarrierBeatReceipt report;
+    report.status = "unsupported_carrier_beat_geometry";
+    const auto whole = whole_slot(slot);
+    if ((!iq.empty() && iq.size() != whole.rows) || (!valid.empty() && valid.size() != iq.size()))
+        throw Error("Robust carrier beat requires the whole public input");
+    if ((compare_white_power || compare_colored_power) && (!protected_only || scan ||
+        !std::isfinite(config.noise_variance) ||
+        !(config.noise_variance > 0)))
+        throw Error("Robust power comparison requires a fixed protected aperture and declared variance");
+    if (config.helper_enabled || config.physical_rf_retuning || slot.format.fhss ||
+        !std::isfinite(config.sample_rate_hz) || config.sample_rate_hz < 12)
+        return report;
+    if (slot.quiet_first_sample < slot.first_sample || slot.quiet_stop_sample > slot.stop_sample ||
+        slot.quiet_first_sample > slot.quiet_stop_sample)
+        throw Error("Invalid Robust carrier beat aperture");
+    if (!(coordinate.arrival_seconds >= slot.arrival_lower_seconds &&
+          coordinate.arrival_seconds <= slot.arrival_upper_seconds) ||
+        !std::isfinite(slot.arrival_lower_seconds) || !std::isfinite(slot.arrival_upper_seconds) ||
+        !std::isfinite(coordinate.clock_ppm) || std::abs(coordinate.clock_ppm) > config.clock_bound_ppm ||
+        std::ranges::find(receiver_epoch_offsets, coordinate.epoch_offset_seconds) == receiver_epoch_offsets.end() ||
+        slot.format.epoch < 6 || slot.format.epoch > UINT64_MAX - 6)
+        throw Error("Invalid Robust carrier beat coordinate");
+
+    const auto waveform = geometry(slot.format);
+    const auto fs = config.sample_rate_hz;
+    const auto scale = 1 + coordinate.clock_ppm * 1e-6;
+    if (!(scale > 0)) throw Error("Invalid Robust carrier beat clock");
+    const auto spacing = waveform.carrier_spacing_hz * scale;
+    const auto rows = round_rows(std::min(.25, 1 / (waveform.fine_chip_rate_hz * scale)), fs);
+    if (rows < 5 || rows > maximum_basis_rows || spacing * rows < 3 * fs || 4 * spacing >= fs)
+        return report;
+    const auto first = protected_only ? slot.quiet_first_sample - slot.first_sample : 0;
+    const auto end = protected_only ? slot.quiet_stop_sample - slot.first_sample : whole.rows;
+    const auto blocks = (end - first) / rows;
+    if (blocks * static_cast<double>(rows) * waveform.fine_chip_rate_hz * scale < 2 * fs)
+        return report;
+    using Harmonics = std::array<Complex, 2>;
+    using HarmonicBasis = std::array<double, 5>;
+    using Templates = std::array<std::array<Harmonics, 2>, 2>; // bit, path model, harmonic
+    report.block_rows = rows;
+    report.blocks = blocks;
+    report.workspace_bytes = checked_add(8192, checked_add(
+        checked_multiply(rows, sizeof(HarmonicBasis)), checked_multiply(2, waveform.source_workspace_bytes)));
+    if (compare_white_power || compare_colored_power)
+        report.workspace_bytes = checked_add(report.workspace_bytes, 4096);
+    const auto stride = static_cast<long double>(rows) / fs;
+    long double anchor = coordinate.arrival_seconds;
+    std::size_t shifts = 1, template_blocks = blocks;
+    if (scan) {
+        constexpr std::size_t maximum_block_coordinate_pairs = 25'000'000;
+        const auto maximum_shifts = maximum_block_coordinate_pairs / receiver_epoch_offsets.size() / blocks;
+        const auto width = static_cast<long double>(slot.arrival_upper_seconds) - slot.arrival_lower_seconds;
+        const auto intervals = std::floor(width / stride);
+        if (intervals >= maximum_shifts) {
+            report.status = "carrier_beat_scan_work_limit";
+            return report;
+        }
+        shifts += static_cast<std::size_t>(intervals);
+        // Residual span is shared at both edges, so every public arrival is
+        // at most a half stride away from a scored center.
+        anchor = slot.arrival_lower_seconds + (width - intervals * stride) / 2;
+        template_blocks = checked_add(blocks, shifts - 1);
+        report.workspace_bytes = checked_add(report.workspace_bytes, checked_add(64 * 1024,
+            checked_add(checked_multiply(blocks, sizeof(Harmonics)),
+                checked_multiply(template_blocks, sizeof(Templates)))));
+        scan->coordinates = shifts * receiver_epoch_offsets.size();
+    }
+    if (report.workspace_bytes > scratch_limit)
+        throw ReceiverWorkspaceError("Robust carrier beat exceeds the admitted workspace");
+    if (iq.empty()) {
+        report.status = "quoted";
+        return report;
+    }
+    if (!valid.empty() && !std::ranges::all_of(valid.subspan(first, blocks * rows),
+            [](std::uint8_t value) { return value != 0; })) {
+        report.status = "invalid_carrier_beat_observation";
+        return report;
+    }
+
+    // Least squares on the power waveform, including DC and both signed
+    // harmonics. Finite blocks need not contain an integer number of cycles.
+    std::vector<HarmonicBasis> basis(rows);
+    std::array<HarmonicBasis, 5> lower{};
+    const auto radians_per_row = tau * spacing / fs;
+    for (std::size_t row = 0; row < rows; ++row) {
+        const auto phase = radians_per_row * row;
+        const auto first_harmonic = std::polar(1., phase);
+        const auto second_harmonic = first_harmonic * first_harmonic;
+        auto& column = basis[row];
+        column = {1., first_harmonic.real(), first_harmonic.imag(),
+            second_harmonic.real(), second_harmonic.imag()};
+        for (std::size_t j = 0; j < column.size(); ++j)
+            for (std::size_t k = 0; k <= j; ++k)
+                lower[j][k] += column[j] * column[k];
+    }
+    BeatCoefficients basis_mean{};
+    BeatProducts basis_gram{};
+    if (compare_colored_power) {
+        for (std::size_t j = 0; j < basis_mean.size(); ++j) {
+            basis_mean[j] = lower[j + 1][0] / rows;
+            for (std::size_t k = 0; k <= j; ++k)
+                basis_gram[j][k] = basis_gram[k][j] = lower[j + 1][k + 1] - basis_mean[j] * lower[k + 1][0];
+        }
+    }
+    for (std::size_t j = 0; j < lower.size(); ++j) {
+        for (std::size_t k = 0; k <= j; ++k) {
+            for (std::size_t q = 0; q < k; ++q) lower[j][k] -= lower[j][q] * lower[k][q];
+            lower[j][k] = j == k ? std::sqrt(lower[j][j]) : lower[j][k] / lower[k][k];
+        }
+        if (!(lower[j][j] > 0)) throw Error("Robust carrier beat harmonics are singular");
+    }
+    const auto measure = [&](std::span<const Complex> input, std::size_t offset,
+                             BeatCoefficients* moments) -> Harmonics {
+        HarmonicBasis fit{};
+        for (std::size_t row = 0; row < rows; ++row) {
+            const auto power = std::norm(input[row]);
+            for (std::size_t j = 0; j < fit.size(); ++j) fit[j] += power * basis[row][j];
+        }
+        if (!std::isfinite(fit[0])) throw Error("Nonfinite Robust carrier beat energy");
+        if (!(fit[0] > 0)) return {};
+        if (moments)
+            for (std::size_t j = 0; j < moments->size(); ++j)
+                (*moments)[j] = (fit[j + 1] - basis_mean[j] * fit[0]) / config.noise_variance;
+        const auto normalization = .5 * rows / fit[0];
+        for (std::size_t j = 0; j < fit.size(); ++j) {
+            for (std::size_t k = 0; k < j; ++k) fit[j] -= lower[j][k] * fit[k];
+            fit[j] /= lower[j][j];
+        }
+        for (std::size_t j = fit.size(); j-- > 0;) {
+            for (std::size_t k = j + 1; k < fit.size(); ++k) fit[j] -= lower[k][j] * fit[k];
+            fit[j] /= lower[j][j];
+        }
+        const auto phase = -tau * std::remainder(static_cast<long double>(spacing) * offset / fs, 1.L);
+        const auto rotation = std::polar(1., static_cast<double>(phase));
+        // Normalizing by the block's mean energy cancels arbitrary common
+        // phase and voltage scale. Restore a common time origin across blocks.
+        return {Complex(fit[1], -fit[2]) * rotation * normalization,
+            Complex(fit[3], -fit[4]) * rotation * rotation * normalization};
+    };
+
+    const auto source_rate = effective_sample_rate(slot.format);
+    const auto arrival = anchor + slot.window_capture_lead_seconds +
+        slot.source_start_seconds / scale;
+    const auto source_rows_per_input = source_rate * scale / fs;
+    // Incoherent paths omit their mutual cross-beats. The fixed nominal
+    // delay weights preserve each individual path's carrier self-products.
+    const double selective_power = config.selective_modulation_rate_hz > 0 ?
+        (config.selective_slow_depth * config.selective_slow_depth +
+         config.selective_fast_depth * config.selective_fast_depth) / 9 : 0;
+    const auto delay = selective_power > 0 ? 1 / (3 * waveform.nominal_carrier_bandwidth_hz) : 0;
+    struct Path {
+        double lag = 0, power = 0;
+        Harmonics rotation{};
+    };
+    std::array<Path, 6> paths{};
+    std::size_t path_count = 0;
+    const std::array echo_offsets{0., config.spread_delay_seconds / 2};
+    const auto echo_terms = config.spread_delay_seconds > 0 ? echo_offsets.size() : 1;
+    for (const auto echo : std::span(echo_offsets).first(echo_terms)) {
+        for (unsigned tap = 0; tap < (selective_power > 0 ? 3U : 1U); ++tap) {
+            const auto lag = echo + tap * delay;
+            const auto rotation = std::polar(1., -tau * spacing * lag);
+            paths[path_count++] = {lag, (tap == 0 ? 1. : 0.) + selective_power,
+                {rotation, rotation * rotation}};
+        }
+    }
+    struct TemplatePower {
+        Harmonics beats{};
+        double mean = 0;
+    };
+    const auto predict = [&](PatternSource& source, long double offset) {
+        std::array<TemplatePower, 2> expected{};
+        constexpr unsigned integration_points = 4;
+        for (unsigned point = 0; point < integration_points; ++point) {
+            const auto sample = offset + (point + .5L) * rows / integration_points;
+            const auto origin = sample * source_rows_per_input - arrival * source_rate * scale;
+            for (std::size_t tap = 0; tap < path_count; ++tap) {
+                const auto& path = paths[tap];
+                const auto c = source.carrier_samples_at(origin - path.lag * source_rate * scale);
+                const auto power = std::norm(c[0]) + std::norm(c[1]) + std::norm(c[2]);
+                const Harmonics beats{c[1] * std::conj(c[0]) + c[2] * std::conj(c[1]), c[2] * std::conj(c[0])};
+                if (tap == 0) {
+                    expected[0].mean += power;
+                    for (std::size_t h = 0; h < beats.size(); ++h) expected[0].beats[h] += beats[h];
+                }
+                expected[1].mean += path.power * power;
+                for (std::size_t h = 0; h < beats.size(); ++h)
+                    expected[1].beats[h] += path.power * path.rotation[h] * beats[h];
+            }
+        }
+        std::array<Harmonics, 2> result{};
+        for (std::size_t model = 0; model < expected.size(); ++model)
+            if (expected[model].mean > 0)
+                for (std::size_t h = 0; h < result[model].size(); ++h)
+                    result[model][h] = expected[model].beats[h] / expected[model].mean;
+        return result;
+    };
+
+    const auto sources_for = [&](std::int64_t epoch_offset) {
+        auto format = slot.format;
+        if (epoch_offset < 0) format.epoch -= static_cast<std::uint64_t>(-epoch_offset);
+        else format.epoch += static_cast<std::uint64_t>(epoch_offset);
+        return std::array{PatternSource(format, key, 0), PatternSource(format, key, 1)};
+    };
+
+    struct Correlation {
+        Complex dot{};
+        double energy = 0;
+    };
+    using FitHalf = std::array<std::array<std::array<Correlation, 2>, 2>, 2>;
+    using FitBank = std::array<FitHalf, 2>;
+    std::array<std::array<double, 2>, 2> half_energy{};
+    const auto add_observation = [&](std::size_t block, BeatCoefficients* moments = nullptr) {
+        const auto offset = first + block * rows;
+        const auto values = measure(iq.subspan(offset, rows), offset, moments);
+        auto& energy = half_energy[block >= blocks / 2];
+        for (std::size_t h = 0; h < values.size(); ++h) energy[h] += std::norm(values[h]);
+        return values;
+    };
+    const auto add_fit = [](FitHalf& fit, const Harmonics& measured, const Templates& expected) {
+        for (std::size_t bit = 0; bit < expected.size(); ++bit)
+            for (std::size_t model = 0; model < expected[bit].size(); ++model)
+                for (std::size_t h = 0; h < measured.size(); ++h) {
+                    const auto value = expected[bit][model][h];
+                    auto& aggregate = fit[model][bit][h];
+                    aggregate.dot += measured[h] * std::conj(value);
+                    aggregate.energy += std::norm(value);
+                }
+    };
+    const auto finish = [&](const FitBank& fit) {
+        auto result = report;
+        for (std::size_t h = 0; h < result.observed_harmonic_energy.size(); ++h)
+            result.observed_harmonic_energy[h] = half_energy[0][h] + half_energy[1][h];
+        const auto total = result.observed_harmonic_energy[0] + result.observed_harmonic_energy[1];
+        for (std::size_t model = 0; model < result.profiles.size(); ++model)
+            for (std::size_t bit = 0; bit < result.profiles[model].bit_projection_fraction.size(); ++bit) {
+                auto& profile = result.profiles[model];
+                std::array<double, 2> predicted{};
+                double explained = 0;
+                for (std::size_t h = 0; h < result.observed_harmonic_energy.size(); ++h) {
+                    const auto& earlier = fit[0][model][bit][h];
+                    const auto& later = fit[1][model][bit][h];
+                    const Correlation value{earlier.dot + later.dot, earlier.energy + later.energy};
+                    const auto both = value.energy * result.observed_harmonic_energy[h];
+                    if (both > 0) profile.bit_correlations[bit][h] = value.dot / std::sqrt(both);
+                    if (value.energy > 0) explained += std::norm(value.dot) / value.energy;
+                    // Reduction of squared error on held samples compared
+                    // with predicting zero, fitting gains on the other half.
+                    for (std::size_t half = 0; half < fit.size(); ++half) {
+                        const auto& training = fit[1 - half][model][bit][h];
+                        const auto& held = fit[half][model][bit][h];
+                        if (!(training.energy > 0)) continue;
+                        const auto gain = training.dot / training.energy;
+                        predicted[half] += 2 * (held.dot * std::conj(gain)).real() - std::norm(gain) * held.energy;
+                    }
+                }
+                if (total > 0) profile.bit_projection_fraction[bit] = std::clamp(explained / total, 0., 1.);
+                for (std::size_t half = 0; half < fit.size(); ++half) {
+                    const auto held = half_energy[half][0] + half_energy[half][1];
+                    if (held > 0) profile.held_out_explained_fraction[bit][half] = predicted[half] / held;
+                }
+            }
+        result.status = "scored";
+        return result;
+    };
+    if (!scan) {
+        auto sources = sources_for(coordinate.epoch_offset_seconds);
+        FitBank fit{};
+        std::array<std::array<ColoredBeatScore, 2>, 2> colored_scores{}; // bit, model
+        for (std::size_t block = 0; block < blocks; ++block) {
+            check_cancelled(stop);
+            const auto offset = first + block * rows;
+            const Templates expected{predict(sources[0], offset), predict(sources[1], offset)};
+            BeatCoefficients moments{};
+            add_fit(fit[block >= blocks / 2],
+                    add_observation(block, compare_colored_power ? &moments : nullptr), expected);
+            if (compare_colored_power) {
+                const auto turns = std::remainder(static_cast<long double>(spacing) * offset / fs, 1.L);
+                const auto rotation = std::polar(1., static_cast<double>(tau * turns));
+                const Harmonics rotations{rotation, rotation * rotation};
+                for (std::size_t bit = 0; bit < expected.size(); ++bit)
+                    for (std::size_t model = 0; model < expected[bit].size(); ++model)
+                        colored_scores[bit][model].add(expected[bit][model], rotations, moments, basis_gram);
+            }
+        }
+        auto result = finish(fit);
+        if (compare_colored_power) {
+            auto& combined = result.colored_power_log_evidence.emplace();
+            for (std::size_t bit = 0; bit < combined.size(); ++bit)
+                combined[bit] = log_add(colored_scores[bit][0].log_evidence(),
+                                        colored_scores[bit][1].log_evidence()) - std::log(2.);
+        }
+        if (!compare_white_power) return result;
+
+        constexpr std::array scales{.5, 1., 2.};
+        using TiltScores = std::array<double, scales.size()>;
+        std::array<std::array<std::array<TiltScores, 2>, 2>, 2> log_scores{}; // held half, bit, model, scale
+        for (std::size_t block = 0; block < blocks; ++block) {
+            check_cancelled(stop);
+            const std::size_t half = block >= blocks / 2;
+            const auto offset = first + block * rows;
+            const Templates expected{predict(sources[0], offset), predict(sources[1], offset)};
+            const auto turns = std::remainder(static_cast<long double>(spacing) * offset / fs, 1.L);
+            const auto rotation = std::polar(1., static_cast<double>(tau * turns));
+            const Harmonics rotations{rotation, rotation * rotation};
+            Templates predicted{};
+            for (std::size_t bit = 0; bit < expected.size(); ++bit)
+                for (std::size_t model = 0; model < expected[bit].size(); ++model)
+                    for (std::size_t h = 0; h < rotations.size(); ++h) {
+                        const auto& training = fit[1 - half][model][bit][h];
+                        if (training.energy > 0)
+                            predicted[bit][model][h] = (training.dot / training.energy) *
+                                expected[bit][model][h] * rotations[h];
+                    }
+            for (std::size_t row = 0; row < rows; ++row) {
+                if (!(row % 4096)) check_cancelled(stop);
+                const auto power = std::norm(iq[offset + row]) / config.noise_variance;
+                if (!std::isfinite(power)) throw Error("Nonfinite Robust normalized white power");
+                for (std::size_t bit = 0; bit < predicted.size(); ++bit)
+                    for (std::size_t model = 0; model < predicted[bit].size(); ++model) {
+                        const auto& p = predicted[bit][model];
+                        const auto& b = basis[row];
+                        const double tilt = 2 * (p[0].real() * b[1] - p[0].imag() * b[2] +
+                            p[1].real() * b[3] - p[1].imag() * b[4]);
+                        for (std::size_t k = 0; k < scales.size(); ++k) {
+                            const auto a = std::clamp(tilt * scales[k], -.5, .5);
+                            log_scores[half][bit][model][k] += a * power + std::log1p(-a);
+                        }
+                    }
+            }
+        }
+        // With the fit fixed from the other half, each held power is Exp(1)
+        // under white I/Q. Normalize every likelihood and average directions,
+        // models and scales. Multiplying the two directions would reuse
+        // training data as independent evidence.
+        const auto log_count = std::log(static_cast<double>(4 * scales.size()));
+        auto& combined = result.white_power_log_evidence.emplace();
+        for (std::size_t bit = 0; bit < combined.size(); ++bit) {
+            double evidence = -infinity;
+            for (const auto& direction : log_scores)
+                for (const auto& model : direction[bit])
+                    evidence = std::accumulate(model.begin(), model.end(), evidence, log_add);
+            combined[bit] = evidence - log_count;
+        }
+        return result;
+    }
+
+    std::vector<Harmonics> observation(blocks);
+    for (std::size_t block = 0; block < blocks; ++block) {
+        check_cancelled(stop);
+        observation[block] = add_observation(block);
+    }
+    std::vector<Templates> templates(template_blocks);
+    std::array<double, 2> best{};
+    double best_exploratory = 0;
+    for (const auto epoch : receiver_epoch_offsets) {
+        check_cancelled(stop);
+        auto sources = sources_for(epoch);
+        // Delaying a template by S whole blocks uses its earlier sample at
+        // row n-S*rows. The origin can precede the observation so all legal
+        // shifts are slices of this one keyed bank.
+        const auto origin = static_cast<long double>(first) - static_cast<long double>(shifts - 1) * rows;
+        for (std::size_t block = 0; block < template_blocks; ++block) {
+            check_cancelled(stop);
+            const auto offset = origin + static_cast<long double>(block) * rows;
+            templates[block] = {predict(sources[0], offset), predict(sources[1], offset)};
+        }
+        for (std::size_t shift = 0; shift < shifts; ++shift) {
+            check_cancelled(stop);
+            const auto offset = shifts - 1 - shift;
+            FitBank fit{};
+            for (std::size_t block = 0; block < blocks; ++block) {
+                if (!(block % 4096)) check_cancelled(stop);
+                add_fit(fit[block >= blocks / 2], observation[block], templates[offset + block]);
+            }
+            auto evidence = finish(fit);
+            const auto delay = std::clamp(static_cast<double>(anchor + shift * stride),
+                slot.arrival_lower_seconds, slot.arrival_upper_seconds);
+            if (exploratory) {
+                for (std::uint8_t bit = 0; bit < 2; ++bit) {
+                    const auto strength = carrier_beat_prediction_strength(evidence, bit);
+                    if (strength <= best_exploratory) continue;
+                    best_exploratory = strength;
+                    scan->exploratory_nomination = CarrierBeatNomination{{epoch, delay, 0, 0}, evidence, bit};
+                }
+            }
+            const auto bit = qualified_carrier_beat_bit(evidence);
+            if (!bit) continue;
+            const auto strength = std::min(evidence.profiles[0].bit_projection_fraction[*bit],
+                                           evidence.profiles[1].bit_projection_fraction[*bit]);
+            if (strength <= best[*bit]) continue;
+            best[*bit] = strength;
+            scan->nominations[*bit] = CarrierBeatNomination{{epoch, delay, 0, 0}, std::move(evidence), *bit};
+        }
+    }
+    report.status = "scored";
+    return report;
+}
+
+} // namespace
+
+CarrierBeatReceipt score_carrier_beat(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+        const Crypto& key, std::span<const Complex> iq, std::span<const std::uint8_t> valid,
+        const FineCoordinate& coordinate, bool protected_only, std::size_t scratch_limit,
+        std::stop_token stop, bool compare_white_power, bool compare_colored_power) {
+    return carrier_beat_impl(config, slot, key, iq, valid, coordinate, protected_only, scratch_limit,
+        nullptr, stop, compare_white_power, false, compare_colored_power);
+}
+
+std::optional<std::uint8_t> qualified_carrier_beat_bit(const CarrierBeatReceipt& evidence) {
+    if (evidence.status != "scored") return std::nullopt;
+    for (std::uint8_t bit = 0; bit < 2; ++bit) {
+        if (carrier_beat_prediction_strength(evidence, bit) > 0 &&
+            std::ranges::all_of(evidence.profiles, [bit](const auto& profile) {
+                return profile.bit_projection_fraction[bit] > .5 &&
+                    profile.bit_projection_fraction[bit] > profile.bit_projection_fraction[1 - bit];
+            })) return bit;
+    }
+    return std::nullopt;
+}
+
+CarrierBeatScanReceipt scan_carrier_beat(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+        const Crypto& key, std::span<const Complex> iq, std::span<const std::uint8_t> valid,
+        std::size_t scratch_limit, std::stop_token stop, bool exploratory) {
+    CarrierBeatScanReceipt scan;
+    const FineCoordinate coordinate{0, slot.arrival_lower_seconds, 0, 0};
+    const auto result = carrier_beat_impl(config, slot, key, iq, valid, coordinate, true, scratch_limit, &scan,
+        stop, false, exploratory);
+    scan.status = result.status;
+    scan.workspace_bytes = result.workspace_bytes;
+    return scan;
+}
+
 struct FineSession::Impl {
     // The public geometry of one dispatch: at most two consecutive blocks
     // of one segment. It depends on the calendar and validity mask alone.
@@ -4497,6 +5024,64 @@ std::vector<std::size_t> varying_quiet_blocks(const BlockCalendar& calendar, con
     return blocks;
 }
 } // namespace
+
+std::size_t packed_affine_quiet_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot) {
+    const BlockCalendar calendar(config, slot);
+    const ProjectionBands bands(config, slot);
+    std::size_t bytes = 4096, rows_maximum = 0, scratch = 0, float_rows = 0;
+    for (const auto rows : calendar.lengths()) {
+        if (!rows) continue;
+        const auto modes = visit_projection_modes(rows, bands, {}, [](std::size_t) {});
+        bytes = checked_add(bytes, DftPlan::workspace_bytes(rows));
+        bytes = checked_add(bytes, checked_multiply(rows, sizeof(std::size_t)));
+        if (bands.use_float(rows, modes)) {
+            bytes = checked_add(bytes, FloatProjection::workspace_bytes());
+            float_rows = FloatProjection::scratch_rows;
+        }
+        rows_maximum = std::max(rows_maximum, rows);
+        scratch = std::max(scratch, DftPlan::scratch_samples(rows));
+    }
+    bytes = checked_add(bytes, checked_multiply(float_rows, sizeof(FineFloatComplex)));
+    return checked_add(bytes, checked_multiply(rows_maximum + scratch, sizeof(Complex)));
+}
+
+void score_packed_affine_quiet(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+        std::span<const Complex> iq, ReceiverSlotScore& score, std::stop_token stop) {
+    const BlockCalendar calendar(config, slot);
+    const ProjectionBands bands(config, slot);
+    const auto lengths = calendar.lengths();
+    std::array<std::optional<Projection>, 4> projections;
+    std::size_t scratch_rows = 0, float_rows = 0;
+    for (std::size_t index = 0; index < lengths.size() && lengths[index]; ++index) {
+        projections[index].emplace(lengths[index], bands, stop);
+        scratch_rows = std::max(scratch_rows, DftPlan::scratch_samples(lengths[index]));
+        float_rows = std::max(float_rows, projections[index]->float_scratch_rows());
+    }
+    std::vector<Complex> values(*std::ranges::max_element(lengths)), scratch(scratch_rows);
+    std::vector<FineFloatComplex> float_scratch(float_rows);
+    score.quiet_energy = 0;
+    score.quiet_modes = 0;
+    for (std::size_t segment = 0; segment < iq.size();) {
+        const auto segment_rows = calendar.segment_length(segment);
+        auto first = segment;
+        for (std::size_t block = 0; block < calendar.block_count(segment_rows); ++block) {
+            check_cancelled(stop);
+            const auto rows = calendar.block_length(segment_rows, block);
+            const auto index = std::ranges::find(lengths, rows) - lengths.begin();
+            const auto& projection = *projections[index];
+            const auto observed = std::span(values).first(rows);
+            std::ranges::copy(iq.subspan(first, rows), observed.begin());
+            projection.apply(observed, scratch, stop, float_scratch);
+            score.quiet_energy += finite_energy(observed.first(projection.modes())) / config.noise_variance;
+            score.quiet_modes += projection.modes();
+            first += rows;
+        }
+        segment += segment_rows;
+    }
+    if (!std::isfinite(score.quiet_energy)) throw Error("Robust quiet energy is nonfinite");
+    score.quiet_threshold = quiet_noise_threshold(score.quiet_modes);
+    score.noise_statistics_valid = score.complete && score.all_valid && score.quiet_modes;
+}
 
 std::size_t varying_quiet_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers) {
     if (!config.time_varying_channel) return 0;

@@ -60,6 +60,14 @@ void parsing_and_formatting() {
           "Older partial commands must preserve configured calendar/noise");
     check(!launch_command::parse("--rate 1200").minimum_carrier_spacing_hz,
           "Older partial commands must leave the minimum carrier spacing unspecified");
+    check(!launch_command::parse("--rate 1200").data_cadence,
+          "Older partial commands must leave DATA cadence unspecified");
+    for (const auto* cadence : {"scheduled", "continuous"}) {
+        const auto patch = launch_command::parse(std::string("--data-cadence ") + cadence);
+        check(patch.data_cadence == cadence && launch_command::parse(launch_command::format(patch)) == patch,
+              "DATA cadence must survive launch round trips");
+    }
+    rejects([] { launch_command::parse("--data-cadence auto"); }, "Invalid DATA cadence accepted");
     for(const auto* bad:{"--calendar-epoch 5","--calendar-epoch 4294967290","--calendar-epoch -1",
         "--calendar-epoch 1.5","--calendar-ordinal -1","--calendar-ordinal 18446744073709551616",
         "--live-noise-dbfs-hz nan","--live-noise-dbfs-hz -251","--live-noise-dbfs-hz 1",

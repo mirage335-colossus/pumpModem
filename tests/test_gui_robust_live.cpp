@@ -244,6 +244,51 @@ live::Settings settings(bool simulation) {
     return s;
 }
 
+void data_cadence_profiles() {
+    auto s = settings(true);
+    const auto calendar = *s.calendar;
+    const auto scheduled = live::detail::prepare_profile(s, calendar, {}, {.simulation_seed = 1});
+    s.data_cadence = live::DataCadence::continuous;
+    live::validate_settings(s);
+    const auto simulated = live::detail::prepare_profile(s, calendar, {}, {.simulation_seed = 1});
+    s.simulation = false;
+    const auto live_profile = live::detail::prepare_profile(s, calendar, {});
+    const auto adjusted = live::detail::with_capture_uncertainty(live_profile, .2, .1, 100);
+    const auto first = simulated.waveform.transmit_slot(0);
+    const auto next = simulated.waveform.transmit_slot(1);
+    check(!scheduled.waveform.config().continuous_data && simulated.waveform.config().continuous_data &&
+          scheduled.waveform.transmit_slot(0).pattern_end < scheduled.waveform.transmit_slot(1).pattern_begin &&
+          first.pattern_end == next.pattern_begin,
+          "Shared Robust DATA cadence did not pack consecutive gates");
+    for (const auto* profile : {&live_profile, &adjusted}) {
+        check(profile->waveform.config().continuous_data && profile->waveform.transmit_slot(0) == first &&
+              profile->waveform.transmit_slot(1) == next &&
+              profile->waveform.slot(1).symbol_ordinal == calendar.initial_ordinal + 1,
+              "Live preparation or capture uncertainty changed the configured packed calendar");
+    }
+    const auto rejects = [](const auto& operation) {
+        try { operation(); } catch (const Error& error) {
+            return std::string_view(error.what()).starts_with("Continuous Robust DATA requires");
+        }
+        return false;
+    };
+    auto incompatible = s;
+    const auto verify = [&] {
+        check(rejects([&] { live::validate_settings(incompatible); }) &&
+              rejects([&] { live::detail::prepare_profile(incompatible, calendar, {}); }),
+              "Continuous Robust DATA accepted an incompatible waveform setting");
+        incompatible = s;
+    };
+    incompatible.helper.power_w = 1;
+    verify();
+    incompatible.symbol_burst_wait = 1;
+    verify();
+    incompatible.symbol_burst_random = 1;
+    verify();
+    incompatible.fhss_profile = "fake-fcc";
+    verify();
+}
+
 void carrier_band_matches_profile() {
     auto s = settings(true);
     auto& modem = s.transfer.modem;
@@ -1523,18 +1568,20 @@ void raw_bit_session_transmission_and_ordinal() {
     close(session);
 }
 
-void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dynamic_channel = false) {
+void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dynamic_channel = false,
+                                live::DataCadence cadence = live::DataCadence::scheduled) {
     // One predeclared functional stratum, not a sensitivity/capacity claim:
     // public calendar, clear e=001, FEC/Helper/FHSS Off and exact
     // oscillators, target and actual 80 dB-Hz with positive physical noise.
     // The default case has spread/selective Off. The optional nonstationary
     // case exercises HF Worst, Each 65%, and a bounded common-shift trajectory.
-    // Both score at most five complete windows, 600,000 samples and 90s.
+    // All cases score at most five complete windows, 600,000 samples and 90s.
     const auto captures = fixture::capture_opens.load(), playbacks = fixture::playback_opens.load();
     auto simulated = settings(true);
     // A saved browser filter must not discard the native reception baseline.
     simulated.wrong_key_admission = "strict";
     simulated.gpu = gpu;
+    simulated.data_cadence = cadence;
     if (gpu_fp32) simulated.transfer.modem.search_arithmetic = modem::SearchArithmetic::fp32;
     if (gpu) {
 #if defined(DATAPUMP_HAVE_TRIAD_CUDA)
@@ -1546,8 +1593,8 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
         simulated.receiver_memory_limit = 1024U * 1024 * 1024;
 #endif
     }
-    // The public slot cadence is at least a minute. A supported lower logical
-    // sample rate keeps the full physical calendar inside the sample budget.
+    // The scheduled cadence is at least a minute. A supported lower logical
+    // sample rate keeps either physical calendar inside the sample budget.
     simulated.transfer.modem.sample_rate = 1500;
     simulated.transfer.modem.carrier_hz = 500;
     if (dynamic_channel) {
@@ -1577,6 +1624,9 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
               "Non-Vulkan session reported Vulkan workspace admission");
     check(prepared.bit_seconds && prepared.slot_stride_seconds && *prepared.slot_stride_seconds * 6 * 1500 < 600000,
           "Robust simulation exceeds its predeclared sample budget");
+    if (cadence == live::DataCadence::continuous)
+        check(std::abs(*prepared.slot_stride_seconds - *prepared.bit_seconds) <= 1. / 1500,
+              "Continuous simulation still leaves gaps between DATA gates");
     session.transmit(Message{.data = {'e'}});
     std::vector<transfer::Received> received;
     std::vector<live::SignalUpdate> signal_events;
@@ -1660,9 +1710,9 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
     const bool decoded = received.size() == 1 && received[0].stream_complete && received[0].content_validated &&
         received[0].short_text_decoded && received[0].content.message.data == Bytes{'e'} &&
         received[0].raw_bits == Bytes({0, 0, 1}) && received[0].missing_symbols == 0;
-    if (!decoded && dynamic_channel) {
+    if (!decoded && (dynamic_channel || cadence == live::DataCadence::continuous)) {
         for (const auto& row : completed.pattern_steps) {
-            std::cerr << "nonstationary slot=" << row.index
+            std::cerr << "simulation slot=" << row.index
                       << " decision=" << static_cast<unsigned>(row.decision)
                       << " bit=" << (row.bit ? std::to_string(*row.bit) : "null")
                       << " evidence=" << row.bit_evidence[0] << ',' << row.bit_evidence[1]
@@ -1956,6 +2006,11 @@ int main(int argc, char** argv) {
         }
         if (argc == 2 && std::string_view(argv[1]) == "--simulation-rx-preview") {
             complete_native_simulation();
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--continuous-data") {
+            data_cadence_profiles();
+            complete_native_simulation(false, false, false, live::DataCadence::continuous);
             return 0;
         }
         if (argc == 3 && std::string_view(argv[1]) == "--fixed-receiver-link") {

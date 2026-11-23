@@ -324,7 +324,7 @@ Json diagnose_hf_normalized_null(const ReceiverConfig& config, const ReceiverSlo
         "normalized null requires the complete bounded first public observation");
     const auto first = static_cast<std::size_t>(slot.quiet_first_sample - slot.first_sample);
     const auto rows = static_cast<std::size_t>(slot.quiet_stop_sample - slot.quiet_first_sample);
-    const auto block_rows = std::min(rows, fine_block_geometry(config.sample_rate_hz).block_rows);
+    const auto block_rows = std::min(rows, fine_block_geometry(config, slot).block_rows);
     const auto tail = rows % block_rows;
     const auto blocks = rows / block_rows + (tail != 0);
     const auto dft_rows = std::max(DftPlan::scratch_samples(block_rows), tail ? DftPlan::scratch_samples(tail) : 0);

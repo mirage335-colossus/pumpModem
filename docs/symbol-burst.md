@@ -6,8 +6,8 @@ The GUI minimum-wait choices Off, 1, 2, 3, 5 and 10 symbols map to
 `HelperBurstPlan`, not individual chips or FFT tiles. The native
 `Format::burst_wait_tiles` remains a separate within-bit calendar.
 
-Both peers share the same public anchor, initial ordinal, key and wait settings.
-Each support starts on the UTC 30-second grid. Helper-enabled slots preserve a
+Both peers share the same public anchor, initial ordinal, key, DATA cadence and wait settings.
+In Scheduled mode each support starts on the UTC 30-second grid. Helper-enabled slots preserve a
 fresh 38-second lead, complete DATA pulse support and protected Helper tail.
 Off removes the requested additional wait. The current calendar still includes
 the waveform support, guards and grid alignment.
@@ -69,10 +69,11 @@ at the experimental cadences remain unqualified.
 
 ### Native packed DATA checks
 
-The native receiver probe can select a sample-grid calendar with consecutive
-DATA gates, retaining the original waveform tapers, padded reference supports
-and final source tail. This experimental geometry requires Helper and both
-wait controls Off. The GUI and live paths continue to use the UTC calendar.
+**Robust setup → DATA cadence → Continuous DATA** selects a sample-grid
+calendar for simulation and live audio. Both peers select the same cadence.
+Continuous DATA uses consecutive DATA gates with the original waveform
+tapers, padded reference supports and final source tail. It requires Helper,
+both wait controls and FHSS Off. Scheduled remains the default.
 Helper has its own protected acquisition lead, which needs a separate design
 and qualification to support continuous DATA.
 
@@ -110,8 +111,9 @@ through the real stream controller and codec. The full observation still
 supplies coarse proposals and input validity. Every admitting family uses a
 projection built within the protected aperture. Families that cannot retain
 their public grid keep their prior weight and contribute zero evidence. An
-empty aperture stays unresolved. This path currently excludes affine
-continuation, Helper and physical RF retuning.
+empty aperture stays unresolved. This explicit probe override excludes affine
+continuation. The production packed receiver retains a fresh predecessor
+nomination. Packed operation requires Helper and physical RF retuning Off.
 
 On the same captured I/Q as the original tight clean packed failure, protected
 scoring received `e` and verified both quiet slots. It also completed the
@@ -131,6 +133,188 @@ geometry, the seven protected Fourier blocks and 147 modes held 11–12% of
 the nominal bit template energy, versus over 99.99% in the tight geometry.
 A boundary-dominant bit can mimic quiet when only this restricted support
 is scored.
+
+#### Protected discovery and polarity
+
+`--protected-discovery on` allows one additional native coarse search after
+valid unresolved protected scoring. That search masks samples outside the
+aperture before projection, keeping the arrival, frequency, clock and epoch
+grid fixed. Only newly nominated affine cells are scored on the actual
+protected observation, at their original full-grid weights. The fallback
+keeps accepted DATA and wrong-key rejections. It reuses the ordinary coarse
+and fine workspace and the same executor.
+
+In a deterministic near-far fixture, synthetic nuisance outside the aperture
+displaced the ordinary shortlist while the protected IQ stayed fixed. The
+ordinary score was −8.48 nats and ambiguous. The fallback scored three new
+cells, restored the correct bit at +186.20 nats and matched the clean score
+to the reported precision. In the broad HF pair at 1,500 samples/s, discovery
+found four new cells per slot and added about 1.2 s of coarse work per slot.
+It preserved the 50 dB-Hz absent-center QUIET and the 15 dB-Hz wanted erasure.
+The compact 15 dB-Hz complete message and the
+[physical I3 controls](validation.md#packed-data-under-physical-hf-models--22-november-2026)
+retained their decisions. The broad replay shows actual extra cost and no
+demonstrated sensitivity gain at that placement.
+
+A separate phase-insensitive carrier-band power comparison falsely favored
+bit 0 for a correctly received bit 1 at 6 kHz, Rate 3.6 Hz, HF Worst and
+Each 65%. Both bit log scores were negative on that strong capture. It
+passed a separated-carrier control with independent fast phase rotations,
+which did not cover the coupled delay and cross-carrier effects. The failed
+power-shape implementation was removed. A spherical directional null does
+not represent arbitrary wrong-key waveforms.
+[Angular density and its assumptions](https://www.eurasip.org/Proceedings/Eusipco/Eusipco2016/papers/1570256519.pdf)
+· [Earlier normalized covariance tests](../_appraisal/highFidelity-triple_Robust_Modem/hf-normalized-null.md).
+
+The carrier-beat comparison retains the relative phase discarded by
+separate power bands. For every complete disjoint protected block it
+regresses squared I/Q magnitude against DC and the two nonzero carrier
+spacing harmonics. A common phase cancels from a single arriving waveform's
+self-products. Distinct delayed paths retain cross-terms. The two fixed
+templates compare the direct self-products and an incoherent sum of
+delayed self-products, without simulator phase, arrival, or path state.
+Each harmonic fits one complex gain over the aperture, and the two
+chronological halves also predict one another using gains fitted on the
+other half. These predictive comparisons are empirical on colored input.
+[Spectral correlation in multicarrier signals](https://doi.org/10.1155/2010/794246)
+· [Pilot assumptions of a doubly selective receiver](https://arxiv.org/abs/2503.17565).
+
+Two previously inverted packed slots with the reported severe 3.6 Hz
+geometry had the same I/Q before and after diagnostic scoring. The
+nominal direct fits explained 0.513 versus 0.040 of the measured beat
+energy for the first wanted `0`, and 0.507 versus 0.049 for the final
+wanted `1`. The corresponding dispersed fits explained 0.544 versus
+0.045 and 0.524 versus 0.053. A previously correct `1` control also
+favored its transmitted bit. Clean phase-rotation and gain controls
+with separated carriers favored both true bits and preserved predictive
+fractions within 1e−13 when arbitrary common sample phase and per-block
+gain were applied.
+
+The experimental `--carrier-beat-polarity on` branch runs after provisional
+native DATA classification, including cases the selected wrong-key policy
+then rejects.
+Both templates must explain a majority of full-aperture beat energy and
+favor the same alternative in both held-out comparisons. The public nominal
+coordinate and the two native affine nominations can be tested. An opposite
+qualified nomination prevents reversal. If none qualifies, a bounded
+search shares measured beat blocks and a shifted template bank across all
+13 public epoch offsets and the arrival interval at block spacing on the
+nominal clock. It charges its scratch to the existing owner and declines
+geometries beyond 25 million block-coordinate pairs. The full native clock
+and frequency search remains in force. The winner can nominate one omitted
+affine cell, snapped to the original public grid and deduplicated against
+both ordinary and protected-discovery cells. Both fresh native likelihoods
+at that cell enter at their original grid and family weights. Native
+admission retains the line and equal-bit mixture weights and applies the
+selected wrong-key policy to the resulting evidence. The beat fit
+contributes no likelihood. Scored quiet apertures, validity checks and
+coherent-line protection still apply. A short nonnominal regression
+exercised the retained line case and verified that it kept both correct
+native bits and their original likelihoods. The beat rule is not a
+calibrated test of key identity.
+
+In a fresh 6 kHz, Rate 3.6 Hz HF Worst and Each 65% capture, seed 74022,
+the nominal and native nominations explained at most 0.017 of the beat
+energy, and the native bit was inverted. The 741-coordinate search found a
+nomination at epoch offset 0 and arrival −4.965 s with direct and dispersed
+fits of 0.894 and 0.910 for the transmitted bit. The fresh weighted native
+anchor supplied about 203.5 million nats, above this slot's 15.5-nat
+threshold. The initial experiment corrected the bit on identical I/Q.
+It kept the original Guarded margin. This distinction led to adding the
+unique two-bit affine cell and reevaluating admission with the native policy.
+The holdout covers one fresh active window under the severe synthetic setting.
+
+An exploratory proposal removed the majority-fit, provisional-DATA and
+singleton-admission prerequisites. It chose one cell by the weakest positive
+held-out gain across both models and halves, then scored it in the ordinary
+affine mixture. At 20 dB-Hz on the long holdout, the strongest proposal favored
+the true bit with about 0.05 of the beat energy and gave −35.55 nats of weighted
+native support. An evaluator-only check at the same channel's higher-power
+alignment gave −34.35 nats on identical low-power I/Q. Both stayed erasures.
+The broader 15 dB-Hz wanted capture also remained an erasure after searching
+1,105 cells. Its short beat block passed a measured 5×5 Gram condition check
+of about 4.19. The matched absent center stayed quiet despite a sizable beat
+fit, and the matched strong foreign capture kept its original admission.
+These checks distinguish insufficient affine support from a hard majority
+cutoff or a one-step timing error on those samples. The relaxed affine
+scorer and fixed evaluator alignment were removed. The low-information
+ranking remains available to the separate raw-simulator likelihood.
+
+#### Weak beat evidence on raw simulator input
+
+`--white-beat-evidence on` is a native probe option for protected
+packed captures with independent proper-complex white thermal noise. The
+probe verifies the absence of frontend processing and AGC, and checks the
+declared thermal variance against the scorer's variance. The receiver uses
+the existing fixed-prior supplement and reserves half the likelihood
+weight for it even when the ordinary models already reach provisional DATA.
+The remaining half keeps the native model families and their priors.
+
+The supplement selects one ranked beat coordinate only after provisional
+native non-DATA. It snaps the coordinate to the existing finite grid. In
+each time direction, harmonic gains fitted on one half define bounded
+signed weights `a` on the other half. If a held sample's normalized
+power is `X`, each log likelihood term is `a X + log(1 − a)`.
+The likelihood averages the two directions, two physical models and three
+fixed scales. It retains original grid and bit weights. The native line
+check, physical quiet test and selected wrong-key policy still decide the
+result. Reusing mutually trained halves as independent evidence would
+invalidate this calculation. Colored real audio requires a separate
+conditional noise model. [E-value mixture principle](https://sas.uwaterloo.ca/~wang/papers/2020Vovk-Wang-AOS.pdf).
+
+At 20 dB-Hz, the fixed-coordinate evaluator at the blind proposal near
+−4.715 s gave 26.75 and −16.86 nats after the affine-grid and bit charge.
+The standalone white statistic also gave about 47.83 million nats for
+bit 1 on the strong independent-key observation. For that capture the
+ordinary native components are much larger, and provisional DATA skips
+the supplement. The actual fixed mixture preserves the original Guarded
+rejection. The held-out true-bit preference therefore supports a
+supplemental role on these controls and supplies no standalone
+wrong-key test. The evaluator-only pinned coordinate was removed.
+
+##### Stationary colored Gaussian PCM qualification
+
+The signed beat statistic has a separate native likelihood for stationary
+Gaussian PCM. It uses the power at each sample after the fixed analytic
+projection. The complete receive FIR support and fixed gain make expected
+power constant under the zero-mean stationary null. The statistic centers
+each keyed signed tilt within its block, including blocks containing a
+fractional number of beat cycles.
+
+In real-augmented coordinates let `Σ` be the joint IQ covariance and let
+`ν` be the declared complex variance. The bound assumes `Σ ⪯ ν I/2`.
+For deterministic centered weights `a`, the Gaussian quadratic form uses
+`B = 2 Σ^(1/2) diag(a,a) Σ^(1/2) / ν`. Constant expected power gives
+`tr(B)=0`. With `|a| ≤ ρ < 0.5`, the log moment-generating function is
+at most `g(ρ) Σ a²`, where `g(ρ)=(-log(1-ρ)-ρ)/ρ²`. This follows from
+`tr(B²) ≤ 2 Σ a²` and the Gaussian determinant identity. It accounts for
+correlations across the entire observation and permits improper IQ.
+
+The scorer selects four real gain components from a fixed 19-point grid for
+each path model. The selected statistic pays `4 log(19)` nats, even for a
+zero estimate and uses the radius bound specific to its chosen gain. The
+score averages the two fixed path alternatives. A
+selected arrival, epoch and clock cell keeps its full public-prior debit.
+Blockwise harmonic moments and a four-dimensional Gram matrix suffice for
+this whole-window calculation. It needs no whitening matrix or independence
+assumption between fitted and evaluated sample halves.
+
+The protected admission probe offers `--colored-beat-evidence on` for a
+matched comparison. Add `--project-colored-pcm on` to pass the same entire
+capture through real PCM, a fixed contractive MA(1) filter and the native
+analytic projection. Both signal and noise pass through the filter. The
+receipt hashes the projected IQ and charges the public FIR halo. The native
+component check also uses real PCM with a synthetic colored-noise model. Live
+requires a bound at the normalized input, which a short noise-floor sample
+alone cannot establish. The signed model is disabled in ordinary operation
+pending evidence for spectral envelopes and departures from stationarity,
+including resampling, interference, clipping and impulsive noise. The
+quiet-null probability bound does not control wrong-key or in-band signal
+admission. [Weighted Gaussian quadratic forms](https://doi.org/10.1214/aos/1015957395)
+· [Colored spectral-correlation statistics](https://doi.org/10.1186/s13634-025-01241-8)
+· [Physical noise and real PCM assumptions](../_appraisal/highFidelity-triple_Robust_Modem/research-reconciliation.md#real-pcm-covariance-and-historical-scheduled-repeated-bit-evidence)
+
+#### Severe simulated HF observations
 
 At the reported 6 kHz, Rate 3.6 Hz and 265 Hz spacing, a protected packed
 admission with seed 74021 received bit `1` between adjacent `0` and `1`
@@ -167,6 +351,16 @@ scorer gave `1, 0, ambiguous, quiet, quiet`. Protected scoring gave
 a sensitivity trend.
 
 #### Boundary model findings
+
+The native receiver limits packed DATA to the intersection of the full capture,
+the reachable wanted support, and the support free of both neighbors under
+the configured arrival, clock, channel-tail and receive-filter bounds. The
+wanted extent uses the full search bounds. It can recover leading or trailing
+samples near the ends of the configured calendar. Interior samples that a
+neighbor could occupy remain excluded. The physical quiet aperture keeps its
+original bounds and whole-block projections. The receiver searches the full
+public input for proposals and can revisit the protected samples or rescore an
+omitted coordinate from the preceding accepted DATA slot with fresh evidence.
 
 Fixed-coordinate matched tests used the same native center I/Q throughout
 each comparison. They used the known public schedules and ordinary receiver
@@ -213,11 +407,17 @@ The fixed-coordinate experimental code was retired after these checks.
 A general boundary statistic needs an absent-center model covering the
 allowed neighboring waveforms and channel uncertainty. The desired and
 absent models must use the same observed support, including any admitted
-boundary evidence. Flexible delay–Doppler basis models have been studied
-under specific waveform and sparsity assumptions. Those assumptions
-require separate qualification in Robust. [Projection assumptions](https://doi.org/10.1109/LSP.2023.3270080)
+boundary evidence. Taking the minimum of statistics validated in separate
+arrival strata preserves the composite null bound. When the preceding and
+following emissions can arrive independently, the preceding-latest and
+following-earliest stratum still has the original narrow safe aperture.
+Sharing one latent arrival between neighbors needs separate evidence that
+they are from one source. Flexible delay–Doppler fits and recent joint
+factor-graph detectors also depend on their channel or waveform assumptions.
+[Projection assumptions](https://doi.org/10.1109/LSP.2023.3270080)
 · [Composite-null likelihood bounds](https://pmc.ncbi.nlm.nih.gov/articles/PMC7382245/)
 · [Safe testing](https://academic.oup.com/jrsssb/article/86/5/1091/7623686)
+· [Blind detection under modeled inter-symbol interference](https://doi.org/10.1109/TCOMM.2025.3541033)
 · [Doubly sparse channel models](https://arxiv.org/abs/2504.13762)
 · [Fractional-Doppler basis expansion](https://arxiv.org/abs/2504.18901)
 

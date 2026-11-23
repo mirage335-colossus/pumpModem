@@ -651,6 +651,13 @@ and one pulse bandwidth. Both peers need the same effective spacing. Invalid aud
 bandwidth or fixed Helper placement fails configuration explicitly. None/Off
 channel choices preserve an explicit unperturbed baseline.
 
+Robust Setup offers **Scheduled** and **Continuous DATA** cadence in both
+simulation and live operation. Scheduled is the default. Continuous DATA places
+consecutive DATA gates on adjacent samples and requires Helper, both Symbol
+Burst waits, and FHSS Off. Cadence changes the public slot addresses. Both peers
+must agree on it alongside the anchor and initial ordinal. See
+[packed cadence and receiver evidence](symbol-burst.md#native-packed-data-checks).
+
 Carrier recommendations and the Link planner use the native three-carrier
 DATA width, including the RRC rolloff and the minimum public tile's certified
 gate allowance. The receiver and Helper placement use the same calculation

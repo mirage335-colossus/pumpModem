@@ -1,4 +1,5 @@
 #include "datapump/triad_receiver.hpp"
+#include "datapump/robust_audio_frontend.hpp"
 #include "datapump/robust_profile.hpp"
 #include "datapump/triad_stream.hpp"
 #include "datapump/triad_stream_receiver.hpp"
@@ -196,6 +197,269 @@ void protected_observation_validity() {
           "protected scoring must still reject an invalid sample outside the aperture");
 }
 
+void protected_discovery_near_far() {
+    using namespace receiver_detail;
+    auto input = fixture(std::nullopt, false, true);
+    const auto wanted = fixture(0, false, true);
+    const auto& config = input.config;
+    auto& slot = input.slot;
+    const auto geom = geometry(slot.format);
+    const auto start = static_cast<std::size_t>(std::llround(
+        (slot.window_capture_lead_seconds + slot.source_start_seconds) * config.sample_rate_hz));
+    const auto gate = static_cast<std::size_t>(std::llround(geom.bit_seconds * config.sample_rate_hz));
+    const auto first = start + geom.calendar_origin_sample + gate / 4;
+    const auto stop = first + gate / 2;
+    check(first < stop && stop < input.iq.size(), "near-far fixture requires nonempty protected and boundary samples");
+    slot.quiet_first_sample = slot.first_sample + first;
+    slot.quiet_stop_sample = slot.first_sample + stop;
+    for (auto row = first; row < stop; ++row) input.iq[row] += .20 * (wanted.iq[row] - input.iq[row]);
+
+    // Two competing epochs and both bits supply synthetic nuisance to the
+    // full coarse search, entirely outside the scored protected aperture.
+    const auto rows = input.iq.size();
+    std::vector<Complex> nuisance(rows), basis(rows);
+    std::vector<double> offsets(rows);
+    for (std::size_t row = 0; row < rows; ++row) offsets[row] = static_cast<double>(row);
+    Candidate mapping;
+    mapping.arrival_seconds = static_cast<double>(slot.window_capture_lead_seconds + slot.source_start_seconds);
+    for (auto epoch : {-4, 4}) {
+        auto format = slot.format;
+        format.epoch = static_cast<std::uint32_t>(static_cast<std::int64_t>(format.epoch) + epoch);
+        for (auto bit : {0, 1}) {
+            PatternSource source(format, input.key, static_cast<std::uint8_t>(bit));
+            shaped_basis_mapped(source, mapping, config.sample_rate_hz, 0, offsets, basis, config.data_if_hz);
+            for (std::size_t row = 0; row < rows; ++row)
+                if (row < first || row >= stop) nuisance[row] += basis[row];
+        }
+    }
+    auto contaminated = input.iq;
+    for (std::size_t row = 0; row < rows; ++row) contaminated[row] += 32. * nuisance[row];
+    check(std::ranges::equal(std::span(contaminated).subspan(first, stop - first),
+                             std::span(input.iq).subspan(first, stop - first)),
+          "near-far protected samples must remain identical");
+    const auto quote = protected_slot_workspace(config, slot, 1);
+    const auto run = [&](std::span<const Complex> samples, bool enabled) {
+        return score_protected_slot(config, slot, input.key, samples, input.valid, 1, quote, {}, nullptr, enabled);
+    };
+    const auto clean = run(input.iq, true);
+    const auto ordinary = run(contaminated, false);
+    const auto augmented = run(contaminated, true);
+    check(clean.decision == SlotDecision::data && clean.bit == 0 && !clean.protected_discovery_attempted &&
+          ordinary.complete && ordinary.decision != SlotDecision::data && !ordinary.protected_discovery_attempted,
+          "out-of-aperture nuisance must displace the otherwise admitted protected candidate");
+    check(augmented.complete && augmented.all_valid && augmented.zero_h0_verified &&
+          augmented.decision == SlotDecision::data && augmented.bit == 0 &&
+          augmented.protected_discovery_attempted && augmented.protected_discovery_admitted &&
+          augmented.protected_discovery_candidates > 0,
+          "masked nominations must recover the wanted bit from the same protected samples");
+    check(ordinary.fine_candidates > 0 &&
+          augmented.fine_candidates == ordinary.fine_candidates + augmented.protected_discovery_candidates &&
+          std::abs(augmented.selected_prior_mass -
+              ordinary.selected_prior_mass / ordinary.fine_candidates * augmented.fine_candidates) < 1e-12,
+          "protected discovery must retain exactly the original mass of each distinct atom");
+    check(augmented.coarse_arrival_points == ordinary.coarse_arrival_points &&
+          augmented.coarse_frequency_points == ordinary.coarse_frequency_points &&
+          augmented.operational_threshold == ordinary.operational_threshold &&
+          augmented.quiet_energy == ordinary.quiet_energy &&
+          augmented.workspace_peak_bytes == ordinary.workspace_peak_bytes,
+          "protected discoveries must share the original hypotheses, observations and workspace bounds");
+}
+
+void protected_carrier_beat_preserves_wanted() {
+    using namespace receiver_detail;
+    constexpr unsigned fs = 600;
+    constexpr double lag = .004, clock = 137;
+    constexpr std::int64_t epoch_offset = 2;
+    for (const std::uint8_t bit : {0, 1}) {
+        Fixture input;
+        auto& config = input.config;
+        config.sample_rate_hz = fs;
+        config.data_if_hz = 150;
+        config.noise_variance = .25;
+        config.clock_bound_ppm = 200;
+        config.time_varying_channel = true;
+        config.selective_modulation_rate_hz = .6;
+        config.selective_slow_depth = .65;
+        config.selective_fast_depth = .26;
+        auto& slot = input.slot;
+        slot.index = 37;
+        slot.first_sample = 20'000;
+        slot.source_start_seconds = 18.1;
+        slot.window_capture_lead_seconds = -17.5;
+        slot.arrival_lower_seconds = -.012;
+        slot.arrival_upper_seconds = .012;
+        slot.format.sample_rate = fs;
+        slot.format.inner_rate_hz = 96;
+        slot.format.added_symbols = 1;
+        slot.format.minimum_carrier_spacing_hz = 125;
+        slot.format.bit_seconds = .001;
+        slot.format.epoch = 1793850000;
+        slot.format.symbol_ordinal = 7000037;
+        const auto shape = geometry(slot.format);
+        const auto rows = shape.source_samples + fs + 32;
+        check(rows < 8000, "carrier beat fixture exceeds its sample budget");
+        const auto active_first = 360 + shape.calendar_origin_sample;
+        slot.stop_sample = slot.first_sample + rows;
+        slot.quiet_first_sample = slot.first_sample + active_first + 15;
+        slot.quiet_stop_sample = slot.first_sample + active_first +
+            static_cast<std::uint64_t>(std::llround(shape.bit_seconds * fs)) - 15;
+
+        auto format = slot.format;
+        format.epoch += epoch_offset;
+        PatternSource source(format, input.key, bit);
+        std::vector<double> offsets(rows);
+        for (std::size_t row = 0; row < rows; ++row) offsets[row] = static_cast<double>(row);
+        input.iq.resize(rows);
+        input.valid.resize(rows, 1);
+        const auto render = [&](double physical_lag, double physical_clock) {
+            Candidate truth;
+            truth.clock_ppm = physical_clock;
+            const auto scale = 1 + physical_clock * 1e-6;
+            truth.arrival_seconds = static_cast<double>(slot.window_capture_lead_seconds + physical_lag +
+                slot.source_start_seconds / scale);
+            truth.frequency_hz = -config.data_if_hz * (scale - 1);
+            shaped_basis_mapped(source, truth, config.sample_rate_hz, 0, offsets, input.iq, config.data_if_hz);
+            std::mt19937_64 random(71837);
+            std::normal_distribution<double> normal(0, std::sqrt(config.noise_variance / 2));
+            for (auto& sample : input.iq) sample = .72 * sample + Complex{normal(random), normal(random)};
+        };
+
+        const auto quote = protected_slot_workspace(config, slot, 1);
+        render(lag, clock);
+        const auto observable = score_carrier_beat(config, slot, input.key, input.iq, input.valid,
+            {epoch_offset, lag, 0., clock}, true, quote);
+        check(observable.status == "scored" && qualified_carrier_beat_bit(observable) == bit,
+              "the nonnominal fixed-coordinate carrier beats must support the keyed bit");
+        const auto ordinary = score_protected_slot(config, slot, input.key, input.iq, input.valid,
+            1, quote, {}, nullptr, false, false);
+        const auto enabled = score_protected_slot(config, slot, input.key, input.iq, input.valid,
+            1, quote, {}, nullptr, false, true);
+        check(ordinary.complete && ordinary.all_valid && ordinary.decision == SlotDecision::data &&
+              ordinary.bit == bit && !ordinary.protected_carrier_beat,
+              "native protected fixture must admit the nonnominal wanted bit");
+        check(enabled.complete && enabled.all_valid && enabled.decision == ordinary.decision &&
+              enabled.bit == ordinary.bit && !enabled.protected_carrier_beat_corrected_polarity &&
+              enabled.operational_bit_evidence == ordinary.operational_bit_evidence &&
+              enabled.workspace_peak_bytes == ordinary.workspace_peak_bytes,
+              "carrier beat polarity must preserve already-correct native DATA and presence evidence");
+        // This narrow-carrier observation activates ordinary line handling.
+        // The raw beat rule cannot replace the line-conditioned result.
+        check(ordinary.reason == "varying_data_evidence_with_coherent_line" &&
+              enabled.reason == ordinary.reason && !enabled.protected_carrier_beat &&
+              enabled.protected_carrier_beat_search_coordinates == 0,
+              "protected polarity must defer to the retained coherent-line model");
+
+        render(0., 0.);
+        const auto scan = scan_carrier_beat(config, slot, input.key, input.iq, input.valid, quote);
+        check(scan.status == "scored" && scan.coordinates == receiver_epoch_offsets.size() &&
+              !scan.nominations[1 - bit] && scan.nominations[bit] &&
+              scan.nominations[bit]->coordinate.epoch_offset_seconds == epoch_offset,
+              "the nominal-clock scanner must find the wanted bit at its nonnominal public epoch");
+    }
+}
+
+void protected_colored_carrier_beat() {
+    using namespace receiver_detail;
+    using live::detail::AudioInput;
+    using live::detail::real_pcm;
+    constexpr unsigned fs = 600;
+    constexpr double center = 150;
+    constexpr double variance = .08;
+    ReceiverConfig config;
+    config.sample_rate_hz = fs;
+    config.data_if_hz = center;
+    config.noise_variance = variance;
+    ReceiverSlotPlan slot;
+    slot.index = 37;
+    slot.first_sample = 20'000;
+    slot.source_start_seconds = 18;
+    slot.window_capture_lead_seconds = -17.5;
+    slot.format.sample_rate = fs;
+    slot.format.inner_rate_hz = 96;
+    slot.format.added_symbols = 1;
+    slot.format.minimum_carrier_spacing_hz = 120;
+    slot.format.bit_seconds = .001;
+    slot.format.epoch = 1793850000;
+    slot.format.symbol_ordinal = 7000037;
+    const auto geometry = triad::v3::geometry(slot.format);
+    const auto arrival_rows = fs / 2;
+    const auto rows = geometry.source_samples + fs;
+    const auto active_first = arrival_rows + geometry.calendar_origin_sample;
+    slot.quiet_first_sample = slot.first_sample + active_first + 15;
+    slot.quiet_stop_sample = slot.first_sample + active_first +
+        static_cast<std::uint64_t>(std::llround(geometry.bit_seconds * fs)) - 15;
+    slot.stop_sample = slot.first_sample + rows;
+    check(rows < 8000, "colored PCM fixture exceeds its sample budget");
+
+    const auto key = Crypto::amateur();
+    std::array<std::uint8_t, 64> foreign_aes{}, foreign_serpent{};
+    foreign_aes.fill(0x57);
+    foreign_serpent.fill(0xc3);
+    const auto foreign_key = Crypto::from_independent_roots(foreign_serpent, foreign_aes);
+    const FineCoordinate coordinate{0, 0, 0, 0};
+    const auto quote = score_carrier_beat(config, slot, key, {}, {}, coordinate, true,
+        workspace_limit, {}, false, true);
+    check(quote.status == "quoted" && quote.workspace_bytes > 0, "colored power scorer must quote its workspace");
+    const auto fit = [&](std::span<const Complex> iq, std::span<const std::uint8_t> valid) {
+        return score_carrier_beat(config, slot, key, iq, valid, coordinate, true,
+            quote.workspace_bytes, {}, false, true);
+    };
+    const std::vector<Complex> zero(rows);
+    const std::vector<Complex> constant(rows, Complex{.2, .3});
+    const double zero_atom = -4 * std::log(19.);
+    for (const auto& iq : {std::cref(zero), std::cref(constant)}) {
+        const auto evidence = fit(iq.get(), {});
+        check(evidence.status == "scored" && !evidence.white_power_log_evidence && evidence.colored_power_log_evidence,
+              "colored power must use only the declared likelihood model");
+        for (const auto bit : *evidence.colored_power_log_evidence)
+            check(std::abs(bit - zero_atom) < 1e-12, "constant power must retain only the zero gain atom");
+    }
+    rejects<ReceiverWorkspaceError>([&] {
+        (void)score_carrier_beat(config, slot, key, zero, {}, coordinate, true,
+            quote.workspace_bytes - 1, {}, false, true);
+    }, "colored power must honor the exact scorer workspace");
+
+    const auto capture = [&](const Crypto& transmit_key, double gain) {
+        constexpr double lower = 20, upper = 280;
+        const auto halo = AudioInput(fs, center, lower, upper).halo_samples();
+        AudioInput audio(fs, center, lower, upper, slot.first_sample - halo);
+        PatternSource source(slot.format, transmit_key, 1);
+        std::vector<float> pcm(rows + 2 * halo);
+        std::mt19937_64 random(61572);
+        std::normal_distribution<double> gaussian(0, std::sqrt(variance / 2));
+        auto previous = gaussian(random);
+        for (std::size_t i = 0; i < pcm.size(); ++i) {
+            const auto next = gaussian(random);
+            // The two-tap filter has norm at most one. A preceding independent
+            // draw makes the Gaussian color stationary over the entire input.
+            const auto colored = .65 * next + .35 * previous;
+            previous = next;
+            const auto sample = static_cast<long double>(i) - halo - arrival_rows;
+            pcm[i] = real_pcm(source.sample_at(sample), i, center, fs, gain) + static_cast<float>(colored);
+        }
+        std::vector<Complex> iq;
+        std::vector<std::uint8_t> validity;
+        const auto first = audio.project(pcm, iq, {}, &validity);
+        check(first == slot.first_sample && iq.size() == rows &&
+              std::ranges::all_of(validity, [](auto value) { return value == 1; }),
+              "native colored PCM fixture must retain full projection support");
+        const auto observed = fit(iq, validity);
+        validity[slot.quiet_first_sample - slot.first_sample] = 0;
+        check(!fit(iq, validity).colored_power_log_evidence, "an invalid protected row must prevent colored power evidence");
+        check(observed.status == "scored" && observed.colored_power_log_evidence &&
+              std::ranges::all_of(*observed.colored_power_log_evidence, [](double e) { return std::isfinite(e); }),
+              "native PCM fixture must produce finite colored likelihoods");
+        return *observed.colored_power_log_evidence;
+    };
+    const auto absent = capture(key, 0);
+    const auto wanted = capture(key, .55);
+    const auto foreign = capture(foreign_key, .55);
+    check(*std::ranges::max_element(absent) < 0, "fixed stationary colored noise must fall below unit evidence");
+    check(wanted[1] > 0 && wanted[1] > wanted[0] &&
+          wanted[1] > *std::ranges::max_element(foreign),
+          "native colored power must prefer the planted bit to its opposite and the matched foreign capture");
+}
+
 void protected_drift_lattice() {
     using namespace receiver_detail;
     auto noise = fixture(std::nullopt, false, false);
@@ -310,6 +574,44 @@ void affine_continuation() {
           continued_quiet.operational_bit_evidence == quiet_baseline.operational_bit_evidence &&
           continued_quiet.affine_continuation_attempted && !continued_quiet.affine_continuation_admitted,
           "a strong earlier coordinate cannot turn freshly scored noise into DATA");
+
+    // Model the late packed beat path nominating a fresh cell whose own
+    // likelihood leaves the slot unresolved. Its coordinate must enter the
+    // same bank as its evidence before ordered continuation sees the slot.
+    auto after_beat = context;
+    auto unresolved = baseline;
+    const FineCoordinate beat_coordinate{receiver_epoch_offsets.back(), 0, 0, 0};
+    const auto beat_atom = fine(input, beat_coordinate);
+    check(beat_atom.complete && beat_atom.decision != SlotDecision::data,
+          "late beat fixture must leave the ordinary slot unresolved");
+    for (std::size_t bit = 0; bit < unresolved.operational_bit_evidence.size(); ++bit) {
+        const auto a = unresolved.operational_bit_evidence[bit], b = beat_atom.operational_bit_evidence[bit];
+        unresolved.operational_bit_evidence[bit] = std::max(a, b) + std::log1p(std::exp(-std::abs(a - b)));
+    }
+    FinePreparation bank{*context.grid, {context.ordinary.front()}, {}, {}, {}};
+    retain_affine_atoms(bank, unresolved, beat_atom, std::span(&beat_coordinate, 1));
+    after_beat.ordinary_count = bank.coordinates.size();
+    std::ranges::copy(bank.coordinates, after_beat.ordinary.begin());
+    check(after_beat.ordinary_count == 2 && unresolved.fine_candidates == 2 &&
+          after_beat.ordinary[1] == beat_coordinate &&
+          std::abs(unresolved.selected_prior_mass - 2 * std::exp(effective_prior)) < 1e-12,
+          "beat revision must retain its unique affine atom even without a DATA decision");
+    auto packed = input.slot;
+    packed.protected_data_first_sample = packed.first_sample;
+    packed.protected_data_stop_sample = packed.stop_sample;
+    const auto from_beat = continue_affine_slot(input.config, packed, input.key, input.iq,
+        1, after_beat.scratch_bytes, {}, nullptr, after_beat,
+        ReceiverSlotScore::TimingProposal{beat_coordinate.epoch_offset_seconds, 0, 0, 0}, unresolved, true);
+    check(!from_beat.affine_continuation_attempted && from_beat.decision == unresolved.decision &&
+          from_beat.operational_bit_evidence == unresolved.operational_bit_evidence &&
+          from_beat.quiet_energy == unresolved.quiet_energy && from_beat.quiet_modes == unresolved.quiet_modes,
+          "continuation must skip a retained beat coordinate and preserve the physical quiet statistic");
+    const auto after_predecessor = continue_affine_slot(input.config, packed, input.key, input.iq,
+        1, after_beat.scratch_bytes, {}, nullptr, after_beat, predecessor, unresolved, true);
+    check(after_predecessor.affine_continuation_admitted && after_predecessor.bit == 0 &&
+          after_predecessor.fine_candidates == 3 &&
+          std::abs(after_predecessor.selected_prior_mass - 3 * std::exp(effective_prior)) < 1e-12,
+          "packed continuation must score an omitted earlier DATA coordinate once at its original mass");
 
     const auto continued = continue_affine_slot(input.config, input.slot, input.key, input.iq,
         1, context.scratch_bytes, {}, nullptr, context, predecessor, baseline);
@@ -3600,6 +3902,11 @@ int main(int argc, char** argv) {
             const std::string_view part = argv[1];
             if (part == "carrier") configured_carrier_reception();
             else if (part == "affine-continuation") affine_continuation();
+            else if (part == "protected-discovery") protected_discovery_near_far();
+            else if (part == "protected-carrier-beat") {
+                protected_carrier_beat_preserves_wanted();
+                protected_colored_carrier_beat();
+            }
             else if (part == "protected-observation") {
                 protected_observation_validity();
                 protected_drift_lattice();
@@ -3639,6 +3946,9 @@ int main(int argc, char** argv) {
         complete_data();
         affine_continuation();
         protected_observation_validity();
+        protected_discovery_near_far();
+        protected_carrier_beat_preserves_wanted();
+        protected_colored_carrier_beat();
         protected_drift_lattice();
         wrong_key_policy_boundaries();
         large_aperture_supplemental_plans();

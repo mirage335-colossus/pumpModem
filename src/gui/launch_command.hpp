@@ -22,6 +22,7 @@ struct Patch {
     std::optional<double> receiver_cpu_budget;
     // Optional patches retain disabled/random preferences without enabling a key.
     std::optional<unsigned> symbol_burst,symbol_burst_random;
+    std::optional<std::string> data_cadence;
     // Inline list contents or a file reference; parser never opens files.
     std::optional<std::string> fhss_list,fhss_list_file;
     // File references, explicit public/empty bank and named selection only;

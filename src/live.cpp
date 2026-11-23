@@ -1237,7 +1237,8 @@ struct Session::Impl {
         const auto key = mode == EmissionMode::Noise ? Crypto::amateur() : active.key;
         const auto previous = used_until.find(tag(key));
         if (previous == used_until.end()) return false;
-        const auto beginning = helper ? utc_time(slot.helper_begin, rate) : utc_time(slot.pattern_begin, rate);
+        const auto beginning = helper ? utc_time(slot.helper_begin, rate) :
+            static_cast<long double>(slot.pattern_begin.epoch);
         return beginning <= previous->second;
     }
 
@@ -1255,8 +1256,11 @@ struct Session::Impl {
             // A first generated sample can already enter the device queue.
             // Retain that reservation through cancellation or profile changes.
             auto& used = used_until[identity];
-            const auto through = helper ? slot.helper_end : slot.pattern_begin;
-            used = std::max(used, utc_time(through, rate));
+            // The DATA key includes the whole-second epoch. A fractional
+            // cadence change cannot reopen a reserved epoch in this session.
+            const auto through = helper ? utc_time(slot.helper_end, rate) :
+                static_cast<long double>(slot.pattern_begin.epoch);
+            used = std::max(used, through);
         }
         const auto following = add_slot(index, 3);
         separated_after = following <= calendar.last_slot()

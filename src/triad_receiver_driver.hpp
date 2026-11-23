@@ -32,6 +32,10 @@ struct FinePreparation {
 // A complete coarse search selects these coordinates. Partial work must never
 // supply candidates to an operational fine session.
 FinePreparation prepare_fine_coordinates(const ReceiverConfig&, const ReceiverSlotPlan&, const CoarseResult&);
+// Retain the diagnostics and unique coordinates of an already merged affine
+// contribution together. The late continuation must see the same atom bank.
+void retain_affine_atoms(FinePreparation&, ReceiverSlotScore&, const ReceiverSlotScore&,
+                         std::span<const FineCoordinate>);
 
 inline constexpr std::size_t maximum_fine_coordinates = 64;
 
@@ -53,15 +57,26 @@ ReceiverSlotScore score_slot_for_continuation(const ReceiverConfig&, const Recei
     ReceiverExecutor*, AffineContinuationContext&);
 ReceiverSlotScore continue_affine_slot(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
     std::span<const Complex>, unsigned, std::size_t, std::stop_token, ReceiverExecutor*,
-    const AffineContinuationContext&, const ReceiverSlotScore::TimingProposal&, ReceiverSlotScore);
+    const AffineContinuationContext&, const ReceiverSlotScore::TimingProposal&, ReceiverSlotScore,
+    bool protected_data = false);
 
-// Packed-calendar qualification only. The public observation supplies coarse
+// The whole packed-calendar observation supplies coarse
 // proposals and full validity. Admitting statistics use only the declared
 // neighbor-free interval, with the original model-family weights.
 std::size_t protected_slot_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned);
+ReceiverSlotScore score_continuous_data_slot(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
+    std::span<const Complex>, std::span<const std::uint8_t>, unsigned, std::size_t, std::stop_token,
+    ReceiverExecutor*, AffineContinuationContext*);
+// Qualification only. The caller must verify independent proper-complex
+// Gaussian simulator noise at the raw input, at the configured variance.
+std::size_t protected_white_beat_slot_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned);
+// Qualification only. Joint real-augmented Gaussian covariance bounded by
+// half the declared variance and constant per-sample expected IQ power.
+std::size_t protected_colored_beat_slot_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned);
 ReceiverSlotScore score_protected_slot(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
     std::span<const Complex>, std::span<const std::uint8_t>, unsigned, std::size_t, std::stop_token,
-    ReceiverExecutor*);
+    ReceiverExecutor*, bool discover_protected_affine = false, bool carrier_beat_polarity = false,
+    bool white_beat_evidence = false, bool colored_beat_evidence = false);
 
 // Extra raw short-track timing cells on the prepared public grid, available
 // only when the coarse plan did not reserve segmented timing.

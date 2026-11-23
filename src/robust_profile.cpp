@@ -20,6 +20,15 @@ void check(bool condition, const char* message) {
     if (!condition) throw Error(message);
 }
 
+void validate_data_cadence(const Settings& settings, bool helper_enabled) {
+    check(settings.data_cadence == DataCadence::scheduled || settings.data_cadence == DataCadence::continuous,
+          "Invalid Robust DATA cadence");
+    if (settings.data_cadence == DataCadence::continuous)
+        check(!helper_enabled && !settings.symbol_burst_wait && !settings.symbol_burst_random &&
+              settings.fhss_profile == "off",
+              "Continuous Robust DATA requires Helper, both Symbol Burst waits, and FHSS off");
+}
+
 bool in_range(double value, double low, double high) {
     return std::isfinite(value) && value >= low && value <= high;
 }
@@ -258,7 +267,7 @@ void validate_settings(const Settings& s) {
               "Invalid Robust oscillator model");
     (void)tuning::parse_spread_preset(s.spread_preset);
     (void)selective_depths(s.selective_perturbation);
-    helper::validate(helper_options(s));
+    validate_data_cadence(s, helper::effective_helper_power(helper_options(s)) > 0);
     check(std::isfinite(s.helper.power_w) && s.helper.power_w >= 0,
           "Robust Helper power must be finite and nonnegative");
     check(s.transfer.fec == FecMode::off || s.transfer.fec == FecMode::rs20 || s.transfer.fec == FecMode::rs60,
@@ -351,6 +360,8 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     const auto arrival = arrival_prior(s);
     auto key = s.transfer.key.value_or(Crypto::amateur());
     auto helper = helper_options(s);
+    const bool helper_enabled = helper::effective_helper_power(helper) > 0;
+    validate_data_cadence(s, helper_enabled);
 
     check(osc.sideband == modem::OscillatorSideband::upper,
           "Robust supports only upper-sideband carrier translation");
@@ -395,7 +406,7 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     // the bounded changing-channel proposal searches its public support.
     rx.time_varying_atmospheric_hz = std::abs(rx.spread_doppler_hz);
     rx.time_varying_common_doppler_hz = std::abs(s.doppler_shift_hz) + rx.time_varying_atmospheric_hz;
-    rx.helper_enabled = helper::effective_helper_power(helper) > 0;
+    rx.helper_enabled = helper_enabled;
 
     auto minimum = minimum_shaping(s);
     minimum.format.configured_carrier_hz = modem.carrier_hz + osc.rf_shift_hz;
@@ -429,6 +440,7 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     configuration.helper_enabled = rx.helper_enabled;
     configuration.wait_bits = s.symbol_burst_wait;
     configuration.random_extra_bits = s.symbol_burst_random;
+    configuration.continuous_data = s.data_cadence == DataCadence::continuous;
     configuration.arrival_low_seconds = arrival.lower;
     configuration.arrival_high_seconds = arrival.upper;
     configuration.capture_lead_seconds = std::max(.25, -arrival.lower + .25);

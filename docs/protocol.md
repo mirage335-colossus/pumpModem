@@ -10,8 +10,8 @@ versioned domain and is not the former long-message keyed format.
 The current [Robust stack](robust-current.md) is native C++ and linked into the
 GUI. It uses the canonical `IndependentApskV2` waveform, shaping, continuous
 sampled channel, Helper generator and complete slot receiver. Peers explicitly
-share a public calendar, initial keyed ordinal, waveform profile, FEC mode and
-compression setting.
+share a public calendar, initial keyed ordinal, waveform profile, DATA cadence,
+FEC mode and compression setting.
 Unknown waveform-address acquisition remains outside the current scope.
 
 The `independent-apsk-v2-carrier-v1` waveform key derivation also binds the

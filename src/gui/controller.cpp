@@ -419,6 +419,8 @@ struct Controller::Impl {
         f(UiField::symbol_burst).selected="off";
         f(UiField::symbol_burst_random).options={{"0","0"},{"1","1"},{"2","2"},{"3","3"}};
         f(UiField::symbol_burst_random).selected="0";
+        f(UiField::data_cadence).options={{"scheduled","Scheduled"},{"continuous","Continuous DATA"}};
+        f(UiField::data_cadence).selected="scheduled";
         f(UiField::rf_oscillator).options.push_back({"baseband-clock","Baseband clock"});
         for(const auto& preset:tuning::oscillator_presets()) {
             if(preset.baseband_supported)f(UiField::simulation_oscillator).options.push_back({std::string(preset.id),std::string(preset.name)});
@@ -669,6 +671,7 @@ struct Controller::Impl {
             }
             if(load->symbol_burst)f(UiField::symbol_burst).selected=*load->symbol_burst?std::to_string(*load->symbol_burst):"off";
             if(load->symbol_burst_random)f(UiField::symbol_burst_random).selected=std::to_string(*load->symbol_burst_random);
+            choice(UiField::data_cadence,load->data_cadence);
             if(load->helper_power_w)f(UiField::helper_power).selected=f(UiField::helper_power).text=planner_number(*load->helper_power_w);
             if(load->helper_ratio_limit_db)f(UiField::helper_ratio_limit).selected=planner_number(*load->helper_ratio_limit_db);
             if(load->helper_callsign)f(UiField::helper_callsign).text=*load->helper_callsign;
@@ -727,6 +730,10 @@ struct Controller::Impl {
             f(UiField::minimum_carrier_spacing).selected,"Minimum carrier spacing");
         settings.symbol_burst_wait=modem::parse_symbol_burst_wait(f(UiField::symbol_burst).selected);
         settings.symbol_burst_random=modem::parse_symbol_burst_random(f(UiField::symbol_burst_random).selected);
+        const auto& cadence=f(UiField::data_cadence).selected;
+        if(cadence=="scheduled")settings.data_cadence=live::DataCadence::scheduled;
+        else if(cadence=="continuous")settings.data_cadence=live::DataCadence::continuous;
+        else throw Error("Select an available DATA cadence");
         settings.fhss_profile=f(UiField::fhss).selected;settings.fhss_frequencies_hz=fhss_list;
         const auto epoch=f(UiField::calendar_epoch).text;
         const auto ordinal=integer(f(UiField::calendar_ordinal).text,"Calendar ordinal");
@@ -883,6 +890,7 @@ struct Controller::Impl {
         values.fhss=f(UiField::fhss).selected;
         values.symbol_burst=modem::parse_symbol_burst_wait(f(UiField::symbol_burst).selected);
         values.symbol_burst_random=modem::parse_symbol_burst_random(f(UiField::symbol_burst_random).selected);
+        values.data_cadence=f(UiField::data_cadence).selected;
         if(!fhss_list.empty())values.fhss_list=fhss::list_text(fhss_list);
         if(!key_path.empty())values.keyfile=path_text(std::filesystem::absolute(key_path).lexically_normal());
         else if(key_origin==KeyOrigin::amateur)values.keyset="amateur";
@@ -1196,7 +1204,7 @@ struct Controller::Impl {
             UiField::simulation,UiField::link_power,UiField::link_loss,UiField::link_noise,
             UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error,
             UiField::calendar_epoch,UiField::calendar_ordinal,UiField::live_noise_dbfs_hz,
-            UiField::minimum_carrier_spacing,
+            UiField::minimum_carrier_spacing,UiField::data_cadence,
             UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::carrier,
             UiField::bandwidth,UiField::doppler,UiField::spread_preset,UiField::selective_perturbation,
             UiField::search_margin,UiField::dsss_factor,UiField::dsss_version,UiField::fhss,
@@ -1981,7 +1989,7 @@ void Controller::select(UiField field,std::string id) {
         else if(field==UiField::selective_perturbation) p.configure();
         else if(field==UiField::helper_power||field==UiField::helper_ratio_limit||field==UiField::simulation||field==UiField::simulation_oscillator||field==UiField::rf_oscillator||
             field==UiField::fec||field==UiField::dsp_workspace||field==UiField::fhss||
-            field==UiField::minimum_carrier_spacing||
+            field==UiField::minimum_carrier_spacing||field==UiField::data_cadence||
             field==UiField::symbol_burst||field==UiField::symbol_burst_random||
             field==UiField::dsss_version||field==UiField::search_arithmetic||field==UiField::receiver_strategy) p.configure();
         else if(field==UiField::dsss_factor) {

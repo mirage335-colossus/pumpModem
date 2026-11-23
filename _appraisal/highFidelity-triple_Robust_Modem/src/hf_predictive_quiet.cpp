@@ -1,6 +1,7 @@
 #include "hf_predictive_quiet.hpp"
 
 #include "datapump/triad_stream_receiver.hpp"
+#include "triad_receiver_executor.hpp"
 #include "triad_receiver_fine.hpp"
 
 #include <algorithm>
@@ -163,6 +164,12 @@ bool band_quiet(const ReceiverSlotScore& evidence) {
     return evidence.varying_quiet_modes && evidence.varying_quiet_energy <= evidence.varying_quiet_threshold;
 }
 
+void score_serial_quiet(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                       std::span<const Complex> input, ReceiverSlotScore& score, std::stop_token stop) {
+    ReceiverExecutor executor(1);
+    score_varying_quiet(config, slot, input, score, stop, 1, executor);
+}
+
 bool gap_band_quiet(const ReceiverConfig& config, const ReceiverSlotPlan& format, const ToneMean& mean,
                     std::span<const Complex> input, std::stop_token stop) {
     std::vector<Complex> residual(input.size());
@@ -170,7 +177,7 @@ bool gap_band_quiet(const ReceiverConfig& config, const ReceiverSlotPlan& format
         residual[row] = input[row] - phase * mean.amplitude;
     });
     ReceiverSlotScore quiet;
-    score_varying_quiet(config, gap_plan(format, mean.range), residual, quiet, stop);
+    score_serial_quiet(config, gap_plan(format, mean.range), residual, quiet, stop);
     return band_quiet(quiet);
 }
 
@@ -333,7 +340,7 @@ std::size_t quiet_workspace(const ReceiverConfig& config, const ReceiverSlotPlan
     const auto rows = slot.stop_sample - slot.first_sample;
     if (rows > maximum_slot_rows) return 0;
     const auto input_and_copy = checked_multiply(static_cast<std::size_t>(rows), 2 * sizeof(Complex) + 1);
-    return checked_add(checked_add(input_and_copy, varying_quiet_workspace(config, slot)), fixed_scratch);
+    return checked_add(checked_add(input_and_copy, varying_quiet_workspace(config, slot, 1)), fixed_scratch);
 }
 
 } // namespace
@@ -357,10 +364,10 @@ HfPredictiveQuiet::HfPredictiveQuiet(const PublicProfile& profile, const Receive
             const auto proposal = gap_plan(training_slot_, frequency_training_ranges(gap).proposal);
             const auto split = gap.stop - gap.size() / 3;
             largest_stage = std::max({largest_stage, varying_line_workspace(config, proposal),
-                varying_quiet_workspace(config, proposal),
-                varying_quiet_workspace(config, whole),
-                varying_quiet_workspace(config, gap_plan(training_slot_, {gap.first, split})),
-                varying_quiet_workspace(config, gap_plan(training_slot_, {split, gap.stop}))});
+                varying_quiet_workspace(config, proposal, 1),
+                varying_quiet_workspace(config, whole, 1),
+                varying_quiet_workspace(config, gap_plan(training_slot_, {gap.first, split}), 1),
+                varying_quiet_workspace(config, gap_plan(training_slot_, {split, gap.stop}), 1)});
         }
         preceding = current;
     }
@@ -505,7 +512,7 @@ void HfPredictiveQuiet::train(std::size_t index, std::stop_token stop) {
     std::vector<Complex> whitened(validation_rows);
     transform.write(validation, whitened, training_config_.sample_rate_hz, stop);
     ReceiverSlotScore quiet;
-    score_varying_quiet(training_config_, gap_plan(training_slot_, result.validation), whitened, quiet, stop);
+    score_serial_quiet(training_config_, gap_plan(training_slot_, result.validation), whitened, quiet, stop);
     result.validation_energy = quiet.varying_quiet_energy;
     result.validation_threshold = quiet.varying_quiet_threshold;
     if (!band_quiet(quiet)) {
@@ -646,8 +653,8 @@ void HfPredictiveQuiet::consider(const ReceiverConfig& config, const ReceiverSlo
         transform.write(aperture_input, std::span<Complex>(whitened).subspan(offset, aperture_input.size()),
                         config.sample_rate_hz, stop);
         ReceiverSlotScore legacy, expanded;
-        score_varying_quiet(legacy_config, slot, whitened, legacy, stop);
-        score_varying_quiet(config, slot, whitened, expanded, stop);
+        score_serial_quiet(legacy_config, slot, whitened, legacy, stop);
+        score_serial_quiet(config, slot, whitened, expanded, stop);
         evidence.legacy_modes = legacy.varying_quiet_modes;
         evidence.legacy_threshold = legacy.varying_quiet_threshold;
         evidence.expanded_modes = expanded.varying_quiet_modes;

@@ -29,6 +29,8 @@ struct PublicSlot {
     // observation. A quiet aperture is always within it, and can be empty.
     SampleRange observation, data_support, quiet_aperture;
     std::uint64_t previous_signal_stop = 0, next_signal_first = 0;
+    // Packed scoring may use the neighbor-free part of the searched DATA support.
+    SampleRange protected_data_aperture;
 };
 
 struct PublicProfileConfig {
@@ -56,7 +58,7 @@ struct PublicProfileConfig {
     std::optional<double> signal_delay_ms; // Defaults to the declared spread bound.
     double delay_excursion_seconds = 0;
     bool selective_signal_tail = false;
-    // Explicit qualification cadence shared by both endpoints. Requires
+    // Explicit DATA cadence shared by both endpoints. Requires
     // Helper and whole-bit waits off. The first slot retains its UTC anchor.
     bool continuous_data = false;
 };

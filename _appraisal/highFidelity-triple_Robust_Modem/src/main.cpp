@@ -106,6 +106,7 @@ struct Options {
     std::optional<std::size_t> memory_bytes;
     std::size_t chunk=4096;
     bool service_replay=false, service_options=false;
+    bool continuous_data=false, protected_discovery=false;
     bool hf_predictive_quiet=false;
     bool hf_compare_admitted_models=false, hf_phase_filter=false, hf_phase_filter_receiver=false, hf_phase_filter_paths=false;
     bool hf_phase_filter_sticky=false, hf_phase_bridge=false;
@@ -141,6 +142,8 @@ Options parse(int argc,char** argv) {
     for(int i=1;i<argc;++i) {
         const std::string key=argv[i];
         if(key=="--service-replay") {o.service_replay=true;continue;}
+        if(key=="--continuous-data") {o.continuous_data=true;continue;}
+        if(key=="--protected-discovery") {o.protected_discovery=true;continue;}
         if(key=="--hf-predictive-quiet") {o.hf_predictive_quiet=true;continue;}
         if(key=="--hf-compare-admitted-models") {o.hf_compare_admitted_models=true;continue;}
         if(key=="--hf-phase-filter") {o.hf_phase_filter=true;continue;}
@@ -267,6 +270,15 @@ Options parse(int argc,char** argv) {
     }
     require(o.mode=="plan"||o.mode=="channel"||o.mode=="receive"||o.mode=="slot"||o.mode=="oracle"||
         o.mode=="diagnose"||o.mode=="hf-search"||o.mode=="gui-varying"||o.mode=="gui-repeated-bit","unknown mode");
+    require(!o.protected_discovery||o.continuous_data,"Protected discovery requires Continuous DATA");
+    require(!o.continuous_data||((o.mode=="plan"||o.mode=="receive")&&o.scenario!="hf-gui-native"&&
+        o.backend=="cpu"&&o.waveform=="reference"&&!o.helper&&o.fec=="off"&&
+        (o.control=="wanted"||o.control=="noise"||o.control=="wrong-key")&&
+        o.service_episodes==1&&!o.repeat_bit&&!o.two_hop_alarm_matrix&&!o.two_hop_additive_boundary&&
+        !o.two_hop_spread_comparison&&!o.hf_predictive_quiet&&!o.hf_compare_admitted_models&&
+        !o.hf_public_phase_receiver&&!o.hf_correlated_gain_receiver&&!o.hf_target_presence_diagnostic),
+        "Continuous DATA requires a direct reference CPU plan or receive, one episode, Helper/FEC off, "
+        "and wanted, noise or wrong-key control without an alternate receiver policy");
     const bool gui_repeated=o.mode=="gui-repeated-bit";
     require(!o.repeat_selected_attempt||(gui_repeated&&o.repeat_separate_attempts&&
         *o.repeat_selected_attempt%3==0&&*o.repeat_selected_attempt<=48&&
@@ -1340,6 +1352,11 @@ Setup setup(const Options& o,std::stop_token stop) {
     const bool evolving_native_chain_case=scenario.id.starts_with("hf-vector-evolving-chain-");
     const bool evolving_vector_case=scenario.id.starts_with("hf-vector-evolving");
     const bool native_chain_case=scenario.id.starts_with("hf-wave-chain-")||vector_native_chain_case;
+    if(o.continuous_data&&(native_chain_case||scenario.family!="skywave-1-30MHz"||
+        scenario.channel.fullwave_reflection||scenario.channel.magnetoionic_reflection||
+        scenario.channel.wave_optics||scenario.channel.phase_screens||scenario.channel.vector_oblique||
+        scenario.channel.vector_two_hop))
+        throw Unavailable("Continuous DATA qualification requires a direct HF path renderer");
     if(o.hf_target_presence_diagnostic&&scenario.channel.vector_oblique&&scenario.id!="hf-vector-oblique")
         throw Unavailable("target-presence diagnostic is qualified only for the original direct hf-vector-oblique primary");
     if(o.hf_target_presence_diagnostic&&(native_chain_case||
@@ -1535,6 +1552,7 @@ Setup setup(const Options& o,std::stop_token stop) {
     pc.spread_doppler_hz=scenario.bounds.doppler_width_hz;
     pc.delay_excursion_seconds=scenario.bounds.delay_excursion_seconds;
     pc.helper_enabled=o.helper;
+    pc.continuous_data=o.continuous_data;
     if(o.helper) {
         f.sample_rate=6000;pc.data_if_hz=1725;
         pc.helper.data_power_w=1;pc.helper.power_w=2;pc.helper.ratio_limit_db=90;
@@ -1591,7 +1609,10 @@ Setup setup(const Options& o,std::stop_token stop) {
     Setup s(std::move(scenario),std::move(profile),std::move(transmit_profile),rc,mp,std::move(draft),key,txkey,message);
     s.cn0=cn0;
     evaluate_source_extent(s,o);
-    s.source_stop=add(s.source_stop,checked_samples(pc.capture_lead_seconds,rc.sample_rate_hz));
+    const auto preroll=checked_samples(pc.capture_lead_seconds,rc.sample_rate_hz);
+    const auto active_stop=o.continuous_data?add(preroll,s.transmit_profile.calendar().distance(
+        s.transmit_profile.origin(),s.transmit_profile.transmit_slot(s.q0-1).pattern_end)):0;
+    s.source_stop=add(s.source_stop,preroll);
     if(s.scenario.channel.fullwave_reflection&&s.source_stop<
         checked_samples(appraisal::HfFullwaveReflectionSpec::minimum_source_seconds+pc.capture_lead_seconds,rc.sample_rate_hz))
         throw Unavailable("full-wave reflection source must span the complete predeclared 60+480 second profile-test envelope");
@@ -1633,7 +1654,7 @@ Setup setup(const Options& o,std::stop_token stop) {
                 static_cast<double>(appraisal::HfVectorTwoHopTable::last_lag_samples())/rc.sample_rate_hz;
             s.tail=std::max(s.tail,geometry_tail);
         }
-        auto clean=add(s.source_stop,checked_samples(s.tail,rc.sample_rate_hz));
+        auto clean=add(o.continuous_data?active_stop:s.source_stop,checked_samples(s.tail,rc.sample_rate_hz));
         if(native_chain_case) {
             chain_tx_horizon=add(checked_samples(static_cast<long double>(s.source_stop)/rc.sample_rate_hz/chain_slowest,
                 rc.sample_rate_hz),chain_endpoint_tail);
@@ -1642,7 +1663,12 @@ Setup setup(const Options& o,std::stop_token stop) {
                 rc.sample_rate_hz),chain_endpoint_tail);
             s.tail=static_cast<double>(clean-s.source_stop)/rc.sample_rate_hz;
         }
-        while(make_receiver_slot_plan(s.profile,s.receiver,s.q0).first_sample<clean) {
+        const auto quiet_ready=[&](const ReceiverSlotPlan& slot) {
+            if(!o.continuous_data) return slot.first_sample>=clean;
+            return slot.quiet_first_sample>=clean&&slot.quiet_first_sample<slot.quiet_stop_sample;
+        };
+        while(!quiet_ready(make_receiver_slot_plan(s.profile,s.receiver,s.q0))||
+              (o.continuous_data&&!quiet_ready(make_receiver_slot_plan(s.profile,s.receiver,s.q0+1)))) {
             require(s.q0<add(s.episode_starts.back(),s.truth.size()+100),"physical tail does not fit the bounded quiet-horizon search");++s.q0;
         }
         // Exactly two complete uncontaminated quiet opportunities confirm the
@@ -1863,6 +1889,12 @@ Json plan_json(const Setup& s,const Options& o) {
             {"public_profile_observation",range(slot.observation)},
             {"previous_signal_stop",slot.previous_signal_stop},{"next_signal_first",slot.next_signal_first},
             {"quiet_aperture",range({rx.quiet_first_sample,rx.quiet_stop_sample})},{"evaluator_transmitting",source_episode(s,i).has_value()&&o.control!="noise"}}));
+        if(o.continuous_data) {
+            const auto& calendar=s.profile.calendar();
+            slots.back()["transmit_data_gate_samples"]=range({
+                calendar.distance(s.profile.origin(),slot.tx.pattern_begin),
+                calendar.distance(s.profile.origin(),slot.tx.pattern_end)});
+        }
     }
     auto result=object({{"sample_rate_hz",s.receiver.sample_rate_hz},
         {"requested_bit_seconds",s.native_channel?o.bit_seconds.value_or(f.bit_seconds):f.bit_seconds},{"actual_bit_seconds",g.bit_seconds},
@@ -1925,6 +1957,14 @@ Json plan_json(const Setup& s,const Options& o) {
             {"workers_explicit",o.workers.has_value()},{"owners_explicit",o.owners.has_value()}})},
         {"capture_gap",range({s.gap_first,s.gap_stop})},{"public_slots",std::move(slots)},
         {"configured_calendar_only",true},{"capacity_qualified",false},{"empirically_validated",false}});
+    if(o.continuous_data) {
+        result["continuous_data"]=true;
+        result["packed_score_support"]="protected_native_observation";
+        result["protected_discovery"]=o.protected_discovery;
+        result["quiet_horizon_scope"]="first two complete protected apertures after the public DATA end and channel tail";
+        const auto first=make_receiver_slot_plan(s.profile,s.receiver,0);
+        result["first_slot_workspace_bytes"]=receiver_detail::protected_slot_workspace(s.receiver,first,s.resources.workers);
+    }
     if(o.service_replay||o.hf_predictive_quiet||o.two_hop_additive_boundary||o.two_hop_spread_comparison)
         result["service_replay"]=service_plan_json(s,o);
     if(o.two_hop_spread_comparison)
@@ -2317,6 +2357,10 @@ Json score_json(const StreamSlotReceipt& receipt) {
         {"coarse_seconds",r.coarse_seconds},{"fine_seconds",r.fine_seconds},{"helper_overlapped",r.helper_overlapped},
         {"coarse_frequency_points",r.coarse_frequency_points},{"coarse_arrival_points",r.coarse_arrival_points},
         {"coarse_workspaces",r.coarse_workspaces},{"fine_candidates",r.fine_candidates},{"basis_rows",r.basis_rows},
+        {"protected_discovery_attempted",r.protected_discovery_attempted},
+        {"protected_discovery_admitted",r.protected_discovery_admitted},
+        {"protected_discovery_candidates",r.protected_discovery_candidates},
+        {"protected_discovery_coarse_seconds",r.protected_discovery_coarse_seconds},
         {"adaptive_peak_states",r.adaptive_peak_states},{"adaptive_transition_edges",r.adaptive_transition_edges},
         {"coarse_fft_precision",r.coarse_fft_precision},{"coarse_precision_reason",r.coarse_precision_reason},
         {"varying_status",r.varying_status},{"varying_candidates",r.varying_candidates},{"varying_blocks",r.varying_blocks},
@@ -4377,7 +4421,16 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
         s.stream.first_slot=receive_first_slot;
         s.stream.first_input_sample=receive_input_first;
     }
-    if(receive&&predictive_receiver) {
+    if(receive&&o.continuous_data) {
+        s.stream.affine_continuation=false;
+        const auto score=[discover=o.protected_discovery](const auto& config,const auto& slot,const auto& key,auto input,auto validity,
+                unsigned workers,std::size_t bytes,std::stop_token stop,receiver_detail::ReceiverExecutor* executor) {
+            return receiver_detail::score_protected_slot(config,slot,key,input,validity,workers,bytes,stop,executor,discover);
+        };
+        receiver.reset(new CompleteStreamReceiver(datapump::triad::v3::detail::StreamReceiverFixture::make_with_executor(
+            s.profile,s.receiver,s.key,s.stream,receiver_detail::protected_slot_workspace,score,
+            message_decoder(s.message_profile.fec),message_receiver_options(s.message_profile))));
+    } else if(receive&&predictive_receiver) {
         const datapump::triad::v3::detail::StreamWorkspace workspace=[&](const auto& config,const auto& slot,unsigned workers) {
             return predictive_receiver->workspace(config,slot,workers,false);
         };
@@ -5546,6 +5599,8 @@ int main(int argc,char** argv) {
             result["two_hop_spread_replay_usage"]="--two-hop-spread-comparison --two-hop-spread-replay PATH reuses the frozen verified comparison capture for only the operational 7 ms declared-spread receiver; no field regeneration.";
             result["physical_repeated_bit_usage"]="--mode plan|receive --scenario hf-ensemble-changing-rate --repeat-bit 0|1 --repeat-separate-attempts --bit-seconds 128 --cn0 0 --seed 30107 --noise-seed 40107 --hf-trajectory-seed 20107 --hf-trajectory-offset-seconds 197 --max-samples 4350000 --max-wall-seconds 180 evaluates five separate raw-bit attempts through one continuous changing-rate channel. The bounded hf-disturbed profile is limited to C/N0 12, seed 9202 or 9601, omitted noise seed, 4096-sample chunks and otherwise the same CPU reference bounds.";
             result["service_replay_usage"]="--service-replay in receive/plan pre-renders native I/Q into the canonical bounded ObservationSpool; accepts --service-episodes 1|2, --service-spool-byte-limit N, paired --service-backlog-begin-slot N --service-backlog-end-slot N, and chunks <=4096. Full service includes receiver construction, unchanged-chunk replay, drain/destruction and separately reported replay reads/hash; rendering is excluded. Two episodes retain the global ordinal and fixed two-quiet gap, with a final extra quiet slot. Backlog eligibility and communication completion are separate; no capacity qualification.";
+            result["continuous_data_usage"]="--continuous-data selects adjacent sample-grid DATA gates and the native protected-window scorer for a direct HF reference CPU plan or receive. One episode, Helper/FEC off, with wanted, noise or wrong-key control. The receiver still scores two physical quiet slots for completion.";
+            result["protected_discovery_usage"]="--protected-discovery requires --continuous-data and enables native protected-aperture affine candidate discovery on eligible unresolved slots.";
             result["hf_compare_admitted_models_usage"]="--hf-compare-admitted-models opts CPU receive/plan into comparison of all supported models with unchanged ordinary/overlap workspace quotes; excludes --hf-public-phase-receiver";
             result["hf_phase_filter_usage"]="--hf-phase-filter requires hf-search, --hf-phase-refinement and --search-timing full; reports a bounded public phase-filter diagnostic without changing receiver decisions";
             result["hf_phase_filter_receiver_usage"]="--hf-phase-filter-receiver requires receive, --hf-public-phase-receiver and --hf-phase-refinement; adds the fixed equal correlated phase mixture through the existing native fallback hook, restricted to the qualified full 39-atom geometry";

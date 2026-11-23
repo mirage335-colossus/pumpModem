@@ -141,6 +141,59 @@ struct FineBlockGeometry {
 };
 FineBlockGeometry fine_block_geometry(const ReceiverConfig&, const ReceiverSlotPlan&);
 std::size_t fine_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, FineObservation, unsigned workers);
+
+struct CarrierBeatProfile {
+    // Normalized complex correlations [bit][harmonic]. A fitted constant
+    // complex gain per harmonic is shared over the complete aperture.
+    std::array<std::array<Complex, 2>, 2> bit_correlations{};
+    std::array<double, 2> bit_projection_fraction{};
+    // [bit][scored half]. The other half fits the complex gain before this
+    // half is scored. Negative values mean the prediction increased error.
+    std::array<std::array<double, 2>, 2> held_out_explained_fraction{};
+};
+struct CarrierBeatReceipt {
+    std::string_view status;
+    // Direct and incoherent delayed-path mixtures, respectively.
+    std::array<CarrierBeatProfile, 2> profiles{};
+    std::array<double, 2> observed_harmonic_energy{};
+    // Optional fixed-coordinate diagnostic. Valid only under independent
+    // proper complex white noise at the declared variance.
+    std::optional<std::array<double, 2>> white_power_log_evidence;
+    // Fixed-dictionary lower bound under stationary Gaussian PCM and the
+    // resulting joint real-coordinate IQ covariance envelope.
+    std::optional<std::array<double, 2>> colored_power_log_evidence;
+    std::size_t blocks = 0, block_rows = 0, workspace_bytes = 0;
+};
+// Fixed-coordinate comparison of keyed carrier cross-products with the power
+// waveform. Optional power evidence requires the matching declared noise model
+// and retains the selected public coordinate's original mass at the caller.
+// Supply the whole slot and select protected_only for a packed calendar.
+// Empty input requests a workspace and observation-geometry quote.
+CarrierBeatReceipt score_carrier_beat(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
+        std::span<const Complex> iq, std::span<const std::uint8_t> valid, const FineCoordinate&,
+        bool protected_only, std::size_t scratch_limit_bytes, std::stop_token = {},
+        bool compare_white_power = false, bool compare_colored_power = false);
+std::optional<std::uint8_t> qualified_carrier_beat_bit(const CarrierBeatReceipt&);
+
+struct CarrierBeatNomination {
+    FineCoordinate coordinate;
+    CarrierBeatReceipt evidence;
+    std::uint8_t bit = 0;
+};
+struct CarrierBeatScanReceipt {
+    std::string_view status;
+    std::size_t coordinates = 0, workspace_bytes = 0;
+    std::array<std::optional<CarrierBeatNomination>, 2> nominations;
+    // Optional nomination by positive held-out fit without a majority gate.
+    std::optional<CarrierBeatNomination> exploratory_nomination;
+};
+// Packed protected aperture only. Covers every public epoch and the full
+// arrival interval at block stride on the nominal clock. Both nominations
+// can be present and must be treated as competing. Empty IQ quotes the work.
+CarrierBeatScanReceipt scan_carrier_beat(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
+        std::span<const Complex> iq, std::span<const std::uint8_t> valid,
+        std::size_t scratch_limit_bytes, std::stop_token = {}, bool exploratory = false);
+
 void score_fine(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                 std::span<const Complex> iq, std::span<const FineCoordinate>,
                 double projected_sample_rate_hz, double coarse_clock_gap_ppm,
@@ -228,6 +281,9 @@ void score_varying_fine(const ReceiverConfig&, const ReceiverSlotPlan&, const Cr
                         TrackedFrequencySpan* = nullptr, TrackedFrequencyClockShadow* = nullptr,
                         const MidpointTrackInput* = nullptr);
 std::size_t varying_quiet_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers);
+std::size_t packed_affine_quiet_workspace(const ReceiverConfig&, const ReceiverSlotPlan&);
+void score_packed_affine_quiet(const ReceiverConfig&, const ReceiverSlotPlan&, std::span<const Complex>,
+                               ReceiverSlotScore&, std::stop_token);
 // Quiet-aperture blocks project on the given lanes; their energy terms are
 // summed in public block order, so results do not depend on the lane count.
 void score_varying_quiet(const ReceiverConfig&, const ReceiverSlotPlan&, std::span<const Complex>,

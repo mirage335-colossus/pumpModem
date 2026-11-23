@@ -15,6 +15,8 @@ struct Calendar {
     std::uint64_t epoch = 0, initial_ordinal = 0;
 };
 
+enum class DataCadence : std::uint8_t { scheduled, continuous };
+
 struct Settings {
     transfer::Options transfer;
     std::string device="default";
@@ -40,6 +42,8 @@ struct Settings {
     double doppler_shift_hz=0;
     std::string spread_preset="none", selective_perturbation="off";
     unsigned added_symbols=1, symbol_burst_wait=0, symbol_burst_random=0;
+    // Public calendar choice shared by the transmitting and receiving peers.
+    DataCadence data_cadence=DataCadence::scheduled;
     bool added_interleave=false;
     std::string fhss_profile="off";
     std::vector<double> fhss_frequencies_hz;

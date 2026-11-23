@@ -188,6 +188,10 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.purpose=ControlPurpose::setup;
         control.help="Minimum center-to-center spacing between adjacent Robust DATA carriers. The native waveform uses the larger of this setting and its rate-derived spacing. Both peers must use the same setting.";
     }
+    if(control.field==Field::data_cadence) {
+        control.purpose=ControlPurpose::setup;
+        control.help="Continuous DATA places successive DATA gates on adjacent samples. It requires Helper, both Symbol Burst waits, and FHSS off. Both peers must select the same DATA cadence.";
+    }
     if(slot==Slot::diagnostics)control.help="Actual session diagnostics. Functional reception and modeled duration do not establish physical sensitivity or sustained CPU capacity.";
     if(slot==Slot::waterfall) {control.footer_height=24;control.click=Command::toggle_waterfall_expanded;control.right_click=Command::toggle_helper_waterfall_expanded;control.help="With Helper Carrier enabled, right-click to zoom in on the low pilot, auxiliary and high pilot tones. Click for the fullscreen configured search band and a little surrounding spectrum with adjacent amplitude/phase columns. Phase brightness follows amplitude; quiet noise stays dim. Escape or another click restores this environmental view. Clear waterfall clears history separately. Simulation uses a fixed 40 dB range; hardware spans the captured sample rate, including surrounding interference.";}
     if(slot==Slot::waveform) {
@@ -258,6 +262,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::text,Field::calendar_ordinal,Command::none,Bitmap::none,Page::robust_setup,1,"Initial waveform ordinal",2,false,32}, Slot::none),
         placed({Kind::text,Field::live_noise_dbfs_hz,Command::none,Bitmap::none,Page::robust_setup,2,"Live input noise (dBFS/Hz)",2,false,64}, Slot::none),
         placed({Kind::choice,Field::minimum_carrier_spacing,Command::none,Bitmap::none,Page::robust_setup,3,"Minimum carrier spacing"}, Slot::none),
+        placed({Kind::choice,Field::data_cadence,Command::none,Bitmap::none,Page::robust_setup,3,"DATA cadence"}, Slot::none),
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,4,"Live reception uses a declared local noise model. Simulation uses the sampled channel noise."}, Slot::none),
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,5,"Unknown transmission starts are not acquired. Message completion requires two scored quiet slots."}, Slot::none),
         {.kind=Kind::bitmap,.bitmap=Bitmap::cpu_utilization,.page=Page::robust_setup,.row=6,.label="CPU utilization",.unslotted_height=86},

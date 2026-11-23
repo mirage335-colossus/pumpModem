@@ -3,6 +3,7 @@
 #include "datapump/triad_message_receiver.hpp"
 #include "datapump/triad_stream_receiver.hpp"
 #include "triad_random_process.hpp"
+#include "triad_receiver_executor.hpp"
 #include "triad_receiver_fine.hpp"
 
 #include <algorithm>
@@ -27,6 +28,12 @@ constexpr std::size_t target_slot = 3;
 
 void check(bool condition, const char* reason) {
     if (!condition) throw std::runtime_error(reason);
+}
+
+void score_serial_quiet(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+                        std::span<const Complex> iq, ReceiverSlotScore& score) {
+    ReceiverExecutor executor(1);
+    score_varying_quiet(config, slot, iq, score, {}, 1, executor);
 }
 
 PublicProfileConfig public_config() {
@@ -103,7 +110,7 @@ struct Input {
         auto legacy = config;
         legacy.time_varying_atmospheric_hz = 0;
         ReceiverSlotScore result;
-        score_varying_quiet(legacy, slot, observation, result, {});
+        score_serial_quiet(legacy, slot, observation, result);
         result.quiet_modes = result.varying_quiet_modes;
         result.quiet_energy = result.varying_quiet_energy;
         result.quiet_threshold = result.varying_quiet_threshold;
@@ -280,8 +287,8 @@ void check_continuous_residual_envelope() {
         for (std::uint64_t row = 0; row < whole_aperture; ++row)
             corrected[offset + row] -= sample(hz, input.slot.quiet_first_sample + row) * (prior + (1 - g) * (now - prior));
         ReceiverSlotScore legacy, expanded;
-        score_varying_quiet(legacy_cfg, input.slot, corrected, legacy, {});
-        score_varying_quiet(input.config, input.slot, corrected, expanded, {});
+        score_serial_quiet(legacy_cfg, input.slot, corrected, legacy);
+        score_serial_quiet(input.config, input.slot, corrected, expanded);
         const auto coherent = std::norm(now - prior) * whole_aperture * g * g / noise;
         check(coherent <= report.coherent_residual && legacy.varying_quiet_energy <= report.legacy_energy &&
               expanded.varying_quiet_energy <= report.expanded_energy,
@@ -365,7 +372,7 @@ void retained_native_line() {
         score.varying_line_frequency_hz = retained->frequency_hz;
         score.varying_line_log_evidence = retained->log_weighted_evidence;
         score.reason = "coherent_line_in_public_data_aperture";
-        score_varying_quiet(input.config, input.slot, observed, score, {});
+        score_serial_quiet(input.config, input.slot, observed, score);
         check(QuietSlotMessageReceiver::classification(score) == SlotDecision::ambiguous,
               "retained-line fixture must remain ambiguous before independent quiet scoring");
         prediction.consider(input.config, input.slot, observed, score, {});

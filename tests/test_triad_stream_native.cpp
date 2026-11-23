@@ -9,6 +9,7 @@
 #include <chrono>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <stdexcept>
 #include <string_view>
 #include <thread>
@@ -44,6 +45,111 @@ ReceiverConfig receiver(const PublicProfile& p) {
     c.data_if_hz = p.data_if_hz();
     c.noise_variance = 1;
     return c;
+}
+
+void packed_data_aperture() {
+    PublicProfileConfig config;
+    config.format.sample_rate = 6000;
+    config.format.inner_rate_hz = 3.6;
+    config.format.added_symbols = 1;
+    config.format.bit_seconds = 160.4;
+    config.format.epoch = 1793850000;
+    config.format.symbol_ordinal = std::numeric_limits<std::uint64_t>::max() - 2;
+    config.arrival_low_seconds = -7;
+    config.arrival_high_seconds = 7.07;
+    config.capture_lead_seconds = 7.25;
+    config.capture_trail_seconds = .25;
+    config.clock_bound_ppm = 40;
+    config.spread_delay_ms = 21;
+    config.receiver_filter_halo_samples = 97;
+    const PublicProfile scheduled(config);
+    auto rx = receiver(scheduled);
+    rx.clock_bound_ppm = config.clock_bound_ppm;
+    const auto ordinary = make_receiver_slot_plan(scheduled, rx, 1);
+    check(ordinary.protected_data_first_sample == 0 && ordinary.protected_data_stop_sample == 0,
+          "scheduled receiver unexpectedly acquired packed DATA geometry");
+
+    config.continuous_data = true;
+    const PublicProfile packed(config);
+    check(packed.last_slot() == 2, "fixture requires three configured slots");
+    for (std::uint64_t index = 0; index <= packed.last_slot(); ++index) {
+        const auto slot = packed.slot(index);
+        const auto plan = make_receiver_slot_plan(packed, rx, index);
+        const auto aperture = slot.protected_data_aperture;
+        check(slot.observation.first <= aperture.first && aperture.first < aperture.stop &&
+              aperture.stop <= slot.observation.stop &&
+              plan.protected_data_first_sample == aperture.first && plan.protected_data_stop_sample == aperture.stop,
+              "packed scorer lost its neighbor-free public capture bounds");
+        check(plan.quiet_first_sample == slot.quiet_aperture.first &&
+              plan.quiet_stop_sample == slot.quiet_aperture.stop &&
+              aperture.first <= slot.quiet_aperture.first && slot.quiet_aperture.stop <= aperture.stop,
+              "packed DATA geometry altered physical quiet support");
+        if (index == 0) {
+            check(aperture.first > slot.observation.first && aperture.first < slot.quiet_aperture.first,
+                  "first slot missed safe leading DATA support");
+        } else {
+            check(aperture.first == slot.previous_signal_stop, "packed DATA includes a possible preceding tail");
+        }
+        if (index == packed.last_slot()) {
+            check(aperture.stop < slot.observation.stop && aperture.stop > slot.quiet_aperture.stop,
+                  "last slot missed safe trailing DATA support");
+        } else {
+            check(aperture.stop == slot.next_signal_first, "packed DATA includes a possible following signal");
+        }
+    }
+
+    config.arrival_low_seconds = -100;
+    config.arrival_high_seconds = 100;
+    config.capture_lead_seconds = 100.25;
+    const auto crowded = PublicProfile(config).slot(1);
+    check(crowded.next_signal_first < crowded.previous_signal_stop && crowded.protected_data_aperture.size() == 0,
+          "overlapping possible neighboring signals must leave the packed DATA aperture empty");
+}
+
+void packed_data_aperture_retains_delayed_energy() {
+    PublicProfileConfig config;
+    config.format.sample_rate = 1500;
+    config.format.inner_rate_hz = 120;
+    config.format.bit_seconds = 8;
+    config.format.epoch = 1793850000;
+    config.format.symbol_ordinal = std::numeric_limits<std::uint64_t>::max() - 1;
+    config.data_if_hz = 375;
+    config.continuous_data = true;
+    config.capture_lead_seconds = .25;
+    config.capture_trail_seconds = .25;
+    config.clock_bound_ppm = 5000;
+    const PublicProfile packed(config);
+    const auto terminal = packed.slot(1);
+    check(packed.last_slot() == 1 && terminal.protected_data_aperture.stop > terminal.quiet_aperture.stop,
+          "delayed energy fixture needs a wider terminal DATA aperture");
+
+    StreamChannelConfig physical;
+    physical.effects.sample_rate = config.format.sample_rate;
+    physical.effects.occupied_bandwidth_hz = packed.geometry().occupied_bandwidth_hz;
+    physical.effects.capture_lead_seconds = config.capture_lead_seconds;
+    physical.effects.capture_trail_seconds = config.capture_trail_seconds;
+    physical.effects.tx.audio_ppm = -2500;
+    physical.effects.rx.audio_ppm = 2500;
+    physical.effects.noise_enabled = false;
+    physical.minimum_capture_samples = terminal.observation.stop;
+    const auto key = Crypto::amateur();
+    const auto end_energy = [&](std::span<const std::uint8_t> bits) {
+        Emission emission(packed, key, EmissionOptions{.bits = bits});
+        StreamingChannel channel(emission.source(), physical);
+        std::array<Complex, 2048> block;
+        double energy = 0;
+        for (std::uint64_t first = 0; first < terminal.protected_data_aperture.stop;) {
+            const auto rows = std::min<std::uint64_t>(block.size(), terminal.protected_data_aperture.stop - first);
+            check(channel.read(std::span(block).first(rows)) == rows, "delayed energy fixture truncated capture");
+            for (auto sample = std::max(first, terminal.quiet_aperture.stop); sample < first + rows; ++sample)
+                energy += std::norm(block[sample - first]);
+            first += rows;
+        }
+        return energy;
+    };
+    const std::array<std::uint8_t, 2> bits{0, 1};
+    check(end_energy(bits) > 1e-12, "wider packed DATA support retained no delayed wanted energy");
+    check(end_energy(std::span(bits).first(1)) == 0, "wider packed DATA support retained neighboring DATA");
 }
 
 StreamReceiverOptions options() {
@@ -1027,6 +1133,8 @@ void long_addressed_episode_and_decode_reservation() {
 int main() {
     try {
         resource_resolution();
+        packed_data_aperture();
+        packed_data_aperture_retains_delayed_energy();
         order_and_backpressure();
         overlap_lease_uses_only_spare_memory();
         closed_executor_adds_no_worker();

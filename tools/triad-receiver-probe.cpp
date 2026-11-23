@@ -142,7 +142,8 @@ struct Options {
     bool work_only = false;
     bool helper_overlap = true;
     bool continuous_data = false, affine_continuation = true;
-    bool protected_packed = false;
+    bool protected_packed = false, protected_discovery = false, carrier_beat = false, carrier_beat_polarity = false;
+    bool white_beat_evidence = false, colored_beat_evidence = false, project_colored_pcm = false;
     std::string adjacent_data;
     FecMode fec = FecMode::off;
     // --capture-cache: the directory of exact captures for later runs, and
@@ -154,7 +155,7 @@ struct Options {
 // Options that select receiver arithmetic, backends, allocation, budgets or
 // deadlines. None of them changes a generated capture, so a capture cache key
 // leaves them out; every other given option is part of the key.
-constexpr std::array<std::string_view, 39> receiver_only_options{
+constexpr std::array<std::string_view, 44> receiver_only_options{
     "--backend", "--tensor-precision", "--tensor-coarse-math", "--tensor-fine-projection",
     "--cuda-segmented-timing", "--vulkan-precision", "--vulkan-fine-projection", "--vulkan-segmented-timing",
     "--vulkan-gain-rank", "--vulkan-drift", "--vulkan-varying-fine", "--vulkan-varying-arithmetic",
@@ -163,7 +164,8 @@ constexpr std::array<std::string_view, 39> receiver_only_options{
     "--gpu-fp32-minimum", "--native-coarse-precision", "--wrong-key-admission", "--require-accelerator",
     "--device-index", "--device-memory-limit-bytes", "--workers", "--slot-owners", "--memory-limit-bytes",
     "--max-samples", "--max-spool-bytes", "--deadline-ms", "--coarse-tiles", "--pilot-workers", "--units",
-    "--helper-overlap", "--affine-continuation", "--protected-packed", "--capture-cache"};
+    "--helper-overlap", "--affine-continuation", "--protected-packed", "--protected-discovery",
+    "--carrier-beat", "--carrier-beat-polarity", "--white-beat-evidence", "--colored-beat-evidence", "--capture-cache"};
 
 template<class T>
 T number(std::string_view text, std::string_view flag) {
@@ -293,6 +295,12 @@ Options parse(int argc, char** argv) {
     assign("--affine-continuation", o.affine_continuation);
     assign("--adjacent-data", o.adjacent_data);
     assign("--protected-packed", o.protected_packed);
+    assign("--protected-discovery", o.protected_discovery);
+    assign("--carrier-beat", o.carrier_beat);
+    assign("--carrier-beat-polarity", o.carrier_beat_polarity);
+    assign("--white-beat-evidence", o.white_beat_evidence);
+    assign("--colored-beat-evidence", o.colored_beat_evidence);
+    assign("--project-colored-pcm", o.project_colored_pcm);
     assign("--capture-cache", o.capture_cache);
     if (const auto pilot = take("--pilot-workers")) {
         auto remaining = *pilot;
@@ -447,15 +455,29 @@ Options parse(int argc, char** argv) {
     require(!affine_continuation_supplied || one_of(o.command, {"plan", "message", "backlog"}),
             "The affine continuation control requires a stream plan or replay");
     require(o.adjacent_data.empty() ||
-            (o.command == "admission" && o.slot_index > 0 && !o.helper && !o.waits && !o.interferer_cn0 &&
-             o.adjacent_data.size() == 2 && o.adjacent_data.find_first_not_of("01q") == std::string::npos),
-            "Adjacent DATA qualification requires admission, a nonzero slot index, Helper and waits off, "
-            "no interferer and a pair of 0, 1 or q (quiet)");
+            (o.command == "admission" && !o.helper && !o.waits && !o.interferer_cn0 &&
+             o.adjacent_data.size() == 2 && o.adjacent_data.find_first_not_of("01q") == std::string::npos &&
+             (o.slot_index > 0 || o.adjacent_data.front() == 'q')),
+            "Adjacent DATA qualification requires admission, Helper and waits off, no interferer and a "
+            "pair of 0, 1 or q (quiet). At slot zero the preceding state must be q");
     require(!o.protected_packed || (o.continuous_data && o.backend == "cpu" &&
             one_of(o.command, {"message", "backlog", "admission"}) &&
             !(affine_continuation_supplied && o.affine_continuation)),
             "Protected packed scoring requires a CPU packed replay or admission probe with affine continuation off");
     if (o.protected_packed) o.affine_continuation = false;
+    require(!o.protected_discovery || o.protected_packed,
+            "Protected discovery requires protected packed scoring");
+    require(!o.carrier_beat || (o.command == "admission" && o.backend == "cpu" && !o.helper),
+            "Carrier beat is an evaluator-only CPU admission comparison with Helper off");
+    require(!o.carrier_beat_polarity || o.protected_packed,
+            "Carrier-beat polarity requires experimental protected packed scoring");
+    require(!o.white_beat_evidence || o.protected_packed,
+            "White beat evidence requires a protected packed raw-simulator capture");
+    require(!o.colored_beat_evidence || (o.protected_packed && !o.white_beat_evidence),
+            "Colored beat evidence requires protected packed scoring and no white supplement");
+    require(!o.project_colored_pcm || (o.command == "admission" && o.protected_packed &&
+            !o.white_beat_evidence && o.capture_cache.empty()),
+            "Colored PCM projection requires a protected CPU admission probe without the white supplement or capture cache");
     if (o.command == "regression" || o.command == "slot" || o.command == "admission")
         require(o.stratum == "active" || o.stratum == "noise", "Use continuation for diagnostic fine strata");
     if (o.interferer_cn0 || o.interferer_seconds || o.interferer_rate || o.interferer_offset_seconds ||
@@ -523,6 +545,13 @@ Options parse(int argc, char** argv) {
 std::uint64_t maximum_spool_bytes(const Options& o) {
     return o.spool_limit.value_or(o.sample_limit > UINT64_MAX / ObservationSpool::row_bytes ?
         UINT64_MAX : o.sample_limit * ObservationSpool::row_bytes);
+}
+
+auto slot_workspace_for_options(const Options& o) {
+    if (o.white_beat_evidence) return protected_white_beat_slot_workspace;
+    if (o.colored_beat_evidence) return protected_colored_beat_slot_workspace;
+    const bool canonical_packed = o.continuous_data && one_of(o.command, {"message", "backlog", "plan"});
+    return o.protected_packed || canonical_packed ? protected_slot_workspace : receiver_slot_workspace;
 }
 
 const char* fec_name(FecMode mode) {
@@ -756,6 +785,11 @@ struct Capture {
     bool selective_filter = false;
     std::size_t generation_reserved_bytes = 0, generation_read_rows = 0, generation_stack_bytes = 0;
     unsigned generation_helpers = 0;
+    struct PcmProjection {
+        std::uint64_t hilbert_halo = 0, first_simulator_row = 0, synthetic_prefix_rows = 0;
+        std::uint64_t retained_valid_rows = 0;
+    };
+    std::optional<PcmProjection> pcm_projection;
     struct Cache {
         std::string key, file;
         bool reused = false, stored = false;
@@ -975,6 +1009,12 @@ Json profile_json(const Options& o, const Profile& profile, const ReceiverSlotPl
         {"encrypt", waveform.config().format.encrypt}, {"helper_enabled", config.helper_enabled},
         {"continuous_data", waveform.config().continuous_data},
         {"protected_packed", o.protected_packed},
+        {"protected_discovery", o.protected_discovery},
+        {"carrier_beat_polarity", o.carrier_beat_polarity},
+        {"white_beat_evidence", o.white_beat_evidence},
+        {"colored_beat_evidence", o.colored_beat_evidence},
+        {"project_colored_pcm", o.project_colored_pcm},
+        {"receiver_filter_halo_samples", waveform.config().receiver_filter_halo_samples},
         {"affine_continuation", one_of(o.command, {"plan", "message", "backlog"}) ?
             Json(o.affine_continuation) : Json{}},
         {"added_symbols", o.added_symbols}, {"added_interleave", o.interleave},
@@ -1017,7 +1057,7 @@ Json profile_json(const Options& o, const Profile& profile, const ReceiverSlotPl
             {"channel_selective_fast_depth", channel.effects.perturbation_fast_depth}});
     }
     try {
-        result["receiver_slot_workspace_bytes"] = receiver_slot_workspace(cpu_config, slot, resources.workers);
+        result["receiver_slot_workspace_bytes"] = slot_workspace_for_options(o)(cpu_config, slot, resources.workers);
     } catch (const Error& error) {
         result["receiver_slot_workspace_bytes"] = Json{};
         result["receiver_slot_workspace_reason"] = error.what();
@@ -1060,6 +1100,17 @@ Json observation(const Capture& capture, std::uint64_t stop, const ReceiverSlotP
                    {"bounded_spread_realization", std::move(spread)},
                    {"common_doppler_realization", std::move(common)},
                    {"evaluator_bit", o.stratum == "noise" ? Json{} : Json(o.bit)}});
+    if (capture.pcm_projection) {
+        const auto& pcm = *capture.pcm_projection;
+        result["pcm_projection"] = object({{"model", "native_analytic_projection_of_fixed_ma1_real_pcm"},
+            {"real_conversion_scale", 1. / std::numbers::sqrt2},
+            {"covariance_bound_pcm_over_declared_iq_variance", .5},
+            {"ma1_current", 2. / 3}, {"ma1_previous", 1. / 3},
+            {"hilbert_halo_samples", pcm.hilbert_halo}, {"ma1_halo_samples", 1},
+            {"first_simulator_input_row", pcm.first_simulator_row},
+            {"synthetic_thermal_prefix_rows", pcm.synthetic_prefix_rows},
+            {"retained_valid_rows", pcm.retained_valid_rows}});
+    }
     if (capture.cache) {
         const auto& identity = capture_binary_identity();
         Json::Array libraries;
@@ -1667,6 +1718,92 @@ CaptureRecord capture_record(const CaptureKey& key, const Capture& capture, std:
     return record;
 }
 
+// Fixed, blind probe transform. The first projected row precedes the public
+// observation and may lack the initial MA predecessor. Each retained row
+// has complete real PCM and analytic FIR support.
+class ColoredPcmCapture {
+public:
+    // AudioInput allows at most 2048 samples on either side. Charge its
+    // ring, taps and masks together with one PCM and projected chunk.
+    static constexpr auto workspace_bound = 128 * 1024 +
+        input_chunk * (sizeof(float) + sizeof(Complex) + 2 * sizeof(std::uint8_t));
+
+    ColoredPcmCapture(const Profile& profile, std::uint64_t first)
+        : rate_(profile.waveform.config().format.sample_rate), carrier_(profile.receiver.data_if_hz),
+          projector_(rate_, carrier_, profile.minimum_audio_hz, profile.maximum_audio_hz),
+          halo_(projector_.halo_samples()),
+          first_simulator_row_(first > halo_ + 1 ? first - halo_ - 1 : 0),
+          prefix_rows_(first < halo_ + 1 ? halo_ + 1 - first : 0) {
+        output_.reserve(input_chunk);
+        output_valid_.reserve(input_chunk);
+    }
+
+    auto halo() const { return halo_; }
+    auto first_simulator_row() const { return first_simulator_row_; }
+    auto prefix_rows() const { return prefix_rows_; }
+    auto written() const { return written_; }
+    auto valid_count() const { return valid_count_; }
+
+    void begin(std::uint64_t seed, double variance, Capture& capture, CaptureHasher& digest) {
+        if (!prefix_rows_) return;
+        require(prefix_rows_ <= pcm_.size(), "Colored PCM thermal prefix exceeds its buffer");
+        std::mt19937_64 random(seed ^ 0x50434d5052454649ULL);
+        std::normal_distribution<double> thermal(0., std::sqrt(variance / 2));
+        for (std::size_t i = 0; i < prefix_rows_; ++i)
+            push(i, static_cast<float>(thermal(random)), 1);
+        project(static_cast<std::size_t>(prefix_rows_), capture, digest);
+    }
+
+    void append(std::span<const Complex> iq, std::span<const std::uint8_t> valid,
+                Capture& capture, CaptureHasher& digest) {
+        constexpr double scale = 1. / std::numbers::sqrt2;
+        require(iq.size() <= pcm_.size() && valid.size() == iq.size(), "Invalid colored PCM input chunk");
+        for (std::size_t i = 0; i < iq.size(); ++i)
+            push(i, live::detail::real_pcm(iq[i], local_input_ + i, carrier_, rate_, scale), valid[i]);
+        project(iq.size(), capture, digest);
+    }
+
+private:
+    void push(std::size_t i, float real, std::uint8_t valid) {
+        pcm_[i] = static_cast<float>((static_cast<double>(real) + .5 * previous_) / 1.5);
+        pcm_valid_[i] = valid && previous_valid_;
+        previous_ = real;
+        previous_valid_ = valid;
+    }
+
+    void project(std::size_t count, Capture& capture, CaptureHasher& digest) {
+        const auto projected_first = projector_.project(std::span(pcm_).first(count), output_,
+            std::span(pcm_valid_).first(count), &output_valid_);
+        local_input_ += count;
+        const auto wanted_first = halo_ + 1;
+        if (output_.empty() || projected_first + output_.size() <= wanted_first) return;
+        const auto skip = projected_first < wanted_first ? wanted_first - projected_first : 0;
+        const auto iq = std::span(output_).subspan(skip);
+        const auto valid = std::span(output_valid_).subspan(skip);
+        require(projected_first + skip - wanted_first == written_ &&
+                written_ <= capture.iq.size() && iq.size() <= capture.iq.size() - written_,
+                "Colored PCM projection did not preserve the public capture extent");
+        digest.add(iq, valid);
+        std::ranges::copy(iq, capture.iq.begin() + written_);
+        std::ranges::copy(valid, capture.valid.begin() + written_);
+        written_ += iq.size();
+        valid_count_ += std::ranges::count(valid, std::uint8_t{1});
+    }
+
+    std::uint32_t rate_;
+    double carrier_;
+    live::detail::AudioInput projector_;
+    std::uint64_t halo_, first_simulator_row_, prefix_rows_;
+    std::array<float, input_chunk> pcm_{};
+    std::array<std::uint8_t, input_chunk> pcm_valid_{};
+    std::vector<Complex> output_;
+    Bytes output_valid_;
+    double previous_ = 0;
+    bool previous_valid_ = false;
+    std::uint64_t local_input_ = 0;
+    std::size_t written_ = 0, valid_count_ = 0;
+};
+
 Capture simulate(const Options& o, const Profile& profile, std::span<const EmissionOptions> episodes,
                  std::uint64_t first, std::uint64_t end, std::uint64_t& samples_left,
                  const StreamReceiverResources& resources, std::stop_token stop,
@@ -1681,8 +1818,12 @@ Capture simulate(const Options& o, const Profile& profile, std::span<const Emiss
     constexpr auto row_bytes = sizeof(Complex) + sizeof(std::uint8_t);
     // A capture stored to --capture-cache also holds the writer's buffers;
     // reuse reads through smaller buffers inside the unused channel reserve.
-    const auto stored_bytes = (spool ? spool->working_bytes() + 4096 : static_cast<std::size_t>(rows) * row_bytes) +
+    const auto retained_bytes = spool ? spool->working_bytes() + 4096 : static_cast<std::size_t>(rows) * row_bytes;
+    const auto capture_overhead = (o.project_colored_pcm ? ColoredPcmCapture::workspace_bound : 0) +
         (o.capture_cache.empty() ? 0 : CaptureCacheWriter::buffer_bytes);
+    if (capture_overhead > SIZE_MAX - retained_bytes)
+        throw Incomplete("Canonical capture storage exceeds the local address range");
+    const auto stored_bytes = retained_bytes + capture_overhead;
     const auto simultaneous_sources = std::max(std::size_t{1}, episodes.size() + (secondary != nullptr));
     const auto reserve = simultaneous_sources * channel_source_bound;
     const auto remaining = memory_remaining(resources);
@@ -1732,6 +1873,16 @@ Capture simulate(const Options& o, const Profile& profile, std::span<const Emiss
     capture.generation_stack_bytes = stack;
     capture.generation_read_rows = read_rows;
     CaptureHasher digest;
+    std::unique_ptr<ColoredPcmCapture> pcm_projection;
+    auto simulator_first = first;
+    auto simulator_stop = end;
+    if (o.project_colored_pcm) {
+        pcm_projection = std::make_unique<ColoredPcmCapture>(profile, first);
+        if (pcm_projection->halo() > samples_left - end)
+            throw Incomplete("Colored PCM projection halo exceeds the declared probe sample budget");
+        simulator_first = pcm_projection->first_simulator_row();
+        simulator_stop += pcm_projection->halo();
+    }
     Timing cache_write{0, 0};
     // The digest and the copy or spool of each read run in pieces in order,
     // one piece as an extra job of each lent block preparation of the next
@@ -1748,20 +1899,24 @@ Capture simulate(const Options& o, const Profile& profile, std::span<const Emiss
         const auto n = std::min(input_chunk, delivery.iq.size() - delivery.done);
         const auto samples = delivery.iq.subspan(delivery.done, n);
         const auto mask = delivery.valid.subspan(delivery.done, n);
-        digest.add(samples, mask);
-        if (writer) {
-            const Timer io;
-            writer->append(samples, mask);
-            add_time(cache_write, io.elapsed());
-        }
-        if (capture.spool) {
-            const Timer io;
-            capture.spool->append(samples, mask);
-            add_time(capture.spool_write, io.elapsed());
+        if (pcm_projection) {
+            pcm_projection->append(samples, mask, capture, digest);
         } else {
-            const auto target = static_cast<std::size_t>(delivery.target + delivery.done);
-            std::ranges::copy(samples, capture.iq.begin() + target);
-            std::ranges::copy(mask, capture.valid.begin() + target);
+            digest.add(samples, mask);
+            if (writer) {
+                const Timer io;
+                writer->append(samples, mask);
+                add_time(cache_write, io.elapsed());
+            }
+            if (capture.spool) {
+                const Timer io;
+                capture.spool->append(samples, mask);
+                add_time(capture.spool_write, io.elapsed());
+            } else {
+                const auto target = static_cast<std::size_t>(delivery.target + delivery.done);
+                std::ranges::copy(samples, capture.iq.begin() + target);
+                std::ranges::copy(mask, capture.valid.begin() + target);
+            }
         }
         delivery.done += n;
     };
@@ -1821,11 +1976,11 @@ Capture simulate(const Options& o, const Profile& profile, std::span<const Emiss
     };
     composite.readers = sum.parallel() ? std::make_shared<CompositeSource::Readers>(sum) : nullptr;
     auto configuration = profile.channel;
-    configuration.minimum_capture_samples = end;
+    configuration.minimum_capture_samples = simulator_stop;
     configuration.maximum_chunk_samples = read_rows;
     configuration.lanes = lent;
     StreamingChannel channel(std::move(composite), configuration);
-    if (channel.total_samples() < end)
+    if (channel.total_samples() < simulator_stop)
         throw Error("Native channel ended before the public observation");
     capture.first = first;
     capture.spool = std::move(spool);
@@ -1838,6 +1993,7 @@ Capture simulate(const Options& o, const Profile& profile, std::span<const Emiss
         capture.iq.resize(static_cast<std::size_t>(rows));
         capture.valid.resize(static_cast<std::size_t>(rows));
     }
+    if (pcm_projection) pcm_projection->begin(o.seed, configuration.complex_noise_variance, capture, digest);
     std::array<std::vector<Complex>, 2> iq{std::vector<Complex>(read_rows), std::vector<Complex>(read_rows)};
     std::array<Bytes, 2> valid{Bytes(read_rows), Bytes(read_rows)};
     std::size_t buffer = 0;
@@ -1845,21 +2001,27 @@ Capture simulate(const Options& o, const Profile& profile, std::span<const Emiss
         while (delivery.pending()) deliver();
         if (delivery.error) std::rethrow_exception(delivery.error);
     };
-    while (channel.position() < end) {
+    while (channel.position() < simulator_stop) {
         check_stop(stop);
         const auto offset = channel.position();
-        const auto chunk = static_cast<std::size_t>(std::min<std::uint64_t>(end - offset, read_rows));
+        const auto chunk = static_cast<std::size_t>(std::min<std::uint64_t>(simulator_stop - offset, read_rows));
         if (channel.read(std::span(iq[buffer]).first(chunk), std::span(valid[buffer]).first(chunk)) != chunk)
             throw Error("Native channel returned a partial public observation");
         finish_delivery();
-        if (offset + chunk > first) {
-            const auto begin = static_cast<std::size_t>(std::max(offset, first) - offset);
+        if (offset + chunk > simulator_first) {
+            const auto begin = static_cast<std::size_t>(std::max(offset, simulator_first) - offset);
             delivery = {std::span<const Complex>(iq[buffer]).subspan(begin, chunk - begin),
-                std::span<const std::uint8_t>(valid[buffer]).subspan(begin, chunk - begin), offset + begin - first, 0, {}};
+                std::span<const std::uint8_t>(valid[buffer]).subspan(begin, chunk - begin),
+                offset + begin - simulator_first, 0, {}};
             buffer ^= 1;
         }
     }
     finish_delivery();
+    if (pcm_projection) {
+        require(pcm_projection->written() == rows, "Colored PCM projection did not fill the public observation");
+        capture.pcm_projection = Capture::PcmProjection{pcm_projection->halo(), simulator_first,
+            pcm_projection->prefix_rows(), pcm_projection->valid_count()};
+    }
     if (capture.spool) {
         const Timer io;
         capture.spool->seal();
@@ -1868,8 +2030,8 @@ Capture simulate(const Options& o, const Profile& profile, std::span<const Emiss
     capture.generation = timer.elapsed();
     capture.channel = channel.report();
     capture.selective_filter = capture.channel.selective_perturbation.has_value();
-    capture.generated_samples = end;
-    samples_left -= end;
+    capture.generated_samples = simulator_stop;
+    samples_left -= simulator_stop;
     capture.digest = digest.finish();
     if (writer) {
         const Timer io;
@@ -1976,6 +2138,22 @@ Json score_json(const ReceiverSlotScore& score) {
         gain_lags.emplace_back(lag);
     for (const auto& map : std::span(score.signed_lag_gain_map_bit_evidence).first(score.signed_lag_gain_candidates))
         gain_map_evidence.emplace_back(scores(map));
+    Json carrier_beat;
+    if (const auto& beat = score.protected_carrier_beat) {
+        Json::Array models;
+        for (std::size_t i = 0; i < beat->explained_fraction.size(); ++i)
+            models.push_back(object({{"explained_fraction", scores(beat->explained_fraction[i])},
+                {"held_out_fraction", Json::Array{scores(beat->held_out_fraction[i][0]),
+                                                 scores(beat->held_out_fraction[i][1])}}}));
+        const auto& affine = beat->affine_support;
+        carrier_beat = object({{"epoch_offset_seconds", beat->epoch_offset_seconds},
+            {"arrival_seconds", beat->arrival_seconds}, {"clock_ppm", beat->clock_ppm},
+            {"ordinary_bit", beat->ordinary_bit}, {"predicted_bit", beat->predicted_bit},
+            {"affine_support", affine ? object({{"arrival_seconds", affine->arrival_seconds},
+                {"frequency_hz", affine->frequency_hz}, {"clock_ppm", affine->clock_ppm},
+                {"weighted_log_e", affine->log_e}}) : Json{}},
+            {"direct_and_dispersive_models", std::move(models)}});
+    }
     return object({
         {"index", score.index}, {"first_sample", score.first_sample}, {"stop_sample", score.stop_sample},
         {"decision", decision_name(score.decision)}, {"bit", score.bit ? Json(*score.bit) : Json{}},
@@ -1988,6 +2166,13 @@ Json score_json(const ReceiverSlotScore& score) {
         {"operational_passes_conditional_bound", score.operational_passes_conditional_bound},
         {"affine_continuation_attempted", score.affine_continuation_attempted},
         {"affine_continuation_admitted", score.affine_continuation_admitted},
+        {"protected_discovery_attempted", score.protected_discovery_attempted},
+        {"protected_discovery_admitted", score.protected_discovery_admitted},
+        {"protected_discovery_candidates", score.protected_discovery_candidates},
+        {"protected_discovery_coarse_seconds", score.protected_discovery_coarse_seconds},
+        {"protected_carrier_beat_corrected_polarity", score.protected_carrier_beat_corrected_polarity},
+        {"protected_carrier_beat_search_coordinates", score.protected_carrier_beat_search_coordinates},
+        {"protected_carrier_beat", std::move(carrier_beat)},
         {"bit_evidence", scores(score.bit_evidence)}, {"adaptive_diagnostics", score.adaptive_diagnostics},
         {"adaptive_bit_evidence", score.adaptive_diagnostics ? scores(score.adaptive_bit_evidence) : Json{}},
         {"combined_bit_evidence", score.adaptive_diagnostics ? scores(score.combined_bit_evidence) : Json{}},
@@ -2529,8 +2714,7 @@ std::pair<ReceiverSlotScore, Timing> complete_probe_slot(const Options& o, const
     // The public workspace includes the IQ lease already held by the probe.
     // The remaining process allowance covers DSP and stacks. Spare memory
     // grants the lease that lets Helper run beside coarse preparation.
-    const auto workspace = o.protected_packed ? protected_slot_workspace(profile.receiver, slot, resources.workers) :
-        receiver_slot_workspace(profile.receiver, slot, resources.workers);
+    const auto workspace = slot_workspace_for_options(o)(profile.receiver, slot, resources.workers);
     const auto lease_bytes = iq.size() * (sizeof(Complex) + 1);
     const auto scratch = standalone_scratch(resources);
     if (workspace < lease_bytes || workspace - lease_bytes > scratch)
@@ -2538,7 +2722,8 @@ std::pair<ReceiverSlotScore, Timing> complete_probe_slot(const Options& o, const
     if (o.protected_packed) {
         const Timer began;
         auto score = score_protected_slot(profile.receiver, slot, profile.key, iq, valid,
-            resources.workers, workspace, stop, nullptr);
+            resources.workers, workspace, stop, nullptr, o.protected_discovery, o.carrier_beat_polarity,
+            o.white_beat_evidence, o.colored_beat_evidence);
         return {std::move(score), began.elapsed()};
     }
     const auto wider = receiver_slot_overlap_workspace(profile.receiver, slot, resources.workers);
@@ -2594,11 +2779,11 @@ void admission_run(Json& report, const Options& o, const Profile& profile, const
                         waveform.transmit_slot(index).helper_begin), .stop = stop};
             };
             const std::array adjoining{
-                emitter(slot.index - 1, o.adjacent_data[0] != 'q', std::span(bits).first<1>()),
+                emitter(slot.index ? slot.index - 1 : 0, o.adjacent_data[0] != 'q', std::span(bits).first<1>()),
                 emitter(slot.index, wanted, std::span(bits).subspan<1, 1>()),
                 emitter(slot.index + 1, o.adjacent_data[1] != 'q', std::span(bits).last<1>())};
-            return simulate(o, profile, adjoining, slot.first_sample, slot.stop_sample, samples_left,
-                            resources, stop);
+            const auto sources = std::span(adjoining).subspan(slot.index ? 0 : 1);
+            return simulate(o, profile, sources, slot.first_sample, slot.stop_sample, samples_left, resources, stop);
         }
         if (!o.interferer_cn0)
             return simulate(o, profile, emissions, slot.first_sample, slot.stop_sample, samples_left, resources, stop);
@@ -2714,6 +2899,57 @@ void admission_run(Json& report, const Options& o, const Profile& profile, const
           profile.receiver.sample_rate_hz, score_json(score));
     if (!score.complete || !score.all_valid)
         throw Incomplete("Admission diagnostic did not score the complete valid public slot");
+
+    if (o.carrier_beat) {
+        const Timer began;
+        const double arrival = std::clamp(0., slot.arrival_lower_seconds, slot.arrival_upper_seconds);
+        std::vector<FineCoordinate> coordinates{{0, arrival, 0., 0.}};
+        for (const auto& hint : score.affine_tracking) if (hint) {
+            const FineCoordinate coordinate{hint->epoch_offset_seconds, hint->arrival_seconds,
+                hint->frequency_hz, hint->clock_ppm};
+            if (std::ranges::find(coordinates, coordinate) == coordinates.end())
+                coordinates.push_back(coordinate);
+        }
+        const auto first = static_cast<std::size_t>(slot.first_sample - capture.first);
+        const auto rows = static_cast<std::size_t>(slot.stop_sample - slot.first_sample);
+        const auto iq = std::span(capture.iq).subspan(first, rows);
+        const auto valid = std::span(capture.valid).subspan(first, rows);
+        const auto scratch = standalone_scratch(resources);
+        const auto evaluate = [&](const Crypto& key, const FineCoordinate& coordinate) {
+            const auto evidence = score_carrier_beat(profile.receiver, slot, key, iq, valid,
+                coordinate, o.continuous_data, scratch, stop);
+            const auto pair = [](const std::array<double, 2>& values) {
+                return Json::Array{values[0], values[1]};
+            };
+            Json::Array models;
+            for (const auto& model : evidence.profiles) {
+                Json::Array correlations;
+                for (const auto& bit : model.bit_correlations)
+                    correlations.push_back(Json::Array{Json::Array{bit[0].real(), bit[0].imag()},
+                                                       Json::Array{bit[1].real(), bit[1].imag()}});
+                models.push_back(object({{"projection_fraction", pair(model.bit_projection_fraction)},
+                    {"held_out_explained_fraction", Json::Array{pair(model.held_out_explained_fraction[0]),
+                                                              pair(model.held_out_explained_fraction[1])}},
+                                         {"correlations", std::move(correlations)}}));
+            }
+            return object({{"status", evidence.status}, {"blocks", evidence.blocks},
+                {"block_rows", evidence.block_rows}, {"workspace_bytes", evidence.workspace_bytes},
+                {"observed_harmonic_energy", pair(evidence.observed_harmonic_energy)},
+                {"direct_and_dispersive_models", std::move(models)}});
+        };
+        const auto foreign = slot.format.encrypt ? std::optional(Crypto::from_independent_roots(
+            admission_digest(o.seed, 4), admission_digest(o.seed, 5))) : std::nullopt;
+        Json::Array comparisons;
+        for (const auto& coordinate : coordinates) {
+            comparisons.push_back(object({{"epoch_offset_seconds", coordinate.epoch_offset_seconds},
+                {"arrival_seconds", coordinate.arrival_seconds}, {"frequency_hz", coordinate.frequency_hz},
+                {"clock_ppm", coordinate.clock_ppm}, {"configured_key", evaluate(profile.key, coordinate)},
+                {"independent_key_at_same_coordinate", foreign ? evaluate(*foreign, coordinate) : Json{}}}));
+        }
+        phase(report, "carrier_beat", began.elapsed(), rows / profile.receiver.sample_rate_hz,
+              object({{"coordinates", std::move(comparisons)}, {"protected_only", o.continuous_data}}),
+              0, "qualification_only");
+    }
 
     auto policies = object({});
     for (const auto policy : wrong_key_admission_policies) {
@@ -2884,10 +3120,20 @@ Replay replay(const Options& o, const Profile& profile, const Capture& capture, 
         stream.affine_continuation = o.affine_continuation;
         run.maximum_pending_messages = stream.maximum_pending_messages;
         const auto codec = message_profile(o, profile);
+        const auto protected_score = [discovery = o.protected_discovery,
+                                      polarity = o.carrier_beat_polarity,
+                                      white_beat = o.white_beat_evidence,
+                                      colored_beat = o.colored_beat_evidence](const ReceiverConfig& config,
+                const ReceiverSlotPlan& slot, const Crypto& key, std::span<const Complex> iq,
+                std::span<const std::uint8_t> valid, unsigned workers, std::size_t workspace,
+                std::stop_token stop, ReceiverExecutor* executor) {
+            return score_protected_slot(config, slot, key, iq, valid, workers, workspace, stop, executor,
+                                        discovery, polarity, white_beat, colored_beat);
+        };
         auto receiver = o.protected_packed ?
             datapump::triad::v3::detail::StreamReceiverFixture::make_with_executor(
-                profile.waveform, profile.receiver, profile.key, stream, protected_slot_workspace,
-                score_protected_slot, message_decoder(codec.fec), message_receiver_options(codec)) :
+                profile.waveform, profile.receiver, profile.key, stream, slot_workspace_for_options(o),
+                protected_score, message_decoder(codec.fec), message_receiver_options(codec)) :
             CompleteStreamReceiver(profile.waveform, profile.receiver, profile.key, stream, codec);
         std::stop_callback interrupt(stop, [&] { receiver.request_cancel(); });
         const auto drain = [&] {
@@ -3312,8 +3558,15 @@ void help() {
         "    Helper and waits off (default off)\n"
         "  --affine-continuation on|off compares stream replay with or without receiver state (default on)\n"
         "  admission scores one complete slot for all policies; --stratum noise omits wanted DATA\n"
-        "    --adjacent-data PAIR with --slot-index N (N >= 1) selects adjoining 0, 1 or quiet (q) slots\n"
+        "    --adjacent-data PAIR selects adjoining 0, 1 or quiet (q) slots. N=0 requires leading q\n"
         "    --protected-packed on scores only protected samples in packed native CPU qualification\n"
+        "    --protected-discovery on adds protected-aperture proposals after unresolved packed scoring\n"
+        "    --carrier-beat on compares keyed carrier-beat correlations at fixed native coordinates (CPU)\n"
+        "    --carrier-beat-polarity on nominates an extra public affine cell before final DATA admission\n"
+        "    --white-beat-evidence on compares a fixed-prior native supplement on raw white simulator IQ\n"
+        "    --colored-beat-evidence on compares the stationary Gaussian bound on the selected capture\n"
+        "    --project-colored-pcm on scores native analytic projection of contractive MA(1) real PCM\n"
+        "    on protected CPU admission, with capture caching disabled\n"
         "  optional encrypted admission interferer: --interferer-cn0 DB_HZ --interferer-seconds SECONDS\n"
         "    --interferer-seed N --interferer-bit 0|1 [--interferer-rate HZ --interferer-frequency-offset-hz HZ]\n"
         "    [--interferer-offset-seconds SECONDS | --interferer-uniform-window on]\n"
@@ -3441,6 +3694,11 @@ void run(Json& report, const Options& o, std::stop_token stop) {
         const Timer preparation;
         auto profile = live::detail::prepare_profile(settings, *settings.calendar, stop,
             {.simulation_seed = o.seed, .fixture_active_seconds = o.active_seconds});
+        if (o.project_colored_pcm) {
+            const live::detail::AudioInput input(profile.waveform.config().format.sample_rate,
+                profile.receiver.data_if_hz, profile.minimum_audio_hz, profile.maximum_audio_hz);
+            profile = live::detail::with_capture_uncertainty(profile, 0, 0, input.halo_samples() + 1);
+        }
         if (o.continuous_data) {
             auto config = profile.waveform.config();
             config.continuous_data = true;
@@ -3448,6 +3706,12 @@ void run(Json& report, const Options& o, std::stop_token stop) {
         }
         configure_link_contrast(profile.channel, o);
         configure_channel_model(profile, o);
+        if (o.white_beat_evidence || o.colored_beat_evidence || o.project_colored_pcm)
+            require(profile.channel.effects.noise_enabled && !profile.channel.effects.slow_agc &&
+                    !profile.channel.frontend.active() &&
+                    profile.channel.diagnostic_iq_noise.mode == background_noise::Mode::Off &&
+                    profile.channel.complex_noise_variance == profile.receiver.noise_variance,
+                    "Beat evidence and PCM projection need unfiltered simulator IQ at the configured thermal variance");
         const auto preparation_elapsed = preparation.elapsed();
         profile.receiver.bulk_backend = backend;
         if (o.native_coarse_precision == "q15")
@@ -3457,8 +3721,15 @@ void run(Json& report, const Options& o, std::stop_token stop) {
         const auto retained = slot.stop_sample - slot.first_sample;
         const auto bytes = retained <= UINT64_MAX / ObservationSpool::row_bytes ?
             Json(retained * ObservationSpool::row_bytes) : Json{};
-        report["configuration"]["slot_plan"] = object({{"generated_samples", slot.stop_sample},
-            {"retained_samples", retained}, {"retained_bytes", bytes}, {"fits_sample_budget", slot.stop_sample <= o.sample_limit},
+        auto generated = slot.stop_sample;
+        if (o.project_colored_pcm) {
+            const auto halo = profile.waveform.config().receiver_filter_halo_samples - 1;
+            if (halo > UINT64_MAX - generated)
+                throw Incomplete("Colored PCM projection halo exceeds the declared probe sample budget");
+            generated += halo;
+        }
+        report["configuration"]["slot_plan"] = object({{"generated_samples", generated},
+            {"retained_samples", retained}, {"retained_bytes", bytes}, {"fits_sample_budget", generated <= o.sample_limit},
             {"fits_capture_ram_budget", retained <= resources.memory_limit_bytes / ObservationSpool::row_bytes}});
         if (o.command == "plan" || o.command == "message" || o.command == "backlog")
             report["configuration"]["stream_plan"] = stream_plan(o, profile, resources);

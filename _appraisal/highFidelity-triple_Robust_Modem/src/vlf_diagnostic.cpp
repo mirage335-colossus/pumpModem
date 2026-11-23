@@ -199,7 +199,7 @@ void diagnose_vlf_slot(datapump::triad::probe::Json& report, const ReceiverConfi
     // full slot's ordinary segment boundaries. No evaluator bit or realized
     // path delay selects the crop or any receiver coordinates.
     const auto fs = static_cast<std::size_t>(config.sample_rate_hz);
-    const auto geometry = fine_block_geometry(config.sample_rate_hz);
+    const auto geometry = fine_block_geometry(config, slot);
     const auto rows = fs * checkpoint_seconds.back();
     const auto center = std::midpoint(slot.quiet_first_sample, slot.quiet_stop_sample) - slot.first_sample;
     if (center < rows / 2 || center > iq.size() - rows / 2)

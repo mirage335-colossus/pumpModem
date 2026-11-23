@@ -176,8 +176,10 @@ bool detail::stream_simulation_workspace_fits(const PublicProfile& profile, cons
         if (rows > limit / 4 / sample_bytes) return false;
         // The raw queue may hold the window and one chunk during assembly.
         const auto raw = add(window_bytes(add(rows, chunk)), times(add(rows/chunk, 3), raw_block_overhead));
-        return raw < available && receiver_slot_workspace(config, plan, *options.workers) <= available - raw &&
-            within_budget();
+        if (raw >= available) return false;
+        const auto workspace = profile.config().continuous_data ? receiver_detail::protected_slot_workspace :
+            receiver_slot_workspace;
+        return workspace(config, plan, *options.workers) <= available - raw && within_budget();
     };
     // Clock growth can make the last window fail quickly. A middle window
     // can also require more scratch when the native or device plan changes.
@@ -207,6 +209,8 @@ ReceiverSlotPlan make_receiver_slot_plan(const PublicProfile& profile, const Rec
     result.stop_sample = slot.observation.stop;
     result.quiet_first_sample = slot.quiet_aperture.first;
     result.quiet_stop_sample = slot.quiet_aperture.stop;
+    result.protected_data_first_sample = slot.protected_data_aperture.first;
+    result.protected_data_stop_sample = slot.protected_data_aperture.stop;
     result.format = profile.basis_format(slot);
     result.arrival_lower_seconds = declared.arrival_low_seconds;
     result.arrival_upper_seconds = declared.arrival_high_seconds;
@@ -233,6 +237,7 @@ struct CompleteStreamReceiver::Impl {
     Crypto key;
     StreamReceiverOptions options;
     StreamReceiverResources resources;
+    const bool continuous_data;
     StreamWorkspace workspace, overlap_workspace;
     StreamExecutorScorer scorer;
     const bool native_scorer;
@@ -264,7 +269,9 @@ struct CompleteStreamReceiver::Impl {
          StreamWorkspace overlap_fn, bool native_score)
         : profile(std::move(profile_value)), config(std::move(config_value)), key(std::move(key_value)),
           options(stream), resources(resolve_stream_receiver_resources(options)),
-          workspace(std::move(workspace_fn)), overlap_workspace(std::move(overlap_fn)), scorer(std::move(score_fn)),
+          continuous_data(native_score && profile.config().continuous_data),
+          workspace(continuous_data ? StreamWorkspace(receiver_detail::protected_slot_workspace) : std::move(workspace_fn)),
+          overlap_workspace(continuous_data ? StreamWorkspace{} : std::move(overlap_fn)), scorer(std::move(score_fn)),
           native_scorer(native_score),
           footprint(footprint_fn ? std::move(footprint_fn) : StreamFootprint(stream_controller_footprint_bytes)),
           codec(std::move(decoder), with_public_message_address(message, profile),
@@ -544,6 +551,9 @@ struct CompleteStreamReceiver::Impl {
         job.task = std::make_unique<SlotTask>(executor, wake,
             [this, work, input = job.input, context = job.continuation] {
                 const auto token = stop.get_token();
+                if (continuous_data)
+                    return receiver_detail::score_continuous_data_slot(config, work.plan, key, input->iq,
+                        input->valid, work.workers, work.dsp, token, &executor, context.get());
                 if (context && native_scorer)
                     return receiver_detail::score_slot_for_continuation(config, work.plan, key, input->iq,
                         input->valid, work.workers, work.dsp, token, &executor, *context);
@@ -661,7 +671,8 @@ struct CompleteStreamReceiver::Impl {
                  hint = *tracking, baseline = *job.score, scratch]() mutable {
                     try {
                         return receiver_detail::continue_affine_slot(config, work.plan, key, input->iq,
-                            work.workers, scratch, stop.get_token(), &executor, *context, hint, baseline);
+                            work.workers, scratch, stop.get_token(), &executor, *context, hint, baseline,
+                            continuous_data);
                     } catch (const ReceiverWorkspaceError&) {
                         return std::move(baseline);
                     } catch (const std::bad_alloc&) {

@@ -543,6 +543,20 @@ void finite_duplex_policy() {
     app.select(F::fast_mode,"legacy");
     check(app.field(F::fast_mode).selected=="robust");
 }
+void data_cadence_policy() {
+    using F = gui::ui::Field;
+    gui::Controller controller({.simulation=true});
+    check(controller.settings().data_cadence == live::DataCadence::scheduled);
+    controller.select(F::data_cadence, "continuous");
+    check(controller.settings().data_cadence == live::DataCadence::continuous);
+    const auto saved = gui::launch_command::parse(controller.field(F::planner_command).text);
+    check(saved.data_cadence == "continuous");
+    gui::Controller fresh({.simulation=true, .launch_settings=saved});
+    check(fresh.settings().data_cadence == live::DataCadence::continuous &&
+          fresh.field(F::data_cadence).selected == "continuous");
+    fresh.select(F::data_cadence, "scheduled");
+    check(fresh.settings().data_cadence == live::DataCadence::scheduled);
+}
 void simulation_launch_defaults() {
     using F=gui::ui::Field;
     using C=gui::ui::Command;
@@ -665,6 +679,7 @@ int main() {
         admission_browser_controller();
         required_gpu_policy();
         finite_duplex_policy();
+        data_cadence_policy();
         simulation_launch_defaults();
         check(gui::parse_binary_bits("0")==Bytes({0}));
         check(gui::parse_binary_bits("000101")==Bytes({0,0,0,1,0,1}));

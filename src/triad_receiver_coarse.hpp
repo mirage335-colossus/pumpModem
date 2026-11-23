@@ -386,6 +386,13 @@ struct FrequencyAssistance {
     AssistanceBound bound;
 };
 
+// Optional in-place observation mask for a native proposal-only pass.
+// Bounds are relative to the complete public window. Geometry, template
+// support and the configured coarse search grid remain unchanged.
+struct CoarseInputSupport {
+    std::size_t first, stop;
+};
+
 // One full configured search over a fixed, immutable IQ lease. Preparation
 // consumes that lease synchronously and retains the projected observation.
 // Subsequent calls are confined to the owner thread, except cancel(). Without
@@ -396,7 +403,8 @@ public:
                   std::span<const Complex>, std::span<const FrequencyInterval>,
                   unsigned workers, std::size_t scratch_limit_bytes, std::stop_token = {},
                   ReceiverExecutor* = nullptr, MidpointTimingEvaluation = MidpointTimingEvaluation::off,
-                  CoarseInputCheck = CoarseInputCheck::scan);
+                  CoarseInputCheck = CoarseInputCheck::scan,
+                  std::optional<CoarseInputSupport> = std::nullopt);
     // Acquisition runs beside the template bank and observation filter. This
     // requires coarse_defers_frequency_grid(). Results are identical to a
     // session given the acquired intervals.
@@ -453,7 +461,8 @@ CoarseResult score_coarse(const ReceiverConfig&, const ReceiverSlotPlan&, const 
                           std::span<const Complex>, std::span<const FrequencyInterval>,
                           unsigned workers, std::size_t scratch_limit_bytes, std::stop_token,
                           ReceiverExecutor* = nullptr, MidpointTimingEvaluation = MidpointTimingEvaluation::off,
-                          CoarseInputCheck = CoarseInputCheck::scan);
+                          CoarseInputCheck = CoarseInputCheck::scan,
+                          std::optional<CoarseInputSupport> = std::nullopt);
 CoarseResult score_coarse(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
                           std::span<const Complex>, const FrequencyAssistance&,
                           unsigned workers, std::size_t scratch_limit_bytes, std::stop_token,

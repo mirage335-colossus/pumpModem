@@ -458,6 +458,26 @@ the experimental receiver is enabled only by an explicit appraisal option.
 
 ## Reference experiments
 
+For a bounded packed DATA comparison, use the canonical reference waveform
+and protected native scoring with Helper and FEC Off. The public DATA gates
+abut on the sample grid. Channel state and the two scored physical quiet slots
+remain part of the experiment. The direct HF reference path supports
+`wanted`, `noise` and `wrong-key` controls.
+
+```sh
+_appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal \
+  --mode receive --scenario hf-watterson-i3 --waveform reference \
+  --continuous-data --cn0 20 --seed 10102 --max-wall-seconds 60 --max-samples 8000000
+```
+
+Use a separate invocation with `--control wrong-key` for the independent
+transmit key. Keep the two outcomes distinct. The same path and noise seeds
+on different calendars do not yield identical observations or keyed addresses.
+Add `--protected-discovery` to test the native fallback on an identical
+generated capture. Compare the capture hashes and physical outcomes across
+the two runs.
+See the [packed physical-path checks](../../docs/validation.md#packed-data-under-physical-hf-models--22-november-2026).
+
 Inspect actual native geometry before a long run:
 
 ```sh

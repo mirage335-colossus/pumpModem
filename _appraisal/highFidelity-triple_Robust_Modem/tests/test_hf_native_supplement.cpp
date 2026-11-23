@@ -368,7 +368,7 @@ int main() {
         policy_and_invalid_inputs(quiet);
         // The strong original fixture crosses an ordinary fallback first;
         // its line gate must still run although the extension was skipped.
-        retained_line_suppresses_raw_extension(.5, 0);
+        retained_line_suppresses_raw_extension(.6, 0);
         // This fixed weaker line keeps the original evidence below admission,
         // so synthetic supplemental evidence triggers the SAME line/quiet gate.
         retained_line_suppresses_raw_extension(.1, 1);

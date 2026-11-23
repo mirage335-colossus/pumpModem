@@ -167,7 +167,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             flag=="--reference"||flag=="--sideband"||flag=="--lf-reference"||
             flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--receiver-strategy"||flag=="--receiver-cpu-budget"||flag=="--doppler"||flag=="--fhss"||flag=="--fhss-list"||flag=="--fhss-list-file"||flag=="--live-duplex"||flag=="--gpu"||flag=="--hardware-channel-test"||
             flag=="--keyfile"||flag=="--keyset"||flag=="--key-name"||flag=="--tx-key"||
-            flag=="--symbol-burst"||flag=="--symbol-burst-random"||
+            flag=="--symbol-burst"||flag=="--symbol-burst-random"||flag=="--data-cadence"||
             flag=="--helper-power"||flag=="--helper-ratio-limit"||flag=="--helper-callsign"||
             flag=="--calendar-epoch"||flag=="--calendar-ordinal"||flag=="--live-noise-dbfs-hz"||
             flag=="--minimum-carrier-spacing"||flag=="--fec"||flag=="--wrong-key-admission";
@@ -250,6 +250,10 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         }
         else if(flag=="--symbol-burst")result.symbol_burst=modem::parse_symbol_burst_wait(value);
         else if(flag=="--symbol-burst-random")result.symbol_burst_random=modem::parse_symbol_burst_random(value);
+        else if(flag=="--data-cadence") {
+            if(value!="scheduled"&&value!="continuous")invalid("--data-cadence must be scheduled or continuous.");
+            result.data_cadence=value;
+        }
         else if(flag=="--live-duplex") {
             if(value!="yes"&&value!="no")invalid("--live-duplex must be yes or no.");
             result.full_duplex=value=="yes";
@@ -390,6 +394,7 @@ std::string format(const Patch& settings) {
     if(settings.fhss)add("--fhss",std::string(fhss::id(fhss::parse(*settings.fhss))));
     if(settings.symbol_burst)add("--symbol-burst",*settings.symbol_burst?std::to_string(*settings.symbol_burst):"off");
     if(settings.symbol_burst_random)add("--symbol-burst-random",std::to_string(*settings.symbol_burst_random));
+    if(settings.data_cadence)add("--data-cadence",*settings.data_cadence);
     if(settings.fhss_list)add("--fhss-list",fhss::list_text(fhss::parse_list(*settings.fhss_list)));
     if(settings.fhss_list_file)arguments.push_back("--fhss-list-file="+*settings.fhss_list_file);
     // Equal syntax preserves a filename or key name beginning with '--'.

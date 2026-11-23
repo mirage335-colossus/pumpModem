@@ -91,6 +91,10 @@ struct ReceiverSlotPlan {
     long double window_capture_lead_seconds = 0, source_start_seconds = 0;
     long double helper_begin_seconds = 0, helper_end_seconds = 0;
     CalendarAdmissionContext calendar_admission;
+    // Optional packed DATA support. Includes all observed samples that
+    // cannot contain a neighboring configured slot; quiet scoring uses the
+    // separate physical aperture above.
+    std::uint64_t protected_data_first_sample = 0, protected_data_stop_sample = 0;
 };
 
 enum class SlotDecision { ambiguous, data, quiet };
@@ -160,6 +164,24 @@ struct ReceiverSlotScore {
     // commit can transfer the admitted bit's coordinate as a nomination.
     std::array<std::optional<TimingProposal>, 2> affine_tracking{};
     bool affine_continuation_attempted = false, affine_continuation_admitted = false;
+    // Supplemental proposal work on the neighbor-free observation.
+    bool protected_discovery_attempted = false, protected_discovery_admitted = false;
+    std::size_t protected_discovery_candidates = 0;
+    double protected_discovery_coarse_seconds = 0;
+    struct ProtectedCarrierBeat {
+        std::int64_t epoch_offset_seconds = 0;
+        double arrival_seconds = 0, clock_ppm = 0;
+        std::uint8_t ordinary_bit = 0, predicted_bit = 0;
+        std::array<std::array<double, 2>, 2> explained_fraction{};
+        std::array<std::array<std::array<double, 2>, 2>, 2> held_out_fraction{};
+        struct AffineSupport {
+            double arrival_seconds, frequency_hz, clock_ppm, log_e;
+        };
+        std::optional<AffineSupport> affine_support;
+    };
+    std::optional<ProtectedCarrierBeat> protected_carrier_beat;
+    std::size_t protected_carrier_beat_search_coordinates = 0;
+    bool protected_carrier_beat_corrected_polarity = false;
     std::size_t varying_timing_proposal_count = 0;
     std::array<TimingProposal, 8> varying_timing_proposals{};
     std::string midpoint_timing_status, midpoint_timing_precision;

@@ -913,6 +913,18 @@ private:
     std::shared_ptr<const CoarseBulkFilter> device_filter_;
 };
 
+void copy_observation(std::span<const Complex> iq, const std::optional<CoarseInputSupport>& support,
+                      std::size_t first, std::span<Complex> values) {
+    if (!support) {
+        std::copy_n(iq.begin() + first, values.size(), values.begin());
+        return;
+    }
+    std::ranges::fill(values, Complex{});
+    const auto begin = std::max(first, support->first);
+    const auto end = std::min(first + values.size(), support->stop);
+    if (begin < end) std::copy_n(iq.begin() + begin, end - begin, values.begin() + (begin - first));
+}
+
 // The native observation filter as one job per overlap-add chunk, on any
 // lanes in any order. A lane keeps one FFT-sized scratch across its chunk
 // jobs, within its preparation charge, until release(). The job that
@@ -921,8 +933,8 @@ private:
 class ChunkedFilter {
 public:
     ChunkedFilter(const Projection& projection, std::span<const Complex> iq, std::size_t crop_first,
-                  std::size_t crop_rows, unsigned lanes)
-        : projection_(projection), iq_(iq), crop_first_(crop_first),
+                  std::size_t crop_rows, unsigned lanes, std::optional<CoarseInputSupport> support = {})
+        : projection_(projection), iq_(iq), support_(support), crop_first_(crop_first),
           chunks_(fir_chunks(iq.size(), crop_first, crop_rows, projection.decimation(), projection.taps().size(),
                              staged_rows_)),
           staging_(staged_rows_), work_(chunks_.size()), scratch_(std::max(1U, lanes)),
@@ -939,7 +951,7 @@ public:
         auto& scratch = scratch_.at(lane);
         if (scratch.empty()) scratch.resize(projection_.fft_rows());
         projection_.apply_chunk(chunks_.at(job), crop_first_, [this](std::size_t first, std::span<Complex> values) {
-            std::copy_n(iq_.begin() + static_cast<std::ptrdiff_t>(first), values.size(), values.begin());
+            copy_observation(iq_, support_, first, values);
         }, out, staging_, scratch, work_[job], stop);
         if (unfiltered_.fetch_sub(1, std::memory_order_acq_rel) != 1) return false;
         check_stop(stop);
@@ -961,6 +973,7 @@ public:
 private:
     const Projection& projection_;
     std::span<const Complex> iq_;
+    std::optional<CoarseInputSupport> support_;
     std::size_t crop_first_ = 0, staged_rows_ = 0;
     std::vector<FirChunk> chunks_;
     std::vector<Complex> staging_;
@@ -4722,7 +4735,8 @@ struct CoarseSession::Impl {
          std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
          const FrequencyAssistance* assistance,
          unsigned workers, std::size_t limit, std::stop_token outer_stop, ReceiverExecutor* shared,
-         MidpointTimingEvaluation midpoint_evaluation, CoarseInputCheck input_check)
+         MidpointTimingEvaluation midpoint_evaluation, CoarseInputCheck input_check,
+         std::optional<CoarseInputSupport> input_support = std::nullopt)
         : config(config), slot(slot),
           owned_executor(shared ? nullptr : std::make_unique<ReceiverExecutor>(std::max(1U, workers))),
           executor(shared ? *shared : *owned_executor), external_stop(outer_stop, PropagateStop{cancellation}) {
@@ -4737,6 +4751,10 @@ struct CoarseSession::Impl {
         geometry = make_plan(config, slot);
         const auto& layout = geometry.layout;
         require_coarse(iq.size() == capture_samples(slot), "coarse receiver input does not match its public window");
+        require_coarse(!input_support || (!assistance &&
+            midpoint_evaluation == MidpointTimingEvaluation::off &&
+            input_support->first < input_support->stop && input_support->stop <= iq.size()),
+            "restricted coarse support requires a nonempty independent proposal window");
         // Acquisition overlaps preparation, which needs a grid that can follow it.
         const bool overlapped = assistance != nullptr;
         require_coarse(!overlapped || (assistance->acquire && defers_frequency_grid(geometry, config)),
@@ -4865,7 +4883,7 @@ struct CoarseSession::Impl {
             prepare(key, iq, projection, mapped ? &*mapped : nullptr,
                     !bulk && !lag && !split_bank && !fused_float && !route_open ? fft.get() : nullptr, workers, stop,
                     overlapped ? assistance : nullptr, plan_search, workspace.echo_phase_rows,
-                    synthesis ? &*synthesis : nullptr);
+                    synthesis ? &*synthesis : nullptr, input_support);
         }
         if (route_open) {
             lag = work.route == CoarseRoute::lag_groups;
@@ -4953,7 +4971,8 @@ struct CoarseSession::Impl {
                  const MappedProjection* mapped, const native_fft::DoublePlan* spectrum_fft,
                  unsigned workers, std::stop_token stop, const FrequencyAssistance* acquisition,
                  const std::function<void(std::span<const FrequencyInterval>)>& plan_search,
-                 std::size_t echo_phase_rows, TemplateSynthesis* device_bank = nullptr) {
+                 std::size_t echo_phase_rows, TemplateSynthesis* device_bank,
+                 std::optional<CoarseInputSupport> input_support) {
         const auto& layout = geometry.layout;
         std::vector<Complex> echo_phases;
         double echo_setup_seconds = 0;
@@ -4980,7 +4999,7 @@ struct CoarseSession::Impl {
         if (geometry.varying_passband) differential.emplace(geometry, slot, config, varying_span, stop,
             midpoint_geometry ? &*midpoint_geometry : nullptr, bulk.get());
         const auto copy = [&](std::size_t first, std::span<Complex> values) {
-            std::copy_n(iq.begin() + first, values.size(), values.begin());
+            copy_observation(iq, input_support, first, values);
         };
         const auto observed = [&](std::stop_token job_stop) {
             if (differential) differential->prepare(observation, projection.variance(config.noise_variance), job_stop);
@@ -4992,7 +5011,7 @@ struct CoarseSession::Impl {
         // compiled FIR, whose device context serializes the chunks.
         std::optional<ChunkedFilter> chunked;
         if (device_bank && !projection.bulk()) {
-            chunked.emplace(projection, iq, layout.crop_first, layout.crop_rows, workers);
+            chunked.emplace(projection, iq, layout.crop_first, layout.crop_rows, workers, input_support);
             observation.assign(layout.crop_rows, Complex{});
         }
         const auto filter = [&](unsigned lane, std::size_t job, std::stop_token job_stop) {
@@ -5362,9 +5381,10 @@ struct CoarseSession::Impl {
 CoarseSession::CoarseSession(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                              std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
                              unsigned workers, std::size_t limit, std::stop_token stop, ReceiverExecutor* executor,
-                             MidpointTimingEvaluation midpoint_timing, CoarseInputCheck input_check)
+                             MidpointTimingEvaluation midpoint_timing, CoarseInputCheck input_check,
+                             std::optional<CoarseInputSupport> input_support)
     : impl_(std::make_unique<Impl>(config, slot, key, iq, intervals, nullptr, workers, limit, stop, executor,
-                                   midpoint_timing, input_check)) {}
+                                   midpoint_timing, input_check, input_support)) {}
 
 CoarseSession::CoarseSession(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
                              std::span<const Complex> iq, const FrequencyAssistance& assistance,
@@ -5516,9 +5536,9 @@ CoarseResult score_coarse(const ReceiverConfig& config, const ReceiverSlotPlan& 
                           std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
                           unsigned workers, std::size_t scratch_limit_bytes, std::stop_token stop,
                           ReceiverExecutor* executor, MidpointTimingEvaluation midpoint_timing,
-                          CoarseInputCheck input_check) {
+                          CoarseInputCheck input_check, std::optional<CoarseInputSupport> input_support) {
     return complete(CoarseSession(config, slot, key, iq, intervals, workers, scratch_limit_bytes, stop, executor,
-                                  midpoint_timing, input_check));
+                                  midpoint_timing, input_check, input_support));
 }
 
 CoarseResult score_coarse(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
