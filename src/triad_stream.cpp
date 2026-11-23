@@ -217,6 +217,10 @@ PublicProfile::PublicProfile(PublicProfileConfig config, std::optional<Crypto> c
             bounds.arrival_low_seconds <= bounds.arrival_high_seconds,
             "invalid Robust shared gap fill bounds");
     }
+    if (config_.scheduled_gap_bridge)
+        require(!config_.continuous_data && !config_.scheduled_gap_fill && !config_.helper_enabled &&
+                !config_.format.fhss && !config_.format.burst_wait_tiles,
+            "Robust gap bridging requires Scheduled DATA with Helper, FHSS, and within-bit waits off");
     nominal_endpoint_ = config_.audio_pair_ppm * .5e-6L;
     const auto clock = config_.clock_bound_ppm * 1e-6;
     affine_min_scale_ = 1 - clock;
@@ -541,6 +545,10 @@ DataPowerReference data_power_reference(const Format& format, const Crypto& key,
 }
 
 struct Emission::Impl {
+    struct Bridge {
+        SampleRange range;
+        std::uint64_t following_gate = 0, epoch = 0, slot = 0;
+    };
     PublicProfile profile;
     Format format;
     TransmissionKeys keys;
@@ -549,13 +557,16 @@ struct Emission::Impl {
     std::function<std::uint8_t(std::uint64_t)> bit_at;
     std::stop_token stop;
     std::unique_ptr<PatternSource> data;
+    std::unique_ptr<PatternSource> bridge_source_cache;
     std::unique_ptr<helper::Generator> helper;
     std::optional<HelperBurstSlot> current;
     std::optional<Crypto> gap_fill_key;
     SampleRange current_gap;
+    Bridge previous_bridge, current_bridge;
     std::uint64_t first_slot = 0, last_slot = 0, source_first = 0, source_stop = 0, data_first = 0;
     std::uint64_t active_helper_first = 0, active_slot_stop = 0;
     std::uint64_t data_begin_offset = 0, data_end_offset = 0;
+    std::uint64_t bridge_ramp_samples = 0, bridge_source_first = 0;
     long double active_helper_begin_seconds = 0, active_helper_end_seconds = 0;
     bool data_enabled = false, helper_enabled = false;
     bool noise = false, packed = false, data_is_fill = false;
@@ -573,17 +584,21 @@ struct Emission::Impl {
         long double helper_begin_seconds = 0, helper_end_seconds = 0;
         std::optional<std::uint8_t> bit;
         SampleRange gap;
+        Bridge incoming, outgoing;
     };
     struct Reader {
         std::uint64_t data_slot = 0;
         bool data_is_fill = false;
         std::unique_ptr<PatternSource> data;
+        std::uint64_t bridge_source_first = 0;
+        std::unique_ptr<PatternSource> bridge_source;
         std::unique_ptr<helper::Generator> helper;
     };
     std::vector<Reader> readers;
     std::vector<Span> spans;
     std::vector<std::array<double, 2>> norms;
     std::vector<double> fill_norms;
+    std::vector<double> bridge_cross_norms;
     std::uint64_t plan_first = 0, plan_count = 0, plan_error_index = UINT64_MAX;
     std::exception_ptr plan_error;
 
@@ -633,9 +648,16 @@ struct Emission::Impl {
                 [](std::uint8_t bit) { return bit <= 1; }), "invalid or oversized Robust transmit draft");
             bits.assign(options.bits.begin(), options.bits.end());
             last_slot = add(options.first_slot, count - 1);
-            if (options.mode == EmissionMode::Message && profile.config().scheduled_gap_fill && count > 1) {
+            const bool bridge = profile.config().scheduled_gap_bridge;
+            if (options.mode == EmissionMode::Message && (profile.config().scheduled_gap_fill || bridge) && count > 1) {
                 require(!helper_enabled && !packed && !format.fhss, "invalid Robust scheduled fill profile");
                 gap_fill_key = options.qualification_gap_fill_key ? *options.qualification_gap_fill_key : Crypto::temporary();
+                if (bridge) {
+                    const auto edge = std::max(format.ramp_seconds, 8 / geometry.fine_chip_rate_hz);
+                    bridge_ramp_samples = packed_bit_samples(edge, rate);
+                    require(bridge_ramp_samples <= packed_bit_samples(geometry.bit_seconds, rate) / 2,
+                            "Robust bridge ramps overlap within an active DATA gate");
+                }
             }
             source_stop = profile.calendar().distance(profile.origin(), profile.transmit_slot(last_slot).helper_end);
             set_slot(profile.transmit_slot(options.first_slot));
@@ -650,8 +672,20 @@ struct Emission::Impl {
         return profile.gap_fill_after(slot.index).value_or(SampleRange{});
     }
 
-    std::uint64_t slot_stop(const HelperBurstSlot& slot, SampleRange gap) const {
-        return std::max(gap.stop, profile.calendar().distance(profile.origin(), packed ? slot.pattern_end : slot.helper_end));
+    Bridge bridge_after(const HelperBurstSlot& slot) const {
+        if (!bridge_ramp_samples || slot.index >= last_slot) return {};
+        const auto& calendar = profile.calendar();
+        const auto current_first = calendar.distance(profile.origin(), slot.pattern_begin);
+        const auto current_stop = add(current_first, packed_bit_samples(profile.geometry().bit_seconds, format.sample_rate));
+        const auto next_first = calendar.distance(profile.origin(), calendar.successor(slot).pattern_begin);
+        if (current_stop >= next_first) return {};
+        return {{current_stop - bridge_ramp_samples, add(next_first, bridge_ramp_samples)},
+                next_first, slot.pattern_begin.epoch, slot.index};
+    }
+
+    std::uint64_t slot_stop(const HelperBurstSlot& slot, SampleRange gap, const Bridge& bridge) const {
+        const auto ordinary = profile.calendar().distance(profile.origin(), packed ? slot.pattern_end : slot.helper_end);
+        return std::max({gap.stop, bridge.following_gate, ordinary});
     }
 
     void set_slot(const HelperBurstSlot& slot) {
@@ -664,7 +698,9 @@ struct Emission::Impl {
         data_first = calendar.distance(origin, slot.support_begin);
         active_helper_first = calendar.distance(origin, slot.helper_begin);
         current_gap = gap_after(slot);
-        active_slot_stop = slot_stop(slot, current_gap);
+        previous_bridge = current_bridge;
+        current_bridge = bridge_after(slot);
+        active_slot_stop = slot_stop(slot, current_gap, current_bridge);
         active_helper_begin_seconds = calendar.relative_seconds(origin, slot.helper_begin);
         active_helper_end_seconds = calendar.relative_seconds(origin, slot.helper_end);
     }
@@ -763,6 +799,30 @@ struct Emission::Impl {
         return index >= gap.first && index < gap.stop;
     }
 
+    static const Bridge& bridge_at(std::uint64_t index, const Bridge& incoming, const Bridge& outgoing) {
+        return in_gap(index, incoming.range) ? incoming : outgoing;
+    }
+
+    Complex bridge_sample(std::uint64_t index, const Bridge& bridge, std::unique_ptr<PatternSource>& cache,
+                          std::uint64_t& cached_first) const {
+        if (!in_gap(index, bridge.range)) return {};
+        if (!cache || cached_first != bridge.range.first) {
+            cache.reset();
+            auto addressed = format;
+            addressed.epoch = bridge.epoch;
+            addressed.symbol_ordinal += bridge.slot;
+            const auto interior = static_cast<long double>(bridge.range.size()) + 5.L * bridge_ramp_samples;
+            addressed.bit_seconds = std::max({format.bit_seconds, 100.,
+                static_cast<double>(interior / format.sample_rate)});
+            cache = std::make_unique<PatternSource>(addressed, *gap_fill_key, 0);
+            cached_first = bridge.range.first;
+        }
+        // The sampled region stays inside the native gate at both ends.
+        // Only the complementary wanted ramp shapes this bridge.
+        return cache->sample_at(static_cast<long double>(index - bridge.range.first) +
+            2.L * bridge_ramp_samples + cache->geometry().calendar_origin_sample);
+    }
+
     bool in_data(std::uint64_t index, std::uint64_t first) const {
         return data_enabled && index >= first && index - first >= data_begin_offset &&
             index - first < data_end_offset;
@@ -770,7 +830,7 @@ struct Emission::Impl {
 
     struct Value {
         Complex sample;
-        double data_norm = 0, helper_norm = 0, fill_norm = 0;
+        double data_norm = 0, helper_norm = 0, fill_norm = 0, cross_norm = 0;
     };
 
     Complex gap_sample(std::uint64_t index, PatternSource& source, SampleRange gap) const {
@@ -799,7 +859,7 @@ struct Emission::Impl {
     // sample lies in its support.
     Value value_at(std::uint64_t index, PatternSource* source, std::uint64_t first,
                    long double helper_begin, long double helper_end, const helper::Generator* generator,
-                   SampleRange gap = {}) const {
+                   SampleRange gap, Complex bridge = {}) const {
         const bool filling = in_gap(index, gap);
         Complex raw_data;
         if (source) raw_data = filling ? gap_sample(index, *source, gap) :
@@ -813,7 +873,18 @@ struct Emission::Impl {
             normalized_data * up;
         const auto helper_component = active ? audio - normalized_data * up : Complex{};
         const auto norm = std::norm(normalized_data);
-        return {audio * std::conj(up), filling ? 0 : norm, std::norm(helper_component), filling ? norm : 0};
+        const auto wanted = audio * std::conj(up);
+        if (bridge != Complex{}) {
+            const auto& g = profile.geometry();
+            // Match PatternSource's integer-local coordinate before any
+            // conversion of a potentially large absolute sample index.
+            const auto envelope = source ? shaping_envelope(format, g,
+                (static_cast<long double>(index - first) - g.calendar_origin_sample) / format.sample_rate) : 0.;
+            const auto complement = std::clamp(1 - envelope, 0., 1.);
+            const auto fill = bridge * (report.data_gain * complement);
+            return {wanted + fill, norm, 0, std::norm(fill), 2 * (wanted * std::conj(fill)).real()};
+        }
+        return {wanted, filling ? 0 : norm, std::norm(helper_component), filling ? norm : 0};
     }
 
     Complex next(std::uint64_t local_index) {
@@ -842,13 +913,17 @@ struct Emission::Impl {
             }
             source = data.get();
         }
+        const auto& bridge = bridge_at(index, previous_bridge, current_bridge);
+        const auto fill = bridge_ramp_samples ? bridge_sample(index, bridge, bridge_source_cache, bridge_source_first) :
+            Complex{};
         const auto value = value_at(index, source, data_first, active_helper_begin_seconds,
-            active_helper_end_seconds, helper.get(), current_gap);
+            active_helper_end_seconds, helper.get(), current_gap, fill);
         report.data_energy += value.data_norm;
         report.helper_energy += value.helper_norm;
-        if (filling) {
+        if (filling || in_gap(index, bridge.range)) {
             ++report.gap_fill_samples;
             report.gap_fill_energy += value.fill_norm;
+            report.gap_bridge_cross_energy += value.cross_norm;
         }
         ++report.generated_samples;
         return value.sample;
@@ -863,28 +938,35 @@ struct Emission::Impl {
     }
 
     std::size_t reader_bytes(std::size_t count, std::uint64_t plan) const {
-        return count * (sizeof(Reader) + (data_enabled ? profile.geometry().source_workspace_bytes : 0) +
+        return count * (sizeof(Reader) + source_workspace_bytes() +
             (helper ? sizeof(helper::Generator) : 0)) + static_cast<std::size_t>(plan) * sizeof(norms[0]) +
             (gap_fill_key ? static_cast<std::size_t>(plan) * sizeof(double) : 0) +
+            (bridge_ramp_samples ? static_cast<std::size_t>(plan) * sizeof(double) : 0) +
             span_capacity(plan) * sizeof(Span);
+    }
+    std::size_t source_workspace_bytes() const {
+        return data_enabled ? profile.geometry().source_workspace_bytes * (bridge_ramp_samples ? 2 : 1) : 0;
     }
     void open(std::size_t count, std::uint64_t plan) {
         readers.resize(count);
         norms.resize(static_cast<std::size_t>(plan));
         if (gap_fill_key) fill_norms.resize(static_cast<std::size_t>(plan));
+        if (bridge_ramp_samples) bridge_cross_norms.resize(static_cast<std::size_t>(plan));
         spans.reserve(span_capacity(plan));
     }
     Span current_span(std::uint64_t begin) const {
         return {begin, current, data_first, active_slot_stop, active_helper_begin_seconds,
-            active_helper_end_seconds, slot_bit, current_gap};
+            active_helper_end_seconds, slot_bit, current_gap, previous_bridge, current_bridge};
     }
     Span successor_span(const Span& span, std::uint64_t begin) const {
         const auto slot = profile.calendar().successor(*span.slot);
         const auto& calendar = profile.calendar();
         const auto origin = profile.origin();
         const auto gap = gap_after(slot);
-        return {begin, slot, calendar.distance(origin, slot.support_begin), slot_stop(slot, gap),
-            calendar.relative_seconds(origin, slot.helper_begin), calendar.relative_seconds(origin, slot.helper_end), {}, gap};
+        const auto outgoing = bridge_after(slot);
+        return {begin, slot, calendar.distance(origin, slot.support_begin), slot_stop(slot, gap, outgoing),
+            calendar.relative_seconds(origin, slot.helper_begin), calendar.relative_seconds(origin, slot.helper_end), {}, gap,
+            span.outgoing, outgoing};
     }
     // The slot states of local samples [first, first + count) and the bits
     // of their DATA sources, resolved in order as next() resolves them.
@@ -951,10 +1033,14 @@ struct Emission::Impl {
         if (helper && !reader.helper)
             reader.helper = std::make_unique<helper::Generator>(profile.config().helper, report.helper_plan,
                 format.epoch, true, keys.helper);
+        const auto& bridge = bridge_at(index, span.incoming, span.outgoing);
+        const auto fill = bridge_ramp_samples ? bridge_sample(index, bridge, reader.bridge_source, reader.bridge_source_first) :
+            Complex{};
         const auto value = value_at(index, source, span.data_first, span.helper_begin_seconds,
-            span.helper_end_seconds, reader.helper.get(), span.gap);
+            span.helper_end_seconds, reader.helper.get(), span.gap, fill);
         norms[static_cast<std::size_t>(local - plan_first)] = {value.data_norm, value.helper_norm};
         if (gap_fill_key) fill_norms[static_cast<std::size_t>(local - plan_first)] = value.fill_norm;
+        if (bridge_ramp_samples) bridge_cross_norms[static_cast<std::size_t>(local - plan_first)] = value.cross_norm;
         return value.sample;
     }
     // next()'s order: its stop check, then the slot state of the sample.
@@ -978,6 +1064,8 @@ struct Emission::Impl {
             active_helper_begin_seconds = next_span.helper_begin_seconds;
             active_helper_end_seconds = next_span.helper_end_seconds;
             current_gap = next_span.gap;
+            previous_bridge = next_span.incoming;
+            current_bridge = next_span.outgoing;
             slot_bit.reset();
         }
         return true;
@@ -994,9 +1082,12 @@ struct Emission::Impl {
             const auto& value = norms[static_cast<std::size_t>(accepted)];
             report.data_energy += value[0];
             report.helper_energy += value[1];
-            if (gap_fill_key && in_gap(index, current_gap)) {
+            const auto& bridge = bridge_at(index, previous_bridge, current_bridge);
+            const auto bridged = in_gap(index, bridge.range);
+            if (in_gap(index, current_gap) || bridged) {
                 ++report.gap_fill_samples;
                 report.gap_fill_energy += fill_norms[static_cast<std::size_t>(accepted)];
+                if (bridged) report.gap_bridge_cross_energy += bridge_cross_norms[static_cast<std::size_t>(accepted)];
             }
             ++report.generated_samples;
         }
@@ -1046,7 +1137,7 @@ EmittedSource Emission::source() const {
     result.maximum_frequency_hz = std::max(full_bandwidth / 2,
         state->helper_enabled ? state->report.helper_plan.frequency_hz - if_hz : 0.) + spectral_skirt_allowance_hz;
     result.working_bytes = sizeof(Impl) + state->bits.capacity() +
-        (state->data_enabled ? geometry.source_workspace_bytes : 0) + (state->helper ? sizeof(helper::Generator) : 0);
+        state->source_workspace_bytes() + (state->helper ? sizeof(helper::Generator) : 0);
     result.sample_at = [state](std::uint64_t index) { return state->next(index); };
     result.readers = std::make_shared<Readers>(*state);
     return result;

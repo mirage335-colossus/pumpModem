@@ -191,11 +191,13 @@ agreed local calendar. Both peers must use the same anchor.
 Shared unsigned initial waveform ordinal; default 0. It advances through DATA
 and quiet slots and does not reset at message boundaries.
 .TP
-.BI \-\-data\-cadence " scheduled|scheduled-fill|continuous"
+.BI \-\-data\-cadence " scheduled|scheduled-fill|scheduled-bridge|continuous"
 Select the Robust DATA cadence. The default is scheduled.
 Scheduled-fill keeps the calendar and fills eligible inter-DATA intervals
-in the DATA band with an independent transmitter key. It requires Helper
-and FHSS off. Continuous places successive DATA gates on adjacent samples
+in the DATA band with an independent transmitter key. Scheduled-bridge
+overlaps that fill with the DATA edge taper and uses the full Scheduled
+receiver. Both filled cadences require Helper and FHSS off.
+Continuous places successive DATA gates on adjacent samples
 and also requires both Symbol Burst waits off. Both peers select the same
 cadence.
 .TP
@@ -307,13 +309,15 @@ without one, waveform material is publicly reproducible.
 Select one native symbol lane or interleaved added-symbol lanes. Peers must
 share the mode and factor. This does not qualify sensitivity or interference rejection.
 .TP
-.BI \-\-fhss " off|fake-fcc|fake-eu|fake-list"
+.BI \-\-fhss " off|fake-fcc|fake-fcc-short|fake-eu|fake-list"
 Select the canonical FHSS envelope and an illustrative Carrier/Shift schedule.
 It does not retune external radio hardware or enable simultaneous reception.
-Below 800 MHz both use narrow experimental spacing derived from the waveform;
+Below 800 MHz the named illustrative profiles use spacing derived from the waveform;
 800 MHz is a product convention, not a regulatory boundary. Higher frequencies
 use band-specific profiles or report no applicable profile. The legacy
-fake-0.4s-200 identifier maps to fake-fcc. The envelope affects transmitted audio
+fake-0.4s-200 identifier maps to fake-fcc. Fake-fcc-short uses the illustrative
+FCC policy and selects a 2 ms silence guard on each dwell edge with a 4 ms
+requested ramp. Both peers select the same FHSS envelope. The envelope affects transmitted audio
 while the audio IF and hardware tuning remain fixed. Profile details and unimplemented access assumptions
 appear under Model limits and references; the illustration is not certification.
 .TP

@@ -142,8 +142,9 @@ struct Options {
     bool work_only = false;
     bool helper_overlap = true;
     bool continuous_data = false, affine_continuation = true;
-    bool scheduled_gap_fill = false, gap_fill_transmit = true, foreign_receiver_key = false;
-    bool match_scheduled_gap_fill_admission = false;
+    bool scheduled_gap_fill = false, scheduled_gap_bridge = false;
+    bool gap_fill_transmit = true, foreign_receiver_key = false;
+    bool match_scheduled_gap_admission = false;
     bool protected_packed = false, protected_discovery = false, carrier_beat = false, carrier_beat_polarity = false;
     bool white_beat_evidence = false, colored_beat_evidence = false, project_colored_pcm = false;
     std::string adjacent_data;
@@ -152,6 +153,8 @@ struct Options {
     // the given options that can change a capture, sorted by flag.
     std::string capture_cache;
     std::vector<std::pair<std::string, std::string>> capture_arguments;
+
+    bool fills_scheduled_gaps() const { return scheduled_gap_fill || scheduled_gap_bridge; }
 };
 
 // Options that select receiver arithmetic, backends, allocation, budgets or
@@ -294,8 +297,10 @@ Options parse(int argc, char** argv) {
     assign("--work-only", o.work_only);
     assign("--helper-overlap", o.helper_overlap);
     assign("--continuous-data", o.continuous_data);
-    o.match_scheduled_gap_fill_admission = o.command == "admission" && values.contains("--scheduled-gap-fill");
+    o.match_scheduled_gap_admission = o.command == "admission" &&
+        (values.contains("--scheduled-gap-fill") || values.contains("--scheduled-gap-bridge"));
     assign("--scheduled-gap-fill", o.scheduled_gap_fill);
+    assign("--scheduled-gap-bridge", o.scheduled_gap_bridge);
     const bool gap_fill_transmit_supplied = values.contains("--gap-fill-transmit");
     assign("--gap-fill-transmit", o.gap_fill_transmit);
     assign("--foreign-receiver-key", o.foreign_receiver_key);
@@ -463,8 +468,11 @@ Options parse(int argc, char** argv) {
     require(!o.scheduled_gap_fill || (one_of(o.command, {"plan", "message", "admission"}) &&
             !o.helper && !o.fhss && !o.continuous_data && o.capture_cache.empty()),
             "Scheduled gap fill requires plan, message or admission with Helper and FHSS off and no capture cache");
-    require(!gap_fill_transmit_supplied || (o.scheduled_gap_fill && one_of(o.command, {"message", "admission"})),
-            "The gap-fill transmit control needs scheduled-fill message or admission");
+    require(!o.scheduled_gap_bridge || (one_of(o.command, {"plan", "message", "admission"}) &&
+            !o.scheduled_gap_fill && !o.helper && !o.fhss && !o.continuous_data && o.capture_cache.empty()),
+            "Scheduled short transitions require plan, message or admission with guarded fill, Helper and FHSS off and no capture cache");
+    require(!gap_fill_transmit_supplied || (o.fills_scheduled_gaps() && one_of(o.command, {"message", "admission"})),
+            "The gap-fill transmit control needs scheduled fill or short transitions in a message or admission probe");
     require(!o.foreign_receiver_key || (o.command == "message" && o.encrypt),
             "The foreign receiver key control needs an encrypted message probe");
     require(!affine_continuation_supplied || one_of(o.command, {"plan", "message", "backlog"}),
@@ -475,7 +483,7 @@ Options parse(int argc, char** argv) {
              (o.slot_index > 0 || o.adjacent_data.front() == 'q')),
             "Adjacent DATA qualification requires admission, Helper and waits off, no interferer and a "
             "pair of 0, 1 or q (quiet). At slot zero the preceding state must be q");
-    require(!o.match_scheduled_gap_fill_admission ||
+    require(!o.match_scheduled_gap_admission ||
             (!o.continuous_data && o.stratum == "active" && o.slot_index > 0 && o.adjacent_data.size() == 2 &&
              o.adjacent_data.find_first_not_of("01") == std::string::npos),
             "Scheduled gap fill admission requires an active interior slot between two DATA bits");
@@ -584,6 +592,7 @@ live::Settings settings_for(const Options& o, std::size_t memory_limit) {
     live::Settings s;
     s.wrong_key_admission = o.wrong_key_admission;
     if (o.scheduled_gap_fill) s.data_cadence = live::DataCadence::scheduled_fill;
+    if (o.scheduled_gap_bridge) s.data_cadence = live::DataCadence::scheduled_bridge;
     s.simulation = true;
     s.receiver_memory_limit = memory_limit;
     if (o.native_coarse_precision == "fp64") s.transfer.modem.search_arithmetic = modem::SearchArithmetic::fp64;
@@ -808,7 +817,7 @@ struct Capture {
     unsigned generation_helpers = 0;
     struct GapFill {
         std::uint64_t samples = 0;
-        long double wanted_energy = 0, energy = 0;
+        long double wanted_energy = 0, energy = 0, cross_energy = 0;
     };
     std::optional<GapFill> gap_fill;
     struct PcmProjection {
@@ -1100,6 +1109,10 @@ Json profile_json(const Options& o, const Profile& profile, const ReceiverSlotPl
             receipt["planned_source_samples"] = fill->size();
         }
     }
+    if (o.scheduled_gap_bridge) {
+        result["scheduled_gap_bridge"] = object({{"transmit_enabled", o.gap_fill_transmit},
+            {"receiver", "ordinary_scheduled"}, {"foreign_receiver_key", o.foreign_receiver_key}});
+    }
     return result;
 }
 
@@ -1151,9 +1164,14 @@ Json observation(const Capture& capture, std::uint64_t stop, const ReceiverSlotP
     }
     if (capture.gap_fill) {
         const auto& fill = *capture.gap_fill;
-        result["scheduled_gap_fill"] = object({{"emitted_samples", fill.samples},
+        auto receipt = object({{"emitted_samples", fill.samples},
             {"wanted_energy_samples", static_cast<double>(fill.wanted_energy)},
             {"filler_energy_samples", static_cast<double>(fill.energy)}});
+        if (o.scheduled_gap_bridge) {
+            receipt["data_filler_cross_energy_samples"] = static_cast<double>(fill.cross_energy);
+            receipt["combined_energy_samples"] = static_cast<double>(fill.wanted_energy + fill.energy + fill.cross_energy);
+        }
+        result[o.scheduled_gap_bridge ? "scheduled_gap_bridge" : "scheduled_gap_fill"] = std::move(receipt);
     }
     if (capture.cache) {
         const auto& identity = capture_binary_identity();
@@ -1868,7 +1886,7 @@ Capture simulate(const Options& o, const Profile& profile, std::span<const Emiss
     if (capture_overhead > SIZE_MAX - retained_bytes)
         throw Incomplete("Canonical capture storage exceeds the local address range");
     const auto stored_bytes = retained_bytes + capture_overhead;
-    const auto fill_sources = o.scheduled_gap_fill && o.gap_fill_transmit ? episodes.size() : 0;
+    const auto fill_sources = o.fills_scheduled_gaps() && o.gap_fill_transmit ? episodes.size() : 0;
     const auto simultaneous_sources = std::max(std::size_t{1}, episodes.size() + fill_sources + (secondary != nullptr));
     const auto reserve = simultaneous_sources * channel_source_bound;
     const auto remaining = memory_remaining(resources);
@@ -1981,9 +1999,10 @@ Capture simulate(const Options& o, const Profile& profile, std::span<const Emiss
     std::vector<EmittedSource> inputs;
     std::vector<std::uint64_t> origins;
     std::optional<PublicProfile> silent_transmitter;
-    if (o.scheduled_gap_fill && !o.gap_fill_transmit) {
+    if (o.fills_scheduled_gaps() && !o.gap_fill_transmit) {
         auto config = profile.waveform.config();
         config.scheduled_gap_fill = false;
+        config.scheduled_gap_bridge = false;
         silent_transmitter.emplace(std::move(config), profile.key);
     }
     const auto& transmit = silent_transmitter ? *silent_transmitter : profile.waveform;
@@ -2082,13 +2101,14 @@ Capture simulate(const Options& o, const Profile& profile, std::span<const Emiss
     capture.generation = timer.elapsed();
     capture.channel = channel.report();
     capture.selective_filter = capture.channel.selective_perturbation.has_value();
-    if (o.scheduled_gap_fill) {
+    if (o.fills_scheduled_gaps()) {
         auto& filler = capture.gap_fill.emplace();
         for (const auto& emitter : emitters) {
             const auto& source = emitter.report();
             filler.samples += source.gap_fill_samples;
             filler.wanted_energy += source.data_energy;
             filler.energy += source.gap_fill_energy;
+            filler.cross_energy += source.gap_bridge_cross_energy;
         }
     }
     capture.generated_samples = simulator_stop;
@@ -2885,11 +2905,11 @@ void admission_run(Json& report, const Options& o, const Profile& profile, const
             const auto source_begin = [&](std::uint64_t index) {
                 return waveform.calendar().distance(waveform.origin(), waveform.transmit_slot(index).helper_begin);
             };
-            if (o.match_scheduled_gap_fill_admission) {
+            if (o.match_scheduled_gap_admission) {
                 const auto first = slot.index - 1;
                 std::array sources{EmissionOptions{.mode = EmissionMode::Message, .first_slot = first, .bits = bits,
                     .source_first_sample = source_begin(first), .stop = stop}};
-                if (o.scheduled_gap_fill && o.gap_fill_transmit)
+                if (o.fills_scheduled_gaps() && o.gap_fill_transmit)
                     sources.front().qualification_gap_fill_key = Crypto::from_independent_roots(
                         admission_digest(o.seed, 6), admission_digest(o.seed, 7));
                 return simulate(o, profile, sources, slot.first_sample, slot.stop_sample, samples_left, resources, stop);
@@ -3497,7 +3517,7 @@ void stream_run(Json& report, const Options& o, const Profile& profile, const St
         emissions.push_back({.mode = EmissionMode::Message, .first_slot = first, .bits = {}, .slot_count = wire,
             .source_first_sample = source_first, .stop = stop,
             .bit_at = draft.bit_source(first, [&](std::uint64_t index) { return message_address(profile.waveform, index); })});
-        if (o.scheduled_gap_fill && o.gap_fill_transmit)
+        if (o.fills_scheduled_gaps() && o.gap_fill_transmit)
             emissions.back().qualification_gap_fill_key = Crypto::from_independent_roots(
                 admission_digest(o.seed, 6), admission_digest(o.seed, 7));
     }
@@ -3556,7 +3576,7 @@ void stream_run(Json& report, const Options& o, const Profile& profile, const St
         {"message_and_physical_quiet_verified", physical_correct}, {"configured_calendar_reacquired", backlog && physical_correct},
         {"complete_receiver_service", work_complete}, {"scope", "configured_public_iq_stream"}});
     if (o.foreign_receiver_key) result["receive_key_control"] = "independent_root";
-    if (o.scheduled_gap_fill && profile.receiver.wrong_key_admission == WrongKeyAdmission::current) {
+    if (o.fills_scheduled_gaps() && profile.receiver.wrong_key_admission == WrongKeyAdmission::current) {
         Json::Object policy_counts;
         for (const auto policy : wrong_key_admission_policies) {
             std::size_t admitted = 0;
@@ -3716,8 +3736,9 @@ void help() {
         "  --continuous-data on|off qualifies packed DATA for plan, message, backlog or admission with\n"
         "    Helper and waits off (default off)\n"
         "  --scheduled-gap-fill on|off qualifies Scheduled + gap fill for plan, message or admission\n"
+        "  --scheduled-gap-bridge on|off qualifies Scheduled + short transitions with the ordinary receiver\n"
         "    admission requires an active interior slot between two --adjacent-data bits\n"
-        "    --gap-fill-transmit off omits only transmit fill in a matched fill-aware message or admission probe\n"
+        "    --gap-fill-transmit off omits only transmit fill in a matched message or admission probe\n"
         "  --foreign-receiver-key on compares an independent receive key in an encrypted message probe\n"
         "  --affine-continuation on|off compares stream replay with or without receiver state (default on)\n"
         "  admission scores one complete slot for all policies; --stratum noise omits wanted DATA\n"

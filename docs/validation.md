@@ -221,6 +221,147 @@ later full-gap or gain-control trial. The full-gap source and executable were
 removed. Retire the intermediate receipts once that comparison supersedes
 their geometries, timing ranges and matched-data evidence.
 
+## Short DATA-to-fill transition checks — 22 November 2026
+
+Two bounded native source fixtures tested a same-triplet, independent-key
+overlap through the bit-independent portion of the DATA taper. With `D = aU`
+the original shaped DATA and `B` the filler from the interior of a native
+source, the mixture was `aU + (1-a)B`. The convex weights preserve the native
+component peak bound. Direct differences of the two possible DATA bits were
+identical before and after mixing throughout the touched samples. This limits
+changes to the bit-independent waveform at the transmitter and leaves the
+receiver's acquisition and presence tests to qualify separately.
+
+The two measurements used 6 kHz logical PCM, the native 48 kHz playback and
+6 kHz capture resamplers, 265 Hz spacing and 1,725 Hz IF. The largest duration
+below the indicated fraction of settled DATA power used 10 ms moving RMS.
+
+| Rate and cadence | Existing only, below −3 / −6 / −10 dB | Complementary fill, below −3 / −6 / −10 dB |
+| --- | --- | --- |
+| 3.6 Hz, 160.4 s DATA / 210 s stride | 30,971 / 28,482 / 25,636 ms | 864 / 501 / 176 ms |
+| 120 Hz, 10.4 s DATA / 60 s stride | 14,650 / 14,600 / 14,496 ms | 28.33 / 20.17 / 11.83 ms |
+
+The 3.6 Hz mix removed all exact internal zeros. The longest drop below
+−10 dB was 176 ms inside the independent filler and 169 ms in the fill-to-DATA
+taper. Per-carrier phase alignment at the taper left both deep dips
+essentially unchanged. Three other predeclared filler keys had no −10 dB
+dips. Across these four keys, each waveform had at least one −6 dB interval
+longer than 100 ms in the filler or a transition. The two untouched DATA
+reference intervals each had at most 2.5 ms below −6 dB. This distinguishes
+programmed silence, natural filler amplitude variation and transition dips.
+The 120 Hz mix never dropped below −10 dB in either transition. Its 11.83 ms
+drop occurred inside the filler. At −6 dB its DATA-to-fill and fill-to-DATA
+dips were 0.17 ms and 1.83 ms in this realization. Device-rate peak was
+0.3244 versus 0.3212
+for the 3.6 Hz pair and 0.3651 for both 120 Hz arms. For 3.6 Hz, integration of
+a tapered-FFT capture outside ±2 Hz of the same carrier centers rose 0.67 dB
+relative to total energy. The 120 Hz FFT comparison beyond IF ±305 Hz changed
+from −108.39 to −108.54 dBc. These are digital observations on a small set of
+source realizations through native resamplers. An RF filter, AGC, or synthesizer
+can behave differently.
+
+With 2,000 samples/s, Rate 120 Hz, IF 500 Hz, spacing 265 Hz, tight arrival
+±2.5 ms, HF Worst, Each 65%, 8 Hz Doppler and seed 74021, the complete native
+receiver decoded `e` with `001QQ` in both the current guarded and actual
+complementary-fill captures at 32 and 20 dB-Hz. The weaker case retained the
+same receiver reference and noise while reducing transmitted signal. Both
+used six arrivals and 718 frequencies. The compared services took 2.25–2.67 s
+with 16 workers and peak reservations of 1.20–1.30 GB. Current admitted a
+different, unauthenticated short text from an independent receive key at
+32 dB-Hz. Direct native Guarded on the same capture returned `AAAQQ` and no
+message. A separate cutoff after the third bit returned `001` and no message.
+
+In a broad short-gate replay at 45 dB-Hz with 1,500 samples/s, IF 375 Hz,
+30 MHz Shift, margin 3, arrival −7 to +7.07 s, HF Worst and Each 65%, the
+actual overlap and guarded arms both decoded the interior bit 0. Both
+scored 10,553 arrivals by two frequencies and eight fine candidates.
+The overlap reduced bit separation from 88,506 to 37,113. Removing the
+center DATA with the adjacent fills still present produced a false bit
+with log evidence about 144,480. Native Guarded applied to the retained
+slot evidence rejected that false decision and kept the wanted decision.
+Strict rejected both. A paired current-guarded absent center scored quiet
+at log evidence −34.55. At 10 and 20 dB-Hz, both broad wanted arms returned
+ambiguous with negative presence evidence while retaining the same public
+grid and candidate count. The broad checks cover one slot and one seed.
+They supply no filtered error rate or sensitivity-floor estimate.
+
+In a separate nominal full-gap control, a laboratory crop based on the
+known actual arrival retained 9.91 s of clean support within a 10.4 s gate
+when the intersection across all arrivals was empty. With center DATA
+removed this exact-arrival crop scored quiet. On the same capture each of
+two crops based on another public arrival admitted false DATA. The later
+quiet slot after actual filler ended scored quiet with the full ordinary
+receiver. This separates candidate support for bit likelihood from physical
+quiet evidence.
+
+The linked **Scheduled + short transitions** mode reproduced the compact
+message and EOF controls through the canonical stream receiver. At 32 dB-Hz
+it emitted 201,602 bridge samples and preserved wanted energy exactly across
+the fill-on and fill-withheld arms. Weighted filler energy and the signed
+cross term are separate in the receipt. Total emitted energy rose by 6.39 dB
+in this compact fixture at fixed wanted power. Direct native Guarded with an
+independent receive key scored `AAAQQ` and accepted no message.
+
+At 6 kHz, Rate 3.6 Hz, 265 Hz spacing, IF 1,725 Hz and the broad 30 MHz
+GPSDO/HF Worst/Each 65% geometry, the production bridge and fill-withheld
+arms decoded bit 0 at 38 dB-Hz. Both evaluated 14,071 arrivals, 15 frequencies
+and eight fine candidates. Bit separation was 4,144 with the bridge and
+3,811 without it. The three-bit source energy rose by 1.16 dB at fixed wanted
+power. The selected slot used the same 1.422 GB workspace quote
+in both arms. Receiver wall time was 29.64 and 32.60 s on the 12-logical-CPU
+Ryzen 5 PRO 5650U with 24 workers. These single-slot comparisons establish
+that the complete search ran on both sources. The paired decisions are well
+above threshold and do not estimate a sensitivity floor or a speedup.
+
+The direct +20 dB-Hz HF appraisal tested the production bridge in Watterson
+I3 seed 10102 and moving eikonal seed 10105. Both wanted paths decoded `e` as
+`001QQ`. The matched Watterson fill-withheld arm gave the same decision and
+wanted DATA energy, both quiet scores were exact, and the three active log-e
+changes from fill were below 0.20 nats in magnitude. Its independent transmit
+key control with the bridge scored `AAAQQ`, giving no false DATA or accepted
+content. [Reference appraisal](../_appraisal/highFidelity-triple_Robust_Modem/README.md#scheduled-gap-fill)
+
+The compact linked bridge also decoded `e` at 80 dB-Hz on actual RADV
+RENOIR Vulkan with broad timing, verified both quiet slots and the
+incomplete-EOF control, and reported 473,556,408 native FP32 Vulkan score
+rows. This is a device execution check and supplies no capacity estimate.
+
+The Realtek ALC257 cable test at 5% playback used 6 kHz logical audio and
+48 kHz hardware. It decoded `e` with `001QQ`, completed both native drains
+and accepted exactly 2,413,150 capture frames. All six GUI filter views
+retained that wanted record. In the four 400 ms overlap regions the ADC
+10 ms moving RMS minima were −54.10, −55.05, −52.52 and −52.73 dBFS against
+settled DATA −47.16 dBFS. No 10 ms window in those transitions fell 10 dB
+below settled DATA. Capture peak was 0.0143 and commanded playback peak
+was 0.0191 after gain, with approximately 25.7 dB conservative digital
+headroom after the final converter. This resolution and cable path cannot
+establish 1–5 ms transient behavior or radio gain-control performance.
+The cable used worker SHA-256 `69d4bfcc24b88afc7ca43a4f9ca02811f43c93fb7ab607dec0200317b246a918`.
+The later integer-local envelope expression is equivalent for its bounded
+physical sample coordinates. The final source was checked separately by
+the bit-difference and exact serial/staged parity tests.
+
+The existing simulated FHSS profile's 55 ms quiet on either side of each
+400 ms dwell imposes about 110 ms of actual zero envelope at each boundary
+before either ramp. It is independent of the source's inter-DATA gap. A
+disposable Rate 360 Hz and Added 1 example at 18 kHz accepted 2 ms of quiet
+and a 4 ms taper on each side. The native spectrum planner converged with
+661 Hz placement width and the envelope stayed below −10 dB for 7.17 ms,
+including 4 ms exactly zero. The Added 10 example with its longer 20.44 ms
+taper also had 4 ms of silence and stayed below −10 dB for 20.28 ms. These
+profiles also change the public number of fine coefficients. This check
+covers waveform shaping only. The matched **Fake: FCC (short guard)** GUI
+simulation decoded `e` and scored both quiet slots using the production
+envelope. The native GUI leaves external synthesizer tuning fixed. The
+shaping, native stream and GUI regression checks also passed.
+[Short-transition contract](symbol-burst.md#short-audio-transitions)
+
+The small receipts in ignored `local-evidence/short-gap-*` and
+`local-evidence/scheduled-bridge-*` record the converter, aperture, native
+receiver and FHSS cases. The disposable source and binaries are retired.
+Remove the receipts after the next implementation reproduces or supersedes
+these transition, detection and absence results.
+
 ## Continuous DATA in simulation and live audio — 22 November 2026
 
 The shared GUI runs Continuous DATA through the canonical native stream

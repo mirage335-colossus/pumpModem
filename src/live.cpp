@@ -117,7 +117,7 @@ std::size_t live_transmit_reservation(const Settings& settings, const Profile& p
     // larger of codec preparation and the subsequent live waveform phase.
     if (!settings.full_duplex) return queued;
     const auto storage = text_message_transmit_storage(message);
-    const auto playback = checked_workspace(profile.waveform.geometry().source_workspace_bytes,
+    const auto playback = checked_workspace(profile.waveform.emission_source_workspace_bytes(),
         playback_provider_workspace + playback_controller_workspace + lazy_bit_workspace);
     return std::max(storage.preparation_bytes,
         checked_workspace(std::max(storage.prepared_bytes, queued), playback));
@@ -1418,7 +1418,7 @@ struct Session::Impl {
             emission.emplace(make_emission(send, active, first_slot, slots, source_first, owner, stop));
             if (s.full_duplex && s.live_noise_dbfs_hz &&
                 emission->source().working_bytes > checked_workspace(
-                    calendar.geometry().source_workspace_bytes, playback_controller_workspace))
+                    calendar.emission_source_workspace_bytes(), playback_controller_workspace))
                 throw Error("Robust waveform exceeded its full-duplex source workspace allowance");
             const auto& report = emission->report();
             const auto helper_peak = report.helper_plan.helper_gain * report.composite_gain *

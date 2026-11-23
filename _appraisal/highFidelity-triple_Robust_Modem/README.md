@@ -502,6 +502,14 @@ intervals describe possible emissions between successive DATA slots. Source
 fill stops before the completion pair and the receiver still scores two
 physical quiet slots.
 
+Use `--scheduled-gap-bridge` on its own for full inter-DATA fill with
+short transitions at the adjoining DATA ramps. The ordinary Scheduled
+receiver scores these captures, which can contain same-band filler in
+its DATA observations. `--gap-fill-transmit off` gives the paired silent
+transmitter with the same receive geometry. The source receipt records
+the signed DATA/filler cross energy and the actual composite energy in
+addition to the two component energies and the fill sample count.
+
 Inspect actual native geometry before a long run:
 
 ```sh

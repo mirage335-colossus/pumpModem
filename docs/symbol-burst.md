@@ -504,6 +504,59 @@ simulation's 0.75 s gain-control state to settle. Keeping actual radio gain
 or a hardware transmit detector active through those portions remains a
 separate qualification. [Native paired results](validation.md#native-guarded-scheduled-gap-fill--22-november-2026)
 
+### Short audio transitions
+
+**Robust Setup → DATA cadence → Scheduled + short transitions** uses
+the same Scheduled addresses and optional waits. It overlaps
+independently keyed, same-band filler with the bit-independent DATA taper,
+then runs the native filler untapered through the nominal gap. Both peers
+select this cadence with Helper and FHSS Off. The last DATA gate ends
+normally and the receiver still requires two physically scored quiet slots.
+The receiver uses the full ordinary Scheduled window in this cadence. In
+broad timing conditions the filler can produce additional Current decisions.
+The GUI admission filters can help interpret the retained evidence. The
+guarded **Scheduled + gap fill** cadence remains available for isolation.
+
+Measure the longest interval of low **in-band power** through a DATA-to-fill
+or fill-to-DATA transition. The working target is below 100 ms, preferably
+below 10 ms. Count low short-window RMS relative to the adjoining settled
+DATA at multiple levels. Exact zeros alone can miss a deep envelope dip.
+Retain the prefilter and postfilter levels, peak headroom and transient
+out-of-band energy. Compare the result with the radio's detector threshold,
+AGC time constants and, if it hops, measured time to usable in-band output.
+[HF equipment appraisal](../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/55-equipment-and-front-end-effects.md)
+· [ITU-R pulse shaping and transient emissions](https://www.itu.int/dms_pubrec/itu-r/rec/sm/R-REC-SM.328-12-202509-I%21%21PDF-E.pdf)
+
+The outer DATA taper is at least eight fine chips, or 13.33 s in the
+3.6 Hz example. A short independent ramp at its edge cannot compensate for
+that falling power. Overlapping gradual transitions can keep the narrow
+waveform and may use the existing bit-independent cover at each edge. Their
+headroom depends on the coherent sum. An equal-power weighting can add
+up to 3 dB to the peak for two equal-amplitude streams. A convex weighting
+bounds that sum by the larger instantaneous amplitude and still permits
+cancellation. Measure the mixed waveform after the intended bandpass.
+
+The common clean receive aperture can be empty when the whole nominal gap
+is filled. Conditioning on one public timing hypothesis moves the desired
+DATA and filler boundaries together when they come from one transmitter.
+This permits a longer aperture after subtracting differential path and
+filter support. Other timing hypotheses can put full-strength filler in that
+same region. Candidate-relative exclusion is therefore a proposal tool until
+its admission likelihood accounts for admitted filler under competing timing,
+clock and channel hypotheses. A matched test needs those alternatives and
+interior absence controls in addition to wanted reception. The two physical
+quiet slots after the message use their own absence test.
+
+The original simulated FHSS profiles use 55 ms of silence on each edge of a
+400 ms dwell. Successive dwells therefore have approximately 110 ms with
+zero envelope, before accounting for either ramp. Shortening inter-DATA
+gaps leaves that separate interval in place. The illustrative **Fake: FCC
+(short guard)** option, `--fhss fake-fcc-short`, reduces this programmed gate
+to 2 ms on each edge and requests a 4 ms ramp with the native shaping planner.
+Both peers select that profile. The GUI waveform leaves external radio
+tuning fixed. Radio retune and mute behavior require timing measurements on
+the radio itself.
+
 ## Retained scheduling lessons
 
 Separating transmissions can give a receiver time to process queued work, but

@@ -20,6 +20,10 @@ ordinal, waveform profile, encryption/key, FEC, compression and DATA cadence.
 **Robust Setup → DATA cadence → Scheduled + gap fill** keeps the Scheduled
 calendar and uses the DATA waveform with a temporary key inside eligible gaps.
 Both peers need Helper and FHSS Off. [Gap fill and its guard](../symbol-burst.md#scheduled-gaps-and-temporary-key-noise)
+**Robust Setup → DATA cadence → Scheduled + short transitions** keeps the
+calendar and overlaps the independent filler with DATA's outer taper. Its
+full-window receiver can also score filler or adjacent DATA in broad timing
+conditions. [Scope and measured transitions](../symbol-burst.md#short-audio-transitions)
 **Robust setup → DATA cadence → Continuous DATA** removes the scheduled silence
 between successive DATA gates. Both peers need Helper, both burst waits and
 FHSS Off for this cadence. Scheduled remains the default because broad timing

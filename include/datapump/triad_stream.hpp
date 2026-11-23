@@ -75,6 +75,10 @@ struct PublicProfileConfig {
     // A receiver's locally widened capture preserves this source schedule.
     bool scheduled_gap_fill = false;
     std::optional<ScheduledGapFillBounds> gap_fill_bounds;
+    // Complement the nonterminal DATA ramps with independently keyed DATA
+    // waveform and bridge the entire space between their gates. The receiver
+    // uses the ordinary Scheduled geometry and may observe bridge energy.
+    bool scheduled_gap_bridge = false;
     // Additional receive-side transport support for excluding possible fill.
     std::uint64_t gap_fill_transport_halo_samples = 0;
 };
@@ -87,6 +91,10 @@ public:
     explicit PublicProfile(PublicProfileConfig, std::optional<Crypto> calendar_key = {});
     const PublicProfileConfig& config() const { return config_; }
     const Geometry& geometry() const { return geometry_; }
+    // Upper bound on simultaneous native waveform caches during emission.
+    std::size_t emission_source_workspace_bytes() const {
+        return geometry_.source_workspace_bytes * (config_.scheduled_gap_bridge ? 2 : 1);
+    }
     const HelperBurstPlan& calendar() const { return calendar_; }
     HelperBurstCoordinate origin() const { return {config_.format.epoch, 0}; }
     double effective_sample_rate() const { return config_.format.sample_rate; }
@@ -172,6 +180,8 @@ struct EmissionReport {
     // baseband energy in squared magnitude times sample count.
     std::uint64_t gap_fill_samples = 0;
     long double gap_fill_energy = 0;
+    // Signed interference term in |DATA + bridge|²; zero without overlap.
+    long double gap_bridge_cross_energy = 0;
 };
 
 // Bounded composite I/Q at baseband, relative to the configured DATA IF.

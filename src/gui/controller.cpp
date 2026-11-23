@@ -412,7 +412,8 @@ struct Controller::Impl {
         f(UiField::receiver_cpu_budget).text="0.6";
         for(const auto* value:{"0.25","0.4","0.6","0.8","1","2"})
             f(UiField::receiver_cpu_budget).options.push_back({value,std::string(value)+" s / 1 s"});
-        f(UiField::fhss).options={{"off","Off"},{"fake-fcc","Fake: FCC"},{"fake-eu","Fake: EU"}};
+        f(UiField::fhss).options={{"off","Off"},{"fake-fcc","Fake: FCC"},
+            {"fake-fcc-short","Fake: FCC (short guard)"},{"fake-eu","Fake: EU"}};
         f(UiField::fhss).selected="off";
         f(UiField::symbol_burst).options={{"off","Off"},{"1","1 symbol"},{"2","2 symbols"},
             {"3","3 symbols"},{"5","5 symbols"},{"10","10 symbols"}};
@@ -420,6 +421,7 @@ struct Controller::Impl {
         f(UiField::symbol_burst_random).options={{"0","0"},{"1","1"},{"2","2"},{"3","3"}};
         f(UiField::symbol_burst_random).selected="0";
         f(UiField::data_cadence).options={{"scheduled","Scheduled"},{"scheduled-fill","Scheduled + gap fill"},
+            {"scheduled-bridge","Scheduled + short transitions"},
             {"continuous","Continuous DATA"}};
         f(UiField::data_cadence).selected="scheduled";
         f(UiField::rf_oscillator).options.push_back({"baseband-clock","Baseband clock"});
@@ -734,6 +736,7 @@ struct Controller::Impl {
         const auto& cadence=f(UiField::data_cadence).selected;
         if(cadence=="scheduled")settings.data_cadence=live::DataCadence::scheduled;
         else if(cadence=="scheduled-fill")settings.data_cadence=live::DataCadence::scheduled_fill;
+        else if(cadence=="scheduled-bridge")settings.data_cadence=live::DataCadence::scheduled_bridge;
         else if(cadence=="continuous")settings.data_cadence=live::DataCadence::continuous;
         else throw Error("Select an available DATA cadence");
         settings.fhss_profile=f(UiField::fhss).selected;settings.fhss_frequencies_hz=fhss_list;
@@ -1760,7 +1763,8 @@ Controller::Controller(Options options):impl_(std::make_unique<Impl>(options)) {
 Controller::~Controller()=default;
 void Controller::set_developer_mode(bool value) {
     auto& p=*impl_;p.developer_mode=value;
-    p.f(UiField::fhss).options={{"off","Off"},{"fake-fcc","Fake: FCC"},{"fake-eu","Fake: EU"}};
+    p.f(UiField::fhss).options={{"off","Off"},{"fake-fcc","Fake: FCC"},
+        {"fake-fcc-short","Fake: FCC (short guard)"},{"fake-eu","Fake: EU"}};
     if(value)p.f(UiField::fhss).options.push_back({"fake-list","Fake: List"});
     p.controls();
 }

@@ -15,7 +15,7 @@ struct Calendar {
     std::uint64_t epoch = 0, initial_ordinal = 0;
 };
 
-enum class DataCadence : std::uint8_t { scheduled, continuous, scheduled_fill };
+enum class DataCadence : std::uint8_t { scheduled, continuous, scheduled_fill, scheduled_bridge };
 
 struct Settings {
     transfer::Options transfer;

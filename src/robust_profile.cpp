@@ -24,7 +24,7 @@ void check(bool condition, const char* message) {
 
 void validate_data_cadence(const Settings& settings, bool helper_enabled) {
     check(settings.data_cadence == DataCadence::scheduled || settings.data_cadence == DataCadence::continuous ||
-          settings.data_cadence == DataCadence::scheduled_fill,
+          settings.data_cadence == DataCadence::scheduled_fill || settings.data_cadence == DataCadence::scheduled_bridge,
           "Invalid Robust DATA cadence");
     if (settings.data_cadence == DataCadence::continuous)
         check(!helper_enabled && !settings.symbol_burst_wait && !settings.symbol_burst_random &&
@@ -33,6 +33,9 @@ void validate_data_cadence(const Settings& settings, bool helper_enabled) {
     if (settings.data_cadence == DataCadence::scheduled_fill)
         check(!helper_enabled && settings.fhss_profile == "off",
               "Scheduled Robust gap fill requires Helper and FHSS off");
+    if (settings.data_cadence == DataCadence::scheduled_bridge)
+        check(!helper_enabled && settings.fhss_profile == "off",
+              "Scheduled Robust short transitions require Helper and FHSS off");
 }
 
 bool in_range(double value, double low, double high) {
@@ -89,13 +92,15 @@ ShapingPlan minimum_shaping(const Settings& settings) {
         double minimum_carrier_spacing_hz;
         std::uint32_t sample_rate;
         bool fhss;
+        bool short_dwell_guard;
         bool operator==(const Shape&) const = default;
     };
     using Entry = std::pair<Shape, ShapingPlan>;
     thread_local std::optional<Entry> last;
     const auto& modem = settings.transfer.modem;
     const Shape shape{modem.bandwidth_hz, settings.added_symbols, settings.minimum_carrier_spacing_hz,
-                      modem.sample_rate, settings.fhss_profile != "off"};
+                      modem.sample_rate, settings.fhss_profile != "off",
+                      settings.fhss_profile == "fake-fcc-short"};
     validate_minimum_spacing(shape.minimum_carrier_spacing_hz);
     if (!last || last->first != shape) {
         Format format;
@@ -106,6 +111,10 @@ ShapingPlan minimum_shaping(const Settings& settings) {
         format.bit_seconds = .001;
         format.fhss = shape.fhss;
         format.quiet_seconds = shape.fhss ? .055 : 0;
+        if (shape.short_dwell_guard) {
+            format.quiet_seconds = .002;
+            format.ramp_seconds = .004;
+        }
         last = Entry{shape, plan_shaping(format)};
     }
     auto result = last->second;
@@ -176,7 +185,7 @@ std::vector<double> illustrated_hops(const Settings& settings, double bandwidth)
     if (rf < 800e6) {
         upper = 800e6;
         channels = 200;
-    } else if (settings.fhss_profile == "fake-fcc") {
+    } else if (settings.fhss_profile == "fake-fcc" || settings.fhss_profile == "fake-fcc-short") {
         spacing = std::max(25000., guarded);
         if (rf >= 902e6 && rf <= 928e6) {
             lower = 902e6; upper = 928e6; channels = guarded < 250000 ? 50 : 25;
@@ -250,7 +259,7 @@ void validate_settings(const Settings& s) {
           s.symbol_burst_wait == 3 || s.symbol_burst_wait == 5 || s.symbol_burst_wait == 10,
           "Invalid Robust Symbol_Burst minimum wait");
     check(s.symbol_burst_random <= 3, "Robust Symbol_Burst random extra must be 0 to 3");
-    check(s.fhss_profile == "off" || s.fhss_profile == "fake-fcc" ||
+    check(s.fhss_profile == "off" || s.fhss_profile == "fake-fcc" || s.fhss_profile == "fake-fcc-short" ||
           s.fhss_profile == "fake-eu" || s.fhss_profile == "fake-list", "Invalid Robust FHSS profile");
     check(s.fhss_frequencies_hz.size() <= 200 &&
           (s.fhss_profile != "fake-list" || s.fhss_frequencies_hz.size() >= 2),
@@ -435,8 +444,6 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     if (!plan.shaping) throw Error("Robust target SNR has no bounded native duration: " + plan.reason);
     const auto& shaping = *plan.shaping;
     const auto& geometry = shaping.geometry;
-    if (s.receiver_memory_limit && geometry.source_workspace_bytes >= *s.receiver_memory_limit)
-        throw Error("Robust native waveform workspace exceeds the configured session memory limit");
 
     PublicProfileConfig configuration;
     configuration.format = shaping.format;
@@ -448,6 +455,7 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     configuration.random_extra_bits = s.symbol_burst_random;
     configuration.continuous_data = s.data_cadence == DataCadence::continuous;
     configuration.scheduled_gap_fill = s.data_cadence == DataCadence::scheduled_fill;
+    configuration.scheduled_gap_bridge = s.data_cadence == DataCadence::scheduled_bridge;
     configuration.arrival_low_seconds = arrival.lower;
     configuration.arrival_high_seconds = arrival.upper;
     configuration.capture_lead_seconds = std::max(.25, -arrival.lower + .25);
@@ -473,6 +481,8 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
             configuration.arrival_low_seconds, configuration.arrival_high_seconds, halo};
     }
     PublicProfile waveform(std::move(configuration), s.transfer.key);
+    if (s.receiver_memory_limit && waveform.emission_source_workspace_bytes() >= *s.receiver_memory_limit)
+        throw Error("Robust native waveform workspace exceeds the configured session memory limit");
     rx.helper = waveform.helper_plan();
     const auto power = data_power_reference(waveform.config().format, key, stop);
     const auto reference_gain = 1 / std::sqrt(power.mean_norm);

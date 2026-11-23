@@ -3,6 +3,7 @@
 #include "datapump/robust_profile.hpp"
 #include "datapump/triad_message_receiver.hpp"
 #include "datapump/triad_stream_receiver.hpp"
+#include "datapump/triad_shaping.hpp"
 #include "../src/live_capture_queue.hpp"
 #include "../src/live_finite_plan.hpp"
 
@@ -244,6 +245,46 @@ live::Settings settings(bool simulation) {
     return s;
 }
 
+void short_fhss_profile() {
+    auto s = settings(true);
+    s.transfer.modem.bandwidth_hz = 360;
+    s.minimum_carrier_spacing_hz = 265;
+    s.receiver_memory_limit = 2U * 1024 * 1024 * 1024;
+    s.fhss_profile = "fake-fcc";
+    const auto ordinary = live::detail::prepare_profile(s, *s.calendar, {});
+    s.fhss_profile = "fake-fcc-short";
+    const auto shortened = live::detail::prepare_profile(s, *s.calendar, {});
+    const auto& old_format = ordinary.waveform.config().format;
+    const auto& new_format = shortened.waveform.config().format;
+    const auto& shape = shortened.waveform.geometry();
+    check(old_format.quiet_seconds == .055 && new_format.quiet_seconds == .002 &&
+          old_format.dwell_seconds == new_format.dwell_seconds &&
+          !shortened.hop_shifts_hz.empty(), "Short FHSS profile lost its independent gate or hop schedule");
+    check(shape.bit_seconds < 60 && shaping_envelope(new_format, shape, .4028L) > 0 &&
+          shaping_envelope(new_format, shape, .399L) == 0,
+          "Short FHSS did not open its native envelope at the modeled boundary");
+
+    live::Session session;
+    session.start(s);
+    const auto ready_to_send = wait(session, [](const auto& out) { return out.running && !out.transmit_unavailable; },
+        "Short FHSS simulation did not prepare");
+    check(ready_to_send.slot_stride_seconds && *ready_to_send.slot_stride_seconds * 6 * 6000 < 2'400'000,
+          "Short FHSS exceeds the finite sample budget");
+    session.transmit(Message{.data = {'e'}});
+    std::vector<transfer::Received> received;
+    const auto terminal = wait(session, [&](auto& out) {
+        for (auto& record : out.received) received.push_back(std::move(record));
+        check(out.error.empty() && out.receiver_error.empty(), "Short FHSS native simulation failed");
+        return !out.transmitting && out.simulation_replay_available;
+    }, "Short FHSS simulation did not finish", 60s);
+    check(received.size() == 1 && received.front().stream_complete &&
+          received.front().content.message.data == Bytes{'e'} &&
+          terminal.pattern_steps.size() == 5 &&
+          terminal.pattern_steps[3].decision == live::PatternDecision::quiet &&
+          terminal.pattern_steps[4].decision == live::PatternDecision::quiet,
+          "Short FHSS lost the message or physical quiet completion");
+}
+
 void data_cadence_profiles() {
     auto s = settings(true);
     const auto calendar = *s.calendar;
@@ -340,6 +381,52 @@ void scheduled_fill_profiles() {
     check(rejects([&] { live::validate_settings(incompatible); }) &&
           rejects([&] { live::detail::prepare_profile(incompatible, calendar, {}); }),
           "Scheduled gap fill accepted FHSS");
+}
+
+void scheduled_bridge_profiles() {
+    auto s = settings(false);
+    s.symbol_burst_wait = 1;
+    s.symbol_burst_random = 2;
+    const auto calendar = *s.calendar;
+    const auto scheduled = live::detail::prepare_profile(s, calendar, {});
+    s.data_cadence = live::DataCadence::scheduled_bridge;
+    live::validate_settings(s);
+    const auto bridged = live::detail::prepare_profile(s, calendar, {});
+    const auto reference = live::detail::with_capture_uncertainty(scheduled, .2, .1, 100);
+    const auto adjusted = live::detail::with_capture_uncertainty(bridged, .2, .1, 100);
+    const auto& waveform = adjusted.waveform;
+    const auto expected = reference.waveform.slot(1);
+    const auto actual = waveform.slot(1);
+    check(!scheduled.waveform.config().scheduled_gap_bridge && waveform.config().scheduled_gap_bridge &&
+          !waveform.config().scheduled_gap_fill && !waveform.config().continuous_data &&
+          waveform.transmit_slot(0) == reference.waveform.transmit_slot(0) &&
+          actual.tx == expected.tx && actual.symbol_ordinal == expected.symbol_ordinal &&
+          actual.observation.first == expected.observation.first && actual.observation.stop == expected.observation.stop &&
+          actual.quiet_aperture.first == expected.quiet_aperture.first && actual.quiet_aperture.stop == expected.quiet_aperture.stop,
+          "Scheduled short transitions changed the calendar or ordinary receive geometry");
+    const auto rejects = [](const auto& operation) {
+        try { operation(); } catch (const Error& error) {
+            return std::string_view(error.what()).starts_with("Scheduled Robust short transitions require");
+        }
+        return false;
+    };
+    auto with_helper = s, with_hops = s;
+    with_helper.helper.power_w = 1;
+    with_hops.fhss_profile = "fake-fcc";
+    for (const auto* incompatible : {&with_helper, &with_hops})
+        check(rejects([&] { live::validate_settings(*incompatible); }) &&
+              rejects([&] { live::detail::prepare_profile(*incompatible, calendar, {}); }),
+              "Scheduled short transitions accepted active Helper or FHSS");
+    auto bounded = s;
+    bounded.receiver_memory_limit = waveform.emission_source_workspace_bytes();
+    bool source_rejected = false;
+    try { (void)live::detail::prepare_profile(bounded, calendar, {}); }
+    catch (const Error& error) {
+        source_rejected = std::string_view(error.what()) ==
+            "Robust native waveform workspace exceeds the configured session memory limit";
+    }
+    check(*bounded.receiver_memory_limit > waveform.geometry().source_workspace_bytes && source_rejected,
+          "Scheduled short transitions admitted a session limit with room for only its source caches");
 }
 
 void carrier_band_matches_profile() {
@@ -2069,6 +2156,15 @@ int main(int argc, char** argv) {
         if (argc == 2 && std::string_view(argv[1]) == "--scheduled-fill") {
             scheduled_fill_profiles();
             complete_native_simulation(false, false, false, live::DataCadence::scheduled_fill);
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--scheduled-bridge") {
+            scheduled_bridge_profiles();
+            complete_native_simulation(false, false, false, live::DataCadence::scheduled_bridge);
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--short-fhss") {
+            short_fhss_profile();
             return 0;
         }
         if (argc == 3 && std::string_view(argv[1]) == "--fixed-receiver-link") {

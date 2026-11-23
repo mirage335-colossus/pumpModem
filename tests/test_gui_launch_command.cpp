@@ -62,7 +62,7 @@ void parsing_and_formatting() {
           "Older partial commands must leave the minimum carrier spacing unspecified");
     check(!launch_command::parse("--rate 1200").data_cadence,
           "Older partial commands must leave DATA cadence unspecified");
-    for (const auto* cadence : {"scheduled", "scheduled-fill", "continuous"}) {
+    for (const auto* cadence : {"scheduled", "scheduled-fill", "scheduled-bridge", "continuous"}) {
         const auto patch = launch_command::parse(std::string("--data-cadence ") + cadence);
         check(patch.data_cadence == cadence && launch_command::parse(launch_command::format(patch)) == patch,
               "DATA cadence must survive launch round trips");
@@ -174,7 +174,7 @@ void parsing_and_formatting() {
     const auto clock=launch_command::parse("--clock-sync GPS_0.1ms-400ms_region-2564ms_offset --audio-error 30ms --dsss-factor 1000 --fhss fake-0.4s-200 --live-duplex yes");
     check(clock.fhss=="fake-fcc"&&launch_command::format(clock).find("--fhss fake-fcc")!=std::string::npos,
         "legacy Fake FHSS must migrate to the persistent FCC preference");
-    for(const auto* choice:{"off","fake-fcc","fake-eu","fake-list"}) {
+    for(const auto* choice:{"off","fake-fcc","fake-fcc-short","fake-eu","fake-list"}) {
         const auto patch=launch_command::parse(std::string("--fhss ")+choice);
         check(patch.fhss==choice&&launch_command::parse(launch_command::format(patch))==patch,
             "FHSS preference did not survive CLI/parameter-list round trip");

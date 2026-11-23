@@ -560,6 +560,12 @@ void data_cadence_policy() {
     gui::Controller filled({.simulation=true, .launch_settings=fill});
     check(fill.data_cadence == "scheduled-fill" && filled.settings().data_cadence == live::DataCadence::scheduled_fill &&
           filled.field(F::data_cadence).selected == "scheduled-fill");
+    filled.select(F::data_cadence, "scheduled-bridge");
+    const auto bridge = gui::launch_command::parse(filled.field(F::planner_command).text);
+    gui::Controller bridged({.simulation=true, .launch_settings=bridge});
+    check(bridge.data_cadence == "scheduled-bridge" &&
+          bridged.settings().data_cadence == live::DataCadence::scheduled_bridge &&
+          bridged.field(F::data_cadence).selected == "scheduled-bridge");
     fresh.select(F::data_cadence, "scheduled");
     check(fresh.settings().data_cadence == live::DataCadence::scheduled);
 }

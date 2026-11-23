@@ -106,7 +106,8 @@ struct Options {
     std::optional<std::size_t> memory_bytes;
     std::size_t chunk=4096;
     bool service_replay=false, service_options=false;
-    bool continuous_data=false, protected_discovery=false, scheduled_gap_fill=false;
+    bool continuous_data=false, protected_discovery=false;
+    bool scheduled_gap_fill=false, scheduled_gap_bridge=false;
     std::optional<bool> gap_fill_transmit;
     bool hf_predictive_quiet=false;
     bool hf_compare_admitted_models=false, hf_phase_filter=false, hf_phase_filter_receiver=false, hf_phase_filter_paths=false;
@@ -126,6 +127,7 @@ struct Options {
     unsigned service_episodes=1;
     std::optional<std::uint64_t> service_backlog_begin,service_backlog_end,service_spool_limit;
     bool helper=false, list=false, help=false, hf_phase_bank=false, search_options=false, hf_public_phase_receiver=false, hf_physical_diagnostic=false, hf_phase_refinement=false;
+    bool fills_scheduled_gaps() const {return scheduled_gap_fill||scheduled_gap_bridge;}
 };
 void require(bool value, const char* text) { if(!value) throw Error(text); }
 std::uint64_t integer(const std::string& text) {
@@ -145,6 +147,7 @@ Options parse(int argc,char** argv) {
         if(key=="--service-replay") {o.service_replay=true;continue;}
         if(key=="--continuous-data") {o.continuous_data=true;continue;}
         if(key=="--scheduled-gap-fill") {o.scheduled_gap_fill=true;continue;}
+        if(key=="--scheduled-gap-bridge") {o.scheduled_gap_bridge=true;continue;}
         if(key=="--protected-discovery") {o.protected_discovery=true;continue;}
         if(key=="--hf-predictive-quiet") {o.hf_predictive_quiet=true;continue;}
         if(key=="--hf-compare-admitted-models") {o.hf_compare_admitted_models=true;continue;}
@@ -286,11 +289,12 @@ Options parse(int argc,char** argv) {
     require(!o.continuous_data||direct_reference_cadence,
         "Continuous DATA requires a direct reference CPU plan or receive, one episode, Helper/FEC off, "
         "and wanted, noise or wrong-key control without an alternate receiver policy");
-    require(!o.scheduled_gap_fill||(direct_reference_cadence&&!o.continuous_data&&!o.service_replay&&
+    require(!(o.scheduled_gap_fill&&o.scheduled_gap_bridge),"select one Scheduled gap policy");
+    require(!o.fills_scheduled_gaps()||(direct_reference_cadence&&!o.continuous_data&&!o.service_replay&&
         !o.hf_normalized_null&&!o.hf_nominal_gain_witness&&!o.hf_live_gain_contrast),
-        "Scheduled gap fill requires a direct reference CPU plan or receive, one episode, Helper/FEC off, "
+        "Scheduled gap fill or bridge requires a direct reference CPU plan or receive, one episode, Helper/FEC off, "
         "and wanted, noise or wrong-key control with the canonical scheduled receiver");
-    require(!o.gap_fill_transmit||o.scheduled_gap_fill,"gap fill transmit control requires Scheduled gap fill");
+    require(!o.gap_fill_transmit||o.fills_scheduled_gaps(),"gap fill transmit control requires Scheduled gap fill or bridge");
     const bool gui_repeated=o.mode=="gui-repeated-bit";
     require(!o.repeat_selected_attempt||(gui_repeated&&o.repeat_separate_attempts&&
         *o.repeat_selected_attempt%3==0&&*o.repeat_selected_attempt<=48&&
@@ -1380,7 +1384,7 @@ Setup setup(const Options& o,std::stop_token stop) {
     const bool evolving_native_chain_case=scenario.id.starts_with("hf-vector-evolving-chain-");
     const bool evolving_vector_case=scenario.id.starts_with("hf-vector-evolving");
     const bool native_chain_case=scenario.id.starts_with("hf-wave-chain-")||vector_native_chain_case;
-    if((o.continuous_data||o.scheduled_gap_fill)&&(native_chain_case||scenario.family!="skywave-1-30MHz"||
+    if((o.continuous_data||o.fills_scheduled_gaps())&&(native_chain_case||scenario.family!="skywave-1-30MHz"||
         scenario.channel.fullwave_reflection||scenario.channel.magnetoionic_reflection||
         scenario.channel.wave_optics||scenario.channel.phase_screens||scenario.channel.vector_oblique||
         scenario.channel.vector_two_hop))
@@ -1566,7 +1570,7 @@ Setup setup(const Options& o,std::stop_token stop) {
     f.added_symbols=o.waveform=="smoke"?1:scenario.waveform.added_symbols;
     f.bit_seconds=o.bit_seconds.value_or(o.waveform=="smoke"?.001:scenario.waveform.requested_bit_seconds);
     f.fhss=o.waveform=="reference"&&scenario.waveform.fhss;
-    if(o.scheduled_gap_fill&&f.fhss)throw Unavailable("Scheduled gap fill requires FHSS off");
+    if(o.fills_scheduled_gaps()&&f.fhss)throw Unavailable("Scheduled gap fill or bridge requires FHSS off");
     f.encrypt=true;f.epoch=1793404800;f.symbol_ordinal=0;
     f.pulse_shape=o.pulse=="tapered-rrc"?PulseShape::TaperedRrc:PulseShape::Rrc;
     pc.data_if_hz=240;
@@ -1583,6 +1587,7 @@ Setup setup(const Options& o,std::stop_token stop) {
     pc.helper_enabled=o.helper;
     pc.continuous_data=o.continuous_data;
     pc.scheduled_gap_fill=o.scheduled_gap_fill;
+    pc.scheduled_gap_bridge=o.scheduled_gap_bridge;
     if(o.helper) {
         f.sample_rate=6000;pc.data_if_hz=1725;
         pc.helper.data_power_w=1;pc.helper.power_w=2;pc.helper.ratio_limit_db=90;
@@ -1606,6 +1611,7 @@ Setup setup(const Options& o,std::stop_token stop) {
     PublicProfile profile(capture_config);
     auto txpc=pc;if(o.control=="wrong-ordinal")txpc.format.symbol_ordinal=1;
     txpc.scheduled_gap_fill=pc.scheduled_gap_fill&&o.gap_fill_transmit.value_or(true);
+    txpc.scheduled_gap_bridge=pc.scheduled_gap_bridge&&o.gap_fill_transmit.value_or(true);
     PublicProfile transmit_profile(txpc);
     std::string message=o.message;
     if((o.control=="interior-fade"||o.control=="capture-gap")&&message=="e")message="A";
@@ -2001,9 +2007,13 @@ Json plan_json(const Setup& s,const Options& o) {
         const auto first=make_receiver_slot_plan(s.profile,s.receiver,0);
         result["first_slot_workspace_bytes"]=receiver_detail::protected_slot_workspace(s.receiver,first,s.resources.workers);
     }
-    if(o.scheduled_gap_fill) {
-        result["scheduled_gap_fill"]=object({{"receiver_enabled",true},
-            {"transmitter_enabled",s.transmit_profile.config().scheduled_gap_fill}});
+    if(o.fills_scheduled_gaps()) {
+        if(o.scheduled_gap_bridge)
+            result["scheduled_gap_bridge"]=object({{"receiver","ordinary_scheduled"},
+                {"transmitter_enabled",s.transmit_profile.config().scheduled_gap_bridge}});
+        else
+            result["scheduled_gap_fill"]=object({{"receiver_enabled",true},
+                {"transmitter_enabled",s.transmit_profile.config().scheduled_gap_fill}});
         const auto first=make_receiver_slot_plan(s.profile,s.receiver,0);
         const auto workspace=first.scheduled_gap_fill?receiver_detail::protected_slot_workspace:receiver_slot_workspace;
         result["first_slot_workspace_bytes"]=workspace(s.receiver,first,s.resources.workers);
@@ -4138,7 +4148,8 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
     const ServiceTimer render_timer;
     EmissionOptions eo;eo.mode=o.control=="noise"?EmissionMode::Quiet:EmissionMode::Message;
     eo.slot_count=s.truth.size();eo.stop=deadline.stop.get_token();
-    if(s.transmit_profile.config().scheduled_gap_fill&&eo.mode==EmissionMode::Message)
+    const auto& source_config=s.transmit_profile.config();
+    if((source_config.scheduled_gap_fill||source_config.scheduled_gap_bridge)&&eo.mode==EmissionMode::Message)
         eo.qualification_gap_fill_key=qualification_gap_fill_key(o.seed);
     if(o.repeat_bit||o.hf_nominal_gain_witness_bit_one)eo.bits=s.truth;
     else if(eo.mode==EmissionMode::Message)eo.bit_at=s.draft->bit_source(0,[&](std::uint64_t i){return message_address(s.transmit_profile,i);});
@@ -5206,9 +5217,14 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
         {"reference_relative_standard_error",source_report.data_reference.tile_relative_standard_error},
         {"generated_samples",source_report.generated_samples},{"data_energy_sample_sum",static_cast<double>(source_report.data_energy)},
         {"helper_energy_sample_sum",static_cast<double>(source_report.helper_energy)}});
-    if(o.scheduled_gap_fill) {
+    if(o.fills_scheduled_gaps()) {
         result["source"]["gap_fill_emitted_samples"]=source_report.gap_fill_samples;
         result["source"]["gap_fill_energy_sample_sum"]=static_cast<double>(source_report.gap_fill_energy);
+    }
+    if(o.scheduled_gap_bridge) {
+        result["source"]["gap_bridge_cross_energy_sample_sum"]=static_cast<double>(source_report.gap_bridge_cross_energy);
+        result["source"]["combined_energy_sample_sum"]=static_cast<double>(source_report.data_energy+
+            source_report.gap_fill_energy+source_report.gap_bridge_cross_energy);
     }
     const bool shared_render=o.hf_predictive_quiet||comparison_replay;
     result["timing"]=object({{"wall_seconds",shared_render?render_time.wall+std::chrono::duration<double>(end-policy_begin).count():std::chrono::duration<double>(end-begin).count()},
@@ -5651,6 +5667,7 @@ int main(int argc,char** argv) {
             result["service_replay_usage"]="--service-replay in receive/plan pre-renders native I/Q into the canonical bounded ObservationSpool; accepts --service-episodes 1|2, --service-spool-byte-limit N, paired --service-backlog-begin-slot N --service-backlog-end-slot N, and chunks <=4096. Full service includes receiver construction, unchanged-chunk replay, drain/destruction and separately reported replay reads/hash; rendering is excluded. Two episodes retain the global ordinal and fixed two-quiet gap, with a final extra quiet slot. Backlog eligibility and communication completion are separate; no capacity qualification.";
             result["continuous_data_usage"]="--continuous-data selects adjacent sample-grid DATA gates and the native protected-window scorer for a direct HF reference CPU plan or receive. One episode, Helper/FEC off, with wanted, noise or wrong-key control. The receiver still scores two physical quiet slots for completion.";
             result["scheduled_gap_fill_usage"]="--scheduled-gap-fill uses the canonical scheduled calendar and native gap fill for direct HF reference CPU plan or receive. One episode, Helper/FHSS/FEC off, with wanted, noise or wrong-key control. Use --gap-fill-transmit off to keep the same receiver declaration and suppress only transmitted fill.";
+            result["scheduled_gap_bridge_usage"]="--scheduled-gap-bridge uses native short transitions and the ordinary Scheduled receiver on the same direct HF reference CPU plan or receive. Use --gap-fill-transmit off for a paired silent transmitter.";
             result["protected_discovery_usage"]="--protected-discovery requires --continuous-data and enables native protected-aperture affine candidate discovery on eligible unresolved slots.";
             result["hf_compare_admitted_models_usage"]="--hf-compare-admitted-models opts CPU receive/plan into comparison of all supported models with unchanged ordinary/overlap workspace quotes; excludes --hf-public-phase-receiver";
             result["hf_phase_filter_usage"]="--hf-phase-filter requires hf-search, --hf-phase-refinement and --search-timing full; reports a bounded public phase-filter diagnostic without changing receiver decisions";

@@ -166,8 +166,9 @@ void scheduled_gap_fill_emission() {
     aes.fill(0x48);
     const auto different_key = Crypto::from_independent_roots(serpent, aes);
 
-    const auto emit = [&](const PublicProfile& mode, const Crypto& key, bool staged) {
-        Emission emission(mode, data_key, EmissionOptions{.bits = bits, .qualification_gap_fill_key = key});
+    const auto emit = [&](const PublicProfile& mode, const Crypto& key, bool staged,
+                          std::span<const std::uint8_t> draft) {
+        Emission emission(mode, data_key, EmissionOptions{.bits = draft, .qualification_gap_fill_key = key});
         auto source = emission.source();
         constexpr std::size_t chunk = 257;
         check(source.geometry.source_samples < 100'000, "scheduled fill fixture exceeded its sample budget");
@@ -191,10 +192,10 @@ void scheduled_gap_fill_emission() {
         return std::pair{std::move(samples), emission.report()};
     };
 
-    const auto [ordinary, ordinary_report] = emit(scheduled, fill_key, false);
-    const auto [with_fill, fill_report] = emit(filled, fill_key, false);
-    const auto [parallel, parallel_report] = emit(filled, fill_key, true);
-    const auto [changed_key, changed_report] = emit(filled, different_key, false);
+    const auto [ordinary, ordinary_report] = emit(scheduled, fill_key, false, bits);
+    const auto [with_fill, fill_report] = emit(filled, fill_key, false, bits);
+    const auto [parallel, parallel_report] = emit(filled, fill_key, true, bits);
+    const auto [changed_key, changed_report] = emit(filled, different_key, false, bits);
     check(with_fill.size() == ordinary.size() && with_fill == parallel &&
           fill_report.data_energy == ordinary_report.data_energy &&
           fill_report.gap_fill_samples == parallel_report.gap_fill_samples &&
@@ -220,6 +221,78 @@ void scheduled_gap_fill_emission() {
         }
     }
     check(different_fill, "scheduled fill ignored its independent temporary key");
+
+    config.scheduled_gap_fill = false;
+    config.scheduled_gap_bridge = true;
+    const PublicProfile bridged(config);
+    const auto [bridge, bridge_report] = emit(bridged, fill_key, false, bits);
+    const auto [bridge_staged, bridge_staged_report] = emit(bridged, fill_key, true, bits);
+    const auto [bridge_alternate, alternate_report] = emit(bridged, different_key, false, bits);
+    const std::array<std::uint8_t, 3> flipped{1, 1, 0};
+    const auto [ordinary_flipped, ordinary_flipped_report] = emit(scheduled, fill_key, false, flipped);
+    const auto [bridge_flipped, bridge_flipped_report] = emit(bridged, fill_key, false, flipped);
+    check(bridged.emission_source_workspace_bytes() == 2 * scheduled.emission_source_workspace_bytes() &&
+          bridge.size() == ordinary.size() && ordinary_flipped.size() == ordinary.size() &&
+          bridge_flipped.size() == ordinary.size() && bridge == bridge_staged &&
+          bridge_report.gap_fill_samples == bridge_staged_report.gap_fill_samples &&
+          bridge_report.data_energy == ordinary_report.data_energy &&
+          bridge_flipped_report.data_energy == ordinary_flipped_report.data_energy &&
+          bridge_report.gap_fill_energy == bridge_staged_report.gap_fill_energy &&
+          bridge_report.gap_fill_energy == bridge_flipped_report.gap_fill_energy &&
+          bridge_report.gap_bridge_cross_energy == bridge_staged_report.gap_bridge_cross_energy &&
+          bridge_report.gap_fill_energy > 0 && alternate_report.gap_fill_energy > 0,
+          "scheduled bridge changed DATA energy or staged samples, or failed to render");
+    for (std::size_t slot = 0; slot < bits.size(); ++slot) {
+        const auto ordinary_slot = scheduled.slot(slot);
+        const auto bridge_slot = bridged.slot(slot);
+        check(ordinary_slot.tx == bridge_slot.tx &&
+              ordinary_slot.observation.first == bridge_slot.observation.first &&
+              ordinary_slot.observation.stop == bridge_slot.observation.stop &&
+              ordinary_slot.quiet_aperture.first == bridge_slot.quiet_aperture.first &&
+              ordinary_slot.quiet_aperture.stop == bridge_slot.quiet_aperture.stop &&
+              bridge_slot.protected_data_aperture.size() == 0,
+              "scheduled bridge changed public DATA or physical quiet geometry");
+    }
+    std::array<std::uint64_t, bits.size()> begin{};
+    for (std::size_t slot = 0; slot < begin.size(); ++slot)
+        begin[slot] = bridged.calendar().distance(bridged.origin(), bridged.transmit_slot(slot).pattern_begin);
+    const auto& shape = bridged.geometry();
+    const auto ramp = static_cast<std::uint64_t>(std::ceil(config.format.sample_rate *
+        std::max(config.format.ramp_seconds, 8 / shape.fine_chip_rate_hz)));
+    const auto ideal_active = config.format.sample_rate * shape.bit_seconds;
+    check(std::abs(ideal_active - std::round(ideal_active)) > .1,
+          "scheduled bridge fixture needs a fractional DATA ending before sample rounding");
+    const auto active = static_cast<std::uint64_t>(std::ceil(ideal_active));
+    long double bridge_energy = 0;
+    bool overlaps_wanted = false, different_bridge = false, reaches_gap_core = false, flips_wanted_core = false;
+    for (std::size_t sample = 0; sample < ordinary.size(); ++sample) {
+        bridge_energy += std::norm(bridge[sample]);
+        const bool inter_data = (begin[0] + active - ramp <= sample && sample < begin[1] + ramp) ||
+                                (begin[1] + active - ramp <= sample && sample < begin[2] + ramp);
+        if (inter_data) {
+            overlaps_wanted |= ordinary[sample] != Complex{} && ordinary[sample] != bridge[sample];
+            different_bridge |= bridge[sample] != bridge_alternate[sample];
+            reaches_gap_core |= begin[0] + active < sample && sample < begin[1] && bridge[sample] != Complex{};
+            if (ordinary[sample] != bridge[sample])
+                check(ordinary[sample] == ordinary_flipped[sample],
+                      "scheduled bridge overlapped bit-dependent DATA");
+            const auto component = bridge[sample] - ordinary[sample];
+            const auto flipped_component = bridge_flipped[sample] - ordinary_flipped[sample];
+            const auto scale = std::max({1., std::abs(bridge[sample]), std::abs(bridge_flipped[sample]),
+                                          std::abs(ordinary[sample]), std::abs(ordinary_flipped[sample])});
+            check(std::abs(component - flipped_component) <= 8 * std::numeric_limits<double>::epsilon() * scale,
+                  "scheduled bridge component depended on the transmitted DATA bits");
+        } else {
+            flips_wanted_core |= ordinary[sample] != ordinary_flipped[sample];
+            check(ordinary[sample] == bridge[sample] && ordinary[sample] == bridge_alternate[sample] &&
+                  ordinary_flipped[sample] == bridge_flipped[sample],
+                  "scheduled bridge changed a DATA core sample or added terminal filler");
+        }
+    }
+    const auto accounted = bridge_report.data_energy + bridge_report.gap_fill_energy + bridge_report.gap_bridge_cross_energy;
+    check(overlaps_wanted && different_bridge && reaches_gap_core && flips_wanted_core &&
+          std::abs(accounted - bridge_energy) < 1e-10L * bridge_energy,
+          "scheduled bridge lost its crossfade, temporary key, or component energy accounting");
 }
 
 StreamReceiverOptions options() {

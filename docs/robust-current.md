@@ -656,10 +656,13 @@ and one pulse bandwidth. Both peers need the same effective spacing. Invalid aud
 bandwidth or fixed Helper placement fails configuration explicitly. None/Off
 channel choices preserve an explicit unperturbed baseline.
 
-Robust Setup offers **Scheduled**, **Scheduled + gap fill**, and **Continuous DATA**
+Robust Setup offers **Scheduled**, **Scheduled + gap fill**,
+**Scheduled + short transitions**, and **Continuous DATA**
 in simulation and live operation. Scheduled is the default. Scheduled + gap
 fill keeps the Scheduled calendar and optional waits, and adds a temporary-key
-waveform inside eligible gaps. It requires Helper and FHSS Off. Continuous DATA
+waveform inside eligible gaps. Scheduled + short transitions overlaps the
+filler with DATA's bit-independent edge taper. Both filled cadences require
+Helper and FHSS Off. Continuous DATA
 places consecutive DATA gates on adjacent samples and also requires both Symbol
 Burst waits Off. Both peers must match the cadence, anchor and initial ordinal.
 [Cadence and receiver evidence](symbol-burst.md)
