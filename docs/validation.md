@@ -1318,6 +1318,215 @@ In its initial 12 s measurement interval, the SSH relay returned
 This corroborates the local presentation measurement. TCP byte counts
 and the effect of transport on receiver compute remain unmeasured.
 
+## First-window failure at 0.1 Hz with 265 Hz spacing
+
+A bounded follow-up at `08f7a8ea` loaded the same link assumptions through
+the shared GUI Controller, enabled Simulation, and used two raw DATA bits.
+Rate was 0.1 Hz, Spreading was Off, and the selected minimum carrier spacing
+was 265 Hz. The 6 kHz receive path used HF Worst, Each 65%, and Margin 3.
+Helper, FHSS, and burst waits were Off. The sandbox had no accessible
+physical Vulkan GPU. After reported GPU fallback, the Ryzen 5 PRO 5650U
+used 24 automatic workers with about 8.7 GiB of usable receiver workspace.
+The first public slot's native DSP quote alone was 43.8 GiB. The earlier GUI
+advanced to 6,766.6 of 27,017.0 modeled RX seconds in 106.1 seconds of compute
+and reported `receiver_workspace_limit` at the first window. It published
+zero slot decisions. The revised GUI uses the first-slot workspace quote
+before generating samples when the first window must be admitted alone.
+The same settings now report the required and available MiB before input
+progress starts. At 3.6 Hz, a plan-only check on otherwise matched settings
+quoted about 1.32 GiB of first-slot DSP workspace.
+
+With the physical Radeon render node available, the 0.1 Hz GUI session
+initialized RADV RENOIR and reported a shared Vulkan workspace of 3,576 MiB.
+The frequency-tile planner selected `native-vulkan-workspace`. The first
+slot required 44,888.10 MiB against 9,302.02 MiB of available receiver
+workspace. The GUI reported this before generating input or executing
+GPU search rows.
+
+A native CPU plan for the same receive geometry at 64 workers quoted
+61,057,109,404 bytes (56.9 GiB) for the first slot's DSP. This was a
+plan-only check on the local host with a nominal 128 GB limit. A 32-vCPU
+zLab allocation can resolve to 64 workers. Its usable shared memory,
+application and input reservations, and service through both quiet slots
+still depend on the actual allocation.
+
+During the original CPU run, received FFT peaks reached about 68 dB above modeled
+bin noise. The previous simulation palette saturated at +34 dB. The revised
+palette keeps the dim-noise mapping and extends the fixed upper end for
+strong configured links. The color scale applies to the presentation.
+In a 14-second presentation check at 3.6 Hz with the same link and channel
+settings, 133 actual central-carrier preview peaks exceeded the old
+ceiling. Their revised intensities spanned 0.58–0.86. That run executed
+16,463,070 Vulkan search rows before the planned cancellation. Complete
+service at 0.1 Hz remains unverified on other hardware.
+
+The shared waterfall now samples along modeled time for long simulations.
+In a controlled 0.1 Hz DATA preview at 1,500 samples/s, with 265 Hz spacing
+and spread Off, it retained 100 rows covering 3,600.25 modeled seconds before
+planned cancellation. Each row covered about 36 seconds. Across the interior
+rows from 1,260 to 3,600 modeled seconds, the three carrier bins varied by
+approximately 12.6, 11.5 and 10.7 dB. The run stopped before slot scoring.
+A separate short fixture captured all rows over the first DATA bit, then
+retained the same history through the paced replay and two scored quiet slots.
+Manual replay restored that history with its original scale after a carrier edit.
+
+A presentation-only check at 0.1 Hz used the native source, streaming
+channel and waterfall recorder at 6 kHz with 265 Hz spacing, 1,725 Hz IF,
+HF Worst, Each 65%, Margin 3 and channel seed 74021. The first 50 rows
+covered 1,800.125 modeled seconds. From 720 to 1,800 seconds into DATA,
+row power integrated within ±100 Hz of each nominal carrier varied by
+13.6, 9.7 and 9.0 dB. These ranges combine waveform amplitude, interference
+and frequency motion under one channel realization. A matched source and link
+with spread and selective perturbation Off gave a median 90%-power width of
+11.7 Hz in each carrier region, versus 149.4 Hz for HF Worst. Widths were
+measured in the 5.86 Hz FFT bins within ±100 Hz of each nominal center after
+subtracting median out-of-band noise. Neither case had two consecutive interior
+rows at least 10 dB below the corresponding band-power peak. The measurements
+describe the averaged display in these two realizations and ran no scorer.
+The Console comparison in ignored `local-evidence/robust-0p1hz-modeled-waterfall/`
+can be removed once the display investigation closes.
+A separate local zLab worker check delivered changing waterfall bitmaps and
+modeled-time captions in DPW1 snapshots throughout a 96.4-second bit at 6 Hz.
+When Clear arrived during another sample of that fixture, the first subsequent
+nonempty bitmap displayed 48.2–59.0 seconds, leaving the earlier rows cleared.
+With the fixed full-bit axis, the native renderer checks earlier row positions,
+blank future or erased intervals, and gaps between actual FFT windows in the
+7.2-second detailed view. The local zLab relay exercised both views in a 3.6 Hz
+message that decoded and completed with two scored quiet slots. This is separate
+from the 0.1 Hz presentation-only comparison.
+
+The first named GUI run passed 35 of 36 tests. Appending the modeled-waterfall
+fixture to the long Robust live test hit `receiver_workspace_limit` under its
+512 MiB whole-process limit. A repeat found 72–76 MiB resident from earlier
+fixtures before the modeled capture and one thread after lifecycle cleanup.
+The original live test and a separate modeled-waterfall CTest both passed after
+isolating that fixture. The 512 MiB limit and physical-completion assertions
+were retained.
+
+### Fullscreen simulation waterfall scanlines
+
+The former fullscreen view dated each FFT that survived the UI preview queue.
+At 6 kHz each FFT covered about 0.171 modeled seconds. An accelerated 3.6 Hz
+zLab relay fixture reproduced just 8 contiguous amplitude rows at the bottom
+of its 320-pixel bitmap. The revised worker filled all 320 raster rows with
+160 distinct FFT rows at 45 ms intervals during computation. The fixture decoded
+the sent byte and scored both quiet slots. A separate 120 Hz relay fixture
+verified that replay left leading time blank and reopening fullscreen after
+Clear did not restore the replay rows. The local relay comparison did not
+exercise a deployed zLab instance. The actual worker raster in ignored
+`local-evidence/zlab-fullscreen-spectrum/` can be removed after the display
+comparison closes.
+
+A synthetic native presentation check fed a 6 kHz tone with a fourfold
+amplitude step and a 200 ms validity gap. The ring produced matching final FFTs
+with different polling cadences, recovered a 12.04 dB step and left nine FFT
+rows blank where their support met the gap. A three-second replay populated 63
+of 160 rows at 6 kHz. Separate 44.1 and 192 kHz checks blanked display cells with
+missing samples even when those samples lay outside the shorter FFT window.
+The 6 kHz sample took about 2.7 ms to project once locally. These were display
+checks and did not measure full receiver performance.
+
+### Rolling compact waterfall and fullscreen refresh
+
+The first-bit-only worker failed the 3.6 Hz local relay check because the
+compact range never advanced past its initial extent. With bounded rolling
+history, the same fixture advanced from 15.0–175.4 to 19.0–179.4 modeled s.
+The bitmap pixels changed and the span stayed at 160.4 s. The message decoded
+with two scored quiet slots. Clear blanked the final compact window and manual
+replay kept both its range and the cleared rows. A separate native 6 Hz fixture
+scored two DATA bits and two quiet slots, confirmed eviction within the row cap,
+and retained the final window for replay after retuning.
+
+Two consecutive fullscreen bitmaps in the 3.6 Hz relay ended at 51.883 and
+95.573 modeled RX s, a jump greater than the 7.2 s display span. At 6 kHz the
+individual 1,024-sample FFT windows within each bitmap share 754 samples at
+the 45 ms row hop. Fullscreen prepares batches no faster than once per 100 ms
+of wall time. A batch can remain visible while accepted input stops advancing
+or while presentation coalesces updates. The caption now identifies its actual
+modeled RX endpoint. The relay comparison used a local worker and does not
+establish delivery cadence on a deployed instance.
+
+### Strong-signal bit evidence at Rate 0.1 and 360 Hz
+
+The native CPU probe (`7ff6f25d…`, 12 effective hardware threads and 24
+software workers) used 6 kHz, 1,725 Hz IF, 30 MHz Shift, 265 Hz minimum DATA
+spacing, GPSDO XO at both ends, HF Worst, Each 65%, 3× margin, explicit Doppler
+zero, 3 dBm transmit power and 90 dB path loss with −164 dBm/Hz noise.
+Actual C/N₀ was +77 dB-Hz with a +32 dB-Hz planning target. Helper, FHSS,
+Spreading, FEC and waits were Off. The scheduled-bridge tests used the public
+Amateur key and broad timing with 70 ms audio allowance. The fixed fixture
+calendar was 1793850000 with ordinal 7000037 and simulation seed 74021.
+The operator's automatic epoch and seed are not reproduced by those choices.
+
+At 0.1 Hz, the current plan again quoted 47,059,953,884 bytes of first-slot
+DSP against 8,802,043,085 bytes of automatic workspace. The window contained
+40,601,988 samples and the DATA bit lasted 5,760.4 s. No public bit search was
+attempted under that allocation. At 360 Hz the first-window quote was
+1,476,798,086 bytes with an 8.8 s DATA bit. A bounded `e` message probe
+generated 1,582,039 samples in five public slots and ended at its 90 s deadline
+without a completed receiver result. That receipt does not resolve the
+decisions that would have been made with more time.
+
+The same `e` message input, SHA-256 `66b42ff9…a14b4f`, completed with a 300 s
+deadline. The native receiver scored `0`, `0`, `1`, quiet, quiet and recovered
+the expected `e` with no missing bits. The one-slot EOF control scored the
+first bit and produced no completed message. The five-slot IQ replay took
+222.19 wall s over 263.67 modeled s with a 7,707,715,275-byte peak receiver
+reservation. All three DATA decisions used the short varying branch with
+33.3 ms blocks. Retrospective admission retained 3/3 wanted bits through
+Very Strict, 2/3 under Extreme and 0/3 under Maximum. The replay establishes
+one physically complete configured-calendar message for these settings and
+does not establish real-time headroom, new-calendar acquisition or a
+false-admission rate.
+
+The native 360 Hz `admission` probe completed interior slot 1 separately for
+both bit values, with adjoining bits 0 and 1. Each scored all 184,040 samples.
+The zero run took 51.96 s within 55 s, and the one run took 48.37 s within 65 s.
+The short varying branch used 200-sample blocks (33.3 ms) with partial supported
+bandwidth. Operational bit separations favored the true values by 106.07 and
+105.59 million nats. Current, Guarded, Strict and Very Strict retained both
+wanted bits. Extreme and Maximum rejected both. Each tier used the identical
+native score for its capture. These are paired active public slots, with no
+full delivery or false-admission qualification.
+
+A separate exact-channel diagnostic used the same named settings and seed
+with bit sequences `[b,0,1]`. It rendered both alternatives with and without
+noise through the native channel with causal prehistory. At 0.1 Hz it retained
+720,000 rows from 900 to 1,020 modeled seconds after the nominal first DATA
+gate, generating 36,000,012 samples across four renders in 58.56 s. When told
+the realized channel and timing, the observed bit-0 and bit-1 fragments favored
+their true bit by 9.7216 and 9.7213 billion nats. At 360 Hz the whole first
+142,039-row observation gave 1.2155 and 1.2157 billion nats. Paired noise
+residuals agreed to within 5e−16 and their variance was within 0.26% of the
+declared value. This establishes surviving information for these observations.
+The exact-channel references supply privileged information and do not qualify
+public search, ordinary short-block scoring at 0.1 Hz, or link reliability.
+Discarding the exact templates' instantaneous phase left 16.84% of the
+squared template distance at 0.1 Hz and 19.53% at 360 Hz. A radial residual
+comparison still favored the true bit in all four observations. The magnitudes
+in this comparison are time-resolved native samples across the full band.
+The 360 Hz exact-channel first window and the public admission interior window
+are separate observations. Wall-time figures do not establish CPU capacity.
+
+The native carrier-beat scan also distinguished the two noisy 0.1 Hz
+fragments with the configured key and without realized arrival or channel
+data. The wrapper marked only the 120 s excerpt valid and searched 741 public
+timing coordinates at nominal clock rate with the existing direct and
+dispersive models. The best qualified wanted candidates explained 91–93%
+(sent 0) and 92–95% (sent 1) of held-out beat power. The same nomination gate
+qualified an opposite-bit candidate on sent 0 at another timing coordinate
+(11–36%) and a candidate with one independent receive key (3–52%). Those
+weaker candidates show why passing the nomination gate cannot serve as final
+admission. The scheduled-bridge production route does not use this protected
+scan. This diagnostic did not score physical quiet or qualify the full 0.1 Hz
+slot, admission risk, or a new default.
+
+The compact receipts and diagnostic launchers under ignored
+`local-evidence/bright-hf-endpoint-evidence/` support reproducing these
+source-bound observations and the unresolved full 0.1 Hz check. Remove them
+when the corresponding checks are reproduced in maintained tooling or
+superseded by newer validation. No IQ captures are retained there.
+
 ## Blackwell arithmetic and receiver residency — 22 November 2026
 
 The same full RTX PRO 6000 Blackwell Server Edition ran the vector and

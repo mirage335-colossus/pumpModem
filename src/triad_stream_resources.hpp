@@ -26,6 +26,11 @@ bool stream_simulation_workspace_fits(const PublicProfile&, const ReceiverConfig
     std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max(),
     std::stop_token = {});
 
+// Reject before generating input when the first public window must be
+// admitted alone and its DSP quote exceeds the effective receiver limit.
+void check_simulation_first_window_workspace(const PublicProfile&, const ReceiverConfig&,
+    const StreamReceiverOptions&);
+
 constexpr std::size_t stream_uncommitted_slot_limit(unsigned owners) {
     return 2 * static_cast<std::size_t>(owners);
 }

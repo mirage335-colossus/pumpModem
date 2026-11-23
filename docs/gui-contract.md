@@ -144,10 +144,22 @@ Display timing never controls receiver decisions or completion.
 | Error correction | Configured Off, RS20 or RS60 native short/long text profiles. Raw bits bypass text coding and FEC exactly. |
 | Search arithmetic | Default (fastest) selects the fastest supported complete receiver route for the hardware and workload. FP32 minimum selects FP32 products/FFT with higher-precision guards. FP64 force selects its native CPU reference policy. Sensitive stages retain higher precision. |
 | GPU | Runtime choice for native CUDA or Vulkan DATA processing, shared by live reception and simulation. The selector prefers usable CUDA when included, then a compatible physical Vulkan device. The checkbox starts disabled during device discovery and stays off by default on desktop and zLab CPU allocations. zLab GPU allocations prefer GPU. When no device can initialize, ordinary sessions keep the control off and disabled, select CPU, and show the reason in receiver diagnostics. |
-| Simulation | The native emitted waveform runs through the continuous sampled channel and complete receiver without real-time pacing. The console shows modeled receiver-input time and compute wall time. The waterfall, waveform and I/Q preview the newest accepted post-channel samples. The preview stops when input ends. The receiver can still be finishing queued scoring and quiet slots, as shown by the status. A three-second excerpt of signal activity replays at its original rate after finite processing. Live audio follows the device clock. |
+| Simulation | The native emitted waveform runs through the continuous sampled channel and complete receiver without real-time pacing. The console shows modeled receiver-input time and compute wall time. Waveform, I/Q and spectrum details preview the newest accepted post-channel samples. The preview stops when input ends. The receiver can still be finishing queued scoring and quiet slots, as shown by the status. A three-second excerpt of signal activity replays at its original rate after finite processing. Live audio follows the device clock. |
 | Audio device, channel routing, Live/duplex, TX volume, Exclusive | Existing native device service, selected channel layout, capture/playback policy and output gain. |
 | Waterfall, Waveform, Receiver input I/Q | Bounded actual session observations; receiver I/Q is not a substitute TX trace. |
 | Pattern evidence, Pattern steps | Native public-slot classifications, scores, completeness, resource and stage diagnostics. |
+
+The simulation waterfall keeps a common scale relative to modeled FFT-bin
+noise. Strong configured links extend the bright end of the scale so carrier
+fades can remain visible across rows. The display retains the same brightness
+for noise near the modeled reference. For DATA bits lasting at least a minute,
+the first bit sets the Console overview's time scale. Rows fill the view from
+the first DATA arrival and then scroll through later DATA and quiet intervals.
+Each row averages FFT-bin power from evenly spaced windows within its time span.
+The caption gives the fill progress or the visible modeled-time range and the
+averaging interval. Cleared rows stay blank until they scroll out. The final
+overview stays visible through the three-second replay. **Replay sim** restores
+it with its original frequency and scale after a tuning change.
 
 **Robust setup** samples the compute host twice per second and retains up to
 one minute for its CPU, RAM, GPU and VRAM charts. CPU is the worker process
@@ -174,11 +186,15 @@ decoded reception and the public calendar in place. **Cancel TX** can stop it.
 Explicit raw simulations display the received bits even when the same bits
 also form a short-codec character.
 
-While computing, the worker retains one latest receive window for the preview.
-Waterfall rows can skip modeled time when the receiver advances between screen
-updates. Adjacent rows retain their actual sample offsets. The preview adds no
-silence between them. The waveform fills its viewport with captured receiver
-samples. The Pattern evidence axis uses a signed logarithmic scale for log
+While computing, the waveform and short Console preview show the latest
+available window. Click the Console waterfall for the expanded amplitude and
+phase view. In simulation it shows 7.2 modeled seconds in 45 ms rows, using
+individual FFTs from a bounded tail of accepted receiver samples. UI updates
+can skip whole views while the native sample history still covers that span.
+The caption gives the modeled receive time at the end of the displayed batch.
+Each image stays in place until delivery of a newer batch.
+Unavailable input and the unfilled part of the three-second replay appear
+blank. The Pattern evidence axis uses a signed logarithmic scale for log
 evidence and its threshold, with exact values in **Pattern steps**.
 
 Carrier presets use the native occupied DATA bandwidth, including spreading,

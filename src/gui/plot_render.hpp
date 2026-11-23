@@ -24,9 +24,14 @@ public:
     static PlotSnapshot constellation(std::vector<std::complex<double>> points, bool symbols = false);
     static PlotSnapshot waterfall(SpectrumHistory history, bool overview = false);
     static PlotSnapshot waterfall_shared(std::shared_ptr<const SpectrumHistory> history, bool overview = false);
+    // Modeled-time view keeps a fixed vertical timebase; rows before
+    // first_timeline_row and after available history remain blank.
+    static PlotSnapshot waterfall_timeline_shared(std::shared_ptr<const SpectrumHistory> history,
+        std::size_t timeline_rows, std::size_t first_timeline_row = 0);
     // Expansion crops retained native bins before pooling; no additional FFT.
     static PlotSnapshot waterfall_detail(std::shared_ptr<const SpectrumHistory> history,
-        std::optional<std::pair<double,double>> searched_band_hz = {}, std::string band_label = "Search");
+        std::optional<std::pair<double,double>> searched_band_hz = {}, std::string band_label = "Search",
+        std::optional<double> fixed_modeled_seconds = {});
     static PlotSnapshot qr(std::optional<QrCode> code, QrBrightness brightness = QrBrightness::dark);
     static PlotSnapshot codeword(std::size_t data, std::size_t parity);
     // Top: the operational bit alternatives and aggregate/threshold on a

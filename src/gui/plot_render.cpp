@@ -32,8 +32,17 @@ WaveformView waveform_view(const Waveform& data) {
     return {view,data.fit_capture?view.size():extent};
 }
 struct Constellation { std::vector<std::complex<double>> points; bool symbols; };
-struct Waterfall { std::shared_ptr<const SpectrumHistory> history; bool overview; };
-struct SpectrumDetail { std::shared_ptr<const SpectrumHistory> history; std::optional<std::pair<double,double>> band; std::string label; };
+struct Waterfall {
+    std::shared_ptr<const SpectrumHistory> history;
+    bool overview;
+    std::size_t timeline_rows=0,first_timeline_row=0;
+};
+struct SpectrumDetail {
+    std::shared_ptr<const SpectrumHistory> history;
+    std::optional<std::pair<double,double>> band;
+    std::string label;
+    std::optional<double> fixed_modeled_seconds;
+};
 struct Qr { std::optional<QrCode> code; QrBrightness brightness; };
 struct Codeword { std::size_t data, parity; };
 struct PatternEvidence { std::vector<PatternEvidencePoint> points; };
@@ -198,14 +207,22 @@ PlotSnapshot PlotSnapshot::waterfall(SpectrumHistory history, bool overview) {
 }
 PlotSnapshot PlotSnapshot::waterfall_shared(std::shared_ptr<const SpectrumHistory> history,bool overview) {
     if(!history)throw Error("missing waterfall history");
-    return PlotSnapshot(std::make_shared<Data>(Waterfall{std::move(history),overview}));
+    return PlotSnapshot(std::make_shared<Data>(Waterfall{std::move(history),overview,0,0}));
+}
+PlotSnapshot PlotSnapshot::waterfall_timeline_shared(std::shared_ptr<const SpectrumHistory> history,
+    std::size_t timeline_rows,std::size_t first_timeline_row) {
+    if(!history)throw Error("missing modeled waterfall history");
+    if(!timeline_rows || first_timeline_row>timeline_rows)throw Error("invalid modeled waterfall time extent");
+    return PlotSnapshot(std::make_shared<Data>(Waterfall{std::move(history),true,timeline_rows,first_timeline_row}));
 }
 PlotSnapshot PlotSnapshot::waterfall_detail(std::shared_ptr<const SpectrumHistory> history,
-    std::optional<std::pair<double,double>> band,std::string band_label) {
+    std::optional<std::pair<double,double>> band,std::string band_label,std::optional<double> fixed_modeled_seconds) {
     if(!history)throw Error("missing detailed waterfall history");
     if(band && (!std::isfinite(band->first) || !std::isfinite(band->second) || band->first>band->second))
         throw Error("invalid searched spectrum band");
-    return PlotSnapshot(std::make_shared<Data>(SpectrumDetail{std::move(history),band,std::move(band_label)}));
+    if(fixed_modeled_seconds && (!std::isfinite(*fixed_modeled_seconds) || !(*fixed_modeled_seconds>0)))
+        throw Error("invalid modeled spectrum time window");
+    return PlotSnapshot(std::make_shared<Data>(SpectrumDetail{std::move(history),band,std::move(band_label),fixed_modeled_seconds}));
 }
 PlotSnapshot PlotSnapshot::qr(std::optional<QrCode> code, QrBrightness brightness) {
     return PlotSnapshot(std::make_shared<Data>(Qr{std::move(code), brightness}));
@@ -366,6 +383,25 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
             // Missing startup history stays blank at the top at the same scale.
             const auto visible_rows = std::min<std::size_t>(request.height, SpectrumHistory::capacity);
             rows(request, sink, color, [&](unsigned x, unsigned y) {
+                if(data.timeline_rows) {
+                    const auto begin=static_cast<std::size_t>(y)*data.timeline_rows/request.height;
+                    const auto end=std::min(data.timeline_rows,std::max(begin+1,
+                        static_cast<std::size_t>(y+1)*data.timeline_rows/request.height));
+                    double peak=-std::numeric_limits<double>::infinity();
+                    for(auto timeline_row=begin;timeline_row<end;++timeline_row) {
+                        if(timeline_row<data.first_timeline_row)continue;
+                        const auto source=timeline_row-data.first_timeline_row;
+                        if(source>=history.size())continue;
+                        const auto& row=history[source];
+                        const auto first=static_cast<std::size_t>(x)*row.size()/request.width;
+                        const auto last=std::max(first+1,static_cast<std::size_t>(x+1)*row.size()/request.width);
+                        peak=std::max(peak,*std::max_element(row.begin()+static_cast<std::ptrdiff_t>(first),
+                            row.begin()+static_cast<std::ptrdiff_t>(last)));
+                    }
+                    if(!std::isfinite(peak))return gray(0);
+                    const auto intensity=static_cast<unsigned char>(data.history->intensity(peak)*255);
+                    return color?theme::waterfall_palette[intensity]:gray(intensity);
+                }
                 if(request.fit_content) {
                     if(history.empty())return gray(0);
                     const auto begin=static_cast<std::size_t>(y)*history.size()/request.height;
@@ -399,7 +435,9 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
             const auto columns=std::max(1U,request.width/2);
             rows(request,sink,color,[&](unsigned x,unsigned y) {
                 if(history.empty() || !(high>low) || !(data.history->max_hz()>0))return gray(0);
-                const auto source=static_cast<std::ptrdiff_t>(history.size())-static_cast<std::ptrdiff_t>(visible_rows)+
+                const auto source=data.fixed_modeled_seconds?
+                    static_cast<std::ptrdiff_t>(static_cast<std::size_t>(y)*history.size()/request.height):
+                    static_cast<std::ptrdiff_t>(history.size())-static_cast<std::ptrdiff_t>(visible_rows)+
                     static_cast<std::ptrdiff_t>(static_cast<std::size_t>(y)*visible_rows/request.height);
                 if(source<0 || static_cast<std::size_t>(source)>=history.size())return gray(0);
                 const auto& row=history[static_cast<std::size_t>(source)];
@@ -663,6 +701,8 @@ std::string PlotSnapshot::caption(unsigned width) const {
             const bool context=data.band && (low!=std::clamp(data.band->first,0.,data.history->max_hz()) ||
                                              high!=std::clamp(data.band->second,0.,data.history->max_hz()));
             out << std::setprecision(6);
+            if(data.fixed_modeled_seconds)
+                out << "Last " << *data.fixed_modeled_seconds << " modeled s · individual FFTs · unavailable intervals blank\n";
             if(data.band)out << data.label << " " << data.band->first << ".." << data.band->second << " Hz"
                 << (context?" + surrounding spectrum; ":"; ");
             out << low << ".." << high << " Hz shown / retained " << spacing << " Hz/bin; ";

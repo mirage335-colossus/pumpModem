@@ -145,7 +145,10 @@ bool Application::tick() {
     if(now>=impl_->next) {
         impl_->next=now+std::chrono::milliseconds(40);
         if(impl_->started_session&&impl_->regular_selected()&&!closing())impl_->resources.start();
-        impl_->controller.poll();
+        const bool expanded_spectrum = impl_->overlay && std::ranges::any_of(impl_->overlay->controls, [](const auto& control) {
+            return control.bitmap==ui::Bitmap::waterfall_detail || control.bitmap==ui::Bitmap::waterfall_helper_detail;
+        });
+        impl_->controller.poll(expanded_spectrum);
         const auto& devices=impl_->controller.audio_devices();
         if(impl_->device_count!=devices.size()) {
             impl_->fast_controller.set_devices(devices);impl_->legacy_controller.set_devices(devices);

@@ -13,7 +13,9 @@
 #include <chrono>
 #include <cmath>
 #include <deque>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 #include <utility>
 
 namespace datapump::triad::v3 {
@@ -47,6 +49,13 @@ std::size_t window_samples(const ReceiverSlotPlan& plan) {
 }
 
 std::size_t window_bytes(std::size_t samples) { return times(samples, sample_bytes); }
+
+std::size_t native_stream_workspace(bool continuous, const ReceiverConfig& config,
+                                    const ReceiverSlotPlan& plan, unsigned workers) {
+    const auto quote = continuous || plan.scheduled_gap_fill ?
+        receiver_detail::protected_slot_workspace : receiver_slot_workspace;
+    return quote(config, plan, workers);
+}
 
 std::size_t receipt_reservation(const StreamReceiverOptions& stream, const MessageReceiverOptions& message,
                                 unsigned owners) {
@@ -177,9 +186,8 @@ bool detail::stream_simulation_workspace_fits(const PublicProfile& profile, cons
         // The raw queue may hold the window and one chunk during assembly.
         const auto raw = add(window_bytes(add(rows, chunk)), times(add(rows/chunk, 3), raw_block_overhead));
         if (raw >= available) return false;
-        const auto workspace = profile.config().continuous_data || plan.scheduled_gap_fill ?
-            receiver_detail::protected_slot_workspace : receiver_slot_workspace;
-        return workspace(config, plan, *options.workers) <= available - raw && within_budget();
+        return native_stream_workspace(profile.config().continuous_data, config, plan, *options.workers) <=
+            available - raw && within_budget();
     };
     // Clock growth can make the last window fail quickly. A middle window
     // can also require more scratch when the native or device plan changes.
@@ -189,6 +197,29 @@ bool detail::stream_simulation_workspace_fits(const PublicProfile& profile, cons
     for (auto index = options.first_slot + 1; index < last_slot; ++index)
         if (!fits(index)) return false;
     return true;
+}
+
+void detail::check_simulation_first_window_workspace(const PublicProfile& profile, const ReceiverConfig& config,
+    const StreamReceiverOptions& options) {
+    if (!options.memory_limit_bytes || !options.workers || !options.slot_owners)
+        throw Error("Robust simulation first-window preflight requires resolved receiver limits");
+    const auto plan = make_receiver_slot_plan(profile, config, options.first_slot);
+    if (*options.workers > 1 && *options.slot_owners > 1 && options.first_slot < profile.last_slot()) {
+        const auto next = make_receiver_slot_plan(profile, config, options.first_slot + 1);
+        // A chunk that completes two windows may admit balanced DSP shapes
+        // even if one full-worker shape would exceed the limit.
+        if (next.stop_sample <= plan.stop_sample ||
+            next.stop_sample - plan.stop_sample < options.maximum_input_chunk_samples) return;
+    }
+    const auto required = native_stream_workspace(profile.config().continuous_data, config, plan, *options.workers);
+    const auto available = *options.memory_limit_bytes;
+    if (required <= available) return;
+    constexpr double mib = 1024.0 * 1024.0;
+    std::ostringstream reason;
+    reason << "Robust simulation first receive window requires " << std::fixed << std::setprecision(2)
+           << (static_cast<double>(required) / mib) << " MiB of DSP workspace. Available receiver workspace is "
+           << (static_cast<double>(available) / mib) << " MiB after input and channel reservations";
+    throw ReceiverWorkspaceError(reason.str());
 }
 
 ReceiverSlotPlan make_receiver_slot_plan(const PublicProfile& profile, const ReceiverConfig& config,
@@ -271,9 +302,7 @@ struct CompleteStreamReceiver::Impl {
           options(stream), resources(resolve_stream_receiver_resources(options)),
           workspace(native_score ? StreamWorkspace([continuous = profile.config().continuous_data](
                   const ReceiverConfig& cfg, const ReceiverSlotPlan& plan, unsigned workers) {
-              const auto quote = continuous || plan.scheduled_gap_fill ? receiver_detail::protected_slot_workspace :
-                  receiver_slot_workspace;
-              return quote(cfg, plan, workers);
+              return native_stream_workspace(continuous, cfg, plan, workers);
           }) : std::move(workspace_fn)),
           overlap_workspace(native_score && (profile.config().continuous_data || profile.config().scheduled_gap_fill) ?
               StreamWorkspace{} : std::move(overlap_fn)), scorer(std::move(score_fn)),

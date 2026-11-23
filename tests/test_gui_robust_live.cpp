@@ -6,6 +6,7 @@
 #include "datapump/triad_shaping.hpp"
 #include "../src/live_capture_queue.hpp"
 #include "../src/live_finite_plan.hpp"
+#include "../src/triad_stream_resources.hpp"
 
 #include <algorithm>
 #include <array>
@@ -553,6 +554,40 @@ void native_precision_profile_policy() {
             : message.find("GPU reception is unavailable in this build (CUDA or Vulkan support required)") != std::string_view::npos;
     }
     check(rejected, "GPU plus FP64 force did not report the applicable explicit validation error");
+}
+
+void simulation_first_window_admission() {
+    auto s = settings(true);
+    const auto prepared = live::detail::prepare_profile(s, *s.calendar, {});
+    triad::v3::StreamReceiverOptions options;
+    options.workers = 1;
+    options.slot_owners = 1;
+    options.memory_limit_bytes = 1;
+    bool rejected = false;
+    try {
+        triad::v3::detail::check_simulation_first_window_workspace(prepared.waveform, prepared.receiver, options);
+    } catch (const Error& error) {
+        const std::string_view message(error.what());
+        rejected = message.find("first receive window requires") != std::string_view::npos &&
+            message.find("Available receiver workspace is 0.00 MiB") != std::string_view::npos;
+    }
+    check(rejected, "Simulation first-window preflight admitted a DSP bound above the receiver limit");
+    options.memory_limit_bytes = std::numeric_limits<std::size_t>::max();
+    triad::v3::detail::check_simulation_first_window_workspace(prepared.waveform, prepared.receiver, options);
+
+    s.data_cadence = live::DataCadence::continuous;
+    s.transfer.modem.sample_rate = 100;
+    s.transfer.modem.carrier_hz = 25;
+    s.transfer.modem.bandwidth_hz = 36;
+    const auto packed = live::detail::prepare_profile(s, *s.calendar, {});
+    options.workers = 2;
+    options.slot_owners = 2;
+    options.memory_limit_bytes = 1;
+    options.maximum_input_chunk_samples = 4096;
+    check(packed.waveform.slot(1).observation.stop - packed.waveform.slot(0).observation.stop <
+          options.maximum_input_chunk_samples,
+          "Simulation preflight fixture needs two windows that can arrive in the same chunk");
+    triad::v3::detail::check_simulation_first_window_workspace(packed.waveform, packed.receiver, options);
 }
 
 void configured_physical_carrier_context() {
@@ -1690,6 +1725,83 @@ void raw_bit_session_transmission_and_ordinal() {
     close(session);
 }
 
+void modeled_simulation_waterfall() {
+    // Run this under its own CTest entry. Earlier fixtures can leave allocator
+    // pages charged against the receiver's 512 MiB whole-process limit.
+    auto simulated = settings(true);
+    simulated.transfer.modem.sample_rate = 1500;
+    simulated.transfer.modem.carrier_hz = 500;
+    simulated.transfer.modem.bandwidth_hz = 6;
+    simulated.minimum_carrier_spacing_hz = 3.5;
+    live::Session session;
+    session.start(simulated);
+    const auto prepared = ready(session);
+    check(prepared.bit_seconds && *prepared.bit_seconds >= 60 && *prepared.bit_seconds < 110 &&
+          prepared.slot_stride_seconds && *prepared.slot_stride_seconds * 4 * 1500 < 750'000,
+          "Long-waterfall fixture exceeded its intended bit or sample budget");
+
+    session.transmit_bits(std::array<std::uint8_t, 2>{0, 1});
+    std::shared_ptr<const live::Snapshot::SimulationWaterfall> first_bit_waterfall;
+    std::shared_ptr<const live::Snapshot::SimulationWaterfall> replay_waterfall;
+    const auto completed = wait(session, [&](const auto& out) {
+        check(out.error.empty(), "Modeled waterfall simulation failed: " + out.error);
+        const auto& active = out.simulation_waterfall;
+        if (active && active->first_row == 0 && active->rows.size() >= active->total_rows / 2)
+            first_bit_waterfall = active;
+        if (out.simulation_replay && !replay_waterfall) replay_waterfall = out.simulation_waterfall;
+        return !out.transmitting;
+    }, "Modeled waterfall simulation did not complete", 25s);
+    const auto history = completed.simulation_waterfall;
+    check(history && history == replay_waterfall && history->total_rows == history->rows.size() &&
+          history->total_rows <= live::Snapshot::SimulationWaterfall::maximum_rows && history->total_rows >= 50 &&
+          history->first_row >= history->total_rows,
+          "Modeled rows did not roll through the later DATA and quiet intervals or survive replay");
+    check(std::abs(history->seconds_per_row * history->total_rows - *prepared.bit_seconds) < 0.25 &&
+          std::abs(history->bin_hz - 1500. / 1024) < 1e-9,
+          "Modeled waterfall lost the DATA timebase or native FFT grid");
+    const auto central_bin = static_cast<std::size_t>(std::lround(500. / history->bin_hz));
+    check(first_bit_waterfall && first_bit_waterfall->rows.front() != history->rows.front() &&
+          first_bit_waterfall->seconds_per_row == history->seconds_per_row,
+          "Scrolling did not evict old rows at the original time scale");
+    const auto& first_rows = first_bit_waterfall->rows;
+    double low = std::numeric_limits<double>::infinity(), high = -low;
+    for (std::size_t i = first_rows.size() / 4; i < first_rows.size() * 3 / 4; ++i) {
+        const auto& spectrum = *first_rows[i];
+        check(spectrum.size() == 513 && std::isfinite(spectrum[central_bin]),
+              "Modeled waterfall did not retain actual receive-bin power");
+        low = std::min(low, spectrum[central_bin]);
+        high = std::max(high, spectrum[central_bin]);
+    }
+    check(high - low > 3., "Modeled waterfall lost carrier variation within the DATA gate");
+    check(completed.pattern_steps.size() == 4 && completed.pattern_steps[0].bit == 0 &&
+          completed.pattern_steps[1].bit == 1 &&
+          completed.pattern_steps[2].decision == live::PatternDecision::quiet &&
+          completed.pattern_steps[3].decision == live::PatternDecision::quiet,
+          "Waterfall collection changed DATA or physical quiet-slot scoring");
+    simulated.transfer.modem.carrier_hz += 50;
+    session.configure(simulated);
+    const auto adjusted = ready(session);
+    check(adjusted.simulation_replay_available && !adjusted.simulation_waterfall,
+          "A tuning change did not reset the active waterfall and keep the completed replay");
+    session.replay_simulation();
+    const auto replayed = wait(session, [](const auto& out) { return out.simulation_replay; },
+                               "Modeled waterfall replay did not restart after tuning", 2s);
+    check(replayed.simulation_waterfall == history,
+          "Replay did not restore the original modeled waterfall after tuning");
+    check(!replayed.simulation_detail, "Compact preview unexpectedly generated fullscreen FFTs");
+    std::shared_ptr<const live::Snapshot::SimulationDetail> replay_detail;
+    wait(session, [&](const auto& out) {
+        if (!out.simulation_replay) return false;
+        replay_detail = session.snapshot(true).simulation_detail;
+        return replay_detail && !replay_detail->rows.empty() && !replay_detail->rows.back().db.empty();
+    }, "Fullscreen replay did not receive observed FFT rows", 2s);
+    check(replay_detail->sample_rate == 1500 && replay_detail->rows.size() == live::simulation_detail_rows &&
+          replay_detail->rows.front().db.empty() && replay_detail->rows.back().db.size() == 513,
+          "Fullscreen replay did not retain its native FFT grid and blank leading time");
+    session.cancel_transmit();
+    close(session);
+}
+
 void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dynamic_channel = false,
                                 live::DataCadence cadence = live::DataCadence::scheduled) {
     // One predeclared functional stratum, not a sensitivity/capacity claim:
@@ -2131,6 +2243,10 @@ int main(int argc, char** argv) {
             fractional_spacing_helper_profile();
             return 0;
         }
+        if (argc == 2 && std::string_view(argv[1]) == "--simulation-admission") {
+            simulation_first_window_admission();
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--gpu") {
             check(live::gpu_receiver_available(), "Actual GPU session test requires a compiled GPU backend");
             complete_native_simulation(true);
@@ -2159,6 +2275,10 @@ int main(int argc, char** argv) {
         }
         if (argc == 2 && std::string_view(argv[1]) == "--simulation-rx-preview") {
             complete_native_simulation();
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--modeled-waterfall") {
+            modeled_simulation_waterfall();
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--continuous-data") {
@@ -2226,6 +2346,7 @@ int main(int argc, char** argv) {
         simulation_transmit_ignores_realized_channel();
         late_affine_clock_support();
         simulation_cancel_is_not_completion();
+        simulation_first_window_admission();
         std::cout << "Native Robust lifecycle, duplex routing, and cancellation passed\n" << std::flush;
         raw_bit_session_transmission_and_ordinal();
         std::cout << "Native Robust single-bit raw transmission and ordinal checks passed\n" << std::flush;

@@ -13,6 +13,7 @@ import base64
 import json
 import os
 from pathlib import Path
+import re
 import select
 import struct
 import subprocess
@@ -115,6 +116,36 @@ class SimulationTest(unittest.TestCase):
             proc.stdin.write(frame(2, payload))
             wait(lambda: int(snapshot["ack"]) >= sequence)
 
+        def bitmap_pixels(bitmap):
+            if "rgbRuns" in bitmap:
+                runs = base64.b64decode(bitmap["rgbRuns"])
+                pixels = b"".join(runs[i+1:i+4] * (runs[i]+1) for i in range(0, len(runs), 4))
+            else:
+                pixels = base64.b64decode(bitmap["rgb"])
+            self.assertEqual(len(pixels), bitmap["width"] * bitmap["height"] * 3)
+            return pixels
+
+        def fullscreen_spectrum():
+            return next(item for item in snapshot["overlay"] if item["kind"] == "bitmap")
+
+        def amplitude_coverage(bitmap):
+            width, height = bitmap["width"], bitmap["height"]
+            self.assertGreaterEqual(width, 64, "fullscreen spectrum should use paired columns")
+            pixels = bitmap_pixels(bitmap)
+            # Newest rows are at the bottom. Count the continuous observed
+            # suffix using amplitude (even columns), independently of phase.
+            distinct = set()
+            count = 0
+            row_bytes = width * 3
+            for end in range(len(pixels), 0, -row_bytes):
+                begin = end - row_bytes
+                row = (pixels[begin:end:6], pixels[begin+1:end:6], pixels[begin+2:end:6])
+                if not any(any(channel) for channel in row):
+                    break
+                count += 1
+                distinct.add(row)
+            return count, len(distinct)
+
         try:
             wait(lambda: snapshot is not None)
             wait(lambda: any(item.get("text") == "Robust simulation ready" for item in snapshot["controls"]))
@@ -140,8 +171,17 @@ class SimulationTest(unittest.TestCase):
             def replaying():
                 return any("· replaying 3 seconds" in item.get("text", "") for item in snapshot["controls"])
 
+            def overview_span():
+                caption = control("Spectrum").get("caption", "")
+                interval = re.search(r"(\d+(?:\.\d+)?)([/–])(\d+(?:\.\d+)?) modeled s", caption)
+                if not interval:
+                    return 0.0, 0.0
+                first, last = float(interval[1]), float(interval[3])
+                return (0.0, first) if interval[2] == "/" else (first, last)
+
             def preview_visible():
-                return "dB relative to modeled noise" in control("Spectrum").get("caption", "")
+                return ("dB relative to modeled noise" in control("Spectrum").get("caption", "") or
+                        overview_span()[1] > 0.0)
 
             wait(lambda: preview_visible() or replaying() or not control("Cancel TX")["enabled"])
             self.assertTrue(preview_visible(), "simulated samples never reached the waterfall")
@@ -149,6 +189,70 @@ class SimulationTest(unittest.TestCase):
             self.assertTrue(control("Cancel TX")["enabled"], "the preview should arrive during simulation")
             self.assertTrue(any("s compute" in item.get("text", "") and
                                 "s modeled RX" in item.get("text", "") for item in snapshot["controls"]))
+            if rate == "3.6 Hz":
+                wait(lambda: overview_span()[1] >= 7.2 or replaying() or not control("Cancel TX")["enabled"])
+                self.assertGreaterEqual(overview_span()[1], 7.2)
+                self.assertFalse(replaying(), "expected the fullscreen spectrum during capture")
+                self.assertTrue(control("Cancel TX")["enabled"])
+                spectrum = control("Spectrum")
+                self.assertIn("overview", spectrum["caption"])
+                event(8, spectrum["id"], "")
+                def transmitting():
+                    return any(item["text"] == "Robust simulation" for item in snapshot["controls"])
+
+                detail = fullscreen_spectrum()
+                bitmap = detail["bitmap"]
+                count, distinct = amplitude_coverage(bitmap)
+                if count * 10 < bitmap["height"] * 9:
+                    # The open event can be acknowledged before the next
+                    # capture reaches the newly visible overlay.
+                    revision = bitmap["revision"]
+                    wait(lambda: fullscreen_spectrum()["bitmap"]["revision"] != revision or
+                         replaying() or not transmitting())
+                    detail = fullscreen_spectrum()
+                    bitmap = detail["bitmap"]
+                    count, distinct = amplitude_coverage(bitmap)
+                self.assertFalse(replaying())
+                self.assertTrue(transmitting())
+                self.assertIn("Last 7.2 modeled s", detail["caption"].splitlines()[0])
+                self.assertGreaterEqual(count * 10, bitmap["height"] * 9,
+                                        f"fullscreen waterfall has only {count}/{bitmap['height']} "
+                                        "contiguous observed amplitude rows")
+                self.assertGreaterEqual(distinct, 8, "fullscreen history repeats too few observed FFT rows")
+
+                def fullscreen_end():
+                    caption = fullscreen_spectrum()["caption"].splitlines()[0]
+                    value = re.search(r"end (\d+\.\d+) modeled s", caption)
+                    return float(value[1]) if value else 0.0
+
+                first_end = fullscreen_end()
+                self.assertGreater(first_end, 0.0)
+                wait(lambda: fullscreen_end() > first_end or replaying() or not transmitting())
+                second_end = fullscreen_end()
+                self.assertGreater(second_end, first_end)
+                self.assertFalse(replaying())
+                self.assertNotEqual(fullscreen_spectrum()["bitmap"]["revision"], bitmap["revision"])
+                event(8, fullscreen_spectrum()["id"], "")
+
+                def capture_finished():
+                    return replaying() or not control("Cancel TX")["enabled"]
+
+                wait(lambda: overview_span()[0] > 0.0 or capture_finished())
+                start, stop = overview_span()
+                self.assertGreater(start, 0.0, "compact waterfall never scrolled past the first DATA bit")
+                self.assertFalse(capture_finished(), "expected the compact waterfall to scroll during capture")
+                scrolled_bitmap = control("Spectrum")["bitmap"]
+                wait(lambda: overview_span()[0] > start or capture_finished())
+                later_start, later_stop = overview_span()
+                self.assertGreater(later_start, start)
+                self.assertAlmostEqual(later_stop - later_start, stop - start, delta=0.2)
+                later_bitmap = control("Spectrum")["bitmap"]
+                self.assertNotEqual(later_bitmap["revision"], scrolled_bitmap["revision"])
+                self.assertNotEqual(bitmap_pixels(later_bitmap), bitmap_pixels(scrolled_bitmap),
+                                    "compact waterfall advanced its label without advancing the image")
+                print(f"Fullscreen ends at {first_end:.3f} and {second_end:.3f} modeled s. "
+                      f"Compact range advances from {start:.1f}–{stop:.1f} to "
+                      f"{later_start:.1f}–{later_stop:.1f} modeled s.", flush=True)
             wait(lambda: bool(control("Pattern steps").get("records")) or not control("Cancel TX")["enabled"])
             wait(lambda: not control("Cancel TX")["enabled"])
             steps = control("Pattern steps").get("records", [])
@@ -172,6 +276,15 @@ class SimulationTest(unittest.TestCase):
                 print(diagnostics, flush=True)
             if not check_replay:
                 print(f"{rate} {base_oscillator}: {simulation_status()}", flush=True)
+                final_span = overview_span()
+                self.assertGreater(final_span[0], 0.0)
+                event(4, control("Clear waterfall")["id"], "")
+                wait(lambda: not any(bitmap_pixels(control("Spectrum")["bitmap"])))
+                event(4, control("Replay sim")["id"], "")
+                wait(replaying)
+                self.assertEqual(overview_span(), final_span)
+                self.assertFalse(any(bitmap_pixels(control("Spectrum")["bitmap"])),
+                                 "replay restored cleared compact waterfall rows")
                 return
             for label in ("Spectrum", "Waveform", "Receiver input I/Q", "Pattern evidence"):
                 self.assertEqual(control(label)["kind"], "bitmap", label)
@@ -199,12 +312,7 @@ class SimulationTest(unittest.TestCase):
             spectrum = control("Spectrum")
             bitmap = spectrum["bitmap"]
             width, height = bitmap["width"], bitmap["height"]
-            if "rgbRuns" in bitmap:
-                runs = base64.b64decode(bitmap["rgbRuns"])
-                pixels = b"".join(runs[i+1:i+4] * (runs[i]+1) for i in range(0, len(runs), 4))
-            else:
-                pixels = base64.b64decode(bitmap["rgb"])
-            self.assertEqual(len(pixels), width * height * 3)
+            pixels = bitmap_pixels(bitmap)
 
             def peak(first_hz, last_hz):
                 first, last = (hz * width // 3000 * 3 for hz in (first_hz, last_hz))
@@ -214,6 +322,23 @@ class SimulationTest(unittest.TestCase):
             self.assertGreater(noise, 0, "The modeled noise floor was entirely black")
             self.assertGreater(occupied, noise + 40, "The retained waterfall lost its occupied band")
             self.assertIn("dB relative to modeled noise", spectrum["caption"])
+
+            event(8, spectrum["id"], "")
+            wait(lambda: amplitude_coverage(fullscreen_spectrum()["bitmap"])[0] > 0)
+            detail = fullscreen_spectrum()
+            replay_rows, _ = amplitude_coverage(detail["bitmap"])
+            self.assertLess(replay_rows * 2, detail["bitmap"]["height"],
+                            "fullscreen replay filled unobserved leading time")
+            event(8, detail["id"], "")
+            event(4, control("Clear waterfall")["id"], "")
+            event(8, control("Spectrum")["id"], "")
+            detail = fullscreen_spectrum()
+            if any(bitmap_pixels(detail["bitmap"])):
+                revision = detail["bitmap"]["revision"]
+                wait(lambda: fullscreen_spectrum()["bitmap"]["revision"] != revision)
+                detail = fullscreen_spectrum()
+            self.assertFalse(any(bitmap_pixels(detail["bitmap"])),
+                             "opening fullscreen restored cleared replay samples")
         finally:
             proc.stdin.close()
             try:

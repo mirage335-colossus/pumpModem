@@ -20,6 +20,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <numeric>
 #include <numbers>
 #include <utility>
@@ -35,10 +36,20 @@ using KeyTag = std::array<std::uint8_t, 32>;
 
 constexpr std::size_t audio_chunk = 4096, plot_size = 1024, history_size = 32;
 constexpr std::size_t simulation_waveform_size = 2048;
+constexpr std::size_t simulation_waterfall_windows_per_row = 32;
 constexpr auto simulation_preview_period = std::chrono::milliseconds(45);
 constexpr auto simulation_workspace_preflight_budget = std::chrono::milliseconds(100);
 constexpr auto simulation_replay_duration = std::chrono::seconds(3);
 constexpr auto simulation_replay_period = std::chrono::milliseconds(50);
+constexpr std::size_t simulation_waterfall_workspace_bytes() {
+    // A slow poller can hold an older set of rows while the recorder
+    // replaces published rows. Charge all three sets even if they overlap.
+    constexpr auto row_bytes = (plot_size / 2 + 1) * sizeof(double) +
+        sizeof(std::shared_ptr<const std::vector<double>>) + 64;
+    return 3 * Snapshot::SimulationWaterfall::maximum_rows * row_bytes + 64 * 1024 +
+        plot_size * (sizeof(Complex) + sizeof(std::uint8_t)) +
+        (plot_size / 2 + 1) * sizeof(double) + 3 * 1024 * 1024U;
+}
 constexpr std::uint64_t simulation_replay_rows(std::uint32_t rate) {
     return static_cast<std::uint64_t>(simulation_replay_duration.count()) * rate + simulation_waveform_size - 1;
 }
@@ -256,6 +267,167 @@ double simulation_plot_noise_reference(const Settings& settings, std::uint32_t r
         10 * std::log10(noise_bandwidth);
 }
 
+std::size_t simulation_detail_workspace_bytes(std::uint32_t rate) {
+    const auto horizon = static_cast<std::size_t>(rate) * 36 / 5;
+    const auto ring_samples = horizon + plot_size;
+    const auto ring_bytes = ring_samples * (sizeof(Complex) + sizeof(std::uint8_t));
+    const auto detached_bytes = ring_bytes;
+    const auto row_bytes = simulation_detail_rows * (plot_size / 2 + 1) *
+        (sizeof(double) + sizeof(std::complex<float>));
+    // Charge the cached batch and its replacement, plus the GUI histories
+    // and bounded native transform scratch.
+    return ring_bytes + detached_bytes + 2 * row_bytes + 3 * 1024 * 1024U;
+}
+
+class SimulationDetailCapture {
+public:
+    SimulationDetailCapture(std::uint64_t segment, std::uint64_t first,
+                            std::uint32_t rate, double if_hz)
+        : segment_(segment), end_(first), rate_(rate), if_hz_(if_hz),
+          capacity_(static_cast<std::size_t>(rate) * 36 / 5 + plot_size),
+          iq_(capacity_), valid_(capacity_, 0) {}
+
+    void append(std::uint64_t first, std::span<const Complex> iq,
+                std::span<const std::uint8_t> valid) {
+        std::lock_guard lock(mutex_);
+        if (first != end_) {
+            // A discontinuity starts a clean segment rather than allowing old
+            // samples to bridge a gap or a newly configured generation.
+            end_ = first;
+            count_ = write_ = 0;
+            ++continuity_;
+            cached_.reset();
+        }
+        if (iq.size() >= capacity_) {
+            const auto skip = iq.size() - capacity_;
+            std::copy(iq.begin() + static_cast<std::ptrdiff_t>(skip), iq.end(), iq_.begin());
+            std::copy(valid.begin() + static_cast<std::ptrdiff_t>(skip), valid.end(), valid_.begin());
+            write_ = 0;
+            count_ = capacity_;
+        } else {
+            const auto first_count = std::min(iq.size(), capacity_ - write_);
+            std::copy_n(iq.begin(), first_count, iq_.begin() + static_cast<std::ptrdiff_t>(write_));
+            std::copy_n(valid.begin(), first_count, valid_.begin() + static_cast<std::ptrdiff_t>(write_));
+            const auto second_count = iq.size() - first_count;
+            if (second_count) {
+                std::copy_n(iq.begin() + static_cast<std::ptrdiff_t>(first_count), second_count, iq_.begin());
+                std::copy_n(valid.begin() + static_cast<std::ptrdiff_t>(first_count), second_count, valid_.begin());
+            }
+            write_ = (write_ + iq.size()) % capacity_;
+            count_ = std::min(count_ + iq.size(), capacity_);
+        }
+        end_ = first + iq.size();
+    }
+
+    std::shared_ptr<const Snapshot::SimulationDetail> snapshot(Clock::time_point now) {
+        std::vector<Complex> samples;
+        std::vector<std::uint8_t> validity;
+        std::uint64_t end = 0, available_first = 0, continuity = 0;
+        {
+            std::lock_guard lock(mutex_);
+            if (cached_ && cached_->end_sample == end_) return cached_;
+            if (cached_ && (building_ || now - last_build_ < std::chrono::milliseconds(100))) return cached_;
+            if (building_) return cached_;
+            end = end_;
+            continuity = continuity_;
+            available_first = end_ - count_;
+            samples.resize(count_);
+            validity.resize(count_);
+            const auto oldest = (write_ + capacity_ - count_) % capacity_;
+            const auto first_count = std::min(count_, capacity_ - oldest);
+            std::copy_n(iq_.begin() + static_cast<std::ptrdiff_t>(oldest), first_count, samples.begin());
+            std::copy_n(valid_.begin() + static_cast<std::ptrdiff_t>(oldest), first_count, validity.begin());
+            if (first_count < count_) {
+                const auto second_count = count_ - first_count;
+                std::copy_n(iq_.begin(), second_count, samples.begin() + static_cast<std::ptrdiff_t>(first_count));
+                std::copy_n(valid_.begin(), second_count, validity.begin() + static_cast<std::ptrdiff_t>(first_count));
+            }
+            building_ = true;
+            last_build_ = now;
+        }
+
+        try {
+            auto detail = std::make_shared<Snapshot::SimulationDetail>();
+            detail->segment = segment_;
+            detail->end_sample = end;
+            detail->sample_rate = rate_;
+            detail->fft_samples = plot_size;
+            detail->rows.resize(simulation_detail_rows);
+            const auto horizon = static_cast<std::uint64_t>(rate_) * 36 / 5;
+            static const modem::detail::search_fft::DoublePlan fft(plot_size);
+            static const auto hann = [] {
+                std::array<double, plot_size> values{};
+                for (std::size_t i = 0; i < values.size(); ++i)
+                    values[i] = .5 - .5 * std::cos(2 * std::numbers::pi *
+                        static_cast<double>(i) / plot_size);
+                return values;
+            }();
+            std::array<Complex, plot_size> bins{};
+            std::array<float, plot_size> pcm{};
+            std::uint64_t previous_fft_end = 0;
+            for (std::size_t row = 0; row < simulation_detail_rows; ++row) {
+                const auto slots_from_end = simulation_detail_rows - row;
+                const auto end_offset = horizon * (slots_from_end - 1) / simulation_detail_rows;
+                const auto cell_width = horizon * slots_from_end / simulation_detail_rows - end_offset;
+                auto& out = detail->rows[row];
+                const auto required_width = std::max<std::uint64_t>(cell_width, plot_size);
+                if (end < end_offset + required_width) continue;
+                const auto row_end = end - end_offset;
+                const auto considered_first = row_end - required_width;
+                const auto fft_first = row_end - plot_size;
+                if (considered_first < available_first) continue;
+                const auto offset = static_cast<std::size_t>(fft_first - available_first);
+                bool valid_window = offset + plot_size <= samples.size();
+                const auto check_offset = static_cast<std::size_t>(considered_first - available_first);
+                for (std::size_t i = 0; valid_window && i < required_width; ++i)
+                    valid_window = validity[check_offset + i] != 0;
+                if (!valid_window) continue;
+                out.start_sample = fft_first;
+                // Adjacent FFTs overlap at ordinary audio rates. Project shared
+                // samples once while preserving the exact native PCM conversion.
+                const auto overlap = fft_first < previous_fft_end ?
+                    static_cast<std::size_t>(previous_fft_end - fft_first) : 0;
+                std::copy(pcm.end() - overlap, pcm.end(), pcm.begin());
+                for (std::size_t i = overlap; i < plot_size; ++i)
+                    pcm[i] = real_pcm(samples[offset + i], fft_first + i, if_hz_, rate_);
+                for (std::size_t i = 0; i < plot_size; ++i)
+                    bins[i] = pcm[i] * hann[i];
+                previous_fft_end = row_end;
+                modem::detail::search_fft::fft(bins, false, fft);
+                out.db.reserve(plot_size / 2 + 1);
+                out.spectrum.reserve(plot_size / 2 + 1);
+                for (const auto value : std::span(bins).first(plot_size / 2 + 1)) {
+                    const auto normalized = value * (2. / plot_size);
+                    out.spectrum.emplace_back(normalized);
+                    out.db.push_back(10 * std::log10(std::max(1e-24, std::norm(normalized))));
+                }
+            }
+
+            std::lock_guard lock(mutex_);
+            building_ = false;
+            if (continuity_ == continuity) cached_ = std::move(detail);
+            return cached_;
+        } catch (...) {
+            std::lock_guard lock(mutex_);
+            building_ = false;
+            throw;
+        }
+    }
+
+private:
+    std::uint64_t segment_, end_, continuity_=0;
+    std::uint32_t rate_;
+    double if_hz_;
+    const std::size_t capacity_;
+    std::vector<Complex> iq_;
+    std::vector<std::uint8_t> valid_;
+    std::size_t write_=0, count_=0;
+    std::mutex mutex_;
+    std::shared_ptr<const Snapshot::SimulationDetail> cached_;
+    Clock::time_point last_build_{};
+    bool building_=false;
+};
+
 struct SimulationReplay {
     SimulationReplay(const Profile& profile, const Settings& settings, const triad::SimulationConfig& effects,
                      std::uint64_t source_sample, std::uint64_t input_total)
@@ -268,12 +440,14 @@ struct SimulationReplay {
         if (profile.receiver.helper_enabled)
             waterfall.helper_band_hz = std::pair{helper::low_pilot_frequency_hz - 100,
                 profile.receiver.helper.frequency_hz + 100};
-        const auto tx_scale = 1 + effects.tx.audio_ppm * 1e-6;
-        const auto rx_scale = 1 + effects.rx.audio_ppm * 1e-6;
+        tx_scale = 1 + effects.tx.audio_ppm * 1e-6;
+        rx_scale = 1 + effects.rx.audio_ppm * 1e-6;
         source_per_input_sample = tx_scale / rx_scale;
         // Invert the simulated direct-path sample coordinate for presentation
         // only. No receiver acquisition or decision uses the known arrival.
-        const auto lead = static_cast<long double>(effects.capture_lead_seconds) + effects.timing_offset_seconds;
+        capture_lead_seconds = effects.capture_lead_seconds;
+        timing_offset_seconds = effects.timing_offset_seconds;
+        const auto lead = static_cast<long double>(capture_lead_seconds) + timing_offset_seconds;
         const auto received = std::ceil((source_sample / static_cast<long double>(tx_scale) +
             lead * rate) * rx_scale);
         first = static_cast<std::uint64_t>(std::clamp(received, 0.L, static_cast<long double>(input_total)));
@@ -282,7 +456,8 @@ struct SimulationReplay {
     }
 
     std::size_t working_bytes() const {
-        auto bytes = limit * sizeof(Complex);
+        auto bytes = limit * (sizeof(Complex) + sizeof(std::uint8_t));
+        if (waterfall_recorder) bytes = checked_workspace(bytes, simulation_waterfall_workspace_bytes());
         if (pattern_steps) {
             bytes += sizeof(*pattern_steps) + pattern_steps->capacity() * sizeof(PatternStep);
             for (const auto& step : *pattern_steps)
@@ -291,16 +466,43 @@ struct SimulationReplay {
         }
         return bytes;
     }
-    void allocate() { input = std::make_unique_for_overwrite<Complex[]>(limit); }
+    void allocate() {
+        input = std::make_unique_for_overwrite<Complex[]>(limit);
+        validity = std::make_unique_for_overwrite<std::uint8_t[]>(limit);
+    }
     std::span<const Complex> samples() const { return {input.get(), filled}; }
+    std::span<const std::uint8_t> valid_samples() const { return {validity.get(), filled}; }
 
-    void record(std::uint64_t begin, std::span<const Complex> observed) {
+    bool record(std::uint64_t begin, std::span<const Complex> observed,
+                std::span<const std::uint8_t> valid) {
         const auto next = first + filled;
-        if (filled == limit || next < begin || next >= begin + observed.size()) return;
-        const auto offset = static_cast<std::size_t>(next - begin);
-        const auto count = std::min(observed.size() - offset, limit - filled);
-        std::copy_n(observed.data() + offset, count, input.get() + filled);
-        filled += count;
+        if (filled != limit && next >= begin && next < begin + observed.size()) {
+            const auto offset = static_cast<std::size_t>(next - begin);
+            const auto count = std::min(observed.size() - offset, limit - filled);
+            std::copy_n(observed.data() + offset, count, input.get() + filled);
+            std::copy_n(valid.data() + offset, count, validity.get() + filled);
+            filled += count;
+        }
+        if (!waterfall_recorder || !waterfall_recorder->record(begin, observed, valid)) return false;
+        modeled_waterfall = waterfall_recorder->snapshot();
+        return true;
+    }
+
+    void enable_waterfall(std::uint64_t segment, double bit_seconds) {
+        if (!std::isfinite(bit_seconds) || bit_seconds < 60) return;
+        const auto lead = static_cast<long double>(capture_lead_seconds) + timing_offset_seconds;
+        const auto source_end = static_cast<long double>(source_first) + bit_seconds * rate;
+        const auto mapped_end = std::ceil((source_end / tx_scale + lead * rate) * rx_scale);
+        const auto end = static_cast<std::uint64_t>(std::clamp(mapped_end, 0.L,
+            static_cast<long double>(UINT64_MAX)));
+        if (end <= first || end - first < plot_size) return;
+        waterfall_recorder = std::make_unique<WaterfallRecorder>(segment, first, end, rate,
+            waterfall.gain_db, data_if_hz);
+        modeled_waterfall = waterfall_recorder->snapshot();
+    }
+
+    std::shared_ptr<const Snapshot::SimulationWaterfall> waterfall_snapshot() const {
+        return modeled_waterfall;
     }
 
     Snapshot::ReplayWaterfall waterfall;
@@ -308,11 +510,130 @@ struct SimulationReplay {
     double data_if_hz;
     std::uint64_t source_first, first;
     double source_per_input_sample;
+    double tx_scale=1, rx_scale=1;
+    double capture_lead_seconds=0, timing_offset_seconds=0;
     std::shared_ptr<const std::vector<PatternStep>> pattern_steps;
 private:
     std::size_t limit;
     std::size_t filled = 0;
     std::unique_ptr<Complex[]> input;
+    std::unique_ptr<std::uint8_t[]> validity;
+    std::shared_ptr<const Snapshot::SimulationWaterfall> modeled_waterfall;
+    struct WaterfallRecorder {
+        WaterfallRecorder(std::uint64_t segment, std::uint64_t first, std::uint64_t end,
+                          std::uint32_t rate, double gain_db,
+                          double if_hz)
+            : bit_samples(end - first), row_first(first), rate(rate), if_hz(if_hz) {
+            value.total_rows = std::min<std::uint64_t>(value.maximum_rows, bit_samples / plot_size);
+            value.segment = segment;
+            value.bin_hz = static_cast<double>(rate) / plot_size;
+            value.gain_db = gain_db;
+            value.seconds_per_row = static_cast<double>(bit_samples) / rate / value.total_rows;
+            value.rows.reserve(value.total_rows);
+        }
+
+        bool record(std::uint64_t chunk_first, std::span<const Complex> samples,
+                    std::span<const std::uint8_t> valid) {
+            const auto completed_before = row;
+            const auto chunk_end = chunk_first + samples.size();
+            while (row_first < chunk_end) {
+                const auto width = row_width();
+                if (width > UINT64_MAX - row_first) break;
+                const auto row_end = row_first + width;
+                const auto count = std::min<std::uint64_t>(simulation_waterfall_windows_per_row, width / plot_size);
+                if (!count) break;
+                if (window == count) {
+                    if (chunk_end < row_end) return row != completed_before;
+                    finish_row();
+                    row_first = row_end;
+                    continue;
+                }
+                const auto row_offset = static_cast<std::uint64_t>(window) * width / count;
+                const auto window_first = row_first + row_offset + (width / count - plot_size) / 2;
+                const auto window_end = window_first + plot_size;
+                if (window_end <= chunk_first) {
+                    // An unavailable earlier window cannot complete this row.
+                    return row != completed_before;
+                }
+                if (window_first >= chunk_end) return row != completed_before;
+                const auto copy_first = std::max(window_first, chunk_first);
+                const auto copy_end = std::min(window_end, chunk_end);
+                const auto source_offset = static_cast<std::size_t>(copy_first - chunk_first);
+                const auto target_offset = static_cast<std::size_t>(copy_first - window_first);
+                if (!target_offset) {
+                    window_valid = true;
+                    window_filled = 0;
+                }
+                if (target_offset != window_filled) return row != completed_before;
+                const auto copy_count = static_cast<std::size_t>(copy_end - copy_first);
+                std::copy_n(samples.data() + source_offset, copy_count, window_samples.data() + target_offset);
+                for (std::size_t i = 0; i < copy_count; ++i)
+                    window_valid = window_valid && valid[source_offset + i] != 0;
+                window_filled += copy_count;
+                if (window_filled != plot_size) return row != completed_before;
+                if (window_valid) accumulate_window(window_first);
+                ++window;
+                window_filled = 0;
+            }
+            return row != completed_before;
+        }
+
+        std::shared_ptr<const Snapshot::SimulationWaterfall> snapshot() const {
+            auto copy = std::make_shared<Snapshot::SimulationWaterfall>(value);
+            return copy;
+        }
+
+    private:
+        std::uint64_t row_width() const {
+            // Repeat the exact first-bit partition without multiplying the
+            // full capture index by the bit's sample count.
+            const auto rows = value.total_rows;
+            const auto slot = row % rows;
+            const auto remainder = bit_samples % rows;
+            return bit_samples / rows + remainder * (slot + 1) / rows - remainder * slot / rows;
+        }
+
+        void accumulate_window(std::uint64_t window_first) {
+            const auto frame = receiver_plot_frame(window_first, rate, if_hz, window_samples);
+            if (power.empty()) power.assign(plot_size / 2 + 1, 0);
+            for (std::size_t bin = 0; bin < power.size(); ++bin) {
+                const auto linear = std::norm(frame.spectrum[bin]);
+                if (std::isfinite(linear) && linear >= 0) power[bin] += linear;
+            }
+            ++valid_windows;
+        }
+
+        void finish_row() {
+            auto db = std::make_shared<std::vector<double>>(plot_size / 2 + 1,
+                -std::numeric_limits<double>::infinity());
+            if (valid_windows) {
+                for (std::size_t bin = 0; bin < db->size(); ++bin) {
+                    const auto mean = power[bin] / valid_windows;
+                    if (mean > 0 && std::isfinite(mean)) (*db)[bin] = 10 * std::log10(mean);
+                }
+            }
+            if (value.rows.size() == value.total_rows) {
+                value.rows.erase(value.rows.begin());
+                ++value.first_row;
+            }
+            value.rows.push_back(std::move(db));
+            power.clear();
+            valid_windows = 0;
+            window = 0;
+            ++row;
+        }
+
+        const std::uint64_t bit_samples;
+        std::uint64_t row_first, row=0;
+        std::uint32_t rate;
+        double if_hz;
+        std::size_t window=0, window_filled=0, valid_windows=0;
+        bool window_valid=false;
+        std::array<Complex, plot_size> window_samples{};
+        std::vector<double> power;
+        Snapshot::SimulationWaterfall value;
+    };
+        std::unique_ptr<WaterfallRecorder> waterfall_recorder;
 };
 
 PatternStep pattern_step(const StreamSlotReceipt& receipt) {
@@ -467,6 +788,7 @@ struct Session::Impl {
     std::shared_ptr<const Profile> profile;
     std::optional<TxRequest> request;
     std::optional<SimulationReplay> retained_replay;
+    std::shared_ptr<SimulationDetailCapture> simulation_detail_capture;
     std::optional<SimulationPreview> simulation_preview;
     std::optional<Clock::time_point> simulation_started;
     bool replay_requested = false;
@@ -1061,8 +1383,12 @@ struct Session::Impl {
                 retained_replay ? retained_replay->working_bytes() : 0, 2 * 1024 * 1024U));
             if (resources->workers > 1) {
                 try {
+                    const auto waterfall_workspace = send.mode == EmissionMode::Message &&
+                        calendar.geometry().bit_seconds >= 60 ? simulation_waterfall_workspace_bytes() : 0;
                     const auto optional_workspace = checked_workspace(StreamingChannel::maximum_working_bytes,
-                        simulation_replay_rows(rate) * sizeof(Complex));
+                        checked_workspace(simulation_replay_rows(rate) *
+                                (sizeof(Complex) + sizeof(std::uint8_t)),
+                            checked_workspace(waterfall_workspace, simulation_detail_workspace_bytes(rate))));
                     const auto options = stream_options(*message, *resources,
                         checked_workspace(fixed_workspace, optional_workspace));
                     if (triad::v3::detail::stream_simulation_workspace_fits(calendar, prepared.receiver,
@@ -1088,23 +1414,39 @@ struct Session::Impl {
         std::optional<SimulationReplay> replay;
         auto tx_slot = calendar.transmit_slot(0);
         const auto segment = new_plot_segment();
+        auto detail_capture = std::make_shared<SimulationDetailCapture>(segment, 0, rate,
+            prepared.receiver.data_if_hz);
+        publish(owner, stop, [&](Snapshot& out) {
+            simulation_detail_capture = detail_capture;
+            out.simulation_waterfall.reset();
+            out.simulation_detail.reset();
+        });
         if (!noise) {
-            publish(owner, stop, [&](Snapshot& out) {
-                simulation_started = began;
-                out.simulation_progress = Snapshot::SimulationProgress{0, channel.total_samples(), rate};
-                out.status = "Simulating receiver input";
-            });
             // In a message preview, include DATA even when a long Helper
             // lead precedes it. Helper-only previews begin at Helper onset.
             const auto activity = send.mode == EmissionMode::HelperOnly ? tx_slot.helper_begin : tx_slot.pattern_begin;
             replay.emplace(prepared, s, config.effects, calendar.calendar().distance(calendar.origin(), activity),
                 channel.total_samples());
+            if (send.mode == EmissionMode::Message)
+                replay->enable_waterfall(segment, calendar.geometry().bit_seconds);
             // Channel working bytes include the waveform source but exclude
             // the prepared text shared by its lazy interval reader and the
             // new presentation slice and retained excerpt beside the receiver.
             const auto options = stream_options(*message, *resources, checked_workspace(fixed_workspace,
-                checked_workspace(channel.report().working_bytes, replay->working_bytes())));
+                checked_workspace(checked_workspace(channel.report().working_bytes, replay->working_bytes()),
+                    simulation_detail_workspace_bytes(rate))));
+            // This uses the same public plan and route selector as native
+            // stream admission. Only reject a first window whose DSP bound
+            // alone exceeds the receiver budget after actual external costs.
+            triad::v3::detail::check_simulation_first_window_workspace(calendar, prepared.receiver, options);
             receiver = std::make_unique<CompleteStreamReceiver>(calendar, prepared.receiver, prepared.key, options, *message);
+            const auto initial_waterfall = replay->waterfall_snapshot();
+            publish(owner, stop, [&](Snapshot& out) {
+                simulation_started = began;
+                out.simulation_progress = Snapshot::SimulationProgress{0, channel.total_samples(), rate};
+                out.simulation_waterfall = initial_waterfall;
+                out.status = "Simulating receiver input";
+            });
             replay->allocate();
             publish(owner, stop, [&](Snapshot& out) { out.receiver_workers = receiver->report().resources.workers; });
         }
@@ -1125,7 +1467,11 @@ struct Session::Impl {
                 const auto samples = std::span(iq).first(count);
                 if (receiver) accept(*receiver, display, s, first, samples, std::span(valid).first(count),
                                      owner, stop, comparison);
-                if (replay) replay->record(first, samples);
+                if (!stop.stop_requested()) detail_capture->append(first, samples, std::span(valid).first(count));
+                if (replay && replay->record(first, samples, std::span(valid).first(count))) {
+                    const auto waterfall = replay->waterfall_snapshot();
+                    publish(owner, stop, [&](Snapshot& out) { out.simulation_waterfall = waterfall; });
+                }
                 const auto now = Clock::now();
                 if (now >= next_preview) {
                     next_preview = now + simulation_preview_period;
@@ -1190,8 +1536,21 @@ struct Session::Impl {
         const auto input = replay.samples();
         if (input.size() < plot_size || stop.stop_requested()) return;
         const auto rate = replay.rate;
+        const auto playback_extent = std::min<std::size_t>(input.size(), static_cast<std::size_t>(rate) * 3);
+        const auto input_validity = replay.valid_samples().first(playback_extent);
         const auto last = input.size() - plot_size;
         const auto segment = new_plot_segment();
+        auto detail_capture = std::make_shared<SimulationDetailCapture>(segment, replay.first,
+            rate, replay.data_if_hz);
+        std::size_t detail_cursor = 0;
+        const auto append_detail_to = [&](std::size_t target) {
+            target = std::min(target, playback_extent);
+            if (target <= detail_cursor) return;
+            const auto count = target - detail_cursor;
+            detail_capture->append(replay.first + detail_cursor, input.subspan(detail_cursor, count),
+                input_validity.subspan(detail_cursor, count));
+            detail_cursor = target;
+        };
         const auto wait_until = [&](Clock::time_point time) {
             std::unique_lock lock(mutex);
             changed.wait_until(lock, stop, time, [] { return false; });
@@ -1200,6 +1559,9 @@ struct Session::Impl {
         constexpr auto frames = simulation_replay_duration / simulation_replay_period;
         const auto pattern_step_count = replay.pattern_steps ? replay.pattern_steps->size() : 0;
         publish(owner, stop, [&](Snapshot& out) {
+            simulation_detail_capture = detail_capture;
+            out.simulation_detail.reset();
+            out.simulation_waterfall = replay.waterfall_snapshot();
             out.simulation_pattern_replay_steps = replay.pattern_steps;
             out.simulation_pattern_replay_active = pattern_step_count != 0;
             out.simulation_pattern_replay_visible_steps = 0;
@@ -1211,9 +1573,15 @@ struct Session::Impl {
             // Slow presentation consumers can skip frames. Never build a
             // backlog or let the replay delay the end of this session.
             tick = std::max(tick, (Clock::now() - started) / simulation_replay_period);
-            if (tick >= frames) return;
+            if (tick >= frames) {
+                append_detail_to(playback_extent);
+                return;
+            }
             const auto offset = static_cast<std::size_t>((tick * simulation_replay_period).count()) * rate / 1000;
             if (offset > last) return;
+            const auto next_detail = std::min(playback_extent, offset +
+                static_cast<std::size_t>(simulation_replay_period.count()) * rate / 1000);
+            append_detail_to(next_detail);
             const auto first = replay.first + offset;
             const auto count = std::min(simulation_waveform_size, input.size() - offset);
             const auto samples = input.subspan(offset, count);
@@ -1859,6 +2227,8 @@ struct Session::Impl {
         if (settings.simulation) {
             simulation_preview.reset();
             simulation_started.reset();
+            simulation_detail_capture.reset();
+            current.simulation_detail.reset();
             current.simulation_progress.reset();
             current.pattern_steps.clear();
             current.simulation_pattern_replay_steps.reset();
@@ -1935,6 +2305,7 @@ void Session::configure(const Settings& value) {
         auto replay_waterfall = value.simulation ? p.current.replay_waterfall : std::nullopt;
         p.profile.reset();
         p.current = {};
+        p.simulation_detail_capture.reset();
         p.current.replay_waterfall = std::move(replay_waterfall);
         p.simulation_preview.reset();
         p.simulation_started.reset();
@@ -2074,10 +2445,12 @@ void Session::cancel_transmit() {
 bool Session::resume_recovery(std::uint64_t) { return false; }
 void Session::cancel_recovery(std::uint64_t) {}
 
-Snapshot Session::snapshot() {
+Snapshot Session::snapshot(bool want_simulation_detail) {
     auto& p = *impl_;
     Snapshot result;
     std::optional<SimulationPreview> preview;
+    std::shared_ptr<SimulationDetailCapture> detail_capture;
+    std::uint64_t detail_generation = 0;
     {
         std::lock_guard lock(p.mutex);
         preview.swap(p.simulation_preview);
@@ -2138,6 +2511,8 @@ Snapshot Session::snapshot() {
             }
         }
         result = p.current;
+        detail_capture = p.simulation_detail_capture;
+        detail_generation = p.generation;
         result.gpu_available = p.gpu_available;
         result.gpu_unavailable_reason = p.gpu_unavailable_reason;
         if (result.simulation_progress && p.simulation_started)
@@ -2147,6 +2522,17 @@ Snapshot Session::snapshot() {
         result.signals.swap(p.signal_events);
         result.received.swap(p.received_events);
         p.lock_status(result);
+    }
+    if (want_simulation_detail && detail_capture) {
+        const auto detail = detail_capture->snapshot(Clock::now());
+        std::lock_guard lock(p.mutex);
+        if (detail && !p.stopping && p.generation == detail_generation &&
+            p.simulation_detail_capture == detail_capture) {
+            p.current.simulation_detail = detail;
+            result.simulation_detail = detail;
+        } else if (p.generation != detail_generation || p.simulation_detail_capture != detail_capture) {
+            result.simulation_detail.reset();
+        }
     }
     if (!result.received.empty()) p.changed.notify_all();
     return result;
@@ -2163,6 +2549,7 @@ void Session::stop() {
         p.current.running = p.current.transmitting = false;
         p.current.receiver_workers = 0;
         p.simulation_preview.reset();
+        p.simulation_detail_capture.reset();
         p.simulation_started.reset();
         p.current.simulation_replay = false;
         p.current.simulation_pattern_replay_active = false;

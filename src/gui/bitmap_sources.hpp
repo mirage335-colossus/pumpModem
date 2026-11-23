@@ -1,7 +1,9 @@
 #pragma once
 #include "controller.hpp"
 #include "plot_render.hpp"
+#include <iomanip>
 #include <map>
+#include <sstream>
 
 namespace datapump::gui {
 inline std::vector<plots::PatternEvidencePoint> pattern_evidence_points(std::span<const live::PatternStep> steps,
@@ -40,6 +42,10 @@ public:
         };
         const auto update = controller.plot_update();
         const auto& snapshot = controller.snapshot();
+        const auto modeled = snapshot.simulation_waterfall;
+        const bool modeled_changed = modeled != modeled_source_;
+        const auto detail = snapshot.simulation_detail;
+        const bool detail_changed = detail != simulation_detail_source_;
         const bool new_simulation_segment=snapshot.simulation && update.append_waterfall &&
             spectrum_segment_ && (*spectrum_segment_!=snapshot.spectrum_segment ||
                 (!snapshot.spectrum_revision && snapshot.transmitting));
@@ -50,7 +56,29 @@ public:
         previewing_=snapshot.simulation_progress && snapshot.transmitting && !replaying_ &&
             !snapshot.simulation_progress->complete;
         simulation_=snapshot.simulation;environment_monitor_=snapshot.environment_monitor;
-        if (clear) {history_.clear();spectrum_revision_.reset();spectrum_segment_.reset();}
+        if (clear) {
+            history_.clear();spectrum_revision_.reset();spectrum_segment_.reset();
+        }
+        if (modeled && modeled->segment != retained_modeled_segment_ &&
+            (replaying_ || (snapshot.simulation_progress && snapshot.simulation_progress->complete))) {
+            retained_modeled_segment_ = modeled->segment;
+            retained_modeled_clear_row_ = modeled->segment == cleared_modeled_segment_ ? cleared_modeled_row_ : 0;
+        }
+        if (update.clear_waterfall) {
+            if (modeled) {
+                // Keep the replay cut separately while another run is in progress.
+                cleared_modeled_segment_ = modeled->segment;
+                cleared_modeled_row_ = modeled->first_row + modeled->rows.size();
+                if (modeled->segment == retained_modeled_segment_)
+                    retained_modeled_clear_row_ = cleared_modeled_row_;
+            }
+            cleared_detail_segment_ = std::max(snapshot.spectrum_segment, detail ? detail->segment : 0);
+            cleared_detail_sample_ = snapshot.spectrum_segment == cleared_detail_segment_ ?
+                snapshot.spectrum_start_sample + snapshot.spectrum_sample_count : 0;
+            if (detail && detail->segment == cleared_detail_segment_)
+                cleared_detail_sample_ = std::max(cleared_detail_sample_, detail->end_sample);
+        }
+        modeled_source_=modeled;
         const bool append=update.append_waterfall && snapshot.spectrum_revision &&
             spectrum_revision_!=snapshot.spectrum_revision;
         if (append) history_.push(snapshot.spectrum_db, snapshot.spectrum_bin_hz,
@@ -92,15 +120,50 @@ public:
         const auto band=controller.spectrum_search_band();
         if (clear || append) {
             frozen_history_=std::make_shared<const plots::SpectrumHistory>(history_);
-            put(ui::Bitmap::waterfall,plots::PlotSnapshot::waterfall_shared(frozen_history_));
         }
-        if(clear || append || band!=searched_band_ || !frames_.contains(ui::Bitmap::waterfall_detail))
-            put(ui::Bitmap::waterfall_detail,plots::PlotSnapshot::waterfall_detail(frozen_history_,band));
+        if (detail_changed || update.clear_waterfall || simulation_changed) {
+            static_assert(plots::SpectrumHistory::capacity == live::simulation_detail_rows);
+            auto history = std::make_shared<plots::SpectrumHistory>();
+            if (detail) {
+                const auto gain = snapshot.replay_waterfall ? std::optional(snapshot.replay_waterfall->gain_db)
+                    : snapshot.simulation_spectrum_gain_db;
+                for (const auto& row : detail->rows) {
+                    if (row.db.empty() || (detail->segment == cleared_detail_segment_ &&
+                                          row.start_sample < cleared_detail_sample_)) {
+                        history->push_empty_detail();
+                    } else {
+                        history->push(row.db, static_cast<double>(detail->sample_rate) / detail->fft_samples,
+                            gain, row.spectrum, row.start_sample, detail->fft_samples, detail->segment);
+                    }
+                }
+            }
+            frozen_simulation_detail_ = std::move(history);
+            simulation_detail_source_ = detail;
+        }
+        if (modeled_changed || (modeled ? update.clear_waterfall : clear || append)) {
+            if (modeled) {
+                const auto clear_row = modeled->segment == cleared_modeled_segment_ ? cleared_modeled_row_ :
+                    modeled->segment == retained_modeled_segment_ ? retained_modeled_clear_row_ : 0;
+                const auto first_available = std::clamp(clear_row, modeled->first_row,
+                    modeled->first_row + modeled->rows.size());
+                const auto skipped = static_cast<std::size_t>(first_available - modeled->first_row);
+                auto history = std::make_shared<plots::SpectrumHistory>();
+                for (std::size_t i = skipped; i < modeled->rows.size(); ++i)
+                    history->push(*modeled->rows[i], modeled->bin_hz, modeled->gain_db);
+                put(ui::Bitmap::waterfall,plots::PlotSnapshot::waterfall_timeline_shared(
+                    std::move(history),modeled->total_rows,skipped));
+            } else put(ui::Bitmap::waterfall,plots::PlotSnapshot::waterfall_shared(frozen_history_));
+        }
+        const auto detail_history = simulation_ ? frozen_simulation_detail_ : frozen_history_;
+        const auto detail_seconds = simulation_ ? std::optional(live::simulation_detail_seconds) : std::nullopt;
+        const bool detail_repaint = simulation_changed || (simulation_ ? detail_changed || update.clear_waterfall : clear || append);
+        if(detail_repaint || band!=searched_band_ || !frames_.contains(ui::Bitmap::waterfall_detail))
+            put(ui::Bitmap::waterfall_detail,plots::PlotSnapshot::waterfall_detail(detail_history,band,"Search",detail_seconds));
         searched_band_=band;
         const auto helper_band=controller.spectrum_helper_band();
-        if((helper_band || helper_band_) && (clear || append || helper_band!=helper_band_ || !frames_.contains(ui::Bitmap::waterfall_helper_detail)))
+        if((helper_band || helper_band_) && (detail_repaint || helper_band!=helper_band_ || !frames_.contains(ui::Bitmap::waterfall_helper_detail)))
             put(ui::Bitmap::waterfall_helper_detail,helper_band?
-                plots::PlotSnapshot::waterfall_detail(frozen_history_,helper_band,"Helper Carrier"):
+                plots::PlotSnapshot::waterfall_detail(detail_history,helper_band,"Helper Carrier",detail_seconds):
                 plots::PlotSnapshot{});
         helper_band_=helper_band;
         const auto& bytes = controller.message_bytes();
@@ -136,8 +199,31 @@ public:
         if (id == ui::Bitmap::qr && !qr_error_.empty()) return qr_error_;
         auto result = get(id).caption(width);
         if(id==ui::Bitmap::waveform || id==ui::Bitmap::waterfall || id==ui::Bitmap::waterfall_detail || id==ui::Bitmap::waterfall_helper_detail) {
-            if(simulation_)result=(replaying_?"RX replay · ":previewing_?"Sampled RX preview · ":"Simulated RX · ")+result;
+            const auto detail = id==ui::Bitmap::waterfall_detail || id==ui::Bitmap::waterfall_helper_detail;
+            if(simulation_) {
+                std::ostringstream prefix;
+                prefix << (replaying_?"RX replay · ":previewing_&&!detail?"Sampled RX preview · ":"Simulated RX · ");
+                if(detail && simulation_detail_source_ && simulation_detail_source_->sample_rate)
+                    prefix << "end " << std::fixed << std::setprecision(3) <<
+                        static_cast<double>(simulation_detail_source_->end_sample) / simulation_detail_source_->sample_rate <<
+                        " modeled s · ";
+                result=prefix.str()+result;
+            }
             else result+=environment_monitor_?" / input monitor":" / modem stream";
+        }
+        if(id==ui::Bitmap::waterfall && modeled_source_) {
+            const auto row_seconds=modeled_source_->seconds_per_row;
+            std::ostringstream caption;
+            caption << "RX overview · " << std::fixed << std::setprecision(1);
+            if (modeled_source_->rows.size() < modeled_source_->total_rows) {
+                caption << modeled_source_->rows.size()*row_seconds << '/' << modeled_source_->total_rows*row_seconds;
+            } else {
+                caption << modeled_source_->first_row*row_seconds << "–" <<
+                    (modeled_source_->first_row+modeled_source_->rows.size())*row_seconds;
+            }
+            caption << " modeled s · avg "
+                    << std::setprecision(row_seconds<2 ? 2 : 1) << row_seconds << " s/row";
+            return caption.str();
         }
         if((id==ui::Bitmap::pattern_scores || id==ui::Bitmap::pattern_evidence) && !pattern_replay_caption_.empty())
             result=pattern_replay_caption_;
@@ -149,7 +235,7 @@ public:
     const char* title(ui::Bitmap id) const {
         switch (id) {
         case ui::Bitmap::waveform: return replaying_ ? "Simulation replay / waveform" : "Live waveform";
-        case ui::Bitmap::waterfall: return replaying_ ? "Replay spectrum" : "Spectrum";
+        case ui::Bitmap::waterfall: return modeled_source_ ? "Modeled RX history" : replaying_ ? "Replay spectrum" : "Spectrum";
         case ui::Bitmap::waterfall_detail: return replaying_ ? "Replay / configured searched spectrum" : "Configured searched spectrum";
         case ui::Bitmap::waterfall_helper_detail: return "Helper Carrier / auxiliary and pilot";
         case ui::Bitmap::constellation:
@@ -165,6 +251,12 @@ private:
     plots::PlotSnapshot empty_;
     plots::SpectrumHistory history_;
     std::shared_ptr<const plots::SpectrumHistory> frozen_history_=std::make_shared<const plots::SpectrumHistory>();
+    std::shared_ptr<const plots::SpectrumHistory> frozen_simulation_detail_=std::make_shared<const plots::SpectrumHistory>();
+    std::shared_ptr<const live::Snapshot::SimulationWaterfall> modeled_source_;
+    std::shared_ptr<const live::Snapshot::SimulationDetail> simulation_detail_source_;
+    std::uint64_t cleared_detail_segment_=0, cleared_detail_sample_=0;
+    std::uint64_t cleared_modeled_segment_=0, cleared_modeled_row_=0;
+    std::uint64_t retained_modeled_segment_=0, retained_modeled_clear_row_=0;
     std::optional<std::pair<double,double>> searched_band_;
     std::optional<std::pair<double,double>> helper_band_;
     std::optional<std::uint64_t> spectrum_revision_, spectrum_segment_;

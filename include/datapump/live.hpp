@@ -5,10 +5,16 @@
 #include "datapump/transmit_trace.hpp"
 #include "datapump/wrong_key_admission.hpp"
 #include <array>
+#include <complex>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <utility>
+#include <vector>
 
 namespace datapump::live {
+inline constexpr std::size_t simulation_detail_rows = 160;
+inline constexpr double simulation_detail_seconds = 7.2;
 // Both ends configure the same calendar independently. Its ordinal advances
 // through quiet slots as well as DATA. A later capture can join this calendar.
 struct Calendar {
@@ -109,6 +115,26 @@ struct PatternStep {
     std::string helper_status, varying_status, drift_status, reason;
 };
 struct Snapshot {
+    struct SimulationDetail {
+        struct Row {
+            std::uint64_t start_sample=0;
+            std::vector<double> db;
+            std::vector<std::complex<float>> spectrum;
+        };
+        std::uint64_t segment=0, end_sample=0;
+        std::uint32_t sample_rate=0;
+        std::size_t fft_samples=0;
+        std::vector<Row> rows;
+    };
+    struct SimulationWaterfall {
+        static constexpr std::size_t maximum_rows = 160;
+        std::uint64_t segment=0;
+        // Absolute row index relative to the first DATA observation.
+        std::uint64_t first_row=0;
+        double bin_hz=0, gain_db=0, seconds_per_row=0;
+        std::size_t total_rows=maximum_rows;
+        std::vector<std::shared_ptr<const std::vector<double>>> rows;
+    };
     struct ReplayWaterfall {
         double gain_db=0;
         std::pair<double,double> search_band_hz;
@@ -132,6 +158,10 @@ struct Snapshot {
     std::optional<double> simulation_spectrum_gain_db;
     // Original band and power calibration of the currently displayed replay.
     std::optional<ReplayWaterfall> replay_waterfall;
+    // Bounded rolling native FFT history for a slow simulation.
+    std::shared_ptr<const SimulationWaterfall> simulation_waterfall;
+    // On-demand rolling native FFT detail for the currently displayed segment.
+    std::shared_ptr<const SimulationDetail> simulation_detail;
     // Native receiver input clock and processing wall time, excluding replay.
     std::optional<SimulationProgress> simulation_progress;
     std::vector<std::complex<double>> constellation;
@@ -218,7 +248,7 @@ public:
     void cancel_transmit();
     bool resume_recovery(std::uint64_t);
     void cancel_recovery(std::uint64_t);
-    Snapshot snapshot();
+    Snapshot snapshot(bool simulation_detail = false);
     void stop();
     bool ready_to_close() const;
 private:

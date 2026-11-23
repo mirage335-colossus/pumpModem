@@ -1387,6 +1387,8 @@ struct Controller::Impl {
     void accept_snapshot(live::Snapshot value) {
         const bool spectrum_changed=value.spectrum_revision!=snapshot.spectrum_revision||
             value.spectrum_segment!=snapshot.spectrum_segment;
+        const bool modeled_waterfall_changed=value.simulation_waterfall!=snapshot.simulation_waterfall;
+        const bool simulation_detail_changed=value.simulation_detail!=snapshot.simulation_detail;
         const bool reception_changed=!value.signals.empty()||!value.received.empty();
         const bool pattern_changed=value.pattern_steps.size()!=snapshot.pattern_steps.size()||
             (!value.pattern_steps.empty()&&!snapshot.pattern_steps.empty()&&
@@ -1493,7 +1495,8 @@ struct Controller::Impl {
             refresh_pattern_steps();
         }
         refresh_airtime();
-        if(reception_changed||spectrum_changed||pattern_changed||state_changed||progress_changed)++revision;
+        if(reception_changed||spectrum_changed||pattern_changed||state_changed||progress_changed||
+            modeled_waterfall_changed||simulation_detail_changed)++revision;
     }
     void refresh_pattern_steps() {
         auto& records=f(UiField::profile_reference).records;records.clear();
@@ -1802,7 +1805,7 @@ void Controller::start(bool active) { auto& p=*impl_; if(!p.started&&!p.closing)
     p.active_requested=active;p.session.start(p.settings,active&&!p.key_loading&&!p.key_failed);
     p.started=true;p.accept_snapshot(p.session.snapshot());
 } }
-void Controller::poll() {
+void Controller::poll(bool expanded_spectrum) {
     auto& p=*impl_; std::optional<Impl::Prepared> prepared,airtime;
     std::optional<std::string> key_progress;
     { std::lock_guard lock(p.mutex); prepared.swap(p.prepared);airtime.swap(p.prepared_preview);key_progress.swap(p.key_progress); }
@@ -1819,7 +1822,7 @@ void Controller::poll() {
             }
             else p.accept(std::move(*prepared));
         }
-        if(!p.closing) { if(p.started) p.accept_snapshot(p.session.snapshot()); p.dispatch(); }
+        if(!p.closing) { if(p.started) p.accept_snapshot(p.session.snapshot(expanded_spectrum)); p.dispatch(); }
     }
     catch(const std::exception& e) { p.notice(e.what(),10); }
     p.controls();

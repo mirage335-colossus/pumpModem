@@ -60,6 +60,14 @@ Watch the selected row
 change to **Terminating** and the status confirm termination. If termination
 fails, select the affected pod and retry with **End simulation**.
 
+For DATA bits of at least a minute, the Console waterfall uses the first bit's
+duration for its time span and scrolls through later receiver samples once full.
+The caption shows the modeled-time range and averaging interval per row. The
+three-second waveform replay runs at its original pace while the final overview
+stays visible. Click the waterfall to see individual spectra every 45 ms across
+the latest 7.2 modeled seconds. The caption shows the end time of the displayed
+batch. Unavailable input appears blank.
+
 In the simulation, choose a **Carrier** preset or enter a frequency with
 units, such as `1850 Hz`. Presets are calculated for the current **Shift**.
 The receiver uses Carrier minus Shift as its audio frequency.

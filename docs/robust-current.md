@@ -724,8 +724,15 @@ from the first Helper onset on a Helper-only transmission, plus one FFT window
 of lookahead. After the receiver drains all available physical windows, the
 app replays this excerpt at its normal sample cadence and retains the plots.
 It computes the display projection and FFT during replay. Stopping that replay
-preserves any already completed reception. Live audio and the open-ended noise
-display keep their real-time cadence. Audio routing, duplex mode, TX volume and
+preserves any already completed reception. When the first DATA bit lasts at
+least 60 seconds, its duration sets the Console waterfall span. Each row
+averages linear received power from up to 32 evenly spaced native FFT windows.
+The newest rows stay within a bounded history of up to 160 rows through later
+DATA and quiet intervals, GUI frame skips and the paced replay.
+The expanded simulation waterfall reads the latest 7.2 modeled seconds from
+bounded accepted samples and their validity flags. It computes up to 160
+short FFTs only on demand, including during paced replay. Live audio and the
+open-ended noise display keep their real-time cadence. Audio routing, duplex mode, TX volume and
 exclusive mode use the existing native audio interface; physical device behavior
 requires its own qualification.
 

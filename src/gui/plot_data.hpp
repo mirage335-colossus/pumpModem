@@ -125,8 +125,15 @@ public:
     };
     void clear() {
         rows_.clear();detail_rows_.clear();previous_complex_.clear();
-        upper_db_ = max_hz_ = bin_hz_ = 0; simulation_reference_ = false;
+        upper_db_ = max_hz_ = bin_hz_ = 0; simulation_upper_db_ = 34; simulation_gain_db_ = 0;
+        simulation_reference_ = false;
         previous_segment_=previous_start_=0;
+    }
+    void push_empty_detail() {
+        if(detail_rows_.size()==capacity)detail_rows_.pop_front();
+        detail_rows_.emplace_back();
+        previous_complex_.clear();
+        previous_segment_=0;
     }
     void push(std::span<const double> bins, double bin_hz,
               std::optional<double> simulation_gain_db = {},
@@ -139,8 +146,16 @@ public:
         const auto edge = bin_hz * static_cast<double>(bins.size() - 1);
         if(!std::isfinite(edge))throw Error("invalid spectrum frequency extent");
         if (!rows_.empty() && (bin_hz != bin_hz_ || std::abs(edge - max_hz_) > 1e-9 * std::max(1., edge) ||
-            simulation_reference_ != simulation_gain_db.has_value())) clear();
+            simulation_reference_ != simulation_gain_db.has_value() ||
+            (simulation_gain_db && *simulation_gain_db != simulation_gain_db_))) clear();
         simulation_reference_ = simulation_gain_db.has_value();
+        if (simulation_gain_db) {
+            simulation_gain_db_ = *simulation_gain_db;
+            // One fixed scale per simulation reference. Keep the original
+            // dim-noise range and extend its upper end 12 dB beyond the
+            // configured signal reference so fading and strong levels remain visible.
+            simulation_upper_db_ = std::max(34., simulation_gain_db_ + 12.);
+        }
         max_hz_ = edge;
         bin_hz_ = bin_hz;
         const auto columns = std::min<std::size_t>(256, bins.size());
@@ -185,11 +200,19 @@ public:
         if(detail_rows_.size()==capacity)detail_rows_.pop_front();
         detail_rows_.push_back(std::move(detail));
     }
-    double intensity(double db) const { return std::clamp((db - lower_db()) / (simulation_reference_ ? 40. : 100.), 0., 1.); }
-    // The simulation offset references measured power to mean modeled bin
-    // noise. Keep it dim while preserving a fixed 40 dB scale for signal peaks.
+    double intensity(double db) const {
+        if (!simulation_reference_) return std::clamp((db - lower_db()) / 100., 0., 1.);
+        // Preserve the original mapping through +6 dB (including dim noise),
+        // then spread stronger simulation levels over the configured headroom.
+        if (db <= 6.) return std::clamp((db + 6.) / 40., 0., 12. / 40.);
+        return std::clamp(12. / 40. + (db - 6.) * (1. - 12. / 40.) /
+                          (simulation_upper_db_ - 6.), 12. / 40., 1.);
+    }
+    // Simulation power is referenced to mean modeled bin noise. The shared
+    // fixed scale retains the original dim-noise mapping and extends above the
+    // configured signal reference without auto-normalizing individual rows.
     double lower_db() const { return simulation_reference_ ? -6 : upper_db_ - 100; }
-    double upper_db() const { return simulation_reference_ ? 34 : upper_db_; }
+    double upper_db() const { return simulation_reference_ ? simulation_upper_db_ : upper_db_; }
     double max_hz() const { return max_hz_; }
     double bin_hz() const { return bin_hz_; }
     bool simulation_reference() const { return simulation_reference_; }
@@ -200,7 +223,8 @@ private:
     std::deque<DetailRow> detail_rows_;
     std::vector<std::complex<float>> previous_complex_;
     std::uint64_t previous_start_=0,previous_segment_=0;
-    double upper_db_ = 0, max_hz_ = 0, bin_hz_=0;
+    double upper_db_ = 0, simulation_upper_db_ = 34, simulation_gain_db_ = 0;
+    double max_hz_ = 0, bin_hz_=0;
     bool simulation_reference_ = false;
 };
 }

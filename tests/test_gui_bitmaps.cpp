@@ -432,9 +432,56 @@ void waterfall_resize() {
     check(std::all_of(empty.pixels().begin(), empty.pixels().end(), [](auto value) { return value == 0; }),
           "empty enlarged waterfall must remain blank");
 }
+void modeled_waterfall_timebase() {
+    const auto bins=[](double level) { return std::vector<double>(4,level); };
+    plots::SpectrumHistory first_history;
+    first_history.push(bins(-20),1);
+    const auto first=PlotSnapshot::waterfall_timeline_shared(
+        std::make_shared<const plots::SpectrumHistory>(first_history),8);
+    auto request=full_bitmap_request(1,8);
+    const auto first_image=render(first,request,false);
+    check(red(first_image,0,0)>0 && red(first_image,0,1)==0,
+          "modeled overview stretched an early row into unrecorded future time");
+
+    auto later_history=first_history;
+    later_history.push(bins(-40),1);later_history.push(bins(-60),1);
+    const auto later=PlotSnapshot::waterfall_timeline_shared(
+        std::make_shared<const plots::SpectrumHistory>(later_history),8);
+    const auto later_image=render(later,request,false);
+    check(red(later_image,0,0)==red(first_image,0,0) && red(later_image,0,1)>0 &&
+          red(later_image,0,3)==0,
+          "new modeled rows shifted the first row or filled the future portion of the fixed timebase");
+
+    plots::SpectrumHistory after_clear;
+    after_clear.push(bins(-50),1);after_clear.push(bins(-70),1);
+    const auto cleared=PlotSnapshot::waterfall_timeline_shared(
+        std::make_shared<const plots::SpectrumHistory>(after_clear),8,3);
+    const auto cleared_image=render(cleared,request,false);
+    check(red(cleared_image,0,0)==0 && red(cleared_image,0,2)==0 &&
+          red(cleared_image,0,3)>0 && red(cleared_image,0,4)>0,
+          "cleared modeled rows did not retain their absolute positions on the bit timebase");
+
+    request.fit_content=true;
+    check(render(first,request,false).pixels()==first_image.pixels(),
+          "fit-content changed the fixed modeled-time axis");
+
+    plots::SpectrumHistory instant;
+    const auto amplitude=bins(-20);
+    instant.push(amplitude,1,{}, {},0,2,9);
+    instant.push_empty_detail();
+    instant.push_empty_detail();
+    instant.push(bins(-60),1,{}, {},6,2,9);
+    const auto detail=PlotSnapshot::waterfall_detail(
+        std::make_shared<const plots::SpectrumHistory>(instant),{},"Search",4.0);
+    const auto timed=render(detail,full_bitmap_request(2,4),false);
+    check(red(timed,0,0)>0 && red(timed,0,1)==0 && red(timed,0,2)==0 && red(timed,0,3)>0 &&
+          detail.caption().starts_with("Last 4 modeled s"),
+          "expanded simulated view stretched measured FFTs across gaps or lost its fixed-time label");
+}
 void simulated_waterfall_reference() {
     plots::SpectrumHistory history;
-    history.push(std::array{-125.,-105.,-150.,-125.},10,125.);
+    // Keep this moderate reference on the original 40 dB presentation range.
+    history.push(std::array{-10.,10.,-35.,-10.},10,10.);
     const auto source=PlotSnapshot::waterfall(history);
     const auto image=render(source,full_bitmap_request(4,2));
     check(red(image,0,0)==0 && red(image,0,1)==38 && red(image,1,1)==165 &&
@@ -442,6 +489,32 @@ void simulated_waterfall_reference() {
           "Simulated waterfall failed to show dim noise and a brighter signal in a fixed 40 dB range");
     check(source.caption().find("dB relative to modeled noise")!=std::string::npos,
           "Simulated waterfall scale mislabeled its power reference");
+
+    // A 1024-sample receiver FFT under the reported +77 dB-Hz modeled link
+    // has about +67.6 dB of bin-reference gain. Keep modeled noise dim while
+    // rendering two strong levels distinctly instead of clipping both.
+    constexpr double gain_db=67.6;
+    std::vector<double> native(1024/2+1,-gain_db);
+    native[40]=native[41]=52.-gain_db;
+    plots::SpectrumHistory configured;
+    configured.push(native,6000./1024,gain_db);
+    native[40]=native[41]=66.-gain_db;
+    configured.push(native,6000./1024,gain_db);
+    const auto configured_source=PlotSnapshot::waterfall(configured);
+    const auto configured_image=render(configured_source,full_bitmap_request(256,2));
+    check(std::abs(configured.upper_db()-(gain_db+12.))<1e-9 &&
+          std::abs(configured.intensity(0.)-.15)<1e-12 &&
+          red(configured_image,0,0)==red(configured_image,0,1) &&
+          red(configured_image,0,0)<red(configured_image,20,0) &&
+          red(configured_image,20,0)<red(configured_image,20,1) &&
+          red(configured_image,20,1)<255,
+          "Configured simulation waterfall clipped distinct strong levels or brightened modeled noise");
+
+    // A changed simulation reference starts a fresh scale segment instead of
+    // mixing history rows that no longer share comparable dB references.
+    configured.push(native,6000./1024,77.);
+    check(configured.rows().size()==1 && std::abs(configured.upper_db()-89.)<1e-9,
+          "Changed simulation reference mixed waterfall rows across scale segments");
 }
 void detailed_waterfall_phase() {
     constexpr std::size_t count=plots::SpectrumHistory::native_bins,k=777;
@@ -628,10 +701,10 @@ void qr_rendering() {
 int main(int argc,char** argv) {
     try {
         if(argc==2&&std::string_view(argv[1])=="--waterfall-only") {
-            waterfall_resize();simulated_waterfall_reference();detailed_waterfall_phase();
+            waterfall_resize();modeled_waterfall_timebase();simulated_waterfall_reference();detailed_waterfall_phase();
             std::cout<<"Focused waterfall display contracts passed\n";return 0;
         }
-        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); environmental_oscilloscope(); pattern_evidence(); resource_charts(); waterfall_resize(); simulated_waterfall_reference(); detailed_waterfall_phase(); fitted_history(); qr_rendering();
+        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); environmental_oscilloscope(); pattern_evidence(); resource_charts(); waterfall_resize(); modeled_waterfall_timebase(); simulated_waterfall_reference(); detailed_waterfall_phase(); fitted_history(); qr_rendering();
         std::cout << "GUI bitmap contract and shared producer tests passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

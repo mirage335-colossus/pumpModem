@@ -32,7 +32,7 @@ public:
     Controller(const Controller&) = delete;
     Controller& operator=(const Controller&) = delete;
     void start(bool active=true);
-    void poll();
+    void poll(bool expanded_spectrum = false);
     void close();
     // TX-idle audio handoff cancels partial DSP capture and retains incomplete
     // rows. Capture restarts on the configured calendar with quiet-slot rearming.
