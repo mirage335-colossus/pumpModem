@@ -58,6 +58,11 @@ Severe-channel reliability gains and sustained receiver cost at the new
 spacings remain unqualified. See the
 [shared settings contract](../gui-contract.md#modems-and-current-availability)
 and [functional checks](../validation.md#robust-minimum-carrier-spacing--22-november-2026).
+In a matched 3.6 Hz, 265 Hz-spacing, Helper-off HF Worst and Each 65% replay,
+Scheduled carrier-beat timing proposals repaired an inversion and recovered
+the whole message through Guarded. The independent-key control preserved
+the original admissions. Natural 0.75 Hz spacing and 0.1 Hz full reception
+remain open for different reasons. [Scope and controls](../validation.md#carrier-beat-nomination-on-the-ordinary-scheduled-scorer)
 For 100 W Helper at low DATA power, see the
 [3.5 Hz passband check](../validation.md#hypothetical-35-hz-minimum-spacing-with-100-w-helper).
 Configure the receiver's local input noise model and use the actual audio-device

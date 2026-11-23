@@ -15,6 +15,10 @@ struct ReceiverDriftAdmission {
 };
 ReceiverDriftAdmission receiver_drift_admission(const ReceiverConfig&, const ReceiverSlotPlan&,
                                                unsigned workers, bool overlap = false);
+// An alternative complete coarse shape for an otherwise unadmittable CPU
+// owner. It preserves the ordinary slot's public geometry and fine families.
+std::optional<std::size_t> grouped_receiver_slot_workspace(
+    const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers);
 
 // The selected span borrows either the Helper result or the caller's fixed
 // full-prior fallback. The original public grid still owns admission mass.

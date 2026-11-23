@@ -1,6 +1,7 @@
 #include "triad_stream_backend.hpp"
 #include "triad_stream_resources.hpp"
 #include "triad_receiver_bulk.hpp"
+#include "triad_receiver_driver.hpp"
 #include "triad_receiver_executor.hpp"
 #include "datapump/triad_shaping.hpp"
 
@@ -151,6 +152,115 @@ void packed_data_aperture_retains_delayed_energy() {
     const std::array<std::uint8_t, 2> bits{0, 1};
     check(end_energy(bits) > 1e-12, "wider packed DATA support retained no delayed wanted energy");
     check(end_energy(std::span(bits).first(1)) == 0, "wider packed DATA support retained neighboring DATA");
+}
+
+void scheduled_carrier_beat_aperture() {
+    PublicProfileConfig config;
+    config.format.sample_rate = 6000;
+    config.format.inner_rate_hz = 3.6;
+    config.format.added_symbols = 1;
+    config.format.added_interleave = false;
+    config.format.minimum_carrier_spacing_hz = 265;
+    config.format.bit_seconds = 160.4;
+    config.format.epoch = 1793850000;
+    config.format.symbol_ordinal = std::numeric_limits<std::uint64_t>::max() - 2;
+    config.capture_lead_seconds = 7.25;
+    config.capture_trail_seconds = .25;
+    config.arrival_low_seconds = -7;
+    config.arrival_high_seconds = 7.07;
+    config.clock_bound_ppm = 1200;
+    config.audio_pair_ppm = 1200;
+    config.spread_delay_ms = 21;
+    config.delay_excursion_seconds = .003;
+    config.receiver_filter_halo_samples = 97;
+    config.gap_fill_transport_halo_samples = 23;
+    config.selective_signal_tail = true;
+    const PublicProfile ordinary(config);
+    config.scheduled_gap_bridge = true;
+    const PublicProfile bridge(config);
+    check(bridge.last_slot() == 2, "carrier beat aperture fixture needs a first, interior and terminal slot");
+
+    auto rx = receiver(bridge);
+    rx.clock_bound_ppm = config.clock_bound_ppm;
+    rx.time_varying_channel = true;
+    rx.selective_modulation_rate_hz = 90;
+    const auto rate = static_cast<long double>(config.format.sample_rate);
+    const auto& shape = bridge.geometry();
+    const auto ramp = std::ceil(rate * std::max(config.format.ramp_seconds, 8 / shape.fine_chip_rate_hz));
+    const auto width = static_cast<long double>(shape.nominal_carrier_bandwidth_hz);
+    const auto tail = .001L * config.spread_delay_ms + config.delay_excursion_seconds + 2 / (3 * width);
+    const auto halo = config.receiver_filter_halo_samples + config.gap_fill_transport_halo_samples;
+    const auto endpoint = .0006L;
+    for (std::uint64_t index = 0; index <= bridge.last_slot(); ++index) {
+        const auto scheduled = ordinary.slot(index);
+        const auto bridged = bridge.slot(index);
+        const auto aperture = bridged.carrier_beat_aperture;
+        const auto scheduled_plan = make_receiver_slot_plan(ordinary, rx, index);
+        const auto plan = make_receiver_slot_plan(bridge, rx, index);
+        check(scheduled.tx == bridged.tx && scheduled.observation.first == bridged.observation.first &&
+              scheduled.observation.stop == bridged.observation.stop &&
+              scheduled.quiet_aperture.first == bridged.quiet_aperture.first &&
+              scheduled.quiet_aperture.stop == bridged.quiet_aperture.stop &&
+              plan.quiet_first_sample == bridged.quiet_aperture.first &&
+              plan.quiet_stop_sample == bridged.quiet_aperture.stop &&
+              plan.protected_data_first_sample == 0 && plan.protected_data_stop_sample == 0,
+              "scheduled carrier beat proposal must preserve observation and physical quiet");
+        check(bridged.quiet_aperture.first <= aperture.first && aperture.first < aperture.stop &&
+              aperture.stop <= bridged.quiet_aperture.stop &&
+              scheduled.carrier_beat_aperture.first <= aperture.first &&
+              aperture.stop <= scheduled.carrier_beat_aperture.stop &&
+              scheduled_plan.carrier_beat_first_sample == scheduled.carrier_beat_aperture.first &&
+              scheduled_plan.carrier_beat_stop_sample == scheduled.carrier_beat_aperture.stop &&
+              plan.carrier_beat_first_sample == aperture.first && plan.carrier_beat_stop_sample == aperture.stop,
+              "bridge transport must only narrow the independent scheduled proposal aperture");
+
+        const auto gate = bridge.calendar().distance(bridge.origin(), bridged.tx.pattern_begin);
+        const auto source_start = (gate + ramp) / rate;
+        const auto source_stop = (gate + std::ceil(shape.bit_seconds * rate) - ramp) / rate;
+        const auto latest = ((source_start / (1 - endpoint)) + config.capture_lead_seconds +
+            config.arrival_high_seconds + tail) * (1 + endpoint);
+        const auto earliest = ((source_stop / (1 + endpoint)) + config.capture_lead_seconds +
+            config.arrival_low_seconds) * (1 - endpoint);
+        check(aperture.first >= std::ceil(latest * rate) + halo &&
+              aperture.stop + halo <= std::floor(earliest * rate) &&
+              scheduled.carrier_beat_aperture.first >= std::ceil(latest * rate) + config.receiver_filter_halo_samples &&
+              scheduled.carrier_beat_aperture.stop + config.receiver_filter_halo_samples <= std::floor(earliest * rate),
+              "carrier beat proposal can contain bridge edges, channel tails or filter support");
+    }
+
+    auto stationary = rx;
+    stationary.time_varying_channel = false;
+    const auto declined = make_receiver_slot_plan(bridge, stationary, 1);
+    check(declined.carrier_beat_first_sample == 0 && declined.carrier_beat_stop_sample == 0,
+          "stationary receiver enabled the selective-channel carrier beat proposal");
+    auto retuned = rx;
+    retuned.physical_rf_retuning = true;
+    const auto retuned_plan = make_receiver_slot_plan(bridge, retuned, 1);
+    check(retuned_plan.carrier_beat_first_sample == 0 && retuned_plan.carrier_beat_stop_sample == 0,
+          "physical RF retuning must decline the fixed-band carrier beat proposal");
+
+    auto compact = config;
+    compact.format.inner_rate_hz = 360;
+    compact.format.bit_seconds = 8.8;
+    const PublicProfile compact_bridge(compact);
+    const auto empty = make_receiver_slot_plan(compact_bridge, rx, 1);
+    check(compact_bridge.slot(1).carrier_beat_aperture.size() == 0 &&
+          empty.carrier_beat_first_sample == 0 && empty.carrier_beat_stop_sample == 0,
+          "short DATA with wide arrival bounds must decline an empty carrier beat aperture");
+
+    config.scheduled_gap_bridge = false;
+    for (const bool packed : {false, true}) {
+        config.continuous_data = packed;
+        config.scheduled_gap_fill = !packed;
+        const PublicProfile protected_cadence(config);
+        const auto slot = protected_cadence.slot(1);
+        const auto plan = make_receiver_slot_plan(protected_cadence, rx, 1);
+        check((!packed || slot.protected_data_aperture.size() > 0) && slot.carrier_beat_aperture.size() == 0 &&
+              plan.protected_data_first_sample == slot.protected_data_aperture.first &&
+              plan.protected_data_stop_sample == slot.protected_data_aperture.stop &&
+              plan.carrier_beat_first_sample == 0 && plan.carrier_beat_stop_sample == 0,
+              "protected cadences must keep their original aperture instead of the scheduled proposal aperture");
+    }
 }
 
 void scheduled_gap_fill_emission() {
@@ -317,12 +427,15 @@ void scheduled_bridge_preserves_helper_and_fhss() {
         config.helper.data_power_w = .1;
         config.helper.callsign = "BRIDGE";
         config.data_if_hz = 1775;
+        config.selective_signal_tail = true;
         const PublicProfile ordinary(config);
         config.scheduled_gap_bridge = true;
         const PublicProfile bridged(config);
         const auto& calendar = ordinary.calendar();
         const auto origin = ordinary.origin();
         const auto first_slot = ordinary.transmit_slot(0), next_slot = ordinary.transmit_slot(1);
+        check((bridged.slot(1).carrier_beat_aperture.size() == 0) == (helper_enabled || fhss),
+              "scheduled beat geometry must decline Helper and FHSS without changing their public slots");
         const auto source_first = calendar.distance(origin, first_slot.helper_begin);
         const auto local = [&](HelperBurstCoordinate coordinate) { return calendar.distance(origin, coordinate) - source_first; };
         const auto first = local(first_slot.pattern_begin), next = local(next_slot.pattern_begin);
@@ -1348,6 +1461,98 @@ void resource_resolution() {
           "explicit intentional overcommit was changed");
 }
 
+void grouped_first_window_admission() {
+    PublicProfileConfig declared;
+    declared.format.sample_rate = 600;
+    declared.format.inner_rate_hz = 3.6;
+    declared.format.added_symbols = 1;
+    declared.format.added_interleave = false;
+    declared.format.minimum_carrier_spacing_hz = 125;
+    declared.format.bit_seconds = .1;
+    declared.data_if_hz = 150;
+    declared.capture_lead_seconds = .8;
+    declared.capture_trail_seconds = .75;
+    declared.arrival_low_seconds = -.5;
+    declared.arrival_high_seconds = .5;
+    declared.cfo_bound_hz = .0005;
+    declared.clock_bound_ppm = 400;
+    const PublicProfile profile(declared);
+    auto rx = receiver(profile);
+    rx.frequency_bound_hz = declared.cfo_bound_hz;
+    rx.clock_bound_ppm = declared.clock_bound_ppm;
+    rx.native_coarse_precision = NativeCoarsePrecision::fp64;
+    const auto slot = make_receiver_slot_plan(profile, rx, 0);
+    auto limited = options();
+    limited.workers = 2;
+    limited.slot_owners = 1;
+    const auto full = receiver_slot_workspace(rx, slot, *limited.workers);
+    const auto grouped = receiver_detail::grouped_receiver_slot_workspace(rx, slot, *limited.workers);
+    check(grouped && *grouped < full, "first-window fixture requires a reduced full-receiver grouped lease");
+    limited.memory_limit_bytes = *grouped;
+    check_simulation_first_window_workspace(profile, rx, limited);
+    --*limited.memory_limit_bytes;
+    bool rejected = false;
+    try { check_simulation_first_window_workspace(profile, rx, limited); }
+    catch (const ReceiverWorkspaceError&) { rejected = true; }
+    check(rejected, "simulation must reject even grouped admission below its complete first-window lease");
+
+    // Keep a generous gap between the DSP leases so process footprint and
+    // worker stacks fit without relying on allocator or host timing details.
+    constexpr std::size_t headroom = 128 * 1024 * 1024;
+    check(slot.stop_sample < 120'000 && full - *grouped > headroom,
+          "forced grouped dispatch fixture needs a bounded capture with room for controller memory");
+    const auto key = Crypto::amateur();
+    const auto receive = [&](std::span<const Complex> iq, std::size_t ceiling) {
+        auto options = limited;
+        options.memory_limit_bytes = ceiling;
+        CompleteStreamReceiver receiver(profile, rx, key, options);
+        for (std::size_t first = 0; first < iq.size();) {
+            const auto count = std::min(iq.size() - first, options.maximum_input_chunk_samples);
+            check(receiver.push(first, iq.subspan(first, count)) == StreamPushResult::accepted,
+                  "dispatch fixture unexpectedly backpressured before one complete slot");
+            first += count;
+        }
+        const auto report = receiver.finish_input();
+        auto receipts = receiver.drain_recent_slots();
+        check(report.state == StreamReceiverState::input_ended && report.next_public_slot == 1 &&
+              report.resources.workers == *options.workers && report.peak_reserved_bytes <= ceiling &&
+              receiver.drain_messages().empty() && receipts.size() == 1 && receipts.front().workers == *options.workers &&
+              receipts.front().pattern_epoch == slot.format.epoch && receipts.front().symbol_ordinal == slot.format.symbol_ordinal,
+              "native dispatch must score one addressed slot within its lease without emitting a message at EOF");
+        return std::move(receipts.front().score);
+    };
+    const std::vector<Complex> quiet(slot.stop_sample);
+    std::vector<Complex> wanted(slot.stop_sample);
+    const auto rate = static_cast<long double>(rx.sample_rate_hz);
+    const auto source_begin = slot.first_sample + (slot.window_capture_lead_seconds + slot.source_start_seconds) * rate;
+    PatternSource source(slot.format, key, 1);
+    for (std::size_t row = 0; row < wanted.size(); ++row)
+        wanted[row] = source.sample_at(static_cast<long double>(row) - source_begin);
+
+    // Run both reduced shapes before allowing the allocator to retain any
+    // pages from a roomy bank. Each invocation closes its executor on return.
+    const std::array bounded{receive(quiet, full - 1), receive(wanted, full - 1)};
+    const std::array ordinary{receive(quiet, full + headroom), receive(wanted, full + headroom)};
+    for (std::size_t i = 0; i < bounded.size(); ++i) {
+        const auto& actual = bounded[i];
+        const auto& expected = ordinary[i];
+        const auto decision = i ? SlotDecision::data : SlotDecision::quiet;
+        const auto bit = i ? std::optional<std::uint8_t>{1} : std::nullopt;
+        check(actual.coarse_precision_reason == "memory-bounded-epoch-fp64" &&
+              expected.coarse_precision_reason == "explicit-fp64" &&
+              actual.complete && actual.all_valid && actual.zero_h0_verified && actual.decision == decision &&
+              expected.complete && expected.decision == decision && actual.bit == bit && expected.bit == bit &&
+              actual.coarse_workspaces == expected.coarse_workspaces && actual.coarse_arrival_points == expected.coarse_arrival_points &&
+              actual.coarse_frequency_points == expected.coarse_frequency_points && actual.consumed_samples == expected.consumed_samples &&
+              actual.fine_candidates == expected.fine_candidates && actual.basis_rows == expected.basis_rows &&
+              actual.selected_prior_mass == expected.selected_prior_mass && actual.bit_evidence == expected.bit_evidence &&
+              actual.operational_log_e == expected.operational_log_e && actual.operational_bit_evidence == expected.operational_bit_evidence &&
+              actual.quiet_energy == expected.quiet_energy && actual.quiet_modes == expected.quiet_modes &&
+              actual.quiet_threshold == expected.quiet_threshold,
+              "grouped execution at a forced cap must preserve wanted DATA, physical quiet and complete public work");
+    }
+}
+
 void long_addressed_episode_and_decode_reservation() {
     const auto p = profile();
     constexpr std::uint64_t first = 11;
@@ -1397,8 +1602,10 @@ void long_addressed_episode_and_decode_reservation() {
 int main() {
     try {
         resource_resolution();
+        grouped_first_window_admission();
         packed_data_aperture();
         packed_data_aperture_retains_delayed_energy();
+        scheduled_carrier_beat_aperture();
         scheduled_gap_fill_emission();
         scheduled_bridge_preserves_helper_and_fhss();
         order_and_backpressure();

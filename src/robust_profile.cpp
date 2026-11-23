@@ -557,7 +557,7 @@ Profile with_capture_uncertainty(const Profile& input, double provider_seconds, 
     config.arrival_high_seconds += seconds;
     config.capture_lead_seconds += seconds;
     config.receiver_filter_halo_samples = filter_halo_samples;
-    if (config.scheduled_gap_fill)
+    if (config.scheduled_gap_fill || config.scheduled_gap_bridge)
         config.gap_fill_transport_halo_samples = audio::native_roundtrip_filter_halo_samples(config.format.sample_rate);
     Profile result = input;
     result.receiver.capture_tail_bound_seconds = std::max(result.receiver.capture_tail_bound_seconds,

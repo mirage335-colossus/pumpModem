@@ -316,8 +316,10 @@ struct CoarseWorkPlan {
     std::size_t segmented_timing_blocks = 0, segmented_timing_frequencies = 0, segmented_timing_hop = 0;
     std::size_t workspaces = 0, rays = 0, clocks = 0;
     // One tile advances either adjacent CFOs for all workspaces or adjacent
-    // workspaces for all CFOs. The final tile may be smaller.
+    // workspaces for all CFOs. The bounded bank advances adjacent CFOs for
+    // one epoch at a time. The final frequency tile may be smaller.
     std::size_t tile_width = 0, total_tiles = 0;
+    std::size_t workspace_group_size = 0;
     std::optional<CoarseFrequencyPlan> bulk_frequency_admission;
     std::size_t workspace_reserved_bytes = 0, workspace_limit_bytes = 0, bulk_host_workspace_bytes = 0;
     double input_sample_rate_hz = 0, projected_sample_rate_hz = 0;
@@ -448,6 +450,8 @@ CoarseWorkspace coarse_workspace_bounds(const ReceiverConfig&, const ReceiverSlo
     AssistanceBound overlapped, MidpointTimingEvaluation);
 // Public geometry alone decides whether preparation can precede the grid.
 bool coarse_defers_frequency_grid(const ReceiverConfig&, const ReceiverSlotPlan&);
+// Supply the effective coarse stage configuration after family selection.
+bool grouped_cpu_coarse_supported(const ReceiverConfig&, const ReceiverSlotPlan&);
 // Geometry and workspace quote from the same planner as a scoring session.
 // No input, preparation, arithmetic selection or device work is involved.
 CoarseWorkPlan coarse_work_plan(const ReceiverConfig&, const ReceiverSlotPlan&,

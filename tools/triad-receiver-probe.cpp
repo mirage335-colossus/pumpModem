@@ -2461,6 +2461,7 @@ Json coarse_json(const CoarseProgress& p) {
         {"workers", g.workers}, {"first_sample", g.first_sample}, {"stop_sample", g.stop_sample},
         {"public_slot", g.public_slot}, {"pattern_epoch", g.pattern_epoch}, {"symbol_ordinal", g.symbol_ordinal},
         {"rays", g.rays}, {"clocks", g.clocks}, {"workspaces", g.workspaces}, {"frequency_points", g.frequency_points},
+        {"workspace_group_size", g.workspace_group_size},
         {"frequency_groups", g.frequency_groups}, {"arrival_points", g.arrival_points},
         {"source_rows", g.source_rows}, {"raw_template_rows", g.raw_template_rows},
         {"projected_template_rows", g.projected_template_rows}, {"projected_observation_rows", g.projected_observation_rows},
@@ -3925,6 +3926,10 @@ void run(Json& report, const Options& o, std::stop_token stop) {
               0, "one_time_profile_preparation");
         if (o.command == "plan") {
             auto& configuration = report["configuration"];
+            if (!profile.waveform.config().continuous_data && !profile.waveform.config().scheduled_gap_fill) {
+                const auto grouped = grouped_receiver_slot_workspace(profile.receiver, slot, resources.workers);
+                if (grouped) configuration["memory_bounded_coarse_slot_workspace_bytes"] = *grouped;
+            }
             try {
                 FrequencyInterval fallback{};
                 const auto intervals = public_frequency_intervals(profile.receiver, HelperResult{}, fallback);

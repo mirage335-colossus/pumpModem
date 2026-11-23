@@ -34,6 +34,10 @@ struct PublicSlot {
     SampleRange protected_data_aperture;
     // A possible source fill can affect this slot under local receive bounds.
     bool gap_fill_may_enter_observation = false;
+    // Scheduled carrier-beat timing proposals use a common interior past
+    // the DATA ramps and any possible adjoining fill. Scoring and physical
+    // quiet detection keep their own apertures.
+    SampleRange carrier_beat_aperture;
 };
 
 struct ScheduledGapFillBounds {
@@ -79,7 +83,8 @@ struct PublicProfileConfig {
     // waveform and bridge the entire space between their gates. The receiver
     // uses the ordinary Scheduled geometry and may observe bridge energy.
     bool scheduled_gap_bridge = false;
-    // Additional receive-side transport support for excluding possible fill.
+    // Additional receive-side transport support for excluding possible fill
+    // or short transitions.
     std::uint64_t gap_fill_transport_halo_samples = 0;
 };
 
@@ -117,7 +122,8 @@ private:
     std::uint64_t signal_first(long double source_begin_seconds, bool search,
                                const ScheduledGapFillBounds* shared = nullptr) const;
     std::uint64_t signal_stop(long double source_end_seconds, bool search,
-                              const ScheduledGapFillBounds* shared = nullptr) const;
+                              const ScheduledGapFillBounds* shared = nullptr,
+                              bool clamp_before_origin = false) const;
     std::uint64_t active_data_stop_sample(const HelperBurstSlot&) const;
     bool can_successor_transmit(const HelperBurstSlot&, const HelperBurstSlot&) const;
     std::optional<SampleRange> gap_fill_between(const HelperBurstSlot&, const HelperBurstSlot&) const;

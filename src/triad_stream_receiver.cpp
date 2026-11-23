@@ -57,6 +57,13 @@ std::size_t native_stream_workspace(bool continuous, const ReceiverConfig& confi
     return quote(config, plan, workers);
 }
 
+std::optional<std::size_t> grouped_stream_workspace(const PublicProfile& profile, const ReceiverConfig& config,
+                                                     const ReceiverSlotPlan& plan, unsigned workers) {
+    if (profile.config().continuous_data || profile.config().scheduled_gap_fill || plan.scheduled_gap_fill)
+        return {};
+    return receiver_detail::grouped_receiver_slot_workspace(config, plan, workers);
+}
+
 std::size_t receipt_reservation(const StreamReceiverOptions& stream, const MessageReceiverOptions& message,
                                 unsigned owners) {
     // Charge bounded episode work, queued message metadata and the returned
@@ -186,8 +193,12 @@ bool detail::stream_simulation_workspace_fits(const PublicProfile& profile, cons
         // The raw queue may hold the window and one chunk during assembly.
         const auto raw = add(window_bytes(add(rows, chunk)), times(add(rows/chunk, 3), raw_block_overhead));
         if (raw >= available) return false;
-        return native_stream_workspace(profile.config().continuous_data, config, plan, *options.workers) <=
-            available - raw && within_budget();
+        const auto lease = available - raw;
+        if (native_stream_workspace(profile.config().continuous_data, config, plan, *options.workers) <= lease)
+            return within_budget();
+        if (!within_budget()) return false;
+        const auto grouped = grouped_stream_workspace(profile, config, plan, *options.workers);
+        return grouped && *grouped <= lease && within_budget();
     };
     // Clock growth can make the last window fail quickly. A middle window
     // can also require more scratch when the native or device plan changes.
@@ -211,9 +222,13 @@ void detail::check_simulation_first_window_workspace(const PublicProfile& profil
         if (next.stop_sample <= plan.stop_sample ||
             next.stop_sample - plan.stop_sample < options.maximum_input_chunk_samples) return;
     }
-    const auto required = native_stream_workspace(profile.config().continuous_data, config, plan, *options.workers);
+    auto required = native_stream_workspace(profile.config().continuous_data, config, plan, *options.workers);
     const auto available = *options.memory_limit_bytes;
     if (required <= available) return;
+    if (const auto grouped = grouped_stream_workspace(profile, config, plan, *options.workers)) {
+        required = std::min(required, *grouped);
+        if (required <= available) return;
+    }
     constexpr double mib = 1024.0 * 1024.0;
     std::ostringstream reason;
     reason << "Robust simulation first receive window requires " << std::fixed << std::setprecision(2)
@@ -242,6 +257,10 @@ ReceiverSlotPlan make_receiver_slot_plan(const PublicProfile& profile, const Rec
     result.quiet_stop_sample = slot.quiet_aperture.stop;
     result.protected_data_first_sample = slot.protected_data_aperture.first;
     result.protected_data_stop_sample = slot.protected_data_aperture.stop;
+    if (config.time_varying_channel && config.selective_modulation_rate_hz && !config.physical_rf_retuning) {
+        result.carrier_beat_first_sample = slot.carrier_beat_aperture.first;
+        result.carrier_beat_stop_sample = slot.carrier_beat_aperture.stop;
+    }
     result.scheduled_gap_fill = slot.gap_fill_may_enter_observation;
     result.format = profile.basis_format(slot);
     result.arrival_lower_seconds = declared.arrival_low_seconds;
@@ -467,11 +486,27 @@ struct CompleteStreamReceiver::Impl {
         return result;
     }
 
-    Work prepare(const ReceiverSlotPlan& plan, unsigned workers) const {
+    Work prepare(ReceiverSlotPlan plan, unsigned workers, std::size_t dsp) const {
         const auto bytes = window_bytes(window_samples(plan));
-        const auto dsp = workspace(config, plan, workers);
         if (dsp<bytes) throw Error("Robust slot workspace omitted the complete input lease");
-        return {plan, workers, dsp, bytes, add(dsp, input_overhead)};
+        return {std::move(plan), workers, dsp, bytes, add(dsp, input_overhead)};
+    }
+
+    Work prepare(const ReceiverSlotPlan& plan, unsigned workers) const {
+        return prepare(plan, workers, workspace(config, plan, workers));
+    }
+
+    std::optional<Work> prepare_grouped(ReceiverSlotPlan plan) const {
+        if (!native_scorer) return {};
+        const auto workers = resources.workers;
+        const auto existing = reserved(workers);
+        if (existing >= resources.memory_limit_bytes) return {};
+        const auto available = resources.memory_limit_bytes - existing;
+        if (available <= input_overhead) return {};
+        const auto dsp = grouped_stream_workspace(profile, config, plan, workers);
+        if (!dsp || *dsp > available - input_overhead) return {};
+        plan.memory_bounded_coarse = true;
+        return prepare(std::move(plan), workers, *dsp);
     }
 
     std::vector<Work> choose() const {
@@ -618,8 +653,14 @@ struct CompleteStreamReceiver::Impl {
         if (work.size()<capacity && (work.empty() || (work.back().plan.index<last_public_slot &&
                 input_stop>=plan(work.back().plan.index+1).stop_sample)) && release_waiting_continuations())
             work = choose();
-        if (work.empty() && !active())
-            throw ReceiverWorkspaceError("Robust public window exceeds the admitted workspace");
+        if (work.empty() && !active()) {
+            // A grouped shape costs more coarse work. Keep the ordinary
+            // full and balanced owner choices, including after releasing
+            // retained continuation input, before trying the solo fallback.
+            auto grouped = prepare_grouped(*next);
+            if (!grouped) throw ReceiverWorkspaceError("Robust public window exceeds the admitted workspace");
+            work.push_back(std::move(*grouped));
+        }
         std::size_t remaining_bytes = 0, remaining_lanes = 0;
         for (const auto& item : work) {
             remaining_bytes = add(remaining_bytes, item.reserved);

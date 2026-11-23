@@ -621,6 +621,102 @@ void frequency_continuation(const datapump::Crypto& crypto) {
     rejects([&] { cancelled.advance(1); }, "cancelled coarse work resumed");
 }
 
+void grouped_cpu_parity(const datapump::Crypto& crypto) {
+    auto fixture = capture(crypto, false);
+    auto& config = fixture.config;
+    auto& ordinary_slot = fixture.slot;
+    config.helper_enabled = false;
+    config.frequency_bound_hz = .06;
+    config.native_coarse_precision = v::NativeCoarsePrecision::fp64;
+    ordinary_slot.arrival_lower_seconds = -.5;
+    ordinary_slot.arrival_upper_seconds = .5;
+    auto grouped_slot = ordinary_slot;
+    grouped_slot.memory_bounded_coarse = true;
+    const std::array<r::FrequencyInterval, 1> intervals{{{-.06, .06}}};
+    constexpr unsigned workers = 3;
+    check(r::grouped_cpu_coarse_supported(config, grouped_slot), "grouped fixture needs the exact CPU frequency route");
+    auto unsupported = config;
+    unsupported.helper_enabled = true;
+    check(!r::grouped_cpu_coarse_supported(unsupported, grouped_slot), "grouped exact CPU search unexpectedly accepted Helper");
+    unsupported = config;
+    unsupported.time_varying_channel = true;
+    check(!r::grouped_cpu_coarse_supported(unsupported, grouped_slot), "grouped exact CPU search accepted varying coarse work");
+
+    const auto ordinary_lease = r::coarse_workspace(config, ordinary_slot, workers);
+    const auto grouped_lease = r::coarse_workspace(config, grouped_slot, workers);
+    check(grouped_lease < ordinary_lease, "grouped epoch bank must reduce the native workspace quote");
+    auto automatic = config;
+    automatic.native_coarse_precision = v::NativeCoarsePrecision::automatic;
+    check(r::coarse_work_plan(automatic, ordinary_slot, intervals, workers).workspace_group_size == 0,
+          "ordinary automatic work must preserve the complete resident bank");
+    rejects<v::ReceiverWorkspaceError>([&] {
+        r::CoarseSession unadmitted(config, grouped_slot, crypto, fixture.iq, intervals, workers, grouped_lease - 1);
+    }, "grouped CPU preparation accepted one byte below its admitted quote");
+
+    const std::vector<v::Complex> quiet(fixture.iq.size());
+    for (const bool wanted : {true, false}) {
+        const auto iq = wanted ? std::span<const v::Complex>(fixture.iq) : std::span<const v::Complex>(quiet);
+        const auto reference = r::score_coarse(config, ordinary_slot, crypto, iq, intervals, workers, ordinary_lease, {});
+        r::CoarseSession grouped(config, grouped_slot, crypto, iq, intervals, workers, grouped_lease);
+        const auto plan = grouped.progress().plan;
+        const auto& full = reference.work.plan;
+        check(plan.route == r::CoarseRoute::frequency_tiles && plan.route == full.route &&
+              plan.fft_precision == "fp64" && plan.precision_reason == "memory-bounded-epoch-fp64" &&
+              full.fft_precision == "fp64" && full.precision_reason == "explicit-fp64" && full.workspace_group_size == 0 &&
+              plan.clocks == 3 && plan.rays == 2 && plan.workspace_group_size == 2 * plan.clocks &&
+              plan.workspaces == full.workspaces && plan.workspaces == 13 * plan.workspace_group_size &&
+              plan.frequency_points == full.frequency_points && plan.frequency_points > 2 &&
+              plan.arrival_points == full.arrival_points && plan.arrival_points > 105 &&
+              plan.correlation_fft_rows == full.correlation_fft_rows &&
+              plan.workspace_reserved_bytes == grouped_lease && plan.total_tiles > 1 && !grouped.finish(),
+              "grouping must preserve the exact public epochs, bits, clocks, rays, CFOs, lags and transform extent");
+        const std::vector<double> grid(grouped.frequency_grid().begin(), grouped.frequency_grid().end());
+        grouped.advance(1);
+        const auto prefix = grouped.progress();
+        check(prefix.state == r::CoarseState::searching && prefix.completed_tiles == 1 &&
+              prefix.proposals == 0 && prefix.refined_coordinates == 0 && !grouped.finish() &&
+              prefix.search.operations.workspace_frequency_pairs == plan.workspace_group_size * plan.tile_width &&
+              prefix.retained_bytes <= grouped_lease && std::ranges::equal(grouped.frequency_grid(), grid),
+              "partial epoch work must retain the fixed frequency grid without publishing a result");
+        while (grouped.state() == r::CoarseState::searching) grouped.advance(64);
+        const auto result = grouped.finish();
+        check(result && result->work.state == r::CoarseState::finished && result->work.completed_tiles == plan.total_tiles &&
+              result->coordinates == reference.coordinates && result->varying_coordinates == reference.varying_coordinates &&
+              result->segmented_timing_coordinates == reference.segmented_timing_coordinates &&
+              result->epoch_timing_coordinates == reference.epoch_timing_coordinates &&
+              result->proposal_count == reference.proposal_count && result->proposal_count == 4 &&
+              result->work.refined_coordinates == reference.work.refined_coordinates &&
+              result->workspace_peak_bytes <= grouped_lease,
+              "the grouped exact CPU search changed complete frontier coordinates or exceeded its quote");
+        for (std::size_t i = 0; i < reference.proposal_count; ++i) {
+            const auto& actual = result->proposals[i];
+            const auto& expected = reference.proposals[i];
+            check(actual.coordinate == expected.coordinate && actual.bit == expected.bit &&
+                  actual.rank == expected.rank && actual.score == expected.score,
+                  "grouping changed the ordered exact FP64 proposals or tie handling");
+        }
+        const auto& work = result->work.search.operations;
+        const auto& ordinary = reference.work.search.operations;
+        check(work.workspace_frequency_pairs == plan.workspaces * plan.frequency_points &&
+              work.workspace_frequency_pairs == ordinary.workspace_frequency_pairs &&
+              work.score_rows == work.workspace_frequency_pairs * plan.arrival_points &&
+              work.score_rows == ordinary.score_rows && work.inverse_ffts == ordinary.inverse_ffts &&
+              work.forward_ffts == 13 * ordinary.forward_ffts && work.retained_peaks == ordinary.retained_peaks &&
+              result->work.template_bank.operations.projected_columns == reference.work.template_bank.operations.projected_columns &&
+              result->work.selection.operations.selection_peak_rows == reference.work.selection.operations.selection_peak_rows,
+              "the grouped search must cover each public score exactly once and account for repeated observation FFTs");
+        if (wanted) check_winner(fixture, *result);
+    }
+
+    std::stop_source stop;
+    r::CoarseSession cancelled(config, grouped_slot, crypto, fixture.iq, intervals, workers, grouped_lease, stop.get_token());
+    cancelled.advance(1);
+    stop.request_stop();
+    check(cancelled.progress().state == r::CoarseState::cancelled && cancelled.progress().completed_tiles == 1 &&
+          !cancelled.finish(), "cancelling grouped CPU search must not publish its prepared epoch prefix");
+    rejects([&] { cancelled.advance(1); }, "cancelled epoch preparation resumed");
+}
+
 enum class BulkFault {
     missing_workspace, missing_execution, stale_execution, valid_scores,
     valid_frontiers, frontier_missing_workspace, frontier_count, frontier_lag,
@@ -1641,9 +1737,14 @@ int main(int argc, char** argv) try {
     const bool overlap_failures = argc == 2 && std::string_view(argv[1]) == "--overlap-failures";
     const bool quarter_clock = argc == 2 && std::string_view(argv[1]) == "--quarter-clock";
     const bool midpoint = argc == 2 && std::string_view(argv[1]) == "--midpoint-timing";
-    if (argc != 1 && !overlap_failures && !quarter_clock && !midpoint) {
-        std::cerr << "Usage: test_triad_coarse_native [--overlap-failures | --quarter-clock | --midpoint-timing]\n";
+    const bool grouped = argc == 2 && std::string_view(argv[1]) == "--grouped-cpu";
+    if (argc != 1 && !overlap_failures && !quarter_clock && !midpoint && !grouped) {
+        std::cerr << "Usage: test_triad_coarse_native [--overlap-failures | --quarter-clock | --midpoint-timing | --grouped-cpu]\n";
         return 2;
+    }
+    if (grouped) {
+        grouped_cpu_parity(key());
+        return 0;
     }
     quarter_clocks_nominate_only_missing_public_cells();
     if (quarter_clock) return 0;

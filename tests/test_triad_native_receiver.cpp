@@ -358,6 +358,168 @@ void protected_carrier_beat_preserves_wanted() {
     }
 }
 
+void scheduled_carrier_beat_reception() {
+    constexpr unsigned fs = 600;
+    constexpr unsigned workers = 2;
+    constexpr double arrival_bound = .018;
+    PublicProfileConfig declared;
+    declared.format.sample_rate = fs;
+    declared.format.inner_rate_hz = 7.2;
+    declared.format.added_symbols = 1;
+    declared.format.added_interleave = false;
+    declared.format.minimum_carrier_spacing_hz = 125;
+    declared.format.bit_seconds = .001;
+    declared.format.epoch = 1793850000;
+    declared.format.symbol_ordinal = 7000037;
+    declared.data_if_hz = 150;
+    declared.capture_lead_seconds = .2 + arrival_bound;
+    declared.capture_trail_seconds = .3;
+    declared.arrival_low_seconds = -arrival_bound;
+    declared.arrival_high_seconds = arrival_bound;
+    declared.selective_signal_tail = true;
+    declared.scheduled_gap_bridge = true;
+    const PublicProfile profile(declared);
+
+    ReceiverConfig config;
+    config.sample_rate_hz = fs;
+    config.data_if_hz = declared.data_if_hz;
+    config.noise_variance = .015;
+    config.time_varying_channel = true;
+    config.selective_modulation_rate_hz = .6;
+    config.selective_slow_depth = .65;
+    config.selective_fast_depth = .26;
+    const auto slot = make_receiver_slot_plan(profile, config, 0);
+    check(slot.carrier_beat_first_sample < slot.carrier_beat_stop_sample &&
+          slot.stop_sample - slot.first_sample < 75'000,
+          "scheduled beat fixture must have a bounded proposal aperture");
+    auto original = slot;
+    original.carrier_beat_first_sample = original.carrier_beat_stop_sample = 0;
+    const auto lease = receiver_slot_workspace(config, slot, workers);
+    check(lease == receiver_slot_workspace(config, original, workers) && lease <= workspace_limit,
+          "scheduled beat proposals must use the existing slot lease");
+    auto malformed = slot;
+    malformed.carrier_beat_stop_sample = slot.stop_sample + 1;
+    rejects<Error>([&] { (void)receiver_slot_workspace(config, malformed, workers); },
+                   "a scheduled proposal outside the public observation must be rejected");
+    const auto rows = static_cast<std::size_t>(slot.stop_sample - slot.first_sample);
+    std::vector<Complex> iq(rows);
+    std::vector<std::uint8_t> valid(rows, 1);
+    std::vector<double> offsets(rows);
+    for (std::size_t row = 0; row < rows; ++row) offsets[row] = static_cast<double>(row);
+    Candidate coordinate;
+    coordinate.arrival_seconds = static_cast<double>(slot.source_start_seconds + slot.window_capture_lead_seconds);
+    const auto key = Crypto::amateur();
+    const auto run = [&](const ReceiverSlotPlan& input, const Crypto& receive_key) {
+        return score_receiver_slot(config, input, receive_key, iq, valid, workers, lease);
+    };
+    for (const std::uint8_t bit : {0, 1}) {
+        PatternSource source(slot.format, key, bit);
+        shaped_basis_mapped(source, coordinate, fs, 0, offsets, iq, config.data_if_hz);
+        std::mt19937_64 random(71837);
+        std::normal_distribution<double> normal(0, std::sqrt(config.noise_variance / 2));
+        for (auto& sample : iq) sample += Complex{normal(random), normal(random)};
+        const auto baseline = run(original, key);
+        const auto enabled = run(slot, key);
+        check(baseline.complete && baseline.all_valid && baseline.decision == SlotDecision::data &&
+              baseline.bit == bit && !baseline.protected_carrier_beat,
+              "scheduled beat fixture must admit both wanted bits before nomination");
+        check(enabled.protected_carrier_beat && enabled.protected_carrier_beat->predicted_bit == bit,
+              "the ordinary scorer must use the scheduled carrier beat to nominate both wanted bits");
+        check(enabled.complete && enabled.all_valid && enabled.decision == baseline.decision &&
+              enabled.bit == baseline.bit && enabled.reason == baseline.reason &&
+              !enabled.protected_carrier_beat_corrected_polarity &&
+              !enabled.protected_carrier_beat->affine_support &&
+              enabled.operational_bit_evidence == baseline.operational_bit_evidence &&
+              enabled.selected_prior_mass == baseline.selected_prior_mass &&
+              enabled.fine_candidates == baseline.fine_candidates &&
+              enabled.quiet_energy == baseline.quiet_energy &&
+              enabled.workspace_peak_bytes == baseline.workspace_peak_bytes,
+              "scheduled beat nomination must preserve already-correct evidence, prior and lease");
+    }
+    std::array<std::uint8_t, 64> serpent{}, aes{};
+    serpent.fill(0x37);
+    aes.fill(0x16);
+    const auto foreign = Crypto::from_independent_roots(serpent, aes);
+    const auto baseline_foreign = run(original, foreign);
+    const auto received_foreign = run(slot, foreign);
+    check(received_foreign.decision == baseline_foreign.decision && received_foreign.bit == baseline_foreign.bit &&
+          received_foreign.operational_bit_evidence == baseline_foreign.operational_bit_evidence &&
+          !received_foreign.protected_carrier_beat_corrected_polarity,
+          "scheduled beat nomination must not alter this independent-key decision or evidence");
+
+    // Blockwise phase rotation weakens the wanted waveform's coherent coarse
+    // peak without removing its carrier beats. The smaller coherent pattern
+    // at another public epoch draws the ordinary candidates away from it.
+    auto competing_format = slot.format;
+    ++competing_format.epoch;
+    const auto arrival = (slot.source_start_seconds + slot.window_capture_lead_seconds) * fs;
+    constexpr unsigned quarter_second = fs / 4;
+    constexpr std::array correction_cases{std::pair{.30, std::uint8_t{1}}, std::pair{.08, std::uint8_t{0}}};
+    for (const auto& [gain, ordinary_bit] : correction_cases) {
+        PatternSource wanted(slot.format, key, 0);
+        PatternSource competing(competing_format, key, 1);
+        std::mt19937_64 random(71837);
+        std::normal_distribution<double> normal(0, std::sqrt(config.noise_variance / 2));
+        for (std::size_t row = 0; row < rows; ++row) {
+            const auto phase = (row / quarter_second % 4) * (std::numbers::pi / 2);
+            const auto at = row - arrival;
+            iq[row] = std::polar(1., phase) * wanted.sample_at(at) + gain * competing.sample_at(at) +
+                Complex{normal(random), normal(random)};
+        }
+        const auto baseline = run(original, key);
+        const auto repaired = run(slot, key);
+        check(baseline.complete && baseline.all_valid && baseline.decision == SlotDecision::data &&
+              baseline.bit == ordinary_bit,
+              "the phase-rotated fixture must reproduce the ordinary DATA decision");
+        if (ordinary_bit == 0)
+            check(!wrong_key_admission_passes(baseline, WrongKeyAdmission::guarded),
+                  "the original correct bit must miss the Guarded margin in the same-bit repair case");
+        check(repaired.complete && repaired.all_valid && repaired.zero_h0_verified &&
+              repaired.reason == "carrier_beat_affine_nomination" && repaired.bit == 0 &&
+              repaired.protected_carrier_beat_corrected_polarity == (ordinary_bit == 1) &&
+              repaired.protected_carrier_beat_search_coordinates > 0 && repaired.protected_carrier_beat &&
+              repaired.protected_carrier_beat->ordinary_bit == ordinary_bit &&
+              repaired.protected_carrier_beat->predicted_bit == 0 && repaired.protected_carrier_beat->affine_support &&
+              wrong_key_admission_passes(repaired, WrongKeyAdmission::guarded),
+              "a new corroborating affine cell must recover the wanted bit through Guarded");
+        check(repaired.fine_candidates == baseline.fine_candidates + 1 &&
+              repaired.coarse_arrival_points == baseline.coarse_arrival_points &&
+              repaired.coarse_frequency_points == baseline.coarse_frequency_points &&
+              repaired.workspace_peak_bytes == baseline.workspace_peak_bytes && repaired.quiet_energy == baseline.quiet_energy,
+              "the repair must add only one cell while preserving public search, workspace and quiet evidence");
+        const auto cell_prior = baseline.selected_prior_mass / baseline.fine_candidates;
+        check(std::abs(repaired.selected_prior_mass / repaired.fine_candidates - cell_prior) < 1e-12 * cell_prior,
+              "the additional affine cell must use the original grid prior");
+        for (std::size_t bit = 0; bit < repaired.bit_evidence.size(); ++bit) {
+            const auto before = baseline.bit_evidence[bit] + std::log(static_cast<double>(baseline.fine_candidates));
+            const auto after = repaired.bit_evidence[bit] + std::log(static_cast<double>(repaired.fine_candidates));
+            check(after > before, "the additional cell must contribute fresh evidence for both bits");
+            const auto atom = after + std::log1p(-std::exp(before - after)) + std::log(cell_prior);
+            const auto old = baseline.operational_bit_evidence[bit];
+            const auto combined = std::max(old, atom) + std::log1p(std::exp(-std::abs(old - atom)));
+            check(std::abs(repaired.operational_bit_evidence[bit] - combined) < 1e-8,
+                  "both added native bit scores must carry the original grid weight");
+            if (bit == 0)
+                check(std::abs(repaired.protected_carrier_beat->affine_support->log_e - atom + std::numbers::ln2) < 1e-8,
+                      "carrier beat support must report the admitted native cell with its equal bit prior");
+        }
+    }
+
+    valid[slot.carrier_beat_first_sample - slot.first_sample] = 0;
+    const auto erased = run(slot, key);
+    check(!erased.all_valid && !erased.protected_carrier_beat && !erased.protected_carrier_beat_search_coordinates,
+          "invalid DATA must not nominate a carrier beat hypothesis");
+    std::ranges::fill(iq, Complex{});
+    std::ranges::fill(valid, 1);
+    const auto baseline_quiet = run(original, key);
+    const auto quiet = run(slot, key);
+    check(quiet.complete && quiet.decision == SlotDecision::quiet && !quiet.bit &&
+          !quiet.protected_carrier_beat && !quiet.protected_carrier_beat_search_coordinates &&
+          quiet.quiet_modes == baseline_quiet.quiet_modes && quiet.quiet_energy == baseline_quiet.quiet_energy &&
+          quiet.quiet_threshold == baseline_quiet.quiet_threshold,
+          "scheduled beat nomination must leave physical quiet classification and support unchanged");
+}
+
 void protected_colored_carrier_beat() {
     using namespace receiver_detail;
     using live::detail::AudioInput;
@@ -4006,6 +4168,7 @@ int main(int argc, char** argv) {
                 protected_carrier_beat_preserves_wanted();
                 protected_colored_carrier_beat();
             }
+            else if (part == "scheduled-carrier-beat") scheduled_carrier_beat_reception();
             else if (part == "protected-observation") {
                 protected_observation_validity();
                 protected_drift_lattice();

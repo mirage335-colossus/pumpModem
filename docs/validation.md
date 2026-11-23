@@ -1517,8 +1517,8 @@ dispersive models. The best qualified wanted candidates explained 91–93%
 qualified an opposite-bit candidate on sent 0 at another timing coordinate
 (11–36%) and a candidate with one independent receive key (3–52%). Those
 weaker candidates show why passing the nomination gate cannot serve as final
-admission. The scheduled-bridge production route does not use this protected
-scan. This diagnostic did not score physical quiet or qualify the full 0.1 Hz
+admission. The tested scheduled-bridge revision did not use this protected
+scan. The diagnostic did not score physical quiet or qualify the full 0.1 Hz
 slot, admission risk, or a new default.
 
 The compact receipts and diagnostic launchers under ignored
@@ -1526,6 +1526,187 @@ The compact receipts and diagnostic launchers under ignored
 source-bound observations and the unresolved full 0.1 Hz check. Remove them
 when the corresponding checks are reproduced in maintained tooling or
 superseded by newer validation. No IQ captures are retained there.
+
+### Carrier-beat nomination on the ordinary Scheduled scorer
+
+The native CPU manifest `7ff6f25d…` reproduced the archived 3.6 Hz natural-spacing
+inversion. With seed 950101, the same 1,215,321-sample hash `b4d8fa5a…8bf8`
+gave 292.23 and 320.03 million nats for sent 0. The native carrier-beat
+evaluator declined the 0.75 Hz spacing because its short blocks require at
+least three cycles of the carrier spacing. The packed repair at 265 Hz does
+not cover this failure.
+
+A private paired 265 Hz spacing trial reused the existing carrier-beat
+nomination in the ordinary full-window scorer. At Rate 3.6 Hz and +77 dB-Hz,
+it used the first slot of an encrypted `001` source with seed 74021 and the
+same calendar as above. The candidate's 118.492 s nomination aperture was
+inside the DATA gate after accounting for both transition ramps, public
+arrival and clock bounds, signal tails and filter support. Native likelihoods
+and physical quiet still used their original observation. The 741-coordinate
+search qualified only bit-0 candidates for both Scheduled and Scheduled +
+short transitions. The selected candidate's four held-out beat fits explained
+90.25–93.32%. The ordinary score already favored zero in both captures, and
+the prototype preserved both operational bit scores exactly in each pair.
+This test establishes clean interior evidence and score preservation for
+the encrypted short-transition case.
+
+The unencrypted Scheduled case at the same seed reproduced the first-bit
+inversion. On identical 1,215,321-row IQ and mask inputs (`3b2fdfa4…42f0`),
+the ordinary score chose 1 by 2.527 million nats. The prototype's nominal
+beat coordinate qualified and supplied an omitted two-bit affine fit. The
+unmodified native decision rule recovered 0 by 26.844 million nats, above
+the Guarded requirement of approximately 20.071 million. The two full-slot
+calls took 26.38 and 29.29 wall seconds and used the same 1.422 GB quote.
+The matching short-transition test reproduced and repaired the inversion
+on its own identical 1,215,321-row input (`61a42571…aee0`). Its margins were
+4.617 million nats for the wrong bit and 26.844 million for the corrected bit,
+above the retrospective Guarded requirement of about 20.184 million nats.
+That pair took 27.03 and 28.20 s at the same workspace quote. These pairs
+establish active-slot repairs on the selected unencrypted source. They do
+not qualify all five slots, an independent-key control in these cadences,
+an encrypted short-transition inversion, or an automatic default. The 0.1 Hz
+complete-receiver gate above remains open.
+
+Through the normal stream, the production Scheduled + short transitions
+receiver decoded `e` (`001`), followed by two scored quiet slots. The old
+receiver scored `101` on the same 6,255,321 IQ and mask samples
+(`4007e0f1…c46a`), saw both quiet slots and missed the payload. The new arm
+preserved both quiet energy scores exactly and withheld a message in the
+EOF control. This was the unencrypted seed-74021 fixture at 6 kHz, 3.6 Hz
+Rate, 265 Hz minimum spacing, +77/+32 dB-Hz actual/target, HF Worst and
+Each 65% with 3× search margin, independent GPSDO XO and Helper/FHSS/FEC off.
+
+The production receiver added one genuinely new, originally weighted
+two-bit affine cell to each DATA slot. The first changed polarity. The
+other two kept their original decisions and cleared the existing Guarded
+margin. Retrospective Guarded admission climbed from 0/3 to 3/3. Strict
+retained 2/3 and Very Strict retained 1/3. In this one native CPU comparison
+the same 24 software workers on 12 effective hardware threads reserved a
+peak of 7,930,255,994 bytes in both arms. The five-slot receiver replay took
+126.12 and 129.93 wall seconds. This pair is a selected communication check
+and does not qualify sustained service or a sensitivity distribution.
+Replaying the exact same input after the grouped memory fallback was
+integrated repeated all five decisions, bit likelihoods, quiet statistics
+and admission counts. The higher host memory allowance on this replay let
+the last quiet slot use a wider ordinary worker shape, which limits
+comparison of the whole-application peak memory.
+
+A fresh encrypted seed-74022 short-transition capture (`2a2dfe0f…acd9`)
+also decoded `e` as `001` followed by two scored quiet slots and passed the
+EOF control. Retrospective Current, Guarded and Strict kept all three bits.
+An independent receive key on that identical capture produced `011` followed
+by two quiet slots and an unrelated unauthenticated record. The old and new
+receivers had identical native bit likelihoods, decisions, quiet statistics
+and admission counts in every slot. The new beat scan selected no candidate
+with that key. Both retained three false DATA bits under Current, two under
+Guarded and none under Strict. This control preserves a known near-far
+limitation of the existing score filter and supplies no population rate.
+Treating an unsuccessful beat scan as an automatic admission veto would
+exclude all three false DATA bits in that pair. It would also reject two
+valid wanted controls at 600 samples/s, Rate 7.2 Hz and 125 Hz spacing.
+Those controls reversed the center carrier's phase halfway through the
+proposal interval. The full native likelihood chose both transmitted bits
+through Strict, while the completed 13-coordinate beat scan qualified
+neither. A missing nomination is therefore insufficient to veto DATA.
+
+Ordinary Scheduled with native Guarded enabled also recovered `e` as
+`001` plus two scored quiet slots and passed the EOF control on a separate
+unencrypted seed-74021 input (`2f2906d8…b438`). All three DATA slots used an
+additional affine fit. Receiver service took 135.94 s. This exercises the
+configured native policy as well as the retrospective GUI score filter.
+
+The earlier successful 360 Hz capture (`66b42ff9…a14b4f`) replayed `001`
+and both physical quiet slots with identical bit scores, quiet statistics and
+policy counts on all five slots. All three DATA slots used the existing
+33.3 ms varying-channel score. The Scheduled beat pass did no work in this
+fixture, and the incomplete-input control still withheld the message.
+
+A Scheduled absence control at Rate 7.2 Hz, 2 kHz logical audio and 125 Hz
+spacing placed strong DATA on both sides of an empty center. The tight
+timing fixture (`16152914…befc`) scored the complete center as physically
+quiet under every policy. Its broad-timing arm (`50fcfff2…674f`) reached
+the 64 s probe deadline without a decision. It provides no broad absence
+qualification for this geometry.
+
+Retain the compact complete-stream receipts in ignored
+`local-evidence/robust-severe-hf-2026-11-23/` until a later matched receiver
+qualification supersedes their wanted and independent-key comparisons. The
+private Scheduled prototype and its launchers are superseded. No IQ capture
+or binary is retained in these results.
+
+At natural 0.75 Hz carrier spacing, a separate 120 s native diagnostic
+tracked the keyed beat template within the integration interval. It searched
+13 public epochs and 282 arrival centers. On the two exact seed-950101
+captures it found correct-bit held-out fits of 32.50% and 35.07%, versus
+competing fits of 1.73% and 0.90%. An independent receive key gave 2.06% and
+physical quiet gave 0.52%. The scan used no realized arrival or channel data.
+Rescoring the best timing and its two adjacent 50 ms hypotheses with the
+original native likelihood and atom weights still left the original sent 0
+inverted. The best added wanted score was 317.18 million nats, below the
+original 320.03-million-nat wrong fit. The correct sent 1 was preserved. A
+different simulation seed and public ordinal (950102 and 7000047) corrected
+a separate inverted 1 in a retrospective Current score, with 29.88 million
+nats separation at its nomination against 34.60 million required by Guarded.
+These fixed-cell controls demonstrate that finding usable timing alone does
+not resolve the natural-spacing likelihood. The compact diagnostic and
+receipts in ignored `local-evidence/robust-natural-spacing-feasibility/`
+support that unresolved comparison. Remove them when a newly qualified
+likelihood supersedes it.
+
+At 0.1 Hz and 265 Hz spacing, the native plan-only decomposition attributed
+46,369,654,552 of the 47,059,953,884 quoted first-slot bytes to coarse search.
+The retained two-ray FFT bank alone occupies 19.50 GiB at the quoted shape.
+Reducing the requested worker count to one still quotes 23.52 GB and would
+lower capacity. One private six-workspace epoch reused the existing native
+projection and search kernels at the exact long geometry. It passed a 4.81 GB
+component preflight, with a 5 GiB address-space limit and four pinned logical
+CPUs, and timed out at 119.9 s during bank preparation. No selected frequency
+tile finished. It used a synthetic projected observation and measured no full
+slot or reception. An affordable 3.6 Hz control completed one six-workspace
+epoch and three frequency tiles over 14,071 arrivals using a single reusable
+inverse FFT buffer per correlation worker. Its 253,278 FP64 score rows
+exactly matched the original two-buffer kernel. This establishes arithmetic
+parity for that selected batch. A later instrumented 0.1 Hz checkpoint
+completed one workspace and one CFO in 16.47 s at 955.5 MiB peak RSS. The
+phased six-workspace epoch completed both keyed sources, all twelve rays and
+one nominal CFO in 36.14 s at 3.36 GiB peak RSS. All 84,426 arrival scores
+matched the two-buffer kernel exactly. Both exact-size checkpoints used
+four pinned logical CPUs and synthetic projected input. Neither establishes
+the 24-worker operational reservation or a full result.
+
+The native memory-admission fallback for this shape quotes 6,315,406,100
+bytes per first slot, down from 47,059,953,884 at the same 24-worker budget.
+One built production coarse tile at the exact 0.1 Hz input extent finished
+337,704 public scores in 38.99 s including observation and template
+preparation, with 5.30 GiB process RSS on the synthetic impulse observation.
+It prepared all twelve ray columns for the first epoch and scored four
+frequencies for each of that epoch's six workspaces over all 14,071 arrivals.
+The full planner still accounts for 78 workspaces and 485 frequencies.
+This checkpoint had no complete coarse result or bit decision. The grouped
+route also completed every public hypothesis and matched ordered FP64
+proposals on affordable wanted and quiet fixtures. The complete software
+receiver also processed separate smaller wanted and quiet slots under a cap
+below the old DSP quote. Grouped and roomy dispatch recovered the same
+configured bit 1 and the same physical quiet decision. They matched the
+likelihoods, prior mass and public work counts and withheld message
+completion at EOF. These checks support memory admission and canonical
+work, with full 0.1 Hz decoding still open.
+
+The native Triad and GUI groups passed all 57 and 37 cases across their
+initial invocations and targeted reruns. The initial runs under load hit two
+software OpenCL deadlines, a Fast audio FIFO overflow and a Robust GUI
+deadline. All four passed lower-load reruns. After grouping was
+integrated and the regression binaries were rebuilt, all 13 selected
+coarse, native receiver, stream, probe and GUI checks passed. The native
+stream check passed again after adding the forced-cap wanted DATA case.
+The permanent compact Scheduled regression exercises both polarity repair
+and same-bit Guarded recovery, checking both originally weighted additions
+and physical quiet preservation. These software checks provide no device
+throughput measurement.
+
+The decomposition and bounded trials remain
+in ignored `local-evidence/robust-0p1hz-workspace-decomposition/` until a
+measured low-memory search and complete-service comparison supersede them.
 
 ## Blackwell arithmetic and receiver residency — 22 November 2026
 

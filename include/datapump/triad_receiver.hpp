@@ -98,6 +98,11 @@ struct ReceiverSlotPlan {
     // Scheduled gap fill may enter the full capture outside protected DATA.
     // All proposal families start from that same protected input support.
     bool scheduled_gap_fill = false;
+    // Proposal-only Scheduled DATA interior. Both endpoints are zero when
+    // the declared geometry has no eligible carrier-beat aperture.
+    std::uint64_t carrier_beat_first_sample = 0, carrier_beat_stop_sample = 0;
+    // Local scorer shape selected for an admitted owner under memory pressure.
+    bool memory_bounded_coarse = false;
 };
 
 enum class SlotDecision { ambiguous, data, quiet };

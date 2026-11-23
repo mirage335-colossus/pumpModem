@@ -167,7 +167,7 @@ struct CarrierBeatReceipt {
 // Fixed-coordinate comparison of keyed carrier cross-products with the power
 // waveform. Optional power evidence requires the matching declared noise model
 // and retains the selected public coordinate's original mass at the caller.
-// Supply the whole slot and select protected_only for a packed calendar.
+// Supply the whole slot and select protected_only to use the plan's aperture.
 // Empty input requests a workspace and observation-geometry quote.
 CarrierBeatReceipt score_carrier_beat(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
         std::span<const Complex> iq, std::span<const std::uint8_t> valid, const FineCoordinate&,
@@ -187,7 +187,7 @@ struct CarrierBeatScanReceipt {
     // Optional nomination by positive held-out fit without a majority gate.
     std::optional<CarrierBeatNomination> exploratory_nomination;
 };
-// Packed protected aperture only. Covers every public epoch and the full
+// Protected aperture only. Covers every public epoch and the full
 // arrival interval at block stride on the nominal clock. Both nominations
 // can be present and must be treated as competing. Empty IQ quotes the work.
 CarrierBeatScanReceipt scan_carrier_beat(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,

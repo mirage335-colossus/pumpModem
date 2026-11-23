@@ -213,6 +213,19 @@ exercised the retained line case and verified that it kept both correct
 native bits and their original likelihoods. The beat rule is not a
 calibrated test of key identity.
 
+Scheduled and Scheduled + short transitions can also nominate an omitted
+affine cell on a changing selective channel when the short-block scorer is
+unavailable. The common public DATA interior excludes both outer ramps and
+possible bridge energy over the allowed arrival, clock and delay bounds,
+including the receive filter halo. The scorer uses that interior only for
+the beat statistic. A proposed polarity change is checked against competing
+timing matches and must agree with the new full-window likelihood. A matching
+proposal may also strengthen a bit that failed Guarded, when the new native
+likelihood confirms the original bit at the same Guarded threshold. The
+ordinary likelihood, physical-quiet aperture and owner lease still cover
+their original geometry. An empty or unsupported interior leaves the
+ordinary decision in effect. [Paired Scheduled measurements](validation.md#carrier-beat-nomination-on-the-ordinary-scheduled-scorer)
+
 In a fresh 6 kHz, Rate 3.6 Hz HF Worst and Each 65% capture, seed 74022,
 the nominal and native nominations explained at most 0.017 of the beat
 energy, and the native bit was inverted. The 741-coordinate search found a

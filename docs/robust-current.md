@@ -70,6 +70,16 @@ including strong long-window signals, may be hidden. See the
 [research limits and evidence](triad-stochastic.md#wrong-key-admission) and
 [GUI settings](gui-contract.md#modems-and-current-availability).
 
+For a supported ordinary Scheduled CPU slot, a memory-bounded coarse path can
+run when neither the ordinary full-worker shape nor a wider balanced group can
+be admitted. It preserves the worker budget, public grid and fine and quiet
+models. It keeps one epoch's bit and clock templates resident, scores every
+frequency and arrival for that epoch, then releases the bank. Scorers reuse
+one inverse FFT buffer and retain the first ray's public arrival prefix. The
+fallback reports `memory-bounded-epoch-fp64` for its actual arithmetic. The
+ordinary search remains preferred when its lease fits. [Bounded measurements
+and scope](validation.md#carrier-beat-nomination-on-the-ordinary-scheduled-scorer)
+
 ## Native interfaces and ownership
 
 | Interface | Responsibility |

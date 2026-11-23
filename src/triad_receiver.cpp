@@ -51,6 +51,10 @@ std::size_t validate(const ReceiverConfig& c, const ReceiverSlotPlan& s, unsigne
     require(s.first_sample < s.stop_sample && s.stop_sample - s.first_sample <= SIZE_MAX &&
         s.first_sample <= s.quiet_first_sample && s.quiet_first_sample <= s.quiet_stop_sample &&
         s.quiet_stop_sample <= s.stop_sample, "invalid Robust public receiver window");
+    require((!s.carrier_beat_first_sample && !s.carrier_beat_stop_sample) ||
+        (s.first_sample <= s.carrier_beat_first_sample &&
+         s.carrier_beat_first_sample < s.carrier_beat_stop_sample && s.carrier_beat_stop_sample <= s.stop_sample),
+        "invalid Robust carrier beat proposal aperture");
     require(s.format.epoch >= 6 && s.format.epoch <= UINT32_MAX - 6, "invalid Robust waveform epoch");
     require(std::isfinite(s.arrival_lower_seconds) && std::isfinite(s.arrival_upper_seconds) &&
         s.arrival_lower_seconds <= s.arrival_upper_seconds && std::isfinite(s.window_capture_lead_seconds) &&
@@ -90,10 +94,41 @@ bool uses_varying_coarse(const StageWorkspace& workspace) {
     return workspace.varying.block_rows || workspace.drift.workspace_bytes || workspace.coherent_gain.block_rows;
 }
 
+std::optional<StageWorkspace> grouped_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
+        unsigned workers, StageWorkspace ordinary) {
+    // Freeze the ordinary model-family selection before repricing coarse
+    // scratch. A smaller lease must not change the set of admitting models.
+    if (config.helper_enabled || config.bulk_backend || slot.scheduled_gap_fill || ordinary.helper || ordinary.line ||
+        uses_varying_coarse(ordinary) || ordinary.evidence_supplement) return {};
+    auto search = config;
+    search.time_varying_channel = false;
+    if (!grouped_cpu_coarse_supported(search, slot)) return {};
+    auto group = slot;
+    group.memory_bounded_coarse = true;
+    const auto coarse = coarse_workspace_bounds(search, group, workers, {}, MidpointTimingEvaluation::off);
+    const auto scratch = std::max({coarse.host_bytes, ordinary.fine, varying_quiet_workspace(config, slot, workers)});
+    const auto total = checked_add(checked_add(ordinary.input, receipts_bytes), scratch);
+    if (total >= ordinary.total) return {};
+    ordinary.coarse = ordinary.overlapped_coarse = coarse.host_bytes;
+    ordinary.total = ordinary.overlapped_total = total;
+    ordinary.drift_envelope = ordinary.overlapped_drift_envelope = total;
+    return ordinary;
+}
+
 StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
                               bool quote_overlap, const SlotEvidenceSupplement* supplement = nullptr,
                               const ReceiverSlotPlan* protected_plan = nullptr,
                               const StageWorkspace* public_workspace = nullptr) {
+    if (slot.memory_bounded_coarse) {
+        require(!supplement && !protected_plan && !public_workspace,
+                "Grouped coarse scoring requires the ordinary Robust observation");
+        auto original = slot;
+        original.memory_bounded_coarse = false;
+        const auto bounded = grouped_workspace(config, original, workers,
+            plan_workspace(config, original, workers, quote_overlap));
+        if (!bounded) throw ReceiverWorkspaceError("Robust grouped coarse receiver shape is unavailable");
+        return *bounded;
+    }
     const auto rows = validate(config, slot, workers);
     const auto& inference = protected_plan ? *protected_plan : slot;
     const auto varying_plan = [&](bool line, bool coherent_gain) {
@@ -647,6 +682,17 @@ std::size_t receiver_slot_workspace(const ReceiverConfig& config, const Receiver
     return plan_workspace(config, slot, workers, false).total;
 }
 
+std::optional<std::size_t> receiver_detail::grouped_receiver_slot_workspace(
+        const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers) {
+    if (config.helper_enabled || config.bulk_backend || config.physical_rf_retuning || slot.scheduled_gap_fill)
+        return {};
+    auto original = slot;
+    original.memory_bounded_coarse = false;
+    const auto bounded = grouped_workspace(config, original, workers,
+        plan_workspace(config, original, workers, false));
+    return bounded ? std::optional(bounded->total) : std::nullopt;
+}
+
 std::size_t receiver_detail::protected_slot_workspace(const ReceiverConfig& config, const ReceiverSlotPlan& slot,
                                                        unsigned workers) {
     return plan_protected_observation(config, slot, workers).restricted.total;
@@ -678,7 +724,8 @@ enum class EvidenceEvaluation { bounded_competition, compare_admitted };
 std::optional<ReceiverSlotScore::ProtectedCarrierBeat> find_protected_carrier_beat(
         const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
         std::span<const Complex> iq, std::span<const std::uint8_t> valid,
-        ReceiverSlotScore& score, std::uint8_t ordinary_bit, std::size_t scratch, std::stop_token stop) {
+        ReceiverSlotScore& score, std::uint8_t ordinary_bit, std::size_t scratch, std::stop_token stop,
+        const FinePreparation* scheduled_fine, bool improve_guarded_margin) {
     std::array<FineCoordinate, 3> proposals{};
     proposals[0] = {0, std::clamp(0., slot.arrival_lower_seconds, slot.arrival_upper_seconds), 0., 0.};
     std::size_t proposal_count = 1;
@@ -716,10 +763,24 @@ std::optional<ReceiverSlotScore::ProtectedCarrierBeat> find_protected_carrier_be
         strongest = strength;
         select(proposal, beat, *bit);
     }
-    if (!supported) {
+    // Scheduled changes require a scan for competing proposals even when
+    // a fixed fit already qualifies.
+    if (!supported || (scheduled_fine && (improve_guarded_margin || supported->predicted_bit != ordinary_bit))) {
         const auto scan = scan_carrier_beat(config, slot, key, iq, valid, scratch, stop);
         score.protected_carrier_beat_search_coordinates = scan.coordinates;
         if (scan.nominations[0] && scan.nominations[1]) return std::nullopt;
+        if (supported) {
+            if (scan.status != "scored" || scan.nominations[1 - supported->predicted_bit]) return std::nullopt;
+            if (improve_guarded_margin && supported->predicted_bit == ordinary_bit && scan.nominations[ordinary_bit]) {
+                const auto fixed = snap({supported->epoch_offset_seconds, supported->arrival_seconds,
+                                         0., supported->clock_ppm}, scheduled_fine->grid);
+                if (std::ranges::find(scheduled_fine->coordinates, fixed) != scheduled_fine->coordinates.end()) {
+                    const auto& alternative = *scan.nominations[ordinary_bit];
+                    select(alternative.coordinate, alternative.evidence, alternative.bit);
+                }
+            }
+            return supported;
+        }
         for (std::uint8_t bit = 0; bit < scan.nominations.size(); ++bit)
             if (const auto& nomination = scan.nominations[bit])
                 select(nomination->coordinate, nomination->evidence, bit);
@@ -1181,6 +1242,10 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         std::log(1. + (varying_prior != nullptr) + (drift_prior != nullptr) + (coherent_gain_prior != nullptr)) -
         (public_workspace.line ? std::numbers::ln2 : 0.) +
         (has_supplement ? std::log1p(-supplement->fixed_weight) : 0.);
+    const bool scheduled_carrier_beat = !protection && slot.carrier_beat_stop_sample && !varying && !supplement &&
+        evaluation == EvidenceEvaluation::bounded_competition && gain == AffineGainEvaluation::operational;
+    const bool improve_guarded_margin = scheduled_carrier_beat &&
+        !wrong_key_admission_passes(score, WrongKeyAdmission::guarded);
     const auto provisional_bit = score.decision == SlotDecision::data ? score.bit : std::nullopt;
     apply_wrong_key_admission(score, config.wrong_key_admission);
     if (protection && discover_protected_affine && likelihood_iq.size() < iq.size() &&
@@ -1257,15 +1322,25 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
         }
     }
     const auto ordinary_bit = score.bit ? score.bit : provisional_bit;
-    if (protection && carrier_beat_polarity && ordinary_bit &&
+    if (((protection && carrier_beat_polarity) || scheduled_carrier_beat) && ordinary_bit &&
         score.complete && score.all_valid && score.zero_h0_verified &&
         config.time_varying_channel && config.selective_modulation_rate_hz && !retained_line) {
         const auto revise = [&] {
-            const auto beat_slot = protected_beat_observation(config, slot);
+            auto beat_slot = slot;
+            if (scheduled_carrier_beat) {
+                // Only the timing statistic sees this interior. The full
+                // observation and public grid still control admission.
+                beat_slot.quiet_first_sample = slot.carrier_beat_first_sample;
+                beat_slot.quiet_stop_sample = slot.carrier_beat_stop_sample;
+            } else beat_slot = protected_beat_observation(config, slot);
+            // The native beat search quotes and checks its own scratch
+            // against the available sequential fine-stage lease.
             score.protected_carrier_beat = find_protected_carrier_beat(config, beat_slot, key, iq, valid,
-                score, *ordinary_bit, workspace.fine, stop);
+                score, *ordinary_bit, workspace.fine, stop, scheduled_carrier_beat ? &fine : nullptr,
+                improve_guarded_margin);
             auto& beat = score.protected_carrier_beat;
-            if (!beat || (beat->predicted_bit == ordinary_bit && score.decision == SlotDecision::data)) return;
+            const bool allow_same_bit = scheduled_carrier_beat ? improve_guarded_margin : score.decision != SlotDecision::data;
+            if (!beat || (beat->predicted_bit == ordinary_bit && !allow_same_bit)) return;
             const auto coordinate = snap({beat->epoch_offset_seconds, beat->arrival_seconds, 0., beat->clock_ppm},
                                          fine.grid);
             if (fine.coordinates.size() >= maximum_fine_coordinates ||
@@ -1290,7 +1365,13 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
                 operational[bit] = log_add(score.operational_bit_evidence[bit],
                                            atom.bit_evidence[bit] + affine_atom_log_mass);
             classify_operational_scores(candidate, operational, separation, std::nullopt, final_threshold);
+            if (scheduled_carrier_beat && beat->predicted_bit == ordinary_bit &&
+                !wrong_key_admission_passes(candidate, WrongKeyAdmission::guarded)) return;
             apply_wrong_key_admission(candidate, config.wrong_key_admission);
+            // Scheduled proposals can repair a decision only when the
+            // full-window native likelihood corroborates the bit.
+            if (scheduled_carrier_beat &&
+                (candidate.decision != SlotDecision::data || candidate.bit != beat->predicted_bit)) return;
             if (workspace.line) {
                 const auto line_threshold = candidate.operational_log_e >= receiver_operational_threshold() ?
                     receiver_operational_threshold() : final_threshold;
@@ -1299,7 +1380,8 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
 
             candidate.protected_carrier_beat_corrected_polarity = candidate.bit && candidate.bit != ordinary_bit;
             if (candidate.decision == SlotDecision::data)
-                candidate.reason = "protected_carrier_beat_affine_nomination";
+                candidate.reason = scheduled_carrier_beat ? "carrier_beat_affine_nomination" :
+                    "protected_carrier_beat_affine_nomination";
             retain_affine_atoms(fine, candidate, atom, std::span(&coordinate, 1));
             score = std::move(candidate);
         };

@@ -54,6 +54,11 @@ std::uint64_t packed_bit_samples(double seconds, std::uint32_t sample_rate) {
                             add(rows, static_cast<std::uint64_t>(correction));
 }
 
+std::uint64_t data_ramp_samples(const Format& format, const Geometry& geometry) {
+    return packed_bit_samples(std::max(format.ramp_seconds, 8 / geometry.fine_chip_rate_hz),
+                              format.sample_rate);
+}
+
 std::uint64_t bridge_dwell_samples(const Format& format) {
     if (!format.fhss) return 0;
     // Scheduled support starts on UTC 30-second boundaries. The common DATA
@@ -382,7 +387,7 @@ std::uint64_t PublicProfile::signal_first(long double source_begin_seconds, bool
 }
 
 std::uint64_t PublicProfile::signal_stop(long double source_end_seconds, bool search,
-                                        const ScheduledGapFillBounds* shared) const {
+                                        const ScheduledGapFillBounds* shared, bool clamp_before_origin) const {
     const long double rate = effective_sample_rate();
     const auto endpoint = search ? receive_endpoint_ : nominal_endpoint_;
     const auto tx_min = 1 - endpoint, rx_max = 1 + endpoint;
@@ -392,7 +397,7 @@ std::uint64_t PublicProfile::signal_stop(long double source_end_seconds, bool se
         static_cast<long double>(config_.capture_lead_seconds) + config_.arrival_high_seconds) + tail;
     auto end = rx_max * (source_end_seconds / tx_min + offset);
     if (search) end = std::max(end, source_end_seconds / affine_min_scale_ + offset);
-    return receive_coordinate(std::ceil(rate * end), false);
+    return receive_coordinate(std::ceil(rate * end), clamp_before_origin);
 }
 
 std::uint64_t PublicProfile::active_data_stop_sample(const HelperBurstSlot& slot) const {
@@ -541,9 +546,32 @@ PublicSlot PublicProfile::slot(std::uint64_t index) const {
             quiet_stop = std::clamp(quiet_stop, quiet_first, stop);
         }
     }
+    SampleRange carrier_beat;
+    if (!config_.continuous_data && !config_.scheduled_gap_fill && !config_.helper_enabled &&
+        !config_.format.fhss && !config_.format.burst_wait_tiles && config_.selective_signal_tail) {
+        const long double rate = config_.format.sample_rate;
+        const auto gate_first = calendar_.distance(origin(), tx.pattern_begin);
+        const auto gate_stop = active_data_stop_sample(tx);
+        const auto ramp = data_ramp_samples(config_.format, geometry_);
+        if (ramp < (gate_stop - gate_first) / 2) {
+            // The same public source ramps bound bridge overlap. Move the
+            // left edge past the latest incoming transition and its tail,
+            // and keep the right edge before the earliest outgoing one.
+            const auto latest = signal_stop((gate_first + ramp) / rate, true, nullptr, true);
+            const auto earliest = signal_first((gate_stop - ramp) / rate, true);
+            const auto half_width = (earliest - std::min(earliest, latest)) / 2;
+            const auto transport_halo = config_.scheduled_gap_bridge ? config_.gap_fill_transport_halo_samples : 0;
+            if (halo < half_width && transport_halo < half_width - halo) {
+                const auto proposal_halo = halo + transport_halo;
+                const auto first = std::max(quiet_first, latest + proposal_halo);
+                const auto stop = std::min(quiet_stop, earliest - proposal_halo);
+                if (first < stop) carrier_beat = {first, stop};
+            }
+        }
+    }
     return {index, tx.pattern_begin.epoch, config_.format.symbol_ordinal + index, tx,
         observation, data, {quiet_first, quiet_stop}, previous_stop, next_first, protected_data,
-        gap_fill_may_enter_observation};
+        gap_fill_may_enter_observation, carrier_beat};
 }
 
 Format PublicProfile::basis_format(const PublicSlot& slot) const {
@@ -667,8 +695,7 @@ struct Emission::Impl {
             if (options.mode == EmissionMode::Message && (profile.config().scheduled_gap_fill || bridge) && count > 1) {
                 gap_fill_key = options.qualification_gap_fill_key ? *options.qualification_gap_fill_key : Crypto::temporary();
                 if (bridge) {
-                    const auto edge = std::max(format.ramp_seconds, 8 / geometry.fine_chip_rate_hz);
-                    bridge_ramp_samples = packed_bit_samples(edge, rate);
+                    bridge_ramp_samples = data_ramp_samples(format, geometry);
                     require(bridge_ramp_samples <= packed_bit_samples(geometry.bit_seconds, rate) / 2,
                             "Robust bridge ramps overlap within an active DATA gate");
                     bridge_dwell = bridge_dwell_samples(format);
