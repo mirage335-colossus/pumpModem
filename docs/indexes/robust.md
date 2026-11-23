@@ -16,8 +16,8 @@ stack linked into the GUI. In-process owners share immutable buffers and a
 bounded executor; Python only orchestrates native testing and analysis.
 
 For a configured-calendar midlatitude HF path with moderate delay and
-Doppler spread, Robust Setup offers **HF midlatitude moderate 0.5 Hz
-1 ms**. The receiver checks used Search Margin 3 and Selective Perturbation
+Doppler spread, Robust Setup offers **HF typical 0.5Hz 1ms**.
+The receiver checks used Search Margin 3 and Selective Perturbation
 Off. The appraisal includes continental US and
 both Atlantic directions with independent wanted and absence controls.
 Apply the preset when its nominal path support is a reasonable match to

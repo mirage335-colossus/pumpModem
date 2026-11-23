@@ -438,26 +438,55 @@ calibrated channel replay. See the
 
 ### Midlatitude moderate HF
 
-The Robust spread preset **HF midlatitude moderate 0.5 Hz 1 ms**
+The Robust spread preset **HF typical 0.5Hz 1ms**
 (`hf-midlatitude-moderate`) uses two independent, equal-mean-power Gaussian
 fading paths at 0 and 1 ms. Each path has a 0.5 Hz full 2σ Doppler
 power-spectrum width. This is the midlatitude moderate test law in
 [ITU-R F.1487 Annex 3](https://www.itu.int/dms_pubrec/itu-r/rec/f/R-REC-F.1487-0-200005-I!!PDF-E.pdf).
-The separate **HF moderate 10 Hz 6 ms** preset retains its bounded echo and
-common wander. The new preset starts with selective amplitude perturbation
+The separate **HF moderate 10Hz 6ms** preset retains its bounded echo and
+common wander. HF typical starts with selective amplitude perturbation
 Off. An explicit selection still applies, as does any explicit Doppler.
+
+At Off, the two delayed copies still add coherently. The relative phase
+changes by `2π Δf τ` across a frequency separation `Δf`. The 1 ms delay
+therefore makes different frequency components reinforce or cancel at the
+same instant. The 0.5 Hz Doppler width governs how the path gains evolve
+over time. For equal, independent Gaussian paths the ideal received-power
+correlation is `cos²(π Δf τ)`. At 265 Hz DATA carrier spacing it is about
+0.45 between neighbors and 0.009 across the 530 Hz outer span. At 7.5 Hz
+natural spacing it is about 0.998 across the 15 Hz outer span.
+
+A bounded native check replayed individual tones with the same path
+seed and both added perturbation and receiver noise off. The complex
+gains at ±265 Hz matched the 1 ms two-path response within 1e−12.
+The zero-delay control produced equal complex gains at the two frequencies
+within 1e−15. These are channel-mechanism checks. The five-seed message
+test used 7.5 Hz spacing. The separate 265 Hz message check used one seed.
+Keep the compact `local-evidence/hf-typical-selectivity-u84gtfpl` receipt
+until a superseding native channel check records the same comparison.
+[Receiver test coverage](../_appraisal/highFidelity-triple_Robust_Modem/hf-validation.md#moderate-continental-and-atlantic-hf)
+
+The extra control applies a separate time-varying dispersive filter.
+Its coefficients and frequency scale are synthetic stress settings.
+Watterson's selected Illinois–Colorado measurements contained three or
+four unequal propagation modes and 20–100 µs of delay smear within a mode.
+Additional, weaker or moving paths can change the frequency correlation
+predicted by the two-ray preset. Those measurements give no additional-AM
+percentage for this control. [Measured path summaries](https://its.ntia.gov/publications/download/87-221_ocr.pdf)
 
 The receiver scores the nominal 1 ms path spacing with time-varying gain.
 Search Margin expands the public delay support and spectral allowance
 while preserving the two physical ray delays and their fading widths.
-At Margin 3 the receiver reserves 3 ms of excess delay, up to an additional
-±3 Hz for the search center and ±4.5 Hz total for the atmospheric
-spectrum on each side before oscillator, explicit Doppler and optional
+At the GUI's default Margin 3 the receiver reserves 3 ms of excess delay,
+an additional ±3 Hz for the search center and 4.5 Hz of total atmospheric
+allowance per band edge before oscillator, explicit Doppler and optional
 selective-modulation terms. The receiver can use up to 0.25 Hz of the
 existing center allowance for a linear-drift fallback. Margin 1 supplies no
 extra drift allowance. The Gaussian simulator remains centered unless
 explicit Doppler is set. A different actual tap spacing can require its
-own channel calibration.
+own channel calibration. The Doppler width describes the model's power
+spectrum, and 1 ms is its nominal path spacing. The search allowance has
+no associated percentile of ionospheric conditions or message delivery rate.
 
 The high-fidelity appraisal also provides continental models derived from
 measured delay/Doppler summaries and eastbound and westbound Atlantic

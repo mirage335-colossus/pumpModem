@@ -77,6 +77,7 @@ input[type=text]:hover, select:hover { border-color: #89a6b2; }
 (() => {
   const fields = ['Encryption', 'Helper Carrier Transmit Power', 'Transmit Power', 'Path loss', 'Clock sync / Region / Offset / Audio error', 'Base Oscillator', 'Shift Oscillator', 'Doppler/delay spread', 'Additional frequency selective amplitude modulation', 'Margin', 'DSSS', 'Spreading', 'FHSS', 'Symbol_burst', 'Rate', 'Baseband Carrier', 'Shift', 'Target SNR dB/1Hz'];
   const fieldSet = new Set(fields);
+  const hfTypical = 'HF typical 0.5Hz 1ms';
   const builtins = {
     Encryption: ['Yes', 'No'],
     'Helper Carrier Transmit Power': ['0 W', '40 W', '15 kW'],
@@ -90,7 +91,7 @@ input[type=text]:hover, select:hover { border-color: #89a6b2; }
     'Clock sync / Region / Offset / Audio error': ['Clock sync 10ms, Region 1ms, Offset 0ms, Audio error 70ms bounded search', 'Default several seconds receiver search space'],
     'Base Oscillator': ['Free-running crystal', 'GPSDO hobbyist XO (no oven)', 'GPSDO TXCO (no oven)', 'GPSDO OCXO'],
     'Shift Oscillator': ['Baseband clock', 'Free-running crystal', 'CB SSB / ATS Mini V4 SSB: +/-20ppm/radio', 'IC-7100 +/-0.5 ppm/radio', 'GPSDO hobbyist XO (no oven)', 'GPSDO TXCO (no oven)', 'GPSDO OCXO'],
-    'Doppler/delay spread': ['None - 0 Hz 0 ms', 'Sub9 best 0.001Hz 0.005ms', 'Sub9 moderate 0.005Hz 0.05ms', 'Sub9 worst 0.05Hz 5ms', 'HF best 0.1Hz 0.5ms', 'HF moderate 10Hz 6ms', 'HF midlatitude moderate 0.5 Hz 1 ms', 'HF worst 30Hz 7ms', 'Aurora best 10Hz 3ms', 'Aurora worst 55Hz 11ms', 'EME focused 6Hz 0.5ms'],
+    'Doppler/delay spread': ['None - 0 Hz 0 ms', 'Sub9 best 0.001Hz 0.005ms', 'Sub9 moderate 0.005Hz 0.05ms', 'Sub9 worst 0.05Hz 5ms', 'HF best 0.1Hz 0.5ms', hfTypical, 'HF moderate 10Hz 6ms', 'HF worst 30Hz 7ms', 'Aurora best 10Hz 3ms', 'Aurora worst 55Hz 11ms', 'EME focused 6Hz 0.5ms'],
     'Additional frequency selective amplitude modulation': ['Off', ...['Slow', 'Fast', 'Each'].flatMap(speed => ['1%', '5%', '10%', '25%', '65%'].map(amount => `${speed} - ${amount}`))],
     'Target SNR dB/1Hz': ['200', '140', '120', '100', '80', '60', '55', '40', '32', '20', '6', '-6', '-10', '-16', '-20', '-23', '-26', '-30', '-60']
   };
@@ -123,7 +124,12 @@ input[type=text]:hover, select:hover { border-color: #89a6b2; }
     const tab = line.raw.indexOf('\t');
     if (tab < 0) return null;
     const name = line.raw.slice(tab + 1);
-    return fieldSet.has(name) ? { name, value: line.raw.slice(0, tab) } : null;
+    if (!fieldSet.has(name)) return null;
+    const value = line.raw.slice(0, tab);
+    // Show the current option for an imported alias and preserve the original line until edited.
+    const legacyHfTypical = name === 'Doppler/delay spread'
+      && value.trim().toLowerCase() === 'hf midlatitude moderate 0.5 hz 1 ms';
+    return { name, value: legacyHfTypical ? hfTypical : value };
   }
   function serialize() {
     const lineText = line => line.raw + line.eol;

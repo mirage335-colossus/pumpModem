@@ -23,9 +23,9 @@ constexpr std::array spread_models{
     SpreadPreset{"sub9-moderate","Sub9 moderate 0.005Hz 0.05ms",.05,.005,false},
     SpreadPreset{"sub9-worst","Sub9 worst 0.05Hz 5ms",5,.05,false},
     SpreadPreset{"hf-best","HF best 0.1Hz 0.5ms",.5,.1,true},
-    SpreadPreset{"hf-moderate","HF moderate 10Hz 6ms",6,10,true},
-    SpreadPreset{"hf-midlatitude-moderate","HF midlatitude moderate 0.5 Hz 1 ms",1,.5,false,
+    SpreadPreset{"hf-midlatitude-moderate","HF typical 0.5Hz 1ms",1,.5,false,
         SpreadPreset::DopplerLaw::gaussian_rays},
+    SpreadPreset{"hf-moderate","HF moderate 10Hz 6ms",6,10,true},
     SpreadPreset{"hf-worst","HF worst 30Hz 7ms",7,30,true},
     SpreadPreset{"aurora-best","Aurora best 10Hz 3ms",3,10,true},
     SpreadPreset{"aurora-worst","Aurora worst 55Hz 11ms",11,55,true},
@@ -53,7 +53,8 @@ OscillatorPreset parse_oscillator_preset(std::string_view name) {
 }
 std::span<const SpreadPreset> spread_presets(){return spread_models;}
 SpreadPreset parse_spread_preset(std::string_view name) {
-    const auto wanted=normalized(name);
+    auto wanted=normalized(name);
+    if(wanted==normalized("HF midlatitude moderate 0.5 Hz 1 ms"))wanted="hf-midlatitude-moderate";
     for(const auto& preset:spread_models)
         if(normalized(preset.id)==wanted || normalized(preset.name)==wanted)return preset;
     throw Error("unknown spread preset: "+std::string(name));

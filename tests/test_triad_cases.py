@@ -176,6 +176,22 @@ class TriadCasesTests(unittest.TestCase):
         self.assertEqual(set(result["cases"][0]["raw_fields"]), set(FIELDS))
         self.assertIn("Encryption", result["cases"][0]["field_lines"])
 
+    def test_hf_typical_and_previous_label_normalize_to_the_same_preset(self):
+        labels = ("HF typical 0.5Hz 1ms", "HF midlatitude moderate 0.5 Hz 1 ms")
+        field = "Doppler/delay spread"
+        preset = "hf-midlatitude-moderate"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manual.md"
+            path.write_text("\n".join(FIXTURE.replace("Sub9 best 0.001Hz 0.005ms", label)
+                                      for label in labels), encoding="utf-8")
+            current, previous = load_cases(path)["cases"]
+        for case, label in zip((current, previous), labels):
+            self.assertEqual(case["raw_fields"][field], label)
+            self.assertEqual(case["fields"][field], preset)
+            args = case["native_args"]
+            self.assertEqual(args[args.index("--spread-preset") + 1], preset)
+        self.assertEqual(current["configuration_hash"], previous["configuration_hash"])
+
     def test_unknown_duplicate_and_invalid_values_fail_with_line_numbers(self):
         original = FIXTURE
         mutations = (

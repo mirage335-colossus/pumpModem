@@ -2,6 +2,7 @@
 #include "launch_command.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/clock_sync.hpp"
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -332,6 +333,14 @@ void parsing_and_formatting() {
     check(midlatitude.delay_ms==1&&midlatitude.doppler_hz==.5&&!midlatitude.default_perturbation&&
           midlatitude.doppler_law==datapump::tuning::SpreadPreset::DopplerLaw::gaussian_rays,
           "the midlatitude HF preset must declare 0.5 Hz Gaussian rays, 1 ms, and perturbation off");
+    const auto spreads=datapump::tuning::spread_presets();
+    const auto best=std::ranges::find(spreads,"hf-best",&datapump::tuning::SpreadPreset::id);
+    check(spreads.end()-best>=3&&(best+1)->id==midlatitude.id&&(best+2)->id==historical_hf.id,
+          "HF typical must appear between HF best and HF moderate");
+    check(midlatitude.name=="HF typical 0.5Hz 1ms"&&
+          launch_command::parse("--spread-preset 'HF typical 0.5Hz 1ms'").spread_preset==midlatitude.id&&
+          launch_command::parse("--spread-preset 'HF midlatitude moderate 0.5 Hz 1 ms'").spread_preset==midlatitude.id,
+          "current and legacy spread labels must import under the original preset ID");
     rejects([]{launch_command::parse("--selective-perturbation each-2");},"invalid perturbation selection accepted");
     const auto windows=launch_command::parse(R"("C:\Program Files\Data Pump\datapump-gui.exe" --rate "3.6 kHz"
         --carrier=1.5kHz --oscillator "GPSDO: OCXO" --target-snr=+23)");

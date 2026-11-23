@@ -1217,6 +1217,24 @@ parser passed 16 tests. The compact receipts in ignored
 bounded comparison and failure evidence. Record any superseding matched
 result before removing those receipts.
 
+### HF typical repeatability at Search Margin 3×
+
+The renamed **HF typical 0.5Hz 1ms** preset ran a predeclared five-seed
+check on its nominal Gaussian simulator at 10 dB-Hz. It used 36 Hz Rate,
+24 seconds of configured active time, tight fixture timing, natural carrier
+spacing, Guarded admission and 24 native CPU workers. Each seed produced a
+different verified input capture. All five recovered the three-bit `e`
+message with two physically scored quiet slots and passed the EOF control.
+
+The sample estimates repeatability only at this fixed short-message
+operating point. Even five independent successes give a one-sided 95%
+binomial upper failure bound of about 45%. The test varied the simulation
+seed and held Search Margin at 3×. The contribution of that margin and
+the field distribution of conditions are still unmeasured. The commands
+and receipts in `local-evidence/hf-typical-five-seeds-6fbn8z6j` identify
+source `3967c593…a58e` and probe `475ce9a7…f24d`. Retain them until a
+superseding sensitivity check preserves this fixed-point result.
+
 ### Current-source severe statistical and coupled-oblique replays
 
 The receiver with the moderate-HF continuation change also repeated two
