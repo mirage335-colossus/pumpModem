@@ -16,6 +16,65 @@ its maintenance cost. Keep concise useful conclusions in maintained guidance;
 do not accumulate session histories, obsolete experiment instructions or raw
 outputs here. Follow the material lifecycle in docs/development.md.
 
+
+
+
+
+
+TEMPLATE - Science Based triple Robust Modem Development
+=======================================
+
+Throughout the development, please thoroughly research and contemplate, consulting more academic literature as appropriate, including recent academic literature which may add more nuanced or contradictory information - especially please regularly make good use of the findings already presented .
+
+Please also use available documentation, research, experiment results, etc, etc.
+
+_ref/
+
+_appraisal/
+
+docs/
+
+
+Please regularly continue, cross-check, and reconcile, implementation findings, more research, etc.
+
+A theoretical weakness should be taken seriously.
+
+A slight disadvantage, more computing, less efficiency, lower bit rate throughput, in all situations is not much of a concern, whereas a general purpose solution without breaking failure due to more drastic CPU ceiling or sensitivity loss in some situations, including merely theoretical situations, should be preferred.
+
+This is especially important for triple Robust Modem as there is not usually much computational ceiling for truly unnecessary redundant historical searching, and due to the long, slow transmission time in the challenging cases for which optimization is important, there is not a practical opportunity to communicate back from the receiver to the transmitter what the conditions are.
+
+
+Preferably, as SNR decreases, or conditions deteriorate, the fundamental mathematical necessity of more time/energy required, computation getting closer to the computational ceiling of the processor, is supported, with gaps and especially the usable sensitivity or deteriorated conditions floor, is as graciously close as practical, to the smooth trends predicted by corresponding theoretical limits along these trends, to the point of the most challenging situation remaining as feasible as practical.
+
+
+
+...
+
+
+
+Please use the high fidelity test results and tests, etc, to implement appropriate improvements, to prevent failures, pitfalls, etc, for triple Robust Modem.
+
+
+
+RunPod GPUs remain available. Please deploy RunPod instances, upload, etc, as reasonably needed, preferably keeping upload times less than a few minutes, building and caching on RunPod cheap persistent volumes if uploads get much larger than a few hundred megabytes and thus slower, etc.
+
+The limits on RunPod hours and budget are somewhat relaxed for this work. Although being able to run such tests reasonably quickly in future testing remains important, up to 8hours and $20 per hour spend on RunPod usage is reasonable for this work.
+
+
+
+
+
+Reduce low rate transmit time.
+=======================================
+
+The 0.1Hz rate sure takes impractically forever to transmit, regardless of target SNR, etc.
+
+Can this be shortened while nevertheless communicating through deleterious conditions sufficiently long fragments of evidence to establish confidence in the uniquely correct bit pattern?
+
+
+
+
+
 Complete the Bookworm offline build path
 =======================================
 
