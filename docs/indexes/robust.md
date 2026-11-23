@@ -20,15 +20,17 @@ ordinal, waveform profile, encryption/key, FEC, compression and DATA cadence.
 **Robust Setup → DATA cadence → Scheduled + gap fill** keeps the Scheduled
 calendar and uses the DATA waveform with a temporary key inside eligible gaps.
 Both peers need Helper and FHSS Off. [Gap fill and its guard](../symbol-burst.md#scheduled-gaps-and-temporary-key-noise)
-**Robust Setup → DATA cadence → Scheduled + short transitions** keeps the
-calendar and overlaps the independent filler with DATA's outer taper. Its
+**Robust Setup → DATA cadence → Scheduled + short transitions** is the
+startup selection. It keeps the calendar, overlaps the independent filler
+with DATA's outer taper, and preserves the selected Helper waveform and
+FHSS ramp and mute intervals. Its
 full-window receiver can also score filler or adjacent DATA in broad timing
 conditions. [Scope and measured transitions](../symbol-burst.md#short-audio-transitions)
 **Robust setup → DATA cadence → Continuous DATA** removes the scheduled silence
 between successive DATA gates. Both peers need Helper, both burst waits and
-FHSS Off for this cadence. Scheduled remains the default because broad timing
-still excludes neighbor-ambiguous interior energy and because the weak colored
-live likelihood needs field qualification. [Cadence and validation](../symbol-burst.md#native-packed-data-checks)
+FHSS Off for this cadence. Broad timing can still exclude interior energy
+when adjacent DATA is ambiguous, and the weak colored live likelihood needs
+field qualification. [Cadence and validation](../symbol-burst.md#native-packed-data-checks)
 Both peers also need the same effective DATA carrier spacing. Robust Setup
 defaults to a 265 Hz minimum. Select 0 Hz for a peer using the original
 rate-derived spacing. The 3.5 and 125 Hz options provide smaller shared floors.

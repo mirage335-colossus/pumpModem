@@ -54,6 +54,20 @@ std::uint64_t packed_bit_samples(double seconds, std::uint32_t sample_rate) {
                             add(rows, static_cast<std::uint64_t>(correction));
 }
 
+std::uint64_t bridge_dwell_samples(const Format& format) {
+    if (!format.fhss) return 0;
+    // Scheduled support starts on UTC 30-second boundaries. The common DATA
+    // halo shifts every hop origin by the same number of samples.
+    const auto rows = static_cast<long double>(format.dwell_seconds) * format.sample_rate;
+    const auto integer = std::round(rows);
+    const auto grid_rows = 30ULL * format.sample_rate;
+    require(integer >= 1 && integer <= grid_rows &&
+        std::abs(rows - integer) <= 4 * std::numeric_limits<double>::epsilon() * integer &&
+        grid_rows % static_cast<std::uint64_t>(integer) == 0,
+        "Robust gap bridging requires an integral FHSS dwell aligned with the Scheduled grid");
+    return static_cast<std::uint64_t>(integer);
+}
+
 HelperBurstConfig burst_config(const PublicProfileConfig& config, const Geometry& geometry) {
     require(config.format.sample_rate_denominator == 1,
         "whole-bit Robust stream requires an integer sample rate");
@@ -217,10 +231,11 @@ PublicProfile::PublicProfile(PublicProfileConfig config, std::optional<Crypto> c
             bounds.arrival_low_seconds <= bounds.arrival_high_seconds,
             "invalid Robust shared gap fill bounds");
     }
-    if (config_.scheduled_gap_bridge)
-        require(!config_.continuous_data && !config_.scheduled_gap_fill && !config_.helper_enabled &&
-                !config_.format.fhss && !config_.format.burst_wait_tiles,
-            "Robust gap bridging requires Scheduled DATA with Helper, FHSS, and within-bit waits off");
+    if (config_.scheduled_gap_bridge) {
+        require(!config_.continuous_data && !config_.scheduled_gap_fill && !config_.format.burst_wait_tiles,
+            "Robust gap bridging requires Scheduled DATA with within-bit waits off");
+        (void)bridge_dwell_samples(config_.format);
+    }
     nominal_endpoint_ = config_.audio_pair_ppm * .5e-6L;
     const auto clock = config_.clock_bound_ppm * 1e-6;
     affine_min_scale_ = 1 - clock;
@@ -547,7 +562,7 @@ DataPowerReference data_power_reference(const Format& format, const Crypto& key,
 struct Emission::Impl {
     struct Bridge {
         SampleRange range;
-        std::uint64_t following_gate = 0, epoch = 0, slot = 0;
+        std::uint64_t preceding_gate = 0, source_offset = 0, epoch = 0, slot = 0;
     };
     PublicProfile profile;
     Format format;
@@ -566,7 +581,7 @@ struct Emission::Impl {
     std::uint64_t first_slot = 0, last_slot = 0, source_first = 0, source_stop = 0, data_first = 0;
     std::uint64_t active_helper_first = 0, active_slot_stop = 0;
     std::uint64_t data_begin_offset = 0, data_end_offset = 0;
-    std::uint64_t bridge_ramp_samples = 0, bridge_source_first = 0;
+    std::uint64_t bridge_ramp_samples = 0, bridge_dwell = 0, bridge_source_first = 0;
     long double active_helper_begin_seconds = 0, active_helper_end_seconds = 0;
     bool data_enabled = false, helper_enabled = false;
     bool noise = false, packed = false, data_is_fill = false;
@@ -650,13 +665,13 @@ struct Emission::Impl {
             last_slot = add(options.first_slot, count - 1);
             const bool bridge = profile.config().scheduled_gap_bridge;
             if (options.mode == EmissionMode::Message && (profile.config().scheduled_gap_fill || bridge) && count > 1) {
-                require(!helper_enabled && !packed && !format.fhss, "invalid Robust scheduled fill profile");
                 gap_fill_key = options.qualification_gap_fill_key ? *options.qualification_gap_fill_key : Crypto::temporary();
                 if (bridge) {
                     const auto edge = std::max(format.ramp_seconds, 8 / geometry.fine_chip_rate_hz);
                     bridge_ramp_samples = packed_bit_samples(edge, rate);
                     require(bridge_ramp_samples <= packed_bit_samples(geometry.bit_seconds, rate) / 2,
                             "Robust bridge ramps overlap within an active DATA gate");
+                    bridge_dwell = bridge_dwell_samples(format);
                 }
             }
             source_stop = profile.calendar().distance(profile.origin(), profile.transmit_slot(last_slot).helper_end);
@@ -679,13 +694,23 @@ struct Emission::Impl {
         const auto current_stop = add(current_first, packed_bit_samples(profile.geometry().bit_seconds, format.sample_rate));
         const auto next_first = calendar.distance(profile.origin(), calendar.successor(slot).pattern_begin);
         if (current_stop >= next_first) return {};
-        return {{current_stop - bridge_ramp_samples, add(next_first, bridge_ramp_samples)},
-                next_first, slot.pattern_begin.epoch, slot.index};
+        const auto first = current_stop - bridge_ramp_samples;
+        auto offset = 2 * bridge_ramp_samples;
+        if (bridge_dwell) {
+            // Align the cover's FHSS chip lattice too. The same offsets from
+            // each dwell boundary then see the original shaped chip positions.
+            const auto phase = (first - current_first) % bridge_dwell;
+            offset = add(offset, (phase + bridge_dwell - offset % bridge_dwell) % bridge_dwell);
+        }
+        return {{first, add(next_first, bridge_ramp_samples)}, current_first, offset,
+                slot.pattern_begin.epoch, slot.index};
     }
 
-    std::uint64_t slot_stop(const HelperBurstSlot& slot, SampleRange gap, const Bridge& bridge) const {
+    std::uint64_t slot_stop(const HelperBurstSlot& slot, SampleRange gap) const {
         const auto ordinary = profile.calendar().distance(profile.origin(), packed ? slot.pattern_end : slot.helper_end);
-        return std::max({gap.stop, bridge.following_gate, ordinary});
+        // A bridge can cross the slot change. Advance on the original Helper
+        // boundary and carry it as incoming while the next lead is rendered.
+        return std::max(gap.stop, ordinary);
     }
 
     void set_slot(const HelperBurstSlot& slot) {
@@ -700,7 +725,7 @@ struct Emission::Impl {
         current_gap = gap_after(slot);
         previous_bridge = current_bridge;
         current_bridge = bridge_after(slot);
-        active_slot_stop = slot_stop(slot, current_gap, current_bridge);
+        active_slot_stop = slot_stop(slot, current_gap);
         active_helper_begin_seconds = calendar.relative_seconds(origin, slot.helper_begin);
         active_helper_end_seconds = calendar.relative_seconds(origin, slot.helper_end);
     }
@@ -803,24 +828,39 @@ struct Emission::Impl {
         return in_gap(index, incoming.range) ? incoming : outgoing;
     }
 
-    Complex bridge_sample(std::uint64_t index, const Bridge& bridge, std::unique_ptr<PatternSource>& cache,
-                          std::uint64_t& cached_first) const {
+    Complex bridge_sample(std::uint64_t index, const Bridge& bridge, bool has_data, std::uint64_t first,
+                          std::unique_ptr<PatternSource>& cache, std::uint64_t& cached_first) const {
         if (!in_gap(index, bridge.range)) return {};
+        const auto& g = profile.geometry();
+        // Use the exact DATA-relative coordinate inside its cover taper. In
+        // the gap, continue the same periodic gate from the prior DATA start.
+        const auto t = has_data ?
+            (static_cast<long double>(index - first) - g.calendar_origin_sample) / format.sample_rate : 0.L;
+        const auto envelope = has_data ? shaping_data_envelope(format, g, t) : 0.;
+        auto weight = std::clamp(1 - envelope, 0., 1.);
+        if (bridge_dwell) {
+            const auto phase = envelope > 0 ? t :
+                static_cast<long double>((index - bridge.preceding_gate) % bridge_dwell) / format.sample_rate;
+            weight *= shaping_fhss_envelope(format, phase);
+        }
+        if (weight == 0) return {};
         if (!cache || cached_first != bridge.range.first) {
             cache.reset();
             auto addressed = format;
             addressed.epoch = bridge.epoch;
             addressed.symbol_ordinal += bridge.slot;
-            const auto interior = static_cast<long double>(bridge.range.size()) + 5.L * bridge_ramp_samples;
+            const auto interior = static_cast<long double>(bridge.range.size()) + bridge.source_offset +
+                3.L * bridge_ramp_samples;
             addressed.bit_seconds = std::max({format.bit_seconds, 100.,
                 static_cast<double>(interior / format.sample_rate)});
             cache = std::make_unique<PatternSource>(addressed, *gap_fill_key, 0);
             cached_first = bridge.range.first;
         }
-        // The sampled region stays inside the native gate at both ends.
-        // Only the complementary wanted ramp shapes this bridge.
-        return cache->sample_at(static_cast<long double>(index - bridge.range.first) +
-            2.L * bridge_ramp_samples + cache->geometry().calendar_origin_sample);
+        // The sampled region stays inside the filler source's outer taper.
+        // Apply only the scheduled FHSS gate, not a gate at its own origin.
+        const auto position = static_cast<long double>(index - bridge.range.first) +
+            bridge.source_offset + cache->geometry().calendar_origin_sample;
+        return cache->sample_at_without_fhss_gate(position) * (report.data_gain * weight);
     }
 
     bool in_data(std::uint64_t index, std::uint64_t first) const {
@@ -874,16 +914,9 @@ struct Emission::Impl {
         const auto helper_component = active ? audio - normalized_data * up : Complex{};
         const auto norm = std::norm(normalized_data);
         const auto wanted = audio * std::conj(up);
-        if (bridge != Complex{}) {
-            const auto& g = profile.geometry();
-            // Match PatternSource's integer-local coordinate before any
-            // conversion of a potentially large absolute sample index.
-            const auto envelope = source ? shaping_envelope(format, g,
-                (static_cast<long double>(index - first) - g.calendar_origin_sample) / format.sample_rate) : 0.;
-            const auto complement = std::clamp(1 - envelope, 0., 1.);
-            const auto fill = bridge * (report.data_gain * complement);
-            return {wanted + fill, norm, 0, std::norm(fill), 2 * (wanted * std::conj(fill)).real()};
-        }
+        if (bridge != Complex{})
+            return {wanted + bridge, norm, std::norm(helper_component), std::norm(bridge),
+                2 * (normalized_data * std::conj(bridge)).real()};
         return {wanted, filling ? 0 : norm, std::norm(helper_component), filling ? norm : 0};
     }
 
@@ -914,8 +947,8 @@ struct Emission::Impl {
             source = data.get();
         }
         const auto& bridge = bridge_at(index, previous_bridge, current_bridge);
-        const auto fill = bridge_ramp_samples ? bridge_sample(index, bridge, bridge_source_cache, bridge_source_first) :
-            Complex{};
+        const auto fill = bridge_ramp_samples ?
+            bridge_sample(index, bridge, source != nullptr, data_first, bridge_source_cache, bridge_source_first) : Complex{};
         const auto value = value_at(index, source, data_first, active_helper_begin_seconds,
             active_helper_end_seconds, helper.get(), current_gap, fill);
         report.data_energy += value.data_norm;
@@ -964,7 +997,7 @@ struct Emission::Impl {
         const auto origin = profile.origin();
         const auto gap = gap_after(slot);
         const auto outgoing = bridge_after(slot);
-        return {begin, slot, calendar.distance(origin, slot.support_begin), slot_stop(slot, gap, outgoing),
+        return {begin, slot, calendar.distance(origin, slot.support_begin), slot_stop(slot, gap),
             calendar.relative_seconds(origin, slot.helper_begin), calendar.relative_seconds(origin, slot.helper_end), {}, gap,
             span.outgoing, outgoing};
     }
@@ -1034,8 +1067,8 @@ struct Emission::Impl {
             reader.helper = std::make_unique<helper::Generator>(profile.config().helper, report.helper_plan,
                 format.epoch, true, keys.helper);
         const auto& bridge = bridge_at(index, span.incoming, span.outgoing);
-        const auto fill = bridge_ramp_samples ? bridge_sample(index, bridge, reader.bridge_source, reader.bridge_source_first) :
-            Complex{};
+        const auto fill = bridge_ramp_samples ?
+            bridge_sample(index, bridge, source != nullptr, span.data_first, reader.bridge_source, reader.bridge_source_first) : Complex{};
         const auto value = value_at(index, source, span.data_first, span.helper_begin_seconds,
             span.helper_end_seconds, reader.helper.get(), span.gap, fill);
         norms[static_cast<std::size_t>(local - plan_first)] = {value.data_norm, value.helper_norm};

@@ -52,26 +52,19 @@ inline std::string list_text(std::span<const double> list,char separator=',') {
     }
     return result;
 }
-enum class Preference { off, fcc, eu, list, fcc_short };
+enum class Preference { off, fcc, eu, list };
 inline Preference parse(std::string_view id) {
     if(id=="off")return Preference::off;
     // The original illustration had no jurisdiction. Migrate to FCC once;
     // the preference is subsequently independent of the resolved RF band.
     if(id=="fake-fcc"||id=="fake-0.4s-200")return Preference::fcc;
-    if(id=="fake-fcc-short")return Preference::fcc_short;
+    if(id=="fake-fcc-short")throw std::invalid_argument("The draft FHSS profile fake-fcc-short was retired. Select fake-fcc for the original ramps.");
     if(id=="fake-eu")return Preference::eu;
     if(id=="fake-list")return Preference::list;
-    throw std::invalid_argument("FHSS must be off, fake-fcc, fake-fcc-short, fake-eu or fake-list.");
+    throw std::invalid_argument("FHSS must be off, fake-fcc, fake-eu or fake-list.");
 }
 inline std::string_view id(Preference p) {
-    switch(p) {
-        case Preference::off: return "off";
-        case Preference::fcc: return "fake-fcc";
-        case Preference::fcc_short: return "fake-fcc-short";
-        case Preference::eu: return "fake-eu";
-        case Preference::list: return "fake-list";
-    }
-    return "off";
+    return p==Preference::fcc?"fake-fcc":p==Preference::eu?"fake-eu":p==Preference::list?"fake-list":"off";
 }
 struct Band {double lower_hz=0,upper_hz=0;};
 // The saved preference/list is retained for the canonical triad backend.

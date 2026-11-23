@@ -44,6 +44,7 @@ datapump::live::detail::Profile prepare_hf_gui_profile(
     const HfGuiProfileOptions& options, std::stop_token stop) {
     validate_options(options);
     datapump::live::Settings settings;
+    settings.data_cadence = datapump::live::DataCadence::scheduled;
     settings.simulation = true;
     settings.device = "contained-hf-native-gui";
     settings.calendar = hf_gui_calendar;

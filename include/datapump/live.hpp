@@ -43,7 +43,7 @@ struct Settings {
     std::string spread_preset="none", selective_perturbation="off";
     unsigned added_symbols=1, symbol_burst_wait=0, symbol_burst_random=0;
     // Public calendar choice shared by the transmitting and receiving peers.
-    DataCadence data_cadence=DataCadence::scheduled;
+    DataCadence data_cadence=DataCadence::scheduled_bridge;
     bool added_interleave=false;
     std::string fhss_profile="off";
     std::vector<double> fhss_frequencies_hz;

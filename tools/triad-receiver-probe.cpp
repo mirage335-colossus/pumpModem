@@ -469,8 +469,8 @@ Options parse(int argc, char** argv) {
             !o.helper && !o.fhss && !o.continuous_data && o.capture_cache.empty()),
             "Scheduled gap fill requires plan, message or admission with Helper and FHSS off and no capture cache");
     require(!o.scheduled_gap_bridge || (one_of(o.command, {"plan", "message", "admission"}) &&
-            !o.scheduled_gap_fill && !o.helper && !o.fhss && !o.continuous_data && o.capture_cache.empty()),
-            "Scheduled short transitions require plan, message or admission with guarded fill, Helper and FHSS off and no capture cache");
+            !o.scheduled_gap_fill && !o.continuous_data && o.capture_cache.empty()),
+            "Scheduled short transitions require plan, message or admission without guarded fill, Continuous DATA or capture cache");
     require(!gap_fill_transmit_supplied || (o.fills_scheduled_gaps() && one_of(o.command, {"message", "admission"})),
             "The gap-fill transmit control needs scheduled fill or short transitions in a message or admission probe");
     require(!o.foreign_receiver_key || (o.command == "message" && o.encrypt),
@@ -590,6 +590,7 @@ const char* fec_name(FecMode mode) {
 
 live::Settings settings_for(const Options& o, std::size_t memory_limit) {
     live::Settings s;
+    s.data_cadence = live::DataCadence::scheduled;
     s.wrong_key_admission = o.wrong_key_admission;
     if (o.scheduled_gap_fill) s.data_cadence = live::DataCadence::scheduled_fill;
     if (o.scheduled_gap_bridge) s.data_cadence = live::DataCadence::scheduled_bridge;
@@ -817,7 +818,7 @@ struct Capture {
     unsigned generation_helpers = 0;
     struct GapFill {
         std::uint64_t samples = 0;
-        long double wanted_energy = 0, energy = 0, cross_energy = 0;
+        long double wanted_energy = 0, energy = 0, cross_energy = 0, helper_energy = 0;
     };
     std::optional<GapFill> gap_fill;
     struct PcmProjection {
@@ -1170,6 +1171,8 @@ Json observation(const Capture& capture, std::uint64_t stop, const ReceiverSlotP
         if (o.scheduled_gap_bridge) {
             receipt["data_filler_cross_energy_samples"] = static_cast<double>(fill.cross_energy);
             receipt["combined_energy_samples"] = static_cast<double>(fill.wanted_energy + fill.energy + fill.cross_energy);
+            receipt["combined_energy_scope"] = "transmitted_data_and_bridge";
+            receipt["helper_energy_samples"] = static_cast<double>(fill.helper_energy);
         }
         result[o.scheduled_gap_bridge ? "scheduled_gap_bridge" : "scheduled_gap_fill"] = std::move(receipt);
     }
@@ -2109,6 +2112,7 @@ Capture simulate(const Options& o, const Profile& profile, std::span<const Emiss
             filler.wanted_energy += source.data_energy;
             filler.energy += source.gap_fill_energy;
             filler.cross_energy += source.gap_bridge_cross_energy;
+            filler.helper_energy += source.helper_energy;
         }
     }
     capture.generated_samples = simulator_stop;

@@ -181,7 +181,7 @@ double shaping_pulse(PulseShape p,double t) {
     if(index==count)return table[count];
     return std::lerp(table[index],table[index+1],position-index);
 }
-double shaping_envelope(const Format& f,const Geometry& g,long double t) {
+double shaping_data_envelope(const Format& f,const Geometry& g,long double t) {
     if(t<0||t>=g.bit_seconds)return 0;
     const long double edge=std::max(f.ramp_seconds,span/g.fine_chip_rate_hz);
     double result=smooth(static_cast<double>(t/edge))*smooth(static_cast<double>((g.bit_seconds-t)/edge));
@@ -189,8 +189,14 @@ double shaping_envelope(const Format& f,const Geometry& g,long double t) {
         if(id%(f.burst_wait_tiles+1)!=0||id/(f.burst_wait_tiles+1)>=g.tile_count)return 0;
         const auto within=t-id*static_cast<long double>(g.tile_seconds);
         result*=smooth(static_cast<double>(within/edge))*smooth(static_cast<double>((g.tile_seconds-within)/edge));}
-    if(f.fhss)result*=gate(f,t);
     return result;
+}
+double shaping_fhss_envelope(const Format& f,long double t) {
+    return gate(f,t);
+}
+double shaping_envelope(const Format& f,const Geometry& g,long double t) {
+    const auto data=shaping_data_envelope(f,g,t);
+    return f.fhss && data!=0 ? data*gate(f,t) : data;
 }
 namespace {
 SpectralCertificate shaping_spectrum_impl(const Format& f,const ShapingOptions& o,std::size_t& total_kernel_ffts) {

@@ -44,6 +44,10 @@ struct ShapingPlan {
 };
 const char* pulse_shape_name(PulseShape);
 double shaping_pulse(PulseShape,double chip_offset);
+// The finite DATA envelope and the periodic FHSS envelope have separate time
+// origins when a filler is rendered from the interior of a native source.
+double shaping_data_envelope(const Format&,const Geometry&,long double calendar_seconds);
+double shaping_fhss_envelope(const Format&,long double calendar_seconds);
 // Same source envelope used by renderer and spectral kernels. Physical
 // propagation follows shaping and must retain its own complete tails.
 double shaping_envelope(const Format&,const Geometry&,long double calendar_seconds);

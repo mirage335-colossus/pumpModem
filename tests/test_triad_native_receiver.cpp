@@ -1808,6 +1808,7 @@ void long_calm_drift_owner_lease(bool active = true, std::uint8_t bit = 0, bool 
     constexpr double actual_cn0 = -2.3044892137827393;
     const auto prepare = [&](double target) {
         live::Settings settings;
+        settings.data_cadence = live::DataCadence::scheduled;
         settings.simulation = true;
         settings.device = "native-long-calm-regression";
         settings.calendar = live::Calendar{1793404800, 0};

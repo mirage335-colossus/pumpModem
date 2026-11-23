@@ -93,6 +93,9 @@ public:
     // source_sample is a possibly fractional sample coordinate. Outside the
     // complete finite waveform support the source is exactly zero.
     Complex sample_at(long double source_sample);
+    // The bridge applies the original dwell envelope at its transmit time,
+    // independent of this source's interior coefficient coordinates.
+    Complex sample_at_without_fhss_gate(long double source_sample);
     std::array<Complex,3> carrier_samples_at(long double source_sample);
     // Keyed physical-cell coefficients before pulse shaping, carrier rotation
     // and common 1/sqrt(3) scale. Returns zero outside the active calendar.
@@ -121,6 +124,8 @@ public:
         256 * 256 + 4096 * 3 * sizeof(Complex) + 4096;
     std::size_t working_bytes() const;
 private:
+    Complex sample_at_impl(long double source_sample, bool apply_fhss_gate);
+    std::array<Complex,3> carrier_samples_at_impl(long double source_sample, bool apply_fhss_gate);
     static void render_bank_impl(std::span<PatternSource* const> sources,
                                  long double first_sample, long double sample_step,
                                  std::size_t count, std::span<const double> offsets,

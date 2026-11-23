@@ -192,11 +192,13 @@ Shared unsigned initial waveform ordinal; default 0. It advances through DATA
 and quiet slots and does not reset at message boundaries.
 .TP
 .BI \-\-data\-cadence " scheduled|scheduled-fill|scheduled-bridge|continuous"
-Select the Robust DATA cadence. The default is scheduled.
+Select the Robust DATA cadence. Startup selects scheduled-bridge.
+Older commands using default load scheduled-bridge.
 Scheduled-fill keeps the calendar and fills eligible inter-DATA intervals
 in the DATA band with an independent transmitter key. Scheduled-bridge
-overlaps that fill with the DATA edge taper and uses the full Scheduled
-receiver. Both filled cadences require Helper and FHSS off.
+overlaps the DATA edge taper with fill and uses the full Scheduled
+receiver. It preserves Helper and the original FHSS envelope. Guarded
+scheduled-fill requires Helper and FHSS off.
 Continuous places successive DATA gates on adjacent samples
 and also requires both Symbol Burst waits off. Both peers select the same
 cadence.
@@ -309,16 +311,16 @@ without one, waveform material is publicly reproducible.
 Select one native symbol lane or interleaved added-symbol lanes. Peers must
 share the mode and factor. This does not qualify sensitivity or interference rejection.
 .TP
-.BI \-\-fhss " off|fake-fcc|fake-fcc-short|fake-eu|fake-list"
+.BI \-\-fhss " off|fake-fcc|fake-eu|fake-list"
 Select the canonical FHSS envelope and an illustrative Carrier/Shift schedule.
 It does not retune external radio hardware or enable simultaneous reception.
 Below 800 MHz the named illustrative profiles use spacing derived from the waveform;
 800 MHz is a product convention, not a regulatory boundary. Higher frequencies
 use band-specific profiles or report no applicable profile. The legacy
-fake-0.4s-200 identifier maps to fake-fcc. Fake-fcc-short uses the illustrative
-FCC policy and selects a 2 ms silence guard on each dwell edge with a 4 ms
-requested ramp. Both peers select the same FHSS envelope. The envelope affects transmitted audio
-while the audio IF and hardware tuning remain fixed. Profile details and unimplemented access assumptions
+fake-0.4s-200 identifier maps to fake-fcc. Both peers select the same FHSS
+envelope. Scheduled-bridge continues the same guards and ramps through the
+inter-DATA filler. The envelope affects transmitted audio while the audio IF
+and hardware tuning remain fixed. Profile details and unimplemented access assumptions
 appear under Model limits and references; the illustration is not certification.
 .TP
 .BI \-\-fhss-list " FREQUENCIES"

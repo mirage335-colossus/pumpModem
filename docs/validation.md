@@ -341,7 +341,7 @@ The later integer-local envelope expression is equivalent for its bounded
 physical sample coordinates. The final source was checked separately by
 the bit-difference and exact serial/staged parity tests.
 
-The existing simulated FHSS profile's 55 ms quiet on either side of each
+The original simulated FHSS profile's 55 ms quiet on either side of each
 400 ms dwell imposes about 110 ms of actual zero envelope at each boundary
 before either ramp. It is independent of the source's inter-DATA gap. A
 disposable Rate 360 Hz and Added 1 example at 18 kHz accepted 2 ms of quiet
@@ -350,10 +350,11 @@ and a 4 ms taper on each side. The native spectrum planner converged with
 including 4 ms exactly zero. The Added 10 example with its longer 20.44 ms
 taper also had 4 ms of silence and stayed below −10 dB for 20.28 ms. These
 profiles also change the public number of fine coefficients. This check
-covers waveform shaping only. The matched **Fake: FCC (short guard)** GUI
-simulation decoded `e` and scored both quiet slots using the production
-envelope. The native GUI leaves external synthesizer tuning fixed. The
-shaping, native stream and GUI regression checks also passed.
+covers waveform shaping only. The draft **Fake: FCC (short guard)** GUI
+simulation decoded `e` and scored both quiet slots with that experimental
+envelope. The draft option was retired to preserve the original FHSS
+behavior, including the original ramps. The native GUI leaves external
+synthesizer tuning fixed.
 [Short-transition contract](symbol-burst.md#short-audio-transitions)
 
 The small receipts in ignored `local-evidence/short-gap-*` and
@@ -361,6 +362,79 @@ The small receipts in ignored `local-evidence/short-gap-*` and
 receiver and FHSS cases. The disposable source and binaries are retired.
 Remove the receipts after the next implementation reproduces or supersedes
 these transition, detection and absence results.
+
+## Named short-transition default with Helper and FHSS — 22 November 2026
+
+The GUI selects **Scheduled + short transitions** at startup. The menu
+lists the actual cadences, and the previous `--data-cadence default` launch
+value resolves to `scheduled-bridge`. Toggling either feature preserves the
+chosen cadence. Live and simulated profiles match ordinary Scheduled's
+public slot geometry, Helper lead, FHSS hop plan, and 400 ms dwell with
+55 ms guards per side. The receiver probe and HF appraisal still pin their
+historical Scheduled measurement baselines explicitly.
+
+The four combinations of Helper and FHSS passed sample-exact serial and
+staged emission parity. At the same DATA and Helper calibration, the fill
+extended through the next Helper lead, followed the original FHSS gate and
+chip phase, and ended within the last DATA's leading taper. The original
+DATA core and terminal samples were identical to ordinary Scheduled.
+The compiled GUI simulation with both features decoded `e` and closed it
+after two physically scored quiet slots.
+
+Paired native CPU checks compared ordinary Scheduled and the bridge with a
+fixed seed of 74021, 6 kHz sampling, 1,775 Hz IF, Rate 120 and 10× Interleave.
+With both features at actual/target 32 dB-Hz, both decoded `e` as `001QQ`
+and withheld completion in the EOF control. Wanted DATA energy, Helper
+energy, all five operational log-e and bit-separation scores, and quiet
+energies were identical. Both explicitly used the original full-prior
+fallback for Helper pilot acquisition under FHSS. At 80 dB-Hz, without
+FHSS, 25% Helper power and the 1 MHz IC-7100 shift gave 14,071 arrivals and a
+±1 Hz frequency prior. Both arms narrowed the active slots to 5, 5 and 6
+frequencies using Helper and retained all 76 frequencies for the quiet
+slots. Both decoded `001QQ` with identical quiet statistics.
+
+With both features enabled, the matched **HF Worst + Each 65%** pair used
+actual/target 70 dB-Hz, 0.1 W Helper and 0.1 W DATA, a ±2.5 ms timing prior,
+9.2 s DATA bits and a 90 s recurrence. The channel used 7 ms delay spread,
+30 Hz Doppler spread and common wander, and 65% slow and fast selective AM.
+Both arms decoded `001QQ` and passed the EOF control. Both evaluated the
+same 1-by-7 coarse grid and short-block varying-channel search with 4,780
+blocks and three frequency states. The largest log-e change on an active
+slot was about 15 nats against active values of 48–85 million, and quiet
+statistics were identical. Each pair used at most five scored slots per
+message, 3.5 million samples, 3 GiB, and 50 s per arm. These fixed-seed
+software checks cover the native FHSS audio envelope and receiver path.
+They establish neither an over-the-air sensitivity floor nor external
+synthesizer timing, ADC behavior, or a throughput change.
+
+The first local ALC257 zLab cable attempt used a 6 kHz logical rate,
+Rate 120, 10× Interleave, 265 Hz minimum carrier spacing, 1,795 Hz IF,
+1 mW Helper and 4 mW DATA. Both cadence plans required a 2,735.54 Hz
+receive upper edge, above the converter's 2,520 Hz flat passband. Capture
+rejected that geometry before returning audio. A revised Rate 60, 125 Hz
+spacing and 1,590 Hz IF profile required 2,500.48 Hz with either cadence.
+It accepted real audio at 48 kHz hardware / 6 kHz logical and returned
+224,780 logical frames before the zLab clock-offset check stopped the
+attempt. Playback had yet to open. The finite zLab test also needs two
+pre-transmission quiet decisions and admission of the full terminal
+capture endpoint. The abbreviated cable bound did not cover those gates.
+
+A direct desktop full-duplex session used the same revised waveform and
+power at 5% playback, with the ordinary native audio path. ALSA playback
+and capture both ran at 48 kHz and the receiver committed the wanted first
+DATA 0 with the original gated-Helper fallback. In 6 kHz receive audio,
+mean power over 1,555–1,625 Hz in a five-second bridge interval was
+5.27 dB above the Helper lead and 2.64 dB above the first DATA interval.
+The 5.27 dB increase missed the predeclared 10 dB attribution margin.
+Capture peak was 0.3362. The trial stopped deliberately after 153 s.
+It checks live playback, capture, and the first DATA decision. Full live
+message completion and short-window hardware transition margins remain
+unmeasured in this combined profile.
+
+The native `triad` and `gui` groups passed all 55 and 36 tests respectively.
+The rebuilt local zLab worker passed its self-check, and the isolated zLab
+launcher group passed all 32 tests.
+[Operating contract](symbol-burst.md#short-audio-transitions)
 
 ## Continuous DATA in simulation and live audio — 22 November 2026
 

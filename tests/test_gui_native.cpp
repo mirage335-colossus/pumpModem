@@ -545,8 +545,27 @@ void finite_duplex_policy() {
 }
 void data_cadence_policy() {
     using F = gui::ui::Field;
+    using C = gui::ui::Command;
     gui::Controller controller({.simulation=true});
-    check(controller.settings().data_cadence == live::DataCadence::scheduled);
+    const auto& cadence=controller.field(F::data_cadence);
+    check(controller.settings().data_cadence == live::DataCadence::scheduled_bridge &&
+          cadence.selected == "scheduled-bridge" &&
+          std::none_of(cadence.options.begin(),cadence.options.end(),[](const auto& option){return option.id=="default";}) &&
+          std::any_of(cadence.options.begin(),cadence.options.end(),[](const auto& option){
+              return option.id=="scheduled-bridge"&&option.label=="Scheduled + short transitions";
+          }));
+    check(gui::launch_command::parse(controller.field(F::planner_command).text).data_cadence=="scheduled-bridge");
+    gui::Controller from_legacy({.simulation=true, .launch_settings=gui::launch_command::Patch{.data_cadence="default"}});
+    check(from_legacy.settings().data_cadence == live::DataCadence::scheduled_bridge &&
+          from_legacy.field(F::data_cadence).selected == "scheduled-bridge");
+    from_legacy.edit(F::planner_command, "--rate 360 --fhss fake-fcc");
+    from_legacy.activate(C::planner_load_command);
+    check(from_legacy.settings().fhss_profile == "fake-fcc" &&
+          from_legacy.field(F::data_cadence).selected == "scheduled-bridge" &&
+          from_legacy.settings().data_cadence == live::DataCadence::scheduled_bridge);
+    from_legacy.select(F::fhss, "off");
+    check(from_legacy.settings().fhss_profile == "off" &&
+          from_legacy.settings().data_cadence == live::DataCadence::scheduled_bridge);
     controller.select(F::data_cadence, "continuous");
     check(controller.settings().data_cadence == live::DataCadence::continuous);
     const auto saved = gui::launch_command::parse(controller.field(F::planner_command).text);
@@ -568,6 +587,14 @@ void data_cadence_policy() {
           bridged.field(F::data_cadence).selected == "scheduled-bridge");
     fresh.select(F::data_cadence, "scheduled");
     check(fresh.settings().data_cadence == live::DataCadence::scheduled);
+    fresh.edit(F::planner_command, "--target-snr 33");
+    fresh.activate(C::planner_load_command);
+    check(fresh.settings().target_cn0_db_hz == 33 &&
+          fresh.settings().data_cadence == live::DataCadence::scheduled);
+    fresh.edit(F::planner_command, "--data-cadence default");
+    fresh.activate(C::planner_load_command);
+    check(fresh.settings().data_cadence == live::DataCadence::scheduled_bridge &&
+          fresh.field(F::data_cadence).selected == "scheduled-bridge");
 }
 void simulation_launch_defaults() {
     using F=gui::ui::Field;
@@ -607,6 +634,8 @@ void simulation_launch_defaults() {
           simulation.field(F::status).text.find("6 kHz sampled band")!=std::string::npos);
     simulation.edit(F::helper_power,"1 W");
     check(simulation.settings().helper.power_w==1 &&
+          simulation.settings().data_cadence==live::DataCadence::scheduled_bridge &&
+          simulation.field(F::data_cadence).selected=="scheduled-bridge" &&
           std::any_of(simulation.field(F::carrier).options.begin(),simulation.field(F::carrier).options.end(),
                       [](const auto& option){return option.enabled;}));
 }

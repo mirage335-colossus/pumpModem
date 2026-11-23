@@ -223,6 +223,7 @@ live::Snapshot wait(live::Session& session, Predicate ready, const char* reason,
 
 live::Settings settings(bool simulation) {
     live::Settings s;
+    s.data_cadence = live::DataCadence::scheduled;
     s.simulation = simulation;
     s.device = "robust-fixture";
     s.transfer.fec = FecMode::off;
@@ -243,46 +244,6 @@ live::Settings settings(bool simulation) {
         std::chrono::system_clock::now().time_since_epoch()).count();
     s.calendar = live::Calendar{static_cast<std::uint64_t>(now), 7000037};
     return s;
-}
-
-void short_fhss_profile() {
-    auto s = settings(true);
-    s.transfer.modem.bandwidth_hz = 360;
-    s.minimum_carrier_spacing_hz = 265;
-    s.receiver_memory_limit = 2U * 1024 * 1024 * 1024;
-    s.fhss_profile = "fake-fcc";
-    const auto ordinary = live::detail::prepare_profile(s, *s.calendar, {});
-    s.fhss_profile = "fake-fcc-short";
-    const auto shortened = live::detail::prepare_profile(s, *s.calendar, {});
-    const auto& old_format = ordinary.waveform.config().format;
-    const auto& new_format = shortened.waveform.config().format;
-    const auto& shape = shortened.waveform.geometry();
-    check(old_format.quiet_seconds == .055 && new_format.quiet_seconds == .002 &&
-          old_format.dwell_seconds == new_format.dwell_seconds &&
-          !shortened.hop_shifts_hz.empty(), "Short FHSS profile lost its independent gate or hop schedule");
-    check(shape.bit_seconds < 60 && shaping_envelope(new_format, shape, .4028L) > 0 &&
-          shaping_envelope(new_format, shape, .399L) == 0,
-          "Short FHSS did not open its native envelope at the modeled boundary");
-
-    live::Session session;
-    session.start(s);
-    const auto ready_to_send = wait(session, [](const auto& out) { return out.running && !out.transmit_unavailable; },
-        "Short FHSS simulation did not prepare");
-    check(ready_to_send.slot_stride_seconds && *ready_to_send.slot_stride_seconds * 6 * 6000 < 2'400'000,
-          "Short FHSS exceeds the finite sample budget");
-    session.transmit(Message{.data = {'e'}});
-    std::vector<transfer::Received> received;
-    const auto terminal = wait(session, [&](auto& out) {
-        for (auto& record : out.received) received.push_back(std::move(record));
-        check(out.error.empty() && out.receiver_error.empty(), "Short FHSS native simulation failed");
-        return !out.transmitting && out.simulation_replay_available;
-    }, "Short FHSS simulation did not finish", 60s);
-    check(received.size() == 1 && received.front().stream_complete &&
-          received.front().content.message.data == Bytes{'e'} &&
-          terminal.pattern_steps.size() == 5 &&
-          terminal.pattern_steps[3].decision == live::PatternDecision::quiet &&
-          terminal.pattern_steps[4].decision == live::PatternDecision::quiet,
-          "Short FHSS lost the message or physical quiet completion");
 }
 
 void data_cadence_profiles() {
@@ -389,7 +350,9 @@ void scheduled_bridge_profiles() {
     s.symbol_burst_random = 2;
     const auto calendar = *s.calendar;
     const auto scheduled = live::detail::prepare_profile(s, calendar, {});
-    s.data_cadence = live::DataCadence::scheduled_bridge;
+    s.data_cadence = live::Settings{}.data_cadence;
+    check(s.data_cadence == live::DataCadence::scheduled_bridge,
+          "New native Robust settings did not select short transitions");
     live::validate_settings(s);
     const auto bridged = live::detail::prepare_profile(s, calendar, {});
     const auto reference = live::detail::with_capture_uncertainty(scheduled, .2, .1, 100);
@@ -404,19 +367,29 @@ void scheduled_bridge_profiles() {
           actual.observation.first == expected.observation.first && actual.observation.stop == expected.observation.stop &&
           actual.quiet_aperture.first == expected.quiet_aperture.first && actual.quiet_aperture.stop == expected.quiet_aperture.stop,
           "Scheduled short transitions changed the calendar or ordinary receive geometry");
-    const auto rejects = [](const auto& operation) {
-        try { operation(); } catch (const Error& error) {
-            return std::string_view(error.what()).starts_with("Scheduled Robust short transitions require");
-        }
-        return false;
-    };
-    auto with_helper = s, with_hops = s;
-    with_helper.helper.power_w = 1;
-    with_hops.fhss_profile = "fake-fcc";
-    for (const auto* incompatible : {&with_helper, &with_hops})
-        check(rejects([&] { live::validate_settings(*incompatible); }) &&
-              rejects([&] { live::detail::prepare_profile(*incompatible, calendar, {}); }),
-              "Scheduled short transitions accepted active Helper or FHSS");
+    for (const auto helper_on : {false, true}) for (const auto fhss_on : {false, true}) {
+        auto configuration = s;
+        configuration.added_symbols = 10;
+        configuration.transfer.modem.carrier_hz = 1775;
+        configuration.helper.power_w = helper_on ? .1 : 0;
+        configuration.fhss_profile = fhss_on ? "fake-fcc" : "off";
+        configuration.simulation = helper_on == fhss_on;
+        live::validate_settings(configuration);
+        const auto selected = live::detail::prepare_profile(configuration, calendar, {}, {.simulation_seed = 1});
+        configuration.data_cadence = live::DataCadence::scheduled;
+        const auto ordinary = live::detail::prepare_profile(configuration, calendar, {}, {.simulation_seed = 1});
+        const auto& config = selected.waveform.config();
+        const auto& reference = ordinary.waveform.config();
+        check(config.scheduled_gap_bridge && !config.scheduled_gap_fill && !config.continuous_data &&
+              config.helper_enabled == helper_on && config.helper_enabled == reference.helper_enabled &&
+              config.format.fhss == fhss_on && config.format.fhss == reference.format.fhss &&
+              config.format.quiet_seconds == reference.format.quiet_seconds &&
+              config.format.ramp_seconds == reference.format.ramp_seconds &&
+              config.format.dwell_seconds == reference.format.dwell_seconds &&
+              selected.hop_shifts_hz == ordinary.hop_shifts_hz &&
+              selected.waveform.transmit_slot(1) == ordinary.waveform.transmit_slot(1),
+              "Short transitions changed the selected Scheduled Helper or FHSS profile");
+    }
     auto bounded = s;
     bounded.receiver_memory_limit = waveform.emission_source_workspace_bytes();
     bool source_rejected = false;
@@ -489,6 +462,15 @@ void carrier_band_matches_profile() {
           "Enabled Helper preview did not enforce its fixed low-tone separation");
     const auto edge = band.data_passband(modem.carrier_hz);
     const auto native = live::detail::prepare_profile(s, *s.calendar, {});
+    const auto& hop_format = native.waveform.config().format;
+    const auto hop_envelope = [&](long double seconds) {
+        return shaping_envelope(hop_format, native.waveform.geometry(), seconds);
+    };
+    check(hop_format.dwell_seconds == .4 && hop_format.quiet_seconds == .055 &&
+          hop_envelope(.346L) == 0 && hop_envelope(.454L) == 0 &&
+          hop_envelope(.344L) > 0 && hop_envelope(.456L) > 0 &&
+          !native.waveform.config().scheduled_gap_bridge,
+          "The default DATA cadence changed the original FHSS dwell guard or added a bridge");
     const auto& placement = native.waveform.placement();
     check(near(edge.lower_hz, native.minimum_data_hz) && near(edge.upper_hz, native.maximum_data_hz) &&
           near(band.waveform_bandwidth_hz, placement.waveform_bandwidth_hz + placement.gate_bandwidth_hz),
@@ -2033,6 +2015,37 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
     check(session.snapshot().received.empty(), "Stopped simulation emitted a late duplicate message");
 }
 
+void bridge_helper_fhss_simulation() {
+    auto s = settings(true);
+    s.data_cadence = live::Settings{}.data_cadence;
+    s.transfer.modem.carrier_hz = 1775;
+    s.added_symbols = 10;
+    s.added_interleave = true;
+    s.helper.power_w = .1;
+    s.fhss_profile = "fake-fcc";
+    s.receiver_memory_limit = 3ULL * 1024 * 1024 * 1024;
+    live::Session session;
+    session.start(s);
+    const auto prepared = ready(session);
+    check(prepared.slot_stride_seconds && *prepared.slot_stride_seconds * 6 * 6000 < 3'500'000,
+          "Helper and FHSS bridge fixture exceeds its finite sample budget");
+    session.transmit(Message{.data = {'e'}});
+    std::vector<transfer::Received> received;
+    const auto finished = wait(session, [&](auto& out) {
+        for (auto& record : out.received) received.push_back(std::move(record));
+        check(out.error.empty() && out.receiver_error.empty(),
+              "Helper and FHSS bridge simulation failed: " + out.error + out.receiver_error);
+        return !out.transmitting && out.simulation_replay_available;
+    }, "Helper and FHSS bridge simulation timed out", 75s);
+    check(received.size() == 1 && received.front().stream_complete &&
+          received.front().content.message.data == Bytes{'e'} &&
+          finished.pattern_steps.size() == 5 &&
+          finished.pattern_steps[3].decision == live::PatternDecision::quiet &&
+          finished.pattern_steps[4].decision == live::PatternDecision::quiet,
+          "Helper and FHSS bridge lost its message or physical quiet completion");
+    close(session);
+}
+
 bool native_lag_simulation() {
     // One bounded actual Session fixture for the exact public one-arrival,
     // wide-frequency route. The selection counter is not completion evidence;
@@ -2160,11 +2173,11 @@ int main(int argc, char** argv) {
         }
         if (argc == 2 && std::string_view(argv[1]) == "--scheduled-bridge") {
             scheduled_bridge_profiles();
-            complete_native_simulation(false, false, false, live::DataCadence::scheduled_bridge);
+            complete_native_simulation(false, false, false, live::Settings{}.data_cadence);
             return 0;
         }
-        if (argc == 2 && std::string_view(argv[1]) == "--short-fhss") {
-            short_fhss_profile();
+        if (argc == 2 && std::string_view(argv[1]) == "--bridge-helper-fhss") {
+            bridge_helper_fhss_simulation();
             return 0;
         }
         if (argc == 3 && std::string_view(argv[1]) == "--fixed-receiver-link") {

@@ -2,6 +2,7 @@
 #include "triad_stream_resources.hpp"
 #include "triad_receiver_bulk.hpp"
 #include "triad_receiver_executor.hpp"
+#include "datapump/triad_shaping.hpp"
 
 #include <algorithm>
 #include <array>
@@ -293,6 +294,126 @@ void scheduled_gap_fill_emission() {
     check(overlaps_wanted && different_bridge && reaches_gap_core && flips_wanted_core &&
           std::abs(accounted - bridge_energy) < 1e-10L * bridge_energy,
           "scheduled bridge lost its crossfade, temporary key, or component energy accounting");
+}
+
+void scheduled_bridge_preserves_helper_and_fhss() {
+    const auto key = Crypto::amateur();
+    std::array<std::uint8_t, 64> serpent{}, aes{};
+    serpent.fill(0x87);
+    aes.fill(0x62);
+    const auto fill_key = Crypto::from_independent_roots(serpent, aes);
+    constexpr std::array<std::uint8_t, 2> bits{0, 1};
+    constexpr unsigned rate = 6000, dwell_rows = 2400;
+    for (bool fhss : {false, true}) for (bool helper_enabled : {false, true}) {
+        PublicProfileConfig config;
+        config.format.sample_rate = rate;
+        config.format.inner_rate_hz = 120;
+        config.format.added_symbols = 10;
+        config.format.bit_seconds = 9.2;
+        config.format.fhss = fhss;
+        config.format.quiet_seconds = fhss ? .055 : 0;
+        config.helper_enabled = helper_enabled;
+        config.helper.power_w = helper_enabled ? .2 : 0;
+        config.helper.data_power_w = .1;
+        config.helper.callsign = "BRIDGE";
+        config.data_if_hz = 1775;
+        const PublicProfile ordinary(config);
+        config.scheduled_gap_bridge = true;
+        const PublicProfile bridged(config);
+        const auto& calendar = ordinary.calendar();
+        const auto origin = ordinary.origin();
+        const auto first_slot = ordinary.transmit_slot(0), next_slot = ordinary.transmit_slot(1);
+        const auto source_first = calendar.distance(origin, first_slot.helper_begin);
+        const auto local = [&](HelperBurstCoordinate coordinate) { return calendar.distance(origin, coordinate) - source_first; };
+        const auto first = local(first_slot.pattern_begin), next = local(next_slot.pattern_begin);
+        const auto& shape = ordinary.geometry();
+        const auto extent = static_cast<std::uint64_t>(std::ceil(static_cast<long double>(shape.bit_seconds) * rate));
+        const auto ramp = static_cast<std::uint64_t>(std::ceil(static_cast<long double>(rate) *
+            std::max(config.format.ramp_seconds, 8 / shape.fine_chip_rate_hz)));
+        const auto start = first + extent - ramp, stop = next + ramp;
+        Emission baseline(ordinary, key, {.bits = bits, .source_first_sample = source_first});
+        Emission serial(bridged, key, {.bits = bits, .source_first_sample = source_first,
+            .qualification_gap_fill_key = fill_key});
+        Emission staged(bridged, key, {.bits = bits, .source_first_sample = source_first,
+            .qualification_gap_fill_key = fill_key});
+        constexpr std::size_t chunk = 4093;
+        auto emitted = staged.source();
+        const auto count = emitted.geometry.source_samples;
+        check(count == baseline.source().geometry.source_samples && count < 850'000 &&
+              bridged.transmit_slot(0) == first_slot && bridged.transmit_slot(1) == next_slot &&
+              bridged.slot(2).quiet_aperture.first == ordinary.slot(2).quiet_aperture.first &&
+              bridged.slot(2).quiet_aperture.stop == ordinary.slot(2).quiet_aperture.stop,
+              "combined bridge changed the public schedule or terminal quiet support");
+        emitted.readers->open(2, chunk);
+        auto reference_format = ordinary.basis_format(ordinary.slot(0));
+        auto filler_offset = 2 * ramp;
+        if (fhss) {
+            while (filler_offset % dwell_rows != (start - first) % dwell_rows) ++filler_offset;
+        }
+        reference_format.bit_seconds = std::max({config.format.bit_seconds, 100.,
+            static_cast<double>((stop - start + filler_offset + 3.L * ramp) / rate)});
+        PatternSource raw_filler(reference_format, fill_key, 0);
+        std::array<Complex, chunk> base_block, new_block;
+        long double fill_energy = 0;
+        std::size_t active_samples = 0, helper_lead_samples = 0, guarded_samples = 0, ramp_samples = 0;
+        for (std::uint64_t offset = 0; offset < count;) {
+            const auto rows = std::min<std::uint64_t>(chunk, count - offset);
+            check(baseline.read(std::span(base_block).first(rows)) == rows &&
+                  serial.read(std::span(new_block).first(rows)) == rows,
+                  "combined bridge did not emit the complete scheduled range");
+            emitted.readers->plan(offset, rows);
+            for (std::size_t row = 0; row < rows; ++row) {
+                const auto sample = offset + row;
+                check(emitted.readers->evaluate(row % 2, sample) == new_block[row],
+                      "combined bridge changed across staged reader boundaries");
+                if (sample < start || sample >= stop) {
+                    check(base_block[row] == new_block[row], "combined bridge changed a DATA core or terminal sample");
+                    continue;
+                }
+                const auto filler = new_block[row] - base_block[row];
+                fill_energy += std::norm(filler);
+                const auto phase = (sample - first) % dwell_rows;
+                const bool whole_gap = first + extent <= sample && sample < next;
+                // Interior guard rows stay completely unchanged, even when
+                // Helper is active there. Avoid ambiguous floating endpoints.
+                if (fhss && (phase < 329 || phase > 2071)) {
+                    check(filler == Complex{}, "combined bridge emitted into an FHSS mute");
+                    ++guarded_samples;
+                }
+                if (whole_gap && phase == 600 && filler != Complex{}) {
+                    ++active_samples;
+                    if (helper_enabled && sample > local(next_slot.helper_begin) && base_block[row] != Complex{})
+                        ++helper_lead_samples;
+                }
+                if (whole_gap && (phase == 390 || phase == 600 || phase == 2010)) {
+                    const auto gate = fhss ? shaping_fhss_envelope(config.format,
+                        static_cast<long double>(phase) / rate) : 1.;
+                    const auto expected = raw_filler.sample_at_without_fhss_gate(
+                        static_cast<long double>(sample - start) + filler_offset + raw_filler.geometry().calendar_origin_sample) *
+                        (baseline.report().data_gain * gate);
+                    check(std::abs(filler - expected) <= 8 * std::numeric_limits<double>::epsilon() *
+                          std::max({1., std::abs(expected), std::abs(base_block[row])}),
+                          "combined bridge changed the periodic FHSS ramp or the existing Helper component");
+                    if (fhss && gate > 0 && gate < 1) ++ramp_samples;
+                }
+            }
+            std::exception_ptr error;
+            check(emitted.readers->accept(rows, false, error) == rows && !error,
+                  "combined bridge did not account for its staged samples");
+            offset += rows;
+        }
+        const auto& stream = serial.report();
+        const auto& reference = baseline.report();
+        const auto& parallel = staged.report();
+        check(active_samples > 0 && (!helper_enabled || (helper_lead_samples > 0 && reference.helper_energy > 0)) &&
+              (!fhss || (guarded_samples > 0 && ramp_samples > 0)) && stream.gap_fill_samples == stop - start &&
+              stream.data_energy == reference.data_energy && stream.helper_energy == reference.helper_energy &&
+              stream.gap_fill_samples == parallel.gap_fill_samples &&
+              stream.gap_fill_energy == parallel.gap_fill_energy && stream.helper_energy == parallel.helper_energy &&
+              stream.gap_bridge_cross_energy == parallel.gap_bridge_cross_energy &&
+              std::abs(stream.gap_fill_energy - fill_energy) < 1e-10L * fill_energy,
+              "combined bridge lost its Helper, FHSS, or staged power contract");
+    }
 }
 
 StreamReceiverOptions options() {
@@ -1279,6 +1400,7 @@ int main() {
         packed_data_aperture();
         packed_data_aperture_retains_delayed_energy();
         scheduled_gap_fill_emission();
+        scheduled_bridge_preserves_helper_and_fhss();
         order_and_backpressure();
         overlap_lease_uses_only_spare_memory();
         closed_executor_adds_no_worker();

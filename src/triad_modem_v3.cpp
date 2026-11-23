@@ -363,10 +363,14 @@ std::array<Complex,3> PatternSource::pattern_coefficient_at(std::uint64_t fine){
     return impl_->chip(fine);
 }
 std::array<Complex,3> PatternSource::carrier_samples_at(long double sample){
+    return carrier_samples_at_impl(sample,true);
+}
+std::array<Complex,3> PatternSource::carrier_samples_at_impl(long double sample,bool apply_fhss_gate){
     Chip output{};const auto& g=impl_->geom;
     if(!std::isfinite(sample)||sample<0||sample>=g.source_samples)return output;
     const long double t=(sample-impl_->halo)/impl_->sample_rate;
-    const auto envelope=impl_->envelope(t);if(envelope==0)return output;
+    const auto envelope=apply_fhss_gate ? impl_->envelope(t) : shaping_data_envelope(impl_->format,g,t);
+    if(envelope==0)return output;
     const auto offset=impl_->center_offset();
     const auto cell=t*g.fine_chip_rate_hz;
     const auto first_real=std::max(0.L,detail::ceil_coordinate(cell-(8+offset)));
@@ -378,8 +382,14 @@ std::array<Complex,3> PatternSource::carrier_samples_at(long double sample){
     return output;
 }
 Complex PatternSource::sample_at(long double sample){
+    return sample_at_impl(sample,true);
+}
+Complex PatternSource::sample_at_without_fhss_gate(long double sample){
+    return sample_at_impl(sample,false);
+}
+Complex PatternSource::sample_at_impl(long double sample,bool apply_fhss_gate){
     if(!std::isfinite(sample)||sample<0||sample>=impl_->geom.source_samples)return {};
-    const auto carriers=carrier_samples_at(sample);const auto t=(sample-impl_->halo)/impl_->sample_rate;
+    const auto carriers=carrier_samples_at_impl(sample,apply_fhss_gate);const auto t=(sample-impl_->halo)/impl_->sample_rate;
     Complex result{};for(unsigned c=0;c<3;++c){const auto cycles=(static_cast<int>(c)-1)*impl_->geom.carrier_spacing_hz*t;
         result+=carriers[c]*std::polar(1.,static_cast<double>(tau*std::remainder(cycles,1.L)));}return result;
 }

@@ -67,6 +67,11 @@ void parsing_and_formatting() {
         check(patch.data_cadence == cadence && launch_command::parse(launch_command::format(patch)) == patch,
               "DATA cadence must survive launch round trips");
     }
+    const auto legacy_cadence=launch_command::parse("--data-cadence default");
+    check(legacy_cadence.data_cadence=="scheduled-bridge" &&
+          launch_command::format({.data_cadence="default"}).find("--data-cadence scheduled-bridge")!=std::string::npos &&
+          launch_command::parse(launch_command::format(legacy_cadence))==legacy_cadence,
+          "Legacy DATA cadence did not normalize to the named startup choice");
     rejects([] { launch_command::parse("--data-cadence auto"); }, "Invalid DATA cadence accepted");
     for(const auto* bad:{"--calendar-epoch 5","--calendar-epoch 4294967290","--calendar-epoch -1",
         "--calendar-epoch 1.5","--calendar-ordinal -1","--calendar-ordinal 18446744073709551616",
@@ -174,11 +179,13 @@ void parsing_and_formatting() {
     const auto clock=launch_command::parse("--clock-sync GPS_0.1ms-400ms_region-2564ms_offset --audio-error 30ms --dsss-factor 1000 --fhss fake-0.4s-200 --live-duplex yes");
     check(clock.fhss=="fake-fcc"&&launch_command::format(clock).find("--fhss fake-fcc")!=std::string::npos,
         "legacy Fake FHSS must migrate to the persistent FCC preference");
-    for(const auto* choice:{"off","fake-fcc","fake-fcc-short","fake-eu","fake-list"}) {
+    for(const auto* choice:{"off","fake-fcc","fake-eu","fake-list"}) {
         const auto patch=launch_command::parse(std::string("--fhss ")+choice);
         check(patch.fhss==choice&&launch_command::parse(launch_command::format(patch))==patch,
             "FHSS preference did not survive CLI/parameter-list round trip");
     }
+    rejects([]{launch_command::parse("--fhss fake-fcc-short");},
+        "The retired draft FHSS profile silently changed a saved waveform");
     const auto custom=launch_command::parse("--fhss fake-list --fhss-list '30.0015MHz,30.0075MHz,30.0215MHz'");
     check(custom.fhss_list=="30001500,30007500,30021500"&&launch_command::parse(launch_command::format(custom))==custom,"Inline FHSS list round trip failed");
     const auto file=launch_command::parse("--fhss fake-list --fhss-list-file '/no/such file;$(echo test)'");

@@ -412,8 +412,7 @@ struct Controller::Impl {
         f(UiField::receiver_cpu_budget).text="0.6";
         for(const auto* value:{"0.25","0.4","0.6","0.8","1","2"})
             f(UiField::receiver_cpu_budget).options.push_back({value,std::string(value)+" s / 1 s"});
-        f(UiField::fhss).options={{"off","Off"},{"fake-fcc","Fake: FCC"},
-            {"fake-fcc-short","Fake: FCC (short guard)"},{"fake-eu","Fake: EU"}};
+        f(UiField::fhss).options={{"off","Off"},{"fake-fcc","Fake: FCC"},{"fake-eu","Fake: EU"}};
         f(UiField::fhss).selected="off";
         f(UiField::symbol_burst).options={{"off","Off"},{"1","1 symbol"},{"2","2 symbols"},
             {"3","3 symbols"},{"5","5 symbols"},{"10","10 symbols"}};
@@ -423,7 +422,7 @@ struct Controller::Impl {
         f(UiField::data_cadence).options={{"scheduled","Scheduled"},{"scheduled-fill","Scheduled + gap fill"},
             {"scheduled-bridge","Scheduled + short transitions"},
             {"continuous","Continuous DATA"}};
-        f(UiField::data_cadence).selected="scheduled";
+        f(UiField::data_cadence).selected="scheduled-bridge";
         f(UiField::rf_oscillator).options.push_back({"baseband-clock","Baseband clock"});
         for(const auto& preset:tuning::oscillator_presets()) {
             if(preset.baseband_supported)f(UiField::simulation_oscillator).options.push_back({std::string(preset.id),std::string(preset.name)});
@@ -674,7 +673,8 @@ struct Controller::Impl {
             }
             if(load->symbol_burst)f(UiField::symbol_burst).selected=*load->symbol_burst?std::to_string(*load->symbol_burst):"off";
             if(load->symbol_burst_random)f(UiField::symbol_burst_random).selected=std::to_string(*load->symbol_burst_random);
-            choice(UiField::data_cadence,load->data_cadence);
+            if(load->data_cadence)
+                f(UiField::data_cadence).selected=*load->data_cadence=="default"?"scheduled-bridge":*load->data_cadence;
             if(load->helper_power_w)f(UiField::helper_power).selected=f(UiField::helper_power).text=planner_number(*load->helper_power_w);
             if(load->helper_ratio_limit_db)f(UiField::helper_ratio_limit).selected=planner_number(*load->helper_ratio_limit_db);
             if(load->helper_callsign)f(UiField::helper_callsign).text=*load->helper_callsign;
@@ -1763,8 +1763,7 @@ Controller::Controller(Options options):impl_(std::make_unique<Impl>(options)) {
 Controller::~Controller()=default;
 void Controller::set_developer_mode(bool value) {
     auto& p=*impl_;p.developer_mode=value;
-    p.f(UiField::fhss).options={{"off","Off"},{"fake-fcc","Fake: FCC"},
-        {"fake-fcc-short","Fake: FCC (short guard)"},{"fake-eu","Fake: EU"}};
+    p.f(UiField::fhss).options={{"off","Off"},{"fake-fcc","Fake: FCC"},{"fake-eu","Fake: EU"}};
     if(value)p.f(UiField::fhss).options.push_back({"fake-list","Fake: List"});
     p.controls();
 }

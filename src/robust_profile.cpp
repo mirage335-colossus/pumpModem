@@ -23,19 +23,17 @@ void check(bool condition, const char* message) {
 }
 
 void validate_data_cadence(const Settings& settings, bool helper_enabled) {
-    check(settings.data_cadence == DataCadence::scheduled || settings.data_cadence == DataCadence::continuous ||
-          settings.data_cadence == DataCadence::scheduled_fill || settings.data_cadence == DataCadence::scheduled_bridge,
+    const auto cadence = settings.data_cadence;
+    const auto without_helper_or_hops = !helper_enabled && settings.fhss_profile == "off";
+    check(cadence == DataCadence::scheduled || cadence == DataCadence::continuous ||
+          cadence == DataCadence::scheduled_fill || cadence == DataCadence::scheduled_bridge,
           "Invalid Robust DATA cadence");
-    if (settings.data_cadence == DataCadence::continuous)
-        check(!helper_enabled && !settings.symbol_burst_wait && !settings.symbol_burst_random &&
-              settings.fhss_profile == "off",
+    if (cadence == DataCadence::continuous)
+        check(without_helper_or_hops && !settings.symbol_burst_wait && !settings.symbol_burst_random,
               "Continuous Robust DATA requires Helper, both Symbol Burst waits, and FHSS off");
-    if (settings.data_cadence == DataCadence::scheduled_fill)
-        check(!helper_enabled && settings.fhss_profile == "off",
+    if (cadence == DataCadence::scheduled_fill)
+        check(without_helper_or_hops,
               "Scheduled Robust gap fill requires Helper and FHSS off");
-    if (settings.data_cadence == DataCadence::scheduled_bridge)
-        check(!helper_enabled && settings.fhss_profile == "off",
-              "Scheduled Robust short transitions require Helper and FHSS off");
 }
 
 bool in_range(double value, double low, double high) {
@@ -92,15 +90,13 @@ ShapingPlan minimum_shaping(const Settings& settings) {
         double minimum_carrier_spacing_hz;
         std::uint32_t sample_rate;
         bool fhss;
-        bool short_dwell_guard;
         bool operator==(const Shape&) const = default;
     };
     using Entry = std::pair<Shape, ShapingPlan>;
     thread_local std::optional<Entry> last;
     const auto& modem = settings.transfer.modem;
     const Shape shape{modem.bandwidth_hz, settings.added_symbols, settings.minimum_carrier_spacing_hz,
-                      modem.sample_rate, settings.fhss_profile != "off",
-                      settings.fhss_profile == "fake-fcc-short"};
+                      modem.sample_rate, settings.fhss_profile != "off"};
     validate_minimum_spacing(shape.minimum_carrier_spacing_hz);
     if (!last || last->first != shape) {
         Format format;
@@ -111,10 +107,6 @@ ShapingPlan minimum_shaping(const Settings& settings) {
         format.bit_seconds = .001;
         format.fhss = shape.fhss;
         format.quiet_seconds = shape.fhss ? .055 : 0;
-        if (shape.short_dwell_guard) {
-            format.quiet_seconds = .002;
-            format.ramp_seconds = .004;
-        }
         last = Entry{shape, plan_shaping(format)};
     }
     auto result = last->second;
@@ -185,7 +177,7 @@ std::vector<double> illustrated_hops(const Settings& settings, double bandwidth)
     if (rf < 800e6) {
         upper = 800e6;
         channels = 200;
-    } else if (settings.fhss_profile == "fake-fcc" || settings.fhss_profile == "fake-fcc-short") {
+    } else if (settings.fhss_profile == "fake-fcc") {
         spacing = std::max(25000., guarded);
         if (rf >= 902e6 && rf <= 928e6) {
             lower = 902e6; upper = 928e6; channels = guarded < 250000 ? 50 : 25;
@@ -259,7 +251,7 @@ void validate_settings(const Settings& s) {
           s.symbol_burst_wait == 3 || s.symbol_burst_wait == 5 || s.symbol_burst_wait == 10,
           "Invalid Robust Symbol_Burst minimum wait");
     check(s.symbol_burst_random <= 3, "Robust Symbol_Burst random extra must be 0 to 3");
-    check(s.fhss_profile == "off" || s.fhss_profile == "fake-fcc" || s.fhss_profile == "fake-fcc-short" ||
+    check(s.fhss_profile == "off" || s.fhss_profile == "fake-fcc" ||
           s.fhss_profile == "fake-eu" || s.fhss_profile == "fake-list", "Invalid Robust FHSS profile");
     check(s.fhss_frequencies_hz.size() <= 200 &&
           (s.fhss_profile != "fake-list" || s.fhss_frequencies_hz.size() >= 2),

@@ -73,7 +73,7 @@ at the experimental cadences remain unqualified.
 calendar for simulation and live audio. Both peers select the same cadence.
 Continuous DATA uses consecutive DATA gates with the original waveform
 tapers, padded reference supports and final source tail. It requires Helper,
-both wait controls and FHSS Off. Scheduled remains the default.
+both wait controls and FHSS Off.
 Helper has its own protected acquisition lead, which needs a separate design
 and qualification to support continuous DATA.
 
@@ -506,16 +506,31 @@ separate qualification. [Native paired results](validation.md#native-guarded-sch
 
 ### Short audio transitions
 
-**Robust Setup → DATA cadence → Scheduled + short transitions** uses
-the same Scheduled addresses and optional waits. It overlaps
+**Robust Setup → DATA cadence → Scheduled + short transitions** is the
+visible startup selection. It continues to operate with Helper and FHSS
+while preserving the Scheduled addresses and optional waits. It overlaps
 independently keyed, same-band filler with the bit-independent DATA taper,
-then runs the native filler untapered through the nominal gap. Both peers
-select this cadence with Helper and FHSS Off. The last DATA gate ends
+then runs the native filler through the nominal gap. Both peers select the
+same cadence. The last DATA gate ends
 normally and the receiver still requires two physically scored quiet slots.
 The receiver uses the full ordinary Scheduled window in this cadence. In
 broad timing conditions the filler can produce additional Current decisions.
 The GUI admission filters can help interpret the retained evidence. The
 guarded **Scheduled + gap fill** cadence remains available for isolation.
+
+Helper retains its original acquisition lead, timing, pilot and metadata
+envelopes, gain and endpoint. The filler is added to the DATA leg at its
+calibrated gain. There is no new composite normalization. An active Helper
+component is unchanged when the DATA filler crosses the boundary into the
+next scheduled lead. Reception still uses the existing Helper acquisition
+and ordinary full DATA search and scores two physical quiet slots at the end.
+Pilot acquisition depends on the DATA isolation achieved by the receiver and
+channel together. The matched checks cover an isolated pilot pass and the
+original fallback for gated pilots. A separate HF pilot study also finds
+that errors in locating pilots can limit reception even where the payload is
+strong, in a different waveform with information-bearing pilot locations.
+[Native paired checks](validation.md#named-short-transition-default-with-helper-and-fhss--22-november-2026)
+· [HF pilot study](https://arxiv.org/abs/2402.16618)
 
 Measure the longest interval of low **in-band power** through a DATA-to-fill
 or fill-to-DATA transition. The working target is below 100 ms, preferably
@@ -547,15 +562,13 @@ clock and channel hypotheses. A matched test needs those alternatives and
 interior absence controls in addition to wanted reception. The two physical
 quiet slots after the message use their own absence test.
 
-The original simulated FHSS profiles use 55 ms of silence on each edge of a
+The simulated FHSS profiles use 55 ms of silence on each edge of a
 400 ms dwell. Successive dwells therefore have approximately 110 ms with
-zero envelope, before accounting for either ramp. Shortening inter-DATA
-gaps leaves that separate interval in place. The illustrative **Fake: FCC
-(short guard)** option, `--fhss fake-fcc-short`, reduces this programmed gate
-to 2 ms on each edge and requests a 4 ms ramp with the native shaping planner.
-Both peers select that profile. The GUI waveform leaves external radio
-tuning fixed. Radio retune and mute behavior require timing measurements on
-the radio itself.
+zero DATA envelope before either ramp. Short transitions shapes the DATA
+crossfade first, then applies the original dwell gate to the added filler at
+the Scheduled DATA phase. The filled and ordinary profiles use the same 400
+ms dwell, ramps, mute intervals, and hop selection. The illustration leaves
+external radio tuning fixed.
 
 ## Retained scheduling lessons
 
