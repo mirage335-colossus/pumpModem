@@ -13,6 +13,17 @@ geometry owns exact tile, sample, pulse, clock-address and burst calendars.
 [Current integration checks](validation.md#native-codec-and-measurement-migration) are separate
 from the dated research below.
 
+Rate is the inner pattern rate. The native source produces inner coefficients
+at Rate/6 and requires at least 64 protected coefficients per tile, plus the
+shaped waveform edges. With Spreading and FHSS Off, the one-tile minimum at
+0.1 Hz is 5,760.4 seconds per DATA bit.
+Interleave spreading raises the fine coefficient rate and can reduce the edge
+time at a fixed Rate, while the 64-coefficient inner floor remains. Lower
+Target C/N0 can add more whole tiles when the duration model needs them, so
+changing Target may leave the selected duration unchanged until another tile
+is required. The Console time estimate includes two scored quiet slots to
+confirm message completion.
+
 The [duration-planner evidence](validation-data/triad-v3/2026-11-06-duration-planner/README.md)
 and [long-coordinate forecast checks](validation-data/triad-v3/2026-11-06-long-forecast/README.md)
 record the assumptions and limits. The latter checked integer geometry without

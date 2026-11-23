@@ -66,8 +66,6 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Total loss between transmitter and receiver, in dB, including antenna gains and feed-line losses. Choose a preset or enter a nonnegative value. Received power equals transmit power minus this loss.";
     if(slot==Slot::link_noise)
         control.help="Simulated receiver noise power in one hertz, in dBm/Hz. Received power minus this density gives simulated C/N0. Live input uses the separate declared audio noise density in Robust setup.";
-    if(slot==Slot::snr||control.field==Field::planner_target)
-        control.help="Target sets the planned DATA duration. Budget target rounds the nominal DATA C/N0 down to a whole dB-Hz within the supported range. It is a starting point from the link budget before propagation effects. Helper power is separate from DATA power.";
     if(slot==Slot::simulation_oscillator)
         control.help="Illustrative ADC/DAC oscillator model for sampled channel effects and public receiver bounds. It does not discipline or control physical hardware.";
     if(control.field==Field::rf_oscillator)control.help="Oscillator model for the radio shift and its public receiver bounds. Baseband clock uses a shared reference; selecting it does not control hardware.";
@@ -80,7 +78,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::clock_region)control.help="Total remaining propagation-delay search width centered on Offset. For example 400 ms means +/-200 ms. Both GPS error bounds are added outside this region. Editable ns/us/ms/s; Default resets all four timing controls.";
     if(slot==Slot::clock_offset)control.help="Approximate fixed one-way path delay, or total Earth-Moon-Earth path delay (2564 ms example). Region extends nearer and farther around it. This does not set the PC clock. Default resets all four timing controls.";
     if(slot==Slot::audio_error)control.help="Declared audio-lag bound from zero through 60 seconds. Default is 70 ms. Provider timing must support the selected live calendar; this assumption does not measure device latency.";
-    if(slot==Slot::dsss_factor)control.help="Added-symbol spreading factor for the canonical three-carrier waveform. Selecting a factor enables Interleave and adjusts Rate to preserve the initial occupied bandwidth.";
+    if(slot==Slot::dsss_factor)control.help="Selects the Added Symbols factor, enables Interleave, and sets Rate to 3600 Hz divided by the factor. Edit Rate afterward to use a different inner rate.";
     if(slot==Slot::dsss_version)control.help="Off uses one symbol coefficient; Interleave uses the selected Added Symbols spreading factor in the canonical waveform.";
     if(slot==Slot::fhss)control.help="Canonical FHSS envelope and synthetic sequential hopping profile. This does not retune physical hardware or enable simultaneous reception.";
     if(slot==Slot::symbol_burst)control.help="Minimum whole-bit waiting periods between scheduled DATA slots. Scheduled waiting is not a scored quiet slot and cannot finish a message.";
@@ -155,12 +153,14 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::exclusive)control.help=exclusive_audio_help;
     if(slot==Slot::bandwidth)control.help="Canonical inner pattern rate in Hz, from 0.001 Hz through 30 MHz. Added Symbols and shaping determine occupied bandwidth; unsupported audio profiles report a validation error.";
     if(slot==Slot::carrier)control.help="Enter an absolute frequency or choose a preset. The baseband frequency is Carrier minus Shift. Recommendations include half the inner Rate for suitable radio hardware and higher frequencies that leave room below the occupied DATA band. Valid custom baseband frequencies survive changes to Shift. Bare numbers are in Hz.";
-    if(slot==Slot::snr)control.help="Locally agreed target C/N0 in dB-Hz for provisional duration planning and the expected live DATA level relative to the declared input noise floor. Both peers must use the same target; it does not change simulated actual signal/noise power or guarantee sensitivity.";
     if(control.field==Field::planner_command) {
         control.document_only=true;control.tab_navigation=true;control.font_size=11;control.submit=Command::none;control.submit_mode=Field::count;
         control.help="Copy to launch with this plan. Paste settings, then Load. The target is shared with Robust Console. Enter inserts a new line.";
     }
-    if(control.field==Field::planner_target) {control.document_only=true;control.help="Robust target shared with Console and native modeled-duration planning. Full receiver sensitivity and CPU forecasts remain unqualified.";}
+    if(slot==Slot::snr||control.field==Field::planner_target) {
+        if(control.field==Field::planner_target)control.document_only=true;
+        control.help="Both peers use the same target C/N0 in dB-Hz. Every DATA bit takes at least one waveform tile. A lower target adds whole tiles when the model needs more time. Live DATA reference amplitude also uses this target. The simulation link budget sets actual C/N0 and supplies the suggested Budget target.";
+    }
     if(control.field==Field::search_arithmetic) {
         control.document_only=true;control.developer_only=true;control.purpose=ControlPurpose::setup;
         control.help="Default (fastest) selects the fastest supported complete receiver path for the current CPU or GPU and workload. It can use lower precision after channel isolation. FP32 minimum and FP64 force select higher search precision. FP64 force applies to CPU search.";
