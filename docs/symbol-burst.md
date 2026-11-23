@@ -428,6 +428,41 @@ protected-path comparisons and the decisive boundary-model counterexamples
 for comparison against the next complete receiver. Record that comparison
 in validation and remove the superseded receipts.
 
+## Scheduled gaps and temporary-key noise
+
+The scheduled DATA patterns keep their public UTC addresses and can carry a
+previously accepted timing and frequency proposal across a gap. The receiver
+still scores that proposal afresh when DATA resumes. The channel model evolves
+through the elapsed time. An independent temporary-key filler gives the
+receiver no known waveform to correlate over that time. A known pilot can
+provide such a measurement under an appropriate channel model. [Watterson channel model](https://its.ntia.gov/publications/details?pub=3106)
+· [Known pilot channel estimation in doubly selective channels](https://arxiv.org/abs/2503.17565)
+
+For a fixed linear channel, gap fill contributes the separately propagated
+filler waveform. When that contribution lies outside the scored observations,
+the receiver sees the same DATA, noise and timing. If independent filler
+instead overlaps a wanted observation, the added covariance can only reduce
+or preserve the known-template discrimination at fixed wanted energy. An
+audio gain-control or transmitter gating benefit would require a separate
+device test. Filler that overlaps an echo can mask it. The same additional
+power can also mask wanted DATA or interfere with physical quiet scoring.
+
+In the broad 6 kHz, 3.6 Hz, 265 Hz spacing, HF Worst and Each 65% profile,
+two consecutive 209.553667 s receive windows leave 0.446333 s between
+them on the 210 s scheduled grid. The declared arrival span is 14.07 s
+before multipath tails and receiver filtering. There is therefore no
+same-band fill interval guaranteed to arrive outside those observations,
+even though the nominal DATA gates leave 49.6 s between them. An off-window
+guard is a sufficient way to retain ordinary receiver evidence. An overlapping
+filler requires its own qualified detection model. The earlier independently
+keyed [Watterson I3 replay](validation.md#packed-data-under-physical-hf-models--22-november-2026)
+produced a false DATA decision before the codec rejected the episode.
+The two post-DATA quiet slots remain physical observations and are outside
+any inter-DATA fill test.
+The [matched native comparison](validation.md#scheduled-gap-fill-comparison--22-november-2026)
+found exact receive-window equality for a guarded compact fill and observed
+receive-window overlap when fill began near the end of a DATA gate.
+
 ## Retained scheduling lessons
 
 Separating transmissions can give a receiver time to process queued work, but

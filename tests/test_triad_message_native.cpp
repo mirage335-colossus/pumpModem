@@ -443,6 +443,119 @@ void long_intervals() {
     }
 }
 
+void long_first_marker_recovery(FecMode mode) {
+    const NativeMessageProfile profile{mode, true, 4096, Crypto::amateur()};
+    const auto text = text_fixture(257);
+    const auto draft = prepare_text_message(text, profile);
+    constexpr std::uint64_t first = 47;
+    const auto bits = collect(draft, first);
+    check(bits.size() >= 2*message_interval_bits, "first-marker fixture lacks later intervals");
+    const auto after_first = std::span(bits).subspan(1);
+    for (const auto lost : {SlotDecision::ambiguous, SlotDecision::quiet}) {
+        for (const bool rearm_boundary : {false, true}) {
+            if (lost == SlotDecision::ambiguous && rearm_boundary) continue;
+            std::vector<std::uint64_t> authenticated_slots;
+            const auto address = [&](std::uint64_t index) {
+                authenticated_slots.push_back(index);
+                return test_address(index);
+            };
+            ContinuousMessageReceiver receiver(profile, address, first-rearm_boundary);
+            if (rearm_boundary) receiver.consume(slot(first-1, SlotDecision::quiet));
+            receiver.consume(slot(first, lost));
+            check(receiver.next_slot_index() == first+1, "leading loss advanced the public ordinal twice");
+            if (rearm_boundary)
+                check(receiver.result().slots_consumed == 0 && !receiver.recovering(),
+                      "idle lookbehind left a live episode after two physically scored quiet slots");
+            feed(receiver, after_first);
+            check(receiver.result().long_form && receiver.pending_messages() == 0 &&
+                  !receiver.result().decoded_content, "first marker recovery published before scored quiet");
+            const auto done = physical_end(receiver);
+            const auto first_trailing = bits.size()-rearm_boundary;
+            const auto local_erasures = rearm_boundary ? std::vector<std::uint64_t>{} :
+                std::vector<std::uint64_t>{0};
+            check(done.state == MessageState::complete && done.decoded_content &&
+                  done.decoded_content->authenticated && done.decoded_content->message.data == text &&
+                  done.missing_slots == 1 && done.observed_bits == bits.size()-1 &&
+                  done.first_marker_erasure_public_slot == first && done.erasure_slot_indices == local_erasures &&
+                  done.trailing_quiet_slots == std::vector<std::uint64_t>{first_trailing, first_trailing+1} &&
+                  receiver.next_slot_index() == first+bits.size()+2,
+                  "first marker erasure lost authenticated content or changed physical chronology");
+            check(authenticated_slots.size() == bits.size()/message_interval_bits,
+                  "first marker recovery skipped a codeword address");
+            for (std::size_t i=0; i<authenticated_slots.size(); ++i)
+                check(authenticated_slots[i] == first+message_marker_bits+i*message_interval_bits,
+                      "first marker recovery shifted a coded word's public address");
+        }
+    }
+
+}
+
+void long_first_marker_loss() {
+    for (const auto mode : {FecMode::off, FecMode::rs20, FecMode::rs60})
+        long_first_marker_recovery(mode);
+
+    const NativeMessageProfile profile{FecMode::rs20, true, 4096, Crypto::amateur()};
+    constexpr std::uint64_t first = 47;
+    const auto bits = collect(prepare_text_message(text_fixture(257), profile), first);
+    const auto after_first = std::span(bits).subspan(1);
+    const auto short_bits = collect(prepare_text_message(Bytes{'e'}, profile));
+    ContinuousMessageReceiver short_after_idle(profile, test_address);
+    short_after_idle.consume(slot(0, SlotDecision::quiet));
+    short_after_idle.consume(slot(1, SlotDecision::quiet));
+    feed(short_after_idle, short_bits);
+    check(short_after_idle.consume(slot(short_after_idle.next_slot_index(), SlotDecision::quiet)) &&
+          !short_after_idle.pending_messages() &&
+          short_after_idle.consume(slot(short_after_idle.next_slot_index(), SlotDecision::quiet)),
+          "ordinary keyed short lost its physical completion boundary");
+    const auto short_messages = short_after_idle.drain_messages();
+    check(short_messages.size() == 1 && short_messages.front().first_public_slot == 2,
+          "idle lookbehind rebased an ordinary keyed short episode");
+    const auto& short_done = short_messages.front().message;
+    check(short_done.filtered_text == "e" && !short_done.long_form && !short_done.missing_slots &&
+          !short_done.first_marker_erasure_public_slot && short_done.slots_consumed == short_bits.size()+2 &&
+          short_done.represented_samples == 100*short_done.slots_consumed,
+          "idle lookbehind changed ordinary keyed short content or sample receipts");
+
+    ContinuousMessageReceiver shifted_prefix(profile, test_address, first);
+    shifted_prefix.consume(slot(first, SlotDecision::quiet));
+    feed(shifted_prefix, after_first.first(message_marker_bits-1));
+    check(!shifted_prefix.result().long_form && !physical_end(shifted_prefix).decoded_content,
+          "shifted marker prefix overrode short decoding before the ordinary wire bound");
+
+    ContinuousMessageReceiver short_loss(profile, test_address);
+    short_loss.consume(slot(0, SlotDecision::ambiguous));
+    feed(short_loss, std::span(short_bits).subspan(1));
+    const auto short_rejected = physical_end(short_loss);
+    check(!short_rejected.decoded_content && short_rejected.reason == "leading_message_prefix_unqualified",
+          "keyed long-marker repair guessed a short message prefix");
+
+    ContinuousMessageReceiver eof(profile, test_address, first);
+    eof.consume(slot(first, SlotDecision::quiet));
+    feed(eof, after_first);
+    eof.consume(slot(eof.next_slot_index(), SlotDecision::quiet));
+    eof.finish_input();
+    check(eof.result().long_form && !eof.pending_messages() && !eof.result().physical_complete &&
+          !eof.result().decoded_content, "EOF completed a first-marker repair without the second physical quiet slot");
+
+    std::array<std::uint8_t, 64> serpent{}, aes{};
+    serpent.fill(0x31);
+    aes.fill(0x73);
+    auto wrong_profile = profile;
+    wrong_profile.key = Crypto::from_independent_roots(serpent, aes);
+    const auto wrong_address = [](std::uint64_t index) { auto a=test_address(index); ++a.ordinal; return a; };
+    for (const auto lost : {SlotDecision::ambiguous, SlotDecision::quiet}) {
+        ContinuousMessageReceiver foreign(wrong_profile, test_address, first);
+        ContinuousMessageReceiver shifted(profile, wrong_address, first);
+        for (auto* receiver : {&foreign, &shifted}) {
+            receiver->consume(slot(first, lost));
+            feed(*receiver, after_first);
+            const auto rejected = physical_end(*receiver);
+            check(rejected.long_form && !rejected.decoded_content && rejected.state == MessageState::invalid_message,
+                  "first-marker repair admitted a foreign key or wrong public address");
+        }
+    }
+}
+
 void long_rejections() {
     NativeMessageProfile profile{FecMode::rs20, true, 4096, Crypto::amateur()};
     const auto draft = prepare_text_message(text_fixture(257), profile);
@@ -470,7 +583,8 @@ void long_rejections() {
         check(end.long_form && !end.decoded_content, "truncated marker or interval decoded as complete content");
     }
     auto leading_loss = bits;
-    leading_loss.front().reset();
+    leading_loss[0].reset();
+    leading_loss[1].reset();
     ContinuousMessageReceiver prefix(profile, test_address);
     feed(prefix, leading_loss);
     check(prefix.recovering() && prefix.pending_messages()==0,
@@ -560,7 +674,7 @@ int main() {
     try {
         short_completion();incomplete_and_erased();evidence_and_geometry();
         continuous_messages();decoder_boundary();fec_profiles();leading_fec_prefix();
-        long_intervals();long_rejections();long_counted_source();admission_history_evidence();
+        long_intervals();long_first_marker_loss();long_rejections();long_counted_source();admission_history_evidence();
         rejects(continuous_lifecycle,"empty decoder was accepted");
         std::cout<<"native Robust short/long message lifecycle and configured FEC checks passed\n";
     } catch(const std::exception& error) {

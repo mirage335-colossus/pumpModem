@@ -45,6 +45,51 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Keyed long-message recovery after one missed marker slot — 22 November 2026
+
+The ordered native codec test used a 257-byte message spanning multiple
+intervals with FEC Off, RS20, and RS60. It recovered the exact payload after an ambiguous first
+marker slot, a scored quiet first marker slot, and a scored quiet first
+marker slot at an idle rearm boundary. Every existing interval tag used
+its original first coded-bit epoch and ordinal. In the rearm case the
+earlier slot is recorded by its absolute public address, outside the
+episode's local diagnostic indices. Ordinary short payload and sample
+receipts stayed unchanged after the same idle rearm.
+
+Independent-key, incorrect-address, multiple leading ambiguous slots,
+damaged-first-codeword and one-quiet-plus-EOF controls preserved their
+rejections. All successful cases required both scored quiet slots. These
+are codec checks against ordered slot receipts with no additional on-air
+samples or search hypotheses. [Wire and completion rules](protocol.md#native-long-message-intervals)
+
+## Scheduled gap-fill comparison — 22 November 2026
+
+A bounded native comparison held scheduled DATA, public addresses, channel
+state and the thermal seed fixed. It used 1,500 samples/s, Rate 120 Hz,
+500 Hz IF, 60 s slot spacing, Target 80 dB-Hz and nominal observed 32 dB-Hz.
+The channel used HF Worst, Each 65%, 8 Hz Doppler and seed 74021. Two
+six-second tapered, independently keyed fills were placed centrally between
+successive DATA slots. The fills changed 17,996 transmit and 18,120 receive
+samples and added 2.30% to the wanted-only energy. Across all five full
+receive windows the IQ and validity masks matched exactly. Both arms
+scored `001QQ`, decoded `e`, and passed the incomplete-EOF control. The
+independent receive key produced the same raw `110QQ` in both arms and
+the codec rejected both results. This
+compact fixture establishes invariance when filler stays outside the
+observations. Hardware gain and gating effects remain unmeasured.
+
+A two-second fill starting 11 s after the first DATA gate began was inside
+nominal transmit silence, yet changed 174 samples in the first receive
+window. At the broad 6 kHz and 3.6 Hz operating point, the 210 s cadence
+leaves 0.446333 s between full adjacent receive windows. The 14.07 s arrival
+span alone exceeds that clearance. Scheduled silence remains the operating
+choice. [Gap geometry and coherence](symbol-burst.md#scheduled-gaps-and-temporary-key-noise)
+
+The small receipt under `local-evidence/scheduled-gap-fill.jXMY3pjr` records
+the controlled waveform and numerical results. The temporary source and
+executable were removed. Retain the receipt until a subsequent same-DATA
+coupled-front-end evaluation supersedes it.
+
 ## Continuous DATA in simulation and live audio — 22 November 2026
 
 The shared GUI runs Continuous DATA through the canonical native stream

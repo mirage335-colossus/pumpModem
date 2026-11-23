@@ -102,6 +102,9 @@ struct MessageResult {
     // change source decoding, physical completion or the original content.
     WrongKeyAdmissionEvidence wrong_key_evidence;
     std::size_t recognized_markers = 0, damaged_markers = 0;
+    // An admitted long-marker erasure uses its actual public slot. A carried
+    // idle quiet receipt can precede this episode's local diagnostic indices.
+    std::optional<std::uint64_t> first_marker_erasure_public_slot;
     bool long_form = false;
     Bytes received_bits;
     std::vector<MessageBit> bit_slots;
@@ -135,6 +138,7 @@ public:
     bool terminal() const noexcept;
     static SlotDecision classification(const ReceiverSlotScore&) noexcept;
 private:
+    friend class ContinuousMessageReceiver;
     MessageDecoder decoder_;
     MessageReceiverOptions options_;
     MessageResult result_;
@@ -142,11 +146,15 @@ private:
     std::unique_ptr<IntervalReceiver> intervals_;
     std::uint64_t first_public_slot_;
     std::optional<std::uint64_t> pending_nondata_first_;
+    std::optional<std::uint64_t> preceding_idle_quiet_slot_;
     std::size_t quiet_run_ = 0;
     std::optional<std::uint64_t> previous_first_, previous_stop_;
     bool leading_ambiguity_ = false;
+    bool first_marker_ambiguous_ = false, first_marker_quiet_ = false;
     void fail(MessageState, const char*);
     bool physical_geometry(const ReceiverSlotScore&);
+    void begin_intervals(std::uint64_t first_public_slot);
+    void try_quiet_marker(std::uint64_t local_index);
     void commit_erasures(std::uint64_t stop);
     void commit_bit(MessageBit, std::uint64_t local_index);
     void finish_decode();

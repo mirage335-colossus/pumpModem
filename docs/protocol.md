@@ -58,7 +58,7 @@ validate after Reed–Solomon correction. Erased bit slots identify erased bytes
 These codec lengths are fixed local limits checked only after the receiver
 establishes physical end. They do not choose receive sample extents or silence
 thresholds. Ambiguous leading prefixes cannot establish the beginning of a
-message and are not repaired by guessing a shortened FEC frame. Received text
+short message and are not repaired by guessing a shortened FEC frame. Received text
 still passes the shared presentation restrictions.
 
 ## Native long-message intervals
@@ -67,10 +67,14 @@ Text longer than 16 bytes uses fixed intervals of **1,216 physical bit slots**:
 a 192-bit marker followed by one 128-byte codeword. The marker repeats the first
 96 bits of SHA-256 over ASCII `DataPump/byte-boundary/v1`. Initial recognition
 requires at least 144 known marker bits and at most eight mismatches at the
-configured start. It does not slide across samples, insert/delete bits or infer
-an unknown waveform address. After recognition, every marker/codeword keeps the
-same public cadence even when later markers are damaged; their evidence is
-reported separately.
+configured start. A keyed long message can recover one erased leading marker
+slot at its retained public position. This can also be the immediately preceding
+physically scored idle quiet slot. The receiver tries the idle-quiet alternative
+only after the observed interval exceeds the short wire limit and checks the
+same fixed marker. The resulting first coded-bit address must validate the keyed
+tag. This leaves the short-frame decision available while its length still fits.
+The search uses the configured public calendar, including when later markers
+are damaged. Every marker/codeword keeps its fixed cadence after recognition.
 
 FEC and key selection are local peer settings, not received length headers:
 

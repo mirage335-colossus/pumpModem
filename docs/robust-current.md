@@ -259,6 +259,11 @@ browser row is marked rejected, including when recovery and a new episode occur
 between deliveries; it does not remain labelled as actively receiving. See the
 [persistent-reception audit](validation.md#persistent-reception-investigation--17-november-2026).
 
+The keyed long-message codec can recover one missed first marker slot using
+the fixed marker and its existing per-interval public-address tags. This is
+bounded codec work on ordered slot decisions. The [long-message protocol](protocol.md#native-long-message-intervals)
+describes the fixed start choices and short-frame limits.
+
 The optional `finite_duplex` session setting is a one-message planning seam for
 a trusted, bounded audio provider, currently used by the experimental RunPod
 lab. It requires live full duplex, a configured public calendar and declared

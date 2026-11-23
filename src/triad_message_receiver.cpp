@@ -87,20 +87,25 @@ const std::array<std::uint8_t, message_marker_bits>& marker() {
 }
 
 bool enough_marker_evidence(std::size_t known, std::size_t errors) {
-    // One configured start, no sliding or deleted-bit hypotheses. At least
+    // For each fixed start, without sliding or deleted-bit hypotheses, at least
     // 144 known bits and at most eight mismatches give a fair-bit false-match
     // bound below 2^-100 (sum of C(n,i), i<=8, divided by 2^n).
     return known >= 144 && errors <= 8;
 }
 
-bool marker_matches(std::span<const MessageBit> prefix) {
-    if (prefix.size() < 144 || prefix.size() > message_marker_bits) return false;
+bool marker_matches(std::span<const MessageBit> prefix, bool erased_first = false) {
+    const std::size_t first_known = erased_first;
+    if (prefix.size() < 144 || prefix.size() > message_marker_bits-first_known) return false;
     std::size_t known = 0, errors = 0;
     for (std::size_t i=0; i<prefix.size(); ++i) if (prefix[i]) {
         ++known;
-        errors += *prefix[i] != marker()[i];
+        errors += *prefix[i] != marker()[first_known+i];
     }
     return enough_marker_evidence(known, errors);
+}
+
+bool can_repair_first_marker(const std::optional<NativeMessageProfile>& profile) {
+    return profile && profile->key && profile->content_limit > short_text_bytes;
 }
 
 Bytes interval_tag(const NativeMessageProfile& profile, MessageAddress address,
@@ -623,9 +628,42 @@ bool QuietSlotMessageReceiver::physical_geometry(const ReceiverSlotScore& row) {
     return true;
 }
 
+void QuietSlotMessageReceiver::begin_intervals(std::uint64_t first_public_slot) {
+    const auto& profile = *options_.native_profile;
+    result_.long_form = true;
+    result_.recognized_markers = 1;
+    if (profile.content_limit <= short_text_bytes) {
+        fail(MessageState::resource_limit, "local_interval_content_limit_exceeded");
+        return;
+    }
+    intervals_ = std::make_unique<IntervalReceiver>(profile, options_.address, first_public_slot);
+}
+
+void QuietSlotMessageReceiver::try_quiet_marker(std::uint64_t local_index) {
+    // A short frame keeps its full ordinary decoding opportunity. Try this
+    // one-slot lookbehind only as a new slot exceeds the short wire bound.
+    constexpr auto known_part = message_marker_bits-1;
+    const auto buffered = std::span(result_.bit_slots);
+    if (!first_marker_quiet_ || buffered.size() < known_part || local_index < buffered.size() ||
+        !marker_matches(buffered.first(known_part), true)) return;
+    const auto first_data = local_index-buffered.size();
+    const auto first_public = first_data ? std::optional{address_add(first_public_slot_, first_data-1)} :
+        preceding_idle_quiet_slot_;
+    if (!first_public) return;
+    begin_intervals(*first_public);
+    ++result_.missing_slots;
+    result_.first_marker_erasure_public_slot = *first_public;
+    if (first_data)
+        result_.erasure_slot_indices.insert(result_.erasure_slot_indices.begin(), first_data-1);
+    for (const auto bit : buffered.subspan(known_part)) intervals_->push(bit, result_);
+    result_.bit_slots.clear();
+}
+
 void QuietSlotMessageReceiver::commit_bit(MessageBit value, std::uint64_t local_index) {
     const auto& profile = options_.native_profile;
     if (profile) {
+        if (!intervals_ && result_.bit_slots.size() == short_wire_limit(profile->fec))
+            try_quiet_marker(local_index);
         const auto limit = intervals_ ? intervals_->layout.wire_limit() : short_wire_limit(profile->fec);
         if (result_.observed_bits+result_.missing_slots >= limit) {
             fail(MessageState::resource_limit, "local_wire_bit_limit_exceeded");
@@ -646,17 +684,12 @@ void QuietSlotMessageReceiver::commit_bit(MessageBit value, std::uint64_t local_
         return;
     }
     result_.bit_slots.push_back(value);
-    if (profile && !leading_ambiguity_ && result_.bit_slots.size() == message_marker_bits &&
+    if (profile && (!leading_ambiguity_ || first_marker_ambiguous_) && result_.bit_slots.size() == message_marker_bits &&
         marker_matches(result_.bit_slots)) {
-        result_.long_form = true;
-        result_.recognized_markers = 1;
-        if (profile->content_limit <= short_text_bytes) {
-            fail(MessageState::resource_limit, "local_interval_content_limit_exceeded");
-            return;
-        }
         const auto first = address_add(first_public_slot_, local_index-(message_marker_bits-1));
-        intervals_ = std::make_unique<IntervalReceiver>(*profile, options_.address, first);
-        result_.bit_slots.clear();
+        if (first_marker_ambiguous_) result_.first_marker_erasure_public_slot = first;
+        begin_intervals(first);
+        if (intervals_) result_.bit_slots.clear();
     }
 }
 
@@ -679,7 +712,7 @@ void QuietSlotMessageReceiver::finish_decode() {
     result_.trailing_quiet_slots = {first_trailing, first_trailing+1};
     result_.physical_complete = true;
     if (terminal()) return;
-    if (leading_ambiguity_) {
+    if (leading_ambiguity_ && !intervals_) {
         // FEC corrects located interior losses, not an unknown message start.
         // Only the continuous owner's separate two-quiet rearm can discard an
         // unresolved prefix and establish the start of a new bounded episode.
@@ -734,6 +767,11 @@ const MessageResult& QuietSlotMessageReceiver::consume_slot(std::uint64_t local_
     const auto category = physical_geometry(row) ? classification(row) : SlotDecision::ambiguous;
     ++result_.classification_counts[static_cast<std::size_t>(category)];
     if (category == SlotDecision::data) {
+        if (!result_.observed_bits && can_repair_first_marker(options_.native_profile)) {
+            first_marker_ambiguous_ = leading_ambiguity_ && pending_nondata_first_ &&
+                local_index-*pending_nondata_first_ == 1;
+            first_marker_quiet_ = !leading_ambiguity_ && (local_index != 0 || preceding_idle_quiet_slot_);
+        }
         result_.reacquisition_required = pending_nondata_first_.has_value();
         if (result_.reacquisition_required) {
             ++result_.reacquisition_count;
@@ -850,7 +888,11 @@ bool ContinuousMessageReceiver::consume(const ReceiverSlotScore& supplied) {
         quiet_run_ = category == SlotDecision::quiet ? 1 : 0;
     } else if (!message.observed_bits) {
         quiet_run_ = category == SlotDecision::quiet ? quiet_run_+1 : 0;
-        if (quiet_run_ >= quiet_slots) rearm();
+        if (quiet_run_ >= quiet_slots) {
+            rearm();
+            if (can_repair_first_marker(options_.native_profile))
+                episode_.preceding_idle_quiet_slot_ = row.index;
+        }
     } else quiet_run_ = 0;
     return true;
 }
