@@ -67,6 +67,15 @@ void planner_checks(){
         "ineligible refinement FFT cap unnecessarily executed coarse profiles");
     auto slow=before;slow.inner_rate_hz=.001;
     check(rejects([&]{(void)plan_shaping(slow);}),"infeasible low-rate FHSS was relabeled as supported");
+    auto narrow=before;narrow.inner_rate_hz=372;narrow.sample_rate=6000;
+    narrow.fhss_center_aligned=false;narrow.ramp_seconds=Format{}.ramp_seconds;
+    check(rejects([&]{(void)geometry(narrow);}),"narrow FHSS fixture accepted the default ramp");
+    const auto recovered=plan_shaping(narrow);
+    check(!recovered.format.fhss_center_aligned&&recovered.format.fhss&&
+        recovered.format.quiet_seconds==narrow.quiet_seconds&&recovered.format.margin_seconds==narrow.margin_seconds&&
+        recovered.format.ramp_seconds>0&&recovered.format.ramp_seconds<narrow.ramp_seconds&&
+        recovered.geometry.payload_fine_cells_per_tile>=narrow.minimum_inner_coefficients,
+        "shaping failed to preserve protected FHSS cells on an unaligned narrow dwell");
     auto capped=before;capped.inner_rate_hz=.36;capped.added_symbols=1000;
     const auto geometry_error=rejection([&]{(void)geometry(capped);});
     check(geometry_error=="triad v3 protected tile exceeds bounded source workspace"&&

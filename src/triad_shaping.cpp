@@ -268,16 +268,23 @@ SpectralCertificate shaping_spectrum(const Format& f,const ShapingOptions& o) {
 ShapingPlan plan_shaping(const Format& input,const ShapingOptions& o) {
     validate(o);(void)pulse_shape_name(input.pulse_shape);
     std::optional<Geometry> original;
-    std::string original_aperture_failure;
     try{original=geometry(input);}catch(const Error& e){
         // Only an aperture/lattice failure can be remedied by ramp/placement
         // selection. In particular preserve source workspace/coordinate caps
         // instead of misreporting them as a physical no-pulse condition.
         if(!input.fhss||!repairable_aperture_failure(e.what()))throw;
-        original_aperture_failure=e.what();
     }
     std::vector<Format> candidates;
     std::string candidate_resource_failure;
+    const auto add_candidates=[&](Format f,double ramp){
+        for(const auto pulse:{PulseShape::Rrc,PulseShape::TaperedRrc}){
+            f.ramp_seconds=ramp;f.pulse_shape=pulse;
+            try{const auto g=geometry(f);if(original&&!same_allocation(*original,g))continue;
+                if(std::none_of(candidates.begin(),candidates.end(),[&](const Format& x){return x.ramp_seconds==ramp&&
+                    x.pulse_shape==pulse&&x.fhss_center_aligned==f.fhss_center_aligned;}))candidates.push_back(f);
+            }catch(const Error& e){if(!repairable_aperture_failure(e.what()))candidate_resource_failure=e.what();}
+        }
+    };
     for(const bool aligned:{input.fhss_center_aligned,!input.fhss_center_aligned}){
         if(aligned&&(!input.fhss||(!o.allow_center_alignment&&!input.fhss_center_aligned)))continue;
         Format f=input;f.fhss_center_aligned=aligned;
@@ -293,19 +300,26 @@ ShapingPlan plan_shaping(const Format& input,const ShapingOptions& o) {
             if(limit>1/effective_sample_rate(f))ramps.push_back(limit-1/effective_sample_rate(f));
             if(!original&&limit>0)ramps.push_back(limit*.5);
         }
-        for(const auto ramp:ramps)for(const auto pulse:{PulseShape::Rrc,PulseShape::TaperedRrc}){
-            f.ramp_seconds=ramp;f.pulse_shape=pulse;
-            try{const auto g=geometry(f);if(original&&!same_allocation(*original,g))continue;
-                if(std::none_of(candidates.begin(),candidates.end(),[&](const Format& x){return x.ramp_seconds==ramp&&
-                    x.pulse_shape==pulse&&x.fhss_center_aligned==aligned;}))candidates.push_back(f);
-            }catch(const Error& e){if(!repairable_aperture_failure(e.what()))candidate_resource_failure=e.what();}
-        }
+        for(const auto ramp:ramps)add_candidates(f,ramp);
         if(!input.fhss)break;
+    }
+    if(candidates.empty()&&!original){
+        // A half-cell grid needs one complete fine interval of protected
+        // aperture for arbitrary dwell phases. Leave half that interval at
+        // each edge in addition to the existing pulse support and guards.
+        Format f=input;f.fhss_center_aligned=false;
+        const double rate=(f.inner_rate_hz/6)*f.added_symbols;
+        const double ramp_limit=f.dwell_seconds/2-f.quiet_seconds-f.margin_seconds-(span+.5)/rate;
+        if(ramp_limit>0){
+            const auto sample_seconds=1/effective_sample_rate(f);
+            const auto ramp=std::max(ramp_limit-sample_seconds,ramp_limit*.5);
+            add_candidates(f,std::min(f.ramp_seconds,ramp));
+        }
     }
     if(candidates.empty()){
         if(!candidate_resource_failure.empty())throw Error(candidate_resource_failure);
-        if(!original_aperture_failure.empty())throw Error(original_aperture_failure);
-        throw Error("triad shaping cannot place a complete protected pulse within this dwell");
+        throw Error("FHSS cannot fit a protected DATA pulse in each 400 ms dwell at this Rate and Spreading. "
+                    "Increase Rate or Spreading, or turn FHSS off.");
     }
     std::optional<ShapingPlan> best;
     std::string failures;

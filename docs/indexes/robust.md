@@ -26,6 +26,14 @@ with DATA's outer taper, and preserves the selected Helper waveform and
 FHSS ramp and mute intervals. Its
 full-window receiver can also score filler or adjacent DATA in broad timing
 conditions. [Scope and measured transitions](../symbol-burst.md#short-audio-transitions)
+
+FHSS reserves 55 ms of quiet at both ends of each 400 ms dwell. The
+remaining interval must fit the DATA pulse, ramp and margin. If the planner
+cannot fit a protected pulse, increase Rate or Spreading on both peers, or
+turn FHSS off. At 6 kHz audio, Rate 36 Hz with Spreading Off fails this
+geometry check, and 10× Interleave at the same Rate fits on the center-aligned
+grid. Carrier and Helper placement have separate bandwidth checks.
+
 **Robust setup → DATA cadence → Continuous DATA** removes the scheduled silence
 between successive DATA gates. Both peers need Helper, both burst waits and
 FHSS Off for this cadence. Broad timing can still exclude interior energy

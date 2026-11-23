@@ -591,6 +591,29 @@ void data_cadence_policy() {
     check(fresh.settings().data_cadence == live::DataCadence::scheduled_bridge &&
           fresh.field(F::data_cadence).selected == "scheduled-bridge");
 }
+void fhss_rate_compatibility() {
+    using F = gui::ui::Field;
+    gui::Controller defaults({.simulation=true});
+    check(defaults.field(F::bandwidth).text == "3.6 kHz" &&
+          defaults.field(F::fhss).selected == "off");
+    defaults.select(F::fhss, "fake-fcc");
+    check(defaults.settings().fhss_profile == "fake-fcc" &&
+          defaults.field(F::fhss).selected == "fake-fcc");
+
+    gui::Controller low_rate({.simulation=true});
+    low_rate.edit(F::bandwidth, "36 Hz");
+    check(low_rate.settings().transfer.modem.bandwidth_hz == 36 &&
+          low_rate.field(F::fhss).selected == "off");
+    low_rate.select(F::fhss, "fake-fcc");
+    check(low_rate.settings().fhss_profile == "off" &&
+          low_rate.field(F::fhss).selected == "fake-fcc" &&
+          low_rate.field(F::status).text.find(
+              "FHSS cannot fit a protected DATA pulse in each 400 ms dwell at this Rate and Spreading. "
+              "Increase Rate or Spreading, or turn FHSS off.") != std::string::npos);
+    low_rate.edit(F::bandwidth, "372 Hz");
+    check(low_rate.settings().transfer.modem.bandwidth_hz == 372 &&
+          low_rate.settings().fhss_profile == "fake-fcc");
+}
 void simulation_launch_defaults() {
     using F=gui::ui::Field;
     using C=gui::ui::Command;
@@ -716,6 +739,7 @@ int main() {
         required_gpu_policy();
         finite_duplex_policy();
         data_cadence_policy();
+        fhss_rate_compatibility();
         simulation_launch_defaults();
         check(gui::parse_binary_bits("0")==Bytes({0}));
         check(gui::parse_binary_bits("000101")==Bytes({0,0,0,1,0,1}));
