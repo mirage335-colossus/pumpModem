@@ -774,6 +774,24 @@ deployment fixtures covered both worker profiles without a CUDA toolkit or
 an NVIDIA ICD, including rejection of CPU-only reuse receipts. Windows recipe
 checks passed. Windows binaries and live RunPod deployments were not tested.
 
+### Runtime GPU availability in the shared checkbox
+
+On the `a58c1ba2` base, an invalid Vulkan ICD reproduced the reported instance
+initialization error when the old worker accepted a GPU toggle from a ready
+CPU simulation. The revised Vulkan and CPU-only workers left the ordinary
+checkbox unchecked and disabled when GPU discovery failed. The pipe tests
+covered default and preferred startup, saved `--gpu yes`, disabled control
+events, and strict `--require-gpu` failure. A bounded 120 Hz CPU simulation
+through the real zLab relay decoded `e` and scored both quiet slots with the
+ICD unavailable.
+
+On the local Ryzen 5 PRO 5650U, the zLab relay worker detected the physical
+RADV Renoir device, enabled the unchecked control, and switched to Vulkan and
+back to CPU in one session. The separate native GPU session completed the
+short message with 130 actual GPU search rows. These checks cover local
+selection and completion. Live RunPod deployment and CUDA execution were
+outside this check.
+
 ## Robust minimum carrier spacing — 22 November 2026
 
 The initial Robust Setup control defaulted to a 265 Hz minimum and also

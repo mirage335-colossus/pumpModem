@@ -734,13 +734,16 @@ class GpuStartupReadinessTests(unittest.TestCase):
 
     def test_cpu_fallback_diagnostic_allows_simulation_readiness(self):
         worker = self.start_worker([
-            {'kind': 'label', 'text': 'Preferred GPU reception unavailable: no compatible device · using CPU'},
-            {'kind': 'toggle', 'label': 'GPU', 'enabled': True, 'checked': False},
+            {'kind': 'label', 'text': 'GPU control disabled · GPU reception unavailable: no compatible device · using CPU'},
+            {'kind': 'toggle', 'label': 'GPU', 'enabled': False, 'checked': False},
             {'kind': 'label', 'text': 'Robust simulation ready'},
         ])
         worker.wait_ready(timeout=5)
         self.assertTrue(worker.ready)
         self.assertIsNone(worker.startup_error)
+        gpu = next(control for control in worker.snapshot['controls'] if control.get('label') == 'GPU')
+        self.assertFalse(gpu['enabled'])
+        self.assertFalse(gpu['checked'])
 
     def test_required_gpu_failure_reports_backend_diagnostic(self):
         diagnostic = 'GPU reception unavailable: no compatible device'

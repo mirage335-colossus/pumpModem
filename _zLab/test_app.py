@@ -459,11 +459,12 @@ class Tests(unittest.TestCase):
     def test_remote_compute_must_match_recorded_catalog_choice(self):
         self.assertTrue(simulation_gpu({'compute_kind':'gpu','compute_id':'g1'},
                                        {'gpu':{'id':'g1','count':1}}))
-        self.assertFalse(simulation_gpu({'compute_kind':'cpu','compute_id':'c1','requested_vcpu':32,'minimum_memory_gb':128},
-                                        {'cpu':{'id':'c1','vcpuCount':32,'memory':128}}))
-        with self.assertRaises(ValueError):
-            simulation_gpu({'compute_kind':'cpu','compute_id':'c1','requested_vcpu':32,'minimum_memory_gb':128},
-                           {'cpu':{'id':'c1','vcpuCount':32,'memory':64}})
+        record = {'compute_kind': 'cpu', 'compute_id': 'c1', 'requested_vcpu': 64, 'minimum_memory_gb': 128}
+        cpu = {'id': 'c1', 'vcpuCount': 64, 'memory': 128}
+        self.assertFalse(simulation_gpu(record, {'cpu': cpu}))
+        for mismatch in ({'vcpuCount': 32}, {'memory': 64}):
+            with self.subTest(mismatch=mismatch), self.assertRaises(ValueError):
+                simulation_gpu(record, {'cpu': dict(cpu, **mismatch)})
         with self.assertRaises(ValueError):
             simulation_gpu({'compute_kind':'gpu','compute_id':'g1'}, {'gpu':{'id':'g2','count':1}})
         with self.assertRaises(ValueError):
@@ -578,16 +579,57 @@ class Tests(unittest.TestCase):
 
     def test_catalog(self):
         choices = options([{'id': 'NVIDIA GeForce RTX 4090'}, {'id':'RTX 5090'}],
-                          [{'id': 'small', 'vcpu': {'min': 1, 'max': 32}, 'ramGbPerVcpu': 2},
-                           {'id': 'large', 'vcpu': {'min': 2, 'max': 32}, 'ramGbPerVcpu': 4}])
-        self.assertEqual([i[1] for i in choices], [{'gpu':{'id':'RTX 5090','count':1}, 'cloud':'SECURE'},
-                         {'gpu':{'id':'NVIDIA GeForce RTX 4090','count':1}, 'cloud':'SECURE'},
-                         {'cpu':{'id':'large','vcpuCount':32}, 'cloud':'SECURE'}])
+                          {32: [{'id': 'small', 'vcpu': {'min': 1, 'max': 32}, 'ramGbPerVcpu': 2},
+                                {'id': 'large', 'vcpu': {'min': 2, 'max': 32}, 'ramGbPerVcpu': 4}]})
+        self.assertEqual([value for _, value in choices], [
+            {'cpu': {'id': 'large', 'vcpuCount': 32}, 'cloud': 'SECURE'},
+            {'gpu': {'id': 'RTX 5090', 'count': 1}, 'cloud': 'SECURE'},
+            {'gpu': {'id': 'NVIDIA GeForce RTX 4090', 'count': 1}, 'cloud': 'SECURE'},
+        ])
+
+    def test_catalog_checks_exact_cpu_sizes_and_prioritizes_cpu_capacity(self):
+        client = Mock()
+        cpu = {'id': 'balanced', 'vcpu': {'min': 2, 'max': 96}, 'ramGbPerVcpu': 4,
+               'price': {'securePerVcpu': .04}, 'availability': 'HIGH'}
+        cheaper = dict(cpu, id='compute', ramGbPerVcpu=2, price={'securePerVcpu': .03})
+        largest = dict(cpu, id='largest', vcpu={'min': 128, 'max': 128})
+        client.list_cpus.side_effect = [
+            [cpu, cheaper, largest], [dict(largest, availability='NONE')],
+            [dict(cpu, availability='LOW'), dict(cheaper, availability='LOW')], [cpu],
+        ]
+        client.list_gpus.return_value = [{'id': 'RTX 4090', 'availability': 'HIGH'}]
+
+        choices, warnings = app_module.load_catalog(client)
+
+        self.assertFalse(warnings)
+        self.assertEqual([args.kwargs.get('count') for args in client.list_cpus.call_args_list],
+                         [None, 128, 64, 32])
+        self.assertEqual([value.get('cpu') for _, value in choices], [
+            {'id': 'compute', 'vcpuCount': 64}, {'id': 'balanced', 'vcpuCount': 64},
+            {'id': 'balanced', 'vcpuCount': 32}, None,
+        ])
+        self.assertIn('64 vCPU / 128 GB · stock low · $1.92/hr', choices[0][0])
+
+    def test_failed_larger_cpu_stock_lookup_keeps_confirmed_smaller_cpu(self):
+        client = Mock()
+        cpu = {'id': 'balanced', 'vcpu': {'min': 2, 'max': 64}, 'ramGbPerVcpu': 4}
+        client.list_cpus.side_effect = [[cpu], RunPodError('private', status=429),
+                                      [dict(cpu, availability='LOW')]]
+        client.list_gpus.return_value = [{'id': 'RTX 4090', 'availability': 'HIGH'}]
+        choices, warnings = app_module.load_catalog(client)
+        self.assertEqual(choices[0][1]['cpu'], {'id': 'balanced', 'vcpuCount': 32})
+        self.assertEqual(warnings, ['CPU 64 vCPU catalog rate limited (HTTP 429); try again later'])
+
+    def test_confirmed_gpu_precedes_cpu_with_unconfirmed_stock(self):
+        cpus = {64: [{'id': 'cpu', 'vcpu': {'min': 2, 'max': 64}, 'ramGbPerVcpu': 4}]}
+        choices = options([{'id': 'RTX 4090', 'availability': 'HIGH'}], cpus)
+        self.assertIn('gpu', choices[0][1])
+        self.assertIn('stock unknown', choices[1][0])
 
     def test_catalog_defaults_to_available_full_gpus_before_partitions(self):
         models = ['NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 1g.24gb',
                   'NVIDIA GeForce RTX 5090', 'NVIDIA RTX PRO 6000 Blackwell Server Edition']
-        choices = options([{'id': model, 'availability': 'LOW'} for model in models], [])
+        choices = options([{'id': model, 'availability': 'LOW'} for model in models], {})
         self.assertEqual([value['gpu']['id'] for _, value in choices],
                          [models[2], models[1], models[0]])
 
@@ -628,7 +670,7 @@ class Tests(unittest.TestCase):
         gpus = [{'id': 'RTX 5090', 'availability': 'NONE'},
                 {'id': 'RTX 4090', 'availability': 'HIGH', 'secure': False},
                 {'id': 'RTX PRO 6000 Blackwell Server Edition'}]
-        cpus = [{'id': 'cpu', 'availability': 'NONE', 'vcpu': {'min': 2, 'max': 32}, 'ramGbPerVcpu': 4}]
+        cpus = {32: [{'id': 'cpu', 'availability': 'NONE', 'vcpu': {'min': 2, 'max': 32}, 'ramGbPerVcpu': 4}]}
         choices = options(gpus, cpus)
         self.assertEqual(len(choices), 1)
         self.assertEqual(choices[0][1]['gpu']['id'], gpus[2]['id'])
@@ -669,14 +711,18 @@ class Tests(unittest.TestCase):
                     app_module.creation_quote(client, select)
             client.list_gpus.assert_called_once_with('COMMUNITY', count=3)
 
-    def test_32_vcpu_quote_and_memory_requirement(self):
+    def test_cpu_quote_checks_exact_count_stock_and_memory_requirement(self):
         client = Mock()
-        cpu = {'id': 'general', 'vcpu': {'min': 2, 'max': 32}, 'ramGbPerVcpu': 4,
+        cpu = {'id': 'general', 'vcpu': {'min': 2, 'max': 64}, 'ramGbPerVcpu': 2,
                'price': {'securePerVcpu': 0.025}, 'availability': 'MEDIUM'}
-        select = {'cpu': {'id': 'general', 'vcpuCount': 32}, 'cloud': 'SECURE'}
+        select = {'cpu': {'id': 'general', 'vcpuCount': 64}, 'cloud': 'SECURE'}
         client.list_cpus.return_value = [cpu]
-        self.assertIn('128 GB · stock medium · $0.8/hr', app_module.creation_quote(client, select))
-        client.list_cpus.return_value = [dict(cpu, ramGbPerVcpu=2)]
+        self.assertIn('64 vCPU / 128 GB · stock medium · $1.6/hr', app_module.creation_quote(client, select))
+        client.list_cpus.assert_called_once_with(count=64)
+        client.list_cpus.return_value = [dict(cpu, availability='NONE')]
+        with self.assertRaisesRegex(ValueError, 'stock none'):
+            app_module.creation_quote(client, select)
+        client.list_cpus.return_value = [dict(cpu, ramGbPerVcpu=1)]
         with self.assertRaisesRegex(ValueError, 'no longer listed'):
             app_module.creation_quote(client, select)
         client.list_gpus.assert_not_called()
@@ -692,7 +738,7 @@ class Tests(unittest.TestCase):
                     raise value
                 return value
             def list_gpus(self, cloud): return self.fetch('gpu')
-            def list_cpus(self): return self.fetch('cpu')
+            def list_cpus(self, count=None): return self.fetch('cpu')
         gpu = [{'id': 'NVIDIA GeForce RTX 4090'}]
         cpu = [{'id': 'cpu-128', 'vcpu': {'min': 2, 'max': 32}, 'ramGbPerVcpu': 4}]
         secret = 'token-that-must-not-be-displayed'
@@ -702,7 +748,7 @@ class Tests(unittest.TestCase):
                 client = Catalog(failure if failed_kind == 'GPU' else gpu,
                                  failure if failed_kind == 'CPU' else cpu)
                 choices, warnings = app_module.load_catalog(client)
-                self.assertEqual(client.calls, ['gpu', 'cpu'])
+                self.assertEqual(client.calls, ['gpu', 'cpu', 'cpu'] if failed_kind == 'GPU' else ['gpu', 'cpu'])
                 self.assertEqual(len(choices), 1)
                 self.assertEqual(len(warnings), 1)
                 self.assertIn(failed_kind + ' catalog', warnings[0])

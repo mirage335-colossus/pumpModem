@@ -157,10 +157,13 @@ struct GpuReceiverOptions {
     bool opencl_coarse_one_ray = VulkanReceiverOptions{}.opencl_coarse_one_ray;
 };
 
-// Shared GUI and probe entry point. Prefer native CUDA where compiled and
-// available, otherwise a compatible physical Vulkan GPU. Never selects CPU
-// emulation; individual stages retain their explicit native routing contracts.
+// Whether a GPU receiver backend is compiled into this binary.
 bool gpu_receiver_backend_available() noexcept;
+// Check device initialization without constructing a DSP backend. Throws
+// GpuBackendUnavailable when no compiled route can initialize a physical GPU.
+void check_gpu_receiver_backend();
+// Prefer usable native CUDA, then a compatible physical Vulkan GPU. Never
+// selects CPU emulation; stages retain their explicit native routing contracts.
 std::shared_ptr<receiver_detail::ReceiverBulkBackend>
 make_gpu_receiver_backend(const GpuReceiverOptions& = {});
 

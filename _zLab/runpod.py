@@ -249,9 +249,13 @@ class RunPodClient:
         return self._catalog("gpus", {"include": "AVAILABILITY", "product": "POD",
                                       "count": count, "cloud": cloud})
 
-    def list_cpus(self):
+    def list_cpus(self, count=None):
+        if count is None:
+            return self._catalog("cpus", None)
+        if type(count) is not int or count < 2 or count & (count - 1):
+            raise ValueError("CPU count must be a power of two and at least 2")
         return self._catalog("cpus", {"include": "AVAILABILITY", "product": "POD",
-                                      "vcpuCount": 32})
+                                      "vcpuCount": count})
 
     def _catalog(self, kind, query):
         operation = {"gpus": "GET /v2/catalog/gpus", "cpus": "GET /v2/catalog/cpus"}[kind]

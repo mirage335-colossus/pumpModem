@@ -102,7 +102,7 @@ class RunPodTests(unittest.TestCase):
                          ("GET", "https://api.runpod.io/v2/catalog/gpus?include=AVAILABILITY&product=POD&count=1&cloud=SECURE",
                           {"Authorization": "Bearer secret-key", "Accept": "application/json"},
                           None, 7))
-        self.assertTrue(fake.calls[1][1].endswith("/cpus?include=AVAILABILITY&product=POD&vcpuCount=32"))
+        self.assertTrue(fake.calls[1][1].endswith("/catalog/cpus"))
         self.assertEqual(client.list_gpus("COMMUNITY", count=3), [])
         self.assertTrue(fake.calls[2][1].endswith("count=3&cloud=COMMUNITY"))
         with self.assertRaises(ValueError):
@@ -112,6 +112,17 @@ class RunPodTests(unittest.TestCase):
                 client.list_gpus(count=count)
         self.assertNotIn("secret-key", fake.calls[0][1])
         self.assertNotIn("secret-key", repr(client))
+
+    def test_cpu_availability_requests_the_exact_count(self):
+        fake = FakeTransport((200, {"cpus": [{"id": "cpu", "availability": "HIGH"}]}))
+        client = RunPodClient("key", transport=fake)
+        self.assertEqual(client.list_cpus(count=64), [{"id": "cpu", "availability": "HIGH"}])
+        self.assertEqual(fake.calls[0][1],
+                         "https://api.runpod.io/v2/catalog/cpus?include=AVAILABILITY&product=POD&vcpuCount=64")
+        for count in (-2, 0, 1, 48, 64.0, "64", True):
+            with self.subTest(count=count), self.assertRaises(ValueError):
+                client.list_cpus(count=count)
+        self.assertEqual(len(fake.calls), 1)
 
     def test_pagination_encodes_opaque_cursor(self):
         fake = FakeTransport(

@@ -350,7 +350,8 @@ struct Controller::Impl {
 
     ui::FieldState& f(UiField id) { return fields.at(static_cast<std::size_t>(id)); }
     const ui::FieldState& f(UiField id) const { return fields.at(static_cast<std::size_t>(id)); }
-    explicit Impl(Options value):options(value) {
+    explicit Impl(Options value):options(value),session(value.require_gpu ?
+        live::Session::GpuPolicy::explicit_selection : live::Session::GpuPolicy::interactive) {
         f(UiField::transmit_scope).records=transmit_scope_records({});
         f(UiField::transmit_scope_caption).text=transmit_scope_caption({});
         f(UiField::transmit_scope_format).options={{"none","None"},{"hex-auto-hide","Hex, auto-hide"},{"hex","Hex"},{"bits","Bits"}};
@@ -469,8 +470,7 @@ struct Controller::Impl {
         f(UiField::live_noise_dbfs_hz).text="unspecified";
         f(UiField::live_noise_dbfs_hz).options={{"unspecified","Unspecified"}};
         f(UiField::message_label).text="Message"; f(UiField::binary_label).text="Binary / first 16 bytes";
-        f(UiField::gpu).checked=options.prefer_gpu&&live::gpu_receiver_available();
-        settings.gpu_preferred=f(UiField::gpu).checked;
+        settings.gpu=options.prefer_gpu&&live::gpu_receiver_available();
         f(UiField::compression_codes).text=compression_reference();
         f(UiField::mode).text="Starting continuous reception";
         if(options.launch_settings&&(options.launch_settings->keyfile||options.launch_settings->keyset||options.launch_settings->fhss_list_file)) {
@@ -698,10 +698,7 @@ struct Controller::Impl {
             if(load->live_noise_dbfs_hz)f(UiField::live_noise_dbfs_hz).text=planner_number(*load->live_noise_dbfs_hz);
             if(load->fec)f(UiField::fec).selected=*load->fec;
             if(load->full_duplex)f(UiField::live_duplex).checked=*load->full_duplex;
-            if(load->gpu) {
-                f(UiField::gpu).checked=*load->gpu;
-                settings.gpu_preferred=false;
-            }
+            if(load->gpu)settings.gpu=*load->gpu;
             if(load->workspace_percent) {dsp_workspace_percent=*load->workspace_percent;f(UiField::dsp_workspace).selected=*load->workspace_percent?"ram-"+std::to_string(*load->workspace_percent):"auto";}
             if(load->fhss_list){fhss_list=fhss::parse_list(*load->fhss_list);f(UiField::fhss_list).text=fhss::list_text(fhss_list,'\n');}
             if(load->tx_key=="none")f(UiField::key).selected="none";
@@ -711,10 +708,8 @@ struct Controller::Impl {
         }
         // Enforce the embedding policy after every loaded patch, including
         // saved settings that previously selected CPU execution.
-        if(options.require_gpu) {
-            f(UiField::gpu).checked=true;
-            settings.gpu_preferred=false;
-        }
+        if(options.require_gpu)settings.gpu=true;
+        else if(!live::gpu_receiver_available()||!snapshot.gpu_unavailable_reason.empty())settings.gpu=false;
         if(options.simulation_only) {
             f(UiField::simulation).selected="yes";
             f(UiField::live_duplex).checked=false;
@@ -725,7 +720,6 @@ struct Controller::Impl {
         settings.device=f(UiField::device).text;settings.simulation=f(UiField::simulation).selected=="yes";
         settings.full_duplex=f(UiField::live_duplex).checked;settings.exclusive=f(UiField::exclusive).checked;
         settings.finite_duplex=options.finite_duplex;
-        settings.gpu=f(UiField::gpu).checked;
         settings.tx_dbm=planner_inputs.tx_dbm;settings.path_loss_db=planner_inputs.path_loss_db;
         settings.noise_dbm_hz=planner_inputs.noise_density_dbm_hz;settings.target_cn0_db_hz=planner_inputs.target_db_hz;
         auto& modem=settings.transfer.modem;
@@ -1224,7 +1218,8 @@ struct Controller::Impl {
             UiField::fec,UiField::dsp_workspace,UiField::snr,UiField::planner_target,
             UiField::search_arithmetic,UiField::receiver_strategy,UiField::receiver_cpu_budget})
             f(id).enabled=!closing&&!busy;
-        f(UiField::gpu).enabled=!closing&&!busy&&!options.require_gpu&&live::gpu_receiver_available();
+        f(UiField::gpu).enabled=!closing&&!busy&&!options.require_gpu&&snapshot.gpu_available;
+        f(UiField::gpu).checked=settings.gpu&&(options.require_gpu||snapshot.gpu_available);
         if(options.finite_duplex||options.simulation_only) {
             f(UiField::simulation).enabled=false;
             f(UiField::live_duplex).enabled=false;
@@ -1430,14 +1425,12 @@ struct Controller::Impl {
             value.gpu_native_coarse_precision_sessions!=snapshot.gpu_native_coarse_precision_sessions||
             value.gpu_host_scored_rows!=snapshot.gpu_host_scored_rows||
             value.gpu_selection_reason!=snapshot.gpu_selection_reason||
-            value.gpu_fallback_reason!=snapshot.gpu_fallback_reason||
+            value.gpu_available!=snapshot.gpu_available||value.gpu_unavailable_reason!=snapshot.gpu_unavailable_reason||
             value.gpu_native_coarse_lag_sessions!=snapshot.gpu_native_coarse_lag_sessions||
             value.transmit_trace.revision!=snapshot.transmit_trace.revision;
         snapshot=std::move(value);
-        if(settings.gpu_preferred&&!snapshot.gpu_fallback_reason.empty()) {
-            f(UiField::gpu).checked=false;
+        if(settings.gpu&&!snapshot.gpu_unavailable_reason.empty()) {
             settings.gpu=false;
-            settings.gpu_preferred=false;
             sync_launch_command();
         }
         apply_receptions(inbox,signals,snapshot);
@@ -1460,9 +1453,11 @@ struct Controller::Impl {
                 f(UiField::diagnostics).text=std::string(policy)+" · modeled DATA duration "+
                     planner_number(*snapshot.bit_seconds)+" s · configured calendar";
             }
-            if(!snapshot.gpu_fallback_reason.empty())
-                f(UiField::diagnostics).text="Preferred "+snapshot.gpu_fallback_reason+
-                    " · using CPU · "+f(UiField::diagnostics).text;
+        }
+        if(!snapshot.gpu_unavailable_reason.empty()) {
+            auto& diagnostics=f(UiField::diagnostics).text;
+            if(!diagnostics.empty())diagnostics+=" · ";
+            diagnostics+="GPU control disabled · "+snapshot.gpu_unavailable_reason+" · using CPU";
         }
         const auto& trace=snapshot.transmit_trace;
         std::string active_fhss;
@@ -2033,13 +2028,10 @@ void Controller::toggle(UiField field,bool value) {
         }
         else if(field==UiField::gpu) {
             const bool previous=p.settings.gpu;
-            const bool previously_preferred=p.settings.gpu_preferred;
-            p.f(field).checked=value;
-            p.settings.gpu_preferred=false;
+            p.settings.gpu=value;
             try {p.configure();}
             catch(const std::exception& error) {
-                p.settings.gpu_preferred=previously_preferred;
-                p.f(field).checked=previous;
+                p.settings.gpu=previous;
                 p.notice(error.what(),10);
             }
         }

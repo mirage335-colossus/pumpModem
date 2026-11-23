@@ -20,6 +20,8 @@ import time
 from runpod import RunPodClient, RunPodError
 
 IMAGE = 'runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404'
+MIN_CPU_VCPUS = 32
+MIN_CPU_MEMORY_GB = 128
 GPU_MODELS = ('RTX PRO 6000', 'RTX 5090', 'RTX 4090')
 RTX_PRO_6000 = 'NVIDIA RTX PRO 6000 Blackwell Server Edition'
 RTX_5090 = 'NVIDIA GeForce RTX 5090'
@@ -111,8 +113,12 @@ def gpu_count_ceiling(item, cloud):
     return limit if type(limit) is int and limit >= 0 else None
 
 
+def valid_cpu_count(count):
+    return type(count) is int and count >= MIN_CPU_VCPUS and (count & (count - 1)) == 0
+
+
 def catalog_offer(item, kind, cloud, count=1):
-    """Return the GUI label, create payload and stock for one supported SKU."""
+    """Return the GUI label, create payload, stock and hourly price for one SKU and count."""
     if not isinstance(item, dict) or not isinstance(item.get('id'), str) or not item['id']:
         return None
     identity = item['id']
@@ -136,25 +142,48 @@ def catalog_offer(item, kind, cloud, count=1):
         per_gpu = prices.get(cloud.lower())
         price = per_gpu * count if type(per_gpu) in (int, float) else None
     else:
-        if cloud != 'SECURE':
+        if cloud != 'SECURE' or not valid_cpu_count(count):
+            return None
+        bounds = item.get('vcpu')
+        if not isinstance(bounds, dict):
+            return None
+        minimum, maximum = bounds.get('min'), bounds.get('max')
+        memory_per_vcpu = item.get('ramGbPerVcpu')
+        if (type(minimum) is not int or type(maximum) is not int or not 1 <= minimum <= count <= maximum
+                or type(memory_per_vcpu) not in (int, float)):
             return None
         try:
-            bounds = item['vcpu']
-            memory = item['ramGbPerVcpu'] * 32
-            if not (bounds['min'] <= 32 <= bounds['max'] and math.isfinite(memory) and memory >= 128):
+            memory = memory_per_vcpu * count
+            if not math.isfinite(memory) or memory < MIN_CPU_MEMORY_GB:
                 return None
-        except (KeyError, TypeError, OverflowError):
+        except OverflowError:
             return None
-        compute = {'cpu': {'id': identity, 'vcpuCount': 32}, 'cloud': cloud}
-        label = f'CPU: {identity}, 32 vCPU / {memory:g} GB'
+        compute = {'cpu': {'id': identity, 'vcpuCount': count}, 'cloud': cloud}
+        label = f'CPU: {identity}, {count} vCPU / {memory:g} GB'
         per_vcpu = prices.get('securePerVcpu')
-        price = per_vcpu * 32 if type(per_vcpu) in (int, float) else None
+        price = per_vcpu * count if type(per_vcpu) in (int, float) else None
     label += f' · stock {stock.lower()}'
     if type(price) in (int, float) and math.isfinite(price) and price > 0:
         label += f' · ${price:g}/hr'
     else:
         label += ' · price unknown'
-    return label, compute, stock
+        price = None
+    return label, compute, stock, price
+
+
+def cpu_catalog_counts(cpus):
+    """Find the exact stock queries supported by the flavor ranges and memory."""
+    counts = set()
+    for item in cpus:
+        bounds = item.get('vcpu') if isinstance(item, dict) else None
+        maximum = bounds.get('max') if isinstance(bounds, dict) else None
+        if type(maximum) is not int or maximum < MIN_CPU_VCPUS:
+            continue
+        for power in range(MIN_CPU_VCPUS.bit_length() - 1, maximum.bit_length()):
+            count = 1 << power
+            if catalog_offer(item, 'cpu', 'SECURE', count):
+                counts.add(count)
+    return sorted(counts, reverse=True)
 
 
 def options(gpus, cpus, cloud='SECURE', *, multi_gpu=None):
@@ -164,35 +193,38 @@ def options(gpus, cpus, cloud='SECURE', *, multi_gpu=None):
             offer = catalog_offer(item, 'gpu', cloud, count)
             if offer and offer[2] != 'NONE' and (count == 1 or offer[2] != 'UNKNOWN'):
                 offers.append(offer)
-    offers.extend(offer for item in cpus if (offer := catalog_offer(item, 'cpu', cloud))
-                  and offer[2] != 'NONE')
+    offers.extend(offer for count, rows in cpus.items() for item in rows
+                  if (offer := catalog_offer(item, 'cpu', cloud, count)) and offer[2] != 'NONE')
 
     def priority(offer):
-        _, compute, stock = offer
-        gpu = compute.get('gpu', {})
-        identity = gpu.get('id', '')
-        preference = PREFERRED_GPUS.get((identity, gpu.get('count')), len(PREFERRED_GPUS))
+        _, compute, stock, price = offer
+        if 'cpu' in compute:
+            cpu = compute['cpu']
+            return stock == 'UNKNOWN', 0, -cpu['vcpuCount'], price if price is not None else math.inf, cpu['id']
+        gpu = compute['gpu']
+        identity = gpu['id']
+        preference = PREFERRED_GPUS.get((identity, gpu['count']), len(PREFERRED_GPUS))
         model = identity.upper()
         model_rank = next((i for i, name in enumerate(GPU_MODELS) if name in model), len(GPU_MODELS))
-        return stock == 'UNKNOWN', preference, not gpu, 'MIG' in model.split(), model_rank, 'MAX-Q' in model
+        return stock == 'UNKNOWN', 1, preference, 'MIG' in model.split(), model_rank, 'MAX-Q' in model
 
-    return [(label, compute) for label, compute, _ in sorted(offers, key=priority)]
+    return [(label, compute) for label, compute, _, _ in sorted(offers, key=priority)]
 
 
 def creation_quote(client, compute):
     """Recheck the exact selected SKU and tier before confirming a paid request."""
     cloud = compute['cloud']
     kind = 'gpu' if 'gpu' in compute else 'cpu'
-    count = compute['gpu']['count'] if kind == 'gpu' else 1
-    items = client.list_gpus(cloud, count=count) if kind == 'gpu' else client.list_cpus()
+    count = compute['gpu']['count'] if kind == 'gpu' else compute['cpu']['vcpuCount']
+    items = client.list_gpus(cloud, count=count) if kind == 'gpu' else client.list_cpus(count=count)
     matches = [item for item in items if isinstance(item, dict) and item.get('id') == compute[kind]['id']]
     offer = catalog_offer(matches[0], kind, cloud, count) if len(matches) == 1 else None
     if not offer or offer[1] != compute:
         raise ValueError('This compute option is no longer listed for the selected tier. Reload the catalog.')
-    label, _, stock = offer
+    label, _, stock, _ = offer
     if stock == 'NONE':
         raise ValueError(f'{label} on {cloud.title()} Cloud. Reload the catalog for another placement.')
-    if count > 1 and stock == 'UNKNOWN':
+    if kind == 'gpu' and count > 1 and stock == 'UNKNOWN':
         raise ValueError(f'RunPod could not confirm stock for {label}. Reload the catalog and try again.')
     return label
 
@@ -224,7 +256,12 @@ def load_catalog(client, cloud='SECURE'):
             return []
 
     gpus = fetch_catalog('GPU', lambda: client.list_gpus(cloud))
-    cpus = fetch_catalog('CPU', client.list_cpus) if cloud == 'SECURE' else []
+    cpus = {}
+    if cloud == 'SECURE':
+        # The unexpanded catalog describes supported sizes. Availability at
+        # one size cannot confirm stock at another.
+        for count in cpu_catalog_counts(fetch_catalog('CPU', client.list_cpus)):
+            cpus[count] = fetch_catalog(f'CPU {count} vCPU', lambda: client.list_cpus(count=count))
     multi_gpu = {}
     for count in (2, 3):
         # The hardware ceiling can skip impossible queries. Only availability
@@ -395,9 +432,9 @@ class Ownership:
                   'compute_kind': kind, 'compute_id': choice['id']}
         if kind == 'cpu':
             vcpu = choice.get('vcpuCount')
-            if type(vcpu) is not int or vcpu != 32:
-                raise ValueError('CPU choice must request 32 vCPUs')
-            record.update(requested_vcpu=vcpu, minimum_memory_gb=128)
+            if not valid_cpu_count(vcpu):
+                raise ValueError(f'CPU choice must request a power of two and at least {MIN_CPU_VCPUS} vCPUs')
+            record.update(requested_vcpu=vcpu, minimum_memory_gb=MIN_CPU_MEMORY_GB)
         else:
             count = choice.get('count', 1)
             if type(count) is not int or count < 1:
@@ -829,8 +866,8 @@ def simulation_gpu(record, pod):
         vcpu, memory = actual.get('vcpuCount'), actual.get('memory')
         if (type(vcpu) is not int or vcpu != record.get('requested_vcpu') or
                 type(memory) not in (int, float) or not math.isfinite(memory) or
-                memory < record.get('minimum_memory_gb', 128)):
-            raise ValueError('RunPod did not report the requested CPU count and at least 128 GB host memory')
+                memory < record.get('minimum_memory_gb', MIN_CPU_MEMORY_GB)):
+            raise ValueError(f'RunPod did not report the requested CPU count and at least {MIN_CPU_MEMORY_GB} GB host memory')
         return False
     raise ValueError('Pod compute type is unknown; this record cannot launch a simulation')
 
@@ -1391,6 +1428,8 @@ class App:
             count = r.get('requested_gpu_count')
             if type(count) is int and count > 1:
                 compute = f'{compute} x{count}'
+            elif type(vcpu := r.get('requested_vcpu')) is int:
+                compute = f'{compute}, {vcpu} vCPU'
             identity = r.get('id') or r.get('queue_id') or 'ID pending'
             self.list.insert('end', f'{status}  |  {compute}  |  {identity}  |  deadline {when}')
             if name is not None and r.get('name') == name:

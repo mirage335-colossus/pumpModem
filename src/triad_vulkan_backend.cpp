@@ -1407,6 +1407,12 @@ private:
 
 } // namespace
 
+void check_automatic_vulkan_receiver_backend(const VulkanReceiverOptions& options) {
+    // Use the actual device selection and logical-device check without
+    // constructing the optional OpenCL backend or any DSP workspaces.
+    const vulkan::Shared device(options, true);
+}
+
 std::vector<CoarseBulkPeaks> vulkan_select_peak_rows(const VulkanReceiverOptions& options,
     std::span<const double> scores, std::size_t arrivals, std::size_t separation) {
     require(arrivals && separation && !scores.empty() && scores.size() % arrivals == 0,

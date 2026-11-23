@@ -807,11 +807,14 @@ kernels. [Kernel emulation](../tests/triad_kernel_emulation/) ·
 
 Select Robust Modem and use the **GPU** checkbox immediately left of Developer.
 It defaults off on the desktop and on zLab CPU allocations, and persists as
-`--gpu yes|no`. A zLab GPU allocation starts with GPU preferred and falls back
-to CPU if no GPU can initialize. Receiver diagnostics show the reason for that
-fallback. Clear the checkbox between runs to select the CPU in the same
-application. Explicit GPU initialization failures appear in the receiver status,
-where the control remains available to select CPU.
+`--gpu yes|no`. The session checks device initialization before enabling the
+checkbox. A zLab GPU allocation starts with GPU preferred. When initialization
+finds no usable GPU, ordinary sessions run on CPU with the checkbox off and
+disabled. Receiver diagnostics show the reason. The session retains this result
+across settings changes, including settings loaded with `--gpu yes`. Start a
+new session after changing the device or driver environment. A strict worker
+started with `--require-gpu` reports an initialization failure.
+Clear an enabled GPU checkbox between runs to select CPU in the same application.
 The generic selector tries usable CUDA first, then compatible physical Vulkan.
 Search arithmetic Default selects qualified automatic CPU/GPU routing, including
 the scoped Vulkan GUI native chirp-Z crossover; FP32 minimum selects FP32 CUDA

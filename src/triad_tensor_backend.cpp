@@ -3063,18 +3063,20 @@ std::shared_ptr<receiver_detail::ReceiverBulkBackend> make_tensor_receiver_backe
     }
 }
 
-std::shared_ptr<receiver_detail::ReceiverBulkBackend> make_automatic_cuda_receiver_backend(TensorPrecision precision) {
 #if DATAPUMP_TRIAD_TENSOR_CUDA
+namespace {
+struct CudaCandidate {
+    unsigned index;
+    std::uint64_t parallel_clock;
+    std::size_t memory;
+};
+
+std::vector<CudaCandidate> automatic_cuda_candidates() {
     int count = 0;
     if (const auto status = cudaGetDeviceCount(&count); status != cudaSuccess)
         throw TensorBackendUnavailable("Robust CUDA device discovery failed: " + std::string(cudaGetErrorString(status)));
 
-    struct Candidate {
-        unsigned index;
-        std::uint64_t parallel_clock;
-        std::size_t memory;
-    };
-    std::vector<Candidate> candidates;
+    std::vector<CudaCandidate> candidates;
     for (int index = 0; index < count && index <= std::numeric_limits<c10::DeviceIndex>::max(); ++index) {
         cudaDeviceProp properties{};
         if (cudaGetDeviceProperties(&properties, index) != cudaSuccess || properties.integrated ||
@@ -3085,13 +3087,45 @@ std::shared_ptr<receiver_detail::ReceiverBulkBackend> make_automatic_cuda_receiv
             static_cast<std::uint64_t>(properties.multiProcessorCount) * properties.clockRate,
             properties.totalGlobalMem});
     }
-    std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+    std::stable_sort(candidates.begin(), candidates.end(), [](const CudaCandidate& a, const CudaCandidate& b) {
         if (a.parallel_clock != b.parallel_clock) return a.parallel_clock > b.parallel_clock;
         return a.memory > b.memory;
     });
+    return candidates;
+}
+
+[[noreturn]] void throw_cuda_unavailable(const std::string& reason) {
+    if (!reason.empty()) throw TensorBackendUnavailable("Robust CUDA initialization failed: " + reason);
+    throw TensorBackendUnavailable("No compatible discrete CUDA device is available");
+}
+} // namespace
+
+namespace receiver_detail {
+void check_automatic_cuda_receiver_backend() {
+    std::string reason;
+    for (const auto& candidate : automatic_cuda_candidates()) {
+        try {
+            const at::Device device(at::kCUDA, static_cast<c10::DeviceIndex>(candidate.index));
+            const c10::cuda::CUDAGuard guard(device);
+            std::size_t free = 0, total = 0;
+            // Requires a working context, without constructing an Arena or
+            // changing ATen's allocator and FFT cache limits.
+            C10_CUDA_CHECK(cudaMemGetInfo(&free, &total));
+            return;
+        } catch (const c10::Error& error) {
+            reason = std::string(error.what_without_backtrace()).substr(0, 512);
+        }
+    }
+    throw_cuda_unavailable(reason);
+}
+} // namespace receiver_detail
+#endif
+
+std::shared_ptr<receiver_detail::ReceiverBulkBackend> make_automatic_cuda_receiver_backend(TensorPrecision precision) {
+#if DATAPUMP_TRIAD_TENSOR_CUDA
     std::string reason;
     std::exception_ptr workspace_failure;
-    for (const auto& candidate : candidates) {
+    for (const auto& candidate : automatic_cuda_candidates()) {
         try {
             return std::make_shared<receiver_detail::TensorBackend>(
                 TensorReceiverOptions{TensorDevice::cuda, candidate.index, 0, precision, TensorCoarseMath::fft}, true);
@@ -3106,8 +3140,7 @@ std::shared_ptr<receiver_detail::ReceiverBulkBackend> make_automatic_cuda_receiv
         }
     }
     if (workspace_failure) std::rethrow_exception(workspace_failure);
-    if (!reason.empty()) throw TensorBackendUnavailable("Robust CUDA initialization failed: " + reason);
-    throw TensorBackendUnavailable("No compatible discrete CUDA device is available");
+    throw_cuda_unavailable(reason);
 #else
     (void)precision;
     throw TensorBackendUnavailable("Robust CUDA requested with a CPU-only LibTorch backend");

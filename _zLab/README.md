@@ -71,16 +71,26 @@ termination if the exact pod reappears. Closing
 the lab waits briefly for cleanup. If a pod or connection is still pending,
 the window offers to close while keeping the saved cleanup record.
 
-Secure Cloud is the default. The startup catalog tries RTX PRO 6000 Blackwell
-Server Edition x2 first, followed by the same GPU x1 and desktop RTX 5090
-x3, x2, then x1. Other supported single-GPU models
-and Secure Cloud CPU types with 32 vCPUs and at least 128 GB of RAM are also
-available. The hourly compute list price covers the entire selected allocation.
+Secure Cloud is the default. zLab prefers CPU pods with reported stock, at
+least 32 vCPUs, and at least 128 GB of RAM. It checks the supported power-of-two
+sizes separately, selects the largest available vCPU count, and uses the lower
+hourly price to break ties. The catalog reports vCPU allocations and flavor
+metadata. Actual processor speed depends on the host and workload. The hourly
+compute list price covers the entire selected allocation.
+
+This default follows the operator's observation that GPU acceleration usually
+added little value for the cost in their zLab experiments with a 32-core CPU.
+GPU pods remain selectable, including the RTX PRO 6000 Blackwell Server Edition
+and RTX 5090. The standard worker includes GPU support. The
+[matched severe-HF trials](../docs/triad-performance.md#choosing-compute-for-hf-sensitivity-trials)
+document larger GPU gains for specific receiver paths.
+
 With a saved key, startup selects the available compute before handling older
 pod records.
 The arrow to the right of the dropdown refreshes stock and prices. Refresh
 keeps a manual selection while it is available. If that selection disappears,
-choose another option. Multi-GPU options require stock for the exact count.
+choose another option. Choices with confirmed stock precede choices with
+unknown stock. Multi-GPU options require stock for the exact count.
 The receiver currently uses one GPU per session on a multi-GPU pod.
 
 **Start simulation** checks the selected hardware, count and tier again when creating a pod. If stock
@@ -193,11 +203,11 @@ NVFP4 template projection at every worker allocation. CUDA discovery and Vulkan'
 CUDA import extensions fail with the socket filter active on that driver. See the
 [matched runtime checks](../docs/validation.md#blackwell-nvfp4-fine-projection--19-november-2026).
 CPU allocations start with **GPU** off. GPU allocations start with GPU preferred
-through `--prefer-gpu`. If neither CUDA nor a physical
-Vulkan device can initialize, the worker clears **GPU**, starts on the CPU, and
-shows the reason in receiver diagnostics. Selecting **GPU** explicitly in the
-GUI requires a usable device. Use the relay's `--require-gpu` option for strict
-GPU qualification.
+through `--prefer-gpu`. The worker checks runtime availability before enabling
+**GPU**. If neither CUDA nor a physical Vulkan device can initialize, **GPU**
+stays off and disabled and the worker runs on CPU. Receiver diagnostics show
+the reason. The result lasts for the worker session. Use the relay's
+`--require-gpu` option for strict GPU qualification.
 Check the receiver's backend, scored rows and stage counters to see where GPU work ran. Reopening a managed deployment
 checks the source, build settings and worker hash before reuse. An interrupted
 matching build can resume. A different source or an unmanaged directory requires
@@ -420,7 +430,7 @@ own receiver and memory. An individual ordered stream uses the resources on
 its pod. Reuse an active compatible pod across a bounded batch.
 
 - The controller matches **RTX PRO 6000**, **RTX 5090**, **RTX 4090** and
-  **32 vCPU / at least 128 GB RAM** CPU types against RunPod's catalog. Verify
+  CPU types with **at least 32 vCPUs and 128 GB RAM** against RunPod's catalog. Verify
   the exact GPU edition and full-device allocation. The full Blackwell Server Edition was the measured
   development device. Record what the pod actually exposes, including full
   device or partition, VRAM, host memory limit, effective CPU allocation and
@@ -478,8 +488,9 @@ The current REST API uses bearer authorization at `https://api.runpod.io/v2`.
 The catalog and pod calls use the `catalog:read`, `pods:read` and `pods:write`
 scopes. Resolve hardware in `/catalog/gpus` or `/catalog/cpus`. Use
 `POST /pods` with a template/image and either `gpu: {id, count}` or
-`cpu: {id, vcpuCount: 32}`. For the CPU choice, select a type whose range
-includes 32 and whose RAM per vCPU yields 128 GB. For a GPU, distinguish
+`cpu: {id, vcpuCount}`. For the CPU choice, request a supported power-of-two
+count of at least 32 with enough RAM per vCPU to yield at least 128 GB. Check
+POD availability at the exact count. For a GPU, distinguish
 catalog VRAM from host RAM placement. Poll the individual `GET /pods/{id}`
 until running and read `ssh.direct` for the host, username and mapped port.
 Full SSH requires the image to run an SSH server, accept the public key and

@@ -13,7 +13,7 @@ import time
 import types
 import unittest
 from unittest.mock import patch
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import app as lab
 from runpod import RunPodClient, RunPodError
@@ -31,7 +31,9 @@ class FakeProvider:
                       'price': {'secure': 1.25, 'community': 0.75}}]
         self.multi_gpu = {}
         self.cpus = [{'id': 'test-cpu', 'vcpu': {'min': 2, 'max': 32}, 'ramGbPerVcpu': 4}]
+        self.cpus_by_count = {}
         self.calls = []
+        self.cpu_counts = []
         self.gpu_tiers = []
         self.gpu_counts = []
         self.pods = []
@@ -50,11 +52,13 @@ class FakeProvider:
             raise rows
         return rows
 
-    def list_cpus(self):
+    def list_cpus(self, count=None):
         self.calls.append('cpus')
-        if isinstance(self.cpus, Exception):
-            raise self.cpus
-        return self.cpus
+        self.cpu_counts.append(count)
+        rows = self.cpus_by_count.get(count, self.cpus)
+        if isinstance(rows, Exception):
+            raise rows
+        return rows
 
     def create_pod(self, payload):
         self.calls.append('create')
@@ -413,7 +417,7 @@ class TkControllerIntegration(unittest.TestCase):
             ask.assert_not_called()
         self.assertIn('RTX 5090 · stock none', self.controller.status.get())
         self.assertIn('Secure Cloud', self.controller.status.get())
-        self.assertEqual(self.provider.calls, ['gpus', 'cpus', 'gpus'])
+        self.assertEqual(self.provider.calls, ['gpus', 'cpus', 'cpus', 'gpus'])
         self.assertEqual(self.provider.gpu_tiers, ['SECURE', 'SECURE'])
         self.assertEqual(self.controller.state.read(), [])
         self.load_catalog()
@@ -437,9 +441,10 @@ class TkControllerIntegration(unittest.TestCase):
         self.assertFalse(self.controller.choices)
         self.assertFalse(self.controller.compute.get())
         self.button('Start simulation').invoke()
-        self.assertEqual(self.provider.calls, ['gpus', 'cpus'])
+        self.assertEqual(self.provider.calls, ['gpus', 'cpus', 'cpus'])
         self.execute(lambda: None, lambda: not self.controller.busy and bool(self.controller.choices))
-        self.assertEqual(self.provider.calls, ['gpus', 'cpus', 'gpus'])
+        self.assertEqual(self.provider.calls, ['gpus', 'cpus', 'cpus', 'gpus'])
+        self.assertEqual(self.provider.cpu_counts, [None, 32])
         self.assertFalse(any('CPU:' in label for label in self.controller.dropdown['values']))
         self.assertIn('RTX 4090', self.controller.compute.get())
         self.provider.gpus[0].update(availability='MEDIUM', price={'community': 0.81})
@@ -459,6 +464,36 @@ class TkControllerIntegration(unittest.TestCase):
         self.assertEqual(self.provider.created[0]['gpu'], {'id': 'NVIDIA GeForce RTX 4090', 'count': 1})
         self.assertEqual(self.provider.created[0]['cloud'], 'COMMUNITY')
         self.assertEqual(self.controller.state.read()[0]['cloud'], 'COMMUNITY')
+
+    def test_default_cpu_selection_requotes_and_creates_the_largest_count(self):
+        cpu = {'id': 'large-cpu', 'vcpu': {'min': 2, 'max': 64}, 'ramGbPerVcpu': 4,
+               'price': {'securePerVcpu': 0.0625}}
+        self.provider.cpus = [cpu]
+        self.provider.cpus_by_count = {32: [dict(cpu, availability='HIGH')],
+                                       64: [dict(cpu, availability='LOW')]}
+        self.load_catalog()
+        self.assertIsNone(self.provider.cpu_counts[0])
+        self.assertCountEqual(self.provider.cpu_counts[1:], [32, 64])
+        cpu_label = self.controller.compute.get()
+        self.assertIn('64 vCPU / 256 GB · stock low · $4/hr', cpu_label)
+        self.assertTrue(any('32 vCPU' in label for label in self.controller.dropdown['values']))
+        gpu_label = next(label for label in self.controller.dropdown['values'] if 'RTX 4090' in label)
+        self.controller.dropdown.set(gpu_label)
+        self.controller.compute_selected()
+        self.load_catalog()
+        self.assertEqual(self.controller.compute.get(), gpu_label)
+
+        self.controller.dropdown.set(cpu_label)
+        self.controller.compute_selected()
+        self.provider.cpus_by_count[64][0]['price'] = {'securePerVcpu': 0.078125}
+        with patch.object(messagebox, 'askyesno', return_value=True) as ask:
+            self.execute(self.button('Start simulation').invoke,
+                         lambda: not self.controller.busy and self.controller.setting_up)
+        self.assertEqual(self.provider.cpu_counts[-1], 64)
+        self.assertIn('64 vCPU / 256 GB · stock low · $5/hr on Secure Cloud', ask.call_args.args[1])
+        self.assertEqual(len(self.provider.created), 1)
+        self.assertEqual(self.provider.created[0]['cpu'], {'id': 'large-cpu', 'vcpuCount': 64})
+        self.assertEqual(self.controller.state.read()[0]['requested_vcpu'], 64)
 
     def test_refresh_updates_default_until_user_selects_and_creates_exact_count(self):
         pro = {'id': lab.RTX_PRO_6000, 'availability': 'HIGH', 'price': {'secure': 2.09},
@@ -572,7 +607,11 @@ class TkControllerIntegration(unittest.TestCase):
         with patch.object(lab, 'RunPodClient', return_value=client):
             self.execute(self.button('Refresh compute').invoke,
                          lambda: not self.controller.busy and 'Catalog' in self.controller.status.get())
-        self.assertEqual([urlsplit(row[1]).path.rsplit('/', 1)[-1] for row in requests], ['gpus', 'cpus'])
+        self.assertEqual([urlsplit(row[1]).path.rsplit('/', 1)[-1] for row in requests],
+                         ['gpus', 'cpus', 'cpus'])
+        self.assertFalse(urlsplit(requests[1][1]).query)
+        self.assertEqual(parse_qs(urlsplit(requests[2][1]).query),
+                         {'include': ['AVAILABILITY'], 'product': ['POD'], 'vcpuCount': ['32']})
         self.assertIn('CPU:', self.controller.compute.get())
         self.assertIn('GPU catalog', self.controller.status.get())
         self.assertIn('403', self.controller.status.get())

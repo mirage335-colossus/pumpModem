@@ -45,7 +45,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::header) {control.font_size=22;control.scope=ScreenScope::shared;}
     if(slot==Slot::fast_mode) {control.scope=ScreenScope::shared;control.help="Choose Fast Modem, Robust Modem or Legacy Modem. Each mode keeps its own settings.";}
     if(slot==Slot::gpu||slot==Slot::developer_mode||slot==Slot::shellcode_mode)control.scope=ScreenScope::shared;
-    if(slot==Slot::gpu)control.help="Use a compatible GPU for Robust reception and simulation. Clear this option to run on the CPU. Driver or device errors appear in receiver status.";
+    if(slot==Slot::gpu)control.help="Use a compatible GPU for Robust reception and simulation. The control is enabled after a GPU initializes. Device failures appear in receiver diagnostics.";
     if(slot==Slot::shellcode_mode) {control.developer_only=true;control.help="Allow printable English ASCII in received text. Newlines are allowed in both modes; other controls and non-ASCII bytes remain underscores. Turning Developer mode off resets this exception.";}
     if(slot==Slot::developer_mode)control.help="Show advanced controls and inspection tabs. Hiding them keeps their current settings, including command-line overrides.";
     if(slot==Slot::helper_power)control.help="Requested Helper transmit power in watts, separate from DATA power. Zero disables Helper. The configured ratio limit can reduce its effective power; this setting does not adjust radio hardware.";

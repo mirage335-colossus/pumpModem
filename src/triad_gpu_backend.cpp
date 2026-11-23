@@ -4,6 +4,11 @@
 #include <utility>
 
 namespace datapump::triad::v3 {
+namespace receiver_detail {
+void check_automatic_cuda_receiver_backend();
+void check_automatic_vulkan_receiver_backend(const VulkanReceiverOptions&);
+}
+
 namespace {
 
 // Preserve backend ownership and stage policies while exposing the application
@@ -100,10 +105,16 @@ bool gpu_receiver_backend_available() noexcept {
 #endif
 }
 
-std::shared_ptr<receiver_detail::ReceiverBulkBackend> make_gpu_receiver_backend(const GpuReceiverOptions& options) {
+namespace {
+std::shared_ptr<receiver_detail::ReceiverBulkBackend> select_gpu_receiver_backend(
+        [[maybe_unused]] const GpuReceiverOptions& options, [[maybe_unused]] bool check_only) {
     std::string unavailable;
 #if defined(DATAPUMP_HAVE_TRIAD_CUDA)
     try {
+        if (check_only) {
+            receiver_detail::check_automatic_cuda_receiver_backend();
+            return {};
+        }
         const auto precision = options.fp32_minimum ? TensorPrecision::fp32_minimum : TensorPrecision::automatic;
         return std::make_shared<SelectedGpu>(make_automatic_cuda_receiver_backend(precision),
             "automatic CUDA receiver");
@@ -117,6 +128,10 @@ std::shared_ptr<receiver_detail::ReceiverBulkBackend> make_gpu_receiver_backend(
         vulkan.coarse_precision = options.fp32_minimum ? VulkanCoarsePrecision::fp32 : VulkanCoarsePrecision::automatic;
         vulkan.prefer_native_exact_chirp_z = !options.fp32_minimum;
         vulkan.opencl_coarse_one_ray = options.opencl_coarse_one_ray;
+        if (check_only) {
+            receiver_detail::check_automatic_vulkan_receiver_backend(vulkan);
+            return {};
+        }
         auto backend = make_automatic_vulkan_receiver_backend(vulkan);
         const auto selected = backend->fine_maps_on_host()
             ? "automatic Vulkan receiver with OpenCL NVFP4 available"
@@ -128,10 +143,17 @@ std::shared_ptr<receiver_detail::ReceiverBulkBackend> make_gpu_receiver_backend(
         if (!unavailable.empty()) unavailable += "; ";
         unavailable += std::string(error.what()).substr(0, 512);
     }
-#else
-    (void)options;
 #endif
     if (unavailable.empty()) unavailable = "this build has no native CUDA or Vulkan receiver backend";
     throw GpuBackendUnavailable("GPU reception unavailable: " + unavailable);
+}
+} // namespace
+
+void check_gpu_receiver_backend() {
+    (void)select_gpu_receiver_backend({}, true);
+}
+
+std::shared_ptr<receiver_detail::ReceiverBulkBackend> make_gpu_receiver_backend(const GpuReceiverOptions& options) {
+    return select_gpu_receiver_backend(options, false);
 }
 } // namespace datapump::triad::v3

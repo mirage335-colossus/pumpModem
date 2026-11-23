@@ -58,8 +58,6 @@ try:
     assert kind == 101
     snapshot = json.loads(value)
     assert isinstance(snapshot, dict)
-    gpu_capable = any(item.get("label") == "GPU" and item.get("kind") == "toggle"
-                      and item.get("enabled") for item in snapshot["controls"])
     # Fragments are accepted without losing the framing boundary.
     ping = frame(15, struct.pack("<Qd", 7, 123.5))
     for part in [ping[:1], ping[1:7], ping[7:13], ping[13:]]:
@@ -98,88 +96,146 @@ def string(value):
     return struct.pack("<I", len(data)) + data
 
 
-if gpu_capable:
-    def wait_for_gpu_probe(process, predicate):
-        end = time.monotonic() + 15
-        while time.monotonic() < end:
-            kind, payload = read_frame(process, end - time.monotonic())
-            assert kind != 103, payload
-            if kind == 101:
-                state = json.loads(payload)
-                if predicate(state):
-                    return state
-        raise AssertionError("GPU selection deadline")
+def wait_for_gpu_state(process, predicate):
+    end = time.monotonic() + 15
+    while time.monotonic() < end:
+        kind, payload = read_frame(process, end - time.monotonic())
+        assert kind != 103, payload
+        if kind == 101:
+            state = json.loads(payload)
+            if predicate(state):
+                return state
+    raise AssertionError("GPU selection deadline")
 
-    def label_text(state):
-        return [item.get("text", "") for item in state["controls"] if item.get("kind") == "label"]
 
-    def simulation_ready(state):
-        return "Robust simulation ready" in label_text(state)
+def label_text(state):
+    return [item.get("text", "") for item in state["controls"] if item.get("kind") == "label"]
 
-    def gpu_unavailable(state):
-        return any("GPU reception unavailable" in value for value in label_text(state))
 
-    def gpu_toggle(state):
-        toggle = next(item for item in state["controls"] if item["label"] == "GPU")
-        assert toggle["kind"] == "toggle"
-        return toggle
+def simulation_ready(state):
+    return "Robust simulation ready" in label_text(state)
 
-    def select_gpu(process, state, checked):
-        sequence = int(state["ack"]) + 1
-        event = (struct.pack("<IQQQIII", 1, int(state["generation"]), sequence,
-                             int(gpu_toggle(state)["id"]), 3, int(checked), 0)
-                 + string("") + string(""))
-        process.stdin.write(frame(2, event))
-        return sequence
 
-    # A broken loader at the search path's first entry exercises a loader
-    # failure even on a host with a working Vulkan driver and GPU.
-    with tempfile.TemporaryDirectory(prefix="datapump-vulkan-unavailable-") as directory:
-        (Path(directory) / "libvulkan.so.1").touch()
-        environment = os.environ.copy()
-        previous = environment.get("LD_LIBRARY_PATH")
-        environment["LD_LIBRARY_PATH"] = f"{directory}:{previous}" if previous else directory
-        environment["CUDA_VISIBLE_DEVICES"] = ""
-        for flag in ("--prefer-gpu", "--require-gpu"):
-            process = subprocess.Popen([worker, "--simulation-only", flag],
-                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                       stderr=subprocess.PIPE, bufsize=0, env=environment)
-            try:
-                startup = wait_for_gpu_probe(process, lambda state: simulation_ready(state) or gpu_unavailable(state))
-                toggle = gpu_toggle(startup)
-                if flag == "--prefer-gpu":
-                    assert simulation_ready(startup), label_text(startup)
-                    assert gpu_unavailable(startup)
-                    assert any("using CPU" in value for value in label_text(startup))
-                    assert toggle["enabled"] and not toggle["checked"]
+def gpu_unavailable(state):
+    return next((text for text in label_text(state) if "GPU reception unavailable" in text), "")
 
-                    sequence = select_gpu(process, startup, True)
-                    unavailable = wait_for_gpu_probe(process, lambda state: int(state["ack"]) >= sequence
-                                                     and gpu_unavailable(state) and not simulation_ready(state))
-                    toggle = gpu_toggle(unavailable)
-                    assert toggle["enabled"] and toggle["checked"]
-                    assert not any("using CPU" in value for value in label_text(unavailable))
 
-                    sequence = select_gpu(process, unavailable, False)
-                    cpu = wait_for_gpu_probe(process, lambda state: int(state["ack"]) >= sequence
-                                             and simulation_ready(state))
-                    assert not gpu_toggle(cpu)["checked"]
-                    assert not gpu_unavailable(cpu)
-                else:
-                    assert gpu_unavailable(startup) and not simulation_ready(startup), label_text(startup)
-                    assert not toggle["enabled"] and toggle["checked"]
+def gpu_toggle(state):
+    toggle = next(item for item in state["controls"] if item["label"] == "GPU")
+    assert toggle["kind"] == "toggle"
+    return toggle
 
-                process.stdin.close()
-                while process.poll() is None:
-                    try:
-                        read_frame(process)
-                    except AssertionError:
+
+def send_gpu_test_event(process, state, kind, target, value="", checked=False):
+    sequence = int(state["ack"]) + 1
+    event = (struct.pack("<IQQQIII", 1, int(state["generation"]), sequence,
+                         int(target), kind, int(checked), 0)
+             + string(value) + string(""))
+    process.stdin.write(frame(2, event))
+    return sequence
+
+
+def update_gpu_test_state(process, state, kind, target, value=""):
+    sequence = send_gpu_test_event(process, state, kind, target, value)
+    return wait_for_gpu_state(process, lambda updated: int(updated["ack"]) >= sequence)
+
+
+def document_nodes(node):
+    yield node
+    for child in node["children"]:
+        yield from document_nodes(child)
+
+
+# A broken loader at the search path's first entry exercises a loader
+# failure even on a host with a working Vulkan driver and GPU.
+with tempfile.TemporaryDirectory(prefix="datapump-vulkan-unavailable-") as directory:
+    (Path(directory) / "libvulkan.so.1").touch()
+    environment = os.environ.copy()
+    previous = environment.get("LD_LIBRARY_PATH")
+    environment["LD_LIBRARY_PATH"] = f"{directory}:{previous}" if previous else directory
+    environment["CUDA_VISIBLE_DEVICES"] = ""
+    no_compiled_gpu = "this build has no native CUDA or Vulkan receiver backend"
+    gpu_compiled = None
+    for flag in (None, "--prefer-gpu", "--require-gpu"):
+        arguments = [worker, "--simulation-only"]
+        if flag is not None:
+            arguments.append(flag)
+        process = subprocess.Popen(arguments,
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, bufsize=0, env=environment)
+        try:
+            if flag == "--require-gpu" and not gpu_compiled:
+                output, error = process.communicate(timeout=10)
+                assert process.returncode != 0 and not output, (output, error)
+                assert b"GPU reception is unavailable in this build" in error, error
+                continue
+
+            startup = wait_for_gpu_state(process, gpu_unavailable)
+            diagnostic = gpu_unavailable(startup)
+            if flag == "--require-gpu":
+                assert diagnostic.startswith("GPU reception unavailable:"), diagnostic
+                assert not simulation_ready(startup), label_text(startup)
+                assert not gpu_toggle(startup)["enabled"] and gpu_toggle(startup)["checked"]
+            else:
+                assert "using CPU" in diagnostic and not diagnostic.startswith("GPU reception unavailable"), diagnostic
+                gpu_compiled = no_compiled_gpu not in diagnostic
+                if not simulation_ready(startup):
+                    startup = wait_for_gpu_state(process, simulation_ready)
+                assert not gpu_toggle(startup)["enabled"] and not gpu_toggle(startup)["checked"]
+
+            if flag is None:
+                # The saved setting goes through the same planner load action
+                # as an ordinary browser session.
+                planner = next(tab for tab in startup["tabs"] if tab["label"] == "Link planner")
+                state = update_gpu_test_state(process, startup, 11, planner["id"])
+                nodes = list(document_nodes(state["document"]))
+                command = next(node["control"] for node in nodes
+                               if (node.get("control") or {}).get("label") == "Launch command")
+                state = update_gpu_test_state(process, state, 1, command["id"], "--gpu yes")
+                load = next(node for node in document_nodes(state["document"])
+                            if node["kind"] == "action" and node["text"] == "Load")
+                state = update_gpu_test_state(process, state, 4, load["id"])
+                command = next(node["control"] for node in document_nodes(state["document"])
+                               if (node.get("control") or {}).get("label") == "Launch command")
+                assert "--gpu no" in command["text"], command["text"]
+                console = next(tab for tab in state["tabs"] if tab["label"] == "Console")
+                state = update_gpu_test_state(process, state, 11, console["id"])
+                assert not gpu_toggle(state)["enabled"] and not gpu_toggle(state)["checked"]
+                assert "using CPU" in gpu_unavailable(state), label_text(state)
+
+                # A disabled GPU target rejects the event at the protocol
+                # boundary. A draft can still be transmitted on the CPU route.
+                sequence = send_gpu_test_event(process, state, 3, gpu_toggle(state)["id"], checked=True)
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline:
+                    kind, payload = read_frame(process, deadline - time.monotonic())
+                    if kind == 103:
+                        assert payload == string("Web control is unavailable"), payload
                         break
-                assert process.wait(timeout=10) == 0, process.stderr.read()
-            finally:
-                if process.poll() is None:
-                    process.kill()
-                    process.wait()
+                else:
+                    raise AssertionError("Disabled GPU selection was not rejected")
+                state = wait_for_gpu_state(process, lambda updated: int(updated["ack"]) >= sequence)
+                message = next(item for item in state["controls"] if item["kind"] == "text"
+                               and item.get("byteLimit") == 4 * 1024 * 1024)
+                state = update_gpu_test_state(process, state, 1, message["id"], "CPU draft")
+                def can_transmit(updated):
+                    return any(item["label"] == "Transmit" and item["enabled"]
+                               for item in updated["controls"])
+                if not can_transmit(state):
+                    state = wait_for_gpu_state(process, can_transmit)
+                assert not gpu_toggle(state)["enabled"] and not gpu_toggle(state)["checked"]
+
+            process.stdin.close()
+            while process.poll() is None:
+                try:
+                    read_frame(process)
+                except AssertionError:
+                    break
+            assert process.wait(timeout=10) == 0, process.stderr.read()
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
 
 with tempfile.TemporaryDirectory(prefix="datapump-file-contract-") as directory:
     fixture = bytes([0, 1, 2, 3, 255, 192, 128, 68, 97, 116, 97, 80, 117, 109, 112, 10])

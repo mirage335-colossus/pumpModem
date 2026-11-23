@@ -452,12 +452,16 @@ struct SimulationComparison {
 } // namespace
 
 struct Session::Impl {
+    const GpuPolicy gpu_policy;
     mutable execution::Mutex mutex;
     execution::StopCondition changed;
     execution::Task manager;
     std::stop_source generation_stop, tx_stop;
     Settings settings;
     Snapshot current;
+    // Retain the runtime discovery result across settings generations.
+    bool gpu_available = false;
+    std::string gpu_unavailable_reason;
     std::vector<SignalUpdate> signal_events;
     std::vector<transfer::Received> received_events;
     std::shared_ptr<const Profile> profile;
@@ -485,6 +489,8 @@ struct Session::Impl {
         bool cutoff_accepted = false, exact_input_drained = false, physical_complete = false;
     } finite;
 
+    explicit Impl(GpuPolicy policy) : gpu_policy(policy) {}
+
     ~Impl() {
         manager.request_stop();
         generation_stop.request_stop();
@@ -499,6 +505,12 @@ struct Session::Impl {
         if (owner != generation || stop.stop_requested() || stopping || suspended) return false;
         update(current);
         return true;
+    }
+
+    void record_gpu_availability(std::string reason = {}) {
+        std::lock_guard lock(mutex);
+        gpu_available = reason.empty();
+        gpu_unavailable_reason = std::move(reason);
     }
 
     std::uint64_t new_plot_segment() {
@@ -1512,7 +1524,6 @@ struct Session::Impl {
                 current.gpu_backend.clear();
                 current.gpu_device_uuid.reset();
                 current.gpu_selection_reason.clear();
-                current.gpu_fallback_reason.clear();
                 current.gpu_score_rows = 0;
                 current.gpu_precision.clear();
                 current.gpu_fp32_score_rows = 0;
@@ -1596,19 +1607,32 @@ struct Session::Impl {
             };
 
             try {
-                if (const auto reason = basic_transmit_reason(s)) throw Error(*reason);
-                std::string gpu_fallback_reason;
-                if (s.gpu) {
+                const auto blocked = basic_transmit_reason(s);
+                const bool interactive_gpu = gpu_policy == GpuPolicy::interactive;
+                if (interactive_gpu && (!s.gpu || blocked) && !gpu_available && gpu_unavailable_reason.empty()) {
+                    try {
+                        check_gpu_receiver_backend();
+                        record_gpu_availability();
+                    } catch (const GpuBackendUnavailable& error) {
+                        record_gpu_availability(error.what());
+                    }
+                }
+                if (s.gpu && !blocked && (!interactive_gpu || gpu_unavailable_reason.empty())) {
                     const bool fp32_minimum = s.transfer.modem.search_arithmetic == modem::SearchArithmetic::fp32;
                     try {
                         gpu_backend = make_gpu_receiver_backend(GpuReceiverOptions{fp32_minimum});
+                        if (interactive_gpu) record_gpu_availability();
                     } catch (const GpuBackendUnavailable& error) {
-                        if (!s.gpu_preferred) throw;
-                        gpu_fallback_reason = error.what();
-                        s.gpu = false;
-                        s.gpu_preferred = false;
+                        if (!interactive_gpu) throw;
+                        record_gpu_availability(error.what());
                     }
                 }
+                if (interactive_gpu && s.gpu && !gpu_unavailable_reason.empty()) {
+                    s.gpu = false;
+                    std::lock_guard lock(mutex);
+                    if (owner == generation) settings.gpu = false;
+                }
+                if (blocked) throw Error(*blocked);
                 const auto gpu_initial_receipt = gpu_backend ? gpu_backend->status_receipt() : receiver_detail::BulkReceipt{};
                 const auto gpu_device = gpu_backend ? gpu_initial_receipt.device_name : std::string{};
                 const auto gpu_backend_name = gpu_backend ? gpu_initial_receipt.device : std::string{};
@@ -1633,11 +1657,6 @@ struct Session::Impl {
                     current.gpu_backend = gpu_backend_name;
                     current.gpu_device_uuid = gpu_initial_receipt.device_uuid;
                     current.gpu_selection_reason = gpu_selection_reason;
-                    current.gpu_fallback_reason = gpu_fallback_reason;
-                    if (!gpu_fallback_reason.empty()) {
-                        settings.gpu = false;
-                        settings.gpu_preferred = false;
-                    }
                     current.gpu_native_lag_preference_supported = native_lag_preference;
                     current.bit_seconds = calendar.geometry().bit_seconds;
                     current.slot_stride_seconds = static_cast<double>(calendar.calendar().distance(
@@ -1877,7 +1896,8 @@ struct Session::Impl {
     }
 };
 
-Session::Session() : impl_(std::make_unique<Impl>()) {}
+Session::Session() : Session(GpuPolicy::explicit_selection) {}
+Session::Session(GpuPolicy gpu_policy) : impl_(std::make_unique<Impl>(gpu_policy)) {}
 Session::~Session() = default;
 
 void Session::start(const Settings& value, bool active) {
@@ -2118,6 +2138,8 @@ Snapshot Session::snapshot() {
             }
         }
         result = p.current;
+        result.gpu_available = p.gpu_available;
+        result.gpu_unavailable_reason = p.gpu_unavailable_reason;
         if (result.simulation_progress && p.simulation_started)
             result.simulation_progress->elapsed_seconds =
                 std::chrono::duration<double>(Clock::now() - *p.simulation_started).count();
