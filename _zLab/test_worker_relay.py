@@ -71,6 +71,17 @@ class RelayTests(unittest.TestCase):
                 self.assertEqual(env["OPENCL_VENDOR_PATH"], str(vendors))
                 self.assertNotIn("OCL_ICD_FILENAMES", env)
                 self.assertNotIn("OPENCL_LAYERS", env)
+                # A CPU start still needs the validated driver environment so
+                # the GPU can be selected later within this worker process.
+                with mock.patch.object(worker_relay.subprocess, "Popen",
+                                       side_effect=OSError("intercepted worker startup")) as spawn:
+                    with self.assertRaisesRegex(OSError, "intercepted worker startup"):
+                        worker_relay.relay(str(binary))
+                self.assertEqual(spawn.call_args.args[0], [str(binary), "--simulation-only"])
+                launch_env = spawn.call_args.kwargs["env"]
+                self.assertIsNotNone(launch_env)
+                self.assertEqual(launch_env["VK_DRIVER_FILES"], str(manifest))
+                self.assertEqual(launch_env["OCL_ICD_VENDORS"], str(vendors))
                 vendor.write_text("wrong-driver.so\n")
                 with self.assertRaisesRegex(worker_relay.RelayError, "Invalid deployment OpenCL vendor manifest"):
                     worker_relay.gpu_environment(binary, False)

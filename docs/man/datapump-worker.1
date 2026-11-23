@@ -19,8 +19,9 @@ platforms are rejected. Do not invoke the protocol interactively in a terminal.
 .SH OPTIONS
 .TP
 .B \-\-prefer\-gpu
-Initially select the Robust GPU receiver when the worker includes one.
-The shared GPU checkbox can still select CPU processing in this worker.
+Start Robust on a usable GPU. If a compiled GPU backend cannot initialize,
+the worker starts on the CPU and reports the reason in receiver diagnostics.
+The shared GPU checkbox can still select the processing backend in this worker.
 .TP
 .B \-\-require\-gpu
 Require GPU processing for Robust settings. Use this for GPU qualification,

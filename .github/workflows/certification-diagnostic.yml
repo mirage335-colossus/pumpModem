@@ -153,7 +153,7 @@ jobs:
       run: |
         cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
         cp .ci-bootstrap/tools/build_capacity.py "$RUNNER_TEMP/build_capacity.py"
-        sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git python3 file binutils make cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth fonts-dejavu-core fontconfig-config libxtst6 libgl1 libopengl0 libgl1-mesa-dri
+        sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git python3 file binutils make cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libvulkan-dev glslang-dev glslang-tools spirv-tools xvfb xauth fonts-dejavu-core fontconfig-config libxtst6 libgl1 libopengl0 libgl1-mesa-dri
     - name: Check out the requested source without changing its tests
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:

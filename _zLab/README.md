@@ -154,21 +154,21 @@ public key must be installed on the pod. Confirm the exact host key through an
 independent trusted channel before putting it in `known_hosts`; scanning a key
 over the connection alone does not authenticate it. With the verified host and
 port substituted below, and an SSH identity supplied explicitly or available
-through the SSH agent, the CPU build is requested by:
+through the SSH agent, deploy the standard worker with:
 
 ```sh
 python3 _zLab/deploy.py --host POD_HOST --port POD_PORT --user root \
-  --known-hosts "$HOME/.ssh/known_hosts" --mode cpu
+  --known-hosts "$HOME/.ssh/known_hosts"
 ```
 
-For a GPU job, the GUI requests `--mode gpu`. The deployer checks whether
+The GUI uses the same GPU-capable deployment for CPU and GPU jobs. The deployer checks whether
 CUDA can discover the device inside the worker's socket restrictions. With
 compatible CUDA and LibTorch prerequisites and a passing probe it builds the
 CUDA worker. If CUDA is unavailable there, it builds the native Vulkan worker
 and configures a private NVIDIA EGL driver manifest for headless operation when
 the host exposes an NVIDIA Vulkan ICD. Generic `--mode gpu` builds may omit that
-NVIDIA manifest and leave accelerator discovery optional at runtime, so the GUI
-can still run the CPU path. Explicit `--mode vulkan` remains strict and requires
+NVIDIA manifest. The Vulkan build works without a device or CUDA toolkit, and
+the worker discovers devices when GPU processing is selected. Explicit `--mode vulkan` remains strict and requires
 the NVIDIA manifest.
 On the supported Ubuntu 24.04 amd64 image the deployer installs missing
 Vulkan build dependencies from signed Ubuntu packages. If the main archive
@@ -178,9 +178,9 @@ Ubuntu ICD loader if needed. A compatible build embeds the offline Blackwell
 NVFP4 program and opens the system loader by absolute path to avoid a conflicting
 CUDA toolkit loader. The worker uses a deployment-private NVIDIA ICD and checks
 the selected accelerator before any FP4 work.
-The standalone CLI
-defaults to `--mode cpu`. Use `--mode gpu` for automatic GPU selection or
-`--mode cuda` to require CUDA. Use `--mode vulkan` to build the Vulkan worker
+The standalone CLI defaults to the same `--mode gpu` build. Older `--mode cpu`
+commands also request that build. Use `--mode cuda` to require CUDA or
+`--mode vulkan` to build the Vulkan worker
 directly, including the Blackwell OpenCL module when its build prerequisites
 are present. This lets a CUDA-capable host run the Vulkan/OpenCL route for a
 matched comparison. A required CUDA build ends at the discovery check if
@@ -192,10 +192,12 @@ Vulkan for the sessions that search declines. It uses OpenCL for qualified
 NVFP4 template projection at every worker allocation. CUDA discovery and Vulkan's
 CUDA import extensions fail with the socket filter active on that driver. See the
 [matched runtime checks](../docs/validation.md#blackwell-nvfp4-fine-projection--19-november-2026).
-GPU allocations deploy a GPU-capable worker with GPU preferred through
-`--prefer-gpu`, while ordinary simulation and live sessions leave GPU use as a
-runtime GUI choice. The GPU preference can be turned off to run the CPU path.
-Use the relay's explicit `--require-gpu` option only for strict GPU qualification.
+CPU allocations start with **GPU** off. GPU allocations start with GPU preferred
+through `--prefer-gpu`. If neither CUDA nor a physical
+Vulkan device can initialize, the worker clears **GPU**, starts on the CPU, and
+shows the reason in receiver diagnostics. Selecting **GPU** explicitly in the
+GUI requires a usable device. Use the relay's `--require-gpu` option for strict
+GPU qualification.
 Check the receiver's backend, scored rows and stage counters to see where GPU work ran. Reopening a managed deployment
 checks the source, build settings and worker hash before reuse. An interrupted
 matching build can resume. A different source or an unmanaged directory requires
@@ -246,7 +248,7 @@ themselves establish a qualified physical or remote live path.
 Build the local companion on Linux from the repository root, with CMake 3.21+,
 a C++20 toolchain, OpenSSL 3 development files and the project dependencies
 described in the [build guide](../docs/building.md). These commands configure a
-separate CPU Release build and compile only the companion target:
+separate Release build and compile only the companion target:
 
 ```sh
 ./build.sh configure --cli --web-worker --build-dir build/lab-local -- \

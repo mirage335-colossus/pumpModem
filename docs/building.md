@@ -28,7 +28,8 @@ explicit optional native ATen build uses LibTorch C++ libraries. The browser
 profile additionally uses Python to
 assemble its self-contained static page; it is not a browser runtime dependency.
 
-For Debian/Ubuntu, see the package list in the [README](../README.md#build-and-run).
+Linux and Windows native builds also need the
+[Vulkan development dependencies](#vulkan-and-opencl-gpu-builds).
 On Fedora/RHEL-family systems, the corresponding development packages include
 `gcc-c++`, `cmake`, `openssl-devel`, `libX11-devel`, `libXft-devel`,
 `libXext-devel`, `libXrender-devel`, `libXcursor-devel`, `libXfixes-devel`,
@@ -660,10 +661,9 @@ provenance, limitations and cleanup reason. Do not accumulate historical runs.
 ### Vulkan and OpenCL GPU builds
 
 Native Linux and Windows builds include the Vulkan/VkFFT receiver backend
-by default when its development dependencies are available. VkFFT 1.3.4
+by default. Portable builds on these platforms require this backend. VkFFT 1.3.4
 is pinned in [`third_party/vkfft`](../third_party/vkfft/README.datapump.md).
-The portable release preset and release workflows require this backend by
-default. They build against Vulkan
+They build against Vulkan
 headers and link the glslang/SPIR-V shader compiler. The application opens
 the host Vulkan loader only when a GPU receiver is requested. A CPU session
 can run without a Vulkan loader or graphics driver. On Debian, the build packages are
@@ -681,8 +681,11 @@ ctest --test-dir build/dev-vulkan --output-on-failure \
 ./build/dev-vulkan/triad_receiver_probe describe --backend vulkan
 ```
 
-`DATAPUMP_TRIAD_VULKAN` defaults to `AUTO`. Set it to `ON` to require
-the build dependencies or to `OFF` for a developer CPU-only build.
+`DATAPUMP_TRIAD_VULKAN` defaults to `ON` on supported native targets. Existing
+`AUTO` configurations follow the same platform default. Missing build dependencies
+stop configuration. For a deliberately CPU-only development build, set both
+`DATAPUMP_PORTABLE=OFF` and `DATAPUMP_TRIAD_VULKAN=OFF`. In standard builds,
+select CPU or GPU at runtime using the **GPU** control.
 `DATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE` defaults to `OFF`.
 `test_triad_vulkan --plan` is a CPU-only geometry
 preflight registered as `triad_vulkan_plan` when the backend is built. Setting
@@ -803,10 +806,12 @@ kernels. [Kernel emulation](../tests/triad_kernel_emulation/) ·
 [resident fine windows](triad-gpu-optimization.md#device-rendered-fine-tiles-and-resident-windows).
 
 Select Robust Modem and use the **GPU** checkbox immediately left of Developer.
-It defaults off on the desktop and persists as `--gpu yes|no`. A zLab GPU
-allocation starts with it selected. Clear it between runs to select the CPU
-in the same application. Requested GPU initialization failures appear in
-the receiver status, where the control remains available to select CPU.
+It defaults off on the desktop and on zLab CPU allocations, and persists as
+`--gpu yes|no`. A zLab GPU allocation starts with GPU preferred and falls back
+to CPU if no GPU can initialize. Receiver diagnostics show the reason for that
+fallback. Clear the checkbox between runs to select the CPU in the same
+application. Explicit GPU initialization failures appear in the receiver status,
+where the control remains available to select CPU.
 The generic selector tries usable CUDA first, then compatible physical Vulkan.
 Search arithmetic Default selects qualified automatic CPU/GPU routing, including
 the scoped Vulkan GUI native chirp-Z crossover; FP32 minimum selects FP32 CUDA

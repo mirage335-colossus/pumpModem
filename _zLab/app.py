@@ -875,7 +875,7 @@ def deploy_selected(pod, record, known_hosts, identity, secret='', deploy_func=N
                     *, on_progress=None, cancelled=None):
     """Deploy an admitted selection and retain only bounded, redacted receipts."""
     from deploy import deploy, _connection
-    gpu = simulation_gpu(record, pod)
+    simulation_gpu(record, pod)
     direct = (pod.get('ssh') or {}).get('direct') or {}
     host, user, port = direct.get('host'), direct.get('username'), direct.get('port')
     _connection(host, user, port, known_hosts, identity)
@@ -892,7 +892,7 @@ def deploy_selected(pod, record, known_hosts, identity, secret='', deploy_func=N
     if cancelled is not None:
         progress['cancelled'] = cancelled
     (deploy_func or deploy)(host, user, port, known_hosts, identity=identity,
-                            mode='gpu' if gpu else 'cpu', timeout=min(remaining, 900 if gpu else 300), profile=profile,
+                            mode='gpu', timeout=min(remaining, 900), profile=profile,
                             on_output=output.append, **progress)
     lines = []
     for line in '\n'.join(output).splitlines():
@@ -1771,10 +1771,8 @@ class App:
                                               on_progress=set_progress, cancelled=cancelled)
                     if not cancelled.is_set():
                         set_progress('Starting the simulation worker…')
-                        # A GPU allocation selects a GPU-capable worker build,
-                        # but GPU use is a runtime choice in the shared GUI.
-                        # Keep the relay's strict --require-gpu mode for
-                        # explicit qualification runs only.
+                        # Both allocations use GPU-capable workers. Only the
+                        # initial runtime preference follows the allocation.
                         command = ssh_command(pod, pin, identity,
                                               file_channel=files is not None,
                                               live=profile == 'live',

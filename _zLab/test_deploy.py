@@ -62,6 +62,14 @@ class DeployTests(unittest.TestCase):
                 self.assertEqual(result, '/workspace/pump-lab-live/build/lab/datapump-lab-worker')
                 self.assertEqual(shlex.split(self.calls[-1][0][-1])[-4:], [digest, mode, 'live', '12'])
 
+    def test_default_and_legacy_cpu_request_the_same_gpu_capable_build(self):
+        with patch.object(deploy.bundle, 'create_bundle', side_effect=self.bundle):
+            deploy.deploy('pod.example.com', 'root', 22, self.known, runner=self.runner)
+            deploy.deploy('pod.example.com', 'root', 22, self.known, mode='cpu', runner=self.runner)
+        default, alias = [shlex.split(call[0][-1]) for call in self.calls]
+        self.assertEqual(default, alias)
+        self.assertEqual(default[-3], 'gpu')
+
     def test_invalid_connection_and_mode_never_execute(self):
         for host in ('-oProxyCommand=evil', 'bad;touch', 'a/b', 'bad:22', 'foo\nbar'):
             with self.subTest(host=host), self.assertRaises(ValueError):
@@ -133,7 +141,7 @@ python3 -c "import time; from pathlib import Path; gate=Path('ready'); exec('whi
 mkdir -p build/lab
 printf '#!/bin/sh\nexit 0\n' > build/lab/datapump-worker
 chmod +x build/lab/datapump-worker
-echo PUMP_LAB_MODE=cpu
+echo PUMP_LAB_MODE=vulkan
 '''
         code = 'BUILD = ' + repr(build) + "\nRESOURCES = ''\n" + script
         data = b'archive'
@@ -146,7 +154,7 @@ echo PUMP_LAB_MODE=cpu
                 (destination / 'ready').touch()
 
         status, tail = deploy._bounded_process(
-            [sys.executable, '-c', code, digest, 'cpu', 'simulation', str(len(data))],
+            [sys.executable, '-c', code, digest, 'gpu', 'simulation', str(len(data))],
             data, 4, on_progress=progress)
         self.assertEqual(status, 0, tail)
         self.assertEqual(stages, [deploy._STAGE_MESSAGES[b'upload'], deploy._STAGE_MESSAGES[b'compile']])
@@ -200,19 +208,20 @@ echo PUMP_LAB_MODE=cpu
     def test_remote_build_modes_execute_correct_flags(self):
         # Exercise the actual POSIX script with fake CMake and fake Torch. This
         # checks branching/arguments, not CUDA availability or a real build.
-        cases = itertools.product(('cpu', 'cuda', 'vulkan', 'gpu'), ('simulation', 'live'),
+        cases = itertools.product(('cuda', 'vulkan', 'gpu'), ('simulation', 'live'),
                                   ('ninja', 'make', 'existing-make'))
         for requested, profile, generator_case in (*cases, ('cuda-unavailable', 'simulation', 'ninja'),
-                                                    ('gpu-no-icd', 'simulation', 'ninja')):
+                                                    ('gpu-no-icd-or-toolkit', 'simulation', 'ninja'),
+                                                    ('gpu-no-icd-or-toolkit', 'live', 'ninja')):
             cuda_unavailable = requested == 'cuda-unavailable'
-            no_nvidia_icd = requested == 'gpu-no-icd'
+            no_nvidia_icd = requested == 'gpu-no-icd-or-toolkit'
             mode = 'cuda' if cuda_unavailable else 'gpu' if no_nvidia_icd else requested
             with self.subTest(mode=requested, profile=profile, generator=generator_case):
                 home = self.root / (requested + '-' + profile + '-' + generator_case)
                 home.mkdir(mode=0o700)
                 archive = home / 'source.tar.gz'
                 sizing = (b"import sys\nassert sys.argv[1] == '--runpod'\n"
-                          b"print({'cpu': 16, 'vulkan': 12, 'cuda': 8}[sys.argv[2]])\n")
+                          b"print({'vulkan': 12, 'cuda': 8}[sys.argv[2]])\n")
                 with tarfile.open(archive, 'w:gz') as tar:
                     info = tarfile.TarInfo('source-file')
                     info.size = 1
@@ -301,16 +310,17 @@ fi
                 nvcc = toolkit / 'bin' / 'nvcc'
                 for key in ('CUDACXX', 'CUDA_HOME', 'CUDA_PATH', 'CUDAToolkit_ROOT'):
                     env.pop(key, None)
-                # Explicit Vulkan also works without a CUDA toolkit. The
-                # remaining Vulkan cases make CUDA discovery viable.
-                if mode != 'cpu' and not (mode == 'vulkan' and generator_case == 'make'):
+                # The ordinary deployment must also work without a CUDA
+                # toolkit or a private NVIDIA ICD on either worker profile.
+                has_toolkit = not no_nvidia_icd and not (mode == 'vulkan' and generator_case == 'make')
+                if has_toolkit:
                     nvcc.parent.mkdir(parents=True)
                     nvcc.touch(mode=0o755)
                     if profile == 'live':
                         env['CUDACXX'] = str(nvcc)
                 cuda_probe_unavailable = mode == 'gpu' and profile == 'simulation'
-                vulkan = mode == 'vulkan' or cuda_probe_unavailable
-                if mode != 'cpu':
+                vulkan = mode == 'vulkan' or (mode == 'gpu' and (not has_toolkit or cuda_probe_unavailable))
+                if has_toolkit:
                     # Stand in for the compiled CUDA probe. Its discovery result
                     # decides the branch; building the worker is still simulated.
                     compiler = bin_dir / 'c++'
@@ -333,7 +343,7 @@ fi
                     (home / '_zLab').mkdir()
                     (home / '_zLab/prepare_vulkan.sh').write_text(prepare)
                     loader = home / 'libOpenCL.so.1'
-                    if generator_case != 'existing-make':
+                    if has_toolkit and generator_case != 'existing-make':
                         loader.touch()
                     dpkg_query = bin_dir / 'dpkg-query'
                     dpkg_query.write_text('''#!/bin/sh
@@ -372,8 +382,8 @@ for arg do package=$arg; done
                 self.assertEqual([line.partition('=')[2] for line in output.splitlines()
                                   if line.startswith('PUMP_LAB_STAGE=')], expected_stages)
                 flags = log.read_text()
-                backend = 'vulkan' if vulkan else 'cuda' if mode == 'gpu' else mode
-                jobs = {'cpu': 16, 'vulkan': 12, 'cuda': 8}[backend]
+                backend = 'vulkan' if vulkan else 'cuda'
+                jobs = {'vulkan': 12, 'cuda': 8}[backend]
                 selected_generator = 'Unix Makefiles' if generator_case != 'ninja' else 'Ninja'
                 self.assertIn(f'-G {selected_generator}', flags)
                 self.assertIn(f'--build build/lab --parallel {jobs} --target ', flags)
@@ -397,7 +407,7 @@ for arg do package=$arg; done
                 receipt = json.loads((home / '.worker-receipt.json').read_text())
                 self.assertEqual(receipt['request']['mode'], mode)
                 self.assertEqual(receipt['backend'], backend)
-                if mode == 'vulkan':
+                if mode == 'vulkan' or not has_toolkit:
                     self.assertFalse((home / 'build/lab/probe-cuda-worker').exists())
                 self.assertIn(f'PUMP_LAB_BUILD_JOBS={jobs}', receipt['text'].splitlines())
                 self.assertIn(f'PUMP_LAB_BUILD_GENERATOR={selected_generator}', receipt['text'].splitlines())
@@ -434,11 +444,13 @@ for arg do package=$arg; done
                     self.assertIn('-DCMAKE_CUDA_COMPILER=' + str(nvcc), flags)
                     self.assertIn('-DCUDA_TOOLKIT_ROOT_DIR=' + str(toolkit), flags)
                     self.assertIn('-DCUDAToolkit_ROOT=' + str(toolkit), flags)
-                elif backend == 'vulkan':
+                else:
                     self.assertIn('-DDATAPUMP_TRIAD_VULKAN=ON', flags)
                     self.assertIn('-DDATAPUMP_TRIAD_VULKAN_REQUIRE_DEVICE=ON', flags)
                     self.assertIn('-DDATAPUMP_TRIAD_TENSOR=OFF', flags)
-                    expected_loader = str(loader) if generator_case == 'ninja' else ''
+                    self.assertNotIn('-DDATAPUMP_TRIAD_VULKAN=OFF', flags)
+                    self.assertIn('PUMP_LAB_DEVICE=Vulkan support compiled (runtime device selection pending)', output)
+                    expected_loader = str(loader) if has_toolkit and generator_case == 'ninja' else ''
                     self.assertIn('-DDATAPUMP_TRIAD_OPENCL_LOADER_PATH=' + expected_loader + ' ', flags)
                     manifest = home / 'build/lab/nvidia-headless-icd.json'
                     vendors = manifest.parent / 'nvidia-opencl-vendors'
@@ -473,12 +485,6 @@ for arg do package=$arg; done
                         self.assertIn(b'manifest does not match', incompatible.stderr)
                         self.assertEqual(manifest.read_bytes(), original)
                         self.assertEqual(list(manifest.parent.glob('.icd-*')), [])
-                else:
-                    self.assertIn('PUMP_LAB_DEVICE=CPU (processor not identified)', output)
-                    self.assertIn('PUMP_LAB_GPU_SCOPE=not requested', output)
-                    self.assertIn('PUMP_LAB_TORCH=not requested', output)
-                    self.assertIn('-DDATAPUMP_TRIAD_TENSOR=OFF', flags)
-                    self.assertNotIn('REQUIRE_CUDA', flags)
 
     def test_runtime_cgroup_v2_hierarchical_limits(self):
         namespace = {'__name__': 'receipt_test'}
@@ -671,8 +677,8 @@ mkdir -p build/lab
 printf '#!/bin/sh\nexit 0\n' > build/lab/datapump-worker
 chmod +x build/lab/datapump-worker
 echo PUMP_LAB_PROFILE=simulation
-echo PUMP_LAB_MODE=cpu
-echo PUMP_LAB_DEVICE=CPU
+echo PUMP_LAB_MODE=vulkan
+echo PUMP_LAB_DEVICE=Vulkan
 echo PUMP_LAB_TORCH=not-requested
 echo PUMP_LAB_CUDA=not-requested
 printf 'PUMP_LAB_WORKER_SHA256='
@@ -682,7 +688,7 @@ sha256sum build/lab/datapump-worker | cut -d ' ' -f 1
         data = b'bounded archive'
         digest = hashlib.sha256(data).hexdigest()
 
-        def invoke(payload=data, checksum=digest, mode='cpu'):
+        def invoke(payload=data, checksum=digest, mode='gpu'):
             return subprocess.run([sys.executable, '-c', code, checksum, mode, 'simulation', str(len(data))],
                                   input=payload, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10)
 
@@ -707,17 +713,18 @@ sha256sum build/lab/datapump-worker | cut -d ' ' -f 1
             self.assertEqual(json.loads(deployment.read_text()), current_request)
         self.assertEqual((destination / 'attempts').read_text(), 'build\n')
 
-        self.assertNotEqual(invoke(mode='gpu').returncode, 0)
+        self.assertNotEqual(invoke(mode='cuda').returncode, 0)
         self.assertNotEqual(invoke(mode='vulkan').returncode, 0)
         self.assertNotEqual(invoke(checksum='0' * 64).returncode, 0)
         self.assertEqual((destination / 'attempts').read_text(), 'build\n')
 
         # A missing receipt represents interruption after extraction/build.
-        (destination / '.worker-receipt.json').unlink()
+        receipt_path = destination / '.worker-receipt.json'
+        receipt_path.unlink()
         (destination / 'fail-build').touch()
         failed = invoke()
         self.assertNotEqual(failed.returncode, 0)
-        self.assertFalse((destination / '.worker-receipt.json').exists())
+        self.assertFalse(receipt_path.exists())
         (destination / 'fail-build').unlink()
         resumed = invoke()
         self.assertEqual(resumed.returncode, 0, resumed.stdout)
@@ -727,9 +734,45 @@ sha256sum build/lab/datapump-worker | cut -d ' ' -f 1
         self.assertNotEqual(invoke(payload=b'partial').returncode, 0)
         self.assertEqual((destination / 'source.tar.gz').read_bytes(), data)
         self.assertEqual(list(destination.glob('.upload-*')), [])
-        (destination / '.deployment.json').unlink()
+
+        # Even matching request and worker hashes cannot admit a CPU receipt.
+        receipt = json.loads(receipt_path.read_text())
+        receipt_path.write_text(json.dumps({**receipt, 'backend': 'cpu'}))
+        rebuilt = invoke()
+        self.assertEqual(rebuilt.returncode, 0, rebuilt.stdout)
+        self.assertNotIn(b'PUMP_LAB_STAGE=reuse', rebuilt.stdout)
+        self.assertEqual(json.loads(receipt_path.read_text())['backend'], 'vulkan')
+        self.assertEqual((destination / 'attempts').read_text(), 'build\n' * 4)
+
+        deployment.write_text(json.dumps({**current_request, 'mode': 'cpu'}))
+        rejected = invoke()
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn(b'Existing deployment uses different source or build settings', rejected.stdout)
+        deployment.unlink()
         self.assertNotEqual(invoke().returncode, 0)
-        self.assertEqual((destination / 'attempts').read_text(), 'build\nbuild\nbuild\n')
+        self.assertEqual((destination / 'attempts').read_text(), 'build\n' * 4)
+
+    def test_remote_wrapper_rejects_unexpected_built_backend(self):
+        destination = self.root / 'managed'
+        script = deploy.REMOTE_DEPLOY.replace("directory = '/workspace/pump-lab-live' if profile == 'live' else '/workspace/pump-lab'",
+                                             'directory = ' + repr(str(destination)))
+        build = '''set -eu
+mkdir -p build/lab
+touch build/lab/datapump-worker
+echo "PUMP_LAB_MODE=$REPORTED_BACKEND"
+'''
+        code = 'BUILD = ' + repr(build) + "\nRESOURCES = ''\n" + script
+        data = b'archive'
+        digest = hashlib.sha256(data).hexdigest()
+        for requested, reported in (('gpu', 'cpu'), ('cuda', 'vulkan'), ('vulkan', 'cuda')):
+            with self.subTest(requested=requested, reported=reported):
+                result = subprocess.run([sys.executable, '-c', code, digest, requested, 'simulation', str(len(data))],
+                                        input=data, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5,
+                                        env=dict(os.environ, REPORTED_BACKEND=reported))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(b'Build did not return a complete deployment receipt', result.stdout)
+                self.assertFalse((destination / '.worker-receipt.json').exists())
+                shutil.rmtree(destination)
 
     def test_remote_wrapper_keeps_running_build_locked(self):
         import fcntl
@@ -740,7 +783,7 @@ sha256sum build/lab/datapump-worker | cut -d ' ' -f 1
         code = "BUILD = ''\nRESOURCES = ''\n" + script
         with (destination / '.deploy.lock').open('w') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            result = subprocess.run([sys.executable, '-c', code, '0' * 64, 'cpu', 'simulation', '1'],
+            result = subprocess.run([sys.executable, '-c', code, '0' * 64, 'gpu', 'simulation', '1'],
                                     input=b'x', stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(b'already running', result.stdout)
@@ -758,15 +801,15 @@ sha256sum build/lab/datapump-worker | cut -d ' ' -f 1
 mkdir -p build/lab
 printf '#!/bin/sh\nexit 0\n' > build/lab/datapump-worker
 chmod +x build/lab/datapump-worker
-echo PUMP_LAB_MODE=cpu
+echo PUMP_LAB_MODE=vulkan
 '''
         code = 'BUILD = ' + repr(build) + "\nRESOURCES = ''\n" + script
         data = b'archive'
         digest = hashlib.sha256(data).hexdigest()
-        result = subprocess.run([sys.executable, '-c', code, digest, 'cpu', 'simulation', str(len(data))],
+        result = subprocess.run([sys.executable, '-c', code, digest, 'gpu', 'simulation', str(len(data))],
                                 input=data, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
         self.assertEqual(result.returncode, 0, result.stdout[-1000:])
-        self.assertIn(b'PUMP_LAB_MODE=cpu', result.stdout)
+        self.assertIn(b'PUMP_LAB_MODE=vulkan', result.stdout)
         self.assertTrue((destination / '.worker-receipt.json').is_file())
 
     def test_gpu_receipt_fallbacks_and_no_full_device_claim(self):
@@ -812,7 +855,7 @@ echo PUMP_LAB_MODE=cpu
     def test_hash_mismatch_aborts_before_extraction_or_build(self):
         (self.root / 'source.tar.gz').write_bytes(b'not the bundle')
         script = deploy.REMOTE_BUILD.replace('cd "$directory"', 'directory=' + shlex.quote(str(self.root)) + '\ncd "$directory"', 1)
-        result = subprocess.run(['sh', '-s', '--', '0' * 64, 'cpu', 'simulation'], input=script, text=True,
+        result = subprocess.run(['sh', '-s', '--', '0' * 64, 'gpu', 'simulation'], input=script, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.root / 'build').exists())

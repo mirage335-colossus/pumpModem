@@ -1512,6 +1512,7 @@ struct Session::Impl {
                 current.gpu_backend.clear();
                 current.gpu_device_uuid.reset();
                 current.gpu_selection_reason.clear();
+                current.gpu_fallback_reason.clear();
                 current.gpu_score_rows = 0;
                 current.gpu_precision.clear();
                 current.gpu_fp32_score_rows = 0;
@@ -1596,9 +1597,17 @@ struct Session::Impl {
 
             try {
                 if (const auto reason = basic_transmit_reason(s)) throw Error(*reason);
+                std::string gpu_fallback_reason;
                 if (s.gpu) {
                     const bool fp32_minimum = s.transfer.modem.search_arithmetic == modem::SearchArithmetic::fp32;
-                    gpu_backend = make_gpu_receiver_backend(GpuReceiverOptions{fp32_minimum});
+                    try {
+                        gpu_backend = make_gpu_receiver_backend(GpuReceiverOptions{fp32_minimum});
+                    } catch (const GpuBackendUnavailable& error) {
+                        if (!s.gpu_preferred) throw;
+                        gpu_fallback_reason = error.what();
+                        s.gpu = false;
+                        s.gpu_preferred = false;
+                    }
                 }
                 const auto gpu_initial_receipt = gpu_backend ? gpu_backend->status_receipt() : receiver_detail::BulkReceipt{};
                 const auto gpu_device = gpu_backend ? gpu_initial_receipt.device_name : std::string{};
@@ -1624,6 +1633,11 @@ struct Session::Impl {
                     current.gpu_backend = gpu_backend_name;
                     current.gpu_device_uuid = gpu_initial_receipt.device_uuid;
                     current.gpu_selection_reason = gpu_selection_reason;
+                    current.gpu_fallback_reason = gpu_fallback_reason;
+                    if (!gpu_fallback_reason.empty()) {
+                        settings.gpu = false;
+                        settings.gpu_preferred = false;
+                    }
                     current.gpu_native_lag_preference_supported = native_lag_preference;
                     current.bit_seconds = calendar.geometry().bit_seconds;
                     current.slot_stride_seconds = static_cast<double>(calendar.calendar().distance(

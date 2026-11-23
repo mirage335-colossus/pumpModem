@@ -487,6 +487,40 @@ if os.environ.get("FAIL_STEP") == ("build" if "--build" in sys.argv else "config
                 self.assertEqual(calls, [])
 
 
+@unittest.skipUnless(shutil.which('cmake'), 'CMake is required for the Vulkan configure checks')
+class VulkanBuildPolicyTests(unittest.TestCase):
+    def configure(self, *options):
+        module = Path(__file__).resolve().parents[1] / 'cmake/TriadVulkan.cmake'
+        with tempfile.TemporaryDirectory(prefix='datapump-vulkan-policy-') as directory:
+            script = Path(directory) / 'check.cmake'
+            script.write_text('cmake_minimum_required(VERSION 3.21)\n'
+                              'set(CMAKE_SYSTEM_NAME Linux)\n'
+                              'set(CMAKE_CROSSCOMPILING TRUE)\n'
+                              'foreach(package glslang SPIRV-Tools SPIRV-Tools-opt SPIRV-Tools-link)\n'
+                              '  set(CMAKE_DISABLE_FIND_PACKAGE_${package} ON)\n'
+                              'endforeach()\n'
+                              f'include([==[{module.as_posix()}]==])\n', encoding='utf-8')
+            return subprocess.run(['cmake', *options, '-P', str(script)],
+                                  text=True, capture_output=True, check=False)
+
+    def test_default_and_existing_auto_require_vulkan_dependencies(self):
+        for options in ((), ('-DDATAPUMP_TRIAD_VULKAN=AUTO',)):
+            with self.subTest(options=options):
+                result = self.configure(*options)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('SPIRV-Tools CMake package', result.stderr)
+
+    def test_disabling_vulkan_requires_a_nonportable_build(self):
+        off = '-DDATAPUMP_TRIAD_VULKAN=OFF'
+        portable = self.configure('-DDATAPUMP_PORTABLE=ON', off)
+        self.assertNotEqual(portable.returncode, 0)
+        self.assertIn('Portable Linux and Windows builds require Vulkan receiver support',
+                      portable.stderr)
+
+        development = self.configure('-DDATAPUMP_PORTABLE=OFF', off)
+        self.assertEqual(development.returncode, 0, development.stderr)
+
+
 @unittest.skipUnless(shutil.which('cmake'), 'CMake is required for SDK discovery checks')
 class SourceSdkToolchainTests(unittest.TestCase):
     def setUp(self):

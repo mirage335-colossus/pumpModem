@@ -75,7 +75,10 @@ Its modulation, settings, and checks are independent of Fast. See the
 ./build.sh test contract
 ```
 
-The default build produces the native GUI and CLI. Use `./build.sh --cli` for a
+The default native Linux and Windows build includes GPU support and selects
+CPU or GPU processing at runtime. Install the
+[Vulkan development dependencies](docs/building.md#vulkan-and-opencl-gpu-builds)
+before configuring. The default build produces the GUI and CLI. Use `./build.sh --cli` for a
 CLI-only build. See the [build guide](docs/building.md) for optional frontends,
 test groups, package profiles, and offline installation.
 

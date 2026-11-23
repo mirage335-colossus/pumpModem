@@ -27,6 +27,8 @@ struct Settings {
     bool finite_duplex=false;
     // Local processing choice; it does not change the on-air profile.
     bool gpu=false;
+    // A launch preference permits CPU fallback when a GPU cannot initialize.
+    bool gpu_preferred=false;
     // Reversible browser filter; the GUI receiver always preserves Current
     // baseline decisions and the original decoded content.
     std::string wrong_key_admission="current";
@@ -148,7 +150,7 @@ struct Snapshot {
     std::string status,error,receiver_error;
     unsigned receiver_workers=0; // Active receiver's software-worker ceiling.
     std::string gpu_device,gpu_precision;
-    std::string gpu_backend,gpu_selection_reason;
+    std::string gpu_backend,gpu_selection_reason,gpu_fallback_reason;
     std::optional<std::array<std::uint8_t,16>> gpu_device_uuid;
     std::uint64_t gpu_score_rows=0;
     // Bounded cumulative executed-work diagnostics for this settings generation.

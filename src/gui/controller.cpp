@@ -470,6 +470,7 @@ struct Controller::Impl {
         f(UiField::live_noise_dbfs_hz).options={{"unspecified","Unspecified"}};
         f(UiField::message_label).text="Message"; f(UiField::binary_label).text="Binary / first 16 bytes";
         f(UiField::gpu).checked=options.prefer_gpu&&live::gpu_receiver_available();
+        settings.gpu_preferred=f(UiField::gpu).checked;
         f(UiField::compression_codes).text=compression_reference();
         f(UiField::mode).text="Starting continuous reception";
         if(options.launch_settings&&(options.launch_settings->keyfile||options.launch_settings->keyset||options.launch_settings->fhss_list_file)) {
@@ -697,7 +698,10 @@ struct Controller::Impl {
             if(load->live_noise_dbfs_hz)f(UiField::live_noise_dbfs_hz).text=planner_number(*load->live_noise_dbfs_hz);
             if(load->fec)f(UiField::fec).selected=*load->fec;
             if(load->full_duplex)f(UiField::live_duplex).checked=*load->full_duplex;
-            if(load->gpu)f(UiField::gpu).checked=*load->gpu;
+            if(load->gpu) {
+                f(UiField::gpu).checked=*load->gpu;
+                settings.gpu_preferred=false;
+            }
             if(load->workspace_percent) {dsp_workspace_percent=*load->workspace_percent;f(UiField::dsp_workspace).selected=*load->workspace_percent?"ram-"+std::to_string(*load->workspace_percent):"auto";}
             if(load->fhss_list){fhss_list=fhss::parse_list(*load->fhss_list);f(UiField::fhss_list).text=fhss::list_text(fhss_list,'\n');}
             if(load->tx_key=="none")f(UiField::key).selected="none";
@@ -707,7 +711,10 @@ struct Controller::Impl {
         }
         // Enforce the embedding policy after every loaded patch, including
         // saved settings that previously selected CPU execution.
-        if(options.require_gpu)f(UiField::gpu).checked=true;
+        if(options.require_gpu) {
+            f(UiField::gpu).checked=true;
+            settings.gpu_preferred=false;
+        }
         if(options.simulation_only) {
             f(UiField::simulation).selected="yes";
             f(UiField::live_duplex).checked=false;
@@ -1423,9 +1430,16 @@ struct Controller::Impl {
             value.gpu_native_coarse_precision_sessions!=snapshot.gpu_native_coarse_precision_sessions||
             value.gpu_host_scored_rows!=snapshot.gpu_host_scored_rows||
             value.gpu_selection_reason!=snapshot.gpu_selection_reason||
+            value.gpu_fallback_reason!=snapshot.gpu_fallback_reason||
             value.gpu_native_coarse_lag_sessions!=snapshot.gpu_native_coarse_lag_sessions||
             value.transmit_trace.revision!=snapshot.transmit_trace.revision;
         snapshot=std::move(value);
+        if(settings.gpu_preferred&&!snapshot.gpu_fallback_reason.empty()) {
+            f(UiField::gpu).checked=false;
+            settings.gpu=false;
+            settings.gpu_preferred=false;
+            sync_launch_command();
+        }
         apply_receptions(inbox,signals,snapshot);
         if(reception_changed) {refresh_files();refresh_signals();}
         plot_update.append_waterfall=plot_update.append_waterfall||spectrum_changed;
@@ -1446,6 +1460,9 @@ struct Controller::Impl {
                 f(UiField::diagnostics).text=std::string(policy)+" · modeled DATA duration "+
                     planner_number(*snapshot.bit_seconds)+" s · configured calendar";
             }
+            if(!snapshot.gpu_fallback_reason.empty())
+                f(UiField::diagnostics).text="Preferred "+snapshot.gpu_fallback_reason+
+                    " · using CPU · "+f(UiField::diagnostics).text;
         }
         const auto& trace=snapshot.transmit_trace;
         std::string active_fhss;
@@ -2016,9 +2033,15 @@ void Controller::toggle(UiField field,bool value) {
         }
         else if(field==UiField::gpu) {
             const bool previous=p.settings.gpu;
+            const bool previously_preferred=p.settings.gpu_preferred;
             p.f(field).checked=value;
+            p.settings.gpu_preferred=false;
             try {p.configure();}
-            catch(const std::exception& error) {p.f(field).checked=previous;p.notice(error.what(),10);}
+            catch(const std::exception& error) {
+                p.settings.gpu_preferred=previously_preferred;
+                p.f(field).checked=previous;
+                p.notice(error.what(),10);
+            }
         }
         else if(field==UiField::repeatable)p.set_repeatable(value);
         else if(field==UiField::mono) {

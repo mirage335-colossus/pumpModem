@@ -248,7 +248,7 @@ jobs:
     - name: Install native baseline dependencies and pinned scanner
       if: ${{ !matrix.sdk }}
       run: |
-        sh "$RUNNER_TEMP/ci-apt.sh" install cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libncurses-dev libsdl2-dev
+        sh "$RUNNER_TEMP/ci-apt.sh" install cmake ninja-build g++-11 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libncurses-dev libsdl2-dev libvulkan-dev glslang-dev glslang-tools spirv-tools
         sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
         echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
     - name: Install native Rev compiler and module-aware Ninja

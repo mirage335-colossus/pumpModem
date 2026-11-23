@@ -92,7 +92,7 @@ jobs:
     - name: Prepare build dependencies
       run: |
         cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
-        sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git cmake ninja-build make g++-11 binutils libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libncurses-dev libsdl2-dev xvfb xauth fontconfig-config fonts-dejavu-core python3
+        sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git cmake ninja-build make g++-11 binutils libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libncurses-dev libsdl2-dev libvulkan-dev glslang-dev glslang-tools spirv-tools xvfb xauth fontconfig-config fonts-dejavu-core python3
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         persist-credentials: false

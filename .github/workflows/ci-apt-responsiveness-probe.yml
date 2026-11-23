@@ -70,6 +70,7 @@ jobs:
                 libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev
                 libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev
                 libncurses-dev libsdl2-dev xvfb xauth fontconfig-config
+                libvulkan-dev glslang-dev glslang-tools spirv-tools
                 fonts-dejavu-core python3
               ) ;;
             sdk-runtime-ubuntu24)

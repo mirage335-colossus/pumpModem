@@ -6,9 +6,9 @@ For SSH use a non-PTY channel (for example ``ssh -T``) and connect the local
 client's binary input and output to this process. Standard error is diagnostic;
 standard output contains only DPW1 frames. The worker is always started in
 simulation mode unless ``--live`` is explicitly supplied; the host file-service
-pipe is opt-in. Pass ``--prefer-gpu`` to start with GPU selected while leaving
-it available as a runtime choice, or ``--require-gpu`` for strict qualification.
-Omit both for CPU jobs. This is a transport adapter, not
+pipe is opt-in. Pass ``--prefer-gpu`` to start on a usable GPU or fall back to
+CPU, or ``--require-gpu`` for strict qualification.
+Omit both to start on the CPU. This is a transport adapter, not
 authentication or a provider launcher. A separate local adapter is required for
 physical audio and its dated sample transport.
 Each direction accepts one frame of at most 8 MiB at a time and propagates
@@ -180,7 +180,7 @@ def gpu_environment(worker, live):
     try:
         fd = os.open(manifest, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
-        return None  # The CUDA build uses the default driver environment.
+        return None  # No deployment-specific NVIDIA driver override.
     with os.fdopen(fd, "rb") as source:
         entry = os.fstat(fd)
         if (not stat.S_ISREG(entry.st_mode) or entry.st_uid != os.geteuid()
@@ -230,13 +230,12 @@ def relay(worker, stop_requested=lambda: False, require_gpu=False, file_channel=
     # Explicit pipes ensure the worker's no-socket/anonymous-pipe checks remain
     # meaningful even when this relay's own stdio is an SSH channel.
     command = [worker] + ([] if live else ["--simulation-only"])
-    environment = None
     if require_gpu:
         command.append("--require-gpu")
     elif prefer_gpu:
         command.append("--prefer-gpu")
-    if require_gpu or prefer_gpu:
-        environment = gpu_environment(worker, live)
+    # A worker starting on CPU can select its GPU later in the GUI.
+    environment = gpu_environment(worker, live)
     file_read = file_write = None
     if file_channel:
         file_read, file_write = os.pipe()
@@ -320,7 +319,7 @@ def main():
     parser.add_argument("--require-gpu", action="store_true",
                         help="require the native GPU receiver policy")
     parser.add_argument("--prefer-gpu", action="store_true",
-                        help="start with GPU selected while allowing runtime opt-out")
+                        help="start on a usable GPU or fall back to CPU")
     parser.add_argument("--live", action="store_true",
                         help="start the worker for live audio, not simulation")
     parser.add_argument("--file-channel", action="store_true",

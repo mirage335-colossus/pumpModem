@@ -98,7 +98,7 @@ jobs:
           *) echo 'Invalid CUDA architecture selection' >&2; exit 2 ;;
         esac
         test -d "$LIBTORCH_PREFIX"
-        ./build.sh configure --cli --build-dir build/triad-cuda --jobs 2 -- -DCMAKE_PREFIX_PATH="$LIBTORCH_PREFIX" -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCHITECTURES" -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON
+        ./build.sh configure --cli --build-dir build/triad-cuda --jobs 2 -- -DCMAKE_PREFIX_PATH="$LIBTORCH_PREFIX" -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCHITECTURES" -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON -DDATAPUMP_TRIAD_VULKAN=OFF
         cmake --build build/triad-cuda --target triad_receiver_probe test_triad_tensor_cuda test_triad_tensor_cuda_automatic test_triad_tensor_fft test_gui_robust_live --parallel 2
     - name: Require CUDA arithmetic, half FFT and GUI session checks
       run: |
@@ -124,7 +124,7 @@ jobs:
         git worktree add --detach "$RUNNER_TEMP/triad-cuda-reference" "$REFERENCE_SHA"
         (
           cd "$RUNNER_TEMP/triad-cuda-reference"
-          ./build.sh configure --cli --build-dir "$RUNNER_TEMP/triad-cuda-reference-build" --jobs 2 -- -DCMAKE_PREFIX_PATH="$LIBTORCH_PREFIX" -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCHITECTURES" -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON
+          ./build.sh configure --cli --build-dir "$RUNNER_TEMP/triad-cuda-reference-build" --jobs 2 -- -DCMAKE_PREFIX_PATH="$LIBTORCH_PREFIX" -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCHITECTURES" -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON -DDATAPUMP_TRIAD_VULKAN=OFF
           cmake --build "$RUNNER_TEMP/triad-cuda-reference-build" --target triad_receiver_probe --parallel 2
         )
     - name: Measure bounded native CUDA reference

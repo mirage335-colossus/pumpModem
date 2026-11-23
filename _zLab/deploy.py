@@ -36,6 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent
 REMOTE_DIR = '/workspace/pump-lab'
 LIVE_REMOTE_DIR = '/workspace/pump-lab-live'
 DEFAULT_TIMEOUT = 3600
+DEFAULT_MODE = 'gpu'
 BUILD_MODES = ('cpu', 'cuda', 'vulkan', 'gpu')
 _STAGE_MESSAGES = {
     b'upload': 'Uploading the source bundle to RunPod…',
@@ -56,7 +57,7 @@ REMOTE_BUILD = r'''set -eu
 mode=$2
 profile=$3
 unset requested_mode PUMP_LAB_OPTIONAL_NVIDIA_ICD
-case "$mode" in cpu|cuda|vulkan|gpu) ;; *) exit 2 ;; esac
+case "$mode" in cuda|vulkan|gpu) ;; *) exit 2 ;; esac
 case "$profile" in
   simulation) directory=/workspace/pump-lab ;;
   live) directory=/workspace/pump-lab-live ;;
@@ -67,28 +68,26 @@ printf '%s  %s\n' "$1" source.tar.gz | sha256sum -c -
 tar --extract --gzip --file source.tar.gz --no-same-owner --no-same-permissions
 set -- -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DDATAPUMP_BUILD_GUI=OFF \
   -DDATAPUMP_BUILD_CLI=ON -DDATAPUMP_BUILD_WEB_WORKER=ON -DDATAPUMP_PORTABLE=OFF \
-  -DDATAPUMP_COMPILER_CACHE=ON -DDATAPUMP_TRIAD_VULKAN=OFF
-if [ "$mode" != cpu ]; then
-  # A noninteractive SSH shell can omit the image's CUDA bin directory.
-  # CUDA uses this toolkit for Torch and CMake. Vulkan can use nvcc to
-  # embed the optional Blackwell OpenCL program without loading Torch.
-  cuda_root=${CUDAToolkit_ROOT:-${CUDA_HOME:-${CUDA_PATH:-}}}
-  if [ -n "${CUDACXX:-}" ]; then
-    nvcc=$(command -v "$CUDACXX" || true)
-  elif [ -n "$cuda_root" ]; then
-    nvcc="$cuda_root/bin/nvcc"
-  else
-    nvcc=$(command -v nvcc || printf '%s\n' /usr/local/cuda/bin/nvcc)
-  fi
-  if [ -f "$nvcc" ] && [ -x "$nvcc" ]; then
-    nvcc=$(readlink -f "$nvcc")
-    cuda_bin=$(dirname "$nvcc")
-    cuda_root=$(dirname "$cuda_bin")
-    export CUDACXX="$nvcc" PATH="$cuda_bin:$PATH"
-  elif [ "$mode" = cuda ]; then
-    echo "CUDA build requires nvcc. Set CUDACXX or CUDA_HOME to the installed toolkit." >&2
-    exit 78
-  fi
+  -DDATAPUMP_COMPILER_CACHE=ON
+# A noninteractive SSH shell can omit the image's CUDA bin directory.
+# CUDA uses this toolkit for Torch and CMake. Vulkan can use nvcc to
+# embed the optional Blackwell OpenCL program without loading Torch.
+cuda_root=${CUDAToolkit_ROOT:-${CUDA_HOME:-${CUDA_PATH:-}}}
+if [ -n "${CUDACXX:-}" ]; then
+  nvcc=$(command -v "$CUDACXX" || true)
+elif [ -n "$cuda_root" ]; then
+  nvcc="$cuda_root/bin/nvcc"
+else
+  nvcc=$(command -v nvcc || printf '%s\n' /usr/local/cuda/bin/nvcc)
+fi
+if [ -f "$nvcc" ] && [ -x "$nvcc" ]; then
+  nvcc=$(readlink -f "$nvcc")
+  cuda_bin=$(dirname "$nvcc")
+  cuda_root=$(dirname "$cuda_bin")
+  export CUDACXX="$nvcc" PATH="$cuda_bin:$PATH"
+elif [ "$mode" = cuda ]; then
+  echo "CUDA build requires nvcc. Set CUDACXX or CUDA_HOME to the installed toolkit." >&2
+  exit 78
 fi
 if [ "$mode" = cuda ] || [ "$mode" = gpu ]; then
   requested_mode=$mode
@@ -119,10 +118,10 @@ if [ "$mode" = cuda ]; then
   torch_prefix=$(python3 -c 'from torch.utils import cmake_prefix_path; print(cmake_prefix_path)')
   native_sm=$(python3 -c 'import torch; print("".join(map(str,torch.cuda.get_device_capability())))')
   export TORCH_CUDA_ARCH_LIST="$(python3 -c 'import torch; print(".".join(map(str,torch.cuda.get_device_capability())))')"
-  set -- "$@" -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON \
+  set -- "$@" -DDATAPUMP_TRIAD_TENSOR=ON -DDATAPUMP_TRIAD_TENSOR_REQUIRE_CUDA=ON -DDATAPUMP_TRIAD_VULKAN=OFF \
     "-DCMAKE_CUDA_COMPILER=$nvcc" "-DCUDAToolkit_ROOT=$cuda_root" "-DCUDA_TOOLKIT_ROOT_DIR=$cuda_root" \
     "-DCMAKE_PREFIX_PATH=$torch_prefix" "-DCMAKE_CUDA_ARCHITECTURES=$native_sm"
-elif [ "$mode" = vulkan ]; then
+else
   # Only automatic GPU mode may lack a host NVIDIA driver: the compiled
   # Vulkan backend remains optional at runtime and other GPUs may be visible.
   # Explicit Vulkan mode still requires the NVIDIA headless manifest.
@@ -138,8 +137,6 @@ elif [ "$mode" = vulkan ]; then
     opencl_loader=
   fi
   set -- "$@" "-DDATAPUMP_TRIAD_OPENCL_LOADER_PATH=$opencl_loader"
-else
-  set -- "$@" -DDATAPUMP_TRIAD_TENSOR=OFF
 fi
 worker=datapump-worker
 if [ "$profile" = live ]; then
@@ -206,10 +203,8 @@ printf 'PUMP_LAB_PROFILE=%s\n' "$profile"
 printf 'PUMP_LAB_MODE=%s\n' "$mode"
 if [ "$mode" = cuda ]; then
   python3 -c 'import torch; print("PUMP_LAB_DEVICE=" + str(torch.cuda.get_device_name())); print("PUMP_LAB_TORCH=" + str(torch.__version__)); print("PUMP_LAB_CUDA=" + str(torch.version.cuda))'
-elif [ "$mode" = vulkan ]; then
-  printf 'PUMP_LAB_DEVICE=NVIDIA headless Vulkan (execution pending)\nPUMP_LAB_TORCH=not requested\nPUMP_LAB_CUDA=not selected\n'
 else
-  printf 'PUMP_LAB_DEVICE=CPU (processor not identified)\nPUMP_LAB_TORCH=not requested\nPUMP_LAB_CUDA=not requested\n'
+  printf 'PUMP_LAB_DEVICE=Vulkan support compiled (runtime device selection pending)\nPUMP_LAB_TORCH=not requested\nPUMP_LAB_CUDA=not selected\n'
 fi
 worker_hash=$(sha256sum "build/lab/$worker")
 printf 'PUMP_LAB_WORKER_SHA256=%s\n' "${worker_hash%% *}"
@@ -358,7 +353,7 @@ def gpu_receipts():
             print('PUMP_LAB_GPU_VISIBLE_UUID=unavailable')
             print('PUMP_LAB_GPU_PARTITION_STATUS=unverified')
     else:
-        print('PUMP_LAB_GPU_SCOPE=NVIDIA inventory during Vulkan build; verify device use in the worker')
+        print('PUMP_LAB_GPU_SCOPE=NVIDIA inventory probe during Vulkan build; verify device use in the worker')
     binary = shutil.which('nvidia-smi')
     try:
         if not binary:
@@ -401,8 +396,9 @@ REMOTE_DEPLOY = r'''import fcntl, hashlib, json, os, re, stat, subprocess, sys, 
 from pathlib import Path
 
 digest, mode, profile, size_text = sys.argv[1:]
-if not re.fullmatch('[a-f0-9]{64}', digest) or mode not in ('cpu','cuda','vulkan','gpu') or profile not in ('simulation','live'):
+if not re.fullmatch('[a-f0-9]{64}', digest) or mode not in ('cuda','vulkan','gpu') or profile not in ('simulation','live'):
     raise SystemExit('Invalid deployment request')
+allowed_backends = ('cuda', 'vulkan') if mode == 'gpu' else (mode,)
 size = int(size_text)
 if not 0 < size <= 256 * 1024 * 1024:
     raise SystemExit('Source archive exceeded the deployment limit')
@@ -494,7 +490,7 @@ try:
     receipt = read_json('.worker-receipt.json')
 except FileNotFoundError:
     receipt = None
-if (receipt and receipt.get('request') == request and worker.is_file()
+if (receipt and receipt.get('request') == request and receipt.get('backend') in allowed_backends and worker.is_file()
         and not worker.is_symlink()
         and hashlib.sha256(worker.read_bytes()).hexdigest() == receipt.get('worker_sha256')):
     print('PUMP_LAB_STAGE=reuse', flush=True)
@@ -509,7 +505,7 @@ if (receipt and receipt.get('request') == request and worker.is_file()
 reported_build = BUILD
 for stage, command in (
     ('unpack', 'tar --extract --gzip '),
-    ('environment', 'if [ "$mode" != cpu ]; then\n'),
+    ('environment', 'cuda_root=${CUDAToolkit_ROOT:-${CUDA_HOME:-${CUDA_PATH:-}}}\n'),
     ('dependencies', '  timeout -k 10 480 sh _zLab/prepare_vulkan.sh\n'),
     ('configure', 'measure_stage configure cmake -S . -B build/lab '),
     ('compile', 'measure_stage compile cmake --build build/lab '),
@@ -563,7 +559,7 @@ text = '\n'.join(lines)
 for receipt_line in lines:
     print(receipt_line, flush=True)
 backend = next((line.partition('=')[2] for line in lines if line.startswith('PUMP_LAB_MODE=')), None)
-if backend not in ('cpu', 'cuda', 'vulkan') or not worker.is_file():
+if backend not in allowed_backends or not worker.is_file():
     raise SystemExit('Build did not return a complete deployment receipt')
 write_json('.worker-receipt.json', {'request':request, 'text':text, 'backend':backend,
                                   'worker_sha256':hashlib.sha256(worker.read_bytes()).hexdigest()})
@@ -756,7 +752,7 @@ def _run(argv, *, stage, timeout, runner, input_data=None, on_progress=None, can
         raise DeployError(f'{stage} could not start: {exc.strerror or type(exc).__name__}') from exc
 
 
-def deploy(host, user, port, known_hosts, *, mode='cpu', profile='simulation', identity=None,
+def deploy(host, user, port, known_hosts, *, mode=DEFAULT_MODE, profile='simulation', identity=None,
            timeout=DEFAULT_TIMEOUT, runner=None, on_output=None, on_progress=None, cancelled=None):
     """Bundle, upload and build; return the expected remote worker path.
 
@@ -769,6 +765,8 @@ def deploy(host, user, port, known_hosts, *, mode='cpu', profile='simulation', i
     host, user, options = _connection(host, user, port, known_hosts, identity)
     if mode not in BUILD_MODES:
         raise ValueError('Build mode must be cpu, cuda, vulkan or gpu')
+    if mode == 'cpu':
+        mode = DEFAULT_MODE
     if profile not in ('simulation', 'live'):
         raise ValueError('Build profile must be simulation or live')
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
@@ -816,8 +814,9 @@ def main(argv=None):
     parser.add_argument('--port', type=int, required=True)
     parser.add_argument('--known-hosts', required=True, help='file containing the independently verified SSH host key')
     parser.add_argument('--identity', help='optional local SSH private-key path')
-    parser.add_argument('--mode', choices=BUILD_MODES, default='cpu',
-                        help='gpu selects a compatible backend. cuda and vulkan require their named backend')
+    parser.add_argument('--mode', choices=BUILD_MODES, default=DEFAULT_MODE,
+                        help='gpu (default) and its legacy cpu alias build a GPU-capable worker. '
+                             'cuda and vulkan require their named backend')
     parser.add_argument('--profile', choices=('simulation', 'live'), default='simulation',
                         help='worker profile; live audio is experimental and separately unqualified')
     parser.add_argument('--timeout', type=float, default=DEFAULT_TIMEOUT,

@@ -725,18 +725,33 @@ os._exit(0)
 
 
 class GpuStartupReadinessTests(unittest.TestCase):
-    def test_unavailable_preferred_gpu_requires_enabled_gpu_toggle(self):
-        self.assertTrue(browser_bridge._gpu_unavailable_toggle([
-            {'kind': 'label', 'text': 'GPU reception unavailable'},
-            {'kind': 'toggle', 'label': 'GPU', 'enabled': True, 'checked': True},
-        ]))
-        for controls in (
-                [{'kind': 'toggle', 'label': 'GPU', 'enabled': False, 'checked': True}],
-                [{'kind': 'toggle', 'label': 'GPU acceleration', 'enabled': True}],
-                [{'kind': 'toggle', 'label': 'Audio', 'enabled': True}],
-                [{'kind': 'label', 'text': 'GPU reception unavailable'}]):
-            with self.subTest(controls=controls):
-                self.assertFalse(browser_bridge._gpu_unavailable_toggle(controls))
+    def start_worker(self, controls):
+        snapshot = json.dumps({'version': 1, 'generation': '1', 'ack': '0', 'controls': controls}).encode()
+        script = PEER.replace('b\'{"generation":"1","ack":"0"}\'', repr(snapshot))
+        worker = browser_bridge.SimulationWorker([sys.executable, '-u', '-c', script], managed=True)
+        self.addCleanup(worker.close)
+        return worker
+
+    def test_cpu_fallback_diagnostic_allows_simulation_readiness(self):
+        worker = self.start_worker([
+            {'kind': 'label', 'text': 'Preferred GPU reception unavailable: no compatible device · using CPU'},
+            {'kind': 'toggle', 'label': 'GPU', 'enabled': True, 'checked': False},
+            {'kind': 'label', 'text': 'Robust simulation ready'},
+        ])
+        worker.wait_ready(timeout=5)
+        self.assertTrue(worker.ready)
+        self.assertIsNone(worker.startup_error)
+
+    def test_required_gpu_failure_reports_backend_diagnostic(self):
+        diagnostic = 'GPU reception unavailable: no compatible device'
+        worker = self.start_worker([
+            {'kind': 'toggle', 'label': 'GPU', 'enabled': False, 'checked': True},
+            {'kind': 'label', 'text': diagnostic},
+        ])
+        with self.assertRaises(browser_bridge._preview.PreviewError) as failure:
+            worker.wait_ready(timeout=5)
+        self.assertEqual(str(failure.exception), diagnostic)
+        self.assertFalse(worker.ready)
 
 
 class ManagedBrowserTests(unittest.TestCase):

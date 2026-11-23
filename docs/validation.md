@@ -741,6 +741,39 @@ reproduced on the unchanged baseline.
 The short, strong-link fixtures qualify functional selection and completion.
 They do not measure severe-channel sensitivity or sustained service.
 
+### zLab CPU fallback on an unavailable GPU — 22 November 2026
+
+The previous Vulkan-capable worker left the simulator blocked when launched
+with `--prefer-gpu` and no compatible physical GPU. The corrected worker on
+the `a7846929` base opened through the local zLab relay and browser readiness
+handler with GPU cleared and the fallback reason visible. The CPU-only build
+and the Vulkan build using that fallback each decoded `e` in the bounded
+120 Hz simulation and scored three DATA and two QUIET slots. The worker
+regression also covered a missing loader, an explicit GPU toggle, and strict
+`--require-gpu` startup. These checks used local workers and establish CPU
+functionality for this fixture. RunPod deployment and GPU execution were
+outside this check.
+
+### GPU-capable standard builds with runtime selection — 22 November 2026
+
+On the `a7846929` base with this change, the Linux x86-64 FLTK portable TGZ
+and ZIP passed inventory, dependency and relocated startup checks. The first
+verification could not access the ambient X11 display. A private Xvfb display
+passed the framebuffer checks in both archives. A relocated worker with the
+Vulkan loader hidden by an invalid first search entry started with GPU off,
+fell back from preferred GPU and reported failure for required GPU. The same
+worker passed its runtime-toggle regression and decoded `e` on CPU with two
+scored quiet slots. Neither the relocated worker nor the GUI had a hard
+Vulkan loader dependency.
+
+On the local Ryzen 5 PRO 5650U (15 GiB RAM, Mesa 25.0.7, Vulkan loader
+1.4.309), the native Vulkan session test decoded `e` with 130 physical RADV
+Renoir GPU search rows, then switched to CPU and back to GPU in the same
+session. These are functional checks of selection and completion. The zLab
+deployment fixtures covered both worker profiles without a CUDA toolkit or
+an NVIDIA ICD, including rejection of CPU-only reuse receipts. Windows recipe
+checks passed. Windows binaries and live RunPod deployments were not tested.
+
 ## Robust minimum carrier spacing — 22 November 2026
 
 The initial Robust Setup control defaulted to a 265 Hz minimum and also

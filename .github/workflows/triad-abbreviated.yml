@@ -61,7 +61,7 @@ jobs:
         sudo apt-get install -y cmake ninja-build g++ pkg-config libssl-dev
     - name: Check canonical source and receiver stages
       run: |
-        ./build.sh test triad --cli --build-dir build/triad-candidate --jobs 2 -- -DPython3_EXECUTABLE="$(command -v python)"
+        ./build.sh test triad --cli --build-dir build/triad-candidate --jobs 2 -- -DPython3_EXECUTABLE="$(command -v python)" -DDATAPUMP_TRIAD_VULKAN=OFF
         cmake --build build/triad-candidate --target triad_receiver_probe --parallel 2
     - name: Build same-run native reference
       if: steps.reference.outputs.mode == 'compare'
@@ -71,7 +71,7 @@ jobs:
         git worktree add --detach "$RUNNER_TEMP/triad-reference" "$REFERENCE_SHA"
         (
           cd "$RUNNER_TEMP/triad-reference"
-          ./build.sh configure --cli --build-dir "$RUNNER_TEMP/triad-reference-build" --jobs 2 -- -DPython3_EXECUTABLE="$(command -v python)"
+          ./build.sh configure --cli --build-dir "$RUNNER_TEMP/triad-reference-build" --jobs 2 -- -DPython3_EXECUTABLE="$(command -v python)" -DDATAPUMP_TRIAD_VULKAN=OFF
           cmake --build "$RUNNER_TEMP/triad-reference-build" --target triad_receiver_probe --parallel 2
         )
     - name: Measure bounded native reference

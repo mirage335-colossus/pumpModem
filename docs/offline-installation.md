@@ -57,6 +57,8 @@ Both `DATAPUMP_BUILD_GUI` and `DATAPUMP_PORTABLE` default to `ON`. Setting the G
 option to `OFF` creates a CLI-only package. Setting the portable option to `OFF`
 disables runtime collection and creates an installation for systems where native
 libraries are managed separately; use the default for copyable installations.
+Portable Linux and Windows builds include GPU support. Select GPU or CPU
+processing at runtime on the destination computer.
 
 FLTK is linked statically. Portable builds default to static OpenSSL, the static
 MSVC runtime on Windows, and static GCC C++ support libraries on Linux release

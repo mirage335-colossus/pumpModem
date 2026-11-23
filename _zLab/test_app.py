@@ -499,8 +499,8 @@ class Tests(unittest.TestCase):
             record.update(compute_kind='cpu', compute_id='c1', requested_vcpu=32, minimum_memory_gb=128,
                           deadline=time.time()+1800)
             deploy_selected(pod, record, str(known), None, deploy_func=fake)
-            self.assertEqual(calls[1][1]['mode'], 'cpu')
-            self.assertEqual(calls[1][1]['timeout'], 300)
+            self.assertEqual(calls[1][1]['mode'], 'gpu')
+            self.assertEqual(calls[1][1]['timeout'], 900)
             deploy_selected(pod, record, str(known), None, deploy_func=fake, profile='live')
             self.assertEqual(calls[-1][1]['profile'], 'live')
             with self.assertRaises(ValueError):
