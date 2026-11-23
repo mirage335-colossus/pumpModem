@@ -102,12 +102,14 @@ StageWorkspace plan_workspace(const ReceiverConfig& config, const ReceiverSlotPl
                                                       public_workspace->line_varying) :
             (coherent_gain ? public_workspace->coherent_gain : public_workspace->varying);
         if (!original.block_rows) return original;
-        const auto planned = varying_fine_plan(config, inference, workers, line, coherent_gain);
+        const auto tracking_final_rows = slot.scheduled_gap_fill ?
+            original.block_rows + rows % original.block_rows : 0;
+        const auto planned = varying_fine_plan(config, inference, workers, line, coherent_gain, tracking_final_rows);
         if (!planned.block_rows) return planned;
         if (planned.block_rows != original.block_rows || planned.track_frequency != original.track_frequency ||
             planned.nominal_independent_gain_candidates != original.nominal_independent_gain_candidates)
             return VaryingFinePlan{0, 0, "protected_varying_model_grid_unavailable"};
-        if (planned.track_frequency && !line) {
+        if (planned.track_frequency && !line && !tracking_final_rows) {
             // Helper-off tracking bins are tied to the power-of-two maximum
             // block transform. A changed tail must preserve that lattice.
             const auto span = inference.stop_sample - inference.first_sample;
@@ -864,8 +866,17 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     } else {
         const auto intervals = acquire(lanes, stop);
         began = Clock::now();
+        std::optional<CoarseInputSupport> support;
+        if (protection && slot.scheduled_gap_fill &&
+            (likelihood_slot.first_sample != slot.first_sample || likelihood_slot.stop_sample != slot.stop_sample)) {
+            // Keep the original full public grid, including segmented timing
+            // and midpoint gain nominations. The known possible fill support
+            // is removed before the observation filter, on every backend.
+            support = CoarseInputSupport{static_cast<std::size_t>(likelihood_slot.first_sample - slot.first_sample),
+                static_cast<std::size_t>(likelihood_slot.stop_sample - slot.first_sample)};
+        }
         coarse = score_coarse(search, slot, key, iq, intervals, workers, workspace.coarse, stop, executor,
-                              midpoint_evaluation, CoarseInputCheck::already_finite);
+                              midpoint_evaluation, CoarseInputCheck::already_finite, support);
     }
     score.coarse_seconds = elapsed(began);
     score.coarse_workspaces = coarse.workspaces;
@@ -1364,7 +1375,7 @@ ReceiverSlotScore receiver_detail::score_protected_slot(const ReceiverConfig& co
                         nullptr, &plan, discover_protected_affine, carrier_beat_polarity);
 }
 
-ReceiverSlotScore receiver_detail::score_continuous_data_slot(const ReceiverConfig& config,
+ReceiverSlotScore receiver_detail::score_protected_data_slot(const ReceiverConfig& config,
         const ReceiverSlotPlan& slot, const Crypto& key, std::span<const Complex> iq,
         std::span<const std::uint8_t> valid, unsigned workers, std::size_t memory_limit_bytes,
         std::stop_token stop, ReceiverExecutor* executor, AffineContinuationContext* continuation) {
@@ -1372,7 +1383,7 @@ ReceiverSlotScore receiver_detail::score_continuous_data_slot(const ReceiverConf
     const auto plan = plan_protected_observation(config, slot, workers);
     return score_stages(config, slot, key, iq, valid, workers, memory_limit_bytes, stop, executor, false,
                         nullptr, EvidenceEvaluation::bounded_competition, AffineGainEvaluation::operational,
-                        continuation, &plan, true, true);
+                        continuation, &plan, !slot.scheduled_gap_fill, true);
 }
 
 std::size_t receiver_detail::protected_white_beat_slot_workspace(

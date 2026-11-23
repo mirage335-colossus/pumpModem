@@ -95,6 +95,9 @@ struct ReceiverSlotPlan {
     // cannot contain a neighboring configured slot; quiet scoring uses the
     // separate physical aperture above.
     std::uint64_t protected_data_first_sample = 0, protected_data_stop_sample = 0;
+    // Scheduled gap fill may enter the full capture outside protected DATA.
+    // All proposal families start from that same protected input support.
+    bool scheduled_gap_fill = false;
 };
 
 enum class SlotDecision { ambiguous, data, quiet };

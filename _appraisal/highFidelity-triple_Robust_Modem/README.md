@@ -478,6 +478,30 @@ generated capture. Compare the capture hashes and physical outcomes across
 the two runs.
 See the [packed physical-path checks](../../docs/validation.md#packed-data-under-physical-hf-models--22-november-2026).
 
+### Scheduled gap fill
+
+For scheduled gap fill on the same HF paths, use the reference waveform
+with `--scheduled-gap-fill`. Add
+`--gap-fill-transmit off` for a paired run with the same receiver masks,
+transmission calendar and channel/noise seeds. Both paths use the canonical
+receiver. The appraisal derives a repeatable filler key from the experiment
+seed for the transmitter alone. Helper, FHSS and FEC are off.
+
+```sh
+_appraisal/highFidelity-triple_Robust_Modem/.build/bin/high_fidelity_appraisal \
+  --mode receive --scenario hf-watterson-i3 --waveform reference \
+  --scheduled-gap-fill --cn0 20 --seed 10102 --max-wall-seconds 60 --max-samples 8000000
+```
+
+The plan records each public fill interval in source samples and flags
+observations where fill can intrude. A `null` interval means the declared
+timing and filter bounds leave no safe fill there. The source receipt records
+actual generated fill samples and energy separately from wanted DATA. Compare
+these alongside ordered slot decisions and exact completion. Public fill
+intervals describe possible emissions between successive DATA slots. Source
+fill stops before the completion pair and the receiver still scores two
+physical quiet slots.
+
 Inspect actual native geometry before a long run:
 
 ```sh

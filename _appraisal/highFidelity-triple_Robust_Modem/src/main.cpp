@@ -106,7 +106,8 @@ struct Options {
     std::optional<std::size_t> memory_bytes;
     std::size_t chunk=4096;
     bool service_replay=false, service_options=false;
-    bool continuous_data=false, protected_discovery=false;
+    bool continuous_data=false, protected_discovery=false, scheduled_gap_fill=false;
+    std::optional<bool> gap_fill_transmit;
     bool hf_predictive_quiet=false;
     bool hf_compare_admitted_models=false, hf_phase_filter=false, hf_phase_filter_receiver=false, hf_phase_filter_paths=false;
     bool hf_phase_filter_sticky=false, hf_phase_bridge=false;
@@ -143,6 +144,7 @@ Options parse(int argc,char** argv) {
         const std::string key=argv[i];
         if(key=="--service-replay") {o.service_replay=true;continue;}
         if(key=="--continuous-data") {o.continuous_data=true;continue;}
+        if(key=="--scheduled-gap-fill") {o.scheduled_gap_fill=true;continue;}
         if(key=="--protected-discovery") {o.protected_discovery=true;continue;}
         if(key=="--hf-predictive-quiet") {o.hf_predictive_quiet=true;continue;}
         if(key=="--hf-compare-admitted-models") {o.hf_compare_admitted_models=true;continue;}
@@ -187,6 +189,10 @@ Options parse(int argc,char** argv) {
         if(key=="--mode") o.mode=value;
         else if(key=="--scenario") o.scenario=value;
         else if(key=="--waveform") o.waveform=value;
+        else if(key=="--gap-fill-transmit") {
+            require(value=="on"||value=="off","gap fill transmit must be on or off");
+            o.gap_fill_transmit=value=="on";
+        }
         else if(key=="--control") o.control=value;
         else if(key=="--backend") o.backend=value;
         else if(key=="--message") o.message=value;
@@ -271,14 +277,20 @@ Options parse(int argc,char** argv) {
     require(o.mode=="plan"||o.mode=="channel"||o.mode=="receive"||o.mode=="slot"||o.mode=="oracle"||
         o.mode=="diagnose"||o.mode=="hf-search"||o.mode=="gui-varying"||o.mode=="gui-repeated-bit","unknown mode");
     require(!o.protected_discovery||o.continuous_data,"Protected discovery requires Continuous DATA");
-    require(!o.continuous_data||((o.mode=="plan"||o.mode=="receive")&&o.scenario!="hf-gui-native"&&
+    const bool direct_reference_cadence=(o.mode=="plan"||o.mode=="receive")&&o.scenario!="hf-gui-native"&&
         o.backend=="cpu"&&o.waveform=="reference"&&!o.helper&&o.fec=="off"&&
         (o.control=="wanted"||o.control=="noise"||o.control=="wrong-key")&&
         o.service_episodes==1&&!o.repeat_bit&&!o.two_hop_alarm_matrix&&!o.two_hop_additive_boundary&&
         !o.two_hop_spread_comparison&&!o.hf_predictive_quiet&&!o.hf_compare_admitted_models&&
-        !o.hf_public_phase_receiver&&!o.hf_correlated_gain_receiver&&!o.hf_target_presence_diagnostic),
+        !o.hf_public_phase_receiver&&!o.hf_correlated_gain_receiver&&!o.hf_target_presence_diagnostic;
+    require(!o.continuous_data||direct_reference_cadence,
         "Continuous DATA requires a direct reference CPU plan or receive, one episode, Helper/FEC off, "
         "and wanted, noise or wrong-key control without an alternate receiver policy");
+    require(!o.scheduled_gap_fill||(direct_reference_cadence&&!o.continuous_data&&!o.service_replay&&
+        !o.hf_normalized_null&&!o.hf_nominal_gain_witness&&!o.hf_live_gain_contrast),
+        "Scheduled gap fill requires a direct reference CPU plan or receive, one episode, Helper/FEC off, "
+        "and wanted, noise or wrong-key control with the canonical scheduled receiver");
+    require(!o.gap_fill_transmit||o.scheduled_gap_fill,"gap fill transmit control requires Scheduled gap fill");
     const bool gui_repeated=o.mode=="gui-repeated-bit";
     require(!o.repeat_selected_attempt||(gui_repeated&&o.repeat_separate_attempts&&
         *o.repeat_selected_attempt%3==0&&*o.repeat_selected_attempt<=48&&
@@ -1147,6 +1159,22 @@ Crypto wrong_key() {
     for(unsigned i=0;i<64;++i){a[i]=static_cast<std::uint8_t>(i+1);b[i]=static_cast<std::uint8_t>(255-i);}
     return Crypto::from_independent_roots(a,b);
 }
+Crypto qualification_gap_fill_key(std::uint64_t seed) {
+    constexpr std::string_view tag="datapump.appraisal.scheduled-gap-fill.v1";
+    std::array<std::uint8_t,tag.size()+9> input{};
+    std::ranges::copy(tag,input.begin());
+    for(unsigned i=0;i<8;++i)input[tag.size()+i]=static_cast<std::uint8_t>(seed>>(8*i));
+    const auto root=[&](std::uint8_t purpose) {
+        input.back()=purpose;
+        std::array<std::uint8_t,64> result{};
+        unsigned bytes=0;
+        require(EVP_Digest(input.data(),input.size(),result.data(),&bytes,EVP_sha512(),nullptr)==1&&
+            bytes==result.size(),"could not derive appraisal gap fill key");
+        return result;
+    };
+    const auto serpent=root(0), aes=root(1);
+    return Crypto::from_independent_roots(serpent,aes);
+}
 struct Setup {
     struct CorrelatedGainCalendarQuote {
         appraisal::HfCorrelatedGainPlan maximum;
@@ -1352,11 +1380,11 @@ Setup setup(const Options& o,std::stop_token stop) {
     const bool evolving_native_chain_case=scenario.id.starts_with("hf-vector-evolving-chain-");
     const bool evolving_vector_case=scenario.id.starts_with("hf-vector-evolving");
     const bool native_chain_case=scenario.id.starts_with("hf-wave-chain-")||vector_native_chain_case;
-    if(o.continuous_data&&(native_chain_case||scenario.family!="skywave-1-30MHz"||
+    if((o.continuous_data||o.scheduled_gap_fill)&&(native_chain_case||scenario.family!="skywave-1-30MHz"||
         scenario.channel.fullwave_reflection||scenario.channel.magnetoionic_reflection||
         scenario.channel.wave_optics||scenario.channel.phase_screens||scenario.channel.vector_oblique||
         scenario.channel.vector_two_hop))
-        throw Unavailable("Continuous DATA qualification requires a direct HF path renderer");
+        throw Unavailable("cadence qualification requires a direct HF path renderer");
     if(o.hf_target_presence_diagnostic&&scenario.channel.vector_oblique&&scenario.id!="hf-vector-oblique")
         throw Unavailable("target-presence diagnostic is qualified only for the original direct hf-vector-oblique primary");
     if(o.hf_target_presence_diagnostic&&(native_chain_case||
@@ -1538,6 +1566,7 @@ Setup setup(const Options& o,std::stop_token stop) {
     f.added_symbols=o.waveform=="smoke"?1:scenario.waveform.added_symbols;
     f.bit_seconds=o.bit_seconds.value_or(o.waveform=="smoke"?.001:scenario.waveform.requested_bit_seconds);
     f.fhss=o.waveform=="reference"&&scenario.waveform.fhss;
+    if(o.scheduled_gap_fill&&f.fhss)throw Unavailable("Scheduled gap fill requires FHSS off");
     f.encrypt=true;f.epoch=1793404800;f.symbol_ordinal=0;
     f.pulse_shape=o.pulse=="tapered-rrc"?PulseShape::TaperedRrc:PulseShape::Rrc;
     pc.data_if_hz=240;
@@ -1553,6 +1582,7 @@ Setup setup(const Options& o,std::stop_token stop) {
     pc.delay_excursion_seconds=scenario.bounds.delay_excursion_seconds;
     pc.helper_enabled=o.helper;
     pc.continuous_data=o.continuous_data;
+    pc.scheduled_gap_fill=o.scheduled_gap_fill;
     if(o.helper) {
         f.sample_rate=6000;pc.data_if_hz=1725;
         pc.helper.data_power_w=1;pc.helper.power_w=2;pc.helper.ratio_limit_db=90;
@@ -1575,6 +1605,7 @@ Setup setup(const Options& o,std::stop_token stop) {
     if(o.two_hop_spread_comparison) capture_config.spread_delay_ms=1000*two_hop_comparison_delay_seconds;
     PublicProfile profile(capture_config);
     auto txpc=pc;if(o.control=="wrong-ordinal")txpc.format.symbol_ordinal=1;
+    txpc.scheduled_gap_fill=pc.scheduled_gap_fill&&o.gap_fill_transmit.value_or(true);
     PublicProfile transmit_profile(txpc);
     std::string message=o.message;
     if((o.control=="interior-fade"||o.control=="capture-gap")&&message=="e")message="A";
@@ -1895,6 +1926,11 @@ Json plan_json(const Setup& s,const Options& o) {
                 calendar.distance(s.profile.origin(),slot.tx.pattern_begin),
                 calendar.distance(s.profile.origin(),slot.tx.pattern_end)});
         }
+        if(o.scheduled_gap_fill) {
+            const auto gap=s.profile.gap_fill_after(i);
+            slots.back()["public_gap_fill_after"]=gap?range(*gap):Json{};
+            slots.back()["observation_may_include_gap_fill"]=rx.scheduled_gap_fill;
+        }
     }
     auto result=object({{"sample_rate_hz",s.receiver.sample_rate_hz},
         {"requested_bit_seconds",s.native_channel?o.bit_seconds.value_or(f.bit_seconds):f.bit_seconds},{"actual_bit_seconds",g.bit_seconds},
@@ -1964,6 +2000,13 @@ Json plan_json(const Setup& s,const Options& o) {
         result["quiet_horizon_scope"]="first two complete protected apertures after the public DATA end and channel tail";
         const auto first=make_receiver_slot_plan(s.profile,s.receiver,0);
         result["first_slot_workspace_bytes"]=receiver_detail::protected_slot_workspace(s.receiver,first,s.resources.workers);
+    }
+    if(o.scheduled_gap_fill) {
+        result["scheduled_gap_fill"]=object({{"receiver_enabled",true},
+            {"transmitter_enabled",s.transmit_profile.config().scheduled_gap_fill}});
+        const auto first=make_receiver_slot_plan(s.profile,s.receiver,0);
+        const auto workspace=first.scheduled_gap_fill?receiver_detail::protected_slot_workspace:receiver_slot_workspace;
+        result["first_slot_workspace_bytes"]=workspace(s.receiver,first,s.resources.workers);
     }
     if(o.service_replay||o.hf_predictive_quiet||o.two_hop_additive_boundary||o.two_hop_spread_comparison)
         result["service_replay"]=service_plan_json(s,o);
@@ -4095,6 +4138,8 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
     const ServiceTimer render_timer;
     EmissionOptions eo;eo.mode=o.control=="noise"?EmissionMode::Quiet:EmissionMode::Message;
     eo.slot_count=s.truth.size();eo.stop=deadline.stop.get_token();
+    if(s.transmit_profile.config().scheduled_gap_fill&&eo.mode==EmissionMode::Message)
+        eo.qualification_gap_fill_key=qualification_gap_fill_key(o.seed);
     if(o.repeat_bit||o.hf_nominal_gain_witness_bit_one)eo.bits=s.truth;
     else if(eo.mode==EmissionMode::Message)eo.bit_at=s.draft->bit_source(0,[&](std::uint64_t i){return message_address(s.transmit_profile,i);});
     std::vector<Emission> emissions;emissions.reserve(s.episode_starts.size());
@@ -4493,8 +4538,9 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
     } else if(receive) {
         const auto declaration=o.hf_nominal_gain_witness_bit_one||o.hf_nominal_gain_witness_motion?
             hf_worst_margin3_declaration(s.receiver):s.receiver;
-        result["plan"]["first_slot_workspace_bytes"]=receiver_slot_workspace(declaration,
-            make_receiver_slot_plan(s.profile,declaration,receive_first_slot),s.resources.workers);
+        const auto first=make_receiver_slot_plan(s.profile,declaration,receive_first_slot);
+        const auto workspace=first.scheduled_gap_fill?receiver_detail::protected_slot_workspace:receiver_slot_workspace;
+        result["plan"]["first_slot_workspace_bytes"]=workspace(declaration,first,s.resources.workers);
         receiver=std::make_unique<CompleteStreamReceiver>(s.profile,declaration,s.key,s.stream,s.message_profile);
     }
     const bool receiver_executed=bool(receiver);
@@ -5160,6 +5206,10 @@ void execute(Json& result,Setup& s,const Options& o,Deadline& deadline,
         {"reference_relative_standard_error",source_report.data_reference.tile_relative_standard_error},
         {"generated_samples",source_report.generated_samples},{"data_energy_sample_sum",static_cast<double>(source_report.data_energy)},
         {"helper_energy_sample_sum",static_cast<double>(source_report.helper_energy)}});
+    if(o.scheduled_gap_fill) {
+        result["source"]["gap_fill_emitted_samples"]=source_report.gap_fill_samples;
+        result["source"]["gap_fill_energy_sample_sum"]=static_cast<double>(source_report.gap_fill_energy);
+    }
     const bool shared_render=o.hf_predictive_quiet||comparison_replay;
     result["timing"]=object({{"wall_seconds",shared_render?render_time.wall+std::chrono::duration<double>(end-policy_begin).count():std::chrono::duration<double>(end-begin).count()},
         {"source_preparation_seconds",std::chrono::duration<double>(prepared-begin).count()},
@@ -5600,6 +5650,7 @@ int main(int argc,char** argv) {
             result["physical_repeated_bit_usage"]="--mode plan|receive --scenario hf-ensemble-changing-rate --repeat-bit 0|1 --repeat-separate-attempts --bit-seconds 128 --cn0 0 --seed 30107 --noise-seed 40107 --hf-trajectory-seed 20107 --hf-trajectory-offset-seconds 197 --max-samples 4350000 --max-wall-seconds 180 evaluates five separate raw-bit attempts through one continuous changing-rate channel. The bounded hf-disturbed profile is limited to C/N0 12, seed 9202 or 9601, omitted noise seed, 4096-sample chunks and otherwise the same CPU reference bounds.";
             result["service_replay_usage"]="--service-replay in receive/plan pre-renders native I/Q into the canonical bounded ObservationSpool; accepts --service-episodes 1|2, --service-spool-byte-limit N, paired --service-backlog-begin-slot N --service-backlog-end-slot N, and chunks <=4096. Full service includes receiver construction, unchanged-chunk replay, drain/destruction and separately reported replay reads/hash; rendering is excluded. Two episodes retain the global ordinal and fixed two-quiet gap, with a final extra quiet slot. Backlog eligibility and communication completion are separate; no capacity qualification.";
             result["continuous_data_usage"]="--continuous-data selects adjacent sample-grid DATA gates and the native protected-window scorer for a direct HF reference CPU plan or receive. One episode, Helper/FEC off, with wanted, noise or wrong-key control. The receiver still scores two physical quiet slots for completion.";
+            result["scheduled_gap_fill_usage"]="--scheduled-gap-fill uses the canonical scheduled calendar and native gap fill for direct HF reference CPU plan or receive. One episode, Helper/FHSS/FEC off, with wanted, noise or wrong-key control. Use --gap-fill-transmit off to keep the same receiver declaration and suppress only transmitted fill.";
             result["protected_discovery_usage"]="--protected-discovery requires --continuous-data and enables native protected-aperture affine candidate discovery on eligible unresolved slots.";
             result["hf_compare_admitted_models_usage"]="--hf-compare-admitted-models opts CPU receive/plan into comparison of all supported models with unchanged ordinary/overlap workspace quotes; excludes --hf-public-phase-receiver";
             result["hf_phase_filter_usage"]="--hf-phase-filter requires hf-search, --hf-phase-refinement and --search-timing full; reports a bounded public phase-filter diagnostic without changing receiver decisions";

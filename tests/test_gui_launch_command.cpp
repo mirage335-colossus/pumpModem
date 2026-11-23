@@ -62,7 +62,7 @@ void parsing_and_formatting() {
           "Older partial commands must leave the minimum carrier spacing unspecified");
     check(!launch_command::parse("--rate 1200").data_cadence,
           "Older partial commands must leave DATA cadence unspecified");
-    for (const auto* cadence : {"scheduled", "continuous"}) {
+    for (const auto* cadence : {"scheduled", "scheduled-fill", "continuous"}) {
         const auto patch = launch_command::parse(std::string("--data-cadence ") + cadence);
         check(patch.data_cadence == cadence && launch_command::parse(launch_command::format(patch)) == patch,
               "DATA cadence must survive launch round trips");

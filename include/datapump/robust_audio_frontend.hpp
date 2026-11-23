@@ -10,6 +10,8 @@ namespace datapump::live::detail {
 // phase does not change the receiver's channel hypotheses.
 class AudioInput {
 public:
+    static std::size_t required_halo_samples(std::uint32_t rate, double carrier_hz,
+                                             double lower_hz, double upper_hz);
     AudioInput(std::uint32_t rate, double carrier_hz, double lower_hz, double upper_hz,
                std::uint64_t first_input_sample = 0);
     std::uint64_t first_valid_sample() const { return origin_ + half_; }

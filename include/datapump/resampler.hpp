@@ -40,6 +40,9 @@ public:
     void begin_timing_block();
     struct TimingBlock {std::uint64_t frames=0;long double minimum=0,maximum=0;};
     TimingBlock timing_block() const noexcept;
+    // Half support around the mapped source time, excluding buffering latency.
+    static double source_support_seconds(std::uint32_t input_rate, std::uint32_t output_rate, bool adjustable);
+    static constexpr double maximum_rate_correction = .001;
     double source_lookahead_seconds() const noexcept;
     // Repeat with the unconsumed input and a fresh output span. end=true marks
     // the final input; subsequently call with empty input to drain the filter.

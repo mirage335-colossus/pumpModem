@@ -289,6 +289,59 @@ void data_cadence_profiles() {
     verify();
 }
 
+void scheduled_fill_profiles() {
+    auto s = settings(true);
+    s.symbol_burst_wait = 1;
+    s.symbol_burst_random = 2;
+    const auto calendar = *s.calendar;
+    const auto scheduled = live::detail::prepare_profile(s, calendar, {}, {.simulation_seed = 1});
+    s.data_cadence = live::DataCadence::scheduled_fill;
+    live::validate_settings(s);
+    const auto simulated = live::detail::prepare_profile(s, calendar, {}, {.simulation_seed = 1});
+    s.simulation = false;
+    const auto live_profile = live::detail::prepare_profile(s, calendar, {});
+    const auto adjusted = live::detail::with_capture_uncertainty(live_profile, .2, .1, 100);
+    const auto fill = simulated.waveform.gap_fill_after(0);
+    const auto ingress_halo = live::detail::AudioInput::required_halo_samples(s.transfer.modem.sample_rate,
+        live_profile.receiver.data_if_hz, live_profile.minimum_audio_hz, live_profile.maximum_audio_hz);
+    const auto transport_halo = audio::native_roundtrip_filter_halo_samples(s.transfer.modem.sample_rate);
+    check(!scheduled.waveform.config().scheduled_gap_fill && fill && fill->size(),
+          "Scheduled gap-fill selection did not create an eligible source interval");
+    check(simulated.waveform.config().receiver_filter_halo_samples == 0 &&
+          simulated.waveform.config().gap_fill_transport_halo_samples == 0 &&
+          adjusted.waveform.config().receiver_filter_halo_samples == 100 &&
+          adjusted.waveform.config().gap_fill_transport_halo_samples == transport_halo,
+          "Scheduled gap fill changed the actual complex simulation or live filter halo");
+    for (const auto* profile : {&simulated, &live_profile, &adjusted}) {
+        const auto& waveform = profile->waveform;
+        const auto candidate = waveform.gap_fill_after(0);
+        check(waveform.config().scheduled_gap_fill && !waveform.config().continuous_data &&
+              waveform.transmit_slot(0) == scheduled.waveform.transmit_slot(0) &&
+              waveform.transmit_slot(1) == scheduled.waveform.transmit_slot(1) &&
+              waveform.slot(1).symbol_ordinal == calendar.initial_ordinal + 1 &&
+              waveform.config().gap_fill_bounds &&
+              waveform.config().gap_fill_bounds->receiver_filter_halo_samples == ingress_halo + transport_halo &&
+              candidate && candidate->first == fill->first && candidate->stop == fill->stop,
+              "Gap fill, live preparation or local capture uncertainty changed shared source coordinates");
+    }
+    const auto rejects = [](const auto& operation) {
+        try { operation(); } catch (const Error& error) {
+            return std::string_view(error.what()).starts_with("Scheduled Robust gap fill requires");
+        }
+        return false;
+    };
+    auto incompatible = s;
+    incompatible.helper.power_w = 1;
+    check(rejects([&] { live::validate_settings(incompatible); }) &&
+          rejects([&] { live::detail::prepare_profile(incompatible, calendar, {}); }),
+          "Scheduled gap fill accepted active Helper power");
+    incompatible = s;
+    incompatible.fhss_profile = "fake-fcc";
+    check(rejects([&] { live::validate_settings(incompatible); }) &&
+          rejects([&] { live::detail::prepare_profile(incompatible, calendar, {}); }),
+          "Scheduled gap fill accepted FHSS");
+}
+
 void carrier_band_matches_profile() {
     auto s = settings(true);
     auto& modem = s.transfer.modem;
@@ -1710,7 +1763,7 @@ void complete_native_simulation(bool gpu = false, bool gpu_fp32 = false, bool dy
     const bool decoded = received.size() == 1 && received[0].stream_complete && received[0].content_validated &&
         received[0].short_text_decoded && received[0].content.message.data == Bytes{'e'} &&
         received[0].raw_bits == Bytes({0, 0, 1}) && received[0].missing_symbols == 0;
-    if (!decoded && (dynamic_channel || cadence == live::DataCadence::continuous)) {
+    if (!decoded && (dynamic_channel || cadence != live::DataCadence::scheduled)) {
         for (const auto& row : completed.pattern_steps) {
             std::cerr << "simulation slot=" << row.index
                       << " decision=" << static_cast<unsigned>(row.decision)
@@ -2011,6 +2064,11 @@ int main(int argc, char** argv) {
         if (argc == 2 && std::string_view(argv[1]) == "--continuous-data") {
             data_cadence_profiles();
             complete_native_simulation(false, false, false, live::DataCadence::continuous);
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--scheduled-fill") {
+            scheduled_fill_profiles();
+            complete_native_simulation(false, false, false, live::DataCadence::scheduled_fill);
             return 0;
         }
         if (argc == 3 && std::string_view(argv[1]) == "--fixed-receiver-link") {

@@ -190,7 +190,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     }
     if(control.field==Field::data_cadence) {
         control.purpose=ControlPurpose::setup;
-        control.help="Continuous DATA places successive DATA gates on adjacent samples. It requires Helper, both Symbol Burst waits, and FHSS off. Both peers must select the same DATA cadence.";
+        control.help="Scheduled + gap fill retains the scheduled DATA gates and fills eligible inter-DATA intervals on the same band. Keep Helper and FHSS off. Continuous DATA places successive gates on adjacent samples and also requires both Symbol Burst waits off. Both peers must select the same DATA cadence.";
     }
     if(slot==Slot::diagnostics)control.help="Actual session diagnostics. Functional reception and modeled duration do not establish physical sensitivity or sustained CPU capacity.";
     if(slot==Slot::waterfall) {control.footer_height=24;control.click=Command::toggle_waterfall_expanded;control.right_click=Command::toggle_helper_waterfall_expanded;control.help="With Helper Carrier enabled, right-click to zoom in on the low pilot, auxiliary and high pilot tones. Click for the fullscreen configured search band and a little surrounding spectrum with adjacent amplitude/phase columns. Phase brightness follows amplitude; quiet noise stays dim. Escape or another click restores this environmental view. Clear waterfall clears history separately. Simulation uses a fixed 40 dB range; hardware spans the captured sample rate, including surrounding interference.";}

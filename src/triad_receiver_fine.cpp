@@ -815,23 +815,33 @@ struct WorkerScratch {
     }
 };
 
-std::span<Complex> render_templates(MappedBasis& basis, const MappedBasisRow& row, std::span<const Tap> taps,
-                                   const ObservationBlock& block, WorkerScratch& scratch, std::stop_token stop) {
-    const auto rows = block.projection->rows();
+// Render the full block into column-major storage through bounded basis requests.
+void render_templates_into(MappedBasis& basis, const MappedBasisRow& row, std::span<const Tap> taps,
+                           std::size_t block_first, std::size_t rows, std::span<Complex> out, WorkerScratch& scratch,
+                           std::stop_token stop) {
     const auto columns = 2 * taps.size();
-    auto raw = std::span(scratch.raw).first(rows * columns);
     for (std::size_t first = 0; first < rows; first += maximum_basis_rows) {
         const auto count = std::min(maximum_basis_rows, rows - first);
-        auto rendered = count == rows ? raw : std::span(scratch.chunk).first(count * columns);
-        basis.render_pair(row, taps, block.first + first, std::span(scratch.offsets).first(count),
-                          rendered, stop);
+        auto rendered = count == rows ? out.first(rows * columns) : std::span(scratch.chunk).first(count * columns);
+        basis.render_pair(row, taps, block_first + first, std::span(scratch.offsets).first(count), rendered, stop);
         if (count != rows) {
             for (std::size_t column = 0; column < columns; ++column)
                 std::copy_n(rendered.begin() + static_cast<std::ptrdiff_t>(column * count), count,
-                            raw.begin() + static_cast<std::ptrdiff_t>(column * rows + first));
+                            out.begin() + static_cast<std::ptrdiff_t>(column * rows + first));
         }
     }
+}
+
+std::span<Complex> render_templates(MappedBasis& basis, const MappedBasisRow& row, std::span<const Tap> taps,
+                                   std::size_t first, std::size_t rows, WorkerScratch& scratch, std::stop_token stop) {
+    auto raw = std::span(scratch.raw).first(2 * taps.size() * rows);
+    render_templates_into(basis, row, taps, first, rows, raw, scratch, stop);
     return raw;
+}
+
+std::span<Complex> render_templates(MappedBasis& basis, const MappedBasisRow& row, std::span<const Tap> taps,
+                                   const ObservationBlock& block, WorkerScratch& scratch, std::stop_token stop) {
+    return render_templates(basis, row, taps, block.first, block.projection->rows(), scratch, stop);
 }
 
 template<typename Precision>
@@ -3729,9 +3739,7 @@ void raw_track_statistics(MappedBasis& basis, const MappedBasisRow& map, std::sp
                           double observation_energy, std::stop_token stop) {
     const auto rows = observation.size();
     const auto columns = 2 * taps.size();
-    auto templates = std::span(scratch.raw).first(columns * rows);
-    // Tracking uses a compact block, so this render is always one cache request.
-    basis.render_pair(map, taps, first, std::span(scratch.offsets).first(rows), templates, stop);
+    const auto templates = render_templates(basis, map, taps, first, rows, scratch, stop);
     for (std::size_t column = 0; column < columns; ++column) {
         auto values = spectrum.subspan(column * plan.fft_rows, plan.fft_rows);
         std::fill(values.begin(), values.end(), Complex{});
@@ -3826,24 +3834,6 @@ struct VaryingDeviceRoute {
     std::span<const std::int64_t> shifts;
     std::size_t device_batches = 0, native_batches = 0;
 };
-
-// render_templates into caller storage [column][rows]: the same basis
-// requests, so the same values.
-void render_templates_into(MappedBasis& basis, const MappedBasisRow& row, std::span<const Tap> taps,
-                           std::size_t block_first, std::size_t rows, std::span<Complex> out, WorkerScratch& scratch,
-                           std::stop_token stop) {
-    const auto columns = 2 * taps.size();
-    for (std::size_t first = 0; first < rows; first += maximum_basis_rows) {
-        const auto count = std::min(maximum_basis_rows, rows - first);
-        auto rendered = count == rows ? out.first(rows * columns) : std::span(scratch.chunk).first(count * columns);
-        basis.render_pair(row, taps, block_first + first, std::span(scratch.offsets).first(count), rendered, stop);
-        if (count != rows) {
-            for (std::size_t column = 0; column < columns; ++column)
-                std::copy_n(rendered.begin() + static_cast<std::ptrdiff_t>(column * count), count,
-                            out.begin() + static_cast<std::ptrdiff_t>(column * rows + first));
-        }
-    }
-}
 
 // One lane's phase receipts, on its own cache line. A lane's idle time in a
 // phase runs from its first leaf there to the end of the phase.
@@ -3959,7 +3949,7 @@ void enable_midpoint_tracking(VaryingFinePlan& plan) {
 }
 
 VaryingFinePlan varying_fine_plan(const ReceiverConfig& config, const ReceiverSlotPlan& slot, unsigned workers,
-                                 bool project_line_atom, bool coherent_gain_blocks) {
+                                 bool project_line_atom, bool coherent_gain_blocks, std::size_t tracking_final_rows) {
     if (!config.time_varying_channel) return {};
     const auto fs = config.sample_rate_hz;
     const auto rows = static_cast<std::size_t>(slot.stop_sample - slot.first_sample);
@@ -4014,8 +4004,13 @@ VaryingFinePlan varying_fine_plan(const ReceiverConfig& config, const ReceiverSl
     const auto mapped = std::min(maximum_basis_rows, final);
     auto tracking_config = config;
     tracking_config.helper_enabled |= project_line_atom;
-    auto track = final <= maximum_basis_rows ?
-        tracking_plan(tracking_config, block, final, coherent_gain_blocks) : FrequencyTrackingPlan{};
+    if (tracking_final_rows && (tracking_final_rows < block || tracking_final_rows >= 2 * block))
+        return {0, 0, "protected_varying_model_grid_unavailable"};
+    // A crop can merge more rows into the last block. Its templates can be
+    // rendered in chunks and all fit in the original FFT (at least 2 * block).
+    const auto tracking_rows = tracking_final_rows ? tracking_final_rows : final;
+    auto track = tracking_rows <= maximum_basis_rows ? tracking_plan(tracking_config, block, tracking_rows,
+        coherent_gain_blocks) : FrequencyTrackingPlan{};
     if (track.states && tracking_config.helper_enabled) {
         const auto non_dc = [&](std::size_t rows) {
             const auto spacing = fs / rows;
@@ -4078,6 +4073,7 @@ VaryingFinePlan varying_fine_plan(const ReceiverConfig& config, const ReceiverSl
     result.batch_blocks = batch_blocks;
     result.batch_block_bytes = block_bytes;
     result.batch_track_bytes = track.states ? varying_track_block_bytes(projected_tracks, track.states) : 0;
+    result.tracking_final_rows = tracking_final_rows;
     return result;
 }
 
@@ -4191,7 +4187,10 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
     auto tracking_config = config;
     tracking_config.helper_enabled |= line != nullptr;
     const auto track = plan.track_frequency ?
-        tracking_plan(tracking_config, block_rows, final_rows, plan.coherent_gain_blocks) : FrequencyTrackingPlan{};
+        tracking_plan(tracking_config, block_rows, plan.tracking_final_rows ? plan.tracking_final_rows : final_rows,
+            plan.coherent_gain_blocks) : FrequencyTrackingPlan{};
+    if (track.states && final_rows > track.fft_rows)
+        throw Error("Robust final tracking block exceeds its public FFT");
     auto projected_tracking_config = tracking_config;
     projected_tracking_config.helper_enabled = true;
     const auto nontrivial_projection = [](const Projection& projection) {
@@ -4522,10 +4521,8 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
                     statistics.nonzero_basis = nonzero;
                     continue;
                 }
-                const auto rows = block.projection->rows();
-                auto templates = std::span(lane_scratch.raw).first(4 * rows);
-                basis.render_pair(independent_maps[item], independent_paths, block.first,
-                    std::span(lane_scratch.offsets).first(rows), templates, leaf_stop);
+                const auto templates = render_templates(basis, independent_maps[item], independent_paths,
+                    block, lane_scratch, leaf_stop);
                 if (!nonzero) nonzero = std::ranges::any_of(templates, [](auto value) { return value != Complex{}; });
                 independent_nonzero[slot_index] = nonzero;
                 projected_track_cells(templates, independent_paths.size(), block, config.sample_rate_hz,
@@ -4558,9 +4555,8 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
                 const auto rows = block.projection->rows();
                 const auto slot_index = coordinate * batch_capacity + index;
                 if (projected_tracks) {
-                    auto templates = std::span(lane_scratch.raw).first(2 * track_taps.size() * rows);
-                    basis.render_pair(tracking_maps[coordinate], track_taps, block.first,
-                        std::span(lane_scratch.offsets).first(rows), templates, leaf_stop);
+                    const auto templates = render_templates(basis, tracking_maps[coordinate], track_taps,
+                        block, lane_scratch, leaf_stop);
                     projected_track_cells(templates, track_taps.size(), block, config.sample_rate_hz, track,
                         lane_scratch, tracking_scratch[lane],
                         std::span(projected_track_storage).subspan(slot_index * track_cells, track_cells), leaf_stop);
@@ -4615,8 +4611,8 @@ void score_varying_fine(const ReceiverConfig& config, const ReceiverSlotPlan& sl
                 render_templates_into(basis, independent_maps[item - states.size()], independent_paths, block_first,
                                       rows, host_templates, lane_scratch, leaf_stop);
             } else {
-                basis.render_pair(independent_maps[item - affine_items], independent_paths, block_first,
-                    std::span(lane_scratch.offsets).first(rows), host_templates, leaf_stop);
+                render_templates_into(basis, independent_maps[item - affine_items], independent_paths,
+                    block_first, rows, host_templates, lane_scratch, leaf_stop);
                 nonzero = std::ranges::any_of(host_templates, [](auto value) { return value != Complex{}; });
             }
             // Required for a complete receipt even on slots that contain only noise.

@@ -554,6 +554,12 @@ void data_cadence_policy() {
     gui::Controller fresh({.simulation=true, .launch_settings=saved});
     check(fresh.settings().data_cadence == live::DataCadence::continuous &&
           fresh.field(F::data_cadence).selected == "continuous");
+    fresh.select(F::data_cadence, "scheduled-fill");
+    check(fresh.settings().data_cadence == live::DataCadence::scheduled_fill);
+    const auto fill = gui::launch_command::parse(fresh.field(F::planner_command).text);
+    gui::Controller filled({.simulation=true, .launch_settings=fill});
+    check(fill.data_cadence == "scheduled-fill" && filled.settings().data_cadence == live::DataCadence::scheduled_fill &&
+          filled.field(F::data_cadence).selected == "scheduled-fill");
     fresh.select(F::data_cadence, "scheduled");
     check(fresh.settings().data_cadence == live::DataCadence::scheduled);
 }

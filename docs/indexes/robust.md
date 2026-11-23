@@ -17,6 +17,9 @@ bounded executor; Python only orchestrates native testing and analysis.
 
 For live reception, first match the peers' public calendar epoch, initial keyed
 ordinal, waveform profile, encryption/key, FEC, compression and DATA cadence.
+**Robust Setup → DATA cadence → Scheduled + gap fill** keeps the Scheduled
+calendar and uses the DATA waveform with a temporary key inside eligible gaps.
+Both peers need Helper and FHSS Off. [Gap fill and its guard](../symbol-burst.md#scheduled-gaps-and-temporary-key-noise)
 **Robust setup → DATA cadence → Continuous DATA** removes the scheduled silence
 between successive DATA gates. Both peers need Helper, both burst waits and
 FHSS Off for this cadence. Scheduled remains the default because broad timing

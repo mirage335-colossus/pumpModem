@@ -1,25 +1,40 @@
 #include "datapump/resampler.hpp"
+#include "datapump/audio.hpp"
+#include "audio_rates.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <numbers>
 
 namespace datapump::audio {
+namespace {
+void validate_rates(std::uint32_t input, std::uint32_t output) {
+    if(input<64 || input>120000000 || output<64 || output>120000000)
+        throw Error("resampler rate must be 64..120000000 Hz");
+}
+std::uint32_t intermediate_rate(std::uint32_t input, std::uint32_t output) {
+    auto rate=output;
+    while(static_cast<std::uint64_t>(rate)*4<input)rate*=4;
+    return rate;
+}
+std::size_t filter_radius(std::uint32_t input, std::uint32_t output) {
+    const double ratio=std::min(1.,static_cast<double>(output)/input);
+    return static_cast<std::size_t>(std::ceil(48/ratio));
+}
+}
 Resampler::Resampler(std::uint32_t input_rate,std::uint32_t output_rate,bool adjustable)
     :input_rate_(input_rate),output_rate_(output_rate),adjustable_(adjustable),capture_nominal_unshifted_(!adjustable) {
-    if(input_rate<64 || input_rate>120000000 || output_rate<64 || output_rate>120000000)
-        throw Error("resampler rate must be 64..120000000 Hz");
+    validate_rates(input_rate,output_rate);
     if(input_rate==output_rate && !adjustable_)return;
-    if(static_cast<std::uint64_t>(input_rate)>static_cast<std::uint64_t>(output_rate)*4) {
-        auto intermediate_rate=output_rate;
-        while(static_cast<std::uint64_t>(intermediate_rate)*4<input_rate)intermediate_rate*=4;
-        first_stage_=std::make_unique<Resampler>(input_rate,intermediate_rate);
-        last_stage_=std::make_unique<Resampler>(intermediate_rate,output_rate,adjustable_);
+    const auto intermediate=intermediate_rate(input_rate,output_rate);
+    if(intermediate!=output_rate) {
+        first_stage_=std::make_unique<Resampler>(input_rate,intermediate);
+        last_stage_=std::make_unique<Resampler>(intermediate,output_rate,adjustable_);
         intermediate_.resize(256);
         return;
     }
     const double ratio=std::min(1.,static_cast<double>(output_rate)/input_rate);
-    radius_=static_cast<std::size_t>(std::ceil(48/ratio));
+    radius_=filter_radius(input_rate,output_rate);
     taps_=radius_*2+1;
     ring_.resize(taps_+2);
     coefficients_.resize((phases+1)*taps_);
@@ -40,8 +55,28 @@ Resampler::Resampler(std::uint32_t input_rate,std::uint32_t output_rate,bool adj
             coefficients_[phase*taps_+tap]=static_cast<float>(coefficients_[phase*taps_+tap]/sum);
     }
 }
+double Resampler::source_support_seconds(std::uint32_t input, std::uint32_t output, bool adjustable) {
+    validate_rates(input,output);
+    if(input==output && !adjustable)return 0;
+    const auto intermediate=intermediate_rate(input,output);
+    if(intermediate!=output)
+        return source_support_seconds(input,intermediate,false)+source_support_seconds(intermediate,output,adjustable);
+    // The integer index can be one sample earlier than the fractional time.
+    return static_cast<double>(filter_radius(input,output)+1)/input;
+}
+std::uint64_t native_roundtrip_filter_halo_samples(std::uint32_t logical_rate) {
+    double playback=0, capture=0;
+    for(const auto hardware:detail::rate_candidates(logical_rate)) {
+        playback=std::max(playback,Resampler::source_support_seconds(logical_rate,hardware,true));
+        capture=std::max(capture,Resampler::source_support_seconds(hardware,logical_rate,true));
+    }
+    // Both corrected sample clocks can stretch the support relative to the
+    // logical calendar. Device and analog response are outside this bound.
+    const auto minimum_scale=1-Resampler::maximum_rate_correction;
+    return static_cast<std::uint64_t>(std::ceil(logical_rate*(playback+capture)/(minimum_scale*minimum_scale)));
+}
 void Resampler::set_rate_correction(double correction,double slew) {
-    if(!adjustable_ || !std::isfinite(correction) || std::abs(correction)>.001 ||
+    if(!adjustable_ || !std::isfinite(correction) || std::abs(correction)>maximum_rate_correction ||
        !std::isfinite(slew) || slew<=0 || slew>.001)
         throw Error("invalid continuous resampler rate correction");
     if(last_stage_) {last_stage_->set_rate_correction(correction,slew);return;}
@@ -49,7 +84,7 @@ void Resampler::set_rate_correction(double correction,double slew) {
 }
 void Resampler::initialize_timing(double fraction,double correction) {
     if(!adjustable_ || started_ || !std::isfinite(fraction) || fraction<0 || fraction>=1 ||
-       !std::isfinite(correction) || std::abs(correction)>.001)
+       !std::isfinite(correction) || std::abs(correction)>maximum_rate_correction)
         throw Error("invalid initial resampler timing");
     if(last_stage_) {
         // Both stages preserve time zero. Express the original fractional

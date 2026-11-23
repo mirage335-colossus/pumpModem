@@ -1,5 +1,6 @@
 #include "resource_test_margin.hpp"
 #include "datapump/resampler.hpp"
+#include "datapump/audio.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -107,6 +108,21 @@ ComposedOutput composed(std::span<const float> input,std::uint32_t from,std::uin
 }
 }
 int main(){try {
+    {
+        constexpr std::uint32_t logical=6000, hardware=48000;
+        constexpr std::size_t first=500, stop=700;
+        std::vector<float> source(1200);
+        std::fill(source.begin()+first,source.begin()+stop,1.f);
+        const auto playback=convert(source,logical,hardware,137,271);
+        const auto roundtrip=convert(playback,hardware,logical,251,227);
+        const auto halo=datapump::audio::native_roundtrip_filter_halo_samples(logical);
+        require(halo>=109 && halo<first,"native FIR bound missed a cascaded converter");
+        require(std::ranges::any_of(std::span(roundtrip).subspan(first-halo,halo-32),[](float x){return x!=0;}),
+            "roundtrip edge failed to exercise support beyond the modem's fixed guard");
+        require(std::ranges::all_of(std::span(roundtrip).first(first-halo),[](float x){return x==0;}) &&
+                std::ranges::all_of(std::span(roundtrip).subspan(stop+halo),[](float x){return x==0;}),
+            "roundtrip audio leaked outside the declared FIR bound");
+    }
     // Composition happens after all conversion and the payload safety gain.
     // This permits an independent hardware-rate tone while keeping payload PCM
     // and its clock unchanged, including multistage and corrected conversion.

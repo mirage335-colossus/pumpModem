@@ -3075,6 +3075,104 @@ void signed_relative_doppler_endpoints() {
 // Vulkan gain-rank checks.
 using namespace signed_gain_fixtures;
 
+void scheduled_fill_preserves_midpoint_search() {
+    using namespace receiver_detail;
+    auto input = signed_gain_fixture(-1);
+    auto& slot = input.slot;
+    slot.scheduled_gap_fill = true;
+    slot.protected_data_first_sample = slot.first_sample + 17;
+    slot.protected_data_stop_sample = slot.stop_sample - 29;
+    slot.quiet_first_sample = std::max(slot.quiet_first_sample, slot.protected_data_first_sample);
+    slot.quiet_stop_sample = std::min(slot.quiet_stop_sample, slot.protected_data_stop_sample);
+    const auto lease = protected_slot_workspace(input.config, slot, 2);
+    const auto count = static_cast<std::size_t>(slot.stop_sample - slot.first_sample);
+    const auto changed = [&] {
+        auto iq = input.iq;
+        for (auto i : {std::size_t{0}, std::size_t{16}, count - 29, count - 1})
+            iq[i] += Complex{100, 200};
+        return iq;
+    }();
+    const auto score = [&](std::span<const Complex> iq) {
+        return score_protected_data_slot(input.config, slot, Crypto::amateur(), iq, {}, 2,
+            lease, {}, nullptr, nullptr);
+    };
+    const auto baseline = score(input.iq), filled = score(changed);
+    check(baseline.complete && baseline.decision == SlotDecision::data && baseline.bit == 0 &&
+          baseline.midpoint_timing_lags > 0 && baseline.varying_frequency_states > 0,
+          "scheduled fill must keep the full midpoint and varying receiver families");
+    check(filled.complete && filled.bit == baseline.bit &&
+          filled.operational_bit_evidence == baseline.operational_bit_evidence &&
+          filled.quiet_energy == baseline.quiet_energy &&
+          filled.midpoint_timing_scored_lags == baseline.midpoint_timing_scored_lags &&
+          filled.coarse_frequency_points == baseline.coarse_frequency_points &&
+          filled.coarse_arrival_points == baseline.coarse_arrival_points &&
+          !filled.protected_discovery_attempted,
+          "possible fill must be masked before all proposal families with one full public search");
+}
+
+void scheduled_fill_preserves_large_tracking_tail() {
+    using namespace receiver_detail;
+    constexpr unsigned rate = 96'000;
+    constexpr std::size_t block = 12'000, trim = 100;
+    ReceiverConfig config;
+    config.sample_rate_hz = rate;
+    config.data_if_hz = 24'000;
+    config.noise_variance = 1;
+    config.frequency_bound_hz = 4;
+    config.spread_delay_seconds = .001;
+    config.time_varying_channel = true;
+    config.time_varying_common_doppler_hz = 4;
+    ReceiverSlotPlan full;
+    full.first_sample = rate;
+    full.stop_sample = full.first_sample + 2 * block;
+    full.window_capture_lead_seconds = -2;
+    full.source_start_seconds = .5;
+    full.format.sample_rate = rate;
+    full.format.inner_rate_hz = 96;
+    full.format.added_symbols = 1;
+    full.format.bit_seconds = .001;
+    auto cropped = full;
+    cropped.first_sample += trim;
+    cropped.window_capture_lead_seconds -= static_cast<long double>(trim) / rate;
+    const auto original = varying_fine_plan(config, full, 1);
+    const auto unpreserved = varying_fine_plan(config, cropped, 1);
+    const auto preserved = varying_fine_plan(config, cropped, 1, false, false, block);
+    const auto originally_untracked = varying_fine_plan(config, full, 1, false, false, 2 * block - trim);
+    check(original.block_rows == block && original.track_frequency &&
+          unpreserved.block_rows == block && !unpreserved.track_frequency &&
+          preserved.block_rows == block && preserved.track_frequency &&
+          preserved.nominal_independent_gain_candidates == original.nominal_independent_gain_candidates,
+          "a merged protected tail must keep the public varying frequency and gain families");
+    check(originally_untracked.block_rows == block && !originally_untracked.track_frequency,
+          "a shorter protected tail must keep the public fixed-frequency varying family");
+    const auto full_line = varying_fine_plan(config, full, 1, true);
+    const auto protected_line = varying_fine_plan(config, cropped, 1, true, false, block);
+    check(full_line.track_frequency && protected_line.track_frequency,
+          "a merged protected tail must keep the line-conditioned tracker");
+
+    const auto key = Crypto::amateur();
+    PatternSource source(full.format, key, 0);
+    std::vector<Complex> iq(2 * block);
+    source.render(rate + rate / 2, iq);
+    const std::array timing{FineCoordinate{}};
+    ReceiverExecutor executor(1);
+    const auto score = [&](const ReceiverSlotPlan& slot, const VaryingFinePlan& plan, std::span<const Complex> samples) {
+        ReceiverSlotScore result;
+        score_varying_fine(config, slot, key, plan, samples, timing, {}, rate, 0, 1, result, {}, executor);
+        return result;
+    };
+    const auto public_score = score(full, original, iq);
+    const auto protected_score = score(cropped, preserved, std::span(iq).subspan(trim));
+    check(public_score.varying_blocks == 2 && protected_score.varying_blocks == 1 &&
+          public_score.varying_frequency_states > 1 &&
+          protected_score.varying_frequency_states == public_score.varying_frequency_states &&
+          protected_score.tracked_frequency_log_prior_adjustment == public_score.tracked_frequency_log_prior_adjustment &&
+          protected_score.nominal_independent_gain_frequency_states == public_score.nominal_independent_gain_frequency_states &&
+          std::ranges::all_of(protected_score.tracked_frequency_bit_evidence,
+              [](double evidence) { return std::isfinite(evidence); }),
+          "merged protected tracking must score the full tail on its original lattice");
+}
+
 void signed_gain_timing_and_exact_admission() {
     using namespace receiver_detail;
     const auto profile_config = signed_gain_profile_config();
@@ -3910,6 +4008,8 @@ int main(int argc, char** argv) {
             else if (part == "protected-observation") {
                 protected_observation_validity();
                 protected_drift_lattice();
+                scheduled_fill_preserves_midpoint_search();
+                scheduled_fill_preserves_large_tracking_tail();
             }
             else if (part == "short-drift") {
                 drift_ridge_interchange_oracle();
@@ -3950,6 +4050,8 @@ int main(int argc, char** argv) {
         protected_carrier_beat_preserves_wanted();
         protected_colored_carrier_beat();
         protected_drift_lattice();
+        scheduled_fill_preserves_midpoint_search();
+        scheduled_fill_preserves_large_tracking_tail();
         wrong_key_policy_boundaries();
         large_aperture_supplemental_plans();
         broad_frequency_timing_plan();

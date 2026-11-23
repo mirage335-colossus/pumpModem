@@ -464,6 +464,181 @@ void centered_receiver_filter_support() {
     rejects([&]{PublicProfile(config).slot(1);},"filter support overflow accepted");
 }
 
+void scheduled_gap_fill_support() {
+    PublicProfileConfig config;
+    config.format.sample_rate=6000;
+    config.format.inner_rate_hz=3.6;
+    config.format.added_symbols=1;
+    config.format.minimum_carrier_spacing_hz=265;
+    config.format.bit_seconds=160.4;
+    config.format.epoch=epoch;
+    config.format.symbol_ordinal=std::numeric_limits<std::uint64_t>::max()-2;
+    config.capture_lead_seconds=7.25;
+    config.capture_trail_seconds=.25;
+    config.arrival_low_seconds=-7;
+    config.arrival_high_seconds=7.07;
+    config.spread_delay_ms=21;
+    config.selective_signal_tail=true;
+    config.receiver_filter_halo_samples=97;
+    const PublicProfile scheduled(config);
+    config.scheduled_gap_fill=true;
+    const PublicProfile filled(config);
+    check(!scheduled.gap_fill_after(0) && !filled.gap_fill_after(2),
+          "gap fill escaped the selected mode or public calendar");
+
+    const auto rate=filled.effective_sample_rate();
+    const auto source_rows=[&](HelperBurstCoordinate coordinate) {
+        return filled.calendar().distance(filled.origin(),coordinate);
+    };
+    const auto active_rows=static_cast<std::uint64_t>(std::ceil(filled.geometry().bit_seconds*rate));
+    const auto lower_offset=rate*(config.capture_lead_seconds+config.arrival_low_seconds);
+    const auto upper_offset=rate*(config.capture_lead_seconds+config.arrival_high_seconds+
+        config.spread_delay_ms/1000+2/(3*filled.geometry().nominal_carrier_bandwidth_hz));
+    const auto halo=config.receiver_filter_halo_samples;
+    const auto first_arrival=[&](std::uint64_t source) { return source+lower_offset-32-halo; };
+    const auto stop_arrival=[&](std::uint64_t source) { return source+upper_offset+32+halo; };
+    for (std::uint64_t index=0; index<2; ++index) {
+        const auto prev=filled.slot(index), next=filled.slot(index+1);
+        const auto prev_scheduled=scheduled.slot(index), next_scheduled=scheduled.slot(index+1);
+        check(prev.tx==prev_scheduled.tx && next.tx==next_scheduled.tx &&
+              prev.observation.first==prev_scheduled.observation.first &&
+              prev.observation.stop==prev_scheduled.observation.stop &&
+              next.observation.first==next_scheduled.observation.first &&
+              next.observation.stop==next_scheduled.observation.stop,
+              "gap fill changed the scheduled transmit or receive calendar");
+        const auto fill=filled.gap_fill_after(index);
+        check(fill && fill->size()>18*rate && fill->size()<23*rate,
+              "broad scheduled profile lost its usable central gap");
+        const auto previous_end=source_rows(prev.tx.pattern_begin)+active_rows;
+        const auto next_begin=source_rows(next.tx.pattern_begin);
+        check(fill->first>previous_end && fill->stop<next_begin &&
+              std::floor(first_arrival(fill->first))>=std::ceil(stop_arrival(previous_end))-1 &&
+              std::ceil(stop_arrival(fill->stop))<=std::floor(first_arrival(next_begin))+1,
+              "gap fill reached a wanted gate after arrival, channel and FIR bounds");
+        check(prev.gap_fill_may_enter_observation && next.gap_fill_may_enter_observation &&
+              prev.protected_data_aperture.stop+1>=std::ceil(stop_arrival(previous_end)) &&
+              next.protected_data_aperture.first<=std::floor(first_arrival(next_begin))+1 &&
+              prev.protected_data_aperture.stop<=std::floor(first_arrival(fill->first))+1 &&
+              next.protected_data_aperture.first+1>=std::ceil(stop_arrival(fill->stop)),
+              "gap fill crop dropped reachable wanted DATA or admitted possible fill");
+    }
+
+    auto widened_config=filled.config();
+    widened_config.capture_lead_seconds+=.75;
+    widened_config.arrival_low_seconds-=.75;
+    widened_config.arrival_high_seconds+=.75;
+    widened_config.receiver_filter_halo_samples+=47;
+    const PublicProfile widened(widened_config);
+    auto widened_baseline_config=widened_config;
+    widened_baseline_config.scheduled_gap_fill=false;
+    const auto widened_quiet=PublicProfile(widened_baseline_config).slot(1).quiet_aperture;
+    const auto base=filled.slot(1), local=widened.slot(1);
+    for (const auto index : {0,1}) {
+        const auto original=filled.gap_fill_after(index), local_range=widened.gap_fill_after(index);
+        check(original && local_range && original->first==local_range->first && original->stop==local_range->stop,
+              "receiver-only capture widening moved the public source fill");
+    }
+    check(local.protected_data_aperture.first>base.protected_data_aperture.first &&
+          local.protected_data_aperture.stop<base.protected_data_aperture.stop &&
+          local.protected_data_aperture.first<=local.quiet_aperture.first &&
+          local.quiet_aperture.stop<=local.protected_data_aperture.stop &&
+          local.quiet_aperture.first>=widened_quiet.first && local.quiet_aperture.stop<=widened_quiet.stop,
+          "local capture widening did not conservatively exclude the unchanged fill");
+
+    auto transport_config=filled.config();
+    constexpr std::uint64_t transport_halo=240;
+    transport_config.gap_fill_transport_halo_samples=transport_halo;
+    const PublicProfile with_transport(transport_config);
+    const auto transported=with_transport.slot(1);
+    const auto base_fill=filled.gap_fill_after(1), transported_fill=with_transport.gap_fill_after(1);
+    check(base_fill && transported_fill && base_fill->first==transported_fill->first &&
+          base_fill->stop==transported_fill->stop && transported.observation.first==base.observation.first &&
+          transported.observation.stop==base.observation.stop &&
+          transported.protected_data_aperture.first==base.protected_data_aperture.first+transport_halo &&
+          transported.protected_data_aperture.stop+transport_halo==base.protected_data_aperture.stop,
+          "transport support was ignored or changed the public source or capture");
+
+    // An endpoint with tighter local bounds can receive the same source
+    // calendar while its entire observation lies outside possible fill.
+    auto narrow_config=filled.config();
+    narrow_config.capture_lead_seconds=.25;
+    narrow_config.arrival_low_seconds=-.01;
+    narrow_config.arrival_high_seconds=.01;
+    const PublicProfile narrow(narrow_config);
+    narrow_config.scheduled_gap_fill=false;
+    const auto ordinary_narrow=PublicProfile(narrow_config).slot(1), filled_narrow=narrow.slot(1);
+    check(narrow.gap_fill_after(0) && narrow.gap_fill_after(1) &&
+          !filled_narrow.gap_fill_may_enter_observation && filled_narrow.protected_data_aperture.size()==0 &&
+          filled_narrow.quiet_aperture.first==ordinary_narrow.quiet_aperture.first &&
+          filled_narrow.quiet_aperture.stop==ordinary_narrow.quiet_aperture.stop,
+          "fill outside the complete capture modified ordinary receive support");
+
+    config.arrival_low_seconds=-100;
+    config.arrival_high_seconds=100;
+    config.capture_lead_seconds=100.25;
+    const PublicProfile crowded(config);
+    check(!crowded.gap_fill_after(0) && !crowded.slot(1).gap_fill_may_enter_observation &&
+          crowded.slot(1).protected_data_aperture.size()==0,
+          "covered DATA arrivals left a putative gap fill interval");
+}
+
+void scheduled_fill_in_distant_receive_window() {
+    PublicProfileConfig config;
+    config.format.sample_rate=6000;
+    config.format.inner_rate_hz=3.6;
+    config.format.added_symbols=1;
+    config.format.minimum_carrier_spacing_hz=265;
+    config.format.bit_seconds=160.4;
+    config.format.epoch=epoch;
+    config.format.symbol_ordinal=91;
+    config.capture_lead_seconds=15.25;
+    config.capture_trail_seconds=.25;
+    config.arrival_low_seconds=-15;
+    config.arrival_high_seconds=15;
+    config.spread_delay_ms=21;
+    config.selective_signal_tail=true;
+    config.random_extra_bits=1;
+    config.scheduled_gap_fill=true;
+    const PublicProfile source(config);
+    constexpr double widening=105;
+    auto local_config=source.config();
+    local_config.capture_lead_seconds+=widening;
+    local_config.arrival_low_seconds-=widening;
+    local_config.arrival_high_seconds+=widening;
+    local_config.receiver_filter_halo_samples=97;
+    local_config.gap_fill_transport_halo_samples=240;
+    const PublicProfile local(local_config);
+    const auto rate=local.effective_sample_rate();
+    const auto offset_first=rate*(local_config.capture_lead_seconds+local_config.arrival_low_seconds);
+    const auto offset_stop=rate*(local_config.capture_lead_seconds+local_config.arrival_high_seconds+
+        local_config.spread_delay_ms/1000+2/(3*local.geometry().nominal_carrier_bandwidth_hz));
+    const auto halo=local_config.receiver_filter_halo_samples+local_config.gap_fill_transport_halo_samples;
+
+    bool earlier_witness=false, later_witness=false;
+    for (std::uint64_t index=2; index<64 && (!earlier_witness || !later_witness); ++index) {
+        if (source.gap_fill_after(index-1) || source.gap_fill_after(index)) continue;
+        const auto previous_gap=source.gap_fill_after(index-2), next_gap=source.gap_fill_after(index+1);
+        const auto original=source.slot(index), slot=local.slot(index);
+        const auto overlaps=[&](const std::optional<SampleRange>& gap) {
+            return gap && std::floor(gap->first+offset_first-32-halo)<slot.observation.stop &&
+                std::ceil(gap->stop+offset_stop+32+halo)>slot.observation.first;
+        };
+        const bool earlier=overlaps(previous_gap), later=overlaps(next_gap);
+        if (!earlier && !later) continue;
+        check(!original.gap_fill_may_enter_observation && slot.gap_fill_may_enter_observation,
+              "local capture missed possible fill beyond its two adjacent gaps");
+        check(slot.protected_data_aperture.size()>0 &&
+              slot.protected_data_aperture.first>=slot.previous_signal_stop &&
+              slot.protected_data_aperture.stop<=slot.next_signal_first &&
+              slot.quiet_aperture.first>=slot.protected_data_aperture.first &&
+              slot.quiet_aperture.stop<=slot.protected_data_aperture.stop,
+              "adjacent DATA bounds did not protect the distant-fill aperture");
+        earlier_witness=earlier_witness || earlier;
+        later_witness=later_witness || later;
+    }
+    check(earlier_witness && later_witness,"deterministic waits did not expose both distant fill cases");
+}
+
 void rejection_boundaries() {
     auto c=config();c.sample_rate=0;
     rejects([&]{HelperBurstPlan p(c);},"zero sample clock accepted");
@@ -496,7 +671,8 @@ int main() {
         grid_and_geometry();waits_and_quiet_intervals();protected_tail();
         indexed_public_calendar();continuous_data_calendar();continuous_emission_boundaries();
         random_extra_waits();public_epoch_and_ordinal_boundaries();
-        emission_modes_and_cancellation();centered_receiver_filter_support();rejection_boundaries();
+        emission_modes_and_cancellation();centered_receiver_filter_support();scheduled_gap_fill_support();
+        scheduled_fill_in_distant_receive_window();rejection_boundaries();
         std::cout<<"triad Helper whole-bit calendar checks passed\n";
     } catch(const std::exception& e) {
         std::cerr<<e.what()<<'\n';return 1;

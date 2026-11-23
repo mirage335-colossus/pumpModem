@@ -82,13 +82,144 @@ A two-second fill starting 11 s after the first DATA gate began was inside
 nominal transmit silence, yet changed 174 samples in the first receive
 window. At the broad 6 kHz and 3.6 Hz operating point, the 210 s cadence
 leaves 0.446333 s between full adjacent receive windows. The 14.07 s arrival
-span alone exceeds that clearance. Scheduled silence remains the operating
-choice. [Gap geometry and coherence](symbol-burst.md#scheduled-gaps-and-temporary-key-noise)
+span alone exceeds that clearance. The comparison at that stage kept Scheduled
+silence. [Gap geometry and coherence](symbol-burst.md#scheduled-gaps-and-temporary-key-noise)
 
 The small receipt under `local-evidence/scheduled-gap-fill.jXMY3pjr` records
 the controlled waveform and numerical results. The temporary source and
 executable were removed. Retain the receipt until a subsequent same-DATA
 coupled-front-end evaluation supersedes it.
+
+## Native guarded Scheduled gap fill — 22 November 2026
+
+The GUI simulator, live session and launch command share a selectable filled
+Scheduled cadence. It uses the same keyed public DATA addresses, the original
+receiver model families and two physically scored quiet slots. The fill adds
+the same native waveform at the calibrated DATA gain with an independent
+temporary key and an edge taper. The source guard reserves modeled channel
+tails and both native endpoint converters. The receiver removes possible fill
+before acquisition and limits scoring to the resulting wanted aperture. The
+unaffected slots use ordinary Scheduled processing. The finite 6 kHz to 48 kHz
+and back FIR test exercises nonzero ringing outside 32 logical samples and
+checks exact zeros outside the computed round-trip bound. Distant fill remains
+covered after local timing widens past either neighboring silent gap.
+[Implementation and scope](symbol-burst.md#scheduled-gaps-and-temporary-key-noise)
+
+The predeclared compact replay used five slots, native 1,500 samples/s,
+120 Hz Rate, 500 Hz IF, HF Worst, Each 65%, 8 Hz Doppler and seed 74021.
+The protected IQ and validity masks, including their slot scores, matched
+exactly when toggling fill at each of 20 and 32 dB-Hz. Fill changed the raw
+capture. Ordinary Scheduled at 20 dB-Hz also produced `001QQ` and decoded
+`e`. Each wanted run passed the incomplete-EOF control. The compact waveform
+added about 6.31 dB to the energy needed to transmit the same DATA at the same
+level over the episode, mostly due to its 10.4 s DATA gates and long filled
+gaps. In the separate fixed-episode-energy compact comparison, the filled
+arm reduced wanted C/N0 from 20 to 13.71 dB-Hz at the same receiver reference
+and noise. Both arms decoded `e` with `001QQ` and rejected incomplete EOF.
+DATA log-e fell from 657–762 to 31–47. The strongest policy retained two of
+three bits in the filled arm and all three without fill. The energy
+tradeoff can erode the margin even when the bits still pass Current.
+
+The 6 kHz broad HF Worst and Each 65% run used Rate 3.6 Hz, 265 Hz
+spacing, 30 MHz Shift, GPSDO/XO, margin 3, target 32 dB-Hz and nominal
+77 dB-Hz received. The matched receiver processed five slots over 1,042.55 s
+of represented time. Turning the transmitted fill on produced identical
+protected IQ and mask hashes, decisions `001QQ`, fine scores and public
+search counts. It changed three active raw windows and left both trailing
+quiet windows unchanged. Each arm evaluated 14,071 arrivals and 15 coarse
+frequencies in its first slot. Fill occupied roughly 19.6 s of each 49.6 s
+source gap, leaving about 30 s quiet across both guards. The low-rate native
+taper put the mean fill power about 7 dB below the mean DATA power in this
+example. Whole-episode transmit energy rose by about 0.07 dB at fixed wanted
+power. This quantifies the guarded partial fill, including its residual silence.
+
+On one Ryzen 5 PRO 5650U with 12 logical threads and 24 workers, receiver
+wall time was 152.05 s without transmitted fill and 135.25 s with fill.
+Receiver CPU time was 1,308 and 1,296 s, and native peak reservation was
+8.41 and 8.43 GB. Input generation took 4.06 and 4.17 s. Separate incomplete
+EOF controls added 30.57 and 36.25 s. These single runs had different
+automatic resource leases and co-runners, so they bound the observed work
+without establishing a speedup or a general receiver ceiling.
+
+A one-slot broad test reduced the actual received signal to 32 dB-Hz while
+keeping the nominal receiver reference fixed. Ordinary Scheduled, protected
+with fill withheld, and protected with fill present all retained the same
+14,071 by 15 public coarse grid and eight fine candidates. Current found
+presence but returned an ambiguous bit in all three. The wanted-to-competing
+log-e margin was 1.48, 0.55 and 0.55, below the common 5.29 requirement. The
+fill toggle produced exact protected samples and scores. This one realization
+shows a possible change from the crop itself near the decision boundary.
+It supplies neither a reception probability nor performance at the floor.
+
+A bounded native feasibility check tested occupying the entire nominal gap
+with an independent-key waveform. At the same 3.6 Hz geometry an aperture
+that excludes every possible filler arrival retained 99.18% of realized
+wanted-only channel energy (0.036 dB loss) for one interior slot. It retained
+145.41 s and excluded about 16 s of nonzero wanted support, mainly in the
+taper for this profile and seed. At 32 dB-Hz, both guarded and full-gap arms
+returned ambiguous. Each evaluated the same public grid and eight fine
+candidates. The full-gap capture changed 300,348 raw I/Q rows and matched
+exactly in the common clean aperture. Its bit separation rose from 0.55 to
+2.93 against a shared 5.29 requirement. The crop changes the noise and
+statistical aperture as well as the amount of retained signal, so this
+direction in one seed supplies no general sensitivity gain. At the same
+public arrival bounds with a 10.4 s DATA gate, the conservative full-fill
+aperture is empty by 3.73 s. This is a counterexample to using one full-gap
+mask for general Scheduled operation. Full-gap fill remains a feasibility test.
+
+At 32 dB-Hz an independent receive key under Current admission decoded the
+same three-bit `e` in one earlier compact replay. This short dictionary form
+carries no authentication tag. With the final audio guard, the matched
+independent-key replay produced the same wrong short text with fill on and
+off. A direct native Guarded replay of the same filled capture returned three
+ambiguous slots and no message, with both quiet slots scored. These controls
+distinguish existing Current false admission from filler in this channel seed.
+The GUI visibility filter uses retained competing-bit evidence separately.
+
+The Radeon functional replay used the native Vulkan backend on RADV RENOIR
+with the compact HF channel, 80 dB-Hz and broad timing. It decoded `e`, verified
+both scored quiet and the EOF control, and reported 473,556,408 native Vulkan
+FP32 score rows. Final-build receiver service took 13.26 s with the EOF check
+separate. This checks actual device dispatch. It supplies no measured Vulkan
+speedup or receiver capacity on another GPU.
+
+The direct analytical HF appraisal exercised the canonical native source and
+receiver at +20 dB-Hz, with the reference profile's timing guards. Watterson
+I3 seed 10102 decoded `e` with `001QQ` in both matched arms. Applying fill
+changed the full capture hash and preserved wanted DATA energy and every
+reported likelihood and quiet-energy value. The independent transmit key
+scored `AAAQQ` with zero false DATA decisions and zero accepted messages.
+Moving eikonal seed 10105 with fill also scored `001QQ`, decoded `e` and
+confirmed physical completion. These channel results differ from the compact
+Current false admission because the geometry and channel realization differ.
+[Reference appraisal](../_appraisal/highFidelity-triple_Robust_Modem/README.md#scheduled-gap-fill)
+
+The Realtek ALC257 analog cable test used 6 kHz logical and 48 kHz hardware
+audio, a crystal clock, 120 Hz Rate, 1,725 Hz IF, spacing 265 Hz, 5% playback
+gain and a 750 ms declared audio-error interval. The native worker and local
+audio companion used their normal device timestamps and shared a verified
+kernel clock. Anonymous pipes carried the native frames directly. The test
+decoded `e` with `001QQ`, confirmed hardware playback drain and exact capture
+cutoff, and retained the wanted message under all six GUI filter views.
+The capture had zero discontinuities. In the two measured inner fill intervals
+the ADC mean-square level was within 0.02 dB of the inner DATA interval.
+The logged playback and sampled capture intervals had zero full-scale rows.
+Completion took 400.76 s including startup and the scheduled quiet slots.
+This strong cable case measures signal delivery, headroom and finite
+completion on that device. Radio AGC and weak real-audio sensitivity remain
+unqualified.
+
+Two attempts through the zLab relay ended at its relative-clock check. In
+the instrumented attempt the request leg took 7.86 ms, while the timestamp
+response leg took 198.66 ms. Both processes shared the same kernel clock.
+The direct-pipe test kept native timestamps and finite-device checks, and
+qualifies the cable independently of the relay timing path.
+
+The raw native receipts and the two short full-gap feasibility summaries are
+kept under ignored `local-evidence/scheduled-fill-*` for comparison with a
+later full-gap or gain-control trial. The full-gap source and executable were
+removed. Retire the intermediate receipts once that comparison supersedes
+their geometries, timing ranges and matched-data evidence.
 
 ## Continuous DATA in simulation and live audio — 22 November 2026
 

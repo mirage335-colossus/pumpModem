@@ -152,6 +152,76 @@ void packed_data_aperture_retains_delayed_energy() {
     check(end_energy(std::span(bits).first(1)) == 0, "wider packed DATA support retained neighboring DATA");
 }
 
+void scheduled_gap_fill_emission() {
+    const auto scheduled = profile();
+    auto config = scheduled.config();
+    config.scheduled_gap_fill = true;
+    const PublicProfile filled(config);
+    const std::array<std::uint8_t, 3> bits{0, 0, 1};
+    const auto data_key = Crypto::amateur();
+    std::array<std::uint8_t, 64> serpent{}, aes{};
+    serpent.fill(0x67);
+    aes.fill(0x82);
+    const auto fill_key = Crypto::from_independent_roots(serpent, aes);
+    aes.fill(0x48);
+    const auto different_key = Crypto::from_independent_roots(serpent, aes);
+
+    const auto emit = [&](const PublicProfile& mode, const Crypto& key, bool staged) {
+        Emission emission(mode, data_key, EmissionOptions{.bits = bits, .qualification_gap_fill_key = key});
+        auto source = emission.source();
+        constexpr std::size_t chunk = 257;
+        check(source.geometry.source_samples < 100'000, "scheduled fill fixture exceeded its sample budget");
+        std::vector<Complex> samples(source.geometry.source_samples);
+        if (staged) source.readers->open(2, chunk);
+        for (std::size_t first = 0; first < samples.size();) {
+            const auto count = std::min(chunk, samples.size() - first);
+            if (staged) {
+                source.readers->plan(first, count);
+                for (std::size_t row = 0; row < count; ++row)
+                    samples[first + row] = source.readers->evaluate(row % 2, first + row);
+                std::exception_ptr error;
+                check(source.readers->accept(count, false, error) == count && !error,
+                      "staged fill did not accept its complete range");
+            } else {
+                check(emission.read(std::span(samples).subspan(first, count)) == count,
+                      "serial fill did not render its complete range");
+            }
+            first += count;
+        }
+        return std::pair{std::move(samples), emission.report()};
+    };
+
+    const auto [ordinary, ordinary_report] = emit(scheduled, fill_key, false);
+    const auto [with_fill, fill_report] = emit(filled, fill_key, false);
+    const auto [parallel, parallel_report] = emit(filled, fill_key, true);
+    const auto [changed_key, changed_report] = emit(filled, different_key, false);
+    check(with_fill.size() == ordinary.size() && with_fill == parallel &&
+          fill_report.data_energy == ordinary_report.data_energy &&
+          fill_report.gap_fill_samples == parallel_report.gap_fill_samples &&
+          fill_report.gap_fill_energy == parallel_report.gap_fill_energy,
+          "scheduled fill changed DATA energy, endpoint, or staging agreement");
+    for (std::size_t slot = 0; slot < bits.size(); ++slot)
+        check(filled.transmit_slot(slot) == scheduled.transmit_slot(slot), "scheduled fill changed a public address");
+    const auto first_gap = filled.gap_fill_after(0);
+    const auto second_gap = filled.gap_fill_after(1);
+    check(first_gap && second_gap && fill_report.gap_fill_samples == first_gap->size() + second_gap->size() &&
+          fill_report.gap_fill_energy > 0 && changed_report.gap_fill_energy > 0 &&
+          !ordinary_report.gap_fill_samples, "scheduled fill did not render both in-message gaps");
+    bool different_fill = false;
+    for (std::size_t sample = 0; sample < ordinary.size(); ++sample) {
+        const bool gap = (first_gap->first <= sample && sample < first_gap->stop) ||
+                         (second_gap->first <= sample && sample < second_gap->stop);
+        if (gap) {
+            check(ordinary[sample] == Complex{}, "scheduled fill overlapped an active wanted sample");
+            different_fill |= with_fill[sample] != changed_key[sample];
+        } else {
+            check(ordinary[sample] == with_fill[sample] && ordinary[sample] == changed_key[sample],
+                  "scheduled fill changed an out-of-gap sample or added a final tail");
+        }
+    }
+    check(different_fill, "scheduled fill ignored its independent temporary key");
+}
+
 StreamReceiverOptions options() {
     StreamReceiverOptions o;
     o.workers = 4;
@@ -1135,6 +1205,7 @@ int main() {
         resource_resolution();
         packed_data_aperture();
         packed_data_aperture_retains_delayed_energy();
+        scheduled_gap_fill_emission();
         order_and_backpressure();
         overlap_lease_uses_only_spare_memory();
         closed_executor_adds_no_worker();

@@ -19,6 +19,18 @@ float real_pcm(Complex baseband, std::uint64_t sample, double if_hz, std::uint32
     return static_cast<float>(std::sqrt(2.) * (baseband * carrier(sample, if_hz, rate)).real() * scale);
 }
 
+std::size_t AudioInput::required_halo_samples(std::uint32_t rate, double carrier_hz,
+                                             double lower_hz, double upper_hz) {
+    if (!rate || !std::isfinite(carrier_hz) || !std::isfinite(lower_hz) || !std::isfinite(upper_hz) ||
+        lower_hz <= 0 || lower_hz > carrier_hz || upper_hz < carrier_hz || upper_hz >= rate / 2.)
+        throw Error("Invalid Robust audio projection band");
+    const auto edge = std::min(lower_hz, rate / 2. - upper_hz);
+    const auto half = std::ceil(8. * rate / edge);
+    if (!std::isfinite(half) || half < 1 || half > 2048)
+        throw Error("Robust live audio requires more separation from DC or Nyquist");
+    return static_cast<std::size_t>(half);
+}
+
 // At an audio rate with admitted nonoverlapping real spectral images, retain
 // the positive sideband, then translate it to the DATA center. The Fejer taper
 // gives a nonnegative normalized frequency-domain convolution of the ideal
@@ -29,15 +41,8 @@ float real_pcm(Complex baseband, std::uint64_t sample, double if_hz, std::uint32
 // violate that model and live field coverage remains conditional.
 AudioInput::AudioInput(std::uint32_t rate, double carrier_hz, double lower_hz, double upper_hz,
                        std::uint64_t first_input_sample)
-    : rate_(rate), carrier_(carrier_hz), origin_(first_input_sample) {
-    if (!rate || !std::isfinite(carrier_) || !std::isfinite(lower_hz) || !std::isfinite(upper_hz) ||
-        lower_hz <= 0 || lower_hz > carrier_ || upper_hz < carrier_ || upper_hz >= rate / 2.)
-        throw Error("Invalid Robust audio projection band");
-    const auto edge = std::min(lower_hz, rate / 2. - upper_hz);
-    const auto half = std::ceil(8. * rate / edge);
-    if (!std::isfinite(half) || half < 1 || half > 2048)
-        throw Error("Robust live audio requires more separation from DC or Nyquist");
-    half_ = static_cast<std::size_t>(half);
+    : rate_(rate), carrier_(carrier_hz), origin_(first_input_sample),
+      half_(required_halo_samples(rate, carrier_hz, lower_hz, upper_hz)) {
     if (origin_ > std::numeric_limits<std::uint64_t>::max() - half_)
         throw Error("Robust audio origin cannot contain the projection halo");
     length_ = 2 * half_ + 1;

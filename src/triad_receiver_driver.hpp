@@ -64,7 +64,7 @@ ReceiverSlotScore continue_affine_slot(const ReceiverConfig&, const ReceiverSlot
 // proposals and full validity. Admitting statistics use only the declared
 // neighbor-free interval, with the original model-family weights.
 std::size_t protected_slot_workspace(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned);
-ReceiverSlotScore score_continuous_data_slot(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
+ReceiverSlotScore score_protected_data_slot(const ReceiverConfig&, const ReceiverSlotPlan&, const Crypto&,
     std::span<const Complex>, std::span<const std::uint8_t>, unsigned, std::size_t, std::stop_token,
     ReceiverExecutor*, AffineContinuationContext*);
 // Qualification only. The caller must verify independent proper-complex

@@ -220,6 +220,9 @@ struct VaryingFinePlan {
     // and any unified-memory lease, must fit in it
     // (ReceiverBulkBackend::stage_host_bytes). Zero admits none.
     std::size_t device_envelope_bytes = 0;
+    // A protected observation can change the terminal block length while
+    // keeping the original tracker eligibility and frequency lattice.
+    std::size_t tracking_final_rows = 0;
 };
 struct LineAtom {
     std::size_t first = 0, stop = 0;
@@ -230,7 +233,8 @@ std::optional<LineAtom> find_varying_line(const ReceiverConfig&, const ReceiverS
                                         std::span<const Complex>, std::stop_token,
                                         double threshold = receiver_operational_threshold());
 VaryingFinePlan varying_fine_plan(const ReceiverConfig&, const ReceiverSlotPlan&, unsigned workers,
-                                 bool project_line = false, bool coherent_gain_blocks = false);
+                                 bool project_line = false, bool coherent_gain_blocks = false,
+                                 std::size_t tracking_final_rows = 0);
 // Evaluator only: projections onto the exact unprojected short tracker's
 // template spans. No likelihood, candidate feedback or admission decision.
 struct TrackedFrequencySpanBlock {

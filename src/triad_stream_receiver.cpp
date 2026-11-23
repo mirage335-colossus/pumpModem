@@ -177,8 +177,8 @@ bool detail::stream_simulation_workspace_fits(const PublicProfile& profile, cons
         // The raw queue may hold the window and one chunk during assembly.
         const auto raw = add(window_bytes(add(rows, chunk)), times(add(rows/chunk, 3), raw_block_overhead));
         if (raw >= available) return false;
-        const auto workspace = profile.config().continuous_data ? receiver_detail::protected_slot_workspace :
-            receiver_slot_workspace;
+        const auto workspace = profile.config().continuous_data || plan.scheduled_gap_fill ?
+            receiver_detail::protected_slot_workspace : receiver_slot_workspace;
         return workspace(config, plan, *options.workers) <= available - raw && within_budget();
     };
     // Clock growth can make the last window fail quickly. A middle window
@@ -211,6 +211,7 @@ ReceiverSlotPlan make_receiver_slot_plan(const PublicProfile& profile, const Rec
     result.quiet_stop_sample = slot.quiet_aperture.stop;
     result.protected_data_first_sample = slot.protected_data_aperture.first;
     result.protected_data_stop_sample = slot.protected_data_aperture.stop;
+    result.scheduled_gap_fill = slot.gap_fill_may_enter_observation;
     result.format = profile.basis_format(slot);
     result.arrival_lower_seconds = declared.arrival_low_seconds;
     result.arrival_upper_seconds = declared.arrival_high_seconds;
@@ -237,7 +238,6 @@ struct CompleteStreamReceiver::Impl {
     Crypto key;
     StreamReceiverOptions options;
     StreamReceiverResources resources;
-    const bool continuous_data;
     StreamWorkspace workspace, overlap_workspace;
     StreamExecutorScorer scorer;
     const bool native_scorer;
@@ -269,9 +269,14 @@ struct CompleteStreamReceiver::Impl {
          StreamWorkspace overlap_fn, bool native_score)
         : profile(std::move(profile_value)), config(std::move(config_value)), key(std::move(key_value)),
           options(stream), resources(resolve_stream_receiver_resources(options)),
-          continuous_data(native_score && profile.config().continuous_data),
-          workspace(continuous_data ? StreamWorkspace(receiver_detail::protected_slot_workspace) : std::move(workspace_fn)),
-          overlap_workspace(continuous_data ? StreamWorkspace{} : std::move(overlap_fn)), scorer(std::move(score_fn)),
+          workspace(native_score ? StreamWorkspace([continuous = profile.config().continuous_data](
+                  const ReceiverConfig& cfg, const ReceiverSlotPlan& plan, unsigned workers) {
+              const auto quote = continuous || plan.scheduled_gap_fill ? receiver_detail::protected_slot_workspace :
+                  receiver_slot_workspace;
+              return quote(cfg, plan, workers);
+          }) : std::move(workspace_fn)),
+          overlap_workspace(native_score && (profile.config().continuous_data || profile.config().scheduled_gap_fill) ?
+              StreamWorkspace{} : std::move(overlap_fn)), scorer(std::move(score_fn)),
           native_scorer(native_score),
           footprint(footprint_fn ? std::move(footprint_fn) : StreamFootprint(stream_controller_footprint_bytes)),
           codec(std::move(decoder), with_public_message_address(message, profile),
@@ -551,8 +556,8 @@ struct CompleteStreamReceiver::Impl {
         job.task = std::make_unique<SlotTask>(executor, wake,
             [this, work, input = job.input, context = job.continuation] {
                 const auto token = stop.get_token();
-                if (continuous_data)
-                    return receiver_detail::score_continuous_data_slot(config, work.plan, key, input->iq,
+                if (native_scorer && (profile.config().continuous_data || work.plan.scheduled_gap_fill))
+                    return receiver_detail::score_protected_data_slot(config, work.plan, key, input->iq,
                         input->valid, work.workers, work.dsp, token, &executor, context.get());
                 if (context && native_scorer)
                     return receiver_detail::score_slot_for_continuation(config, work.plan, key, input->iq,
@@ -672,7 +677,7 @@ struct CompleteStreamReceiver::Impl {
                     try {
                         return receiver_detail::continue_affine_slot(config, work.plan, key, input->iq,
                             work.workers, scratch, stop.get_token(), &executor, *context, hint, baseline,
-                            continuous_data);
+                            native_scorer && (profile.config().continuous_data || work.plan.scheduled_gap_fill));
                     } catch (const ReceiverWorkspaceError&) {
                         return std::move(baseline);
                     } catch (const std::bad_alloc&) {

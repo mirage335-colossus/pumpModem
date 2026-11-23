@@ -29,8 +29,16 @@ struct PublicSlot {
     // observation. A quiet aperture is always within it, and can be empty.
     SampleRange observation, data_support, quiet_aperture;
     std::uint64_t previous_signal_stop = 0, next_signal_first = 0;
-    // Packed scoring may use the neighbor-free part of the searched DATA support.
+    // Packed or filled scoring uses the part of the observation free of
+    // neighboring DATA and scheduled gap fill.
     SampleRange protected_data_aperture;
+    // A possible source fill can affect this slot under local receive bounds.
+    bool gap_fill_may_enter_observation = false;
+};
+
+struct ScheduledGapFillBounds {
+    double capture_lead_seconds = 0, arrival_low_seconds = 0, arrival_high_seconds = 0;
+    std::uint64_t receiver_filter_halo_samples = 0;
 };
 
 struct PublicProfileConfig {
@@ -61,6 +69,14 @@ struct PublicProfileConfig {
     // Explicit DATA cadence shared by both endpoints. Requires
     // Helper and whole-bit waits off. The first slot retains its UTC anchor.
     bool continuous_data = false;
+    // Scheduled DATA can use an independent-key waveform in the guarded
+    // central interval between adjacent gates. The constructor freezes the
+    // shared arrival and filter bounds when creating the original profile.
+    // A receiver's locally widened capture preserves this source schedule.
+    bool scheduled_gap_fill = false;
+    std::optional<ScheduledGapFillBounds> gap_fill_bounds;
+    // Additional receive-side transport support for excluding possible fill.
+    std::uint64_t gap_fill_transport_halo_samples = 0;
 };
 
 // Public whole-bit recurrence. An epoch is the configured anchor; neither an
@@ -82,13 +98,21 @@ public:
     std::uint64_t last_slot() const;
     std::uint32_t maximum_slot_opportunities_per_day() const { return maximum_slot_opportunities_per_day_; }
     PublicSlot slot(std::uint64_t index) const;
+    // Absolute source sample coordinates measured from origin(). Only a
+    // transmitter with DATA in both adjacent slots emits the optional fill.
+    std::optional<SampleRange> gap_fill_after(std::uint64_t index) const;
     Format basis_format(const PublicSlot&) const;
     std::uint64_t capture_stop(long double source_end_seconds) const;
 private:
     std::uint64_t capture_first(long double source_begin_seconds, bool search) const;
     std::uint64_t capture_stop(long double source_end_seconds, bool search) const;
-    std::uint64_t signal_first(long double source_begin_seconds, bool search) const;
-    std::uint64_t signal_stop(long double source_end_seconds, bool search) const;
+    std::uint64_t signal_first(long double source_begin_seconds, bool search,
+                               const ScheduledGapFillBounds* shared = nullptr) const;
+    std::uint64_t signal_stop(long double source_end_seconds, bool search,
+                              const ScheduledGapFillBounds* shared = nullptr) const;
+    std::uint64_t active_data_stop_sample(const HelperBurstSlot&) const;
+    bool can_successor_transmit(const HelperBurstSlot&, const HelperBurstSlot&) const;
+    std::optional<SampleRange> gap_fill_between(const HelperBurstSlot&, const HelperBurstSlot&) const;
     long double capture_end_offset(long double rate) const;
     std::uint32_t bound_slot_opportunities_per_day() const;
     PublicProfileConfig config_;
@@ -131,6 +155,9 @@ struct EmissionOptions {
     // as for a channel. Each job evaluates its nodes with its own DATA source
     // and Helper generator; the sums keep their node order.
     StreamChannelLanes lanes = {};
+    // Deterministic paired waveform qualification only. Operational sends
+    // obtain a fresh independent temporary key for each filled episode.
+    std::optional<Crypto> qualification_gap_fill_key = {};
 };
 
 struct EmissionReport {
@@ -141,6 +168,10 @@ struct EmissionReport {
     // Sample coordinates relative to the emitted source's first sample.
     std::uint64_t first_data_sample = 0, generated_samples = 0;
     long double data_energy = 0, helper_energy = 0;
+    // Guard-assigned rows (including ramp endpoints) and their normalized
+    // baseband energy in squared magnitude times sample count.
+    std::uint64_t gap_fill_samples = 0;
+    long double gap_fill_energy = 0;
 };
 
 // Bounded composite I/Q at baseband, relative to the configured DATA IF.

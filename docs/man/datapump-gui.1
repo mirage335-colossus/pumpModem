@@ -191,6 +191,14 @@ agreed local calendar. Both peers must use the same anchor.
 Shared unsigned initial waveform ordinal; default 0. It advances through DATA
 and quiet slots and does not reset at message boundaries.
 .TP
+.BI \-\-data\-cadence " scheduled|scheduled-fill|continuous"
+Select the Robust DATA cadence. The default is scheduled.
+Scheduled-fill keeps the calendar and fills eligible inter-DATA intervals
+in the DATA band with an independent transmitter key. It requires Helper
+and FHSS off. Continuous places successive DATA gates on adjacent samples
+and also requires both Symbol Burst waits off. Both peers select the same
+cadence.
+.TP
 .BI \-\-live\-noise\-dbfs\-hz " DENSITY|unspecified"
 Declared one-sided local input-noise density in normalized PCM squared per Hz,
 from \-250 to 0 dBFS/Hz. Default unspecified leaves live reception unconfigured.

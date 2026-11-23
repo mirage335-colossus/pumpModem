@@ -1,5 +1,6 @@
 #include "datapump/triad_stream.hpp"
 
+#include "datapump/triad_shaping.hpp"
 #include "datapump/triad_transmission_keys.hpp"
 #include "triad_coordinate.hpp"
 
@@ -204,6 +205,18 @@ PublicProfile::PublicProfile(PublicProfileConfig config, std::optional<Crypto> c
         std::isfinite(config_.arrival_high_seconds) && config_.arrival_low_seconds <= config_.arrival_high_seconds &&
         config_.signal_delay_ms.value_or(0) <= config_.spread_delay_ms,
         "invalid Robust public arrival, clock, or delay range");
+    if (config_.scheduled_gap_fill) {
+        require(!config_.continuous_data && !config_.helper_enabled && !config_.format.fhss,
+            "Robust gap fill requires Scheduled DATA with Helper and FHSS off");
+        if (!config_.gap_fill_bounds)
+            config_.gap_fill_bounds = ScheduledGapFillBounds{config_.capture_lead_seconds,
+                config_.arrival_low_seconds, config_.arrival_high_seconds, config_.receiver_filter_halo_samples};
+        const auto& bounds = *config_.gap_fill_bounds;
+        require(std::isfinite(bounds.capture_lead_seconds) && bounds.capture_lead_seconds >= 0 &&
+            std::isfinite(bounds.arrival_low_seconds) && std::isfinite(bounds.arrival_high_seconds) &&
+            bounds.arrival_low_seconds <= bounds.arrival_high_seconds,
+            "invalid Robust shared gap fill bounds");
+    }
     nominal_endpoint_ = config_.audio_pair_ppm * .5e-6L;
     const auto clock = config_.clock_bound_ppm * 1e-6;
     affine_min_scale_ = 1 - clock;
@@ -337,26 +350,89 @@ std::uint64_t PublicProfile::capture_first(long double source_begin_seconds, boo
     return receive_coordinate(std::floor(rate * begin), true);
 }
 
-std::uint64_t PublicProfile::signal_first(long double source_begin_seconds, bool search) const {
+std::uint64_t PublicProfile::signal_first(long double source_begin_seconds, bool search,
+                                         const ScheduledGapFillBounds* shared) const {
     const long double rate = effective_sample_rate();
     const auto endpoint = search ? receive_endpoint_ : nominal_endpoint_;
     const auto tx_max = 1 + endpoint, tx_min = 1 - endpoint;
-    const auto offset = static_cast<long double>(config_.capture_lead_seconds) + config_.arrival_low_seconds;
+    const auto offset = shared ? static_cast<long double>(shared->capture_lead_seconds) + shared->arrival_low_seconds :
+        static_cast<long double>(config_.capture_lead_seconds) + config_.arrival_low_seconds;
     auto begin = tx_min * (source_begin_seconds / tx_max + offset);
     if (search) begin = std::min(begin, source_begin_seconds / affine_max_scale_ + offset);
     return receive_coordinate(std::floor(rate * begin - 32), true);
 }
 
-std::uint64_t PublicProfile::signal_stop(long double source_end_seconds, bool search) const {
+std::uint64_t PublicProfile::signal_stop(long double source_end_seconds, bool search,
+                                        const ScheduledGapFillBounds* shared) const {
     const long double rate = effective_sample_rate();
     const auto endpoint = search ? receive_endpoint_ : nominal_endpoint_;
     const auto tx_min = 1 - endpoint, rx_max = 1 + endpoint;
     const auto tail = config_.signal_delay_ms.value_or(config_.spread_delay_ms) * .001 + config_.delay_excursion_seconds +
         (config_.selective_signal_tail ? 2 / (3 * geometry_.nominal_carrier_bandwidth_hz) : 0.) + 32. / rate;
-    const auto offset = static_cast<long double>(config_.capture_lead_seconds) + config_.arrival_high_seconds + tail;
+    const auto offset = (shared ? static_cast<long double>(shared->capture_lead_seconds) + shared->arrival_high_seconds :
+        static_cast<long double>(config_.capture_lead_seconds) + config_.arrival_high_seconds) + tail;
     auto end = rx_max * (source_end_seconds / tx_min + offset);
     if (search) end = std::max(end, source_end_seconds / affine_min_scale_ + offset);
     return receive_coordinate(std::ceil(rate * end), false);
+}
+
+std::uint64_t PublicProfile::active_data_stop_sample(const HelperBurstSlot& slot) const {
+    // The scheduled calendar's bit_samples uses nearest rounding. The active
+    // pattern's final integer sample is determined by its strict time gate.
+    return add(calendar_.distance(origin(), slot.pattern_begin),
+               packed_bit_samples(geometry_.bit_seconds, config_.format.sample_rate));
+}
+
+bool PublicProfile::can_successor_transmit(const HelperBurstSlot& slot, const HelperBurstSlot& next) const {
+    return slot.index < max_coordinate - config_.format.symbol_ordinal &&
+        next.pattern_begin.epoch <= last_pattern_epoch && next.helper_end.epoch < helper_epoch_limit;
+}
+
+std::optional<SampleRange> PublicProfile::gap_fill_between(const HelperBurstSlot& slot,
+                                                           const HelperBurstSlot& next) const {
+    if (!config_.scheduled_gap_fill || !can_successor_transmit(slot, next)) return {};
+    const auto& shared = *config_.gap_fill_bounds;
+    const auto halo = shared.receiver_filter_halo_samples;
+    const auto seconds = [rate = static_cast<long double>(config_.format.sample_rate)](std::uint64_t samples) {
+        return samples / rate;
+    };
+    const auto first_arrival = [&](std::uint64_t samples) {
+        const auto first = signal_first(seconds(samples), true, &shared);
+        return first - std::min(first, halo);
+    };
+    const auto stop_arrival = [&](std::uint64_t samples) {
+        return add(signal_stop(seconds(samples), true, &shared), halo);
+    };
+    const auto previous_gate_stop = active_data_stop_sample(slot);
+    const auto next_gate_first = calendar_.distance(origin(), next.pattern_begin);
+    if (previous_gate_stop >= next_gate_first) return {};
+    const auto previous_data_stop = stop_arrival(previous_gate_stop);
+    const auto next_data_first = first_arrival(next_gate_first);
+    if (previous_data_stop >= next_data_first) return {};
+
+    // Each edge is an outward-rounded monotone map of source time. Find the
+    // maximal source range that arrives wholly between the two DATA envelopes.
+    auto lower = previous_gate_stop, upper = next_gate_first;
+    while (lower < upper) {
+        const auto middle = lower + (upper - lower) / 2;
+        if (first_arrival(middle) < previous_data_stop) lower = middle + 1;
+        else upper = middle;
+    }
+    const auto first = lower;
+    upper = next_gate_first;
+    while (lower < upper) {
+        const auto middle = upper - (upper - lower) / 2;
+        if (stop_arrival(middle) <= next_data_first) lower = middle;
+        else upper = middle - 1;
+    }
+    if (first == lower) return {};
+    return SampleRange{first, lower};
+}
+
+std::optional<SampleRange> PublicProfile::gap_fill_after(std::uint64_t index) const {
+    if (!config_.scheduled_gap_fill) return {};
+    const auto slot = transmit_slot(index);
+    return gap_fill_between(slot, calendar_.successor(slot));
 }
 
 PublicSlot PublicProfile::slot(std::uint64_t index) const {
@@ -379,28 +455,76 @@ PublicSlot PublicProfile::slot(std::uint64_t index) const {
     const auto previous_end = [&](const HelperBurstSlot& previous) {
         return config_.continuous_data ? previous.pattern_end : previous.helper_end;
     };
-    const auto previous_stop = index ? add(signal_stop(seconds(previous_end(transmit_slot(index - 1))), true), halo) : 0;
-    const auto next_first = earlier(signal_first(seconds(config_.continuous_data ? next.pattern_begin : next.helper_begin), true));
+    const auto previous = index ? std::optional{transmit_slot(index - 1)} : std::nullopt;
+    auto previous_stop = previous ? add(signal_stop(seconds(previous_end(*previous)), true), halo) : 0;
+    std::uint64_t next_first = earlier(signal_first(seconds(config_.continuous_data ? next.pattern_begin : next.helper_begin), true));
     // Larger clock support and the filter halo cannot extend the quiet
     // aperture. Their adjacent signal exclusions can only narrow it.
-    const auto quiet_first = std::min(nominal_observation.stop,
+    auto quiet_first = std::min(nominal_observation.stop,
         std::max({nominal_observation.first, data.first, previous_stop}));
-    const auto quiet_stop = std::max(quiet_first, std::min({nominal_observation.stop, data.stop, next_first}));
+    auto quiet_stop = std::max(quiet_first, std::min({nominal_observation.stop, data.stop, next_first}));
     SampleRange protected_data;
+    bool gap_fill_may_enter_observation = false;
     if (config_.continuous_data) {
         // Keep the nominal quiet aperture and the reachable DATA in the
         // affine clock and filter margins. Exclude both neighboring signals.
         const auto wanted_first = earlier(signal_first(data_begin, true));
         const auto wanted_stop = add(signal_stop(data_end, true), halo);
         const auto first = std::clamp(std::max(previous_stop, wanted_first), observation.first, observation.stop);
-        const bool next_is_public = index < max_coordinate - config_.format.symbol_ordinal &&
-            next.pattern_begin.epoch <= last_pattern_epoch && next.helper_end.epoch < helper_epoch_limit;
-        const auto stop = std::clamp(next_is_public ? std::min(next_first, wanted_stop) : wanted_stop,
+        const auto stop = std::clamp(can_successor_transmit(tx, next) ? std::min(next_first, wanted_stop) : wanted_stop,
             first, observation.stop);
         protected_data = {first, stop};
+    } else if (config_.scheduled_gap_fill) {
+        // The receive image of the frozen source fill uses this endpoint's
+        // actual declared uncertainty and transport/filter halo. Additional
+        // local uncertainty can narrow the aperture without moving the fill.
+        const auto fill_halo = add(halo, config_.gap_fill_transport_halo_samples);
+        const auto sample_seconds = [rate = static_cast<long double>(config_.format.sample_rate)](std::uint64_t rows) {
+            return rows / rate;
+        };
+        const auto earliest = [&](long double source_seconds) {
+            const auto first = signal_first(source_seconds, true);
+            return first - std::min(first, fill_halo);
+        };
+        const auto latest = [&](long double source_seconds) {
+            return add(signal_stop(source_seconds, true), fill_halo);
+        };
+        const auto arriving_fill = [&](const HelperBurstSlot& left, const HelperBurstSlot& right)
+                -> std::optional<SampleRange> {
+            const auto fill = gap_fill_between(left, right);
+            if (!fill) return {};
+            const SampleRange arrival{earliest(sample_seconds(fill->first)), latest(sample_seconds(fill->stop))};
+            if (arrival.first >= observation.stop || arrival.stop <= observation.first) return {};
+            return arrival;
+        };
+        const auto incoming = previous ? arriving_fill(*previous, tx) : std::nullopt;
+        const auto outgoing = arriving_fill(tx, next);
+        // Every earlier fill ends at or before the previous DATA gate begins.
+        // Every later fill starts at or after the next DATA gate ends. The
+        // arrival maps are monotone, so these two bounds cover arbitrarily
+        // distant gaps even with variable waits and no adjacent fill.
+        const auto has_next = can_successor_transmit(tx, next);
+        const auto earlier_fill = index >= 2 && latest(seconds(previous->pattern_begin)) > observation.first;
+        const auto later_fill = has_next && earliest(sample_seconds(active_data_stop_sample(next))) < observation.stop &&
+            can_successor_transmit(next, calendar_.successor(next));
+        gap_fill_may_enter_observation = incoming.has_value() || outgoing.has_value() || earlier_fill || later_fill;
+        if (gap_fill_may_enter_observation) {
+            previous_stop = previous ? latest(sample_seconds(active_data_stop_sample(*previous))) : 0;
+            next_first = has_next ? earliest(seconds(next.pattern_begin)) : observation.stop;
+            if (incoming) previous_stop = std::max(previous_stop, incoming->stop);
+            if (outgoing) next_first = std::min(next_first, outgoing->first);
+            const auto first = std::clamp(previous_stop, observation.first, observation.stop);
+            const auto stop = std::clamp(next_first, first, observation.stop);
+            protected_data = {first, stop};
+            // Keep the existing quiet aperture except where possible fill
+            // or DATA from a neighbor requires tighter bounds.
+            quiet_first = std::clamp(quiet_first, first, stop);
+            quiet_stop = std::clamp(quiet_stop, quiet_first, stop);
+        }
     }
     return {index, tx.pattern_begin.epoch, config_.format.symbol_ordinal + index, tx,
-        observation, data, {quiet_first, quiet_stop}, previous_stop, next_first, protected_data};
+        observation, data, {quiet_first, quiet_stop}, previous_stop, next_first, protected_data,
+        gap_fill_may_enter_observation};
 }
 
 Format PublicProfile::basis_format(const PublicSlot& slot) const {
@@ -427,12 +551,14 @@ struct Emission::Impl {
     std::unique_ptr<PatternSource> data;
     std::unique_ptr<helper::Generator> helper;
     std::optional<HelperBurstSlot> current;
+    std::optional<Crypto> gap_fill_key;
+    SampleRange current_gap;
     std::uint64_t first_slot = 0, last_slot = 0, source_first = 0, source_stop = 0, data_first = 0;
     std::uint64_t active_helper_first = 0, active_slot_stop = 0;
     std::uint64_t data_begin_offset = 0, data_end_offset = 0;
     long double active_helper_begin_seconds = 0, active_helper_end_seconds = 0;
     bool data_enabled = false, helper_enabled = false;
-    bool noise = false, packed = false;
+    bool noise = false, packed = false, data_is_fill = false;
     std::uint8_t isolated_bit = 0;
     // The bit of the current slot's DATA source once it is resolved.
     std::optional<std::uint8_t> slot_bit;
@@ -446,15 +572,18 @@ struct Emission::Impl {
         std::uint64_t data_first = 0, slot_stop = 0;
         long double helper_begin_seconds = 0, helper_end_seconds = 0;
         std::optional<std::uint8_t> bit;
+        SampleRange gap;
     };
     struct Reader {
         std::uint64_t data_slot = 0;
+        bool data_is_fill = false;
         std::unique_ptr<PatternSource> data;
         std::unique_ptr<helper::Generator> helper;
     };
     std::vector<Reader> readers;
     std::vector<Span> spans;
     std::vector<std::array<double, 2>> norms;
+    std::vector<double> fill_norms;
     std::uint64_t plan_first = 0, plan_count = 0, plan_error_index = UINT64_MAX;
     std::exception_ptr plan_error;
 
@@ -504,6 +633,10 @@ struct Emission::Impl {
                 [](std::uint8_t bit) { return bit <= 1; }), "invalid or oversized Robust transmit draft");
             bits.assign(options.bits.begin(), options.bits.end());
             last_slot = add(options.first_slot, count - 1);
+            if (options.mode == EmissionMode::Message && profile.config().scheduled_gap_fill && count > 1) {
+                require(!helper_enabled && !packed && !format.fhss, "invalid Robust scheduled fill profile");
+                gap_fill_key = options.qualification_gap_fill_key ? *options.qualification_gap_fill_key : Crypto::temporary();
+            }
             source_stop = profile.calendar().distance(profile.origin(), profile.transmit_slot(last_slot).helper_end);
             set_slot(profile.transmit_slot(options.first_slot));
             require(source_first <= active_helper_first, "Robust playback starts after the first transmitted sample");
@@ -512,19 +645,26 @@ struct Emission::Impl {
         prepare_power(options.lanes);
     }
 
-    std::uint64_t slot_stop(const HelperBurstSlot& slot) const {
-        return profile.calendar().distance(profile.origin(), packed ? slot.pattern_end : slot.helper_end);
+    SampleRange gap_after(const HelperBurstSlot& slot) const {
+        if (!gap_fill_key || slot.index >= last_slot) return {};
+        return profile.gap_fill_after(slot.index).value_or(SampleRange{});
+    }
+
+    std::uint64_t slot_stop(const HelperBurstSlot& slot, SampleRange gap) const {
+        return std::max(gap.stop, profile.calendar().distance(profile.origin(), packed ? slot.pattern_end : slot.helper_end));
     }
 
     void set_slot(const HelperBurstSlot& slot) {
         current = slot;
         data.reset();
+        data_is_fill = false;
         slot_bit.reset();
         const auto& calendar = profile.calendar();
         const auto origin = profile.origin();
         data_first = calendar.distance(origin, slot.support_begin);
         active_helper_first = calendar.distance(origin, slot.helper_begin);
-        active_slot_stop = slot_stop(slot);
+        current_gap = gap_after(slot);
+        active_slot_stop = slot_stop(slot, current_gap);
         active_helper_begin_seconds = calendar.relative_seconds(origin, slot.helper_begin);
         active_helper_end_seconds = calendar.relative_seconds(origin, slot.helper_end);
     }
@@ -606,6 +746,23 @@ struct Emission::Impl {
         }
         return std::make_unique<PatternSource>(addressed_format, keys.data, bit);
     }
+
+    std::unique_ptr<PatternSource> gap_source(const HelperBurstSlot& slot, SampleRange gap) const {
+        auto addressed_format = format;
+        addressed_format.epoch = slot.pattern_begin.epoch;
+        addressed_format.symbol_ordinal += slot.index;
+        // The normal duration planner rounds this request up to full native
+        // tiles. The selected waveform keeps the same carrier, pulse, chip
+        // rate and bounded tile workspace as DATA.
+        addressed_format.bit_seconds = std::max(format.bit_seconds,
+            static_cast<double>(gap.size()) / format.sample_rate);
+        return std::make_unique<PatternSource>(addressed_format, *gap_fill_key, 0);
+    }
+
+    static bool in_gap(std::uint64_t index, SampleRange gap) {
+        return index >= gap.first && index < gap.stop;
+    }
+
     bool in_data(std::uint64_t index, std::uint64_t first) const {
         return data_enabled && index >= first && index - first >= data_begin_offset &&
             index - first < data_end_offset;
@@ -613,14 +770,40 @@ struct Emission::Impl {
 
     struct Value {
         Complex sample;
-        double data_norm = 0, helper_norm = 0;
+        double data_norm = 0, helper_norm = 0, fill_norm = 0;
     };
+
+    Complex gap_sample(std::uint64_t index, PatternSource& source, SampleRange gap) const {
+        const auto relative = static_cast<long double>(index - gap.first);
+        const auto& full = source.geometry();
+        auto value = source.sample_at(relative + full.calendar_origin_sample);
+        const auto boundary = static_cast<long double>(gap.size()) / format.sample_rate;
+        const auto seconds = relative / format.sample_rate;
+        const auto edge = std::max(format.ramp_seconds, 8 / full.fine_chip_rate_hz);
+        if (boundary < full.bit_seconds && seconds + edge > boundary) {
+            // Use the same native ending ramp at the guarded cut. Divide
+            // out the longer source's envelope only for a nonzero sample,
+            // with the final weight bounded by one for PCM headroom.
+            auto shortened = full;
+            shortened.bit_seconds = static_cast<double>(boundary);
+            const auto original = shaping_envelope(source.format(), full, seconds);
+            if (original > 0) {
+                const auto clipped = shaping_envelope(source.format(), shortened, seconds);
+                value *= std::min(1., clipped / original);
+            }
+        }
+        return value;
+    }
+
     // One sample of a slot state. data is that slot's DATA source when the
     // sample lies in its support.
     Value value_at(std::uint64_t index, PatternSource* source, std::uint64_t first,
-                   long double helper_begin, long double helper_end, const helper::Generator* generator) const {
+                   long double helper_begin, long double helper_end, const helper::Generator* generator,
+                   SampleRange gap = {}) const {
+        const bool filling = in_gap(index, gap);
         Complex raw_data;
-        if (source) raw_data = source->sample_at(static_cast<long double>(index - first));
+        if (source) raw_data = filling ? gap_sample(index, *source, gap) :
+            source->sample_at(static_cast<long double>(index - first));
         const auto seconds = static_cast<long double>(index) / format.sample_rate;
         const auto up = rotation(profile.data_if_hz(), seconds);
         const auto normalized_data = raw_data * report.data_gain;
@@ -629,7 +812,8 @@ struct Emission::Impl {
             seconds, format.sample_rate, helper_end, helper_begin) * report.composite_gain :
             normalized_data * up;
         const auto helper_component = active ? audio - normalized_data * up : Complex{};
-        return {audio * std::conj(up), std::norm(normalized_data), std::norm(helper_component)};
+        const auto norm = std::norm(normalized_data);
+        return {audio * std::conj(up), filling ? 0 : norm, std::norm(helper_component), filling ? norm : 0};
     }
 
     Complex next(std::uint64_t local_index) {
@@ -640,18 +824,32 @@ struct Emission::Impl {
         if (current && current->index < last_slot && index >= active_slot_stop)
             set_slot(profile.calendar().successor(*current));
         PatternSource* source = nullptr;
-        if (in_data(index, data_first)) {
-            if (!data) {
+        const bool filling = in_gap(index, current_gap);
+        if (filling) {
+            if (!data || !data_is_fill) {
+                data.reset();
+                data = gap_source(*current, current_gap);
+                data_is_fill = true;
+            }
+            source = data.get();
+        } else if (in_data(index, data_first)) {
+            if (!data || data_is_fill) {
                 const auto bit = slot_bit ? *slot_bit : slot_data_bit(current);
+                data.reset();
                 data = data_source(current, bit);
+                data_is_fill = false;
                 slot_bit = bit;
             }
             source = data.get();
         }
         const auto value = value_at(index, source, data_first, active_helper_begin_seconds,
-            active_helper_end_seconds, helper.get());
+            active_helper_end_seconds, helper.get(), current_gap);
         report.data_energy += value.data_norm;
         report.helper_energy += value.helper_norm;
+        if (filling) {
+            ++report.gap_fill_samples;
+            report.gap_fill_energy += value.fill_norm;
+        }
         ++report.generated_samples;
         return value.sample;
     }
@@ -667,23 +865,26 @@ struct Emission::Impl {
     std::size_t reader_bytes(std::size_t count, std::uint64_t plan) const {
         return count * (sizeof(Reader) + (data_enabled ? profile.geometry().source_workspace_bytes : 0) +
             (helper ? sizeof(helper::Generator) : 0)) + static_cast<std::size_t>(plan) * sizeof(norms[0]) +
+            (gap_fill_key ? static_cast<std::size_t>(plan) * sizeof(double) : 0) +
             span_capacity(plan) * sizeof(Span);
     }
     void open(std::size_t count, std::uint64_t plan) {
         readers.resize(count);
         norms.resize(static_cast<std::size_t>(plan));
+        if (gap_fill_key) fill_norms.resize(static_cast<std::size_t>(plan));
         spans.reserve(span_capacity(plan));
     }
     Span current_span(std::uint64_t begin) const {
         return {begin, current, data_first, active_slot_stop, active_helper_begin_seconds,
-            active_helper_end_seconds, slot_bit};
+            active_helper_end_seconds, slot_bit, current_gap};
     }
     Span successor_span(const Span& span, std::uint64_t begin) const {
         const auto slot = profile.calendar().successor(*span.slot);
         const auto& calendar = profile.calendar();
         const auto origin = profile.origin();
-        return {begin, slot, calendar.distance(origin, slot.support_begin), slot_stop(slot),
-            calendar.relative_seconds(origin, slot.helper_begin), calendar.relative_seconds(origin, slot.helper_end), {}};
+        const auto gap = gap_after(slot);
+        return {begin, slot, calendar.distance(origin, slot.support_begin), slot_stop(slot, gap),
+            calendar.relative_seconds(origin, slot.helper_begin), calendar.relative_seconds(origin, slot.helper_end), {}, gap};
     }
     // The slot states of local samples [first, first + count) and the bits
     // of their DATA sources, resolved in order as next() resolves them.
@@ -736,12 +937,14 @@ struct Emission::Impl {
         auto& reader = readers[which];
         const auto index = source_first + local;
         PatternSource* source = nullptr;
-        if (in_data(index, span.data_first)) {
+        const bool filling = in_gap(index, span.gap);
+        if (filling || in_data(index, span.data_first)) {
             const auto slot = span.slot ? span.slot->index : 0;
-            if (!reader.data || reader.data_slot != slot) {
+            if (!reader.data || reader.data_slot != slot || reader.data_is_fill != filling) {
                 reader.data.reset();
-                reader.data = data_source(span.slot, *span.bit);
+                reader.data = filling ? gap_source(*span.slot, span.gap) : data_source(span.slot, *span.bit);
                 reader.data_slot = slot;
+                reader.data_is_fill = filling;
             }
             source = reader.data.get();
         }
@@ -749,8 +952,9 @@ struct Emission::Impl {
             reader.helper = std::make_unique<helper::Generator>(profile.config().helper, report.helper_plan,
                 format.epoch, true, keys.helper);
         const auto value = value_at(index, source, span.data_first, span.helper_begin_seconds,
-            span.helper_end_seconds, reader.helper.get());
+            span.helper_end_seconds, reader.helper.get(), span.gap);
         norms[static_cast<std::size_t>(local - plan_first)] = {value.data_norm, value.helper_norm};
+        if (gap_fill_key) fill_norms[static_cast<std::size_t>(local - plan_first)] = value.fill_norm;
         return value.sample;
     }
     // next()'s order: its stop check, then the slot state of the sample.
@@ -767,11 +971,13 @@ struct Emission::Impl {
             const auto& next_span = spans[++span];
             current = next_span.slot;
             data.reset();
+            data_is_fill = false;
             data_first = next_span.data_first;
             active_helper_first = profile.calendar().distance(profile.origin(), next_span.slot->helper_begin);
             active_slot_stop = next_span.slot_stop;
             active_helper_begin_seconds = next_span.helper_begin_seconds;
             active_helper_end_seconds = next_span.helper_end_seconds;
+            current_gap = next_span.gap;
             slot_bit.reset();
         }
         return true;
@@ -783,10 +989,15 @@ struct Emission::Impl {
         for (; accepted < count; ++accepted) {
             const auto local = plan_first + accepted;
             if (!reach(local, span, error)) break;
-            if (in_data(source_first + local, data_first)) slot_bit = spans[span].bit;
+            const auto index = source_first + local;
+            if (in_data(index, data_first)) slot_bit = spans[span].bit;
             const auto& value = norms[static_cast<std::size_t>(accepted)];
             report.data_energy += value[0];
             report.helper_energy += value[1];
+            if (gap_fill_key && in_gap(index, current_gap)) {
+                ++report.gap_fill_samples;
+                report.gap_fill_energy += fill_norms[static_cast<std::size_t>(accepted)];
+            }
             ++report.generated_samples;
         }
         if (accepted == count && failed && count < plan_count) (void)reach(plan_first + count, span, error);

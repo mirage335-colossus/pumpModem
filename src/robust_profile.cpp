@@ -1,5 +1,7 @@
 #include "datapump/robust_profile.hpp"
 
+#include "datapump/audio.hpp"
+#include "datapump/robust_audio_frontend.hpp"
 #include "datapump/triad_acceleration.hpp"
 #include "datapump/tuning.hpp"
 
@@ -21,12 +23,16 @@ void check(bool condition, const char* message) {
 }
 
 void validate_data_cadence(const Settings& settings, bool helper_enabled) {
-    check(settings.data_cadence == DataCadence::scheduled || settings.data_cadence == DataCadence::continuous,
+    check(settings.data_cadence == DataCadence::scheduled || settings.data_cadence == DataCadence::continuous ||
+          settings.data_cadence == DataCadence::scheduled_fill,
           "Invalid Robust DATA cadence");
     if (settings.data_cadence == DataCadence::continuous)
         check(!helper_enabled && !settings.symbol_burst_wait && !settings.symbol_burst_random &&
               settings.fhss_profile == "off",
               "Continuous Robust DATA requires Helper, both Symbol Burst waits, and FHSS off");
+    if (settings.data_cadence == DataCadence::scheduled_fill)
+        check(!helper_enabled && settings.fhss_profile == "off",
+              "Scheduled Robust gap fill requires Helper and FHSS off");
 }
 
 bool in_range(double value, double low, double high) {
@@ -441,6 +447,7 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     configuration.wait_bits = s.symbol_burst_wait;
     configuration.random_extra_bits = s.symbol_burst_random;
     configuration.continuous_data = s.data_cadence == DataCadence::continuous;
+    configuration.scheduled_gap_fill = s.data_cadence == DataCadence::scheduled_fill;
     configuration.arrival_low_seconds = arrival.lower;
     configuration.arrival_high_seconds = arrival.upper;
     configuration.capture_lead_seconds = std::max(.25, -arrival.lower + .25);
@@ -452,14 +459,24 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     configuration.spread_doppler_hz = rx.spread_doppler_hz;
     configuration.selective_signal_tail = rx.selective_modulation_rate_hz > 0;
     rx.source_spectral_skirt_allowance_hz = configuration.gate_bandwidth_hz / 2;
+    const auto data_passband = helper::mono_passband({configuration.data_if_hz,
+        geometry.occupied_bandwidth_hz, configuration.gate_bandwidth_hz, configuration.format.fhss});
+    const double skirts = rx.frequency_bound_hz + rx.time_varying_atmospheric_hz +
+        rx.spread_doppler_hz + rx.selective_modulation_rate_hz;
+    if (configuration.scheduled_gap_fill) {
+        // Reserve the audio projection and both endpoint transport filters in
+        // the shared source guard. The simulator captures complex I/Q directly.
+        const auto passband = guarded_audio_band(data_passband, 0, skirts, fs);
+        const auto halo = AudioInput::required_halo_samples(fs, configuration.data_if_hz,
+            passband.lower_hz, passband.upper_hz) + audio::native_roundtrip_filter_halo_samples(fs);
+        configuration.gap_fill_bounds = ScheduledGapFillBounds{configuration.capture_lead_seconds,
+            configuration.arrival_low_seconds, configuration.arrival_high_seconds, halo};
+    }
     PublicProfile waveform(std::move(configuration), s.transfer.key);
     rx.helper = waveform.helper_plan();
     const auto power = data_power_reference(waveform.config().format, key, stop);
     const auto reference_gain = 1 / std::sqrt(power.mean_norm);
 
-    const auto data_passband = helper::mono_passband(waveform.placement());
-    const double skirts = rx.frequency_bound_hz + rx.time_varying_atmospheric_hz +
-        rx.spread_doppler_hz + rx.selective_modulation_rate_hz;
     const auto passband = guarded_audio_band(data_passband, rx.helper.frequency_hz, skirts, fs);
 
     StreamChannelConfig channel;
@@ -538,6 +555,8 @@ Profile with_capture_uncertainty(const Profile& input, double provider_seconds, 
     config.arrival_high_seconds += seconds;
     config.capture_lead_seconds += seconds;
     config.receiver_filter_halo_samples = filter_halo_samples;
+    if (config.scheduled_gap_fill)
+        config.gap_fill_transport_halo_samples = audio::native_roundtrip_filter_halo_samples(config.format.sample_rate);
     Profile result = input;
     result.receiver.capture_tail_bound_seconds = std::max(result.receiver.capture_tail_bound_seconds,
         result.receiver.spread_delay_seconds + static_cast<double>(filter_halo_samples) /

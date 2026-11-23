@@ -4752,7 +4752,6 @@ struct CoarseSession::Impl {
         const auto& layout = geometry.layout;
         require_coarse(iq.size() == capture_samples(slot), "coarse receiver input does not match its public window");
         require_coarse(!input_support || (!assistance &&
-            midpoint_evaluation == MidpointTimingEvaluation::off &&
             input_support->first < input_support->stop && input_support->stop <= iq.size()),
             "restricted coarse support requires a nonempty independent proposal window");
         // Acquisition overlaps preparation, which needs a grid that can follow it.

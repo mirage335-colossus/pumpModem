@@ -142,6 +142,8 @@ struct Options {
     bool work_only = false;
     bool helper_overlap = true;
     bool continuous_data = false, affine_continuation = true;
+    bool scheduled_gap_fill = false, gap_fill_transmit = true, foreign_receiver_key = false;
+    bool match_scheduled_gap_fill_admission = false;
     bool protected_packed = false, protected_discovery = false, carrier_beat = false, carrier_beat_polarity = false;
     bool white_beat_evidence = false, colored_beat_evidence = false, project_colored_pcm = false;
     std::string adjacent_data;
@@ -155,7 +157,7 @@ struct Options {
 // Options that select receiver arithmetic, backends, allocation, budgets or
 // deadlines. None of them changes a generated capture, so a capture cache key
 // leaves them out; every other given option is part of the key.
-constexpr std::array<std::string_view, 44> receiver_only_options{
+constexpr std::array<std::string_view, 45> receiver_only_options{
     "--backend", "--tensor-precision", "--tensor-coarse-math", "--tensor-fine-projection",
     "--cuda-segmented-timing", "--vulkan-precision", "--vulkan-fine-projection", "--vulkan-segmented-timing",
     "--vulkan-gain-rank", "--vulkan-drift", "--vulkan-varying-fine", "--vulkan-varying-arithmetic",
@@ -165,7 +167,8 @@ constexpr std::array<std::string_view, 44> receiver_only_options{
     "--device-index", "--device-memory-limit-bytes", "--workers", "--slot-owners", "--memory-limit-bytes",
     "--max-samples", "--max-spool-bytes", "--deadline-ms", "--coarse-tiles", "--pilot-workers", "--units",
     "--helper-overlap", "--affine-continuation", "--protected-packed", "--protected-discovery",
-    "--carrier-beat", "--carrier-beat-polarity", "--white-beat-evidence", "--colored-beat-evidence", "--capture-cache"};
+    "--carrier-beat", "--carrier-beat-polarity", "--white-beat-evidence", "--colored-beat-evidence", "--capture-cache",
+    "--foreign-receiver-key"};
 
 template<class T>
 T number(std::string_view text, std::string_view flag) {
@@ -291,6 +294,11 @@ Options parse(int argc, char** argv) {
     assign("--work-only", o.work_only);
     assign("--helper-overlap", o.helper_overlap);
     assign("--continuous-data", o.continuous_data);
+    o.match_scheduled_gap_fill_admission = o.command == "admission" && values.contains("--scheduled-gap-fill");
+    assign("--scheduled-gap-fill", o.scheduled_gap_fill);
+    const bool gap_fill_transmit_supplied = values.contains("--gap-fill-transmit");
+    assign("--gap-fill-transmit", o.gap_fill_transmit);
+    assign("--foreign-receiver-key", o.foreign_receiver_key);
     const bool affine_continuation_supplied = values.contains("--affine-continuation");
     assign("--affine-continuation", o.affine_continuation);
     assign("--adjacent-data", o.adjacent_data);
@@ -452,6 +460,13 @@ Options parse(int argc, char** argv) {
     require(!o.continuous_data ||
             (one_of(o.command, {"plan", "message", "backlog", "admission"}) && !o.helper && !o.waits),
             "Continuous DATA qualification requires plan, message, backlog or admission with Helper and waits off");
+    require(!o.scheduled_gap_fill || (one_of(o.command, {"plan", "message", "admission"}) &&
+            !o.helper && !o.fhss && !o.continuous_data && o.capture_cache.empty()),
+            "Scheduled gap fill requires plan, message or admission with Helper and FHSS off and no capture cache");
+    require(!gap_fill_transmit_supplied || (o.scheduled_gap_fill && one_of(o.command, {"message", "admission"})),
+            "The gap-fill transmit control needs scheduled-fill message or admission");
+    require(!o.foreign_receiver_key || (o.command == "message" && o.encrypt),
+            "The foreign receiver key control needs an encrypted message probe");
     require(!affine_continuation_supplied || one_of(o.command, {"plan", "message", "backlog"}),
             "The affine continuation control requires a stream plan or replay");
     require(o.adjacent_data.empty() ||
@@ -460,6 +475,10 @@ Options parse(int argc, char** argv) {
              (o.slot_index > 0 || o.adjacent_data.front() == 'q')),
             "Adjacent DATA qualification requires admission, Helper and waits off, no interferer and a "
             "pair of 0, 1 or q (quiet). At slot zero the preceding state must be q");
+    require(!o.match_scheduled_gap_fill_admission ||
+            (!o.continuous_data && o.stratum == "active" && o.slot_index > 0 && o.adjacent_data.size() == 2 &&
+             o.adjacent_data.find_first_not_of("01") == std::string::npos),
+            "Scheduled gap fill admission requires an active interior slot between two DATA bits");
     require(!o.protected_packed || (o.continuous_data && o.backend == "cpu" &&
             one_of(o.command, {"message", "backlog", "admission"}) &&
             !(affine_continuation_supplied && o.affine_continuation)),
@@ -550,8 +569,9 @@ std::uint64_t maximum_spool_bytes(const Options& o) {
 auto slot_workspace_for_options(const Options& o) {
     if (o.white_beat_evidence) return protected_white_beat_slot_workspace;
     if (o.colored_beat_evidence) return protected_colored_beat_slot_workspace;
-    const bool canonical_packed = o.continuous_data && one_of(o.command, {"message", "backlog", "plan"});
-    return o.protected_packed || canonical_packed ? protected_slot_workspace : receiver_slot_workspace;
+    const bool protected_cadence = o.scheduled_gap_fill ||
+        (o.continuous_data && one_of(o.command, {"message", "backlog", "plan"}));
+    return o.protected_packed || protected_cadence ? protected_slot_workspace : receiver_slot_workspace;
 }
 
 const char* fec_name(FecMode mode) {
@@ -563,6 +583,7 @@ const char* fec_name(FecMode mode) {
 live::Settings settings_for(const Options& o, std::size_t memory_limit) {
     live::Settings s;
     s.wrong_key_admission = o.wrong_key_admission;
+    if (o.scheduled_gap_fill) s.data_cadence = live::DataCadence::scheduled_fill;
     s.simulation = true;
     s.receiver_memory_limit = memory_limit;
     if (o.native_coarse_precision == "fp64") s.transfer.modem.search_arithmetic = modem::SearchArithmetic::fp64;
@@ -785,6 +806,11 @@ struct Capture {
     bool selective_filter = false;
     std::size_t generation_reserved_bytes = 0, generation_read_rows = 0, generation_stack_bytes = 0;
     unsigned generation_helpers = 0;
+    struct GapFill {
+        std::uint64_t samples = 0;
+        long double wanted_energy = 0, energy = 0;
+    };
+    std::optional<GapFill> gap_fill;
     struct PcmProjection {
         std::uint64_t hilbert_halo = 0, first_simulator_row = 0, synthetic_prefix_rows = 0;
         std::uint64_t retained_valid_rows = 0;
@@ -1062,6 +1088,18 @@ Json profile_json(const Options& o, const Profile& profile, const ReceiverSlotPl
         result["receiver_slot_workspace_bytes"] = Json{};
         result["receiver_slot_workspace_reason"] = error.what();
     }
+    if (o.scheduled_gap_fill) {
+        result["scheduled_gap_fill"] = object({{"receiver_enabled", waveform.config().scheduled_gap_fill},
+            {"transmit_enabled", o.gap_fill_transmit}, {"foreign_receiver_key", o.foreign_receiver_key},
+            {"protected_first_sample", slot.protected_data_first_sample},
+            {"protected_stop_sample", slot.protected_data_stop_sample}});
+        if (const auto fill = waveform.gap_fill_after(slot.index)) {
+            auto& receipt = result["scheduled_gap_fill"];
+            receipt["planned_source_start_sample"] = fill->first;
+            receipt["planned_source_stop_sample"] = fill->stop;
+            receipt["planned_source_samples"] = fill->size();
+        }
+    }
     return result;
 }
 
@@ -1110,6 +1148,12 @@ Json observation(const Capture& capture, std::uint64_t stop, const ReceiverSlotP
             {"first_simulator_input_row", pcm.first_simulator_row},
             {"synthetic_thermal_prefix_rows", pcm.synthetic_prefix_rows},
             {"retained_valid_rows", pcm.retained_valid_rows}});
+    }
+    if (capture.gap_fill) {
+        const auto& fill = *capture.gap_fill;
+        result["scheduled_gap_fill"] = object({{"emitted_samples", fill.samples},
+            {"wanted_energy_samples", static_cast<double>(fill.wanted_energy)},
+            {"filler_energy_samples", static_cast<double>(fill.energy)}});
     }
     if (capture.cache) {
         const auto& identity = capture_binary_identity();
@@ -1824,7 +1868,8 @@ Capture simulate(const Options& o, const Profile& profile, std::span<const Emiss
     if (capture_overhead > SIZE_MAX - retained_bytes)
         throw Incomplete("Canonical capture storage exceeds the local address range");
     const auto stored_bytes = retained_bytes + capture_overhead;
-    const auto simultaneous_sources = std::max(std::size_t{1}, episodes.size() + (secondary != nullptr));
+    const auto fill_sources = o.scheduled_gap_fill && o.gap_fill_transmit ? episodes.size() : 0;
+    const auto simultaneous_sources = std::max(std::size_t{1}, episodes.size() + fill_sources + (secondary != nullptr));
     const auto reserve = simultaneous_sources * channel_source_bound;
     const auto remaining = memory_remaining(resources);
     // Two read buffers: one is delivered while the channel fills the other.
@@ -1935,10 +1980,17 @@ Capture simulate(const Options& o, const Profile& profile, std::span<const Emiss
     std::vector<Emission> emitters;
     std::vector<EmittedSource> inputs;
     std::vector<std::uint64_t> origins;
+    std::optional<PublicProfile> silent_transmitter;
+    if (o.scheduled_gap_fill && !o.gap_fill_transmit) {
+        auto config = profile.waveform.config();
+        config.scheduled_gap_fill = false;
+        silent_transmitter.emplace(std::move(config), profile.key);
+    }
+    const auto& transmit = silent_transmitter ? *silent_transmitter : profile.waveform;
     for (const auto& episode : episodes) {
         auto options = episode;
         options.lanes = lent;
-        emitters.emplace_back(profile.waveform, profile.key, options);
+        emitters.emplace_back(transmit, profile.key, options);
         inputs.push_back(emitters.back().source());
         origins.push_back(episode.source_first_sample);
     }
@@ -2030,6 +2082,15 @@ Capture simulate(const Options& o, const Profile& profile, std::span<const Emiss
     capture.generation = timer.elapsed();
     capture.channel = channel.report();
     capture.selective_filter = capture.channel.selective_perturbation.has_value();
+    if (o.scheduled_gap_fill) {
+        auto& filler = capture.gap_fill.emplace();
+        for (const auto& emitter : emitters) {
+            const auto& source = emitter.report();
+            filler.samples += source.gap_fill_samples;
+            filler.wanted_energy += source.data_energy;
+            filler.energy += source.gap_fill_energy;
+        }
+    }
     capture.generated_samples = simulator_stop;
     samples_left -= simulator_stop;
     capture.digest = digest.finish();
@@ -2120,6 +2181,49 @@ void frontend(Json& report, const Profile& profile, const Capture& capture, std:
     }
     phase(report, "audio_frontend", total, static_cast<double>(capture.rows()) / rate,
           std::move(work), unit, "native_pcm_projection_separate_from_iq_receive");
+}
+
+Json scheduled_fill_window_hashes(const Profile& profile, const Capture& capture, unsigned slots,
+                                 std::stop_token stop) {
+    struct Window {
+        SampleRange observation, aperture;
+        CaptureHasher full_hash, aperture_hash;
+    };
+    std::vector<Window> windows;
+    windows.reserve(slots);
+    for (unsigned index = 0; index < slots; ++index) {
+        const auto slot = make_receiver_slot_plan(profile.waveform, profile.receiver, index);
+        windows.push_back({{slot.first_sample, slot.stop_sample},
+            {slot.protected_data_first_sample, slot.protected_data_stop_sample}, {}, {}});
+    }
+    SpoolReplay replay(*capture.spool);
+    auto active = windows.begin();
+    for (std::uint64_t first = 0; first < capture.rows();) {
+        check_stop(stop);
+        const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(capture.rows() - first, input_chunk));
+        replay.load(first, count);
+        const auto end = first + count;
+        while (active != windows.end() && active->observation.stop <= first) ++active;
+        const auto add = [&](SampleRange range, CaptureHasher& hash) {
+            const auto low = std::max(first, range.first), high = std::min(end, range.stop);
+            if (low < high)
+                hash.add(replay.iq().subspan(low - first, high - low), replay.valid().subspan(low - first, high - low));
+        };
+        for (auto it = active; it != windows.end() && it->observation.first < end; ++it) {
+            add(it->observation, it->full_hash);
+            add(it->aperture, it->aperture_hash);
+        }
+        first = end;
+    }
+    (void)replay.finish(capture, capture.rows());
+    Json::Array receipts;
+    for (auto& window : windows) {
+        receipts.push_back(object({{"first_sample", window.observation.first},
+            {"stop_sample", window.observation.stop}, {"input_sha256", window.full_hash.finish()},
+            {"protected_first_sample", window.aperture.first}, {"protected_stop_sample", window.aperture.stop},
+            {"protected_input_sha256", window.aperture.size() ? Json(window.aperture_hash.finish()) : Json{}}}));
+    }
+    return receipts;
 }
 
 const char* decision_name(SlotDecision decision) {
@@ -2719,6 +2823,12 @@ std::pair<ReceiverSlotScore, Timing> complete_probe_slot(const Options& o, const
     const auto scratch = standalone_scratch(resources);
     if (workspace < lease_bytes || workspace - lease_bytes > scratch)
         throw Incomplete("Native full-slot probe exceeds its local memory lease");
+    if (o.scheduled_gap_fill) {
+        const Timer began;
+        auto score = score_protected_data_slot(profile.receiver, slot, profile.key, iq, valid,
+            resources.workers, workspace, stop, nullptr, nullptr);
+        return {std::move(score), began.elapsed()};
+    }
     if (o.protected_packed) {
         const Timer began;
         auto score = score_protected_slot(profile.receiver, slot, profile.key, iq, valid,
@@ -2772,11 +2882,22 @@ void admission_run(Json& report, const Options& o, const Profile& profile, const
             require(slot.index < waveform.last_slot(), "Adjacent DATA qualification needs a following public slot");
             const std::array bits{static_cast<std::uint8_t>(o.adjacent_data[0] == '1'),
                 static_cast<std::uint8_t>(o.bit), static_cast<std::uint8_t>(o.adjacent_data[1] == '1')};
+            const auto source_begin = [&](std::uint64_t index) {
+                return waveform.calendar().distance(waveform.origin(), waveform.transmit_slot(index).helper_begin);
+            };
+            if (o.match_scheduled_gap_fill_admission) {
+                const auto first = slot.index - 1;
+                std::array sources{EmissionOptions{.mode = EmissionMode::Message, .first_slot = first, .bits = bits,
+                    .source_first_sample = source_begin(first), .stop = stop}};
+                if (o.scheduled_gap_fill && o.gap_fill_transmit)
+                    sources.front().qualification_gap_fill_key = Crypto::from_independent_roots(
+                        admission_digest(o.seed, 6), admission_digest(o.seed, 7));
+                return simulate(o, profile, sources, slot.first_sample, slot.stop_sample, samples_left, resources, stop);
+            }
             const auto emitter = [&](std::uint64_t index, bool active, std::span<const std::uint8_t> data) {
                 return EmissionOptions{.mode = active ? EmissionMode::Message : EmissionMode::Quiet,
                     .first_slot = index, .bits = active ? data : std::span<const std::uint8_t>{},
-                    .source_first_sample = waveform.calendar().distance(waveform.origin(),
-                        waveform.transmit_slot(index).helper_begin), .stop = stop};
+                    .source_first_sample = source_begin(index), .stop = stop};
             };
             const std::array adjoining{
                 emitter(slot.index ? slot.index - 1 : 0, o.adjacent_data[0] != 'q', std::span(bits).first<1>()),
@@ -2893,6 +3014,13 @@ void admission_run(Json& report, const Options& o, const Profile& profile, const
     report["observation"] = observation(capture, slot.stop_sample, slot, o);
     if (!o.adjacent_data.empty())
         report["observation"]["adjacent_data"] = object({{"bits", o.adjacent_data}, {"center_has_data", wanted}});
+    if (o.scheduled_gap_fill && slot.protected_data_stop_sample > slot.protected_data_first_sample) {
+        const auto offset = slot.protected_data_first_sample - capture.first;
+        const auto rows = slot.protected_data_stop_sample - slot.protected_data_first_sample;
+        CaptureHasher digest;
+        digest.add(std::span(capture.iq).subspan(offset, rows), std::span(capture.valid).subspan(offset, rows));
+        report["observation"]["scheduled_gap_fill"]["protected_input_sha256"] = digest.finish();
+    }
     generation_phase(report, profile, capture);
     const auto [score, elapsed] = complete_probe_slot(o, profile, slot, capture, resources, stop);
     phase(report, "native_slot", elapsed, (slot.stop_sample - slot.first_sample) /
@@ -3080,7 +3208,7 @@ const char* stream_state(StreamReceiverState state) {
 
 struct MessageCheck {
     std::uint64_t first = 0, stop = 0;
-    bool physical_complete = false, matches = false, long_form = false;
+    bool physical_complete = false, decoded = false, authenticated = false, matches = false, long_form = false;
     std::size_t observed_bits = 0, missing_slots = 0, trailing_quiet = 0;
     double codec_seconds = 0;
 };
@@ -3153,6 +3281,7 @@ Replay replay(const Options& o, const Profile& profile, const Capture& capture, 
                 const auto& message = event.message;
                 const auto& decoded = message.decoded_content;
                 run.messages.push_back({event.first_public_slot, event.stop_public_slot, message.physical_complete,
+                    decoded.has_value(), decoded && decoded->authenticated,
                     decoded && std::ranges::equal(decoded->message.data, expected), message.long_form,
                     message.observed_bits, message.missing_slots, message.trailing_quiet_slots.size(),
                     message.message_service_seconds});
@@ -3239,7 +3368,8 @@ Json replay_json(const Replay& run, const Profile& profile, std::size_t expected
     }
     for (const auto& row : run.messages) {
         messages.push_back(object({{"first_public_slot", row.first}, {"stop_public_slot", row.stop},
-            {"physical_complete", row.physical_complete}, {"expected_source_matches", row.matches},
+            {"physical_complete", row.physical_complete}, {"decoded_content_present", row.decoded},
+            {"authenticated_content", row.authenticated}, {"expected_source_matches", row.matches},
             {"long_form", row.long_form}, {"observed_bits", row.observed_bits}, {"missing_slots", row.missing_slots},
             {"trailing_quiet_slots", row.trailing_quiet}, {"message_service_seconds", row.codec_seconds}}));
     }
@@ -3367,6 +3497,9 @@ void stream_run(Json& report, const Options& o, const Profile& profile, const St
         emissions.push_back({.mode = EmissionMode::Message, .first_slot = first, .bits = {}, .slot_count = wire,
             .source_first_sample = source_first, .stop = stop,
             .bit_at = draft.bit_source(first, [&](std::uint64_t index) { return message_address(profile.waveform, index); })});
+        if (o.scheduled_gap_fill && o.gap_fill_transmit)
+            emissions.back().qualification_gap_fill_key = Crypto::from_independent_roots(
+                admission_digest(o.seed, 6), admission_digest(o.seed, 7));
     }
     const auto capture = simulate(o, profile, emissions, 0, last.stop_sample, samples_left, receiver_resources, stop,
                                   std::move(spool));
@@ -3377,7 +3510,17 @@ void stream_run(Json& report, const Options& o, const Profile& profile, const St
     report["observation"]["wire_bits_per_episode"] = wire;
     generation_phase(report, profile, capture);
     frontend(report, profile, capture, stop);
-    const auto active = replay(o, profile, capture, last.stop_sample, slot_count, stream_source, receiver_resources, stop);
+    if (o.scheduled_gap_fill) {
+        const Timer began;
+        auto hashes = scheduled_fill_window_hashes(profile, capture, slot_count, stop);
+        phase(report, "scheduled_fill_window_identity", began.elapsed(), 0,
+            object({{"windows", std::move(hashes)}}), 0, "qualification_only_excluded_from_receiver_service");
+    }
+    auto receiver_profile = profile;
+    if (o.foreign_receiver_key)
+        receiver_profile.key = Crypto::from_independent_roots(admission_digest(o.seed, 8), admission_digest(o.seed, 9));
+    const auto active = replay(o, receiver_profile, capture, last.stop_sample, slot_count, stream_source,
+                               receiver_resources, stop);
     auto receipt = replay_json(active, profile, slot_count, spool_reservation);
     const auto measured = object({{"committed_slots", active.slots.size()}, {"input_rows", active.input_rows},
         {"verified_input_sha256", active.verified_input_sha256}, {"allocation", allocation(resources)},
@@ -3412,6 +3555,21 @@ void stream_run(Json& report, const Options& o, const Profile& profile, const St
     auto result = object({{"stream", std::move(receipt)}, {"expected_message_count", episode_count},
         {"message_and_physical_quiet_verified", physical_correct}, {"configured_calendar_reacquired", backlog && physical_correct},
         {"complete_receiver_service", work_complete}, {"scope", "configured_public_iq_stream"}});
+    if (o.foreign_receiver_key) result["receive_key_control"] = "independent_root";
+    if (o.scheduled_gap_fill && profile.receiver.wrong_key_admission == WrongKeyAdmission::current) {
+        Json::Object policy_counts;
+        for (const auto policy : wrong_key_admission_policies) {
+            std::size_t admitted = 0;
+            for (const auto& slot : active.slots) {
+                auto score = slot.score;
+                apply_wrong_key_admission(score, policy);
+                admitted += score.decision == SlotDecision::data;
+            }
+            policy_counts.emplace(std::string(wrong_key_admission_name(policy)), admitted);
+        }
+        result["retrospective_data_counts_by_admission_policy"] = std::move(policy_counts);
+    }
+    bool eof_verified = true;
     if (backlog) {
         result["backlog_interval"] = backlog_interval(active, profile, backlog_begin, backlog_end);
         Json::Array replays;
@@ -3430,17 +3588,18 @@ void stream_run(Json& report, const Options& o, const Profile& profile, const St
     } else {
         // Stop after one actual DATA observation and before the first quiet
         // observation. Decoder and scheduler must leave this episode open.
-        const auto partial = replay(o, profile, capture, first.stop_sample, 1, stream_source, receiver_resources, stop);
-        const bool eof_rejected = stream_work_complete(partial, profile, 1) &&
-            partial.slots.front().score.decision == SlotDecision::data && partial.messages.empty();
+        const auto partial = replay(o, receiver_profile, capture, first.stop_sample, 1, stream_source,
+                                    receiver_resources, stop);
+        eof_verified = stream_work_complete(partial, profile, 1) &&
+            (o.foreign_receiver_key || partial.slots.front().score.decision == SlotDecision::data) && partial.messages.empty();
         phase(report, "eof_control", partial.service, partial.input_rows / profile.receiver.sample_rate_hz,
             replay_json(partial, profile, 1, spool_reservation), 0, "separate_functional_control");
-        result["eof_control_verified"] = eof_rejected;
-        physical_correct &= eof_rejected;
+        result["eof_control_verified"] = eof_verified;
     }
     report["result"] = std::move(result);
     if (!work_complete) throw Incomplete("Native stream missed required valid scoring work or public chronology");
-    if (!backlog && !physical_correct) throw Incomplete("Native stream missed the declared message, quiet or EOF control");
+    if (!eof_verified || (!backlog && !o.foreign_receiver_key && !physical_correct))
+        throw Incomplete("Native stream missed the declared message, quiet or EOF control");
 }
 
 void codec_run(Json& report, const Options& o, const Profile& profile, std::stop_token stop) {
@@ -3556,6 +3715,10 @@ void help() {
         "  --helper-overlap off keeps regression in sequence: Helper, then coarse preparation\n"
         "  --continuous-data on|off qualifies packed DATA for plan, message, backlog or admission with\n"
         "    Helper and waits off (default off)\n"
+        "  --scheduled-gap-fill on|off qualifies Scheduled + gap fill for plan, message or admission\n"
+        "    admission requires an active interior slot between two --adjacent-data bits\n"
+        "    --gap-fill-transmit off omits only transmit fill in a matched fill-aware message or admission probe\n"
+        "  --foreign-receiver-key on compares an independent receive key in an encrypted message probe\n"
         "  --affine-continuation on|off compares stream replay with or without receiver state (default on)\n"
         "  admission scores one complete slot for all policies; --stratum noise omits wanted DATA\n"
         "    --adjacent-data PAIR selects adjoining 0, 1 or quiet (q) slots. N=0 requires leading q\n"

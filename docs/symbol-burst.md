@@ -430,6 +430,44 @@ in validation and remove the superseded receipts.
 
 ## Scheduled gaps and temporary-key noise
 
+**Robust setup → DATA cadence → Scheduled + gap fill** enables native
+same-band filler between DATA bits. Both peers select the filled cadence.
+It uses the ordinary Scheduled addresses and wait settings. Helper and FHSS
+are Off for this profile. The transmitter generates an independent temporary
+key for the message's fill, and the receiver needs only the public calendar
+and common guard settings. Filler uses the same three-carrier waveform,
+native pulse shaping and calibrated DATA gain. A shortened edge follows the
+native taper, bounded by unity. The renderer emits filler only between DATA
+slots in the submitted draft and keeps the final source and two physical
+quiet slots.
+
+The source guard is placed between the complete reachable wanted DATA
+envelopes. It allows the public clock and arrival search, modeled channel
+tails, the analytic projection FIR and both endpoint sample-rate conversion
+filters. Parts of that fill may
+still enter a full receive window. In that case the receiver removes those
+possible parts before the coarse observation filter and evaluates the native
+likelihoods on the remaining uninterrupted aperture. The mask is public and
+uses a single full proposal search, with its original clock, timing,
+epoch and frequency axes. The short frequency tracker preserves its original
+lattice when the cropped terminal block has a different length. Physical
+quiet is scored on its own valid aperture. Slots where possible fill stays
+outside the full observation use the ordinary Scheduled receiver. Later
+accepted timing is still usable by the next public slot.
+
+The source bounds are frozen from the shared profile. A receive device's
+additional timing uncertainty enlarges its local exclusion around the same
+source fill. A sufficiently wide capture also checks the bounds of more
+distant fills even when its two neighboring gaps are empty. Excess local
+uncertainty can narrow the wanted aperture, and
+a public gap too short for the declared promises carries no fill. Physical
+effects outside the delay and filter bounds can still leak into wanted
+samples. Live playback uses existing PCM headroom checks. ADC gain, AGC,
+analog ringing and radiated spectral compliance depend on the hardware.
+[Appraisal front-end evidence](../_ref/highFidelity-triple_Robust_Modem/Fable-5.2/55-equipment-and-front-end-effects.md)
+· [ITU-R treatment of pulse shaping and transmitter transients](https://www.itu.int/dms_pubrec/itu-r/rec/sm/R-REC-SM.328-12-202509-I%21%21PDF-E.pdf)
+· [ETSI HF gain attack and recovery test, section 10.16](https://www.etsi.org/deliver/etsi_EN/300300_300399/30037301/01.03.06_30/en_30037301v010306v.pdf)
+
 The scheduled DATA patterns keep their public UTC addresses and can carry a
 previously accepted timing and frequency proposal across a gap. The receiver
 still scores that proposal afresh when DATA resumes. The channel model evolves
@@ -450,11 +488,10 @@ power can also mask wanted DATA or interfere with physical quiet scoring.
 In the broad 6 kHz, 3.6 Hz, 265 Hz spacing, HF Worst and Each 65% profile,
 two consecutive 209.553667 s receive windows leave 0.446333 s between
 them on the 210 s scheduled grid. The declared arrival span is 14.07 s
-before multipath tails and receiver filtering. There is therefore no
-same-band fill interval guaranteed to arrive outside those observations,
-even though the nominal DATA gates leave 49.6 s between them. An off-window
-guard is a sufficient way to retain ordinary receiver evidence. An overlapping
-filler requires its own qualified detection model. The earlier independently
+before multipath tails and receiver filtering. A same-band fill in the nominal
+49.6 s between DATA gates can therefore enter the full observations. The
+filled profile instead guards the reachable wanted support and can place
+about 19.5 s of filler in the middle of each gap in this example. The earlier independently
 keyed [Watterson I3 replay](validation.md#packed-data-under-physical-hf-models--22-november-2026)
 produced a false DATA decision before the codec rejected the episode.
 The two post-DATA quiet slots remain physical observations and are outside
@@ -462,6 +499,10 @@ any inter-DATA fill test.
 The [matched native comparison](validation.md#scheduled-gap-fill-comparison--22-november-2026)
 found exact receive-window equality for a guarded compact fill and observed
 receive-window overlap when fill began near the end of a DATA gate.
+The remaining quiet portions in the broad example are long enough for the
+simulation's 0.75 s gain-control state to settle. Keeping actual radio gain
+or a hardware transmit detector active through those portions remains a
+separate qualification. [Native paired results](validation.md#native-guarded-scheduled-gap-fill--22-november-2026)
 
 ## Retained scheduling lessons
 

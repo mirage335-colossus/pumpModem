@@ -15,6 +15,9 @@ namespace datapump::audio {
 namespace detail {class EntropyCaptureOwner;}
 struct Device {std::string id,description;};
 std::vector<Device> devices();
+// Largest combined digital playback and capture FIR half support, in logical
+// PCM rows. Endpoints may negotiate different native rates independently.
+std::uint64_t native_roundtrip_filter_halo_samples(std::uint32_t logical_rate);
 // Modem callbacks and supplied/returned PCM use logical_rate. The sound card
 // may run at another supported rate; conversion is automatic and bounded.
 // usable_passband_hz describes the converter's flat passband, not a promise

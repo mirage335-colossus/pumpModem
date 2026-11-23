@@ -251,7 +251,8 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         else if(flag=="--symbol-burst")result.symbol_burst=modem::parse_symbol_burst_wait(value);
         else if(flag=="--symbol-burst-random")result.symbol_burst_random=modem::parse_symbol_burst_random(value);
         else if(flag=="--data-cadence") {
-            if(value!="scheduled"&&value!="continuous")invalid("--data-cadence must be scheduled or continuous.");
+            if(value!="scheduled"&&value!="scheduled-fill"&&value!="continuous")
+                invalid("--data-cadence must be scheduled, scheduled-fill, or continuous.");
             result.data_cadence=value;
         }
         else if(flag=="--live-duplex") {

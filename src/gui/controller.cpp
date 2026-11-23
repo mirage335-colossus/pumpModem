@@ -419,7 +419,8 @@ struct Controller::Impl {
         f(UiField::symbol_burst).selected="off";
         f(UiField::symbol_burst_random).options={{"0","0"},{"1","1"},{"2","2"},{"3","3"}};
         f(UiField::symbol_burst_random).selected="0";
-        f(UiField::data_cadence).options={{"scheduled","Scheduled"},{"continuous","Continuous DATA"}};
+        f(UiField::data_cadence).options={{"scheduled","Scheduled"},{"scheduled-fill","Scheduled + gap fill"},
+            {"continuous","Continuous DATA"}};
         f(UiField::data_cadence).selected="scheduled";
         f(UiField::rf_oscillator).options.push_back({"baseband-clock","Baseband clock"});
         for(const auto& preset:tuning::oscillator_presets()) {
@@ -732,6 +733,7 @@ struct Controller::Impl {
         settings.symbol_burst_random=modem::parse_symbol_burst_random(f(UiField::symbol_burst_random).selected);
         const auto& cadence=f(UiField::data_cadence).selected;
         if(cadence=="scheduled")settings.data_cadence=live::DataCadence::scheduled;
+        else if(cadence=="scheduled-fill")settings.data_cadence=live::DataCadence::scheduled_fill;
         else if(cadence=="continuous")settings.data_cadence=live::DataCadence::continuous;
         else throw Error("Select an available DATA cadence");
         settings.fhss_profile=f(UiField::fhss).selected;settings.fhss_frequencies_hz=fhss_list;

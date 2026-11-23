@@ -4,6 +4,7 @@
 #include "datapump/audio_entropy.hpp"
 #endif
 #include "audio_trace.hpp"
+#include "audio_rates.hpp"
 #include <iostream>
 #include <syncstream>
 #include "datapump/resampler.hpp"
@@ -33,6 +34,7 @@
 
 namespace datapump::audio {
 namespace {
+using detail::rate_candidates;
 // Only this typed preflight failure permits ordinary playback fallback. Device
 // and clock failures after format/source scheduling retain their fatal behavior.
 struct TimingPreflightUnavailable : Error {
@@ -57,22 +59,6 @@ std::size_t sample_count(double seconds,std::uint32_t rate,std::size_t memory_li
         seconds*rate>static_cast<double>(memory_limit/sizeof(float)))
         throw Error("audio duration/sample rate exceeds memory budget or valid range");
     return static_cast<std::size_t>(seconds*rate);
-}
-std::vector<std::uint32_t> rate_candidates(std::uint32_t logical_rate,std::uint32_t minimum_rate=0) {
-    if(logical_rate<64 || logical_rate>120000000)throw Error("invalid logical sample rate");
-    constexpr std::array<std::uint32_t,13> common{8000,11025,16000,22050,24000,32000,44100,48000,88200,96000,176400,192000,384000};
-    // Sound-card interfaces stay within actual audio clock ranges. SDR-rate
-    // logical PCM remains separate and does not imply an SDR audio backend.
-    std::vector<std::uint32_t> result;
-    if(logical_rate>=8000 && logical_rate<=384000)result.push_back(logical_rate);
-    // Preserve physical passband when a faster device clock is available.
-    for(const auto rate:common)if(rate>logical_rate)result.push_back(rate);
-    for(auto it=common.rbegin();it!=common.rend();++it)if(*it<logical_rate)result.push_back(*it);
-    if(minimum_rate) {
-        std::erase_if(result,[&](const auto rate){return rate<minimum_rate;});
-        if(result.empty())throw Error("no native audio sample rate meets the requested minimum of "+std::to_string(minimum_rate)+" Hz");
-    }
-    return result;
 }
 void report_format(std::uint32_t logical,std::uint32_t hardware,std::size_t workspace,const StreamFormatCallback& callback,
                    bool timed=false,double uncertainty=0,bool adjusted=false,TimingQuality qualified=TimingQuality::unavailable,
