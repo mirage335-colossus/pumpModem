@@ -289,11 +289,83 @@ Model build(const Inputs& inputs, std::stop_token stop) {
     return result;
 }
 
+namespace {
+using CoarseObservation = native::receiver_detail::CoarseProbeObservation;
+constexpr std::size_t minimum_coarse_probe_pairs = 24;
+constexpr unsigned minimum_coarse_probe_lanes = 8;
+
+struct CoarseProjection {
+    double lower_seconds, upper_seconds;
+    bool rates_consistent;
+};
+
+std::optional<CoarseProjection> coarse_projection(const CoarseObservation& observation) {
+    const auto [slow, fast] = std::minmax(observation.completed_pairs[0], observation.completed_pairs[1]);
+    if (!observation.windows_complete || !observation.total_pairs || slow < minimum_coarse_probe_pairs ||
+        std::min(observation.contributing_lanes[0], observation.contributing_lanes[1]) < minimum_coarse_probe_lanes)
+        return {};
+
+    const auto pair_seconds = static_cast<double>(observation.total_pairs) * CoarseObservation::window_seconds;
+    const bool rates_consistent = static_cast<long double>(fast) * 100 <= static_cast<long double>(slow) * 115;
+    return CoarseProjection{pair_seconds / fast, pair_seconds / slow, rates_consistent};
+}
+}
+
+std::string sample_progress_text(const SampleProgress& progress) {
+    std::ostringstream out;
+    if (progress.trial) out << "Trial " << progress.trial << " · ";
+    switch (progress.stage) {
+    case SampleProgress::Stage::planning: out << "Planning receive geometry and workspace"; break;
+    case SampleProgress::Stage::preparing: out << "Preparing the waveform and receiver"; break;
+    case SampleProgress::Stage::feeding: out << "Streaming modeled receiver input"; break;
+    case SampleProgress::Stage::scoring: out << "Finishing receiver scoring"; break;
+    }
+    if (progress.episode_seconds > 0) {
+        out << " · " << duration(progress.input_seconds) << " of " << duration(progress.episode_seconds)
+            << " modeled input accepted · " << progress.scored_slots << "/3 public slots scored";
+    }
+    out << " · " << std::fixed << std::setprecision(1) << progress.elapsed_seconds << " s elapsed";
+    if (progress.coarse_probe) {
+        const auto& observation = *progress.coarse_probe;
+        const auto [first_pairs, second_pairs] = observation.completed_pairs;
+        if (observation.windows_complete)
+            out << " · First-slot coarse probe recorded " << first_pairs << " and " << second_pairs << " FFT pairs ("
+                << static_cast<double>(first_pairs) / CoarseObservation::window_seconds << " and "
+                << static_cast<double>(second_pairs) / CoarseObservation::window_seconds << " pairs/s)";
+        if (const auto projection = coarse_projection(observation)) {
+            out << (projection->rates_consistent ? " · First-slot coarse correlation work projects to " :
+                " · Coarse rates varied by more than 15%. At those rates, first-slot coarse correlations would take ")
+                << std::setprecision(0) << std::floor(projection->lower_seconds) << "–"
+                << std::ceil(projection->upper_seconds) << " s";
+            if (projection->rates_consistent) out << " at the observed rates";
+            out << ". Other phases remain unmeasured";
+        } else if (!observation.windows_complete) {
+            out << " · A coarse projection needs two complete " << CoarseObservation::window_seconds << " s windows";
+        } else {
+            const auto [first_lanes, second_lanes] = observation.contributing_lanes;
+            out << " across " << first_lanes << " and " << second_lanes << " lanes · A coarse projection needs "
+                << minimum_coarse_probe_pairs << " FFT pairs and " << minimum_coarse_probe_lanes << " lanes in each window";
+        }
+    }
+    return out.str();
+}
+
+namespace {
+std::string sample_status(const SampleResult& sample) {
+    if (!sample.interrupted_trial) return sample.status;
+    const auto progress = sample_progress_text(*sample.interrupted_trial) + ".";
+    return sample.status.empty() ? progress : sample.status + " " + progress;
+}
+}
+
 void add_sample(Model& model, const SampleResult& sample) {
     model.sampling = false;
-    model.sample_status = sample.status;
-    if (!model.selected || !model.selected->bit_seconds || !model.selected->workspace_fits) return;
-    add_sample(model, *model.selected->bit_seconds, sample);
+    if (model.selected && model.selected->bit_seconds && model.selected->workspace_fits)
+        add_sample(model, *model.selected->bit_seconds, sample);
+    else {
+        model.sample_status = sample_status(sample);
+        model.offer_extended_sample = false;
+    }
 }
 
 void add_sample(Model& model, double bit_seconds, const SampleResult& sample) {
@@ -303,11 +375,20 @@ void add_sample(Model& model, double bit_seconds, const SampleResult& sample) {
     const auto correct = trials == 2 ? sample.first_pair_correct : sample.correct;
     std::optional<double> probability;
     if (trials && correct <= trials) probability = static_cast<double>(correct) / trials;
+    std::optional<double> lower_bound;
+    if (!sample.trials && !sample.processing_ratio && sample.interrupted_trial) {
+        const auto& progress = *sample.interrupted_trial;
+        if (progress.trial && progress.episode_seconds > 0 && std::isfinite(progress.episode_seconds)) {
+            const auto ratio = progress.elapsed_seconds / progress.episode_seconds;
+            if (ratio > 0 && std::isfinite(ratio)) lower_bound = ratio;
+        }
+    }
     const auto matches = [bit_seconds](const Point& point) {
         return point.workspace_fits && point.bit_seconds == bit_seconds;
     };
     const auto apply = [&](Point& point) {
         point.cpu_seconds_per_audio_second = sample.processing_ratio;
+        point.cpu_probe_lower_bound = lower_bound;
         point.rx_success_probability = probability;
     };
     // The simulation holds actual power and the channel fixed. Targets on
@@ -316,7 +397,13 @@ void add_sample(Model& model, double bit_seconds, const SampleResult& sample) {
         if (matches(point)) apply(point);
     if (!model.selected || !matches(*model.selected)) return;
     apply(*model.selected);
-    model.sample_status = sample.status;
+    model.sample_status = sample_status(sample);
+    model.offer_extended_sample = sample.interrupted_trial.has_value() && trials == 0;
+    if (model.offer_extended_sample && sample.interrupted_trial->coarse_probe) {
+        const auto projection = coarse_projection(*sample.interrupted_trial->coarse_probe);
+        if (projection && projection->rates_consistent && projection->lower_seconds > extended_probe_seconds)
+            model.offer_extended_sample = false;
+    }
     if (probability) {
         // Joint 95% coverage for both predeclared bit-balanced prefixes.
         const auto radius = std::sqrt(std::log(80.) / (2 * trials));
@@ -330,6 +417,8 @@ void add_sample(Model& model, double bit_seconds, const SampleResult& sample) {
     }
     if (sample.processing_ratio)
         model.cpu_status = "Slowest completed finite simulation, including channel generation and receiver work.";
+    else if (lower_bound)
+        model.cpu_status = "Elapsed time divided by the full modeled episode gives a lower bound for this interrupted simulation.";
     else
         model.cpu_status = "A complete simulation trial is needed to measure processing pace.";
 }

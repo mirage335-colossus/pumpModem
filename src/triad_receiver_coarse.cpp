@@ -75,6 +75,7 @@ void check_stop(std::stop_token stop) {
 }
 
 using PhaseClock = std::chrono::steady_clock;
+constexpr auto coarse_probe_window = std::chrono::seconds(CoarseProbeObservation::window_seconds);
 
 double elapsed(PhaseClock::time_point began) {
     return std::chrono::duration<double>(PhaseClock::now() - began).count();
@@ -3152,7 +3153,7 @@ CoarseOperationCounts score_frequencies(const Plan& plan, std::span<const Worksp
                                          std::span<Peak> peaks, std::size_t first, std::size_t count,
                                          double variance, const Fft& fft, unsigned lanes, std::stop_token stop,
                                          ReceiverExecutor& executor, std::uint64_t public_slot,
-                                         int observation_exponent = 0, bool pack = false) {
+                                         int observation_exponent, bool pack, CoarseProbeProgress* probe) {
     const auto& layout = plan.layout;
     const auto peak_slots = arrival_peak_slots(layout.lag_count);
     const auto local_count = mul(grid.size(), peak_slots);
@@ -3164,6 +3165,7 @@ CoarseOperationCounts score_frequencies(const Plan& plan, std::span<const Worksp
         CoarseOperationCounts work;
     };
     std::vector<Lane> scratch(std::min<std::size_t>(lanes, count));
+    if (probe && !probe->begin(mul(count, bank.size()))) probe = nullptr;
     parallel(count, static_cast<unsigned>(scratch.size()), stop, executor, public_slot,
              [&](unsigned lane, std::size_t index, std::stop_token job_stop) {
         auto& own = scratch[lane];
@@ -3188,8 +3190,10 @@ CoarseOperationCounts score_frequencies(const Plan& plan, std::span<const Worksp
             const auto selected = std::span(arrivals).first(peak_slots);
             std::copy(selected.begin(), selected.end(), peaks.begin() + workspace * local_count + frequency * peak_slots);
             for (const auto& peak : selected) if (std::isfinite(peak.score)) note(own.work.retained_peaks, 1);
+            if (probe) probe->record_pair(lane);
         }
     });
+    if (probe) probe->finish();
     CoarseOperationCounts complete;
     for (const auto& own : scratch) combine(complete, own.work);
     return complete;
@@ -3489,6 +3493,43 @@ std::size_t gain_device_charge(const Plan&, const ReceiverConfig&, const Receive
                                const WorkspaceQuote&, unsigned workers);
 
 } // namespace
+
+bool CoarseProbeProgress::begin(std::size_t pairs) noexcept {
+    if (claimed_.test_and_set(std::memory_order_relaxed)) return false;
+    began_ = PhaseClock::now();
+    pairs_.store(pairs, std::memory_order_release);
+    return true;
+}
+
+void CoarseProbeProgress::record_pair(unsigned lane) noexcept {
+    const auto age = PhaseClock::now() - began_;
+    if (age >= 2 * coarse_probe_window) return;
+    auto& window = windows_[age >= coarse_probe_window];
+    // Count all pairs. The mask conservatively counts only the first 64 lanes.
+    if (lane < 64) window.lane_mask.fetch_or(std::uint64_t{1} << lane, std::memory_order_relaxed);
+    window.completed_pairs.fetch_add(1, std::memory_order_release);
+}
+
+void CoarseProbeProgress::finish() noexcept {
+    finished_.store(true, std::memory_order_release);
+}
+
+std::optional<CoarseProbeObservation> CoarseProbeProgress::observe(PhaseClock::time_point as_of) const noexcept {
+    const auto pairs = pairs_.load(std::memory_order_acquire);
+    if (!pairs || finished_.load(std::memory_order_acquire)) return std::nullopt;
+
+    CoarseProbeObservation observation{.total_pairs = pairs};
+    observation.windows_complete = std::min(as_of, PhaseClock::now()) - began_ >= 2 * coarse_probe_window;
+    if (observation.windows_complete) {
+        for (std::size_t i = 0; i < windows_.size(); ++i) {
+            observation.completed_pairs[i] = windows_[i].completed_pairs.load(std::memory_order_acquire);
+            const auto mask = windows_[i].lane_mask.load(std::memory_order_relaxed);
+            observation.contributing_lanes[i] = static_cast<unsigned>(std::popcount(mask));
+        }
+    }
+    if (finished_.load(std::memory_order_acquire)) return std::nullopt;
+    return observation;
+}
 
 std::vector<FineCoordinate> nominate_quarter_clock_timing(const ReceiverConfig& config,
         const ReceiverSlotPlan& slot, const CoarseResult& coarse) {
@@ -5393,9 +5434,13 @@ struct CoarseSession::Impl {
     CoarseOperationCounts search(const Fft& transform, std::size_t first, std::size_t count,
                                  int exponent, bool pack, std::stop_token stop) {
         const auto& plan = receipt.plan;
-        if (count >= mul(2, plan.workers))
+        if (count >= mul(2, plan.workers)) {
+            auto* probe = config.coarse_probe_progress.get();
+            if (probe && (slot.index || first || count != plan.frequency_points || config.bulk_backend || plan.workers < 8))
+                probe = nullptr;
             return score_frequencies(geometry, bank, observation, frequency_values, peaks, first, count, variance,
-                                     transform, plan.workers, stop, executor, slot.index, exponent, pack);
+                                     transform, plan.workers, stop, executor, slot.index, exponent, pack, probe);
+        }
         CoarseOperationCounts completed;
         for (std::size_t done = 0; done < count;) {
             const auto width = std::min(plan.tile_width, count - done);

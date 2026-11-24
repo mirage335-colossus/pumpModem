@@ -51,13 +51,31 @@ planner simulation. Finite-duplex lab sessions reserve capture for their
 physical episode.
 
 The probe streams up to four independent channel and noise draws in fixed-size
-blocks, balanced across both bit values, with a cooperative 30-second
-processing deadline starting before workspace admission. A success requires the
-correct bit and two physically scored quiet slots. The planner uses the first
-balanced pair if the second pair does not finish. It reports a 95% sampling
-interval with joint coverage for the two predeclared sample sizes. The
-processing line shows the slowest completed simulation's
+blocks, balanced across both bit values. The interactive run has a cooperative
+30-second deadline starting before workspace admission. It reports the latest
+phase, accepted modeled input and scored public slots. A timeout before the
+first balanced pair can offer **Run longer simulation**, a manual 120-second
+retry using the selected geometry and route. A measured coarse projection
+above 120 seconds leaves the planner on the quick run. Both runs can be cancelled.
+
+A success requires the correct bit and two physically scored quiet slots. The
+planner uses the first balanced pair if the second pair does not finish. It
+reports a 95% sampling interval with joint coverage for the two predeclared
+sample sizes. The processing line shows the slowest completed simulation's
 elapsed processing seconds per audio second, including source and channel work.
+When the first trial runs out of time, the processing graph can mark a lower
+bound using the work elapsed before the deadline divided by the full modeled
+episode duration. The arrow represents an interrupted finite simulation. RX
+success remains unmeasured until a balanced pair completes.
+
+For an eligible interrupted first-slot native CPU frequency search, the planner
+can also project the cost of that span from two disjoint three-second work
+windows. Each window needs at least 24 completed workspace-frequency pairs from
+eight software lanes for a time range. The range applies those two rates to the
+full same-shape correlation and peak-retention work. Rates within 15% qualify
+the range for the retry decision. Wider variation is shown with the implied
+time at the observed rates. Preparation, proposal selection, fine scoring and
+quiet slots have their own costs.
 The planner retains up to eight sampled geometries for comparison while the
 other link settings, processing route, and worker allocation match. A short
 sample does not qualify sustained real-time capacity, field sensitivity, or

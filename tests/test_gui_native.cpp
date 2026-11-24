@@ -131,7 +131,44 @@ void planner_target_navigation_and_graph() {
     auto unmeasured=model;
     const gui::planner::SampleResult incomplete{.status="No completed trials"};
     gui::planner::add_sample(unmeasured,incomplete);
-    check(!unmeasured.selected->rx_success_probability);
+    check(!unmeasured.selected->rx_success_probability&&!unmeasured.offer_extended_sample);
+
+    using Stage=gui::planner::SampleProgress::Stage;
+    const gui::planner::SampleResult interrupted{.interrupted_trial=gui::planner::SampleProgress{
+        .stage=Stage::scoring,.trial=1,.scored_slots=0,.input_seconds=300,
+        .episode_seconds=300,.elapsed_seconds=30}};
+    gui::planner::add_sample(unmeasured,interrupted);
+    check(unmeasured.selected->cpu_probe_lower_bound==.1&&!unmeasured.selected->cpu_seconds_per_audio_second&&
+          !unmeasured.selected->rx_success_probability&&unmeasured.offer_extended_sample);
+    const auto interrupted_page=gui::planner_page::build(unmeasured,900,false,false);
+    check(document_contains(interrupted_page,"0/3 public slots scored")&&
+          document_contains(interrupted_page,"Run longer simulation")&&
+          document_contains(interrupted_page,"up to 120 s")&&document_contains(interrupted_page,"≥"));
+    auto slow_coarse=interrupted;
+    slow_coarse.interrupted_trial->coarse_probe=triad::v3::receiver_detail::CoarseProbeObservation{
+        .total_pairs=56940,.completed_pairs={566,620},.contributing_lanes={16,19},.windows_complete=true};
+    gui::planner::add_sample(unmeasured,slow_coarse);
+    check(!unmeasured.offer_extended_sample&&!unmeasured.selected->rx_success_probability&&
+          !unmeasured.selected->cpu_seconds_per_audio_second&&unmeasured.selected->cpu_probe_lower_bound==.1&&
+          unmeasured.sample_status.find("coarse")!=std::string::npos);
+    slow_coarse.interrupted_trial->coarse_probe->completed_pairs[1]=760;
+    gui::planner::add_sample(unmeasured,slow_coarse);
+    check(unmeasured.offer_extended_sample&&unmeasured.sample_status.find("pairs/s")!=std::string::npos&&
+          unmeasured.sample_status.find("Coarse rates varied by more than 15%")!=std::string::npos&&
+          !unmeasured.selected->cpu_seconds_per_audio_second&&!unmeasured.selected->rx_success_probability);
+    slow_coarse.interrupted_trial->coarse_probe->contributing_lanes[1]=2;
+    gui::planner::add_sample(unmeasured,slow_coarse);
+    check(unmeasured.offer_extended_sample&&unmeasured.sample_status.find("8 lanes in each window")!=std::string::npos);
+    slow_coarse.interrupted_trial->coarse_probe->contributing_lanes[1]=19;
+    slow_coarse.interrupted_trial->coarse_probe->completed_pairs[1]=16;
+    gui::planner::add_sample(unmeasured,slow_coarse);
+    check(unmeasured.offer_extended_sample&&unmeasured.sample_status.find("24 FFT pairs")!=std::string::npos);
+    slow_coarse.interrupted_trial->coarse_probe->windows_complete=false;
+    gui::planner::add_sample(unmeasured,slow_coarse);
+    check(unmeasured.offer_extended_sample&&unmeasured.sample_status.find("two complete 3 s windows")!=std::string::npos&&
+          unmeasured.sample_status.find("FFT pairs")==std::string::npos);
+    gui::planner::add_sample(unmeasured,trials);
+    check(!unmeasured.selected->cpu_probe_lower_bound&&!unmeasured.offer_extended_sample);
 
     const auto mono_graph=[](const gui::planner::Model& current) {
         const auto document=gui::planner_page::build(current,500,false,false);

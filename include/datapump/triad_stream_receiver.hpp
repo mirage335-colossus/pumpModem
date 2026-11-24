@@ -114,9 +114,11 @@ public:
     std::vector<StreamSlotReceipt> drain_recent_slots();
     StreamReceiverReport report() const;
 
-    // Drains accepted complete windows, subject to output backpressure.
+    // Closes input and drains accepted complete windows, subject to output
+    // backpressure. With wait=false, use wait_for_slot_completion to drain
+    // in steps and observe ordered commits between waits.
     // Neither EOF nor cancellation creates a quiet decision.
-    StreamReceiverReport finish_input();
+    StreamReceiverReport finish_input(bool wait = true);
     StreamReceiverReport cancel();
     void request_cancel() noexcept;
 

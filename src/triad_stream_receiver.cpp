@@ -1038,9 +1038,9 @@ std::vector<StreamSlotReceipt> CompleteStreamReceiver::drain_recent_slots() {
     return result;
 }
 StreamReceiverReport CompleteStreamReceiver::report() const { return impl_->report(); }
-StreamReceiverReport CompleteStreamReceiver::finish_input() {
+StreamReceiverReport CompleteStreamReceiver::finish_input(bool wait) {
     impl_->closed = true;
-    return resume(true);
+    return resume(wait);
 }
 StreamReceiverReport CompleteStreamReceiver::cancel() {
     if (impl_->state==StreamReceiverState::receiving)

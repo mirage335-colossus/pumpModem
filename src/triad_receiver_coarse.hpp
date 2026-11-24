@@ -6,6 +6,8 @@
 #include "triad_receiver_fine.hpp"
 
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -299,6 +301,27 @@ struct CoarsePhaseWork {
     // The template bank, observation filter and mapped-profile gate overlap
     // on one lane set. Each reports its own interval; these are not additive.
     double wall_seconds = 0;
+};
+
+// Measures just one unfinished first-slot native frequency span. A completed
+// pair contributes diagnostic work only, independently of slot admission.
+class CoarseProbeProgress {
+public:
+    bool begin(std::size_t pairs) noexcept;
+    void record_pair(unsigned lane) noexcept;
+    void finish() noexcept;
+    std::optional<CoarseProbeObservation> observe(std::chrono::steady_clock::time_point as_of) const noexcept;
+
+private:
+    struct Window {
+        std::atomic<std::size_t> completed_pairs{0};
+        std::atomic<std::uint64_t> lane_mask{0};
+    };
+    std::atomic_flag claimed_{};
+    std::atomic<bool> finished_{false};
+    std::atomic<std::size_t> pairs_{0};
+    std::chrono::steady_clock::time_point began_{};
+    std::array<Window, 2> windows_{};
 };
 
 struct CoarseWorkPlan {

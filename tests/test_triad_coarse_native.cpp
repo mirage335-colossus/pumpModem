@@ -32,6 +32,21 @@ void check(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
 
+void coarse_probe_observes_only_current_unfinished_work() {
+    using Clock = std::chrono::steady_clock;
+    const auto deadline = Clock::now();
+    r::CoarseProbeProgress probe;
+    check(!probe.observe(deadline), "coarse probe must wait for an eligible native span");
+    check(probe.begin(56940), "coarse probe did not admit its first span");
+    probe.record_pair(0);
+    const auto early = probe.observe(deadline + std::chrono::seconds(1));
+    check(early && early->total_pairs == 56940 && !early->windows_complete &&
+              early->completed_pairs == std::array<std::size_t, 2>{},
+          "a partial coarse window cannot supply a complete-window rate");
+    probe.finish();
+    check(!probe.observe(Clock::now()), "a finished coarse span cannot produce an unfinished-work projection");
+}
+
 template<class Exception = datapump::Error, class Function>
 void rejects(Function action, const char* message) {
     try { action(); }
@@ -1746,6 +1761,7 @@ int main(int argc, char** argv) try {
         grouped_cpu_parity(key());
         return 0;
     }
+    coarse_probe_observes_only_current_unfinished_work();
     quarter_clocks_nominate_only_missing_public_cells();
     if (quarter_clock) return 0;
     const auto crypto = key();

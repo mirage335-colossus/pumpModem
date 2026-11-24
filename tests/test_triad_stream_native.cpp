@@ -889,8 +889,12 @@ void retry_after_one_completion() {
           "ingress wait did not return when the later owner released its workspace");
     check(stream.push(first, extra)==StreamPushResult::accepted && stream.report().input_stop==first+1,
           "unchanged ingress retry did not use released workspace");
+    const auto closing = stream.finish_input(false);
+    check(closing.input_closed && closing.state==StreamReceiverState::receiving &&
+          closing.next_public_slot==0 && closing.active_owners==1,
+          "nonblocking EOF did not preserve pending work and ordered commits");
     release[0] = true;
-    const auto eof = stream.finish_input();
+    const auto eof = stream.wait_for_slot_completion();
     check(eof.state==StreamReceiverState::input_ended && eof.next_public_slot==2,
           "EOF did not drain both accepted slots in order");
 }

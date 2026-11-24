@@ -5,6 +5,8 @@
 #include "datapump/wrong_key_admission.hpp"
 
 #include <array>
+#include <cstddef>
+#include <memory>
 #include <optional>
 #include <stop_token>
 #include <string>
@@ -12,7 +14,18 @@
 
 namespace datapump::triad::v3 {
 
-namespace receiver_detail { class ReceiverBulkBackend; }
+namespace receiver_detail {
+class ReceiverBulkBackend;
+class CoarseProbeProgress;
+
+struct CoarseProbeObservation {
+    static constexpr unsigned window_seconds = 3;
+    std::size_t total_pairs = 0;
+    std::array<std::size_t, 2> completed_pairs{};
+    std::array<unsigned, 2> contributing_lanes{};
+    bool windows_complete = false;
+};
+}
 
 // Automatic may choose Q15 products on a supported native AVX2 geometry.
 // FP32 permits higher precision fallback. Explicit Q15 requires support.
@@ -65,6 +78,8 @@ struct ReceiverConfig {
     // Optional compiled bulk arithmetic. The shared receiver still owns all
     // tracking state, original priors, physical decisions and worker permits.
     std::shared_ptr<receiver_detail::ReceiverBulkBackend> bulk_backend;
+    // Optional observation of the first complete native frequency-search span.
+    std::shared_ptr<receiver_detail::CoarseProbeProgress> coarse_probe_progress;
 };
 
 class PublicProfile;

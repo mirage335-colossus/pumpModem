@@ -109,6 +109,54 @@ device identity. A second request acquired the resumed backend. This covers
 the startup and handoff control flow. GPU numerical execution requires
 separate device qualification.
 
+### Link Planner −3 dB-Hz timeout
+
+The pasted launcher at base `a5bd5f0e` used 3 dBm, 170 dB path loss and
+−164 dBm/Hz noise. The −3 dB-Hz target matched actual C/N₀. Auto selected
+6 kHz, with 2.4 kHz Rate, 1725 Hz carrier, Crystal, search margin 3, Helper off
+and Scheduled + short transitions. The local Ryzen 5 PRO 5650U selected the
+native CPU route with 24 workers. The native 176-second bit and both quiet
+windows required 3,304,684 samples, 550.781 modeled seconds, in the bit-zero
+trial. Its approximately 738 MB workspace quote fit the 8.8 GB allowance.
+
+The 30-second reproduction accepted all input by 5.18 seconds and stopped
+with zero scored slots. A separate first-trial check admitted all input by
+3.72 seconds and remained at zero scored slots at the 120-second cap. A final
+15-second discriminator logged the exact native score path. Slot zero's coarse
+preparation took 6.94 seconds, then entered one span of 31 planned tiles. The
+plan used 78 workspaces, 730 frequency points, 28,141 arrival points and a
+524,288-sample correlation FFT. The process consumed 113 CPU-seconds over
+15.05 seconds and was still in the coarse search. These prefix observations
+identify active coarse work. Whole-slot cost, RX success, GPU cost and sustained
+receiver capacity remain unmeasured for this geometry. The censored finite-run
+pace bounds were about 0.054 and 0.218 processing seconds per modeled audio
+second. Host load varied between the diagnostic runs.
+
+A final 20-second same-work check counted completed correlations and retained
+peaks inside the original slot-zero native FP32 search span. The two disjoint
+three-second windows completed 566 and 620 pairs at 188.5 and 206.6 pairs/s.
+Sixteen and nineteen software lanes contributed. The 9.6% rate difference
+met the predeclared 15% gate. At those rates the 56,940 pairs would take
+approximately 276–302 seconds for that span alone. Later lane contention,
+remaining coarse stages, fine scoring and both quiet slots carry unresolved
+work. The planner's conditional phase estimate uses the observed run, with
+complete CPU pace and RX probability reserved for completed trial evidence.
+
+In a separate 30-second integration run, the planner accepted all of the −3
+dB-Hz input, committed zero slots and declined a qualified coarse projection.
+It reported a 0.0543 s/s lower bound for that interrupted run and kept the
+longer retry available. This preserves the observed variability alongside the
+two passing rate windows from the instrumented check.
+
+The updated sampler was checked on the nominal +32 dB-Hz CPU profile with
+6 kHz input, 24 workers and +47 dB-Hz modeled received C/N₀. All four trials
+scored the correct bit and both quiet slots in 16.92 seconds. The 29
+progress updates stayed ordered and reported three public slot results for
+each trial. A short cancellation check with the original −3 dB-Hz launcher
+confirmed that elapsed time continued updating during coarse scoring and that
+Console cancellation did not publish an incomplete trial. The native stream,
+GUI policy, calendar, FLTK and Rev checks passed.
+
 ## Robust live setup and audio rate
 
 The dated native capture fixture exercised Auto calibration at Target and
