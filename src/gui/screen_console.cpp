@@ -131,7 +131,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     }
     if(slot==Slot::files) {control.activate_record=Command::save_file;control.empty_text="No received files";}
     if(slot==Slot::transmit_scope) {
-        control.list_row_height=17;
+        control.list_row_height=transmit_scope_row_height;
         control.help="Bounded diagnostics from the accepted native transmission. Noise private key material is never captured.";
     }
     if(slot==Slot::transmit_scope_caption)control.font_size=11;
@@ -142,7 +142,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     }
     if(slot==Slot::transmit_scope_format) {
         control.font_size=11;
-        control.help="None hides the preview. Hex, auto-hide is the default: show Hex only during transmission and simulation replay. Hex and Bits keep the retained capture visible after transmission. Hex fits all 32 byte columns. A partial byte shows its exact bits in the row label and its bit count in the cell. Bits shows aligned hexadecimal and binary for direct XOR comparison; scroll horizontally for all 32 columns. This only changes the diagnostic display.";
+        control.help="None always hides the scope. Hex, auto-hide is the default and shows it while transmitting. Hex and Bits keep the scope visible after transmission.";
     }
     if(slot==Slot::qr) {
         control.bitmap_caption=BitmapCaption::overlay_error;control.click=Command::toggle_qr_expanded;

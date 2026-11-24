@@ -86,6 +86,8 @@ void native_tile_selection() {
     options.target_cn0_db_hz = 5;
     auto weaker = plan_duration(base, receiver, options);
     check(weaker.selected && weaker.selected->tiles >= original, "weaker target shortened duration");
+    check(weaker.shaping && weaker.shaping->geometry.inner_coefficients > result.shaping->geometry.inner_coefficients,
+        "weaker fixture target did not increase the native frame's inner-symbol count");
     options.target_cn0_db_hz = 8;
     options.retained_fraction = .5;
     const auto lost = plan_duration(base, receiver, options);

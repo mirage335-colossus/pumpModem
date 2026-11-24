@@ -161,25 +161,33 @@ struct HopPosition {
     std::uint64_t dwell = 0, cycle = 0;
     unsigned channel = 0;
     double shift = 0;
+    Bytes keystream;
 };
 
-HopPosition illustrated_hop(const Profile& active, std::uint64_t sample, bool noise) {
+std::optional<HopPosition> illustrated_hop(const Profile& active, std::uint64_t sample, bool noise,
+                                           std::optional<std::uint64_t> previous_dwell) {
+    if (active.hop_shifts_hz.empty()) return std::nullopt;
     const auto& format = active.waveform.config().format;
     const auto rate = format.sample_rate;
     // Split the absolute UTC coordinate at a two-second integral boundary.
     // Five exact 400 ms dwells fit that interval.
     const auto dwell = format.epoch / 2 * 5 + (format.epoch % 2 * rate + sample) / (rate / 5 * 2);
+    if (previous_dwell == dwell) return std::nullopt;
     const auto count = active.hop_shifts_hz.size();
     const auto cycle = dwell / count;
     const auto key = noise ? Crypto::amateur() : active.key;
-    const auto order = key.stream(StreamPurpose::Fhss, format.epoch, cycle * 8, 8);
+    auto order = key.stream(StreamPurpose::Fhss, format.epoch, cycle * 8, 8);
     std::uint64_t seed = 0;
     for (const auto byte : order) seed = (seed << 8) | byte;
     auto stride = 1 + (seed >> 32) % count;
     while (std::gcd(stride, count) != 1) stride = stride % count + 1;
     const auto channel = static_cast<unsigned>((seed % count + stride * (dwell % count)) % count);
-    return {dwell, cycle, channel, active.hop_shifts_hz[channel]};
+    return HopPosition{dwell, cycle, channel, active.hop_shifts_hz[channel], std::move(order)};
 }
+
+struct EmissionTraceCursor {
+    std::optional<std::uint64_t> pattern_ordinal, hop_dwell;
+};
 
 struct PlotFrame {
     std::vector<float> waveform;
@@ -442,7 +450,6 @@ struct SimulationReplay {
                 profile.receiver.helper.frequency_hz + 100};
         tx_scale = 1 + effects.tx.audio_ppm * 1e-6;
         rx_scale = 1 + effects.rx.audio_ppm * 1e-6;
-        source_per_input_sample = tx_scale / rx_scale;
         // Invert the simulated direct-path sample coordinate for presentation
         // only. No receiver acquisition or decision uses the known arrival.
         capture_lead_seconds = effects.capture_lead_seconds;
@@ -509,7 +516,6 @@ struct SimulationReplay {
     std::uint32_t rate;
     double data_if_hz;
     std::uint64_t source_first, first;
-    double source_per_input_sample;
     double tx_scale=1, rx_scale=1;
     double capture_lead_seconds=0, timing_offset_seconds=0;
     std::shared_ptr<const std::vector<PatternStep>> pattern_steps;
@@ -888,21 +894,29 @@ struct Session::Impl {
         });
     }
 
-    void trace_hop(const Profile& active, std::uint64_t sample, bool noise,
-                   std::uint64_t owner, std::stop_token stop) {
-        if (active.hop_shifts_hz.empty()) return;
-        const auto hop = illustrated_hop(active, sample, noise);
+    void trace_emission(const Emission& emission, const Profile& active, std::uint64_t sample, bool noise,
+                        EmissionTraceCursor& cursor, std::uint64_t owner, std::stop_token stop) {
+        auto pattern = emission.message_pattern_preview(cursor.pattern_ordinal);
+        auto hop = illustrated_hop(active, sample, noise, cursor.hop_dwell);
+        if (!pattern && !hop) return;
         publish(owner, stop, [&](Snapshot& out) {
             auto& trace = out.transmit_trace;
-            if (trace.fhss_available && trace.fhss_hop == hop.dwell) return;
-            trace.fhss = trace.fhss_available = trace.fhss_utc_calendar = true;
-            trace.fhss_epoch = active.waveform.origin().epoch;
-            trace.fhss_hop = hop.dwell;
-            trace.fhss_cycle = hop.cycle;
-            trace.fhss_channel = hop.channel;
-            trace.fhss_channels = static_cast<unsigned>(active.hop_shifts_hz.size());
-            trace.fhss_shift_hz = hop.shift;
-            trace.fhss_dwell_seconds = active.waveform.config().format.dwell_seconds;
+            if (pattern) {
+                cursor.pattern_ordinal = pattern->ordinal;
+                trace.pattern = std::move(pattern);
+            }
+            if (hop) {
+                cursor.hop_dwell = hop->dwell;
+                trace.fhss_available = true;
+                trace.fhss_epoch = active.waveform.origin().epoch;
+                trace.fhss_hop = hop->dwell;
+                trace.fhss_cycle = hop->cycle;
+                trace.fhss_byte_offset = hop->cycle * 8;
+                trace.fhss_channel = hop->channel;
+                trace.fhss_channels = static_cast<unsigned>(active.hop_shifts_hz.size());
+                trace.fhss_shift_hz = hop->shift;
+                trace.fhss_key = std::move(hop->keystream);
+            }
             ++trace.revision;
         });
     }
@@ -922,7 +936,6 @@ struct Session::Impl {
         publish(owner, stop, [&](Snapshot& out) {
             auto& trace = out.transmit_trace;
             trace.total_wire_bits = send.wire_bits();
-            trace.short_text = !send.prepared->long_form();
             ++trace.revision;
         });
     }
@@ -1455,6 +1468,7 @@ struct Session::Impl {
         std::array<std::uint8_t, audio_chunk> valid{};
         ReceiveDisplay display;
         std::size_t generated_bits = 0;
+        EmissionTraceCursor trace_cursor;
         const auto noise_started = Clock::now();
         auto next_preview = noise_started;
         bool scoring_tail = false;
@@ -1462,8 +1476,12 @@ struct Session::Impl {
             while (!stop.stop_requested()) {
                 execution::checkpoint();
                 const auto first = channel.position();
+                const auto generated_before = emission.report().generated_samples;
                 const auto count = channel.read(iq, valid);
                 if (!count) break;
+                const auto generated = emission.report().generated_samples;
+                if (generated != generated_before)
+                    trace_emission(emission, prepared, generated - 1, noise, trace_cursor, owner, stop);
                 const auto samples = std::span(iq).first(count);
                 if (receiver) accept(*receiver, display, s, first, samples, std::span(valid).first(count),
                                      owner, stop, comparison);
@@ -1475,13 +1493,10 @@ struct Session::Impl {
                 const auto now = Clock::now();
                 if (now >= next_preview) {
                     next_preview = now + simulation_preview_period;
-                    if (emission.report().generated_samples)
-                        trace_hop(prepared, emission.report().generated_samples - 1, noise, owner, stop);
                     preview_receiver_input(owner, stop, segment, first, rate,
                         prepared.receiver.data_if_hz, samples, replay ? &*replay : nullptr);
                 }
                 if (send.mode == EmissionMode::Message) {
-                    const auto generated = emission.report().generated_samples;
                     const auto previous_bits = generated_bits;
                     while (generated_bits < wire_bits &&
                            generated >= calendar.calendar().distance(calendar.origin(), tx_slot.support_end)) {
@@ -1494,9 +1509,13 @@ struct Session::Impl {
                             ++out.transmit_trace.revision;
                         });
                 }
-                if (!noise && !scoring_tail && emission.report().generated_samples >= source_stop) {
+                if (!noise && !scoring_tail && generated >= source_stop) {
                     scoring_tail = true;
-                    publish(owner, stop, [](Snapshot& out) { out.status = "Simulating the receive tail and scoring reception"; });
+                    publish(owner, stop, [](Snapshot& out) {
+                        out.transmit_trace.emitting = false;
+                        ++out.transmit_trace.revision;
+                        out.status = "Simulating the receive tail and scoring reception";
+                    });
                 }
                 if (noise) {
                     // An open-ended noise command is played at its physical rate
@@ -1531,8 +1550,7 @@ struct Session::Impl {
         return replay;
     }
 
-    void replay_simulation(const SimulationReplay& replay, std::uint64_t owner,
-                           std::stop_token stop, const Profile* prepared = nullptr) {
+    void replay_simulation(const SimulationReplay& replay, std::uint64_t owner, std::stop_token stop) {
         const auto input = replay.samples();
         if (input.size() < plot_size || stop.stop_requested()) return;
         const auto rate = replay.rate;
@@ -1585,11 +1603,6 @@ struct Session::Impl {
             const auto first = replay.first + offset;
             const auto count = std::min(simulation_waveform_size, input.size() - offset);
             const auto samples = input.subspan(offset, count);
-            if (prepared) {
-                const auto source_sample = replay.source_first +
-                    static_cast<std::uint64_t>(static_cast<long double>(offset) * replay.source_per_input_sample);
-                trace_hop(*prepared, source_sample, false, owner, stop);
-            }
             const auto elapsed = static_cast<std::uint64_t>(tick * simulation_replay_period.count());
             const auto visible_steps = pattern_step_count * static_cast<std::size_t>(tick + 1) /
                 static_cast<std::size_t>(frames);
@@ -1673,6 +1686,7 @@ struct Session::Impl {
         std::optional<Emission> emission;
         std::uint64_t first_slot = 0, last_slot = 0, source_first = 0, next_reservation = 0;
         std::size_t generated_bits = 0;
+        EmissionTraceCursor trace_cursor;
         bool reserved_final = false;
         PlotMeter meter(rate);
         const auto segment = new_plot_segment();
@@ -1719,8 +1733,8 @@ struct Session::Impl {
                     throw Error("Robust playback exceeded calibrated PCM headroom");
                 out[i] = pcm;
             }
+            if (count) trace_emission(*emission, active, end - 1, noise, trace_cursor, owner, stop);
             if (auto frame = meter.update(source_first + begin, out.first(count), {})) {
-                if (count) trace_hop(active, end - 1, noise, owner, stop);
                 if (!s.full_duplex || !s.live_noise_dbfs_hz)
                     set_plot(owner, stop, std::move(*frame), false, segment);
             }
@@ -2101,7 +2115,7 @@ struct Session::Impl {
                                         replay->pattern_steps = std::make_shared<const std::vector<PatternStep>>(current.pattern_steps);
                                         retained_replay = std::move(replay);
                                     }
-                                    replay_simulation(*retained_replay, owner, transmission, active.get());
+                                    replay_simulation(*retained_replay, owner, transmission);
                                 }
                             } else play_live(*active, transmit_settings, send, owner, transmission);
                         }
@@ -2127,6 +2141,7 @@ struct Session::Impl {
                         if (replay_only) replay_requested = false;
                         else {
                             out.transmit_trace.active = false;
+                            out.transmit_trace.emitting = false;
                             ++out.transmit_trace.revision;
                         }
                         out.error = failure;
@@ -2246,11 +2261,12 @@ struct Session::Impl {
         const auto revision = trace.revision + 1;
         trace = {};
         trace.revision = revision;
+        trace.emitting = true;
+        trace.fhss = settings.fhss_profile != "off";
         trace.active = send.mode == EmissionMode::Message;
         trace.temporary_key = send.mode == EmissionMode::Noise;
         if (trace.active) {
             trace.raw = send.raw;
-            trace.short_text = !send.raw && send.input.size() <= transfer::short_message_bytes;
             if (send.raw) {
                 trace.total_wire_bits = send.input.size();
                 const auto count = std::min(send.input.size(), modem::TransmitTrace::bit_limit);

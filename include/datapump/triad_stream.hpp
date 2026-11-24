@@ -1,4 +1,5 @@
 #pragma once
+#include "datapump/transmit_trace.hpp"
 
 #include "datapump/triad_helper_burst.hpp"
 #include "datapump/triad_modem_v3.hpp"
@@ -211,6 +212,10 @@ public:
     EmittedSource source() const;
     std::size_t read(std::span<Complex>);
     const EmissionReport& report() const;
+    // Inspect the newest generated message frame, once per ordinal. Quiet,
+    // Helper-only and temporary-key noise expose no DATA pattern preview.
+    std::optional<modem::TransmitPatternPreview> message_pattern_preview(
+        std::optional<std::uint64_t> previous_ordinal) const;
 private:
     struct Impl;
     struct Readers;

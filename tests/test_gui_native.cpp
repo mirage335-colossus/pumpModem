@@ -6,10 +6,12 @@
 #include "datapump/compression.hpp"
 #include "datapump/live.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <limits>
 #include <source_location>
+#include <thread>
 #include <vector>
 
 using namespace datapump;
@@ -318,13 +320,96 @@ void pending_transmit_trace() {
         for(const auto& row:rows)for(const auto& cell:row.cells)if(cell.text.find(text)!=std::string::npos)return true;
         return false;
     };
-    check(contains("source-coding preview unavailable")&&!contains("raw bits bypass compression"));
+    check(contains("configured framing / FEC")&&!contains("exact payload bits"));
     trace.total_wire_bits=1216;trace.generated_bits=17;
-    check(gui::transmit_scope_caption(trace).find("17 / 1216 wire bits begun")!=std::string::npos);
+    check(gui::transmit_scope_caption(trace).find("17 / 1216 wire bits generated")!=std::string::npos);
     trace.raw=true;
-    check(contains("raw bits bypass compression"));
+    check(contains("exact payload bits"));
     trace.active=false;trace.temporary_key=true;trace.total_wire_bits=0;
-    check(gui::transmit_scope_caption(trace).find("17 temporary-key noise bits begun")!=std::string::npos);
+    check(gui::transmit_scope_caption(trace).find("temporary-key noise")!=std::string::npos);
+}
+void transmit_scope_rendering() {
+    modem::TransmitTrace trace;
+    trace.active=true;
+    trace.total_wire_bits=12;
+    trace.fhss=true;
+    trace.fhss_available=true;
+    trace.pattern=modem::TransmitPatternPreview{.epoch=1793850000,.ordinal=23,.inner_coefficients=420,
+        .prefixes={Bytes{0x12,0x34,0xab,0xcd},Bytes{0x56,0x78,0xef,0x01}}};
+    trace.fhss_key=Bytes{0x01,0x23,0x45,0x67,0x89,0xab,0xcd,0xef};
+    const auto caption=gui::transmit_scope_caption(trace);
+    check(caption.find("epoch 1793850000 · ordinal 23 · first 2 inner symbols")!=std::string::npos);
+    const auto rows=gui::transmit_scope_records(trace);
+    check(rows.size()==gui::ui::transmit_scope_rows);
+    const auto find=[&](std::string_view id)->const gui::ui::Record* {
+        const auto row=std::find_if(rows.begin(),rows.end(),[&](const auto& value){return value.id==id;});
+        return row==rows.end()?nullptr:&*row;
+    };
+    const auto has_text=[](const gui::ui::Record* row,std::string_view text) {
+        return row&&std::any_of(row->cells.begin(),row->cells.end(),[&](const auto& cell){return cell.text.find(text)!=std::string::npos;});
+    };
+    check(find("tx-pattern-0")&&find("tx-pattern-1"));
+    check(has_text(find("tx-pattern-0"),"Bit 0 pattern")&&has_text(find("tx-pattern-0"),"420 symbols")&&
+          has_text(find("tx-pattern-0"),"12")&&has_text(find("tx-pattern-0"),"34")&&
+          has_text(find("tx-pattern-0"),"AB")&&has_text(find("tx-pattern-0"),"CD"));
+    check(has_text(find("tx-pattern-1"),"Bit 1 pattern")&&has_text(find("tx-pattern-1"),"56")&&
+          has_text(find("tx-pattern-1"),"78")&&has_text(find("tx-pattern-1"),"EF")&&
+          has_text(find("tx-pattern-1"),"01"));
+    check(find("tx-fhss-key")&&has_text(find("tx-fhss-key"),"01")&&
+          has_text(find("tx-fhss-key"),"89")&&has_text(find("tx-fhss-key"),"EF"));
+    for(const auto& row:rows)
+        check(row.id!="tx-pattern-key"&&row.id!="tx-pattern"&&row.id!="tx-pattern-output"&&
+              row.id!="tx-dsss-key"&&row.id!="tx-dsss-outer"&&row.id!="tx-dsss-permutation"&&
+              row.id!="tx-compressed"&&row.id!="tx-data-key"&&row.id!="tx-wire");
+    const auto detailed=gui::transmit_scope_records(trace,true);
+    check(std::any_of(detailed.begin(),detailed.end(),[](const auto& row){
+        return row.id=="tx-pattern-0"&&std::any_of(row.cells.begin(),row.cells.end(),[](const auto& cell){return cell.text=="00010010";});
+    }));
+}
+void transmit_scope_visibility_policy() {
+    using F=gui::ui::Field;
+    using C=gui::ui::Command;
+    using namespace std::chrono_literals;
+    gui::Application app({.simulation=true});
+    app.select(F::fast_mode,"robust");
+    const auto check_scope=[&](bool visible) {
+        check(app.field(F::transmit_scope).visible==visible&&
+              app.field(F::transmit_scope_caption).visible==visible&&
+              app.field(F::transmit_scope_format).visible);
+    };
+    const auto wait_for=[&](C command,bool enabled) {
+        const auto until=std::chrono::steady_clock::now()+5s;
+        while(app.enabled(command)!=enabled&&std::chrono::steady_clock::now()<until) {
+            std::this_thread::sleep_for(10ms);
+            app.tick();
+        }
+        check(app.enabled(command)==enabled);
+    };
+    check(app.field(F::transmit_scope_format).selected=="hex-auto-hide");
+    check_scope(false);
+    app.select(F::transmit_scope_format,"hex");
+    check_scope(true);
+    app.select(F::transmit_scope_format,"bits");
+    check_scope(true);
+    app.select(F::transmit_scope_format,"none");
+    check_scope(false);
+    app.select(F::transmit_scope_format,"hex-auto-hide");
+    check_scope(false);
+    app.start();
+    wait_for(C::transmit_noise,true);
+    app.dispatch(C::transmit_noise);
+    check(app.enabled(C::cancel));
+    check_scope(true);
+    const auto revision=app.revision();
+    app.select(F::transmit_scope_format,"none");
+    check(app.revision()>revision);
+    check_scope(false);
+    app.select(F::transmit_scope_format,"hex-auto-hide");
+    check_scope(true);
+    app.dispatch(C::cancel);
+    wait_for(C::cancel,false);
+    check_scope(false);
+    app.close();
 }
 void retained_raw_bits() {
     gui::Signals signals;
@@ -759,6 +844,8 @@ int main() {
         gpu_route_diagnostics();
         text_and_raw_draft_boundaries();
         pending_transmit_trace();
+        transmit_scope_rendering();
+        transmit_scope_visibility_policy();
         retained_raw_bits();
         received_text_boundary();
         reversible_admission_history();

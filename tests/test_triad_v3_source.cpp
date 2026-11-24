@@ -31,6 +31,38 @@ Crypto fixture_key() {
     return triad_test_key(bytes);
 }
 
+void inner_pattern_preview_checks() {
+    Format format;
+    format.inner_rate_hz = 360;
+    format.added_symbols = 1;
+    format.added_interleave = false;
+    const auto key = fixture_key();
+    const auto prefixes = PatternSource::inner_pattern_prefixes(format, key, 16);
+    check(prefixes[0].size() == 32 && prefixes[1].size() == 32 && prefixes[0] != prefixes[1],
+          "inner pattern preview did not retain both alternatives");
+    constexpr std::array<std::array<unsigned,3>,6> orders{{{0,1,2},{0,2,1},{1,0,2},{1,2,0},{2,0,1},{2,1,0}}};
+    constexpr std::array<double,3> powers{.4,1.,1.6};
+    for (std::uint8_t bit = 0; bit < 2; ++bit) {
+        PatternSource source(format, key, bit);
+        const auto rate = source.geometry().fine_chip_rate_hz;
+        const auto edge = 8 / rate + std::max(format.ramp_seconds, 8 / rate) + format.margin_seconds;
+        const auto first = static_cast<std::uint64_t>(std::ceil(edge * rate - .5));
+        for (std::size_t symbol = 0; symbol < 16; ++symbol) {
+            const unsigned code = (static_cast<unsigned>(prefixes[bit][2 * symbol]) << 8) | prefixes[bit][2 * symbol + 1];
+            const unsigned order = code >> 9;
+            check(order < orders.size(), "inner pattern preview amplitude order is out of range");
+            const auto coefficients = source.pattern_coefficient_at(first + symbol);
+            for (unsigned lane = 0; lane < 3; ++lane) {
+                const unsigned octant = (code >> (6 - 3 * lane)) & 7U;
+                const auto expected = std::polar(std::sqrt(powers[orders[order][lane]]),
+                                                 octant * std::acos(-1.) / 4);
+                check(std::abs(coefficients[lane] - expected) < 1e-14,
+                      "inner pattern preview differs from the emitted coefficient");
+            }
+        }
+    }
+}
+
 // Reconstruct the documented public coordinates rather than asking the
 // transmitter which child it selected. This checks the current independently keyed layout.
 datapump::Bytes payload_context(const Format& f) {
@@ -780,6 +812,7 @@ void month_and_low_sample_rate_checks() {
 
 int main() {
     try {
+        inner_pattern_preview_checks();
         confidentiality_payload_checks();
         configured_carrier_key_checks();
         independent_patterns_and_apsk();

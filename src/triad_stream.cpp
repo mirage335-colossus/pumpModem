@@ -826,13 +826,17 @@ struct Emission::Impl {
         }
         return bit;
     }
-    std::unique_ptr<PatternSource> data_source(const std::optional<HelperBurstSlot>& slot, std::uint8_t bit) const {
+    Format addressed_data_format(const std::optional<HelperBurstSlot>& slot) const {
         auto addressed_format = format;
         if (slot) {
             addressed_format.epoch = slot->pattern_begin.epoch;
             addressed_format.symbol_ordinal += slot->index;
         }
-        return std::make_unique<PatternSource>(addressed_format, keys.data, bit);
+        return addressed_format;
+    }
+
+    std::unique_ptr<PatternSource> data_source(const std::optional<HelperBurstSlot>& slot, std::uint8_t bit) const {
+        return std::make_unique<PatternSource>(addressed_data_format(slot), keys.data, bit);
     }
 
     std::unique_ptr<PatternSource> gap_source(const HelperBurstSlot& slot, SampleRange gap) const {
@@ -1213,5 +1217,18 @@ std::size_t Emission::read(std::span<Complex> output) {
 }
 
 const EmissionReport& Emission::report() const { return impl_->report; }
+
+std::optional<modem::TransmitPatternPreview> Emission::message_pattern_preview(
+        std::optional<std::uint64_t> previous_ordinal) const {
+    const auto& state = *impl_;
+    if (state.noise || !state.current || !state.slot_bit) return std::nullopt;
+    const auto addressed = state.addressed_data_format(state.current);
+    if (previous_ordinal == addressed.symbol_ordinal) return std::nullopt;
+    const auto& geometry = state.profile.geometry();
+    const auto symbols = std::min<std::uint64_t>(geometry.payload_fine_cells_per_tile / addressed.added_symbols,
+        modem::TransmitTrace::byte_limit / 2);
+    return modem::TransmitPatternPreview{addressed.epoch, addressed.symbol_ordinal, geometry.inner_coefficients,
+        PatternSource::inner_pattern_prefixes(addressed, state.keys.data, static_cast<std::size_t>(symbols))};
+}
 
 } // namespace datapump::triad::v3

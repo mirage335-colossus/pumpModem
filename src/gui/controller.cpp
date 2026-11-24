@@ -1218,6 +1218,11 @@ struct Controller::Impl {
     }
     void controls() {
         for(auto& field:fields)field.enabled=!closing;
+        const bool emitting=snapshot.transmitting&&snapshot.transmit_trace.emitting;
+        const auto& scope_format=f(UiField::transmit_scope_format).selected;
+        f(UiField::transmit_scope).visible=scope_format!="none"&&
+            (scope_format!="hex-auto-hide"||emitting);
+        f(UiField::transmit_scope_caption).visible=f(UiField::transmit_scope).visible;
         const auto budget_target=link_inputs_valid()?link_plan()->budget_target_db_hz:std::nullopt;
         f(UiField::snr).display_text=budget_target?planner_number(*budget_target):std::string{};
         f(UiField::planner_target).display_text=f(UiField::snr).display_text;
@@ -1416,6 +1421,7 @@ struct Controller::Impl {
                     std::round(10*snapshot.simulation_progress->elapsed_seconds)));
         const bool state_changed=value.status!=snapshot.status||value.error!=snapshot.error||
             value.receiver_error!=snapshot.receiver_error||value.transmitting!=snapshot.transmitting||
+            value.simulation_replay!=snapshot.simulation_replay||
             value.simulation_replay_available!=snapshot.simulation_replay_available||
             value.simulation_pattern_replay_steps!=snapshot.simulation_pattern_replay_steps||
             value.simulation_pattern_replay_active!=snapshot.simulation_pattern_replay_active||
@@ -1479,7 +1485,8 @@ struct Controller::Impl {
         }
         const auto& trace=snapshot.transmit_trace;
         std::string active_fhss;
-        if(snapshot.transmitting&&trace.fhss_available&&trace.fhss_channels&&trace.fhss_channel<trace.fhss_channels) {
+        if(snapshot.transmitting&&trace.emitting&&trace.fhss_available&&trace.fhss_channels&&
+            trace.fhss_channel<trace.fhss_channels) {
             active_fhss="Synthetic FHSS channel "+std::to_string(trace.fhss_channel+1)+"/"+
                 std::to_string(trace.fhss_channels)+" · Shift "+planner_number(trace.fhss_shift_hz)+" Hz · hardware tuning fixed";
             if(!f(UiField::diagnostics).text.empty())f(UiField::diagnostics).text+=" | ";
@@ -2027,8 +2034,10 @@ void Controller::select(UiField field,std::string id) {
             if(factor>1)p.f(UiField::bandwidth).text=exact_frequency_text(3600./factor);
             p.configure();
         }
-        else if(field==UiField::transmit_scope_format)
+        else if(field==UiField::transmit_scope_format) {
             p.f(UiField::transmit_scope).records=transmit_scope_records(p.snapshot.transmit_trace,state.selected=="bits");
+            ++p.revision;
+        }
     } catch(const std::exception& e) { p.notice(e.what(),10); }
     p.controls();
 }

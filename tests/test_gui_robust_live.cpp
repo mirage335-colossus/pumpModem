@@ -4,6 +4,7 @@
 #include "datapump/triad_message_receiver.hpp"
 #include "datapump/triad_stream_receiver.hpp"
 #include "datapump/triad_shaping.hpp"
+#include "datapump/crypto.hpp"
 #include "../src/live_capture_queue.hpp"
 #include "../src/live_finite_plan.hpp"
 #include "../src/triad_receiver_fine.hpp"
@@ -1183,7 +1184,8 @@ void simulation_cancel_is_not_completion() {
          "Simulated noise did not produce a waveform");
     session.cancel_transmit();
     auto stopped = wait(session, [](const auto& out) { return !out.transmitting; }, "Noise cancellation did not stop");
-    check(stopped.received.empty() && stopped.pattern_steps.empty() && stopped.signals.empty(),
+    check(stopped.received.empty() && stopped.pattern_steps.empty() && stopped.signals.empty() &&
+          !stopped.transmit_trace.emitting,
           "Noise or its cancellation fabricated successful reception");
     ready(session);
     session.transmit(Message{.data = {'e'}});
@@ -1224,10 +1226,14 @@ void long_live_prefix_and_cancel(bool duplex) {
         return fixture::playback_active == 1 && fixture::scheduled_epoch && !fixture::playback_prefix.empty();
     }, "Long Robust draft did not reach scheduled native PCM");
     const auto& trace = sending.transmit_trace;
-    check(trace.active && !trace.raw && !trace.short_text && trace.total_wire_bits == message_interval_bits &&
+    check(trace.emitting && trace.active && !trace.raw && trace.total_wire_bits == message_interval_bits &&
           trace.source.size() == modem::TransmitTrace::source_limit &&
           trace.wire_plain_bits.size() == modem::TransmitTrace::bit_limit,
           "Long Robust TX lost its exact interval extent or bounded trace");
+    check(trace.pattern && trace.pattern->inner_coefficients > 0 &&
+          trace.pattern->prefixes[0].size() == 32 && trace.pattern->prefixes[1].size() == 32 &&
+          trace.pattern->prefixes[0] != trace.pattern->prefixes[1],
+          "Long Robust TX did not retain two distinct bounded current-frame pattern previews");
     // First 96 bits of SHA-256("DataPump/byte-boundary/v1"), twice on wire.
     constexpr std::array<std::uint8_t, 12> marker{
         0xe8,0x1c,0xac,0x57,0x5d,0xff,0x31,0xfa,0xea,0xa0,0xf8,0x40};
@@ -1252,8 +1258,15 @@ void long_live_prefix_and_cancel(bool duplex) {
           "HF Worst / Each 65% did not remain configured as receive-side search bounds");
     const auto& calendar = profile.waveform;
     const auto slot = calendar.first_slot_not_before({epoch, 0});
-    const auto start = calendar.transmit_slot(slot).helper_begin;
+    const auto scheduled = calendar.transmit_slot(slot);
+    const auto start = scheduled.helper_begin;
     check(start == HelperBurstCoordinate{epoch,0}, "Long Robust TX began outside its configured public slot");
+    const auto addressed = calendar.basis_format(calendar.slot(slot));
+    check(trace.pattern->epoch == scheduled.pattern_begin.epoch &&
+          trace.pattern->ordinal == calendar.config().format.symbol_ordinal + slot &&
+          trace.pattern->inner_coefficients == calendar.geometry().inner_coefficients &&
+          trace.pattern->prefixes == PatternSource::inner_pattern_prefixes(addressed, profile.key, 16),
+          "Prepared Robust frame and displayed pattern address, complexity or prefixes disagree");
     const auto first = calendar.calendar().distance(calendar.origin(), start);
     constexpr std::array<std::uint8_t, 1> first_marker_bit{1};
     Emission expected(calendar, profile.key, {EmissionMode::Message, slot, first_marker_bit, 1, first, {}});
@@ -1272,7 +1285,7 @@ void long_live_prefix_and_cancel(bool duplex) {
     const auto ended = wait(session, [](const auto& out) {
         return !out.transmitting && fixture::playback_active == 0;
     }, "Cancelling the long Robust draft did not stop playback");
-    check(ended.received.empty() && ended.pattern_steps.empty() &&
+    check(!ended.transmit_trace.emitting && ended.received.empty() && ended.pattern_steps.empty() &&
           std::none_of(ended.signals.begin(), ended.signals.end(), [](const auto& signal) { return signal.complete; }),
           "Cancelling the long Robust draft fabricated a receive result");
     close(session);
@@ -2215,6 +2228,8 @@ void bridge_helper_fhss_simulation() {
     check(prepared.slot_stride_seconds && *prepared.slot_stride_seconds * 6 * 6000 < 3'500'000,
           "Helper and FHSS bridge fixture exceeds its finite sample budget");
     session.transmit(Message{.data = {'e'}});
+    check(session.snapshot().transmit_trace.emitting,
+          "Robust TX scope did not mark the simulated send as emitting");
     std::vector<transfer::Received> received;
     const auto finished = wait(session, [&](auto& out) {
         for (auto& record : out.received) received.push_back(std::move(record));
@@ -2226,8 +2241,16 @@ void bridge_helper_fhss_simulation() {
           received.front().content.message.data == Bytes{'e'} &&
           finished.pattern_steps.size() == 5 &&
           finished.pattern_steps[3].decision == live::PatternDecision::quiet &&
-          finished.pattern_steps[4].decision == live::PatternDecision::quiet,
+          finished.pattern_steps[4].decision == live::PatternDecision::quiet &&
+          !finished.transmit_trace.emitting,
           "Helper and FHSS bridge lost its message or physical quiet completion");
+    const auto& trace = finished.transmit_trace;
+    const auto key = s.transfer.key.value_or(Crypto::amateur());
+    check(trace.fhss_available && trace.fhss_key.size() == 8 &&
+          trace.fhss_byte_offset == trace.fhss_cycle * 8 &&
+          trace.fhss_key == key.stream(StreamPurpose::Fhss, trace.fhss_epoch,
+              trace.fhss_cycle * 8, 8),
+          "FHSS trace did not retain the exact eight bytes used by the configured UTC cycle");
     close(session);
 }
 

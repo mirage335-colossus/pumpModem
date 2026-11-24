@@ -101,6 +101,9 @@ public:
     // and common 1/sqrt(3) scale. Returns zero outside the active calendar.
     // This diagnostic uses the same bounded cache as rendered samples.
     std::array<Complex,3> pattern_coefficient_at(std::uint64_t fine_cell);
+    // Pack each tile-zero inner symbol into a big-endian 12-bit code in
+    // two bytes: amplitude permutation followed by three phase octants.
+    static std::array<Bytes,2> inner_pattern_prefixes(const Format&, const Crypto&, std::size_t symbols);
     void render(std::uint64_t first_sample, std::span<Complex> output);
     // Render a bank on one uniform (possibly fractional) sample lattice. The
     // sources may differ in key, epoch, ordinal, bit and pattern revision, but

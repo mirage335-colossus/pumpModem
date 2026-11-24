@@ -13,6 +13,7 @@ inline constexpr int oscillator_row_height = 96;
 inline constexpr int helper_row_height = 48;
 inline constexpr int margin = 16, field_height = 27, label_height = 16;
 inline constexpr int action_height = 29, compact_action_height = 20;
+inline constexpr int transmit_scope_rows = 6, transmit_scope_row_height = 17;
 
 enum class Slot {
     none, header, fast_mode, mode, gpu, developer_mode, shellcode_mode, clear, callsign, grid, repeatable, simulation,
@@ -258,7 +259,8 @@ struct DesktopLayout {
 
         out[Slot::transmit_scope_caption]={margin,buttons_y+31,width-2*margin-144,transmit_scope_visible?18:0};
         out[Slot::transmit_scope_format]={width-margin-136,buttons_y+31,136,18};
-        out[Slot::transmit_scope]={margin,buttons_y+51,width-2*margin,transmit_scope_visible?206:0};
+        const int scope_height=transmit_scope_rows*transmit_scope_row_height+19; // Includes horizontal scrollbar.
+        out[Slot::transmit_scope]={margin,buttons_y+51,width-2*margin,transmit_scope_visible?scope_height:0};
         const int signal_y=out[Slot::transmit_scope].y+out[Slot::transmit_scope].h+23;
         constexpr int files_width = 252;
         const int reception_x=margin;

@@ -136,6 +136,21 @@ acoustic symbol rate and coding rate; both peers must use matching updated
 geometry. It is not a measured value or automatic transmit-feedback control.
 Display timing never controls receiver decisions or completion.
 
+The TX generation scope keeps the selected frame's two DATA pattern alternatives
+as separate **Bit 0 pattern** and **Bit 1 pattern** rows. Each row shows up to
+16 inner symbols from the first tile as hexadecimal 16-bit words, most-significant
+byte first.
+Bits 11–9 encode the amplitude permutation, followed by the three carrier phase
+octants in left-to-right order. The rows show the guaranteed inner-symbol count,
+and the scope caption identifies the frame epoch and ordinal. The FHSS row
+shows the eight bytes used as the UTC-cycle hop seed. Its channel schedule is
+illustrative and leaves external radio tuning fixed.
+
+The scope format defaults to **Hex, auto-hide**, which displays the scope during
+transmission and hides it when transmission ends. **None** always hides the
+scope. **Hex** and **Bits** keep the last generated frame visible after
+transmission. These options only change the diagnostic display.
+
 | Shared control | Native meaning |
 | --- | --- |
 | Robust key | Reception and ordinary DATA transmission use the selected key. The built-in Amateur key is public and provides no confidentiality or sender authentication. Open a keyfile to use one of its named keys. |
@@ -358,9 +373,10 @@ a one-shot override of that lock and separation wait, preserves reuse history,
 and retains draft, key, device and resource checks. Cancellation does not reset
 the public calendar or erase reuse history.
 
-Detailed transmission inspection remains deferred. This is separate from the
-connected live Pattern evidence and Pattern steps views, which show native
-receiver observations and score records.
+The bounded TX generation scope shows source and wire previews, both current
+frame DATA pattern alternatives, and the FHSS hop seed. The separate live
+Pattern evidence and Pattern steps views show native receiver observations and
+score records.
 
 The **Link Planner** retains its controls, presets, command editor, general
 link-budget arithmetic, and generic plots. Robust receive-probability, CPU-pace,

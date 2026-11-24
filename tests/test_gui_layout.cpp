@@ -24,11 +24,11 @@ void established_default() {
     check(layout[Slot::paste_previous] == Rect{625, 317, 240, 20}, "previous-message button moved");
     check(layout[Slot::binary] == Rect{879, 339, 220, 78}, "binary editor moved");
     check(layout[Slot::qr] == Rect{1113, 339, 115, 115}, "QR preview must span the editor and action rows");
-    check(layout[Slot::transmit_scope] == Rect{16, 476, 1212, 206}, "generation scope size changed");
-    check(layout[Slot::profile_reference] == Rect{948, 838, 280, 163}, "profile reference must share the plot row at the right edge");
-    check(layout[Slot::signals] == Rect{16, 705, 946, 110}, "received signals size changed");
-    check(layout[Slot::files] == Rect{976, 705, 252, 74}, "received files size changed");
-    check(layout[Slot::waterfall] == Rect{16, 838, 220, 163}, "header must preserve usable plot height");
+    check(layout[Slot::transmit_scope] == Rect{16, 476, 1212, 121}, "generation scope size changed");
+    check(layout[Slot::profile_reference] == Rect{948, 753, 280, 248}, "profile reference must share the plot row at the right edge");
+    check(layout[Slot::signals] == Rect{16, 620, 946, 110}, "received signals size changed");
+    check(layout[Slot::files] == Rect{976, 620, 252, 74}, "received files size changed");
+    check(layout[Slot::waterfall] == Rect{16, 753, 220, 248}, "header must preserve usable plot height");
     check(layout[Slot::device] == Rect{16, 1033, 212, 27}, "persistent modem controls moved");
     check(layout[Slot::bandwidth] == Rect{238, 1033, 133, 27} &&
           layout[Slot::carrier] == Rect{381, 1033, 156, 27} &&
@@ -282,7 +282,7 @@ void supported_sizes() {
               "previous-message action overlaps the heading or editor");
         const auto signals = layout[Slot::signals], files = layout[Slot::files], save = layout[Slot::save_file];
         const auto scope=layout[Slot::transmit_scope],scope_caption=layout[Slot::transmit_scope_caption];
-        check(contains(layout[Slot::page],scope)&&scope.h>=11*17+19&&
+        check(contains(layout[Slot::page],scope)&&scope.h>=transmit_scope_rows*transmit_scope_row_height+19&&
               layout[Slot::transmit].y+layout[Slot::transmit].h<=scope_caption.y&&
               scope_caption.y+scope_caption.h<=scope.y&&scope.y+scope.h<=layout[Slot::signal_label].y&&
               signals.h>=54+24+6&&message.h>=50,

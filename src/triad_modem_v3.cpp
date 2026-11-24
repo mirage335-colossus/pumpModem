@@ -109,6 +109,23 @@ Bytes amplitude_orders(std::size_t count,const Crypto& key,std::uint64_t epoch){
     return result;
 }
 
+unsigned pattern_alternative(const Format& format,const Crypto& key,std::uint64_t carrier,unsigned bit){
+    if(!format.encrypt)return bit;
+    const auto payload=key.confidentiality_child(child_id("payload",format,carrier,0));
+    return bit^(payload.confidentiality_stream(format.epoch,0,1)[0]&1U);
+}
+
+struct InnerPattern {
+    Bytes orders, phases;
+};
+
+InnerPattern inner_pattern(const Format& format,const Crypto& key,std::uint64_t carrier,
+                           std::uint64_t tile,unsigned alternative,std::size_t count){
+    return {amplitude_orders(count,child(key,"inner-amplitude",format,carrier,tile,alternative),format.epoch),
+        child(key,"inner-phase",format,carrier,tile,alternative)
+            .stream(StreamPurpose::Scrambler,format.epoch,0,count*3)};
+}
+
 Chip independent_pattern(std::uint8_t order_index,const std::uint8_t* phases,
                          const std::uint8_t* outer_radii,const std::uint8_t* outer_phases,
                          double depth){
@@ -261,12 +278,7 @@ struct PatternSource::Impl {
             const auto range=aligned_protected_range(f,geom.fine_chip_rate_hz);
             protected_first=range.first;protected_last=range.second;
         }
-        bit=source_bit;
-        if(f.encrypt){
-            const auto payload=master.confidentiality_child(child_id("payload",f,carrier,0));
-            const auto mask=payload.confidentiality_stream(f.epoch,0,1);
-            bit^=mask[0]&1U;
-        }
+        bit=pattern_alternative(f,master,carrier,source_bit);
     }
     bool active_tile(std::uint64_t physical_tile) const {
         return physical_tile%(format.burst_wait_tiles+1)==0&&
@@ -313,10 +325,7 @@ struct PatternSource::Impl {
         std::vector<std::size_t> order;
         if(format.added_interleave)order=permutation(n,child(master,"permutation",format,carrier,ordinal),format.epoch);
         const auto inner_count=n/format.added_symbols;
-        const auto inner_orders=amplitude_orders(inner_count,
-            child(master,"inner-amplitude",format,carrier,ordinal,bit),format.epoch);
-        const auto inner_phase=child(master,"inner-phase",format,carrier,ordinal,bit)
-            .stream(StreamPurpose::Scrambler,format.epoch,0,inner_count*3);
+        const auto inner=inner_pattern(format,master,carrier,ordinal,bit,inner_count);
         const auto outer_radii=format.added_symbols>1?child(master,"added-amplitude",format,carrier,ordinal,bit)
             .stream(StreamPurpose::Dsss,format.epoch,0,n*3):Bytes{};
         const auto outer_phase=format.added_symbols>1?child(master,"added-phase",format,carrier,ordinal,bit)
@@ -324,8 +333,8 @@ struct PatternSource::Impl {
         // Three consecutive byte addresses are the three carrier lanes;
         // logical/Added selects the inner symbol without splitting it.
         for(std::size_t i=0;i<n;++i){const auto logical=format.added_interleave?order[i]:i;
-            tile.chips[payload[i]]=independent_pattern(inner_orders[logical/format.added_symbols],
-                inner_phase.data()+(logical/format.added_symbols)*3,
+            tile.chips[payload[i]]=independent_pattern(inner.orders[logical/format.added_symbols],
+                inner.phases.data()+(logical/format.added_symbols)*3,
                 outer_radii.empty()?nullptr:outer_radii.data()+logical*3,
                 outer_phase.empty()?nullptr:outer_phase.data()+logical*3,format.added_amplitude_depth);}
 
@@ -361,6 +370,25 @@ std::size_t PatternSource::working_bytes()const{return impl_->geom.source_worksp
 std::array<Complex,3> PatternSource::pattern_coefficient_at(std::uint64_t fine){
     if(fine>=impl_->geom.fine_cells)return {};
     return impl_->chip(fine);
+}
+std::array<Bytes,2> PatternSource::inner_pattern_prefixes(const Format& format,const Crypto& key,std::size_t symbols){
+    std::array<Bytes,2> prefixes;
+    if(!symbols)return prefixes;
+    require(symbols<=maximum_tile_cells,"triad v3 inner pattern prefix exceeds tile cap");
+    const auto carrier=carrier_context(format);
+    const auto first_alternative=pattern_alternative(format,key,carrier,0);
+    for(unsigned bit=0;bit<prefixes.size();++bit){
+        const auto inner=inner_pattern(format,key,carrier,0,first_alternative^bit,symbols);
+        auto& bytes=prefixes[bit];
+        bytes.reserve(symbols*2);
+        for(std::size_t i=0;i<symbols;++i){
+            unsigned code=inner.orders[i];
+            for(unsigned lane=0;lane<3;++lane)code=(code<<3)|(inner.phases[i*3+lane]&7U);
+            bytes.push_back(static_cast<std::uint8_t>(code>>8));
+            bytes.push_back(static_cast<std::uint8_t>(code));
+        }
+    }
+    return prefixes;
 }
 std::array<Complex,3> PatternSource::carrier_samples_at(long double sample){
     return carrier_samples_at_impl(sample,true);
