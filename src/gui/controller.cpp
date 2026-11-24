@@ -1363,7 +1363,7 @@ struct Controller::Impl {
                 baseline<<"\nMeasured idle input "<<std::fixed<<std::setprecision(1)
                         <<*snapshot.live_noise_baseline_dbfs_hz<<" dBFS/Hz.";
                 timing+=baseline.str();
-            } else timing+="\nAuto measures idle input when live starts.";
+            } else timing+="\nAuto measures idle input and retries if needed.";
         } else if(!settings.simulation)timing+=settings.live_noise_dbfs_hz?"\nLive reception uses the entered noise density.":
             "\nChoose Auto or enter a measured noise density for live reception.";
         f(UiField::fhss_list_status).text=fhss_list_error.empty()?"Configured synthetic hopping list; physical audio/radio tuning stays fixed.":fhss_list_error;

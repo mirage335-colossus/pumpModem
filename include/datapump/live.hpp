@@ -4,6 +4,7 @@
 #include "datapump/helper_carrier.hpp"
 #include "datapump/transmit_trace.hpp"
 #include "datapump/wrong_key_admission.hpp"
+#include <algorithm>
 #include <array>
 #include <complex>
 #include <cstddef>
@@ -13,6 +14,10 @@
 #include <vector>
 
 namespace datapump::live {
+inline constexpr std::size_t waveform_history_samples = 2048;
+inline constexpr double waveform_default_intervals(std::uint32_t sample_rate) {
+    return std::min<double>(waveform_history_samples - 1, sample_rate * .5);
+}
 inline constexpr std::size_t simulation_detail_rows = 160;
 inline constexpr double simulation_detail_seconds = 7.2;
 // An explicit shared UTC calendar. Its ordinal advances through quiet slots

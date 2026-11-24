@@ -280,12 +280,13 @@ the startup PCM, spanning about 2.7 seconds at the default 6 kHz. It removes
 the measured constant DC offset in calibration and live projection. It uses
 the largest averaged one-sided PSD bin across the centered spectrum with 3 dB
 of headroom. Stable tones contribute to that bound. The bounded measurement
-rejects silent, clipped or unstable input. The receiver first scores a fully
-observable public slot after calibration and filter settling. Calibration
-samples supply no DATA or quiet evidence. Once measured, the baseline stays fixed through scoring and survives
-a half-duplex pause in the same settings generation. A configuration change
-measures again. Full-duplex transmission waits for the automatically calibrated
-receiver to start. Numeric overrides use their declared baseline directly.
+rejects silent, clipped or unstable input and retries with fresh input on the
+same capture. The receiver first scores a fully observable public slot after
+calibration and filter settling. Calibration samples supply no DATA or quiet
+evidence. Once measured, the baseline stays fixed through scoring and survives a
+half-duplex pause in the same settings generation. A configuration change measures
+again. Full-duplex transmission waits for the automatically calibrated receiver to
+start. Numeric overrides use their declared baseline directly.
 
 The live noise declaration is a receiver noise-model reference, not merely an
 average measured power. At fixed Target SNR it scales noise variance and the

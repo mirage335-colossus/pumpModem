@@ -145,10 +145,10 @@ void startup_noise_calibration() {
               with_tone.noise_dbfs_hz < -120.,
           "Robust calibration did not account for a stable, low-level tone in the estimated density");
 
-    auto expect_error = [](const std::vector<float>& input, const char* fragment) {
+    auto expect_rejection = [](const std::vector<float>& input, const char* fragment) {
         try {
             (void)calibrate_noise_dbfs_hz(input, sample_rate);
-        } catch (const std::exception& error) {
+        } catch (const datapump::live::detail::NoiseCalibrationRejected& error) {
             if (std::string_view(error.what()).find(fragment) == std::string_view::npos)
                 throw std::runtime_error(std::string("Unexpected Robust calibration diagnostic: ") + error.what());
             return;
@@ -156,21 +156,21 @@ void startup_noise_calibration() {
         throw std::runtime_error("Robust calibration accepted unusable startup audio");
     };
     std::fill(pcm.begin(), pcm.end(), 0.f);
-    expect_error(pcm, "silent");
+    expect_rejection(pcm, "silent");
 
     std::fill(pcm.begin(), pcm.end(), added_dc);
-    expect_error(pcm, "silent");
+    expect_rejection(pcm, "silent");
 
     for (std::size_t i = 0; i < count; ++i) pcm[i] = white(generator);
     for (std::size_t i = count - 1024; i < count; ++i) pcm[i] *= 5.f;
-    expect_error(pcm, "unstable");
+    expect_rejection(pcm, "unstable");
 
     std::fill(pcm.begin(), pcm.end(), .1f);
     pcm[count / 2] = 1.f;
-    expect_error(pcm, "clipping");
+    expect_rejection(pcm, "clipping");
 
     pcm[count / 2] = std::numeric_limits<float>::quiet_NaN();
-    expect_error(pcm, "nonfinite");
+    expect_rejection(pcm, "nonfinite");
 }
 }
 

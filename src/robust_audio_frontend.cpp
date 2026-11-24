@@ -82,12 +82,12 @@ NoiseCalibration calibrate_noise_dbfs_hz(std::span<const float> pcm, std::uint32
             throw Error("Robust audio noise calibration was cancelled");
         const auto sample = static_cast<double>(pcm[i]);
         if (!std::isfinite(sample))
-            throw Error("Robust audio noise calibration received nonfinite audio");
+            throw NoiseCalibrationRejected("Robust audio noise calibration received nonfinite audio");
         peak = std::max(peak, std::abs(sample));
         sum += sample;
     }
     if (peak >= .999)
-        throw Error("Robust audio input is clipping; reduce the input level before calibration");
+        throw NoiseCalibrationRejected("Robust audio input is clipping; reduce the input level before calibration");
     const auto dc_offset = sum / static_cast<double>(required);
 
     DoublePlan plan(n, stop);
@@ -123,14 +123,14 @@ NoiseCalibration calibrate_noise_dbfs_hz(std::span<const float> pcm, std::uint32
     // changing enough that one stationary calibration is not representative.
     const auto typical_power = median(frame_power);
     if (!(typical_power > 0))
-        throw Error("Robust audio input is silent; connect an audio source before calibration");
+        throw NoiseCalibrationRejected("Robust audio input is silent; connect an audio source before calibration");
     const auto largest_frame = *std::max_element(frame_power.begin(), frame_power.end());
     if (largest_frame > typical_power * 8.)
-        throw Error("Robust audio input level is unstable; keep the channel idle during calibration");
+        throw NoiseCalibrationRejected("Robust audio input level is unstable; keep the channel idle during calibration");
 
     const auto density = *std::max_element(averaged.begin(), averaged.end());
     if (!(density > 0) || !std::isfinite(density))
-        throw Error("Robust audio noise calibration could not measure a usable noise floor");
+        throw NoiseCalibrationRejected("Robust audio noise calibration could not measure a usable noise floor");
     return {10 * std::log10(density) + calibration_margin_db, dc_offset};
 }
 

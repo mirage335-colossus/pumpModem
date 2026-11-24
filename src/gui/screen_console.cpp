@@ -190,7 +190,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     }
     if(control.field==Field::live_noise_dbfs_hz) {
         control.purpose=ControlPurpose::setup;
-        control.help="Auto measures this receiver's idle input noise density at live startup. You can instead enter a measured dBFS/Hz value or select Unspecified for transmit-only operation. dBFS/Hz is local input noise power per hertz relative to digital full scale; Target SNR sets the design ratio. Simulation uses modeled channel noise.";
+        control.help="Auto measures this receiver's idle input noise density at live startup and retries with fresh audio until it has a usable measurement. You can enter a measured dBFS/Hz value or select Unspecified for transmit-only operation. dBFS/Hz is local input noise power per hertz relative to digital full scale. Target SNR sets the design ratio. Simulation uses modeled channel noise.";
     }
     if(control.field==Field::calendar_timing) {
         control.help="Waveform, cadence and burst waits set the spacing between public slots. Leave Symbol Burst Off and Random extra at 0 for short messages. The Console estimates time for the draft and two scored quiet slots. Allow additional time for the first eligible slot and receiver processing.";

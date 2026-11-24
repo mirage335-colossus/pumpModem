@@ -37,7 +37,6 @@ using Clock = std::chrono::steady_clock;
 using KeyTag = std::array<std::uint8_t, 32>;
 
 constexpr std::size_t audio_chunk = 4096, plot_size = 1024, history_size = 32;
-constexpr std::size_t simulation_waveform_size = 2048;
 constexpr std::size_t simulation_waterfall_windows_per_row = 32;
 constexpr auto simulation_preview_period = std::chrono::milliseconds(45);
 constexpr auto simulation_workspace_preflight_budget = std::chrono::milliseconds(100);
@@ -53,7 +52,7 @@ constexpr std::size_t simulation_waterfall_workspace_bytes() {
         (plot_size / 2 + 1) * sizeof(double) + 3 * 1024 * 1024U;
 }
 constexpr std::uint64_t simulation_replay_rows(std::uint32_t rate) {
-    return static_cast<std::uint64_t>(simulation_replay_duration.count()) * rate + simulation_waveform_size - 1;
+    return static_cast<std::uint64_t>(simulation_replay_duration.count()) * rate + waveform_history_samples - 1;
 }
 // Binding can briefly hold two interval readers. Playback's native provider
 // allowance covers its converter, PCM blocks, and the dated PipeWire ring.
@@ -63,7 +62,7 @@ constexpr std::size_t playback_controller_workspace = 2 * 1024 * 1024U;
 constexpr auto no_transmitter = "Select Robust to start its session.";
 constexpr auto preparing = "Preparing the configured Robust profile.";
 constexpr auto duplex_workspace_error = "Robust full-duplex transmit workspace exceeds the receiver memory limit";
-constexpr auto calibrating_live_noise = "Measuring startup audio noise. Keep the channel idle.";
+constexpr auto calibrating_live_noise = "Measuring input noise for calibration. Keep the channel idle.";
 constexpr auto wait_for_live_calibration = "Wait for live audio calibration before full-duplex transmission.";
 // Wire address origin for automatic live operation. Each waveform uses its
 // own public slot spacing and advances the ordinal through idle slots.
@@ -302,28 +301,33 @@ struct SimulationPreview {
 
 class PlotMeter {
 public:
-    explicit PlotMeter(std::uint32_t rate) : rate_(rate), fft_(plot_size) {}
+    explicit PlotMeter(std::uint32_t rate) : rate_(rate),
+        minimum_samples_(std::max(plot_size, 1 + static_cast<std::size_t>(std::ceil(waveform_default_intervals(rate))))),
+        fft_(plot_size) {}
     std::optional<PlotFrame> update(std::uint64_t first, std::span<const float> pcm,
                                     std::span<const Complex> iq) {
         // Retain a contiguous recent PCM window. The watermark is actual
         // consumed input; skipped UI frames do not change waveform coordinates.
         for (const auto sample : pcm) {
-            pcm_[at_++ % plot_size] = sample;
-            fill_ = std::min(fill_ + 1, plot_size);
+            pcm_[at_++ % pcm_.size()] = sample;
         }
+        fill_ = std::min(fill_ + pcm.size(), pcm_.size());
         const auto now = Clock::now();
-        if (fill_ < plot_size || now < next_) return {};
+        // The first trace covers the default timebase. The FFT uses only its
+        // own, shorter window, even when the waveform retains more history.
+        if (fill_ < minimum_samples_ || now < next_) return {};
         next_ = now + std::chrono::milliseconds(45);
         const auto end = first + pcm.size();
-        std::vector<float> waveform(plot_size);
-        for (std::size_t i = 0; i < plot_size; ++i)
-            waveform[i] = pcm_[(at_ + i) % plot_size];
-        return plot_frame(end >= plot_size ? end - plot_size : 0, rate_, std::move(waveform), iq, fft_);
+        std::vector<float> waveform(fill_);
+        for (std::size_t i = 0; i < fill_; ++i)
+            waveform[i] = pcm_[(at_ - fill_ + i) % pcm_.size()];
+        return plot_frame(end >= fill_ ? end - fill_ : 0, rate_, std::move(waveform), iq, fft_);
     }
 private:
     std::uint32_t rate_;
+    std::size_t minimum_samples_;
     modem::detail::search_fft::DoublePlan fft_;
-    std::array<float, plot_size> pcm_{};
+    std::array<float, waveform_history_samples> pcm_{};
     std::size_t at_ = 0, fill_ = 0;
     Clock::time_point next_{};
 };
@@ -942,7 +946,7 @@ struct Session::Impl {
     void preview_receiver_input(std::uint64_t owner, std::stop_token stop, std::uint64_t segment,
                                 std::uint64_t first, std::uint32_t rate, double if_hz,
                                 std::span<const Complex> samples, const SimulationReplay* replay) {
-        const auto size = std::min(simulation_waveform_size, samples.size());
+        const auto size = std::min(waveform_history_samples, samples.size());
         const auto tail = samples.last(size);
         SimulationPreview preview{owner, segment, first + samples.size() - size, rate, if_hz, stop,
             replay ? std::optional(replay->waterfall) : std::nullopt, {}};
@@ -1236,11 +1240,17 @@ struct Session::Impl {
         constexpr auto overhead = 2 * 1024 * 1024U;
         const auto ingress_workspace = overhead + queue_limit * sizeof(float) + input.working_bytes();
         const auto calibration_rows = s.auto_live_noise && !noise_baseline ? detail::noise_calibration_samples(rate) : 0;
-        const auto calibration_deadline = Clock::now() + std::chrono::seconds(15);
+        constexpr auto calibration_idle_period = std::chrono::seconds(15);
+        std::optional calibration_idle_deadline{Clock::now() + calibration_idle_period};
         std::vector<float> calibration;
-        if (calibration_rows) publish(owner, stop, [](Snapshot& out) {
-            if (!out.transmitting) out.status = calibrating_live_noise;
-        });
+        const auto calibration_status = [&](std::string message) {
+            publish(owner, stop, [&](Snapshot& out) {
+                out.receiver_error.clear();
+                if (!out.transmitting) out.status = message;
+                if (s.full_duplex) out.transmit_unavailable = std::move(message);
+            });
+        };
+        if (calibration_rows) calibration_status(calibrating_live_noise);
         execution::Task capture([&](std::stop_token capture_stop) {
             try {
                 audio::Options options;
@@ -1315,12 +1325,14 @@ struct Session::Impl {
                         break;
                     }
                 }
-                if (calibration_rows && !noise_baseline && Clock::now() >= calibration_deadline)
-                    throw Error("Robust noise calibration did not receive enough audio. Check the input device or enter a measured noise density.");
                 if (chunk.pcm.empty()) {
                     if (receiver) {
                         receiver_ok(receiver->resume(false));
                         deliver(*receiver, display, s, owner, stop);
+                    } else if (calibration_rows && !noise_baseline && calibration_idle_deadline &&
+                               Clock::now() >= *calibration_idle_deadline) {
+                        calibration_idle_deadline.reset();
+                        calibration_status("Waiting for audio samples for calibration. Check the input device.");
                     }
                     continue;
                 }
@@ -1352,6 +1364,8 @@ struct Session::Impl {
                     origin_stamp = stamp;
                 }
                 if (calibration_rows && !noise_baseline) {
+                    if (!calibration_idle_deadline) calibration_status(calibrating_live_noise);
+                    calibration_idle_deadline = Clock::now() + calibration_idle_period;
                     if (calibration.empty()) {
                         const auto external = checked_workspace(transmit_reservation, checked_workspace(provider_bytes, ingress_workspace));
                         const auto available = *stream_options(s, external).memory_limit_bytes;
@@ -1363,7 +1377,13 @@ struct Session::Impl {
                     const auto count = std::min(calibration_rows - calibration.size(), chunk.pcm.size());
                     calibration.insert(calibration.end(), chunk.pcm.begin(), chunk.pcm.begin() + count);
                     if (calibration.size() == calibration_rows) {
-                        noise_baseline = detail::calibrate_noise_dbfs_hz(calibration, rate, stop);
+                        try {
+                            noise_baseline = detail::calibrate_noise_dbfs_hz(calibration, rate, stop);
+                        } catch (const detail::NoiseCalibrationRejected& error) {
+                            calibration.clear();
+                            calibration_status(std::string(error.what()) + ". Retrying calibration.");
+                            continue;
+                        }
                         std::vector<float>{}.swap(calibration);
                         publish(owner, stop, [&](Snapshot& out) {
                             out.live_noise_baseline_dbfs_hz = noise_baseline->noise_dbfs_hz;
@@ -1683,7 +1703,7 @@ struct Session::Impl {
                 static_cast<std::size_t>(simulation_replay_period.count()) * rate / 1000);
             append_detail_to(next_detail);
             const auto first = replay.first + offset;
-            const auto count = std::min(simulation_waveform_size, input.size() - offset);
+            const auto count = std::min(waveform_history_samples, input.size() - offset);
             const auto samples = input.subspan(offset, count);
             const auto elapsed = static_cast<std::uint64_t>(tick * simulation_replay_period.count());
             const auto visible_steps = pattern_step_count * static_cast<std::size_t>(tick + 1) /

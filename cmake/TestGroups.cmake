@@ -13,6 +13,7 @@ set(_aliases
   "gui_inspection_page=test_inspection_page"
   "gui_binary_editor=test_binary_editor"
   "gui_native_policy=test_gui_native"
+  "gui_robust_oscilloscope=test_gui_robust_live"
   "gui_robust_automatic_noise=test_gui_robust_live"
   "gui_robust_automatic_calendar=test_gui_robust_live"
   "gui_robust_automatic_calendar_latency=test_gui_robust_live"

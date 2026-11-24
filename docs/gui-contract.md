@@ -37,10 +37,11 @@ start about two minutes ahead and ordinal 0. Share its Link Planner command
 with the peer or enter the same UTC anchor and ordinal directly.
 
 **Live noise calibration** defaults to **Auto** in ordinary live setup. Keep
-the channel idle while it measures the first few seconds of dated input. The
-receiver shows the local startup baseline in dBFS/Hz, normalized PCM power
-per hertz, and uses it for that settings generation. **Recalibrate input**
-restarts the measurement on the existing calendar after an audio adjustment.
+the channel idle while it measures a few seconds of dated input. Auto takes a
+fresh measurement after a rejected window and shows the reason while it retries.
+The receiver shows the usable baseline in dBFS/Hz, normalized PCM power per
+hertz, and uses it for that settings generation. **Recalibrate input** starts a
+fresh measurement on the existing calendar after an audio adjustment.
 A measured numeric value
 is available for manual use on that device and gain. Explicit Unspecified
 retains transmit-only operation. Simulation derives noise from its link model.

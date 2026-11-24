@@ -1683,7 +1683,7 @@ void automatic_noise_capture_lifecycle() {
     const auto calibration_rows = live::detail::noise_calibration_samples(rate);
     auto input = std::make_shared<fixture::CaptureInput>();
     input->first_utc = static_cast<long double>(s.calendar->epoch) - 8;
-    input->samples.resize(calibration_rows + rate / 2);
+    input->samples.resize(calibration_rows + 3 * rate);
     input->pause_after = calibration_rows + rate / 4;
     input->chunk_size = rate / 20;
     input->callback_may_block = true;
@@ -1693,32 +1693,63 @@ void automatic_noise_capture_lifecycle() {
         const auto phase = 2 * std::numbers::pi * 73 * static_cast<double>(i) / rate;
         input->samples[i] = static_cast<float>(2e-4 + 2e-5 * std::cos(phase)) + noise(rng);
     }
+    // Each rejected window consumes its last callback. Align the following
+    // input to those boundaries so the clipped window requires another retry.
+    const auto chunk = input->chunk_size;
+    const auto rejected_frames = (calibration_rows + chunk - 1) / chunk * chunk;
+    auto recovering = std::make_shared<fixture::CaptureInput>(*input);
+    recovering->samples.insert(recovering->samples.begin(), rejected_frames, 1.f);
+    recovering->samples.insert(recovering->samples.begin(), rejected_frames, 0.f);
+    recovering->pause_after = rejected_frames;
     auto silent = std::make_shared<fixture::CaptureInput>(*input);
     std::fill(silent->samples.begin(), silent->samples.end(), 0.f);
     const auto set_input = [](const auto& source) {
         std::lock_guard lock(fixture::mutex);
         fixture::capture_input = source;
     };
-    set_input(input);
+    set_input(recovering);
     fixture::hold_capture = true;
     fixture::pause_released = false;
+    const auto startup_opens = fixture::capture_opens.load();
     live::Session session;
     session.start(s);
     wait(session, [](const auto& out) {
         return out.transmit_unavailable && out.transmit_unavailable->find("calibration") != std::string::npos;
     }, "Automatic full-duplex transmitter did not wait for its input calibration");
     const std::array<std::uint8_t, 1> bit{1};
-    bool blocked = false;
-    try { session.transmit_bits(bit); }
-    catch (const Error& error) { blocked = std::string_view(error.what()).find("calibration") != std::string::npos; }
-    check(blocked, "Automatic full-duplex transmitter accepted a calibration-contaminating transmission");
+    const auto check_transmit_blocked = [&] {
+        bool blocked = false;
+        try { session.transmit_bits(bit); }
+        catch (const Error& error) { blocked = std::string_view(error.what()).find("calibration") != std::string_view::npos; }
+        check(blocked, "Automatic full-duplex transmitter accepted a calibration-contaminating transmission");
+    };
+    const auto pending_calibration = [&] {
+        const auto pending = wait(session, [](const auto& out) {
+            if (!out.receiver_error.empty()) throw Error("Automatic calibration stopped: " + out.receiver_error);
+            return out.status.find("Retrying calibration") != std::string::npos &&
+                out.status.find("silent") != std::string::npos;
+        }, "Automatic Robust calibration did not retry after unusable input");
+        check(!pending.live_noise_baseline_dbfs_hz && !pending.receiver_workers && pending.received.empty() &&
+              pending.pattern_steps.empty() && fixture::capture_active == 1,
+              "Robust released capture or published receiver evidence while calibration was pending");
+        return pending;
+    };
+    check_transmit_blocked();
     fixture::hold_capture = false;
+    const auto pending = pending_calibration();
+    check(pending.transmit_unavailable == pending.status, "Retry reason was hidden by the full-duplex transmit gate");
+    check_transmit_blocked();
+    fixture::pause_released = true;
     const auto listening = [](const auto& out) {
         return out.live_noise_baseline_dbfs_hz && out.receiver_workers && out.receiver_error.empty();
     };
-    const auto first = wait(session, listening, "Automatic full-duplex calibration did not start receiving");
+    const auto first = wait(session, listening, "Automatic Robust calibration did not recover on the same capture");
+    check(fixture::capture_opens == startup_opens + 1 && first.pattern_steps.empty(),
+          "Automatic Robust retry reopened capture or invented public receiver evidence");
 
     s.full_duplex = false;
+    set_input(input);
+    fixture::pause_released = false;
     session.configure(s);
     wait(session, listening, "Automatic half-duplex calibration did not start receiving");
     const auto opens = fixture::capture_opens.load();
@@ -1731,16 +1762,64 @@ void automatic_noise_capture_lifecycle() {
           resumed.pattern_steps.empty(), "Half-duplex resume changed its noise baseline or invented receive evidence");
 
     session.configure(s);
-    const auto failed = wait(session, [](const auto& out) { return out.receiver_error.find("silent") != std::string::npos; },
-                             "A new settings generation reused the expired calibration");
-    check(!failed.live_noise_baseline_dbfs_hz && failed.pattern_steps.empty(),
-          "A failed calibration published noise or physical slot evidence");
-    set_input(input);
-    session.configure(s);
-    wait(session, listening, "Retrying calibration on the same calendar did not recover listening");
+    pending_calibration();
     close(session);
+    check(fixture::capture_active == 0, "Closing Robust did not release a retrying audio capture");
     fixture::pause_released = true;
     set_input(std::shared_ptr<const fixture::CaptureInput>{});
+}
+
+void live_oscilloscope_retains_environmental_window() {
+    auto s = settings(false);
+    s.live_noise_dbfs_hz = -100;
+    constexpr std::size_t capture_samples = 8192;
+    constexpr std::size_t scope_samples = 2048;
+    constexpr std::size_t spectrum_samples = 1024;
+    auto input = std::make_shared<fixture::CaptureInput>();
+    input->first_utc = static_cast<long double>(s.calendar->epoch) - 2;
+    input->samples.resize(capture_samples);
+    input->chunk_size = 128;
+    input->pause_after = scope_samples;
+    fixture::pause_released = false;
+    fixture::capture_paused = false;
+    for (std::size_t i = 0; i < input->samples.size(); ++i)
+        input->samples[i] = static_cast<float>(static_cast<int>(i % 251) - 125) / 4096.f;
+    {
+        std::lock_guard lock(fixture::mutex);
+        fixture::capture_input = input;
+    }
+
+    live::Session session;
+    session.start(s);
+    const auto initial = wait(session, [](const auto& snapshot) {
+        if (snapshot.waveform.empty()) return false;
+        check(snapshot.waveform.size() == scope_samples,
+              "Live Robust oscilloscope displayed a partial startup window");
+        return fixture::capture_paused.load();
+    }, "Live Robust oscilloscope did not publish its full startup window");
+    check(initial.waveform_sample_rate == s.transfer.modem.sample_rate &&
+          initial.spectrum_sample_count == spectrum_samples &&
+          initial.spectrum_start_sample == scope_samples - spectrum_samples &&
+          std::equal(initial.waveform.begin(), initial.waveform.end(), input->samples.begin()),
+          "Live Robust oscilloscope lost its startup PCM or shifted the FFT tail");
+
+    fixture::pause_released = true;
+    const auto wrapped = wait(session, [](const auto& snapshot) {
+        return snapshot.spectrum_start_sample > scope_samples - spectrum_samples;
+    }, "Live Robust oscilloscope did not publish a wrapped window");
+    check(wrapped.waveform.size() == scope_samples &&
+          wrapped.spectrum_start_sample <= input->samples.size() - spectrum_samples,
+          "Live Robust oscilloscope lost its retained window or FFT coordinates after wrapping");
+    const auto waveform_first = wrapped.spectrum_start_sample - (scope_samples - spectrum_samples);
+    const auto expected = std::span(input->samples).subspan(waveform_first, scope_samples);
+    check(std::equal(wrapped.waveform.begin(), wrapped.waveform.end(), expected.begin()),
+          "Live Robust oscilloscope reordered or truncated its wrapped PCM window");
+
+    close(session);
+    {
+        std::lock_guard lock(fixture::mutex);
+        fixture::capture_input.reset();
+    }
 }
 
 void automatic_live_first_contact(bool default_latency = false) {
@@ -2828,6 +2907,11 @@ int main(int argc, char** argv) {
         if (argc == 2 && std::string_view(argv[1]) == "--automatic-noise") {
             automatic_noise_capture_lifecycle();
             dated_live_data_then_eof({}, true, true);
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--oscilloscope") {
+            live_oscilloscope_retains_environmental_window();
+            std::cout << "Live Robust oscilloscope retains its full window and wraps in order\n";
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--automatic-calendar") {

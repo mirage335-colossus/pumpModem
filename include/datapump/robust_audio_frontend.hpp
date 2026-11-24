@@ -20,6 +20,12 @@ struct NoiseCalibration {
     double dc_offset;
 };
 
+// A complete window arrived, but it cannot provide a usable baseline.
+class NoiseCalibrationRejected : public Error {
+public:
+    using Error::Error;
+};
+
 std::size_t noise_calibration_samples(std::uint32_t rate);
 // Includes the requested PCM capture plus peak FFT, FFT-plan and averaged-bin
 // storage used while calibrating.
