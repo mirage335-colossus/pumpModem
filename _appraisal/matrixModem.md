@@ -9,6 +9,8 @@ Please thoroughly research. Please comprehensively consult the academic literatu
 
 Matrix Modem is a new standalone modem, attempting to learn from the lessons of Fast Modem, Robust Modem (single carrier), and triple Robust Modem.
 
+As a standalone modem, Matrix Modem should be clearly seprated in the code, and development of Matrix Modem should not change the code of othe other modems.
+
 - Fast Modem is excellent, achieving very near the Shannon limit of bitrate throughput under such extraordinarily challenging conditions as acoustic echo in a large room over physical speakers and microphone. However, Fast Modem does not seem likely to communicate at such low transmit power the carrier would be much less than the noise floor of the bandwidth which GPS DO cannot narrow - although impressive, Fast Modem was not designed as a weak-signal modem.
 
 - Robust Modem (single carrier) is an older implementation in the history of the repository, since removed from active code. A tone was patterned with cryptographically random phase and amplitude shifts, historical search was used to detect the effect on the noise floor. The usable signal-to-noise ratio achievable was impressive, however, the computational ceiling was uncomfortably close for practical use cases, and usability under deleterious (eg. ionospheric) conditions seemed doubtful.
@@ -121,7 +123,7 @@ Both transmitter and receiver must be designed to maximize computational ceiling
 
 
 
-- Total bandwidth should be configurable. A 2.2kHz (450Hz-2650Hz) bandwidth may be preferable, but such a limit is not subject to the 2.8kHz limit, rather this configurable total bandwidth has more to do with avoiding failure due to typical SSB transceiver built-in frequency filters. 
+- Total bandwidth should be configurable. A 2.2kHz (450Hz-2650Hz) bandwidth may be preferable, but such a limit is not subject to the 26dB attenuation of the 2.8kHz limit, rather this configurable total bandwidth has more to do with avoiding failure due to typical SSB transceiver built-in frequency filters. 
 
 - Total bandwidth used should not exceed the FCC Part 97 limit of 2.8kHz and 26dB attenuation outside the band relative to the mean power within it .
 
@@ -139,6 +141,45 @@ Both transmitter and receiver must be designed to maximize computational ceiling
   - Groundwave 30MHz
   - Skywave 1-30MHz
   - Earth-Moon-Earth
+
+
+
+- Some of these configuration options may be relevant, as may be others.
+
+  - FHSS
+
+  - Wrong Key Admission Filtering
+
+  - Keyfile
+  - Encryption key entry
+
+  - Baseband Oscillator
+  - Shift Oscillator
+  - Doppler/delay spread
+  - Frequency Selective Amplitude Modulation
+
+  - Helper Carrier Power
+  - Helper Carrier Ratio Limit
+  - Helper Carrier Callsign
+
+  - Transmit noise
+
+  - Simulation
+  - Transmit Power
+  - Path loss
+  - Clock sync, Region, Offset, Audio error
+  - Target SNR dB/1Hz
+
+  - Shift
+  - Doppler
+
+  - Tone bandwidth and symbol rate (eg. 6.25Hz)
+
+  - Total bandwidth (2.2kHz)
+
+  - Audio device
+  - Live/Duplex
+
 
 
 
