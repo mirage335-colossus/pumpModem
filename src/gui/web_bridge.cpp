@@ -395,7 +395,8 @@ std::string Bridge::snapshot(int width,int height) {
     // Shared desktop geometry assumes its declared minimum extent. A small
     // browser viewport scrolls this same surface, rather than rearranging the
     // application's controls according to a second backend-specific layout.
-    auto& s=*impl_;s.width=std::clamp(width,ui::min_width,4096);s.height=std::clamp(height,ui::min_height,4096);
+    auto& s=*impl_;const auto sizing=s.app.window_sizing();
+    s.width=std::clamp(width,sizing.min_width,4096);s.height=std::clamp(height,sizing.min_height,4096);
     s.synchronize_services();
     if(s.initialized&&s.current_signature()!=s.signature)++s.epoch;
     s.retained.clear();s.targets.clear();s.occurrences.clear();s.document_occurrences.clear();s.used_bitmaps.clear();

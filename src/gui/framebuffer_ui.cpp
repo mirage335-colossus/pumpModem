@@ -153,8 +153,8 @@ struct Session::Impl {
         interior={0,0,value.width-bezel,value.height};
         viewport={interior.w,interior.h,value.metrics};dirty=true;
     }
-    int width() const {return std::max(ui::min_width,viewport.width);}
-    int height() const {return std::max(ui::min_height,viewport.height-22);}
+    int width() const {return std::max(app.window_sizing().min_width,viewport.width);}
+    int height() const {return std::max(app.window_sizing().min_height,viewport.height-22);}
     int cw() const {return viewport.metrics.cell_width;}
     int lh() const {return viewport.metrics.line_height;}
     ui::Rect screen(ui::Rect r) const {r.x-=pan_x;r.y-=pan_y;return r;}

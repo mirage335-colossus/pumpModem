@@ -208,10 +208,20 @@ struct Session::Impl {
         document_clip.reset();return layout.height;
     }
     void declarations(std::span<const ui::Control> controls,int& y,bool overlay,const ui::DocumentPresentation* page_document=nullptr) {
-        const int logical_width=std::max(ui::min_width,columns()*8);
+        const auto sizing=app.window_sizing();
+        const int logical_width=std::max(sizing.min_width,columns()*8);
         // Extra terminal rows reveal more content; they must not recursively
         // enlarge flexible desktop panels and push the footer out of reach.
-        const int logical_height=std::max(ui::min_height,std::min(ui::default_height,rows()*18));
+        int logical_height=std::max(sizing.min_height,std::min(sizing.height,rows()*18));
+        if(overlay) {
+            // Project explicitly positioned controls before applying terminal
+            // scrolling, even when they extend below a compact desktop.
+            for(const auto& control:controls) {
+                const auto& placement=control.placement;
+                if(placement.height>0)
+                    logical_height=std::max(logical_height,placement.top+placement.height+placement.bottom);
+            }
+        }
         std::vector<ui::ControlGroup> visible;
         std::vector<ui::CellLayoutItem> projected;
         for(const auto& group:ui::control_groups(controls)) {

@@ -4,13 +4,13 @@
 #include <cstddef>
 
 namespace datapump::gui::ui {
-inline constexpr int default_width = 1244, default_height = 1168;
-inline constexpr int min_width = 1194, min_height = 1088;
+inline constexpr int default_width = 1244, default_height = 976;
+inline constexpr int min_width = 1194, min_height = 920;
 inline constexpr int fast_default_height = 800, fast_min_height = 720;
+inline constexpr int legacy_default_width = 1040, legacy_default_height = 760;
+inline constexpr int legacy_min_width = 880, legacy_min_height = 600;
 // Preserve established body sizing when the header requires a wider minimum.
 inline constexpr int body_growth_width = 1030;
-inline constexpr int oscillator_row_height = 96;
-inline constexpr int helper_row_height = 48;
 inline constexpr int margin = 16, field_height = 27, label_height = 16;
 inline constexpr int action_height = 29, compact_action_height = 20;
 inline constexpr int transmit_scope_rows = 6, transmit_scope_row_height = 17;
@@ -74,8 +74,9 @@ struct DesktopLayout {
     explicit DesktopLayout(int width = default_width, int height = default_height,
                            bool transmit_scope_visible = true, bool force_transmit_visible = false) {
         auto& out = *this;
-        const int header_rows = oscillator_row_height + helper_row_height;
-        const int content_height = height - header_rows;
+        constexpr int tabs_y = 227, page_y = 259;
+        const int page_bottom = height - 158;
+        const int shortfall=std::max(0,min_height-height);
         out[Slot::header] = {margin, 10, 145, 32};
         out[Slot::fast_mode] = {169, 12, 175, 28};
         out[Slot::mode] = {479, 13, width - 1016, 28};
@@ -161,18 +162,23 @@ struct DesktopLayout {
         out[Slot::fast_correction]={margin,compact_fast_page?368:404,fast_width,48};
         out[Slot::fast_auth]={margin,compact_fast_page?418:466,fast_width,48};
         out[Slot::fast_detail]={margin,compact_fast_page?468:530,fast_width,compact_fast_page?std::min(170,std::max(120,height-580)):170};
-        // Legacy is a separate text terminal; regular/Fast slots stay unchanged.
-        out[Slot::legacy_profile]={margin,76,240,field_height};
-        out[Slot::legacy_carrier]={276,76,170,field_height};
-        out[Slot::legacy_mono]={464,76,156,field_height};
-        out[Slot::legacy_transmit]={width-margin-150,75,150,action_height};
-        const int legacy_transcript_height=(height-486)*3/5;
-        const int legacy_draft_height=(height-486)-legacy_transcript_height;
+        // Keep the waterfall beside the text terminal. Extra height is more
+        // valuable for monitoring and transcript history than for the draft.
+        out[Slot::legacy_profile]={margin,60,240,field_height};
+        out[Slot::legacy_carrier]={276,60,170,field_height};
+        out[Slot::legacy_mono]={464,60,156,field_height};
+        out[Slot::legacy_transmit]={width-margin-150,59,150,action_height};
+        constexpr int legacy_body_y=112,legacy_gap=18,draft_label_gap=24;
+        const int legacy_body_bottom=height-104;
+        const int legacy_text_width=(fast_width-legacy_gap)*3/5;
+        const int legacy_plot_x=margin+legacy_text_width+legacy_gap;
+        const int legacy_draft_height=std::clamp((legacy_body_bottom-legacy_body_y)/4,78,150);
+        const int legacy_draft_y=legacy_body_bottom-legacy_draft_height;
         out[Slot::legacy_device]={margin,height-80,fast_width-258,field_height};
         out[Slot::legacy_squelch]={width-margin-240,height-80,240,field_height};
-        out[Slot::legacy_transcript]={margin,140,fast_width,legacy_transcript_height};
-        out[Slot::legacy_text]={margin,170+legacy_transcript_height,fast_width,legacy_draft_height};
-        out[Slot::legacy_waterfall]={margin,height-284,fast_width,166};
+        out[Slot::legacy_transcript]={margin,legacy_body_y,legacy_text_width,legacy_draft_y-draft_label_gap-legacy_body_y};
+        out[Slot::legacy_text]={margin,legacy_draft_y,legacy_text_width,legacy_draft_height};
+        out[Slot::legacy_waterfall]={legacy_plot_x,legacy_body_y,width-margin-legacy_plot_x,legacy_body_bottom-legacy_body_y};
         out[Slot::legacy_status]={margin,height-31,volume_x-audio_gap-margin,24};
         out[Slot::legacy_volume]={volume_x,height-31,volume_width,field_height};
         out[Slot::legacy_exclusive]={exclusive_x,height-31,exclusive_width,field_height};
@@ -187,43 +193,46 @@ struct DesktopLayout {
         out[Slot::symbol_burst_random] = {width - 451, 62, 76, field_height};
         out[Slot::wrong_key_admission] = {width - 367, 62, 184, field_height};
         out[Slot::key] = {width - 175, 62, 159, field_height};
-        // Link assumptions share the row with the Simulation selector.
+        // Link and clock assumptions share one row: keep the short clock
+        // values together and leave the remaining width to the link inputs.
         constexpr int assumption_x = margin + 100, group_gap = 10;
-        const int assumption_width = width - margin - assumption_x;
+        constexpr int assumptions_y=106,clock_group_width=370;
+        const int clock_x=width-margin-clock_group_width;
+        const int assumption_width = clock_x - group_gap - assumption_x;
         const int power_width = (assumption_width - 2 * group_gap) * 32 / 100;
         const int loss_width = (assumption_width - 2 * group_gap) * 28 / 100;
         const int loss_x = assumption_x + power_width + group_gap;
         const int noise_x = loss_x + loss_width + group_gap;
-        out[Slot::simulation] = {margin, 105, 90, field_height};
-        out[Slot::link_power] = {assumption_x, 105, power_width, field_height};
-        out[Slot::link_loss] = {loss_x, 105, loss_width, field_height};
-        out[Slot::link_noise] = {noise_x, 105, width - margin - noise_x, field_height};
-        // Clock assumptions occupy their own row; full-width model controls follow.
-        out[Slot::clock_accuracy] = {margin, 153, 90, field_height};
-        out[Slot::clock_region] = {116, 153, 80, field_height};
-        out[Slot::clock_offset] = {206, 153, 80, field_height};
-        out[Slot::audio_error] = {296, 153, 90, field_height};
+        out[Slot::simulation] = {margin, assumptions_y, 90, field_height};
+        out[Slot::link_power] = {assumption_x, assumptions_y, power_width, field_height};
+        out[Slot::link_loss] = {loss_x, assumptions_y, loss_width, field_height};
+        out[Slot::link_noise] = {noise_x, assumptions_y, clock_x - group_gap - noise_x, field_height};
+        out[Slot::clock_accuracy] = {clock_x, assumptions_y, 90, field_height};
+        out[Slot::clock_region] = {clock_x+100, assumptions_y, 80, field_height};
+        out[Slot::clock_offset] = {clock_x+190, assumptions_y, 80, field_height};
+        out[Slot::audio_error] = {clock_x+280, assumptions_y, 90, field_height};
         const int spread_width=200, perturbation_width=140, margin_width=90;
         const int oscillator_width=(width-2*margin-4*group_gap-spread_width-perturbation_width-margin_width)/2;
         const int baseband_x=margin;
         const int shift_x=baseband_x+oscillator_width+group_gap;
         const int spread_x=shift_x+oscillator_width+group_gap;
         const int perturbation_x=spread_x+spread_width+group_gap;
-        out[Slot::simulation_oscillator]={baseband_x,201,oscillator_width,field_height};
-        out[Slot::rf_oscillator]={shift_x,201,oscillator_width,field_height};
-        out[Slot::spread_preset]={spread_x,201,spread_width,field_height};
-        out[Slot::selective_perturbation]={perturbation_x,201,perturbation_width,field_height};
-        out[Slot::search_margin]={perturbation_x+perturbation_width+group_gap,201,width-margin-(perturbation_x+perturbation_width+group_gap),field_height};
+        constexpr int oscillator_y=150,helper_y=194;
+        out[Slot::simulation_oscillator]={baseband_x,oscillator_y,oscillator_width,field_height};
+        out[Slot::rf_oscillator]={shift_x,oscillator_y,oscillator_width,field_height};
+        out[Slot::spread_preset]={spread_x,oscillator_y,spread_width,field_height};
+        out[Slot::selective_perturbation]={perturbation_x,oscillator_y,perturbation_width,field_height};
+        out[Slot::search_margin]={perturbation_x+perturbation_width+group_gap,oscillator_y,width-margin-(perturbation_x+perturbation_width+group_gap),field_height};
         const int helper_column=(width-2*margin-3*group_gap)/4;
-        out[Slot::helper_power]={margin,249,helper_column,field_height};
-        out[Slot::helper_ratio_limit]={margin+helper_column+group_gap,249,helper_column,field_height};
+        out[Slot::helper_power]={margin,helper_y,helper_column,field_height};
+        out[Slot::helper_ratio_limit]={margin+helper_column+group_gap,helper_y,helper_column,field_height};
         const int helper_callsign_x=margin+2*(helper_column+group_gap);
-        out[Slot::helper_callsign]={helper_callsign_x,249,width-margin-helper_callsign_x-69,field_height};
-        out[Slot::transmit_helper]={width-margin-61,249,61,field_height};
-        out[Slot::tabs] = {margin, 137, width - 2 * margin, content_height - 296};
-        out[Slot::page] = {margin, 169, width - 2 * margin, content_height - 328};
+        out[Slot::helper_callsign]={helper_callsign_x,helper_y,width-margin-helper_callsign_x-69,field_height};
+        out[Slot::transmit_helper]={width-margin-61,helper_y,61,field_height};
+        out[Slot::tabs] = {margin, tabs_y, width - 2 * margin, std::max(0,page_bottom-tabs_y)};
+        out[Slot::page] = {margin, page_y, width - 2 * margin, std::max(0,page_bottom-page_y)};
 
-        constexpr int compose_y = 195, binary_width = 220;
+        constexpr int compose_y = page_y + 26, binary_width = 220;
         // Keep all ten generation rows visible, including native scrollbar
         // space, at the minimum desktop size. Taller windows grow the editors
         // and received history before allocating the remainder to the plots.
@@ -238,14 +247,15 @@ struct DesktopLayout {
         constexpr int previous_width = 240;
         constexpr int force_width = 166;
         const int force_space = force_transmit_visible ? force_width + 8 : 0;
-        out[Slot::message_label] = {margin, 173, editor_width - previous_width - force_space - 8, 20};
-        out[Slot::paste_previous] = {margin + editor_width - previous_width - force_space, 173, previous_width, 20};
-        out[Slot::force_transmit] = {margin + editor_width - force_width, 173, force_width, 20};
+        constexpr int compose_label_y=page_y+4;
+        out[Slot::message_label] = {margin, compose_label_y, editor_width - previous_width - force_space - 8, 20};
+        out[Slot::paste_previous] = {margin + editor_width - previous_width - force_space, compose_label_y, previous_width, 20};
+        out[Slot::force_transmit] = {margin + editor_width - force_width, compose_label_y, force_width, 20};
         const int qr_choice_width=std::max(78,qr_size);
-        out[Slot::binary_label] = {binary_x, 173, binary_width-(qr_choice_width-qr_size), 20};
+        out[Slot::binary_label] = {binary_x, compose_label_y, binary_width-(qr_choice_width-qr_size), 20};
         out[Slot::message] = {margin, compose_y, editor_width, compose_height};
         out[Slot::binary] = {binary_x, compose_y, binary_width, compose_height};
-        out[Slot::qr_brightness] = {width - margin - qr_choice_width, 173, qr_choice_width, 20};
+        out[Slot::qr_brightness] = {width - margin - qr_choice_width, compose_label_y, qr_choice_width, 20};
         out[Slot::qr] = {width - margin - qr_size, compose_y, qr_size, qr_size};
 
         const int buttons_y = compose_y + compose_height + 8;
@@ -259,21 +269,24 @@ struct DesktopLayout {
 
         out[Slot::transmit_scope_caption]={margin,buttons_y+31,width-2*margin-144,transmit_scope_visible?18:0};
         out[Slot::transmit_scope_format]={width-margin-136,buttons_y+31,136,18};
-        const int scope_height=transmit_scope_rows*transmit_scope_row_height+19; // Includes horizontal scrollbar.
+        constexpr int full_scope_height=transmit_scope_rows*transmit_scope_row_height+19;
+        // A scaled maximized work area can be shorter than the usual size
+        // hint. The list scrolls, so give the plots first claim on this space.
+        const int scope_height=std::max(53,full_scope_height-shortfall);
         out[Slot::transmit_scope]={margin,buttons_y+51,width-2*margin,transmit_scope_visible?scope_height:0};
         const int signal_y=out[Slot::transmit_scope].y+out[Slot::transmit_scope].h+23;
         constexpr int files_width = 252;
         const int reception_x=margin;
         // Reclaim the hidden scope for two more full signal rows and taller
         // plots. The format choice stays reachable above the received lists.
-        const int signal_height = 84+std::min(26,height_growth*26/80)+(transmit_scope_visible?0:108);
+        const int signal_height = 84+std::min(26,height_growth*26/80)+(transmit_scope_visible?0:std::max(0,108-shortfall));
         out[Slot::signal_label] = {reception_x, signal_y - 23, width - reception_x - files_width - 34, 21};
         out[Slot::file_label] = {width - margin - files_width, signal_y - 23, files_width, 21};
         out[Slot::signals] = {reception_x, signal_y, width - reception_x - margin - files_width - 14, signal_height};
         out[Slot::files] = {width - margin - files_width, signal_y, files_width, signal_height - 36};
         out[Slot::save_file] = {width - margin - files_width, signal_y + signal_height - 29, files_width, action_height};
 
-        const int plots_y = signal_y + signal_height + 23, plot_height = content_height - plots_y - 167;
+        const int plots_y = signal_y + signal_height + 23, plot_height = std::max(0,page_bottom-plots_y);
         // Keep the scrollable profile reference inline with the plots at the
         // right edge, leaving reception history its full width.
         constexpr int reference_width=280;
@@ -314,34 +327,42 @@ struct DesktopLayout {
         // and let its reception history grow with the page viewport.
         const int compression_width = width - 2 * margin;
         const int compression_column = (compression_width - 20) / 2;
-        out[Slot::compression_explanation] = {margin, 173, compression_width, 54};
-        out[Slot::short_bits_label] = {margin, 233, compression_column, 22};
-        out[Slot::short_bits] = {margin, 259, compression_column, 72};
-        out[Slot::short_bits_detail] = {margin, 339, compression_column, 58};
-        out[Slot::compression_codes] = {margin + compression_column + 20, 227,
-            compression_width - compression_column - 20, 166};
-        constexpr int short_actions_y = 405;
+        const bool short_window=shortfall>0;
+        const int explanation_height=short_window?48:54;
+        const int short_label_y=page_y+10+explanation_height;
+        const int short_bits_y=short_label_y+26,short_bits_height=short_window?52:72;
+        const int short_detail_y=short_bits_y+short_bits_height+8,short_detail_height=short_window?42:58;
+        const int codes_y=page_y+4+explanation_height,codes_height=short_window?144:166;
+        out[Slot::compression_explanation] = {margin, page_y+4, compression_width, explanation_height};
+        out[Slot::short_bits_label] = {margin, short_label_y, compression_column, 22};
+        out[Slot::short_bits] = {margin, short_bits_y, compression_column, short_bits_height};
+        out[Slot::short_bits_detail] = {margin, short_detail_y, compression_column, short_detail_height};
+        out[Slot::compression_codes] = {margin + compression_column + 20, codes_y,
+            compression_width - compression_column - 20, codes_height};
+        const int short_actions_y=std::max(short_detail_y+short_detail_height,codes_y+codes_height)+8;
         out[Slot::short_use_text] = {margin, short_actions_y, 90, action_height};
         out[Slot::short_send_key] = {116, short_actions_y, 150, action_height};
         out[Slot::short_transmit] = {276, short_actions_y, 125, action_height};
         out[Slot::short_transmit_noise] = {411, short_actions_y, 130, action_height};
         out[Slot::short_cancel] = {551, short_actions_y, 115, action_height};
         out[Slot::short_airtime] = {676, short_actions_y, width - margin - 676, action_height};
-        const int raw_detail_y = out[Slot::page].y + out[Slot::page].h - 62;
-        const int raw_actions_y = raw_detail_y - 38;
-        out[Slot::compression_signals] = {margin, 469, compression_width, raw_actions_y - 479};
+        const int raw_detail_height=short_window?38:52;
+        const int raw_detail_y=page_bottom-raw_detail_height-10;
+        const int raw_actions_y=raw_detail_y-(short_window?34:38);
+        const int raw_signals_y=short_actions_y+(short_window?59:64);
+        out[Slot::compression_signals] = {margin, raw_signals_y, compression_width, std::max(0,raw_actions_y-raw_signals_y-10)};
         out[Slot::copy_raw_signal] = {margin, raw_actions_y, 150, action_height};
         out[Slot::paste_raw_signal] = {margin + 160, raw_actions_y, 180, action_height};
         out[Slot::raw_recovery_actions] = {margin + 350, raw_actions_y, 150, action_height};
-        out[Slot::received_raw_bits] = {margin, raw_detail_y, compression_width, 52};
+        out[Slot::received_raw_bits] = {margin, raw_detail_y, compression_width, raw_detail_height};
 
-        out[Slot::fhss_list_status]={margin,173,width-2*margin,54};
-        out[Slot::fhss_apply]={margin,233,160,action_height};
-        out[Slot::fhss_list]={margin,275,width-2*margin,out[Slot::page].y+out[Slot::page].h-285};
+        out[Slot::fhss_list_status]={margin,page_y+4,width-2*margin,54};
+        out[Slot::fhss_apply]={margin,page_y+64,160,action_height};
+        out[Slot::fhss_list]={margin,page_y+106,width-2*margin,std::max(0,page_bottom-page_y-116)};
 
         // Persistent rows keep the shared target readable without reducing
         // the composition, reception or plot areas.
-        const int controls_y = content_height - 135, extra = std::max(0, width - body_growth_width);
+        const int controls_y = height - 135, extra = std::max(0, width - body_growth_width);
         constexpr int control_gap = 10;
         const int device_width = 170 + extra * 20 / 100, bandwidth_width = 112 + extra * 10 / 100;
         const int carrier_width = 135 + extra * 10 / 100, shift_width = 120 + extra * 10 / 100;
@@ -354,22 +375,18 @@ struct DesktopLayout {
         out[Slot::doppler] = {x, controls_y, doppler_width, field_height}; x += doppler_width + control_gap;
         out[Slot::dsp_workspace] = {x, controls_y, width - margin - x, field_height};
         constexpr int snr_width = 260;
-        const int targets_y = content_height - 92;
+        const int targets_y = height - 92;
         out[Slot::snr] = {margin, targets_y, snr_width, field_height};
         x=margin+snr_width+control_gap;
         out[Slot::fec] = {x, targets_y, width-margin-x, field_height};
         // Audio routing and diagnostics sit below the modem settings without
         // narrowing the editors or their labels at the minimum desktop width.
-        out[Slot::mono] = {margin, content_height - 56, 156, 22};
-        out[Slot::live_duplex] = {180, content_height - 56, 100, 22};
-        out[Slot::diagnostics] = {290, content_height - 56, volume_x - audio_gap - 290, 22};
-        out[Slot::status] = {margin, content_height - 31, volume_x - audio_gap - margin, 24};
-        out[Slot::volume] = {volume_x, content_height - 31, volume_width, field_height};
-        out[Slot::exclusive] = {exclusive_x, content_height - 31, exclusive_width, field_height};
-        // Reserve clock and model rows above every page. Lower settings
-        // remain anchored to the window's bottom edge.
-        for(std::size_t index=static_cast<std::size_t>(Slot::tabs);index<static_cast<std::size_t>(Slot::fast_profile);++index)
-            slots[index].y+=header_rows;
+        out[Slot::mono] = {margin, height - 56, 156, 22};
+        out[Slot::live_duplex] = {180, height - 56, 100, 22};
+        out[Slot::diagnostics] = {290, height - 56, volume_x - audio_gap - 290, 22};
+        out[Slot::status] = {margin, height - 31, volume_x - audio_gap - margin, 24};
+        out[Slot::volume] = {volume_x, height - 31, volume_width, field_height};
+        out[Slot::exclusive] = {exclusive_x, height - 31, exclusive_width, field_height};
     }
 };
 inline Rect fast_page_rect(int width,int height) {

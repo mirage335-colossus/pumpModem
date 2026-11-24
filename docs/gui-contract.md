@@ -449,6 +449,11 @@ Console row and covers Console, Simulation and Modem details, with profile,
 audio and action controls accessible across tabs. Both adapters apply the same
 content-size limits through their native window sizing APIs.
 
+Robust uses a 1244×976 logical default and a 920-pixel minimum height. Legacy
+uses a 1040×760 logical target and an 880×600 minimum. The Robust Setup page keeps
+its calendar, local noise model, carrier-spacing and DATA-cadence choices,
+reception notes and resource charts within the compact viewport.
+
 Features using existing controls should change shared declarations and
 application mapping only. Preserve selection and draft state when changing tabs
 or switching active modems. Keep unsupported or unconfigured actions explicitly unavailable with their

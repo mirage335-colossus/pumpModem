@@ -15,38 +15,90 @@ bool contains(Rect outer, Rect inner) {
 }
 void established_default() {
     const DesktopLayout layout;
-    check(DesktopLayout::default_width == 1244 && DesktopLayout::default_height == 1168 &&
-          DesktopLayout::min_width == 1194 && DesktopLayout::min_height == 1088,
+    check(DesktopLayout::default_width == 1244 && DesktopLayout::default_height == 976 &&
+          DesktopLayout::min_width == 1194 && DesktopLayout::min_height == 920,
           "desktop default or minimum size changed");
-    check(layout[Slot::tabs] == Rect{16, 281, 1212, 728}, "header must preserve the compact link and model controls");
-    check(layout[Slot::page] == Rect{16, 313, 1212, 696}, "page viewport must start below every persistent header control");
-    check(layout[Slot::message] == Rect{16, 339, 849, 78}, "compact message composition size changed");
-    check(layout[Slot::paste_previous] == Rect{625, 317, 240, 20}, "previous-message button moved");
-    check(layout[Slot::binary] == Rect{879, 339, 220, 78}, "binary editor moved");
-    check(layout[Slot::qr] == Rect{1113, 339, 115, 115}, "QR preview must span the editor and action rows");
-    check(layout[Slot::transmit_scope] == Rect{16, 476, 1212, 121}, "generation scope size changed");
-    check(layout[Slot::profile_reference] == Rect{948, 753, 280, 248}, "profile reference must share the plot row at the right edge");
-    check(layout[Slot::signals] == Rect{16, 620, 946, 110}, "received signals size changed");
-    check(layout[Slot::files] == Rect{976, 620, 252, 74}, "received files size changed");
-    check(layout[Slot::waterfall] == Rect{16, 753, 220, 248}, "header must preserve usable plot height");
-    check(layout[Slot::device] == Rect{16, 1033, 212, 27}, "persistent modem controls moved");
-    check(layout[Slot::bandwidth] == Rect{238, 1033, 133, 27} &&
-          layout[Slot::carrier] == Rect{381, 1033, 156, 27} &&
-          layout[Slot::rf_shift] == Rect{547, 1033, 141, 27}, "Rate, Carrier and Shift editors lost their reserved widths");
-    check(layout[Slot::snr] == Rect{16, 1076, 260, 27} &&
-          layout[Slot::fec] == Rect{286, 1076, 942, 27}, "single target and error correction lost their persistent row");
-    check(layout[Slot::doppler]==Rect{698,1033,220,27}&&layout[Slot::dsp_workspace]==Rect{928,1033,300,27},
+    check(layout[Slot::tabs] == Rect{16, 227, 1212, 591}, "tabs must follow the compact shared setup rows");
+    check(layout[Slot::page] == Rect{16, 259, 1212, 559}, "page viewport must start below every persistent header control");
+    check(layout[Slot::message] == Rect{16, 285, 858, 69}, "compact message composition size changed");
+    check(layout[Slot::paste_previous] == Rect{634, 263, 240, 20}, "previous-message button moved");
+    check(layout[Slot::binary] == Rect{888, 285, 220, 69}, "binary editor moved");
+    check(layout[Slot::qr] == Rect{1122, 285, 106, 106}, "QR preview must span the editor and action rows");
+    check(layout[Slot::transmit_scope] == Rect{16, 413, 1212, 121}, "generation scope size changed");
+    check(layout[Slot::profile_reference] == Rect{948, 682, 280, 136}, "profile reference must share the plot row at the right edge");
+    check(layout[Slot::signals] == Rect{16, 557, 946, 102}, "received signals size changed");
+    check(layout[Slot::files] == Rect{976, 557, 252, 66}, "received files size changed");
+    check(layout[Slot::waterfall] == Rect{16, 682, 220, 136}, "compact header must leave a usable plot height");
+    check(layout[Slot::device] == Rect{16, 841, 212, 27}, "persistent modem controls moved");
+    check(layout[Slot::bandwidth] == Rect{238, 841, 133, 27} &&
+          layout[Slot::carrier] == Rect{381, 841, 156, 27} &&
+          layout[Slot::rf_shift] == Rect{547, 841, 141, 27}, "Rate, Carrier and Shift editors lost their reserved widths");
+    check(layout[Slot::snr] == Rect{16, 884, 260, 27} &&
+          layout[Slot::fec] == Rect{286, 884, 942, 27}, "single target and error correction lost their persistent row");
+    check(layout[Slot::doppler]==Rect{698,841,220,27}&&layout[Slot::dsp_workspace]==Rect{928,841,300,27},
         "Doppler or advanced controls lost their separate usable row widths");
-    check(layout[Slot::status] == Rect{16, 1137, 940, 24}, "persistent status must reserve the volume controls");
+    check(layout[Slot::status] == Rect{16, 945, 940, 24}, "persistent status must reserve the volume controls");
 }
-void below_minimum_1080_geometry() {
-    // The native window minimum is 1088; this checks geometry only and does
-    // not claim that the complete window fits a 1080-pixel desktop.
+void maximized_geometry() {
     const DesktopLayout layout(1920,1080);
-    check(layout[Slot::waterfall].h>0 && layout[Slot::simulation_oscillator].w>=300 &&
+    check(layout[Slot::page].y+layout[Slot::page].h==1080-158&&layout[Slot::waterfall].h>=180&&
+          layout[Slot::simulation_oscillator].w>=300 &&
           layout[Slot::rf_oscillator].x>layout[Slot::simulation_oscillator].x &&
           layout[Slot::spread_preset].x>layout[Slot::rf_oscillator].x,
-          "Below-minimum 1080 geometry must retain ordered controls and a nonempty plot");
+          "A maximized 1080-pixel desktop must retain ordered controls and usable plots");
+
+    // A 1040-pixel client area at 125% scaling is 832 logical pixels high.
+    constexpr Rect scaled{0,0,1536,832};
+    for(const bool scope:{false,true}) {
+        const DesktopLayout compact(scaled.w,scaled.h,scope);
+        Control spectrum{Kind::bitmap};spectrum.slot=Slot::waterfall;spectrum.footer_height=24;
+        const auto plot=control_layout(spectrum,{},scaled.w,scaled.h,{&spectrum,1},scope);
+        const auto signals=compact[Slot::signals],waterfall=compact[Slot::waterfall];
+        check(plot.widget.h>=40&&contains(compact[Slot::page],plot.widget)&&
+              signals.y+signals.h<=waterfall.y-23,
+              "A scaled maximized console must keep the plot and history visible in both scope states");
+        if(scope)check(compact[Slot::transmit_scope].h>=2*transmit_scope_row_height,
+              "A scaled maximized console must keep the generation scope scrollable");
+        const auto raw=compact[Slot::compression_signals];
+        check(raw.h>=54&&contains(compact[Slot::page],raw)&&
+              raw.y+raw.h<compact[Slot::copy_raw_signal].y,
+              "A scaled maximized Compression page must retain a full history row above its actions");
+    }
+}
+
+void legacy_compact_geometry() {
+    check(legacy_default_width==1040&&legacy_default_height==760&&
+          legacy_min_width==880&&legacy_min_height==600,
+          "Legacy window defaults or minimum size changed");
+    for(const auto size:{Rect{0,0,legacy_min_width,legacy_min_height},
+                         Rect{0,0,legacy_default_width,legacy_default_height},
+                         Rect{0,0,1920,1080}}) {
+        const DesktopLayout layout(size.w,size.h);
+        const auto transcript=layout[Slot::legacy_transcript];
+        const auto draft=layout[Slot::legacy_text];
+        const auto waterfall=layout[Slot::legacy_waterfall];
+        const auto device=layout[Slot::legacy_device];
+        const auto squelch=layout[Slot::legacy_squelch];
+        const auto volume=layout[Slot::legacy_volume];
+        check(transcript.x==margin&&draft.x==margin&&transcript.w==draft.w&&
+              transcript.y==112&&draft.y==transcript.y+transcript.h+24&&
+              draft.h>=78&&draft.h<=150&&draft.y+draft.h==size.h-104,
+              "Legacy text panes must share a compact left column with a clear title gap");
+        check(waterfall.x==transcript.x+transcript.w+18&&waterfall.y==112&&
+              waterfall.x+waterfall.w==size.w-margin&&waterfall.y+waterfall.h==size.h-104&&
+              waterfall.h>=size.h-216,
+              "Legacy waterfall must use the right column and grow with the window");
+        check(device.x==margin&&device.y==size.h-80&&device.x+device.w+18==squelch.x&&
+              squelch.x+squelch.w==size.w-margin&&waterfall.y+waterfall.h<device.y-label_height&&
+              device.y+device.h<volume.y-label_height,
+              "Legacy audio device and squelch must stay reachable below the waterfall");
+        for(const auto slot:{Slot::legacy_profile,Slot::legacy_carrier,Slot::legacy_mono,
+                             Slot::legacy_transmit,Slot::legacy_transcript,Slot::legacy_text,
+                             Slot::legacy_waterfall,Slot::legacy_device,Slot::legacy_squelch,
+                             Slot::legacy_status,Slot::legacy_volume,Slot::legacy_exclusive})
+            check(contains(size,layout[slot])&&layout[slot].w>0&&layout[slot].h>0,
+                  "Legacy control falls outside its compact, default, or maximized window");
+    }
 }
 void fast_responsive_geometry() {
     check(fast_default_height==800&&fast_min_height==720,
@@ -57,7 +109,7 @@ void fast_responsive_geometry() {
     const auto actual=control_layout(controls.front(),{},default_width,fast_min_height,controls,
         true,false,fast_viewport).frame;
     const auto fallback=control_layout(controls.front(),{},default_width,fast_min_height,controls).frame;
-    check(actual.y==110&&fallback.y==337,
+    check(actual.y==110&&fallback.y==283,
         "Fast row controls must use the actual page viewport while legacy callers retain regular geometry");
     for(const int width:{min_width,default_width})
     for(const int height:{fast_min_height,760,fast_default_height,878,879,919,920}) {
@@ -122,7 +174,7 @@ void supported_sizes() {
     for (const auto size : {Rect{0, 0, min_width, min_height}, Rect{0, 0, min_width, default_height},
                             Rect{0, 0, min_width, 1200}, Rect{0, 0, 1920, min_height},
                             Rect{0, 0, default_width, default_height},
-                            Rect{0, 0, 1387, 1097}, Rect{0, 0, 1920, 1128}}) {
+                            Rect{0, 0, 1387, 1097}, Rect{0, 0, 1920, 1080}, Rect{0, 0, 1920, 1128}}) {
         const DesktopLayout layout(size.w, size.h);
         const auto fast_qr=layout[Slot::fast_qr],fast_brightness=layout[Slot::fast_qr_brightness];
         check(fast_brightness.x==fast_qr.x&&fast_brightness.w==fast_qr.w&&
@@ -147,19 +199,8 @@ void supported_sizes() {
                   "TX volume must retain its native label and upward dropdown geometry");
         }
         check(layout[Slot::fast_diagnostics].w>=552&&
-              layout[Slot::fast_expected_snr].y+field_height<layout[Slot::fast_volume].y-label_height&&
-              layout[Slot::legacy_waterfall].y+layout[Slot::legacy_waterfall].h<layout[Slot::legacy_volume].y-label_height,
+              layout[Slot::fast_expected_snr].y+field_height<layout[Slot::fast_volume].y-label_height,
               "Audio volume labels overlap the preceding modem controls or waterfall");
-        const auto legacy_device=layout[Slot::legacy_device],legacy_squelch=layout[Slot::legacy_squelch];
-        const auto legacy_waterfall=layout[Slot::legacy_waterfall],legacy_text=layout[Slot::legacy_text];
-        check(legacy_device.y==legacy_squelch.y&&legacy_device.x==margin&&legacy_device.w>=600&&
-              legacy_squelch.x==legacy_device.x+legacy_device.w+18&&legacy_squelch.w==240&&
-              legacy_squelch.x+legacy_squelch.w==size.w-margin&&
-              legacy_waterfall.y+legacy_waterfall.h<legacy_device.y-label_height&&
-              legacy_device.y+legacy_device.h<layout[Slot::legacy_volume].y-label_height,
-              "Legacy audio device must be left of Squelch below the waterfall and clear of volume labels");
-        check(legacy_waterfall.h==166&&legacy_text.y+legacy_text.h<legacy_waterfall.y-23,
-              "Moving Legacy audio controls must preserve waterfall height and keep its title clear of the draft");
         for (std::size_t index = 1; index < static_cast<std::size_t>(Slot::count); ++index) {
             const auto slot = static_cast<Slot>(index);
             const auto rect = layout[slot];
@@ -196,8 +237,10 @@ void supported_sizes() {
                   "Both Simulation modes must provide readable, separate editable link inputs");
             previous_input=input;
         }
-        check(previous_input.x+previous_input.w==size.w-margin,
-              "Shared link inputs must use the available row width");
+        const auto clock=layout[Slot::clock_accuracy],audio_error=layout[Slot::audio_error];
+        check(previous_input.x+previous_input.w+10==clock.x&&
+              audio_error.x+audio_error.w==size.w-margin,
+              "Shared link and clock inputs must fit across their reserved portions of one row");
         const auto oscillator=layout[Slot::simulation_oscillator];
         check(oscillator.x==margin&&oscillator.w>=300&&oscillator.h==field_height&&
               oscillator.y-label_height>layout[Slot::audio_error].y+field_height,
@@ -333,10 +376,10 @@ void supported_sizes() {
               "Exact-bit editor overlaps the lowercase compression reference");
         const auto raw_signals=layout[Slot::compression_signals],raw_copy=layout[Slot::copy_raw_signal];
         const auto raw_paste=layout[Slot::paste_raw_signal],raw_detail=layout[Slot::received_raw_bits];
-        check(raw_signals.h>=134&&raw_signals.y+raw_signals.h<raw_copy.y&&
+        check(raw_signals.h>=54&&raw_signals.y+raw_signals.h<raw_copy.y&&
               raw_copy.y==raw_paste.y&&raw_copy.x+raw_copy.w<raw_paste.x&&
               raw_copy.y+raw_copy.h<raw_detail.y&&raw_detail.h>=48,
-              "Exact received bits or their actions overlap the signal history");
+              "Compact exact-bit history must retain one complete row and keep its actions reachable");
         auto previous = layout[Slot::device];
         const auto control_gap = layout[Slot::bandwidth].x - previous.x - previous.w;
         check(control_gap == 10, "Modem row lost its shared control spacing");
@@ -568,7 +611,7 @@ void expanded_bitmaps() {
 }
 int main() {
     try {
-        established_default();below_minimum_1080_geometry();fast_responsive_geometry();
+        established_default();maximized_geometry();legacy_compact_geometry();fast_responsive_geometry();
         document_widths();
         supported_sizes();
         hidden_scope_reclaims_space();

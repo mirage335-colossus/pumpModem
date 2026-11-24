@@ -77,7 +77,14 @@
             <<" logical_height="<<details.size.height<<" scale="<<details.scale<<'\n';
         require(restored_minimum(),
             "Rev Robust mode did not restore its native minimum hint and enlarge the compact Fast window");
-        resize(ui::default_width,ui::default_height);
+        const auto robust_size=application.window_sizing();
+        resize(robust_size.min_width,robust_size.min_height-24);
+        for(int frame=0;frame<3;++frame) {
+            settle();
+            require(details.size.height==robust_size.min_height-24,
+                "Rev Robust mode repeatedly overrode a short native window after applying its minimum hint");
+        }
+        resize(robust_size.width,robust_size.height);
         const auto verify_audio=[&](ui::Field volume_field,ui::Field exclusive_field,ui::Field device_field=ui::Field::count) {
             auto* volume=by_field(volume_field).choice;
             auto* exclusive=by_field(exclusive_field).toggle;
@@ -246,10 +253,23 @@
         }
         resize(ui::default_width,ui::default_height);
         re::Event legacy_selection;selector->params.value="legacy";selector->onChange(legacy_selection);settle();
-        for(const auto size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
+        const auto legacy_size=application.window_sizing();
+        require(window->size.minW==static_cast<int>(std::ceil(legacy_size.min_width*details.scale))&&
+                window->size.minH==static_cast<int>(std::ceil(legacy_size.min_height*details.scale))&&
+                legacy_size.min_height<ui::min_height,
+            "Rev Legacy mode retained its tall shared minimum window size");
+        for(const auto size:{std::pair{legacy_size.width,legacy_size.height},
+                             std::pair{legacy_size.min_width,legacy_size.min_height}}) {
             resize(size.first,size.second);
             verify_audio(ui::Field::legacy_volume,ui::Field::legacy_exclusive,ui::Field::legacy_device);
         }
+        resize(legacy_size.min_width,legacy_size.min_height-24);
+        for(int frame=0;frame<3;++frame) {
+            settle();
+            require(details.size.height==legacy_size.min_height-24,
+                "Rev Legacy mode repeatedly overrode a short native window after applying its minimum hint");
+        }
+        resize(legacy_size.width,legacy_size.height);
         auto* transcript=by_field(ui::Field::legacy_transcript).editor;
         auto* draft=by_field(ui::Field::legacy_text).editor;
         require(transcript&&draft&&transcript->read_only&&!transcript->editable&&transcript->selectable&&

@@ -1031,10 +1031,12 @@ private:
     }
     void apply_window_sizing() {
         const auto sizing=application.window_sizing();
-        if(!applied_window_sizing||*applied_window_sizing!=sizing) {
-            window->size_range(sizing.min_width,sizing.min_height);
-            applied_window_sizing=sizing;
-        }
+        if(applied_window_sizing==sizing)return;
+        window->size_range(sizing.min_width,sizing.min_height);
+        applied_window_sizing=sizing;
+        // Grow a restored window once when switching modes. The window
+        // manager owns the maximized size, even below our requested minimum.
+        if(window->maximize_active()||window->fullscreen_active())return;
         if(window->w()<sizing.min_width||window->h()<sizing.min_height)
             window->resize(window->x(),window->y(),std::max(window->w(),sizing.min_width),
                 std::max(window->h(),sizing.min_height));

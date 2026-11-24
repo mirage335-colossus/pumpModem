@@ -29,6 +29,12 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 import Rev.Window;
 import Rev.NativeWindow;
@@ -843,17 +849,12 @@ public:
     }
     void onClose(bool& reject) override {reject=true;hide_help(true);application.close();}
     void onResize(int width,int height) override {
-        const auto sizing=application.window_sizing();
-        const int minimum_width=static_cast<int>(std::ceil(sizing.min_width*window->scale));
-        const int minimum_height=static_cast<int>(std::ceil(sizing.min_height*window->scale));
-        if(width<minimum_width || height<minimum_height) {
-            width=std::max(width,minimum_width);height=std::max(height,minimum_height);window->setSize(width,height);
-        }
         Rev::Window::onResize(width,height);if(surface)layout_desktop();
     }
     void onScale(float scale) override {
-        Rev::Window::onScale(scale);applied_window_sizing.reset();apply_window_sizing();
-        if(surface)layout_desktop();
+        Rev::Window::onScale(scale);
+        const auto sizing=application.window_sizing();
+        Rev::Window::setMinimumSize(sizing.min_width,sizing.min_height);
     }
     bool allows_input(re::Element* target) const {
         for(auto* element=target;element;element=element->parent) {
@@ -1279,10 +1280,16 @@ public:
     }
     void apply_window_sizing() {
         const auto sizing=application.window_sizing();
-        if(!applied_window_sizing||*applied_window_sizing!=sizing) {
-            Rev::Window::setMinimumSize(sizing.min_width,sizing.min_height);
-            applied_window_sizing=sizing;
-        }
+        if(applied_window_sizing==sizing)return;
+        Rev::Window::setMinimumSize(sizing.min_width,sizing.min_height);
+        applied_window_sizing=sizing;
+        // Growth is a one-time request for restored windows on mode changes.
+        // Subsequent resize notifications give us the actual client size.
+#ifdef _WIN32
+        if(IsZoomed(window->handle))return;
+#else
+        if(window->maximized||window->fullscreen)return;
+#endif
         const int minimum_width=static_cast<int>(std::ceil(sizing.min_width*window->scale));
         const int minimum_height=static_cast<int>(std::ceil(sizing.min_height*window->scale));
         if(window->size.w<minimum_width||window->size.h<minimum_height) {

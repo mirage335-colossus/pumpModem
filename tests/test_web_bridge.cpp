@@ -280,8 +280,11 @@ std::string rect(ui::Rect value) {
 }
 void shared_geometry_and_stable_snapshots() {
     Launch launch;launch.simulation=true;Application app(launch);web::Bridge bridge(app);
+    auto sizing=app.window_sizing();
+    check(sizing==WindowSizing{ui::default_width,ui::default_height,ui::min_width,ui::min_height},
+          "Robust mode must use the compact shared window size");
     const auto small=bridge.snapshot(360,640);
-    check(small.find("\"layout\":{\"width\":"+std::to_string(ui::min_width)+",\"height\":"+std::to_string(ui::min_height))!=std::string::npos,
+    check(small.find("\"layout\":{\"width\":"+std::to_string(sizing.min_width)+",\"height\":"+std::to_string(sizing.min_height))!=std::string::npos,
           "Small browser viewport must preserve shared minimum desktop extent");
     check(small==bridge.snapshot(360,640),"Unchanged polling repainted bitmaps or advanced presentation revision");
     const int width=ui::default_width,height=ui::default_height;
@@ -300,12 +303,33 @@ void shared_geometry_and_stable_snapshots() {
     for(const auto& tab:app.tab_layout(width,height))if(tab.visible)
         check(snapshot.find("\"frame\":"+rect(tab.frame))!=std::string::npos,"Shared tab geometry omitted");
     check(snapshot==bridge.snapshot(width,height),"Full unchanged snapshot is not stable");
-    app.select(ui::Field::fast_mode,"fast");const auto fast=bridge.snapshot(width,height);
+    app.select_page(ui::Page::robust_setup);
+    const auto setup=bridge.snapshot(ui::min_width,ui::min_height);
+    const auto setup_page=app.page_bounds(ui::min_width,ui::min_height);
+    for(const auto& control:ui::console_screen()) {
+        if(control.page!=ui::Page::robust_setup||control.document_only||!app.control(control).visible)continue;
+        const auto frame=app.control_layout(control,ui::min_width,ui::min_height).frame;
+        check(frame.x>=setup_page.x&&frame.y>=setup_page.y&&frame.x+frame.w<=setup_page.x+setup_page.w&&
+              frame.y+frame.h<=setup_page.y+setup_page.h,
+              "Compact Robust setup control escaped its page viewport");
+        check(setup.find("\"geometry\":{\"frame\":"+rect(frame))!=std::string::npos,
+              "Compact Robust setup geometry was omitted from the browser snapshot");
+    }
+    app.select(ui::Field::fast_mode,"fast");sizing=app.window_sizing();
+    check(sizing==WindowSizing{ui::default_width,ui::fast_default_height,ui::min_width,ui::fast_min_height},
+          "Fast mode must retain its existing compact window size");
+    const auto fast=bridge.snapshot(width,height);
     const auto message=id(fast,"Message");auto edit=event(bridge,web::EventKind::edit,message,1);edit.value="layout";
     check(bridge.accept(edit).accepted,"Geometry-aware snapshot lost editable target");
     const auto updated=bridge.snapshot(width,height);
     check(updated!=snapshot&&updated.find("\"ack\":\"1\"")!=std::string::npos,"Actual edit/ack was suppressed by snapshot cache");
     check(updated==bridge.snapshot(width,height),"Edited presentation remains unstable after acknowledgment");
+    app.select(ui::Field::fast_mode,"legacy");sizing=app.window_sizing();
+    check(sizing==WindowSizing{ui::legacy_default_width,ui::legacy_default_height,ui::legacy_min_width,ui::legacy_min_height},
+          "Legacy mode must use its own compact window size");
+    const auto legacy=bridge.snapshot(360,480);
+    check(legacy.find("\"layout\":{\"width\":"+std::to_string(sizing.min_width)+",\"height\":"+std::to_string(sizing.min_height))!=std::string::npos,
+          "Legacy browser viewport must use its compact minimum desktop extent");
     app.close();
 }
 void measured_document_geometry() {

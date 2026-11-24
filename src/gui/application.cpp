@@ -121,7 +121,9 @@ WindowSizing initial_window_sizing(const Launch& options) {
     return fast?WindowSizing{ui::default_width,ui::fast_default_height,ui::min_width,ui::fast_min_height}:WindowSizing{};
 }
 WindowSizing Application::window_sizing() const {
-    return impl_->fast_selected()?WindowSizing{ui::default_width,ui::fast_default_height,ui::min_width,ui::fast_min_height}:WindowSizing{};
+    if(impl_->fast_selected())return {ui::default_width,ui::fast_default_height,ui::min_width,ui::fast_min_height};
+    if(impl_->legacy_selected())return {ui::legacy_default_width,ui::legacy_default_height,ui::legacy_min_width,ui::legacy_min_height};
+    return {ui::default_width,ui::default_height,ui::min_width,ui::min_height};
 }
 void Application::start() {
     if(impl_->started_session)return;

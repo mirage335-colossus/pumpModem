@@ -24,6 +24,10 @@ void presentation_and_isolation() {
     app.select(F::fast_constellation,"256");app.toggle(F::fast_encryption,true);
     app.select(F::fast_mode,"legacy");
     check(app.field(F::fast_mode).options.size()==3&&app.field(F::fast_mode).options.back().label=="Legacy Modem","Legacy dropdown choice missing");
+    const auto legacy_sizing=app.window_sizing();
+    check(legacy_sizing.width==ui::legacy_default_width&&legacy_sizing.height==ui::legacy_default_height&&
+          legacy_sizing.min_width==ui::legacy_min_width&&legacy_sizing.min_height==ui::legacy_min_height,
+          "Legacy selection must apply its compact native window size");
     std::size_t actions=0,editors=0,plots=0;
     for(const auto& c:ui::console_screen()) {
         const auto view=app.control(c);
@@ -33,14 +37,16 @@ void presentation_and_isolation() {
             if(c.kind==ui::Kind::action) {++actions;check(c.command==C::legacy_transmit,"Legacy exposes an extra action");}
             if(c.kind==ui::Kind::text&&c.multiline)++editors;
             if(c.kind==ui::Kind::bitmap)++plots;
-            for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
+            for(const auto size:{ui::Rect{0,0,ui::legacy_min_width,ui::legacy_min_height},
+                                 ui::Rect{0,0,ui::legacy_default_width,ui::legacy_default_height},
+                                 ui::Rect{0,0,1920,1080}}) {
                 const auto r=app.control_layout(c,size.w,size.h).frame;
                 check(r.x>=0&&r.y>=0&&r.w>0&&r.h>0&&r.x+r.w<=size.w&&r.y+r.h<=size.h,"Legacy control lies outside the desktop");
             }
         }
     }
     check(actions==1&&editors==2&&plots==1,"Legacy must expose two text boxes, a waterfall and one Transmit button");
-    for(const auto& tab:app.tab_layout(ui::default_width,ui::default_height))check(!tab.visible,"Regular tabs leaked into Legacy");
+    for(const auto& tab:app.tab_layout(ui::legacy_default_width,ui::legacy_default_height))check(!tab.visible,"Regular tabs leaked into Legacy");
     const auto& transcript=control(F::legacy_transcript);
     check(transcript.read_only&&app.control(transcript).enabled,"Transcript must remain selectable while read-only");
     app.edit(transcript,"must not modify transcript");check(app.field(F::legacy_transcript).text.empty(),"Read-only transcript accepted an edit");
@@ -60,10 +66,18 @@ void presentation_and_isolation() {
     check(app.enabled(C::legacy_transmit),"Legacy text draft did not enable TX");
     app.edit(F::binary,"111");app.select(F::fec,"rs60");app.toggle(F::fast_encryption,false);app.edit(F::fast_text,"stale fast");
     app.select(F::fast_mode,"robust");
+    const auto robust_sizing=app.window_sizing();
+    check(robust_sizing.width==ui::default_width&&robust_sizing.height==ui::default_height&&
+          robust_sizing.min_width==ui::min_width&&robust_sizing.min_height==ui::min_height,
+          "Robust selection must apply the compact shared window size");
     check(app.page()==ui::Page::compression&&app.field(F::binary).text=="001"&&app.field(F::fec).selected==fec&&
         app.field(F::key).selected==encryption&&app.field(F::carrier).text==carrier,"Legacy changed Robust settings or page");
     app.edit(F::legacy_text,"stale hidden Legacy draft");
     app.select(F::fast_mode,"fast");
+    const auto fast_sizing=app.window_sizing();
+    check(fast_sizing.width==ui::default_width&&fast_sizing.height==ui::fast_default_height&&
+          fast_sizing.min_width==ui::min_width&&fast_sizing.min_height==ui::fast_min_height,
+          "Fast selection must retain its existing compact window size");
     check(app.field(F::fast_text).text=="retained fast text"&&app.field(F::fast_encryption).checked&&app.field(F::fast_constellation).selected=="256",
         "Legacy changed Fast source/encryption/modulation settings");
     app.select(F::fast_mode,"legacy");

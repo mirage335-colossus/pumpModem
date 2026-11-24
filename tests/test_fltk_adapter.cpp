@@ -610,6 +610,15 @@ void fast_mode_visibility() {
         window->get_size_range(&minimum_width,&minimum_height);
         require(minimum_height==ui::min_height&&window->h()>=ui::min_height,
             "FLTK Robust transition did not restore its minimum hint and enlarge the compact window");
+        const auto robust_size=app.application.window_sizing();
+        const int below_minimum_height=robust_size.min_height-24;
+        window->resize(window->x(),window->y(),window->w(),below_minimum_height);
+        for(int frame=0;frame<3;++frame) {
+            refresh();
+            require(window->h()==below_minimum_height,
+                "FLTK Robust mode repeatedly overrode a short native window after applying its minimum hint");
+        }
+        window->size(window->w(),robust_size.height);refresh();
         selector->picked(selector->menu());refresh();
         window->get_size_range(&minimum_width,&minimum_height);
         require(minimum_height==ui::fast_min_height,
@@ -785,10 +794,25 @@ void fast_mode_visibility() {
         choose->do_callback();require(app.application.take_services().empty(),"Hidden fast native callback opened a file chooser");
     }
     selector->picked(selector->menu()+2);refresh();
-    for(const auto size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
+    const auto legacy_size=app.application.window_sizing();
+    int legacy_min_width=0,legacy_min_height=0;
+    window->get_size_range(&legacy_min_width,&legacy_min_height);
+    require(legacy_min_width==legacy_size.min_width&&legacy_min_height==legacy_size.min_height&&
+        legacy_size.min_height<ui::min_height,
+        "FLTK Legacy mode retained the tall shared minimum window size");
+    for(const auto size:{std::pair{legacy_size.width,legacy_size.height},
+                         std::pair{legacy_size.min_width,legacy_size.min_height}}) {
         window->size(size.first,size.second);refresh();
         verify_audio(ui::Field::legacy_volume,ui::Field::legacy_exclusive,ui::Field::legacy_device);
     }
+    const int legacy_below_minimum_height=legacy_size.min_height-24;
+    window->resize(window->x(),window->y(),window->w(),legacy_below_minimum_height);
+    for(int frame=0;frame<3;++frame) {
+        refresh();
+        require(window->h()==legacy_below_minimum_height,
+            "FLTK Legacy mode repeatedly overrode a short native window after applying its minimum hint");
+    }
+    window->size(window->w(),legacy_size.height);refresh();
     auto* transcript=field_widget.template operator()<NativeEditor>("Received and transmitted text");
     auto* legacy_draft=field_widget.template operator()<NativeEditor>("Text to transmit");
     auto* legacy_carrier=field_widget.template operator()<NativeInput>("Carrier (Hz)");
@@ -1756,14 +1780,15 @@ void compression_page_labels() {
     NativeApp app(launch);Fl::check();
     app.application.toggle(ui::Field::developer_mode,true);app.application.select_page(ui::Page::compression);
     auto* window=application_window();require(window,"Compression fixture has no native window");
-    window->resize(window->x(),window->y(),ui::min_width,ui::min_height);
     const auto& controls=ui::console_screen();
     const auto console_airtime=std::find_if(controls.begin(),controls.end(),[](const auto& c) {
         return c.page==ui::Page::console&&c.field==ui::Field::airtime;
     });
     require(console_airtime!=controls.end(),"Console airtime declaration is missing");
+    for(const auto& size:{std::pair{ui::min_width,ui::min_height},std::pair{1536,832}})
     for(const auto& draft:std::array<std::string,5>{"","010","0010","01010",std::string(207,'0')+"1"}) {
-        if(!draft.empty())app.application.edit(ui::Field::short_bits,draft);
+        window->size(size.first,size.second);
+        app.application.edit(ui::Field::short_bits,draft);
         const auto check=[&]() -> std::optional<std::string> {
             for(const auto& c:controls)if(c.page==ui::Page::compression&&c.kind==ui::Kind::label) {
                 const auto value=app.application.control(c).label;
@@ -1790,7 +1815,7 @@ void compression_page_labels() {
                     (at_expected&&at_expected->label()?at_expected->label():"no visible label at bounds")+"]";
                 fl_font(label->labelfont(),label->labelsize());int width=0,height=0;fl_measure(value.c_str(),width,height,0);
                 if(width>label->w()||height>label->h())
-                    throw std::runtime_error("Compression label clips at the minimum window size: "+value+
+                    throw std::runtime_error("Compression label clips in the compact window: "+value+
                         " (needs "+std::to_string(width)+"x"+std::to_string(height)+", has "+
                         std::to_string(label->w())+"x"+std::to_string(label->h())+")");
                 if(c.field==ui::Field::airtime) {
@@ -1798,7 +1823,7 @@ void compression_page_labels() {
                     fl_font(label->labelfont(),console_airtime->font_size);width=height=0;
                     fl_measure(value.c_str(),width,height,0);
                     if(width>bounds.w||height>bounds.h)
-                        throw std::runtime_error("Airtime label clips in Console at the minimum window size: "+value);
+                        throw std::runtime_error("Airtime label clips in the compact Console: "+value);
                 }
             }
             if(!draft.empty()&&!app.application.enabled(ui::Command::transmit_short_bits))
