@@ -86,7 +86,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::wrong_key_admission)control.help="Fractions estimate wrong-key DATA-bit admissions remaining relative to Unfiltered in the static-HF reference, not the fraction of messages shown; 1/10 means 90% filtered. The dB values estimate loss of wanted-bit visibility in coarse HF reference tests; they do not reduce the sensitivity of the preserved original reception. These rounded estimates reflect coarse sampling, not exact power costs or statistical bounds. * Extrapolated model target: the 1/100 and 1/1000 remaining admission fractions are model estimates. This browser filter preserves original reception and decoded content in bounded memory history. Completed records remain visible when at least half their admitted DATA bits pass; pending and unrated records stay visible. Unfiltered restores all retained baseline records. Stronger filters can hide wanted signals, including strong signals in long Sub-9 kHz fading windows; higher SNR may not restore visibility. No guaranteed rejection fraction, fixed dB cost, daily rate or authentication. Does not restart reception or alter the waveform.";
     if(slot==Slot::symbol_burst_random||slot==Slot::wrong_key_admission)control.font_size=11;
 
-    if(slot==Slot::mode)control.help="Native three-carrier Robust session state. Live reception needs the shared public calendar and a declared local input-noise model; set these in Robust setup.";
+    if(slot==Slot::mode)control.help="Native three-carrier Robust session state. Set the shared UTC anchor in Robust Setup and keep the input idle during automatic noise calibration.";
     if(slot==Slot::paste_previous) {control.font_size=11;control.help="Paste the previous transmitted message back into Message for editing or retransmission.";}
     if(slot==Slot::force_transmit) {
         control.font_size=11;
@@ -174,19 +174,34 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::dsp_workspace)control.help="Automatic uses cgroup-aware available RAM with bounded host headroom. Percentage choices are explicit receiver limits. Receiver software workers still default to twice effective logical CPU capacity.";
     if(control.field==Field::calendar_epoch) {
         control.purpose=ControlPurpose::setup;
-        control.help="Shared public calendar anchor as whole UTC seconds, 6 through 4294967289. Both peers must configure the same anchor and ordinal. None leaves live transmission/reception unconfigured; simulation uses its own agreed local calendar.";
+        control.help="Auto uses the same UTC calendar at both peers. Match the key and waveform settings. For a custom calendar, enter Unix seconds, YYYY-MM-DD HH:MM:SS, or YYYY-MM-DDTHH:MM:SSZ (seconds 6–4294967289) at both peers.";
+    }
+    if(control.command==Command::new_calendar_anchor) {
+        control.purpose=ControlPurpose::setup;
+        control.help="Optional custom calendar. Choose a UTC anchor about two minutes ahead and reset the initial ordinal to 0. Copy this machine's Link Planner command to the other peer to use that calendar.";
     }
     if(control.field==Field::calendar_ordinal) {
         control.purpose=ControlPurpose::setup;
-        control.help="Shared unsigned initial waveform ordinal. It advances through DATA and quiet slots and does not reset at message boundaries.";
+        control.help="For a custom calendar, use the same starting ordinal at both peers. The waveform ordinal advances through DATA and quiet slots across messages.";
+    }
+    if(control.command==Command::recalibrate_live_noise) {
+        control.purpose=ControlPurpose::setup;
+        control.help="Start a new local measurement from idle input.";
     }
     if(control.field==Field::live_noise_dbfs_hz) {
         control.purpose=ControlPurpose::setup;
-        control.help="Declared one-sided audio input noise density in dBFS/Hz, using normalized PCM squared per hertz. A finite conservative model is required for live likelihoods; this setting is not an automatic calibration or physical-noise qualification. Unspecified keeps live reception unconfigured.";
+        control.help="Auto measures this receiver's idle input noise density at live startup. You can instead enter a measured dBFS/Hz value or select Unspecified for transmit-only operation. dBFS/Hz is local input noise power per hertz relative to digital full scale; Target SNR sets the design ratio. Simulation uses modeled channel noise.";
+    }
+    if(control.field==Field::calendar_timing) {
+        control.help="Waveform, cadence and burst waits set the spacing between public slots. Leave Symbol Burst Off and Random extra at 0 for short messages. The Console estimates time for the draft and two scored quiet slots. Allow additional time for the first eligible slot and receiver processing.";
     }
     if(control.field==Field::minimum_carrier_spacing) {
         control.purpose=ControlPurpose::setup;
         control.help="Minimum center-to-center spacing between adjacent Robust DATA carriers. The native waveform uses the larger of this setting and its rate-derived spacing. Both peers must use the same setting.";
+    }
+    if(control.field==Field::audio_sample_rate) {
+        control.purpose=ControlPurpose::setup;
+        control.help="Auto selects a logical audio sample rate for the configured waveform. Choose an explicit rate for live operation or Simulation when needed. Match the setting and waveform at both peers. Higher rates use more input memory and require a suitable audio device for live operation.";
     }
     if(control.field==Field::data_cadence) {
         control.purpose=ControlPurpose::setup;
@@ -257,14 +272,17 @@ const std::vector<Control>& console_screen() {
         placed({Kind::choice,Field::search_arithmetic,Command::none,Bitmap::none,Page::planner,4,"Search arithmetic"}, Slot::none),
         placed({Kind::choice,Field::receiver_strategy,Command::none,Bitmap::none,Page::planner,4,"Receiver strategy"}, Slot::none),
         placed({Kind::text,Field::receiver_cpu_budget,Command::none,Bitmap::none,Page::planner,4,"CPU budget (s / 1 s)",1,false,64}, Slot::none),
-        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,0,"Both peers must share the calendar, ordinal, key and waveform settings."}, Slot::none),
-        placed({Kind::text,Field::calendar_epoch,Command::none,Bitmap::none,Page::robust_setup,1,"Calendar anchor (UTC seconds)",2,false,32}, Slot::none),
+        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,0,"Auto shares the UTC calendar. Match the key and waveform settings.",3}, Slot::none),
+        placed({Kind::action,Field::count,Command::recalibrate_live_noise,Bitmap::none,Page::robust_setup,0,"Recalibrate input"}, Slot::none),
+        placed({Kind::text,Field::calendar_epoch,Command::none,Bitmap::none,Page::robust_setup,1,"Calendar (Auto or UTC anchor)",2,false,32}, Slot::none),
         placed({Kind::text,Field::calendar_ordinal,Command::none,Bitmap::none,Page::robust_setup,1,"Initial waveform ordinal",2,false,32}, Slot::none),
-        placed({Kind::text,Field::live_noise_dbfs_hz,Command::none,Bitmap::none,Page::robust_setup,1,"Live input noise (dBFS/Hz)",2,false,64}, Slot::none),
+        placed({Kind::text,Field::live_noise_dbfs_hz,Command::none,Bitmap::none,Page::robust_setup,1,"Live noise calibration (dBFS/Hz)",2,false,64}, Slot::none),
+        placed({Kind::action,Field::count,Command::new_calendar_anchor,Bitmap::none,Page::robust_setup,2,"New shared anchor"}, Slot::none),
         placed({Kind::choice,Field::minimum_carrier_spacing,Command::none,Bitmap::none,Page::robust_setup,2,"Minimum carrier spacing"}, Slot::none),
         placed({Kind::choice,Field::data_cadence,Command::none,Bitmap::none,Page::robust_setup,2,"DATA cadence"}, Slot::none),
-        [] { auto c=placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::robust_setup,3,
-            "Live reception uses a declared local noise model. Simulation uses the sampled channel noise.\nUnknown transmission starts are not acquired. Message completion requires two scored quiet slots."}, Slot::none);
+        placed({Kind::text,Field::audio_sample_rate,Command::none,Bitmap::none,Page::robust_setup,2,"Audio sample rate",1,false,32}, Slot::none),
+        [] { auto c=placed({Kind::label,Field::calendar_timing,Command::none,Bitmap::none,Page::robust_setup,3,
+            "Calendar timing"}, Slot::none);
             c.multiline=true;c.font_size=12;c.unslotted_height=32;return c; }(),
         {.kind=Kind::bitmap,.bitmap=Bitmap::cpu_utilization,.page=Page::robust_setup,.row=4,.label="CPU utilization",.stretch=5,.unslotted_height=86},
         {.kind=Kind::bitmap,.bitmap=Bitmap::ram_usage,.page=Page::robust_setup,.row=4,.label="RAM usage",.stretch=3,.unslotted_height=86},

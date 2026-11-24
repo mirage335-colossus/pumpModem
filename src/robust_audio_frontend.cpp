@@ -1,18 +1,137 @@
 #include "datapump/robust_audio_frontend.hpp"
 
+#include "search_fft.hpp"
+
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cmath>
+#include <complex>
 #include <limits>
 #include <numbers>
+#include <vector>
 
 namespace datapump::live::detail {
 namespace {
 using triad::v3::Complex;
 
+constexpr std::size_t calibration_frames = 16;
+constexpr double calibration_margin_db = 3.;
+
+std::size_t calibration_frame_size(std::uint32_t rate) {
+    if (rate < 64 || rate > 192000)
+        throw Error("Robust audio noise calibration requires a supported sample rate");
+    const auto target = static_cast<std::size_t>((rate + 7U) / 8U);
+    const auto size = std::bit_ceil(std::max<std::size_t>(32, target));
+    if (!size || size > std::numeric_limits<std::size_t>::max() / calibration_frames)
+        throw Error("Robust audio noise calibration size is not representable");
+    return size;
+}
+
+double median(std::array<double, calibration_frames> values) {
+    const auto middle = values.begin() + calibration_frames / 2;
+    std::nth_element(values.begin(), middle, values.end());
+    const auto upper = *middle;
+    const auto lower = *std::max_element(values.begin(), middle);
+    return (lower + upper) / 2;
+}
+
 Complex carrier(std::uint64_t sample, double frequency, std::uint32_t rate) {
     const auto cycles = std::remainder(static_cast<long double>(sample) * frequency / rate, 1.L);
     return std::polar(1., static_cast<double>(2 * std::numbers::pi_v<long double> * cycles));
 }
+}
+
+std::size_t noise_calibration_samples(std::uint32_t rate) {
+    return calibration_frames * calibration_frame_size(rate);
+}
+
+std::size_t noise_calibration_workspace_bytes(std::uint32_t rate) {
+    const auto n = calibration_frame_size(rate);
+    const auto bins = n / 2 + 1;
+    constexpr auto max = std::numeric_limits<std::size_t>::max();
+    const auto add = [](std::size_t a, std::size_t b) {
+        if (b > std::numeric_limits<std::size_t>::max() - a)
+            throw Error("Robust audio noise calibration workspace is not representable");
+        return a + b;
+    };
+    // FFT input, plan twiddles, PSD, frame statistics and
+    // caller-owned PCM are all live at their high-water mark here.
+    std::size_t bytes = noise_calibration_samples(rate) * sizeof(float);
+    if (n > max / (2 * sizeof(std::complex<double>)))
+        throw Error("Robust audio noise calibration workspace is not representable");
+    bytes = add(bytes, 2 * n * sizeof(std::complex<double>) - sizeof(std::complex<double>));
+    if (bins > max / sizeof(double))
+        throw Error("Robust audio noise calibration workspace is not representable");
+    bytes = add(bytes, bins * sizeof(double));
+    return add(bytes, 2 * calibration_frames * sizeof(double));
+}
+
+NoiseCalibration calibrate_noise_dbfs_hz(std::span<const float> pcm, std::uint32_t rate,
+                                         std::stop_token stop) {
+    using datapump::modem::detail::search_fft::DoublePlan;
+    using datapump::modem::detail::search_fft::fft;
+    const auto n = calibration_frame_size(rate);
+    const auto required = calibration_frames * n;
+    if (pcm.size() < required)
+        throw Error("Robust noise calibration needs a few seconds of captured audio");
+
+    double peak = 0, sum = 0;
+    for (std::size_t i = 0; i < required; ++i) {
+        if ((i & 4095U) == 0 && stop.stop_requested())
+            throw Error("Robust audio noise calibration was cancelled");
+        const auto sample = static_cast<double>(pcm[i]);
+        if (!std::isfinite(sample))
+            throw Error("Robust audio noise calibration received nonfinite audio");
+        peak = std::max(peak, std::abs(sample));
+        sum += sample;
+    }
+    if (peak >= .999)
+        throw Error("Robust audio input is clipping; reduce the input level before calibration");
+    const auto dc_offset = sum / static_cast<double>(required);
+
+    DoublePlan plan(n, stop);
+    std::vector<std::complex<double>> frame(n);
+    std::vector<double> averaged(n / 2 + 1, 0);
+    std::array<double, calibration_frames> frame_power{};
+    double window_power = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto w = .5 - .5 * std::cos(2 * std::numbers::pi * static_cast<double>(i) /
+                                          static_cast<double>(n - 1));
+        window_power += w * w;
+    }
+    for (std::size_t f = 0; f < calibration_frames; ++f) {
+        if (stop.stop_requested()) throw Error("Robust audio noise calibration was cancelled");
+        const auto start = f * n;
+        double power = 0;
+        for (std::size_t i = 0; i < n; ++i) {
+            const auto sample = static_cast<double>(pcm[start + i]) - dc_offset;
+            power += sample * sample;
+            const auto w = .5 - .5 * std::cos(2 * std::numbers::pi * static_cast<double>(i) /
+                                              static_cast<double>(n - 1));
+            frame[i] = {sample * w, 0};
+        }
+        frame_power[f] = power / static_cast<double>(n);
+        fft(frame, false, plan, stop);
+        for (std::size_t k = 0; k < averaged.size(); ++k) {
+            const auto one_sided = (k == 0 || k == n / 2) ? 1. : 2.;
+            averaged[k] += one_sided * std::norm(frame[k]) /
+                           (static_cast<double>(rate) * window_power * calibration_frames);
+        }
+    }
+    // A single frame >9 dB above the median indicates the captured level was
+    // changing enough that one stationary calibration is not representative.
+    const auto typical_power = median(frame_power);
+    if (!(typical_power > 0))
+        throw Error("Robust audio input is silent; connect an audio source before calibration");
+    const auto largest_frame = *std::max_element(frame_power.begin(), frame_power.end());
+    if (largest_frame > typical_power * 8.)
+        throw Error("Robust audio input level is unstable; keep the channel idle during calibration");
+
+    const auto density = *std::max_element(averaged.begin(), averaged.end());
+    if (!(density > 0) || !std::isfinite(density))
+        throw Error("Robust audio noise calibration could not measure a usable noise floor");
+    return {10 * std::log10(density) + calibration_margin_db, dc_offset};
 }
 
 float real_pcm(Complex baseband, std::uint64_t sample, double if_hz, std::uint32_t rate, double scale) {
@@ -59,6 +178,12 @@ std::size_t AudioInput::working_bytes() const noexcept {
         validity_.capacity() * sizeof(std::uint8_t);
 }
 
+void AudioInput::set_dc_offset(double offset) {
+    if (input_ || !std::isfinite(offset) || std::abs(offset) >= .999)
+        throw Error("Invalid Robust audio projection DC offset");
+    dc_offset_ = offset;
+}
+
 std::uint64_t AudioInput::project(std::span<const float> pcm, std::vector<Complex>& output,
                                   std::span<const std::uint8_t> valid,
                                   std::vector<std::uint8_t>* output_valid) {
@@ -81,7 +206,7 @@ std::uint64_t AudioInput::project(std::span<const float> pcm, std::vector<Comple
         if (!validity_[at_]) --invalid_;
         if (!observed) ++invalid_;
         validity_[at_] = static_cast<std::uint8_t>(observed);
-        samples_[at_] = samples_[at_ + length_] = observed ? pcm[row] : 0;
+        samples_[at_] = samples_[at_ + length_] = observed ? pcm[row] - dc_offset_ : 0;
         if (++at_ == length_) at_ = 0;
         if (input_ >= length_ - 1) {
             const auto center = input_ - half_;

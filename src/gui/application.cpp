@@ -391,6 +391,8 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
     }
     if(declaration.field==ui::Field::gpu&&(!impl_->regular_selected()||impl_->auxiliary_active()))
         view.enabled=false;
+    if(declaration.field==ui::Field::live_noise_dbfs_hz&&field(ui::Field::simulation).selected=="yes")
+        view.enabled=false;
     if(declaration.kind==ui::Kind::label&&declaration.field!=ui::Field::count) {
         view.label=state.text;
         if(declaration.field==ui::Field::fast_status || declaration.field==ui::Field::status) {
@@ -406,6 +408,7 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
         else if(declaration.field==ui::Field::helper_power)view.label="Helper Carrier Power · "+state.display_text;
         else if(declaration.field==ui::Field::snr||declaration.field==ui::Field::planner_target)
             view.label+=" · Budget target "+state.display_text;
+        else if(declaration.field==ui::Field::audio_sample_rate)view.label+=" · "+state.display_text;
     }
     if(declaration.kind==ui::Kind::action) {
         const auto current=command_label(declaration.command);
@@ -673,12 +676,13 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
             if(arg=="--help") {
                 std::cout<<"Data Pump console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name
                     <<" [--color|--monochrome] [--self-check] [--smoke-test]\n"
-                    <<"Robust uses the native three-carrier modem with a configured public calendar.\n"
-                    <<"Live peers must share a waveform profile, calendar and initial ordinal.\n"
+                    <<"Robust uses the native three-carrier modem. Live peers use a shared UTC calendar by default.\n"
+                    <<"Match the waveform profile and key at both peers.\n"
                     <<"Saved settings: --keyfile PATH | --keyset amateur, --key-name NAME,\n"
                     <<"--rate HZ --carrier HZ --shift HZ --target-snr DB-Hz --helper-power WATTS.\n"
-                    <<"Robust receive setup: --calendar-epoch UTC --calendar-ordinal N\n"
-                    <<"--live-noise-dbfs-hz DBFS/Hz; configure the local audio noise model explicitly. --gpu yes|no overrides automatic GPU selection.\n"
+                    <<"--audio-sample-rate auto|HZ sets the shared logical Robust audio sample rate (default auto).\n"
+                    <<"--calendar-epoch auto|UTC selects the shared or a custom calendar. --calendar-ordinal N applies to a custom calendar.\n"
+                    <<"--live-noise-dbfs-hz auto|DBFS/Hz|unspecified selects automatic, fixed, or transmit-only live noise handling. --gpu yes|no overrides automatic GPU selection.\n"
                     <<"--minimum-carrier-spacing 0|3.5|125|265 sets the adjacent Robust carrier spacing floor in Hz (default 265).\n"
                     <<"--data-cadence scheduled|scheduled-fill|scheduled-bridge|continuous selects the shared Robust cadence.\n"
                     <<"  The startup selection is scheduled-bridge. The legacy default value is an alias for scheduled-bridge.\n"

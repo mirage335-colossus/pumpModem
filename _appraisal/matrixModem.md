@@ -62,7 +62,7 @@ Both transmitter and receiver must be designed to maximize computational ceiling
 
 - Full utilization (near 100% busy, 0% idle) of the 'Tensor Core' GPU hardware, especially for the RTX 4090, RTX 5090, RTX PRO 6000, is a high priority.
 
-- C++
+- C++ for the application, number crunching, etc.
 
 - Overlapping thread scheduler, with more software threads than hardware threads, parallel processing to prepare next batches of parallel processing while previous batches of parallel processing are ongoing.
 
@@ -171,6 +171,6 @@ All new such research documentation, etc, should be contained under the director
 
 For now, please especially work on research - this is a complex problem which must begin with a very serious, very extensive, comprehensive understanding of the very chaotic, complex, natural phenomenon and corresponding situations from moderate through worst case.
 
-Please do not edit any repository files, etc, outside the directories _ref , _appraisal .
+Please do not edit any repository files, etc, outside the directories _ref , _appraisal . The _appraisal/ directory may also currently be under editing by another AI agent ,
 
 

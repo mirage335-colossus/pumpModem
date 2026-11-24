@@ -13,6 +13,7 @@ struct Patch {
     std::optional<double> helper_power_w,helper_ratio_limit_db;
     std::optional<std::string> helper_callsign;
     std::optional<double> rate_hz,carrier_hz;
+    std::optional<std::uint32_t> audio_sample_rate_hz; // 0 selects automatic waveform-based sizing.
     // Carrier is the absolute physical frequency; rf_shift_hz stores the
     // translation Shift. Doppler adjusts physical Carrier before subtracting
     // Shift; the configured Carrier and Shift are saved unchanged.
@@ -33,7 +34,9 @@ struct Patch {
     // Zero epoch clears the configured calendar. Ordinal is independent of
     // message boundaries; both peers must use the same initial address.
     std::optional<std::uint64_t> calendar_epoch,calendar_ordinal;
+    bool auto_calendar=false;
     std::optional<double> live_noise_dbfs_hz;
+    bool auto_live_noise=false;
     bool clear_live_noise=false;
     std::optional<std::string> fec;
     std::optional<bool> full_duplex;
@@ -46,6 +49,11 @@ struct Patch {
 // Only argument text is read: no process, shell expansion, or file is invoked.
 // parse accepts an optional executable name/path and ordinary quoted tokens.
 Patch parse(std::string_view command);
+// Parses the shared public calendar's whole UTC epoch. Accepts `none`, an
+// unsigned Unix-seconds value, or an explicit UTC date in one of the UI forms.
+// Zero is the canonical unconfigured-calendar value.
+std::uint64_t parse_calendar_epoch(std::string_view value);
+std::uint32_t parse_audio_sample_rate(std::string_view value);
 // Already split setting arguments, excluding the executable and GUI flags.
 Patch parse_arguments(std::span<const std::string> arguments);
 // Also validate key flags for callers constructing a Patch directly.

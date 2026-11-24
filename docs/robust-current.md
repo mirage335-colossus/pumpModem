@@ -239,12 +239,53 @@ owners; GUI polling does not wait for a full receiver window.
 
 ## Configured-calendar reception
 
-Both peers must agree on the public calendar epoch, initial keyed ordinal,
-waveform profile, key and FEC mode. The GUI exposes calendar epoch and ordinal
-in Robust setup. Live reception also requires a declared local input noise
-floor in dBFS/Hz; link-budget noise in dBm/Hz is a different quantity. Capture
-uses actual provider timestamp information and its uncertainty. A software
-callback timestamp is not a substitute for sample timing.
+Ordinary live **Auto** uses a fixed public calendar origin at 2026-01-01
+00:00:00 UTC and initial keyed ordinal 0. Peers with the same waveform profile,
+key and FEC setup derive the same slot addresses independently. The actual
+slot spacing comes from the waveform, cadence and burst waits. An explicit
+anchor and ordinal remain available for a coordinated session and are required
+by finite duplex. Simulation keeps its local calendar and uses the same stride
+when its Auto waveform and timing settings match live.
+
+Auto chooses compact whole-second spacing for eligible short, unshifted
+Scheduled profiles with Helper, FHSS, time-varying search and waits off. It
+checks the full receive observation against the adjacent signal bounds with
+filter support and a ten-minute affine-clock guard. At the GUI defaults that
+gives a 24-second stride and 3,601 public slot opportunities per day. Compact
+capture maps its physical endpoint through the declared capture lead and
+keeps the full affine search, every public epoch alternative and two scored
+quiet slots at each message boundary. The receiver continues to widen for
+actual provider uncertainty and elapsed clock error. Long listening and
+multi-hour capacity remain separate qualification. Other profiles retain
+the geometry appropriate to their configured cadence.
+
+Automatic live capture measures physical receive coordinates from a recent
+public slot. Its keyed addresses, randomized recurrence and guarded fill
+remain on the original calendar. The receive windows still cover provider
+uncertainty and clock drift over the capture interval. Dated playback checks
+its output against the scheduled UTC start and elapsed source time. Guarded
+gap fill uses its original shared bounds and may leave longer gaps empty.
+
+A listener that joins an ongoing calendar needs two fully observed, scored
+quiet slots to establish a message boundary. The first automatic message
+transmission in a settings generation schedules those idle slots before
+starting DATA. The start calculation counts time spent preparing the draft and
+opening playback and still allows the playback provider its dated start lead.
+Both peers continue to advance through idle slots. A peer that
+starts during DATA waits for the next scored quiet boundary. Completion still
+takes two scored quiet slots after DATA.
+
+Ordinary GUI **Auto** noise calibration uses 16 nonoverlapping Hann windows of
+the startup PCM, spanning about 2.7 seconds at the default 6 kHz. It removes
+the measured constant DC offset in calibration and live projection. It uses
+the largest averaged one-sided PSD bin across the centered spectrum with 3 dB
+of headroom. Stable tones contribute to that bound. The bounded measurement
+rejects silent, clipped or unstable input. The receiver first scores a fully
+observable public slot after calibration and filter settling. Calibration
+samples supply no DATA or quiet evidence. Once measured, the baseline stays fixed through scoring and survives
+a half-duplex pause in the same settings generation. A configuration change
+measures again. Full-duplex transmission waits for the automatically calibrated
+receiver to start. Numeric overrides use their declared baseline directly.
 
 The live noise declaration is a receiver noise-model reference, not merely an
 average measured power. At fixed Target SNR it scales noise variance and the
@@ -702,7 +743,8 @@ frequencies displayed as absolute Carrier after adding Shift.
 
 Target SNR is one shared C/N0 value, default 32 dB-Hz. It drives provisional
 native duration planning and, with the declared input-noise density, the live
-receiver's reference DATA amplitude. The simulated link's actual
+receiver's reference DATA amplitude. Ordinary live may use its startup
+measured baseline in place of an explicit declaration. The simulated link's actual
 transmit-power/path-loss/noise-density calculation remains separate. Planning uses a fixed
 public message assumption rather than the draft length. A predicted duration
 is not a sensitivity guarantee or a real-time capacity result. FHSS profiles

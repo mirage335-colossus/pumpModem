@@ -28,13 +28,58 @@ loads successfully or the operator selects Amateur. Saved commands that ask
 for plaintext Robust operation are rejected and must be updated to select
 Amateur or a named key.
 
-Robust live operation requires both peers to configure the same public calendar
-anchor, initial waveform ordinal, DATA cadence, key and waveform/FEC settings.
-**Robust setup** exposes the calendar, DATA cadence, minimum DATA carrier
-spacing, and a declared local live input-noise density in dBFS/Hz.
-An unconfigured calendar or noise model keeps the affected live action unavailable
-with an explanation. Simulation uses its own agreed local calendar. These
-settings do not implement unknown-start acquisition or measure the audio device.
+**Calendar anchor** defaults to **Auto**. Both peers derive the same public
+schedule and waveform ordinals from UTC. Match the DATA cadence, key and
+waveform/FEC settings and keep both computers' clocks synchronized. A peer
+should be listening before the first transmission is submitted. **New shared
+anchor** remains available for an explicitly planned session. It sets a UTC
+start about two minutes ahead and ordinal 0. Share its Link Planner command
+with the peer or enter the same UTC anchor and ordinal directly.
+
+**Live noise calibration** defaults to **Auto** in ordinary live setup. Keep
+the channel idle while it measures the first few seconds of dated input. The
+receiver shows the local startup baseline in dBFS/Hz, normalized PCM power
+per hertz, and uses it for that settings generation. **Recalibrate input**
+restarts the measurement on the existing calendar after an audio adjustment.
+A measured numeric value
+is available for manual use on that device and gain. Explicit Unspecified
+retains transmit-only operation. Simulation derives noise from its link model.
+Finite duplex requires an explicit numeric value.
+
+Target SNR is the shared C/N₀ design point, initially 32 dB-Hz. Keep it as a
+starting point while learning the radio path. It sets provisional DATA duration
+and live reference amplitude, but it does not measure received SNR or determine
+the local audio noise value. There is no universal dBFS/Hz value for live use.
+
+The first automatic live transmission of a message leaves two upcoming slots
+idle for the listening peer to score before DATA. A peer joining during DATA
+waits for a scored quiet boundary. Both peers advance their calendar through
+DATA and quiet slots. The startup profile uses 24-second slots for its 8.8-second
+DATA bit. The modeled first Send starts DATA in about 61–85 seconds, depending
+on UTC alignment and with the receiver listening through startup. The second
+trailing quiet observation ends about 55 seconds after final DATA support.
+Audio device preparation and receiver processing can add time. Native waveform
+duration, Helper timing, cadence and burst waits determine slot spacing. Leave
+Symbol Burst Off and Random extra at 0 for short messages. The Console's
+calendar estimate includes the DATA slots and two scored quiet slots used to
+confirm physical completion. With one-hour slot spacing, one raw bit takes
+about three hours from its first slot and the text `e` with FEC Off takes
+about five hours. First-send startup on Auto can add two quiet slots plus
+alignment. Receiver processing can add time. Physical reliability and real-time capacity require separate
+qualification.
+
+The initial inner **Rate** is 2.4 kHz. With **Audio sample rate** on **Auto**,
+that profile uses 6 kHz. Auto chooses the smallest standard logical rate at
+or above 6 kHz whose converter passband fits the guarded waveform. For example,
+the usual 3.6 kHz inner Rate at 1725 Hz audio Carrier uses 8 kHz. A numeric
+sample rate remains available for experiments. The negotiated device passband
+limits live operation. The GUI reports both the required and available upper
+edges before receiving or transmitting with an incompatible device. A public
+observation that exceeds the local input cap reports its sample count, duration
+and limit. DSP workspace is admitted separately.
+
+Simulation can use its own local calendar. The finite duplex test requires an
+explicit anchor and numeric noise density.
 See [current architecture](robust-current.md) and
 [current validation](validation.md#native-gui-integration).
 
@@ -160,14 +205,17 @@ transmission. These options only change the diagnostic display.
 | Base/Shift oscillator, Margin | Always-active declared oscillator bounds and public receiver search multiplier; synthetic effects are injected only in Simulation and explicit loopback. |
 | Doppler/delay spread, selective amplitude | Declared receiver assumptions in every mode; synthetic effects are injected only in Simulation and explicit loopback. Off remains explicit. |
 | Rate, Carrier, Shift | Rate is the native inner rate. Carrier accepts a custom absolute frequency or a computed preset. Bare numbers are Hz. The baseband frequency is Carrier minus Shift. Configuration edits preserve a valid baseband frequency, including custom values, and translate it back to an absolute Carrier. Runtime FHSS hops keep the same baseband plan. |
+| Audio sample rate | Shared logical PCM rate for live and Simulation. Auto follows the guarded DATA and Helper band and displays the resolved rate. Higher settings increase input samples per second and require enough device passband for live audio. `--audio-sample-rate` accepts `auto` or an explicit rate in Hz. |
 | Additional Symbols, Spreading | Off uses a factor of 1. Interleave uses the selected `N×` factor. The nominal bandwidth of each DATA carrier is `1.25 × Rate × N / 6`. |
 | Minimum carrier spacing | Robust setup offers 0, 3.5, 125, and 265 Hz, with 265 Hz as the startup default. Adjacent centers use the greater of the selected minimum and the nominal single-carrier bandwidth. The triplet spans twice the center spacing plus one carrier bandwidth before shaping allowances. Select 0 Hz to use the original rate-derived spacing. Both peers must use matching spacing. The launch option accepts `--minimum-carrier-spacing 3.5` and the other listed values. |
 | DATA cadence | Scheduled + short transitions is selected at startup and stays selected with Helper or FHSS. It fills the DATA gaps at the DATA gain and follows the original FHSS envelope. Scheduled + gap fill protects eligible same-band fill with a guard and requires Helper and FHSS Off. Both filled cadences keep the temporary key at the transmitter. Continuous DATA places successive gates on adjacent samples and requires Helper, FHSS and both Symbol Burst waits Off. Match cadence and settings at both endpoints. Explicit saved or launch choices are preserved. `--data-cadence` accepts `scheduled`, `scheduled-fill`, `scheduled-bridge`, or `continuous`. Older commands using `default` load `scheduled-bridge`. [Burst scheduling](symbol-burst.md) |
-| Symbol burst, Random extra | Shared whole-bit calendar waits; see [burst scheduling](symbol-burst.md). |
+| Calendar anchor, Initial ordinal | Auto derives the public calendar and waveform ordinal from UTC. `--calendar-epoch auto` saves that choice. A manual anchor and ordinal can be shared for a planned session. Slot spacing follows the planned waveform, Helper timing, cadence and waits. |
+| Symbol burst, Random extra | Optional shared whole-bit waits. Leave Symbol Burst Off and Random extra at 0 for short messages to avoid adding idle time. See [burst scheduling](symbol-burst.md). |
 | Wrong Key Admission | Reversible Robust history/browser filter. Unfiltered shows the baseline; stronger choices hide completed records when fewer than half their admitted DATA bits pass. Pattern evidence marks the selected filter's pass/reject results for rated slots. The original likelihoods, decisions and decoded content are retained. The dB labels are approximate HF reference visibility losses. Strong wanted signals can also be hidden. |
 | FHSS | Canonical envelope and illustrative frequency schedule. Short transitions applies the original FHSS envelope to filler and preserves the guards and ramps. The illustration leaves external radio tuning fixed. |
-| Target SNR dB/1Hz | One shared C/N0 target, default 32 dB-Hz, for provisional duration planning and live reference DATA amplitude relative to declared input noise. The adjacent Budget target is a starting value from the nominal DATA link budget, rounded down to a whole dB-Hz within the supported range before fades. It leaves the selected target in place. |
-| Live input noise dBFS/Hz | Local receiver noise-model reference, separate from link-budget noise in dBm/Hz. At fixed Target SNR, changing it scales receiver variance and reference DATA amplitude together; correlated or impulsive noise is not qualified by mean power alone. See the [calibration scope](robust-current.md#configured-calendar-reception). |
+| Target SNR (dB-Hz) | Shared C/N₀ design point, initially 32 dB-Hz. It drives provisional duration planning and the live reference DATA amplitude. The adjacent Budget target is a starting value from the nominal DATA link budget, rounded down to a whole dB-Hz within the supported range before fades. It leaves the selected target in place. |
+| Live noise calibration (dBFS/Hz) | Auto measures a startup baseline on the local audio input. A manual numeric value also sets the receiver noise reference. At fixed Target C/N₀, changing the baseline scales receiver variance and reference DATA amplitude together. See the [calibration scope](robust-current.md#configured-calendar-reception). |
+| DATA duration, slot spacing | Native modeled values for the selected waveform and cadence. DATA duration sets each bit's integration time. Slot spacing also accounts for Helper timing and configured waits. The airtime estimate includes two scored quiet slots after DATA for physical completion; receiver processing can add time beyond the audio schedule. |
 | Error correction | Configured Off, RS20 or RS60 native short/long text profiles. Raw bits bypass text coding and FEC exactly. |
 | Search arithmetic | Default (fastest) selects the fastest supported complete receiver route for the hardware and workload. FP32 minimum selects FP32 products/FFT with higher-precision guards. FP64 force selects its native CPU reference policy. Sensitive stages retain higher precision. |
 | GPU | Runtime choice for native CUDA or Vulkan DATA processing, shared by live reception and simulation. The selector prefers usable CUDA when included, then a compatible physical Vulkan device. The checkbox is off and disabled during discovery, and defaults to checked when a compatible physical GPU initializes on the receiver machine. Without a usable device, it stays off and disabled and diagnostics explain CPU use. Desktop and zLab workers share this default. |

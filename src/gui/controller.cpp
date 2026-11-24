@@ -41,6 +41,22 @@ std::string bit_text(std::span<const std::uint8_t> bits) {
     for(const auto bit:bits)result+=bit?'1':'0';
     return result;
 }
+std::string modeled_duration(double seconds) {
+    double unit_seconds=1;
+    const char* unit="s";
+    if(seconds>=86400) {unit_seconds=86400;unit="d";}
+    else if(seconds>=3600) {unit_seconds=3600;unit="h";}
+    else if(seconds>=60) {unit_seconds=60;unit="min";}
+    std::ostringstream out;
+    out<<std::setprecision(3)<<seconds/unit_seconds<<' '<<unit;
+    return out.str();
+}
+std::string modeled_duration_range(double first,double last) {
+    auto lower=modeled_duration(first);
+    const auto upper=modeled_duration(last);
+    if(lower!=upper)lower+="–"+upper;
+    return lower;
+}
 std::string compression_reference() {
     std::string result="Fixed dictionary (up to "+std::to_string(transfer::short_message_bytes)+" source bytes)\n";
     for(const auto group:{" etao","in","shrd","luc","mfwy","pbg"}) {
@@ -138,9 +154,14 @@ std::string exact_frequency_text(double hz) {
     return exact.str();
 }
 
-bool carrier_fits(const live::detail::CarrierBand& band, double baseband_hz) {
+// Dated/resampled audio can report this flat fraction even when logical and
+// hardware rates match. An actual endpoint's narrower band is checked on open.
+constexpr double nominal_converter_flat_fraction = .42;
+
+bool carrier_fits(const live::detail::CarrierBand& band, double baseband_hz,
+                  std::optional<double> audio_upper_limit = std::nullopt) {
     try {
-        band.validate(baseband_hz);
+        band.validate(baseband_hz, audio_upper_limit);
         return true;
     } catch (const Error&) {
         return false;
@@ -153,19 +174,20 @@ struct CarrierRecommendations {
 };
 
 CarrierRecommendations carrier_recommendations(const live::detail::CarrierBand& band,
-                                                double rate_hz, double shift_hz) {
+                                                double rate_hz, double shift_hz,
+                                                std::optional<double> audio_upper_limit = std::nullopt) {
     CarrierRecommendations result;
     const double floor_hz = band.helper_enabled ? 1400 : 375;
     const auto representable = [shift_hz](double hz) { return shift_hz + hz > shift_hz; };
     const auto recommended = [&](double hz) {
-        return representable(hz) && carrier_fits(band, hz) && band.data_passband(hz).lower_hz >= floor_hz;
+        return representable(hz) && carrier_fits(band, hz, audio_upper_limit) && band.data_passband(hz).lower_hz >= floor_hz;
     };
     const auto append = [&](double hz) {
         if (std::find(result.frequencies.begin(), result.frequencies.end(), hz) == result.frequencies.end())
             result.frequencies.push_back(hz);
     };
     const auto half_rate = rate_hz / 2;
-    if (representable(half_rate) && carrier_fits(band, half_rate)) append(half_rate);
+    if (representable(half_rate) && carrier_fits(band, half_rate, audio_upper_limit)) append(half_rate);
     if (recommended(1725)) {
         result.preferred = 1725;
     } else if (band.helper_enabled && recommended(1775)) {
@@ -175,8 +197,9 @@ CarrierRecommendations carrier_recommendations(const live::detail::CarrierBand& 
         // Start one grid point at or below the bound and check the actual edge
         // so a rounding error on an exact multiple of 5 cannot skip it. The
         // upper band can exclude 1775 while leaving a lower point usable.
-        for (double hz = 5 * std::floor(minimum / 5); hz < band.sample_rate / 2.; hz += 5) {
-            if (band.data_passband(hz).upper_hz >= band.sample_rate / 2.) break;
+        const auto upper = audio_upper_limit.value_or(band.sample_rate / 2.);
+        for (double hz = 5 * std::floor(minimum / 5); hz < upper; hz += 5) {
+            if (band.data_passband(hz).upper_hz > upper) break;
             if (recommended(hz)) {
                 result.preferred = hz;
                 break;
@@ -189,6 +212,33 @@ CarrierRecommendations carrier_recommendations(const live::detail::CarrierBand& 
             if (recommended(hz)) append(hz);
     if (!result.preferred && !result.frequencies.empty()) result.preferred = result.frequencies.front();
     return result;
+}
+
+std::uint32_t automatic_audio_rate(live::Settings preview, double doppler_ratio, double shift_hz,
+                                   std::optional<double> baseband_hz, bool require_carrier) {
+    constexpr std::array<std::uint32_t,10> rates{6000,8000,12000,16000,24000,32000,48000,64000,96000,192000};
+    // Use the planner's conservative Helper phase for both Simulation and
+    // live. The choice depends on shared geometry and survives mode changes.
+    preview.simulation=true;
+    std::optional<std::uint32_t> fallback;
+    for (const auto rate : rates) {
+        preview.transfer.modem.sample_rate=rate;
+        const auto upper=nominal_converter_flat_fraction*rate;
+        if (require_carrier && baseband_hz && *baseband_hz>=upper) continue;
+        try {
+            const auto band=live::detail::plan_carrier_band(preview,doppler_ratio);
+            if (baseband_hz && shift_hz+*baseband_hz>shift_hz && carrier_fits(band,*baseband_hz,upper))
+                return rate;
+            if (!require_carrier && !fallback && carrier_recommendations(band,preview.transfer.modem.bandwidth_hz,shift_hz,upper).preferred) {
+                if (!baseband_hz) return rate;
+                fallback=rate;
+            }
+        } catch (const triad::v3::InsufficientSampleRate&) {
+            continue;
+        }
+    }
+    if (fallback) return *fallback;
+    throw Error("Auto audio sample rate cannot fit this Robust waveform. Check Rate, Carrier, Shift and Helper, or choose a compatible explicit sample rate.");
 }
 
 }
@@ -364,8 +414,12 @@ struct Controller::Impl {
         f(UiField::mono).checked=true;
         f(UiField::mono).options={{"left","Left mono"},{"right","Right mono"},{"stereo","Stereo"}};
         f(UiField::mono).selected="left";
-        f(UiField::bandwidth).text="3.6 kHz";
+        f(UiField::bandwidth).text="2.4 kHz";
         for(const auto* s:{"0.001 Hz","0.01 Hz","0.1 Hz","1 Hz","3.6 Hz","10 Hz","36 Hz","100 Hz","360 Hz","1.2 kHz","2.4 kHz","3.6 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
+        f(UiField::audio_sample_rate).text="auto";
+        f(UiField::audio_sample_rate).options={{"auto","Auto"}};
+        for(const auto* rate:{"6 kHz","8 kHz","12 kHz","24 kHz","48 kHz"})
+            f(UiField::audio_sample_rate).options.push_back({rate,rate});
         f(UiField::doppler).text="0.000000c";
         f(UiField::snr).text="32"; f(UiField::planner_target).text="32";
         for(const auto id:{UiField::snr,UiField::planner_target})
@@ -467,11 +521,12 @@ struct Controller::Impl {
         f(UiField::fec).options={{"off","Off"},{"rs20","Reed-Solomon 20%"},{"rs60","Reed-Solomon 60%"}}; f(UiField::fec).selected="off";
         f(UiField::dsp_workspace).options={{"auto","Automatic headroom"},{"ram-25","25% available RAM"},{"ram-50","50% available RAM"},{"ram-75","75% available RAM"}};
         f(UiField::dsp_workspace).selected="auto";
-        f(UiField::calendar_epoch).text="none";
-        f(UiField::calendar_epoch).options={{"none","Unconfigured"}};
+        f(UiField::calendar_epoch).text=options.finite_duplex?"none":"auto";
+        f(UiField::calendar_epoch).options=options.finite_duplex?
+            std::vector<ui::Option>{{"none","Unconfigured"}}:std::vector<ui::Option>{{"auto","Auto"}};
         f(UiField::calendar_ordinal).text="0";
-        f(UiField::live_noise_dbfs_hz).text="unspecified";
-        f(UiField::live_noise_dbfs_hz).options={{"unspecified","Unspecified"}};
+        f(UiField::live_noise_dbfs_hz).text=options.finite_duplex?"unspecified":"auto";
+        f(UiField::live_noise_dbfs_hz).options={{"auto","Auto (measure at startup)"},{"unspecified","Unspecified"}};
         f(UiField::message_label).text="Message"; f(UiField::binary_label).text="Binary / first 16 bytes";
         if(options.launch_settings)gpu_preference=options.launch_settings->gpu;
         f(UiField::compression_codes).text=compression_reference();
@@ -536,9 +591,9 @@ struct Controller::Impl {
     void refresh_airtime() {
         const auto show_count=[this](std::size_t count,std::string_view prefix={}) {
             ordinary_airtime=std::string(prefix)+std::to_string(count)+" DATA + 2 scored quiet slots";
-            if(snapshot.slot_stride_seconds) {
-                std::ostringstream out;out<<std::setprecision(5)<<(count+2)* *snapshot.slot_stride_seconds;
-                ordinary_airtime+=" (~"+out.str()+" s)";
+            if(settings_valid&&snapshot.slot_stride_range_seconds) {
+                const auto [shortest,longest]=*snapshot.slot_stride_range_seconds;
+                ordinary_airtime+=" (~"+modeled_duration_range((count+2)*shortest,(count+2)*longest)+" from first slot)";
             }
         };
         // The accepted TX owns this count, even if the user edits the next
@@ -664,6 +719,8 @@ struct Controller::Impl {
             const auto text=[&](UiField id,const auto& value){if(value)f(id).text=planner_number(*value);};
             const auto choice=[&](UiField id,const auto& value){if(value)f(id).selected=*value;};
             if(load->rate_hz)f(UiField::bandwidth).text=exact_frequency_text(*load->rate_hz);
+            if(load->audio_sample_rate_hz)f(UiField::audio_sample_rate).text=*load->audio_sample_rate_hz?
+                exact_frequency_text(*load->audio_sample_rate_hz):"auto";
             text(UiField::carrier,load->carrier_hz);
             text(UiField::rf_shift,load->rf_shift_hz);text(UiField::search_margin,load->search_margin);
             text(UiField::receiver_cpu_budget,load->receiver_cpu_budget);
@@ -706,10 +763,15 @@ struct Controller::Impl {
             if(load->clock_sync)clock_fields(clock_sync::parse(*load->clock_sync));
             if(load->audio_timing_default)f(UiField::audio_error).text="Default";
             else if(load->audio_timing_error_seconds)f(UiField::audio_error).text=clock_sync::duration_text(*load->audio_timing_error_seconds);
-            if(load->calendar_epoch)f(UiField::calendar_epoch).text=*load->calendar_epoch?std::to_string(*load->calendar_epoch):"none";
+            if(load->auto_calendar||load->calendar_epoch) {
+                auto& anchor=f(UiField::calendar_epoch).text;
+                if(load->calendar_epoch.value_or(0))anchor=std::to_string(*load->calendar_epoch);
+                else anchor=options.finite_duplex?"none":"auto";
+            }
             if(load->calendar_ordinal)f(UiField::calendar_ordinal).text=std::to_string(*load->calendar_ordinal);
             if(load->clear_live_noise)f(UiField::live_noise_dbfs_hz).text="unspecified";
             if(load->live_noise_dbfs_hz)f(UiField::live_noise_dbfs_hz).text=planner_number(*load->live_noise_dbfs_hz);
+            else if(load->auto_live_noise&&!load->clear_live_noise)f(UiField::live_noise_dbfs_hz).text="auto";
             if(load->fec)f(UiField::fec).selected=*load->fec;
             if(load->full_duplex)f(UiField::live_duplex).checked=*load->full_duplex;
             if(load->gpu)gpu_preference=load->gpu;
@@ -733,6 +795,7 @@ struct Controller::Impl {
         settings.noise_dbm_hz=planner_inputs.noise_density_dbm_hz;settings.target_cn0_db_hz=planner_inputs.target_db_hz;
         auto& modem=settings.transfer.modem;
         modem.bandwidth_hz=frequency(f(UiField::bandwidth).text,"Rate");
+        const auto requested_sample_rate=launch_command::parse_audio_sample_rate(f(UiField::audio_sample_rate).text);
         const auto shift=frequency(f(UiField::rf_shift).text,"Shift");
         const auto doppler=tuning::parse_doppler(f(UiField::doppler).text);
         settings.spread_preset=f(UiField::spread_preset).selected;
@@ -750,13 +813,20 @@ struct Controller::Impl {
         else if(cadence=="continuous")settings.data_cadence=live::DataCadence::continuous;
         else throw Error("Select an available DATA cadence");
         settings.fhss_profile=f(UiField::fhss).selected;settings.fhss_frequencies_hz=fhss_list;
-        const auto epoch=f(UiField::calendar_epoch).text;
-        const auto ordinal=integer(f(UiField::calendar_ordinal).text,"Calendar ordinal");
-        settings.calendar=epoch.empty()||epoch=="none"?std::nullopt:
-            std::optional<live::Calendar>{{integer(epoch,"Calendar epoch"),ordinal}};
+        const auto& anchor=f(UiField::calendar_epoch).text;
+        settings.auto_calendar=anchor=="auto";
+        const auto epoch=settings.auto_calendar?0:launch_command::parse_calendar_epoch(anchor);
+        settings.calendar=epoch?std::optional<live::Calendar>{{epoch,
+            integer(f(UiField::calendar_ordinal).text,"Calendar ordinal")}}:std::nullopt;
         const auto noise=f(UiField::live_noise_dbfs_hz).text;
-        settings.live_noise_dbfs_hz=noise.empty()||noise=="unspecified"?std::nullopt:
-            std::optional<double>{number(noise,"Live noise density")};
+        settings.auto_live_noise=noise=="auto";
+        settings.live_noise_dbfs_hz.reset();
+        if(!noise.empty()&&noise!="unspecified"&&noise!="auto") {
+            const auto density=number(noise,"Live noise density");
+            if(density< -250||density>0)throw Error("Live noise density must be -250 to 0 dBFS/Hz");
+            settings.live_noise_dbfs_hz=density;
+            settings.auto_live_noise=false;
+        }
         settings.transfer.modem.oscillator_search.emplace();
         auto& oscillator=*settings.transfer.modem.oscillator_search;
         oscillator.rf_shift_hz=shift;
@@ -796,9 +866,16 @@ struct Controller::Impl {
         settings.helper.ratio_limit_db=number(f(UiField::helper_ratio_limit).selected,"Helper ratio");
         settings.helper.callsign=f(UiField::helper_callsign).text;validate_helper_callsign(settings.helper.callsign);
 
-        const auto band=live::detail::plan_carrier_band(settings,doppler.frequency_ratio);
-        const auto recommendations=carrier_recommendations(band,modem.bandwidth_hz,shift);
         auto& carrier=f(UiField::carrier);
+        const bool explicit_carrier=edit_carrier||(load&&load->carrier_hz);
+        const auto baseband=explicit_carrier?std::optional<double>{frequency(carrier.text,"Carrier")-shift}:
+            selected_baseband_hz;
+        modem.sample_rate=requested_sample_rate?requested_sample_rate:
+            automatic_audio_rate(settings,doppler.frequency_ratio,shift,baseband,explicit_carrier);
+        const auto converter_upper=requested_sample_rate?std::nullopt:
+            std::optional<double>{nominal_converter_flat_fraction*modem.sample_rate};
+        const auto band=live::detail::plan_carrier_band(settings,doppler.frequency_ratio);
+        const auto recommendations=carrier_recommendations(band,modem.bandwidth_hz,shift,converter_upper);
         std::optional<double> preset_baseband;
         for (const auto baseband : recommendations.frequencies) {
             const auto absolute=exact_frequency_text(shift+baseband);
@@ -810,11 +887,11 @@ struct Controller::Impl {
         }
         if (band.helper_enabled && carrier_presets.empty())
             carrier_presets.push_back({"unavailable","No compatible Carrier preset",false});
-        if (edit_carrier || (load && load->carrier_hz)) {
-            const auto absolute=frequency(carrier.text,"Carrier");
-            modem.carrier_hz=preset_baseband.value_or(absolute-shift);
-        } else if (selected_baseband_hz && shift+*selected_baseband_hz>shift &&
-                   carrier_fits(band,*selected_baseband_hz)) {
+        if (explicit_carrier) {
+            modem.carrier_hz=preset_baseband.value_or(*baseband);
+        } else if (selected_baseband_hz && ((requested_sample_rate && modem.sample_rate != previous_settings.transfer.modem.sample_rate) ||
+                   (shift+*selected_baseband_hz>shift && carrier_fits(band,*selected_baseband_hz,converter_upper)))) {
+            if(shift+*selected_baseband_hz<=shift)throw Error("Shift cannot represent the current baseband Carrier");
             modem.carrier_hz=*selected_baseband_hz;
         } else if (recommendations.preferred) {
             modem.carrier_hz=*recommendations.preferred;
@@ -826,7 +903,7 @@ struct Controller::Impl {
             throw Error("No Carrier recommendation fits the current Rate, Shift, Helper and sampled band. "
                         "Adjust the settings or enter a valid custom Carrier.");
         }
-        band.validate(modem.carrier_hz);
+        band.validate(modem.carrier_hz,converter_upper);
         const auto absolute=modem.carrier_hz+shift;
         if (!edit_carrier && !(load && load->carrier_hz) && frequency_input::parse(carrier.text)!=absolute)
             carrier.text=exact_frequency_text(absolute);
@@ -835,11 +912,13 @@ struct Controller::Impl {
         live::validate_settings(settings);
         if(session_started)session.configure(settings);
         carrier.options=std::move(carrier_presets);
+        f(UiField::audio_sample_rate).display_text=requested_sample_rate?std::string{}:frequency_text(modem.sample_rate);
         selected_baseband_hz=modem.carrier_hz;
         planner_inputs.data_passband=data_passband;
         planner_inputs.waveform_bandwidth_hz=band.waveform_bandwidth_hz;
         settings_valid=true;settings_error.clear();
         snapshot.bit_seconds.reset();snapshot.slot_stride_seconds.reset();
+        snapshot.slot_stride_range_seconds.reset();
         if(session_started)accept_snapshot(session.snapshot());
         dirty();sync_launch_command();refresh_files();refresh_signals();
         } catch(const std::exception& error) {
@@ -889,13 +968,16 @@ struct Controller::Impl {
         values.reference=policy.reference==modem::OscillatorReference::shared_radio?"shared-radio":"independent";
         values.target_db_hz=planner_inputs.target_db_hz;
         values.rate_hz=settings.transfer.modem.bandwidth_hz;
+        values.audio_sample_rate_hz=f(UiField::audio_sample_rate).text=="auto"?0:settings.transfer.modem.sample_rate;
         values.carrier_hz=frequency(f(UiField::carrier).text,"Carrier");
         values.doppler=tuning::parse_doppler(f(UiField::doppler).text).canonical;
         values.workspace_percent=dsp_workspace_percent;
-        values.calendar_epoch=settings.calendar?settings.calendar->epoch:0;
-        values.calendar_ordinal=integer(f(UiField::calendar_ordinal).text,"Calendar ordinal");
+        values.auto_calendar=settings.auto_calendar;
+        if(!values.auto_calendar)values.calendar_epoch=settings.calendar?settings.calendar->epoch:0;
+        if(settings.calendar)values.calendar_ordinal=settings.calendar->initial_ordinal;
         values.live_noise_dbfs_hz=settings.live_noise_dbfs_hz;
-        values.clear_live_noise=!settings.live_noise_dbfs_hz;
+        values.auto_live_noise=settings.auto_live_noise;
+        values.clear_live_noise=!values.auto_live_noise&&!values.live_noise_dbfs_hz;
         values.fec=f(UiField::fec).selected;
         values.clock_sync=clock_sync::format(settings.transfer.clock_sync);
         values.audio_timing_default=clock_sync::is_default(f(UiField::audio_error).text);
@@ -1166,6 +1248,9 @@ struct Controller::Impl {
         case Command::planner_fast: return false;
         case Command::planner_day: return false;
         case Command::planner_clock: return false;
+        case Command::new_calendar_anchor: return !settings.simulation&&!busy;
+        case Command::recalibrate_live_noise:
+            return !busy&&settings_valid&&!settings.simulation&&(settings.auto_calendar||settings.calendar)&&settings.auto_live_noise;
         case Command::planner_stronger: return (link_plan()->available||link_plan()->calculating)&&link_plan()->stronger_fit_target.has_value();
         case Command::planner_weaker: return (link_plan()->available||link_plan()->calculating)&&link_plan()->weaker_fit_target.has_value();
         case Command::transmit_short_bits: return !attachment&&!file_loading&&draft_error.empty()&&
@@ -1231,7 +1316,7 @@ struct Controller::Impl {
             UiField::simulation,UiField::link_power,UiField::link_loss,UiField::link_noise,
             UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error,
             UiField::calendar_epoch,UiField::calendar_ordinal,UiField::live_noise_dbfs_hz,
-            UiField::minimum_carrier_spacing,UiField::data_cadence,
+            UiField::minimum_carrier_spacing,UiField::data_cadence,UiField::audio_sample_rate,
             UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::carrier,
             UiField::bandwidth,UiField::doppler,UiField::spread_preset,UiField::selective_perturbation,
             UiField::search_margin,UiField::dsss_factor,UiField::dsss_version,UiField::fhss,
@@ -1239,6 +1324,7 @@ struct Controller::Impl {
             UiField::fec,UiField::dsp_workspace,UiField::snr,UiField::planner_target,
             UiField::search_arithmetic,UiField::receiver_strategy,UiField::receiver_cpu_budget})
             f(id).enabled=!closing&&!busy;
+        f(UiField::calendar_ordinal).enabled=!closing&&!busy&&settings.calendar.has_value();
         f(UiField::gpu).enabled=!closing&&!busy&&!options.require_gpu&&snapshot.gpu_available;
         f(UiField::gpu).checked=settings.gpu&&(options.require_gpu||snapshot.gpu_available);
         if(options.finite_duplex||options.simulation_only) {
@@ -1261,6 +1347,25 @@ struct Controller::Impl {
         f(UiField::fec).display_text=composer.raw_bits()?"Off (exact raw bits)":"";
         f(UiField::force_transmit).visible=snapshot.force_transmit_available;
         f(UiField::airtime).text=ordinary_airtime;
+        auto& timing=f(UiField::calendar_timing).text;
+        if(settings_valid&&snapshot.bit_seconds&&snapshot.slot_stride_range_seconds) {
+            const auto [shortest,longest]=*snapshot.slot_stride_range_seconds;
+            timing="Modeled DATA bit "+modeled_duration(*snapshot.bit_seconds)+
+                " · Slot spacing "+modeled_duration_range(shortest,longest);
+        } else if(!settings.simulation&&!settings.auto_calendar&&!settings.calendar) {
+            timing="Set a shared UTC anchor or use Simulation to preview slot spacing.";
+        } else timing="Slot spacing is calculated from the waveform and burst waits.";
+        if(settings.simulation)timing+="\nSimulation uses modeled channel noise.";
+        else if(settings.auto_calendar)timing+="\nAuto uses the shared UTC calendar.";
+        if(!settings.simulation&&settings.auto_live_noise) {
+            if(snapshot.live_noise_baseline_dbfs_hz) {
+                std::ostringstream baseline;
+                baseline<<"\nMeasured idle input "<<std::fixed<<std::setprecision(1)
+                        <<*snapshot.live_noise_baseline_dbfs_hz<<" dBFS/Hz.";
+                timing+=baseline.str();
+            } else timing+="\nAuto measures idle input when live starts.";
+        } else if(!settings.simulation)timing+=settings.live_noise_dbfs_hz?"\nLive reception uses the entered noise density.":
+            "\nChoose Auto or enter a measured noise density for live reception.";
         f(UiField::fhss_list_status).text=fhss_list_error.empty()?"Configured synthetic hopping list; physical audio/radio tuning stays fixed.":fhss_list_error;
         short_bits_status();
     }
@@ -1421,12 +1526,14 @@ struct Controller::Impl {
                     std::round(10*snapshot.simulation_progress->elapsed_seconds)));
         const bool state_changed=value.status!=snapshot.status||value.error!=snapshot.error||
             value.receiver_error!=snapshot.receiver_error||value.transmitting!=snapshot.transmitting||
+            value.live_noise_baseline_dbfs_hz!=snapshot.live_noise_baseline_dbfs_hz||
             value.simulation_replay!=snapshot.simulation_replay||
             value.simulation_replay_available!=snapshot.simulation_replay_available||
             value.simulation_pattern_replay_steps!=snapshot.simulation_pattern_replay_steps||
             value.simulation_pattern_replay_active!=snapshot.simulation_pattern_replay_active||
             value.simulation_pattern_replay_visible_steps!=snapshot.simulation_pattern_replay_visible_steps||
             value.running!=snapshot.running||value.bit_seconds!=snapshot.bit_seconds||
+            value.slot_stride_range_seconds!=snapshot.slot_stride_range_seconds||
             value.gpu_device!=snapshot.gpu_device||value.gpu_score_rows!=snapshot.gpu_score_rows||
             value.gpu_backend!=snapshot.gpu_backend||value.gpu_precision!=snapshot.gpu_precision||
             value.gpu_statistics_blocks!=snapshot.gpu_statistics_blocks||
@@ -1466,16 +1573,18 @@ struct Controller::Impl {
         f(UiField::mode).text_tone=snapshot.receiver_error.empty()?ui::TextTone::normal:ui::TextTone::negative;
         f(UiField::diagnostics).text=snapshot.receiver_error;
         if(f(UiField::diagnostics).text.empty()) {
+            const auto* calendar=settings.simulation?" · simulation calendar":
+                settings.auto_calendar?" · Auto UTC calendar":" · custom UTC calendar";
             if(settings.gpu&&!snapshot.gpu_device.empty()) {
                 f(UiField::diagnostics).text=gpu_search_diagnostics(snapshot);
                 if(snapshot.bit_seconds)
-                    f(UiField::diagnostics).text+=" · modeled DATA duration "+planner_number(*snapshot.bit_seconds)+" s · configured calendar";
+                    f(UiField::diagnostics).text+=" · modeled DATA duration "+planner_number(*snapshot.bit_seconds)+" s"+calendar;
             } else if(snapshot.bit_seconds) {
                 const auto arithmetic=settings.transfer.modem.search_arithmetic;
                 const auto* policy=arithmetic==modem::SearchArithmetic::fp64?"Native FP64 force":
                     arithmetic==modem::SearchArithmetic::fp32?"Native FP32 minimum":"Native automatic precision";
                 f(UiField::diagnostics).text=std::string(policy)+" · modeled DATA duration "+
-                    planner_number(*snapshot.bit_seconds)+" s · configured calendar";
+                    planner_number(*snapshot.bit_seconds)+" s"+calendar;
             }
         }
         if(!snapshot.gpu_unavailable_reason.empty()) {
@@ -1610,6 +1719,9 @@ struct Controller::Impl {
     void action(Command command) {
         if(!enabled(command)) throw Error("This action is currently unavailable");
         switch(command) {
+        case Command::recalibrate_live_noise:
+            configure();
+            break;
         case Command::fhss_apply: {
             try {
                 auto next=fhss::parse_list(f(UiField::fhss_list).text);
@@ -1623,6 +1735,22 @@ struct Controller::Impl {
         case Command::planner_load_command: {
             const auto values=launch_command::parse(f(UiField::planner_command).text);
             apply_launch(values);break;
+        }
+        case Command::new_calendar_anchor: {
+            using namespace std::chrono;
+            const auto now=floor<seconds>(system_clock::now()).time_since_epoch().count();
+            const auto target=now+120;
+            const auto aligned=((target+29)/30)*30;
+            const auto epoch=aligned<=4294967289LL?aligned:target;
+            if(epoch<6||epoch>4294967289LL)
+                throw Error("Cannot choose a future shared UTC anchor within the supported calendar range.");
+            launch_command::Patch anchor;
+            anchor.calendar_epoch=static_cast<std::uint64_t>(epoch);
+            anchor.calendar_ordinal=0;
+            configure(false,&anchor,false);
+            sync_launch_command(true);
+            notice("Shared UTC anchor configured. Copy the Link Planner command to the other peer.");
+            break;
         }
         case Command::planner_target:
             request(Purpose::planner_target,ui::ServiceKind::prompt,"Plan for signal level (dB in 1 Hz)",planner_number(planner_inputs.target_db_hz));break;
@@ -1921,6 +2049,10 @@ void Controller::edit(UiField field,std::string text) {
             p.helper_callsign_changed(std::move(text));p.controls();return;
         }
         const bool untouched=!p.composer.raw_bits()&&p.draft_error.empty()&&p.f(UiField::message).text==p.seeded_message;
+        if(field==UiField::calendar_epoch) {
+            const auto epoch=text=="auto"?0:launch_command::parse_calendar_epoch(text);
+            text=epoch?std::to_string(epoch):p.options.finite_duplex?"none":"auto";
+        }
         p.f(field).text=std::move(text);
         if(field==UiField::helper_power) {
             p.configure();
@@ -1928,7 +2060,7 @@ void Controller::edit(UiField field,std::string text) {
         }
         else if(field==UiField::short_bits)p.short_bits_changed();
         else if(field==UiField::binary) p.binary_changed();
-        else if(field==UiField::bandwidth) p.configure();
+        else if(field==UiField::bandwidth||field==UiField::audio_sample_rate) p.configure();
         else if(field==UiField::carrier) p.configure(true);
         else if(field==UiField::device||field==UiField::rf_shift||field==UiField::doppler||field==UiField::search_margin||field==UiField::receiver_cpu_budget||
             field==UiField::calendar_epoch||field==UiField::calendar_ordinal||field==UiField::live_noise_dbfs_hz) p.configure();

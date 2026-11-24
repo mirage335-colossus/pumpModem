@@ -61,6 +61,11 @@ struct Format {
     double minimum_carrier_spacing_hz = 0;
 };
 double effective_sample_rate(const Format&);
+// The same valid waveform may fit a higher logical sample rate.
+class InsufficientSampleRate : public Error {
+public:
+    using Error::Error;
+};
 struct Geometry {
     double inner_chip_rate_hz = 0, fine_chip_rate_hz = 0;
     double carrier_spacing_hz = 0, occupied_bandwidth_hz = 0;

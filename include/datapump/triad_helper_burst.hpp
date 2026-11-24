@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <limits>
 #include <numeric>
+#include <utility>
 
 namespace datapump::triad::v3 {
 
@@ -36,6 +37,8 @@ struct HelperBurstConfig {
     // In a Helper-free stream with no selected waits, place consecutive DATA
     // gates together on the sample grid. Padded template supports may overlap.
     bool continuous_data = false;
+    // A whole-second Scheduled stride selected from the public receive geometry.
+    std::uint32_t compact_stride_seconds = 0;
 };
 
 struct HelperBurstSlot {
@@ -59,6 +62,10 @@ public:
             throw Error("Helper tail requires Helper-enabled burst geometry");
         if(config_.continuous_data && (config_.helper_enabled || config_.wait_bits || config_.random_extra_bits))
             throw Error("Continuous Robust DATA requires Helper and symbol waits off");
+        if(config_.compact_stride_seconds && (config_.continuous_data || config_.helper_enabled ||
+           config_.wait_bits || config_.random_extra_bits ||
+           config_.support_samples>multiply(config_.compact_stride_seconds,config_.sample_rate)))
+            throw Error("Invalid compact Scheduled Robust DATA geometry");
         // Validate recurring fixed work before any emission/allocation.
         (void)multiply(config_.wait_bits,config_.bit_samples);
         (void)add_checked(config_.support_samples,config_.helper_tail_samples);
@@ -96,6 +103,13 @@ public:
         return distance(reference.support_begin,next_support(reference,0));
     }
 
+    std::pair<std::uint64_t,std::uint64_t> stride_sample_range() const {
+        const auto minimum=minimum_stride_samples();
+        const auto maximum=config_.random_extra_bits?
+            multiply(random_step_seconds_[config_.random_extra_bits],config_.sample_rate):minimum;
+        return {minimum,maximum};
+    }
+
     // Whole-second lower bound for callers that only report scheduled slots.
     // Packed calendar arithmetic uses minimum_stride_samples().
     std::uint64_t minimum_stride_seconds() const {
@@ -105,6 +119,7 @@ public:
     // Compute a distant public slot without walking all its predecessors. An
     // equal-count permutation keeps each random cycle's total stride fixed.
     // Scheduled Helper slots preserve the UTC30 grid and punctuation phase.
+    // Compact Scheduled slots start on whole UTC seconds.
     // Continuous DATA retains the fractional sample phase of every slot.
     HelperBurstSlot slot_at(HelperBurstCoordinate earliest_support,std::uint64_t index) const {
         const auto first=first_slot(earliest_support);
@@ -184,8 +199,9 @@ private:
         const auto wait=multiply(add_checked(config_.wait_bits,extra_wait),config_.bit_samples);
         auto earliest=add(current.helper_end,wait);
         if(config_.helper_enabled)earliest=add(earliest,multiply(38,config_.sample_rate));
-        const auto minimum=add(current.support_begin,
-            multiply(config_.helper_enabled?76:60,config_.sample_rate));
+        const auto minimum_seconds=config_.compact_stride_seconds ? config_.compact_stride_seconds :
+            config_.helper_enabled ? 76U : 60U;
+        const auto minimum=add(current.support_begin,multiply(minimum_seconds,config_.sample_rate));
         return ceil_grid(std::max(earliest,minimum));
     }
 
@@ -203,11 +219,13 @@ private:
         if(value.phase>=config_.sample_rate)
             throw Error("invalid whole-bit Helper burst sample phase");
     }
+    unsigned scheduled_grid_seconds() const {return config_.compact_stride_seconds ? 1U : 30U;}
     HelperBurstCoordinate ceil_grid(HelperBurstCoordinate value) const {
         check_phase(value);
         if(value.phase)value.epoch=add_checked(value.epoch,1);
-        const auto remainder=value.epoch%30;
-        if(remainder)value.epoch=add_checked(value.epoch,30-remainder);
+        const auto grid=scheduled_grid_seconds();
+        const auto remainder=value.epoch%grid;
+        if(remainder)value.epoch=add_checked(value.epoch,grid-remainder);
         return {value.epoch,0};
     }
     HelperBurstCoordinate protect_endpoint(HelperBurstCoordinate end) const {
@@ -226,7 +244,7 @@ private:
     }
     HelperBurstSlot make_slot(std::uint64_t index,HelperBurstCoordinate support) const {
         check_phase(support);
-        if((!config_.continuous_data && (support.phase || support.epoch%30)) ||
+        if((!config_.continuous_data && (support.phase || support.epoch%scheduled_grid_seconds())) ||
                 (config_.helper_enabled && support.epoch<38))
             throw Error("invalid whole-bit Helper burst support boundary");
         const auto pattern=add(support,config_.leading_halo_samples);

@@ -73,6 +73,43 @@ PhysicalPrior arrival_prior(const Settings& settings) {
     return {center - radius, center + radius, center, radius};
 }
 
+std::uint32_t compact_scheduled_stride(const PublicProfileConfig& config, const Geometry& geometry,
+                                       const helper::MonoPassband& passband, double audio_timing_seconds) {
+    constexpr std::uint32_t longest_compact_stride = 30;
+    constexpr std::uint32_t guard_age_seconds = 600;
+    const auto rate = config.format.sample_rate;
+    if (geometry.source_samples > static_cast<std::uint64_t>(longest_compact_stride) * rate) return 0;
+
+    auto guard = config;
+    // Measure the separation using the real receive geometry, independently
+    // of the chosen epoch, both endpoints' device rates, and startup time.
+    guard.format.epoch = 60;
+    guard.format.symbol_ordinal = 0;
+    guard.receiver_filter_halo_samples = detail::AudioInput::required_halo_samples(rate,
+        config.data_if_hz, passband.lower_hz, passband.upper_hz) + audio::native_roundtrip_filter_halo_samples(rate);
+    const auto uncertainty = audio_timing_seconds / 2 + 1. / rate +
+        longest_compact_stride * config.audio_pair_ppm * 1e-6;
+    guard.capture_lead_seconds += uncertainty;
+    guard.arrival_low_seconds -= uncertainty;
+    guard.arrival_high_seconds += uncertainty;
+
+    // Keep adjacent 13-epoch hypothesis sets separate even on a tight clock.
+    const auto support_seconds = (geometry.source_samples + rate - 1) / rate;
+    const auto shortest = std::max<std::uint32_t>(static_cast<std::uint32_t>(receiver_epoch_offsets.size()),
+        static_cast<std::uint32_t>(support_seconds));
+    for (auto seconds = shortest; seconds <= longest_compact_stride; ++seconds) {
+        guard.compact_stride_seconds = seconds;
+        const PublicProfile trial(guard);
+        // Cover the clock growth of a short exchange. The live receiver
+        // continues to apply its full elapsed clock and timestamp bounds.
+        const auto slot = trial.slot(guard_age_seconds / seconds + 1);
+        if (slot.previous_signal_stop <= slot.observation.first &&
+            slot.observation.stop <= slot.next_signal_first && slot.quiet_aperture.size())
+            return seconds;
+    }
+    return 0;
+}
+
 helper::Options helper_options(const Settings& s) {
     auto options = s.helper;
     options.data_power_w = std::pow(10., (s.tx_dbm - 30) / 10);
@@ -239,6 +276,10 @@ void validate_settings(const Settings& s) {
     check(std::isfinite(s.doppler_shift_hz), "Invalid Robust Doppler shift");
     if (s.calendar) check(s.calendar->epoch >= 6 && s.calendar->epoch <= 4294967289ULL,
                           "Robust calendar epoch must be between 6 and 4294967289 UTC seconds");
+    check(!s.auto_calendar || (!s.calendar && !s.finite_duplex),
+          "Automatic Robust calendar requires ordinary operation with no explicit anchor");
+    check(!s.auto_live_noise || (!s.finite_duplex && !s.live_noise_dbfs_hz),
+          "Automatic Robust live noise needs ordinary live reception with no manual density");
     if (s.live_noise_dbfs_hz)
         check(in_range(*s.live_noise_dbfs_hz, -250, 0), "Live input noise must be -250 to 0 dBFS/Hz");
     if (s.receiver_memory_limit)
@@ -349,7 +390,7 @@ double CarrierBand::minimum_carrier_hz(double lower_edge_hz) const {
     return (lower_edge_hz + .5 * waveform_bandwidth_hz + fixed_allowance_hz_) / (1 - proportional_allowance_);
 }
 
-void CarrierBand::validate(double carrier_hz) const {
+void CarrierBand::validate(double carrier_hz, std::optional<double> audio_upper_limit_hz) const {
     check(std::isfinite(carrier_hz) && carrier_hz > 0 && carrier_hz < sample_rate / 2.,
           "Robust DATA audio frequency must be positive and below Nyquist");
     check(carrier_hz >= nominal_bandwidth_hz_ / 2,
@@ -359,7 +400,9 @@ void CarrierBand::validate(double carrier_hz) const {
     const auto data = helper::mono_passband(placement);
     const auto high_helper_hz = helper_guard_ ? helper_guard_->high_pilot_hz(placement, sample_rate) : 0;
     const auto allowance = fixed_allowance_hz_ + proportional_allowance_ * carrier_hz;
-    (void)guarded_audio_band(data, high_helper_hz, allowance, sample_rate);
+    const auto guarded = guarded_audio_band(data, high_helper_hz, allowance, sample_rate);
+    if (audio_upper_limit_hz)
+        check(guarded.upper_hz <= *audio_upper_limit_hz, "Robust profile exceeds the planned audio converter passband");
 }
 
 Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token stop,
@@ -501,6 +544,13 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
         configuration.gap_fill_bounds = ScheduledGapFillBounds{configuration.capture_lead_seconds,
             configuration.arrival_low_seconds, configuration.arrival_high_seconds, halo};
     }
+    if (s.auto_calendar && !shifted && !rx.time_varying_channel && !configuration.helper_enabled &&
+        !configuration.format.fhss && !configuration.continuous_data && !configuration.scheduled_gap_fill &&
+        !configuration.wait_bits && !configuration.random_extra_bits) {
+        const auto passband = guarded_audio_band(data_passband, 0, skirts, fs);
+        configuration.compact_stride_seconds = compact_scheduled_stride(configuration, geometry,
+            passband, s.transfer.audio_timing_error_seconds);
+    }
     PublicProfile waveform(std::move(configuration), s.transfer.key);
     if (s.receiver_memory_limit && waveform.emission_source_workspace_bytes() >= *s.receiver_memory_limit)
         throw Error("Robust native waveform workspace exceeds the configured session memory limit");
@@ -560,23 +610,28 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     channel.complex_noise_variance = fs / std::pow(10., actual_cn0 / 10);
     const auto maximum_unscaled_data = source_peak(shaping.format.pulse_shape);
     auto hops = illustrated_hops(s, shaping.spectrum.placement_bandwidth_hz);
+    rx.data_basis_gain = reference_gain;
     if (s.simulation) {
         rx.noise_variance = channel.complex_noise_variance;
-        rx.data_basis_gain = reference_gain;
     } else if (s.live_noise_dbfs_hz) {
-        // One-sided PSD bound for normalized real PCM, propagated through the
-        // unit-norm analytic projection (see AudioInput below). Reserve the
-        // proper-complex covariance enclosing both real component axes.
-        rx.noise_variance = fs * std::pow(10., *s.live_noise_dbfs_hz / 10);
-        rx.data_basis_gain = std::sqrt(std::pow(10., s.target_cn0_db_hz / 10) *
-                                       rx.noise_variance / fs) * reference_gain;
+        apply_live_noise_model(rx, s.target_cn0_db_hz, *s.live_noise_dbfs_hz);
     }
     return {std::move(waveform), rx, std::move(channel), std::move(key), passband.lower_hz, passband.upper_hz,
             data_passband.lower_hz - skirts, data_passband.upper_hz + skirts, maximum_unscaled_data, std::move(hops)};
 }
 
+void apply_live_noise_model(triad::v3::ReceiverConfig& receiver, double target_cn0_db_hz,
+                            double noise_dbfs_hz) {
+    // The analytic projection is unit norm on real PCM. Use the one-sided
+    // density for the proper-complex covariance and the coupled DATA gain.
+    const auto density = std::pow(10., noise_dbfs_hz / 10);
+    receiver.noise_variance = receiver.sample_rate_hz * density;
+    receiver.data_basis_gain *= std::sqrt(std::pow(10., target_cn0_db_hz / 10) * density);
+}
+
 Profile with_capture_uncertainty(const Profile& input, double provider_seconds, double anchor_seconds,
-                                 std::uint64_t filter_halo_samples) {
+                                 std::uint64_t filter_halo_samples,
+                                 std::optional<triad::v3::HelperBurstCoordinate> receive_origin) {
     if (!std::isfinite(provider_seconds) || provider_seconds < 0 || provider_seconds > 60)
         throw Error("Robust audio timestamp uncertainty exceeds the supported 60-second bound");
     if (!std::isfinite(anchor_seconds) || anchor_seconds < 0)
@@ -587,6 +642,7 @@ Profile with_capture_uncertainty(const Profile& input, double provider_seconds, 
     config.arrival_high_seconds += seconds;
     config.capture_lead_seconds += seconds;
     config.receiver_filter_halo_samples = filter_halo_samples;
+    if (receive_origin) config.receive_origin = receive_origin;
     if (config.scheduled_gap_fill || config.scheduled_gap_bridge)
         config.gap_fill_transport_halo_samples = audio::native_roundtrip_filter_halo_samples(config.format.sample_rate);
     Profile result = input;

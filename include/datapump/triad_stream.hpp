@@ -87,6 +87,11 @@ struct PublicProfileConfig {
     // Additional receive-side transport support for excluding possible fill
     // or short transitions.
     std::uint64_t gap_fill_transport_halo_samples = 0;
+    // Receive-only coordinate origin for dated live audio. This does not
+    // move the public recurrence, keyed addresses, or transmitted gap fill.
+    std::optional<HelperBurstCoordinate> receive_origin;
+    // Whole-second stride for a compact, Helper-free Scheduled calendar.
+    std::uint32_t compact_stride_seconds = 0;
 };
 
 // Public whole-bit recurrence. An epoch is the configured anchor; neither an
@@ -103,6 +108,7 @@ public:
     }
     const HelperBurstPlan& calendar() const { return calendar_; }
     HelperBurstCoordinate origin() const { return {config_.format.epoch, 0}; }
+    HelperBurstCoordinate receive_origin() const { return config_.receive_origin.value_or(origin()); }
     double effective_sample_rate() const { return config_.format.sample_rate; }
     double data_if_hz() const { return config_.data_if_hz; }
     const helper::PlacementBand& placement() const { return placement_; }

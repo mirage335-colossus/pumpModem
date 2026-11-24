@@ -153,7 +153,7 @@ MFD convention. The backend offers two banks of Console operating functions:
 TUNE contains the modem selector, the selected modem's rate/profile, carrier,
 SNR targets or squelch where available, and actual TX audio volume. Fast also
 includes its baseband/shift oscillator assumptions, spread, selective
-perturbation, search margin and shift frequency. Robust Rate starts at 3.6 kHz.
+perturbation, search margin and shift frequency. Robust Rate starts at 2.4 kHz.
 ACTIONS contains Transmit, Transmit noise where supported, Cancel TX and Clear
 received where available. Abbreviations include TX, RX,
 Exp SNR, Chan profile and Mdm. The header identifies the selected function and

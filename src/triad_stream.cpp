@@ -76,6 +76,8 @@ std::uint64_t bridge_dwell_samples(const Format& format) {
 HelperBurstConfig burst_config(const PublicProfileConfig& config, const Geometry& geometry) {
     require(config.format.sample_rate_denominator == 1,
         "whole-bit Robust stream requires an integer sample rate");
+    require(!config.compact_stride_seconds || (!config.format.fhss && !config.scheduled_gap_fill),
+        "Compact Scheduled Robust DATA requires FHSS and guarded gap fill off");
     const auto rounded = std::round(static_cast<long double>(geometry.bit_seconds) * config.format.sample_rate);
     require(rounded >= 1 && rounded < std::ldexp(1.L, 64), "whole-bit logical calendar extent overflow");
     // PatternSource admits integer samples strictly before bit_seconds. In
@@ -84,7 +86,8 @@ HelperBurstConfig burst_config(const PublicProfileConfig& config, const Geometry
                                                  static_cast<std::uint64_t>(rounded);
     return {config.format.sample_rate, count, geometry.source_samples,
         geometry.calendar_origin_sample, config.wait_bits, config.helper_enabled, 0,
-        config.random_extra_bits, config.format.epoch, config.format.symbol_ordinal, config.continuous_data};
+        config.random_extra_bits, config.format.epoch, config.format.symbol_ordinal, config.continuous_data,
+        config.compact_stride_seconds};
 }
 
 std::uint64_t mix64(std::uint64_t value) {
@@ -255,6 +258,8 @@ PublicProfile::PublicProfile(PublicProfileConfig config, std::optional<Crypto> c
         config_.lead_samples = config_.helper_enabled ? std::uint64_t{helper_lead_seconds} * config_.format.sample_rate : 0;
     const auto first = transmit_slot(0);
     require(first.helper_begin >= origin(), "Robust calendar anchor must precede the first Helper sample");
+    require(receive_origin() >= origin() && receive_origin().phase < config_.format.sample_rate,
+        "Invalid Robust receive coordinate origin");
     helper::validate(config_.helper);
     if (config_.helper_enabled) {
         // Use the same public active reference window as the emitted source.
@@ -365,7 +370,11 @@ std::uint64_t PublicProfile::capture_first(long double source_begin_seconds, boo
     const long double rate = effective_sample_rate();
     const auto endpoint = search ? receive_endpoint_ : nominal_endpoint_;
     const auto tx_max = 1 + endpoint, rx_min = 1 - endpoint;
-    auto begin = rx_min * (source_begin_seconds / tx_max + config_.arrival_low_seconds);
+    const auto offset = static_cast<long double>(config_.arrival_low_seconds) +
+        (config_.compact_stride_seconds ? config_.capture_lead_seconds : 0.);
+    auto begin = rx_min * (source_begin_seconds / tx_max + offset);
+    // The compact physical edge is on the same capture axis as signal_first.
+    if (config_.compact_stride_seconds) begin -= 32 / rate;
     if (search) {
         const auto edge = source_begin_seconds - 2 / rate;
         const auto scale = edge < 0 ? affine_min_scale_ : affine_max_scale_;
@@ -462,7 +471,7 @@ std::optional<SampleRange> PublicProfile::gap_fill_after(std::uint64_t index) co
 PublicSlot PublicProfile::slot(std::uint64_t index) const {
     const auto tx = transmit_slot(index);
     const auto next = calendar_.successor(tx);
-    const auto seconds = [&](HelperBurstCoordinate value) { return calendar_.relative_seconds(origin(), value); };
+    const auto seconds = [&](HelperBurstCoordinate value) { return calendar_.relative_seconds(receive_origin(), value); };
     const auto halo = config_.receiver_filter_halo_samples;
     const auto earlier = [halo](std::uint64_t sample) { return sample - std::min(sample, halo); };
     const auto begin = seconds(tx.helper_begin), end = seconds(tx.helper_end);
@@ -486,6 +495,7 @@ PublicSlot PublicProfile::slot(std::uint64_t index) const {
     // aperture. Their adjacent signal exclusions can only narrow it.
     auto quiet_first = std::min(nominal_observation.stop,
         std::max({nominal_observation.first, data.first, previous_stop}));
+    if (config_.compact_stride_seconds) quiet_first = std::max(quiet_first, observation.first);
     auto quiet_stop = std::max(quiet_first, std::min({nominal_observation.stop, data.stop, next_first}));
     SampleRange protected_data;
     bool gap_fill_may_enter_observation = false;
@@ -503,8 +513,9 @@ PublicSlot PublicProfile::slot(std::uint64_t index) const {
         // actual declared uncertainty and transport/filter halo. Additional
         // local uncertainty can narrow the aperture without moving the fill.
         const auto fill_halo = add(halo, config_.gap_fill_transport_halo_samples);
-        const auto sample_seconds = [rate = static_cast<long double>(config_.format.sample_rate)](std::uint64_t rows) {
-            return rows / rate;
+        const auto origin_sample = calendar_.distance(origin(), receive_origin());
+        const auto sample_seconds = [rate = static_cast<long double>(config_.format.sample_rate), origin_sample](std::uint64_t rows) {
+            return (static_cast<long double>(rows) - origin_sample) / rate;
         };
         const auto earliest = [&](long double source_seconds) {
             const auto first = signal_first(source_seconds, true);
@@ -550,8 +561,8 @@ PublicSlot PublicProfile::slot(std::uint64_t index) const {
     if (!config_.continuous_data && !config_.scheduled_gap_fill && !config_.helper_enabled &&
         !config_.format.fhss && !config_.format.burst_wait_tiles && config_.selective_signal_tail) {
         const long double rate = config_.format.sample_rate;
-        const auto gate_first = calendar_.distance(origin(), tx.pattern_begin);
-        const auto gate_stop = active_data_stop_sample(tx);
+        const auto gate_first = calendar_.distance(receive_origin(), tx.pattern_begin);
+        const auto gate_stop = add(gate_first, packed_bit_samples(geometry_.bit_seconds, config_.format.sample_rate));
         const auto ramp = data_ramp_samples(config_.format, geometry_);
         if (ramp < (gate_stop - gate_first) / 2) {
             // The same public source ramps bound bridge overlap. Move the

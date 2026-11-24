@@ -51,6 +51,85 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Robust live setup and audio rate
+
+The dated native capture fixture exercised Auto calibration at Target and
+observed C/N₀ of 32 dB-Hz. It received `e` and both physical quiet slots after
+measuring a seeded white-noise startup prefix. Lifecycle checks covered
+full-duplex calibration gating, half-duplex baseline reuse, rejection of a
+silent startup and recalibration on the same calendar. A bounded dated fixture
+used low-level noise with DC and a faint line for the automatic lifecycle. The
+PCM component check covered normalization, matching DC subtraction in the
+noise model and projection, conservative inclusion of stable tones, and
+rejection of clipping and unstable input. Separate audio fixtures checked the
+required and available RX/TX bands.
+
+The automatic-calendar integration used generated TX PCM and injected dated
+capture in a separate native session. With 1.5 kHz logical audio,
+**Scheduled + short transitions** and a declared 15 ppm base oscillator, the
+receiver agreed on the current global epoch and ordinal in all seven slots.
+It scored two startup quiet slots, decoded the three DATA bits of `e` and
+completed after the second trailing quiet slot. The default broad arrival
+policy also skipped a partially observable startup slot, scheduled two fully
+observable quiet slots and showed emission only when PCM generation began.
+A separate geometry check preserved keyed random waits, packed
+fractional-phase coordinates, neighboring signal exclusions and the source's
+frozen guarded gap fill. This covers first contact when the receiver observes
+the startup quiet boundary. Device timing and sensitivity on a physical path
+remain open.
+
+The final affected native stream, audio, Robust GUI and shared GUI checks
+passed 17/17. An earlier full GUI run passed 39/40. Its Scheduled + short
+transitions simulation failed the replay receipt assertion, which passed on
+two isolated reruns and in the final affected run. The failing condition
+within that compound assertion was not identified.
+
+### Compact automatic timing
+
+The native Controller uses 8.800 s of DATA and 8.841 s of source support at
+6 kHz audio and 2.4 kHz Rate. The compact selection changed the shared Auto
+stride from 60 to 24 s and calendar opportunities from 1,441 to 3,601 per day.
+A dated geometry sweep at quarter-second intervals over one stride found
+61.0–84.75 s from Send to first DATA, assuming playback is ready in time,
+and 55.43–55.44 s from final source support to the second trailing observation
+before scoring. The equivalent former schedule took about 142–202 s from
+playback preflight to first DATA and 127.5 s after the last support. The new
+schedule counts preparation after Send toward the startup quiet interval.
+The sweep used the declared −7 to +7.07 s arrival range and 300.015 ppm
+search. At 648 s of elapsed capture, full observation clearance from the
+possible preceding and following DATA was about 0.59 and 0.30 s.
+
+The injected dated native first-contact check sent `e` with the default
+waveform, +6.75 s arrival and 40 dB-Hz against the measured local noise model.
+In one timing receipt it processed three DATA and five scored quiet slots in
+9.11 s wall over 195.75 s of dated input. Per-slot coarse and fine stage times
+summed to 15.27 s for quiet and 13.32 s for DATA, with work overlapping. The
+second trailing quiet physically completed reception. The native GUI timing
+test also retained the 1.88 h stride in its slow profile. These are bounded
+local CPU and geometry checks. They leave physical audio, lower C/N₀ and
+sustained receiver service open.
+
+The affected check set passed 18/19 in its grouped run. The existing
+explicit-calendar raw-bit simulation failed its compound receive-record
+assertion and passed in a serial rerun. All compact automatic checks passed
+in both the isolated and grouped runs.
+
+The native `triad_receiver_probe` built at `c4fb635b` plus the local Robust
+startup changes measured one five-slot clean simulation per configuration on
+the Ryzen 5 PRO 5650U. All used 24 workers, seed 74021, 1725 Hz IF,
+265 Hz minimum spacing, Helper Off, Shift 0, spread and selective effects Off,
+Target 32 dB-Hz and observed 80 dB-Hz. The stop limits were 3 million generated
+samples and 25 seconds per run. Each decoded its message through both scored
+quiet slots and passed the EOF control. The simulator generated 1.58 million
+samples in 0.34 s at 6 kHz and 2.11 million in 0.51 s at 8 kHz for the same
+2.4 kHz inner Rate. Receiver service was 2.78 and 3.19 s. At 8 kHz with a
+3.6 kHz inner Rate, simulator and receiver service were 0.52 and 3.89 s.
+The corresponding plan-only 3.6 Hz HF Worst and Each 65% comparison at
+30 MHz Shift, 3× margin and the same carrier spacing quoted 1.42 versus
+1.58 GB full-worker slot workspace and 262,144 versus 524,288 coarse FFT rows.
+Single-run timings are descriptive. The fixture and plan quotes leave physical
+audio timing, device compatibility and long-window receiver capacity open.
+
 ## Keyed long-message recovery after one missed marker slot — 22 November 2026
 
 The ordered native codec test used a 257-byte message spanning multiple

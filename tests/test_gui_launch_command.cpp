@@ -20,6 +20,24 @@ template<class Function> void rejects(Function function,const std::string& messa
 void parsing_and_formatting() {
     check(!launch_command::parse("--rate 1200").wrong_key_admission,
           "Older partial commands must leave Wrong Key Admission unchanged");
+    const auto widened_audio=launch_command::parse("--audio-sample-rate '8 kHz' --rate 3.6kHz --carrier 2500");
+    const auto audio_command=launch_command::format(widened_audio);
+    check(widened_audio.audio_sample_rate_hz==8000&&widened_audio.rate_hz==3600&&widened_audio.carrier_hz==2500&&
+          audio_command.find("--audio-sample-rate 8000")!=std::string::npos&&
+          launch_command::parse(audio_command)==widened_audio,
+          "Audio sample rate must round trip as numeric Hz separately from the inner Rate");
+    const auto automatic_audio=launch_command::parse("--audio-sample-rate auto --rate 3.6kHz");
+    const auto automatic_audio_command=launch_command::format(automatic_audio);
+    check(automatic_audio.audio_sample_rate_hz==0&&automatic_audio.rate_hz==3600&&
+          automatic_audio_command.find("--audio-sample-rate auto")!=std::string::npos&&
+          launch_command::parse(automatic_audio_command)==automatic_audio,
+          "Explicit automatic audio sample rate must round trip independently of the inner Rate");
+    check(!launch_command::parse("--rate 1200").audio_sample_rate_hz&&
+          launch_command::parse_audio_sample_rate("65 Hz")==65&&launch_command::parse_audio_sample_rate("192 kHz")==192000,
+          "Audio sample rate must preserve omissions and accept both native bounds");
+    for(const auto* value:{"0","64","6001","6000.5","192005","NaN"})
+        rejects([&]{launch_command::parse(std::string("--audio-sample-rate ")+value);},"Invalid audio sample rate accepted");
+    rejects([]{launch_command::format({.audio_sample_rate_hz=6001});},"Invalid audio sample rate export accepted");
     for(const auto* value:{"current","guarded","strict","very-strict","extreme","maximum"}) {
         const auto policy=launch_command::parse(std::string("--wrong-key-admission ")+value);
         check(policy.wrong_key_admission==value&&launch_command::parse(launch_command::format(policy))==policy,
@@ -44,7 +62,30 @@ void parsing_and_formatting() {
     const auto unconfigured=launch_command::parse("--calendar-epoch none --live-noise-dbfs-hz unspecified --fec off");
     check(unconfigured.calendar_epoch==0&&unconfigured.clear_live_noise&&!unconfigured.live_noise_dbfs_hz&&
           launch_command::parse(launch_command::format(unconfigured))==unconfigured,
-          "Explicit calendar/noise clearing must survive launch round trip");
+          "Legacy missing calendar and noise clearing must survive launch round trip");
+    const auto automatic_calendar=launch_command::parse("--calendar-epoch auto");
+    check(automatic_calendar.auto_calendar&&!automatic_calendar.calendar_epoch&&
+          launch_command::parse(launch_command::format(automatic_calendar))==automatic_calendar,
+          "Automatic calendar selection must survive launch round trip");
+    const auto custom_last=launch_command::parse("--calendar-epoch auto --calendar-epoch 1793850000");
+    const auto auto_last=launch_command::parse("--calendar-epoch 1793850000 --calendar-epoch auto");
+    check(!custom_last.auto_calendar&&custom_last.calendar_epoch==1793850000ULL&&auto_last==automatic_calendar,
+          "The last calendar epoch flag must replace the previous mode");
+    const auto dated_calendar=launch_command::parse("--calendar-epoch '2026-11-23 00:00:00' --calendar-ordinal 0");
+    const auto iso_calendar=launch_command::parse("--calendar-epoch 2026-11-23T00:00:00Z --calendar-ordinal 0");
+    check(dated_calendar.calendar_epoch&&dated_calendar.calendar_epoch==iso_calendar.calendar_epoch&&
+          dated_calendar.calendar_epoch==launch_command::parse("--calendar-epoch "+std::to_string(*dated_calendar.calendar_epoch)).calendar_epoch&&
+          launch_command::format(dated_calendar).find("--calendar-epoch "+std::to_string(*dated_calendar.calendar_epoch))!=std::string::npos,
+          "UTC calendar date forms must resolve identically and export as numeric seconds");
+    const auto automatic_noise=launch_command::parse("--live-noise-dbfs-hz auto");
+    check(automatic_noise.auto_live_noise&&!automatic_noise.clear_live_noise&&!automatic_noise.live_noise_dbfs_hz&&
+          launch_command::parse(launch_command::format(automatic_noise))==automatic_noise,
+          "Automatic live noise selection must survive launch round trip");
+    const auto noise_manual_wins=launch_command::parse("--live-noise-dbfs-hz auto --live-noise-dbfs-hz -101.5");
+    const auto noise_auto_wins=launch_command::parse("--live-noise-dbfs-hz unspecified --live-noise-dbfs-hz auto");
+    check(!noise_manual_wins.auto_live_noise&&!noise_manual_wins.clear_live_noise&&noise_manual_wins.live_noise_dbfs_hz==-101.5&&
+          noise_auto_wins.auto_live_noise&&!noise_auto_wins.clear_live_noise&&!noise_auto_wins.live_noise_dbfs_hz,
+          "Repeated live noise flags must reset prior modes and retain the last occurrence");
     for(const auto spacing:{0.0,3.5,125.0,265.0}) {
         const auto patch=launch_command::parse("--minimum-carrier-spacing "+std::to_string(spacing));
         check(patch.minimum_carrier_spacing_hz==spacing&&
@@ -56,7 +97,7 @@ void parsing_and_formatting() {
     check(formatted_three_point_five.find("--minimum-carrier-spacing 3.5")!=std::string::npos&&
           formatted_three_point_five.find("3.500000")==std::string::npos,
           "Minimum carrier spacing must use canonical compact decimal formatting");
-    check(!launch_command::parse("--rate 1200").calendar_epoch&&
+    check(!launch_command::parse("--rate 1200").calendar_epoch&&!launch_command::parse("--rate 1200").auto_calendar&&
           !launch_command::parse("--rate 1200").clear_live_noise,
           "Older partial commands must preserve configured calendar/noise");
     check(!launch_command::parse("--rate 1200").minimum_carrier_spacing_hz,
@@ -75,7 +116,9 @@ void parsing_and_formatting() {
           "Legacy DATA cadence did not normalize to the named startup choice");
     rejects([] { launch_command::parse("--data-cadence auto"); }, "Invalid DATA cadence accepted");
     for(const auto* bad:{"--calendar-epoch 5","--calendar-epoch 4294967290","--calendar-epoch -1",
-        "--calendar-epoch 1.5","--calendar-ordinal -1","--calendar-ordinal 18446744073709551616",
+        "--calendar-epoch 1.5","--calendar-epoch '2026-02-30 12:00:00'","--calendar-epoch 2026-11-23T24:00:00Z",
+        "--calendar-epoch 2026-11-23T00:00:00","--calendar-epoch 2026-11-23 12:00 PST",
+        "--calendar-ordinal -1","--calendar-ordinal 18446744073709551616",
         "--live-noise-dbfs-hz nan","--live-noise-dbfs-hz -251","--live-noise-dbfs-hz 1",
         "--minimum-carrier-spacing -1","--minimum-carrier-spacing 1","--minimum-carrier-spacing 3.4",
         "--minimum-carrier-spacing 3.6","--minimum-carrier-spacing 124","--minimum-carrier-spacing 125.5",

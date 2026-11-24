@@ -5,6 +5,7 @@
 #include "../src/gui/transmit_scope.hpp"
 #include "datapump/compression.hpp"
 #include "datapump/live.hpp"
+#include "datapump/robust_profile.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -632,7 +633,8 @@ void finite_duplex_policy() {
     gui::Controller ordinary({.simulation=true});
     check(!ordinary.settings().finite_duplex);
     gui::Controller finite({.finite_duplex=true});
-    check(finite.settings().finite_duplex&&!finite.settings().simulation&&finite.settings().full_duplex);
+    check(finite.settings().finite_duplex&&!finite.settings().simulation&&finite.settings().full_duplex&&
+          !finite.settings().auto_calendar&&!finite.settings().calendar);
     check(!finite.field(F::simulation).enabled&&!finite.field(F::live_duplex).enabled);
     finite.select(F::simulation,"yes");finite.toggle(F::live_duplex,false);
     check(finite.settings().finite_duplex&&!finite.settings().simulation&&finite.settings().full_duplex);
@@ -649,6 +651,136 @@ void finite_duplex_policy() {
     check(app.field(F::fast_mode).selected=="robust"&&!app.field(F::fast_mode).enabled);
     app.select(F::fast_mode,"legacy");
     check(app.field(F::fast_mode).selected=="robust");
+}
+void robust_setup_calendar_timing() {
+    using F=gui::ui::Field;
+    using C=gui::ui::Command;
+    using namespace std::chrono_literals;
+    gui::Controller anchor;
+    const auto automatic=gui::launch_command::parse(anchor.field(F::planner_command).text);
+    check(anchor.settings().auto_calendar&&!anchor.settings().calendar&&anchor.field(F::calendar_epoch).text=="auto"&&
+          automatic.auto_calendar&&!automatic.calendar_epoch&&!automatic.calendar_ordinal&&
+          !anchor.field(F::calendar_ordinal).enabled&&anchor.enabled(C::recalibrate_live_noise)&&
+          anchor.enabled(C::new_calendar_anchor));
+    const auto legacy=gui::launch_command::parse("--calendar-epoch none --calendar-ordinal 9");
+    gui::Controller reloaded({.launch_settings=legacy});
+    check(reloaded.settings().auto_calendar&&!reloaded.settings().calendar&&
+          reloaded.field(F::calendar_epoch).text=="auto"&&!reloaded.field(F::calendar_ordinal).enabled);
+    anchor.edit(F::calendar_epoch,"2026-11-23T00:00:00Z");
+    const auto typed_epoch=gui::launch_command::parse_calendar_epoch("2026-11-23T00:00:00Z");
+    check(!anchor.settings().auto_calendar&&anchor.settings().calendar&&anchor.settings().calendar->epoch==typed_epoch&&
+          anchor.field(F::calendar_ordinal).enabled&&
+          anchor.field(F::calendar_epoch).text==std::to_string(typed_epoch));
+    anchor.edit(F::calendar_epoch,"2026-02-30 00:00:00");
+    check(anchor.settings().calendar&&anchor.settings().calendar->epoch==typed_epoch);
+    anchor.activate(C::new_calendar_anchor);
+    const auto chosen=anchor.settings().calendar;
+    const auto exported=anchor.field(F::planner_command).text;
+    const auto exported_settings=gui::launch_command::parse(exported);
+    const auto now=std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    check(chosen&&chosen->epoch>static_cast<std::uint64_t>(now)&&chosen->epoch<=static_cast<std::uint64_t>(now+150)&&
+          chosen->epoch%30==0&&chosen->initial_ordinal==0&&exported_settings.calendar_epoch==chosen->epoch&&
+          exported_settings.calendar_ordinal==0&&anchor.field(F::calendar_epoch).text==std::to_string(chosen->epoch));
+    check(anchor.settings().auto_live_noise&&exported_settings.auto_live_noise&&anchor.enabled(C::recalibrate_live_noise));
+    const auto profile=live::detail::prepare_profile(anchor.settings(),*chosen,{});
+    check(profile.maximum_audio_hz<=2520&&anchor.settings().transfer.modem.sample_rate==6000);
+    anchor.activate(C::recalibrate_live_noise);
+    check(anchor.settings().calendar->epoch==chosen->epoch&&anchor.settings().calendar->initial_ordinal==0);
+    anchor.edit(F::calendar_epoch,"auto");
+    check(anchor.settings().auto_calendar&&!anchor.settings().calendar&&
+          gui::launch_command::parse(anchor.field(F::planner_command).text).auto_calendar);
+    gui::Application app({.simulation=true});
+    app.select(F::fast_mode,"robust");
+    app.navigate(gui::ui::Page::robust_setup);
+    const auto& declarations=gui::ui::console_screen();
+    const auto noise=std::find_if(declarations.begin(),declarations.end(),[](const auto& control) {
+        return control.field==F::live_noise_dbfs_hz;
+    });
+    check(noise!=declarations.end()&&app.control(*noise).visible&&!app.control(*noise).enabled);
+    const auto new_anchor=std::find_if(declarations.begin(),declarations.end(),[](const auto& control) {
+        return control.command==C::new_calendar_anchor;
+    });
+    check(new_anchor!=declarations.end()&&!app.control(*new_anchor).enabled);
+    check(app.field(F::calendar_timing).text.find("Simulation uses modeled channel noise")!=std::string::npos);
+    check(app.field(F::symbol_burst).selected=="off"&&app.field(F::symbol_burst_random).selected=="0");
+    app.edit(F::bandwidth,"0.1 Hz");
+    app.edit(F::short_bits,"1");
+    app.start();
+    const auto wait_for_timing=[&](std::string_view spacing) {
+        const auto until=std::chrono::steady_clock::now()+5s;
+        while(app.field(F::calendar_timing).text.find(spacing)==std::string::npos&&
+              std::chrono::steady_clock::now()<until) {
+            std::this_thread::sleep_for(10ms);
+            app.tick();
+        }
+        check(app.field(F::calendar_timing).text.find(spacing)!=std::string::npos);
+    };
+    wait_for_timing("Slot spacing 1.88 h\n");
+    check(app.field(F::calendar_timing).text.starts_with("Modeled DATA bit 1.6 h"));
+    check(app.field(F::airtime).text.starts_with("1 DATA + 2 scored quiet slots (~")&&
+          app.field(F::airtime).text.ends_with(" h from first slot)"));
+    app.select(F::symbol_burst_random,"1");
+    wait_for_timing("Slot spacing 1.88 h–");
+    check(app.field(F::airtime).text.find(" h–")!=std::string::npos);
+    app.close();
+}
+void robust_audio_sample_rate_policy() {
+    using F=gui::ui::Field;
+    using C=gui::ui::Command;
+    gui::Application app({.simulation=true});
+    app.select(F::fast_mode,"robust");
+    app.navigate(gui::ui::Page::robust_setup);
+    const auto& controls=gui::ui::console_screen();
+    const auto sample_rate=std::find_if(controls.begin(),controls.end(),[](const auto& control) {
+        return control.field==F::audio_sample_rate;
+    });
+    check(sample_rate!=controls.end()&&app.control(*sample_rate).visible&&app.control(*sample_rate).enabled&&
+          app.field(F::audio_sample_rate).text=="auto"&&app.control(*sample_rate).label=="Audio sample rate · 6 kHz");
+    app.edit(F::bandwidth,"3.6 kHz");
+    check(app.control(*sample_rate).label=="Audio sample rate · 8 kHz");
+    const auto auto_settings=gui::launch_command::parse(app.field(F::planner_command).text);
+    check(auto_settings.audio_sample_rate_hz==0&&auto_settings.rate_hz==3600);
+    gui::Controller peer({.simulation=true,.launch_settings=auto_settings});
+    check(peer.settings().transfer.modem.sample_rate==8000&&peer.settings().transfer.modem.carrier_hz==1725);
+    app.edit(F::bandwidth,"2.4 kHz");
+    check(app.control(*sample_rate).label=="Audio sample rate · 6 kHz");
+    app.preset(*sample_rate,"8 kHz");
+    app.edit(F::bandwidth,"3.6 kHz");
+    app.edit(F::carrier,"2.5 kHz");
+    const auto saved=gui::launch_command::parse(app.field(F::planner_command).text);
+    check(saved.audio_sample_rate_hz==8000&&saved.rate_hz==3600&&saved.carrier_hz==2500);
+    app.select(F::simulation,"no");
+    app.select(F::simulation,"yes");
+    check(app.field(F::audio_sample_rate).text=="8 kHz"&&
+          gui::launch_command::parse(app.field(F::planner_command).text).audio_sample_rate_hz==8000);
+    app.close();
+
+    gui::Controller reloaded({.simulation=true,.launch_settings=saved});
+    check(reloaded.settings().transfer.modem.sample_rate==8000&&
+          reloaded.settings().transfer.modem.bandwidth_hz==3600&&reloaded.settings().transfer.modem.carrier_hz==2500);
+    reloaded.edit(F::audio_sample_rate,"6001");
+    check(reloaded.settings().transfer.modem.sample_rate==8000&&
+          reloaded.field(F::status).text.find("whole multiple of 5 Hz")!=std::string::npos);
+    reloaded.edit(F::audio_sample_rate,"6 kHz");
+    check(reloaded.settings().transfer.modem.sample_rate==8000&&reloaded.settings().transfer.modem.carrier_hz==2500);
+    reloaded.edit(F::audio_sample_rate,"8 kHz");
+    reloaded.edit(F::planner_command,"--audio-sample-rate 6000");
+    reloaded.activate(C::planner_load_command);
+    check(reloaded.settings().transfer.modem.sample_rate==8000&&reloaded.settings().transfer.modem.carrier_hz==2500);
+
+    gui::Controller wide({.simulation=true});
+    wide.edit(F::bandwidth,"12 kHz");
+    check(wide.settings().transfer.modem.bandwidth_hz==12000&&wide.settings().transfer.modem.sample_rate==24000);
+    const auto wide_command=gui::launch_command::parse(wide.field(F::planner_command).text);
+    gui::Controller wide_peer({.simulation=true,.launch_settings=wide_command});
+    check(wide_command.audio_sample_rate_hz==0&&wide_peer.settings().transfer.modem.sample_rate==24000&&
+          wide_peer.settings().transfer.modem.carrier_hz==wide.settings().transfer.modem.carrier_hz);
+
+    gui::Controller spread({.simulation=true});
+    spread.select(F::dsss_version,"interleave");
+    spread.edit(F::bandwidth,"1.2 kHz");
+    check(spread.settings().added_interleave&&spread.settings().added_symbols==10&&
+          spread.settings().transfer.modem.sample_rate==24000);
 }
 void data_cadence_policy() {
     using F = gui::ui::Field;
@@ -706,7 +838,7 @@ void data_cadence_policy() {
 void fhss_rate_compatibility() {
     using F = gui::ui::Field;
     gui::Controller defaults({.simulation=true});
-    check(defaults.field(F::bandwidth).text == "3.6 kHz" &&
+    check(defaults.field(F::bandwidth).text == "2.4 kHz" &&
           defaults.field(F::fhss).selected == "off");
     defaults.select(F::fhss, "fake-fcc");
     check(defaults.settings().fhss_profile == "fake-fcc" &&
@@ -739,7 +871,7 @@ void simulation_launch_defaults() {
         "datapump-gui --tx-dbm 3 --helper-power 0 --helper-ratio-limit 90 --helper-callsign= "
         "--path-loss-db 90 --noise-dbm-hz -164 --oscillator gpsdo-xo --rf-oscillator gpsdo-xo "
         "--spread-preset hf-worst --selective-perturbation each-65 --shift 3e+07 --search-margin 3 "
-        "--reference independent --target-snr 32 --rate 3.6000000000000001 --carrier 3.0001725e+07 "
+        "--reference independent --target-snr 32 --rate 3.6000000000000001 --carrier 3.0001725e+07 --audio-sample-rate 6000 "
         "--doppler 0c --calendar-epoch 1793850000 --clock-sync default --audio-error 70ms "
         "--dsss-mode off --dsss-factor 10 --dsss-version interleave --live-duplex yes --keyset amateur");
     simulation.activate(C::planner_load_command);
@@ -852,6 +984,8 @@ int main() {
         admission_browser_controller();
         required_gpu_policy();
         finite_duplex_policy();
+        robust_setup_calendar_timing();
+        robust_audio_sample_rate_policy();
         data_cadence_policy();
         fhss_rate_compatibility();
         simulation_launch_defaults();

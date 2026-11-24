@@ -15,8 +15,8 @@
 namespace datapump::live {
 inline constexpr std::size_t simulation_detail_rows = 160;
 inline constexpr double simulation_detail_seconds = 7.2;
-// Both ends configure the same calendar independently. Its ordinal advances
-// through quiet slots as well as DATA. A later capture can join this calendar.
+// An explicit shared UTC calendar. Its ordinal advances through quiet slots
+// as well as DATA. A later capture can join this calendar.
 struct Calendar {
     std::uint64_t epoch = 0, initial_ordinal = 0;
 };
@@ -40,9 +40,13 @@ struct Settings {
     double transmit_gain=1;
     helper::Options helper;
     std::optional<Calendar> calendar;
+    // Ordinary live sessions can use the public UTC recurrence without an
+    // exchange of calendar settings.
+    bool auto_calendar=false;
     // One-sided audio input density, in squared normalized PCM per Hz.
-    // The live scorer requires a separately declared input noise model.
     std::optional<double> live_noise_dbfs_hz;
+    // Ordinary GUI live reception can measure a startup noise baseline.
+    bool auto_live_noise=false;
     std::optional<std::size_t> receiver_memory_limit;
     double tx_dbm=20, path_loss_db=120, noise_dbm_hz=-174, target_cn0_db_hz=32;
     double doppler_shift_hz=0;
@@ -172,6 +176,8 @@ struct Snapshot {
     modem::TransmitTrace transmit_trace;
     std::vector<PatternStep> pattern_steps;
     std::optional<double> bit_seconds, slot_stride_seconds;
+    std::optional<std::pair<double,double>> slot_stride_range_seconds;
+    std::optional<double> live_noise_baseline_dbfs_hz;
     std::optional<std::pair<double,double>> search_band_hz, helper_band_hz;
     std::optional<std::string> transmit_unavailable;
     std::optional<std::string> noise_transmit_unavailable;

@@ -15,7 +15,7 @@ struct CarrierBand {
 
     helper::MonoPassband data_passband(double carrier_hz) const;
     double minimum_carrier_hz(double lower_edge_hz) const;
-    void validate(double carrier_hz) const;
+    void validate(double carrier_hz, std::optional<double> audio_upper_limit_hz = std::nullopt) const;
 
 private:
     friend CarrierBand plan_carrier_band(const Settings&, std::optional<double>);
@@ -55,9 +55,21 @@ struct ProfilePreparationOptions {
 // receiver never obtains its format, prior, or duration from the draft.
 Profile prepare_profile(const Settings&, Calendar, std::stop_token,
                         ProfilePreparationOptions = {});
+// Apply a local noise density to the unscaled live DATA reference gain.
+void apply_live_noise_model(triad::v3::ReceiverConfig&, double target_cn0_db_hz, double noise_dbfs_hz);
 // A device's actual timestamp uncertainty can widen the live public search.
 // The nominal source format, recurrence and keyed address remain fixed.
 Profile with_capture_uncertainty(const Profile&, double provider_seconds, double anchor_seconds,
-                                 std::uint64_t filter_halo_samples);
+                                 std::uint64_t filter_halo_samples,
+                                 std::optional<triad::v3::HelperBurstCoordinate> receive_origin = {});
+
+struct DatedReceiveStart {
+    Profile profile;
+    std::int64_t first_input_sample;
+    std::uint64_t first_slot, first_observation_sample;
+};
+// Select the first fully observable slot after capture and filter startup.
+DatedReceiveStart plan_dated_receive_start(const Profile&, bool automatic, long double first_utc,
+                                          double provider_uncertainty, std::size_t filter_halo);
 
 } // namespace datapump::live::detail

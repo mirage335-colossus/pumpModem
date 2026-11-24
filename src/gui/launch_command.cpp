@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <chrono>
 #include <cctype>
 #include <cmath>
 #include <limits>
@@ -115,6 +116,11 @@ double frequency(std::string_view text,std::string_view flag,double low,bool all
         invalid(std::string(flag)+" is outside its supported frequency range.");
     return *value;
 }
+std::uint32_t checked_audio_sample_rate(double value) {
+    if(value<65||value>192000||value!=std::trunc(value)||static_cast<std::uint32_t>(value)%5)
+        invalid("Audio sample rate must be a whole multiple of 5 Hz from 65 Hz through 192 kHz.");
+    return static_cast<std::uint32_t>(value);
+}
 std::string numeric(double value) {
     if(!std::isfinite(value))invalid("Cannot format a non-finite launch setting.");
     if(value==0)value=0;
@@ -151,6 +157,51 @@ void validate_key_selection(const Patch& settings) {
     if(settings.keyset&&settings.keyfile)invalid("--keyset conflicts with --keyfile.");
 }
 
+std::uint32_t parse_audio_sample_rate(std::string_view value) {
+    if(value=="auto")return 0;
+    return checked_audio_sample_rate(frequency_input::parse(value).value_or(0));
+}
+
+std::uint64_t parse_calendar_epoch(std::string_view value) {
+    constexpr std::string_view usage="Use auto, UTC seconds from 6 through 4294967289, YYYY-MM-DD HH:MM:SS, or YYYY-MM-DDTHH:MM:SSZ.";
+    if(value=="none")return 0;
+    const auto check_range=[&](std::uint64_t seconds) {
+        if(seconds&&(seconds<6||seconds>4294967289ULL))
+            invalid("Calendar epoch is outside its supported range. "+std::string(usage));
+        return seconds;
+    };
+    if(!value.empty()&&std::all_of(value.begin(),value.end(),[](unsigned char ch){return ch>='0'&&ch<='9';})) {
+        std::uint64_t seconds=0;
+        const auto parsed=std::from_chars(value.data(),value.data()+value.size(),seconds);
+        if(parsed.ec!=std::errc{}||parsed.ptr!=value.data()+value.size())
+            invalid("Calendar epoch is outside its supported range. "+std::string(usage));
+        return check_range(seconds);
+    }
+
+    const bool spaced=value.size()==19&&value[10]==' ';
+    const bool iso=value.size()==20&&value[10]=='T'&&value[19]=='Z';
+    const bool delimiters=(spaced||iso)&&value[4]=='-'&&value[7]=='-'&&value[13]==':'&&value[16]==':';
+    const auto digits=[](std::string_view text,int& out) {
+        if(text.empty()||!std::all_of(text.begin(),text.end(),[](unsigned char ch){return ch>='0'&&ch<='9';}))return false;
+        const auto parsed=std::from_chars(text.data(),text.data()+text.size(),out);
+        return parsed.ec==std::errc{}&&parsed.ptr==text.data()+text.size();
+    };
+    int year=0,month=0,day=0,hour=0,minute=0,second=0;
+    if(!delimiters||!digits(value.substr(0,4),year)||!digits(value.substr(5,2),month)||
+       !digits(value.substr(8,2),day)||!digits(value.substr(11,2),hour)||
+       !digits(value.substr(14,2),minute)||!digits(value.substr(17,2),second))
+        invalid("Calendar epoch is invalid. "+std::string(usage));
+    const std::chrono::year_month_day date{std::chrono::year{year},std::chrono::month{static_cast<unsigned>(month)},
+                                           std::chrono::day{static_cast<unsigned>(day)}};
+    if(!date.ok()||hour>23||minute>59||second>59)
+        invalid("Calendar epoch must be a real UTC date and time (seconds 00–59). "+std::string(usage));
+    const auto duration=std::chrono::sys_days{date}.time_since_epoch()+std::chrono::hours{hour}+
+                        std::chrono::minutes{minute}+std::chrono::seconds{second};
+    const auto seconds=std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+    if(seconds<0)invalid("Calendar epoch is outside its supported range. "+std::string(usage));
+    return check_range(static_cast<std::uint64_t>(seconds));
+}
+
 Patch parse_arguments(std::span<const std::string> arguments) {
     if(arguments.empty())invalid("Enter a launch command or settings flags.");
     if(arguments.size()>maximum_arguments)invalid("Launch command has too many arguments.");
@@ -170,7 +221,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         const auto flag=argument.substr(0,equal);
         const bool known=flag=="--tx-dbm"||flag=="--path-loss-db"||flag=="--noise-dbm-hz"||
             flag=="--oscillator"||flag=="--target-snr"||
-            flag=="--rate"||flag=="--bw"||flag=="--carrier"||flag=="--dsp-workspace"||
+            flag=="--rate"||flag=="--bw"||flag=="--audio-sample-rate"||flag=="--carrier"||flag=="--dsp-workspace"||
             flag=="--spread-preset"||flag=="--selective-perturbation"||flag=="--rf-oscillator"||flag=="--shift"||flag=="--rf-shift"||flag=="--rf-carrier"||flag=="--search-margin"||
             flag=="--reference"||flag=="--sideband"||flag=="--lf-reference"||
             flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--receiver-strategy"||flag=="--receiver-cpu-budget"||flag=="--doppler"||flag=="--fhss"||flag=="--fhss-list"||flag=="--fhss-list-file"||flag=="--live-duplex"||flag=="--gpu"||flag=="--hardware-channel-test"||
@@ -196,18 +247,20 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         else if(flag=="--noise-dbm-hz")result.noise_dbm_hz=number(value,flag,-250,0);
         else if(flag=="--target-snr")result.target_db_hz=number(value,flag,-200,200);
         else if(flag=="--rate"||flag=="--bw")result.rate_hz=frequency(value,flag,tuning::minimum_bandwidth_hz);
+        else if(flag=="--audio-sample-rate")result.audio_sample_rate_hz=parse_audio_sample_rate(value);
         else if(flag=="--carrier")result.carrier_hz=frequency(value,flag,0,false,std::numeric_limits<double>::max());
         else if(flag=="--dsp-workspace")result.workspace_percent=workspace(value);
         else if(flag=="--calendar-epoch") {
-            result.calendar_epoch=value=="none"?0:unsigned_integer(value,flag);
-            if(*result.calendar_epoch&&(*result.calendar_epoch<6||*result.calendar_epoch>4294967289ULL))
-                invalid("Calendar epoch must be none or UTC seconds from 6 through 4294967289.");
+            result.auto_calendar=value=="auto";
+            if(result.auto_calendar)result.calendar_epoch.reset();
+            else result.calendar_epoch=parse_calendar_epoch(value);
         }
         else if(flag=="--calendar-ordinal")result.calendar_ordinal=unsigned_integer(value,flag);
         else if(flag=="--live-noise-dbfs-hz") {
+            result.auto_live_noise=value=="auto";
             result.clear_live_noise=value=="unspecified";
             result.live_noise_dbfs_hz.reset();
-            if(!result.clear_live_noise)result.live_noise_dbfs_hz=number(value,flag,-250,0);
+            if(!result.clear_live_noise&&!result.auto_live_noise)result.live_noise_dbfs_hz=number(value,flag,-250,0);
         }
         else if(flag=="--minimum-carrier-spacing") {
             const auto spacing=number(value,flag,0,265);
@@ -369,14 +422,19 @@ std::string format(const Patch& settings) {
     if(settings.reference)add("--reference",*settings.reference);
     if(settings.target_db_hz)add("--target-snr",numeric(*settings.target_db_hz));
     if(settings.rate_hz)add("--rate",numeric(*settings.rate_hz));
+    if(settings.audio_sample_rate_hz) {
+        const auto rate=*settings.audio_sample_rate_hz;
+        add("--audio-sample-rate",rate?std::to_string(checked_audio_sample_rate(rate)):"auto");
+    }
     if(settings.carrier_hz)add("--carrier",numeric(*settings.carrier_hz));
     if(settings.doppler)add("--doppler",tuning::parse_doppler(*settings.doppler).canonical);
     if(settings.workspace_percent)add("--dsp-workspace",*settings.workspace_percent?std::to_string(*settings.workspace_percent)+"%":"auto");
-    if(settings.calendar_epoch)add("--calendar-epoch",*settings.calendar_epoch?std::to_string(*settings.calendar_epoch):"none");
+    if(settings.auto_calendar)add("--calendar-epoch","auto");
+    else if(settings.calendar_epoch)add("--calendar-epoch",*settings.calendar_epoch?std::to_string(*settings.calendar_epoch):"none");
     if(settings.calendar_ordinal)add("--calendar-ordinal",std::to_string(*settings.calendar_ordinal));
-    if(settings.clear_live_noise&&settings.live_noise_dbfs_hz)invalid("Cannot export both a live noise density and an unspecified density.");
-    if(settings.clear_live_noise)add("--live-noise-dbfs-hz","unspecified");
-    else if(settings.live_noise_dbfs_hz)add("--live-noise-dbfs-hz",numeric(*settings.live_noise_dbfs_hz));
+    if(settings.live_noise_dbfs_hz)add("--live-noise-dbfs-hz",numeric(*settings.live_noise_dbfs_hz));
+    else if(settings.auto_live_noise)add("--live-noise-dbfs-hz","auto");
+    else if(settings.clear_live_noise)add("--live-noise-dbfs-hz","unspecified");
     if(settings.fec)add("--fec",*settings.fec);
     if(settings.wrong_key_admission)add("--wrong-key-admission",*settings.wrong_key_admission);
     if(settings.clock_sync)add("--clock-sync",clock_sync::format(clock_sync::parse(*settings.clock_sync)));

@@ -21,10 +21,11 @@ into the application; Python is not part of its operating path. Legacy supports
 BPSK31, BPSK125 and Olivia-4/2k text.
 The modes have separate settings.
 Peers must select matching waveform, source, coding and key settings.
-Live Robust also requires a shared public calendar and initial waveform ordinal,
-plus a declared local input-noise model in Robust setup. Unknown-start
-acquisition, native real-time capacity and physical-device qualification remain
-unqualified. Robust audio CLI commands remain retired.
+Live Robust defaults to a shared UTC calendar and measures each receiver's
+local noise at startup. The first message in an automatic session leaves two
+public slots for receivers to score quiet before DATA. A receiver must be
+listening for those slots to rearm. Native real-time capacity and physical-device
+qualification remain open. Robust audio CLI commands remain retired.
 .PP
 Robust keeps Baseband Osc, Shift Osc and Margin beside its main Carrier and
 Shift frequency controls. Shift 0 disables Shift Osc as N/A and excludes all
@@ -183,14 +184,16 @@ authentication. Older commands using \-\-keyset none or \-\-tx-key none are
 rejected and must select Amateur or a named key instead. Omitting the option
 preserves the current key bank.
 .TP
-.BI \-\-calendar\-epoch " UTC|none"
-Shared public calendar anchor in whole UTC seconds, 6 through 4294967289.
-Default none leaves live operation unconfigured; simulation uses its own
-agreed local calendar. Both peers must use the same anchor.
+.BI \-\-calendar\-epoch " auto|UTC"
+Auto (default) selects the same UTC recurrence at both live peers. A custom
+anchor accepts whole UTC seconds from 6 through 4294967289 or a date and time
+such as 2026-11-23T20:00:00Z. Set the same custom anchor at both peers if using
+one. Older settings with none select Auto in ordinary live operation.
+Simulation with Auto uses a local calendar. Finite duplex needs a custom anchor.
 .TP
 .BI \-\-calendar\-ordinal " N"
-Shared unsigned initial waveform ordinal; default 0. It advances through DATA
-and quiet slots and does not reset at message boundaries.
+Custom calendar's shared unsigned initial waveform ordinal (default 0). It
+advances through DATA and quiet slots across message boundaries.
 .TP
 .BI \-\-data\-cadence " scheduled|scheduled-fill|scheduled-bridge|continuous"
 Select the Robust DATA cadence. Startup selects scheduled-bridge.
@@ -204,10 +207,11 @@ Continuous places successive DATA gates on adjacent samples
 and also requires both Symbol Burst waits off. Both peers select the same
 cadence.
 .TP
-.BI \-\-live\-noise\-dbfs\-hz " DENSITY|unspecified"
-Declared one-sided local input-noise density in normalized PCM squared per Hz,
-from \-250 to 0 dBFS/Hz. Default unspecified leaves live reception unconfigured.
-This is separate from simulated link noise in dBm/Hz and does not calibrate a device.
+.BI \-\-live\-noise\-dbfs\-hz " auto|DENSITY|unspecified"
+Auto measures a local noise baseline from idle startup audio and is the
+ordinary live GUI default. An explicit density uses normalized PCM squared per
+Hz from \-250 to 0 dBFS/Hz. Unspecified leaves live reception disabled.
+Simulation uses its modeled link noise. Finite duplex requires a numeric density.
 .TP
 .BI \-\-fec " off|rs20|rs60"
 Configured native short/long text error correction; default off. Peers must agree.
@@ -350,10 +354,16 @@ sensitivity guarantee, measured in-band SNR or native CPU-capacity forecast.
 .BI \-\-rate " FREQUENCY"
 Set the native inner rate, parsed from 0.001 Hz to 30 MHz.
 The selected waveform and fixed Helper placement must fit the actual audio rate.
-Default: 3.6 kHz.
+Default: 2.4 kHz.
 This is not the payload bit rate.
 .B \-\-bw
 is an alias.
+.TP
+.BI \-\-audio\-sample\-rate " auto|FREQUENCY"
+Set the Robust logical audio sample rate for live and Simulation. Auto is the
+default and chooses the smallest standard rate at or above 6 kHz that fits
+the guarded waveform. Match the resolved rate at both peers. Live operation
+also depends on the device's negotiated usable passband and timing support.
 .TP
 .BI \-\-carrier " FREQUENCY"
 Set the absolute transmitted/received carrier; default 1725 Hz. Recommendations use the selected

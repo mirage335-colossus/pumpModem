@@ -29,8 +29,49 @@ added airtime fits. At 8 dB-Hz on one quiet-HF realization, RS20 recovered
 `HELLO` through three erasures. The uncoded 65-bit transmission failed and
 the 136-bit coded transmission completed. [Coding and fade evidence](../../_appraisal/highFidelity-triple_Robust_Modem/hf-validation.md#moderate-continental-and-atlantic-hf)
 
-For live reception, first match the peers' public calendar epoch, initial keyed
-ordinal, waveform profile, encryption/key, FEC, compression and DATA cadence.
+For live reception, leave **Robust Setup → Calendar anchor** on **Auto**.
+Peers derive the same calendar from UTC and need synchronized clocks and
+matching waveform settings, encryption/key, FEC, compression and DATA cadence.
+Start the receiving peer before submitting the first message so it can score
+the two startup quiet slots. The default has an 8.8-second DATA bit and 24-second
+slot spacing. First Send takes about 61–85 seconds to reach DATA in the native
+timing model. Confirmation needs about 55 seconds of capture after the final
+DATA support, plus receiver processing. An explicitly planned shared calendar is also
+available in Robust Setup. The native waveform, Helper timing, cadence and waits
+determine slot spacing. Start with Symbol Burst
+Off and Random extra 0 for short messages. The initial Target C/N₀ is 32 dB-Hz
+for provisional planning. With one-hour slot spacing, one raw bit takes about
+three hours from its first slot and the text `e` with FEC Off takes about five
+hours, including the two quiet slots needed for physical completion. Allow time
+for automatic first-send alignment and the two startup quiet slots, plus
+receiver processing. Physical
+reliability and real-time capacity require separate qualification. See the
+[duration assumptions](../triad-duration-planning.md).
+
+Leave live noise calibration on **Auto** for a quiet startup and stable gain.
+Each receiver measures its own local baseline. A manual density in dBFS/Hz is
+available for measured device and gain configurations. Simulations use the
+configured link and noise model. See the
+[calibration limits](../robust-current.md#configured-calendar-reception) and
+[GUI control meanings](../gui-contract.md#modems-and-current-availability).
+
+Leave **Audio sample rate** on **Auto**. It resolves to 6 kHz at startup
+with the 2.4 kHz inner Rate and to 8 kHz with 3.6 kHz at the standard audio
+carrier. Use explicit logical rates when comparing simulation setups. Both
+live peers need the same resolved logical rate and enough device passband.
+At a fixed observation duration, 8 kHz increases raw sample storage by one
+third over 6 kHz. The actual converter and device clock determine live timing.
+
+On the Ryzen 5 PRO 5650U, one matched clean native simulation with 24 workers,
+Rate 2.4 kHz, 1725 Hz IF, Target 32 dB-Hz and observed 80 dB-Hz decoded the
+short message and both quiet slots at 6 and 8 kHz. Receiver wall time was
+2.78 and 3.19 s, respectively, and simulator generation was 0.34 and 0.51 s.
+The 8 kHz, 3.6 kHz inner-rate check also completed. A separate 3.6 Hz HF Worst
+geometry quote moved the coarse FFT from 262,144 to 524,288 rows at 8 kHz.
+These are bounded single-fixture results, with no physical device or long-window
+capacity measurement. Keep Auto on the smaller compatible rate when the
+waveform fits. [Validation details](../validation.md#robust-live-setup-and-audio-rate)
+
 **Robust Setup → DATA cadence → Scheduled + gap fill** keeps the Scheduled
 calendar and uses the DATA waveform with a temporary key inside eligible gaps.
 Both peers need Helper and FHSS Off. [Gap fill and its guard](../symbol-burst.md#scheduled-gaps-and-temporary-key-noise)

@@ -297,9 +297,15 @@ with tempfile.TemporaryDirectory(prefix="datapump-file-contract-") as directory:
         assert not control("Transmit")["enabled"], "empty Robust draft enabled transmission"
         setup = next(tab for tab in snapshot["tabs"] if tab["label"] == "Robust setup")
         event(11, setup["id"])
+        assert control("Audio sample rate · 6 kHz")["text"] == "auto"
+        console = next(tab for tab in snapshot["tabs"] if tab["label"] == "Console")
+        event(11, console["id"])
+        event(1, control("Rate")["id"], "3.6 kHz")
+        event(11, setup["id"])
+        assert control("Audio sample rate · 8 kHz")["text"] == "auto"
+        event(1, control("Audio sample rate · 8 kHz")["id"], "6000")
         # The carrier checks below exercise the rate-derived narrow span.
         event(2, control("Minimum carrier spacing")["id"], "0")
-        console = next(tab for tab in snapshot["tabs"] if tab["label"] == "Console")
         event(11, console["id"])
         message = next(item for item in snapshot["controls"]
                        if item["kind"] == "text" and item.get("byteLimit") == 4 * 1024 * 1024)

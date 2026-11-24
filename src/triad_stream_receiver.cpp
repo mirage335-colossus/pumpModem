@@ -50,6 +50,24 @@ std::size_t window_samples(const ReceiverSlotPlan& plan) {
 
 std::size_t window_bytes(std::size_t samples) { return times(samples, sample_bytes); }
 
+std::string input_bound_error(const ReceiverSlotPlan& plan, double sample_rate_hz,
+                              std::size_t maximum_samples, std::size_t memory_limit_bytes,
+                              bool explicit_input_limit) {
+    const auto requested_samples = window_samples(plan);
+    std::ostringstream message;
+    message << "Robust public observation exceeds the local input bound: requested "
+            << requested_samples << " samples (" << std::setprecision(6)
+            << static_cast<long double>(requested_samples) / sample_rate_hz << " s at "
+            << sample_rate_hz << " Hz). Maximum admitted " << maximum_samples << " samples ("
+            << static_cast<long double>(maximum_samples) / sample_rate_hz << " s). The per-window I/Q and validity input cap is "
+            << window_bytes(maximum_samples) << " bytes, "
+            << (explicit_input_limit ? "explicit maximum_buffer_samples" :
+                "automatic memory_limit_bytes / 4 input cap")
+            << ", total receiver memory limit " << memory_limit_bytes
+            << " bytes. The DSP search needs additional workspace. Try a shorter bit duration or a lower audio sample rate that fits the waveform.";
+    return message.str();
+}
+
 std::size_t native_stream_workspace(bool continuous, const ReceiverConfig& config,
                                     const ReceiverSlotPlan& plan, unsigned workers) {
     const auto quote = continuous || plan.scheduled_gap_fill ?
@@ -247,7 +265,7 @@ ReceiverSlotPlan make_receiver_slot_plan(const PublicProfile& profile, const Rec
         throw Error("Robust scorer and public stream profile differ");
     const auto slot = profile.slot(index);
     const auto seconds = [&](HelperBurstCoordinate coordinate) {
-        return profile.calendar().relative_seconds(profile.origin(), coordinate);
+        return profile.calendar().relative_seconds(profile.receive_origin(), coordinate);
     };
     ReceiverSlotPlan result;
     result.index = slot.index;
@@ -358,7 +376,8 @@ struct CompleteStreamReceiver::Impl {
     ReceiverSlotPlan plan(std::uint64_t index) const {
         auto result = make_receiver_slot_plan(profile, config, index);
         if (window_samples(result)>maximum_buffer)
-            throw ReceiverWorkspaceError("Robust public observation exceeds the local input bound");
+            throw ReceiverWorkspaceError(input_bound_error(result, config.sample_rate_hz, maximum_buffer,
+                resources.memory_limit_bytes, options.maximum_buffer_samples.has_value()));
         return result;
     }
 

@@ -7,7 +7,9 @@ The GUI minimum-wait choices Off, 1, 2, 3, 5 and 10 symbols map to
 `Format::burst_wait_tiles` remains a separate within-bit calendar.
 
 Both peers share the same public anchor, initial ordinal, key, DATA cadence and wait settings.
-In Scheduled mode each support starts on the UTC 30-second grid. Helper-enabled slots preserve a
+Explicit Scheduled calendars use the UTC 30-second grid. Auto can use a shorter
+whole-second stride for eligible short Scheduled profiles after checking the
+full receive and neighboring signal bounds. Helper-enabled slots preserve a
 fresh 38-second lead, complete DATA pulse support and protected Helper tail.
 Off removes the requested additional wait. The current calendar still includes
 the waveform support, guards and grid alignment.
@@ -35,6 +37,13 @@ recurrence accounts for the complete waveform allocation and grid alignment.
 Receiver clock, arrival and delay-spread bounds affect receive windows and
 can inform public duration planning. See the
 [simulator boundary](channel-models.md#robust-simulator-boundary).
+
+At the ordinary Auto settings, the compact stride is 24 seconds for an
+8.8-second DATA bit and a declared arrival search of −7 to +7.07 seconds.
+The receiver derives its admission count from the shorter public calendar.
+Explicit calendars and profiles requiring a longer guard keep their existing
+spacing. The examples below retain the explicit legacy timing for historical
+comparability. [Current checks](validation.md#robust-live-setup-and-audio-rate)
 
 In the Helper-off 6 kHz case at Rate 3.6 Hz, 30 MHz shift, 1,725 Hz IF,
 GPSDO XO, 3× margin, HF Worst, Each 65% and Target 32 dB-Hz, the DATA gate

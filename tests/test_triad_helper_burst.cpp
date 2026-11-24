@@ -1,6 +1,7 @@
 #include "datapump/triad_helper_burst.hpp"
 #include "datapump/triad_stream.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -9,6 +10,7 @@
 #include <limits>
 #include <stop_token>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -63,6 +65,9 @@ void waits_and_quiet_intervals() {
     struct Example {unsigned wait;std::uint64_t expected;};
     for(const auto e:std::array<Example,3>{{{0,90},{1,120},{3,210}}}) {
         HelperBurstPlan p(config(40,e.wait));
+        check(p.stride_sample_range()==std::pair<std::uint64_t,std::uint64_t>{
+                  static_cast<std::uint64_t>(e.expected)*1000,static_cast<std::uint64_t>(e.expected)*1000},
+              "fixed Helper interval range changed its exact recurrence");
         const auto first=p.first_slot({epoch,0}),second=p.successor(first);
         check(second.index==1 && second.support_begin.epoch==epoch+e.expected,
               "whole-bit wait recurrence changed");
@@ -88,6 +93,68 @@ void waits_and_quiet_intervals() {
         check(a.helper_begin==a.support_begin && a.helper_end==a.support_end,
               "Helper-disabled calendar introduced Helper airtime");
     }
+}
+
+void compact_scheduled_calendar() {
+    auto c=config(8,0,false);
+    c.compact_stride_seconds=24;
+    const HelperBurstCoordinate earliest{epoch+2,1};
+    const HelperBurstPlan calendar(c);
+    const auto first=calendar.first_slot(earliest);
+    check(first.support_begin==HelperBurstCoordinate{epoch+3,0},
+          "compact Scheduled calendar did not round to the next UTC second");
+    constexpr std::uint64_t index=1'000'001;
+    const auto distant=calendar.slot_at(earliest,index);
+    check(distant.support_begin==HelperBurstCoordinate{epoch+3+24*index,0} &&
+          distant.pattern_begin.phase==100 &&
+          calendar.successor(distant)==calendar.slot_at(earliest,index+1),
+          "compact Scheduled lookup changed the global index or source phase");
+    check(calendar.stride_sample_range()==std::pair<std::uint64_t,std::uint64_t>{24'000,24'000},
+          "compact Scheduled interval range lost its exact stride");
+    auto unsupported=c;
+    unsupported.helper_enabled=true;
+    rejects([&]{HelperBurstPlan profile(unsupported);},"compact Scheduled Helper accepted");
+    unsupported=c;
+    unsupported.wait_bits=1;
+    rejects([&]{HelperBurstPlan profile(unsupported);},"compact Scheduled symbol wait accepted");
+    unsupported=c;
+    unsupported.random_extra_bits=1;
+    rejects([&]{HelperBurstPlan profile(unsupported);},"compact Scheduled random wait accepted");
+    unsupported=c;
+    unsupported.continuous_data=true;
+    rejects([&]{HelperBurstPlan profile(unsupported);},"compact Scheduled continuous cadence accepted");
+    unsupported=c;
+    unsupported.compact_stride_seconds=8;
+    rejects([&]{HelperBurstPlan profile(unsupported);},"compact Scheduled stride truncated pulse support");
+
+    PublicProfileConfig configured;
+    configured.format.sample_rate=6000;
+    configured.format.epoch=epoch;
+    configured.format.symbol_ordinal=73;
+    configured.format.inner_rate_hz=100;
+    configured.format.bit_seconds=8;
+    configured.capture_lead_seconds=7.25;
+    configured.capture_trail_seconds=.25;
+    configured.arrival_low_seconds=-7;
+    configured.arrival_high_seconds=7.07;
+    configured.receiver_filter_halo_samples=97;
+    const PublicProfile ordinary(configured);
+    configured.compact_stride_seconds=24;
+    const PublicProfile compact(configured);
+    const auto slot=compact.slot(5);
+    const auto legacy=ordinary.slot(2);
+    check(slot.tx.pattern_begin==legacy.tx.pattern_begin && slot.symbol_ordinal==78 &&
+          compact.first_slot_not_before(slot.tx.helper_begin)==5 &&
+          compact.first_slot_not_before(compact.calendar().add(slot.tx.helper_begin,1))==6,
+          "compact Scheduled recurrence changed address geometry or UTC lookup");
+    check(slot.observation.first>legacy.observation.first && slot.observation.stop==legacy.observation.stop &&
+          slot.quiet_aperture.first>=slot.observation.first && slot.quiet_aperture.stop<=slot.observation.stop &&
+          slot.quiet_aperture.stop>slot.quiet_aperture.first,
+          "compact Scheduled capture lost its quiet aperture or trailing coverage");
+    check(compact.maximum_slot_opportunities_per_day()==3601 && ordinary.maximum_slot_opportunities_per_day()==1441,
+          "compact Scheduled cadence bypassed calendar-derived admission");
+    configured.scheduled_gap_fill=true;
+    rejects([&]{PublicProfile profile(configured);},"compact Scheduled guarded fill accepted");
 }
 
 void protected_tail() {
@@ -150,6 +217,9 @@ void continuous_data_calendar() {
     packed.support_samples+=371;
     packed.continuous_data=true;
     const HelperBurstPlan plan(packed);
+    check(plan.stride_sample_range()==std::pair<std::uint64_t,std::uint64_t>{
+              packed.bit_samples,packed.bit_samples},
+          "continuous DATA interval range changed its exact sample stride");
     const HelperBurstCoordinate earliest{epoch+1,73};
     const auto first=plan.first_slot(earliest);
     check(first.support_begin==HelperBurstCoordinate{epoch+30,0},
@@ -312,6 +382,10 @@ void random_extra_waits() {
             const auto first=fixed.first_slot(earliest);
             strides[i]=fixed.successor(first).support_begin.epoch-first.support_begin.epoch;
         }
+        const auto [minimum_stride,maximum_stride]=p.stride_sample_range();
+        check(minimum_stride==*std::min_element(strides.begin(),strides.begin()+extra+1)*c.sample_rate &&
+              maximum_stride==*std::max_element(strides.begin(),strides.begin()+extra+1)*c.sample_rate,
+              "random Helper interval range omitted a configured UTC-rounded wait");
         auto current=p.first_slot(earliest);
         std::array<unsigned,cycle_slots> first_cycle{};
         bool different_second_cycle=false;
@@ -668,7 +742,7 @@ void rejection_boundaries() {
 
 int main() {
     try {
-        grid_and_geometry();waits_and_quiet_intervals();protected_tail();
+        grid_and_geometry();waits_and_quiet_intervals();compact_scheduled_calendar();protected_tail();
         indexed_public_calendar();continuous_data_calendar();continuous_emission_boundaries();
         random_extra_waits();public_epoch_and_ordinal_boundaries();
         emission_modes_and_cancellation();centered_receiver_filter_support();scheduled_gap_fill_support();

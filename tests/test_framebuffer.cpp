@@ -341,9 +341,9 @@ void mfd_tuning_and_pages() {
     require(app.field(ui::Field::fast_mode).selected=="legacy","MFD next modem");
     require(!scene_text(session,"Expected SNR"),"stale Fast tuning in Legacy bank");
     bezel(session,4);require(app.field(ui::Field::fast_mode).selected=="robust","MFD return to Robust");
-    mfd_choose(session,"TUNE","Rate");require(app.field(ui::Field::bandwidth).text=="3.6 kHz","Robust initial rate");
-    bezel(session,4);require(app.field(ui::Field::bandwidth).text=="2.4 kHz","MFD lower rate");
-    bezel(session,5);require(app.field(ui::Field::bandwidth).text=="3.6 kHz","MFD higher rate");
+    mfd_choose(session,"TUNE","Rate");require(app.field(ui::Field::bandwidth).text=="2.4 kHz","Robust initial rate");
+    bezel(session,4);require(app.field(ui::Field::bandwidth).text=="1.2 kHz","MFD lower rate");
+    bezel(session,5);require(app.field(ui::Field::bandwidth).text=="2.4 kHz","MFD higher rate");
     mfd_choose(session,"TUNE","Target SNR");const auto before=std::stod(app.field(ui::Field::snr).text);
     bezel(session,5);const auto higher=std::stod(app.field(ui::Field::snr).text);
     require(higher>before,"MFD numeric presets followed descending declaration order");
@@ -455,7 +455,7 @@ void mfd_operating_subset() {
     const Inventory inventories[]{
         {"fast",{"Fast Mdm","Chan profile","Exp SNR","TX vol","Baseband oscillator","Shift oscillator",
             "Doppler / delay","Selective AM","Search margin (x)","Shift frequency"},{"Clear RX","TX text","Cancel"}},
-        {"robust",{"Robust Mdm","Rate","Shift","Doppler","Target SNR","TX vol"},
+        {"robust",{"Robust Mdm","Rate","Carrier","Shift","Doppler","Target SNR","TX vol"},
             {"Clear RX","Helper","TX","TX noise","Cancel TX"}},
         {"legacy",{"Legacy Mdm","Modulation","Squelch","TX vol"},{"TX"}}
     };
@@ -473,7 +473,8 @@ void mfd_operating_subset() {
                     require(value.find(removed)==std::string::npos,"desktop/setup control escaped into MFD");
                 require(app.page()==ui::Page::console,"MFD operating subset navigated away from Console");
                 const auto start=value.find(" | ");require(start!=std::string::npos,"missing MFD function label");
-                const auto label=value.substr(start+3,value.find(" | ",start+3)-(start+3));
+                auto label=value.substr(start+3,value.find(" | ",start+3)-(start+3));
+                if(label.starts_with("Target SNR · Budget "))label="Target SNR";
                 require(std::find(expected.begin(),expected.end(),label)!=expected.end(),("unexpected MFD function: "+value).c_str());
                 require(std::find(seen.begin(),seen.end(),label)==seen.end(),"MFD cycle repeated a function before returning");
                 seen.push_back(label);bezel(session,3);

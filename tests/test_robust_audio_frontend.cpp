@@ -5,10 +5,15 @@
 #include <iostream>
 #include <limits>
 #include <numbers>
+#include <random>
 #include <stdexcept>
+#include <string>
 
 namespace {
 using datapump::live::detail::AudioInput;
+using datapump::live::detail::calibrate_noise_dbfs_hz;
+using datapump::live::detail::noise_calibration_samples;
+using datapump::live::detail::noise_calibration_workspace_bytes;
 using datapump::live::detail::real_pcm;
 using datapump::triad::v3::Complex;
 
@@ -91,12 +96,89 @@ void erasure_and_eof() {
         throw std::runtime_error("Unmasked nonfinite PCM entered Robust projection");
     } catch (const datapump::Error&) {}
 }
+
+void startup_noise_calibration() {
+    constexpr std::uint32_t sample_rate = 6000;
+    const auto count = noise_calibration_samples(sample_rate);
+    check(count == 16 * 1024 && noise_calibration_workspace_bytes(sample_rate) > count * sizeof(float),
+          "Robust calibration capture or reported workspace changed unexpectedly");
+    std::mt19937 generator(0x51A7U);
+    std::normal_distribution<float> white(0.f, .025f);
+    std::vector<float> pcm(count);
+    for (auto& sample : pcm) sample = white(generator);
+    const auto measured = calibrate_noise_dbfs_hz(pcm, sample_rate);
+    const auto expected = 10 * std::log10(2. * .025 * .025 / sample_rate);
+    check(std::isfinite(measured.noise_dbfs_hz) && measured.noise_dbfs_hz >= expected + 1. &&
+              measured.noise_dbfs_hz <= expected + 8.,
+          "Robust white-noise density estimate is not normalized or conservatively bounded");
+
+    constexpr float added_dc = 2e-5f;
+    std::vector<float> quiet(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        quiet[i] = pcm[i] * 1e-5f;
+        pcm[i] = quiet[i] + added_dc;
+    }
+    const auto quiet_baseline = calibrate_noise_dbfs_hz(quiet, sample_rate);
+    const auto with_dc = calibrate_noise_dbfs_hz(pcm, sample_rate);
+    check(std::abs(with_dc.dc_offset - quiet_baseline.dc_offset - added_dc) < 1e-12 &&
+              std::abs(with_dc.noise_dbfs_hz - quiet_baseline.noise_dbfs_hz) < .001,
+          "Quiet input with a small DC offset changed the calibrated noise density");
+
+    AudioInput original(rate, center, 500, 2900), corrected(rate, center, 500, 2900);
+    original.set_dc_offset(quiet_baseline.dc_offset);
+    corrected.set_dc_offset(with_dc.dc_offset);
+    std::vector<Complex> original_iq, corrected_iq;
+    const auto first_original = original.project(quiet, original_iq);
+    const auto first_corrected = corrected.project(pcm, corrected_iq);
+    check(first_original == first_corrected && !original_iq.empty() &&
+              std::equal(original_iq.begin(), original_iq.end(), corrected_iq.begin(), corrected_iq.end(),
+                         [](Complex a, Complex b) { return std::abs(a - b) < 2e-12; }),
+          "Robust live projection did not use the calibrated DC correction");
+
+    constexpr double tone_frequency = 937.5;
+    constexpr double tone_amplitude = 1.8e-6;
+    for (std::size_t i = 0; i < count; ++i)
+        pcm[i] = quiet[i] + static_cast<float>(
+            tone_amplitude * std::sin(2 * std::numbers::pi * tone_frequency * i / sample_rate));
+    const auto with_tone = calibrate_noise_dbfs_hz(pcm, sample_rate);
+    check(with_tone.noise_dbfs_hz > quiet_baseline.noise_dbfs_hz + 20. &&
+              with_tone.noise_dbfs_hz < -120.,
+          "Robust calibration did not account for a stable, low-level tone in the estimated density");
+
+    auto expect_error = [](const std::vector<float>& input, const char* fragment) {
+        try {
+            (void)calibrate_noise_dbfs_hz(input, sample_rate);
+        } catch (const std::exception& error) {
+            if (std::string_view(error.what()).find(fragment) == std::string_view::npos)
+                throw std::runtime_error(std::string("Unexpected Robust calibration diagnostic: ") + error.what());
+            return;
+        }
+        throw std::runtime_error("Robust calibration accepted unusable startup audio");
+    };
+    std::fill(pcm.begin(), pcm.end(), 0.f);
+    expect_error(pcm, "silent");
+
+    std::fill(pcm.begin(), pcm.end(), added_dc);
+    expect_error(pcm, "silent");
+
+    for (std::size_t i = 0; i < count; ++i) pcm[i] = white(generator);
+    for (std::size_t i = count - 1024; i < count; ++i) pcm[i] *= 5.f;
+    expect_error(pcm, "unstable");
+
+    std::fill(pcm.begin(), pcm.end(), .1f);
+    pcm[count / 2] = 1.f;
+    expect_error(pcm, "clipping");
+
+    pcm[count / 2] = std::numeric_limits<float>::quiet_NaN();
+    expect_error(pcm, "nonfinite");
+}
 }
 
 int main() {
     try {
         continuity_and_passband();
         erasure_and_eof();
+        startup_noise_calibration();
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

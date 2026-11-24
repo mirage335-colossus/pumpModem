@@ -12,7 +12,9 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <thread>
 
@@ -47,6 +49,53 @@ ReceiverConfig receiver(const PublicProfile& p) {
     c.data_if_hz = p.data_if_hz();
     c.noise_variance = 1;
     return c;
+}
+
+void dated_capture_keeps_canonical_calendar() {
+    auto config = profile().config();
+    config.format.epoch = 1767225600;
+    config.format.bit_seconds = 2.125;
+    config.capture_lead_seconds = .25;
+    config.receiver_filter_halo_samples = 4;
+    constexpr std::uint64_t index = 30001;
+    for (const auto cadence : {0, 1, 2}) {
+        config.random_extra_bits = cadence == 0 ? 3 : 0;
+        config.continuous_data = cadence == 1;
+        config.scheduled_gap_fill = cadence == 2;
+        const auto key = Crypto::amateur();
+        const PublicProfile canonical(config, key);
+        auto local_config = canonical.config();
+        local_config.receive_origin = canonical.transmit_slot(index - 1).helper_begin;
+        const PublicProfile local(local_config, key);
+        const auto tx = canonical.transmit_slot(index);
+        check(local.transmit_slot(index) == tx &&
+              local.first_slot_not_before(tx.helper_begin) == index &&
+              local.last_slot() == canonical.last_slot() &&
+              local.maximum_slot_opportunities_per_day() == canonical.maximum_slot_opportunities_per_day(),
+              "dated capture moved the canonical recurrence");
+        const auto absolute = canonical.slot(index);
+        const auto observation = local.slot(index);
+        const auto plan = make_receiver_slot_plan(local, receiver(local), index);
+        const auto offset = local.calendar().distance(local.origin(), local.receive_origin());
+        const auto aligned = [offset](std::uint64_t rebased, std::uint64_t original) {
+            return original + 1 >= rebased + offset && rebased + offset + 1 >= original;
+        };
+        check(plan.format.epoch == absolute.pattern_epoch && plan.format.symbol_ordinal == absolute.symbol_ordinal &&
+              aligned(plan.first_sample, absolute.observation.first) && aligned(plan.stop_sample, absolute.observation.stop) &&
+              aligned(observation.previous_signal_stop, absolute.previous_signal_stop) &&
+              aligned(observation.next_signal_first, absolute.next_signal_first),
+              "dated capture moved waveform addressing or neighboring signal bounds");
+        check(plan.source_start_seconds == local.calendar().relative_seconds(local.receive_origin(), tx.support_begin),
+              "scorer did not use the dated capture origin");
+        if (config.continuous_data)
+            check(local.receive_origin().phase != 0, "fixture missed a fractional capture origin");
+        if (config.scheduled_gap_fill) {
+            const auto gap = canonical.gap_fill_after(index);
+            const auto rebased_gap = local.gap_fill_after(index);
+            check(gap && rebased_gap && gap->first == rebased_gap->first && gap->stop == rebased_gap->stop,
+                  "dated capture moved the frozen transmit gap fill");
+        }
+    }
 }
 
 void packed_data_aperture() {
@@ -1553,6 +1602,37 @@ void grouped_first_window_admission() {
     }
 }
 
+void public_observation_input_bound_diagnostic() {
+    const auto p = profile();
+    const auto rx = receiver(p);
+    const auto plan = make_receiver_slot_plan(p, rx, 0);
+    const auto requested_samples = plan.stop_sample - plan.first_sample;
+    auto limited = options();
+    limited.maximum_buffer_samples = 1;
+    limited.maximum_gap_samples = 0;
+
+    bool rejected_with_bound_details = false;
+    try {
+        (void)StreamReceiverFixture::make(p, rx, Crypto::amateur(), limited, workspace,
+            [](const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto&,
+               auto, auto, unsigned, std::size_t, std::stop_token) {
+                return row(config, slot, SlotDecision::quiet);
+            });
+    } catch (const ReceiverWorkspaceError& error) {
+        const std::string message = error.what();
+        std::ostringstream requested;
+        requested << "requested " << requested_samples << " samples (";
+        rejected_with_bound_details = message.find("Robust public observation exceeds the local input bound") != std::string::npos &&
+            message.find(requested.str()) != std::string::npos &&
+            message.find("Maximum admitted 1 samples (") != std::string::npos &&
+            message.find("explicit maximum_buffer_samples") != std::string::npos &&
+            message.find("total receiver memory limit") != std::string::npos &&
+            message.find("DSP search needs additional workspace") != std::string::npos;
+    }
+    check(rejected_with_bound_details,
+          "public input-bound rejection must preserve its error class and report requested/admitted geometry and memory context");
+}
+
 void long_addressed_episode_and_decode_reservation() {
     const auto p = profile();
     constexpr std::uint64_t first = 11;
@@ -1603,6 +1683,7 @@ int main() {
     try {
         resource_resolution();
         grouped_first_window_admission();
+        dated_capture_keeps_canonical_calendar();
         packed_data_aperture();
         packed_data_aperture_retains_delayed_energy();
         scheduled_carrier_beat_aperture();
@@ -1622,6 +1703,7 @@ int main() {
         idle_pool_stacks_remain_reserved();
         simulation_borrows_only_idle_helpers();
         simulation_workspace_checks_all_windows();
+        public_observation_input_bound_diagnostic();
         inter_window_gap_and_rearm();
         rejected_episode_requires_two_contiguous_quiet_slots();
         application_growth_keeps_live_dsp_reservations();

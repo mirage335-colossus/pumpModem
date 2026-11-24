@@ -176,8 +176,8 @@ Geometry geometry(const Format& f){
     // Preserve the historical arithmetic exactly when the floor is inactive.
     g.occupied_bandwidth_hz=g.carrier_spacing_hz==g.nominal_carrier_bandwidth_hz?
         3*g.nominal_carrier_bandwidth_hz:2*g.carrier_spacing_hz+g.nominal_carrier_bandwidth_hz;
-    require(sample_rate>=4*g.fine_chip_rate_hz&&sample_rate>1.1*g.occupied_bandwidth_hz,
-            "triad v3 sample rate cannot contain shaped adjacent carriers");
+    if (!(sample_rate>=4*g.fine_chip_rate_hz && sample_rate>1.1*g.occupied_bandwidth_hz))
+        throw InsufficientSampleRate("triad v3 sample rate cannot contain shaped adjacent carriers");
     require(f.minimum_inner_coefficients<=maximum_tile_cells/f.added_symbols,"triad v3 tile complexity exceeds workspace cap");
     const auto needed=f.minimum_inner_coefficients*f.added_symbols;
     const long double endpoint=8/g.fine_chip_rate_hz+

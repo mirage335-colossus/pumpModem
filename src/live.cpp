@@ -18,11 +18,13 @@
 #include <cmath>
 #include <deque>
 #include <functional>
+#include <iomanip>
 #include <limits>
 #include <map>
 #include <mutex>
 #include <numeric>
 #include <numbers>
+#include <sstream>
 #include <utility>
 
 namespace datapump::live {
@@ -61,6 +63,27 @@ constexpr std::size_t playback_controller_workspace = 2 * 1024 * 1024U;
 constexpr auto no_transmitter = "Select Robust to start its session.";
 constexpr auto preparing = "Preparing the configured Robust profile.";
 constexpr auto duplex_workspace_error = "Robust full-duplex transmit workspace exceeds the receiver memory limit";
+constexpr auto calibrating_live_noise = "Measuring startup audio noise. Keep the channel idle.";
+constexpr auto wait_for_live_calibration = "Wait for live audio calibration before full-duplex transmission.";
+// Wire address origin for automatic live operation. Each waveform uses its
+// own public slot spacing and advances the ordinal through idle slots.
+constexpr Calendar automatic_live_calendar{1767225600, 0}; // 2026-01-01 00:00:00 UTC
+
+bool live_receive_enabled(const Settings& settings) {
+    return settings.auto_live_noise || settings.live_noise_dbfs_hz.has_value();
+}
+
+std::string passband_error(std::string_view direction, const audio::StreamFormat& format,
+                           double required_upper_hz) {
+    std::ostringstream message;
+    message << std::setprecision(8)
+            << "Robust " << direction << " band requires an upper edge of " << required_upper_hz
+            << " Hz. The selected audio device has a usable passband of "
+            << format.usable_passband_hz << " Hz (logical rate " << format.logical_rate
+            << " Hz, hardware rate " << format.hardware_rate
+            << " Hz). Reduce Rate at both peers or select a device with a wider passband.";
+    return message.str();
+}
 
 long double utc_now() {
     return std::chrono::duration<long double>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -83,6 +106,43 @@ long double utc_time(HelperBurstCoordinate position, std::uint32_t rate) {
     return position.epoch + static_cast<long double>(position.phase) / rate;
 }
 
+} // namespace
+
+detail::DatedReceiveStart detail::plan_dated_receive_start(const Profile& base, bool automatic, long double first_utc,
+                                                           double provider_uncertainty, std::size_t filter_halo) {
+    const auto& waveform = base.waveform;
+    const auto rate = waveform.config().format.sample_rate;
+    if (first_utc < 0 || first_utc >= 4294967296.L)
+        throw Error("Robust input timestamp is outside the configured calendar");
+    const auto earliest = coordinate(std::max<long double>(first_utc, waveform.origin().epoch), rate);
+    auto slot = waveform.first_slot_not_before(earliest);
+    // Dated playback bounds emission against the current UTC slot. Keep the
+    // predecessor available for adjacent-signal exclusion in the local view.
+    const auto origin = automatic && slot ? waveform.transmit_slot(slot - 1).helper_begin : waveform.origin();
+    const auto age = first_utc - utc_time(origin, rate);
+    const auto epoch_ambiguity = std::abs(age) * waveform.config().audio_pair_ppm * 1e-6L;
+    auto adjusted = with_capture_uncertainty(base, provider_uncertainty + 1. / rate,
+        static_cast<double>(epoch_ambiguity), filter_halo, origin);
+    const auto input_sample = std::llround((age + adjusted.waveform.config().capture_lead_seconds) * rate);
+    const auto valid_first = input_sample + static_cast<std::int64_t>(filter_halo);
+    auto first = adjusted.waveform.slot(slot).observation.first;
+    if (valid_first > 0 && first < static_cast<std::uint64_t>(valid_first)) {
+        auto high = adjusted.waveform.last_slot();
+        while (slot < high) {
+            const auto middle = slot + (high - slot) / 2;
+            if (adjusted.waveform.slot(middle).observation.first < static_cast<std::uint64_t>(valid_first))
+                slot = middle + 1;
+            else high = middle;
+        }
+        first = adjusted.waveform.slot(slot).observation.first;
+        if (first < static_cast<std::uint64_t>(valid_first))
+            throw Error("No fully observable future slot remains in the configured Robust calendar");
+    }
+    return {std::move(adjusted), input_sample, slot, first};
+}
+
+namespace {
+
 std::uint64_t add_slot(std::uint64_t first, std::uint64_t offset) {
     if (offset > UINT64_MAX - first) throw Error("Robust calendar slot overflow");
     return first + offset;
@@ -101,6 +161,7 @@ struct TxRequest {
     Bytes input;
     bool force = false, raw = false;
     std::optional<PreparedTextMessage> prepared;
+    long double requested_utc = 0;
 
     std::size_t wire_bits() const { return prepared ? prepared->wire_bits() : (raw ? input.size() : 0); }
 };
@@ -1162,7 +1223,8 @@ struct Session::Impl {
         display = {};
     }
 
-    void receive_live(const Profile& base, const Settings& s, std::uint64_t owner, std::stop_token stop) {
+    void receive_live(const Profile& base, const Settings& s, std::optional<detail::NoiseCalibration>& noise_baseline,
+                      std::uint64_t owner, std::stop_token stop) {
         const auto rate = s.transfer.modem.sample_rate;
         const auto transmit_reservation = live_transmit_reservation_checked(s, base);
         AudioInput input(rate, base.receiver.data_if_hz, base.minimum_audio_hz, base.maximum_audio_hz);
@@ -1171,6 +1233,14 @@ struct Session::Impl {
         CaptureQueue queue;
         std::function<void(std::uint64_t,std::stop_token)> finite_stop_at;
         const auto queue_limit = static_cast<std::size_t>(rate) * 2;
+        constexpr auto overhead = 2 * 1024 * 1024U;
+        const auto ingress_workspace = overhead + queue_limit * sizeof(float) + input.working_bytes();
+        const auto calibration_rows = s.auto_live_noise && !noise_baseline ? detail::noise_calibration_samples(rate) : 0;
+        const auto calibration_deadline = Clock::now() + std::chrono::seconds(15);
+        std::vector<float> calibration;
+        if (calibration_rows) publish(owner, stop, [](Snapshot& out) {
+            if (!out.transmitting) out.status = calibrating_live_noise;
+        });
         execution::Task capture([&](std::stop_token capture_stop) {
             try {
                 audio::Options options;
@@ -1189,7 +1259,7 @@ struct Session::Impl {
                         std::min(audio_chunk, static_cast<std::size_t>(rate) / 20), stop, capture_stop);
                 }, capture_stop, [&](const audio::StreamFormat& format) {
                     if (format.usable_passband_hz < base.maximum_audio_hz)
-                        throw Error("Robust receive band exceeds the selected device passband");
+                        throw Error(passband_error("receive", format, base.maximum_audio_hz));
                     if (s.finite_duplex && (!format.capture_callback_may_block || !format.capture_stop_at))
                         throw Error("Finite Robust duplex requires a bounded, dated capture provider");
                     std::lock_guard lock(queue.mutex);
@@ -1240,9 +1310,13 @@ struct Session::Impl {
                             lock.unlock();
                             finish_input(*receiver, display, s, owner, stop);
                         }
+                        if (calibration_rows && !noise_baseline)
+                            throw Error("Audio ended during Robust noise calibration. Check the input device or enter a measured noise density.");
                         break;
                     }
                 }
+                if (calibration_rows && !noise_baseline && Clock::now() >= calibration_deadline)
+                    throw Error("Robust noise calibration did not receive enough audio. Check the input device or enter a measured noise density.");
                 if (chunk.pcm.empty()) {
                     if (receiver) {
                         receiver_ok(receiver->resume(false));
@@ -1266,34 +1340,48 @@ struct Session::Impl {
                 const auto clock_envelope = base.waveform.config().audio_pair_ppm * .5e-6;
                 if (std::abs(device_scale - 1.) > clock_envelope + stamp.rate_uncertainty_fraction)
                     throw Error("The dated Robust input contradicts the configured Base Oscillator rate");
-                if (!origin_stamp) {
+                if (origin_stamp) {
+                    // Check one dated timeline, including calibration input.
+                    const auto seconds = static_cast<long double>(chunk.first) / rate;
+                    const auto expected = origin_stamp->utc_seconds + seconds;
+                    const auto allowance = origin_stamp->uncertainty_seconds + stamp.uncertainty_seconds +
+                        seconds * base.waveform.config().audio_pair_ppm * .5e-6L + 2.L / rate;
+                    if (std::abs(stamp.utc_seconds - expected) > allowance)
+                        throw Error("Robust input timestamps no longer fit the configured oscillator and capture date");
+                } else {
                     origin_stamp = stamp;
-                    const auto age = stamp.utc_seconds - base.waveform.origin().epoch;
-                    if (stamp.utc_seconds < 0 || stamp.utc_seconds >= 4294967296.L)
-                        throw Error("Robust input timestamp is outside the configured calendar");
-                    const auto epoch_ambiguity = std::abs(age) * base.waveform.config().audio_pair_ppm * 1e-6L;
-                    const auto adjusted = detail::with_capture_uncertainty(base, stamp.uncertainty_seconds + 1. / rate,
-                        static_cast<double>(epoch_ambiguity), input.halo_samples());
-                    capture_first = std::llround((age + adjusted.waveform.config().capture_lead_seconds) * rate);
-                    const auto valid_first = capture_first + static_cast<std::int64_t>(input.first_valid_sample());
-                    const auto earliest = coordinate(std::max<long double>(stamp.utc_seconds, adjusted.waveform.origin().epoch), rate);
-                    auto slot = adjusted.waveform.first_slot_not_before(earliest);
-                    auto first = adjusted.waveform.slot(slot).observation.first;
-                    if (valid_first > 0 && first < static_cast<std::uint64_t>(valid_first)) {
-                        auto high = adjusted.waveform.last_slot();
-                        while (slot < high) {
-                            const auto middle = slot + (high - slot) / 2;
-                            if (adjusted.waveform.slot(middle).observation.first < static_cast<std::uint64_t>(valid_first))
-                                slot = middle + 1;
-                            else high = middle;
-                        }
-                        first = adjusted.waveform.slot(slot).observation.first;
-                        if (first < static_cast<std::uint64_t>(valid_first))
-                            throw Error("No fully observable future slot remains in the configured Robust calendar");
+                }
+                if (calibration_rows && !noise_baseline) {
+                    if (calibration.empty()) {
+                        const auto external = checked_workspace(transmit_reservation, checked_workspace(provider_bytes, ingress_workspace));
+                        const auto available = *stream_options(s, external).memory_limit_bytes;
+                        const auto required = checked_workspace(triad::v3::detail::stream_controller_footprint_bytes(),
+                            detail::noise_calibration_workspace_bytes(rate));
+                        if (required > available) throw Error("Robust startup noise calibration exceeds the receiver memory limit");
+                        calibration.reserve(calibration_rows);
                     }
+                    const auto count = std::min(calibration_rows - calibration.size(), chunk.pcm.size());
+                    calibration.insert(calibration.end(), chunk.pcm.begin(), chunk.pcm.begin() + count);
+                    if (calibration.size() == calibration_rows) {
+                        noise_baseline = detail::calibrate_noise_dbfs_hz(calibration, rate, stop);
+                        std::vector<float>{}.swap(calibration);
+                        publish(owner, stop, [&](Snapshot& out) {
+                            out.live_noise_baseline_dbfs_hz = noise_baseline->noise_dbfs_hz;
+                        });
+                    }
+                    // Start the FIR on the next dated chunk. Discarded samples
+                    // and partial slots cannot contribute quiet evidence.
+                    continue;
+                }
+                if (!receiver) {
+                    auto [adjusted, first_sample, slot, first] = detail::plan_dated_receive_start(base, s.auto_calendar,
+                        stamp.utc_seconds, stamp.uncertainty_seconds, input.halo_samples());
+                    if (noise_baseline) {
+                        input.set_dc_offset(noise_baseline->dc_offset);
+                        detail::apply_live_noise_model(adjusted.receiver, s.target_cn0_db_hz, noise_baseline->noise_dbfs_hz);
+                    }
+                    capture_first = first_sample;
                     observation_first = first;
-                    constexpr auto overhead = 2 * 1024 * 1024U;
-                    const auto ingress_workspace = overhead + queue_limit * sizeof(float) + input.working_bytes();
                     auto options = stream_options(s, checked_workspace(transmit_reservation,
                         checked_workspace(provider_bytes, ingress_workspace)));
                     options.first_slot = slot;
@@ -1318,19 +1406,13 @@ struct Session::Impl {
                     publish(owner, stop, [&](Snapshot& out) {
                         out.receiver_error.clear();
                         out.receiver_workers = receiver->report().resources.workers;
-                        if (!out.transmitting) out.status = stamp.quality == audio::TimingQuality::bounded
-                            ? "Listening on the configured Robust calendar"
-                            : "Listening on the configured Robust calendar with estimated audio dates";
+                        if (s.auto_live_noise && s.full_duplex) out.transmit_unavailable.reset();
+                        if (!out.transmitting) {
+                            out.status = s.auto_calendar ? "Listening on the automatic Robust UTC calendar" :
+                                "Listening on the configured Robust calendar";
+                            if (stamp.quality != audio::TimingQuality::bounded) out.status += " with estimated audio dates";
+                        }
                     });
-                } else {
-                    // A configured oscillator is an assumption, not license
-                    // to glue a discontinuous timeline back onto old samples.
-                    const auto seconds = static_cast<long double>(chunk.first) / rate;
-                    const auto expected = origin_stamp->utc_seconds + seconds;
-                    const auto allowance = origin_stamp->uncertainty_seconds + stamp.uncertainty_seconds +
-                        seconds * base.waveform.config().audio_pair_ppm * .5e-6L + 2.L / rate;
-                    if (std::abs(stamp.utc_seconds - expected) > allowance)
-                        throw Error("Robust input timestamps no longer fit the configured oscillator and capture date");
                 }
                 const auto first_local = input.project(chunk.pcm, iq);
                 if (auto frame = meter.update(chunk.first, chunk.pcm, iq))
@@ -1661,7 +1743,7 @@ struct Session::Impl {
             : 4294967296.L;
     }
 
-    void play_live(const Profile& active, const Settings& s, const TxRequest& send,
+    void play_live(const Profile& active, const Settings& s, const TxRequest& send, bool startup_quiet,
                    std::uint64_t owner, std::stop_token stop) {
         if (!audio::utc_follow_supported())
             throw Error("The selected audio provider cannot schedule the configured Robust calendar");
@@ -1733,9 +1815,13 @@ struct Session::Impl {
                     throw Error("Robust playback exceeded calibrated PCM headroom");
                 out[i] = pcm;
             }
+            if (count && !begin) publish(owner, stop, [](Snapshot& snapshot) {
+                snapshot.transmit_trace.emitting = true;
+                ++snapshot.transmit_trace.revision;
+            });
             if (count) trace_emission(*emission, active, end - 1, noise, trace_cursor, owner, stop);
             if (auto frame = meter.update(source_first + begin, out.first(count), {})) {
-                if (!s.full_duplex || !s.live_noise_dbfs_hz)
+                if (!s.full_duplex || !live_receive_enabled(s))
                     set_plot(owner, stop, std::move(*frame), false, segment);
             }
             if (send.mode == EmissionMode::Message) {
@@ -1752,14 +1838,29 @@ struct Session::Impl {
             return count;
         }, stop, [&](const audio::StreamFormat& format) {
             if (format.usable_passband_hz < active.maximum_audio_hz)
-                throw Error("Robust transmit band exceeds the selected device passband");
-            if (s.full_duplex && s.live_noise_dbfs_hz &&
+                throw Error(passband_error("transmit", format, active.maximum_audio_hz));
+            if (s.full_duplex && live_receive_enabled(s) &&
                 format.workspace_bytes > playback_provider_workspace)
                 throw Error("Robust playback provider exceeded the full-duplex audio workspace allowance");
             if (emission) return;
             // The provider has opened and completed timing preflight. Allow
             // bounded source preparation before the scheduled first sample.
-            first_slot = earliest_tx_slot(active, audio::minimum_lead_seconds() + 3);
+            constexpr auto startup_margin_seconds = 3;
+            const auto lead = audio::minimum_lead_seconds() + startup_margin_seconds;
+            first_slot = earliest_tx_slot(active, lead);
+            if (startup_quiet) {
+                // Queued preparation and playback preflight already leave
+                // the peer time to collect quiet audio. Count from Send,
+                // with room for calibration and the full observation edge.
+                const auto calibration = static_cast<long double>(detail::noise_calibration_samples(rate)) / rate;
+                const auto halo = AudioInput::required_halo_samples(rate, active.receiver.data_if_hz,
+                    active.minimum_audio_hz, active.maximum_audio_hz);
+                const auto peer_ready = send.requested_utc + startup_margin_seconds + calibration;
+                const auto peer = detail::plan_dated_receive_start(active, true, peer_ready, lag / 2, halo);
+                first_slot = std::max(first_slot, add_slot(peer.first_slot, 2));
+                if (first_slot > calendar.last_slot())
+                    throw Error("No Robust transmission slot remains after the startup quiet interval");
+            }
             {
                 std::lock_guard lock(mutex);
                 if (s.finite_duplex) {
@@ -1810,7 +1911,7 @@ struct Session::Impl {
             const auto first = calendar.transmit_slot(first_slot);
             source_first = calendar.calendar().distance(calendar.origin(), first.helper_begin);
             emission.emplace(make_emission(send, active, first_slot, slots, source_first, owner, stop));
-            if (s.full_duplex && s.live_noise_dbfs_hz &&
+            if (s.full_duplex && live_receive_enabled(s) &&
                 emission->source().working_bytes > checked_workspace(
                     calendar.emission_source_workspace_bytes(), playback_controller_workspace))
                 throw Error("Robust waveform exceeded its full-duplex source workspace allowance");
@@ -1839,7 +1940,8 @@ struct Session::Impl {
                 finite.planned = true;
             }
             publish(owner, stop, [&](Snapshot& out) {
-                out.status = "Robust audio scheduled for UTC second " + std::to_string(first.helper_begin.epoch);
+                out.status = std::string(startup_quiet ? "Leaving two quiet slots before first Robust transmission. Scheduled for UTC second " :
+                    "Robust audio scheduled for UTC second ") + std::to_string(first.helper_begin.epoch);
             });
         }, s.channel_mode, std::move(options));
     }
@@ -1850,7 +1952,7 @@ struct Session::Impl {
         return "Robust needs the desktop native receiver workers. Use the native application for Robust.";
 #else
         if (s.simulation) return {};
-        if (!s.calendar) return "Configure the shared UTC calendar before Robust live operation.";
+        if (!s.calendar && !s.auto_calendar) return "Choose Auto or enter a shared UTC anchor in Robust Setup.";
         if (!audio::utc_follow_supported())
             return "This audio provider cannot schedule a dated Robust calendar. Simulation is available.";
         return {};
@@ -1860,7 +1962,8 @@ struct Session::Impl {
     void lock_status(Snapshot& out) const {
         out.force_transmit_available = false;
         out.noise_transmit_unavailable = out.transmit_unavailable;
-        if (!profile || settings.simulation || out.transmitting || suspended || stopping) return;
+        if (!profile || settings.simulation || out.transmitting || suspended || stopping ||
+            (settings.auto_live_noise && settings.full_duplex && !out.receiver_workers)) return;
         try {
             const auto index = earliest_tx_slot(*profile, 5);
             const auto waits_for_quiet = utc_time(profile->waveform.transmit_slot(index).helper_begin,
@@ -1934,6 +2037,7 @@ struct Session::Impl {
                 current.gpu_cuda_half_fft_fallback_summary.clear();
                 current.gpu_native_lag_preference_supported = false;
                 current.receiver_workers = 0;
+                current.live_noise_baseline_dbfs_hz.reset();
             }
             std::stop_callback shutdown(manager_stop, [source = generation_stop]() mutable { source.request_stop(); });
             std::shared_ptr<const Profile> active;
@@ -1942,15 +2046,19 @@ struct Session::Impl {
             // releases it only after capture and all receiver owners drain.
             std::shared_ptr<receiver_detail::ReceiverBulkBackend> gpu_backend;
             execution::Task capture;
+            // One owner at a time. A half-duplex pause joins the capture task
+            // before a new task can reuse its estimate, avoiding TX tail bias.
+            std::optional<detail::NoiseCalibration> noise_baseline;
+            bool first_automatic_message = s.auto_calendar;
             auto start_capture = [&] {
-                if (s.simulation || !s.live_noise_dbfs_hz) return;
+                if (s.simulation || !live_receive_enabled(s)) return;
                 if (s.finite_duplex) {
                     std::lock_guard lock(mutex);
                     finite = {};
                 }
                 capture = execution::Task([&, active](std::stop_token capture_stop) {
                     try {
-                        receive_live(*active, s, owner, capture_stop);
+                        receive_live(*active, s, noise_baseline, owner, capture_stop);
                         publish(owner, capture_stop, [&](Snapshot& out) {
                             if (s.finite_duplex && finite.exact_input_drained && finite.physical_complete) {
                                 out.receiver_error.clear();
@@ -1969,7 +2077,11 @@ struct Session::Impl {
                             if (!out.transmitting) out.status = out.receiver_error;
                         });
                     }
-                    publish(owner, {}, [](Snapshot& out) { out.receiver_workers = 0; });
+                    publish(owner, {}, [&](Snapshot& out) {
+                        out.receiver_workers = 0;
+                        if (s.auto_live_noise && s.full_duplex && !out.receiver_error.empty())
+                            out.transmit_unavailable = out.receiver_error;
+                    });
                     if (s.finite_duplex) {
                         {
                             std::lock_guard lock(mutex);
@@ -2021,7 +2133,8 @@ struct Session::Impl {
                 const auto gpu_selection_reason = gpu_backend ? gpu_initial_receipt.selection_reason : std::string{};
                 const bool native_lag_preference = gpu_backend && gpu_backend->permits_native_exact_chirp_z();
                 const auto prepare = [&] {
-                    const auto anchor = s.simulation ? simulation_calendar(s) : *s.calendar;
+                    const auto anchor = s.simulation ? simulation_calendar(s) :
+                        s.calendar.value_or(automatic_live_calendar);
                     auto prepared = detail::prepare_profile(s, anchor, stop);
                     // Optional wrong-key filtering is a reversible browser
                     // view. Retain the canonical baseline for every reception;
@@ -2043,6 +2156,10 @@ struct Session::Impl {
                     current.bit_seconds = calendar.geometry().bit_seconds;
                     current.slot_stride_seconds = static_cast<double>(calendar.calendar().distance(
                         initial.helper_begin, following.helper_begin)) / calendar.effective_sample_rate();
+                    const auto [minimum_stride,maximum_stride]=calendar.calendar().stride_sample_range();
+                    current.slot_stride_range_seconds=std::pair{
+                        static_cast<double>(minimum_stride)/calendar.effective_sample_rate(),
+                        static_cast<double>(maximum_stride)/calendar.effective_sample_rate()};
                     current.search_band_hz = std::pair{active->minimum_data_hz, active->maximum_data_hz};
                     if (s.simulation)
                         current.simulation_spectrum_gain_db = simulation_plot_noise_reference(s, s.transfer.modem.sample_rate);
@@ -2050,8 +2167,10 @@ struct Session::Impl {
                         current.helper_band_hz = std::pair{helper::low_pilot_frequency_hz - 100,
                             active->receiver.helper.frequency_hz + 100};
                     current.transmit_unavailable.reset();
-                    if (!s.simulation && !s.live_noise_dbfs_hz)
-                        current.receiver_error = "Enter the live audio noise density to enable the configured receiver.";
+                    if (!s.simulation && s.auto_live_noise && s.full_duplex)
+                        current.transmit_unavailable = wait_for_live_calibration;
+                    if (!s.simulation && !live_receive_enabled(s))
+                        current.receiver_error = "Choose Auto or enter a measured noise density to enable Robust reception.";
                     else current.receiver_error.clear();
                     if (current.status == preparing)
                         current.status = s.simulation ? "Robust simulation ready" :
@@ -2091,7 +2210,7 @@ struct Session::Impl {
                         if (replay_only) {
                             replay_simulation(*retained_replay, owner, transmission);
                         } else {
-                            if (!s.simulation && s.full_duplex && s.live_noise_dbfs_hz)
+                            if (!s.simulation && s.full_duplex && live_receive_enabled(s))
                                 (void)live_transmit_reservation_checked(transmit_settings, *active);
                             if (!s.simulation && !s.full_duplex) {
                                 close_capture();
@@ -2117,7 +2236,11 @@ struct Session::Impl {
                                     }
                                     replay_simulation(*retained_replay, owner, transmission);
                                 }
-                            } else play_live(*active, transmit_settings, send, owner, transmission);
+                            } else {
+                                const bool startup_quiet = first_automatic_message && send.mode == EmissionMode::Message;
+                                play_live(*active, transmit_settings, send, startup_quiet, owner, transmission);
+                                if (startup_quiet && !transmission.stop_requested()) first_automatic_message = false;
+                            }
                         }
                     } catch (const std::exception& error) {
                         if (!transmission.stop_requested()) failure = error.what();
@@ -2214,6 +2337,8 @@ struct Session::Impl {
         if (stopping || suspended || !started) throw Error(no_transmitter);
         if (current.transmitting || request) throw Error("A Robust transmission is already active");
         if (!profile) throw Error(current.transmit_unavailable.value_or(preparing));
+        if (!settings.simulation && settings.auto_live_noise && settings.full_duplex && !current.receiver_workers)
+            throw Error(current.transmit_unavailable.value_or(wait_for_live_calibration));
         if (settings.finite_duplex && (!settings.calendar || !settings.live_noise_dbfs_hz))
             throw Error("Finite Robust duplex requires a calendar and input noise density");
         if (settings.finite_duplex && mode != EmissionMode::Message)
@@ -2232,7 +2357,8 @@ struct Session::Impl {
                     profile->waveform.config().format.sample_rate) < separated_after)
                 throw Error("Waiting for two quiet public slots before the next Robust transmission");
         } else if (force) throw Error("Robust simulation has no hardware key-use lock");
-        TxRequest send{mode, {input.begin(), input.end()}, force, raw, {}};
+        const auto requested_utc = settings.simulation ? 0 : utc_now();
+        TxRequest send{mode, {input.begin(), input.end()}, force, raw, {}, requested_utc};
         tx_stop = std::stop_source{};
         current.transmitting = true;
         current.error.clear();
@@ -2261,7 +2387,7 @@ struct Session::Impl {
         const auto revision = trace.revision + 1;
         trace = {};
         trace.revision = revision;
-        trace.emitting = true;
+        trace.emitting = settings.simulation;
         trace.fhss = settings.fhss_profile != "off";
         trace.active = send.mode == EmissionMode::Message;
         trace.temporary_key = send.mode == EmissionMode::Noise;

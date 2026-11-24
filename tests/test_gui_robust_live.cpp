@@ -32,19 +32,21 @@ namespace fixture {
 std::mutex mutex;
 std::atomic<unsigned> capture_opens{0}, capture_active{0}, playback_opens{0}, playback_active{0};
 std::atomic<unsigned> callback_started{0}, callback_finished{0};
-std::atomic<bool> capture_overlap{false}, hold_playback{false};
+std::atomic<bool> capture_overlap{false}, hold_playback{false}, hold_playback_source{false};
 std::atomic<bool> hold_capture{false}, reject_capture_endpoint{false};
 std::atomic<bool> hold_playback_format{false}, hold_endpoint_ack{false}, endpoint_started{false};
 std::atomic<bool> pause_released{true}, capture_paused{false};
 std::atomic<bool> loopback_ready{false};
 std::atomic<std::uint64_t> capture_position{0};
 std::atomic<std::uint64_t> capture_endpoint{0};
+std::atomic<double> capture_passband_override{0}, playback_passband_override{0};
 std::string capture_device, playback_device;
 audio::Options capture_options, playback_options;
 audio::ChannelMode playback_channels = audio::ChannelMode::stereo;
 std::size_t playback_samples = 0;
 bool scheduled = false;
 std::optional<long double> scheduled_epoch;
+std::optional<std::pair<long double, long double>> playback_format_window;
 std::vector<float> playback_prefix;
 std::vector<float> loopback_pcm;
 std::optional<long double> loopback_epoch;
@@ -58,6 +60,10 @@ struct CaptureInput {
     std::optional<std::size_t> pause_after;
 };
 std::shared_ptr<const CaptureInput> capture_input;
+
+long double utc_now() {
+    return std::chrono::duration<long double>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
 }
 
 // Only device I/O is replaced. The Session, channel, waveform, complete native
@@ -78,7 +84,8 @@ void capture(std::uint32_t rate, const std::string& device, const CaptureCallbac
     }
     ++fixture::capture_opens;
     if (format) {
-        StreamFormat actual{rate, rate, rate * .49, 4096};
+        const auto passband = fixture::capture_passband_override.load();
+        StreamFormat actual{rate, rate, passband > 0 ? passband : rate * .49, 4096};
         actual.capture_callback_may_block = input && input->callback_may_block;
         if (actual.capture_callback_may_block) actual.workspace_bytes += input->samples.size() * sizeof(float);
         if (input && input->finite) actual.capture_stop_at = [input](std::uint64_t endpoint, std::stop_token stop) {
@@ -167,6 +174,7 @@ void playback(std::uint32_t rate, const std::string& device, const PlaybackCallb
         fixture::playback_samples = 0;
         fixture::scheduled = false;
         fixture::scheduled_epoch.reset();
+        fixture::playback_format_window.reset();
         fixture::playback_prefix.clear();
         fixture::loopback_pcm.clear();
         fixture::loopback_epoch.reset();
@@ -175,13 +183,20 @@ void playback(std::uint32_t rate, const std::string& device, const PlaybackCallb
     while (fixture::hold_playback_format && !stop.stop_requested()) std::this_thread::sleep_for(2ms);
     if (stop.stop_requested()) return;
     detail::UtcPlaybackScope timed(options.follow_system_clock);
-    if (format) format({rate, rate, rate * .49, 4096});
+    const auto before_format = fixture::utc_now();
+    if (format) {
+        const auto passband = fixture::playback_passband_override.load();
+        format({rate, rate, passband > 0 ? passband : rate * .49, 4096});
+    }
+    const auto after_format = fixture::utc_now();
     {
         std::lock_guard lock(fixture::mutex);
         fixture::scheduled = detail::utc_playback_epoch.has_value();
         fixture::scheduled_epoch = detail::utc_playback_epoch;
+        fixture::playback_format_window = {before_format, after_format};
         fixture::loopback_epoch = detail::utc_playback_epoch;
     }
+    while (fixture::hold_playback_source && !stop.stop_requested()) std::this_thread::sleep_for(2ms);
     std::array<float, 4096> block{};
     while (!stop.stop_requested()) {
         const auto count = source(block);
@@ -654,6 +669,49 @@ live::Snapshot ready(live::Session& session) {
 void close(live::Session& session) {
     session.stop();
     wait(session, [&](const auto&) { return session.ready_to_close(); }, "Robust session did not release workers");
+}
+
+void robust_rate_fits_typical_converter() {
+    auto low_rate = settings(true);
+    low_rate.transfer.modem.bandwidth_hz = 2400;
+    const auto low = live::detail::prepare_profile(low_rate, *low_rate.calendar, {}, {.simulation_seed = 1});
+    auto high_rate = low_rate;
+    high_rate.transfer.modem.bandwidth_hz = 3600;
+    const auto high = live::detail::prepare_profile(high_rate, *high_rate.calendar, {}, {.simulation_seed = 1});
+    high_rate.transfer.modem.sample_rate = 8000;
+    const auto wide = live::detail::prepare_profile(high_rate, *high_rate.calendar, {}, {.simulation_seed = 1});
+    check(low.maximum_audio_hz <= 2520 && high.maximum_audio_hz > 2520 && wide.maximum_audio_hz <= 3360,
+          "Robust passband plan did not distinguish the 6 kHz default and 8 kHz wide profile");
+
+    auto live_settings = settings(false);
+    live_settings.transfer.modem.bandwidth_hz = 3600;
+    live_settings.live_noise_dbfs_hz = -100;
+    fixture::capture_passband_override = 2520;
+    live::Session session;
+    session.start(live_settings);
+    const auto failed = wait(session, [](const auto& snapshot) { return !snapshot.receiver_error.empty(); },
+                             "A narrow Robust input passband was not rejected");
+    check(failed.receiver_error.find("requires an upper edge of") != std::string::npos &&
+          failed.receiver_error.find("usable passband of 2520 Hz") != std::string::npos &&
+          failed.receiver_error.find("logical rate 6000 Hz, hardware rate 6000 Hz") != std::string::npos &&
+          failed.receiver_error.find("Reduce Rate") != std::string::npos,
+          "Robust passband rejection omitted the needed edge, available passband, rates, or remedy");
+    close(session);
+    fixture::capture_passband_override = 0;
+
+    live_settings.live_noise_dbfs_hz.reset();
+    fixture::playback_passband_override = 2520;
+    live::Session transmit;
+    transmit.start(live_settings);
+    ready(transmit);
+    transmit.transmit_bits(std::array<std::uint8_t, 1>{1});
+    const auto rejected = wait(transmit, [](const auto& snapshot) { return !snapshot.transmitting; },
+                               "A narrow Robust output passband was not rejected");
+    check(rejected.error.find("Robust transmit band requires an upper edge") != std::string::npos &&
+          rejected.error.find("usable passband of 2520 Hz") != std::string::npos,
+          "Robust transmit passband rejection omitted the device and required bands");
+    close(transmit);
+    fixture::playback_passband_override = 0;
 }
 
 void capture_backpressure() {
@@ -1614,7 +1672,356 @@ void late_affine_clock_support() {
           "Native DSP could not plan a public clock window with a negative arrival offset");
 }
 
-void dated_live_data_then_eof(std::optional<int> fixed_link_gain_db = {}, bool buffered = false) {
+void automatic_noise_capture_lifecycle() {
+    auto s = settings(false);
+    s.transfer.modem.sample_rate = 1500;
+    s.transfer.modem.carrier_hz = 500;
+    s.calendar->epoch += 60;
+    s.auto_live_noise = true;
+    s.full_duplex = true;
+    const auto rate = s.transfer.modem.sample_rate;
+    const auto calibration_rows = live::detail::noise_calibration_samples(rate);
+    auto input = std::make_shared<fixture::CaptureInput>();
+    input->first_utc = static_cast<long double>(s.calendar->epoch) - 8;
+    input->samples.resize(calibration_rows + rate / 2);
+    input->pause_after = calibration_rows + rate / 4;
+    input->chunk_size = rate / 20;
+    input->callback_may_block = true;
+    std::mt19937_64 rng(1793850000);
+    std::normal_distribution<float> noise(0, 4e-6f);
+    for (std::size_t i = 0; i < input->samples.size(); ++i) {
+        const auto phase = 2 * std::numbers::pi * 73 * static_cast<double>(i) / rate;
+        input->samples[i] = static_cast<float>(2e-4 + 2e-5 * std::cos(phase)) + noise(rng);
+    }
+    auto silent = std::make_shared<fixture::CaptureInput>(*input);
+    std::fill(silent->samples.begin(), silent->samples.end(), 0.f);
+    const auto set_input = [](const auto& source) {
+        std::lock_guard lock(fixture::mutex);
+        fixture::capture_input = source;
+    };
+    set_input(input);
+    fixture::hold_capture = true;
+    fixture::pause_released = false;
+    live::Session session;
+    session.start(s);
+    wait(session, [](const auto& out) {
+        return out.transmit_unavailable && out.transmit_unavailable->find("calibration") != std::string::npos;
+    }, "Automatic full-duplex transmitter did not wait for its input calibration");
+    const std::array<std::uint8_t, 1> bit{1};
+    bool blocked = false;
+    try { session.transmit_bits(bit); }
+    catch (const Error& error) { blocked = std::string_view(error.what()).find("calibration") != std::string::npos; }
+    check(blocked, "Automatic full-duplex transmitter accepted a calibration-contaminating transmission");
+    fixture::hold_capture = false;
+    const auto listening = [](const auto& out) {
+        return out.live_noise_baseline_dbfs_hz && out.receiver_workers && out.receiver_error.empty();
+    };
+    const auto first = wait(session, listening, "Automatic full-duplex calibration did not start receiving");
+
+    s.full_duplex = false;
+    session.configure(s);
+    wait(session, listening, "Automatic half-duplex calibration did not start receiving");
+    const auto opens = fixture::capture_opens.load();
+    set_input(silent);
+    session.transmit_bits(bit);
+    const auto resumed = wait(session, [&](const auto& out) {
+        return !out.transmitting && fixture::capture_opens > opens && listening(out);
+    }, "Half-duplex receive did not resume with its measured baseline");
+    check(resumed.live_noise_baseline_dbfs_hz == first.live_noise_baseline_dbfs_hz && resumed.received.empty() &&
+          resumed.pattern_steps.empty(), "Half-duplex resume changed its noise baseline or invented receive evidence");
+
+    session.configure(s);
+    const auto failed = wait(session, [](const auto& out) { return out.receiver_error.find("silent") != std::string::npos; },
+                             "A new settings generation reused the expired calibration");
+    check(!failed.live_noise_baseline_dbfs_hz && failed.pattern_steps.empty(),
+          "A failed calibration published noise or physical slot evidence");
+    set_input(input);
+    session.configure(s);
+    wait(session, listening, "Retrying calibration on the same calendar did not recover listening");
+    close(session);
+    fixture::pause_released = true;
+    set_input(std::shared_ptr<const fixture::CaptureInput>{});
+}
+
+void automatic_live_first_contact(bool default_latency = false) {
+    using namespace triad::v3;
+    auto s = settings(false);
+    s.calendar.reset();
+    s.auto_calendar = true;
+    s.data_cadence = live::DataCadence::scheduled_bridge;
+    if (default_latency) {
+        s.transfer.modem.bandwidth_hz = 2400;
+        s.minimum_carrier_spacing_hz = 265;
+        s.target_cn0_db_hz = 32;
+        s.transfer.modem.oscillator_search = modem::OscillatorSearchConfig{};
+        s.transfer.clock_sync.reset();
+        s.transfer.key = Crypto::amateur();
+        s.receiver_memory_limit.reset();
+    } else {
+        s.transfer.modem.sample_rate = 1500;
+        s.transfer.modem.carrier_hz = 500;
+        s.transfer.modem.oscillator_search->lf.accuracy_ppm = 15;
+    }
+    const auto rate = s.transfer.modem.sample_rate;
+    // This is the public recurrence, independent of both live sessions.
+    const auto profile = live::detail::prepare_profile(s, {1767225600, 0}, {});
+    const auto& calendar = profile.waveform;
+    const auto utc = [rate](HelperBurstCoordinate point) {
+        return static_cast<long double>(point.epoch) + static_cast<long double>(point.phase) / rate;
+    };
+
+    auto tap = std::make_shared<fixture::CaptureInput>();
+    tap->loopback = true;
+    {
+        std::lock_guard lock(fixture::mutex);
+        fixture::capture_input = tap;
+    }
+    live::Session transmitter;
+    transmitter.start(s);
+    ready(transmitter);
+    const auto requested = fixture::utc_now();
+    constexpr std::array<std::uint8_t, 3> bits{0, 0, 1}; // Short text 'e'.
+    transmitter.transmit(Message{.data = {'e'}});
+    wait(transmitter, [](const auto& out) {
+        check(out.error.empty(), "Automatic Robust TX failed: " + out.error);
+        return !out.transmitting;
+    }, "Automatic Robust TX did not finish");
+    close(transmitter);
+
+    long double start;
+    std::vector<float> played;
+    {
+        std::lock_guard lock(fixture::mutex);
+        check(fixture::scheduled_epoch && !fixture::loopback_pcm.empty(),
+              "Automatic Robust did not schedule and generate dated output");
+        start = *fixture::scheduled_epoch;
+        played = std::move(fixture::loopback_pcm);
+    }
+    const auto second = static_cast<std::uint64_t>(std::floor(start));
+    const auto slot = calendar.first_slot_not_before({second, 0});
+    check(slot > 2 && start == utc(calendar.transmit_slot(slot).helper_begin) &&
+          utc(calendar.transmit_slot(slot - 2).helper_begin) > requested,
+          "Automatic Robust TX did not leave two upcoming quiet slots on the shared recurrence");
+
+    const auto first = slot - 2;
+    const auto trailing_quiet = slot + bits.size() + 1;
+    auto input = std::make_shared<fixture::CaptureInput>();
+    input->first_utc = default_latency ? std::floor(requested * rate) / rate :
+        utc(calendar.transmit_slot(first).helper_begin) - 8;
+    input->chunk_size = rate / 20;
+    const auto frames_at = [&](long double at) {
+        return static_cast<std::size_t>(std::llround((at - input->first_utc) * rate));
+    };
+    const auto nominal_played_first = frames_at(start);
+    const auto played_first = default_latency ? frames_at(start + 6.75L) : nominal_played_first;
+    const auto calibration_rows = live::detail::noise_calibration_samples(rate);
+    auto capture_stop = frames_at(utc(calendar.transmit_slot(trailing_quiet).helper_end) + 4);
+    input->pause_after = frames_at(utc(calendar.transmit_slot(trailing_quiet).helper_begin) - 1);
+    auto first_observed = first;
+    if (default_latency) {
+        // Inject a receiver that starts with Send. Count the same raw rows
+        // that are available to the centered projector after calibration.
+        const auto raw_prefix = ((calibration_rows + input->chunk_size - 1) / input->chunk_size) * input->chunk_size;
+        const auto halo = live::detail::AudioInput::required_halo_samples(rate, profile.receiver.data_if_hz,
+            profile.minimum_audio_hz, profile.maximum_audio_hz);
+        const auto ready_utc = input->first_utc + static_cast<long double>(raw_prefix) / rate;
+        const auto plan = live::detail::plan_dated_receive_start(profile, true, ready_utc, 1e-7, halo);
+        first_observed = plan.first_slot;
+        check(first_observed <= first && first - first_observed <= 1,
+              "Compact default did not leave two fully observable startup quiet slots");
+        const auto raw_stop = [&](std::uint64_t index) {
+            const auto window = plan.profile.waveform.slot(index);
+            check(window.previous_signal_stop <= window.observation.first &&
+                  window.observation.stop <= window.next_signal_first,
+                  "Compact default receive observation overlaps a neighboring signal");
+            return raw_prefix + static_cast<std::size_t>(
+                static_cast<std::int64_t>(window.observation.stop) - plan.first_input_sample) + halo;
+        };
+        for (auto index = first_observed; index < trailing_quiet - 1; ++index) (void)raw_stop(index);
+        capture_stop = raw_stop(trailing_quiet);
+        input->pause_after = raw_stop(trailing_quiet - 1);
+        check(capture_stop > played_first + played.size(), "Compact default capture stops inside DATA");
+        const auto completion_tail = static_cast<long double>(capture_stop - nominal_played_first - played.size()) / rate;
+        check(start - requested <= 90 && completion_tail <= 60,
+              "Compact default exceeded its first-send or confirmation latency budget");
+        std::cout << "Compact default dated fixture: " << start - requested
+                  << " s Send to first DATA slot, " << completion_tail << " s scheduled final support to physical cutoff\n";
+    }
+    check(capture_stop < (default_latency ? 1'300'000U : 800'000U) && played_first + played.size() < capture_stop,
+          "Automatic Robust fixture exceeded its dated sample budget");
+    input->samples.resize(capture_stop);
+    input->callback_may_block = input->burst = true;
+    std::mt19937_64 rng(0x6175746f757463ULL);
+    std::normal_distribution<float> noise(0, .0001f);
+    for (auto& sample : input->samples) sample = 2e-4f + noise(rng);
+    double path_gain = 1;
+    if (default_latency) {
+        // One bounded, above-target functional check at 40 dB-Hz against
+        // the conservative automatically estimated startup noise density.
+        const auto baseline = live::detail::calibrate_noise_dbfs_hz(
+            std::span(input->samples).first(calibration_rows), rate);
+        const auto tx_slot = calendar.transmit_slot(slot);
+        const auto begin = calendar.calendar().distance(tx_slot.helper_begin, tx_slot.pattern_begin);
+        const auto rows = calendar.calendar().distance(tx_slot.pattern_begin, tx_slot.pattern_end);
+        const auto center = std::span(played).subspan(begin + rows / 4, rows / 2);
+        double power = 0;
+        for (const auto sample : center) power += sample * sample;
+        path_gain = std::sqrt(std::pow(10., (baseline.noise_dbfs_hz + 40) / 10) / (power / center.size()));
+    }
+    for (std::size_t i = 0; i < played.size(); ++i)
+        input->samples[played_first + i] += static_cast<float>(path_gain * played[i]);
+    {
+        std::lock_guard lock(fixture::mutex);
+        fixture::capture_input = input;
+    }
+    fixture::pause_released = false;
+    fixture::capture_paused = false;
+
+    s.auto_live_noise = true;
+    live::Session receiver;
+    const auto receive_started = std::chrono::steady_clock::now();
+    receiver.start(s);
+    const auto checked = [](const auto& out) {
+        check(out.error.empty(), "Automatic Robust RX failed to prepare: " + out.error);
+        check(out.receiver_error.empty() || out.receiver_error == "Robust audio input ended.",
+              "Automatic Robust RX failed: " + out.receiver_error);
+    };
+    const auto before_completion = wait(receiver, [&](const auto& out) {
+        checked(out);
+        return fixture::capture_paused && out.pattern_steps.size() >= trailing_quiet - first_observed;
+    }, "Automatic Robust RX did not score the first trailing quiet slot", 35s);
+    check(before_completion.received.empty() &&
+          std::none_of(before_completion.signals.begin(), before_completion.signals.end(),
+                       [](const auto& signal) { return signal.complete; }),
+          "Automatic Robust completed a message after only one trailing quiet slot");
+    fixture::pause_released = true;
+    unsigned decoded = 0;
+    const auto complete = wait(receiver, [&](const auto& out) {
+        checked(out);
+        for (const auto& message : out.received) {
+            check(message.stream_complete && message.content_validated && message.short_text_decoded &&
+                  message.content.message.data == Bytes{'e'} && std::ranges::equal(message.raw_bits, bits) &&
+                  message.missing_symbols == 0, "Automatic Robust RX decoded unexpected content");
+            ++decoded;
+        }
+        return out.receiver_error == "Robust audio input ended.";
+    }, "Automatic Robust RX did not complete on the second trailing quiet slot", 35s);
+    check(decoded == 1 && complete.live_noise_baseline_dbfs_hz &&
+          complete.pattern_steps.size() == trailing_quiet - first_observed + 1,
+          "Automatic Robust RX did not retain the complete public episode");
+    double quiet_scoring_seconds = 0, data_scoring_seconds = 0;
+    for (std::size_t i = 0; i < complete.pattern_steps.size(); ++i) {
+        const auto& row = complete.pattern_steps[i];
+        const auto index = first_observed + i;
+        const bool data = slot <= index && index < slot + bits.size();
+        check(row.index == index && row.ordinal == index && row.evidence_complete &&
+              row.epoch == calendar.transmit_slot(index).pattern_begin.epoch &&
+              (data ? row.decision == live::PatternDecision::data && row.bit == bits[index - slot] :
+                      row.decision == live::PatternDecision::quiet && !row.bit),
+              "Automatic Robust RX scored the wrong public address or decision: " + row.reason);
+        (data ? data_scoring_seconds : quiet_scoring_seconds) += row.coarse_seconds + row.fine_seconds;
+    }
+    if (default_latency) {
+        const auto receiver_wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - receive_started);
+        std::cout << "Compact default receiver processed " << complete.pattern_steps.size() << " slots in "
+                  << receiver_wall.count() << " s wall over " << static_cast<double>(capture_stop) / rate
+                  << " s dated input; summed coarse+fine " << quiet_scoring_seconds << " s quiet, "
+                  << data_scoring_seconds << " s DATA\n";
+    }
+    close(receiver);
+    {
+        std::lock_guard lock(fixture::mutex);
+        fixture::capture_input.reset();
+    }
+    std::cout << "Independent automatic Robust peers decoded e/001 after scored startup and completion quiet slots\n";
+}
+
+void automatic_quiet_start_covers_default_arrival_window() {
+    auto s = settings(false);
+    s.calendar.reset();
+    s.auto_calendar = true;
+    s.data_cadence = live::DataCadence::scheduled_bridge;
+    s.transfer.modem.sample_rate = 1500;
+    s.transfer.modem.carrier_hz = 500;
+    s.transfer.modem.oscillator_search.reset();
+    s.transfer.clock_sync.reset();
+    s.transfer.audio_timing_error_seconds = clock_sync::default_audio_error_seconds;
+    const auto rate = s.transfer.modem.sample_rate;
+    const auto profile = live::detail::prepare_profile(s, {1767225600, 0}, {});
+    const auto& calendar = profile.waveform;
+    const auto halo = live::detail::AudioInput::required_halo_samples(rate, profile.receiver.data_if_hz,
+        profile.minimum_audio_hz, profile.maximum_audio_hz);
+    const auto peer_start = [&](long double utc) {
+        return live::detail::plan_dated_receive_start(profile, true, utc,
+            s.transfer.audio_timing_error_seconds / 2, halo);
+    };
+
+    const auto candidate = calendar.first_slot_not_before({1795500000, 0});
+    const auto date = calendar.transmit_slot(candidate).helper_begin;
+    check(date.phase == 0, "Default scheduled startup fixture expected a whole UTC second");
+    const auto stride = static_cast<long double>(calendar.calendar().minimum_stride_samples()) / rate;
+    const auto early = peer_start(static_cast<long double>(date.epoch) - std::min(20.L, stride - .5L));
+    const auto late = peer_start(static_cast<long double>(date.epoch) - 1);
+    const auto fully_observed = [&](const auto& start) {
+        return start.first_observation_sample >=
+            static_cast<std::uint64_t>(start.first_input_sample + static_cast<std::int64_t>(halo));
+    };
+    check(early.first_slot == candidate && late.first_slot == candidate + 1 &&
+          fully_observed(early) && fully_observed(late),
+          "Default arrival support did not skip the partially observable startup slot");
+
+    live::Session transmitter;
+    transmitter.start(s);
+    ready(transmitter);
+    constexpr std::array<std::uint8_t, 1> bit{1};
+    fixture::hold_playback_source = fixture::hold_playback = true;
+    const auto before_request = fixture::utc_now();
+    transmitter.transmit_bits(bit);
+    const auto after_request = fixture::utc_now();
+    const auto queued = wait(transmitter, [](const auto& out) {
+        check(out.error.empty(), "Default arrival Robust TX failed: " + out.error);
+        std::lock_guard lock(fixture::mutex);
+        return out.transmitting && fixture::scheduled_epoch && fixture::playback_samples == 0;
+    }, "Default arrival Robust TX did not queue playback");
+    check(queued.transmit_trace.active && !queued.transmit_trace.emitting && !queued.transmit_trace.generated_bits,
+          "Robust trace marked a queued message as emitting before first playback PCM");
+    fixture::hold_playback_source = false;
+    wait(transmitter, [](const auto& out) {
+        check(out.error.empty(), "Default arrival Robust TX failed: " + out.error);
+        std::lock_guard lock(fixture::mutex);
+        return out.transmitting && out.transmit_trace.emitting && fixture::playback_samples;
+    }, "Robust trace did not mark first playback PCM as emitting");
+    fixture::hold_playback = false;
+    wait(transmitter, [](const auto& out) {
+        check(out.error.empty(), "Default arrival Robust TX failed: " + out.error);
+        return !out.transmitting;
+    }, "Default arrival Robust TX did not finish");
+    close(transmitter);
+    long double start;
+    std::pair<long double, long double> format_window;
+    {
+        std::lock_guard lock(fixture::mutex);
+        check(fixture::scheduled_epoch && fixture::playback_format_window && fixture::playback_samples,
+              "Default arrival Robust TX did not reach scheduled playback");
+        start = *fixture::scheduled_epoch;
+        format_window = *fixture::playback_format_window;
+    }
+    const auto startup_lead = 3 + static_cast<long double>(live::detail::noise_calibration_samples(rate)) / rate;
+    const auto provider_slot = [&](long double date) {
+        return calendar.first_slot_not_before({static_cast<std::uint64_t>(std::ceil(date + 5)), 0});
+    };
+    const auto first_possible = std::max(peer_start(before_request + startup_lead).first_slot + 2,
+                                         provider_slot(format_window.first));
+    const auto last_possible = std::max(peer_start(after_request + startup_lead).first_slot + 2,
+                                        provider_slot(format_window.second));
+    const auto chosen = calendar.first_slot_not_before({static_cast<std::uint64_t>(start), 0});
+    check(first_possible <= chosen && chosen <= last_possible &&
+          start == calendar.transmit_slot(chosen).helper_begin.epoch,
+          "Default Robust TX did not schedule two fully observable startup quiet slots");
+}
+
+void dated_live_data_then_eof(std::optional<int> fixed_link_gain_db = {}, bool buffered = false,
+                             bool automatic_noise = false) {
     using namespace triad::v3;
     auto s = settings(false);
     s.transfer.modem.sample_rate = 1500;
@@ -1630,23 +2037,30 @@ void dated_live_data_then_eof(std::optional<int> fixed_link_gain_db = {}, bool b
         s.live_noise_dbfs_hz = -80;
         s.receiver_memory_limit = 1024U * 1024 * 1024;
     }
+    const auto noise_density = std::pow(10., *s.live_noise_dbfs_hz / 10);
+    if (automatic_noise) {
+        s.calendar = live::Calendar{1793850000, 7000037};
+        s.target_cn0_db_hz = 32;
+        s.live_noise_dbfs_hz.reset();
+        s.auto_live_noise = true;
+    }
     const auto profile = live::detail::prepare_profile(s, *s.calendar, {});
     const std::array<std::uint8_t, 1> bit{1};
     const std::array<std::uint8_t, 3> text{0, 0, 1}; // Native short-codec representation of 'e'.
-    const std::span<const std::uint8_t> wire = fixed_link_gain_db ? std::span<const std::uint8_t>(text) :
+    const bool expect_message = fixed_link_gain_db || automatic_noise;
+    const std::span<const std::uint8_t> wire = expect_message ? std::span<const std::uint8_t>(text) :
         std::span<const std::uint8_t>(bit);
     Emission source(profile.waveform, profile.key, {EmissionMode::Message, 0, wire});
     const auto rate = s.transfer.modem.sample_rate;
-    const auto prefix = 2U * rate;
-    const auto expected_slots = wire.size() + (fixed_link_gain_db ? 2 : 0);
+    const auto prefix = (automatic_noise ? 8U : 2U) * rate;
+    const auto expected_slots = wire.size() + (expect_message ? 2 : 0);
     const auto after_epoch = profile.waveform.slot(expected_slots - 1).observation.stop + rate;
-    check(after_epoch + prefix < (fixed_link_gain_db ? 500000 : 100000),
+    check(after_epoch + prefix < (expect_message ? 500000 : 100000),
           "Dated live fixture exceeds its sample budget");
-    const auto noise_density = std::pow(10., *s.live_noise_dbfs_hz / 10);
     const auto actual_cn0 = s.target_cn0_db_hz + fixed_link_gain_db.value_or(0);
     const auto signal_gain = std::sqrt(noise_density * std::pow(10., actual_cn0 / 10));
     auto input = std::make_shared<fixture::CaptureInput>();
-    input->first_utc = static_cast<long double>(s.calendar->epoch) - 2;
+    input->first_utc = static_cast<long double>(s.calendar->epoch) - static_cast<long double>(prefix) / rate;
     input->samples.resize(prefix + after_epoch);
     input->callback_may_block = buffered;
     input->burst = buffered;
@@ -1684,7 +2098,7 @@ void dated_live_data_then_eof(std::optional<int> fixed_link_gain_db = {}, bool b
         check(snapshot.receiver_error.empty() || snapshot.receiver_error == "Robust audio input ended.",
               "Dated Robust receive failed: " + snapshot.receiver_error);
         for (const auto& message : snapshot.received) {
-            check(fixed_link_gain_db && message.stream_complete && message.content_validated &&
+            check(expect_message && message.stream_complete && message.content_validated &&
                   message.short_text_decoded && message.content.message.data == Bytes{'e'} &&
                   std::ranges::equal(message.raw_bits, wire) && message.missing_symbols == 0,
                   "Dated Robust did not decode the expected complete native message");
@@ -1692,12 +2106,16 @@ void dated_live_data_then_eof(std::optional<int> fixed_link_gain_db = {}, bool b
         }
         for (const auto& signal : snapshot.signals) {
             if (!signal.complete) continue;
-            check(fixed_link_gain_db && signal.robust_reception && signal.validated && signal.raw_bits == "001",
+            check(expect_message && signal.robust_reception && signal.validated && signal.raw_bits == "001",
                   "Dated Robust completed an unexpected reception");
             complete_signal = true;
         }
         return snapshot.receiver_error == "Robust audio input ended.";
     }, "Dated native DATA scoring did not finish", 45s);
+    if (automatic_noise)
+        check(out.live_noise_baseline_dbfs_hz && *out.live_noise_baseline_dbfs_hz > -100 &&
+              *out.live_noise_baseline_dbfs_hz < -90, "Automatic live noise baseline was absent or out of range");
+    else check(!out.live_noise_baseline_dbfs_hz, "Manual input-noise profile unexpectedly calibrated audio");
     check(out.pattern_steps.size() == expected_slots, "Dated Robust lost a complete public aperture");
     for (std::size_t i = 0; i < expected_slots; ++i) {
         const auto& row = out.pattern_steps[i];
@@ -1712,14 +2130,14 @@ void dated_live_data_then_eof(std::optional<int> fixed_link_gain_db = {}, bool b
                   "Dated Robust quiet slot " + std::to_string(i) + " failed: " + row.reason);
     }
     check(!out.waveform.empty() && !out.constellation.empty() && out.constellation_source == live::ConstellationSource::input &&
-          complete_signal == fixed_link_gain_db.has_value() && decoded_messages == (fixed_link_gain_db ? 1U : 0U),
+          complete_signal == expect_message && decoded_messages == (expect_message ? 1U : 0U),
           "Live input plots or expected physical completion are absent");
     close(session);
     {
         std::lock_guard lock(fixture::mutex);
         fixture::capture_input.reset();
     }
-    if (fixed_link_gain_db)
+    if (expect_message)
         std::cout << "Dated Robust decoded e/001 at " << actual_cn0 << " dB-Hz with Target "
                   << s.target_cn0_db_hz << " dB-Hz, two quiet slots, " << profile.waveform.geometry().bit_seconds
                   << " s bits and peak PCM " << peak << '\n';
@@ -2339,6 +2757,11 @@ int main(int argc, char** argv) {
             fractional_spacing_helper_profile();
             return 0;
         }
+        if (argc == 2 && std::string_view(argv[1]) == "--passband") {
+            robust_rate_fits_typical_converter();
+            std::cout << "Robust startup rate and audio passband checks passed\n";
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--simulation-admission") {
             simulation_first_window_admission();
             return 0;
@@ -2402,6 +2825,20 @@ int main(int argc, char** argv) {
             dated_live_data_then_eof(gain == "30" ? 30 : 0);
             return 0;
         }
+        if (argc == 2 && std::string_view(argv[1]) == "--automatic-noise") {
+            automatic_noise_capture_lifecycle();
+            dated_live_data_then_eof({}, true, true);
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--automatic-calendar") {
+            automatic_live_first_contact();
+            automatic_quiet_start_covers_default_arrival_window();
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--automatic-calendar-latency") {
+            automatic_live_first_contact(true);
+            return 0;
+        }
         if (argc == 2 && std::string_view(argv[1]) == "--gpu-unavailable") {
             unavailable_gpu();
             return 0;
@@ -2425,6 +2862,7 @@ int main(int argc, char** argv) {
         }
         check(argc == 1, "Unexpected Robust session test argument");
         carrier_band_matches_profile();
+        robust_rate_fits_typical_converter();
         fractional_spacing_helper_profile();
         native_precision_profile_policy();
         configured_physical_carrier_context();

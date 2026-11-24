@@ -28,7 +28,7 @@ enum class Field {
     legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_status, legacy_device, legacy_volume, legacy_exclusive, legacy_mono,
     search_arithmetic, doppler, fhss_list, fhss_list_status, receiver_strategy, receiver_cpu_budget,
     symbol_burst, symbol_burst_random, calendar_epoch, calendar_ordinal, live_noise_dbfs_hz,
-    wrong_key_admission, minimum_carrier_spacing, data_cadence, count
+    wrong_key_admission, minimum_carrier_spacing, data_cadence, calendar_timing, audio_sample_rate, count
 };
 enum class Command {
     none, transmit, force_transmit, transmit_noise, transmit_helper, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
@@ -45,7 +45,8 @@ enum class Command {
     fast_open_key, fast_generate_key, fast_choose_file, fast_transmit, fast_listen, fast_cancel, fast_save, fast_use_text, fast_clear_received, fast_copy_signal, fast_paste_signal, fast_toggle_qr_expanded,
     legacy_transmit,
     planner_example_spread, planner_example_weak, planner_example_sub9, planner_example_eme, fhss_apply,
-    toggle_waterfall_expanded, toggle_helper_waterfall_expanded, load_amateur, replay_simulation
+    toggle_waterfall_expanded, toggle_helper_waterfall_expanded, load_amateur, replay_simulation,
+    new_calendar_anchor, recalibrate_live_noise
 };
 enum class Bitmap {
     none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,
