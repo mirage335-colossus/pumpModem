@@ -58,7 +58,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Yes feeds the canonical emitted waveform through the selected sampled channel and native receiver. No uses the selected audio device and configured public calendar.";
     if(slot==Slot::live_duplex) {
         control.font_size=12;
-        control.help="Keep live reception active during transmission. The selected device must support simultaneous capture and playback.";
+        control.help="Keep live reception active during transmission. The selected device must support simultaneous capture and playback. Live playback uses clean audio in either duplex state.";
     }
     if(slot==Slot::link_power)
         control.help="Average transmit power for the shared link budget. Choose a preset or enter power in W, mW, uW, µW or dBm. This is a planning assumption; adjust the radio's output power separately.";
@@ -70,8 +70,9 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Illustrative ADC/DAC oscillator model for sampled channel effects and public receiver bounds. It does not discipline or control physical hardware.";
     if(control.field==Field::rf_oscillator)control.help="Oscillator model for the radio shift and its public receiver bounds. Baseband clock uses a shared reference; selecting it does not control hardware.";
     if(control.field==Field::rf_shift)control.help="Absolute frequency translation or radio LO in Hz, kHz, MHz, GHz or THz; default 0 Hz. Fixed USB delivers a real ADC/DAC stream at Carrier minus Shift, which must stay positive. Set Carrier above Shift to keep the desired stream tone. This setting does not retune physical hardware.";
-    if(control.field==Field::spread_preset)control.help="Selected propagation Doppler and delay-spread model for the sampled channel and public receiver bounds. None is the explicit baseline.";
-    if(control.field==Field::selective_perturbation)control.help="Additional frequency-selective amplitude modulation in the sampled channel. Off is the explicit baseline.";
+    if(control.field==Field::spread_preset)control.help="Sets the receiver's Doppler and delay-spread search bounds. Simulation also applies the selected spread to its sampled channel. None is the baseline.";
+    if(control.field==Field::selective_perturbation)control.help="Sets the receiver's allowance for frequency-selective amplitude variation. Simulation also applies the selected modulation to its sampled channel. Off is the baseline.";
+    if(slot==Slot::doppler)control.help="Declares additional Doppler motion for the receiver search. Simulation also uses it to set the sampled channel's frequency wander.";
     if(control.field==Field::search_margin)control.help="Conservative multiplier of oscillator and channel search bounds; at least 1x. This is an assumption, not measured receiver coverage.";
 
     if(slot==Slot::clock_accuracy)control.help="Station clock-error bound used by the public arrival search. Editable ns/us/ms/s; Default restores timing controls.";

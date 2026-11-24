@@ -1261,6 +1261,7 @@ void long_live_prefix_and_cancel(bool duplex) {
     using namespace triad::v3;
     auto s = settings(false);
     s.transfer.modem.bandwidth_hz = 3600;
+    s.transfer.modem.carrier_hz = 1700; // Leave audio passband room for the HF and Doppler bounds.
     s.transfer.fec = FecMode::rs20;
     s.transfer.key = Crypto::amateur();
     s.full_duplex = duplex;
@@ -1268,6 +1269,7 @@ void long_live_prefix_and_cancel(bool duplex) {
     // physical playback must still be the canonical, unperturbed emission.
     s.spread_preset = "hf-worst";
     s.selective_perturbation = "each-65";
+    s.doppler_shift_hz = 8;
     // One highly compressible long draft. Validate its first physical DATA
     // waveform, then cancel. Whole-interval codec and quiet completion are
     // covered by the separate native codec/short waveform gates.
@@ -1309,11 +1311,13 @@ void long_live_prefix_and_cancel(bool duplex) {
         epoch = static_cast<std::uint64_t>(*fixture::scheduled_epoch);
     }
     const auto profile = live::detail::prepare_profile(s, *s.calendar, {});
-    check(std::abs(profile.receiver.spread_delay_seconds - .007) < 1e-12 &&
+    check(profile.receiver.frequency_bound_hz == 8 &&
+          profile.receiver.time_varying_common_doppler_hz == 38 &&
+          std::abs(profile.receiver.spread_delay_seconds - .007) < 1e-12 &&
           std::abs(profile.receiver.spread_doppler_hz - 30.) < 1e-12 &&
           profile.receiver.selective_slow_depth == .65 &&
           profile.receiver.selective_fast_depth == .65,
-          "HF Worst / Each 65% did not remain configured as receive-side search bounds");
+          "Doppler / HF Worst / Each 65% did not remain configured as receive-side search bounds");
     const auto& calendar = profile.waveform;
     const auto slot = calendar.first_slot_not_before({epoch, 0});
     const auto scheduled = calendar.transmit_slot(slot);
@@ -1333,7 +1337,7 @@ void long_live_prefix_and_cancel(bool duplex) {
     const auto scale = .5 / (std::sqrt(2.) * profile.maximum_unscaled_data * expected.report().data_gain);
     unsigned active = 0;
     for (std::size_t i = 0; i < played.size(); ++i) {
-        const auto sample = live::detail::real_pcm(iq[i], first + i, profile.receiver.data_if_hz,
+        const auto sample = live::detail::real_pcm(iq[i], first + i, s.transfer.modem.carrier_hz,
             s.transfer.modem.sample_rate, scale);
         check(std::abs(sample - played[i]) < 1e-6, "Long Robust playback emitted a different first waveform bit");
         if (std::abs(played[i]) > 1e-4) ++active;

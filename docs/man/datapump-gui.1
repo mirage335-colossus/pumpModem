@@ -141,15 +141,14 @@ The last color or monochrome option wins.
 Open Robust Modem with a continuous simulated noisy channel instead of live
 audio. Emitted samples pass through the selected continuous sampled channel
 and complete native receiver; plots show actual observations and score records.
+.IP
+Selected Doppler, delay spread and frequency-selective amplitude settings
+inform receiver search in both Simulation and live operation. Simulation applies
+the selected effects to its sampled channel. Live playback sends the clean
+emitted waveform in either duplex state.
 .TP
 .BI \-\-hardware-channel-test " yes|no"
 Deprecated compatibility spelling; accepted but ignored and no longer exported.
-Selected Doppler/delay spread and additional amplitude modulation apply in both
-simulation and physical output. Defaults are None and Off. Disable effects using
-those channel controls, not this old flag. Physical output adds no synthetic
-noise, oscillator error or path loss. Enable Live/Duplex for a same-instance
-speaker/microphone or cable loopback. Use \fB\-\-verbose\fP or
-\fB\-\-verbose-file\fP to record actual channel parameters.
 .TP
 .B \-\-debug, \-\-debug-live-duplex
 Run a bounded real-audio Robust GUI duplex diagnostic. Sends one raw 1 bit

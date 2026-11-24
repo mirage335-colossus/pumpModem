@@ -327,9 +327,8 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         }
         else if(flag=="--hardware-channel-test") {
             if(value!="yes"&&value!="no")invalid("--hardware-channel-test must be yes or no.");
-            // Deprecated activation switch: selected channel parameters now
-            // apply to both physical playback and simulation. Preserve imports
-            // without retaining an independent enabling or disabling state.
+            // Accept legacy imports. Synthetic channel effects are selected
+            // by the channel controls and applied during simulation.
         }
         else if(flag=="--fhss-list")result.fhss_list=fhss::list_text(fhss::parse_list(value));
         else if(flag=="--fhss-list-file")result.fhss_list_file=value;
