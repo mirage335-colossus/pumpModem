@@ -267,7 +267,7 @@ DurationPlan plan_duration(const ShapingPlan& base, const ReceiverConfig& receiv
         result.status = DurationStatus::evaluation_limit;
         result.selected.reset(); result.previous_legal.reset();
         result.reason = "bounded duration-model evaluation budget exhausted";
-    } else if (result.selected) {
+    } else if (result.selected && options.resolve_shaping) {
         try {
             auto format = base.format;
             format.bit_seconds = result.selected->active_seconds;
@@ -280,7 +280,8 @@ DurationPlan plan_duration(const ShapingPlan& base, const ReceiverConfig& receiv
             result.status = DurationStatus::geometry_limit;
             result.reason = error.what();
         }
-    } else result.reason = "no duration meets the provisional model within the configured active horizon";
+    } else if (!result.selected)
+        result.reason = "no duration meets the provisional model within the configured active horizon";
     result.evaluated.reserve(trials.size());
     for (const auto& [_, value] : trials) result.evaluated.push_back(value);
     return result;

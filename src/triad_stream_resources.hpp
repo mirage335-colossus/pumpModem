@@ -14,9 +14,27 @@ struct NativeMessageProfile;
 
 namespace detail {
 
+struct StreamWorkspaceQuote {
+    // Peak nominal reservation for a single receiver owner, including its
+    // bounded input, shared controller state, started worker stacks and the
+    // least expensive supported full or grouped DSP quote.
+    std::size_t required_bytes = 0, limit_bytes = 0;
+    bool fits = false;
+};
+
 std::size_t stream_controller_footprint_bytes();
 std::size_t stream_worker_stack_bytes();
 std::optional<double> stream_process_cpu_seconds();
+
+// Quote a bounded configured-calendar prefix without processing input. The
+// caller supplies resolved workers, owners and memory limit. `last_slot` may
+// cover at most the first DATA window and its two scored quiet windows. The
+// default one-quarter input-buffer cap applies after external bytes are held
+// and contributes its implied memory floor to the result;
+// an explicit maximum_buffer_samples remains an independent fixed bound.
+StreamWorkspaceQuote quote_stream_workspace(const PublicProfile&, const ReceiverConfig&,
+    const StreamReceiverOptions&, const NativeMessageProfile&, std::uint64_t last_slot,
+    std::size_t external_bytes, std::stop_token = {});
 
 // Check optional channel storage against every public window within the
 // simulator's preparation budget. A partial scan retains the lone reader.

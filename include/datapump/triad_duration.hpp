@@ -29,6 +29,9 @@ struct DurationOptions {
     std::size_t residual_state_count = 1;
     std::optional<double> manual_active_seconds;
     ShapingOptions shaping_options{};
+    // Skip only the final pulse spectral certificate when resolving advisory
+    // duration sweeps. Selection and integer tile geometry remain identical.
+    bool resolve_shaping = true;
 };
 
 enum class DurationStatus {

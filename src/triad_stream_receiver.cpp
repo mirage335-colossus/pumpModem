@@ -186,6 +186,66 @@ std::optional<double> detail::stream_process_cpu_seconds() {
     return execution::process_cpu_seconds();
 }
 
+detail::StreamWorkspaceQuote detail::quote_stream_workspace(const PublicProfile& profile,
+    const ReceiverConfig& config, const StreamReceiverOptions& options,
+    const NativeMessageProfile& message, std::uint64_t last_slot,
+    std::size_t external_bytes, std::stop_token stop) {
+    if (!options.memory_limit_bytes || !options.workers || !options.slot_owners ||
+        !*options.memory_limit_bytes || !*options.workers || !*options.slot_owners)
+        throw Error("Robust workspace quote requires resolved receiver limits");
+    if (!options.maximum_input_chunk_samples || options.maximum_input_chunk_samples > maximum_chunk ||
+        !options.maximum_pending_messages || !options.recent_slot_receipts || options.recent_slot_receipts > 1024)
+        throw Error("Robust workspace quote requires valid stream buffer and receipt limits");
+    if (last_slot < options.first_slot || last_slot - options.first_slot > 2)
+        throw Error("Robust workspace quote is limited to three consecutive public slots");
+
+    const auto limit = *options.memory_limit_bytes;
+    const auto workers = *options.workers;
+    const auto owners = *options.slot_owners;
+    const auto fixed = controller_reservation(options, message_receiver_options(message), config, owners);
+    const auto stacks = times(workers, add(stream_worker_stack_bytes(), 1024));
+    const auto resident = add(stream_controller_footprint_bytes(), external_bytes);
+    const auto base = add(add(resident, fixed), add(stacks, input_overhead));
+    auto required = base;
+    const auto stream_limit = limit - std::min(limit, external_bytes);
+    const auto maximum_buffer = options.maximum_buffer_samples.value_or(stream_limit / 4 / sample_bytes);
+    const bool automatic_input_cap = !options.maximum_buffer_samples;
+    if (!automatic_input_cap && (!maximum_buffer || window_bytes(maximum_buffer) > stream_limit))
+        throw Error("Robust workspace quote has an invalid input buffer limit");
+    bool fits = base < limit && options.maximum_gap_samples <= maximum_buffer;
+    auto geometry_config = config;
+    // Advisory geometry has no measured noise normalization. Planning uses
+    // only the positive/finite normalization contract, with no samples.
+    if (!geometry_config.noise_variance) geometry_config.noise_variance = 1;
+
+    for (auto index = options.first_slot;; ++index) {
+        if (stop.stop_requested()) throw Error("Robust workspace quote cancelled");
+        const auto plan = make_receiver_slot_plan(profile, config, index);
+        const auto rows = window_samples(plan);
+        if (automatic_input_cap) {
+            // The buffer alone can make a long observation impossible. This
+            // is a lower bound on required RAM when it exceeds the limit.
+            required = std::max(required, add(external_bytes,
+                times(4, window_bytes(std::max(rows, options.maximum_gap_samples)))));
+        }
+        if (rows > maximum_buffer && automatic_input_cap) {
+            fits = false;
+            if (index == last_slot) break;
+            continue;
+        }
+        const auto raw = add(window_bytes(add(rows, options.maximum_input_chunk_samples)),
+            times(add(rows / options.maximum_input_chunk_samples, 3), raw_block_overhead));
+        const auto dsp = native_stream_workspace(profile.config().continuous_data, geometry_config, plan, workers);
+        const auto grouped = grouped_stream_workspace(profile, geometry_config, plan, workers);
+        const auto selected_dsp = grouped ? std::min(dsp, *grouped) : dsp;
+        const auto total = add(add(base, raw), selected_dsp);
+        required = std::max(required, total);
+        fits = fits && rows <= maximum_buffer && total <= limit;
+        if (index == last_slot) break;
+    }
+    return {required, limit, fits};
+}
+
 bool detail::stream_simulation_workspace_fits(const PublicProfile& profile, const ReceiverConfig& config,
     const StreamReceiverOptions& options, const NativeMessageProfile& message, std::uint64_t last_slot,
     std::size_t resident_growth, std::chrono::steady_clock::time_point deadline, std::stop_token stop) {

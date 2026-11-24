@@ -51,6 +51,36 @@ public calendar, so it no longer sets a Helper slot's lease; see the
 one-arrival coarse profile disables Helper; its bank and observation filter
 already overlap, so Helper overlap is inapplicable to that profile.
 
+## Native Link Planner — 24 November 2026
+
+The GUI/receiver working tree based on `27950e9f` exercised the native planner
+on a Ryzen 5 PRO 5650U. Its default CPU profile used Target +32 dB-Hz, a +47 dB-Hz
+link budget, and an 8.8-second DATA bit. The planner sweep took about 0.20 s.
+The ten-second probe completed the first balanced pair, with two correct bits
+and two scored quiet slots per trial. It reported 0.048 processing seconds per
+audio second for the slowest completed finite simulation. The two-trial
+sampling interval was 0–100%.
+
+A separate 3.6 kHz Rate, 12 kHz sample rate, 2.4 kHz carrier Continuous DATA
+probe completed four trials. Three DATA decisions were correct and no trial
+scored both quiet slots, giving zero complete receptions. Its finite pace was
+0.026 s/s. Generation and channel work are included in both pace observations.
+These checks establish planner behavior and finite observations on those settings,
+with sustained service, transferable CPU/GPU calibration, and physical
+sensitivity still unqualified.
+
+The shared controller moved to a distinct fitted duration while retaining the
+first sample on the graph. Returning to its target restored the selected sample.
+Changing path loss cleared the evidence. The native layout and policy checks
+and the FLTK and prepared GCC Rev SDK inline editor probes passed. The separate
+Clang 19 Rev build stopped before assertions at two nested `optional::emplace`
+calls in the unchanged `triad_simulation_stream.cpp`.
+
+The named GUI group passed all 42 tests before the final sample-cache and chart
+refinements. The Triad group passed 59 of 60. Its `triad_receiver_probe` test
+reported the previously observed missing `coarse_prepare` phase, then passed in
+26.15 s when rerun alone. The parallel failure remains part of the result.
+
 ## Robust live setup and audio rate
 
 The dated native capture fixture exercised Auto calibration at Target and

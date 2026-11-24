@@ -6,6 +6,10 @@
 
 namespace datapump::live::detail {
 
+inline constexpr std::size_t receiver_input_chunk_samples = 4096;
+inline constexpr std::size_t receiver_pending_messages = 1;
+inline constexpr Calendar automatic_live_calendar{1767225600, 0}; // 2026-01-01 00:00:00 UTC
+
 // Public DATA occupied band plus the declared receive allowance. Carrier
 // values here are pre-Doppler baseband frequencies (Carrier minus Shift).
 struct CarrierBand {
@@ -50,6 +54,20 @@ struct ProfilePreparationOptions {
     // separately from results for the nominal configured duration.
     std::optional<double> fixture_active_seconds;
 };
+
+// Cheap, source-matched public waveform and receiver geometry for planning.
+// This does not prepare waveform samples or initialize receiver hardware.
+struct ProfilePlan {
+    triad::v3::PublicProfile waveform;
+    triad::v3::ReceiverConfig receiver;
+    triad::v3::DurationPrediction duration;
+    double placement_bandwidth_hz = 0;
+};
+
+ProfilePlan plan_profile(const Settings&, Calendar, std::stop_token);
+// Advisory profile preview. Uses the same duration and integer tile selection
+// while reusing the production minimum-tile spectral allowance.
+ProfilePlan preview_profile(const Settings&, Calendar, std::stop_token);
 
 // Resolve local controls and an independently configured calendar. The
 // receiver never obtains its format, prior, or duration from the draft.

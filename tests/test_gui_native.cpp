@@ -2,6 +2,8 @@
 #include "../src/gui/record_presentations.hpp"
 #include "../src/gui/application.hpp"
 #include "../src/gui/controller.hpp"
+#include "../src/gui/link_planner_model.hpp"
+#include "../src/gui/link_planner_page.hpp"
 #include "../src/gui/transmit_scope.hpp"
 #include "datapump/compression.hpp"
 #include "datapump/live.hpp"
@@ -30,6 +32,10 @@ bool document_contains(const gui::ui::DocumentNode& node, std::string_view text)
     for (const auto& child:node.children) if (document_contains(child,text)) return true;
     return false;
 }
+void document_nodes(const gui::ui::DocumentNode& node,std::vector<const gui::ui::DocumentNode*>& result) {
+    result.push_back(&node);
+    for(const auto& child:node.children)document_nodes(child,result);
+}
 void planner_quick_references() {
     gui::Application app({.simulation=true});
     app.navigate(gui::ui::Page::planner);
@@ -45,6 +51,141 @@ void planner_quick_references() {
     app.dispatch(gui::ui::Command::planner_toggle_details);
     const auto hidden=app.document(gui::ui::Page::planner,900);
     check(hidden && !document_contains(*hidden,"Quick references"));
+}
+void planner_target_navigation_and_graph() {
+    using gui::planner::Point;
+    const std::vector<Point> islands{
+        {.target_db_hz=-58.1,.workspace_fits=true},
+        {.target_db_hz=-50,.workspace_fits=false},
+        {.target_db_hz=-45.1,.workspace_fits=true},
+        {.target_db_hz=-43.8,.workspace_fits=true}};
+    auto selected=gui::planner::select_targets(-50,islands);
+    check(selected.fitted&&*selected.fitted==-45.1);
+    check(selected.stronger&&*selected.stronger==-45.1);
+    selected=gui::planner::select_targets(-60,islands);
+    check(selected.fitted&&*selected.fitted==-58.1);
+    selected=gui::planner::select_targets(-45.1,islands);
+    check(selected.fitted&&*selected.fitted==-45.1);
+    check(selected.weaker&&*selected.weaker==-58.1);
+    const std::vector<Point> no_fit{{.target_db_hz=-60},{.target_db_hz=-50}};
+    selected=gui::planner::select_targets(-55,no_fit);
+    check(!selected.fitted&&!selected.stronger&&!selected.weaker);
+    const std::vector<Point> final_edges{
+        {.target_db_hz=-58.1,.workspace_fits=true},
+        {.target_db_hz=-45.1,.workspace_fits=true},
+        {.target_db_hz=-44.7,.workspace_fits=true}};
+    selected=gui::planner::select_targets(-45.1,final_edges);
+    check(selected.fitted&&*selected.fitted==-45.1);
+    check(selected.weaker&&*selected.weaker==-58.1);
+    check(selected.stronger&&*selected.stronger==-44.7);
+
+    gui::planner::Inputs inputs;
+    inputs.tx_dbm=3;inputs.path_loss_db=120;inputs.noise_density_dbm_hz=-164;
+    const auto budget=gui::planner::budget_preview(inputs);
+    check(budget.received_dbm==-117&&budget.actual_cn0_db_hz==47&&
+          budget.budget_target_db_hz&&*budget.budget_target_db_hz==47);
+
+    gui::planner::Model model;
+    model.available=true;model.selected=Point{.target_db_hz=-45.1,.bit_seconds=12,
+        .cpu_seconds_per_audio_second=.7,.rx_data_detection_probability=.91,
+        .workspace_fraction=.98,.workspace_fits=true};
+    model.points={{.target_db_hz=-58.1,.bit_seconds=24,.cpu_seconds_per_audio_second=1.2,
+        .rx_data_detection_probability=.7,.workspace_fraction=.98,.workspace_fits=true},
+        {.target_db_hz=-50,.bit_seconds=18,.workspace_fraction=1.4,.workspace_fits=false},
+        *model.selected};
+    model.stronger_fit_target=-43.8;model.weaker_fit_target=-58.1;
+    model.cpu_status="CPU estimate pending";model.rx_status="Provisional DATA model";
+    model.workspace_status="Nominal host workspace";
+    const auto page=gui::planner_page::build(model,900,false,false);
+    std::vector<const gui::ui::DocumentNode*> nodes;
+    document_nodes(page,nodes);
+    const auto plots=std::count_if(nodes.begin(),nodes.end(),[](const auto* node) {
+        return node->kind==gui::ui::DocumentKind::bitmap;
+    });
+    check(plots==1&&document_contains(page,"Target C/N₀")&&document_contains(page,"100%")&&
+          document_contains(page,"RX DATA model")&&document_contains(page,"12 s")&&
+          document_contains(page,"91%")&&document_contains(page,"98%"));
+    const auto enabled=[&](gui::ui::Command command) {
+        return std::any_of(nodes.begin(),nodes.end(),[&](const auto* node) {
+            return node->kind==gui::ui::DocumentKind::action&&node->command==command&&node->enabled;
+        });
+    };
+    check(enabled(gui::ui::Command::planner_stronger)&&enabled(gui::ui::Command::planner_weaker));
+
+    const gui::planner::SampleResult trials{.trials=gui::planner::SampleResult::trial_budget,
+        .correct=3,.processing_ratio=.25,.status="4 bounded native trials"};
+    gui::planner::add_sample(model,trials);
+    check(model.selected->rx_success_probability&&*model.selected->rx_success_probability==.75);
+    const auto sampled_page=gui::planner_page::build(model,900,false,false);
+    check(document_contains(sampled_page,"RX sample · 75%"));
+    gui::planner::add_sample(model,24,trials);
+    check(model.points.front().rx_success_probability==.75&&
+          model.points.front().cpu_seconds_per_audio_second==.25);
+    const gui::planner::SampleResult first_pair{.trials=3,.correct=2,.first_pair_correct=1};
+    gui::planner::add_sample(model,first_pair);
+    check(model.selected->rx_success_probability==.5);
+    auto unmeasured=model;
+    const gui::planner::SampleResult incomplete{.status="No completed trials"};
+    gui::planner::add_sample(unmeasured,incomplete);
+    check(!unmeasured.selected->rx_success_probability);
+
+    const auto mono_graph=[](const gui::planner::Model& current) {
+        const auto document=gui::planner_page::build(current,500,false,false);
+        std::vector<const gui::ui::DocumentNode*> rows;
+        document_nodes(document,rows);
+        const auto graph=std::find_if(rows.begin(),rows.end(),[](const auto* node) {
+            return node->kind==gui::ui::DocumentKind::bitmap;
+        });
+        check(graph!=rows.end());
+        gui::BitmapImage pixels(320,160,gui::PixelFormat::mono1);
+        (*graph)->plot.paint(gui::full_bitmap_request(320,160,true),[&](auto x,auto y,auto block) {
+            pixels.blit(x,y,block);
+        },false);
+        return pixels.pixels();
+    };
+    gui::planner::Model mono;
+    mono.points={{.target_db_hz=-58.1},{.target_db_hz=-45.1}};
+    const auto blank=mono_graph(mono);
+    mono.points[0].rx_success_probability=.25;
+    mono.points[1].rx_success_probability=.75;
+    check(mono_graph(mono)!=blank);
+
+    live::Settings settings;
+    settings.gpu=false;settings.simulation=true;settings.target_cn0_db_hz=32;
+    gui::planner::Inputs actual_inputs;
+    actual_inputs.settings=settings;actual_inputs.target_db_hz=32;
+    actual_inputs.tx_dbm=20;actual_inputs.path_loss_db=120;actual_inputs.noise_density_dbm_hz=-174;
+    const auto actual=gui::planner::build(actual_inputs);
+    check(actual.available&&actual.selected&&actual.selected->bit_seconds&&
+          std::isfinite(*actual.selected->bit_seconds)&&*actual.selected->bit_seconds>0);
+    check(actual.selected->workspace_fraction&&std::isfinite(*actual.selected->workspace_fraction)&&
+          actual.selected->workspace_fraction.value()>=0&&actual.workspace_status.find("Nominal")!=std::string::npos);
+    check(actual.selected->rx_data_detection_probability&&
+          std::isfinite(*actual.selected->rx_data_detection_probability)&&
+          *actual.selected->rx_data_detection_probability>=0&&
+          *actual.selected->rx_data_detection_probability<=1);
+    auto weaker=settings;weaker.tx_dbm=-40;
+    const auto nominal_profile=live::detail::plan_profile(settings,live::detail::automatic_live_calendar,{});
+    const auto weaker_profile=live::detail::plan_profile(weaker,live::detail::automatic_live_calendar,{});
+    check(nominal_profile.waveform.geometry().bit_seconds==weaker_profile.waveform.geometry().bit_seconds);
+}
+void planner_commits_checked_target() {
+    using F=gui::ui::Field;
+    gui::launch_command::Patch cpu;
+    cpu.gpu=false;
+    gui::Controller controller({.simulation=true,.smoke=true,.launch_settings=cpu});
+    controller.edit(F::planner_target,"-120");
+    controller.commit_target(F::planner_target);
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(8);
+    while(controller.settings().target_cn0_db_hz==-120&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    const auto target=controller.settings().target_cn0_db_hz;
+    check(target>-120&&std::stod(controller.field(F::snr).text)==target&&
+          std::stod(controller.field(F::planner_target).text)==target);
+    const auto launch=gui::launch_command::parse(controller.field(F::planner_command).text);
+    check(launch.target_db_hz==target);
 }
 void shared_robust_target() {
     gui::Application app({.simulation=true});
@@ -971,6 +1112,8 @@ void admission_browser_controller() {
 int main() {
     try {
         planner_quick_references();
+        planner_target_navigation_and_graph();
+        planner_commits_checked_target();
         shared_robust_target();
         shared_gpu_toggle();
         gpu_route_diagnostics();

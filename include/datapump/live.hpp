@@ -13,6 +13,8 @@
 #include <utility>
 #include <vector>
 
+namespace datapump::triad::v3::receiver_detail { class ReceiverBulkBackend; }
+
 namespace datapump::live {
 inline constexpr std::size_t waveform_history_samples = 2048;
 inline constexpr double waveform_default_intervals(std::uint32_t sample_rate) {
@@ -260,6 +262,9 @@ public:
     bool resume_recovery(std::uint64_t);
     void cancel_recovery(std::uint64_t);
     Snapshot snapshot(bool simulation_detail = false);
+    // Host workspace planning may inspect the initialized backend's geometry
+    // policy without starting DSP work or opening a device.
+    std::weak_ptr<triad::v3::receiver_detail::ReceiverBulkBackend> planning_backend() const;
     void stop();
     bool ready_to_close() const;
 private:

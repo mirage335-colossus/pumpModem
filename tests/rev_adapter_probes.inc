@@ -582,18 +582,21 @@
         editor->apply("-18");editor->cursor=2;editor->selectAnchor=1;editor->selectEnd=2;editor->changed("-18");settle();
         if(!editor->targetFlags.focus||editor->cursor!=2||editor->selectAnchor!=1||editor->selectEnd!=2)
             throw std::runtime_error("Rev document replacement changed the inline editor caret or selection");
+        const auto budget_target=application.field(ui::Field::planner_target).display_text;
         re::Event enter;enter.keyboard.enter.id=1;
         if(!editor->submit_event(enter))throw std::runtime_error("Rev inline editor did not retain Enter submission");
         settle();
         if(editor->content.get()!=application.field(ui::Field::planner_target).text||
-           !application.field(ui::Field::planner_target).display_text.empty())
+           editor->content.get()!=application.field(ui::Field::snr).text||
+           application.field(ui::Field::planner_target).display_text!=budget_target)
             throw std::runtime_error("Rev inline Enter failed to display the accepted target");
         const auto before=editor->content.get();
         const auto option=std::find_if(presets->params.options.begin(),presets->params.options.end(),
             [&](const auto& item){return item.value!=before;});
         if(option==presets->params.options.end())throw std::runtime_error("Rev inline preset fixture has no alternate value");
         presets->params.value=option->value;re::Event picked;presets->onChange(picked);settle();
-        if(editor->content.get()==before||!application.field(ui::Field::planner_target).display_text.empty())
+        if(editor->content.get()==before||editor->content.get()!=application.field(ui::Field::snr).text||
+           application.field(ui::Field::planner_target).display_text!=budget_target)
             throw std::runtime_error("Rev inline preset did not edit and commit through its normal binding");
         focus_control(editor);re::Event tab;tab.keyboard.tab.id=1;keyDown(tab);
         if(!presets->dropdown->targetFlags.focus)throw std::runtime_error("Rev inline editor Tab order skipped its preset control");
@@ -610,14 +613,19 @@
         };
         auto* stronger=action("Stronger");auto* weaker=action("Weaker");
         auto* next=action("Spread-Spectrum DSSS FHSS Example");auto* after=action("Weak-Signal Example");
-        if(!stronger||!weaker||allows_input(stronger)||allows_input(weaker)||!next||!after||
-           !allows_input(next)||!allows_input(after))
+        if(!stronger||!weaker||!next||!after||!allows_input(next)||!allows_input(after))
             throw std::runtime_error("Rev planner action availability differs from the current model");
-        tab.propagate=true;keyDown(tab);
-        if(!next->targetFlags.focus)throw std::runtime_error("Rev inline preset Tab order skipped the next available document action");
-        tab.propagate=true;keyDown(tab);
-        if(!after->targetFlags.focus)throw std::runtime_error("Rev document actions did not retain their visual Tab order");
-        tab.keyboard.shift.id=1;tab.propagate=true;keyDown(tab);tab.propagate=true;keyDown(tab);
+        std::vector<re::Element*> following;
+        if(allows_input(stronger))following.push_back(stronger);
+        if(allows_input(weaker))following.push_back(weaker);
+        following.push_back(next);following.push_back(after);
+        for(auto* expected:following) {
+            tab.propagate=true;keyDown(tab);
+            if(!expected->targetFlags.focus)
+                throw std::runtime_error("Rev inline Tab order skipped an enabled document action");
+        }
+        tab.keyboard.shift.id=1;
+        for(std::size_t index=0;index<following.size();++index) {tab.propagate=true;keyDown(tab);}
         if(!presets->dropdown->targetFlags.focus)throw std::runtime_error("Rev reverse Tab order skipped the inline preset control");
         focus_control(editor);application.dispatch(ui::Command::planner_toggle_details);settle();
         if(find_host()!=host||!editor->targetFlags.focus)

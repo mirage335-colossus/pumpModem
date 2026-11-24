@@ -427,10 +427,11 @@ frame DATA pattern alternatives, and the FHSS hop seed. The separate live
 Pattern evidence and Pattern steps views show native receiver observations and
 score records.
 
-The **Link Planner** retains its controls, presets, command editor, general
-link-budget arithmetic, and generic plots. Robust receive-probability, CPU-pace,
-clock-search, and workspace forecasts are unavailable; see the concise
-[Link Planner status](link-planner.md).
+The **Link Planner** shares the Target SNR and shows native DATA duration,
+modeled detection, nominal host workspace, and available local receiver
+samples on one target graph. Committed targets and the Stronger/Weaker controls
+use the nominal workspace check. The launch-command editor preserves shared
+on-air settings. See [Link Planner](link-planner.md) for sample and model scope.
 
 ## Received content and drafts
 

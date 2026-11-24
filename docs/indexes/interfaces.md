@@ -17,7 +17,7 @@ and the [evidence index](evidence.md).
 | [Web protocol](../web-protocol.md) | Browser/worker message and execution protocol. |
 | [Browser implementation guide](../../web/README.md) | Source-tree browser assets, development and execution details. |
 | [Inspection](../inspection.md) | Live receiver pattern plots and deferred detailed transmission inspection, with interpretation limits. |
-| [Link Planner](../link-planner.md) | Generic planning controls; Robust receive-probability and CPU forecasts remain unqualified for the native receiver. |
+| [Link Planner](../link-planner.md) | Native duration and workspace navigation, modeled DATA detection, and bounded local receiver samples on one target graph. |
 | [QR](../qr.md) | QR transport and application behavior. |
 
 For operating commands see the [six interface manuals](../README.md#command-and-interface-manuals).

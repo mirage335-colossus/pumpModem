@@ -46,7 +46,7 @@ enum class Command {
     legacy_transmit,
     planner_example_spread, planner_example_weak, planner_example_sub9, planner_example_eme, fhss_apply,
     toggle_waterfall_expanded, toggle_helper_waterfall_expanded, load_amateur, replay_simulation,
-    new_calendar_anchor, recalibrate_live_noise
+    new_calendar_anchor, recalibrate_live_noise, planner_sample
 };
 enum class Bitmap {
     none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,

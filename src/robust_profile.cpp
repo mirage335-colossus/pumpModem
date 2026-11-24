@@ -405,8 +405,10 @@ void CarrierBand::validate(double carrier_hz, std::optional<double> audio_upper_
         check(guarded.upper_hz <= *audio_upper_limit_hz, "Robust profile exceeds the planned audio converter passband");
 }
 
-Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token stop,
-                        ProfilePreparationOptions options) {
+namespace {
+
+ProfilePlan build_profile_plan(const Settings& s, Calendar calendar, std::stop_token stop,
+                               ProfilePreparationOptions options, bool resolve_shaping = true) {
     using namespace triad::v3;
     if (stop.stop_requested()) throw Error("Robust preparation cancelled");
     const auto& modem = s.transfer.modem;
@@ -417,7 +419,6 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     const auto spread = tuning::parse_spread_preset(s.spread_preset);
     const auto [slow_depth, fast_depth] = selective_depths(s.selective_perturbation);
     const auto arrival = arrival_prior(s);
-    auto key = s.transfer.key.value_or(Crypto::amateur());
     auto helper = helper_options(s);
     const bool helper_enabled = helper::effective_helper_power(helper) > 0;
     validate_data_cadence(s, helper_enabled);
@@ -499,12 +500,22 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     duration.helper_lead_seconds = rx.helper_enabled ? helper_lead_seconds : 0;
     duration.pulse_halo_seconds = static_cast<double>(minimum.geometry.calendar_origin_sample) / fs;
     duration.manual_active_seconds = options.fixture_active_seconds;
+    duration.resolve_shaping = resolve_shaping;
     // Limit the public model to a locally representable source interval. The
     // receiver separately admits its exact per-window workspace.
     const auto plan = plan_duration(minimum, rx, duration);
     if (stop.stop_requested()) throw Error("Robust preparation cancelled");
-    if (!plan.shaping) throw Error("Robust target SNR has no bounded native duration: " + plan.reason);
-    const auto& shaping = *plan.shaping;
+    if (!plan.shaping && resolve_shaping)
+        throw Error("Robust target SNR has no bounded native duration: " + plan.reason);
+    if (!plan.selected) throw Error("Robust target SNR duration plan has no selected prediction");
+    auto shaping = plan.shaping.value_or(minimum);
+    if (!plan.shaping) {
+        shaping.format.bit_seconds = plan.selected->active_seconds;
+        shaping.geometry = triad::v3::geometry(shaping.format);
+        if (shaping.geometry.tile_seconds != minimum.geometry.tile_seconds ||
+            shaping.geometry.tile_count != plan.selected->tiles)
+            throw Error("Robust preview duration does not match the selected native tile geometry");
+    }
     const auto& geometry = shaping.geometry;
 
     PublicProfileConfig configuration;
@@ -552,9 +563,49 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
             passband, s.transfer.audio_timing_error_seconds);
     }
     PublicProfile waveform(std::move(configuration), s.transfer.key);
+    rx.helper = waveform.helper_plan();
+    return {std::move(waveform), std::move(rx), *plan.selected,
+            shaping.spectrum.placement_bandwidth_hz};
+}
+
+} // namespace
+
+ProfilePlan plan_profile(const Settings& settings, Calendar calendar, std::stop_token stop) {
+    return build_profile_plan(settings, calendar, stop, {});
+}
+
+ProfilePlan preview_profile(const Settings& settings, Calendar calendar, std::stop_token stop) {
+    return build_profile_plan(settings, calendar, stop, {}, false);
+}
+
+Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token stop,
+                        ProfilePreparationOptions options) {
+    using namespace triad::v3;
+    auto planned = build_profile_plan(s, calendar, stop, options);
+    const auto& modem = s.transfer.modem;
+    const auto osc = modem.oscillator_search.value_or(modem::OscillatorSearchConfig{});
+    const auto fs = modem.sample_rate;
+    const auto spread = tuning::parse_spread_preset(s.spread_preset);
+    const auto [slow_depth, fast_depth] = selective_depths(s.selective_perturbation);
+    const auto arrival = arrival_prior(s);
+    auto key = s.transfer.key.value_or(Crypto::amateur());
+    const bool shifted = osc.rf_shift_hz > 0;
+    const bool shared = shifted && osc.reference == modem::OscillatorReference::shared_radio;
+    const auto shift_ppm = shifted ? shift_accuracy(osc) : 0;
+    const auto nominal_endpoint_ppm = osc.lf.accuracy_ppm / 2;
+    const bool gaussian_rays = spread.doppler_law == tuning::SpreadPreset::DopplerLaw::gaussian_rays;
+    auto rx = std::move(planned.receiver);
+    auto waveform = std::move(planned.waveform);
     if (s.receiver_memory_limit && waveform.emission_source_workspace_bytes() >= *s.receiver_memory_limit)
         throw Error("Robust native waveform workspace exceeds the configured session memory limit");
-    rx.helper = waveform.helper_plan();
+    const auto& geometry = waveform.geometry();
+    const auto simulated_common_doppler_hz = std::abs(s.doppler_shift_hz) +
+        (gaussian_rays ? 0 : rx.time_varying_atmospheric_hz);
+    const auto data_passband = helper::mono_passband({modem.carrier_hz,
+        geometry.occupied_bandwidth_hz, waveform.config().gate_bandwidth_hz, waveform.config().format.fhss});
+    double skirts = rx.frequency_bound_hz + rx.time_varying_atmospheric_hz;
+    if (gaussian_rays) skirts += 3 * rx.random_doppler_width_hz;
+    skirts += rx.spread_doppler_hz + rx.selective_modulation_rate_hz;
     const auto power = data_power_reference(waveform.config().format, key, stop);
     const auto reference_gain = 1 / std::sqrt(power.mean_norm);
 
@@ -608,8 +659,8 @@ Profile prepare_profile(const Settings& s, Calendar calendar, std::stop_token st
     }
     const auto actual_cn0 = s.tx_dbm - s.path_loss_db - s.noise_dbm_hz;
     channel.complex_noise_variance = fs / std::pow(10., actual_cn0 / 10);
-    const auto maximum_unscaled_data = source_peak(shaping.format.pulse_shape);
-    auto hops = illustrated_hops(s, shaping.spectrum.placement_bandwidth_hz);
+    const auto maximum_unscaled_data = source_peak(waveform.config().format.pulse_shape);
+    auto hops = illustrated_hops(s, planned.placement_bandwidth_hz);
     rx.data_basis_gain = reference_gain;
     if (s.simulation) {
         rx.noise_variance = channel.complex_noise_variance;

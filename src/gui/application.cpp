@@ -150,7 +150,7 @@ bool Application::tick() {
         const bool expanded_spectrum = impl_->overlay && std::ranges::any_of(impl_->overlay->controls, [](const auto& control) {
             return control.bitmap==ui::Bitmap::waterfall_detail || control.bitmap==ui::Bitmap::waterfall_helper_detail;
         });
-        impl_->controller.poll(expanded_spectrum);
+        impl_->controller.poll(expanded_spectrum,impl_->regular_selected()&&impl_->page==ui::Page::planner);
         const auto& devices=impl_->controller.audio_devices();
         if(impl_->device_count!=devices.size()) {
             impl_->fast_controller.set_devices(devices);impl_->legacy_controller.set_devices(devices);
@@ -614,6 +614,7 @@ std::shared_ptr<const ui::DocumentNode> Application::document(ui::Page page,int 
     width=std::max(ui::document_min_content_width,width);
     if(page==ui::Page::planner) {
         auto& cached=impl_->planner_document;
+        impl_->controller.request_link_plan();
         const auto model=impl_->controller.link_plan();
         if(model->available)cached.previous=model;
         const bool updating=model->calculating&&cached.previous;

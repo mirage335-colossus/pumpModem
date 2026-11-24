@@ -36,7 +36,7 @@ using detail::real_pcm;
 using Clock = std::chrono::steady_clock;
 using KeyTag = std::array<std::uint8_t, 32>;
 
-constexpr std::size_t audio_chunk = 4096, plot_size = 1024, history_size = 32;
+constexpr std::size_t audio_chunk = detail::receiver_input_chunk_samples, plot_size = 1024, history_size = 32;
 constexpr std::size_t simulation_waterfall_windows_per_row = 32;
 constexpr auto simulation_preview_period = std::chrono::milliseconds(45);
 constexpr auto simulation_workspace_preflight_budget = std::chrono::milliseconds(100);
@@ -66,7 +66,6 @@ constexpr auto calibrating_live_noise = "Measuring input noise for calibration. 
 constexpr auto wait_for_live_calibration = "Wait for live audio calibration before full-duplex transmission.";
 // Wire address origin for automatic live operation. Each waveform uses its
 // own public slot spacing and advances the ordinal through idle slots.
-constexpr Calendar automatic_live_calendar{1767225600, 0}; // 2026-01-01 00:00:00 UTC
 
 bool live_receive_enabled(const Settings& settings) {
     return settings.auto_live_noise || settings.live_noise_dbfs_hz.has_value();
@@ -786,7 +785,7 @@ StreamReceiverOptions stream_options(const NativeMessageProfile& message, const 
     options.slot_owners = resources.slot_owners;
     options.memory_limit_bytes = resources.memory_limit_bytes - external_memory;
     options.maximum_input_chunk_samples = audio_chunk;
-    options.maximum_pending_messages = 1;
+    options.maximum_pending_messages = detail::receiver_pending_messages;
     return options;
 }
 
@@ -2154,7 +2153,7 @@ struct Session::Impl {
                 const bool native_lag_preference = gpu_backend && gpu_backend->permits_native_exact_chirp_z();
                 const auto prepare = [&] {
                     const auto anchor = s.simulation ? simulation_calendar(s) :
-                        s.calendar.value_or(automatic_live_calendar);
+                        s.calendar.value_or(detail::automatic_live_calendar);
                     auto prepared = detail::prepare_profile(s, anchor, stop);
                     // Optional wrong-key filtering is a reversible browser
                     // view. Retain the canonical baseline for every reception;
@@ -2606,6 +2605,13 @@ void Session::cancel_transmit() {
 
 bool Session::resume_recovery(std::uint64_t) { return false; }
 void Session::cancel_recovery(std::uint64_t) {}
+
+std::weak_ptr<triad::v3::receiver_detail::ReceiverBulkBackend> Session::planning_backend() const {
+    auto& p = *impl_;
+    std::lock_guard lock(p.mutex);
+    if (p.profile) return p.profile->receiver.bulk_backend;
+    return {};
+}
 
 Snapshot Session::snapshot(bool want_simulation_detail) {
     auto& p = *impl_;

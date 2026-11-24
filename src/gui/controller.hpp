@@ -31,7 +31,7 @@ public:
     Controller(const Controller&) = delete;
     Controller& operator=(const Controller&) = delete;
     void start(bool active=true);
-    void poll(bool expanded_spectrum = false);
+    void poll(bool expanded_spectrum = false, bool planner_visible = false);
     void close();
     // TX-idle audio handoff cancels partial DSP capture and retains incomplete
     // rows. Capture restarts on the configured calendar with quiet-slot rearming.
@@ -40,7 +40,7 @@ public:
     bool closing() const;
     bool ready_to_close() const;
     void edit(ui::Field field, std::string text);
-    // Finish a target edit without changing its already accepted sample timing.
+    // Commit exact text and request a workspace check for the shared target.
     void commit_target(ui::Field field);
     void select(ui::Field field, std::string option_id);
     void toggle(ui::Field field, bool value);
@@ -66,6 +66,7 @@ public:
     const std::shared_ptr<const Inspection>& inspection() const;
     const std::optional<transfer::Estimate>& estimate() const;
     const std::shared_ptr<const planner::Model>& link_plan() const;
+    void request_link_plan();
     bool planner_details() const;
     bool planner_uses_draft() const;
     // Consumes accumulated invalidation flags once for all bitmap producers.

@@ -1550,9 +1550,20 @@ void inline_document_editor() {
         Fl::e_keysym=FL_Tab;Fl::e_state=reverse?FL_SHIFT:0;Fl::e_text=tab_text;Fl::e_length=1;Fl::handle(FL_KEYDOWN,window);
     };
     tab(false);require(Fl::focus()==presets,"Inline Tab did not move from editor to presets");
-    tab(false);require(Fl::focus()==find_button(*document,"Spread-Spectrum DSSS FHSS Example"),"Inline Tab did not skip unavailable planner actions");
-    tab(false);require(Fl::focus()==find_button(*document,"Weak-Signal Example"),"Inline Tab skipped the next available action");
-    tab(true);tab(true);tab(true);require(Fl::focus()==editor,"Inline reverse Tab did not restore document visual order");
+    std::vector<Fl_Widget*> following;
+    for(const auto* label:{"Stronger","Weaker"}) {
+        auto* action=find_button(*document,label);
+        require(action,"Inline document lost a target adjustment action");
+        if(action->active_r())following.push_back(action);
+    }
+    following.push_back(find_button(*document,"Spread-Spectrum DSSS FHSS Example"));
+    following.push_back(find_button(*document,"Weak-Signal Example"));
+    require(following[following.size()-2]&&following.back(),"Inline document lost its example actions");
+    for(auto* expected:following) {
+        tab(false);require(Fl::focus()==expected,"Inline Tab did not follow enabled document actions in visual order");
+    }
+    for(std::size_t index=0;index<following.size()+1;++index)tab(true);
+    require(Fl::focus()==editor,"Inline reverse Tab did not restore document visual order");
     Fl::e_keysym=key;Fl::e_state=state;Fl::e_text=event_text;Fl::e_length=length;
     const auto* original=editor;editor->value("-");editor->do_callback();refresh();
     find(*window);
@@ -1565,13 +1576,16 @@ void inline_document_editor() {
     editor->value("-18");editor->insert_position(2,1);editor->do_callback();refresh();
     require(Fl::focus()==editor&&editor->insert_position()==2&&editor->mark()==1&&std::string(editor->value())=="-18",
         "Ordinary inline typing lost its cursor, selection or edit buffer");
+    const auto budget_target=app.application.field(ui::Field::planner_target).display_text;
     require(editor->submit(false,false),"Inline editor did not preserve ordinary Enter submission");refresh();
     require(std::string(editor->value())==app.application.field(ui::Field::planner_target).text&&
-        app.application.field(ui::Field::planner_target).display_text.empty(),
+        app.application.field(ui::Field::planner_target).text==app.application.field(ui::Field::snr).text&&
+        app.application.field(ui::Field::planner_target).display_text==budget_target,
         "Inline Enter did not display the exact accepted target");
     const auto before=std::string(editor->value());
     presets->picked(presets->menu()+2);refresh();
-    require(std::string(editor->value())!=before&&app.application.field(ui::Field::planner_target).display_text.empty(),
+    require(std::string(editor->value())!=before&&std::string(editor->value())==app.application.field(ui::Field::snr).text&&
+        app.application.field(ui::Field::planner_target).display_text==budget_target,
         "Inline preset failed to edit and commit through the ordinary native control callback");
     editor->take_focus();const int old_y=editor->y();
     app.application.dispatch(ui::Command::planner_toggle_details);refresh();find(*window);
