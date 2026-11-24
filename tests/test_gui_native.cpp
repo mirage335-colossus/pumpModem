@@ -115,60 +115,56 @@ void planner_target_navigation_and_graph() {
         });
     };
     check(enabled(gui::ui::Command::planner_stronger)&&enabled(gui::ui::Command::planner_weaker));
+    check(enabled(gui::ui::Command::planner_sample)&&!document_contains(page,"Measure RX pair"));
 
     const gui::planner::SampleResult trials{.trials=gui::planner::SampleResult::trial_budget,
-        .correct=3,.processing_ratio=.25,.status="4 bounded native trials"};
+        .correct=1,.processing_ratio=.25,.status="Two native trials"};
     gui::planner::add_sample(model,trials);
-    check(model.selected->rx_success_probability&&*model.selected->rx_success_probability==.75);
-    const auto sampled_page=gui::planner_page::build(model,900,false,false);
-    check(document_contains(sampled_page,"RX sample · 75%"));
-    gui::planner::add_sample(model,24,trials);
-    check(model.points.front().rx_success_probability==.75&&
-          model.points.front().cpu_seconds_per_audio_second==.25);
-    const gui::planner::SampleResult first_pair{.trials=3,.correct=2,.first_pair_correct=1};
-    gui::planner::add_sample(model,first_pair);
     check(model.selected->rx_success_probability==.5);
+    const auto sampled_page=gui::planner_page::build(model,900,false,false);
+    check(document_contains(sampled_page,"RX sample · 50%")&&document_contains(sampled_page,"1/2 complete raw-bit successes"));
+    gui::planner::add_sample(model,24,trials);
+    check(model.points.front().rx_success_probability==.5&&
+          model.points.front().cpu_seconds_per_audio_second==.25);
     auto unmeasured=model;
-    const gui::planner::SampleResult incomplete{.status="No completed trials"};
+    const gui::planner::SampleResult incomplete{.trials=1,.correct=1,.processing_ratio=.2};
     gui::planner::add_sample(unmeasured,incomplete);
-    check(!unmeasured.selected->rx_success_probability&&!unmeasured.offer_extended_sample);
+    check(!unmeasured.selected->rx_success_probability&&unmeasured.selected->cpu_seconds_per_audio_second==.2);
 
     using Stage=gui::planner::SampleProgress::Stage;
-    const gui::planner::SampleResult interrupted{.interrupted_trial=gui::planner::SampleProgress{
-        .stage=Stage::scoring,.trial=1,.scored_slots=0,.input_seconds=300,
-        .episode_seconds=300,.elapsed_seconds=30}};
-    gui::planner::add_sample(unmeasured,interrupted);
-    check(unmeasured.selected->cpu_probe_lower_bound==.1&&!unmeasured.selected->cpu_seconds_per_audio_second&&
-          !unmeasured.selected->rx_success_probability&&unmeasured.offer_extended_sample);
-    const auto interrupted_page=gui::planner_page::build(unmeasured,900,false,false);
-    check(document_contains(interrupted_page,"0/3 public slots scored")&&
-          document_contains(interrupted_page,"Run longer simulation")&&
-          document_contains(interrupted_page,"up to 120 s")&&document_contains(interrupted_page,"≥"));
-    auto slow_coarse=interrupted;
-    slow_coarse.interrupted_trial->coarse_probe=triad::v3::receiver_detail::CoarseProbeObservation{
-        .total_pairs=56940,.completed_pairs={566,620},.contributing_lanes={16,19},.windows_complete=true};
-    gui::planner::add_sample(unmeasured,slow_coarse);
-    check(!unmeasured.offer_extended_sample&&!unmeasured.selected->rx_success_probability&&
-          !unmeasured.selected->cpu_seconds_per_audio_second&&unmeasured.selected->cpu_probe_lower_bound==.1&&
-          unmeasured.sample_status.find("coarse")!=std::string::npos);
-    slow_coarse.interrupted_trial->coarse_probe->completed_pairs[1]=760;
-    gui::planner::add_sample(unmeasured,slow_coarse);
-    check(unmeasured.offer_extended_sample&&unmeasured.sample_status.find("pairs/s")!=std::string::npos&&
-          unmeasured.sample_status.find("Coarse rates varied by more than 15%")!=std::string::npos&&
-          !unmeasured.selected->cpu_seconds_per_audio_second&&!unmeasured.selected->rx_success_probability);
-    slow_coarse.interrupted_trial->coarse_probe->contributing_lanes[1]=2;
-    gui::planner::add_sample(unmeasured,slow_coarse);
-    check(unmeasured.offer_extended_sample&&unmeasured.sample_status.find("8 lanes in each window")!=std::string::npos);
-    slow_coarse.interrupted_trial->coarse_probe->contributing_lanes[1]=19;
-    slow_coarse.interrupted_trial->coarse_probe->completed_pairs[1]=16;
-    gui::planner::add_sample(unmeasured,slow_coarse);
-    check(unmeasured.offer_extended_sample&&unmeasured.sample_status.find("24 FFT pairs")!=std::string::npos);
-    slow_coarse.interrupted_trial->coarse_probe->windows_complete=false;
-    gui::planner::add_sample(unmeasured,slow_coarse);
-    check(unmeasured.offer_extended_sample&&unmeasured.sample_status.find("two complete 3 s windows")!=std::string::npos&&
-          unmeasured.sample_status.find("FFT pairs")==std::string::npos);
-    gui::planner::add_sample(unmeasured,trials);
-    check(!unmeasured.selected->cpu_probe_lower_bound&&!unmeasured.offer_extended_sample);
+    gui::planner::SampleProgress progress{.stage=Stage::scoring,.trial=1,.scored_slots=0,.input_seconds=300,
+        .episode_seconds=300,.elapsed_seconds=31};
+    using Observation=triad::v3::receiver_detail::CoarseProbeObservation;
+    progress.backend_id="Native CPU";
+    progress.coarse_probe=Observation{};
+    progress.coarse_probe->total_pairs=56940;
+    progress.coarse_probe->completed_pairs={566,620};
+    progress.coarse_probe->contributing_lanes={16,19};
+    progress.coarse_probe->windows_complete=true;
+    progress.coarse_probe->meter_started=true;
+    progress.coarse_probe->phase=Observation::Phase::coarse_search;
+    progress.coarse_probe->route=Observation::Route::native_frequency;
+    const auto progress_text=[&] {return gui::planner::sample_progress_text(progress);};
+    const auto contains=[&](std::string_view text) {return progress_text().find(text)!=std::string::npos;};
+    check(contains("0/3 public slots scored")&&contains("31.0 s elapsed")&&
+          contains("Selected backend Native CPU")&&contains("Coarse route native frequency search")&&
+          contains("coarse correlation work projects to"));
+    progress.coarse_probe->completed_pairs[1]=760;
+    check(contains("pairs/s")&&contains("Coarse rates varied by more than 15%"));
+    progress.coarse_probe->contributing_lanes[1]=2;
+    check(contains("8 lanes in each window"));
+    progress.coarse_probe->contributing_lanes[1]=19;
+    progress.coarse_probe->completed_pairs[1]=16;
+    check(contains("24 FFT pairs"));
+    progress.coarse_probe->windows_complete=false;
+    check(contains("two complete 3 s windows")&&!contains("FFT pairs"));
+    progress.coarse_probe->phase=Observation::Phase::fine;
+    progress.coarse_probe->completed_span_seconds=19;
+    check(contains("First slot scoring fine candidates")&&contains("span completed in 19 s")&&!contains("projects to"));
+    progress.coarse_probe=Observation{};
+    progress.coarse_probe->phase=Observation::Phase::coarse_search;
+    progress.coarse_probe->route=Observation::Route::backend_frequency;
+    check(contains("Coarse route backend frequency search")&&contains("timing applies to eligible full native frequency spans"));
 
     const auto mono_graph=[](const gui::planner::Model& current) {
         const auto document=gui::planner_page::build(current,500,false,false);
@@ -251,14 +247,18 @@ void planner_simulation_controls() {
         }
         check(predicate());
     };
+    const auto running=[&] {
+        return action(C::planner_sample,"Cancel simulation")&&
+            document_contains(*app.document(ui::Page::planner,900),"Selected backend Native CPU");
+    };
     wait([&] {return action(C::planner_sample,"Run simulation");});
     check(app.field(F::planner_target).text=="32"&&app.field(F::simulation).selected=="no"&&
-          action(C::planner_stronger,"Stronger")&&action(C::planner_weaker,"Weaker"));
+          action(C::planner_stronger,"Stronger")&&action(C::planner_weaker,"Weaker")&&
+          !document_contains(*app.document(ui::Page::planner,900),"Measure RX pair"));
     const auto original_command=app.field(F::planner_command).text;
     app.dispatch(C::planner_sample);
-    check(action(C::planner_sample,"Cancel simulation")&&app.enabled(C::cancel));
-    app.dispatch(C::planner_sample);
-    check(action(C::planner_sample,"Run simulation")&&!app.enabled(C::cancel));
+    wait(running);
+    check(app.enabled(C::cancel));
     check(app.field(F::planner_command).text==original_command);
 
     const auto& controls=ui::console_screen();
@@ -268,16 +268,16 @@ void planner_simulation_controls() {
     check(target!=controls.end());
     app.edit(F::planner_target,"34");
     check(app.submit(*target,false,false));
-    wait([&] {return action(C::planner_sample,"Cancel simulation");});
+    wait(running);
     app.navigate(ui::Page::console);
     check(app.enabled(C::cancel));
     app.dispatch(C::cancel);
     app.navigate(ui::Page::planner);
     wait([&] {return action(C::planner_sample,"Run simulation");});
     check(app.field(F::simulation).selected=="no"&&app.field(F::snr).text=="34"&&
-          !app.enabled(C::cancel));
+          !app.enabled(C::cancel)&&document_contains(*app.document(ui::Page::planner,900),"Simulation cancelled."));
     app.dispatch(C::planner_weaker);
-    wait([&] {return action(C::planner_sample,"Cancel simulation");});
+    wait(running);
     check(std::stod(app.field(F::snr).text)<34&&app.field(F::simulation).selected=="no");
     app.dispatch(C::planner_sample);
     wait([&] {return action(C::planner_sample,"Run simulation");});

@@ -12,11 +12,14 @@ namespace datapump::gui {
 constexpr std::size_t resource_sample_limit = 120;
 constexpr unsigned resource_gpu_limit = 8;
 
+enum class GpuVendor { nvidia, amd };
+
 struct GpuUsage {
     unsigned index;
     std::optional<std::array<std::uint8_t, 16>> uuid;
     std::optional<unsigned> busy_percent;
     std::optional<execution::MemoryUsage> vram;
+    GpuVendor vendor = GpuVendor::nvidia;
 };
 
 struct ResourceSample {

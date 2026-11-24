@@ -40,47 +40,45 @@ covers the model's supported channel settings and does not include successful
 acquisition, bit discrimination, or quiet completion. These limits are
 described in [duration planning](triad-duration-planning.md).
 
-**Run simulation** tests a bounded raw-bit episode with the configured native
-receiver and local processing route. Committing a changed Target SNR in the
-Link Planner or using **Stronger** or **Weaker** starts the same simulation
-after workspace fitting. In live mode, the planner allows up to five seconds
-for capture to release the receiver, then resumes capture on the configured
-calendar when sampling ends. The Simulation selector and saved settings stay
-in place. **Cancel simulation** and the Console's **Cancel TX** both stop a
-planner simulation. Finite-duplex lab sessions reserve capture for their
-physical episode.
+**Run simulation** uses the configured geometry and receiver route. Committing
+a changed Target SNR in the Link Planner or using **Stronger** or **Weaker**
+starts the same simulation after workspace fitting. In live mode, the planner
+allows up to five seconds for capture to release the receiver, then resumes
+capture on the configured calendar when sampling ends. The Simulation selector
+and saved settings stay in place. **Cancel simulation** and the Console's
+**Cancel TX** both stop a planner simulation. Finite-duplex lab sessions
+reserve capture for their physical episode.
 
-The probe streams up to four independent channel and noise draws in fixed-size
-blocks, balanced across both bit values. The interactive run has a cooperative
-30-second deadline starting before workspace admission. It reports the latest
-phase, accepted modeled input and scored public slots. A timeout before the
-first balanced pair can offer **Run longer simulation**, a manual 120-second
-retry using the selected geometry and route. A measured coarse projection
-above 120 seconds leaves the planner on the quick run. Both runs can be cancelled.
+The simulation streams two one-bit trials in fixed-size blocks. It uses one
+trial per bit value with independent channel and noise draws. It ends when the
+pair finishes, when cancelled or superseded by a settings change, or on a
+receiver error. There is no elapsed-time cutoff for sampling. Long geometries
+can take several minutes or more. During sampling the planner shows the
+selected backend, the observed first-slot scoring stage and coarse route,
+accepted modeled input, and the number of public slots scored.
 
-A success requires the correct bit and two physically scored quiet slots. The
-planner uses the first balanced pair if the second pair does not finish. It
-reports a 95% sampling interval with joint coverage for the two predeclared
-sample sizes. The processing line shows the slowest completed simulation's
-elapsed processing seconds per audio second, including source and channel work.
-When the first trial runs out of time, the processing graph can mark a lower
-bound using the work elapsed before the deadline divided by the full modeled
-episode duration. The arrow represents an interrupted finite simulation. RX
-success remains unmeasured until a balanced pair completes.
+A success requires the correct bit and two physically scored quiet slots.
+The planner reports the sample fraction and a 95% sampling interval after
+both trials. The processing line shows the slowest completed trial's elapsed
+processing seconds per audio second, including source and channel work.
 
-For an eligible interrupted first-slot native CPU frequency search, the planner
+For an eligible first-slot native CPU frequency search in progress, the planner
 can also project the cost of that span from two disjoint three-second work
 windows. Each window needs at least 24 completed workspace-frequency pairs from
 eight software lanes for a time range. The range applies those two rates to the
 full same-shape correlation and peak-retention work. Rates within 15% qualify
-the range for the retry decision. Wider variation is shown with the implied
-time at the observed rates. Preparation, proposal selection, fine scoring and
-quiet slots have their own costs.
+the conditional time range. Wider variation is shown with the implied time at
+the observed rates. Preparation, proposal selection, fine scoring and quiet
+slots have their own costs.
+Completed native frequency-span timing remains visible during proposal
+selection and fine scoring. Lag, grouped and backend searches still show the
+observed route and stage. Native frequency work can be metered when it is
+executed as a fallback from the selected backend.
 The planner retains up to eight sampled geometries for comparison while the
 other link settings, processing route, and worker allocation match. A short
 sample does not qualify sustained real-time capacity, field sensitivity, or
-unknown-calendar reception. If the sample hits its work limit or lacks an
-applicable route, the affected curves may remain blank.
+unknown-calendar reception. Missing completed trials or an unavailable
+receiver route can leave the affected curves blank.
 
 The maintained [GPU-assisted forecast procedure](triad-performance.md#runpod-gpu-assisted-manual-capacity-forecast)
 pairs GPU-observed native work with matching local phase costs and independent

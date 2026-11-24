@@ -9,6 +9,9 @@
 
 #if defined(__linux__) && !defined(DATAPUMP_EXECUTION_FIBERS)
 #include <dlfcn.h>
+#include <filesystem>
+#include <fstream>
+#include <string>
 #endif
 
 namespace datapump::gui {
@@ -18,6 +21,18 @@ class GpuMonitor {
 public:
 #ifdef __linux__
     GpuMonitor() {
+        initialize_nvidia();
+        discover_amd();
+    }
+    ~GpuMonitor() {
+        if (initialized_) shutdown_();
+        if (library_) dlclose(library_);
+    }
+    GpuMonitor(const GpuMonitor&) = delete;
+    GpuMonitor& operator=(const GpuMonitor&) = delete;
+
+private:
+    void initialize_nvidia() {
         // Use installed driver paths, including the container runtime's
         // NVIDIA mount. Never search the working directory for executable code.
         for (const auto* path : {"/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1",
@@ -47,13 +62,8 @@ public:
             devices_[index] = {device, identity};
         }
     }
-    ~GpuMonitor() {
-        if (initialized_) shutdown_();
-        if (library_) dlclose(library_);
-    }
-    GpuMonitor(const GpuMonitor&) = delete;
-    GpuMonitor& operator=(const GpuMonitor&) = delete;
 #endif
+public:
     std::vector<GpuUsage> sample() const {
         std::vector<GpuUsage> result;
 #ifdef __linux__
@@ -68,6 +78,22 @@ public:
             if (memory_ && memory_(device,&memory)==success && memory.total && memory.used<=memory.total)
                 usage.vram = execution::MemoryUsage{memory.used,memory.total};
             result.push_back(usage);
+        }
+        for (const auto& device : amd_devices_) {
+            GpuUsage usage{device.index,{},{},{},GpuVendor::amd};
+            // Older amdgpu versions may resume the device on a busy-counter read.
+            std::ifstream power(device.path/"power/runtime_status");
+            std::string status;
+            power>>status;
+            if (status!="suspended" && status!="suspending") {
+                if (const auto busy=read_integer(device.path/"gpu_busy_percent"); busy && *busy<=100)
+                    usage.busy_percent=static_cast<unsigned>(*busy);
+            }
+            const auto used=read_integer(device.path/"mem_info_vram_used");
+            const auto total=read_integer(device.path/"mem_info_vram_total");
+            if (used && total && *total>0 && *used<=*total)
+                usage.vram=execution::MemoryUsage{*used,*total};
+            result.push_back(std::move(usage));
         }
 #endif
         return result;
@@ -102,12 +128,58 @@ private:
     Function symbol(const char* name) const {
         return reinterpret_cast<Function>(dlsym(library_,name));
     }
+    struct AmdDevice {
+        unsigned index;
+        std::filesystem::path path;
+    };
+    static std::optional<std::uint64_t> read_integer(const std::filesystem::path& path) {
+        std::ifstream input(path);
+        std::array<char,32> buffer{};
+        input.read(buffer.data(),buffer.size());
+        if (!input.eof() || input.bad() || !input.gcount()) return {};
+        const auto* last=buffer.data()+input.gcount();
+        if (last[-1]=='\n') --last;
+        std::uint64_t value=0;
+        const auto [end,error]=std::from_chars(buffer.data(),last,value);
+        if (error!=std::errc{} || end!=last) return {};
+        return value;
+    }
+    void discover_amd() {
+        const auto nvidia_count=std::count_if(devices_.begin(),devices_.end(),
+            [](const auto& device){return device.first!=nullptr;});
+        const auto available=devices_.size()-static_cast<std::size_t>(nvidia_count);
+        if (!available) return;
+        std::error_code error;
+        std::vector<AmdDevice> discovered;
+        for (std::filesystem::directory_iterator entry("/sys/class/drm",error),end;
+             !error && entry!=end; entry.increment(error)) {
+            const auto name=entry->path().filename().string();
+            if (!name.starts_with("card") || name.size()==4) continue;
+            unsigned index=0;
+            const auto digits=name.data()+4;
+            const auto [digit_end,parse_error]=std::from_chars(digits,digits+name.size()-4,index);
+            if (parse_error!=std::errc{} || digit_end!=name.data()+name.size()) continue;
+
+            auto device_path=std::filesystem::canonical(entry->path()/"device",error);
+            if (error) {error.clear();continue;}
+            const auto driver=std::filesystem::canonical(device_path/"driver",error);
+            if (error) {error.clear();continue;}
+            if (driver.filename()!="amdgpu") continue;
+            discovered.push_back({index,std::move(device_path)});
+        }
+        std::sort(discovered.begin(),discovered.end(),[](const auto& left,const auto& right) {
+            return left.index<right.index;
+        });
+        if (discovered.size()>available) discovered.resize(available);
+        amd_devices_=std::move(discovered);
+    }
     void* library_ = nullptr;
     bool initialized_ = false;
     Status (*shutdown_)() = nullptr;
     Status (*utilization_)(Device,Utilization*) = nullptr;
     Status (*memory_)(Device,Memory*) = nullptr;
     std::array<std::pair<Device,std::optional<Uuid>>,resource_gpu_limit> devices_{};
+    std::vector<AmdDevice> amd_devices_;
 #endif
 };
 #endif

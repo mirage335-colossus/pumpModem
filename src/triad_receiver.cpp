@@ -847,6 +847,9 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
                                const ProtectedScoringPlan* protection = nullptr,
                                bool discover_protected_affine = false, bool carrier_beat_polarity = false) {
     check_cancelled(stop);
+    using ProbePhase = CoarseProbeObservation::Phase;
+    auto* probe = slot.index == 0 ? config.coarse_probe_progress.get() : nullptr;
+    if (probe) probe->set_phase(ProbePhase::preparing);
     const auto workspace = protection ? protection->restricted : plan_workspace(config, slot, workers, may_overlap, supplement);
     const auto& public_workspace = protection ? protection->original : workspace;
     const auto& likelihood_slot = protection ? protection->aperture : slot;
@@ -883,6 +886,7 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     score.workspace_peak_bytes = overlap ? workspace.overlapped_total : workspace.total;
     if (likelihood_slot.first_sample == likelihood_slot.stop_sample) {
         score.reason = "protected_observation_has_no_samples";
+        if (probe) probe->set_phase(ProbePhase::resolved);
         return score;
     }
     // A standalone slot owns one pool for all of its stages.
@@ -909,6 +913,7 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     if (!score.all_valid) {
         acquire(lanes, stop);
         score.reason = "coarse_erasures_unsupported";
+        if (probe) probe->set_phase(ProbePhase::resolved);
         return score;
     }
 
@@ -966,7 +971,13 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     }
     if (coarse.coordinates.empty()) {
         score.reason = std::move(coarse.reason);
+        if (probe) probe->set_phase(ProbePhase::resolved);
         return score;
+    }
+    if (probe) {
+        // Leave the trace on the original coarse span during supplemental work.
+        search.coarse_probe_progress.reset();
+        probe->set_phase(ProbePhase::fine);
     }
     auto fine = prepare_fine_coordinates(config, slot, coarse);
     // Full-window proposal selection can favor a strong neighbor. Its values
@@ -981,6 +992,7 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     began = Clock::now();
     score_fine(config, likelihood_slot, key, likelihood_iq, fine.coordinates, coarse.projected_sample_rate_hz,
                coarse.clock_gap_ppm, workers, score, workspace.fine, stop, executor, gain);
+    if (probe) probe->set_phase(ProbePhase::additional);
     if (protection) {
         score.first_sample = slot.first_sample;
         score.stop_sample = slot.stop_sample;
@@ -1419,6 +1431,7 @@ ReceiverSlotScore score_stages(const ReceiverConfig& config, const ReceiverSlotP
     }
     score.fine_seconds = elapsed(began) - score.protected_discovery_coarse_seconds;
     check_cancelled(stop);
+    if (probe) probe->set_phase(ProbePhase::resolved);
     return score;
 }
 } // namespace

@@ -1,10 +1,12 @@
 #include "link_planner_model.hpp"
+#include "../triad_receiver_coarse.hpp"
 #include "../triad_stream_resources.hpp"
 #include "datapump/execution.hpp"
 #include "datapump/robust_profile.hpp"
 #include "datapump/triad_stream_receiver.hpp"
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <iomanip>
 #include <map>
@@ -301,7 +303,8 @@ struct CoarseProjection {
 
 std::optional<CoarseProjection> coarse_projection(const CoarseObservation& observation) {
     const auto [slow, fast] = std::minmax(observation.completed_pairs[0], observation.completed_pairs[1]);
-    if (!observation.windows_complete || !observation.total_pairs || slow < minimum_coarse_probe_pairs ||
+    if (!observation.windows_complete || observation.completed_span_seconds || !observation.total_pairs ||
+        slow < minimum_coarse_probe_pairs ||
         std::min(observation.contributing_lanes[0], observation.contributing_lanes[1]) < minimum_coarse_probe_lanes)
         return {};
 
@@ -309,24 +312,67 @@ std::optional<CoarseProjection> coarse_projection(const CoarseObservation& obser
     const bool rates_consistent = static_cast<long double>(fast) * 100 <= static_cast<long double>(slow) * 115;
     return CoarseProjection{pair_seconds / fast, pair_seconds / slow, rates_consistent};
 }
+
+std::string_view slot_phase(CoarseObservation::Phase phase) {
+    using Phase = CoarseObservation::Phase;
+    switch (phase) {
+    case Phase::waiting: return "waiting for input";
+    case Phase::preparing: return "checking the receive window";
+    case Phase::coarse_preparation: return "preparing coarse search";
+    case Phase::coarse_search: return "scoring coarse hypotheses";
+    case Phase::coarse_selection: return "selecting coarse proposals";
+    case Phase::fine: return "scoring fine candidates";
+    case Phase::additional: return "scoring alternate candidates";
+    case Phase::resolved: return "score returned";
+    }
+    return {};
+}
+
+std::string_view coarse_route(CoarseObservation::Route route) {
+    using Route = CoarseObservation::Route;
+    switch (route) {
+    case Route::unknown: return {};
+    case Route::native_frequency: return "native frequency search";
+    case Route::native_lag: return "native lag search";
+    case Route::grouped: return "memory-bounded native search";
+    case Route::backend_frequency: return "backend frequency search";
+    case Route::backend_lag: return "backend lag search";
+    }
+    return {};
+}
 }
 
 std::string sample_progress_text(const SampleProgress& progress) {
     std::ostringstream out;
-    if (progress.trial) out << "Trial " << progress.trial << " · ";
+    if (progress.trial) out << "Trial " << progress.trial << " of " << SampleResult::trial_budget << " · ";
     switch (progress.stage) {
     case SampleProgress::Stage::planning: out << "Planning receive geometry and workspace"; break;
     case SampleProgress::Stage::preparing: out << "Preparing the waveform and receiver"; break;
     case SampleProgress::Stage::feeding: out << "Streaming modeled receiver input"; break;
     case SampleProgress::Stage::scoring: out << "Finishing receiver scoring"; break;
     }
+    if (!progress.backend_id.empty()) out << " · Selected backend " << progress.backend_id;
     if (progress.episode_seconds > 0) {
         out << " · " << duration(progress.input_seconds) << " of " << duration(progress.episode_seconds)
             << " modeled input accepted · " << progress.scored_slots << "/3 public slots scored";
     }
     out << " · " << std::fixed << std::setprecision(1) << progress.elapsed_seconds << " s elapsed";
-    if (progress.coarse_probe) {
-        const auto& observation = *progress.coarse_probe;
+    const auto snapshot = progress.live_probe ? progress.live_probe->observe(std::chrono::steady_clock::now()) :
+        progress.coarse_probe;
+    if (snapshot) {
+        const auto& observation = *snapshot;
+        const auto phase = slot_phase(observation.phase);
+        const auto route = coarse_route(observation.route);
+        if (!phase.empty()) out << " · First slot " << phase;
+        if (!route.empty()) out << " · Coarse route " << route;
+        if (observation.completed_span_seconds) {
+            out << " · First-slot native frequency span completed in " << duration(*observation.completed_span_seconds);
+            return out.str();
+        }
+        if (!observation.meter_started) {
+            if (!route.empty()) out << " · Two-window timing applies to eligible full native frequency spans";
+            return out.str();
+        }
         const auto [first_pairs, second_pairs] = observation.completed_pairs;
         if (observation.windows_complete)
             out << " · First-slot coarse probe recorded " << first_pairs << " and " << second_pairs << " FFT pairs ("
@@ -350,45 +396,22 @@ std::string sample_progress_text(const SampleProgress& progress) {
     return out.str();
 }
 
-namespace {
-std::string sample_status(const SampleResult& sample) {
-    if (!sample.interrupted_trial) return sample.status;
-    const auto progress = sample_progress_text(*sample.interrupted_trial) + ".";
-    return sample.status.empty() ? progress : sample.status + " " + progress;
-}
-}
-
 void add_sample(Model& model, const SampleResult& sample) {
     model.sampling = false;
     if (model.selected && model.selected->bit_seconds && model.selected->workspace_fits)
         add_sample(model, *model.selected->bit_seconds, sample);
-    else {
-        model.sample_status = sample_status(sample);
-        model.offer_extended_sample = false;
-    }
+    else model.sample_status = sample.status;
 }
 
 void add_sample(Model& model, double bit_seconds, const SampleResult& sample) {
-    // An unfinished second pair cannot change the first balanced pair's result.
-    const auto trials = sample.trials == SampleResult::trial_budget ? SampleResult::trial_budget :
-        sample.trials >= 2 ? 2U : 0U;
-    const auto correct = trials == 2 ? sample.first_pair_correct : sample.correct;
     std::optional<double> probability;
-    if (trials && correct <= trials) probability = static_cast<double>(correct) / trials;
-    std::optional<double> lower_bound;
-    if (!sample.trials && !sample.processing_ratio && sample.interrupted_trial) {
-        const auto& progress = *sample.interrupted_trial;
-        if (progress.trial && progress.episode_seconds > 0 && std::isfinite(progress.episode_seconds)) {
-            const auto ratio = progress.elapsed_seconds / progress.episode_seconds;
-            if (ratio > 0 && std::isfinite(ratio)) lower_bound = ratio;
-        }
-    }
+    if (sample.trials == SampleResult::trial_budget && sample.correct <= sample.trials)
+        probability = static_cast<double>(sample.correct) / sample.trials;
     const auto matches = [bit_seconds](const Point& point) {
         return point.workspace_fits && point.bit_seconds == bit_seconds;
     };
     const auto apply = [&](Point& point) {
         point.cpu_seconds_per_audio_second = sample.processing_ratio;
-        point.cpu_probe_lower_bound = lower_bound;
         point.rx_success_probability = probability;
     };
     // The simulation holds actual power and the channel fixed. Targets on
@@ -397,28 +420,20 @@ void add_sample(Model& model, double bit_seconds, const SampleResult& sample) {
         if (matches(point)) apply(point);
     if (!model.selected || !matches(*model.selected)) return;
     apply(*model.selected);
-    model.sample_status = sample_status(sample);
-    model.offer_extended_sample = sample.interrupted_trial.has_value() && trials == 0;
-    if (model.offer_extended_sample && sample.interrupted_trial->coarse_probe) {
-        const auto projection = coarse_projection(*sample.interrupted_trial->coarse_probe);
-        if (projection && projection->rates_consistent && projection->lower_seconds > extended_probe_seconds)
-            model.offer_extended_sample = false;
-    }
+    model.sample_status = sample.status;
     if (probability) {
-        // Joint 95% coverage for both predeclared bit-balanced prefixes.
-        const auto radius = std::sqrt(std::log(80.) / (2 * trials));
+        // A two-sided Hoeffding bound for the fixed, balanced pair.
+        const auto radius = std::sqrt(std::log(40.) / (2 * sample.trials));
         const auto lower = std::max(0., *probability - radius);
         const auto upper = std::min(1., *probability + radius);
         std::ostringstream interval;
-        interval << correct << '/' << trials << " complete raw-bit successes · 95% sampling interval "
+        interval << sample.correct << '/' << sample.trials << " complete raw-bit successes · 95% sampling interval "
                  << std::floor(100 * lower) << "–" << std::ceil(100 * upper) << "%.";
         if (!model.sample_status.empty()) model.sample_status += " ";
         model.sample_status += interval.str();
     }
     if (sample.processing_ratio)
         model.cpu_status = "Slowest completed finite simulation, including channel generation and receiver work.";
-    else if (lower_bound)
-        model.cpu_status = "Elapsed time divided by the full modeled episode gives a lower bound for this interrupted simulation.";
     else
         model.cpu_status = "A complete simulation trial is needed to measure processing pace.";
 }

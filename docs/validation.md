@@ -157,6 +157,56 @@ confirmed that elapsed time continued updating during coarse scoring and that
 Console cancellation did not publish an incomplete trial. The native stream,
 GUI policy, calendar, FLTK and Rev checks passed.
 
+The subsequent timeout follow-through at base `74668161` replaced the fixed
+120-second retry with an explicit two-trial RX measurement and kept the
+30-second quick run. In the previous implementation a
+finished native span discarded its diagnostic, and attaching a selected
+GPU backend could suppress it even during a native fallback. The new trace
+records the first slot's actual scoring phase and coarse dispatch route, and
+retains the elapsed time of a completed metered span through fine scoring.
+On the same +32 dB-Hz nominal control with +47 dB-Hz modeled received C/N₀,
+the explicit action completed exactly two correct trials in 12.10 seconds
+with 24 CPU workers. Each scored both physical quiet slots. The slowest trial
+took 0.08434 processing seconds per modeled audio second. An exact-profile
+controller check reached first-slot coarse preparation with all 9.18 minutes
+of input accepted, then Console **Cancel TX** stopped the run at a total of
+10.4 seconds. Simulation stayed set to No and no partial result was published.
+All six focused native stream, coarse, calendar and GUI tests passed, along
+with the FLTK and Rev inline document checks for the two actions and Cancel.
+The earlier timed failures remain the current exact-profile completion evidence.
+
+A bounded partitioned-correlation discriminator on the same Ryzen 5 PRO 5650U
+used synthetic projected input matching the −3 dB-Hz slot's 28,141 public
+arrival lags, 352,258 template rows and 524,288-row baseline FFT. It accumulated
+the ten block products before the inverse transform, using 65,536 rows per
+block. The source-matched native FFT work, measured over 384 warm pairs per
+route with 24 software lanes, ran at 652–715 pairs/s versus 136–149 pairs/s for
+the current kernel across two repeats. The two synthetic frequency offsets
+preserved the injected arrival peak and all lag outputs. Partitioned FP32
+outputs agreed with the full FP64 reference to a relative RMS error below
+2.9×10⁻⁷. The tested one-ray geometry added about 19 MB of FFT storage at
+24 lanes before the remaining production buffers. These are isolated
+correlation results. Production admission, preparation and complete active
+and quiet slot work need matched evidence before selecting this approach.
+
+The follow-up consolidated automatic and manual simulations into one
+balanced pair with no elapsed-time cutoff. At 30.7 seconds, the exact −3
+dB-Hz CPU fixture with 24 workers had accepted all 9.18 modeled minutes
+and was still scoring the first of three slots via native frequency search.
+Its two short windows reported 734 and 639 completed correlations, with
+a conditional 232–268 seconds for that span alone. Console **Cancel TX**
+stopped the trial without publishing a result. The +32 dB-Hz control
+with +47 dB-Hz modeled C/N₀ finished both trials successfully in 7.04 seconds
+and started no third trial. These functional runs do not establish sustained
+receiver capacity or RX success at −3 dB-Hz.
+
+A separate fake-audio check switched from Simulation to Live during the exact
+profile's first-slot preparation. Capture stayed closed while controller
+polling was withheld. After the sampler drained, one capture opened, no
+stale sample result appeared, and closing the controller released capture.
+The native GUI policy, calendar and GPU-unavailable checks passed, along with
+the FLTK and Rev inline document probes.
+
 ## Robust live setup and audio rate
 
 The dated native capture fixture exercised Auto calibration at Target and

@@ -553,6 +553,14 @@
         auto* host=find_host();auto* editor=host->bindings.front().editor;
         auto* presets=host->bindings.front().suggestions;auto* document=documents.at(ui::Page::planner);
         if(!editor)throw std::runtime_error("Rev inline document has no editor");
+        const auto action=[&](std::string_view label) -> re::Element* {
+            const auto& order=document->tab_elements();
+            const auto found=std::find_if(order.begin(),order.end(),[&](auto* element) {
+                const auto* button=dynamic_cast<theme::RevButton*>(element);
+                return button&&button->labelText->content.get()==label;
+            });
+            return found==order.end()?nullptr:*found;
+        };
         auto* page=pages.at(ui::Page::planner);
         page->resolved.scroll.y=std::max(0.f,page->resolved.scroll.y+editor->rect.y-page->rect.y-20.f);
         shared->layoutDirty=true;settle();
@@ -569,6 +577,8 @@
                 " tab_present="+std::to_string(tab_contains_target()));
         if(std::any_of(bindings.begin(),bindings.end(),[](const auto& binding){return binding.control.field==ui::Field::planner_target;}))
             throw std::runtime_error("Rev document-only editor was duplicated in the persistent desktop");
+        if(!action("Run simulation")||action("Cancel simulation")||action("Measure RX pair"))
+            throw std::runtime_error("Rev planner must show only Run simulation while idle");
         show_help(host->control.help,host->bindings.front().element);help_timing.enter(help_now()-2);update_help();native_frame();
         if(help_text->resolved.hidden)throw std::runtime_error("Rev inline popup tooltip fixture did not become visible");
         presets->openMenu();update_help();native_frame();
@@ -604,18 +614,13 @@
         const auto position=std::find(order.begin(),order.end(),host->element());
         if(position==order.end()||std::distance(position,order.end())<3)
             throw std::runtime_error("Rev inline document lacks the adjacent target actions");
-        const auto action=[&](std::string_view label) -> re::Element* {
-            const auto found=std::find_if(order.begin(),order.end(),[&](auto* element) {
-                const auto* button=dynamic_cast<theme::RevButton*>(element);
-                return button&&button->labelText->content.get()==label;
-            });
-            return found==order.end()?nullptr:*found;
-        };
         auto* stronger=action("Stronger");auto* weaker=action("Weaker");
-        auto* simulation_action=action("Run simulation");
-        if(!simulation_action)simulation_action=action("Cancel simulation");
-        if(!stronger||!weaker||!simulation_action)
-            throw std::runtime_error("Rev planner lost a target adjustment or simulation action");
+        if(!stronger||!weaker)
+            throw std::runtime_error("Rev planner lost a target adjustment action");
+        const bool sampling=application.enabled(ui::Command::cancel);
+        auto* simulation_action=action(sampling?"Cancel simulation":"Run simulation");
+        if(!simulation_action||action(sampling?"Run simulation":"Cancel simulation")||action("Measure RX pair"))
+            throw std::runtime_error("Rev planner must show the simulation action for its current state");
         for(const auto* label:{"Spread-Spectrum DSSS FHSS Example","Weak-Signal Example",
                                "Sub-9kHz Example","Earth-Moon-Earth Example"})
             if(action(label))throw std::runtime_error("Rev planner retained a retired example action");

@@ -32,19 +32,32 @@ void check(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
 
-void coarse_probe_observes_only_current_unfinished_work() {
+void coarse_probe_retains_first_span_observation() {
     using Clock = std::chrono::steady_clock;
-    const auto deadline = Clock::now();
+    using Phase = r::CoarseProbeObservation::Phase;
+    using Route = r::CoarseProbeObservation::Route;
     r::CoarseProbeProgress probe;
-    check(!probe.observe(deadline), "coarse probe must wait for an eligible native span");
+    const auto waiting = probe.observe(Clock::now());
+    check(waiting && waiting->phase == Phase::waiting && waiting->route == Route::unknown &&
+              !waiting->meter_started && !waiting->completed_span_seconds,
+          "coarse probe did not report the initial waiting phase");
+    const auto cutoff = Clock::now();
+    probe.begin_search(Route::native_frequency);
     check(probe.begin(56940), "coarse probe did not admit its first span");
     probe.record_pair(0);
-    const auto early = probe.observe(deadline + std::chrono::seconds(1));
-    check(early && early->total_pairs == 56940 && !early->windows_complete &&
+    const auto early = probe.observe(cutoff + std::chrono::seconds(1));
+    check(early && early->phase == Phase::coarse_search && early->route == Route::native_frequency &&
+              early->meter_started && early->total_pairs == 56940 &&
+              !early->completed_span_seconds && !early->windows_complete &&
               early->completed_pairs == std::array<std::size_t, 2>{},
           "a partial coarse window cannot supply a complete-window rate");
     probe.finish();
-    check(!probe.observe(Clock::now()), "a finished coarse span cannot produce an unfinished-work projection");
+    probe.set_phase(Phase::fine);
+    const auto fine = probe.observe(Clock::now());
+    check(fine && fine->phase == Phase::fine && fine->route == Route::native_frequency &&
+              fine->meter_started && fine->total_pairs == 56940 && fine->completed_span_seconds &&
+              *fine->completed_span_seconds >= 0 && !fine->windows_complete,
+          "fine scoring discarded the completed native coarse span");
 }
 
 template<class Exception = datapump::Error, class Function>
@@ -888,7 +901,9 @@ void native_coarse_fallback_retains_exact_chirp_z(const datapump::Crypto& crypto
     const auto cpu = r::coarse_work_plan(f.config, f.slot, prior, workers);
     for (const auto cause : {CoarseFallback::precision, CoarseFallback::workspace}) {
         const auto backend = std::make_shared<IncompleteCoarseBackend>(BulkFault::missing_workspace, cause);
+        const auto probe = std::make_shared<r::CoarseProbeProgress>();
         f.config.bulk_backend = backend;
+        f.config.coarse_probe_progress = probe;
         const auto quote = r::coarse_workspace(f.config, f.slot, workers);
         const auto fallback = r::score_coarse(f.config, f.slot, crypto, f.iq, prior, workers, quote, {});
         const auto reason = cause == CoarseFallback::workspace ? "fixture-native-workspace" : "fixture-native-precision";
@@ -897,6 +912,11 @@ void native_coarse_fallback_retains_exact_chirp_z(const datapump::Crypto& crypto
               fallback.work.native_fallback_reason == reason && !fallback.work.bulk &&
               fallback.work.search.operations.score_rows == cpu.frequency_points * cpu.workspaces,
               "a required native fallback must retain the exact native search and all public scores");
+        const auto observation = probe->observe(std::chrono::steady_clock::now());
+        check(observation && observation->phase == r::CoarseProbeObservation::Phase::coarse_selection &&
+                  observation->route == r::CoarseProbeObservation::Route::native_lag &&
+                  !observation->meter_started && !observation->completed_span_seconds,
+              "the coarse probe mislabeled a native fallback with an attached backend");
         check_winner(f, fallback);
         check(backend->workspace_quote_count == (cause == CoarseFallback::workspace ? 2U : 0U),
               "workspace preflight and execution must each quote the full prior once");
@@ -1761,7 +1781,7 @@ int main(int argc, char** argv) try {
         grouped_cpu_parity(key());
         return 0;
     }
-    coarse_probe_observes_only_current_unfinished_work();
+    coarse_probe_retains_first_span_observation();
     quarter_clocks_nominate_only_missing_public_cells();
     if (quarter_clock) return 0;
     const auto crypto = key();

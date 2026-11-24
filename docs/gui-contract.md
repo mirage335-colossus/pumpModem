@@ -245,10 +245,12 @@ a limiting cgroup quota from a wider CPU affinity mask. For example, a
 in the affinity mask. The active receiver's software worker ceiling appears
 separately. The default in this example is 54 workers for 27 whole effective
 CPUs. RAM shows usage against the visible container limit or physical system
-RAM. On Linux, the NVIDIA driver provides
-one GPU and VRAM lane per visible device, with the receiver's selected device marked
-when its UUID matches. The Vulkan workspace display reports temporary
-receiver leases and their peaks. The Console reports actual Vulkan search
+RAM. On Linux, available NVIDIA NVML and AMD `amdgpu` driver counters provide
+device-wide GPU utilization and VRAM usage for up to eight GPUs. Captions show
+the NVIDIA driver index or AMD DRM card number. The receiver's selected NVIDIA
+device is marked when its UUID matches. AMD VRAM shows the memory pool reported
+by the driver. The Vulkan workspace display reports temporary receiver leases
+and their peaks. The Console reports actual Vulkan search
 arithmetic and the sum of completed device-command intervals when timestamps
 are available. Command intervals can overlap. Device-wide VRAM usage and GPU
 busy time appear in the setup charts. Blank traces indicate unavailable
@@ -430,9 +432,10 @@ score records.
 The **Link Planner** shares the Target SNR and shows native DATA duration,
 modeled detection, nominal host workspace, and available local receiver
 samples on one target graph. Committed targets and the Stronger/Weaker controls
-use the nominal workspace check. Committing a changed planner target runs a
-temporary simulation. Cancel it on the Link Planner or with **Cancel TX** on
-the Console. The launch-command editor preserves shared on-air settings. A
+use the nominal workspace check. Committing a changed planner target starts the
+same two-trial simulation as **Run simulation**. The trials have no elapsed-time
+cutoff. Cancel the simulation on the Link Planner or with **Cancel TX** on the
+Console. The launch-command editor preserves shared on-air settings. A
 scheduled live transmission shows the seconds remaining until its start.
 See [Link Planner](link-planner.md) for sample and model scope.
 

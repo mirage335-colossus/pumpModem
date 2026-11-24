@@ -303,10 +303,12 @@ struct CoarsePhaseWork {
     double wall_seconds = 0;
 };
 
-// Measures just one unfinished first-slot native frequency span. A completed
-// pair contributes diagnostic work only, independently of slot admission.
+// First-slot stage trace and optional native frequency-span meter. A
+// completed pair contributes diagnostic work independently of slot admission.
 class CoarseProbeProgress {
 public:
+    void set_phase(CoarseProbeObservation::Phase phase) noexcept;
+    void begin_search(CoarseProbeObservation::Route route) noexcept;
     bool begin(std::size_t pairs) noexcept;
     void record_pair(unsigned lane) noexcept;
     void finish() noexcept;
@@ -317,10 +319,13 @@ private:
         std::atomic<std::size_t> completed_pairs{0};
         std::atomic<std::uint64_t> lane_mask{0};
     };
+    std::atomic<CoarseProbeObservation::Phase> phase_{CoarseProbeObservation::Phase::waiting};
+    std::atomic<CoarseProbeObservation::Route> route_{CoarseProbeObservation::Route::unknown};
     std::atomic_flag claimed_{};
     std::atomic<bool> finished_{false};
     std::atomic<std::size_t> pairs_{0};
     std::chrono::steady_clock::time_point began_{};
+    std::chrono::steady_clock::time_point finished_at_{};
     std::array<Window, 2> windows_{};
 };
 

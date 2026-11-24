@@ -112,14 +112,17 @@ double constellation_scale(const Constellation& data) {
 
 bool device_metric(ResourceMetric metric) { return metric==ResourceMetric::gpu || metric==ResourceMetric::vram; }
 
-const GpuUsage* gpu_usage(const ResourceSample& sample, unsigned index) {
-    const auto found=std::find_if(sample.gpus.begin(),sample.gpus.end(),[index](const auto& gpu){return gpu.index==index;});
+const GpuUsage* gpu_usage(const ResourceSample& sample, GpuVendor vendor, unsigned index) {
+    const auto found=std::find_if(sample.gpus.begin(),sample.gpus.end(),[vendor,index](const auto& gpu){
+        return gpu.vendor==vendor && gpu.index==index;
+    });
     return found==sample.gpus.end()?nullptr:&*found;
 }
 
-std::optional<double> resource_percent(ResourceMetric metric, const ResourceSample& sample, unsigned index) {
+std::optional<double> resource_percent(ResourceMetric metric, const ResourceSample& sample,
+        GpuVendor vendor, unsigned index) {
     if(metric==ResourceMetric::cpu) return sample.cpu_busy_percent;
-    const auto* gpu=device_metric(metric)?gpu_usage(sample,index):nullptr;
+    const auto* gpu=device_metric(metric)?gpu_usage(sample,vendor,index):nullptr;
     if(metric==ResourceMetric::gpu) {
         if(gpu && gpu->busy_percent) return *gpu->busy_percent;
         return {};
@@ -155,13 +158,14 @@ std::string resource_caption(const ResourceChart& chart) {
         memory_caption(out,*latest.ram);
         out<<(latest.ram->limited_group?" · container allocation":" · system RAM");
     } else {
-        if(latest.gpus.empty()) return "NVIDIA device telemetry unavailable";
+        if(latest.gpus.empty())
+            return chart.metric==ResourceMetric::gpu?"GPU utilization unavailable":"VRAM usage unavailable";
         bool first=true;
         for(const auto& gpu:latest.gpus) {
             if(!first) out<<" · ";
             first=false;
-            out<<"GPU "<<gpu.index;
-            if(chart.active_gpu && gpu.uuid==chart.active_gpu) out<<" (receiver)";
+            out<<(gpu.vendor==GpuVendor::nvidia?"NVIDIA GPU ":"AMD GPU ")<<gpu.index;
+            if(gpu.vendor==GpuVendor::nvidia && chart.active_gpu && gpu.uuid==chart.active_gpu) out<<" (receiver)";
             out<<" ";
             if(chart.metric==ResourceMetric::gpu && gpu.busy_percent) out<<*gpu.busy_percent<<"%";
             else if(chart.metric==ResourceMetric::vram && gpu.vram) memory_caption(out,*gpu.vram);
@@ -623,6 +627,7 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
             for(std::size_t lane=0;lane<count;++lane) {
                 const int top=static_cast<int>(lane*height/count);
                 const int span=static_cast<int>((lane+1)*height/count)-top-1;
+                const auto vendor=gpu?devices[lane].vendor:GpuVendor::nvidia;
                 const auto index=gpu?devices[lane].index:0;
                 auto& trace=traces[lane];
                 const auto add=[&](int x,int y) {
@@ -632,7 +637,7 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
                 std::optional<std::pair<int,int>> previous;
                 const auto shown=std::min(samples.size(),resource_sample_limit);
                 for(std::size_t i=0;i<shown;++i) {
-                    const auto value=resource_percent(data.metric,samples[samples.size()-shown+i],index);
+                    const auto value=resource_percent(data.metric,samples[samples.size()-shown+i],vendor,index);
                     if(!value || !std::isfinite(*value)) {previous.reset();continue;}
                     const auto x=static_cast<int>((resource_sample_limit-shown+i)*static_cast<std::uint64_t>(width-1)/
                         (resource_sample_limit-1));

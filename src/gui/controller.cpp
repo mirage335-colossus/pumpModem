@@ -398,7 +398,6 @@ struct Controller::Impl {
     struct PendingPlannerSample {
         std::uint64_t request_id;
         planner::Model model;
-        planner::SampleBudget budget;
     };
     std::optional<PendingPlannerSample> pending_planner_sample;
     std::uint64_t planner_request_id=0;
@@ -998,7 +997,12 @@ struct Controller::Impl {
         settings.doppler_shift_hz=absolute*(doppler.frequency_ratio-1);
         const auto data_passband=band.data_passband(modem.carrier_hz);
         live::validate_settings(settings);
-        if(session_started)session.configure(settings);
+        if(session_started) {
+            // A sampler started in Simulation can still own the receiver when Live is selected.
+            if(planner_sample_active&&previous_settings.simulation&&!settings.simulation)
+                (void)session.try_suspend_capture();
+            session.configure(settings);
+        }
         carrier.options=std::move(carrier_presets);
         f(UiField::audio_sample_rate).display_text=requested_sample_rate?std::string{}:frequency_text(modem.sample_rate);
         selected_baseband_hz=modem.carrier_hz;
@@ -1063,7 +1067,7 @@ struct Controller::Impl {
     void dispatch_planner() {
         if(planner_worker.joinable()||closing)return;
         if(pending_planner_sample) {
-            auto [id,model,budget]=std::move(*pending_planner_sample);
+            auto [id,model]=std::move(*pending_planner_sample);
             pending_planner_sample.reset();
             const auto failed_model=model;
             auto backend=model.inputs.settings->gpu ? model.inputs.backend.lock() : nullptr;
@@ -1071,7 +1075,7 @@ struct Controller::Impl {
             planner_sample_active=true;
             try {
                 planner_worker=execution::Task([this,id,model=std::move(model),backend=std::move(backend),
-                    pause_capture,budget](std::stop_token stop) mutable {
+                    pause_capture](std::stop_token stop) mutable {
                     PlannerResult result;result.request_id=id;result.sample=true;result.model=std::move(model);
                     try {
                         // A full-W sample and live capture must not own receivers at the same time.
@@ -1091,7 +1095,7 @@ struct Controller::Impl {
                             auto sampled=planner::sample(result.model.inputs,stop,[this,id](const auto& progress) {
                                 std::lock_guard lock(planner_mutex);
                                 planner_sample_progress=PlannerSampleUpdate{id,progress,Clock::now()};
-                            },budget);
+                            });
                             result.sample_result=sampled;
                             if(result.model.selected&&result.model.selected->bit_seconds)
                                 result.sample_geometry_bit_seconds=*result.model.selected->bit_seconds;
@@ -1149,6 +1153,8 @@ struct Controller::Impl {
                 // The sampler can be waiting for a native slot while the GUI keeps time.
                 progress->progress.elapsed_seconds+=std::chrono::duration<double>(Clock::now()-progress->observed_at).count();
                 model.sample_status=planner::sample_progress_text(progress->progress);
+                if(session_started&&active_requested&&!settings.simulation)
+                    model.sample_status+=" · Live capture resumes when the simulation ends.";
                 planner_model=std::make_shared<const planner::Model>(std::move(model));
                 next_planner_sample_update=now+std::chrono::milliseconds(500);
                 ++revision;
@@ -1234,34 +1240,42 @@ struct Controller::Impl {
             model.inputs.settings&&!model.inputs.awaiting_gpu&&
             (!model.inputs.settings->gpu||!session.planning_backend().expired());
     }
-    void request_planner_sample(bool manual=false) {
+    void request_planner_sample() {
         const auto current=link_plan();
         if(!can_start_planner_sample(*current))return;
-        const auto budget=manual&&current->offer_extended_sample?
-            planner::SampleBudget::extended:planner::SampleBudget::interactive;
         planner_sample_requested=false;
         auto sampled=*current;
         sampled.inputs.backend=session.planning_backend();
         sampled.sampling=true;
-        sampled.sample_status=snapshot.running&&!settings.simulation?
-            "Running bounded one-bit receiver trials. Live capture resumes when the simulation ends.":
-            "Running bounded one-bit receiver trials…";
+        sampled.sample_status="Measuring two one-bit trials…";
+        if(snapshot.running&&!settings.simulation)
+            sampled.sample_status+=" Live capture resumes when the simulation ends.";
         planner_sampling=true;
         next_planner_sample_update={};
-        pending_planner_sample=PendingPlannerSample{planner_request_id,std::move(sampled),budget};
+        pending_planner_sample=PendingPlannerSample{planner_request_id,std::move(sampled)};
         planner_model=std::make_shared<const planner::Model>(pending_planner_sample->model);
         ++revision;
     }
     void cancel_planner_sample() {
         planner_sample_requested=false;
         if(!planner_sampling)return;
-        ++planner_request_id;
+        const auto cancelled_id=planner_request_id++;
         pending_planner_sample.reset();
         if(planner_sample_active)planner_worker.request_stop();
         planner_sampling=false;
         auto model=*link_plan();
         model.sampling=false;
         model.sample_status="Simulation cancelled.";
+        std::optional<PlannerSampleUpdate> progress;
+        {
+            std::lock_guard lock(planner_mutex);
+            if(planner_sample_progress&&planner_sample_progress->request_id==cancelled_id)
+                progress=planner_sample_progress;
+        }
+        if(progress) {
+            progress->progress.elapsed_seconds+=std::chrono::duration<double>(Clock::now()-progress->observed_at).count();
+            model.sample_status+=" "+planner::sample_progress_text(progress->progress)+".";
+        }
         planner_model=std::make_shared<const planner::Model>(std::move(model));
         ++revision;
     }
@@ -2091,7 +2105,7 @@ struct Controller::Impl {
         case Command::planner_toggle_draft: planner_draft=!planner_draft;planner_model.reset();cancel_advisory();break;
         case Command::planner_sample:
             if(planner_sampling)cancel_planner_sample();
-            else request_planner_sample(true);
+            else request_planner_sample();
             break;
         case Command::planner_power:
             request(Purpose::planner_power,ui::ServiceKind::prompt,"Average transmit power (W, mW, µW or dBm)",planner_number(planner_inputs.tx_dbm)+" dBm");break;

@@ -52,15 +52,37 @@ void resource_charts() {
     check(ram.caption().find("2.0/4.0 GiB")!=std::string::npos &&
           ram.caption().find("container allocation")!=std::string::npos,"RAM chart lost its allocation scope");
     const auto gpu=PlotSnapshot::resource_history(ResourceMetric::gpu,history,active);
-    check(gpu.caption()=="GPU 0 0% · GPU 1 (receiver) 80%","GPU chart confused idle and selected devices");
+    check(gpu.caption()=="NVIDIA GPU 0 0% · NVIDIA GPU 1 (receiver) 80%",
+          "GPU chart confused idle and selected devices");
     const auto pixels=render(gpu,request,false);
     check(red(pixels,119,19)==theme::accent && red(pixels,119,23)==theme::accent,
           "GPU chart lost measured activity or zero in distinct device lanes");
     const auto vram=PlotSnapshot::resource_history(ResourceMetric::vram,history,active);
-    check(vram.caption()=="GPU 0 16.0/32.0 GiB · GPU 1 (receiver) 24.0/32.0 GiB",
+    check(vram.caption()=="NVIDIA GPU 0 16.0/32.0 GiB · NVIDIA GPU 1 (receiver) 24.0/32.0 GiB",
           "VRAM chart lost driver used or total bytes");
     check(PlotSnapshot::resource_history(ResourceMetric::gpu,std::make_shared<ResourceHistory>()).caption()
           =="Awaiting compute-host samples","GPU chart fabricated an initial zero sample");
+
+    auto mixed=std::make_shared<ResourceHistory>();
+    mixed->samples.push_back({{},{},{},
+        {{0,{},35,execution::MemoryUsage{2*gib,4*gib},GpuVendor::nvidia},
+         {0,{},70,execution::MemoryUsage{3*gib,8*gib},GpuVendor::amd}}});
+    mixed->samples.push_back({{},{},{},
+        {{0,{},0,execution::MemoryUsage{2*gib,4*gib},GpuVendor::nvidia},
+         {0,{},std::nullopt,std::nullopt,GpuVendor::amd}}});
+    const auto mixed_gpu=PlotSnapshot::resource_history(ResourceMetric::gpu,mixed);
+    check(mixed_gpu.caption()=="NVIDIA GPU 0 0% · AMD GPU 0 unavailable",
+          "GPU chart merged vendor indices or treated missing activity as zero");
+    const auto mixed_pixels=render(mixed_gpu,request,false);
+    check(red(mixed_pixels,118,25)==theme::accent && red(mixed_pixels,119,19)==theme::accent &&
+          red(mixed_pixels,119,39)!=theme::accent,
+          "GPU trace joined same-index devices or plotted missing AMD activity");
+    auto empty_latest=std::make_shared<ResourceHistory>();
+    empty_latest->samples.push_back({{},{},{},{}});
+    check(PlotSnapshot::resource_history(ResourceMetric::gpu,empty_latest).caption()
+          =="GPU utilization unavailable","GPU chart used a vendor-specific empty caption");
+    check(PlotSnapshot::resource_history(ResourceMetric::vram,empty_latest).caption()
+          =="VRAM usage unavailable","VRAM chart used a vendor-specific empty caption");
 }
 
 void transfer_contract() {

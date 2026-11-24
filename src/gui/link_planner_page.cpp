@@ -74,15 +74,12 @@ ScaleRange series_range(const std::vector<planner::Point>& points,std::size_t in
     if(index==2||index==4)return {0,1,true};
     if(index==3)return {0,1.5,true};
     ScaleRange range{std::numeric_limits<double>::infinity(),0,false};
-    const auto include=[&](std::optional<double> value) {
-        if(!value||!std::isfinite(*value)||*value<=0)return;
+    for(const auto& point:points) {
+        const auto value=series_value(point,index);
+        if(!value||!std::isfinite(*value)||*value<=0)continue;
         range.minimum=std::min(range.minimum,*value);
         range.maximum=std::max(range.maximum,*value);
         range.available=true;
-    };
-    for(const auto& point:points) {
-        include(series_value(point,index));
-        if(index==1)include(point.cpu_probe_lower_bound);
     }
     if(range.available&&index==1) {
         range.minimum=std::min(range.minimum,1.);
@@ -267,18 +264,6 @@ BitmapSource planner_chart(const planner::Model& model) {
         };
         threshold_marker(1,1.);
         threshold_marker(3,1.);
-        for(const auto& point:points) {
-            if(!point.cpu_probe_lower_bound)continue;
-            const auto x=x_for(point.target_db_hz);
-            const auto y=bottom-static_cast<int>(std::lround(
-                normalized_value(*point.cpu_probe_lower_bound,1,ranges[1])*graph_height));
-            const auto ink=series_color(1);
-            for(int d=0;d<=3;++d) {
-                put(x-d,y-4+d,ink);
-                put(x+d,y-4+d,ink);
-            }
-            for(int d=-4;d<=4;++d)put(x,y+d,ink);
-        }
         sink(0,0,{width,height,stride,format,pixels.data()});
     },BitmapSampling::continuous,{0,0,640,160});
 }
@@ -288,15 +273,7 @@ std::string selected_value(const planner::Model& model,std::size_t index) {
     const auto& point=*model.selected;
     switch(index) {
     case 0:return point.bit_seconds?planner::duration(*point.bit_seconds):"Unavailable";
-    case 1:
-        if(point.cpu_seconds_per_audio_second)return number(*point.cpu_seconds_per_audio_second)+" s/s";
-        if(point.cpu_probe_lower_bound) {
-            const auto value=*point.cpu_probe_lower_bound;
-            const auto step=std::pow(10.,std::floor(std::log10(value))-2);
-            const auto shown=step>0?std::floor(value/step)*step:value;
-            return "≥ "+number(shown)+" s/s";
-        }
-        return "Unavailable";
+    case 1:return point.cpu_seconds_per_audio_second?number(*point.cpu_seconds_per_audio_second)+" s/s":"Unavailable";
     case 2:return point.rx_data_detection_probability?number(100* *point.rx_data_detection_probability)+"%":"Unavailable";
     case 3:return point.workspace_fraction?number(100* *point.workspace_fraction)+"%":"Unavailable";
     default:return point.rx_success_probability?number(100* *point.rx_success_probability)+"%":"Unavailable";
@@ -353,8 +330,6 @@ Node chart_legend(const planner::Model& model,float width) {
     };
     if(crosses(1,1.))marker_label("✚ CPU 1 s/s crossing");
     if(crosses(3,1.))marker_label("✚ workspace 100% crossing");
-    if(std::ranges::any_of(model.points,[](const auto& point){return point.cpu_probe_lower_bound.has_value();}))
-        marker_label("↑ Interrupted CPU probe lower bound");
     if(!markers.children.empty())legend.children.push_back(std::move(markers));
     return legend;
 }
@@ -380,13 +355,13 @@ ui::DocumentNode build(const planner::Model& model,float width,bool show_details
         paragraph(root,"DATA waveform width "+number(*model.inputs.waveform_bandwidth_hz)+" Hz · "
             "Audio band with oscillator and channel allowance "+number(band.lower_hz)+" to "+number(band.upper_hz)+" Hz.");
     }
-    const auto sample_label=model.sampling?"Cancel simulation":
-        model.offer_extended_sample?"Run longer simulation":"Run simulation";
-    buttons(root,{{sample_label,Command::planner_sample,
-        model.sampling||(model.selected&&model.selected->workspace_fits)}});
+    const bool sample_fits=model.selected&&model.selected->workspace_fits;
+    buttons(root,{{model.sampling?"Cancel simulation":"Run simulation",Command::planner_sample,
+        model.sampling||sample_fits}});
     if(!model.sample_status.empty())paragraph(root,model.sample_status,11,Tone::muted,false,4);
-    if(!model.sampling&&model.offer_extended_sample)
-        paragraph(root,"A longer simulation can run up to "+std::to_string(planner::extended_probe_seconds)+" s.",
+    if(!model.sampling&&sample_fits)
+        paragraph(root,"Run simulation measures two one-bit trials through both quiet slots. It can take several minutes "
+            "or longer. When needed, live capture pauses until the simulation finishes or you cancel.",
             11,Tone::muted,false,4);
     auto chart=column(root.width-2*root.padding);chart.kind=Kind::bitmap;
     chart.plot_name="planner/robust-target-sweep";chart.plot=planner_chart(model);chart.height=196;chart.bottom=4;

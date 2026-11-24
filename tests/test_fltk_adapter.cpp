@@ -1559,10 +1559,10 @@ void inline_document_editor() {
     for(const auto* label:{"Spread-Spectrum DSSS FHSS Example","Weak-Signal Example",
                            "Sub-9kHz Example","Earth-Moon-Earth Example"})
         require(!find_button(*document,label),"Inline document retained a retired planner example action");
-    auto* simulation_action=find_button(*document,"Run simulation");
-    if(!simulation_action)simulation_action=find_button(*document,"Cancel simulation");
-    require(simulation_action,"Inline document lost its simulation action");
-    if(simulation_action->active_r())following.push_back(simulation_action);
+    auto* run_sample=find_button(*document,"Run simulation");
+    require(run_sample&&!find_button(*document,"Cancel simulation")&&!find_button(*document,"Measure RX pair"),
+        "Inline planner must show only Run simulation while idle");
+    if(run_sample->active_r())following.push_back(run_sample);
     for(auto* expected:following) {
         tab(false);require(Fl::focus()==expected,"Inline Tab did not follow enabled document actions in visual order");
     }
@@ -1591,6 +1591,11 @@ void inline_document_editor() {
     require(std::string(editor->value())!=before&&std::string(editor->value())==app.application.field(ui::Field::snr).text&&
         app.application.field(ui::Field::planner_target).display_text==budget_target,
         "Inline preset failed to edit and commit through the ordinary native control callback");
+    if(app.application.enabled(ui::Command::cancel)) {
+        auto* cancel_sample=find_button(*document,"Cancel simulation");
+        require(cancel_sample&&cancel_sample->active_r()&&!find_button(*document,"Run simulation")&&
+            !find_button(*document,"Measure RX pair"),"Inline planner must show only Cancel simulation during sampling");
+    }
     editor->take_focus();const int old_y=editor->y();
     app.application.dispatch(ui::Command::planner_toggle_details);refresh();find(*window);
     require(editor==original&&Fl::focus()==editor,"Adding document details replaced the inline editor or stole focus");

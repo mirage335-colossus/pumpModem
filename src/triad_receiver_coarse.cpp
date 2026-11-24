@@ -3494,6 +3494,15 @@ std::size_t gain_device_charge(const Plan&, const ReceiverConfig&, const Receive
 
 } // namespace
 
+void CoarseProbeProgress::set_phase(CoarseProbeObservation::Phase phase) noexcept {
+    phase_.store(phase, std::memory_order_release);
+}
+
+void CoarseProbeProgress::begin_search(CoarseProbeObservation::Route route) noexcept {
+    route_.store(route, std::memory_order_relaxed);
+    set_phase(CoarseProbeObservation::Phase::coarse_search);
+}
+
 bool CoarseProbeProgress::begin(std::size_t pairs) noexcept {
     if (claimed_.test_and_set(std::memory_order_relaxed)) return false;
     began_ = PhaseClock::now();
@@ -3511,15 +3520,24 @@ void CoarseProbeProgress::record_pair(unsigned lane) noexcept {
 }
 
 void CoarseProbeProgress::finish() noexcept {
+    finished_at_ = PhaseClock::now();
     finished_.store(true, std::memory_order_release);
 }
 
 std::optional<CoarseProbeObservation> CoarseProbeProgress::observe(PhaseClock::time_point as_of) const noexcept {
+    CoarseProbeObservation observation;
+    observation.phase = phase_.load(std::memory_order_acquire);
+    observation.route = route_.load(std::memory_order_relaxed);
     const auto pairs = pairs_.load(std::memory_order_acquire);
-    if (!pairs || finished_.load(std::memory_order_acquire)) return std::nullopt;
-
-    CoarseProbeObservation observation{.total_pairs = pairs};
-    observation.windows_complete = std::min(as_of, PhaseClock::now()) - began_ >= 2 * coarse_probe_window;
+    auto until = std::min(as_of, PhaseClock::now());
+    if (!pairs || began_ > until) return observation;
+    observation.meter_started = true;
+    observation.total_pairs = pairs;
+    if (finished_.load(std::memory_order_acquire) && finished_at_ <= until) {
+        until = finished_at_;
+        observation.completed_span_seconds = std::chrono::duration<double>(until - began_).count();
+    }
+    observation.windows_complete = until - began_ >= 2 * coarse_probe_window;
     if (observation.windows_complete) {
         for (std::size_t i = 0; i < windows_.size(); ++i) {
             observation.completed_pairs[i] = windows_[i].completed_pairs.load(std::memory_order_acquire);
@@ -3527,7 +3545,6 @@ std::optional<CoarseProbeObservation> CoarseProbeProgress::observe(PhaseClock::t
             observation.contributing_lanes[i] = static_cast<unsigned>(std::popcount(mask));
         }
     }
-    if (finished_.load(std::memory_order_acquire)) return std::nullopt;
     return observation;
 }
 
@@ -4872,6 +4889,10 @@ struct CoarseSession::Impl {
     std::stop_source cancellation;
     std::stop_callback<PropagateStop> external_stop;
 
+    CoarseProbeProgress* probe_progress() const noexcept {
+        return slot.index == 0 ? config.coarse_probe_progress.get() : nullptr;
+    }
+
     Impl(const ReceiverConfig& config, const ReceiverSlotPlan& slot, const Crypto& key,
          std::span<const Complex> iq, std::span<const FrequencyInterval> intervals,
          const FrequencyAssistance* assistance,
@@ -4884,6 +4905,7 @@ struct CoarseSession::Impl {
         const auto began = PhaseClock::now();
         const auto stop = cancellation.get_token();
         check_stop(stop);
+        if (auto* probe = probe_progress()) probe->set_phase(CoarseProbeObservation::Phase::coarse_preparation);
         require_coarse(config.native_coarse_precision == NativeCoarsePrecision::automatic ||
                        config.native_coarse_precision == NativeCoarsePrecision::fp64 ||
                        config.native_coarse_precision == NativeCoarsePrecision::q15 ||
@@ -5435,8 +5457,8 @@ struct CoarseSession::Impl {
                                  int exponent, bool pack, std::stop_token stop) {
         const auto& plan = receipt.plan;
         if (count >= mul(2, plan.workers)) {
-            auto* probe = config.coarse_probe_progress.get();
-            if (probe && (slot.index || first || count != plan.frequency_points || config.bulk_backend || plan.workers < 8))
+            auto* probe = probe_progress();
+            if (probe && (first || count != plan.frequency_points || plan.workers < 8))
                 probe = nullptr;
             return score_frequencies(geometry, bank, observation, frequency_values, peaks, first, count, variance,
                                      transform, plan.workers, stop, executor, slot.index, exponent, pack, probe);
@@ -5674,6 +5696,7 @@ void CoarseSession::advance(std::size_t maximum_tiles) {
     check_stop(stop);
     const auto& plan = receipt.plan;
     if (plan.workspace_group_size) {
+        if (auto* probe = impl.probe_progress()) probe->begin_search(CoarseProbeObservation::Route::grouped);
         impl.advance_grouped(maximum_tiles, stop);
         return;
     }
@@ -5684,6 +5707,12 @@ void CoarseSession::advance(std::size_t maximum_tiles) {
         // A device tile keeps its admitted batch shape. Native tiles of one
         // advance form a single span: an interrupted span publishes nothing.
         const auto tiles = std::min(maximum_tiles, ceil_div(extent - impl.cursor, plan.tile_width));
+        if (auto* probe = impl.probe_progress(); probe && tiles) {
+            using Route = CoarseProbeObservation::Route;
+            const auto route = impl.bulk ? (lag ? Route::backend_lag : Route::backend_frequency) :
+                                           (lag ? Route::native_lag : Route::native_frequency);
+            probe->begin_search(route);
+        }
         for (std::size_t tile = 0; impl.bulk && tile < tiles; ++tile) {
             check_stop(stop);
             const auto count = std::min(plan.tile_width, extent - impl.cursor);
@@ -5726,6 +5755,7 @@ std::optional<CoarseResult> CoarseSession::finish() {
     if (impl.state() != CoarseState::searched) return {};
     const auto stop = impl.cancellation.get_token();
     const auto began = PhaseClock::now();
+    if (auto* probe = impl.probe_progress()) probe->set_phase(CoarseProbeObservation::Phase::coarse_selection);
     try {
         const auto& plan = receipt.plan;
         if (impl.bulk) {

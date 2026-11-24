@@ -19,11 +19,18 @@ class ReceiverBulkBackend;
 class CoarseProbeProgress;
 
 struct CoarseProbeObservation {
+    enum class Phase { waiting, preparing, coarse_preparation, coarse_search, coarse_selection, fine, additional, resolved };
+    enum class Route { unknown, native_frequency, native_lag, grouped, backend_frequency, backend_lag };
     static constexpr unsigned window_seconds = 3;
     std::size_t total_pairs = 0;
     std::array<std::size_t, 2> completed_pairs{};
     std::array<unsigned, 2> contributing_lanes{};
     bool windows_complete = false;
+    Phase phase = Phase::waiting;
+    Route route = Route::unknown;
+    bool meter_started = false;
+    // The measured native frequency span, separate from the complete slot.
+    std::optional<double> completed_span_seconds;
 };
 }
 
@@ -78,7 +85,7 @@ struct ReceiverConfig {
     // Optional compiled bulk arithmetic. The shared receiver still owns all
     // tracking state, original priors, physical decisions and worker permits.
     std::shared_ptr<receiver_detail::ReceiverBulkBackend> bulk_backend;
-    // Optional observation of the first complete native frequency-search span.
+    // Optional diagnostic trace of the first public slot and its eligible native frequency span.
     std::shared_ptr<receiver_detail::CoarseProbeProgress> coarse_probe_progress;
 };
 
