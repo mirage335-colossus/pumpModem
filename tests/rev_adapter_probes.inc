@@ -612,13 +612,17 @@
             return found==order.end()?nullptr:*found;
         };
         auto* stronger=action("Stronger");auto* weaker=action("Weaker");
-        auto* next=action("Spread-Spectrum DSSS FHSS Example");auto* after=action("Weak-Signal Example");
-        if(!stronger||!weaker||!next||!after||!allows_input(next)||!allows_input(after))
-            throw std::runtime_error("Rev planner action availability differs from the current model");
+        auto* simulation_action=action("Run simulation");
+        if(!simulation_action)simulation_action=action("Cancel simulation");
+        if(!stronger||!weaker||!simulation_action)
+            throw std::runtime_error("Rev planner lost a target adjustment or simulation action");
+        for(const auto* label:{"Spread-Spectrum DSSS FHSS Example","Weak-Signal Example",
+                               "Sub-9kHz Example","Earth-Moon-Earth Example"})
+            if(action(label))throw std::runtime_error("Rev planner retained a retired example action");
         std::vector<re::Element*> following;
         if(allows_input(stronger))following.push_back(stronger);
         if(allows_input(weaker))following.push_back(weaker);
-        following.push_back(next);following.push_back(after);
+        if(allows_input(simulation_action))following.push_back(simulation_action);
         for(auto* expected:following) {
             tab.propagate=true;keyDown(tab);
             if(!expected->targetFlags.focus)

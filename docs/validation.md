@@ -81,6 +81,34 @@ refinements. The Triad group passed 59 of 60. Its `triad_receiver_probe` test
 reported the previously observed missing `coarse_prepare` phase, then passed in
 26.15 s when rerun alone. The parallel failure remains part of the result.
 
+The interaction refinement based on `8b903407` exercised one workspace-admitted
+CPU probe above the previous sample-count cap. The same Ryzen 5 PRO 5650U at
+24 kHz, Target +32 dB-Hz and default scheduled-bridge cadence reached
+1,714,371 modeled samples through the second quiet slot. The 577,755,140-byte
+workspace quote fit its 8,780,414,976-byte allowance. Three trials scored the
+correct bit and both quiet slots before the 30-second deadline. The partial
+fourth trial was unscored, so the displayed RX estimate used the first balanced
+pair. The slowest completed trial ran at 0.129429 processing s/s amid local
+build activity. This single finite observation establishes that fixed-size
+streaming can pass the old cap. Sustained or accelerated service remains
+unqualified by this check.
+
+A dated playback fixture checked the delay readout before transmission and
+after audio prebuffering. A separate fake-audio controller check opened live
+capture, yielded it to the planner simulation, and reopened it once after
+Console **Cancel TX** with Simulation set to No. The fixture observed no
+overlapping capture. The named GUI group passed 42/42 before the blocked-audio
+GPU route follow-through. The final build passed the five focused native
+policy, layout and Robust live tests, plus the FLTK and Rev inline editor
+checks.
+
+A forced UTC-unavailable provider and mock selected GPU backend verified that
+**Run simulation** becomes available with Simulation set to No. The planner
+suspended the session, and Console cancellation restored the same route and
+device identity. A second request acquired the resumed backend. This covers
+the startup and handoff control flow. GPU numerical execution requires
+separate device qualification.
+
 ## Robust live setup and audio rate
 
 The dated native capture fixture exercised Auto calibration at Target and

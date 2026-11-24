@@ -101,7 +101,7 @@ struct Application::Impl {
         std::shared_ptr<const planner::Model> previous;
         std::shared_ptr<const ui::DocumentNode> root;
         int width=0;
-        bool details=false,draft=false,closing=false,can_load=false;
+        bool details=false,draft=false,closing=false,can_load=false,can_sample=false;
     } planner_document;
 };
 Application::Application(Launch options):launch(std::move(options)),impl_(std::make_unique<Impl>(launch)) {
@@ -525,6 +525,7 @@ void Application::select_page(ui::Page page) {
     if(page_visible(page)) {
         if(impl_->page!=page&&impl_->overlay&&impl_->overlay->policy.dismiss_on_page_change)dismiss_overlay();
         impl_->page=page;
+        if(page==ui::Page::planner&&!closing())impl_->controller.request_link_plan();
     }
 }
 ui::Page Application::page() const { return impl_->page; }
@@ -614,7 +615,6 @@ std::shared_ptr<const ui::DocumentNode> Application::document(ui::Page page,int 
     width=std::max(ui::document_min_content_width,width);
     if(page==ui::Page::planner) {
         auto& cached=impl_->planner_document;
-        impl_->controller.request_link_plan();
         const auto model=impl_->controller.link_plan();
         if(model->available)cached.previous=model;
         const bool updating=model->calculating&&cached.previous;
@@ -622,8 +622,9 @@ std::shared_ptr<const ui::DocumentNode> Application::document(ui::Page page,int 
         const bool details=impl_->controller.planner_details(),draft=impl_->controller.planner_uses_draft();
         const bool closing=impl_->controller.closing();
         const bool can_load=impl_->controller.enabled(ui::Command::planner_load_command);
+        const bool can_sample=impl_->controller.enabled(ui::Command::planner_sample);
         if(!cached.root||cached.model!=model||cached.width!=width||cached.details!=details||
-            cached.draft!=draft||cached.closing!=closing||cached.can_load!=can_load) {
+            cached.draft!=draft||cached.closing!=closing||cached.can_load!=can_load||cached.can_sample!=can_sample) {
             if(updating) {
                 // Numerical results and plots remain explicitly previous,
                 // while navigation always belongs to the current inputs.
@@ -640,7 +641,7 @@ std::shared_ptr<const ui::DocumentNode> Application::document(ui::Page page,int 
                 for(auto& child:node.children)enable(child);
             };
             enable(root);
-            cached={model,cached.previous,std::make_shared<const ui::DocumentNode>(std::move(root)),width,details,draft,closing,can_load};
+            cached={model,cached.previous,std::make_shared<const ui::DocumentNode>(std::move(root)),width,details,draft,closing,can_load,can_sample};
         }
         return cached.root;
     }

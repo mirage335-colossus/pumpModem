@@ -1556,9 +1556,13 @@ void inline_document_editor() {
         require(action,"Inline document lost a target adjustment action");
         if(action->active_r())following.push_back(action);
     }
-    following.push_back(find_button(*document,"Spread-Spectrum DSSS FHSS Example"));
-    following.push_back(find_button(*document,"Weak-Signal Example"));
-    require(following[following.size()-2]&&following.back(),"Inline document lost its example actions");
+    for(const auto* label:{"Spread-Spectrum DSSS FHSS Example","Weak-Signal Example",
+                           "Sub-9kHz Example","Earth-Moon-Earth Example"})
+        require(!find_button(*document,label),"Inline document retained a retired planner example action");
+    auto* simulation_action=find_button(*document,"Run simulation");
+    if(!simulation_action)simulation_action=find_button(*document,"Cancel simulation");
+    require(simulation_action,"Inline document lost its simulation action");
+    if(simulation_action->active_r())following.push_back(simulation_action);
     for(auto* expected:following) {
         tab(false);require(Fl::focus()==expected,"Inline Tab did not follow enabled document actions in visual order");
     }
@@ -1602,6 +1606,9 @@ void inline_document_editor() {
     app.application.edit(ui::Field::message,"e");refresh();
     const auto original_rate=app.application.field(ui::Field::bandwidth).text;
     const auto original_target=app.application.field(ui::Field::snr).text;
+    const auto no_transmit_or_replay=[&] {
+        return !app.application.enabled(ui::Command::cancel)||app.application.enabled(ui::Command::planner_sample);
+    };
     std::string lines="./datapump-gui --unsupported-setting 1";
     for(unsigned line=0;line<24;++line)lines+="\n--line "+std::to_string(line);
     command_editor->buffer()->select(0,command_editor->buffer()->length());
@@ -1619,7 +1626,7 @@ void inline_document_editor() {
     char newline[]={'\n',0};Fl::e_keysym=FL_Enter;Fl::e_state=0;Fl::e_text=newline;Fl::e_length=1;
     command_editor->handle(FL_KEYDOWN);
     Fl::e_keysym=enter_key;Fl::e_state=enter_state;Fl::e_text=enter_text;Fl::e_length=enter_length;refresh();
-    require(buffer_text(*command_editor->buffer())==lines+"\n"&&!app.application.enabled(ui::Command::cancel)&&
+    require(buffer_text(*command_editor->buffer())==lines+"\n"&&no_transmit_or_replay()&&
             app.application.field(ui::Field::message).text=="e"&&app.application.field(ui::Field::bandwidth).text==original_rate&&
             app.application.field(ui::Field::snr).text==original_target,
         "Enter in Launch command transmitted, applied settings or failed to insert a newline");
@@ -1627,7 +1634,7 @@ void inline_document_editor() {
     load->do_callback();refresh();
     require(app.application.field(ui::Field::planner_command).text==lines+"\n"&&
             app.application.field(ui::Field::status).text.find("unsupported-setting")!=std::string::npos&&
-            app.application.field(ui::Field::bandwidth).text==original_rate&&!app.application.enabled(ui::Command::cancel),
+            app.application.field(ui::Field::bandwidth).text==original_rate&&no_transmit_or_replay(),
         "Native Load failed to validate the retained command without starting transmission");
     app.application.select_page(ui::Page::console);refresh();
     require(!editor->visible_r()&&Fl::focus()!=editor,"Hiding the document page retained native editor focus");

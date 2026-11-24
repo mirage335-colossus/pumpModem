@@ -97,19 +97,34 @@ double normalized_value(double value,std::size_t index,const ScaleRange& range) 
     return std::clamp((std::log10(value)-low)/std::max(1e-9,high-low),0.,1.);
 }
 
-std::string scale_description(const std::vector<planner::Point>& points,std::size_t index,
-                              std::string_view units) {
-    const auto range=series_range(points,index);
-    if(!range.available)return std::string(units)+" range unavailable";
-    return number(range.minimum)+" to "+number(range.maximum)+" "+std::string(units);
+constexpr int tick_glyph_width=8;
+void draw_number(const auto& put,int x,int y,std::string_view label,theme::Rgb ink) {
+    static constexpr std::array<std::array<std::uint8_t,5>,12> glyphs{{
+        {{7,5,5,5,7}},{{2,6,2,2,7}},{{7,1,7,4,7}},{{7,1,7,1,7}},{{5,5,7,1,1}},
+        {{7,4,7,1,7}},{{7,4,7,5,7}},{{7,1,1,1,1}},{{7,5,7,5,7}},{{7,5,7,1,7}},
+        {{0,0,7,0,0}},{{0,0,0,0,2}}
+    }};
+    for(const char ch:label) {
+        std::size_t glyph=glyphs.size();
+        if(ch>='0'&&ch<='9')glyph=static_cast<std::size_t>(ch-'0');
+        else if(ch=='-')glyph=10;
+        else if(ch=='.')glyph=11;
+        if(glyph<glyphs.size())for(int row=0;row<5;++row)for(int col=0;col<3;++col)
+            if(glyphs[glyph][static_cast<std::size_t>(row)]&(1U<<(2-col))) {
+                for(int dy=0;dy<2;++dy)for(int dx=0;dx<2;++dx)
+                    put(x+2*col+dx,y+2*row+dy,ink);
+            }
+        x+=tick_glyph_width;
+    }
 }
 
 BitmapSource planner_chart(const planner::Model& model) {
     const auto points=model.points;
     const auto selected=model.selected;
+    const auto budget_target=model.budget_target_db_hz;
     std::array<ScaleRange,5> ranges{};
     for(std::size_t index=0;index<ranges.size();++index)ranges[index]=series_range(points,index);
-    return BitmapSource([points,selected,ranges](const BitmapRequest& request,
+    return BitmapSource([points,selected,budget_target,ranges](const BitmapRequest& request,
             const BitmapSink& sink,bool color_enabled) {
         const auto width=request.width,height=request.height;
         if(!width||!height)return;
@@ -143,11 +158,12 @@ BitmapSource planner_chart(const planner::Model& model) {
         };
         std::fill(pixels.begin(),pixels.end(),background.red);
         const int left=width>48?38:2,right=static_cast<int>(width)-5;
-        const int top=5,bottom=static_cast<int>(height)-20;
+        const int top=7,bottom=static_cast<int>(height)-18;
         const int graph_width=std::max(1,right-left),graph_height=std::max(1,bottom-top);
         for(int row=0;row<=4;++row) {
             const auto y=top+graph_height*row/4;
             for(int x=left;x<=right;++x)put(x,y,grid);
+            draw_number(put,2,y-5,std::to_string((4-row)*25),theme::grayscale(theme::muted));
         }
         for(int column=1;column<=4;++column) {
             const auto x=left+graph_width*column/4;
@@ -166,6 +182,13 @@ BitmapSource planner_chart(const planner::Model& model) {
             const auto fraction=target_span>0?(target-minimum->target_db_hz)/target_span:.5;
             return left+static_cast<int>(std::lround(std::clamp(fraction,0.,1.)*graph_width));
         };
+        for(int tick=0;tick<=4;++tick) {
+            const int x=left+graph_width*tick/4;
+            const auto label=number(minimum->target_db_hz+target_span*tick/4.);
+            const int label_width=static_cast<int>(label.size())*tick_glyph_width;
+            draw_number(put,std::max(left,std::min(right-label_width,x-label_width/2)),
+                bottom+4,label,theme::grayscale(theme::muted));
+        }
         const auto draw_line=[&](int x0,int y0,int x1,int y1,theme::Rgb ink,std::size_t style) {
             const int start_x=x0;
             const int dx=std::abs(x1-x0),sx=x0<x1?1:-1;
@@ -213,8 +236,33 @@ BitmapSource planner_chart(const planner::Model& model) {
             put(x,workspace_limit_y,series_color(3));
         if(selected) {
             const int x=x_for(selected->target_db_hz);
-            for(int y=top;y<=bottom;++y)if(y%3!=0)put(x,y,theme::grayscale(theme::text));
+            for(int y=top;y<=bottom;++y)if(y%3!=0)put(x,y,theme::grayscale(255));
+            for(int dx=-3;dx<=3;++dx)for(int dy=-3;dy<=3;++dy)
+                if(std::abs(dx)+std::abs(dy)<=4)put(x+dx,top+3+dy,theme::grayscale(255));
         }
+        if(budget_target&&*budget_target>=minimum->target_db_hz&&*budget_target<=maximum->target_db_hz) {
+            const int x=x_for(*budget_target);
+            for(int y=top;y<=bottom;++y)if(y%4!=0)put(x,y,theme::grayscale(248));
+            for(int dx=-3;dx<=3;++dx)put(x+dx,bottom-3,theme::grayscale(248));
+        }
+        const auto threshold_marker=[&](std::size_t index,double threshold) {
+            if(!ranges[index].available)return;
+            for(std::size_t i=1;i<points.size();++i) {
+                const auto a=series_value(points[i-1],index),b=series_value(points[i],index);
+                if(!a||!b||!std::isfinite(*a)||!std::isfinite(*b))continue;
+                const auto na=normalized_value(*a,index,ranges[index]);
+                const auto nb=normalized_value(*b,index,ranges[index]);
+                const auto nt=normalized_value(threshold,index,ranges[index]);
+                if((na-nt)*(nb-nt)>0||na==nb)continue;
+                const auto fraction=std::clamp((nt-na)/(nb-na),0.,1.);
+                const auto x=x_for(points[i-1].target_db_hz+fraction*(points[i].target_db_hz-points[i-1].target_db_hz));
+                const auto y=bottom-static_cast<int>(std::lround(normalized_value(threshold,index,ranges[index])*graph_height));
+                for(int dx=-4;dx<=4;++dx)for(int dy=-4;dy<=4;++dy)
+                    if(std::abs(dx)+std::abs(dy)<=5)put(x+dx,y+dy,theme::grayscale(255));
+            }
+        };
+        threshold_marker(1,1.);
+        threshold_marker(3,1.);
         sink(0,0,{width,height,stride,format,pixels.data()});
     },BitmapSampling::continuous,{0,0,640,160});
 }
@@ -233,12 +281,18 @@ std::string selected_value(const planner::Model& model,std::size_t index) {
 
 Node chart_legend(const planner::Model& model,float width) {
     auto legend=column(width);
+    const auto range_label=[&](std::size_t index,std::string_view units) {
+        const auto range=series_range(model.points,index);
+        if(!range.available)return std::string("range unavailable");
+        const double multiplier=(index==2||index==3||index==4)?100.:1.;
+        return number(range.minimum*multiplier)+".."+number(range.maximum*multiplier)+" "+std::string(units);
+    };
     const std::array<std::string,5> labels{
-        "Time per bit · "+selected_value(model,0),
-        "CPU · "+selected_value(model,1),
-        "RX DATA model · "+selected_value(model,2),
-        "DSP workspace · "+selected_value(model,3),
-        "RX sample · "+selected_value(model,4)};
+        "Time/bit · "+selected_value(model,0)+" · log s: "+range_label(0,"s"),
+        "CPU · "+selected_value(model,1)+" · log s/s: "+range_label(1,"s/s"),
+        "RX DATA model · "+selected_value(model,2)+" · "+range_label(2,"%"),
+        "Workspace · "+selected_value(model,3)+" · "+range_label(3,"%"),
+        "RX sample · "+selected_value(model,4)+" · "+range_label(4,"%")};
     const std::array<Tone,5> tones{Tone::accent,Tone::positive,Tone::caution,Tone::comparison,Tone::negative};
     for(std::size_t i=0;i<labels.size();++i) {
         if(i%2!=0)continue;
@@ -249,6 +303,33 @@ Node chart_legend(const planner::Model& model,float width) {
         }
         legend.children.push_back(std::move(row));
     }
+    auto markers=column(width);markers.kind=Kind::row;
+    auto marker_label=[&](std::string label) {
+        if(markers.children.size()==2) {
+            legend.children.push_back(std::move(markers));
+            markers=column(width);markers.kind=Kind::row;
+        }
+        auto item=text(std::move(label),std::max(60.f,(width-12)/2),10,Tone::text);
+        item.bottom=2;item.right=6;markers.children.push_back(std::move(item));
+    };
+    if(model.selected)marker_label("● selected target");
+    if(model.budget_target_db_hz)marker_label("◆ budget C/N₀ intercept");
+    const auto crosses=[&](std::size_t index,double threshold) {
+        const auto range=series_range(model.points,index);
+        const auto nt=normalized_value(threshold,index,range);
+        for(std::size_t i=1;i<model.points.size();++i) {
+            const auto a=series_value(model.points[i-1],index),b=series_value(model.points[i],index);
+            if(a&&b&&std::isfinite(*a)&&std::isfinite(*b)) {
+                const auto na=normalized_value(*a,index,range);
+                const auto nb=normalized_value(*b,index,range);
+                if((na-nt)*(nb-nt)<=0&&na!=nb)return true;
+            }
+        }
+        return false;
+    };
+    if(crosses(1,1.))marker_label("✚ CPU 1 s/s crossing");
+    if(crosses(3,1.))marker_label("✚ workspace 100% crossing");
+    if(!markers.children.empty())legend.children.push_back(std::move(markers));
     return legend;
 }
 }
@@ -261,9 +342,6 @@ ui::DocumentNode build(const planner::Model& model,float width,bool show_details
     control(root,ui::Field::planner_target);
     buttons(root,{{"Stronger",Command::planner_stronger,model.stronger_fit_target.has_value()},
         {"Weaker",Command::planner_weaker,model.weaker_fit_target.has_value()}});
-    buttons(root,{{"Spread-Spectrum DSSS FHSS Example",Command::planner_example_spread},
-        {"Weak-Signal Example",Command::planner_example_weak},{"Sub-9kHz Example",Command::planner_example_sub9},
-        {"Earth-Moon-Earth Example",Command::planner_example_eme}});
     if(error.empty())error=model.error;
     if(!error.empty())paragraph(root,std::move(error),12,Tone::negative,true);
     else if(model.calculating)paragraph(root,"Calculating the target sweep…",12,Tone::muted);
@@ -276,22 +354,21 @@ ui::DocumentNode build(const planner::Model& model,float width,bool show_details
         paragraph(root,"DATA waveform width "+number(*model.inputs.waveform_bandwidth_hz)+" Hz · "
             "Audio band with oscillator and channel allowance "+number(band.lower_hz)+" to "+number(band.upper_hz)+" Hz.");
     }
-    buttons(root,{{"Sample selected target",Command::planner_sample,
-        model.selected&&model.selected->workspace_fits&&!model.sampling}});
-    if(model.sampling)paragraph(root,"Sampling selected target…",11,Tone::muted,false,4);
-    else if(!model.sample_status.empty())paragraph(root,model.sample_status,11,Tone::muted,false,4);
+    buttons(root,{{model.sampling?"Cancel simulation":"Run simulation",Command::planner_sample,
+        model.sampling||(model.selected&&model.selected->workspace_fits)}});
+    if(!model.sample_status.empty())paragraph(root,model.sample_status,11,Tone::muted,false,4);
     auto chart=column(root.width-2*root.padding);chart.kind=Kind::bitmap;
     chart.plot_name="planner/robust-target-sweep";chart.plot=planner_chart(model);chart.height=196;chart.bottom=4;
     root.children.push_back(std::move(chart));
     auto legend=chart_legend(model,root.width-2*root.padding);legend.bottom=3;
     root.children.push_back(std::move(legend));
-    const auto x_range=model.points.empty()?std::string("Unavailable"):number(model.points.front().target_db_hz)+
-        " to "+number(model.points.back().target_db_hz);
-    paragraph(root,"Target C/N₀ (dB-Hz) · "+x_range+
-        " · time and CPU use separate log scales · RX 0–100% · workspace 0–150%, dashed at 100%",10,Tone::muted,false,4);
-    paragraph(root,"Time per bit scale · "+scale_description(model.points,0,"seconds"),10,Tone::muted,false,2);
-    paragraph(root,"CPU pace scale · "+scale_description(model.points,1,"s/s")+
-        " · Dashed line at the real-time limit of 1 s/s",10,Tone::muted,false,4);
+    paragraph(root,"Target C/N₀ (dB-Hz) · Scaled y grid (0–100%)",10,Tone::muted,false,3);
+    paragraph(root,"Dashed limits at 1 s/s CPU and 100% workspace",10,Tone::muted,false,2);
+    if(model.budget_target_db_hz&&(model.points.empty()||*model.budget_target_db_hz<model.points.front().target_db_hz||
+        *model.budget_target_db_hz>model.points.back().target_db_hz))
+        paragraph(root,"Budget C/N₀ intercept: "+number(*model.budget_target_db_hz)+" dB-Hz (outside plotted target range).",10,Tone::caution,false,3);
+    else if(model.budget_target_db_hz)
+        paragraph(root,"Budget C/N₀ intercept at "+number(*model.budget_target_db_hz)+" dB-Hz is marked on the plot.",10,Tone::muted,false,3);
     if(!model.cpu_status.empty())paragraph(root,"CPU: "+model.cpu_status,11,Tone::muted,false,2);
     if(!model.rx_status.empty())paragraph(root,"DATA detection: "+model.rx_status,11,Tone::muted,false,2);
     if(!model.workspace_status.empty())paragraph(root,"DSP workspace: "+model.workspace_status,11,Tone::muted,false,5);
@@ -306,12 +383,10 @@ ui::DocumentNode build(const planner::Model& model,float width,bool show_details
         paragraph(root,"The DATA curve models detection of the true candidate. RX sampling also checks the bit decision and both quiet slots. CPU shows finite simulation work on the selected processing route.");
         paragraph(root,"Quick references",15,Tone::text,true);
         paragraph(root,"Rough comparison examples, not propagation predictions or automatic presets. Antennas, propagation and noise change the result; operating modes do not determine path loss. Power (dBm) and path loss (dB) are separate quantities.");
-        paragraph(root,"Sub-9 kHz · 200 ft antenna · 10 kW: 0 dBm power reference; 200 dB path loss.");
         paragraph(root,"Groundwave · 1 MHz · 150 miles: 180 dB path loss.");
         paragraph(root,"Groundwave · 30 MHz · 150 miles: 210 dB path loss.");
         paragraph(root,"Skywave · 1–30 MHz: SSB voice, 130 dB path loss; FT8, 160 dB path loss.");
         paragraph(root,"Meteor burst: 150 dB path loss.");
-        paragraph(root,"Earth–Moon–Earth · 5.8 GHz: −30 dBm transmit power; 220 dB path loss.");
     }
     return root;
 }

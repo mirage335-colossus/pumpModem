@@ -309,7 +309,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::text,Field::doppler,Command::none,Bitmap::none,Page::console,4,"Doppler",1,false,64}, Slot::doppler),
         placed({Kind::choice,Field::fec,Command::none,Bitmap::none,Page::console,5,"Error correction"}, Slot::fec),
         placed({Kind::choice,Field::dsp_workspace,Command::none,Bitmap::none,Page::console,5,"DSP workspace"}, Slot::dsp_workspace),
-        placed({Kind::text,Field::snr,Command::none,Bitmap::none,Page::console,5,"Target SNR (dB-Hz)"}, Slot::snr),
+        placed({Kind::text,Field::snr,Command::none,Bitmap::none,Page::console,5,"Target SNR"}, Slot::snr),
         placed({Kind::label,Field::message_label,Command::none,Bitmap::none,Page::console,6,"Message"}, Slot::message_label),
         placed({Kind::action,Field::count,Command::paste_previous,Bitmap::none,Page::console,6,"Previous message - click to paste"}, Slot::paste_previous),
         placed({Kind::action,Field::force_transmit,Command::force_transmit,Bitmap::none,Page::console,6,"Force next transmission"}, Slot::force_transmit),

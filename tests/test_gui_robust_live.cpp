@@ -2066,6 +2066,16 @@ void automatic_quiet_start_covers_default_arrival_window() {
         std::lock_guard lock(fixture::mutex);
         return out.transmitting && fixture::scheduled_epoch && fixture::playback_samples == 0;
     }, "Default arrival Robust TX did not queue playback");
+    constexpr std::string_view countdown = "Leaving two quiet slots · transmission starts in ";
+    check(queued.status.starts_with(countdown) && queued.status.ends_with(" seconds"),
+          "Scheduled Robust startup did not report its delay in seconds: " + queued.status);
+    {
+        std::lock_guard lock(fixture::mutex);
+        const auto remaining = std::stoll(queued.status.substr(countdown.size()));
+        const auto expected = std::ceil(*fixture::scheduled_epoch - fixture::utc_now());
+        check(remaining > 0 && std::abs(remaining - expected) <= 1,
+              "Scheduled Robust startup reported an incorrect delay");
+    }
     check(queued.transmit_trace.active && !queued.transmit_trace.emitting && !queued.transmit_trace.generated_bits,
           "Robust trace marked a queued message as emitting before first playback PCM");
     fixture::hold_playback_source = false;
@@ -2074,6 +2084,8 @@ void automatic_quiet_start_covers_default_arrival_window() {
         std::lock_guard lock(fixture::mutex);
         return out.transmitting && out.transmit_trace.emitting && fixture::playback_samples;
     }, "Robust trace did not mark first playback PCM as emitting");
+    check(transmitter.snapshot().status.starts_with(countdown),
+          "Prefilling Robust playback cleared the countdown before the scheduled UTC start");
     fixture::hold_playback = false;
     wait(transmitter, [](const auto& out) {
         check(out.error.empty(), "Default arrival Robust TX failed: " + out.error);

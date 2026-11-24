@@ -15,6 +15,7 @@ struct Inputs {
     std::weak_ptr<triad::v3::receiver_detail::ReceiverBulkBackend> backend;
     std::string backend_id;
     std::optional<std::array<std::uint8_t,16>> gpu_device_uuid;
+    bool awaiting_gpu=false;
     double target_db_hz=32;
     double tx_dbm=3;
     double path_loss_db=120;

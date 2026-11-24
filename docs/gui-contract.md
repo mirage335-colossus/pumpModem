@@ -214,7 +214,7 @@ transmission. These options only change the diagnostic display.
 | Symbol burst, Random extra | Optional shared whole-bit waits. Leave Symbol Burst Off and Random extra at 0 for short messages to avoid adding idle time. See [burst scheduling](symbol-burst.md). |
 | Wrong Key Admission | Reversible Robust history/browser filter. Unfiltered shows the baseline; stronger choices hide completed records when fewer than half their admitted DATA bits pass. Pattern evidence marks the selected filter's pass/reject results for rated slots. The original likelihoods, decisions and decoded content are retained. The dB labels are approximate HF reference visibility losses. Strong wanted signals can also be hidden. |
 | FHSS | Canonical envelope and illustrative frequency schedule. Short transitions applies the original FHSS envelope to filler and preserves the guards and ramps. The illustration leaves external radio tuning fixed. |
-| Target SNR (dB-Hz) | Shared C/N₀ design point, initially 32 dB-Hz. It drives provisional duration planning and the live reference DATA amplitude. The adjacent Budget target is a starting value from the nominal DATA link budget, rounded down to a whole dB-Hz within the supported range before fades. It leaves the selected target in place. |
+| Target SNR | Shared C/N₀ design point, initially 32 dB-Hz. It drives provisional duration planning and the live reference DATA amplitude. The adjacent Budget target is a starting value from the nominal DATA link budget, rounded down to a whole dB-Hz within the supported range before fades. It leaves the selected target in place. |
 | Live noise calibration (dBFS/Hz) | Auto measures a startup baseline on the local audio input. A manual numeric value also sets the receiver noise reference. At fixed Target C/N₀, changing the baseline scales receiver variance and reference DATA amplitude together. See the [calibration scope](robust-current.md#configured-calendar-reception). |
 | DATA duration, slot spacing | Native modeled values for the selected waveform and cadence. DATA duration sets each bit's integration time. Slot spacing also accounts for Helper timing and configured waits. The airtime estimate includes two scored quiet slots after DATA for physical completion; receiver processing can add time beyond the audio schedule. |
 | Error correction | Configured Off, RS20 or RS60 native short/long text profiles. Raw bits bypass text coding and FEC exactly. |
@@ -430,8 +430,11 @@ score records.
 The **Link Planner** shares the Target SNR and shows native DATA duration,
 modeled detection, nominal host workspace, and available local receiver
 samples on one target graph. Committed targets and the Stronger/Weaker controls
-use the nominal workspace check. The launch-command editor preserves shared
-on-air settings. See [Link Planner](link-planner.md) for sample and model scope.
+use the nominal workspace check. Committing a changed planner target runs a
+temporary simulation. Cancel it on the Link Planner or with **Cancel TX** on
+the Console. The launch-command editor preserves shared on-air settings. A
+scheduled live transmission shows the seconds remaining until its start.
+See [Link Planner](link-planner.md) for sample and model scope.
 
 ## Received content and drafts
 

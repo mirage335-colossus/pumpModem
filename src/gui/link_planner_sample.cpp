@@ -15,8 +15,9 @@ namespace {
 namespace native = triad::v3;
 using Clock = std::chrono::steady_clock;
 
-constexpr std::uint64_t sample_cap = 1'000'000;
-constexpr auto wall_budget = std::chrono::seconds(10);
+// Keep the probe bounded by actual admitted workspace and elapsed work rather
+// than rejecting otherwise streamable geometries at an arbitrary sample count.
+constexpr auto wall_budget = std::chrono::seconds(30);
 
 void drain(native::CompleteStreamReceiver& receiver) {
     (void)receiver.drain_messages();
@@ -58,11 +59,6 @@ SampleResult sample(const Inputs& inputs, std::stop_token stop) {
         execution::checkpoint();
         auto plan = live::detail::plan_profile(settings, calendar, work_stop);
         const auto physical_stop = plan.waveform.slot(2).observation.stop;
-        if (physical_stop > sample_cap) {
-            result.status = "Selected receive geometry exceeds the 1,000,000-sample bounded probe.";
-            return result;
-        }
-
         native::StreamReceiverOptions limits;
         limits.memory_limit_bytes = settings.receiver_memory_limit;
         limits.maximum_input_chunk_samples = live::detail::receiver_input_chunk_samples;
@@ -89,13 +85,12 @@ SampleResult sample(const Inputs& inputs, std::stop_token stop) {
             return result;
         }
 
-        // Two observations of each transmitted bit provide a small, explicitly
-        // finite diagnostic sample; this is not a confidence-bound estimate.
         if (resources.memory_limit_bytes <= external_bytes) {
             result.status = "Selected channel and waveform storage exhaust the receiver memory allowance.";
             return result;
         }
         limits.memory_limit_bytes = resources.memory_limit_bytes - external_bytes;
+        // Score two balanced pairs. A partial pair does not enter the RX estimate.
         constexpr std::array<std::uint8_t, SampleResult::trial_budget> bits{0, 1, 0, 1};
         for (unsigned trial = 0; trial < bits.size(); ++trial) {
             execution::checkpoint();
@@ -113,10 +108,6 @@ SampleResult sample(const Inputs& inputs, std::stop_token stop) {
             auto channel_config = profile.channel;
             channel_config.minimum_capture_samples = physical_stop;
             native::StreamingChannel channel(emission.source(), channel_config);
-            if (channel.total_samples() > sample_cap) {
-                result.status = "Selected receive geometry exceeds the 1,000,000-sample bounded probe.";
-                return result;
-            }
             native::CompleteStreamReceiver receiver(profile.waveform, profile.receiver, profile.key,
                 limits, message);
             std::stop_callback cancel(work_stop, [&] { receiver.request_cancel(); });
@@ -194,7 +185,7 @@ SampleResult sample(const Inputs& inputs, std::stop_token stop) {
         result.status = error.what();
     }
     if (stop.stop_requested()) result.status = "Sampling cancelled.";
-    else if (work_stop.stop_requested()) result.status = "The 10-second probe budget was reached after " +
+    else if (work_stop.stop_requested()) result.status = "The 30-second probe budget was reached after " +
         std::to_string(result.trials) + " complete trials.";
     if (result.trials && result.correct != result.trials) {
         result.status += " DATA admitted " + std::to_string(admitted) + ", correct " + std::to_string(matches) +

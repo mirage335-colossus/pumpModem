@@ -44,7 +44,7 @@ enum class Command {
     planner_power_2mw, planner_power_1mw, planner_power_30uw, planner_power_1uw,
     fast_open_key, fast_generate_key, fast_choose_file, fast_transmit, fast_listen, fast_cancel, fast_save, fast_use_text, fast_clear_received, fast_copy_signal, fast_paste_signal, fast_toggle_qr_expanded,
     legacy_transmit,
-    planner_example_spread, planner_example_weak, planner_example_sub9, planner_example_eme, fhss_apply,
+    fhss_apply,
     toggle_waterfall_expanded, toggle_helper_waterfall_expanded, load_amateur, replay_simulation,
     new_calendar_anchor, recalibrate_live_noise, planner_sample
 };

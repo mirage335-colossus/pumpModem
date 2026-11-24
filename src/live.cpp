@@ -856,6 +856,8 @@ struct Session::Impl {
     std::vector<SignalUpdate> signal_events;
     std::vector<transfer::Received> received_events;
     std::shared_ptr<const Profile> profile;
+    // Keep the selected GPU route available to the planner when live audio is blocked.
+    std::weak_ptr<receiver_detail::ReceiverBulkBackend> planning_only_backend;
     std::optional<TxRequest> request;
     std::optional<SimulationReplay> retained_replay;
     std::shared_ptr<SimulationDetailCapture> simulation_detail_capture;
@@ -866,6 +868,8 @@ struct Session::Impl {
     std::uint64_t plot_segment = 0;
     std::uint64_t next_simulation_ordinal = 0, last_simulation_epoch = 0;
     bool started = false, suspended = false, stopping = false, stopped = false, resources_owned = false;
+    std::optional<long double> scheduled_transmit_utc;
+    bool scheduled_startup_quiet = false;
     std::map<KeyTag, long double> used_until;
     long double separated_after = 0;
     // Accessed only under mutex; the receive owner publishes committed quiet
@@ -1959,8 +1963,10 @@ struct Session::Impl {
                 finite.planned = true;
             }
             publish(owner, stop, [&](Snapshot& out) {
-                out.status = std::string(startup_quiet ? "Leaving two quiet slots before first Robust transmission. Scheduled for UTC second " :
-                    "Robust audio scheduled for UTC second ") + std::to_string(first.helper_begin.epoch);
+                scheduled_transmit_utc = start;
+                scheduled_startup_quiet = startup_quiet;
+                out.status = startup_quiet ? "Leaving two quiet slots before first Robust transmission" :
+                    "Robust audio scheduled";
             });
         }, s.channel_mode, std::move(options));
     }
@@ -2122,7 +2128,7 @@ struct Session::Impl {
             try {
                 const auto blocked = basic_transmit_reason(s);
                 const bool interactive_gpu = gpu_policy == GpuPolicy::interactive;
-                if (interactive_gpu && (!s.gpu || blocked) && !gpu_available && gpu_unavailable_reason.empty()) {
+                if (interactive_gpu && !s.gpu && !gpu_available && gpu_unavailable_reason.empty()) {
                     try {
                         check_gpu_receiver_backend();
                         record_gpu_availability();
@@ -2130,7 +2136,7 @@ struct Session::Impl {
                         record_gpu_availability(error.what());
                     }
                 }
-                if (s.gpu && !blocked && (!interactive_gpu || gpu_unavailable_reason.empty())) {
+                if (s.gpu && (!interactive_gpu || gpu_unavailable_reason.empty())) {
                     const bool fp32_minimum = s.transfer.modem.search_arithmetic == modem::SearchArithmetic::fp32;
                     try {
                         gpu_backend = make_gpu_receiver_backend(GpuReceiverOptions{fp32_minimum});
@@ -2144,6 +2150,32 @@ struct Session::Impl {
                     s.gpu = false;
                     std::lock_guard lock(mutex);
                     if (owner == generation) settings.gpu = false;
+                }
+                if (blocked && s.gpu && gpu_backend) {
+                    const auto receipt = gpu_backend->status_receipt();
+                    {
+                        std::lock_guard lock(mutex);
+                        if (owner == generation && !stop.stop_requested()) {
+                            planning_only_backend = gpu_backend;
+                            current.running = false;
+                            current.receiver_error = *blocked;
+                            current.transmit_unavailable = *blocked;
+                            current.status = *blocked;
+                            current.gpu_device = receipt.device_name;
+                            current.gpu_backend = receipt.device;
+                            current.gpu_precision = receipt.precision;
+                            current.gpu_device_uuid = receipt.device_uuid;
+                            current.gpu_selection_reason = receipt.selection_reason;
+                            current.gpu_native_lag_preference_supported =
+                                gpu_backend->permits_native_exact_chirp_z();
+                        }
+                    }
+                    changed.notify_all();
+                    std::unique_lock lock(mutex);
+                    changed.wait(lock, stop, [&] {
+                        return stopping || suspended || owner != generation;
+                    });
+                    throw Error(*blocked);
                 }
                 if (blocked) throw Error(*blocked);
                 const auto gpu_initial_receipt = gpu_backend ? gpu_backend->status_receipt() : receiver_detail::BulkReceipt{};
@@ -2325,6 +2357,7 @@ struct Session::Impl {
             {
                 std::lock_guard lock(mutex);
                 profile.reset();
+                planning_only_backend.reset();
             }
             // Device destruction must stay off the GUI mutex, and suspension
             // must not announce released resources before this teardown.
@@ -2461,6 +2494,7 @@ void Session::configure(const Settings& value) {
         if (p.stopping) throw Error("Robust session is closing");
         if (p.current.transmitting) throw Error("Wait for the Robust transmission to finish before changing its settings");
         p.settings = value;
+        p.planning_only_backend.reset();
         if (!value.simulation || (value.receiver_memory_limit && p.retained_replay &&
             p.retained_replay->working_bytes() >= *value.receiver_memory_limit)) p.retained_replay.reset();
         auto replay_waterfall = value.simulation ? p.current.replay_waterfall : std::nullopt;
@@ -2610,7 +2644,7 @@ std::weak_ptr<triad::v3::receiver_detail::ReceiverBulkBackend> Session::planning
     auto& p = *impl_;
     std::lock_guard lock(p.mutex);
     if (p.profile) return p.profile->receiver.bulk_backend;
-    return {};
+    return p.planning_only_backend;
 }
 
 Snapshot Session::snapshot(bool want_simulation_detail) {
@@ -2679,6 +2713,24 @@ Snapshot Session::snapshot(bool want_simulation_detail) {
             }
         }
         result = p.current;
+        const bool scheduled_status = result.status == "Leaving two quiet slots before first Robust transmission" ||
+            result.status == "Robust audio scheduled";
+        if (p.scheduled_transmit_utc && scheduled_status) {
+            const auto remaining = *p.scheduled_transmit_utc - utc_now();
+            if (remaining > 0) {
+                const auto seconds = static_cast<std::uint64_t>(std::ceil(remaining));
+                result.status = p.scheduled_startup_quiet ?
+                    "Leaving two quiet slots · transmission starts in " + std::to_string(seconds) + " seconds" :
+                    "Transmission starts in " + std::to_string(seconds) + " seconds";
+            } else {
+                p.scheduled_transmit_utc.reset();
+                p.scheduled_startup_quiet = false;
+                p.current.status = result.status = "Robust transmission starting";
+            }
+        } else if (!scheduled_status) {
+            p.scheduled_transmit_utc.reset();
+            p.scheduled_startup_quiet = false;
+        }
         detail_capture = p.simulation_detail_capture;
         detail_generation = p.generation;
         result.gpu_available = p.gpu_available;

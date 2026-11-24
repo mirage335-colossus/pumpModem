@@ -33,8 +33,8 @@ void established_default() {
     check(layout[Slot::bandwidth] == Rect{238, 841, 133, 27} &&
           layout[Slot::carrier] == Rect{381, 841, 156, 27} &&
           layout[Slot::rf_shift] == Rect{547, 841, 141, 27}, "Rate, Carrier and Shift editors lost their reserved widths");
-    check(layout[Slot::snr] == Rect{16, 884, 260, 27} &&
-          layout[Slot::fec] == Rect{286, 884, 942, 27}, "single target and error correction lost their persistent row");
+    check(layout[Slot::snr] == Rect{16, 884, 350, 27} &&
+          layout[Slot::fec] == Rect{376, 884, 240, 27}, "single target and error correction lost their persistent row");
     check(layout[Slot::doppler]==Rect{698,841,220,27}&&layout[Slot::dsp_workspace]==Rect{928,841,300,27},
         "Doppler or advanced controls lost their separate usable row widths");
     check(layout[Slot::status] == Rect{16, 945, 940, 24}, "persistent status must reserve the volume controls");
@@ -398,12 +398,13 @@ void supported_sizes() {
               current.y == previous.y && current.h == previous.h,
               "Target and error correction do not share a persistent row");
         previous = current;
-        check(previous.x + previous.w == size.w - margin && previous.y + previous.h < layout[Slot::mono].y,
+        check(previous.x + previous.w <= size.w - margin && previous.y + previous.h < layout[Slot::mono].y,
               "Target controls overlap audio routing or escape the row");
         check(layout[Slot::bandwidth].w>=82 && layout[Slot::carrier].w>=135 && layout[Slot::rf_shift].w>=120 &&
               persistent_slot(Slot::carrier) && persistent_slot(Slot::rf_shift), "Rate, Carrier or Shift is unusable at the minimum window size");
-        check(layout[Slot::device].w>=112 && layout[Slot::snr].w>=260 &&
-              layout[Slot::fec].w>=148 && layout[Slot::dsp_workspace].w>=121 && layout[Slot::doppler].w>=220,
+        check(layout[Slot::device].w>=112 && layout[Slot::snr].w>=320 &&
+              layout[Slot::fec].w>=148 && layout[Slot::fec].w<=260 &&
+              layout[Slot::dsp_workspace].w>=121 && layout[Slot::doppler].w>=220,
               "A modem control is too narrow for its full native label");
         const auto mono=layout[Slot::mono],duplex=layout[Slot::live_duplex],diagnostics=layout[Slot::diagnostics],device=layout[Slot::device];
         check(persistent_slot(Slot::mono)&&mono.x==device.x&&mono.y>device.y+device.h&&

@@ -5,7 +5,9 @@ detection, host DSP workspace, and any available local receiver samples against
 one Target SNR axis. Console and Link Planner share the target in dB-Hz, initially
 32, and save it as `--target-snr`. Power, path loss, and noise density determine
 the actual C/N₀ used for the link estimate. The target selects the public
-waveform and can leave the duration unchanged across a range of settings.
+waveform and can leave the duration unchanged across a range of settings. The
+plot marks the selected target, the link-budget target, and any plotted
+crossings of the 1 s/s processing and 100% workspace limits.
 
 The workspace curve quotes one owner at a time for the first DATA window and
 two scored quiet windows, using the current local memory allowance, production
@@ -14,10 +16,13 @@ tile's spectral allowance and checks full production shaping before offering a
 target action. The quote includes the nominal input cap, source allowance,
 process baseline, stacks, and receiver state. Where the input cap alone is
 exceeded, the plotted memory requirement is a lower bound. A selected
-GPU route contributes its host workspace once initialized. Later windows,
-additional simultaneous owners, live provider uncertainty, and actual device
-allocation can add constraints. The quote describes nominal host admission
-and does not certify the sustained receiver capacity.
+GPU route contributes its host workspace once initialized. The first sweep
+can show a labeled CPU workspace preview while that route starts. The planner
+checks a committed target again against the selected route before sampling.
+The backend can initialize for planning when the audio provider cannot
+schedule live playback. Later windows, additional simultaneous owners, live
+provider uncertainty, and actual device allocation can add constraints. The
+quote describes nominal host admission.
 
 **Stronger** and **Weaker** normally move about 1 dB and skip targets that fail
 the nominal workspace check. Committing an unsupported target keeps a checked
@@ -35,14 +40,23 @@ covers the model's supported channel settings and does not include successful
 acquisition, bit discrimination, or quiet completion. These limits are
 described in [duration planning](triad-duration-planning.md).
 
-With **Simulation** selected, **Sample selected target** tests a bounded raw-bit
-episode with the configured native receiver and local processing route. It uses
-four independent channel and noise draws, balanced across both bit values,
-with a ten-second processing deadline and a one-million-sample cap per trial. A
-success requires the correct bit and two physically scored quiet slots. The
-planner uses the first balanced pair if the second pair does not finish. It
-reports a 95% sampling interval with joint coverage for the two predeclared
-sample sizes. The processing line shows the slowest completed simulation's
+**Run simulation** tests a bounded raw-bit episode with the configured native
+receiver and local processing route. Committing a changed Target SNR in the
+Link Planner or using **Stronger** or **Weaker** starts the same simulation
+after workspace fitting. In live mode, the planner allows up to five seconds
+for capture to release the receiver, then resumes capture on the configured
+calendar when sampling ends. The Simulation selector and saved settings stay
+in place. **Cancel simulation** and the Console's **Cancel TX** both stop a
+planner simulation. Finite-duplex lab sessions reserve capture for their
+physical episode.
+
+The probe streams up to four independent channel and noise draws in fixed-size
+blocks, balanced across both bit values, with a cooperative 30-second
+processing deadline starting before workspace admission. A success requires the
+correct bit and two physically scored quiet slots. The planner uses the first
+balanced pair if the second pair does not finish. It reports a 95% sampling
+interval with joint coverage for the two predeclared sample sizes. The
+processing line shows the slowest completed simulation's
 elapsed processing seconds per audio second, including source and channel work.
 The planner retains up to eight sampled geometries for comparison while the
 other link settings, processing route, and worker allocation match. A short

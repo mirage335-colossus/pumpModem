@@ -374,11 +374,13 @@ struct DesktopLayout {
         out[Slot::rf_shift] = {x, controls_y, shift_width, field_height}; x += shift_width + control_gap;
         out[Slot::doppler] = {x, controls_y, doppler_width, field_height}; x += doppler_width + control_gap;
         out[Slot::dsp_workspace] = {x, controls_y, width - margin - x, field_height};
-        constexpr int snr_width = 260;
+        // Keep enough room for the live Budget target suffix while giving the
+        // correction selector only the width its longest choice needs.
+        constexpr int snr_width = 350, fec_width = 240;
         const int targets_y = height - 92;
         out[Slot::snr] = {margin, targets_y, snr_width, field_height};
         x=margin+snr_width+control_gap;
-        out[Slot::fec] = {x, targets_y, width-margin-x, field_height};
+        out[Slot::fec] = {x, targets_y, std::min(fec_width,std::max(0,width-margin-x)), field_height};
         // Audio routing and diagnostics sit below the modem settings without
         // narrowing the editors or their labels at the minimum desktop width.
         out[Slot::mono] = {margin, height - 56, 156, 22};

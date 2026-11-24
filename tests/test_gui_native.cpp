@@ -45,8 +45,9 @@ void planner_quick_references() {
     app.dispatch(gui::ui::Command::planner_toggle_details);
     const auto expanded=app.document(gui::ui::Page::planner,900);
     check(expanded && document_contains(*expanded,"Hide details"));
-    for (const auto* reference:{"Sub-9 kHz", "Groundwave", "Skywave", "Meteor burst", "Earth–Moon–Earth"})
+    for (const auto* reference:{"Groundwave", "Skywave", "Meteor burst"})
         check(document_contains(*expanded,reference));
+    check(!document_contains(*expanded,"Sub-9 kHz")&&!document_contains(*expanded,"Earth–Moon–Earth"));
     check(document_contains(*expanded,"not propagation predictions"));
     app.dispatch(gui::ui::Command::planner_toggle_details);
     const auto hidden=app.document(gui::ui::Page::planner,900);
@@ -94,6 +95,7 @@ void planner_target_navigation_and_graph() {
         {.target_db_hz=-50,.bit_seconds=18,.workspace_fraction=1.4,.workspace_fits=false},
         *model.selected};
     model.stronger_fit_target=-43.8;model.weaker_fit_target=-58.1;
+    model.budget_target_db_hz=-50;
     model.cpu_status="CPU estimate pending";model.rx_status="Provisional DATA model";
     model.workspace_status="Nominal host workspace";
     const auto page=gui::planner_page::build(model,900,false,false);
@@ -105,6 +107,8 @@ void planner_target_navigation_and_graph() {
     check(plots==1&&document_contains(page,"Target C/N₀")&&document_contains(page,"100%")&&
           document_contains(page,"RX DATA model")&&document_contains(page,"12 s")&&
           document_contains(page,"91%")&&document_contains(page,"98%"));
+    check(document_contains(page,"Budget C/N₀ intercept at -50 dB-Hz")&&
+          document_contains(page,"workspace 100% crossing"));
     const auto enabled=[&](gui::ui::Command command) {
         return std::any_of(nodes.begin(),nodes.end(),[&](const auto* node) {
             return node->kind==gui::ui::DocumentKind::action&&node->command==command&&node->enabled;
@@ -187,6 +191,60 @@ void planner_commits_checked_target() {
     const auto launch=gui::launch_command::parse(controller.field(F::planner_command).text);
     check(launch.target_db_hz==target);
 }
+void planner_simulation_controls() {
+    using namespace gui;
+    using C=ui::Command;
+    using F=ui::Field;
+    launch_command::Patch cpu;
+    cpu.gpu=false;
+    Application app({.page=ui::Page::planner,.settings=cpu});
+    const auto action=[&](C command, std::string_view label) {
+        const auto document=app.document(ui::Page::planner,900);
+        std::vector<const ui::DocumentNode*> nodes;
+        document_nodes(*document,nodes);
+        return std::any_of(nodes.begin(),nodes.end(),[&](const auto* node) {
+            return node->kind==ui::DocumentKind::action&&node->command==command&&node->text==label&&node->enabled;
+        });
+    };
+    const auto wait=[&](const auto& predicate) {
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(8);
+        while(!predicate()&&std::chrono::steady_clock::now()<deadline) {
+            app.tick();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        check(predicate());
+    };
+    wait([&] {return action(C::planner_sample,"Run simulation");});
+    check(app.field(F::planner_target).text=="32"&&app.field(F::simulation).selected=="no"&&
+          action(C::planner_stronger,"Stronger")&&action(C::planner_weaker,"Weaker"));
+    const auto original_command=app.field(F::planner_command).text;
+    app.dispatch(C::planner_sample);
+    check(action(C::planner_sample,"Cancel simulation")&&app.enabled(C::cancel));
+    app.dispatch(C::planner_sample);
+    check(action(C::planner_sample,"Run simulation")&&!app.enabled(C::cancel));
+    check(app.field(F::planner_command).text==original_command);
+
+    const auto& controls=ui::console_screen();
+    const auto target=std::find_if(controls.begin(),controls.end(),[](const auto& control) {
+        return control.field==F::planner_target;
+    });
+    check(target!=controls.end());
+    app.edit(F::planner_target,"34");
+    check(app.submit(*target,false,false));
+    wait([&] {return action(C::planner_sample,"Cancel simulation");});
+    app.navigate(ui::Page::console);
+    check(app.enabled(C::cancel));
+    app.dispatch(C::cancel);
+    app.navigate(ui::Page::planner);
+    wait([&] {return action(C::planner_sample,"Run simulation");});
+    check(app.field(F::simulation).selected=="no"&&app.field(F::snr).text=="34"&&
+          !app.enabled(C::cancel));
+    app.dispatch(C::planner_weaker);
+    wait([&] {return action(C::planner_sample,"Cancel simulation");});
+    check(std::stod(app.field(F::snr).text)<34&&app.field(F::simulation).selected=="no");
+    app.dispatch(C::planner_sample);
+    wait([&] {return action(C::planner_sample,"Run simulation");});
+}
 void shared_robust_target() {
     gui::Application app({.simulation=true});
     app.select(gui::ui::Field::fast_mode,"robust");
@@ -221,14 +279,14 @@ void shared_robust_target() {
     });
     check(target!=declarations.end());
     check(app.field(gui::ui::Field::snr).text=="32"&&app.field(gui::ui::Field::planner_target).text=="32");
-    check(std::string_view(target->label)=="Target SNR (dB-Hz)");
-    check(app.control(*target).label=="Target SNR (dB-Hz) · Budget target 47");
+    check(std::string_view(target->label)=="Target SNR");
+    check(app.control(*target).label=="Target SNR · Budget target 47");
     app.edit(gui::ui::Field::link_loss,"90 dB");
-    check(app.control(*target).label=="Target SNR (dB-Hz) · Budget target 77");
+    check(app.control(*target).label=="Target SNR · Budget target 77");
     app.edit(gui::ui::Field::link_loss,"");
     check(app.control(*target).label==target->label);
     app.edit(gui::ui::Field::link_loss,"90.25 dB");
-    check(app.control(*target).label=="Target SNR (dB-Hz) · Budget target 76");
+    check(app.control(*target).label=="Target SNR · Budget target 76");
     check(app.field(gui::ui::Field::snr).text=="32");
     app.edit(gui::ui::Field::snr,"40");
     const auto first_command=app.field(gui::ui::Field::planner_command).text;
@@ -1114,6 +1172,7 @@ int main() {
         planner_quick_references();
         planner_target_navigation_and_graph();
         planner_commits_checked_target();
+        planner_simulation_controls();
         shared_robust_target();
         shared_gpu_toggle();
         gpu_route_diagnostics();

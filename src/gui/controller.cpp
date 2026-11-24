@@ -391,6 +391,7 @@ struct Controller::Impl {
     std::optional<std::pair<std::uint64_t,planner::Model>> pending_planner_sample;
     std::uint64_t planner_request_id=0;
     bool planner_requested=false,planner_fit_requested=false,planner_attempted=false,planner_sampling=false,planner_sample_active=false;
+    bool planner_sample_requested=false,planner_target_edited=false;
     std::string generated_launch_command;
     std::uint64_t revision=0,service_id=0,attachment_revision=0;
     Clock::time_point notice_until{};
@@ -567,7 +568,7 @@ struct Controller::Impl {
     }
     bool key_ready() const {return settings.transfer.key.has_value()&&!key_loading&&!key_failed;}
     void start_or_resume_session() {
-        if(!started||!settings.transfer.key)return;
+        if(!started||!settings.transfer.key||planner_sample_active)return;
         const bool active=active_requested&&key_ready();
         if(!session_started) {
             session.start(settings,active);
@@ -996,7 +997,11 @@ struct Controller::Impl {
         snapshot.slot_stride_range_seconds.reset();
         planner_inputs.settings=settings;
         if(session_started)accept_snapshot(session.snapshot());
-        if(!target_only)planner_samples.clear();
+        if(!target_only) {
+            planner_samples.clear();
+            planner_sample_requested=false;
+            planner_target_edited=false;
+        }
         invalidate_planner();dirty();sync_launch_command();refresh_files();refresh_signals();
         } catch(const std::exception& error) {
             fields=previous_fields;settings=previous_settings;keys=previous_keys;key_origin=previous_key_origin;
@@ -1025,14 +1030,16 @@ struct Controller::Impl {
             input.settings=settings;
             if(input.settings->gpu&&!snapshot.gpu_unavailable_reason.empty())input.settings->gpu=false;
         }
-        if(input.settings&&input.settings->gpu) {
+        input.backend=session.planning_backend();
+        if(input.settings&&input.settings->gpu&&!input.backend.expired()) {
             input.backend_id=snapshot.gpu_backend;
             input.gpu_device_uuid=snapshot.gpu_device_uuid;
         } else {
+            input.awaiting_gpu=input.settings&&input.settings->gpu;
+            if(input.awaiting_gpu)input.settings->gpu=false;
             input.backend_id="native-cpu";
             input.gpu_device_uuid.reset();
         }
-        input.backend=session.planning_backend();
         auto model=planner::budget_preview(input);
         model.calculating=settings_valid&&link_inputs_valid()&&planner_target_valid;
         if(!model.calculating&&model.error.empty())model.error=!settings_valid?settings_error:
@@ -1047,20 +1054,37 @@ struct Controller::Impl {
             auto [id,model]=std::move(*pending_planner_sample);
             pending_planner_sample.reset();
             const auto failed_model=model;
+            auto backend=model.inputs.settings->gpu ? model.inputs.backend.lock() : nullptr;
+            const bool pause_capture=session_started&&active_requested&&!settings.simulation;
             planner_sample_active=true;
             try {
-                planner_worker=execution::Task([this,id,model=std::move(model)](std::stop_token stop) mutable {
+                planner_worker=execution::Task([this,id,model=std::move(model),backend=std::move(backend),
+                    pause_capture](std::stop_token stop) mutable {
                     PlannerResult result;result.request_id=id;result.sample=true;result.model=std::move(model);
                     try {
-                        auto sampled=planner::sample(result.model.inputs,stop);
-                        if(!stop.stop_requested()) {
+                        // A full-W sample and live capture must not own receivers at the same time.
+                        bool capture_released=!pause_capture;
+                        const auto release_deadline=Clock::now()+std::chrono::seconds(5);
+                        execution::Mutex wait_mutex;
+                        execution::StopCondition wait;
+                        std::unique_lock lock(wait_mutex);
+                        while(!capture_released&&!stop.stop_requested()&&Clock::now()<release_deadline) {
+                            capture_released=session.try_suspend_capture();
+                            if(capture_released)break;
+                            wait.wait_for(lock,stop,std::chrono::milliseconds(20),[]{return false;});
+                        }
+                        lock.unlock();
+                        if(!capture_released)result.model.sample_status="Live capture did not release its receiver for the simulation.";
+                        else if(!stop.stop_requested()) {
+                            auto sampled=planner::sample(result.model.inputs,stop);
                             result.sample_result=sampled;
                             if(result.model.selected&&result.model.selected->bit_seconds)
                                 result.sample_geometry_bit_seconds=*result.model.selected->bit_seconds;
-                            if(result.sample_geometry_bit_seconds)
+                            if(!stop.stop_requested()&&result.sample_geometry_bit_seconds)
                                 planner::add_sample(result.model,result.sample_geometry_bit_seconds,sampled);
                         }
                     } catch(const std::exception& error) { result.model.sample_status=error.what(); }
+                    backend.reset();
                     result.model.sampling=false;
                     std::lock_guard lock(planner_mutex);
                     planner_result=std::move(result);
@@ -1102,13 +1126,21 @@ struct Controller::Impl {
         }
         if(!ready)return;
         if(planner_worker.joinable())planner_worker.join();
-        if(ready->sample)planner_sample_active=false;
+        if(ready->sample) {
+            planner_sample_active=false;
+            if(!closing)start_or_resume_session();
+            ++revision;
+        }
         if(ready->request_id!=planner_request_id||closing)return;
         planner_sampling=false;
+        const auto unsampled_status=ready->sample&&!ready->sample_result?ready->model.sample_status:std::string{};
         if(ready->sample)remember_sample(*ready);
         apply_cached_samples(ready->model);
+        if(!unsampled_status.empty())ready->model.sample_status=unsampled_status;
         const auto& input=ready->model.inputs;
-        const bool gpu_initializing=input.settings&&input.settings->gpu&&input.backend.expired();
+        const bool gpu_initializing=input.awaiting_gpu||
+            (input.settings&&input.settings->gpu&&input.backend.expired()&&!ready->sample);
+        if(!ready->model.error.empty())planner_fit_requested=false;
         if(ready->model.error.empty()&&planner_fit_requested&&!gpu_initializing) {
             if(snapshot.transmitting) {
                 planner_fit_requested=false;
@@ -1133,8 +1165,10 @@ struct Controller::Impl {
         planner_model=std::make_shared<const planner::Model>(std::move(ready->model));
         ++revision;
     }
-    void planner_target(double value) {
+    void planner_target(double value,bool sample_after=false) {
         if(!std::isfinite(value)||value< -200||value>200)throw Error("Planner target must be -200 to 200 dB in 1 Hz");
+        if(sample_after&&value!=planner_inputs.target_db_hz)planner_sample_requested=true;
+        planner_target_edited=false;
         planner_fit_requested=false;
         planner_inputs.target_db_hz=value;planner_target_valid=true;invalidate_planner();
         set_target_text(planner_number(value));configure(false,nullptr,true,nullptr,nullptr,KeyOrigin::file,true);
@@ -1143,6 +1177,7 @@ struct Controller::Impl {
         planner_fit_requested=true;
         if(planner_model&&planner_model->calculating)return;
         if(planner_model&&planner_model->available) {
+            if(planner_model->inputs.awaiting_gpu)return;
             planner_fit_requested=false;
             if(planner_model->fitted_target&&
                std::abs(*planner_model->fitted_target-planner_inputs.target_db_hz)>1e-9) {
@@ -1152,7 +1187,7 @@ struct Controller::Impl {
                     planner_number(planner_inputs.target_db_hz)+" dB-Hz to fit receiver workspace.");
             } else if(!planner_model->fitted_target) {
                 const auto& input=planner_model->inputs;
-                if(input.settings&&input.settings->gpu&&input.backend.expired()) {
+                if(input.awaiting_gpu||(input.settings&&input.settings->gpu&&input.backend.expired())) {
                     planner_fit_requested=true;
                     return;
                 }
@@ -1163,17 +1198,38 @@ struct Controller::Impl {
         planner_model.reset();planner_attempted=false;
         request_link_plan();
     }
+    bool can_start_planner_sample(const planner::Model& model) const {
+        return !settings.finite_duplex&&!planner_sampling&&!planner_sample_active&&!snapshot.transmitting&&!snapshot.simulation_replay&&
+            model.available&&!model.calculating&&model.selected&&model.selected->workspace_fits&&
+            model.inputs.settings&&!model.inputs.awaiting_gpu&&
+            (!model.inputs.settings->gpu||!session.planning_backend().expired());
+    }
     void request_planner_sample() {
         const auto current=link_plan();
-        if(planner_sampling||planner_sample_active||snapshot.transmitting||!settings.simulation||
-           !current->available||current->calculating||!current->selected||
-           !current->selected->workspace_fits||current->sampling)return;
+        if(!can_start_planner_sample(*current))return;
+        planner_sample_requested=false;
         auto sampled=*current;
+        sampled.inputs.backend=session.planning_backend();
         sampled.sampling=true;
-        sampled.sample_status="Running four configured one-bit trials…";
+        sampled.sample_status=snapshot.running&&!settings.simulation?
+            "Running bounded one-bit receiver trials. Live capture resumes when the simulation ends.":
+            "Running bounded one-bit receiver trials…";
         planner_sampling=true;
         pending_planner_sample=std::pair{planner_request_id,std::move(sampled)};
         planner_model=std::make_shared<const planner::Model>(pending_planner_sample->second);
+        ++revision;
+    }
+    void cancel_planner_sample() {
+        planner_sample_requested=false;
+        if(!planner_sampling)return;
+        ++planner_request_id;
+        pending_planner_sample.reset();
+        if(planner_sample_active)planner_worker.request_stop();
+        planner_sampling=false;
+        auto model=*link_plan();
+        model.sampling=false;
+        model.sample_status="Simulation cancelled.";
+        planner_model=std::make_shared<const planner::Model>(std::move(model));
         ++revision;
     }
     static std::string planner_number(double value) {
@@ -1467,13 +1523,10 @@ struct Controller::Impl {
     bool enabled(Command command) const {
         if(closing) return false;
         const bool busy=snapshot.transmitting;
-        const bool fitting_target=planner_fit_requested&&planner_model&&planner_model->calculating;
+        const bool fitting_target=planner_fit_requested;
         switch(command) {
         case Command::fhss_apply: return developer_mode&&!busy&&!key_loading&&!key_failed;
-        case Command::planner_load_command:
-        case Command::planner_example_spread: case Command::planner_example_weak:
-        case Command::planner_example_sub9: case Command::planner_example_eme:
-            return !busy&&!key_loading&&!key_failed;
+        case Command::planner_load_command: return !busy&&!key_loading&&!key_failed;
         case Command::planner_power: case Command::planner_loss: case Command::planner_noise:
         case Command::planner_power_100w: case Command::planner_power_4w: case Command::planner_power_1w:
         case Command::planner_power_100mw: case Command::planner_power_2mw: case Command::planner_power_1mw:
@@ -1496,13 +1549,9 @@ struct Controller::Impl {
             link_inputs_valid()&&planner_target_valid&&!snapshot.noise_transmit_unavailable;
         case Command::transmit_helper: return !fitting_target&&!planner_sampling&&!planner_sample_active&&session_started&&active_requested&&!busy&&key_ready()&&settings_valid&&
             link_inputs_valid()&&planner_target_valid&&settings.helper.power_w>0&&!snapshot.transmit_unavailable;
-        case Command::planner_sample: {
-            const auto model=link_plan();
-            return !busy&&!planner_sampling&&!planner_sample_active&&settings.simulation&&model->available&&!model->calculating&&
-                model->selected&&model->selected->workspace_fits;
-        }
-        case Command::cancel: return busy||snapshot.simulation_replay;
-        case Command::replay_simulation: return snapshot.simulation_replay_available;
+        case Command::planner_sample: return planner_sampling||can_start_planner_sample(*link_plan());
+        case Command::cancel: return planner_sampling||busy||snapshot.simulation_replay;
+        case Command::replay_simulation: return !planner_sampling&&!planner_sample_active&&snapshot.simulation_replay_available;
         case Command::open_keyfile: case Command::generate_keyfile:
         case Command::load_amateur: return !busy&&!key_loading;
         case Command::show_key_folder: return !busy&&!key_loading&&!key_path.empty();
@@ -1750,8 +1799,11 @@ struct Controller::Impl {
     }
     void accept_snapshot(live::Snapshot value) {
         const bool planner_route_changed=value.gpu_backend!=snapshot.gpu_backend||
+            value.gpu_device_uuid!=snapshot.gpu_device_uuid||
             value.gpu_unavailable_reason!=snapshot.gpu_unavailable_reason;
-        if(planner_route_changed&&(planner_requested||planner_fit_requested))invalidate_planner();
+        const bool planner_gpu_ready=planner_model&&planner_model->inputs.awaiting_gpu&&
+            !session.planning_backend().expired();
+        if(settings.gpu&&(planner_route_changed||planner_gpu_ready))invalidate_planner();
         const bool spectrum_changed=value.spectrum_revision!=snapshot.spectrum_revision||
             value.spectrum_segment!=snapshot.spectrum_segment;
         const bool modeled_waterfall_changed=value.simulation_waterfall!=snapshot.simulation_waterfall;
@@ -1809,7 +1861,8 @@ struct Controller::Impl {
         if(reception_changed) {refresh_files();refresh_signals();}
         plot_update.append_waterfall=plot_update.append_waterfall||spectrum_changed;
         plot_update.update_plots=plot_update.update_plots||spectrum_changed||pattern_changed||state_changed;
-        f(UiField::mode).text=snapshot.transmitting?(snapshot.simulation?"Robust simulation":"Robust transmitting"):
+        f(UiField::mode).text=planner_sampling?"Link Planner simulation":
+            snapshot.transmitting?(snapshot.simulation?"Robust simulation":"Robust transmitting"):
             snapshot.running?"Robust receiving":"Robust idle";
         f(UiField::mode).text_tone=snapshot.receiver_error.empty()?ui::TextTone::normal:ui::TextTone::negative;
         f(UiField::diagnostics).text=snapshot.receiver_error;
@@ -1842,11 +1895,11 @@ struct Controller::Impl {
             if(!f(UiField::diagnostics).text.empty())f(UiField::diagnostics).text+=" | ";
             f(UiField::diagnostics).text+=active_fhss;
         }
-        if(Clock::now()>=notice_until) {
+        if(snapshot.transmitting||Clock::now()>=notice_until) {
             auto& status=f(UiField::status).text;
-            status=!snapshot.error.empty()?snapshot.error:
+            status=planner_sampling?"Running Link Planner simulation…":!snapshot.error.empty()?snapshot.error:
                 !settings_error.empty()?settings_error:!snapshot.receiver_error.empty()?snapshot.receiver_error:
-                snapshot.transmit_unavailable?*snapshot.transmit_unavailable:snapshot.status;
+                !snapshot.transmitting&&snapshot.transmit_unavailable?*snapshot.transmit_unavailable:snapshot.status;
             if(status==snapshot.status && snapshot.simulation_progress && snapshot.simulation_progress->sample_rate) {
                 const auto& progress=*snapshot.simulation_progress;
                 const auto rate=static_cast<double>(progress.sample_rate);
@@ -1954,7 +2007,6 @@ struct Controller::Impl {
         }
         start_or_resume_session();
     }
-    void planner_example(Command) {notice(planner_unavailable);}
     std::size_t last_pattern_page() const {return snapshot.pattern_steps.empty()?0:
         ((snapshot.pattern_steps.size()-1)/page_size)*page_size;}
     void action(Command command) {
@@ -1995,19 +2047,19 @@ struct Controller::Impl {
         }
         case Command::planner_target:
             request(Purpose::planner_target,ui::ServiceKind::prompt,"Plan for signal level (dB in 1 Hz)",planner_number(planner_inputs.target_db_hz));break;
-        case Command::planner_stronger: {const auto value=*link_plan()->stronger_fit_target;planner_target(value);break;}
-        case Command::planner_weaker: {const auto value=*link_plan()->weaker_fit_target;planner_target(value);break;}
-        case Command::planner_example_short: planner_target(-8);break;
-        case Command::planner_example_lpi: planner_target(23);break;
-        case Command::planner_example_spread: case Command::planner_example_weak:
-        case Command::planner_example_sub9: case Command::planner_example_eme:
-            planner_example(command);break;
+        case Command::planner_stronger: planner_target(*link_plan()->stronger_fit_target,true);request_target_fit();break;
+        case Command::planner_weaker: planner_target(*link_plan()->weaker_fit_target,true);request_target_fit();break;
+        case Command::planner_example_short: planner_target(-8,true);request_target_fit();break;
+        case Command::planner_example_lpi: planner_target(23,true);request_target_fit();break;
         case Command::planner_fast: notice(planner_unavailable);break;
         case Command::planner_day: notice(planner_unavailable);break;
         case Command::planner_clock: notice(planner_unavailable);break;
         case Command::planner_toggle_details: planner_details=!planner_details;break;
         case Command::planner_toggle_draft: planner_draft=!planner_draft;planner_model.reset();cancel_advisory();break;
-        case Command::planner_sample: request_planner_sample();break;
+        case Command::planner_sample:
+            if(planner_sampling)cancel_planner_sample();
+            else request_planner_sample();
+            break;
         case Command::planner_power:
             request(Purpose::planner_power,ui::ServiceKind::prompt,"Average transmit power (W, mW, µW or dBm)",planner_number(planner_inputs.tx_dbm)+" dBm");break;
         case Command::planner_loss:
@@ -2046,6 +2098,11 @@ struct Controller::Impl {
             composer_received=previous_received;composer=*previous_message; repeatable_prefix=previous_repeatable_prefix; pending_repeatable_removal=false; f(UiField::repeatable).checked=false;
             seeded_message.clear(); sync_composer(); ++f(UiField::message).text_cursor_end_revision; dirty(); break;
         case Command::cancel:
+            if(planner_sampling) {
+                cancel_planner_sample();
+                notice("Cancelling Link Planner simulation.");
+                break;
+            }
             if(snapshot.simulation_replay)notice("Stopping simulation replay.");
             else notice("Cancelling transmission; cancellation does not complete reception.");
             session.cancel_transmit();
@@ -2139,7 +2196,7 @@ struct Controller::Impl {
         try {
         if(!result.error.empty()) throw Error(result.error);
         switch(pending.purpose) {
-        case Purpose::planner_target: planner_target(number(result.value,"Planner target"));request_target_fit();break;
+        case Purpose::planner_target: planner_target(number(result.value,"Planner target"),true);request_target_fit();break;
         case Purpose::planner_power: edit_link_budget(UiField::link_power,result.value);break;
         case Purpose::planner_loss: edit_link_budget(UiField::link_loss,result.value);break;
         case Purpose::planner_noise: edit_link_budget(UiField::link_noise,result.value);break;
@@ -2212,7 +2269,13 @@ void Controller::poll(bool expanded_spectrum,bool planner_visible) {
         p.accept_planner_result();
         if(!p.closing) {
             if(p.session_started)p.accept_snapshot(p.session.snapshot(expanded_spectrum));
-            if((p.planner_requested||p.planner_fit_requested)&&!p.planner_attempted)p.request_link_plan();
+            if((p.planner_requested||p.planner_fit_requested||p.planner_sample_requested)&&!p.planner_attempted)
+                p.request_link_plan();
+            if(p.planner_sample_requested&&!p.planner_fit_requested&&p.planner_model) {
+                if(p.settings.finite_duplex||!p.planner_model->error.empty()||(p.planner_model->available&&
+                    !p.planner_model->inputs.awaiting_gpu&&!p.planner_model->fitted_target))p.planner_sample_requested=false;
+                else if(p.can_start_planner_sample(*p.planner_model))p.request_planner_sample();
+            }
             p.dispatch_planner();
             p.dispatch();
         }
@@ -2228,9 +2291,10 @@ void Controller::close() {
 bool Controller::try_suspend_capture() {
     auto& p=*impl_;
     if(p.snapshot.transmitting||p.closing)return false;
-    if(p.planner_sampling||p.planner_sample_active)p.invalidate_planner();
+    p.cancel_planner_sample();
     p.active_requested=false;
-    return !p.session_started||p.session.try_suspend_capture();
+    const bool idle=!p.session_started||p.session.try_suspend_capture();
+    return idle&&!p.planner_sample_active;
 }
 void Controller::resume_capture() {if(!impl_->closing) {
     impl_->active_requested=true;
@@ -2253,6 +2317,8 @@ void Controller::edit(UiField field,std::string text) {
         if(const auto error=ui::edit_error(*declaration,text);!error.empty())throw Error(error);
         if(field==UiField::snr||field==UiField::planner_target) {
             p.f(field).text=std::move(text);
+            p.planner_sample_requested=false;
+            if(field==UiField::snr)p.planner_target_edited=false;
             p.planner_fit_requested=false;
             p.invalidate_planner();
             double value=0;
@@ -2262,6 +2328,7 @@ void Controller::edit(UiField field,std::string text) {
             } catch(const Error& error) {
                 p.planner_target_valid=false;p.notice(error.what(),10);p.controls();return;
             }
+            if(field==UiField::planner_target&&value!=p.planner_inputs.target_db_hz)p.planner_target_edited=true;
             p.planner_inputs.target_db_hz=value;p.planner_target_valid=true;
             p.set_target_text(p.f(field).text);p.configure(false,nullptr,true,nullptr,nullptr,Impl::KeyOrigin::file,true);
             p.controls();return;
@@ -2337,6 +2404,7 @@ void Controller::commit_target(UiField field) {
     auto& p=*impl_;
     if(p.closing||!p.f(field).enabled||!p.planner_target_valid)return;
     const auto canonical=Impl::planner_number(p.planner_inputs.target_db_hz);
+    if(field==UiField::planner_target&&std::exchange(p.planner_target_edited,false))p.planner_sample_requested=true;
     p.set_target_text(canonical);p.sync_launch_command();p.request_target_fit();p.controls();
 }
 void Controller::select(UiField field,std::string id) {

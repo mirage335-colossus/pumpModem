@@ -240,7 +240,9 @@ Model build(const Inputs& inputs, std::stop_token stop) {
         return result;
     }
 
-    result.cpu_status = "Sample a target in Simulation to measure finite processing pace on this hardware.";
+    result.cpu_status = "Run a simulation to measure finite processing pace on this hardware.";
+    if (inputs.settings->finite_duplex)
+        result.cpu_status = "This finite-duplex session is reserved for its physical audio episode.";
     result.rx_status = "Provisional true-candidate DATA detection bound. Complete RX success is unqualified.";
     result.workspace_status = "Nominal host reservation for one DATA window and two quiet windows. Target actions use exact shaping.";
     try {
@@ -251,7 +253,9 @@ Model build(const Inputs& inputs, std::stop_token stop) {
         result.receiver_status = selected.limit;
         if (!selected.point.rx_data_detection_probability && selected.point.bit_seconds)
             result.rx_status = "The fixed-energy DATA model is unavailable for this channel or FHSS setting.";
-        if (!sweep.workspace_available())
+        if (inputs.awaiting_gpu)
+            result.workspace_status = "Native CPU workspace preview while the selected GPU route initializes.";
+        else if (!sweep.workspace_available())
             result.workspace_status = "Host workspace will be available after the selected GPU route initializes.";
 
         // Probe every integer dB in the native domain. The model also evaluates
@@ -272,9 +276,10 @@ Model build(const Inputs& inputs, std::stop_token stop) {
 
         const auto first_fit = std::find_if(points.begin(), points.end(),
             [](const Point& point) { return point.workspace_fits; });
-        const auto low = std::min({-12., inputs.target_db_hz - 8,
+        const auto budget = result.budget_target_db_hz.value_or(inputs.target_db_hz);
+        const auto low = std::min({-12., inputs.target_db_hz - 8, budget - 2,
             first_fit != points.end() ? first_fit->target_db_hz - 8 : -12.});
-        const auto high = std::max(48., inputs.target_db_hz + 12);
+        const auto high = std::max({48., inputs.target_db_hz + 12, budget + 2});
         for (const auto& point : points)
             if (point.target_db_hz >= low && point.target_db_hz <= high) result.points.push_back(point);
         result.available = true;
