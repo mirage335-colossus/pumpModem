@@ -25,7 +25,7 @@ struct Patch {
     std::optional<std::string> data_cadence;
     // Inline list contents or a file reference; parser never opens files.
     std::optional<std::string> fhss_list,fhss_list_file;
-    // File references, explicit public/empty bank and named selection only;
+    // File references, explicit public bank and named selection only;
     // never serialize key material. Omitted keyset preserves the current bank.
     std::optional<std::string> keyfile,keyset,key_name,tx_key;
     std::optional<double> audio_timing_error_seconds;
@@ -48,6 +48,8 @@ struct Patch {
 Patch parse(std::string_view command);
 // Already split setting arguments, excluding the executable and GUI flags.
 Patch parse_arguments(std::span<const std::string> arguments);
+// Also validate key flags for callers constructing a Patch directly.
+void validate_key_selection(const Patch& settings);
 // Formats only populated fields, with a host-appropriate relative GUI command.
 // The single Robust target is exported as --target-snr.
 std::string format(const Patch& settings);

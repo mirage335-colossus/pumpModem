@@ -46,6 +46,26 @@ void planner_quick_references() {
 void shared_robust_target() {
     gui::Application app({.simulation=true});
     app.select(gui::ui::Field::fast_mode,"robust");
+    const auto& key=app.field(gui::ui::Field::key);
+    gui::Controller controller({.simulation=true});
+    check(key.selected=="key:WARNING-Amateur"&&controller.settings().transfer.key.has_value());
+    check(std::none_of(key.options.begin(),key.options.end(),[](const auto& option){return option.id=="none";}));
+    check(app.field(gui::ui::Field::planner_command).text.find("--keyset amateur")!=std::string::npos&&
+          app.field(gui::ui::Field::planner_command).text.find("--tx-key named")!=std::string::npos);
+    controller.select(gui::ui::Field::key,"none");
+    check(controller.field(gui::ui::Field::key).selected=="key:WARNING-Amateur"&&
+          controller.settings().transfer.key.has_value()&&
+          controller.field(gui::ui::Field::status).text.find("Select an available item")!=std::string::npos);
+    controller.edit(gui::ui::Field::planner_command,"--tx-key none");
+    controller.activate(gui::ui::Command::planner_load_command);
+    check(controller.field(gui::ui::Field::key).selected=="key:WARNING-Amateur"&&
+          controller.field(gui::ui::Field::status).text.find("requires a key")!=std::string::npos);
+    gui::launch_command::Patch unkeyed;
+    unkeyed.keyset="none";
+    bool unkeyed_patch_rejected=false;
+    try {gui::Controller invalid({.simulation=true,.launch_settings=unkeyed});}
+    catch(const std::exception&) {unkeyed_patch_rejected=true;}
+    check(unkeyed_patch_rejected);
     const auto& declarations=gui::ui::console_screen();
     for(const auto& control:declarations) {
         const std::string_view label=control.label;
@@ -990,8 +1010,8 @@ int main() {
         check(gui::key_entry_names(" Home, Portable , Caf\xc3\xa9 ")==std::vector<std::string>({"Home","Portable","Caf\xc3\xa9"}));
         const std::vector<std::string> choice_names{"A|B","None","_Home","Home","A&B","AB","Path/Back\\slash"};
         check(gui::key_choice_labels(choice_names)==std::vector<std::string>({
-            "None","1. A|B","2. None","3. _Home","4. Home","5. A&B","6. AB","7. Path/Back\\slash"}));
-        check(gui::key_choice_labels({})==std::vector<std::string>({"None"}));
+            "1. A|B","2. None","3. _Home","4. Home","5. A&B","6. AB","7. Path/Back\\slash"}));
+        check(gui::key_choice_labels({}).empty());
         for (const auto* invalid : {"", " ", ",Home", "Home,", "Home,,Portable"}) {
             bool invalid_names=false;
             try { (void)gui::key_entry_names(invalid); } catch (const Error&) { invalid_names=true; }

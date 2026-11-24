@@ -84,10 +84,9 @@ timestamps where available. The receiver continuously scores DATA or null at
 the configured addresses. It does not currently acquire an arbitrary start
 time, waveform epoch or ordinal.
 
-Choose Off when transmitting without encryption, a matching keyfile entry when
-using private keys, or AMATEUR when both peers use the public amateur keyset.
-AMATEUR is public key material; it does not provide confidentiality or
-authenticate a sender. Noise transmission intentionally uses
+Both peers select the same keyfile entry or the built-in public Amateur key.
+The Amateur key provides no confidentiality or sender authentication.
+Noise transmission intentionally uses
 fresh DATA key material and the public Helper key. See the
 [GUI map](../gui-contract.md#modems-and-current-availability),
 [key policy](../robust-current.md#transmit-key-policy) and exact

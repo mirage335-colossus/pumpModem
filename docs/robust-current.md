@@ -663,10 +663,13 @@ and the current [validation record](validation.md).
 
 ## GUI settings and operating limits
 
-The shared profile maps encryption, Helper power/ratio/callsign, DATA transmit
-power, path loss, clock policy, oscillator models, spreading, burst waits, FHSS
-and channel controls to the native components. Rate is the native inner rate;
-Added Symbols and Interleave select native lanes and spreading. Robust Setup
+The shared profile maps the selected key, Helper power/ratio/callsign, DATA
+transmit power, path loss, clock policy, oscillator models, spreading, burst
+waits, FHSS and channel controls to the native components. Ordinary Robust GUI
+DATA and reception use the selected key. The built-in public Amateur key is selected
+at ordinary startup and provides no confidentiality or sender authentication.
+Rate is the native inner rate. Added Symbols and Interleave select native
+lanes and spreading. Robust Setup
 applies the selected minimum of 0, 3.5, 125, or 265 Hz to adjacent DATA carrier
 centers, defaulting to 265 Hz. The nominal span includes the two center gaps
 and one pulse bandwidth. Both peers need the same effective spacing. Invalid audio
@@ -794,10 +797,10 @@ this is waveform separation, not sender authentication. See the
 [canonical key context](crypto.md#canonical-robust-waveform-purposes).
 
 Selecting the public Amateur profile changes key material, not the Robust
-waveform or encryption protocol. Ordinary Robust DATA keeps its configured key
-and encryption setting; any enabled Helper uses the configured effective key.
-At the lower-level resolver, Message mode preserves the caller's DATA encryption
-flag; it does not disable keyed Helper metadata. Transmit-noise DATA always uses
+waveform or encryption protocol. Ordinary Robust GUI DATA always uses its
+selected key; any enabled Helper uses the configured effective key. At the
+lower-level resolver, Message mode preserves the caller's DATA encryption flag;
+it does not disable keyed Helper metadata. Transmit-noise DATA always uses
 fresh, independent operating-system CSPRNG keys and effective encryption, even
 when Amateur is selected. Its dual-lane roots are created once per transmission
 and reused for its samples; private roots are never exported or logged. If Helper
@@ -809,8 +812,8 @@ its ciphertext.
 
 | Transmission | Robust DATA key and encryption | Helper callsign key |
 | --- | --- | --- |
-| Ordinary, private profile | Configured effective key; encrypted when enabled | Configured effective key |
-| Ordinary, Amateur profile | Public Amateur key; preserves the configured encryption setting and is publicly decodable when enabled | Public Amateur key; publicly decodable |
+| Ordinary, private profile | Configured effective key; encrypted | Configured effective key |
+| Ordinary, Amateur profile | Public Amateur key; encrypted with public key material | Public Amateur key; publicly decodable |
 | Transmit noise, either profile | Fresh independent CSPRNG keys; encrypted | Public Amateur key; publicly decodable, if Helper is enabled |
 
 The [background-noise generator](triad-background-noise.md) also creates its

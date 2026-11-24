@@ -44,8 +44,9 @@ void check_controls(Controller& controller) {
     require(controller.settings().calendar&&controller.settings().calendar->initial_ordinal==7&&
         controller.settings().live_noise_dbfs_hz==-92&&!controller.settings().receiver_memory_limit,
         "Configured receiver values did not reach the session");
-    controller.activate(C::unload_keys);
-    require(controller.field(F::key).selected=="none"&&!controller.settings().transfer.key,"Unloading the selected key failed");
+    controller.activate(C::load_amateur);
+    require(controller.settings().transfer.key&&controller.field(F::key).options.size()==1&&
+        controller.field(F::key).selected=="key:WARNING-Amateur","Robust did not select the public Amateur key");
 }
 }
 void Smoke::step(Controller& controller,const BitmapSources*) {if(!done_){check_controls(controller);done_=true;}}

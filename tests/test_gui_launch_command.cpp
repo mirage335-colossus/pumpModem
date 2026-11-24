@@ -230,10 +230,10 @@ void parsing_and_formatting() {
         check(launch_command::parse(launch_command::format(keyed))==keyed,
             "flag-looking and metacharacter key names must remain literal saved arguments");
     }
-    const auto receive_only=launch_command::parse("--keyfile='private keys' --tx-key none");
-    check(receive_only.keyfile=="private keys"&&receive_only.tx_key=="none"&&!receive_only.key_name&&
-        launch_command::parse(launch_command::format(receive_only))==receive_only,
-        "receive-only keyfile selection must round trip without selecting a transmit key");
+    const auto keyed_file=launch_command::parse("--keyfile='private keys' --tx-key named --key-name Station");
+    check(keyed_file.keyfile=="private keys"&&keyed_file.tx_key=="named"&&keyed_file.key_name=="Station"&&
+        launch_command::parse(launch_command::format(keyed_file))==keyed_file,
+        "keyfile selection must round trip with a named transmit key");
     check(!launch_command::parse("--rate 1200").keyfile&&!launch_command::parse("--rate 1200").tx_key,
         "older partial commands must omit key changes");
     const auto policy=datapump::clock_sync::parse(*clock.clock_sync);
@@ -369,12 +369,12 @@ void helper_settings() {
               "Helper empty callsign was discarded");
     }
     {
-        const auto patch=launch_command::parse("--tx-key none --helper-callsign 1234567890123456");
+        const auto patch=launch_command::parse("--tx-key named --helper-callsign 1234567890123456");
         check(patch.helper_callsign=="1234567890123456","A 16-character helper callsign was rejected");
     }
     for(const auto* value:{"--helper-power -1","--helper-power nan","--helper-power 1e308kW",
         "--helper-ratio-limit 30","--helper-ratio-limit 91",
-        "--tx-key none --helper-callsign 12345678901234567","--helper-callsign 'N0CÄLL' --tx-key none"})
+        "--tx-key named --helper-callsign 12345678901234567","--helper-callsign 'N0CÄLL' --tx-key named"})
         rejects([&]{launch_command::parse(value);},"Invalid helper setting accepted");
     for(const auto* callsign:{"12345678901234567","N0CÄLL"}) {
         for(const auto& command:std::vector<std::string>{
@@ -385,6 +385,9 @@ void helper_settings() {
         }
     }
     check(!launch_command::parse("--rate 1200").helper_power_w,"Older partial commands must preserve helper settings");
+    for(const auto* command:{"--keyset none","--tx-key none","--keyset none --key-name Station"})
+        rejects([&]{launch_command::parse(command);},
+                "Robust launch settings must not permit an unkeyed mode");
 }
 
 void invalid_commands() {

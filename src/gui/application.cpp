@@ -670,7 +670,7 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
                     <<" [--color|--monochrome] [--self-check] [--smoke-test]\n"
                     <<"Robust uses the native three-carrier modem with a configured public calendar.\n"
                     <<"Live peers must share a waveform profile, calendar and initial ordinal.\n"
-                    <<"Saved settings: --keyfile PATH | --keyset amateur|none, --key-name NAME,\n"
+                    <<"Saved settings: --keyfile PATH | --keyset amateur, --key-name NAME,\n"
                     <<"--rate HZ --carrier HZ --shift HZ --target-snr DB-Hz --helper-power WATTS.\n"
                     <<"Robust receive setup: --calendar-epoch UTC --calendar-ordinal N\n"
                     <<"--live-noise-dbfs-hz DBFS/Hz; configure the local audio noise model explicitly. --gpu yes|no overrides automatic GPU selection.\n"

@@ -204,8 +204,8 @@ std::vector<std::string> key_entry_names(std::string_view text) {
     }
 }
 std::vector<std::string> key_choice_labels(std::span<const std::string> names) {
-    std::vector<std::string> labels{"None"};
-    labels.reserve(names.size()+1);
+    std::vector<std::string> labels;
+    labels.reserve(names.size());
     for(std::size_t index=0;index<names.size();++index) {
         labels.push_back(std::to_string(index+1)+". "+display_label(names[index]));
     }

@@ -993,9 +993,13 @@ void robust_keyfile_menu_label() {
     }
     check(app.control(item).label==expected&&!app.control(item).enabled,
           "Robust key menu did not show loaded filename on disabled current-keys item");
-    app.activate(C::unload_keys);
-    check(app.control(item).label=="Keep current keys"&&!app.control(item).enabled,
-          "Robust key menu retained a filename after unloading keys");
+    check(app.field(F::key).selected=="key:GUI key"&&
+          std::none_of(app.field(F::key).options.begin(),app.field(F::key).options.end(),
+                       [](const auto& option){return option.id=="none";}),
+          "Loading a valid Robust keyfile did not preserve its named key selection");
+    app.activate(C::load_amateur);
+    check(app.field(F::key).selected=="key:WARNING-Amateur"&&app.field(F::key).enabled,
+          "Robust Amateur recovery did not select a usable public key");
     app.close();
 }
 void robust_public_key_warning() {
@@ -1004,14 +1008,45 @@ void robust_public_key_warning() {
     const auto& status=control(F::status);
     check(app.control(status).label.starts_with("WARNING: Amateur key is public"),
           "Public Robust key warning was not visible in the shared status presentation");
-    app.activate(C::unload_keys);
-    check(!app.control(status).label.starts_with("WARNING: Amateur key is public"),
-          "Public key warning remained after the key was unloaded");
+    Controller controller({.simulation=true});
+    check(app.field(F::key).selected=="key:WARNING-Amateur"&&controller.settings().transfer.key.has_value(),
+          "Robust GUI did not keep a keyed Amateur default");
     app.activate(C::load_amateur);
     check(app.control(status).label.find("Public amateur key")!=std::string::npos&&
           !app.control(status).label.starts_with("WARNING: Amateur key is public"),
           "Public key load notice was duplicated or suppressed");
     app.close();
+}
+void robust_missing_startup_key() {
+    using F=ui::Field;using C=ui::Command;
+    const auto path=std::filesystem::temp_directory_path()/(
+        "datapump-robust-missing-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".key");
+    launch_command::Patch patch;patch.keyfile=path.string();
+    Controller controller({.simulation=true,.smoke=true,.launch_settings=patch});
+    controller.edit(F::message,"e");
+    controller.start();
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    while(!controller.enabled(C::load_amateur)&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(controller.enabled(C::load_amateur)&&!controller.enabled(C::acknowledge_key_failure),
+          "A failed startup keyfile must allow choosing a key but has no current key to keep");
+    check(controller.try_suspend_capture(),"A failed startup keyfile owned Robust capture");
+    controller.resume_capture();
+    controller.poll();
+    check(controller.field(F::key).options.empty()&&!controller.field(F::key).enabled&&
+          !controller.settings().transfer.key&&!controller.snapshot().running&&
+          !controller.enabled(C::transmit)&&!controller.enabled(C::transmit_noise),
+          "A failed startup keyfile let Robust operate without a selected key");
+    controller.activate(C::load_amateur);
+    check(controller.field(F::key).selected=="key:WARNING-Amateur"&&controller.settings().transfer.key,
+          "Loading Amateur did not recover from the startup keyfile failure");
+    const auto start_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    while(!controller.snapshot().running&&std::chrono::steady_clock::now()<start_deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(controller.snapshot().running,"Selecting Amateur after startup failure did not start Robust");
+    controller.close();
 }
 void robust_boundary_keeps_polling() {
     using F=ui::Field;using C=ui::Command;
@@ -1108,6 +1143,6 @@ void robust_native_settings() {
 }
 }
 int main() {
-    try {audio_settings();rate_and_spectrum_presentation();damaged_reception_presentation();fast_simulation_controls();simulation_profile_revalidation();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();robust_keyfile_menu_label();robust_public_key_warning();robust_boundary_keeps_polling();robust_native_settings();std::cout<<"Fast GUI isolation tests passed\n";}
+    try {audio_settings();rate_and_spectrum_presentation();damaged_reception_presentation();fast_simulation_controls();simulation_profile_revalidation();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();robust_keyfile_menu_label();robust_public_key_warning();robust_missing_startup_key();robust_boundary_keeps_polling();robust_native_settings();std::cout<<"Fast GUI isolation tests passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

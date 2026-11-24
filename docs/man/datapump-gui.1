@@ -175,12 +175,13 @@ Unspecified settings retain their startup defaults.
 Link power, path loss and noise describe the planner and simulated channel;
 they do not set a radio's RF output power.
 .TP
-.BI \-\-keyset " amateur|none"
-Select the built-in public amateur keyset or unload all keys. Cannot be combined
-with \-\-keyfile; \-\-keyset none also cannot be combined with \-\-key-name or
-\-\-tx-key named. With the amateur keyset, \-\-tx-key none disables transmission
-encryption and selects plaintext reception while retaining loaded keys for
-later selection. Omitting the option preserves the current key bank.
+.BI \-\-keyset " amateur"
+Select the built-in public Amateur keyset. It cannot be combined with
+\-\-keyfile. The Robust GUI always requires a selected key for transmission and
+reception. The Amateur key is public and provides no confidentiality or sender
+authentication. Older commands using \-\-keyset none or \-\-tx-key none are
+rejected and must select Amateur or a named key instead. Omitting the option
+preserves the current key bank.
 .TP
 .BI \-\-calendar\-epoch " UTC|none"
 Shared public calendar anchor in whole UTC seconds, 6 through 4294967289.
@@ -304,8 +305,8 @@ The native keyed permutation has equal counts in each 252-slot cycle.
 Added-symbol factor for the native three-carrier waveform; 1 disables added
 symbols. Selecting a larger factor in the GUI enables Interleave and adjusts
 Rate to preserve the initial occupied bandwidth. Explicit command values retain
-their supplied Rate and Carrier. No encryption key is required for this control;
-without one, waveform material is publicly reproducible.
+their supplied Rate and Carrier. The selected Robust key supplies the waveform
+key material. The built-in Amateur key makes that material publicly reproducible.
 .TP
 .BI \-\-dsss\-mode " off|interleave"
 Select one native symbol lane or interleaved added-symbol lanes. Peers must
@@ -442,13 +443,13 @@ The Robust controller starts with the built-in public keyset
 Its key material is included in the program and provides no confidentiality
 or sender authentication. It exercises the normal keyed cipher, waveform and
 timing paths. A successfully loaded real keyfile replaces it; a failed load
-retains the current keys. The Keyfile menu offers
+retains the current keys. A startup explicitly configured with a keyfile stays
+inactive until that key loads or Amateur is selected. The key selector lists
+only loaded keys. The Keyfile menu offers
 .B WARNING \- Load Amateur
-to replace the current bank with the public keyset, and
-.B Unload keys
-to remove the transmit and receive keys. The normal live transmit guard remains
-in effect, but it cannot coordinate independent stations or sessions using the
-same key, epoch and stream positions.
+to replace the current bank with the public keyset. The normal live transmit
+guard remains in effect, but it cannot coordinate
+independent stations or sessions using the same key, epoch and stream positions.
 .PP
 Pending Robust receptions expose bounded bit and native score diagnostics.
 Reception completes only after two fully scored quiet public DATA slots.
@@ -477,11 +478,10 @@ lock override that retains history and all draft/key/device/resource checks.
 Robust uses automatic waveform defaults and the fixed Helper arrangement of
 high/low pilot tones and a separate auxiliary tone; these are not selectable.
 Its Launch command includes a file-backed keyring's path and named transmit key
-via \-\-keyfile, \-\-tx-key named and \-\-key-name (or \-\-tx-key none).
-It uses \-\-keyset amateur for the built-in public key and \-\-keyset none for
-an unloaded bank. The keyset option cannot be combined with \-\-keyfile.
-It contains no key bytes. Reception uses only the selected key, or plaintext
-when None is selected. Other loaded ring entries remain available for selection.
+via \-\-keyfile, \-\-tx-key named and \-\-key-name. It uses \-\-keyset amateur
+for the built-in public key. The keyset option cannot be combined with
+\-\-keyfile. It contains no key bytes. Reception uses the selected key. Other
+loaded ring entries remain available for selection.
 Missing files or key names leave the previous settings unchanged.
 Its Launch command can be copied for reuse; Load applies validated settings
 without executing a shell command or starting a transmission.

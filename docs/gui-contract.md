@@ -16,6 +16,16 @@ into the application. Starting Fast does not start a Robust receiver or acquire
 its audio device. Mode changes and pending key loads preserve active intent
 without starting a session with a different key.
 
+Robust GUI operation requires a key for transmission and reception. A normal
+startup selects the built-in public Amateur key. A file-backed key replaces
+that key after the file validates. The key selector lists only loaded keys,
+and the Keyfile menu switches between Amateur and file-backed keys.
+Failed key operations retain the current key when one is available. A
+startup explicitly configured with a keyfile remains inactive until that key
+loads successfully or the operator selects Amateur. Saved commands that ask
+for plaintext Robust operation are rejected and must be updated to select
+Amateur or a named key.
+
 Robust live operation requires both peers to configure the same public calendar
 anchor, initial waveform ordinal, DATA cadence, key and waveform/FEC settings.
 **Robust setup** exposes the calendar, DATA cadence, minimum DATA carrier
@@ -126,7 +136,7 @@ Display timing never controls receiver decisions or completion.
 
 | Shared control | Native meaning |
 | --- | --- |
-| Encryption | Off preserves unencrypted DATA; keyfile and AMATEUR select the effective key. AMATEUR is public key material, not confidentiality. |
+| Robust key | Reception and ordinary DATA transmission use the selected key. The built-in Amateur key is public and provides no confidentiality or sender authentication. Open a keyfile to use one of its named keys. |
 | Helper power, ratio limit, callsign | Requested Helper watts, native power allocation/ratio clamp and Helper metadata. Zero power disables Helper; these settings do not control radio hardware. |
 | Transmit power, path loss | DATA power and simulated link attenuation, separate from playback volume. |
 | Clock sync, region, offset, audio error | Public arrival bounds and sampled timing model. Audio error starts at **Default** and saved settings preserve that choice. Live capture also needs actual provider timestamps and uncertainty. |

@@ -143,6 +143,14 @@ std::string quoted_argument(std::string_view value) {
 }
 }
 
+void validate_key_selection(const Patch& settings) {
+    if(settings.keyset=="none"||settings.tx_key=="none")
+        invalid("Robust Modem requires a key. Use --keyset amateur or --keyfile PATH. Remove any --tx-key none option.");
+    if(settings.keyset&&settings.keyset!="amateur")invalid("--keyset must be amateur.");
+    if(settings.tx_key&&settings.tx_key!="named")invalid("--tx-key must be named.");
+    if(settings.keyset&&settings.keyfile)invalid("--keyset conflicts with --keyfile.");
+}
+
 Patch parse_arguments(std::span<const std::string> arguments) {
     if(arguments.empty())invalid("Enter a launch command or settings flags.");
     if(arguments.size()>maximum_arguments)invalid("Launch command has too many arguments.");
@@ -218,13 +226,13 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         else if(flag=="--clock-sync")result.clock_sync=clock_sync::format(clock_sync::parse(value));
         else if(flag=="--keyfile")result.keyfile=value;
         else if(flag=="--keyset") {
-            if(value!="amateur"&&value!="none")invalid("--keyset must be amateur or none.");
             result.keyset=value;
+            validate_key_selection(result);
         }
         else if(flag=="--key-name")result.key_name=value;
         else if(flag=="--tx-key") {
-            if(value!="none"&&value!="named")invalid("--tx-key must be none or named.");
             result.tx_key=value;
+            validate_key_selection(result);
         }
         else if(flag=="--audio-error") {
             result.audio_timing_error_seconds=clock_sync::parse_audio_error(value);
@@ -327,10 +335,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
     if(result.reference=="shared-radio" && result.rf_shift_hz && *result.rf_shift_hz>0 && result.rf_oscillator &&
        !tuning::parse_oscillator_preset(*result.rf_oscillator).baseband_supported)
         invalid("An RF-only oscillator cannot describe the shared audio clock.");
-    if(result.tx_key=="none"&&result.key_name)invalid("--key-name conflicts with --tx-key none.");
-    if(result.keyset&&result.keyfile)invalid("--keyset conflicts with --keyfile.");
-    if(result.keyset=="none"&&(result.key_name||result.tx_key=="named"))
-        invalid("--keyset none cannot select a transmit key.");
+    validate_key_selection(result);
     if(result.helper_callsign)helper_callsign(*result.helper_callsign);
     if(result.dsss_mode=="interleave"&&(result.dsss_factor==1||result.dsss_version=="legacy"))
         invalid("Interleave mode requires a spreading factor above one and the interleave construction.");

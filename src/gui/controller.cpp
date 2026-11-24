@@ -281,7 +281,8 @@ struct Controller::Impl {
     bool signals_follow_tail=true,files_follow_tail=true;
     std::string admission_filter_status;
     PlotUpdate plot_update;
-    bool started=false,active_requested=false,closing=false,preparing=false,key_loading=false,key_failed=false,file_loading=false;
+    bool started=false,session_started=false,active_requested=false,closing=false;
+    bool preparing=false,key_loading=false,key_failed=false,file_loading=false;
     std::vector<audio::Device> audio_devices;
     bool need_devices=true,settings_valid=true;
     bool attachment_image=false;
@@ -456,10 +457,11 @@ struct Controller::Impl {
         f(UiField::oscillator_reference).enabled=false;
         // A launch with an explicit file starts empty until that file is
         // validated; it must never temporarily receive with the public key.
+        if(options.launch_settings)launch_command::validate_key_selection(*options.launch_settings);
         if(!options.launch_settings||!options.launch_settings->keyfile) {
             keys.push_back(amateur_key());key_origin=KeyOrigin::amateur;
-            key_fields("key:WARNING-Amateur");
-        } else key_fields("none");
+            key_fields("key:"+keys.front().name);
+        } else key_fields({});
         f(UiField::qr_brightness).options={{"normal","Normal"},{"dim","Dim"},{"dark","Dark"},{"off","Off"}}; f(UiField::qr_brightness).selected="dark";
         f(UiField::send_key).options={{"enter","on Enter"},{"ctrl-enter","on Ctrl+Enter"}}; f(UiField::send_key).selected="enter";
         f(UiField::fec).options={{"off","Off"},{"rs20","Reed-Solomon 20%"},{"rs60","Reed-Solomon 60%"}}; f(UiField::fec).selected="off";
@@ -473,7 +475,7 @@ struct Controller::Impl {
         f(UiField::message_label).text="Message"; f(UiField::binary_label).text="Binary / first 16 bytes";
         if(options.launch_settings)gpu_preference=options.launch_settings->gpu;
         f(UiField::compression_codes).text=compression_reference();
-        f(UiField::mode).text="Starting continuous reception";
+        f(UiField::mode).text=keys.empty()?"Robust waiting for a key":"Starting continuous reception";
         if(options.launch_settings&&(options.launch_settings->keyfile||options.launch_settings->keyset||options.launch_settings->fhss_list_file)) {
             configure();apply_launch(*options.launch_settings,false);
         } else configure(false,options.launch_settings?&*options.launch_settings:nullptr,false);
@@ -481,21 +483,30 @@ struct Controller::Impl {
         need_devices=!options.smoke;
     }
     ~Impl() { worker.request_stop(); session.stop(); if(worker.joinable()) worker.join(); }
-    bool encrypted() const { return f(UiField::key).selected!="none"; }
+    bool key_ready() const {return settings.transfer.key.has_value()&&!key_loading&&!key_failed;}
+    void start_or_resume_session() {
+        if(!started||!settings.transfer.key)return;
+        const bool active=active_requested&&key_ready();
+        if(!session_started) {
+            session.start(settings,active);
+            session_started=true;
+            accept_snapshot(session.snapshot());
+        } else if(active) session.resume_capture();
+    }
     const KeyEntry* selected_key() const {
         for(const auto& key:keys) if("key:"+key.name==f(UiField::key).selected) return &key;
         return nullptr;
     }
     std::string key_path_text() const {
         if(key_origin==KeyOrigin::amateur)return "WARNING - Amateur (public)";
-        return key_path.empty()?"None":path_text(key_path.filename());
+        return key_path.empty()?"No key loaded":path_text(key_path.filename());
     }
     void key_fields(std::string selected) {
-        auto& state=f(UiField::key);state.options={{"none","None"}};
+        auto& state=f(UiField::key);state.options.clear();
         std::vector<std::string> names;for(const auto& key:keys)names.push_back(key.name);
         const auto labels=key_choice_labels(names);
         for(std::size_t i=0;i<keys.size();++i)
-            state.options.push_back({"key:"+keys[i].name,key_origin==KeyOrigin::amateur?keys[i].name:labels[i+1]});
+            state.options.push_back({"key:"+keys[i].name,key_origin==KeyOrigin::amateur?keys[i].name:labels[i]});
         state.selected=std::move(selected);
         f(UiField::key_path).text=key_path_text();
         if(!key_warning.empty()) f(UiField::key_path).text="WARNING: OS-only entropy — "+f(UiField::key_path).text;
@@ -646,7 +657,8 @@ struct Controller::Impl {
         try {
         if(loaded_keys) {
             keys=*loaded_keys;key_origin=loaded_origin;if(loaded_path)key_path=*loaded_path;
-            key_fields(keys.empty()?"none":"key:"+keys.front().name);
+            if(keys.empty())throw Error("The keyfile has no key entries");
+            key_fields("key:"+keys.front().name);
         }
         if(load) {
             const auto text=[&](UiField id,const auto& value){if(value)f(id).text=planner_number(*value);};
@@ -703,7 +715,6 @@ struct Controller::Impl {
             if(load->gpu)gpu_preference=load->gpu;
             if(load->workspace_percent) {dsp_workspace_percent=*load->workspace_percent;f(UiField::dsp_workspace).selected=*load->workspace_percent?"ram-"+std::to_string(*load->workspace_percent):"auto";}
             if(load->fhss_list){fhss_list=fhss::parse_list(*load->fhss_list);f(UiField::fhss_list).text=fhss::list_text(fhss_list,'\n');}
-            if(load->tx_key=="none")f(UiField::key).selected="none";
             if(load->key_name){const auto id="key:"+*load->key_name;if(std::none_of(keys.begin(),keys.end(),[&](const auto& k){return k.name==*load->key_name;}))throw Error("Unknown key name");f(UiField::key).selected=id;}
             if(simulation_off&&!options.simulation_only)f(UiField::simulation).selected="no";
             sync_link_fields();
@@ -764,7 +775,9 @@ struct Controller::Impl {
         settings.gpu=options.require_gpu||(live::gpu_receiver_available()&&snapshot.gpu_unavailable_reason.empty()&&
             gpu_preference.value_or(modem.search_arithmetic!=modem::SearchArithmetic::fp64));
         settings.wrong_key_admission=f(UiField::wrong_key_admission).selected;
-        settings.transfer.key=selected_key()?std::optional<Crypto>(selected_key()->key):std::nullopt;
+        const auto* key=selected_key();
+        if(!key&&(!keys.empty()||session_started))throw Error("Select a Robust Modem key");
+        settings.transfer.key=key?std::optional<Crypto>(key->key):std::nullopt;
         settings.transfer.clock_sync=clock_policy();
         settings.transfer.audio_timing_error_seconds=clock_sync::is_default(f(UiField::audio_error).text)?
             clock_sync::default_audio_error_seconds:clock_sync::duration(f(UiField::audio_error).text);
@@ -820,14 +833,14 @@ struct Controller::Impl {
         settings.doppler_shift_hz=absolute*(doppler.frequency_ratio-1);
         const auto data_passband=band.data_passband(modem.carrier_hz);
         live::validate_settings(settings);
-        if(started)session.configure(settings);
+        if(session_started)session.configure(settings);
         carrier.options=std::move(carrier_presets);
         selected_baseband_hz=modem.carrier_hz;
         planner_inputs.data_passband=data_passband;
         planner_inputs.waveform_bandwidth_hz=band.waveform_bandwidth_hz;
         settings_valid=true;settings_error.clear();
         snapshot.bit_seconds.reset();snapshot.slot_stride_seconds.reset();
-        if(started)accept_snapshot(session.snapshot());
+        if(session_started)accept_snapshot(session.snapshot());
         dirty();sync_launch_command();refresh_files();refresh_signals();
         } catch(const std::exception& error) {
             fields=previous_fields;settings=previous_settings;keys=previous_keys;key_origin=previous_key_origin;
@@ -857,7 +870,8 @@ struct Controller::Impl {
         std::ostringstream out;out<<std::setprecision(std::numeric_limits<double>::max_digits10)<<value;return out.str();
     }
     void sync_launch_command(bool force=false) {
-        if(!settings_valid||!link_inputs_valid()||!planner_target_valid)return;
+        const auto* key=selected_key();
+        if(!key||!settings_valid||!link_inputs_valid()||!planner_target_valid)return;
         launch_command::Patch values;
         values.helper_power_w=settings.helper.power_w;
         values.helper_ratio_limit_db=settings.helper.ratio_limit_db;
@@ -903,9 +917,8 @@ struct Controller::Impl {
         if(!fhss_list.empty())values.fhss_list=fhss::list_text(fhss_list);
         if(!key_path.empty())values.keyfile=path_text(std::filesystem::absolute(key_path).lexically_normal());
         else if(key_origin==KeyOrigin::amateur)values.keyset="amateur";
-        else if(key_origin==KeyOrigin::none)values.keyset="none";
-        values.tx_key=encrypted()?"named":"none";
-        if(encrypted())values.key_name=selected_key()->name;
+        values.tx_key="named";
+        values.key_name=key->name;
         auto command=launch_command::format(values);
         // A poll, draft edit or document repaint must not erase pasted input.
         // Only a new accepted launch setting (or successful Load) replaces it.
@@ -916,7 +929,7 @@ struct Controller::Impl {
     }
     void helper_callsign_changed(std::string text) {
         validate_helper_callsign(text);f(UiField::helper_callsign).text=text;
-        settings.helper.callsign=std::move(text);if(started)session.set_helper_callsign(settings.helper.callsign);dirty();sync_launch_command();
+        settings.helper.callsign=std::move(text);if(session_started)session.set_helper_callsign(settings.helper.callsign);dirty();sync_launch_command();
     }
     void message_label() {
         if(!attachment) f(UiField::message_label).text=composer.raw_bits()?
@@ -1157,20 +1170,20 @@ struct Controller::Impl {
         case Command::planner_weaker: return (link_plan()->available||link_plan()->calculating)&&link_plan()->weaker_fit_target.has_value();
         case Command::transmit_short_bits: return !attachment&&!file_loading&&draft_error.empty()&&
             !f(UiField::short_bits).text.empty()&&enabled(Command::transmit);
-        case Command::transmit: return started&&active_requested&&!busy&&!key_loading&&!key_failed&&settings_valid&&
+        case Command::transmit: return session_started&&active_requested&&!busy&&key_ready()&&settings_valid&&
             link_inputs_valid()&&planner_target_valid&&!snapshot.transmit_unavailable&&supported_draft();
-        case Command::force_transmit: return started&&active_requested&&!busy&&!key_loading&&!key_failed&&settings_valid&&
+        case Command::force_transmit: return session_started&&active_requested&&!busy&&key_ready()&&settings_valid&&
             link_inputs_valid()&&planner_target_valid&&snapshot.force_transmit_available&&supported_draft();
-        case Command::transmit_noise: return started&&active_requested&&!busy&&!key_loading&&!key_failed&&settings_valid&&
+        case Command::transmit_noise: return session_started&&active_requested&&!busy&&key_ready()&&settings_valid&&
             link_inputs_valid()&&planner_target_valid&&!snapshot.noise_transmit_unavailable;
-        case Command::transmit_helper: return started&&active_requested&&!busy&&!key_loading&&!key_failed&&settings_valid&&
+        case Command::transmit_helper: return session_started&&active_requested&&!busy&&key_ready()&&settings_valid&&
             link_inputs_valid()&&planner_target_valid&&settings.helper.power_w>0&&!snapshot.transmit_unavailable;
         case Command::cancel: return busy||snapshot.simulation_replay;
         case Command::replay_simulation: return snapshot.simulation_replay_available;
         case Command::open_keyfile: case Command::generate_keyfile:
-        case Command::load_amateur: case Command::unload_keys: return !busy&&!key_loading;
+        case Command::load_amateur: return !busy&&!key_loading;
         case Command::show_key_folder: return !busy&&!key_loading&&!key_path.empty();
-        case Command::acknowledge_key_failure: return !busy&&!key_loading&&key_failed;
+        case Command::acknowledge_key_failure: return !busy&&!key_loading&&key_failed&&settings.transfer.key.has_value();
         case Command::attach_file: return false;
         case Command::use_text: return attachment||file_loading;
         case Command::paste_previous: return previous_message.has_value()&&!attachment&&!file_loading;
@@ -1237,7 +1250,7 @@ struct Controller::Impl {
         // selection until an attachment actually succeeds.
         if(!repeatable_available&&!file_loading&&f(UiField::repeatable).checked)set_repeatable(false);
         f(UiField::repeatable).enabled=!closing&&repeatable_available;
-        f(UiField::key).enabled=!closing&&!key_loading&&!busy;
+        f(UiField::key).enabled=!closing&&!key_loading&&!busy&&!keys.empty();
         f(UiField::fhss_list).enabled=developer_mode&&!closing&&!busy;
         f(UiField::helper_callsign).enabled=f(UiField::helper_ratio_limit).enabled=!closing&&!busy&&settings.helper.power_w>0;
         f(UiField::fec).display_text=composer.raw_bits()?"Off (exact raw bits)":"";
@@ -1314,7 +1327,7 @@ struct Controller::Impl {
         if(pending_key) {
             // Never run keyfile audio capture beside a modem capture, or
             // temporarily start an explicit keyfile launch with an empty key.
-            if(started&&!session.try_suspend_capture())return;
+            if(session_started&&!session.try_suspend_capture())return;
             result.kind=PrepKind::keys; result.path=*pending_key; pending_key.reset(); result.names=std::move(pending_names); pending_names.clear(); result.generate=!result.names.empty();
             result.completion_id=std::exchange(pending_key_completion,0);
             result.key_settings=std::exchange(pending_key_settings,std::nullopt);
@@ -1368,7 +1381,7 @@ struct Controller::Impl {
                 launch_command::Patch patch=result.key_settings.value_or(launch_command::Patch{});
                 configure(false,&patch,result.key_simulation_off,&result.keys,&result.path);
                 key_failed=false;key_warning=std::move(result.key_warning);key_fields(f(UiField::key).selected);
-                if(started&&active_requested)session.resume_capture();
+                start_or_resume_session();
                 if(result.completion_id)service_completions.push_back({result.completion_id,{}});
                 notice(key_warning.empty()?"Keyfile loaded; one selected key is active.":"WARNING: "+key_warning,10);
             } catch(const std::exception& error) {
@@ -1559,7 +1572,6 @@ struct Controller::Impl {
         dirty(); notice(pending_names.empty()?"Loading key entries...":"Collecting microphone input and generating keyfile...",10);
     }
     void apply_launch(launch_command::Patch values,bool simulation_off=true) {
-        if(values.keyset&&values.keyfile)throw Error("--keyset conflicts with --keyfile");
         if(values.fhss_list_file) {
             const auto path=std::filesystem::u8path(*values.fhss_list_file);
             if(!std::filesystem::is_regular_file(path)||std::filesystem::file_size(path)>fhss::list_byte_limit)
@@ -1575,18 +1587,15 @@ struct Controller::Impl {
             begin_key(std::filesystem::absolute(std::filesystem::u8path(*values.keyfile)).lexically_normal());
             pending_key_settings=values;pending_key_simulation_off=simulation_off;
         } else if(values.keyset) {
-            if(*values.keyset!="amateur"&&*values.keyset!="none")throw Error("Invalid keyset");
-            std::vector<KeyEntry> next_keys;
-            if(*values.keyset=="amateur")next_keys.push_back(amateur_key());
+            const std::vector<KeyEntry> next_keys{amateur_key()};
             const std::filesystem::path empty_path;
-            configure(false,&values,simulation_off,&next_keys,&empty_path,
-                      *values.keyset=="amateur"?KeyOrigin::amateur:KeyOrigin::none);
+            configure(false,&values,simulation_off,&next_keys,&empty_path,KeyOrigin::amateur);
             key_failed=false;key_warning.clear();key_fields(f(UiField::key).selected);sync_launch_command(true);notice(settings.simulation?"Settings loaded · Simulation Yes":"Settings loaded · Simulation No");
         } else {
             configure(false,&values,simulation_off);
             sync_launch_command(true);notice(settings.simulation?"Settings loaded · Simulation Yes":"Settings loaded · Simulation No");
         }
-        if(started&&active_requested&&!key_loading&&!key_failed)session.resume_capture();
+        start_or_resume_session();
     }
     void planner_example(Command) {notice(planner_unavailable);}
     std::size_t last_pattern_page() const {return snapshot.pattern_steps.empty()?0:
@@ -1676,24 +1685,20 @@ struct Controller::Impl {
             message_label();dirty();break;
         case Command::open_keyfile: request(Purpose::open_key,ui::ServiceKind::open_file,"Choose encryption keyfile"); break;
         case Command::generate_keyfile: request(Purpose::generate_names,ui::ServiceKind::prompt,"Key entry names, separated by commas","Default"); break;
-        case Command::load_amateur: case Command::unload_keys: {
-            const bool load_public=command==Command::load_amateur;
-            std::vector<KeyEntry> next_keys;
-            if(load_public)next_keys.push_back(amateur_key());
+        case Command::load_amateur: {
+            const std::vector<KeyEntry> next_keys{amateur_key()};
             const std::filesystem::path empty_path;
             launch_command::Patch patch;
             // Validate the complete replacement before committing the bank,
             // its origin, and the corresponding live receiver settings.
-            configure(false,&patch,false,&next_keys,&empty_path,
-                      load_public?KeyOrigin::amateur:KeyOrigin::none);
+            configure(false,&patch,false,&next_keys,&empty_path,KeyOrigin::amateur);
             key_failed=false;key_warning.clear();key_fields(f(UiField::key).selected);
-            if(started&&active_requested)session.resume_capture();
-            notice(load_public?"WARNING: Public amateur key loaded; it provides no confidentiality.":
-                               "Encryption keys unloaded.",10);break;
+            start_or_resume_session();
+            notice("WARNING: Public amateur key loaded; it provides no confidentiality.",10);break;
         }
         case Command::show_key_folder: { const auto folder=std::filesystem::absolute(key_path).parent_path(); if(!std::filesystem::is_directory(folder)) throw Error("The keyfile folder is no longer available"); request(Purpose::folder,ui::ServiceKind::open_folder,"Show keyfile folder",folder_uri(folder)); break; }
         case Command::acknowledge_key_failure: key_failed=false;key_fields(f(UiField::key).selected);
-            if(started&&active_requested)session.resume_capture();notice("Current key selection retained.");break;
+            start_or_resume_session();notice("Current key selection retained.");break;
         case Command::save_file: { const auto* file=selected_file(); request(Purpose::save,ui::ServiceKind::save_file,"Save decoded source",file->message.filename.empty()?"received.bin":received_text(file->message.filename),std::make_shared<const Bytes>(file->message.data)); break; }
         case Command::copy_signal: {
             const auto index=*selected_signal(); if(const auto raw=signals.copy_bits(index)) request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy received binary bits",*raw);
@@ -1805,8 +1810,9 @@ void Controller::set_shellcode_mode(bool value) {
 }
 
 void Controller::start(bool active) { auto& p=*impl_; if(!p.started&&!p.closing) {
-    p.active_requested=active;p.session.start(p.settings,active&&!p.key_loading&&!p.key_failed);
-    p.started=true;p.accept_snapshot(p.session.snapshot());
+    p.active_requested=active;
+    p.started=true;
+    p.start_or_resume_session();
 } }
 void Controller::poll(bool expanded_spectrum) {
     auto& p=*impl_; std::optional<Impl::Prepared> prepared,airtime;
@@ -1825,7 +1831,7 @@ void Controller::poll(bool expanded_spectrum) {
             }
             else p.accept(std::move(*prepared));
         }
-        if(!p.closing) { if(p.started) p.accept_snapshot(p.session.snapshot(expanded_spectrum)); p.dispatch(); }
+        if(!p.closing) { if(p.session_started) p.accept_snapshot(p.session.snapshot(expanded_spectrum)); p.dispatch(); }
     }
     catch(const std::exception& e) { p.notice(e.what(),10); }
     p.controls();
@@ -1839,11 +1845,11 @@ bool Controller::try_suspend_capture() {
     auto& p=*impl_;
     if(p.snapshot.transmitting||p.closing)return false;
     p.active_requested=false;
-    return !p.started||p.session.try_suspend_capture();
+    return !p.session_started||p.session.try_suspend_capture();
 }
 void Controller::resume_capture() {if(!impl_->closing) {
     impl_->active_requested=true;
-    if(impl_->started&&!impl_->key_loading&&!impl_->key_failed)impl_->session.resume_capture();
+    impl_->start_or_resume_session();
 } }
 bool Controller::closing() const { return impl_->closing; }
 bool Controller::ready_to_close() const { return impl_->closing&&!impl_->preparing&&impl_->session.ready_to_close(); }
@@ -1980,14 +1986,14 @@ void Controller::select(UiField field,std::string id) {
         state.selected=std::move(id);
         if(field==UiField::volume) {
             p.settings.transmit_gain=audio_controls::volume_gain(state.selected);
-            if(p.started)p.session.set_transmit_gain(p.settings.transmit_gain);
+            if(p.session_started)p.session.set_transmit_gain(p.settings.transmit_gain);
         }
         else if(field==UiField::mono) {
             state.checked=state.selected!="stereo";
             p.settings.mono=state.checked;
             p.settings.channel_mode=state.selected=="right"?audio::ChannelMode::right_mono:
                 state.checked?audio::ChannelMode::left_mono:audio::ChannelMode::stereo;
-            if(p.started)p.session.set_channel_mode(p.settings.channel_mode);
+            if(p.session_started)p.session.set_channel_mode(p.settings.channel_mode);
         }
         else if(field==UiField::key) p.configure();
         else if(field==UiField::wrong_key_admission) {
@@ -2047,7 +2053,7 @@ void Controller::toggle(UiField field,bool value) {
             p.f(field).selected=value?"left":"stereo";
             p.settings.channel_mode=audio::output_channels(value);
             p.settings.mono=value;
-            if(p.started)p.session.set_mono(value);
+            if(p.session_started)p.session.set_mono(value);
         }
         else { p.f(field).checked=value; p.dirty(); }
         p.controls();
