@@ -1698,7 +1698,7 @@ struct Controller::Impl {
         }
         case Command::show_key_folder: { const auto folder=std::filesystem::absolute(key_path).parent_path(); if(!std::filesystem::is_directory(folder)) throw Error("The keyfile folder is no longer available"); request(Purpose::folder,ui::ServiceKind::open_folder,"Show keyfile folder",folder_uri(folder)); break; }
         case Command::acknowledge_key_failure: key_failed=false;key_fields(f(UiField::key).selected);
-            start_or_resume_session();notice("Current key selection retained.");break;
+            start_or_resume_session();notice("Resuming with the current key.");break;
         case Command::save_file: { const auto* file=selected_file(); request(Purpose::save,ui::ServiceKind::save_file,"Save decoded source",file->message.filename.empty()?"received.bin":received_text(file->message.filename),std::make_shared<const Bytes>(file->message.data)); break; }
         case Command::copy_signal: {
             const auto index=*selected_signal(); if(const auto raw=signals.copy_bits(index)) request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy received binary bits",*raw);
@@ -2066,8 +2066,9 @@ std::vector<ui::ServiceCompletion> Controller::take_service_completions() {std::
 const ui::FieldState& Controller::field(UiField field) const { return impl_->f(field); }
 bool Controller::enabled(Command command) const { return impl_->enabled(command); }
 std::string Controller::command_label(Command command) const {
-    if(command==Command::acknowledge_key_failure && !impl_->key_path.empty()) {
-        auto label=std::string("Keep current keys - ")+impl_->key_path_text();
+    if(command==Command::acknowledge_key_failure && impl_->enabled(command)) {
+        const auto key=impl_->key_origin==Impl::KeyOrigin::amateur?"Amateur (public)":impl_->key_path_text();
+        auto label=std::string("Resume with current key - ")+key;
         if(!impl_->key_warning.empty())label+=" (WARNING: OS-only entropy)";
         return label;
     }

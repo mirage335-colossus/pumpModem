@@ -442,8 +442,10 @@ The Robust controller starts with the built-in public keyset
 .BR WARNING\-Amateur .
 Its key material is included in the program and provides no confidentiality
 or sender authentication. It exercises the normal keyed cipher, waveform and
-timing paths. A successfully loaded real keyfile replaces it; a failed load
-retains the current keys. A startup explicitly configured with a keyfile stays
+timing paths. A successfully loaded keyfile replaces it. After a failed key
+operation with a key already selected, the Keyfile menu offers
+.B Resume with current key
+to resume using that key. A startup explicitly configured with a keyfile stays
 inactive until that key loads or Amateur is selected. The key selector lists
 only loaded keys. The Keyfile menu offers
 .B WARNING \- Load Amateur

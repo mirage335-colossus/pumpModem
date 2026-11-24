@@ -20,7 +20,9 @@ Robust GUI operation requires a key for transmission and reception. A normal
 startup selects the built-in public Amateur key. A file-backed key replaces
 that key after the file validates. The key selector lists only loaded keys,
 and the Keyfile menu switches between Amateur and file-backed keys.
-Failed key operations retain the current key when one is available. A
+After a failed key operation, the Keyfile menu offers **Resume with current
+key** when a previous key is available. Select it to resume using the retained
+key, which the menu identifies by keyfile or as public Amateur. A
 startup explicitly configured with a keyfile remains inactive until that key
 loads successfully or the operator selects Amateur. Saved commands that ask
 for plaintext Robust operation are rejected and must be updated to select

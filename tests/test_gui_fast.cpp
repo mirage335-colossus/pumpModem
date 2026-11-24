@@ -980,26 +980,100 @@ void robust_keyfile_menu_label() {
     using F=ui::Field;using C=ui::Command;
     const auto path=std::filesystem::temp_directory_path()/(
         "datapump-robust-gui-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".key");
-    struct Cleanup {std::filesystem::path path;~Cleanup(){std::error_code e;std::filesystem::remove(path,e);}} cleanup{path};
-    check(create_keyring(path,{"GUI key"},std::nullopt,fixture_keyfile::generation()).audio_used,
+    const auto replacement=std::filesystem::temp_directory_path()/("datapump-robust-replacement-"+
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".key");
+    struct Cleanup {std::vector<std::filesystem::path> paths;~Cleanup(){for(const auto& path:paths){std::error_code e;std::filesystem::remove(path,e);}}} cleanup{{path,replacement}};
+    check(create_keyring(path,{"GUI key"},std::nullopt,fixture_keyfile::generation()).audio_used&&
+          create_keyring(replacement,{"Replacement key"},std::nullopt,fixture_keyfile::generation()).audio_used,
           "Robust GUI fixture did not use synthetic audio");
     launch_command::Patch patch;patch.keyfile=path.string();
     Application app({.simulation=true,.settings=patch});app.select(F::fast_mode,"robust");app.start();
     const auto& item=action(C::acknowledge_key_failure);
-    const auto expected="Keep current keys - "+path.filename().string();
-    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
-    while(app.control(item).label!=expected&&std::chrono::steady_clock::now()<deadline) {
-        app.tick();std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    check(app.control(item).label==expected&&!app.control(item).enabled,
-          "Robust key menu did not show loaded filename on disabled current-keys item");
-    check(app.field(F::key).selected=="key:GUI key"&&
-          std::none_of(app.field(F::key).options.begin(),app.field(F::key).options.end(),
-                       [](const auto& option){return option.id=="none";}),
-          "Loading a valid Robust keyfile did not preserve its named key selection");
+    std::vector<const ui::Control*> key_actions;
+    for(const auto& candidate:ui::console_screen())
+        if(candidate.menu==ui::Menu::keyfile)key_actions.push_back(&candidate);
+    const auto key_menu=[&] {return app.menu(key_actions);};
+    const auto wait_for=[&](const auto& predicate) {
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+        while(!predicate()&&std::chrono::steady_clock::now()<deadline) {
+            app.tick();std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return predicate();
+    };
+    check(wait_for([&]{return app.field(F::key).selected=="key:GUI key";}),
+          "Robust startup keyfile did not load its named key");
+    const auto& key=app.field(F::key);
+    check(key.options.size()==1&&key.options.front().id=="key:GUI key",
+          "Loaded Robust keyfile exposed a choice outside its named keys");
+    const auto initial_menu=key_menu();
+    check(!app.control(item).visible&&
+          std::none_of(initial_menu.options.begin(),initial_menu.options.end(),[](const auto& option) {
+              return option.label.starts_with("Resume with current key");
+          }),"Robust recovery action appeared before a keyfile failure");
+    app.activate(C::open_keyfile);auto request=app.take_services();
+    check(request.size()==1,"Robust replacement keyfile service unavailable");
+    const auto missing=path.string()+".missing";
+    app.complete_service({request.front().id,false,missing,{}});
+    check(wait_for([&]{return app.control(item).visible&&app.control(item).enabled;}),
+          "Failed Robust keyfile did not expose recovery for the retained key");
+    check(app.field(F::key).selected=="key:GUI key"&&app.field(F::mode).text=="Robust idle",
+          "Failed keyfile did not retain its key while pausing Robust capture");
+    check(app.control(item).label=="Resume with current key - "+path.filename().string(),
+          "Robust key recovery label did not identify the retained file");
+    const auto failed_menu=key_menu();
+    const auto retained=std::find_if(failed_menu.options.begin(),failed_menu.options.end(),[&](const auto& option) {
+        return option.label==app.control(item).label&&option.enabled;
+    });
+    check(retained!=failed_menu.options.end(),"Robust recovery action was absent from its visible Keyfile menu");
+    app.select_menu(key_actions,retained->id);
+    check(!app.control(item).visible,"Robust recovery action remained visible after resuming");
+    check(wait_for([&]{return app.field(F::mode).text=="Robust receiving";}),
+          "Resuming with the retained Robust key did not restart capture");
+    app.activate(C::open_keyfile);request=app.take_services();
+    check(request.size()==1,"Robust second replacement keyfile service unavailable");
+    const auto second_missing=path.string()+".second-missing";
+    app.complete_service({request.front().id,false,second_missing,{}});
+    check(wait_for([&]{return app.control(item).visible&&app.control(item).enabled;}),
+          "Second failed replacement did not re-expose the current-key recovery action");
+    app.activate(C::open_keyfile);request=app.take_services();
+    check(request.size()==1,"Robust successful replacement keyfile service unavailable");
+    app.complete_service({request.front().id,false,replacement.string(),{}});
+    check(wait_for([&]{return app.field(F::key).selected=="key:Replacement key";}),
+          "Successful Robust key replacement did not select its new named key");
+    check(!app.control(item).visible,"Successful Robust key replacement retained the recovery action");
     app.activate(C::load_amateur);
     check(app.field(F::key).selected=="key:WARNING-Amateur"&&app.field(F::key).enabled,
-          "Robust Amateur recovery did not select a usable public key");
+          "Robust failed to replace a file-backed key with Amateur");
+    app.close();
+}
+void robust_amateur_keyfile_recovery() {
+    using F=ui::Field;using C=ui::Command;
+    Application app({.simulation=true});app.select(F::fast_mode,"robust");app.start();
+    const auto& item=action(C::acknowledge_key_failure);
+    app.activate(C::open_keyfile);const auto request=app.take_services();
+    check(request.size()==1,"Robust Amateur key replacement service unavailable");
+    const auto missing=std::filesystem::temp_directory_path()/("datapump-amateur-replacement-"+
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".missing");
+    app.complete_service({request.front().id,false,missing.string(),{}});
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+    while(!app.control(item).visible&&std::chrono::steady_clock::now()<deadline) {
+        app.tick();std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(app.control(item).visible&&app.control(item).enabled&&
+          app.control(item).label=="Resume with current key - Amateur (public)",
+          "Failed keyfile did not identify the retained public Amateur key");
+    check(app.field(F::mode).text=="Robust idle","Failed Amateur replacement did not pause Robust capture");
+    app.select(F::fast_mode,"fast");app.tick();
+    check(!app.control(item).visible&&app.field(F::mode).text=="Robust idle",
+          "Switching to Fast exposed Robust recovery or restarted its capture");
+    app.select(F::fast_mode,"robust");
+    app.activate(C::acknowledge_key_failure);
+    check(!app.control(item).visible,"Amateur recovery action remained visible after resuming");
+    const auto resumed=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+    while(app.field(F::mode).text!="Robust receiving"&&std::chrono::steady_clock::now()<resumed) {
+        app.tick();std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(app.field(F::mode).text=="Robust receiving","Amateur recovery did not resume Robust capture");
     app.close();
 }
 void robust_public_key_warning() {
@@ -1047,6 +1121,18 @@ void robust_missing_startup_key() {
     }
     check(controller.snapshot().running,"Selecting Amateur after startup failure did not start Robust");
     controller.close();
+
+    Application app({.simulation=true,.settings=patch});app.select(F::fast_mode,"robust");app.start();
+    const auto& resume=action(C::acknowledge_key_failure);
+    const auto app_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+    while(app.field(F::status).text.find("cannot open keyfile")==std::string::npos&&
+          std::chrono::steady_clock::now()<app_deadline) {
+        app.tick();std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(!app.control(resume).visible&&!app.control(resume).enabled&&
+          app.control(action(C::load_amateur)).enabled&&!app.field(F::key).enabled,
+          "Failed startup keyfile exposed recovery without an existing key");
+    app.close();
 }
 void robust_boundary_keeps_polling() {
     using F=ui::Field;using C=ui::Command;
@@ -1143,6 +1229,6 @@ void robust_native_settings() {
 }
 }
 int main() {
-    try {audio_settings();rate_and_spectrum_presentation();damaged_reception_presentation();fast_simulation_controls();simulation_profile_revalidation();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();robust_keyfile_menu_label();robust_public_key_warning();robust_missing_startup_key();robust_boundary_keeps_polling();robust_native_settings();std::cout<<"Fast GUI isolation tests passed\n";}
+    try {audio_settings();rate_and_spectrum_presentation();damaged_reception_presentation();fast_simulation_controls();simulation_profile_revalidation();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();robust_keyfile_menu_label();robust_amateur_keyfile_recovery();robust_public_key_warning();robust_missing_startup_key();robust_boundary_keeps_polling();robust_native_settings();std::cout<<"Fast GUI isolation tests passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

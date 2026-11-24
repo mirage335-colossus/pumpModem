@@ -274,7 +274,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::action,Field::count,Command::generate_keyfile,Bitmap::none,Page::console,2,"Generate keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::load_amateur,Bitmap::none,Page::console,2,"WARNING - Load Amateur"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::show_key_folder,Bitmap::none,Page::console,2,"Show key folder"}, Slot::key_actions, Menu::keyfile),
-        placed({Kind::action,Field::count,Command::acknowledge_key_failure,Bitmap::none,Page::console,2,"Keep current keys"}, Slot::key_actions, Menu::keyfile),
+        placed({Kind::action,Field::count,Command::acknowledge_key_failure,Bitmap::none,Page::console,2,"Resume with current key"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::choice,Field::dsss_factor,Command::none,Bitmap::none,Page::console,3,"Spreading"}, Slot::dsss_factor),
         placed({Kind::choice,Field::dsss_version,Command::none,Bitmap::none,Page::console,3,"Added Symbols"}, Slot::dsss_version),
         placed({Kind::choice,Field::fhss,Command::none,Bitmap::none,Page::console,3,"FHSS"}, Slot::fhss),

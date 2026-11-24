@@ -408,7 +408,10 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
     if(declaration.kind==ui::Kind::action) {
         const auto current=command_label(declaration.command);
         if(!current.empty())view.label=current;
-        view.enabled=view.enabled&&enabled(declaration.command);
+        const bool available=enabled(declaration.command);
+        view.enabled=view.enabled&&available;
+        if(declaration.command==ui::Command::acknowledge_key_failure)
+            view.visible=view.visible&&available;
     }
     if(declaration.scope==ui::ScreenScope::regular) {
         view.visible=view.visible&&impl_->regular_selected();
