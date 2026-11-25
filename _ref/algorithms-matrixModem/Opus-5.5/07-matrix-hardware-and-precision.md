@@ -38,10 +38,12 @@ derived values are marked.
    levels: ≤ 0.1 dB in mutual-information terms. One-bit samples cost 1.96 dB
    and binary templates 0.9 dB. A Monte Carlo check with 4-bit data and 4-bit
    templates measured a 0.058 dB deflection loss.
-6. **"INT4 only" must mean 4-bit operands with wide exact accumulation.** No
-   target accumulates in 4 bits; a 4-bit accumulator would destroy long
-   correlations. Hardware accumulates in s32 (integer routes) or FP32 (FP4
-   route, exact below 2^24 for integer-valued products).
+6. **Proposed interpretation, pending user decision:** pair 4-bit operands with
+   wide exact accumulation. The original strict INT4-only constraint remains
+   unresolved; this research does not establish that this interpretation
+   satisfies it. A single four-bit accumulator cannot preserve long exact
+   correlation sums. The listed matrix hardware accumulates in s32 (integer
+   routes) or FP32 (FP4 route, exact below 2^24 for integer-valued products).
 7. **The integrated GPUs differ sharply.** The Ryzen 5 PRO 5650U's Vega iGPU
    (gfx90c) has no INT8 or INT4 dot instruction at all (the cited Vega ISA
    document describes gfx906); Iris Xe (Xe-LP) has only DP4A INT8; UHD 630 has
@@ -118,7 +120,16 @@ cost about 0.95 dB.
 
 ## A device-independent numerical contract
 
-A contract that keeps the code lean while using each device's fastest exact
+**25 November clarification — proposal only.** The earlier statement that
+“INT4 only” *must mean* four-bit operands with wide exact accumulation was a
+proposed interpretation, not an approved change to the
+[original research brief](../../../_appraisal/matrixModem.md#preserved-brief).
+Its strict post-isolation precision requirement remains unresolved. The
+proposal below requires an explicit decision on wider accumulation and on any
+FP4 or INT8 substitution; the [implementation alternatives](../Sol-6.2/int4-and-accelerators.md#int4-alternatives-and-the-portability-floor)
+remain relevant. This is not an operative contract.
+
+Proposed contract to keep the code lean while using each device's fastest exact
 route:
 
 1. **Operands:** signed small integers from the codebook
@@ -141,13 +152,17 @@ route:
    setting) must show bit-exact equality with a CPU reference before a route is
    enabled.
 
-**Decision for the user.** The request says FP4 will not be used. On the
-Blackwell targets there is no INT4 Tensor Core route; the choice is between
-integer-valued E2M1 operands on the FP4 instruction (2× the INT8 rate, exact
-integer semantics within the bound above) and INT8 instructions at half that
-rate. The repository's own automatic-mode contract asks for NVFP4 to be tested
-on Blackwell. This research recommends the integer-valued E2M1 lowering, gated
-by the exactness test, but the decision belongs to the user.
+**Decisions for the user.** The original brief says FP4 will not be used, and
+the appraisal preserves strict INT4 as an unresolved constraint. On the
+Blackwell targets there is no documented INT4 Tensor Core route; this research
+proposes integer-valued E2M1 operands on the FP4 instruction (2× the INT8 rate,
+exact integer semantics within the bound above) and also records INT8 as an
+alternative at half that rate. Whether either route is allowed under the
+strict INT4-only rule is unresolved. Separately, whether wide exact accumulation
+is compatible with that rule is unresolved too. The repository's automatic-mode
+contract asks for NVFP4 to be tested on Blackwell. This research recommends the
+integer-valued E2M1 lowering, gated by the exactness test, but neither that
+recommendation nor the proposed accumulation semantics is an approved decision.
 
 ## Measuring utilization honestly
 

@@ -22,11 +22,22 @@ exist.
    - *total bandwidth B* from the **transceiver passband and regulation**
      (2.2 kHz default inside 450–2650 Hz; ≤ 2.8 kHz with the 26 dB mask).
    The alphabet then follows as M ≈ B/Δ.
-3. **Prefer long symbols for weak links.** At −10 to 0 dB-Hz, symbols of 2.5–10 s
-   are within about 0–3 dB of the best duration in *every* Doppler category,
-   while 160 ms symbols lose 5–20 dB in quiet and moderate channels. Long
-   symbols need frequency/drift tracking and stable equipment, which the
-   receiver (and optionally Helper guidance) must supply.
+3. **Prefer long symbols for weak links, but select duration by the modeled
+   channel and design C/N0.** At the sampled −10, −6 and −2 dB-Hz points,
+   2.56 s and 10.24 s are within 2.9 dB of the best duration in the 0.1–5 Hz
+   Doppler rows. Stable-channel exceptions matter: at −10 dB-Hz, 2.56 s costs
+   8.5 dB in AWGN and 7.3 dB in slow Rayleigh, while 10.24 s costs 3.8 dB in
+   AWGN. These are excess Eb/N0 relative to each model's best duration at the
+   same C/N0. The earlier 2.5–10 s / 0–3 dB claim for every Doppler category
+   throughout −10 to 0 dB-Hz was too broad; discrete samples do not establish
+   that continuous-range guarantee. The benefit over short symbols remains:
+   at those three C/N0 points, 160 ms loses about 5–20 dB in the AWGN,
+   slow-Rayleigh and 0.1–1 Hz Doppler rows. Long symbols need frequency/drift
+   tracking and stable equipment, which the receiver (and optionally Helper
+   guidance) must supply. See the [dated qualification](README.md#dated-qualifications-25-november-2026),
+   [sampled fixed-duration results](../../../_appraisal/algorithms-matrixModem/calc/results/mfsk_summary.md#ebn0-db-with-a-fixed-symbol-duration-t--256-s-tone-spacing-1t--4-sigma-and-penalty-vs-best-t),
+   the [information-limits review](../Sol-6.2/information-limits-review.md#boundaries-for-waveform-decisions),
+   and the [finite-alphabet fading study](../Sol-6.2/fading-limit-and-mfsk-alternatives.md#finite-alphabet-in-a-22-khz-band).
 4. **Use keyed hopping for time diversity and observer resistance, not for
    in-band frequency diversity.** In benign conditions the whole 2.2 kHz band
    fades together; diversity comes from spreading the code over many coherence

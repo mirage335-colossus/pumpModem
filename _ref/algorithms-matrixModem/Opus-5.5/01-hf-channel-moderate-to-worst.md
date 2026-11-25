@@ -206,8 +206,10 @@ quantify the consequences. The qualitative picture:
   about twice the 2σ width), but the symbol may last many coherence times: the
   receiver then accumulates energy over a low-rank signal subspace. The FST4
   rule "spread below spacing" holds for single-bin detectors where spacing =
-  1/T. It does not forbid long symbols with wide spacing, which the limits
-  chapter finds near-optimal at low C/N0 in every Doppler category.
+  1/T. It does not forbid long symbols with wide spacing, which can be
+  near-optimal at low C/N0 in the idealized duration-optimized sweeps. A fixed
+  long duration is not uniformly near-optimal: see the [sampled benefits and
+  stable-channel exceptions](05-waveform-and-parameter-design.md#recommendations-in-brief).
 - **Frequency diversity inside 2.2 kHz is conditional.** It exists only in
   categories B–D. Time interleaving must carry the diversity in A.
 - **The round-the-world echo is a symbol-scale ISI source for 160 ms symbols.**

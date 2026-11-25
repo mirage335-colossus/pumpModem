@@ -35,12 +35,20 @@ The two agree closely where they overlap.
    penalties come from channel *variation* (Doppler spread, fading) and from
    processing that throws away phase continuity, not from not knowing the phase.
 4. **Short symbols at low C/N0 are the dominant avoidable loss.** With a fixed
-   160 ms symbol, every channel — even AWGN — needs Eb/N0 ≈ 19 dB at
-   −10 dB-Hz, 12 dB at −2 dB-Hz and 5 dB at +6 dB-Hz, because each symbol
-   carries too little energy. The best symbol duration grows as C/N0 falls
-   (seconds to tens of seconds), and long symbols remain near-optimal at low
-   C/N0 in every Doppler category, provided tone spacing accommodates the
-   spread.
+   160 ms symbol, the AWGN baseline needs Eb/N0 ≈ 19 dB at −10 dB-Hz,
+   12 dB at −2 dB-Hz and 5 dB at +6 dB-Hz, because each symbol carries too
+   little energy. Spread-fading requirements vary and can be higher: the
+   30 Hz row needs 28.9, 21.0 and 13.2 dB at those same C/N0 values. The best
+   symbol duration grows as C/N0 falls
+   (seconds to tens of seconds). Long durations can be near-optimal in the
+   idealized duration-optimized sweeps, but a particular 2.56–10.24 s choice
+   is not within 0–3 dB across all models: at −10 dB-Hz, 2.56 s costs 8.5 dB
+   in AWGN and 7.3 dB in slow Rayleigh, while 10.24 s costs 3.8 dB in AWGN.
+   These are penalties against each model's best duration at the same C/N0,
+   not absolute Eb/N0 values or a guarantee over a continuous C/N0/Doppler
+   range. See the [25 November qualification](README.md#dated-qualifications-25-november-2026),
+   the [information-limits review](../Sol-6.2/information-limits-review.md#boundaries-for-waveform-decisions),
+   and the [finite-alphabet fading study](../Sol-6.2/fading-limit-and-mfsk-alternatives.md#finite-alphabet-in-a-22-khz-band).
 5. **Fading needs time diversity; outages need message-scale erasure tolerance.**
    With no channel knowledge, 100–128-bit messages at 10⁻³ need about
    3.8–4.3 dB Eb/N0 and roughly 30–100 independent fades (Yang, Durisi &

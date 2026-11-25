@@ -64,9 +64,10 @@ on the capacity expression, idealized MFSK sweeps and finite-message limits.
    Cores.** INT4 is native on the Ada GPUs; RTX 5090 and RTX PRO 6000 provide
    4-bit speed only through block-scaled FP4 (E2M1). The 11-level integer
    codebook {0, ±1, ±2, ±3, ±4, ±6} is exact on every 4-bit route and loses
-   only 0.09 dB as an input quantizer, allowing one numerical contract with
-   per-device lowering. Whether to use the FP4 instruction with integer-valued
-   operands on Blackwell is a decision for the user.
+   only 0.09 dB as an input quantizer, motivating a proposed numerical contract
+   with per-device lowering. Wide accumulation and FP4 or INT8 substitution
+   remain proposals requiring an explicit decision; they do not resolve or
+   relax the original strict INT4 requirement.
    ([precision](07-matrix-hardware-and-precision.md))
 7. **Observer resistance needs low energy per observed cell.** A radiometer is
    defeated by noise-level uncertainty at these levels, but an unkeyed observer
@@ -104,6 +105,10 @@ outage, acquisition and practical receiver costs still matter. It also records
 conditions where long per-symbol noncoherent dwells have a measurable gap from
 the coherent limit. These qualifications refine the scope of the original
 conclusion; they do not erase the historical calculation or its cited sources.
+Even within the original sweep, a fixed 2.5–10 s recommendation is too broad:
+the [design chapter](05-waveform-and-parameter-design.md#recommendations-in-brief) records the
+sampled spread-fading benefits and the larger AWGN/slow-Rayleigh penalties,
+relative to each model's best duration at the same C/N0.
 
 ## Reading map
 
