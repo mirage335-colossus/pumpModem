@@ -2,6 +2,11 @@
 
 24 November 2026 · Research note
 
+The subsequent [repeated-FSK receiver experiment](tensor-reception-results.md)
+measured Tensor Core activity in cuBLAS codeword scoring and across the full
+replay, following separate cuFFT projection. The discussion of unmeasured
+activity below refers to the earlier projection comparison.
+
 ## Answer in brief
 
 **A cuFFT call is not evidence that a workload is using Tensor Cores, and the

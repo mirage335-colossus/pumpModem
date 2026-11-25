@@ -8,6 +8,10 @@ Matrix Modem is a proposed standalone C++ weak-signal modem. The first compariso
 
 The [received-history design](received-history-design.md) compares recent-waveform correlation, channelized evidence, and coded FSK at matched airtime and energy. The [Tensor execution note](tensor-execution-evidence.md) explains what the prior projection run established and how actual Tensor Core use would be verified. The [research-pass index](research-pass-index.md) links the relocated studies and their experiments. Experimental source and reproduction notes are under [`_appraisal/algorithms-matrixModem/`](../../../_appraisal/algorithms-matrixModem/).
 
+The [repeated-FSK reception experiment](tensor-reception-results.md) measured Tensor Core scoring, IQ-to-decision speedup and receive errors on Blackwell. The [oscillator-drift experiment](received-history-drift.md) examines a narrow relative-frequency search between two received copies and compares it with known-template acquisition.
+
+The [receiver bottleneck review](tensor-receiver-bottlenecks.md) measures score tiling, shorter tone transforms and narrowband preprocessing. It also compares published waveform and receiver designs that expose useful GPU matrix work.
+
 ## Findings that affect the first experiment
 
 | Question | Evidence and design consequence |

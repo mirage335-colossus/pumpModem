@@ -1,5 +1,9 @@
 # Received-history correlation for Matrix Modem
 
+The [carrier-drift experiment](received-history-drift.md) evaluates the case
+where timing is known well enough to correlate one earlier and one later
+copy and the unknown common carrier offset cancels in magnitude.
+
 24 November 2026. The design target is a simple weak-signal waveform whose receiver can issue large, useful Tensor Core batches when the channel and public search require them. The prior Blackwell run used FP32 cuFFT as a regular-grid control. It demonstrated a faster projection stage for that grid, and the hardware counter request was denied. The experiment used 2,048-element NVFP4 rows containing only 512 active complex samples. Received-versus-received correlations, direct 512-sample products, and joint detection were outside the tested work. [Projection benchmark](../../../_appraisal/algorithms-matrixModem/projection-probe/README.md), [Tensor execution evidence](tensor-execution-evidence.md).
 
 **Develop the format around FSK soft evidence and a small fixed code, with received history available as an extra statistic.** A repeated pattern deserves a direct equal-airtime comparison. Begin by evaluating it in a narrow channelized representation, with a raw correlation reference. The low-SNR penalty and channel memory rule out requiring raw periodicity as the only admission test across the intended HF envelope. The least complicated Matrix candidate with a genuine dense multiply is a batch of bounded timing/frequency hypotheses scored against a short codebook. Use history correlations where they add independently calibrated evidence, then measure whether enough such work is ready to keep Tensor Cores busy. [Earlier waveform findings](waveform-and-repetition-review.md), [channel envelope](channel-envelope-review.md).
