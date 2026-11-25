@@ -1,0 +1,296 @@
+# The fading coherence limit and alternatives to MFSK
+
+25 November 2026 · Research, independent calculations and literature reconciliation
+
+This study examines two linked questions for Matrix Modem. First, is the quoted “hard limit in disturbed channels” correct, and how general is it? Second, has any study shown something substantially better than MFSK for weak signals on disturbed channels, in receiver computation, in sensitivity, or both? It reproduces the limit independently, tests how far it depends on its assumptions, measures how closely practical FFT tone receivers and several alternatives approach it, and reconciles the results with the literature. The calculations are in [`_appraisal/algorithms-matrixModem/coherence-limits/`](../../../_appraisal/algorithms-matrixModem/coherence-limits/README.md). Fielded systems and the computation literature are reviewed in [MFSK alternatives: field practice and receiver computation](mfsk-alternatives-practice-and-computation.md), and the channel evidence behind the model choices is in [HF channel structure and extremes](hf-channel-structure-and-extremes.md).
+
+The design preference stated for this work is to accept a modest, uniform loss of throughput, computation or efficiency in exchange for avoiding a drastic sensitivity or compute failure in any situation, including situations that are only theoretically possible. The conclusions below are organized around that preference. They are research findings, not a qualified receiver: acquisition, nonstationarity, impulsive noise and a complete coded implementation remain to be measured.
+
+## Answer in brief
+
+**The limit is correct and, within its model, close to a worst case.** For a constant-envelope (peak-limited) transmitter, frequency-flat Rayleigh fading with Doppler spectrum `S(f)`, no channel knowledge at either end, known timing and Gaussian noise, every waveform and receiver is bounded by `R ≤ P − ∫ln(1 + P·S(f)) df` nat/s, where `P` is the received C/N₀ in hertz. The quoted values reproduce exactly: 5.39, 14.09, 23.92 and 28.68 dB minimum `Eb/N₀` at −10 dB-Hz for Gaussian spectra of `2σ` = 0.1, 1, 10 and 30 Hz. The governing quantity is the received energy per effective coherence interval, `x = (C/N₀)/B_eff` with `B_eff = 1/∫S²`. Two refinements strengthen the statement. For a given Doppler autocorrelation, zero-mean Gaussian (Rayleigh) fading is the worst fading law in the capacity-per-unit-energy sense. For a given RMS Doppler width, the Gaussian spectrum is within 0.1–0.2 dB of the worst spectral shape. [The bound](#the-bound-and-what-it-assumes), [worst-case status](#is-it-a-worst-case).
+
+**The limit is not universal, and the exceptions matter in both directions.** It is optimistic about finite messages, nonstationary paths, unknown timing and spread, impulsive noise, and two-ray fading that is more severe than Rayleigh. It is pessimistic whenever any part of the received power is specular or confined to a narrow spectral line, when the spectrum is peaked rather than smooth, when more than one receive branch is available, and when the transmitter may exceed its average power during bursts. A specular component of `K` = 0.1, about 9% of the received power, lowers the 30 Hz figure from 28.7 dB to 8.8 dB. Measured quiet one-hop HF channels are often much narrower and more line-like than the Gaussian reference profiles. [Where the channel can be better](#where-the-real-channel-can-be-better), [where it is worse](#where-reality-is-worse-than-the-bound).
+
+**No study found shows something substantially better than well-implemented MFSK in sensitivity on Doppler-spread channels, and the theory explains why.** Long-dwell, constant-envelope tones with a spread-matched weighted-periodogram receiver come within 0.2 dB of the bound in every Gaussian Doppler category tested, in the large-alphabet limit. In a real 2.2 kHz band with 22 tones at 100 Hz spacing, one configuration stays within about 1.1 dB of time across 0.1–30 Hz spreads at −10 dB-Hz, provided the receiver adapts its spread weighting over the message. Constant-envelope PSK can also reach the bound in theory, but only with long-memory joint channel estimation; ordinary differential detection reaches 23% of the bound's rate in the low-SNR limit. Chirps lose about 1.3–1.5 dB of power-equivalent sensitivity in two-path Rayleigh fading at low SNR because they resolve the paths. Noise-like spreading overspreads. The large sensitivity differences found in practice come from receivers, not waveform families: a fixed 160 ms single-bin detector needs 14 dB more time than the bound on a 0.1 Hz channel at −10 dB-Hz, and a weighted periodogram designed for the wrong spread loses up to 20 dB. [Practical receivers](#practical-receivers-against-the-bound), [alternatives](#tone-versus-chirp-and-other-spread-signals).
+
+**Computation.** An FFT evaluates every tone hypothesis together, and the spread-matched statistic is a small weighted sum of bin energies, so MFSK is already near the minimum per-hypothesis cost. No study found an order-of-magnitude reduction at equal sensitivity for weak signals of uncertain frequency. In every domain surveyed, the hypothesis count for timing, frequency, drift and spread dominates both cost and threshold. [Computation](#receiver-computation).
+
+**For Matrix Modem**, the evidence favors phase-continuous, constant-envelope MFSK with tone spacing wider than the worst configured Doppler occupancy, a dwell configured from the target C/N₀, keyed hopping across the band, and a receiver that adapts its spread weighting over the message rather than per symbol. The receiver also needs a long-coherence branch for specular paths, exact drift search and a nonlinear front end against impulses. The [implications section](#implications-for-matrix-modem) lists the conditions under which that choice would be wrong.
+
+## The bound and what it assumes
+
+**Statement.** Take complex baseband `Y(t) = H(t)·X(t) + N(t)` with `H` a stationary, unit-power fading process with normalized Doppler spectrum `S`, `N` white with density `N₀`, and `|X(t)|² ≤` peak. Sethuraman and Hajek give the capacity per unit energy under a peak constraint, and their converse bounds the rate at any average power by `P_avg·η(P_peak)` with `η(P) = 1 − (1/P)∫ln(1 + P·S_ac(f)) df` [Sethuraman and Hajek, IEEE TIT 51(9), 2005, Prop. 3.3, full text](https://hajek.ece.illinois.edu/Papers/SethuramanHajek05.pdf). `S_ac` is the absolutely continuous part of the spectrum. With average equal to peak, `R ≤ P − ∫ln(1 + P·S_ac) df`. Constant-envelope FSK with long symbols achieves it in the infinite-bandwidth limit [Viterbi, IEEE TIT 13(3), 1967](https://doi.org/10.1109/TIT.1967.1054039), [Durisi, Bölcskei and Shamai, ISIT 2007](https://arxiv.org/abs/0705.1682). A discrete-time firm bound valid at every SNR, slightly tighter than this one, is Proposition 2.2 of [Sethuraman, Wang, Hajek and Lapidoth, IEEE TIT 55(4), 2009, full text](https://arxiv.org/abs/0712.2872). The [earlier audit](information-limits-review.md) covers the derivation and the 97–99.8% Monte Carlo ratio; it is not repeated here.
+
+**Independent reproduction.** `bound_shapes.cpp` uses adaptive quadrature rather than the earlier Simpson grid.
+
+| Gaussian `2σ` | `B_eff = 1/∫S²` | rate bound at −10 dB-Hz | minimum `Eb/N₀` | `x = (C/N₀)/B_eff` |
+| ---: | ---: | ---: | ---: | ---: |
+| 0.1 Hz | 0.177 Hz | 0.0289 bit/s | 5.39 dB | −2.5 dB |
+| 1 Hz | 1.77 Hz | 0.00390 bit/s | 14.09 dB | −12.5 dB |
+| 10 Hz | 17.7 Hz | 0.000405 bit/s | 23.92 dB | −22.5 dB |
+| 30 Hz | 53.2 Hz | 0.000135 bit/s | 28.68 dB | −27.3 dB |
+
+**One parameter governs it.** For any spectrum of fixed shape the minimum `Eb/N₀` depends only on `x`. For the Gaussian shape:
+
+| `x` | −30 dB | −20 dB | −10 dB | 0 dB | +10 dB | +20 dB | +30 dB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| minimum `Eb/N₀` | 31.4 dB | 21.5 dB | 11.7 dB | 3.7 dB | −0.2 dB | −1.3 dB | −1.55 dB |
+| loss versus AWGN | 33.0 dB | 23.0 dB | 13.3 dB | 5.3 dB | 1.4 dB | 0.3 dB | 0.05 dB |
+
+Below about `x = −10 dB` the required `Eb/N₀` rises 1 dB for every dB that `x` falls, because the rate falls as `(C/N₀)²/(2·B_eff)`. This is the quadratic regime. In it, halving transmit power quadruples the time per bit, and the energy per bit doubles. The user's phrase “what matters is how much signal energy arrives within one fading coherence interval” is accurate, with the coherence interval defined by `1/B_eff` of the actual spectrum. [Calculation output](../../../_appraisal/algorithms-matrixModem/coherence-limits/results/bound_shapes.md).
+
+**The quoted table is for one C/N₀.** The same spreads need very different `Eb/N₀` at other received levels:
+
+| C/N₀ | `2σ` = 0.1 Hz | 0.5 Hz | 1 Hz | 3 Hz | 10 Hz | 30 Hz |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| −20 dB-Hz | 14.1 dB | 20.9 dB | 23.9 dB | 28.7 dB | 33.9 dB | 38.7 dB |
+| −10 dB-Hz | 5.4 dB | 11.3 dB | 14.1 dB | 18.7 dB | 23.9 dB | 28.7 dB |
+| 0 dB-Hz | 0.4 dB | 3.4 dB | 5.4 dB | 9.2 dB | 14.1 dB | 18.7 dB |
+| +10 dB-Hz | −1.2 dB | −0.3 dB | 0.4 dB | 2.2 dB | 5.4 dB | 9.2 dB |
+| +20 dB-Hz | −1.5 dB | −1.3 dB | −1.2 dB | −0.7 dB | 0.4 dB | 2.2 dB |
+
+### How hard the limit is in HF terms
+
+The time to deliver 100 information bits at the bound, with ideal coding, interleaving and synchronization:
+
+| C/N₀ | AWGN | 0.1 Hz | 0.5 Hz | 1 Hz | 3 Hz | 10 Hz | 30 Hz |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| −30 dB-Hz | 19 h | 286 d | 4 yr | 8 yr | 23 yr | 78 yr | 234 yr |
+| −20 dB-Hz | 116 min | 3 d | 14 d | 29 d | 85 d | 285 d | 2 yr |
+| −10 dB-Hz | 12 min | 58 min | 3.7 h | 7.1 h | 21 h | 3 d | 9 d |
+| 0 dB-Hz | 69 s | 110 s | 4 min | 6 min | 14 min | 43 min | 2.1 h |
+| +10 dB-Hz | 7 s | 8 s | 9 s | 11 s | 17 s | 35 s | 84 s |
+
+The [link-budget review](link-budget-and-operation-review.md#what-a-plausible-noise-spread-does-to-airtime) maps 2 mW–100 mW and 150–180 dB of path loss onto −47 to +14 dB-Hz for noise densities of −144 to −130 dBm/Hz. Combined with this table, the weaker half of that design space cannot carry a short message over a Doppler-spread skywave path in any practical time, whatever the waveform or computation. Only three things move a link out of that region: more received energy per coherence interval (higher peak power, lower loss, quieter noise, more receive aperture), a narrower or partly specular channel, or a transmitter allowed to burst above its average power. Receiver computation cannot. A receiver can, however, lose much of what the channel offers, which is where [practical receivers](#practical-receivers-against-the-bound) differ.
+
+## Is it a worst case?
+
+**Fading law.** For any input `x`, the information divergence that defines capacity per unit energy is `D(P_{Y|x} ‖ P_{Y|0}) = (received energy) − I(H; Y | X = x)`. For a fixed autocovariance of `H`, the Gaussian law maximizes `I(H; xH + N)`, so every non-Gaussian fading law with the same autocorrelation has at least the Rayleigh capacity per unit energy. Koch and Lapidoth proved the corresponding statement for the high-SNR pre-log, with the same maximum-entropy and Szegő step at its core [Koch and Lapidoth, IEEE TIT 56(3), 2010, eqs. 17–18, full text](https://arxiv.org/abs/0902.3372). The low-SNR, per-unit-energy version used here is a derivation from that identity, not a published theorem. Zhang and Mitra supply the achievability side: orthogonal codes with a quadratic receiver that uses only the channel covariance achieve the Rayleigh value for any fading law with that covariance [Zhang and Mitra, arXiv cs/0702108, eqs. 38–41, full text; journal status unverified](https://arxiv.org/abs/cs/0702108). The repository's [large-alphabet calculator](../../../_appraisal/algorithms-matrixModem/coherence-limits/README.md) confirms the same property: the rate of any quadratic tone receiver depends only on second-order channel statistics. Two limits apply. The argument is asymptotic and ergodic. In a slow or finite message, a non-Gaussian law with the same covariance can have more probability near zero amplitude and a worse outage; two comparable discrete rays are the HF example ([channel evidence](hf-channel-structure-and-extremes.md#amplitude-statistics)).
+
+**Spectral shape.** For a fixed support width, the flat spectrum is worst by Jensen's inequality. For a fixed RMS width, the worst spectrum at a given C/N₀ is the Karush–Kuhn–Tucker solution `S(f) = [1/(a + b·f²) − 1/P]⁺`, which tends to a parabola at low SNR. Minimum `Eb/N₀` at −10 dB-Hz, with each shape scaled to the same nominal spread `W`:
+
+| Shape | W = 0.1 Hz | 1 Hz | 10 Hz | 30 Hz |
+| --- | ---: | ---: | ---: | ---: |
+| Gaussian, `2σ = W` | 5.39 | 14.09 | 23.92 | 28.68 |
+| Worst case for `2σ_rms = W` | 5.48 | 14.28 | 24.14 | 28.90 |
+| Flat, `2σ_rms = W` | 5.17 | 13.97 | 23.82 | 28.58 |
+| Jakes (U-shaped), `2σ_rms = W` | 3.71 | 10.52 | 18.65 | 22.76 |
+| Two narrow components at ±W/2 | 3.41 | 11.25 | 20.93 | 25.68 |
+| Lorentzian, same 80%-power width | 4.83 | 12.90 | 22.62 | 27.37 |
+
+The theory agent's independent computation gave the same Gaussian, worst-case, flat and Jakes values. Peaked spectra are better because they concentrate power: the bound penalizes the spread of power, not the presence of Doppler. The Jakes advantage depends on sharp spectral edges that only long observations resolve, and HF channels are not usually modeled with Jakes spectra.
+
+**Measured widths must be converted through `B_eff`.** HF measurements report widths at different levels: `2σ` of a Gaussian fit (F.1487), the band containing 80% of power (Stocker, DAMSON), −10 or −30 dB widths (equatorial spread-F studies), or half-power widths. For heavy-tailed shapes these differ greatly. The bound depends on `B_eff = 1/∫S²`, which for unit-integral shapes is:
+
+| Shape | `B_eff` per −3 dB width | per −10 dB width | per 80%-power width | per `2σ_rms` |
+| --- | ---: | ---: | ---: | ---: |
+| Gaussian | 1.51 | 0.83 | 1.38 | 1.77 |
+| Lorentzian (exponential autocorrelation) | 3.14 | 1.05 | 1.02 | — |
+| Two-sided exponential | 2.89 | 0.87 | 1.24 | 1.41 |
+
+At an equal −10 dB width, a Lorentzian has about 27% more `B_eff` than a Gaussian, so a Gaussian bound is about 1 dB optimistic in the quadratic regime. At an equal half-power width it is about 3 dB optimistic. At an equal 80%-power width the Lorentzian is the better channel. Measured HF spectra are often peaked with heavy tails ([channel evidence](hf-channel-structure-and-extremes.md#doppler-spectrum-shape)), so the safest input to the bound is `B_eff` computed from a measured spectrum, or the −10 dB width with the Gaussian conversion.
+
+## Where the real channel can be better
+
+**Specular or line components.** A spectral line contributes no learning penalty: its power is usable at the coherent efficiency once its phase and frequency are tracked. With a Rician factor `K` and a Gaussian diffuse part of `2σ = W`, at −10 dB-Hz:
+
+| `K` | W = 0.1 Hz | 1 Hz | 10 Hz | 30 Hz | limit `(1 + 1/K)·ln 2` |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 (Rayleigh) | 5.39 | 14.09 | 23.92 | 28.68 | — |
+| 0.1 | 4.25 | 7.86 | 8.71 | 8.79 | 8.82 |
+| 0.3 | 2.88 | 4.48 | 4.75 | 4.77 | 4.78 |
+| 1 | 0.94 | 1.36 | 1.41 | 1.42 | 1.42 |
+| 3 | −0.43 | −0.35 | −0.34 | −0.34 | −0.34 |
+
+At weak signal levels the diffuse power is nearly wasted and the specular fraction sets the efficiency. This agrees with the low-power Rician result `Eb/N₀,min = ln 2/[1 − ln(1+η)/(η(K+1))]` of [Gursoy, Poor and Verdú, IEEE TWC 4(5), 2005, Prop. 3, full text](https://arxiv.org/abs/cs/0501067), which assumes the specular mean is known. Spectral lines are excluded from the Sethuraman–Hajek ergodic model, and a random-phase line is not ergodic. An unknown fixed phase costs a vanishing amount per unit time asymptotically but matters in finite messages. A narrow but nonzero component behaves similarly: 30% of power in a 0.05 Hz component and 70% in a 10 Hz component needs 12.1 dB at −10 dB-Hz instead of 23.9 dB.
+
+Measured quiet mid-latitude one-hop paths are much more coherent than the Gaussian reference profiles: FST4W measurements show mode widths near 0.06 Hz at 14 MHz over 1535 km, including equipment, and stable-carrier Doppler records show discrete traces wandering slowly by up to about ±1 Hz per day ([channel evidence](hf-channel-structure-and-extremes.md#coherence-on-quiet-paths)). Sporadic-E and single stable modes are often Rician. On such paths the Rayleigh bound is pessimistic, but only a receiver with a long-coherence, drift-tracking branch can collect the difference. The [receiver results](#practical-receivers-against-the-bound) show how hard that is: even the matched long-dwell tone receiver stays 2.1 dB from the bound on a `K = 1`, 1 Hz channel at −10 dB-Hz with an 82 s dwell, because a per-symbol noncoherent tone cannot exploit phase memory longer than its dwell.
+
+**Multiple receive branches.** Information adds across independently fading branches, so `n_R` independent branches multiply the bound's rate by `n_R`: about 3 dB less time per doubling, or about 1.5 dB of power in the quadratic regime. Fully correlated branches add coherently, giving 3 dB of power per doubling [Sethuraman, Wang, Hajek and Lapidoth 2009, Prop. 2.4 and Cor. 2.2–2.3](https://arxiv.org/abs/0712.2872); in the wideband noncoherent regime correlation between receive branches is beneficial, the opposite of coherent systems [Schuster, Durisi, Bölcskei and Poor, arXiv 0801.1002, Theorem 3](https://arxiv.org/abs/0801.1002). Polarization is the natural HF branch: a linear antenna receives half of each circular magneto-ionic mode, while a dual-circular receiver can separate them, with more than 25 dB O/X isolation reported on NVIS ([channel evidence](hf-channel-structure-and-extremes.md#polarization-and-magneto-ionic-fading)). At HF, external noise can be correlated between co-located antennas, so the array gain against noise depends on noise directionality and must be measured.
+
+**Transmitter peakiness.** The minimum `Eb/N₀` depends on the received peak C/N₀, not on the average. If the amplifier may exceed an average-power budget by a factor `κ` during bursts, at −10 dB-Hz average and 10 Hz spread the requirement falls from 23.9 dB (`κ` = 1) to 20.9, 18.0, 14.1 and 5.4 dB for `κ` = 2, 4, 10 and 100. For a fixed peak (PEP) limit, constant-envelope transmission at the peak is optimal and duty-cycling only spends time. Two consequences for operation: always transmit at the highest available peak power, and splitting a fixed peak between two simultaneous tones halves the rate in the quadratic regime (ratio 0.50–0.58 at −10 dB-Hz).
+
+## Where reality is worse than the bound
+
+**Finite messages.** The bound is an ergodic rate. Using the receiver's information density (an exact Gamma law for a flat spectrum, moment-matched for Gaussian; a random-coding heuristic, not a converse), the extra time needed for a message to fail with probability `ε`:
+
+| `x` | 20 bits, ε = 1% | 100 bits, 1% | 1000 bits, 1% | 100 bits, 0.1% |
+| ---: | ---: | ---: | ---: | ---: |
+| −20 dB | 3.7 dB | 1.7 dB | 0.5 dB | 2.3 dB |
+| −10 dB | 3.8 dB | 1.8 dB | 0.6 dB | 2.3 dB |
+| 0 dB | 4.5 dB | 2.1 dB | 0.7 dB | 2.8 dB |
+| +10 dB | 7.2 dB | 3.8 dB | 1.3 dB | 4.7 dB |
+| +20 dB | 12.4 dB | 7.7 dB | 3.2 dB | 9.0 dB |
+| +30 dB | 19.5 dB | 13.8 dB | 7.3 dB | 15.4 dB |
+
+At weak signal levels the penalty depends almost only on message length and reliability, because the message spans thousands of coherence intervals. The bound's optimism is largest where the energy per coherence interval is high and a short message spans few fades: a slow path at moderate C/N₀. No published low-SNR finite-blocklength result for stationary noncoherent fading was found; a 2026 paper notes the gap [Sun, Perlaza, Mary and Gorce, arXiv 2604.16062](https://arxiv.org/abs/2604.16062). [Calculation output](../../../_appraisal/algorithms-matrixModem/coherence-limits/results/finite_message.md).
+
+**Fading more severe than Rayleigh.** Two discrete rays of similar strength (O and X on north–south or NVIS paths, high and low rays near the MUF, short and long path) produce deterministic deep nulls with Nakagami `m` between 0.5 and 1. Their spectrum is line-like, so the ergodic bound is favorable, but outage over a finite message is worse than Rayleigh. Polarization matching, frequency hopping and interleaving over the beat period break this structure.
+
+**Nonstationarity and outages.** Second-order channel statistics are roughly stationary over seconds to minutes; traveling ionospheric disturbances move the Doppler centroid by 0.1–1 Hz over 15–180 minutes and can change mode power by 20–30 dB near focusing cusps. Shortwave fadeouts last a mean of 13–39 minutes for C1–X10 flares, with 90th percentiles of 30–123 minutes. Polar cap absorption can last about ten days on polar paths, and storm nights can close the F2 layer. Day-to-day signal deciles span 8–17 dB ([channel evidence](hf-channel-structure-and-extremes.md#nonstationarity-and-outages)). None of these is inside a stationary fading bound. They belong to an availability and erasure layer and to the receiver's ability to track and reacquire.
+
+**Unknown timing and spread.** Locating a message among `A` possible start times costs energy for about `log₂A` extra bits in the capacity-per-unit-cost sense: 72 bits with 2¹⁸ candidate starts cost about 1 dB more energy [Chandar, Tchamkerten and Tse, IEEE TIT 59(3), 2013, Theorem 2](https://arxiv.org/abs/1007.4872); [Polyanskiy, IEEE TIT 59(3), 2013](https://people.lids.mit.edu/yp/homepage/data/async.pdf). This extends to fading only through the same divergence formula. An unknown Doppler spectrum costs no first-order rate with a universal decoder, by analogy with [Feder and Lapidoth, IEEE TIT 44(5), 1998](https://doi.org/10.1109/18.705540), but no theorem for continuous stationary noncoherent fading was found, and a fixed receiver designed for the wrong spread loses heavily ([below](#robustness-to-unknown-spread)).
+
+**Impulsive noise.** For a fixed noise power, non-Gaussian noise increases the information limit, but a receiver built on Gaussian energy statistics may not collect it. With orthogonal codes, a linear receiver's rate is guaranteed for any noise of the same variance, while a quadratic (energy) receiver's rate can tend to zero in Gaussian-mixture impulsive noise [Zhang and Mitra, Example 3, eqs. 31–32](https://arxiv.org/abs/cs/0702108). MFSK energy detection is such a quadratic receiver. HF noise is impulsive and non-Gaussian, varies by roughly ±10 dB between sites and deciles, and includes narrowband carriers ([channel evidence](hf-channel-structure-and-extremes.md#noise-and-interference)). This is a genuine theoretical weakness of MFSK energy detection that needs clipping, blanking or a locally optimum nonlinearity before the transform, and a robust per-bin metric.
+
+**Long echoes.** Round-the-world (about 133–140 ms) and short-path/long-path (tens of milliseconds) echoes are rare but can be within a few dB of the direct signal. With 160 ms symbols they fall mostly into the next symbol's window. With multi-second tones they mostly overlap their own symbol and act as benign energy.
+
+## Practical receivers against the bound
+
+`wideband_receivers.cpp` computes the exact achievable rate (generalized mutual information) of quadratic FFT receivers in the large-alphabet limit with ideal interleaving and known timing and Doppler centre. Gaps are `10·log₁₀(R_bound/R)` at the same C/N₀: the extra transmit time, and energy, at the same transmit power. In the quadratic regime the equivalent C/N₀ penalty is about half that dB value ([Section 5 of the output](../../../_appraisal/algorithms-matrixModem/coherence-limits/results/wideband_receivers.md)). [Full output](../../../_appraisal/algorithms-matrixModem/coherence-limits/results/wideband_receivers.md).
+
+**Long dwell plus spread-matched weighting reaches the bound.** The weighted periodogram computes fine-resolution bins over the dwell and weights each by `λ_k/(1 + λ_k)` from the expected signal energy in that bin; it is the long-observation form of the estimator-correlator, and Q65's fast-fading metric is a fielded instance ([practice review](mfsk-alternatives-practice-and-computation.md#fielded-weak-signal-mfsk-q65-as-the-benchmark)). Gap at −10 dB-Hz versus dwell:
+
+| Channel | 0.16 s | 1.28 s | 10.24 s | 81.92 s |
+| --- | ---: | ---: | ---: | ---: |
+| Gaussian 0.1 Hz | 14.0 dB | 5.4 dB | 1.2 dB | 0.15 dB |
+| Gaussian 1 Hz | 5.5 dB | 1.2 dB | 0.15 dB | 0.02 dB |
+| Gaussian 10 Hz | 1.0 dB | 0.12 dB | 0.02 dB | 0.00 dB |
+| Gaussian 30 Hz | 0.33 dB | 0.04 dB | 0.01 dB | 0.00 dB |
+| Two modes 1 Hz at ±5 Hz | 6.5 dB | 1.3 dB | 0.15 dB | 0.02 dB |
+| Stable phase | 21.0 dB | 12.3 dB | 5.1 dB | 1.4 dB |
+| Rician `K` = 1, 1 Hz diffuse | 18.2 dB | 11.6 dB | 6.4 dB | 2.1 dB |
+
+In the large-alphabet limit a longer dwell does not hurt, whatever the Doppler. For a stationary channel the exact estimator-correlator's rate increases monotonically toward the bound as the dwell grows, because the normalized log-determinant of a Toeplitz covariance is non-increasing in its size; the weighted periodogram follows it, with deviations of at most 0.1 dB in the tested cases. A dwell of about `10/(2σ)` brings the weighted-periodogram loss to about 0.15 dB. The exact estimator-correlator needs about half that dwell for the same loss; an independent finite-burst calculation gave 0.12–0.16 dB at `T·2σ = 5`. On stable and specular channels a per-symbol tone needs very long dwells to approach the coherent limit; this is the noncoherent cost of an unknown phase per symbol, `ln(1+E)/E` for symbol energy `E`.
+
+**Simpler receivers.** At −10 dB-Hz:
+
+| Channel | FT8-like (160 ms, one bin) | best segment-energy receiver | best single coherent bin | matched weighted periodogram |
+| --- | ---: | ---: | ---: | ---: |
+| Gaussian 0.1 Hz | 14.0 dB | 0.9 dB | 1.6 dB | 0.15 dB |
+| Gaussian 1 Hz | 5.5 dB | 0.7 dB | 1.8 dB | 0.02 dB |
+| Gaussian 10 Hz | 3.0 dB | 0.6 dB | 1.8 dB | 0.00 dB |
+| Gaussian 30 Hz | 6.8 dB | 0.8 dB | 1.9 dB | 0.00 dB |
+| Two modes 1 Hz at ±5 Hz | 8.3 dB | 3.7 dB | 4.8 dB | 0.02 dB |
+| Auroral 50 Hz at +20 Hz | 8.8 dB | 0.8 dB | 2.0 dB | 0.00 dB |
+
+The FT8-like detector's 14 dB gap on a 0.1 Hz channel means 25 times the transmit time, or about 7 dB of power. It is the cost of a fixed short symbol at low C/N₀, not of MFSK. A segment-energy receiver whose segment length and bin count suit the channel stays within about 1 dB of time, but that optimum moves from 40 s segments at 0.1 Hz to 0.3 s at 30 Hz, so it must adapt. These results agree with the earlier [Opus-5.5 Monte Carlo](../Opus-5.5/03-information-limits-and-noncoherent-penalties.md#best-symbol-duration-and-the-cost-of-fixed-durations), which found 13.9 dB for a fixed 160 ms symbol on the 0.1 Hz channel at −10 dB-Hz by a different method.
+
+### Robustness to unknown spread
+
+A weighted periodogram designed for one spread and used on another, at −10 dB-Hz and a 10.24 s dwell (time gap; the power-equivalent is about half):
+
+| designed for \ actual | 0.1 Hz | 0.5 Hz | 1 Hz | 3 Hz | 10 Hz | 30 Hz |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.1 Hz | 1.2 | 3.1 | 5.4 | 9.8 | 14.8 | 19.6 |
+| 1 Hz | 6.2 | 1.1 | 0.2 | 2.2 | 6.9 | 11.6 |
+| 10 Hz | 15.6 | 9.7 | 6.9 | 2.6 | 0.0 | 2.2 |
+| 30 Hz | 20.3 | 14.4 | 11.6 | 7.0 | 2.2 | 0.0 |
+
+A factor of three error costs about 2.2 dB of time (1.1 dB of power) and a factor of ten 6–7 dB of time, consistent with the computation review's deflection figures after conversion. An error of 10 dB in the C/N₀ assumed for the weights costs under about 1.6 dB. A fixed spread design is therefore a drastic-failure risk, while a bank of spread hypotheses spaced by √2 to 2 costs at most about 0.1–0.5 dB of power. The bank's selection must be made over many symbols or by the decoder: the finite-alphabet Monte Carlo below shows that choosing the spread independently in each symbol is itself costly at low per-symbol SNR.
+
+### Finite alphabet in a 2.2 kHz band
+
+`finite_alphabet_mc.cpp` puts M = 11–352 tones in a 2.2 kHz band, generates each transmitted tone's fading signal by exact spectral synthesis, includes its leakage into neighboring tones, and estimates the per-symbol GMI by Monte Carlo with 10,000 trials per point (`±` about two standard errors, 0.05–0.3 dB here). It compares the adapted weighted periodogram (`WPm`, weights from the true channel, as a receiver that has learned the spread over the message), a per-symbol GLRT over six spread hypotheses, an unweighted band-energy detector (FT8-style when the dwell equals one over the spacing) and a single coherent bin. Gaps of the adapted receiver ([summary](../../../_appraisal/algorithms-matrixModem/coherence-limits/results/finite_alphabet_summary.md), [full output](../../../_appraisal/algorithms-matrixModem/coherence-limits/results/finite_alphabet_mc.md)):
+
+| C/N₀ | spacing / dwell (M) | 0.1 Hz | 1 Hz | 10 Hz | 30 Hz | two modes ±5 Hz | worst of these | stable phase | Rician `K`=1 |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| −10 dB-Hz | 6.25 Hz / 41 s (352) | 0.31 | −0.05 | 0.94 | 6.31 | 0.52 | 6.31 | 2.24 | 3.24 |
+| −10 dB-Hz | 25 Hz / 10.2 s (88) | 1.15 | 0.45 | −0.10 | 1.84 | 0.23 | 1.84 | 5.13 | 6.33 |
+| −10 dB-Hz | 100 Hz / 41 s (22) | 1.07 | 0.27 | 0.23 | 0.32 | 0.33 | 1.07 | 3.48 | 3.84 |
+| −10 dB-Hz | 200 Hz / 41 s (11) | 1.45 | 0.56 | 0.55 | 0.50 | 0.55 | 1.45 | 4.25 | 4.26 |
+| 0 dB-Hz | 6.25 Hz / 2.56 s (352) | 1.88 | 0.58 | 0.17 | 0.86 | — | 1.88 | 2.97 | 3.02 |
+| 0 dB-Hz | 25 Hz / 2.56 s (88) | 2.32 | 0.75 | 0.07 | 0.73 | — | 2.32 | 3.08 | 3.14 |
+| 0 dB-Hz | 100 Hz / 2.56 s (22) | 2.97 | 1.04 | 0.27 | 0.14 | — | 2.97 | 3.63 | 3.34 |
+| 0 dB-Hz | 100 Hz / 41 s (22) | 9.24 cap | 4.50 cap | 0.56 | 0.37 | — | 9.24 | 11.2 cap | — |
+| +10 dB-Hz | 6.25 Hz / 0.16 s (352) | 3.72 | 2.39 | 0.91 | 0.36 | 3.71 | 3.72 | 3.90 | 2.91 |
+| +10 dB-Hz | 6.25 Hz / 0.64 s (352) | 3.42 | 2.38 | 0.31 | 0.43 | 1.95 | 3.42 | 2.15 | 2.48 |
+| +10 dB-Hz | 100 Hz / 0.64 s (22) | 5.45 | 4.08 | 1.12 | 0.46 | 3.37 | 5.45 | 4.04 | 4.38 |
+
+“cap” marks rates limited by the alphabet: the receiver already extracts nearly `log₂M` bits per dwell, so the rate cannot exceed `log₂M/T`.
+
+- **With an adapted receiver, finite alphabets stay close to the bound when the dwell suits the C/N₀.** At −10 dB-Hz the best configuration for each Doppler-spread channel is within about 0.3 dB of time, and the most uniform single configuration tested (100 Hz spacing, 41 s dwell) is within 1.1 dB on all of them. Slight negative entries are Monte Carlo error.
+- **Spacing trades slow-channel efficiency against fast-channel safety.** A 6.25 Hz grid is best on a 0.1 Hz channel (0.31 dB) because it gives the largest alphabet, but at 30 Hz neighboring tones become confusable and the loss grows with dwell to 6.3 dB. A 100 Hz grid loses about 1 dB on slow channels and stays within 0.4 dB on fast ones; it has the smallest worst case in the −10 dB-Hz stratum.
+- **Configuration errors are asymmetric.** A dwell that is too long for the actual C/N₀ only caps the rate (for example 9.2 dB of time at 0 dB-Hz with a 41 s dwell and 22 tones on a 0.1 Hz path): the message is slower than the channel allows but still decodes. A dwell that is too short for a weaker signal costs sensitivity and, at the extreme, can prevent decoding within any practical time. Under the stated preference for avoiding drastic failure, configure the dwell for the weakest C/N₀ the purpose must survive.
+- **Choosing the spread per symbol is costly at low per-symbol SNR.** The per-symbol GLRT over six spread hypotheses loses a median 3.3–4.3 dB of time relative to the adapted receiver at −10 dB-Hz, about 8–11 dB on 10 Hz channels, and does not resolve at 30 Hz. At 0 dB-Hz the median excess falls to 0.2–1.2 dB, and at +10 dB-Hz to 0–0.7 dB. Spread selection should use many symbols or the decoder whenever the per-symbol energy is low.
+- **Stable and specular channels expose the per-symbol noncoherent cost at finite alphabet size**: 2.2–4.3 dB from the coherent limit at −10 dB-Hz with 41 s dwells. A phase-tracking branch, not a different alphabet, is the remedy.
+- **At +10 dB-Hz the band, not the channel, limits MFSK.** The best configurations are 2–4 dB of time from the infinite-bandwidth bound on slow channels: a finite alphabet in 2.2 kHz cannot carry the rate the bound allows when the energy per coherence interval is high. This is a throughput limit in the easy regime, where coherent or wider-band signaling would do better, not a sensitivity failure. Here the FT8 geometry (6.25 Hz, 160 ms) is as good as the adapted receiver allows on slow channels (3.7 dB at 0.1 Hz). On a 30 Hz channel the same grid with the adapted weighting stays within 0.4 dB, while its single-bin detector loses 6.9 dB.
+- **The unweighted band-energy detector** (all bins of a tone's band summed equally) is not resolved at −10 dB-Hz for multi-second dwells. At 0 dB-Hz on the 6.25 Hz grid it costs about 10–12 dB on stable and 0.1 Hz channels and 3–5 dB on 1–10 Hz channels. Unweighted integration over a band much wider than the signal's Doppler occupancy throws away the benefit of the long dwell.
+
+## Tone versus chirp and other spread signals
+
+**Chirps resolve multipath and pay for it at low SNR.** After dechirping, a linear chirp that sweeps 2.2 kHz over a dwell `T` places a path of delay `τ` at a frequency offset `(2200/T)·τ`. A tone sees two paths as one fading process, since delay only rotates its phase. With equal-power Rayleigh paths, matched receivers for both, and the gap to the flat-fading bound:
+
+| Channel (delay, `2σ`) | C/N₀ | dwell | tone | chirp | chirp − tone |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| F.1487 quiet (0.5 ms, 0.1 Hz) | −10 dB-Hz | 10.24 s | 1.15 dB | 2.19 dB | +1.0 dB |
+| disturbed (2 ms, 1 Hz) | −10 dB-Hz | 1.28 s | 1.17 dB | 4.07 dB | +2.9 dB |
+| NVIS (7 ms, 1 Hz) | −10 dB-Hz | 10.24 s | 0.15 dB | 2.59 dB | +2.4 dB |
+| low-latitude disturbed (6 ms, 10 Hz) | 0 dB-Hz | 1.28 s | 0.12 dB | 1.74 dB | +1.6 dB |
+| high-latitude disturbed (7 ms, 30 Hz) | 0 dB-Hz | 0.16 s | 0.32 dB | 3.28 dB | +3.0 dB |
+
+The chirp is worse in every case, by up to about 3 dB of time (1.3–1.5 dB of power), and the difference vanishes only when the dechirped paths fall within the Doppler spread. This is the low-SNR penalty for splitting energy across independently fading components: in the quadratic regime the rate from two independent halves is half the rate of the combined process. It complements, and does not contradict, the [chirp advantage reported by Marquet and coauthors](weak-signal-mfsk-alternatives.md#direct-comparisons) on a static frequency-selective channel at higher SNR without coding. A static notch erases a fixed tone; frequency hopping with coding across symbols recovers it, while the chirp's in-symbol diversity costs sensitivity on fading paths at weak signal levels.
+
+**Keyed phase codes and DSSS.** In frequency-flat fading every constant-envelope signal has the same channel-learning cost, so a long keyed phase sequence per message hypothesis, detected by correlating and then measuring narrowband energy, has the same sensitivity as a tone; this was the mechanism of the historical single-carrier Robust Modem ([prior modems](prior-modems-and-other-paths.md#historical-single-carrier-robust-useful-mechanism-weak-continuity)). The difference is computation: each hypothesis needs its own correlation, while an FFT evaluates all tone hypotheses together. With delay spread, a wideband chip stream resolves paths and pays the same penalty as the chirp; a noise-like signal filling 2.2 kHz is overspread for weak HF ([Médard and Gallager, IEEE TIT 48(4), 2002](https://doi.org/10.1109/18.992769); [Telatar and Tse, IEEE TIT 46(4), 2000](https://doi.org/10.1109/18.850678); critical-bandwidth arithmetic in the [Opus-5.5 theory review](../Opus-5.5/reviews/review-noncoherent-theory.md)).
+
+**Walsh orthogonal signaling** (STANAG 4415, 3G ALE) has the AWGN performance of MFSK of the same order, but its short phase-coherent symbols resolve multipath and need coherence over the symbol. **OFDM and OTFS** rely on channel estimation that the weak-signal regime cannot support without large pilot overhead; no low-SNR HF comparison was found.
+
+**PSK families.** Constant-envelope PSK with recursive training achieves the same wideband limit `P − ∫ln(1+P·S)`, with interleaving, decision feedback and very short symbols [Zhang and Laneman, IEEE TIT 53(1), 2007, Theorem 4.1, full text](https://arxiv.org/abs/cs/0508121). So MFSK is not uniquely optimal; any constant-envelope signaling with an asymptotically optimal channel estimator reaches the bound. The practical question is how much memory a PSK receiver needs. In the low-SNR limit, joint detection of non-overlapping blocks of `N` symbols reaches the following fraction of the bound's rate ([`psk_lowsnr.py`](../../../_appraisal/algorithms-matrixModem/coherence-limits/results/psk_lowsnr.md)):
+
+| Detector | fraction of bound | extra time | optimum symbol duration |
+| --- | ---: | ---: | ---: |
+| Differential PSK (N = 2) | 0.23 | 6.3 dB | `0.22/(2σ)` |
+| Block, N = 8 | 0.60 | 2.2 dB | `0.11/(2σ)` |
+| Block, N = 16 | 0.72 | 1.5 dB | `0.08/(2σ)` |
+| Block, N = 64 | 0.86 | 0.7 dB | `0.04/(2σ)` |
+| Tone, single coherent bin | 0.66 | 1.8 dB | `0.71/(2σ)` |
+| Tone, weighted periodogram, long dwell | → 1 | → 0 | long |
+
+Ordinary differential PSK loses about 3 dB of power-equivalent sensitivity in the quadratic regime and its optimum symbol rate is tied to the Doppler spread, so it must know the channel category. Long-memory PSK detection approaches the bound but needs iterative estimation and decoding over many symbols per hypothesis. PSK is the better choice where the channel is stable or strongly specular and its phase can be tracked: coherent BPSK with a long code reached about −1 dB `Eb/N₀` on phase-stable VLF ([empirical anchors](../Opus-5.5/04-empirical-weak-signal-anchors.md)), a regime in which a per-symbol noncoherent tone needs dwells of minutes to come within 1–2 dB. Phase-continuous FSK with multi-symbol coherent detection reaches the same regime without changing the transmitter.
+
+## Receiver computation
+
+Per symbol, the weighted periodogram costs one FFT share plus a weighted sum over the bins covering each tone's spread; a bank of spread hypotheses is a small matrix product of bin energies by weight vectors, which maps naturally onto batched matrix hardware. The other families are not cheaper as complete receivers: chirps need a dechirp and an FFT per symbol, keyed phase codes need one correlation per hypothesis, DSSS adds a Doppler-bin dimension that grows with coherent time, and long-memory PSK needs iterative estimation. The [practice and computation review](mfsk-alternatives-practice-and-computation.md#receiver-computation) gives the published numbers: a Taylor-tree drift search loses 1.4–2.5 dB where brute-force and FDMT searches do not, GPU FFTs are bandwidth-bound, tensor-core transforms pay off only when the chain is fused, and the sparse FFT saves about 2× only away from threshold. Across planetary entry links, GNSS and weak-signal amateur practice, the hypothesis count for timing, frequency, drift and spread dominates both the threshold and the cost; reducing it with Helper or GPSDO references is the main computational lever. The existing [tensor receiver results](tensor-receiver-bottlenecks.md) and [execution evidence](tensor-execution-evidence.md) cover what has been measured on the target hardware.
+
+## Implications for Matrix Modem
+
+These are design inferences from the calculations and literature. Each needs confirmation in a native receiver with acquisition, coding and physical completion. Better designs may exist.
+
+1. **Keep phase-continuous, constant-envelope MFSK as the reference waveform, at the highest available peak power.** No family found is substantially better in sensitivity on Doppler-spread channels, and the alternatives that match it in theory need more receiver memory or more computation. Constant envelope at peak is optimal under a PEP limit.
+2. **Configure the dwell from the weakest C/N₀ the purpose must survive, not from the Doppler category.** In the large-alphabet limit a longer dwell does not hurt on any Doppler spread, and short dwells at low C/N₀ cost up to 14–21 dB of time. In the 2.2 kHz Monte Carlo the best dwells put about 0–8 dB of energy in each symbol (`C/N₀·T` ≈ 1–6). A dwell that turns out too long for the actual signal only caps the rate; one that is too short costs sensitivity.
+3. **With long dwells, make the tone spacing several times the widest Doppler spread the configuration must survive.** At −10 dB-Hz, 100 Hz spacing had the smallest worst case over 0.1–30 Hz spreads (1.1 dB of time), while a 6.25 Hz grid lost 6.3 dB at 30 Hz because adjacent tones became confusable. At short dwells and higher C/N₀ a fine grid with spread-aware weighting was acceptable (0.4 dB at 30 Hz). Use the Doppler category to set spacing and alphabet size, and keyed hopping across the band for frequency diversity against static notches and narrowband interference.
+4. **Adapt the spread weighting per message, with a hypothesis bank spaced by √2–2, and include a narrow, long-coherence branch.** A fixed spread assumption risks losses of 6–20 dB of time. A per-message choice costs little; a per-symbol choice is costly at low SNR. A narrow branch with drift tracking captures specular or line-like power when present, which the Rician and quiet-path results show can be worth more than 10 dB.
+5. **Search drift exactly, and spend computation on hypotheses that matter.** A Taylor-tree approximation costs 1.4–2.5 dB; brute-force or FDMT-style search does not. Timing, frequency and drift hypotheses cost energy (about `log₂A` bits each message) as well as computation, so Helper or GPSDO narrowing is valuable for sensitivity as well as cost.
+6. **Protect the energy detector.** Clip or blank impulses before the transform, use robust per-bin statistics, and treat bins with narrowband carriers as erasures. This addresses the one theoretical failure mode of MFSK energy detection identified here.
+7. **Code across many fades and treat outages as erasures.** Interleave over at least the slowest fade and beat periods of interest, use a nonbinary code matched to the alphabet (coded modulation exceeds bit-interleaved capacity by about 1.9 dB at 64-FSK), and size deadlines with the finite-message table and the availability layer, not the ergodic bound.
+8. **Do not expect waveform changes or computation to recover the weak end of the link budget.** At −20 dB-Hz with a 1 Hz spread, the bound needs about a month per 100 bits. Peak power, antennas (including polarization diversity), lower noise, quieter or narrower paths, and specular modes are the levers that move a link out of the quadratic regime.
+
+**When this conclusion could be wrong.** A strongly specular or very stable channel favors phase-tracking receivers, possibly with PSK. Very short messages on slow channels are dominated by outage, where in-symbol diversity (chirps, multitone) can help. Severe narrowband interference or impulsive noise may favor spreading with robust detection. A measured scattering function very different from the models here could change the numbers. None of these reverses the conclusion that a properly adapted MFSK receiver is a sound general-purpose reference.
+
+## Reconciliation with earlier repository findings
+
+- **Opus-5.5 information limits.** Its table of required `Eb/N₀`, its statement that energy per coherence cell governs reception, and its 13.9 dB fixed-160 ms penalty at 0.1 Hz and −10 dB-Hz are reproduced here by an independent closed-form method. Its claim that no waveform family can do materially better in the low-C/N₀ regime is supported, with the qualifications above: specular components, receive branches, bursting above average power, and the finite-message and nonstationary effects. [Opus-5.5 chapter 3](../Opus-5.5/03-information-limits-and-noncoherent-penalties.md).
+- **Sol-6.2 information-limit audit.** Its conclusion that the expression is a conditional asymptotic capacity is confirmed and extended: Gaussian fading is the worst fading for a given autocorrelation in the capacity-per-energy sense, the Gaussian shape is within 0.2 dB of the worst for a given RMS width, and widths must be converted through `B_eff`. [Information limits under Doppler fading](information-limits-review.md).
+- **Opus-5.5 “in-symbol diversity hurts the coded rate.”** Consistent with the chirp-versus-tone and PSK-block results: splitting energy into independently fading pieces costs rate in the quadratic regime.
+- **Earlier chirp evidence.** The [direct comparisons](weak-signal-mfsk-alternatives.md#direct-comparisons) favoring chirps on static frequency-selective channels stand; the new result adds that on Rayleigh multipath at low SNR the chirp is worse by up to about 1.5 dB of power.
+- **Earlier PSK statement.** The [alternatives review](weak-signal-mfsk-alternatives.md#receiver-computation-and-matrix-modem) placed DBPSK and 8-FSK within 0.1 dB in slow flat Rayleigh at high SNR. In the weak, time-varying regime differential PSK is much weaker (23% of the bound's rate), and only long-memory PSK detection is competitive.
+- **Earlier 6.25 Hz default.** The FT8-like configuration is a useful reference, but the results here show it is a high-C/N₀ operating point: at −10 dB-Hz it needs 5.5–14 dB more time than the bound on 0.1–1 Hz channels and loses through leakage at 30 Hz.
+
+## Open questions and limits of this study
+
+- The large-alphabet results assume known timing and Doppler centre, ideal interleaving and stationary Gaussian statistics. Acquisition, drift tracking, a real code and physical completion are not modeled.
+- The finite-message table is a random-coding heuristic. A low-SNR finite-blocklength theory for stationary noncoherent fading does not yet exist.
+- The worst-case-fading argument is asymptotic. Outage on slow channels with two comparable rays is worse than Rayleigh and needs measured traces.
+- Measured HF scattering functions with sub-0.1 Hz resolution, specular fractions, and their occurrence statistics are scarce in accessible literature. They decide how much a long-coherence branch is worth.
+- Impulsive-noise robustness of the energy detector, and the cost of the nonlinear front end, need measurement on recorded HF noise.
+- No 2018–2026 head-to-head of MFSK against chirp, OTFS or DSSS on Watterson channels at low SNR was found.
+
+## Primary sources
+
+- V. Sethuraman and B. Hajek, “Capacity per unit energy of fading channels with a peak constraint,” *IEEE Trans. Inf. Theory* 51(9), 2005. [Author PDF](https://hajek.ece.illinois.edu/Papers/SethuramanHajek05.pdf)
+- V. Sethuraman, L. Wang, B. Hajek and A. Lapidoth, “Low SNR capacity of noncoherent fading channels,” *IEEE Trans. Inf. Theory* 55(4), 2009. [arXiv 0712.2872](https://arxiv.org/abs/0712.2872)
+- T. Koch and A. Lapidoth, “Gaussian fading is the worst fading,” *IEEE Trans. Inf. Theory* 56(3), 2010. [arXiv 0902.3372](https://arxiv.org/abs/0902.3372)
+- A. Lapidoth and L. Wang, “On the low SNR capacity of peak-limited non-coherent fading channels with memory.” [arXiv cs/0604031](https://arxiv.org/abs/cs/0604031)
+- M. C. Gursoy, H. V. Poor and S. Verdú, “The noncoherent Rician fading channel — Part II,” *IEEE Trans. Wireless Commun.* 4(5), 2005. [arXiv cs/0501067](https://arxiv.org/abs/cs/0501067)
+- W. Zhang and J. N. Laneman, “How good is PSK for peak-limited fading channels in the low-SNR regime?” *IEEE Trans. Inf. Theory* 53(1), 2007. [arXiv cs/0508121](https://arxiv.org/abs/cs/0508121)
+- W. Zhang and U. Mitra, “Orthogonal codes for robust low-cost communication.” [arXiv cs/0702108](https://arxiv.org/abs/cs/0702108)
+- U. G. Schuster, G. Durisi, H. Bölcskei and H. V. Poor, “Capacity bounds for peak-constrained multiantenna wideband channels.” [arXiv 0801.1002](https://arxiv.org/abs/0801.1002)
+- V. Chandar, A. Tchamkerten and D. Tse, “Asynchronous capacity per unit cost,” *IEEE Trans. Inf. Theory* 59(3), 2013. [arXiv 1007.4872](https://arxiv.org/abs/1007.4872)
+- Y. Polyanskiy, “Asynchronous communication: exact synchronization, universality and dispersion,” *IEEE Trans. Inf. Theory* 59(3), 2013. [Author PDF](https://people.lids.mit.edu/yp/homepage/data/async.pdf)
+- A. J. Viterbi, “Performance of an M-ary orthogonal communication system using stationary stochastic signals,” *IEEE Trans. Inf. Theory* 13(3), 1967. [DOI](https://doi.org/10.1109/TIT.1967.1054039)
+- G. Durisi, H. Bölcskei and S. Shamai, “Capacity of underspread noncoherent WSSUS fading channels under peak signal constraints,” ISIT 2007. [arXiv 0705.1682](https://arxiv.org/abs/0705.1682)
+- M. Médard and R. G. Gallager, “Bandwidth scaling for fading multipath channels,” *IEEE Trans. Inf. Theory* 48(4), 2002. [DOI](https://doi.org/10.1109/18.992769)
+- I. E. Telatar and D. N. C. Tse, “Capacity and mutual information of wideband multipath fading channels,” *IEEE Trans. Inf. Theory* 46(4), 2000. [DOI](https://doi.org/10.1109/18.850678)
+- M. Feder and A. Lapidoth, “Universal decoding for channels with memory,” *IEEE Trans. Inf. Theory* 44(5), 1998. [DOI](https://doi.org/10.1109/18.705540)
+- Z. Sun, S. M. Perlaza, D. Mary and J.-M. Gorce, finite-blocklength information density for Gauss–Markov fading, ISIT 2026. [arXiv 2604.16062](https://arxiv.org/abs/2604.16062)
