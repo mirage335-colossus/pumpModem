@@ -358,7 +358,9 @@ explains reuse and retirement of local build and SDK caches.
 Retiring a guide, tool or implementation does not retire its citations to the
 scientific literature, standards or technical reports. Move each one, with the
 claim it supported, into the guide that keeps the finding or into a research
-record. Citations lost in earlier cleanups are recovered in
+record. Carry forward only the citation and its claim. Do not keep descriptions
+of the retired code, its programming practices or its test infrastructure.
+Citations lost in earlier cleanups are recovered in
 [retired-guidance citations](../_ref/retired-guidance-citations/README.md).
 
 ### Research material
