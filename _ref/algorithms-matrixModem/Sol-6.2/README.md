@@ -12,6 +12,8 @@ The [repeated-FSK reception experiment](tensor-reception-results.md) measured Te
 
 The [receiver bottleneck review](tensor-receiver-bottlenecks.md) measures score tiling, shorter tone transforms and narrowband preprocessing. It also compares published waveform and receiver designs that expose useful GPU matrix work.
 
+The [one-carrier literature check](mfsk-tensor-core-literature.md) examines measured GPU MFSK receivers, single-chirp encoder and receiver co-design, and the evidence for Tensor Core execution in each.
+
 ## Findings that affect the first experiment
 
 | Question | Evidence and design consequence |
