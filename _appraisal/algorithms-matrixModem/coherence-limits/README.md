@@ -35,6 +35,32 @@ python3 -I psk_lowsnr.py > results/psk_lowsnr.md
 
 `finite_alphabet_mc` accepts `[trials] [channel-name substring] [C/N0 dB-Hz]` to rerun one stratum.
 
+All runs were local on the 12-thread Ryzen 5 PRO 5650U; the longest, the Monte Carlo, took 21 min 27 s at 10,000 trials. RunPod was not used, because nothing in this pass needed more than local CPU time.
+
+## Literature-check calculations
+
+`literature-checks/` holds the small calculations that the literature reviewers of this pass wrote to check or extend published values. The documents cite them as [derived]. They were rerun from these copies on 25 November 2026 and reproduce the cited values; the Monte Carlo values agree within 0.05 dB.
+
+| Program | What it computes | Output | Runtime |
+| --- | --- | --- | --- |
+| `deflection_losses.py` | Low-energy-coherence deflection losses of unweighted boxes and mis-scaled weights on Gaussian, flat and Jakes spectra | `results/deflection_losses.txt` | < 1 s |
+| `quantization_losses.py` | Quantization efficiency of Gaussian input; DFT-matrix error power for FP16, INT8, INT4 and NVFP4; losses with a strong narrowband interferer before isolation | `results/quantization_losses.txt` | ≈ 1 min |
+| `orthogonal_mi.cpp` | Symbol mutual information of noncoherent M-ary orthogonal signaling in AWGN and with energy split over `L` Rayleigh branches (Q65's data rate and Turbo-FSK comparisons) | `results/orthogonal_mi.txt` | ≈ 1–2 min per alphabet |
+| `finite_burst.cpp` | Loss of capacity per unit energy from a finite constant-envelope burst, exact Gaussian log-determinant | `results/finite_burst.txt` | ≈ 26 s |
+| `branch_power.py` | Per-branch C/N0 reduction for 2 and 4 independent or correlated receive branches | `results/branch_power.txt` | ≈ 5 s |
+
+```bash
+cd _appraisal/algorithms-matrixModem/coherence-limits/literature-checks
+python3 -I deflection_losses.py > results/deflection_losses.txt
+python3 -I quantization_losses.py > results/quantization_losses.txt
+g++ -O2 -std=c++20 orthogonal_mi.cpp -o /tmp/orthogonal_mi && /tmp/orthogonal_mi 64 1.2381 200000 > results/orthogonal_mi.txt
+/tmp/orthogonal_mi 128 1.5 100000 >> results/orthogonal_mi.txt && /tmp/orthogonal_mi 256 1.0 50000 >> results/orthogonal_mi.txt
+g++ -O2 -std=c++20 finite_burst.cpp -o /tmp/finite_burst && /tmp/finite_burst > results/finite_burst.txt
+python3 -I branch_power.py > results/branch_power.txt
+```
+
+The Q65 Figure 1 table in the practice review was digitized from the guide's PDF vector paths with throwaway scripts that were not kept; the table, not the extraction, is the record.
+
 ## Conventions and assumptions to keep in view
 
 - Complex baseband, `N0 = 1`, received C/N0 `P` in hertz. Peak equals average received power

@@ -1,0 +1,17 @@
+Gaussian, NVFP4 block16 absmax: rho^2=0.9910
+Gaussian, FP4 block32 (non-quantized scale approx MXFP4-like): rho^2=0.9898
+Gaussian, INT4 sym block16 absmax: rho^2=0.9928
+ INT4 sym global clip 1.5 sigma: rho^2=0.9600
+ INT4 sym global clip 2.0 sigma: rho^2=0.9828
+ INT4 sym global clip 2.5 sigma: rho^2=0.9871
+ INT4 sym global clip 3.0 sigma: rho^2=0.9845
+ INT8 sym global clip 3.0 sigma: rho^2=0.99954
+ INT8 sym global clip 4.0 sigma: rho^2=0.99991
+DFT matrix N=256 relative error power: NVFP4 9.73e-03 (-20.1 dB), INT4 blk 2.79e-03 (-25.5 dB), INT8 blk 1.06e-05 (-49.8 dB)
+DFT matrix FP16 rel err power -76.6 dB
+--- strong narrowband interferer + unit noise; quantization error power relative to noise ---
+INR  0 dB: NVFP4/16 err/noise=0.0185 (loss 0.08 dB); INT4/16 err/noise=0.0132 (loss 0.06 dB); INT8/16 err/noise=4.03e-05 (loss 0.00 dB)
+INR 10 dB: NVFP4/16 err/noise=0.114 (loss 0.47 dB); INT4/16 err/noise=0.0503 (loss 0.21 dB); INT8/16 err/noise=0.000152 (loss 0.00 dB)
+INR 20 dB: NVFP4/16 err/noise=1.17 (loss 3.37 dB); INT4/16 err/noise=0.358 (loss 1.33 dB); INT8/16 err/noise=0.00108 (loss 0.00 dB)
+INR 30 dB: NVFP4/16 err/noise=9.43 (loss 10.18 dB); INT4/16 err/noise=3.25 (loss 6.29 dB); INT8/16 err/noise=0.00984 (loss 0.04 dB)
+INR 40 dB: NVFP4/16 err/noise=99 (loss 20.00 dB); INT4/16 err/noise=30.8 (loss 15.02 dB); INT8/16 err/noise=0.0967 (loss 0.40 dB)

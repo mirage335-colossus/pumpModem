@@ -1,0 +1,17 @@
+Gaussian PSD, best box: eta=0.8901 halfwidth=1.400 sigma, loss=0.253 dB
+ box half-width 1.0 sigma: eta=0.8261 loss=0.415 dB
+ box half-width 1.5 sigma: eta=0.8870 loss=0.260 dB
+ box half-width 2.0 sigma: eta=0.8074 loss=0.465 dB
+ box half-width 3.0 sigma: eta=0.5876 loss=1.154 dB
+Gaussian weight width mismatch ratio 1.189: eta=0.9852 loss=0.032 dB
+Gaussian weight width mismatch ratio 1.414: eta=0.9428 loss=0.128 dB
+Gaussian weight width mismatch ratio 2.000: eta=0.8000 loss=0.485 dB
+Gaussian weight width mismatch ratio 4.000: eta=0.4706 loss=1.637 dB
+flat PSD, box q times too wide: eta=1.000 loss=-0.000 dB
+flat PSD, box q times too wide: eta=0.667 loss=0.880 dB
+flat PSD, box q times too wide: eta=0.500 loss=1.505 dB
+flat PSD, box q times too wide: eta=0.250 loss=3.010 dB
+Jakes PSD over 8 bins, unweighted: eta=0.806 loss=0.467 dB
+Jakes PSD over 16 bins, unweighted: eta=0.727 loss=0.692 dB
+Jakes PSD over 32 bins, unweighted: eta=0.661 loss=0.900 dB
+Jakes PSD over 64 bins, unweighted: eta=0.605 loss=1.091 dB

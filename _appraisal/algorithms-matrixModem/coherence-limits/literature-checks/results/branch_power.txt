@@ -1,0 +1,5 @@
+Per-branch C/N0 reduction (dB) needed to keep the single-antenna rate at C/N0=-10 dB-Hz
+spread   0.1 Hz: nR=2 indep:  1.71; nR=2 corr:  3.01; nR=4 indep:  3.37; nR=4 corr:  6.02
+spread     1 Hz: nR=2 indep:  1.53; nR=2 corr:  3.01; nR=4 indep:  3.06; nR=4 corr:  6.02
+spread    10 Hz: nR=2 indep:  1.51; nR=2 corr:  3.01; nR=4 indep:  3.01; nR=4 corr:  6.02
+spread    30 Hz: nR=2 indep:  1.51; nR=2 corr:  3.01; nR=4 indep:  3.01; nR=4 corr:  6.02
