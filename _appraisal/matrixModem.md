@@ -167,8 +167,11 @@ Both transmitter and receiver must be designed to maximize computational ceiling
   - Simulation
   - Transmit Power
   - Path loss
+
   - Clock sync, Region, Offset, Audio error
-  - Target SNR dB/1Hz
+  - Oscillator and Spread Margin (eg. 3x)
+  
+  - SNR Path Loss Margin (eg. 3dB, 6dB, 10dB, 13dB, 16dB, 20dB)
 
   - Shift
   - Doppler

@@ -20,6 +20,7 @@ comparisons with acquisition, coding and physical completion, or when the study 
 | `summarize_mc.py` | Per-configuration worst case over the Doppler-spread channels and the per-symbol GLRT excess, from the Monte Carlo output | `results/finite_alphabet_summary.md` | < 1 s |
 | `finite_message.cpp` | Extra duration needed for a k-bit message to meet a failure probability, from the receiver's information density (exact Gamma law for a flat spectrum, moment-matched for Gaussian) | `results/finite_message.md` | < 1 s |
 | `psk_lowsnr.py` | Low-SNR (quadratic-regime) fraction of the bound reached by differential and block-detected PSK and by a single coherent tone bin, optimized over symbol duration | `results/psk_lowsnr.md` | ≈ 6 s |
+| `presence_detection.py` | Time to detect one known keyed pattern (known timing, optimum quadratic detector, normal approximation) against the time for 100 bits at the bound, with and without Gaussian Doppler spread | `results/presence_detection.md` | < 1 s |
 
 ## Build and run
 
@@ -31,6 +32,7 @@ g++ -O3 -march=native -std=c++20 -fopenmp finite_alphabet_mc.cpp -o /tmp/finite_
 python3 -I summarize_mc.py results/finite_alphabet_mc.md > results/finite_alphabet_summary.md
 g++ -O2 -std=c++20 finite_message.cpp -o /tmp/finite_message && /tmp/finite_message > results/finite_message.md
 python3 -I psk_lowsnr.py > results/psk_lowsnr.md
+python3 -I presence_detection.py > results/presence_detection.md
 ```
 
 `finite_alphabet_mc` accepts `[trials] [channel-name substring] [C/N0 dB-Hz]` to rerun one stratum.
