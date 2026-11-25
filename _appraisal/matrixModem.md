@@ -205,13 +205,14 @@ All new such research documentation, etc, should be contained under the director
 
 
 
+Some compromises seem acceptable, but should still be reviewed for effectiveness, utilization, etc:
 
-Please generate thorough documentation regarding both what the academic literature supports and possible implementations. Please do not overstate the implementations - better implementations may still be found and that possibility should be acknowledged.
+- FP4 on Blackwell. The values {0, ±1, ±2, ±3, ±4, ±6} are exact in INT4 and in FP4, so one integer codebook could work on every device and cost only 0.09 dB. Using FP4 instructions with those integer values may run at twice the speed of the INT8 alternative.
 
-All new such research documentation, etc, should be contained under the directory _ref/algorithms_matrixModem/Astra-6 .
+- Hours per bit messages, more generally short messages up to 16bytes, are the use case which Matrix Modem must emphasize. No bits should be added, operators must rely on common sense message plausibility, etc. Under less challenging conditions that would allow any modem to operate with a positive signal-to-noise ratio, that is just what Fast Modem is already for.
 
-For now, please especially work on research - this is a complex problem which must begin with a very serious, very extensive, comprehensive understanding of the very chaotic, complex, natural phenomenon and corresponding situations from moderate through worst case.
 
-Please do not edit any repository files, etc, outside the directories _ref , _appraisal . The _appraisal/ directory may also currently be under editing by another AI agent ,
+
+
 
 
