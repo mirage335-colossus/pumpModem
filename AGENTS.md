@@ -185,13 +185,28 @@ Keep an indispensable dataset only when a specific current question cannot be
 answered by the summary; explain why. Preserve evidence needed for unresolved
 work, failed checks and release assurance until its purpose is resolved.
 
-Theoretical calculations are not temporary experiments. Keep significant
-calculations of limits, bounds and derived reference values that maintained
-guidance cites, with the small standalone programs and outputs that reproduce
-them. Label them as theoretical, with their assumptions. They bound future
-results and regression checks, so do not delete them when an implementation or
-simulator later reproduces their tables. Replace one only with a corrected or
-extended calculation that carries its values forward. See the
+Research material is not temporary, and these cleanup rules do not apply to it.
+`_ref/` and `_appraisal/` hold mostly scientific research. That includes
+literature reviews, notes on scientific and academic articles, citations,
+appraisals, measurement data with provenance, theoretical calculations,
+experiment write-ups and fundamental conclusions. Do not delete or condense it
+because it is old, distilled into guidance, superseded by later research,
+reproduced by an implementation, or no longer serving a current investigation.
+Remove research material only at the user's explicit request. Later research
+adds corrections and cross-references instead of deleting earlier work. Never
+delete citations to the scientific literature; findings moved or summarized
+elsewhere keep their sources. Compiled binaries, build outputs, run receipts,
+bulk re-obtainable downloads and prototype modem implementations stored there
+still follow the lifecycle above. Remove them only after their findings,
+citations and provenance are recorded in retained research documents. See the
+[research-material rule](docs/development.md#research-material).
+
+Significant theoretical calculations are research material. They cover limits,
+bounds and derived reference values, with the small standalone programs and
+outputs that reproduce them. Label them as theoretical, with their assumptions.
+They bound future results and regression checks, so do not delete them when an
+implementation or simulator later reproduces their tables. Replace one only with
+a corrected or extended calculation that carries its values forward. See the
 [theoretical-calculation rule](docs/development.md#theoretical-calculations).
 
 Reuse compatible build profiles and caches that current work needs; retire

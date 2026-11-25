@@ -93,8 +93,12 @@ hypotheses, physical completion and `W=2H`. Bounded discriminators and explicit
 resource admission come before costly trials. The statistical design separates
 failure finding, conditional probability confirmation and hardware capacity.
 
-Keep these documents while they serve the research/appraisal purpose. After
-authorized adoption, distill unique findings, contrary evidence and provenance
-into the maintained guides and appraisal records before removing superseded
-material. Temporary downloads and calculation outputs have their own recorded
+These documents are retained research material under the
+[research-material rule](../../../docs/development.md#research-material). After
+authorized adoption, distill unique findings, contrary evidence, citations and
+provenance into the maintained guides and appraisal records. Distillation does
+not make these documents removable; remove them only at the user's explicit
+request. Significant calculation outputs follow the
+[theoretical-calculation rule](../../../docs/development.md#theoretical-calculations).
+Temporary downloads and other calculation outputs have their own recorded
 review purpose and cleanup trigger.

@@ -139,9 +139,11 @@ checks identities, all-knot raw energy/zeros, the common scale, exact support,
 Cartesian interpolation, ablations, damaged/missing inputs and the confound.
 Native runtime processing does not depend on Python or HDF5.
 
-Retain these two small exact fixtures while the current long observed-voltage
-communications investigation and its regressions need them. Remove them when
-that investigation is superseded and its conclusions are distilled. The much
+These two small exact fixtures are measurement data with recorded provenance.
+They are retained research material under the
+[research-material rule](../../../../docs/development.md#research-material).
+They stay after the current long observed-voltage investigation is superseded
+or distilled, and are removed only at the user's explicit request. The much
 larger archive is not a runtime dependency. The original selected HDF5 and
 provider manifest in temporary `local-evidence/` remain only while source
 validation questions need them; no larger redundant source archive is needed.

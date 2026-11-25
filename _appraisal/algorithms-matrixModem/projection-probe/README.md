@@ -3,8 +3,10 @@
 > Relocation record: originally `_appraisal/algorithms_matrixModem/projection-probe`; now `_appraisal/algorithms-matrixModem/projection-probe`. Source and result data were moved without changing their bytes; this location update does not change the experiment's historical inputs or provenance.
 
 
-This temporary research harness compares two GPU implementations of the
-same complex projections, using deterministic, zero-padded 160 ms windows:
+This research harness compares two GPU implementations of the same complex
+projections, using deterministic, zero-padded 160 ms windows. This README is the
+research record and is retained under the
+[research-material rule](../../../docs/development.md#research-material).
 
 - the existing native `CudaNvfp4Projection` implementation, with block-scaled
   NVFP4 operands and FP32 accumulation;

@@ -7,8 +7,11 @@ measurement limits.
 Follow the [material lifecycle](development.md#material-lifecycle): distill
 useful findings, keep only evidence with a concrete current purpose, and retire
 obsolete code, experiments and generated outputs when that purpose ends.
-Significant [theoretical calculations](development.md#theoretical-calculations)
-of limits and bounds are retained reference material, not experiment output.
+[Research material](development.md#research-material) in `_ref/` and
+`_appraisal/` is not subject to that cleanup. That includes literature reviews,
+citations, conclusions and significant
+[theoretical calculations](development.md#theoretical-calculations); remove it
+only at the user's explicit request.
 
 ## Current Robust modem
 

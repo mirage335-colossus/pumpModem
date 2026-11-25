@@ -355,9 +355,32 @@ published-release assets, certification evidence, unresolved failures, active
 work and relevant third-party notices. The [build guide](building.md#local-output-retention)
 explains reuse and retirement of local build and SDK caches.
 
+### Research material
+
+The cleanup rules above do not apply to research material. `_ref/` and
+`_appraisal/` hold mostly scientific research. That includes literature reviews,
+notes on scientific and academic articles, citations, appraisals, measurement
+data with provenance, theoretical calculations, experiment write-ups and
+fundamental conclusions.
+
+- Do not delete or condense research material because it is old, has been
+  distilled into a maintained guide, is superseded by later research, is
+  reproduced by an implementation, or no longer serves a current investigation.
+  Remove it only at the user's explicit request.
+- Later research adds corrections, reconciliations and cross-references. It does
+  not delete the earlier work, even where it disagrees.
+- Never delete citations to the scientific literature. When a finding is moved
+  into a guide or summarized, it keeps its sources and its proven, derived or
+  heuristic status.
+- Compiled binaries, build outputs, run receipts, bulk downloads that can be
+  obtained again, and prototype modem implementations stored in these
+  directories still follow the lifecycle above. Remove them only after their
+  findings, citations and provenance are recorded in a retained research
+  document. Removing a harness never removes its write-up.
+
 ### Theoretical calculations
 
-Theoretical calculations are retained reference material, not temporary
+Theoretical calculations are retained research material, not temporary
 experiment output. This covers significant calculations that maintained guidance
 cites: information-theoretic limits, capacity and energy bounds, minimum airtimes
 and C/N₀ floors, detection thresholds, and similar derived reference values. It
