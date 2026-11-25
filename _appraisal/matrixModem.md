@@ -214,4 +214,6 @@ For now, please especially work on research - this is a complex problem which mu
 
 Please do not edit any repository files, etc, outside the directories _ref , _appraisal .
 
+[Current Matrix Modem research and evidence](../_ref/algorithms-matrixModem/Sol-6.2/README.md) · [Continuing the FSK waveform research](../_ref/algorithms-matrixModem/Sol-6.2/waveform-options.md#continuing-the-waveform-research)
+
 
