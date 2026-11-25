@@ -333,6 +333,55 @@ and applicable severity/time/dependence limits are in [50](50-noise-and-interfer
 | <a id="s58"></a>**S58** | 86's former scalar-only limits now point to90's separate full independent field/range/phase/lunar-width receipt | Use90's exact solver/rounding/convergence limits; field validity and actual station data remain E |
 | <a id="s59"></a>**S59** | 60/86 now distinguish inspected source, completed mathematical specification, passed finite calculation, failed C4 comparison, unimplemented native experiment and physical validity | E/I remain explicitly visible. No communication reliability, natural worst-case coverage or hardware-capacity pass is claimed |
 
+## Primary-source checks recorded at audit start
+
+Restored 25 November 2026 from this audit as committed at `33f6e461`; commit
+`c42dea1c` had removed the section. The introduction, table and notes below are
+the 13 November audit-start record, unchanged apart from this paragraph. Later
+work in the owning chapters supersedes several access statuses: chapter 32
+later inspected the whole QAN–ALE dataset, and chapter 50 read NTIA TR-25-579
+in full. Where a row conflicts with an owning chapter, the chapter's later
+record governs. The rows remain the record of what was checked first, and the
+only citation of the DRDC/RDDC 2018 sounding report and the Hicks–Achatz 2026
+USNC-URSI paper, with its count of 1,071 of 1,443 MGS captures excluded for
+compression. They also keep the earlier access routes for Valčić et al. 2026
+(now cited by DOI in chapter 20) and Yang et al. 2019 (cited by DOI in
+chapter 41).
+
+These are bounded checks for this audit, not the promised comprehensive search.
+Access was checked on November 13, 2026. Each source must ultimately be entered
+once in its owning chapter's evidence table with exact supporting locators.
+
+| Source and inspected access | Consequence and remaining limit |
+| --- | --- |
+| [Cameron et al. 2024](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2023RS007897), full publisher text; measurement and statistical-analysis sections | Chapter 32 was abstract-only at audit start; its source status and detection-conditioned interpretation are now corrected, with section/figure locators. The full text gives the Qaanaaq–Alert acquisition/cadence, quality gates and operational coverage. The scheduled frequencies do not establish simultaneous complex covariance at the modem's carrier spacing; a calibrated joint scenario remains open |
+| [QAN–ALE dataset, DOI 10.7910/DVN/RGDNR1](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/RGDNR1), identified in Cameron section 2 | The paper identifies unfiltered 2012–2016 data, including low-SNR and 18.4 MHz records. Dataset access reached a JavaScript/robot-verification page; file contents, format and license were not inspected. This is a concrete acquisition candidate, not verified usable IQ or a ready holdout |
+| [DRDC/RDDC 2018 sounding report](https://publications.gc.ca/collections/collection_2019/rddc-drdc/D68-2-122-2018-eng.pdf), full report, sections 2.2–3 | Useful high-latitude estimator, instrument-limit and local-stationarity evidence. Use its actual path and censoring; do not convert a sounder ceiling into an environmental upper bound |
+| [Nissen et al. 2003](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2002RS002746), full publisher text | Useful low-frequency long-path spread evidence, but selected single-mode records exclude multimode cases. Preserve that selection when comparing distributions |
+| [Yang et al. 2019](https://doi.org/10.1155/2019/3940837), [full article copy](https://pdfs.semanticscholar.org/e85f/02aa867290416a7c6d972882a7dc556cf947.pdf), pp. 1–9 | Chapter 41's snippet-only status at audit start is now corrected, retaining earlier access history and adding supporting section locators. Its regional passive radiometry at 3, 7.8, 19.35 and 37 GHz includes calibration-bias/topography/seasonal concerns; it supplies neither a disc-integrated 5.76 GHz antenna temperature nor a coherent radar scattering kernel |
+| [Fassett et al. 2025, LPSC 2129](https://www.hou.usra.edu/meetings/lpsc2025/pdf/2129.pdf), full conference abstract | Local X/C-band bistatic SAR constraints support caution about incidence and phase dependence. Full inspection of an abstract does not make it a full journal paper or a whole-disc EME dataset |
+| [Valčić et al. 2026](https://hrcak.srce.hr/en/345745), full NAVTEX article, sections 2–4 | Relevant weak/failed 490/518 kHz reception observations partially address G04. Receiver-display power and assumed ground/transmitter inputs do not establish calibrated 1 MHz transfer or maximum range; investigate the anomaly without adopting the authors' model-failure interpretation as established |
+| [Rogers et al. 2016 proceedings lead](https://sites.nationalacademies.org/cs/groups/pgasite/documents/webpage/pga_183636.pdf), proceedings abstract entry pp. 155–156 | Describes 30–100 MHz NLOS terrain measurements and antenna/soil/topographic inputs. Quantitative data are not supplied by this abstract; retrieve the associated paper/data before parameter use |
+| [25 MHz radar range study, 2017](https://journals.ametsoc.org/view/journals/atot/34/2/jtech-d-16-0139.1.xml), DOI 10.1175/JTECH-D-16-0139.1 | Search/index material identified a near-surface conductivity/sea-state/tide study; publisher open returned HTTP 403. Full methods/results remain uninspected in this audit. Radar working range is not one-way communications path loss |
+| [Haralambous et al. 2022, HF noise over Cyprus](https://www.mdpi.com/2072-4292/14/23/6040), full HTML | Confirms an actual source-access remedy and method-specific noise evidence in chapter 50. Separate it from the related [congestion paper](https://www.mdpi.com/2076-3417/12/22/11808); these are different observables |
+| [ITU-R P.372-18 official record](https://www.itu.int/rec/R-REC-P.372-18-202609-I), edition/status page | Confirms the September 2026 edition. This audit's metadata check is not a new reading of all normative equations/tables; retain earlier passage-level receipts where present and resolve differing access records |
+| [NTIA TR 25-579](https://its.ntia.gov/publications/details?pub=4563), official September 2025 record and abstract | Abstract supports scope, sites and broad comparison only. Earlier large-PDF retrieval failed; no new full-report inspection is claimed |
+| [Hicks and Achatz, 2026 USNC-URSI paper](https://usncursi.org/archive/nrsm/2026/papers/1203.pdf), full two-page text, sections III–IV | Gives a partial alternative primary route: active-rod measurement chain and minute sweeps; 1,071 of 1,443 MGS captures were excluded for compression. Treat this as selection/censoring evidence, not ambient-tail calibration. The paper has inconsistent site naming in its summary; resolve identity before reuse. It does not replace TR 25-579 |
+
+The NTIA short paper's text was available, but a web screenshot attempt returned
+a cache miss; no visual verification of its table values is claimed. The
+compression count above is stated in the prose. No data downloads, waveform
+analysis, receiver tests or site calibration were performed in this audit.
+
+The parent audit used exact queries `site.its.ntia.gov "TR-25-579"`,
+`site.itu.int "P.372-18" "2026"`, and `"McMurdo" "radio noise" NTIA 2025`,
+followed by the official records and the short-paper PDF. Domain checks also
+used targeted title/DOI and source opens; their returned source identities and
+inspection levels are above. Complete query/result logs for those checks were
+not retained, so this table is source-check provenance rather than a
+reproducible systematic-search log. The active plan requires such logs for the
+next coverage pass and does not invent historical queries.
+
 ## Completion and update rule
 
 The final review and documentation-check receipt are in
@@ -348,3 +397,43 @@ its source-to-scenario consumers through the owning chapters before updating a
 preset or receiver claim. Later empirical and native qualification must retain
 their original failure conditions, uncertainty, observation denominator and
 resource limits; research closure supplies no automatic pass for those stages.
+
+## Superseded values from earlier versions
+
+Restored 25 November 2026. Later versions of this chapter corrected, recomputed,
+withdrew or reworded the values in these passages, and no current file in the
+repository stated them. Each passage is reproduced verbatim from the version
+named, with the commit that removed it. An ellipsis marks text left out around a
+quoted sentence or clause. The current chapter governs; these passages record
+earlier results and how they changed, under the
+[research-material rule](../../../docs/development.md#research-material).
+
+These entries come from the 2,586-line pre-execution version of this audit at
+`280b32e4`, which the completion pass condensed into the dispositions above.
+The full text remains in Git at that commit.
+
+**From `280b32e4`, removed in `5f2cc949` — obligation V13.**
+
+**Evidence already read:** Eclipse studies at 21–41 kHz and broad VLF cannot supply low-band magnitudes; no measured low-band storm/polar-cap/eclipse carrier event established.
+
+**From `280b32e4`, removed in `5f2cc949` — obligation GW07.**
+
+**Inspected evidence and unresolved question:** Public source was identified, not analyzed: ZIP `https://its.ntia.gov/media/66293/phase_1.zip`; data listing `https://its.ntia.gov/data/legacy-radio-propagation-data`; Part 1 plains PDF and report records for Parts 2/3 R27. Phase I is 20.084/49.72MHz (not exactly 30); road-site terrain samples, not path-resolved complex groundwave. Part 1 methods show 20/50 antenna uncertainty ±3dB, 5–80km site geometry, short samples ≤50km and minutes at 80km, selection bias from 100MHz path searches. ZIP remains unparsed; Parts 2 & 3 not obtained. Current 20/50 medians are Longley–Reasoner synthesis, not reanalysis.
+
+**From `280b32e4`, removed in `5f2cc949` — obligation GW12.**
+
+**Inspected evidence and unresolved question:** Current chapter calls the ±10dB competition an estimate and acknowledges most terms lack measured rates. Aircraft cross sections assumed (100–1000m²); low-VHF 60.75MHz 2–4dB flutter lacks geometry; backscatter is bound; 280km example gives meteor estimate ~12dB above groundwave. Weitzen 1987 abstract has no numbers; COMET/SNOTEL not obtained. “How often ducts” unknown outside SoCal; Hansen's 32MHz +25dB attributed duct but no refractivity profile. Measured ionospheric ground-backscatter levels 25–50MHz not searched (Eshleman 1957 qualitative only); round-the-world 28–30MHz (~138ms geometric delay) and quantitative auroral-scatter Doppler 28–50MHz not sourced. Bistatic HF radar signals are not direct-path-normalized and HAL `hal-00905980` is bot-blocked.
+
+**From `280b32e4`, removed in `5f2cc949` — coverage the finished research must distinguish.**
+
+| Physical stratum | Quiet / ordinary evidence already present | Moderate or adverse coverage | Severe / worst observed or contemplated coverage | Remaining coverage and owning rows |
+|---|---|---|---|---|
+| MF / low HF, 1–3 MHz, including 160 m | P.1147 through 1.7 MHz; MF studies; DRM ground-plus-sky comparator; Chilcote 2015 is now fully read | Night ground/sky interference and Doppler cases, but no general 1–3 MHz spread distribution | 160 m extreme-distance anecdotes/model disagreement; below-2-MHz daytime extrapolation is outside P.533 validity | Separate 1–1.7, 1.7–2 and 2–3 MHz, day/night, local/long paths. Obtain measured tap/delay/fade evidence and valid loss bounds; do not fill this gap with 5–10 MHz or VHF results. H04, H13, H17–H19 |
+
+**From `280b32e4`, removed in `5f2cc949` — obligation H02.**
+
+Current 30:120–218, 435–461, 522–545; original same sections. Existing Table 1 is a simplified bespoke P.533-like calculation whose temporary scripts are gone; Table 2 omits some terms; one official Kranji–Beijing 4,477-km sample gives 161.7 versus 172.9 dB, and own E screening was applied outside its range. This is not a calibrated 10-dB error model. Route: official [ITU-R-HF source](https://github.com/ITU-R-Study-Group-3/ITU-R-HF), P.533-14, P.1239 grids and `ITURHFProp/ReportsPDD190122-124921.txt`. Pin a source/release, grids, sunspot convention, antenna convention and inputs; reproduce official examples first, then a stratified subset of each published geometry and all extrema used in claims. Preserve printed-equation and reference-code branches rather than mixing them. Deliver reproducible inputs/calculations and corrected table/claim sensitivity. Acceptance: each selected number has an executable recipe and official comparison; the ~11-dB difference is attributed term-by-term or remains an explicit unresolved discrepancy excluding that result from evidence. Fallback: withdraw physical range claims based on the unverified tables, retain illustrative calculations labelled as such. Depends H03/H05; no receiver benchmarks required.
+
+**From `280b32e4`, removed in `5f2cc949` — obligation H05.**
+
+Current 30:96–116, 398–434, 536–573; 31:261–267; original missing 1.8–2 MHz, >10,000-km, Es/duct and daily-correlation items. Read: P.1147/P.533 and a few low-frequency studies; the 1.7–2-MHz gap, 1.8-MHz daytime calculations and 160-m extreme paths lack valid calibrated support. Routes: Vanhamel 2022 doi:10.1155/2022/4809313; McNamara 2008 doi:10.1029/2007RS003742; Toman 1979 doi:10.1029/RS014i003p00447; Nielson–Crochet 1974 doi:10.1029/RG012i004p00688; Lo 2022 doi:10.3390/atmos13081340; primary Suessmann/Gibson–Bradley/Hunt references already cited in 30 for above-MUF laws. Extract illumination, path, antenna/ground losses, estimator and whether signal 60 dB below normal was measurable. Deliver valid-domain map and competing long-path/MUF-loss mechanisms, not one extrapolated curve. Acceptance: all 1–30-MHz scope intervals covered by evidence or an explicitly unqualified theoretical hypothesis; rare opening probability/duration remains unclaimed absent denominators. Fallback: bounded theoretical cases, separating geometry/antenna gain from propagation loss.

@@ -102,3 +102,12 @@ request. Significant calculation outputs follow the
 [theoretical-calculation rule](../../../docs/development.md#theoretical-calculations).
 Temporary downloads and other calculation outputs have their own recorded
 review purpose and cleanup trigger.
+
+On 25 November 2026, citations, access routes and values that the 13 November
+rewrites had removed were restored. Chapters 80 and 87 again carry their
+original source-check tables. Chapters 10–12, 20, 25, 30, 31, 33, 40, 50, 55,
+81, 84, 86, 87 and 90 end with a "Superseded values from earlier versions"
+section, which quotes each removed passage with the commit that removed it. The
+current text of each chapter governs. Citations removed from maintained guides
+before this research existed are recorded in
+[retired-guidance citations](../../retired-guidance-citations/README.md).

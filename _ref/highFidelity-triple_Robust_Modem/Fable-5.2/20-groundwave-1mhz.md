@@ -678,3 +678,17 @@ Grey literature
 - W3SZ, “11-12-17 LF Blog – First 2200m Decodes and more 630m Receive Analysis.” https://w3sz.com/wp2/index.php/2017/11/12/11-12-17-lf-blog/ — search lead for 10,000+ WSPR-reported signal-strength samples; not calibrated groundwave field data. [G]
 
 Own computations [E]: pure-Python residue-series, flat-earth, slab and ray-geometry scripts written for this record and not kept in the repository; formulas as stated in "Physical mechanisms". On review an independent residue-series implementation reproduced the LFMF test vectors, Tables B1 and G1, the midday crossing distances, the conductivity sensitivities and the Millington example to within 0.5 dB or 1 km.
+
+## Superseded values from earlier versions
+
+Restored 25 November 2026. Later versions of this chapter corrected, recomputed,
+withdrew or reworded the values in these passages, and no current file in the
+repository stated them. Each passage is reproduced verbatim from the version
+named, with the commit that removed it. An ellipsis marks text left out around a
+quoted sentence or clause. The current chapter governs; these passages record
+earlier results and how they changed, under the
+[research-material rule](../../../docs/development.md#research-material).
+
+**From `1fdf641a`, removed in `c42dea1c`.**
+
+For T = 576 s, whole-bit coherence loses about 3 dB to a diffuse spread near 2.1 mHz and about 1 dB to a drift near 6 µHz/s (00 §4.1). By day the ground wave is far inside both limits. At night the spread implied by measured fade rates exceeds the first whenever the sky wave is comparable with the ground wave; a ±0.1 Hz travelling-disturbance shift with a 40 min period drifts at up to 2π × 0.1/2 400 ≈ 0.26 mHz/s, about 40 times the second; twilight height changes (15–75 mHz over 20–60 min) drift at about 4–60 µHz/s. [E] These describe whole-bit coherence, not the present receiver, which adds shorter-coherence, common-frequency and drift alternatives when changing-channel settings are selected (00 §4.1).

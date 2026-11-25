@@ -461,3 +461,19 @@ Native-interface, source/domain and completion reviews repaired the recorded
 normalization, time-horizon, Helper-power, source-access and physical-transfer
 issues. No native modem, physical solver, ephemeris execution or receiver
 benchmark was run for these documentation checks.
+
+## Superseded values from earlier versions
+
+Restored 25 November 2026. Later versions of this chapter corrected, recomputed,
+withdrew or reworded the values in these passages, and no current file in the
+repository stated them. Each passage is reproduced verbatim from the version
+named, with the commit that removed it. An ellipsis marks text left out around a
+quoted sentence or clause. The current chapter governs; these passages record
+earlier results and how they changed, under the
+[research-material rule](../../../docs/development.md#research-material).
+
+**From `c42dea1c`, removed in `5f2cc949`.**
+
+| Chapter 90 quantity | Independent check and result | Limit |
+| --- | --- | --- |
+| §3.3 illustrative kernels | Eight laws' mean delay, RMS delay about the mean,2×RMS Doppler/LL, and five cumulative-delay fractions independently integrated; six beam relative powers/mean delays checked below | Original FWHM/−10 dB/50–90%-Doppler-width columns were not independently recomputed and are not selected acceptance inputs |

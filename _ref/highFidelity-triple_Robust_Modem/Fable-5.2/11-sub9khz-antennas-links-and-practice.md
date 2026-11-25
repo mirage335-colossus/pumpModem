@@ -1005,3 +1005,17 @@ Grades: S standard, P research paper or preprint (P-conf: conference paper), T r
 - [H] Chapter 10 of this documentation set (10-sub9khz-propagation.md, Fable-5.2). Used only as a cross-reference for attenuation-rate ranges. [H]
 
 **Own estimates** [E]: Part A's thin-wire electrostatic method of moments and its table, link-budget and detuning calculations (scripts kept only in the temporary working area, not in this directory). On re-check, Tables A–C, the Chu figures, both link-budget tables and the GUI-equivalence example were recomputed independently from the stated inputs and agree to rounding; the link budgets use F_a ≈ 146 and 174 dB (8.27 kHz) and 126 and 171 dB (2.97 kHz) for N2 and N5. On a further re-check an independent thin-wire electrostatic method of moments (exact uniform-charge segment potentials, image ground, 180–600 segments) gave 899 pF and h_e = 50.0 m for the 61 m T, against Part A's 902 pF and 49.8 m, and supplied the sag and sideways-bow detuning values; the Debye tanδ values, the Wheeler comparison and the G1 conversions added on that re-check are likewise [E].
+
+## Superseded values from earlier versions
+
+Restored 25 November 2026. Later versions of this chapter corrected, recomputed,
+withdrew or reworded the values in these passages, and no current file in the
+repository stated them. Each passage is reproduced verbatim from the version
+named, with the commit that removed it. An ellipsis marks text left out around a
+quoted sentence or clause. The current chapter governs; these passages record
+earlier results and how they changed, under the
+[research-material rule](../../../docs/development.md#research-material).
+
+**From `1fdf641a`, removed in `c42dea1c`.**
+
+- **Siple** (Part B): transmitter 100 kW versus 150 kW; antenna 21.2 km versus crossed 21 km versus later 39–42 km (secondary). Primary antenna-efficiency figures (Raghuram et al. 1974 [P5]) were not obtained; the abstract is elided by the publisher (Part A had the abstract; see above).

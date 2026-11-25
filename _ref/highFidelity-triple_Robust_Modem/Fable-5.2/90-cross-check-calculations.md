@@ -543,3 +543,62 @@ The 3 dB point is at B·T ≈ 1.3, consistent with the "about 3 dB at roughly 1.
 - The lunar model uses assumed scattering laws, a geometric delay–Doppler mapping and Gaussian beams. The integrals are now independently reproduced, but contain no regional albedo variation, polarization or ephemeris-driven rotation vector. No measurement was fitted to these illustrative parameters. The available wavelength-specific measurements and public products, including their transfer limits, are assessed separately in [40](40-eme-lunar-scattering-and-geometry.md) and [84](84-scenarios-eme.md); absence of a fit here must not be represented as absence of all relevant lunar data.
 - The skywave delay table uses a mirror model with fixed heights and no group retardation. Its tabulated mode differences do not bound actual multi-hop delays or discriminate discrete modes from scatter. Equal-hop reflection points are imposed geometrically; visibility and ionospheric support must also be checked before treating any row as a physical mode.
 - Numerical reproduction of the displayed ground and lunar quantities, the antenna/power crosswalk, conditional harmonic/Faraday bounds and scoped correlation extremum are completed here. Empirical calibration of those laws, measured temporal statistics, native simulator implementation and communication-success testing are separate work. None of these calculations was compared with a measurement made for this work; their value is arithmetic/convention checking and explicit conditional physical predictions.
+
+## Superseded values from earlier versions
+
+Restored 25 November 2026. Later versions of this chapter corrected, recomputed,
+withdrew or reworded the values in these passages, and no current file in the
+repository stated them. Each passage is reproduced verbatim from the version
+named, with the commit that removed it. An ellipsis marks text left out around a
+quoted sentence or clause. The current chapter governs; these passages record
+earlier results and how they changed, under the
+[research-material rule](../../../docs/development.md#research-material).
+
+Section 3.3's current tables carry most of these values forward at higher
+precision and record corrections, for example the 10 m mean delay from 0.88 to
+0.868 ms. The manual EME row was later recomputed as 28.6, 26.6 and
+23.9 dB-Hz at 50, 80 and 150 K.
+
+**From `07bcbc5d`, removed in `1fdf641a` — section 3.**
+
+**The manual EME row.** Two 3 m dishes give a net loss of 284.1 − 2 × 42.6 = 199.0 dB at mean geocentric distance; 200 dB corresponds to two 2.8 m dishes. The GUI's "40 W, 200 dB" at −164 dBm/Hz gives 10.0 dB-Hz. With two 3 m dishes and a realistic system temperature the same transmitter gives 29.0 dB-Hz at 50 K (N0 = −181.6 dBm/Hz), 26.6 dB-Hz at 80 K and 24.2 dB-Hz at 150 K, before Moon noise, pointing, polarisation and narrow-beam corrections. The GUI default noise density corresponds to a system temperature of about 2,900 K. The 15 kW Helper pilot through the same path at 80 K would be at 52 dB-Hz. [41](41-eme-systems-practice-and-environment.md) gives the full station budgets and noise contributions.
+
+**From `280b32e4`, removed in `5f2cc949` — section 1.**
+
+**Agreement with the chapters.** The research passes for [20](20-groundwave-1mhz.md) and [25](25-groundwave-30mhz.md) wrote their own residue-series codes and checked them against the P.368-9 curves, NTIA test vectors and Barrick's curves. Their reported 1 MHz values (sea 68.5 dB(µV/m) and 73.5 dB at 100 km; 10 mS/m 50.5 and 91.5 dB; 3 mS/m 37.8 and 104.2 dB; 1 mS/m 29.3 and 112.7 dB; 118.7 dB at 300 km over 10 mS/m) are identical to the tables below to 0.1 dB. Their 30 MHz values (sea 132 dB at 100 km and 186 dB at 300 km; land 131 dB at 10 km and 182 dB at 100 km; 180 dB reached at about 280 km over sea and 57–113 km over land) agree to within 1 dB. Three implementations agreeing shows the arithmetic is consistent. It does not validate the model for any real path.
+
+**From `280b32e4`, removed in `5f2cc949` — section 1.**
+
+**Frequency selectivity across a 3 kHz channel.** Over 3×10⁻³ S/m land, W changes by less than 0.07 dB in amplitude and less than 0.03 µs in group delay across 3 kHz at 1 MHz (100 and 300 km), and by less than 0.002 dB and 0.003 µs at 30 MHz (30 and 100 km). Within this selected smooth, homogeneous-earth calculation and listed frequencies/distances, the computed response changes little across 3 kHz. These cells do not establish that all real ground-wave paths are flat or that any observed selectivity must come from other mechanisms: mixed media, terrain, roughness, layering, skywave, antenna and receiver effects are outside this comparison. The numerical result also depends on the unrecertified field solver noted in [C09](87-evidence-remediation-audit.md#c09).
+
+**From `280b32e4`, removed in `5f2cc949` — section 3.3, whole-disc illumination.**
+
+| Law: C, f_d, n | FWHM | −10 dB width | 2 × rms | Width with 50 % of power | 80 % | 90 % | Mean delay | rms delay | Power within 0.1 / 0.5 / 1 / 2 / 5 ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 150, 0.10, 1.5 | 0.085 | 0.28 | 0.27 | 0.091 | 0.29 | 0.49 | 1.12 ms | 2.16 ms | 0.43 / 0.68 / 0.76 / 0.83 / 0.93 |
+| 95, 0, 1.5 | 0.105 | 0.33 | 0.27 | 0.099 | 0.28 | 0.46 | 1.08 ms | 2.16 ms | 0.39 / 0.68 / 0.78 / 0.85 / 0.93 |
+| 95, 0.20, 1.5 | 0.111 | 0.45 | 0.32 | 0.127 | 0.39 | 0.59 | 1.52 ms | 2.40 ms | 0.31 / 0.56 / 0.66 / 0.76 / 0.89 |
+| 65, 0.25, 1.5 | 0.140 | 0.63 | 0.34 | 0.158 | 0.44 | 0.63 | 1.78 ms | 2.52 ms | 0.24 / 0.49 / 0.60 / 0.71 / 0.88 |
+| 65, 0.25, 1.0 | 0.139 | 0.65 | 0.35 | 0.160 | 0.46 | 0.66 | 1.92 ms | 2.68 ms | 0.24 / 0.49 / 0.59 / 0.69 / 0.86 |
+| 40, 0.35, 1.0 | 0.196 | 0.90 | 0.39 | 0.213 | 0.53 | 0.71 | 2.38 ms | 2.82 ms | 0.16 / 0.38 / 0.49 / 0.61 / 0.82 |
+| 40, 0.50, 1.0 | 0.226 | 0.96 | 0.42 | 0.253 | 0.58 | 0.74 | 2.72 ms | 2.87 ms | 0.12 / 0.31 / 0.42 / 0.54 / 0.78 |
+| 20, 0.50, 1.0 | 0.366 | 0.99 | 0.44 | 0.291 | 0.61 | 0.76 | 2.98 ms | 2.91 ms | 0.08 / 0.24 / 0.36 / 0.50 / 0.76 |
+
+**From `280b32e4`, removed in `5f2cc949` — section 3.3, beam-limited illumination.**
+
+| Dish diameter (beamwidth) | FWHM | −10 dB width | 2 × rms | Width with 50 % / 90 % of power | Mean delay | rms delay | Power within 0.1 / 0.5 / 1 ms | Relative power |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
+| 3 m (1.21°) | 0.190 | 0.84 | 0.38 | 0.199 / 0.68 | 2.16 ms | 2.70 ms | 0.17 / 0.41 / 0.52 | −0.3 dB |
+| 5 m (0.73°) | 0.182 | 0.72 | 0.35 | 0.178 / 0.63 | 1.83 ms | 2.47 ms | 0.19 / 0.45 / 0.57 | −0.8 dB |
+| 7.3 m (0.50°) | 0.170 | 0.57 | 0.31 | 0.151 / 0.55 | 1.36 ms | 2.05 ms | 0.22 / 0.52 / 0.66 | −1.6 dB |
+| 10 m (0.36°) | 0.158 | 0.45 | 0.25 | 0.126 / 0.43 | 0.88 ms | 1.46 ms | 0.27 / 0.62 / 0.76 | −2.5 dB |
+| 25 m (0.15°) | 0.115 | 0.24 | 0.12 | 0.072 / 0.19 | 0.17 ms | 0.21 ms | 0.52 / 0.94 / 0.99 | −5.8 dB |
+| 64 m (0.057°) | 0.066 | 0.12 | 0.057 | 0.038 / 0.094 | 0.04 ms | 0.04 ms | 0.92 / 1.00 / 1.00 | −10.9 dB |
+
+**From `280b32e4`, removed in `5f2cc949` — section 3.3.**
+
+- The spectrum is peaked and heavy-tailed, not Gaussian. Its half-power width is only 8–37 % of the limb-to-limb width, while 90 % of the power needs 46–76 %. A single quoted "spread" is therefore ambiguous by a factor of three to five unless its definition is stated.
+
+**From `280b32e4`, removed in `5f2cc949` — section 3.3.**
+
+- The delay profile is continuous from 0 to 11.6 ms, with between a quarter and two thirds of the power within 0.5 ms and 7–24 % beyond 5 ms for whole-disc illumination. It is not a pair of discrete rays.

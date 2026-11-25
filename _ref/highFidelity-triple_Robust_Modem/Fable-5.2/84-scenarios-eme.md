@@ -714,3 +714,17 @@ implementation obligations (E13/E31/E32/E34), outside this research-only
 write scope. Real5–6 cm joint delay–Doppler/polarization/covariance and
 site-specific calibration/availability remain external measurements(E33).
 No literature inference or numerical agreement has been substituted for them.
+
+## Superseded values from earlier versions
+
+Restored 25 November 2026. Later versions of this chapter corrected, recomputed,
+withdrew or reworded the values in these passages, and no current file in the
+repository stated them. Each passage is reproduced verbatim from the version
+named, with the commit that removed it. An ellipsis marks text left out around a
+quoted sentence or clause. The current chapter governs; these passages record
+earlier results and how they changed, under the
+[research-material rule](../../../docs/development.md#research-material).
+
+**From `33f6e461`, removed in `c42dea1c`.**
+
+The Moon is in the far field of each individual station dish: 2D²/λ is about 346 m for 3 m and 1.88 km for 7 m. That does not place it in the Fraunhofer far field of a hypothetical coherent aperture spanning the entire lunar diameter. The surface-element integration and retarded phase account for the distinct extended-target geometry.

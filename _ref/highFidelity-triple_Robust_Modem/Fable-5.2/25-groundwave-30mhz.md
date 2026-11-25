@@ -668,3 +668,25 @@ Access status: **read** = supporting passage read in the full text (for scanned 
 - [R55] Halverson, M. J., Pawlowicz, R., & Chavanne, C. (2017), Dependence of 25-MHz HF Radar Working Range on Near-Surface Conductivity, Sea State, and Tides, *Journal of Atmospheric and Oceanic Technology* 34(2), 447–462, doi:10.1175/JTECH-D-16-0139.1. [Publisher record](https://journals.ametsoc.org/view/journals/atot/34/2/jtech-d-16-0139.1.xml) (403 in this access route); [author-hosted full text](https://www.codar.com/images/about/2017_Halverson_JAOT.pdf) — read, including study design, proxy/input limitations, conductivity and working-range results, and the authors' discussion distinguishing propagation loss from Bragg scattering strength. [P]
 - [R56] Rogers, R. L., Vogel, W., Lacker, S., & Ling, H. (2016), Ground Wave Propagation Measurement in the HF to VHF Frequency Ranges over Non-Line-of-Sight Terrains, *2016 IEEE International Symposium on Antennas and Propagation / USNC-URSI National Radio Science Meeting*, proceedings contribution. [National Academies-hosted two-page text](https://sites.nationalacademies.org/cs/groups/pgasite/documents/webpage/pga_183636.pdf) — read only the available short proceedings text; full paper, numerical outcome tables and raw data not recovered. [P]
 - Own calculations [E]: pure-Python implementation of the Sommerfeld–Norton and residue-series solutions and the auxiliary estimates. The working scripts were temporary and are not part of this record; an independently written residue-series code reproduces table A, the height-gain, frequency, k and mixed-path figures ([90](90-cross-check-calculations.md) §1, and the review re-computation).
+
+## Superseded values from earlier versions
+
+Restored 25 November 2026. Later versions of this chapter corrected, recomputed,
+withdrew or reworded the values in these passages, and no current file in the
+repository stated them. Each passage is reproduced verbatim from the version
+named, with the commit that removed it. An ellipsis marks text left out around a
+quoted sentence or clause. The current chapter governs; these passages record
+earlier results and how they changed, under the
+[research-material rule](../../../docs/development.md#research-material).
+
+**From `07bcbc5d`, removed in `1fdf641a` — summary.**
+
+… The chapter's own smooth-earth calculation (cross-checked against the ITU-R P.368-9 curves, against Barrick's 1970 curves and by an independent re-computation, [90](90-cross-check-calculations.md)) gives, for ground-level vertical antennas, a basic transmission loss of 132 dB at 100 km and 186 dB at 300 km over sea, but 131 dB at only 10 km and 182 dB at 100 km over average land: 180 dB is reached at about 280 km over sea and at 57–113 km over land.
+
+**From `07bcbc5d`, removed in `1fdf641a` — summary.**
+
+… Measured medians over irregular terrain with 1–4 m antennas at 20–50 MHz are 100–130 dB at 5 km and 145–175 dB at 50 km, with 15–35 dB inter-decile spread between sites.
+
+**From `c42dea1c`, removed in `5f2cc949`.**
+
+- Round-the-world echoes at 28–30 MHz (a delay near 138 ms follows from the circumference at F-region height [E]) and quantitative auroral-scatter Doppler spreads at 28–50 MHz: no source opened.

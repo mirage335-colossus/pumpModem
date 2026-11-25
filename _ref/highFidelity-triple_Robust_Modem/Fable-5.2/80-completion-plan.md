@@ -343,3 +343,45 @@ source/version/hash receipts, equations, selected inputs, results and failed
 checks remain in the chapters. Unrelated pre-existing scratch material was
 left untouched. The final documentation/scope checks were repeated after this
 housekeeping.
+
+## 6. Source checks recorded at plan start
+
+Restored 25 November 2026 from the completion plan as committed at
+`33f6e461`, where this was section 5; commit `c42dea1c` removed it when the
+plan became this execution record. The introduction, table and notes below are
+unchanged apart from this paragraph. Owning chapters later read several of
+these sources more fully, and their records govern where they differ. The table
+remains the only citation of Waudby-Smith et al. 2024 and keeps the arXiv
+route for Howard et al. 2021, which chapter 60 cites by DOI as [Howard21] and
+chapter 86 uses for its time-uniform alternative.
+
+These source checks make the next pass concrete. They are additions or access
+updates, not evidence that all recent literature has been covered. Source
+availability is recorded as observed on November 13, 2026.
+
+| Source and access | Contribution to completion | Transfer limit |
+| --- | --- | --- |
+| [ITU-R P.372-18](https://www.itu.int/rec/R-REC-P.372-18-202609-I), official edition/status page | Confirm current noise-standard identity; preserve distinction between updated standard and new measurements | Does not supply a site-specific sub-9 kHz extreme distribution |
+| [Gu et al. 2021](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2020JA029101), abstract and [dataset record](https://doi.org/10.6084/m9.figshare.13536611) accessible in the research pass; full-text access differed by session | Regional VLF noise and lightning dependence; candidate data-access investigation | One region and recorded measurement bandwidths; not a target-antenna or universal storm calibration |
+| [Reuveni et al. 2011](https://www.ursi.org/proceedings/procGA11/ursi/EP1-8.pdf), full proceedings paper | Temporal/seasonal noise statistics from a Negev record, including 4 and 7.5 kHz | Old single-site record; recent indexing does not make it new measurement evidence |
+| [Kirincich and Emery 2023](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2022RS007550), full text | Ocean-path measurement/model comparison, geometry dependence and value of measured roughness inputs | Extract exact operating frequency; neither generic 30 MHz validation nor proof that a complex model always wins |
+| [Hehenkamp et al. 2024](https://www.mdpi.com/1424-8220/24/1/282), full text | MF mixed-path phase/delay model and field comparison; uncertainty in ground maps | MF R-Mode evidence is not direct 1 MHz amplitude validation |
+| [Hehenkamp et al. 2025](https://ars.copernicus.org/articles/22/77/2025/), full text | Layered sea ice over seawater as an alternative to a homogeneous ice half-space | 319 kHz modeled case; not a measured 1 MHz propagation result |
+| [Dagefu et al. 2015](https://deepblue.lib.umich.edu/bitstream/handle/2027.42/111943/rds20240.pdf?sequence=1), full text | Separate 40 MHz short-range clutter/penetration study, DOI 10.1002/2014RS005601 | Do not substitute it for the different cited IEEE TAP paper or extrapolate to long-range surface wave |
+| [Haralambous et al. 2022](https://www.mdpi.com/2076-3417/12/22/11808), full text | Cyprus HF spectral congestion, threshold dependence and time structure | Site/user/quiet-geomagnetic scope; occupancy is not ambient-noise PSD or modem availability |
+| [Male et al. 2021](https://www.mdpi.com/1424-8220/21/6/2210), full text | Measured O/X dependence and availability on a 5.4 MHz NVIS path | Short path/season sample; does not resolve general cross-frequency Helper/DATA covariance |
+| [Ponomarchuk et al., May 2024 storm study](https://naukaru.ru/en/storage/download/242871), full paper | Oblique-path mode/availability evidence during a severe event | Sounder observations do not supply this modem's BER or a complete delay–Doppler distribution |
+| [Themens et al. 2024](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2024GL111677), full text | Disturbance history and high-latitude ionospheric context | Same geomagnetic index need not imply the same channel; still not a receiver trial |
+| [Gao et al. 2023](https://doi.org/10.1016/j.isprsjprs.2023.01.008), abstract/indexed material; full fetch denied | Candidate update for local lunar dielectric/polarimetric interpretation | Local orbital observations cannot be used as a whole-disc 5.8 GHz EME kernel |
+| [Campbell 2025](https://doi.org/10.1016/j.icarus.2025.116738), publisher preview/abstract | Challenges unique physical interpretation of polarimetric components | Other wavelengths and local scattering; full-text review remains needed |
+| [JPL IPN 42-216C](https://ipnpr.jpl.nasa.gov/progress_report/42-216/42-216C.pdf), full report | Explicit example of geometry-dependent lunar channel modeling assumptions | Lunar-asset downlink with surface multipath is not passive Earth–Moon–Earth reflection |
+| [Howard et al. 2021](https://arxiv.org/abs/1810.08240), abstract and publication identity checked | Candidate finite-sample time-uniform inference framework | Select and verify a theorem under the actual episode assumptions before use |
+| [Waudby-Smith et al. 2024](https://arxiv.org/abs/2103.06476), abstract checked | More recent asymptotic confidence-sequence alternative | Asymptotic validity cannot be presented as a finite-sample rare-event guarantee |
+
+The planning searches covered sub-9 kHz noise and antenna evidence, recent MF
+mixed-path and upper-HF/low-VHF measurements, storm sounding and HF congestion,
+NVIS dependence, Mini-RF/EME measurements and sequential inference. They used
+focused mechanism and exact-title searches followed by primary-source opens.
+They did not search every database, language, thesis or nonpublic dataset. The
+next research pass must record its queries under section 4 rather than promote
+this bounded check into a comprehensive search claim.

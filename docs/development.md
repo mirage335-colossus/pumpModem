@@ -355,6 +355,12 @@ published-release assets, certification evidence, unresolved failures, active
 work and relevant third-party notices. The [build guide](building.md#local-output-retention)
 explains reuse and retirement of local build and SDK caches.
 
+Retiring a guide, tool or implementation does not retire its citations to the
+scientific literature, standards or technical reports. Move each one, with the
+claim it supported, into the guide that keeps the finding or into a research
+record. Citations lost in earlier cleanups are recovered in
+[retired-guidance citations](../_ref/retired-guidance-citations/README.md).
+
 ### Research material
 
 The cleanup rules above do not apply to research material. `_ref/` and

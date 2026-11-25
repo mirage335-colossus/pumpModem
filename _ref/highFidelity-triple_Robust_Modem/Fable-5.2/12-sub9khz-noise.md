@@ -459,3 +459,27 @@ Grey
 - G4. Nicholson, P., EbNaut pages (introduction and "Technical details" notes), http://abelian.org/ebnaut/ and /ebnaut/notes.shtml — read through Wayback Machine captures of 2024–2025; the host no longer resolves. [G]
 - G5. Nicholson, P., "VLF receiver software toolkit" (vlfrx-tools 0.9p) documentation, http://abelian.org/vlfrx-tools/notes.html — read through the Wayback Machine capture of 13 January 2025. [G]
 - G6. Köppen, J., "How to measure the sensitivity of VLF receivers", University of Kiel, PDF of 2018. https://portia.astrophysik.uni-kiel.de/~koeppen/VLF/docs/Noisemeter.pdf — read. [G]
+
+## Superseded values from earlier versions
+
+Restored 25 November 2026. Later versions of this chapter corrected, recomputed,
+withdrew or reworded the values in these passages, and no current file in the
+repository stated them. Each passage is reproduced verbatim from the version
+named, with the commit that removed it. An ellipsis marks text left out around a
+quoted sentence or clause. The current chapter governs; these passages record
+earlier results and how they changed, under the
+[research-material rule](../../../docs/development.md#research-material).
+
+**From `1fdf641a`, removed in `c42dea1c` — model-structure options.**
+
+- *B. Layered synthetic generator.* (i) Coloured Gaussian background shaped to the chosen spectrum (f⁻² power slope to the notch, notch depth 10–40 dB at 2–7 kHz, rise to 10 kHz); (ii) clustered Poisson impulses with power-law peak amplitudes (exceedance exponent about −1.3 to −2), cluster rate, length and membership as in T4 Table 4.1 (to be re-fitted for 1–9 kHz), each impulse drawn from a distance-dependent waveform set that includes the ELF slow tail and, at night, tweek tails of 15–100 ms at n × 1.7–1.8 kHz; (iii) slow modulation of background level and impulse rate by diurnal and seasonal factors plus an hour-scale log-normal term of 3–5 dB; (iv) rare storm episodes adding pulses 25–50 dB above background for seconds; (v) a mains comb whose harmonics share one stochastic frequency process (σ about 12–62 mHz on continental grids and 56–133 mHz on islands [P19], minutes-scale correlation, steps at 15/30/60 minutes), with independent slow amplitude variation per harmonic, odd harmonics stronger; (vi) optional ripple-control bursts, railway lines, and band-limited chorus or hiss for high latitudes. Limits: every parameter above 1 kHz and below 10 kHz is borrowed from neighbouring bands or other sites; correlations between layers (for example sferic rate and background level) are not documented in the sources read.
+
+**From `1fdf641a`, removed in `c42dea1c` — simulator comparison.**
+
+| Simulator element | Simulator | Below 9 kHz, from this chapter |
+|---|---|---|
+| Interfering tone | One receiver-coordinate tone of fixed amplitude and frequency (with Shift 0, receiver coordinates are the radio frequency) | A comb every 50 or 60 Hz, odd harmonics stronger, each line wandering in proportion to harmonic number: 2.5–3.1 Hz rms near 8.27 kHz on Continental European and US grids and 8–10 Hz on Nordic and British grids, sweeping up to about 0.3 Hz/s and stepping at trading intervals; plus ripple-control telegrams (100–1600 Hz) near the injecting network and, at high latitude, chorus and hiss [P19, P18, P33, T2, T18] |
+
+**From `c42dea1c`, removed in `5f2cc949`.**
+
+- Instrument floors: LF AWESOME receiver "as low as 0.03 fT/Hz" (sic) with 15–20 ns timing, a 10–25 dB improvement on the 2004 AWESOME [P20, abstract]; Kannuslehto loop receiver about 0.1 fT/√Hz [P25]; the 2010 AWESOME about −10 dB re 1 fT/√Hz (0.3 fT/√Hz) input-referred at 18–30 kHz with the larger loop, enough to detect about 1 fT in 1 Hz at ELF [P21 §V, read]; the NRL 3 kHz tuned loop −193 to −195 dBH0 (0.22–0.28 fT/√Hz) [T18, read]; the Stanford radiometer's VLF loop and preamplifier well below the 10⁻⁵–10⁻⁷ V/m/√Hz typical of the background [T16 §2.2, read]; a wideband E-field receiver covering ~4 Hz–400 kHz at 1 MHz sampling with ~35 µV amplitude resolution and ~12 ns timing [P30, abstract, not re-checked]. Natural noise (0.3 fT/√Hz at the quietest) is thus above the best magnetic sensors everywhere in the band, by a small margin only in the cutoff notch at polar sites: the Tromsø minima of 0.32 fT/√Hz were within 1–3 dB of the NRL receiver's own floor [T18; E].

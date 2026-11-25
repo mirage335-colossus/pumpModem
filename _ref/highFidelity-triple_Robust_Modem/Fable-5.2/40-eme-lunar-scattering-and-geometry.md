@@ -584,3 +584,17 @@ Access status: **read** = supporting passage read in full text or page image; **
 - [CHAN25] Chan, K. et al. (2025). *Enhancements to Mini-RF X/C-band data quality through cross-channel calibration and reprocessing strategies*. LPSC 2294. https://www.hou.usra.edu/meetings/lpsc2025/pdf/2294.pdf — full two-page abstract read; conference evidence, not a journal article. [G]
 - [ST06] Sultan-Salem, A. K., Tyler, G. L. (2006). *Hagfors’ law revisited*. JGR Planets 111,E06012. https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2005JE002489 — supporting original publisher abstract/§§2–3/conclusions inspected. [P]
 - [GBT25] Taylor, P. A. et al. (2025). *The Next Generation Planetary Radar on the Green Bank Telescope*, LPSC 2802. https://www.hou.usra.edu/meetings/lpsc2025/pdf/2802.pdf ; [official ngRadar results](https://ngradar.nrao.edu/page/results) — instrument/imaging evidence; not a5.76 GHz channel record. [G]
+
+## Superseded values from earlier versions
+
+Restored 25 November 2026. Later versions of this chapter corrected, recomputed,
+withdrew or reworded the values in these passages, and no current file in the
+repository stated them. Each passage is reproduced verbatim from the version
+named, with the commit that removed it. An ellipsis marks text left out around a
+quoted sentence or clause. The current chapter governs; these passages record
+earlier results and how they changed, under the
+[research-material rule](../../../docs/development.md#research-material).
+
+**From `c42dea1c`, removed in `5f2cc949` — summary.**
+
+… Rayleigh fading is a useful supported model, with estimated field coherence times of about 6–17 ms in normal conditions.

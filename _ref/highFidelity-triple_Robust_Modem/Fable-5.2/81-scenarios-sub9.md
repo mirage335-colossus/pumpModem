@@ -616,3 +616,32 @@ These dispositions refer to the V01–V27 inventory in [87](87-evidence-remediat
 | Night 87/.30 and tanh → day 74/.50 | Declared diagnostic Wait–Spies law, checked against literature's contrasting profiles → time-varying relative field | Synthetic E1; Thomson/McCormick alternatives constrain interpretation, not its event probability. |
 | Mesh, solver/tolerance/defaults and interpolation bound | LMP source/API → executed numerical checks in §4 | Numerical error coordinates; do not substitute them for empirical model discrepancy. |
 | Ground-wire normalization; below-4-kHz attenuation bracket | Wheeler/Moore–Blair/reciprocity resolve the shared asymptote; Wait/Taylor support a separate theory/observation bracket | Ground-wire finite-geometry qualification and low-band physical discrepancy remain distinct; neither calibrates the selected 8.27-kHz T/E. |
+
+## Superseded values from earlier versions
+
+Restored 25 November 2026. Later versions of this chapter corrected, recomputed,
+withdrew or reworded the values in these passages, and no current file in the
+repository stated them. Each passage is reproduced verbatim from the version
+named, with the commit that removed it. An ellipsis marks text left out around a
+quoted sentence or clause. The current chapter governs; these passages record
+earlier results and how they changed, under the
+[research-material rule](../../../docs/development.md#research-material).
+
+**From `33f6e461`, removed in `c42dea1c` — scenario inputs.**
+
+| Input | Fixed specification | Evidence/status |
+| --- | --- | --- |
+| Path | Fixed 1,000 km great-circle path, mid-latitude, land-dominant reference; use a stated ground-conductivity profile; initialize the reference D region at h′ = 87 km, β = 0.3 km⁻¹ and retain separate E and H transfer functions | Range is a scenario choice; h′ follows the chapter 10 night guide reference while β is a fixed model input, not a universal measured profile. At 8.27 kHz the chapter 10 model gives roughly 46–49 dB basic transmission loss at 1 Mm; forecast only. |
+| Receiver noise reference | Calibrated input-referred H-field PSD in fT/√Hz and dBH0, with receiver self-noise, antenna transfer and external field shown separately. At 8.27 kHz use 11 fT/√Hz (−161.2 dBH0) as the P.372 plotted minimum and 250 fT/√Hz (−134.0 dBH0) as its plotted maximum-scale reference; also retain the chapter 12 plausible 20–50 fT/√Hz mid-latitude moderate band. | P.372 curves are hourly-median expected levels and are not universal bounds. The source material varies in measured component and estimator; do not use a plane-wave E↔H conversion for local man-made fields. Chapter 12 gives conversions and limitations. |
+
+**From `33f6e461`, removed in `c42dea1c`.**
+
+**Unit correction before use:** 1 fT/√Hz = 0.2998 µV/m/√Hz only for a plane wave. Chapter 12 defines dBH0 as dB re 1 A/m/√Hz. Convert magnetic flux density with H = B/μ₀: 1 fT/√Hz = 7.958×10⁻¹⁰ A/m/√Hz = −182.0 dBH0; therefore 11 fT/√Hz = −161.2 dBH0 and 250 fT/√Hz = −134.0 dBH0. Confirm the project's dB-Hz versus dB-H0 labels before feeding any numeric field to the modem.
+
+**From `33f6e461`, removed in `c42dea1c`.**
+
+- Preserve the same antenna, path, signal and continuous state as Scenario B. Use two separate stresses: a 30-minute below-threshold interval, and a slot-aligned fade that covers the full scoring apertures of at least two consecutive public quiet decisions while transmission continues. Determine the actual interval from the configured calendar and tails; the approximately 6,750–6,767 s slot spacing in row 1 makes 30 minutes insufficient for this longer test. Set the wanted received field below the calibrated receiver-detection threshold, or use a documented measured fade if available. Keep noise present at the adverse PSD level and retain any existing filter, decoder and channel memory through the outage and recovery.
+
+**From `33f6e461`, removed in `c42dea1c`.**
+
+For the 1 mW, 1 Mm modeled night field of 523 nV/m in chapter 11, 2 mW gives about 740 nV/m by square-root power scaling. Under a plane-wave E=cB approximation only, that is 2.47 fT and yields approximately −18.2 and −26.1 dB-Hz against 20 and 50 fT/√Hz, before receiver self-noise. The separate chapter-11 −11.5 dB-Hz example and chapter-12 11 fT/√Hz plotted baseline use different noise-figure readings; they are not the same fixed case.

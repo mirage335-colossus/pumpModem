@@ -770,7 +770,7 @@ ITU-R texts were downloaded from itu.int and read unless stated.
 - Pierrard, V. et al. (2025), Atmosphere 16, 299. doi:10.3390/atmos16030299. Abstract.
 - Pignalberi, A., Pietrella, M. & Pezzopane, M. (2021), Atmosphere 12, 1003. doi:10.3390/atmos12081003. Full primary paper read; assimilated and independent validation distinguished.
 - Reid, B. et al. (2023), Space Weather 21, e2022SW003185. doi:10.1029/2022SW003185. Abstract.
-- Rishbeth, H. & Mendillo, M. (2001), J. Atmos. Sol.-Terr. Phys. 63, 1661–1680. doi:10.1016/S1364-6826(01)00036-0. Full primary author-institution copy read: https://sirius.bu.edu/aeronomy/science2.pdf; NmF2 variance, not received-loss statistics.
+- Rishbeth, H. & Mendillo, M. (2001), J. Atmos. Sol.-Terr. Phys. 63, 1661–1680. doi:10.1016/S1364-6826(01)00036-0. Full primary author-institution copy read: https://sirius.bu.edu/aeronomy/science2.pdf; NmF2 variance, not received-loss statistics. The earlier planned route was the [Southampton eprint record](https://eprints.soton.ac.uk/id/eprint/9167) (restored 25 November 2026 after removal in commit `5f2cc949`; it returned HTTP 401 to an automated check that day).
 - Rogers, N. C. & Honary, F. (2015), J. Space Weather Space Clim. 5, A8, doi:10.1051/swsc/2015009; Rogers, N. C. et al. (2016), Space Weather 14, 950–972, doi:10.1002/2016SW001527. Full primary methods/results read: 2015 accepted manuscript at Lancaster; 2016 publisher body.
 - Sauer, H. H. & Wilkinson, D. C. (2008), Space Weather 6, S12002. doi:10.1029/2008SW000399. Full primary paper read, §§3.2–5; includes explicit doubled-vertical product convention.
 - Siskind, D. E. et al. (2017), Space Weather 15, 115–130. doi:10.1002/2016SW001546. Full primary methods/results read; density-profile comparison and conditional absorption modeling.
@@ -800,7 +800,7 @@ ITU-R texts were downloaded from itu.int and read unless stated.
 - Liu, L. & Zou, S. (2026), *Global Ionospheric Responses to Four X-Class Solar Flares in November 2025*, Space Weather 24(11), e2026SW005116. doi:10.1029/2026SW005116. Full primary methods/results read; TEC and ionosonde observables. First published 30 October 2026.
 
 **Grey literature [G]**
-- ITU-R Study Group 3, *ITU-R-HF* source repository (ITURHFProp/P533, version string 14.2; includes the D1 data bank and P.1239 grid files). Executed v14.3 commit `cd172be56dc04b154e5d2fa91cbaa6ecf5284305`, with the sample report `ITURHFProp/ReportsPDD190122-124921.txt`. The earlier review used May 2025 commit `82017594` and the calibration-constant history (3 June 2020, `9b93681a75`); those inspections are distinct from this pinned executable result. https://github.com/ITU-R-Study-Group-3/ITU-R-HF
+- ITU-R Study Group 3, *ITU-R-HF* source repository (ITURHFProp/P533, version string 14.2; includes the D1 data bank and P.1239 grid files). Executed v14.3 commit `cd172be56dc04b154e5d2fa91cbaa6ecf5284305`, with the sample report `ITURHFProp/ReportsPDD190122-124921.txt`. The earlier review used May 2025 commit `82017594` and the calibration-constant history (3 June 2020, `9b93681a75`); those inspections are distinct from this pinned executable result. https://github.com/ITU-R-Study-Group-3/ITU-R-HF. Before the run, the evidence audit planned to obtain official coefficients through the ITU-R Working Party 3M [digital-products listing](https://www.itu.int/en/ITU-R/study-groups/rsg3/rwp3m/Pages/digprod.aspx) (route restored 25 November 2026 after removal in commit `5f2cc949`).
 - Lane, G. (2005), *Review of the High Frequency Ionospheric Communications Enhanced Profile Analysis & Circuit (ICEPAC) Prediction Program*, preprint 2B-1, Ionospheric Effects Symposium. Read. https://voacap.com/2023/documents/GLane_ICEPAC.pdf
 - Luetzelschwab, C. (K9LA), articles at https://k9la.us : *Day-to-Day Variability of the Ionosphere* (WorldRadio, Aug 2004); *Validating Propagation Predictions*; *Multi-Hop at Night on 160-Meters*, *Ducting on 160-Meters*, *Polarization Observations on 160-Meters*, *Low Angles on 160-Meters* (Topband Topics, Aug 2011); *Absorption at Night*; *Ducting and Spotlight Propagation on 160m* (CQ, Dec 2005); *160m at Solar Maximum* (WorldRadio, Mar 2004); *20M Ionosphere-Ionosphere Mode*. Read.
 - HamSCI publications listing, https://hamsci.org/publications. Read (used to locate records).
@@ -808,3 +808,226 @@ ITU-R texts were downloaded from itu.int and read unless stated.
 
 **Own computations [E]**
 - Tables 1–2: 1,320 pinned native ITU-reference cases, with executable recipe, coefficient/build hashes and term audit above. The embedded recipe was independently rerun and reproduced all 1,320 terminal-loss values exactly at report precision. All sixteen Table-3 scalar cells, twelve Table-4 vertical/oblique pairs and three stated loss budgets were also checked against their displayed formulas; the Table-3 rounding discrepancy is recorded above. Table 5 and the printed-law comparison are explicit dimensional/sensitivity calculations, not measured modem performance.
+
+## Superseded values from earlier versions
+
+Restored 25 November 2026. Later versions of this chapter corrected, recomputed,
+withdrew or reworded the values in these passages, and no current file in the
+repository stated them. Each passage is reproduced verbatim from the version
+named, with the commit that removed it. An ellipsis marks text left out around a
+quoted sentence or clause. The current chapter governs; these passages record
+earlier results and how they changed, under the
+[research-material rule](../../../docs/development.md#research-material).
+
+Most of these come from the first-pass loss tables. They used a simplified,
+bespoke re-implementation of P.533-14 whose scripts were not kept. The one
+official reference output then available, Kranji–Beijing, differed from it by
+about 11 dB. The 13 November completion pass replaced Tables 1–2 and the values
+derived from them with pinned ITU-R-HF v14.3 runs (section 1 above), and
+withdrew abstract-only event numbers from quantitative use (H07 disposition
+above). Do not use these values as predictions. They show what the simplified
+method gave and how far it was from the reference code.
+
+**From `c42dea1c`, removed in `5f2cc949` — summary.**
+
+- **Normal in-band basic loss is far below 180 dB.** A simplified re-computation of P.533-14 in this record for mid-latitude paths gives basic transmission loss of about 103–137 dB at night on 1.8–7 MHz and 118–147 dB by day on the best band, for 100–3 000 km. A 10 000 km path gives about 141–150 dB in darkness and 172–183 dB in full daylight on the best band [E]. The GUI's '180 dB at −164 dBm/Hz' is not a basic loss: by section 3.1 of [00](00-method-and-modem-context.md) it stands for L_b + F_a ≈ 193.5 dB, that is L_b ≈ 134 dB at a rural site at 1.8 MHz up to about 175 dB where galactic noise sets the floor at 30 MHz [E].
+
+**From `c42dea1c`, removed in `5f2cc949` — loss-budget anatomy.**
+
+| Term | What it is | Form in P.533-14 | Magnitude |
+|---|---|---|---|
+| L_i | D/E-region absorption (eq. 20) | see next subsection | 0–3 dB at night; 5–60 dB per path by day at 7 MHz; hundreds of dB by day at 1.8–3.5 MHz on long hops [E] |
+
+**From `c42dea1c`, removed in `5f2cc949` — section 1, Tables 1 and 2 with their method and notes.**
+
+**Method [E].** The P.533-14 short-path and long-path equations were re-implemented in simplified form for this record. Inputs and simplifications:
+
+- Monthly-median foF2 and M(3000)F2 from the P.1239 grid files distributed with the ITU reference software; foE from P.1239-4 eqs 12–18.
+- Centred-dipole magnetic field; mid-path ionosphere; mirror height from eq. 2; p = 1.45; L_h omitted; isotropic antennas.
+- Absorption averaged over penetration points and multiplied by hop count, as the ITU reference code does (see "Contradictions"). Applying printed eq. 20 literally would double every [L_i] value below. L_z = 8.72 dB and the above-the-MUF laws are those printed in P.533-14, not the code's.
+- Paths lie along 10°E, centred at 40°N (geomagnetic latitude about 41°). "Noon", "midnight" and "pre-dawn" are 11, 23 and 04 UTC.
+- Each cell is the range over January, April, July and October. R12 is in version-1 units.
+- The cell gives L_b of the strongest unscreened mode and, in brackets, its absorption L_i. A star means the frequency is above that mode's monthly-median basic MUF in all four months; (*) means in some months.
+
+These are this record's estimates, not output of the ITU software. The 1.8 MHz column is outside P.533's validity.
+
+**Check against the reference code [E].** A hand recomputation of one cell (100 km, noon, R12 = 10, 1.8 MHz: 1E mode, L_i about 31 dB in January and 36 dB in July, L_b 125–130 dB) reproduces the table under the stated method. The only published output of the ITU software found, the sample report in its repository (Kranji–Beijing, 4 477 km, January, 02 UTC, R12 = 140, 6.2 MHz, isotropic antennas), gives 161.7 dB for the dominant 2F2 mode. The simplified method gives 172.9 dB there, about 11 dB more, nearly all of it in absorption. It also marks that mode as screened by the E layer, a test P.533 applies only up to 4 000 km (§4). The path lies outside Table 1's geometry (low latitude, beyond d_max, five control points) and the cause of the absorption difference was not isolated. Single cells should nevertheless be read as uncertain by about 10 dB, on top of the prediction error of section 3.
+
+**Table 1. Basic transmission loss L_b (dB), isotropic antennas, P.533-14 short-path equations [E].**
+
+| Path | Time | R12 | 1.8 MHz | 3.5 MHz | 7.0 MHz | 14.0 MHz | 21.0 MHz | 28.0 MHz | path basic MUF (MHz) | foF2 (MHz) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 100 km | noon | 10 | 125–130 [Li 31–36] | 125–129(*) [Li 23–30] | 118–135(*) [Li 5–7] | 155–163* [Li 1–2] | 172–181* [Li 1–1] | 186–188* [Li 0–0] | 6.0–7.3 | 5.5–6.7 |
+| 100 km | noon | 150 | 144–154 [Li 50–60] | 139–143 [Li 39–43] | 124–128 [Li 9–12] | 132–149* [Li 3–3] | 154–165* [Li 1–2] | 166–178* [Li 1–1] | 9.8–13.3 | 9.2–12.8 |
+| 100 km | midnight | 10 | 104–104 [Li 1–2] | 108–109 [Li 0–1] | 141–148* [Li 0–0] | 172–179* [Li 0–0] | 185–186* [Li 0–0] | 188–189* [Li 0–0] | 3.8–4.5 | 3.3–4.0 |
+| 100 km | midnight | 150 | 106–107 [Li 2–3] | 111–111 [Li 1–1] | 116–139(*) [Li 0–0] | 149–170* [Li 0–0] | 167–187* [Li 0–0] | 181–190* [Li 0–0] | 5.0–9.1 | 4.4–8.5 |
+| 100 km | pre-dawn | 10 | 102–103(*) [Li 1–7] | 107–119(*) [Li 0–2] | 141–153* [Li 0–1] | 172–181* [Li 0–0] | 184–185* [Li 0–0] | 187–187* [Li 0–0] | 3.2–4.5 | 2.6–4.0 |
+| 100 km | pre-dawn | 150 | 105–107 [Li 2–12] | 110–112 [Li 1–3] | 115–148(*) [Li 0–1] | 154–180* [Li 0–0] | 172–187* [Li 0–0] | 186–189* [Li 0–0] | 3.8–7.7 | 3.3–7.1 |
+| 1000 km | noon | 10 | 173–195 [Li 67–89] | 142–150 [Li 30–38] | 133–136 [Li 15–17] | 136–139* [Li 7–11] | 158–168* [Li 1–2] | 171–181* [Li 1–1] | 10.1–13.1 | 5.5–6.7 |
+| 1000 km | noon | 150 | 231–272 [Li 124–165] | 165–180 [Li 52–68] | 142–147 [Li 24–29] | 131–132 [Li 5–6] | 132–149(*) [Li 2–7] | 154–167* [Li 1–2] | 15.1–21.1 | 9.2–12.8 |
+| 1000 km | midnight | 10 | 110–111 [Li 2–3] | 114–115 [Li 1–1] | 120–135(*) [Li 0–0] | 161–168* [Li 0–0] | 179–187* [Li 0–0] | 193–194* [Li 0–0] | 5.9–7.2 | 3.3–4.0 |
+| 1000 km | midnight | 150 | 112–114 [Li 3–5] | 116–116 [Li 1–2] | 121–121 [Li 0–1] | 134–160* [Li 0–0] | 157–178* [Li 0–0] | 170–192* [Li 0–0] | 7.5–13.4 | 4.4–8.5 |
+| 1000 km | pre-dawn | 10 | 110–115 [Li 3–9] | 114–118 [Li 1–5] | 120–140(*) [Li 0–1] | 159–172* [Li 0–0] | 177–191* [Li 0–0] | 190–193* [Li 0–0] | 5.3–7.6 | 2.6–4.0 |
+| 1000 km | pre-dawn | 150 | 112–122 [Li 5–16] | 116–121 [Li 2–9] | 120–138(*) [Li 1–2] | 140–169* [Li 0–1] | 160–188* [Li 0–0] | 173–194* [Li 0–0] | 5.7–12.1 | 3.3–7.1 |
+| 3000 km | noon | 10 | 276–333 [Li 158–215] | 190–212 [Li 66–88] | 160–166 [Li 30–36] | 145–156 [Li 9–20] | 141–160(*) [Li 4–5] | 158–171* [Li 2–3] | 17.2–23.4 | 5.5–6.7 |
+| 3000 km | noon | 150 | 411–518 [Li 293–400] | 244–286 [Li 120–163] | 179–191 [Li 49–62] | 149–154 [Li 13–17] | 144–147 [Li 6–10] | 143–158(*) [Li 3–4] | 24.5–34.8 | 9.2–12.8 |
+| 3000 km | midnight | 10 | 125–128 [Li 6–10] | 124–125 [Li 2–3] | 129–129 [Li 1–1] | 149–159* [Li 0–0] | 169–177* [Li 0–0] | 182–190* [Li 0–0] | 9.6–12.0 | 3.3–4.0 |
+| 3000 km | midnight | 150 | 130–136 [Li 10–17] | 126–129 [Li 4–6] | 129–130 [Li 1–2] | 134–150(*) [Li 0–1] | 138–170(*) [Li 0–0] | 160–183* [Li 0–0] | 11.7–21.3 | 4.4–8.5 |
+| 3000 km | pre-dawn | 10 | 126–139 [Li 8–21] | 125–135 [Li 3–11] | 129–134 [Li 1–4] | 144–161* [Li 0–1] | 166–179* [Li 0–0] | 179–193* [Li 0–0] | 8.9–13.1 | 2.6–4.0 |
+| 3000 km | pre-dawn | 150 | 132–157 [Li 14–39] | 127–143 [Li 5–19] | 129–137 [Li 1–6] | 134–161(*) [Li 0–2] | 146–179* [Li 0–1] | 163–192* [Li 0–0] | 9.1–19.9 | 3.3–7.1 |
+
+What Table 1 shows [E]:
+
+- **Night, low bands.** Absorption is 0–2 dB at 3.5 MHz and above for paths up to 1 000 km, and 1–17 dB at 1.8 MHz out to 3 000 km. Loss is close to free-space loss plus L_z.
+- **Day, low bands.** At 1 000 km and noon, 3.5 MHz loses 30–68 dB to absorption and 7 MHz loses 15–29 dB. At 3 000 km, 3.5 MHz loses 66–163 dB and is effectively closed.
+- **Solar cycle.** Solar maximum roughly doubles daytime absorption but lifts the path MUF, so the best band moves up and the best-band loss changes little.
+- **Above the MUF.** P.533 adds up to 62 dB, so the predicted residual sits at 185–194 dB for these path lengths.
+- **Pre-dawn MUF minimum.** The 3 000 km path MUF at noon is 17–35 MHz. Before dawn it is 9–20 MHz. The noon-to-pre-dawn ratio is 2.6–3.6 in January and about 1.2–1.3 in July. Monthly-median foF2 falls to 2.6 MHz (R12 = 10) or 3.3 MHz (R12 = 150) in January at about 04–05 local time.
+
+**Long paths.** Table 2 applies the P.533-14 long-path formula (eqs 29–41). f_M and f_L are the method's upper and lower reference frequencies. Values above 250 dB mean the formula is far outside its window and the band is unusable. The last column is the range, over 24 hours, of the loss on the best of the six bands.
+
+**Table 2. Long-path basic transmission loss L_b (dB), from 50°N 10°E, P.533-14 §5.3 [E].**
+
+| Path | Month | R12 | UTC | fM (MHz) | fL (MHz) | 1.8 MHz | 3.5 MHz | 7.0 MHz | 14.0 MHz | 21.0 MHz | 28.0 MHz | best-band Lb over 24 h (min–max) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 10 000 km, N–S | 1 | 10 | 11 | 27.7 | 11.3 | >250 | >250 | 244 | 176 | 177 | 194 | 144–176 |
+| 10 000 km, N–S | 1 | 10 | 23 | 14.8 | 1.8 | 171 | 144 | 144 | 182 | 244 | >250 | 144–176 |
+| 10 000 km, N–S | 1 | 150 | 11 | 37.3 | 17.1 | >250 | >250 | >250 | 206 | 180 | 181 | 141–181 |
+| 10 000 km, N–S | 1 | 150 | 23 | 16.4 | 1.8 | 171 | 143 | 142 | 173 | 225 | >250 | 141–181 |
+| 10 000 km, N–S | 7 | 10 | 11 | 23.2 | 11.6 | >250 | >250 | 242 | 179 | 186 | 210 | 146–179 |
+| 10 000 km, N–S | 7 | 10 | 23 | 10.5 | 1.8 | 171 | 147 | 156 | 225 | >250 | >250 | 146–179 |
+| 10 000 km, N–S | 7 | 150 | 11 | 38.8 | 17.4 | >250 | >250 | >250 | 209 | 181 | 180 | 144–181 |
+| 10 000 km, N–S | 7 | 150 | 23 | 10.7 | 1.8 | 171 | 147 | 155 | 222 | >250 | >250 | 144–181 |
+| 19 500 km, az. 180° | 1 | 10 | 11 | 16.3 | 15.2 | >250 | >250 | 235 | 176 | 186 | 215 | 167–176 |
+| 19 500 km, az. 180° | 1 | 10 | 23 | 15.7 | 7.5 | >250 | >250 | 172 | 169 | 204 | >250 | 167–176 |
+| 19 500 km, az. 180° | 1 | 150 | 11 | 22.0 | 22.9 | >250 | >250 | >250 | 197 | 178 | 185 | 168–179 |
+| 19 500 km, az. 180° | 1 | 150 | 23 | 18.1 | 11.5 | >250 | >250 | 211 | 170 | 186 | 219 | 168–179 |
+| 19 500 km, az. 180° | 7 | 10 | 11 | 8.9 | 13.8 | >250 | >250 | 182 | 175 | 212 | >250 | 136–179 |
+| 19 500 km, az. 180° | 7 | 10 | 23 | 17.4 | 2.5 | 184 | 145 | 136 | 158 | 199 | >250 | 136–179 |
+| 19 500 km, az. 180° | 7 | 150 | 11 | 17.0 | 20.9 | >250 | >250 | >250 | 182 | 178 | 195 | 129–178 |
+| 19 500 km, az. 180° | 7 | 150 | 23 | 32.1 | 3.6 | 238 | 165 | 136 | 137 | 150 | 169 | 129–178 |
+
+What Table 2 shows [E]:
+
+- **Dark 10 000 km path.** 142–147 dB on the better of 3.5 and 7 MHz. Free-space loss for the 10 494 km slant path is 123.8 dB at 3.5 MHz and 129.8 dB at 7 MHz, so the excess is 12–14 dB in January and about 23 dB in July, when f_M falls to about 10.5 MHz.
+- **Sunlit 10 000 km path.** 176–180 dB on the best band (14–28 MHz). Free-space loss is 135.8 dB at 14 MHz and 141.8 dB at 28 MHz, so the excess is about 40 dB. The window between f_L (11–17 MHz) and f_M (23–39 MHz) is narrow.
+- **Near-antipodal path.** The figures include 15 dB of antipodal focusing. Best-band loss ranges from 129 to 179 dB over the day. At some hours f_L exceeds f_M (for example July, R12 = 10, 11 UTC: f_M 8.9, f_L 13.8 MHz), and no band is inside the window; the formula then still returns about 175–178 dB.
+- **Other geometries** (not tabulated): 10 000 km at azimuth 290°, 136–190 dB; 19 500 km at azimuth 60°, 130–180 dB; the 21 700 km long path, 137–185 dB (best band over 24 h).
+- **Limits.** The long-path formula has no above-the-MUF cap and no auroral term. Its 1.8 MHz values are outside the method's range.
+
+**From `c42dea1c`, removed in `5f2cc949` — section 1, MF conversion.**
+
+**MF night skywave.** Table 3 converts P.1147-4 annual-median field strength at six hours after sunset into basic transmission loss at 1.7 MHz. The conversion is L_b = 146.6 − E_0, taking 1 kW radiated from a short vertical as 34.8 dBW e.i.r.p. and the isotropic received power from P.533 eq. 43 [E].
+
+**From `c42dea1c`, removed in `5f2cc949` — section 1, comparison with Table 1.**
+
+At night the two methods agree. The P.533 extrapolation at 1.8 MHz gives 110–114 dB at 1 000 km and 125–136 dB at 3 000 km (Table 1), against 110 and 126 dB here.
+
+**From `c42dea1c`, removed in `5f2cc949` — section 3.**
+
+- *NVIS.* On UK 5.29 MHz links in 2009–2011, VOACAP and ASAPS matched measurements well in September–November and March. They missed in April–August (attributed to sporadic E and possibly deviative absorption) and in December–February (winter anomaly) [P, abstract: Walden 2012].
+
+**From `c42dea1c`, removed in `5f2cc949` — section 3.**
+
+- *Assimilative foF2 nowcasts.* Two real-time models (IRI background, one digisonde and GPS TEC) gave foF2 r.m.s. errors of 0.2 MHz at night and 0.5 MHz by day at the best ground-truth site, about 685 km from the assimilated digisonde, in South Africa in September 2011. The errors were close to the floor set by travelling ionospheric disturbances [P, abstract: McNamara et al. 2013]. IRTAM, which assimilates a global ionosonde network into IRI, improved foF2 against 40 ionosondes in 2000–2019 but showed no gain against COSMIC radio occultation; it helps only near the assimilated stations [P, abstract: Pignalberi et al. 2021]. In May 2024 the IRI UP IONORING nowcast over Italy overestimated foF2 in the storm's main phase (evening of 10–11 May) and agreed well in the recovery phase [P, read: Spogli et al. 2024].
+
+**From `c42dea1c`, removed in `5f2cc949` — section 4.**
+
+- Thirty-six years of Kokubunji ionograms give extreme fade-out durations of 1.8–3.6 h (once in 10 years), 4.0–6.8 h (once in 100) and 7.4–11.9 h (once in 1 000) [P, abstract: Tao et al. 2020].
+
+**From `c42dea1c`, removed in `5f2cc949` — section 4.**
+
+- A fixed 60° cutoff overestimates the affected area 90 % of the time, by 15–25 % on average [P, abstract: Heino & Partamies 2020]. Cutoff latitude lags Kp by about 3 h [P, abstract: Neal et al. 2013].
+
+**From `c42dea1c`, removed in `5f2cc949` — section 5.**
+
+- **Eclipses.** On 21 August 2017, effects lasted ±0.3 h at 1.8 MHz, ±0.75 h at 3.5 and 7 MHz and ±1 h at 14 MHz [P, abstract: Frissell et al. 2018]. On 8 April 2024, a CHU signal at 7.85 MHz rose tenfold at one site [P, abstract: Usis et al. 2026], and the SuperDARN skip distance lagged maximum obscuration by about 45 min, which SAMI3 did not reproduce [P, abstract: Kunduri et al. 2024]. In the annular eclipse of 14 October 2023, 1- and 2-hop ground-scatter skip distances followed the bottomside density, which lagged peak obscuration by about 30 min [P, abstract: Thomas et al. 2024].
+
+**From `c42dea1c`, removed in `5f2cc949` — section 7, Table 5.**
+
+C/N0 = P_t + G_t + G_r − L_b − F_a + 204 dB-Hz. With 4 W (6 dBW) and 0 dBi antennas, C/N0 = 210 − L_b − F_a [E]. Median man-made noise from P.372-18 (F_am = c − d log f) gives F_a for rural / quiet-rural sites of 60 / 46 dB at 1.8 MHz, 52 / 38 at 3.5 MHz, 44 / 29 at 7 MHz, 36 / 21 at 14 MHz and 27 / 12 at 28 MHz; galactic noise (26 dB at 14 MHz, 19 dB at 28 MHz) sets the floor above about 10 MHz [S, read]. Atmospheric noise can exceed these on the low bands at night; chapter 50 covers it.
+
+**Table 5. C/N0 (dB-Hz) for 4 W and 0 dBi antennas, rural man-made noise [E].**
+
+| Case | L_b (dB) at 3.5 / 7 / 14 MHz | C/N0 at 3.5 MHz | C/N0 at 7 MHz | C/N0 at 14 MHz |
+|---|---|---|---|---|
+| Night, 1 000 km, in band | 115 / 121 / — | 43 | 45 | — |
+| Day, 1 000 km, solar minimum | 142–150 / 133–136 / 136–139 | 8 to 16 | 30 to 33 | 36 to 38 |
+| Day, 3 000 km | — / — / 145–156 | — | — | 19 to 30 |
+| Dark 10 000 km (January) | 144 / 144 / — | 14 | 22 | — |
+| Sunlit 10 000 km | — / — / 176–180 | — | — | −6 to −2 |
+| L_b = 180 dB (the GUI's path-loss figure read as a basic loss; see the comparison section) | 180 at any band | −22 | −14 | −6 |
+| P.533 above-MUF floor | 185–194 at any band | −27 to −36 | −19 to −28 | −11 to −20 |
+
+At a quiet-rural site a basic loss of 180 dB gives −8, +1 and +3 dB-Hz at 3.5, 7 and 14 MHz. Subtract 11–19 dB for the combined lower decile (section 2), and up to about 10 dB more for prediction error at one standard deviation.
+
+**From `c42dea1c`, removed in `5f2cc949` — moderate, adverse and worst-case parameter table.**
+
+| Parameter | Moderate | Adverse | Worst case / outage |
+|---|---|---|---|
+| Basic loss, one hop or NVIS, in band (monthly median) | 103–137 dB (night, 1.8–7 MHz); 118–147 dB (day, best band) [E] | 142–180 dB (day, 3.5 MHz, 1 000 km) [E] | over 190 dB (day, 3.5 MHz, 3 000 km); 276 dB or more at 1.8 MHz [E, outside validity] |
+| Basic loss, 10 000 km | 141–150 dB (dark path) [E] | 172–183 dB (sunlit, best band) [E] | over 200 dB off the usable window [E] |
+| Basic loss, near-antipodal | 129–150 dB [E] | 165–179 dB [E] | f_L above f_M: no in-window band [E] |
+| MF night loss at 1.7 MHz | 110 dB (1 000 km, Φ = 40°) [E from S] | 146 dB (3 000 km, Φ = 60°) [E from S] | plus 22 dB at solar maximum and up to 28 dB per terminal polarisation loss [E from S] |
+| MF day minus night | about 33 dB (winter month) [E from S] | 43 dB (annual median) [S] | about 60 dB or more implied in summer [E from S] |
+| D-region absorption, quiet Sun | 0–3 dB (night, 3.5 MHz and above) [E] | 15–29 dB (7 MHz, noon, 1 000 km) [E] | 66–163 dB (3.5 MHz, noon, 3 000 km) [E] |
+| Flare absorption | 1–2 dB vertical, 6–11 dB per low-angle hop at 14 MHz (M-class) [E from T] | 20–40 dB at 6.4 MHz (X1.3) [P] | total fade-out 15–150 min; hours in extremes [P] |
+| Polar-cap absorption (high-latitude paths) | none | tens of dB (integral flux 1 000, night, one low-angle hop at 10 MHz) [E from T] | over 100 dB for one to four days [B] |
+| Auroral loss (median allowance) | 0 dB below 42.5° [S] | 0.3–7.5 dB at 52.5–62.5° [S] | 16–21 dB median at 62.5–72.5°; decile 30–42 dB [S] |
+| Day-to-day signal, lower decile | 8 dB [S] | 12–13 dB near the MUF [S] | 16–17 dB at 60° or above [S] |
+| Within-hour fading, lower decile | 8 dB [S] | 8 dB | 8 dB (plus mode-specific fading) |
+| Monthly-median prediction error, 1σ | 7–8 dB (under 2 000 km) [S] | 10.5 dB overall [S] | 13.6–14.5 dB (3 000–3 999 and 5 000–6 999 km); 16.0 dB (over 60°) [S] |
+| foF2/MUF daily factor | 0.70–0.90 lower decile at 40–50° latitude [S] | 0.60–0.70 [S] | −70 % for two days (May 2024); F2 absent at high latitude [P] |
+| Noon to pre-dawn MUF ratio | 1.2–1.3 (summer) [E] | 2.6 (winter, solar minimum) [E] | 3.6 (winter, solar maximum) [E] |
+| Above-MUF excess loss | 0–23 dB to f/f_b = 1.4 (P.533 formula) [E from S] | 53 dB (Suessmann) [S] | 62 dB cap (P.533); 80 dB (Gibson–Bradley) [S] |
+| C/N0, 4 W, 0 dBi, rural noise | 30–45 dB-Hz [E] | −6 to +16 dB-Hz [E] | below −20 dB-Hz, or no signal [E] |
+| Outage duration | none | 1–2 h (flare); 5–9 h (storm depression) [P] | days (PCA, superstorm); weeks of suppressed bands [P, B] |
+
+**From `c42dea1c`, removed in `5f2cc949` — comparison with the modem's presets.**
+
+| Preset or convention | Setting | What this chapter establishes |
+|---|---|---|
+| HF best, moderate, worst (0.1 Hz/0.5 ms; 10 Hz/6 ms; 30 Hz/7 ms) | constant level | The level is not constant: within-hour lower decile 8 dB, day-to-day lower decile 8–17 dB, monthly-median prediction error 7–16 dB at 1σ (sections 2–3). Absorption at 7 MHz on 1 000 km rises from 0–2 dB at night to 15–29 dB at noon (Table 1). Fadeouts, storms and proton events come on top (section 4). |
+| Aurora best and worst (10 Hz/3 ms; 55 Hz/11 ms) | constant level | At these latitudes the chapter's largest level penalties apply: a median auroral allowance peaking at 16–21 dB at 62.5–72.5° geomagnetic, upper-decile loss deviations up to 42 dB at 60–65°, a 16 dB prediction error above 60°, polar-cap absorption of tens to over 100 dB lasting hours to four days, and ICEPAC errors up to about 200 dB on a disturbed auroral path. |
+| One attenuation interval with cosine ramps | one event | Can stand for one fadeout (onset in about 100 s, complete loss for about 20 min, recovery over about 30 min; total fade-out 15–150 min) or one MF terminator transition (19–26 dB in two hours). It cannot represent the diurnal absorption cycle, event recurrence (about 123 moderate fadeouts per cycle) or multi-day events (polar-cap absorption; two days of 70 % foF2 depression in May 2024). |
+| Noise −164 dBm/Hz (F_a = 10 dB) | white, fixed | Below every HF noise level of section 7: F_a of 12–60 dB (quiet rural at 28 MHz to rural at 1.8 MHz) and galactic noise of 19–26 dB at 14–28 MHz. |
+| 180 dB at −164 dBm/Hz, 4 W, 30 MHz (manual rows 4–7) | 20 dB-Hz | L_b + F_a ≈ 193.5 dB. With galactic noise near 30 MHz (F_a ≈ 18 dB) that is L_b ≈ 175 dB, about a 28 MHz, 1 000 km path at noon at solar minimum, slightly above its MUF (171–181 dB). A 3 000 km daytime path at solar maximum (143–158 dB) is 17–32 dB easier; a sunlit 10 000 km path at R12 = 150 (180–181 dB) about 5 dB harder; the P.533 above-the-MUF residual (185–194 dB) 10–19 dB harder. At a rural site (F_a ≈ 27 dB) each is about 8 dB harder [E]. |
+| The same figure at lower HF, rural site | 20 dB-Hz | L_b ≈ 141 dB at 3.5 MHz, 150 dB at 7 MHz and 158 dB at 14 MHz. That is a daytime 1 000 km path on 3.5 MHz at solar minimum (142–150 dB, 1–9 dB harder), a daytime 1 000 km path on 7 MHz at solar maximum (142–147 dB, 3–8 dB easier), or a daytime 3 000 km path on 14 MHz (145–156 dB, 2–13 dB easier). Night in-band paths (103–137 dB) are much easier in basic loss, but night-time atmospheric noise raises F_a (chapter 50) [E]. |
+| 180 dB at −164 dBm/Hz near 1 MHz (manual rows 2–3 are at 500 kHz) | 20 dB-Hz | With F_a of the order of 80 dB at night near 1 MHz (00 section 3.1), L_b ≈ 113 dB. Night skywave at 1.7 MHz has L_b of 90–113 dB out to 1 000 km at Φ ≤ 50° (Table 3), and about 11 dB less at 500 kHz, since the P.1147 field hardly depends on frequency within MF. A night skywave path can therefore reach that level; at midday it is about 43 dB weaker [E from S]. |
+
+**From `c42dea1c`, removed in `5f2cc949` — contradictions, open questions and things not found.**
+
+1. *P.533-14 text against its reference code.* Printed eq. 20, unchanged since P.533-13 (07/2015), sums the absorption term over all m penetration points, two per hop, with no hop factor or normalisation [S, read]. P.533-12 (09/2013) instead multiplied by the hop count n and averaged over k control points [S, read]. The public reference code (P533 version string 14.2, repository state of May 2025) keeps that normalisation on penetration points: it averages the per-point terms over the 2n points, multiplies by n, and takes f_L from the control points rather than at each penetration point [G, read]. Where the per-point terms are equal, the printed form therefore gives twice the code's absorption. Neither text says which form is intended. Because L_z is fitted against D1 with an implementation of the method, the printed form should not be combined with the published L_z unless it was the form used in that fit, which neither source documents [E]. The code's constants were changed on 3 June 2020 from the printed L_z = 8.72 dB and L_y = −0.14 dB to 9.14 dB and −0.17 dB; P.533-12 had 10.3 and −0.9 dB [S, G, read: commit history]. Its above-the-MUF laws also differ from the text: for F2 modes, 36(f/f_b − 1)^½ + 5 dB capped at 60 dB up to 3 000 km and 70(f/f_b − 1) + 8 dB capped at 80 dB beyond; for E modes, 46(f/f_b − 1)^½ + 5 dB capped at 58 dB, against the printed 130(f/f_b − 1)² capped at 81 dB [G, read].
+2. *Above-MUF loss.* 23 dB (P.533 text), 28 dB (reference code), 53 dB (Suessmann) and 80 dB (Gibson–Bradley) for the same case, and 6 dB if Hunt's fit is read as printed in Report P.2011-1.
+3. *Frequency exponent of absorption.* 2 in magnetoionic theory and P.533; 1.5 in D-RAP; 1.6 observed by Berngardt et al. (2019).
+4. *D-RAP bias.* Too little flare absorption (Levine, Siskind, Chakraborty). For proton events, occasional overestimates of peak absorption by more than a factor of two at high-latitude stations in the American sector, and systematic underestimates in the European sector (Akmaev). D-RAP also adds proton absorption that is compared with one-way riometer data to X-ray absorption defined for a two-way vertical path [E].
+5. *Antipodal focusing cap.* 15 dB (P.533-14) against 30 dB (CCIR 1980).
+6. *MF night absorption and the solar cycle.* Ray-tracing in the amateur literature finds it constant; ITU-R measurements show a reduction growing with latitude, and the CCIR night formula carries a factor (1 + 0.015 R12).
+7. *160 m beyond 10 000 km.* About 131 dB (duct estimate), 142 dB (P.1147 at low latitude), 171 dB (P.533 long-path formula at its night floor) and 200–218 dB (multi-hop ray tracing): a spread of some 60–90 dB.
+8. *Daytime below 2 MHz.* The P.533 absorption law extrapolated to 1.8 MHz gives 173–272 dB at 1 000 km. P.1147's 43 dB day–night difference implies about 153 dB. The secant-law extrapolation should not be used there.
+9. *Variability treatments.* P.842 (by f/MUF), the CCIR tables (by season, time and latitude) and the IONCAP tables (1965 data) are three different descriptions of the same spread.
+10. *Sunspot-number version.* P.1239 maps need version-1 numbers; modern lists are version 2.
+
+**Not found or not obtained.**
+
+- Full texts of Rishbeth & Mendillo (2001), Sauer & Wilkinson (2008), Fiori et al. (2022), Rogers & Honary (2015), Pederick & Cervera (2014), Zawdie et al. (2017), Levine et al. (2019), Witvliet & Alsina-Pagès (2017), Vanhamel et al. (2022) and Tao et al. (2020). Publisher sites refused automated access or no open copy was found; abstracts or records were used and are marked.
+- The books by Davies (1990), McNamara (1991), Goodman (1992) and Hunsucker & Hargreaves (2003). No number here is attributed to them directly.
+- The threshold table of Fiori et al. (2022) itself. The thresholds are the ICAO ones (their abstract), and the values were read in NWS Instruction 10-1102.
+- Any peer-reviewed validation of VOACAP or P.533 signal levels against WSPR, Reverse Beacon Network or PSKReporter data. A further bounded search in 2026 found only informal comparisons (web logs, workshop slides), which were not read. Chartier et al. (2023) remains the nearest.
+- Signal-level results from the October 2023 annular eclipse; only skip-distance results were found (Thomas et al. 2024).
+- Peer-reviewed HF-absorption analyses of the October 2024 and 2025 X-class flares. The X9.0 flare of 3 October 2024 is confirmed by NOAA SWPC.
+- Solar-cycle-25 statistics of fadeouts and polar-cap absorption.
+- A primary source for IONCAP's absorption expression, which is therefore not given. George & Bradley (1974) and the IONCAP theory were reached only through the CCIR Supplement, Lane (2005) and Dandekar (1985). DTIC reports were not reachable.
+- Measured statistics of 1.8–2.0 MHz loss beyond 10 000 km. The 131–218 dB bracket of contradiction 7 rests on model estimates and one anecdotal reception; nothing better was found.
+- Outputs of the ITU reference software for Table 1's paths. The software was not run; the only reference output compared, the repository's sample report, lies outside Table 1's geometry.
+- Occurrence statistics for sporadic-E blanketing of HF circuits and for scatter modes.
+
+**Open questions.**
+
+- How correlated are day-to-day level deviations from one day to the next, and across bands?
+- What is the real distribution of loss above the MUF for a receiver that can use signals 60 dB down?
+- How often do 160 m ducted openings occur, and for how long?
+
+**Current follow-up disposition (13 November 2026).** The May 2024 Asian-sector paper is now inspected as a full paper, not an abstract-only report: it is event-specific ionogram/MOF evidence, with about 25,000 processed ionograms, 5-minute oblique sounding, and selected vertical/NVIS sequences at 1 minute or faster. It does not release IQ or a calibrated received-link outage denominator. The available article figures make digitization of event-specific route/mode presence possible; waveform replay and modem outage-probability estimation are not supported. A new 2026 Ottawa–Alert study reports narrowband Barker-burst receive parameters for decoded transmissions and shows why nearby vertical riometer absorption is an imperfect oblique-path attenuation proxy. Its measurement cadence, geometric displacement and decode conditioning must be retained; it is not a coherent HF channel sounding source.
+
+The follow-up used the exact topic searches `Ponomarchuk May 10-13 2024 continuous chirp HF oblique sounding May storm Novosibirsk Irkutsk data availability`, `"continuous chirp" "May 2024" ionosphere Magadan Novosibirsk oblique sounding`, `"10.7910/DVN/RGDNR1"`, and `"The Reliability of HF Propagation Links Over Canada During Absorption Events"`. Primary routes included the full Ponomarchuk PDF, publisher article records, and the Harvard Dataverse public dataset API. API metadata for QAN–ALE reports a released 2024-01-09 version 1, one unrestricted ZIP (221,380,570 bytes), and CC0 1.0. The archive was downloaded to temporary storage, its MD5 matched the API checksum, ZIP CRC validation passed, and its inventory contained 5,588 MATLAB 5.0 files only. Six sampled MAT headers/scalar and vector fields contain derived reception observables (including SNR, signal power, TOF, Doppler and spreads, and arrival angles), not I/Q arrays. The metadata's filename template (`ddAle_Ott_...`) differs from the actual archive names (`ddAle_Qan_...`); actual file dates span 2012-07-06–2016-09-10. The per-detection sample does not contain pulse-by-pulse no-reception rows, and file presence/absence alone is not a calibrated attempt denominator. The paper-declared dataset also includes below-zero-SNR and 18.4-MHz records; sample calibration/units, whole-corpus field consistency, event holdouts, and complete attempt/operational masks have not been verified. The Dataverse HTML page's robot-verification response was an earlier access-route limitation; the public API and file download now succeeded. The open full text of Gillies et al. 2026 was also inspected (§§2–4); its assumed scheduled-pulse denominator and remote-riometer-conditioned additional-loss results are described above. This is a scoped retrieval and sample inspection, not exhaustive corpus validation or a systematic literature review.

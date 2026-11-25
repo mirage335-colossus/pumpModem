@@ -517,7 +517,7 @@ Access: "read" = supporting passage read in full text; "abstract" = abstract or 
 - [L2016] M. A. Lombardi, "Evaluating the Frequency and Time Uncertainty of GPS Disciplined Oscillators and Clocks", *NCSLI Measure J. Meas. Sci.* 11(3–4), 30–44, 2016, doi:10.1080/19315775.2017.1316696. https://tf.nist.gov/general/pdf/2871.pdf — read [P].
 - [NL2015] A. N. Novick, M. A. Lombardi, "Practical Limitations of NTP Time Transfer", Proc. 2015 Joint IFCS–EFTF, 570–574, doi:10.1109/FCS.2015.7138909. https://tf.nist.gov/general/pdf/2776.pdf — read [P].
 - [RV2023] E. Rubiola, F. Vernotte, "The Companion of Enrico's Chart for Phase Noise and Two-Sample Variances", *IEEE Trans. Microw. Theory Techn.* 71(7), 2996–3025, 2023, doi:10.1109/TMTT.2023.3238267. https://arxiv.org/abs/2201.07109 — read (arXiv version) [P].
-- [K1995] N. J. Kasdin, "Discrete simulation of colored noise and stochastic processes and 1/f^α power law noise generation", *Proc. IEEE* 83(5), 802–827, 1995, doi:10.1109/5.381848 — primary paper §§III-E/F and V read [P]: https://umbc.edu/photonics/Menyuk/Phase-Noise/kasdin_ProcIEEE_950501n.pdf; the specific recursion quoted through [PINK] retains that secondary attribution.
+- [K1995] N. J. Kasdin, "Discrete simulation of colored noise and stochastic processes and 1/f^α power law noise generation", *Proc. IEEE* 83(5), 802–827, 1995, doi:10.1109/5.381848 — primary paper §§III-E/F and V read [P]: https://umbc.edu/photonics/Menyuk/Phase-Noise/kasdin_ProcIEEE_950501n.pdf (the earlier abstract route, the Princeton record https://collaborate.princeton.edu/en/publications/discrete-simulation-of-colored-noise-and-stochastic-processes-and/, was restored 25 November 2026 after removal in commit `5f2cc949`); the specific recursion quoted through [PINK] retains that secondary attribution.
 - [KW1992] N. J. Kasdin, T. Walter, "Discrete simulation of power law noise", Proc. 1992 IEEE Frequency Control Symp., 274–283, doi:10.1109/FREQ.1992.270003 — record; cited by [SP1065] [P].
 - [BA1966] J. A. Barnes, D. W. Allan, "A statistical model of flicker noise", *Proc. IEEE* 54(2), 176–178, 1966, doi:10.1109/PROC.1966.4630 — record; cited by [SP1065] [P].
 - [C2010] M. B. Cohen, U. S. Inan, E. W. Paschal, "Sensitive Broadband ELF/VLF Radio Reception With the AWESOME Instrument", *IEEE Trans. Geosci. Remote Sens.* 48(1), 3–17, 2010, doi:10.1109/TGRS.2009.2028334 — abstract; specifications secondary via [SBM2020]; full text not obtained (an open repository copy refused automated access) [P].
@@ -593,3 +593,21 @@ Access: "read" = supporting passage read in full text; "abstract" = abstract or 
 - [RAPP1991] C. Rapp, “Effects of HPA-Nonlinearity on a 4-DPSK/OFDM-Signal for a Digital Sound Broadcasting System,” ESA SP-332, pp. 179–184, 1991. https://mediapool.hm.edu/media/fk04/fk04_lokal/professoren_4/rapp/ecsc91.pdf — original paper, §3 and model/application assumptions read; bibliographic identity also confirmed by DLR https://elib.dlr.de/33776/.
 - [KUHNE-G4] Kuhne electronic, *MKU 57 G4, 6 cm Transverter*, two-page manufacturer specification, no revision/date printed in retrieved sheet: https://shop.kuhne-electronic.com/kuhne/en/shop/konverter-transverte/transverter/MKU%2B57%2BG4%2B6%2Bcm%2BTransverter/?action=shop_show_pdf_card&action_id=1857&category_line_no=280000 — read 13 November 2026; typical specifications, not independent measurements.
 - [KUHNE-G3] Kuhne/DB6NT, *MKU 57 G3 Handbuch*, official designer archive: https://db6nt.de/wp-content/uploads/2024/12/MKU_57_G3_Handbuch.pdf — specification and block diagram inspected; document model is G3, not G4; archive path date is not a hardware revision date.
+
+## Superseded values from earlier versions
+
+Restored 25 November 2026. Later versions of this chapter corrected, recomputed,
+withdrew or reworded the values in these passages, and no current file in the
+repository stated them. Each passage is reproduced verbatim from the version
+named, with the commit that removed it. An ellipsis marks text left out around a
+quoted sentence or clause. The current chapter governs; these passages record
+earlier results and how they changed, under the
+[research-material rule](../../../docs/development.md#research-material).
+
+**From `1fdf641a`, removed in `c42dea1c` — unobtained sources.**
+
+… any frequency-accuracy or Doppler-residual measurement made at 5.76 GHz itself (values in table F are from 1.3–24 GHz or are manufacturer statements) …
+
+**From `c42dea1c`, removed in `5f2cc949`.**
+
+- Research-grade reference: AWESOME digitises 16-bit at 100 kS/s with GPS time "precise to 100 nanoseconds" ([SBM2020], secondary for [C2010]); the LF AWESOME upgrade covers 0.5–470 kHz with sensitivity "as low as 0.03 fT/√Hz" and timing error of 15–20 ns ([C2018] abstract, [P]); a site description of an AWESOME receiver quotes "absolute timing accuracy of 15-20 ns and 96 dB of dynamic range", citing [C2018] ([T2026] §2). [C2010]'s abstract lists sensitivity, frequency and phase response, timing accuracy and cross-modulation as characterised; its full text was not obtained (the open repository copy refused automated access), so the 2010 timing figure is known only through [SBM2020].

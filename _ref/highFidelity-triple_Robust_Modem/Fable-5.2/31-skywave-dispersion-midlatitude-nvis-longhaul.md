@@ -537,3 +537,19 @@ Access: **read** = supporting passage read in full text; **abstract** = abstract
 - [FST2020] Franke, S., Somerville, B., & Taylor, J. (2020). The FT4 and FT8 communication protocols. *QEX*, July/August 2020, pp. 7 ff. https://wsjt.sourceforge.io/FT4_FT8_QEX.pdf — read; [G].
 - [WSJTX] *WSJT-X 2.6.1 User Guide*. https://wsjt.sourceforge.io/wsjtx-doc/wsjtx-main-2.6.1.html — read (FST4 section); [G].
 - Lombardi, M. (2022). Allan deviation analysis of WWV Doppler shift measurements recorded with the HamSCI Grape 1 receiver. HamSCI Workshop. https://hamsci.org/publications/2022/allan-deviation-analysis-of-wwv-doppler-shift-measurements-recorded-with-the — abstract; mainly ground-wave data, no skywave values extracted; [G].
+
+## Superseded values from earlier versions
+
+Restored 25 November 2026. Later versions of this chapter corrected, recomputed,
+withdrew or reworded the values in these passages, and no current file in the
+repository stated them. Each passage is reproduced verbatim from the version
+named, with the commit that removed it. An ellipsis marks text left out around a
+quoted sentence or clause. The current chapter governs; these passages record
+earlier results and how they changed, under the
+[research-material rule](../../../docs/development.md#research-material).
+
+**From `07bcbc5d`, removed in `1fdf641a`.**
+
+| Source | Path, frequency | Result | Grade, access |
+|---|---|---|---|
+| Male2021 §4, Figs 11–12 | 97 km, Barcelona–Cambrils, 5.4 MHz, 07–16 UTC | Mean delay spread 0.33 ms (O) and 0.31 ms (X); maxima 2.71 ms (O) and 2.89 ms (X); both waves "often presented no multipath at all" | P; read (estimator not stated explicitly) |
