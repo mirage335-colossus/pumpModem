@@ -173,7 +173,8 @@ Both transmitter and receiver must be designed to maximize computational ceiling
   - Shift
   - Doppler
 
-  - Tone bandwidth and symbol rate (eg. 6.25Hz)
+  - Tone bandwidth (eg. 6.25Hz)
+  - Tone symbol rate (eg. 6.25Hz)
 
   - Total bandwidth (2.2kHz)
 
@@ -214,6 +215,5 @@ For now, please especially work on research - this is a complex problem which mu
 
 Please do not edit any repository files, etc, outside the directories _ref , _appraisal .
 
-[Current Matrix Modem research and evidence](../_ref/algorithms-matrixModem/Sol-6.2/README.md) · [Continuing the FSK waveform research](../_ref/algorithms-matrixModem/Sol-6.2/waveform-options.md#continuing-the-waveform-research) · [Fading coherence limit and MFSK alternatives](../_ref/algorithms-matrixModem/Sol-6.2/fading-limit-and-mfsk-alternatives.md)
 
 
