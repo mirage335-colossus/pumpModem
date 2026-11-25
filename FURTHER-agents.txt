@@ -67,9 +67,36 @@ The limits on RunPod hours and budget are somewhat relaxed for this work. Althou
 Reduce low rate transmit time.
 =======================================
 
-The 0.1Hz rate sure takes impractically forever to transmit, regardless of target SNR, etc.
+The 0.1Hz rate for triple Robust Modem sure takes impractically forever to transmit, regardless of target SNR, etc.
 
 Can this be shortened while nevertheless communicating through deleterious conditions sufficiently long fragments of evidence to establish confidence in the uniquely correct bit pattern?
+
+
+
+
+
+
+
+Revive single Robust Modem.
+=======================================
+At least for specular or otherwise not severe doppler/delay spread, etc, non-deleterious (eg. ionospheric) conditions, the earlier single carrier Robust Modem implementation may at least be mature, with testing, simulation, and a Link planner, capable of extreme sensitivity.
+
+There may have been some improvements which would be relevant to such a single carrier system, such as frequency estimates from the two pilot tone Helper Carrier system as an alternative to or accuracy improvement for GPS DO.
+
+Please identify the git commit in the repository history at which this earlier implementation of Robust Modem was in the best state.
+
+Please comprehensively review code changes, algorithm improvements, abbreviated testing methods, which have been implemented since, including as triple Robust Modem functionality.
+
+
+Please do not revive the performance regression tests, calibration tests, etc, as is, of the earlier Single Robust Modem implementation. The effect on development cycle time, maintenance, etc, was absolutely prohibitive.
+
+
+Please do not revive unnecessary code, which, given the improvements demonstrated since, could be implemented more simply.
+
+
+Please rename the triple Robust Modem dropdown, add a single Robust Modem dropdown, and revive the single Robust Modem with the original Link planner, etc.
+
+
 
 
 
