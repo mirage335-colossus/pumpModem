@@ -14,6 +14,8 @@ The [receiver bottleneck review](tensor-receiver-bottlenecks.md) measures score 
 
 The [one-carrier literature check](mfsk-tensor-core-literature.md) examines measured GPU MFSK receivers, single-chirp encoder and receiver co-design, and the evidence for Tensor Core execution in each.
 
+The [weak-signal MFSK comparison](weak-signal-mfsk-alternatives.md) examines which alternatives improved reception in direct field and simulation comparisons, with separate evidence for sensitivity and receiver computation.
+
 ## Findings that affect the first experiment
 
 | Question | Evidence and design consequence |
