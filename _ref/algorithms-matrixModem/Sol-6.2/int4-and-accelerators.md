@@ -10,19 +10,16 @@ evidence.
 
 ## Main finding
 
-NVIDIA lists the Ada and Blackwell targets as supporting signed or unsigned
-four-bit integer Tensor Core input operands. Its documented warp-level
-`mma.sync` operation takes packed s4/u4 operands and accumulates into s32. This
-is a promising native matrix multiply route on the RTX 4090, RTX 4090 Laptop,
-RTX 4060 Ti, RTX 5090, and RTX PRO 6000 Blackwell. It does **not** implement an
-all-INT4 multiply-accumulate. A dot product with a useful dynamic range needs a
-wider accumulator, and the documented integer accumulator is 32-bit. Blackwell
-SM100-class targets add the newer `tcgen05.mma` programming model, with `i8`
-as its documented integer kind and a separate FP4 path. The RTX 5090 and RTX PRO
-6000 Workstation are SM120-class targets. They use register-based MMA families
-and lack the `tcgen05`/TMEM path. Their documented INT4 input route therefore
-requires a separate real compiler and profiler qualification. [NVIDIA's
-Blackwell pipeline target list](https://docs.nvidia.com/cuda/cublasdx/performance_guide_api_blackwell.html).
+NVIDIA's current Tensor Core input table lists INT4 on Ada and leaves the INT4
+column blank for the Blackwell capabilities. The PTX warp-level `mma.sync`
+syntax includes packed s4/u4 operands with s32 accumulation. Treat this as a
+documented Ada operand route and verify any Blackwell lowering and actual
+execution separately. The instruction's signed 32-bit accumulator changes an
+all-INT4 arithmetic contract. SM100-class Blackwell also offers `tcgen05.mma`,
+whose documented integer kind is `i8`, alongside a separate FP4 path. RTX 5090
+and RTX PRO 6000 Blackwell Workstation are SM120-class targets with documented
+register-based matrix paths. [CUDA input capability table](https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/compute-capabilities.html),
+[NVIDIA's Blackwell pipeline target list](https://docs.nvidia.com/cuda/cublasdx/performance_guide_api_blackwell.html).
 
 Consequently, two requirements have to be made precise before implementation.
 “INT4” can mean that post-downconversion samples and template coefficients are
@@ -39,13 +36,12 @@ Tensor Core speed advantage.
 ## What the accelerator documentation establishes
 
 NVIDIA's CUDA Programming Guide lists Tensor Core input formats by compute
-capability. INT4 is listed for 8.9, 10.0, 10.3, and 12.x. These correspond to
-the requested Ada GeForce GPUs and the requested Blackwell GeForce and RTX PRO
-GPUs. The table is a supported-input-format table, not a promise that a
-particular library call, shape, accumulator, or kernel uses the Tensor Core
-path. CUDA's guide recommends CUDA-X libraries or CUTLASS for Tensor Core
-programming. It also allows inline PTX, which is the documented low-level path
-if a needed operation is missing from the higher-level libraries.
+capability. In the current HTML table, INT4 is listed for 8.9 and earlier
+supported capabilities. The 10.x and 12.x rows list FP4 and INT8 and have an
+empty INT4 cell. Packed storage, successful compilation, emitted instructions,
+native operand execution and dynamic activity are separate checks. Read the
+actual cells rather than relying on the number of extracted “Yes” entries.
+[Current CUDA table](https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/compute-capabilities.html).
 
 The PTX ISA specifies integer `mma.sync` shapes including `m8n8k32`,
 `m16n8k32`, and `m16n8k64` with s4/u4 operands and s32 accumulator/output. Packed
@@ -59,20 +55,21 @@ Blackwell `tcgen05.mma` moves matrix data through shared memory or tensor memory
 and issues an asynchronous matrix operation. PTX 9.5 documents integer
 `tcgen05` as `kind::i8`. The Blackwell CUTLASS guide lists legacy integer types
 for `tcgen05` as int8/uint8 and lists separate low-precision floating formats,
-including FP4. PTX's `mma.sync` section continues to define four-bit integer
-operands. Thus the portable documented proposition is “Blackwell supports
-Tensor Core INT4 input arithmetic,” not “Blackwell INT4 uses `tcgen05`.” The
-RTX 5090 and workstation PRO 6000 share compute capability 12.0, while
-workstation/server Blackwell compute-capability variants and the rest of the
-Blackwell product family must not be conflated.
+including FP4. PTX's `mma.sync` section still defines four-bit integer operands
+and minimum SM targets. Its older form does not establish native Blackwell
+INT4 throughput. Qualify the final instructions and executed operand format on
+the exact device before treating it as a candidate. The RTX 5090 and workstation
+PRO 6000 share compute capability 12.0. Published results on SM100 or another
+Blackwell variant apply only when the instruction path and other prerequisites
+match. [PTX ISA](https://docs.nvidia.com/cuda/parallel-thread-execution/index.html).
 
 | GPU target | Vendor architecture evidence | Four-bit matrix implication | Limits to retain |
 | --- | --- | --- | --- |
 | RTX 4090 desktop | Ada, CC 8.9, fourth-generation Tensor Cores | Documented packed INT4 Tensor Core inputs; legacy warp-level MMA is an obvious supported route | 24 GB GDDR6X and desktop clocks/power are specific to this SKU |
 | RTX 4090 Laptop | Ada family, generally CC 8.9 | Same instruction family where the exact SKU reports CC 8.9 | “RTX 4090 Laptop” is a family across OEM power configurations; do not transfer desktop timing or throughput |
 | RTX 4060 Ti 16 GB | Ada, CC 8.9, fourth-generation Tensor Cores | Same supported INT4 instruction class as the 4090 | Preserve the 16 GB variant; its smaller compute and memory subsystem matter for batching |
-| RTX 5090 | Blackwell, CC 12.0, fifth-generation Tensor Cores | Guide lists INT4 inputs on CC 12.x. Qualify register-based INT4 `mma.sync` on SM120 | Published 3352 AI TOPS does not identify the INT4 rate |
-| Full RTX PRO 6000 Blackwell Workstation Edition | Blackwell, CC 12.0, fifth-generation Tensor Cores | Same SM120 format support. Qualify the compiled INT4 path on this device separately | Verify workstation edition and full 96 GB device allocation. Its 4000 AI TOPS claim is effective FP4 with sparsity |
+| RTX 5090 | Blackwell, CC 12.0, fifth-generation Tensor Cores | Documented SM120 FP4 path. Native signed INT4 requires separate evidence | Published 3352 AI TOPS does not identify the INT4 rate |
+| Full RTX PRO 6000 Blackwell Workstation Edition | Blackwell, CC 12.0, fifth-generation Tensor Cores | Documented SM120 FP4 path. Native signed INT4 requires separate evidence | Verify workstation edition and full 96 GB device allocation. Its 4000 AI TOPS claim is effective FP4 with sparsity |
 | Ryzen 5 PRO 5650U Radeon Graphics | AMD lists the 5650U CPU, while the integrated GPU is a Vega-generation device commonly identified as Vega 7 | No NVIDIA Tensor Core or RDNA3 WMMA path. Use a separately qualified CPU/vector route or a native shader route that does not claim matrix-core execution | Product name “Radeon Graphics” alone does not identify the exact accessible GPU, memory share, or driver path |
 | Core i9-13900H Iris Xe / UHD-class graphics | Intel Xe-LP generation architecture for the Iris Xe Graphics iGPU class | Intel's Xe-LP architecture table reports no FP16 DPAS matrix throughput. It does not provide XMX matrix engines, which arrive in later discrete Arc architectures | Determine the actual integrated device and driver. 13900H includes Iris Xe graphics, but “similar era UHD” can denote multiple configurations |
 | Newer integrated GPUs | Families vary substantially | Some later iGPUs have dedicated matrix paths; others rely on vector ALUs or expose cooperative-matrix APIs over different hardware | Gate by queried device features and compiled instruction route, not by a generic “new iGPU” label |
@@ -91,22 +88,19 @@ to assign an integer format or arithmetic path.
 
 `int4_t` in CUTLASS is a packed signed four-bit storage and operand type. It
 does not require a four-bit accumulator. The CUTLASS Blackwell GEMM guide
-describes the `tcgen05` integer route as 8-bit; the general CUDA compute guide
-continues to list INT4 as a supported Tensor Core input type on CC 12.0.
-These statements are consistent if a Blackwell library uses a different
-instruction family for INT4. The final generated machine code, the exact CUTLASS
-kernel family, its architecture guard, and an instruction/activity counter are
-the evidence needed to say which path ran. A type name in C++ is not enough.
+describes the `tcgen05` integer route as 8-bit. The CUDA capability table leaves
+CC 12.x INT4 blank. The final generated machine code, the exact CUTLASS kernel
+family and its architecture guard help identify a candidate path. Dynamic data
+type and activity evidence identify the hardware work that ran.
 
 For Ada, the documented warp-level INT4 MMA instruction is directly relevant.
-The same general instruction is available in the PTX ISA targeting later
-architectures, but the newest architecture can favor different instruction
-families and scheduling. No academic or vendor material reviewed here
+The same general PTX syntax can have different lowering and support across
+device and toolkit targets. No academic or vendor material reviewed here
 demonstrates that a particular Matrix Modem shape on these exact GPUs will
-reach near-peak operation throughput. PTX establishes semantics and target
-availability. CUTLASS establishes a reusable C++ kernel framework. Neither
-guarantees efficient tiling for the eventual receiver's small and irregular
-matrices.
+reach near-peak operation throughput. PTX establishes the documented abstract
+semantics and target notes. CUTLASS provides a reusable C++ kernel framework.
+Efficient tiling of the receiver's small and irregular matrices requires
+separate measurements. [Tensor execution evidence](tensor-execution-evidence.md).
 
 The four-bit floating-point formats do not satisfy an integer-modem contract.
 Blackwell NVFP4 uses an E2M1 FP4 codebook and scaling, while signed integer
@@ -223,8 +217,9 @@ These are hypotheses to test, not evidence that GPU batching will be faster.
    `mma.sync` operations with AND/XOR and population count. This is an exact
    arithmetic decomposition only if all cross-plane counts, weights, signs,
    and accumulation are preserved. Up to sixteen MMA calls plus reductions
-   make it an alternative for devices or APIs lacking packed INT4, not the
-   first choice on Ada/Blackwell.
+   make it an alternative for devices or APIs lacking packed INT4. Prefer the
+   documented packed-operand route as the initial Ada comparison. Compare
+   lowering and throughput on the exact Blackwell device.
 3. **Packed vector arithmetic.** CPU SIMD or shader integer operations can
    extract nibbles, sign-extend, multiply, and accumulate many values per
    machine word. This may be a useful cross-vendor baseline. It does not create

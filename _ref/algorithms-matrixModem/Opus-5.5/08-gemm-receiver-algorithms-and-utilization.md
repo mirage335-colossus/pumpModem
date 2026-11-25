@@ -222,7 +222,7 @@ analysis; the [CPU allocation contract](../../../docs/development.md#receiver-cp
 sets the default worker budget to twice the logical hardware threads; and the
 [GPU precision guide](../../../docs/gpu-precision-controls.md) requires explicit
 fallback reporting. A Matrix implementation would live under
-`_appraisal/algorithms_matrixModem/` as a standalone native library and must
+`_appraisal/algorithms-matrixModem/` as a standalone native library and must
 not modify Fast, Robust or Legacy code.
 
 ## Sources

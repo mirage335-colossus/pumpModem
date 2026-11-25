@@ -2,7 +2,7 @@
 
 Scope: source-backed facts about INT4/INT8/FP4/FP8/FP16/binary matrix arithmetic on the
 project's receiver targets and development GPUs, written to verify and extend
-`_ref/algorithms_matrixModem/Sol-6.2/int4-and-accelerators.md`. No hardware was run and no
+`_ref/algorithms-matrixModem/Sol-6.2/int4-and-accelerators.md`. No hardware was run and no
 kernel was compiled in this session (no CUDA/ROCm toolchain on this host). Every number is
 marked as **official** (vendor document), **measured** (paper/community microbenchmark),
 **derived** (official per-unit rate × units × clock, computed here) or **unverified**.

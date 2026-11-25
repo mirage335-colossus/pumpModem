@@ -102,7 +102,7 @@ Supporting material:
   Several reviews exhausted their search budgets; their gap lists say what was
   not found.
 - Calculation programs and outputs:
-  [`_appraisal/algorithms_matrixModem/Opus-5.5/calc`](../../../_appraisal/algorithms_matrixModem/Opus-5.5/calc/README.md).
+  [`_appraisal/algorithms-matrixModem/calc`](../../../_appraisal/algorithms-matrixModem/calc/README.md).
 
 ## Decisions for the user
 

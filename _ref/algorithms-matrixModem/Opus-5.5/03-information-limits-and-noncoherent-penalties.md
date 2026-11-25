@@ -4,7 +4,7 @@ Research date: 24 November 2026. This chapter estimates what any one-way
 receiver can achieve before an implementation is chosen, and identifies which
 losses are fundamental. It combines a literature review made for this pass with
 independent calculations in
-[`_appraisal/algorithms_matrixModem/Opus-5.5/calc`](../../../_appraisal/algorithms_matrixModem/Opus-5.5/calc/README.md).
+[`_appraisal/algorithms-matrixModem/calc`](../../../_appraisal/algorithms-matrixModem/calc/README.md).
 The two agree closely where they overlap.
 
 ## Findings

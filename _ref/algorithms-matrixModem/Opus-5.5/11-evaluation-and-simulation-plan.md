@@ -7,7 +7,7 @@ predeclare strata, budgets and stopping rules; run cheap deterministic checks
 first; never use exhaustive or multi-day runs as routine tests. Each stage has
 a decision it must settle and a result that would falsify the current
 recommendation. Implementation would live under
-`_appraisal/algorithms_matrixModem/` and must not modify other modems.
+`_appraisal/algorithms-matrixModem/` and must not modify other modems.
 
 ## Stage 0 — Arithmetic and hardware facts (hours)
 

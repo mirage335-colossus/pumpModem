@@ -3,7 +3,7 @@
 Research date: 24 November 2026. This chapter turns transmit power and path
 loss into received C/N0 using realistic HF noise, then gives ideal and
 channel-aware airtimes. Calculations come from the programs in
-[`_appraisal/algorithms_matrixModem/Opus-5.5/calc`](../../../_appraisal/algorithms_matrixModem/Opus-5.5/calc/README.md)
+[`_appraisal/algorithms-matrixModem/calc`](../../../_appraisal/algorithms-matrixModem/calc/README.md)
 (`link_budget.cpp`, `mfsk_capacity.cpp`, `airtime_table.py`). The noise review
 behind them is
 [F50](../../highFidelity-triple_Robust_Modem/Fable-5.2/50-noise-and-interference-mf-hf.md),

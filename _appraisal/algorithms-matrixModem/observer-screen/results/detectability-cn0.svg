@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="650" viewBox="0 0 1000 650" role="img" aria-labelledby="cn0-title">
+<title id="cn0-title">Ideal observer received carrier power to noise density requirement versus observation duration</title>
+<rect width="100%" height="100%" fill="white"/>
+<text x="500" y="35" text-anchor="middle" font-family="sans-serif" font-size="21">Required received C/N₀ vs observation duration</text>
+<text x="500" y="61" text-anchor="middle" font-family="sans-serif" font-size="13">K = 352 tones, 6.25 Hz grid, Pfa = 10⁻³, Pd = 0.9; energy threshold converted to mean C/N₀</text>
+<line x1="100" y1="545.0" x2="920" y2="545.0" stroke="#ddd"/>
+<text x="88" y="549.0" text-anchor="end" font-family="sans-serif" font-size="12">5</text>
+<line x1="100" y1="455.0" x2="920" y2="455.0" stroke="#ddd"/>
+<text x="88" y="459.0" text-anchor="end" font-family="sans-serif" font-size="12">10</text>
+<line x1="100" y1="365.0" x2="920" y2="365.0" stroke="#ddd"/>
+<text x="88" y="369.0" text-anchor="end" font-family="sans-serif" font-size="12">15</text>
+<line x1="100" y1="275.0" x2="920" y2="275.0" stroke="#ddd"/>
+<text x="88" y="279.0" text-anchor="end" font-family="sans-serif" font-size="12">20</text>
+<line x1="100" y1="185.0" x2="920" y2="185.0" stroke="#ddd"/>
+<text x="88" y="189.0" text-anchor="end" font-family="sans-serif" font-size="12">25</text>
+<line x1="100" y1="95.0" x2="920" y2="95.0" stroke="#ddd"/>
+<text x="88" y="99.0" text-anchor="end" font-family="sans-serif" font-size="12">30</text>
+<line x1="100.0" y1="95" x2="100.0" y2="545" stroke="#eee"/>
+<text x="100.0" y="567" text-anchor="middle" font-family="sans-serif" font-size="12">0.16</text>
+<line x1="305.0" y1="95" x2="305.0" y2="545" stroke="#eee"/>
+<text x="305.0" y="567" text-anchor="middle" font-family="sans-serif" font-size="12">0.32</text>
+<line x1="510.0" y1="95" x2="510.0" y2="545" stroke="#eee"/>
+<text x="510.0" y="567" text-anchor="middle" font-family="sans-serif" font-size="12">0.64</text>
+<line x1="715.0" y1="95" x2="715.0" y2="545" stroke="#eee"/>
+<text x="715.0" y="567" text-anchor="middle" font-family="sans-serif" font-size="12">1.28</text>
+<line x1="920.0" y1="95" x2="920.0" y2="545" stroke="#eee"/>
+<text x="920.0" y="567" text-anchor="middle" font-family="sans-serif" font-size="12">2.56</text>
+<line x1="100" y1="545" x2="920" y2="545" stroke="#222"/>
+<line x1="100" y1="95" x2="100" y2="545" stroke="#222"/>
+<text x="510" y="590" text-anchor="middle" font-family="sans-serif" font-size="14">Observation duration (s, logarithmic axis)</text>
+<text x="22" y="320.0" text-anchor="middle" font-family="sans-serif" font-size="14" transform="rotate(-90 22 320.0)">Required received C/N₀ (dB-Hz)</text>
+<polyline points="100.0,139.9 305.0,169.0 510.0,197.6 715.0,225.8 920.0,253.7" fill="none" stroke="#b23a48" stroke-width="2.5"/>
+<circle cx="100.0" cy="139.9" r="3.3" fill="#b23a48"/>
+<circle cx="305.0" cy="169.0" r="3.3" fill="#b23a48"/>
+<circle cx="510.0" cy="197.6" r="3.3" fill="#b23a48"/>
+<circle cx="715.0" cy="225.8" r="3.3" fill="#b23a48"/>
+<circle cx="920.0" cy="253.7" r="3.3" fill="#b23a48"/>
+<polyline points="100.0,298.1 305.0,340.5 510.0,381.0 715.0,419.4 920.0,455.7" fill="none" stroke="#246a73" stroke-width="2.5"/>
+<circle cx="100.0" cy="298.1" r="3.3" fill="#246a73"/>
+<circle cx="305.0" cy="340.5" r="3.3" fill="#246a73"/>
+<circle cx="510.0" cy="381.0" r="3.3" fill="#246a73"/>
+<circle cx="715.0" cy="419.4" r="3.3" fill="#246a73"/>
+<circle cx="920.0" cy="455.7" r="3.3" fill="#246a73"/>
+<polyline points="100.0,277.2 305.0,321.1 510.0,363.0 715.0,402.6 920.0,439.9" fill="none" stroke="#d17a22" stroke-width="2.5"/>
+<circle cx="100.0" cy="277.2" r="3.3" fill="#d17a22"/>
+<circle cx="305.0" cy="321.1" r="3.3" fill="#d17a22"/>
+<circle cx="510.0" cy="363.0" r="3.3" fill="#d17a22"/>
+<circle cx="715.0" cy="402.6" r="3.3" fill="#d17a22"/>
+<circle cx="920.0" cy="439.9" r="3.3" fill="#d17a22"/>
+<polyline points="100.0,259.5 305.0,304.7 510.0,347.7 715.0,388.4 920.0,426.6" fill="none" stroke="#58427c" stroke-width="2.5"/>
+<circle cx="100.0" cy="259.5" r="3.3" fill="#58427c"/>
+<circle cx="305.0" cy="304.7" r="3.3" fill="#58427c"/>
+<circle cx="510.0" cy="347.7" r="3.3" fill="#58427c"/>
+<circle cx="715.0" cy="388.4" r="3.3" fill="#58427c"/>
+<circle cx="920.0" cy="426.6" r="3.3" fill="#58427c"/>
+<line x1="690" y1="110" x2="718" y2="110" stroke="#b23a48" stroke-width="2.5"/>
+<text x="726" y="114" font-family="sans-serif" font-size="12">Whole-band radiometer</text>
+<line x1="690" y1="130" x2="718" y2="130" stroke="#246a73" stroke-width="2.5"/>
+<text x="726" y="134" font-family="sans-serif" font-size="12">Known hop schedule</text>
+<line x1="690" y1="150" x2="718" y2="150" stroke="#d17a22" stroke-width="2.5"/>
+<text x="726" y="154" font-family="sans-serif" font-size="12">16-schedule sparse search</text>
+<line x1="690" y1="170" x2="718" y2="170" stroke="#58427c" stroke-width="2.5"/>
+<text x="726" y="174" font-family="sans-serif" font-size="12">Search all 352 schedules</text>
+<text x="510" y="625" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#444">E/N₀ values assume the correct schedule is included in each searched bank; fixed-amplitude orthogonal Gaussian-noise model.</text>
+</svg>

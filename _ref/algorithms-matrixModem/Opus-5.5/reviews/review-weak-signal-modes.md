@@ -88,7 +88,7 @@ measured.
 ## 2. Reference limits I computed (finite message length and noncoherent constraints)
 
 These are my own computations [C], made with pure-Python numerical integration and Monte Carlo. The scripts are
-in temporary scratch scripts (`orth.py`, `ncfsk.py`, `ncmin.py`) that are not retained; the orthogonal-signaling values are independently reproduced by `_appraisal/algorithms_matrixModem/Opus-5.5/calc/finite_energy.cpp`.
+in temporary scratch scripts (`orth.py`, `ncfsk.py`, `ncmin.py`) that are not retained; the orthogonal-signaling values are independently reproduced by `_appraisal/algorithms-matrixModem/calc/finite_energy.cpp`.
 
 **(a) Finite-message benchmark: ML detection of M = 2^k orthogonal signals on AWGN.** This scheme is
 achievable. At M = 2^50 it differs negligibly from a simplex code. I did not compute the PPV converse. The

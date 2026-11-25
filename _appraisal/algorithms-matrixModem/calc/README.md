@@ -1,7 +1,7 @@
 # Matrix Modem research calculations (Opus-5.5)
 
 Standalone calculation programs supporting the research in
-[`_ref/algorithms_matrixModem/Opus-5.5`](../../../../_ref/algorithms_matrixModem/Opus-5.5/README.md).
+[`_ref/algorithms-matrixModem/Opus-5.5`](../../../_ref/algorithms-matrixModem/Opus-5.5/README.md).
 They are analysis aids, not modem code: none is linked into the application,
 and none depends on repository sources. C++ uses only the standard library
 (OpenMP for threads); Python uses only the standard library and is run with
@@ -33,7 +33,7 @@ eigenvalues, Gaussian-Doppler Karhunen–Loève spectrum).
 ## Build and run
 
 ```bash
-cd _appraisal/algorithms_matrixModem/Opus-5.5/calc
+cd _appraisal/algorithms-matrixModem/calc
 g++ -O3 -march=native -fopenmp -std=c++20 mfsk_capacity.cpp -o /tmp/mfsk_capacity
 /tmp/mfsk_capacity 2200 1500 > results/mfsk_capacity_B2200.txt
 /tmp/mfsk_capacity 2200 1000 dopp -30 -10 > results/mfsk_capacity_B2200_low.txt

@@ -196,9 +196,9 @@ Both transmitter and receiver must be designed to maximize computational ceiling
 
 
 
-All new code, test documentation, etc, for these experiments should be contained under the directory _appraisal/algorithms_matrixModem/ .
+All new code, test documentation, etc, for these experiments should be contained under the directory _appraisal/algorithms-matrixModem/ .
 
-All new such research documentation, etc, should be contained under the directory _ref/algorithms_matrixModem/ .
+All new such research documentation, etc, should be contained under the directory _ref/algorithms-matrixModem/ .
 
 
 
@@ -208,7 +208,7 @@ All new such research documentation, etc, should be contained under the director
 
 Please generate thorough documentation regarding both what the academic literature supports and possible implementations. Please do not overstate the implementations - better implementations may still be found and that possibility should be acknowledged.
 
-All new such research documentation, etc, should be contained under the directory _ref/algorithms_matrixModem/Astra-6 .
+All new such research documentation, etc, should be contained under the directory _ref/algorithms-matrixModem/Sol-6.2 .
 
 For now, please especially work on research - this is a complex problem which must begin with a very serious, very extensive, comprehensive understanding of the very chaotic, complex, natural phenomenon and corresponding situations from moderate through worst case.
 

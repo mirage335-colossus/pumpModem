@@ -6,7 +6,7 @@ Evidence labels used throughout:
 
 - **[P]** is a published value from the cited source.
 - **[D]** is derived here from a published threshold by a stated unit conversion.
-- **[C]** is computed here from a standard closed-form or Monte Carlo expression. The review's scratch scripts (`gemm_orth.py`, `misc.py`, `div2.py`, `search_cost.py`, `mfsk_mi.py`) were temporary and are not retained; the orthogonal-signaling and MFSK values are independently reproduced by `_appraisal/algorithms_matrixModem/Opus-5.5/calc/`. The checks against analytic M=2 cases and against Yang–Durisi–Polyanskiy's published Table I agree (see §1).
+- **[C]** is computed here from a standard closed-form or Monte Carlo expression. The review's scratch scripts (`gemm_orth.py`, `misc.py`, `div2.py`, `search_cost.py`, `mfsk_mi.py`) were temporary and are not retained; the orthogonal-signaling and MFSK values are independently reproduced by `_appraisal/algorithms-matrixModem/calc/`. The checks against analytic M=2 cases and against Yang–Durisi–Polyanskiy's published Table I agree (see §1).
 
 ## 0. Findings in brief
 

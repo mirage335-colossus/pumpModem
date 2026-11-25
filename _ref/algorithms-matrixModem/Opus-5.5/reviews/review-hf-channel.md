@@ -6,7 +6,7 @@ Prepared 2026-11-24. Scope: one-way, 2–100 mW, path loss over 150 dB, noncoher
 
 **Relation to existing project research.** These files already cover a great deal, and this report does not re-derive it:
 
-- `_ref/algorithms_matrixModem/Sol-6.2/hf-channels.md`, cited here as **[Sol]**
+- `_ref/algorithms-matrixModem/Sol-6.2/hf-channels.md`, cited here as **[Sol]**
 - `_ref/highFidelity-triple_Robust_Modem/Fable-5.2/30–33`, cited as **[F30]–[F33]**
 - `_ref/resilience-triple_Robust_Modem/Fable-5.2/robust-nonstationary-channel-research.md`, cited as **[RNS]**
 

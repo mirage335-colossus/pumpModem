@@ -1,6 +1,6 @@
 # Evaluation plan for a standalone experiment
 
-This plan is for a later native experiment under `_appraisal/algorithms_matrixModem/`. The figures below set bounded research stages and illustrate exposure requirements. They are neither deployment requirements nor completed tests. Start with the [analytical limits](information-limits.md), [channel evidence](hf-channels.md) and [receiver design](receiver-architecture.md).
+This plan is for a later native experiment under `_appraisal/algorithms-matrixModem/`. The figures below set bounded research stages and illustrate exposure requirements. They are neither deployment requirements nor completed tests. Start with the [analytical limits](information-limits.md), [channel evidence](hf-channels.md) and [receiver design](receiver-architecture.md).
 
 ## Declare the operating envelope before comparing waveforms
 
