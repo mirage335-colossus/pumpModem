@@ -185,6 +185,15 @@ Keep an indispensable dataset only when a specific current question cannot be
 answered by the summary; explain why. Preserve evidence needed for unresolved
 work, failed checks and release assurance until its purpose is resolved.
 
+Theoretical calculations are not temporary experiments. Keep significant
+calculations of limits, bounds and derived reference values that maintained
+guidance cites, with the small standalone programs and outputs that reproduce
+them. Label them as theoretical, with their assumptions. They bound future
+results and regression checks, so do not delete them when an implementation or
+simulator later reproduces their tables. Replace one only with a corrected or
+extended calculation that carries its values forward. See the
+[theoretical-calculation rule](docs/development.md#theoretical-calculations).
+
 Reuse compatible build profiles and caches that current work needs; retire
 abandoned profiles and stale outputs for removed targets after checking for
 active users. Do not routinely purge useful caches or other contributors' work.

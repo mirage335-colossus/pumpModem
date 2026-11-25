@@ -355,6 +355,28 @@ published-release assets, certification evidence, unresolved failures, active
 work and relevant third-party notices. The [build guide](building.md#local-output-retention)
 explains reuse and retirement of local build and SDK caches.
 
+### Theoretical calculations
+
+Theoretical calculations are retained reference material, not temporary
+experiment output. This covers significant calculations that maintained guidance
+cites: information-theoretic limits, capacity and energy bounds, minimum airtimes
+and C/N₀ floors, detection thresholds, and similar derived reference values. It
+covers the closed-form, numerical-integration and idealized-model Monte Carlo
+programs that reproduce them, together with their recorded outputs.
+
+- Keep them, and label them as theoretical where guidance cites them. State the
+  model assumptions and whether each value is proven, derived or heuristic.
+- They bound what any implementation can achieve. Use them to judge measured
+  results and regression checks. Treat a result that beats a bound as a
+  measurement error or a violated assumption until shown otherwise.
+- A later implementation or simulator that reproduces their tables is a
+  cross-check, not a reason to delete them.
+- Replace a calculation only with a corrected or extended one that carries its
+  values forward, and record the correction.
+- Keep them small and standalone: standard-library programs with recorded run
+  commands and outputs, not copies of modem code. Measurement captures,
+  benchmark runs and implementation experiments still follow the lifecycle above.
+
 ## Shared security and presentation
 
 Restrict received content before it reaches native GUI text, clipboard requests,

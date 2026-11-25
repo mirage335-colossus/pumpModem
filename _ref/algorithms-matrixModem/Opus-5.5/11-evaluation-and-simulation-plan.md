@@ -119,6 +119,10 @@ only one that can validate the channel assumptions.
 
 Experiment outputs belong in ignored `local-evidence/`, with purpose and
 cleanup trigger recorded in the relevant guide; distilled findings return to
-these chapters. The calculation programs in `calc/` are research aids for this
-document set and should be removed or replaced once a native Matrix simulator
-reproduces their tables.
+these chapters. The calculation programs in
+[`calc/`](../../../_appraisal/algorithms-matrixModem/calc/README.md) are
+theoretical calculations, not experiment outputs. Keep them and their results
+as reference material under the
+[theoretical-calculation rule](../../../docs/development.md#theoretical-calculations).
+A native Matrix simulator that reproduces their tables cross-checks them; it
+does not replace them.

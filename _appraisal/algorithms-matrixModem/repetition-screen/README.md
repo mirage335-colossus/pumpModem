@@ -87,7 +87,9 @@ choosing thresholds on a separate empirical training sample. The toy
 differences are statistically resolvable at this simulation size but do not
 show their practical size for real Matrix waveforms.
 
-`results.csv` is retained only to support this current research conclusion.
-Remove it after its numerical findings are reconciled into the maintained
-Matrix research synthesis. The small executable source remains the reproducible
-test, not a production implementation.
+This is an idealized-model calculation, so `results.csv` and the small
+executable source are kept together as theoretical reference material under the
+[theoretical-calculation rule](../../../docs/development.md#theoretical-calculations).
+Reconciling the numerical findings into the maintained Matrix research synthesis
+does not make them removable. The source is the reproducible calculation, not a
+production implementation.

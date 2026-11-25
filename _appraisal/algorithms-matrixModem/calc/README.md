@@ -7,10 +7,13 @@ and none depends on repository sources. C++ uses only the standard library
 (OpenMP for threads); Python uses only the standard library and is run with
 `-I`.
 
-**Purpose and cleanup trigger.** These reproduce the tables cited in the
-research chapters. Remove them (keeping the distilled tables in the chapters)
-when a native Matrix simulator reproduces the capacity, quantization and
-observer results, or when the chapters are superseded.
+**Purpose and retention.** These are theoretical calculations. They reproduce
+the capacity, energy, airtime, quantization and observer tables cited in the
+research chapters. Keep them as reference material under the
+[theoretical-calculation rule](../../../docs/development.md#theoretical-calculations).
+A native Matrix simulator that reproduces these results is a cross-check, not a
+reason to remove them. Replace a program only with a corrected or extended
+calculation that carries its values forward.
 
 ## Programs
 

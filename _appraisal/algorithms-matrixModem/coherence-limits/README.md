@@ -1,14 +1,19 @@
 # Coherence-limit calculations (Sol-6.2 pass, 25 November 2026)
 
-Standalone C++ programs that audit the peak-limited noncoherent fading bound and measure how
-closely practical FFT tone receivers, and some alternatives, approach it. They support
+Standalone C++ and Python programs that audit the peak-limited noncoherent fading bound and measure
+how closely practical FFT tone receivers, and some alternatives, approach it. They also compute the
+derived airtime, C/N₀-floor and detection tables. They support
 [the fading-limit and MFSK-alternatives study](../../../_ref/algorithms-matrixModem/Sol-6.2/fading-limit-and-mfsk-alternatives.md).
 They are analysis aids, not modem code: nothing here is linked into the application or depends on
 repository sources. Standard library only (OpenMP for the Monte Carlo).
 
-**Purpose and cleanup trigger.** These reproduce the tables cited in the study. Remove them, keeping
-the distilled tables in the study, when a native Matrix Modem simulator reproduces the receiver
-comparisons with acquisition, coding and physical completion, or when the study is superseded.
+**Purpose and retention.** These are theoretical calculations. They reproduce the limits, bounds
+and reference tables cited in the study and its companion reviews, and their `results/` files are
+the full outputs, including columns the study does not repeat. Keep them as reference material under
+the [theoretical-calculation rule](../../../docs/development.md#theoretical-calculations). A native
+Matrix Modem simulator that reproduces the receiver comparisons is a cross-check against them, not a
+reason to remove them. The bounds remain the ceiling for its results and regression checks. Replace
+a program only with a corrected or extended calculation that carries its values forward.
 
 ## Programs
 

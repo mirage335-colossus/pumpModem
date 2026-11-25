@@ -7,6 +7,8 @@ measurement limits.
 Follow the [material lifecycle](development.md#material-lifecycle): distill
 useful findings, keep only evidence with a concrete current purpose, and retire
 obsolete code, experiments and generated outputs when that purpose ends.
+Significant [theoretical calculations](development.md#theoretical-calculations)
+of limits and bounds are retained reference material, not experiment output.
 
 ## Current Robust modem
 
