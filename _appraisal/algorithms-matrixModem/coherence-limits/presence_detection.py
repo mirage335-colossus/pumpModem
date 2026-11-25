@@ -58,8 +58,10 @@ def main():
     spreads = [0.1, 1.0, 10.0, 30.0]
     levels = [-20, -10, 0]
     print("# Presence detection of a known keyed pattern versus a 100-bit message\n")
-    print(f"P_FA = {PFA:g}, P_D = {PD:g} (z = {Z0:.3f} + {Z1:.3f}), Gaussian Doppler spectra, "
-          "known timing and frequency, optimum quadratic detector, normal approximation.\n")
+    print(f"P_FA = {PFA:g}, P_D = {PD:g} (z = {Z0:.3f} + {Z1:.3f}); known timing and frequency. "
+          "No-fading rows assume a static known-phase channel and use a coherent matched filter; "
+          "Gaussian-Doppler Rayleigh-fading rows use the optimum quadratic estimator-correlator "
+          "with a normal approximation for many effective looks.\n")
     print("`x` is the received energy per effective coherence interval, (C/N0)/B_eff; "
           "`looks` is T*B_eff, the number of effectively independent coherence intervals observed.\n")
     print("| C/N0 | 2σ | x | detect pattern | looks | 100 bits at bound | ratio |")

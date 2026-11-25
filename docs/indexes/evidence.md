@@ -5,6 +5,16 @@ and release status. [Latest resource measurements](../ci-resource-results.json)
 are one bounded snapshot; Git keeps prior versions. Historical results are not
 qualification of new source or binaries.
 
+## Matrix Modem research
+
+The [research overview](../../_ref/algorithms-matrixModem/Sol-6.2/README.md)
+connects the original brief, dated literature studies and subsequent refinements.
+Its [evidence map](../../_ref/algorithms-matrixModem/Sol-6.2/research-pass-index.md#evidence-map)
+links theoretical calculations and native receiver experiments with their assumptions,
+reproduction notes and qualification limits. Preserve those research records under
+the [research-material](../development.md#research-material) and
+[theoretical-calculation](../development.md#theoretical-calculations) rules.
+
 ## Retained triad research
 
 The [pattern](../validation-data/triad-v3/2026-11-06-independent-patterns/README.md),

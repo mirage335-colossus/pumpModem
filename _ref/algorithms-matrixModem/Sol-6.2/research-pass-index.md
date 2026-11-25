@@ -1,5 +1,10 @@
 # Matrix Modem research appraisal
 
+Use the [research overview](README.md) for the reading order across the original
+brief, initial Sol material, [24 November Opus pass](../Opus-5.5/README.md) and
+the subsequent studies collected here. This index retains the appraisal's
+original date and source identity alongside its later evidence links.
+
 The seven chapters from the earlier `_ref/algorithms_matrixModem/Astra-6/` research pass now live in this directory. The related experiments were moved from the underscore appraisal path into `_appraisal/algorithms-matrixModem/`. The earlier run used a working tree based on `84dd706d03d42bea606e6d01ef62bd98e431ea9c` with the standalone experiments added.
 
 

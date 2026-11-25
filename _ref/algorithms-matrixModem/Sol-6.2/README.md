@@ -2,6 +2,15 @@
 
 25 November 2026 · Research and experimental design
 
+**Reading the research passes.** The [original brief](../../../_appraisal/matrixModem.md)
+records the requested goals and constraints. The [24 November Opus pass](../Opus-5.5/README.md)
+reviewed the initial Sol material. This directory now also contains the subsequent
+24–25 November appraisals, experiments and refinements, including the
+[research appraisal and evidence map](research-pass-index.md) and
+[fading-limit study](fading-limit-and-mfsk-alternatives.md).
+Read each finding with its date, model and evidence limits; the directory names
+identify research provenance rather than a sequence of superseding specifications.
+
 Matrix Modem is a proposed standalone C++ weak-signal modem. The first comparison should hold a simple one-way waveform fixed and ask how much wanted-signal evidence survives uncertain timing, Doppler, fading and four-bit quantization. A direct packed matrix can calculate the tone and channel-subspace projections. A factored filter bank can reuse many of the same projections. The complete comparison is useful received bits at a measured probability of correct physical completion, per transmit second and joule, with continuous receiver service and bounded memory.
 
 Start with the [waveform research guide](waveform-options.md#continuing-the-waveform-research) to continue work on FSK designs or alternatives. It connects the design choices to matched comparisons, measurements, and the limitations of each result.

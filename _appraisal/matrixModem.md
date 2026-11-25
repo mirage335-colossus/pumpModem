@@ -1,3 +1,16 @@
+# Matrix Modem: original research brief
+
+This document preserves the user's research brief and follow-up directions.
+Its goals and constraints remain the inputs to the research; the text below
+does not establish that a proposed design or experiment has satisfied them.
+For the studies, subsequent qualifications and experimental evidence, start
+with the [research overview](../_ref/algorithms-matrixModem/Sol-6.2/README.md)
+and [evidence map](../_ref/algorithms-matrixModem/Sol-6.2/research-pass-index.md#evidence-map).
+In particular, the strict INT4 requirement remains an unresolved research
+constraint; experiments using wider arithmetic do not silently relax it.
+
+## Preserved brief
+
 
 Please thoroughly research. Please comprehensively consult the academic literature, including recent academic literature which may add more nuanced or contradictory information.
 

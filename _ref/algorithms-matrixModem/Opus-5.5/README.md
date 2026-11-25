@@ -7,13 +7,22 @@ receiver should run almost entirely as low-precision matrix multiplication.
 This pass studied the natural channel from benign to worst case, estimated
 theoretical limits, compared existing weak-signal systems, checked what the
 target hardware really provides, and asked where heavy computation can buy
-sensitivity. It complements the earlier [Sol-6.2 pass](../Sol-6.2/README.md),
-corrects several of its points, and reuses the repository's HF, noise and
-propagation research. No modem was implemented. All performance figures are
-model calculations or literature values under stated assumptions; better
-designs may exist.
+sensitivity. It is the 24 November 2026 Opus-5.5 pass, based on the initial
+Sol-6.2 material then available. It corrects several points in that earlier
+pass and reuses the repository's HF, noise and propagation research. The
+Sol-6.2 directory also contains later, separately dated follow-up research;
+the directories record research passes rather than a permanent authority order.
+For those later refinements, see the [Sol-6.2 overview](../Sol-6.2/README.md),
+its [research-pass index](../Sol-6.2/research-pass-index.md), and the
+[fading-limit and MFSK alternatives study](../Sol-6.2/fading-limit-and-mfsk-alternatives.md).
+No modem was implemented. All performance figures are model calculations or
+literature values under stated assumptions; better designs may exist.
 
 ## Main conclusions
+
+The original findings below retain this pass's values and recommendations.
+Read conclusions 2–3 with the [25 November qualifications](#dated-qualifications-25-november-2026)
+on the capacity expression, idealized MFSK sweeps and finite-message limits.
 
 1. **Realistic HF noise makes the target links much weaker than earlier
    estimates.** ITU-R P.372 medians put HF receive noise at about −144 to
@@ -70,6 +79,31 @@ designs may exist.
    frequency, and multi-day absorption events require erasure coding across the
    whole message; short messages on quiet paths are limited by too few
    independent fades. ([channel](01-hf-channel-moderate-to-worst.md))
+
+## Dated qualifications (25 November 2026)
+
+The headline `97–99.8%` is the rate ratio observed in the stored idealized
+keyed-MFSK sweeps, with ideal synchronization and interleaving. It is not a
+general finite-message or implemented-receiver guarantee. The comparison
+converse is conditional on a hard time peak equal to average power, no channel
+state information, flat Rayleigh fading, and asymptotically long coding. The
+later Sol-6.2 [information-limits review](../Sol-6.2/information-limits-review.md)
+and [fading-limit study](../Sol-6.2/fading-limit-and-mfsk-alternatives.md)
+audit those premises and distinguish them from finite-band, finite-alphabet
+results. In the separate 2.2 kHz finite-alphabet Monte Carlo, an adapted
+receiver could approach the bound at low C/N0 when dwell and spacing suited the
+case, while alphabet limits, symbol noncoherence, and channel mismatch remained
+visible in other cases; see the study's [finite-alphabet results](../Sol-6.2/fading-limit-and-mfsk-alternatives.md#finite-alphabet-in-a-22-khz-band).
+
+Likewise, the original statement that long symbols stay near-optimal across
+Doppler categories is supported by the pass's idealized, duration-optimized
+sweeps; it is not a guarantee for every finite-band configuration or message
+deadline. The later study separates large-alphabet results from finite-band
+tests and reports a finite-burst approach to the bound with longer dwells, but finite alphabet, band limitation,
+outage, acquisition and practical receiver costs still matter. It also records
+conditions where long per-symbol noncoherent dwells have a measurable gap from
+the coherent limit. These qualifications refine the scope of the original
+conclusion; they do not erase the historical calculation or its cited sources.
 
 ## Reading map
 

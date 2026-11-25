@@ -13,6 +13,19 @@ citations, conclusions and significant
 [theoretical calculations](development.md#theoretical-calculations); remove it
 only at the user's explicit request.
 
+## Matrix Modem research
+
+Start with the [Matrix research overview](../_ref/algorithms-matrixModem/Sol-6.2/README.md)
+for the proposed standalone modem, then use its
+[evidence map](../_ref/algorithms-matrixModem/Sol-6.2/research-pass-index.md#evidence-map)
+to find channel studies, theoretical calculations, receiver experiments and their limits.
+The [original brief](../_appraisal/matrixModem.md) records the requested goals and
+constraints. The overview connects the dated research passes and later refinements;
+directory names alone do not indicate their chronological order.
+These studies inform future design; their calculations and isolated experiments
+do not qualify a complete Matrix Modem. The current application's operating
+contracts and validation remain in the component guides below.
+
 ## Current Robust modem
 
 Use the [Robust operating guide and experimental lessons](indexes/robust.md)

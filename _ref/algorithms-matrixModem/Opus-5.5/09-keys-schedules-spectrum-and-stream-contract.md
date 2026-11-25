@@ -18,7 +18,8 @@ which checked the current eCFR text; it is summarized, not repeated.
    ([crypto](../../../docs/crypto.md)). Matrix can reuse both without new key
    formats, satisfying "keyfile format shared with the other modems" and
    "AES-256 + Serpent cascade with 512 bits of entropy" (two independent 512-bit
-   roots).
+   roots). **See the [25 November correction](#dated-correction-to-the-entropy-claim-25-november-2026):
+   the root lengths do not establish the entropy claim.**
 2. **A stream cipher adds no bits.** XORing a keystream addressed by
    (key, epoch, ordinal, offset) onto fixed-geometry coded or source bits
    transmits no IV or nonce; the address is derived from the configured
@@ -48,6 +49,24 @@ which checked the current eCFR text; it is summarized, not repeated.
    bandwidth for listed data bands (§97.307(f)), not a 26 dB mask; the user's
    26 dB target can be kept as an engineering measurement. These must be
    settled per operating profile before transmitting.
+
+## Dated correction to the entropy claim (25 November 2026)
+
+The first finding above correctly identifies the existing `DPMKEY04` format
+and its independent 64-byte Serpent and AES roots as compatible root material
+for reuse. Its wording that this satisfies “512 bits of entropy” (two
+independent 512-bit roots) is unsupported: the 64-byte lengths describe stored
+root sizes, not measured min-entropy or a demonstrated security strength. The
+repository's [keyfile documentation](../../../docs/crypto.md#keyfile-version-4)
+explicitly says that audio is supplementary input, not an entropy estimate,
+and that delay between OS draws does not prove independent entropy. The later
+Sol-6.2 [keys and spectrum research](../Sol-6.2/stream-keys-and-spectrum.md#entropy-claims-and-key-sizes)
+also distinguishes root length from entropy and security strength; see
+[NISTIR 8427](https://csrc.nist.gov/pubs/ir/8427/final) for the distinction
+between bitstring length and full entropy. This corrects the earlier research claim, not the
+cryptographic implementation: no code or source-entropy assessment is changed
+here. The documented cipher lanes, root sizes, derivation details and reuse
+risks above remain as recorded.
 
 ## Proposed key and schedule derivation (sketch)
 

@@ -91,6 +91,7 @@ inspection and Link Planner receive/CPU forecasts retain their stated limits.
 ## Documentation
 
 - [Topic index](docs/README.md)
+- [Matrix Modem research and experimental evidence](docs/README.md#matrix-modem-research) — proposed modem, findings and open questions
 - [Development contract](docs/development.md)
 - [Security and received-content rules](docs/security.md)
 - [Protocol and codecs](docs/protocol.md)

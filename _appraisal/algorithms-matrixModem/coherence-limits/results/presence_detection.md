@@ -1,6 +1,6 @@
 # Presence detection of a known keyed pattern versus a 100-bit message
 
-P_FA = 1e-06, P_D = 0.9 (z = 4.753 + 1.282), Gaussian Doppler spectra, known timing and frequency, optimum quadratic detector, normal approximation.
+P_FA = 1e-06, P_D = 0.9 (z = 4.753 + 1.282); known timing and frequency. No-fading rows assume a static known-phase channel and use a coherent matched filter; Gaussian-Doppler Rayleigh-fading rows use the optimum quadratic estimator-correlator with a normal approximation for many effective looks.
 
 `x` is the received energy per effective coherence interval, (C/N0)/B_eff; `looks` is T*B_eff, the number of effectively independent coherence intervals observed.
 
