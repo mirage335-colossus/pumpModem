@@ -23,6 +23,8 @@ The [repeated-FSK reception experiment](tensor-reception-results.md) measured Te
 
 The [receiver bottleneck review](tensor-receiver-bottlenecks.md) measures score tiling, shorter tone transforms and narrowband preprocessing. It also compares published waveform and receiver designs that expose useful GPU matrix work.
 
+The [FFT/Tensor format guidance](fsk-format-for-fft-and-tensor-receivers.md) records FSK transmission characteristics and a receiver split that keep the CPU FFT front end small and parallel and leave the hypothesis search as fixed-shape Tensor Core GEMM; it is unmeasured design inference.
+
 The [one-carrier literature check](mfsk-tensor-core-literature.md) examines measured GPU MFSK receivers, single-chirp encoder and receiver co-design, and the evidence for Tensor Core execution in each.
 
 The [weak-signal MFSK comparison](weak-signal-mfsk-alternatives.md) examines which alternatives improved reception in direct field and simulation comparisons, with separate evidence for sensitivity and receiver computation.

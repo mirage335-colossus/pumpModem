@@ -442,6 +442,8 @@ Several conclusions above change meaning if two similar-sounding quantities are 
 - No capacity result for nonstationary Doppler spectra, no proof that Gaussian noise is worst for the peak-limited noncoherent fading channel, and no universal-decoding theorem for continuous stationary noncoherent fading were found.
 - Sources not accessed in full: Feder and Lapidoth 1998, Ligong Wang's master's thesis on spectral lines, Bergel and Benedetto, Chowdhury et al., Kowshik and Polyanskiy, Lancho et al., Qi and Koch, Gursoy–Poor–Verdú Part I, Tchamkerten–Chandar–Wornell 2009 (used through Polyanskiy), Rao and Hassibi, Wu and Srikant, Spaulding and Middleton, and the Prelov and Pinsker weak-signal papers; Diggavi and Cover was only skimmed.
 
+Format and receiver-split guidance for a cheap CPU FFT front end with Tensor Core hypothesis follow-up is in [fsk-format-for-fft-and-tensor-receivers.md](fsk-format-for-fft-and-tensor-receivers.md).
+
 **Recommended next experiment.** Implement the adaptive weighted-periodogram receiver in the native Matrix stack and test it with acquisition, drift, a real code, physical completion and impulsive noise included, against the large-alphabet and 2.2 kHz results here.
 
 ## Primary sources
