@@ -50,13 +50,17 @@ exist.
    ([observer chapter](06-observer-lpi-and-interference-perception.md)). It also
    removes the FFT shortcut, which turns the receiver into genuinely dense
    matrix work.
-6. **Do not split power across simultaneous carriers at low C/N0.** In the
-   square-law regime the rate from L simultaneous tones at P/L each is about
-   L·(x/L)² = x²/L of a single tone's rate: three simultaneous carriers cost
-   about 4.8 dB of Eb/N0 relative to one carrier hopping among the same three
-   frequencies. This is a plausible structural contributor to the long transmit
-   times seen with the triple Robust modem in weak, disturbed cases, though the
-   repository's triple-Robust records were not re-analysed here to confirm it.
+6. **Avoid splitting power between independently fading tones in the low-C/N0
+   model.** At fixed summed tone power P, the square-law rate from L independent
+   tone channels at P/L each scales as L·(x/L)² = x²/L, versus x² for a single
+   tone. Three simultaneous carriers then cost about 4.8 dB of Eb/N0 relative
+   to one carrier hopping among the same three frequencies. This compares
+   separately combined component rates; it neither models cross-tone fading
+   covariance nor enforces the composite RF waveform's peak-envelope limit.
+   It is a plausible structural contributor to long triple-Robust transmit
+   times only where those assumptions apply. The repository's triple-Robust
+   records were not re-analysed here to confirm it. See the
+   [conditional waveform comparison](../Sol-6.2/waveform-options.md#candidate-comparison).
 7. **Make the receiver multi-hypothesis over channel categories.** A one-way
    link cannot request reconfiguration. The receiver can run several Doppler
    subspace ranks, drift ranges and coherence assumptions in parallel and
@@ -141,14 +145,24 @@ paths, near zero on spread paths.
 
 ### D. Simultaneous multi-carrier joint detection (triple Robust style)
 
-At fixed total power, L simultaneous tones reduce the per-tone energy per
-coherence cell by L. In the low-x regime that costs about 10·log10(L) dB of
-Eb/N0 relative to one carrier visiting the same frequencies sequentially; in
-the high-x regime the cost is small and frequency diversity can help. Joint
-coherent detection across carriers requires the carriers to share phase, which
-fails once their separation exceeds the coherence bandwidth. Not recommended
-for weak links; retain only as a high-C/N0 option if frequency diversity is
-shown to matter.
+At fixed summed tone power, L equal-power simultaneous tones reduce the
+per-tone energy per coherence cell by L. For independently fading tone channels
+whose rates add, the low-x penalty is about 10·log10(L) dB of Eb/N0 relative to
+one carrier visiting the same frequencies sequentially. In that model the
+high-x cost is small and frequency diversity can help. A receiver that assumes
+shared channel phase across carriers needs that assumption justified; separation
+beyond the coherence bandwidth can break it.
+
+The independent-channel model therefore favours sequential tones for weak
+links, but does not establish a universal penalty for correlated carriers or a
+joint channel statistic. Applying it to triple Robust also requires the actual
+waveform's peak-envelope constraint; summed component powers alone do not
+specify that peak. Retain the high-C/N0 diversity comparison, and reconsider
+weak-link multitone designs only with a justified covariance/statistic model
+and matched energy, actual peak power, acquisition and receiver cost. Correlation
+by itself establishes neither a gain nor a loss. See the
+[channel-correlation limits](../Sol-6.2/prior-modems-and-other-paths.md#three-carrier-robust-proof-of-possibility-and-evidence-of-unfinished-work)
+and [waveform comparison controls](../Sol-6.2/waveform-options.md#candidate-comparison).
 
 ### E. Wideband DSSS filling the band
 
@@ -162,13 +176,19 @@ at much higher C/N0 than this use case. Not recommended for the weak case.
 
 ### F. OFDM, OTFS and chirps
 
-Multicarrier OFDM splits power across many simultaneous subcarriers (worse than
-D at low x) and needs pilots; OTFS needs channel estimation of a sparse
-delay–Doppler representation, which the weak signal cannot support; chirps are
-excellent sounding waveforms but offer no energy advantage for data at low x
-and suffer ionospheric dispersion and drift–delay coupling. All are poor fits
-below the knee. They remain legitimate for high-C/N0 modes, which Fast Modem
-already covers.
+Multicarrier OFDM splits power across many simultaneous subcarriers and needs
+pilots. Under D's independently fading, additive-rate model, more such
+components worsen the low-x power-splitting penalty. That calculation alone
+does not rule out OFDM on correlated channels or a different joint receiver;
+its actual peak-envelope, pilot and equalization costs still need comparison.
+OTFS needs channel estimation of a sparse delay–Doppler representation, whose
+cost is a concern at these weak operating points. Chirps are excellent sounding
+waveforms but have no established data-energy advantage in this low-x
+comparison and suffer ionospheric dispersion and drift–delay coupling.
+These considerations keep the families below the initial weak-link candidates
+in this pass's ranking, rather than proving them universally unsuitable below
+the knee. They remain legitimate for high-C/N0 modes, which Fast Modem already
+covers. See the [conditional alternatives and field evidence](../Sol-6.2/waveform-options.md#candidate-comparison).
 
 ## The "hypothesis vs null hypothesis" construct
 

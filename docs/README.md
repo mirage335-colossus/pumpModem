@@ -150,6 +150,7 @@ the [GPU-assisted procedure](triad-performance.md#runpod-gpu-assisted-manual-cap
 
 | Manual | Interface |
 | --- | --- |
+| [pump(1)](man/pump.1) | Keyfile and audio-device utilities, QR encoding, and Fast commands; Robust audio commands are retired |
 | [pump-fast(1)](man/pump-fast.1) | Fast command-line operation |
 | [datapump-gui(1)](man/datapump-gui.1) | Native graphical application |
 | [datapump-tui(1)](man/datapump-tui.1) | Terminal application |

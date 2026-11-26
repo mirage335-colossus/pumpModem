@@ -21,8 +21,9 @@ literature values under stated assumptions; better designs may exist.
 ## Main conclusions
 
 The original findings below retain this pass's values and recommendations.
-Read conclusions 2–3 with the [25 November qualifications](#dated-qualifications-25-november-2026)
-on the capacity expression, idealized MFSK sweeps and finite-message limits.
+Read conclusions 2–4 with the [25 November qualifications](#dated-qualifications-25-november-2026)
+on the capacity expression, idealized MFSK sweeps, finite-message limits and
+conditional multitone comparison.
 
 1. **Realistic HF noise makes the target links much weaker than earlier
    estimates.** ITU-R P.372 medians put HF receive noise at about −144 to
@@ -50,9 +51,12 @@ on the capacity expression, idealized MFSK sweeps and finite-message limits.
 4. **Recommended starting family:** keyed, constant-envelope, one-tone-at-a-time
    long-symbol MFSK with keyed hopping for time diversity, a Doppler-subspace
    receiver bank, keyed decoy templates as live null hypotheses, and a
-   keyed-noise-tile variant for observer resistance. Simultaneous multi-carrier
-   (triple-Robust style), wideband DSSS, OFDM and OTFS are disfavoured at low
-   C/N0 because they spread energy below the per-cell knee.
+   keyed-noise-tile variant for observer resistance. This pass initially
+   disfavoured simultaneous multi-carrier (triple-Robust style), wideband DSSS,
+   OFDM and OTFS at low C/N0 on per-cell energy grounds. That ranking needs the
+   model distinctions below: the multitone penalty assumes independently fading
+   components and fixed summed tone power, and does not by itself rule out
+   correlated-carrier or other waveform/receiver designs.
 5. **A well-designed live receiver has little matrix work.** Even as dense
    GEMMs, the recommended single-stream receivers need under 0.01% of an RTX
    4090. Full GPU use comes from codeword-level joint correlation over coherent
@@ -111,6 +115,19 @@ Even within the original sweep, a fixed 2.5–10 s recommendation is too broad:
 the [design chapter](05-waveform-and-parameter-design.md#recommendations-in-brief) records the
 sampled spread-fading benefits and the larger AWGN/slow-Rayleigh penalties,
 relative to each model's best duration at the same C/N0.
+
+The original waveform summary also grouped simultaneous carriers, DSSS, OFDM
+and OTFS under one per-cell-energy dismissal. The quantitative multitone
+comparison instead sums the rates of independently fading components at fixed
+summed tone power; it does not model cross-tone covariance or enforce a
+composite RF peak-envelope constraint. Its low-C/N0 penalty remains useful
+within that model, not as a universal diagnosis of triple Robust or Fast.
+DSSS occupancy, OTFS channel estimation and each waveform's receiver overhead
+need their own stated assumptions. The [design chapter](05-waveform-and-parameter-design.md#candidate-waveform-families)
+retains this pass's conditional ranking, while the
+[later waveform comparison](../Sol-6.2/waveform-options.md#candidate-comparison)
+sets out matched energy, actual peak power, covariance and receiver-cost controls.
+No numerical result or historical modem measurement is changed by this qualification.
 
 ## Reading map
 

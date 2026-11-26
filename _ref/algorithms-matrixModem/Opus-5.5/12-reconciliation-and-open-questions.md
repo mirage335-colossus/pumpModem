@@ -24,11 +24,15 @@ the literature's internal disagreements, and lists what remains unknown.
 
 - **Fast Modem.** The repository's acoustic study computed a conditional
   Gaussian-equivalent capacity and reported about 43% of it (Sol-6.2's
-  reconciliation). Fast is an excellent high-C/N0 modem; at the weak-link
-  operating points here (x ≪ 1 in disturbed channels), its OFDM structure falls
-  in the "simultaneous multi-carrier at low x" class the limits rule against.
-  The two modems address different regimes, consistent with the user's
-  framing.
+  reconciliation). Fast is an excellent high-C/N0 modem. At the weak-link
+  operating points here (x ≪ 1 in disturbed channels), splitting a fixed sum
+  of tone powers incurs the quoted penalty only in the independently fading,
+  additive-rate comparison. Applying that result to Fast's OFDM requires its
+  actual channel covariance, receiver statistic and composite RF peak-power
+  constraint; the calculation does not rule out OFDM as a class. The acoustic
+  evidence does not qualify weak-HF operation. The two modems address different
+  tested regimes, consistent with the user's framing; see the
+  [prior-modem comparison](../Sol-6.2/prior-modems-and-other-paths.md#fast-modem-an-acoustic-strength-and-a-boundary).
 - **Single-carrier Robust (historical).** A tone with keyed phase and
   amplitude patterning concentrates all power in one narrow band — the right
   choice for high energy per coherence cell — and gives observer resistance. It
@@ -38,12 +42,16 @@ the literature's internal disagreements, and lists what remains unknown.
   disturbed paths, and (b) the computational structure. This is an inference
   from the user's description and the theory; the removed implementation was
   not re-examined.
-- **Triple Robust.** Three simultaneous carriers at fixed total power cut the
-  energy per coherence cell per carrier by 4.8 dB. In the square-law regime the
-  combined rate falls by about the same factor relative to one carrier visiting
-  the three frequencies in turn. This is a plausible structural contributor to
-  the long transmit times the user observed in weak, disturbed cases; it was not
-  verified against the repository's triple-Robust evidence in this pass.
+- **Triple Robust.** Three equal-power simultaneous carriers at fixed summed
+  tone power cut the energy per coherence cell per carrier by 4.8 dB. With
+  independently fading components whose rates add, the square-law combined
+  rate falls by about the same factor relative to one carrier visiting the
+  three frequencies in turn. This remains a plausible structural contributor
+  to long transmit times in weak, disturbed cases where that model applies;
+  it was not verified against the repository's triple-Robust evidence in this
+  pass. Correlated fading, a joint channel statistic and the composite waveform's
+  actual peak-envelope constraint require a separate matched comparison. See
+  the [conditional design analysis](05-waveform-and-parameter-design.md#d-simultaneous-multi-carrier-joint-detection-triple-robust-style).
 
 ## Disagreements inside the literature
 

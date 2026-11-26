@@ -381,9 +381,13 @@ workspace. Default routes must be unchanged with the option off.
 
 ### Phase 10: CUDA builds
 
-CUDA builds get none of the fine-stage device routes. Either add cuFFT forms
-of the families, or select a backend per stage. First compare the two
-automatic routes on one pod from one source.
+CUDA builds do not run this plan's signed-lag gain-rank, drift-proposal, or
+varying-statistics device families; their device routes are currently Vulkan
+routes. Eligible CUDA fine projection of mapped DATA templates already exists
+(cuFFT, with NVFP4 available for supported Blackwell cases; see the
+[fine-stage route guidance](gpu-precision-controls.md#fine-stage-device-routes)).
+Either add cuFFT forms of the plan's three families or select a backend per
+stage. First compare the two automatic routes on one pod from one source.
 
 ### Phase 11: GPU simulator
 
