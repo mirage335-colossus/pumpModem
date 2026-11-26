@@ -1,8 +1,12 @@
 # Helper complete-stream and inversion-timing evidence — 2026-10-31
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../README.md)
+governs execution.
+
 This package preserves the experimental data supporting the latest
 [integration guide](../../../helper-integration.md) and
-[continuation study](../../../helper-continuation.md#sensitive-pooled-inversion-timing-experimental).
+[historical continuation study](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/helper-continuation.md#sensitive-pooled-inversion-timing-experimental).
 It includes failures and controls as well as successes. These are standalone
 simulation results, not ordinary Robust integration, successful decoding,
 hardware qualification or a physical sensitivity bound.
@@ -112,7 +116,7 @@ python3 tools/helper-evidence.py run --case screen/000 \
 
 The replay command records the new binary hash and output separately and refuses
 to overwrite existing evidence. Use the `argv` arrays to reproduce other cases
-or the [study commands](../../../helper-continuation.md#work-bounds-checks-and-reproduction)
+or the [historical study commands](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/helper-continuation.md#work-bounds-checks-and-reproduction)
 for matched sweeps and applicable focused receiver checks. CPU comparisons must
 be serialized without concurrent compilation/simulation and must distinguish
 tracking, actual conditioned duration, generation and metrology; overlapping

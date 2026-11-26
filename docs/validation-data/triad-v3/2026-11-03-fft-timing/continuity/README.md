@@ -1,5 +1,9 @@
 # Intermediate continuity windows on five retained failures/controls
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../../README.md)
+governs execution.
+
 All **30 receiver jobs** produced valid results: six fixed model choices on
 each of five existing captures. Independent review rehashed the 30 restored
 input files (218,612,706 bytes), matched all 15 historical baseline reports,
@@ -162,7 +166,7 @@ all 30 restored files rather than relying solely on nominal metadata.
 
 ## Archived recipe and optional reproduction
 
-[probe.py](probe.py) is a byte-identical archival copy of the actual local
+[historical probe.py](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-fft-timing/continuity/probe.py) is a byte-identical archival copy of the actual local
 driver, including its pilot-revalidation handling. Its original relative
 directory defaults assume `local-evidence/triad-continuity/probe.py`;
 **do not execute this maintained copy directly**. Restored statistics and

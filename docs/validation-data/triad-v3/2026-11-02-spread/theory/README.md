@@ -1,5 +1,14 @@
 # Stochastic-spread information limits
 
+**Reproduction recovery, 25 November 2026.** The analytical programs and tests
+removed in `419e6bae` are retained here again under the
+[theoretical-calculation rule](../../../../development.md#theoretical-calculations).
+Their scientific model is the historical `f13e3bc937f5b45949d7fd0adaedbe689f1b71b7`
+model, not the current modem. The recorded JSON outputs remain unchanged.
+The pulse/FIR probe now contains only the original mathematical table/kernel
+formulas, and the [window-covariance helper](window_covariance.py) contains only
+the original public covariance preparation; neither restores a receiver.
+
 This is analytical evidence for specified Gaussian observation models. No modem
 or channel simulation is run by these files. The [calculation](spread_frontier.py)
 produces [182 spectrum/SNR cases](spread_frontier.json), covering total-triplet
@@ -105,8 +114,12 @@ rare-tail calibration is claimed. Jakes spectra are outside this bounded study.
 The separate [actual-table calculation](transmitter_bound.py), its
 [C++ helper probe](pulse_bound_probe.cpp), [results](transmitter_bound.json) and
 [five checks](test_transmitter_bound.py) bind an envelope bound to the inspected
-v3 source. The probe calls the shared `pattern_pulse` implementation rather than
-substituting another RRC formula.
+historical v3 source. The original probe called its shared `pattern_pulse`
+implementation. The recovered standalone probe uses those exact pulse-table and
+Gaussian FIR coefficient formulas, retaining their arithmetic order; it does not
+substitute a current pulse or another RRC formula. The original input hashes
+remain in [the recorded result](transmitter_bound.json), and new reports identify
+both that historical model and the recovered calculation sources.
 
 Every chip permutes the amplitudes `sqrt(.4), 1, sqrt(1.6)` across the three
 carriers. Let their sum be `A` and the actual carrier gain be `g`. The source's
@@ -156,15 +169,38 @@ interpolation bound and is not covered by these particular discrete examples.
 
 These calculations bound the deterministic source before stochastic fading;
 received Rayleigh gains remain unbounded. The continuous and discrete reports
-retain separate assumptions, current source hashes and numerical padding.
+retain separate assumptions, recorded source hashes and numerical padding.
 The 1e−9 padding is an engineering allowance, not a formal certificate for all
 compiler, libm, extreme-coordinate or analog reconstruction behavior.
 
-Reproduce from the repository root with the scientific Python environment:
+## Reproduction and source identity
+
+Use Python 3 with NumPy, SciPy and mpmath, plus a C++20 compiler for the small
+pulse/FIR formula probe. Torch, receiver builds and GPU execution are not needed.
+The recovered [spread calculation](spread_frontier.py) and the three existing
+test files are unchanged from their last pre-deletion versions. The
+[transmitter calculation](transmitter_bound.py) replaces imports of the retired
+modem with fixed historical constants and the standalone probe. The
+[public-window diagnostic](actual_window_information.md) uses a spectrum-only
+extraction of the covariance mathematics from the original
+[`triad_gaussian_window.py`](https://github.com/mirage335-colossus/pumpModem/blob/f13e3bc937f5b45949d7fd0adaedbe689f1b71b7/tools/triad_gaussian_window.py)
+(SHA256 `dd5d8083999a97f66f74673264f80117b06557c45b3f4646a88e9668a29d03ee`).
+Its noisy-observation scoring, Torch paths and persistent receiver machinery are
+not part of this calculation. Later changes to that retired receiver's numerical
+guards do not silently change this historical covariance model.
+
+The recovery passed all 18 existing mathematical tests, plus a separate
+[retained public-design check](actual_window_information.md#retained-designs-and-reproduction-coverage)
+covering the two surviving G001 inputs at J64. Newly generated reports
+matched all 10,477 numerical values in `spread_frontier.json` and 356 in
+`transmitter_bound.json` within relative tolerance `5e-12`; the historical pulse
+table and FIR coefficient hashes also matched. These are reproduction checks,
+not receiver or physical-channel qualification. They used Python 3.13, NumPy
+2.5.4, SciPy 1.18.1 and mpmath 1.3.0. The C++ probe and reports are temporary;
+reproduction should write outside the retained reference outputs:
 
 ```sh
-OPENBLAS_NUM_THREADS=1 python docs/validation-data/triad-v3/2026-11-02-spread/theory/spread_frontier.py --output docs/validation-data/triad-v3/2026-11-02-spread/theory/spread_frontier.json
-OPENBLAS_NUM_THREADS=1 python -m unittest discover -s docs/validation-data/triad-v3/2026-11-02-spread/theory -p test_spread_frontier.py
-OPENBLAS_NUM_THREADS=1 python docs/validation-data/triad-v3/2026-11-02-spread/theory/transmitter_bound.py --output docs/validation-data/triad-v3/2026-11-02-spread/theory/transmitter_bound.json
-OPENBLAS_NUM_THREADS=1 python -m unittest discover -s docs/validation-data/triad-v3/2026-11-02-spread/theory -p test_transmitter_bound.py
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 docs/validation-data/triad-v3/2026-11-02-spread/theory/spread_frontier.py --output /tmp/spread_frontier-reproduced.json
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 docs/validation-data/triad-v3/2026-11-02-spread/theory/transmitter_bound.py --output /tmp/transmitter_bound-reproduced.json
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 -m unittest discover -s docs/validation-data/triad-v3/2026-11-02-spread/theory -p 'test_*.py'
 ```

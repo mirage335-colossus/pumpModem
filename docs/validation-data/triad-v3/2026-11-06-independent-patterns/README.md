@@ -1,5 +1,9 @@
 # Independent bit patterns and power-balanced APSK spreading
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../README.md)
+governs execution.
+
 The current default is `independent-apsk-v2`. See the [format and development guide](../../../triad-patterns.md) for exact construction, replay compatibility and cheap commands. This is an isolated triad change; ordinary Robust framing/receiver code was not integrated or qualified.
 
 ## Implementation and security scope
@@ -63,4 +67,4 @@ Passed checks include native source, shaping, channel, receiver, stream/probe, l
 
 Original failures were retained: a source test included an intentionally zero rounded end cell, and the stream power object initially omitted revision metadata. Both were corrected without weakening active-cell or identity checks. EME at 6 kHz also hit an existing pre-planner default 4000-Hz IF check; explicitly requesting the intended 1725 Hz IF passed without raising sample rate. The first random-HF legacy row preceded a metadata-only Helper rebuild; per-run hashes disclose this boundary.
 
-Use the [short commands in the guide](../../../triad-patterns.md#noise-like-appearance-and-cheap-development-checks). `summary.json`, `evidence.tar.gz` and `SHA256SUMS` retain compact results, commands, fixture hashes and source identities. Binary probe arrays are reproducible and omitted from the archive. No RunPod resources were needed for these bounded CPU and cable checks. General blind multi-day acquisition, full parameter-cross-product qualification and physical LPI/AGC guarantees remain outside the demonstrated scope.
+Use the [historical short commands in the guide](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/triad-patterns.md#noise-like-appearance-and-cheap-development-checks). `summary.json`, `evidence.tar.gz` and `SHA256SUMS` retain compact results, commands, fixture hashes and source identities. Binary probe arrays are reproducible and omitted from the archive. No RunPod resources were needed for these bounded CPU and cable checks. General blind multi-day acquisition, full parameter-cross-product qualification and physical LPI/AGC guarantees remain outside the demonstrated scope.

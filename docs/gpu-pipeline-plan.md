@@ -284,8 +284,11 @@ Take the sub-steps in this order. Run the gate after each.
   Each must preserve the exact evidence. The native route already reuses the
   rank-pass slope lists for surviving timing atoms. An opened device
   proposal session still evaluates its existing per-call fallback policy.
-- **3e. Optional: the exact FP64 pass on the device.** Only if Phase 1 shows
-  the host pass bounds the stage after 3c.
+- **3e. Optional: the exact FP64 pass on the device.** Consider this only after
+  3c has passed its gate and fresh stage attribution shows that the host FP64
+  survivor pass remains a material bottleneck. Measure its time and transfer
+  costs in the same configured slot, then compare the candidate device pass
+  with that baseline; keep the exact evidence and existing fallback behavior.
 
 **Checks.** The gate. Extend `test_triad_vulkan --drift` for each new kernel:
 compare with the native record bit for bit where the arithmetic is FP64, and

@@ -1,5 +1,9 @@
 # Corrected dispersive response probe, settled rerun
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../../README.md)
+governs execution.
+
 The first probe's `corrected_results.jsonl` is retained as an original failed
 diagnostic. Its fixed 5,000-second warm-up was shorter than the 8,888.9-second
 maximum branch delay at 0.000075-Hz spacing. Therefore its large error at that
@@ -67,15 +71,15 @@ than deriving them from per-tone magnitude RMS.
 The plot's four inputs are maintained in this directory:
 
 - [Corrected results](response-results.jsonl), 58 profiles, and their
-  [probe source](dispersive_probe.cpp), with the hashes given above.
+  [historical probe source](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective-correction/response-v2/dispersive_probe.cpp), with the hashes given above.
 - [Frozen legacy results](legacy-response-results.jsonl), **30 profiles**,
   SHA-256 `89b4463a9e0003faa593d29c8727843eadbcbe6f56f3826fb3ae68435fe40a48`.
-- [Frozen legacy probe source](legacy_probe.cpp), SHA-256
+- [historical Frozen legacy probe source](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective-correction/response-v2/legacy_probe.cpp), SHA-256
   `26fecc0ae5f8e9e2e3be0dc72a3d097095b45496d4214430f79a19895c362dd0`.
   This source establishes Fs=1 Hz and seed A, which its historical JSONL
   did not record.
 
-[The plotting script](plot_response.py) verifies all four exact input hashes
+[historical The plotting script](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective-correction/response-v2/plot_response.py) verifies all four exact input hashes
 and embeds their paths/hashes and its own source hash in PNG metadata. No
 ignored local-evidence files or new probe executions are needed. From the
 repository root, using a Python environment with Matplotlib installed:

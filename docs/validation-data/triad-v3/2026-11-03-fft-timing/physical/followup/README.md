@@ -1,5 +1,9 @@
 # Independent long-span cohort and selected duration/spread followups
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../../../README.md)
+governs execution.
+
 All **80 additional sampled captures** completed and pass the independent
 record/status/score/manifest audit. This snapshot is separate from the
 [initial 152 captures](../README.md), whose files and denominators are preserved.
@@ -18,7 +22,7 @@ independent validation of A. Changing sample rate changes stochastic sample
 consumption, so equal roots do not preserve identical continuous paths.
 
 The [summary](summary.json) includes each capture, both interval methods,
-energy benchmarks, timing and exact bindings. [analysis.py](analysis.py)
+energy benchmarks, timing and exact bindings. [historical analysis.py](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-fft-timing/physical/followup/analysis.py)
 recounts only retained files. The primary cohort improves evidence beyond
 four trials, but **does not establish 99% or 90% reception** at 95% confidence:
 

@@ -135,7 +135,7 @@ Alternatives include a Gaussian lobe, empirical delay-Doppler kernel, or discret
 
 ## Validation evidence needed
 
-Geometry agreement cannot validate lunar scattering, and self-echo observations cannot by themselves validate separated-station EME. Target-frequency captures with calibrated station patterns and noise are the decisive missing evidence. The [appraisal protocol](../../../_appraisal/highFidelity-triple_Robust_Modem/experiment-protocol.md#eme-validation) contains the concrete validation plan and decision gates.
+Geometry agreement cannot validate lunar scattering, and self-echo observations cannot by themselves validate separated-station EME. Target-frequency captures with calibrated station patterns and noise are the decisive missing evidence. The [coverage matrix](../../../_appraisal/highFidelity-triple_Robust_Modem/coverage.md#five-link-adequacy-and-receiver-generality) records executed EME cases and missing coverage; the [implemented EME model and limits](../../../_appraisal/highFidelity-triple_Robust_Modem/models.md#eme-coupled-kernel-and-numerical-limits) documents its numerical scope.
 
 ## Unresolved evidence needs
 

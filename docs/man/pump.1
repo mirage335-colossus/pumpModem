@@ -19,9 +19,12 @@ subcommands. Fast modem behavior and options are documented in
 .BR pump-fast (1).
 .PP
 The former single-carrier Robust audio commands have been removed. Robust
-transmission and reception are unavailable in the GUI pending connection of the
-canonical native backend. The staged Python receiver components are not an
-end-to-end command-line service.
+transmission and reception are available through the shared GUI's canonical
+native modem stack; the command-line interface does not provide a Robust
+transmit or receive service. Python tools orchestrate native checks and analyze
+results, but do not provide an operating receiver. See
+.BR datapump-gui (1)
+and the project documentation for the configured-calendar and qualification limits.
 .SH COMMANDS
 .TP
 .B devices

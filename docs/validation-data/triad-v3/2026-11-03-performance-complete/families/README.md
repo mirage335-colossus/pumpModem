@@ -1,5 +1,9 @@
 # Preserved sampled-family performance evidence
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../../README.md)
+governs execution.
+
 These are ten completed runs, including failed and inconclusive forecasts,
 plus one bounded diagnostic.
 Six distinct GPU cases validated a forecast across the separate qualification
@@ -105,7 +109,7 @@ claims complete-scope qualification or cold-latency qualification.
 
 The [crossed CPU diagnostic](crossed-diagnostic/cpu-cross-001/result.json.gz)
 ran six balanced blocks in 44.855 seconds using the
-[frozen script](crossed-diagnostic/crossed.py.gz) and
+[historical frozen script](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-complete/families/crossed-diagnostic/crossed.py.gz) and
 [plan](crossed-diagnostic/cpu-cross-001/plan.json.gz). It crossed retained/fresh
 input with call order after generation and checked identical sampled-array
 hashes. The descriptive balanced fresh-minus-cached request-time difference
@@ -136,12 +140,12 @@ still contain their original embedded data. Per-group cached-generation
 receipts are retained once per run. Physical arrays, temporary capture trees
 and executable binaries are excluded.
 
-[matching-python-source.tar.gz](matching-python-source.tar.gz) contains all 25
+[historical matching-python-source.tar.gz](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-complete/families/matching-python-source.tar.gz) contains all 25
 recorded receiver, adapter and measurement source files, each verified against
 the hashes in the results. [source-index.json](source-index.json) maps each
 source member to the records that require those exact bytes. That original snapshot,
 including `b11`, remains unchanged. The appended stage-aware records use the
-separate [source snapshot](matching-python-source-stage-aware.tar.gz) and
+separate [historical source snapshot](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-complete/families/matching-python-source-stage-aware.tar.gz) and
 [source index](source-index-stage-aware.json), with fourteen matching members
 including the `9f3d6600` driver. The deterministic tars use
 zero timestamps and owner IDs. These snapshots are evidence, not a replacement

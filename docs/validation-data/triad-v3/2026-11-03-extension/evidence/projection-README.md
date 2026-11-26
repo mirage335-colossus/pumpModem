@@ -1,11 +1,15 @@
 # Why one 6-dB-Hz missed-hop capture was missed
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../../README.md)
+governs execution.
+
 The independent `loss-random25-validation-11-b1-signal` capture selected the
 correct bit but scored **9.067**, below the strict **22.721** and relaxed
 **17.423** gates. This evaluation used its already scored 455 timing groups and
 three public CFO alternatives; it introduced no receiver hypotheses or truth
 refinement. [Raw results and input hashes](projection-result.json) bind the
-[diagnostic source](projection-diagnostic.py) and receiver version.
+[historical diagnostic source](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-extension/evidence/projection-diagnostic.py) and receiver version.
 
 | Evaluation of clean signal after erasures | Retained energy | Energy/noise, ρ |
 | --- | ---: | ---: |

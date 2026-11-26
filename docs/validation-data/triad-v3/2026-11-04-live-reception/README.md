@@ -1,5 +1,9 @@
 # Actual three-carrier reception through the audio cable
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../README.md)
+governs execution.
+
 This experiment sends complete encrypted, clock-addressed v3 patterns through
 the Realtek ALC257 headphone-to-external-microphone cable, then runs the maintained
 isolated FFT acquisition/likelihood receiver on the captured PCM. It compares
@@ -244,7 +248,7 @@ OPENBLAS_NUM_THREADS=2 OMP_NUM_THREADS=2 python3 tools/triad_live_margins.py ana
   --output local-evidence/triad-live-reception-rescore
 ```
 
-For a new physical comparison, follow the [Live/Duplex guide](../../../triad-live-duplex.md#actual-receiver-admissions-on-cable-captures).
+For a new physical comparison, follow the [historical Live/Duplex guide](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/triad-live-duplex.md#actual-receiver-admissions-on-cable-captures).
 The archived plans specify seeds 95102/95201/95301 for calibration/primary
 validation/stress, fixed epoch 1793821728, exact fixtures, record order and gains.
 Use explicit raw ALSA devices, stereo S16 at 48 kHz and fixed logical capture

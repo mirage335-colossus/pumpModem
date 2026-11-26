@@ -26,8 +26,10 @@ on the capacity expression, idealized MFSK sweeps and finite-message limits.
 
 1. **Realistic HF noise makes the target links much weaker than earlier
    estimates.** ITU-R P.372 medians put HF receive noise at about −144 to
-   −130 dBm/Hz at 7–10 MHz (quiet rural to rural), not −164. 2 mW over 150 dB is
-   about −7 dB-Hz; over 180 dB about −37 dB-Hz.
+   −130 dBm/Hz at 7–10 MHz (quiet rural to rural), not −164. With 2 mW over
+   150 dB, the quiet-rural examples are about −7 dB-Hz at 7.1 MHz and −3 dB-Hz
+   at 10.1 MHz; over 180 dB they are about −37 and −33 dB-Hz, respectively.
+   These medians do not include additional atmospheric noise.
    ([link budget](02-noise-and-link-budget.md))
 2. **The energy received per fading coherence interval governs everything.**
    For a peak-limited transmitter in Rayleigh fading with a Gaussian Doppler

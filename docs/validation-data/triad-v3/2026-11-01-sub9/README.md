@@ -1,5 +1,9 @@
 # Sub-9-kHz, low-rate and month-span study
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../README.md)
+governs execution.
+
 The completed fixed-size holdout obtained **600/600 correct accepted bits at
 −46 dB-Hz with a requested 30-day pattern**, using `static-frequency-ucb` on
 independently generated sampled waveforms. There were no wrong accepted bits or
@@ -189,7 +193,7 @@ fixed trajectory-bank likelihood has a conditional null interpretation; a
 randomized particle likelihood estimator has its corresponding joint scope over
 observation and algorithm randomness. An unbiased likelihood estimate does not
 make its log unbiased, and does not justify selecting the best random run.
-The [analyzer](analyze.py) records these conventions in [analysis.json](analysis.json).
+The [historical analyzer](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-01-sub9/analyze.py) records these conventions in [analysis.json](analysis.json).
 
 ## Development screen and failures near the edge
 
@@ -270,7 +274,7 @@ those presence references, but its strict holdout has four misses. These are
 energy comparisons to simpler presence problems, **not a demonstrated universal
 gap to optimal correct-bit reception**.
 The observed threshold has not been bracketed by a large independent duration
-sweep. The [day oracle derivation](theory/day_oracle_diagnostic.py) and
+sweep. The [historical day oracle derivation](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-01-sub9/theory/day_oracle_diagnostic.py) and
 [results](theory/day-oracle-diagnostic.json) give assumptions and 90% alternatives.
 
 Random fading changes these comparisons. The ideal known-phase/CFO covariance
@@ -372,9 +376,9 @@ not complete waveform generation, export and acquisition throughput.
 
 ## Reproduction and check status
 
-The [screen launcher](reproduction/screen.py), [screen analysis](reproduction/analyze_screen.py),
-[Gaussian rerun](reproduction/rerun_gaussian.py), [holdout scorer](reproduction/score_holdout.py)
-and [follow-up launcher](reproduction/followup_holdouts.py) preserve actual
+The [historical screen launcher](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-01-sub9/reproduction/screen.py), [historical screen analysis](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-01-sub9/reproduction/analyze_screen.py),
+[historical Gaussian rerun](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-01-sub9/reproduction/rerun_gaussian.py), [historical holdout scorer](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-01-sub9/reproduction/score_holdout.py)
+and [historical follow-up launcher](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-01-sub9/reproduction/followup_holdouts.py) preserve actual
 commands and frozen choices. Their original execution paths must be mapped to
 the local checkout and evidence directory when replayed. Source/binary and
 workspace hashes are recorded where available; retained manifests alone do not
@@ -404,7 +408,7 @@ The separate [retained-array check](checks/retained-array-hashes.json) recompute
 1,297 manifest hashes and 46 retained array hashes without a mismatch. It
 explicitly identifies 7,099 omitted referenced files and ten retained oracle
 files lacking report hash references. Those files are not claimed verified.
-Run [its verifier](checks/verify_retained_arrays.py) with the same extracted
+Run [historical its verifier](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-01-sub9/checks/verify_retained_arrays.py) with the same extracted
 `--input` directory and a separate `--output` JSON file. This does not reconstruct
 omitted waveforms or turn the software study into a physical measurement.
 An [archive replay](checks/archive-replay.json) extracted the final compressed

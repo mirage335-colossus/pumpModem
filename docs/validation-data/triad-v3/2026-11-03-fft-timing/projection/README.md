@@ -1,5 +1,9 @@
 # Clean-signal representation in two −60 dB-Hz missed receptions
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../../README.md)
+governs execution.
+
 The original static two-tap representation retained **56.81% and 56.42%** of
 clean signal energy in two selected A850-best observations. The corresponding
 representation losses are **2.455 dB and 2.486 dB**. These are measurements at
@@ -54,7 +58,7 @@ No new detection probability or minimum-duration estimate is inferred.
 ## Bindings and independent review
 
 The byte-identical [result](result.json), [plan](plan.json) and
-[diagnostic](diagnostic.py) retain the native binary identity, original capture
+[historical diagnostic](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-fft-timing/projection/diagnostic.py) retain the native binary identity, original capture
 and score hashes, physical configuration and one-group scope. Export receipts,
 grouped manifests and original score reports are in [provenance](provenance).
 The [review record](review.json) binds those compact copies.

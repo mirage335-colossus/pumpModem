@@ -1,5 +1,9 @@
 # Practical local-CPU acquisition for the HF crystal / IC-7100 case
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../README.md)
+governs execution.
+
 The new isolated Helper-onset → complex FFT proposals → sparse dynamic receiver
 successfully acquired **16/16 independent native target-case transmissions**,
 including both arrival-prior boundaries. It did not construct the earlier
@@ -241,10 +245,10 @@ Evidence entry points:
   108-case clock-projection measurement. The 13.4-MB archive retains original
   result bytes; the approximately 500-MB sampled captures are reproducible
   separately and are not included.
-- [Source overlay](evidence/source-overlay.tar.gz),
+- [historical Source overlay](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-06-realtime/evidence/source-overlay.tar.gz),
   [source identities](evidence/source-overlay-index.json),
-  [campaign recipe](evidence/recipes/campaign.py),
-  [latency recipe](evidence/recipes/latency.py) and [SHA-256 inventory](SHA256SUMS).
+  [historical campaign recipe](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-06-realtime/evidence/recipes/campaign.py),
+  [historical latency recipe](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-06-realtime/evidence/recipes/latency.py) and [SHA-256 inventory](SHA256SUMS).
 
 The final focused test run completed **82 passes and two explicit skips** in
 8.33 seconds (84 discovered cases): one CUDA check had no local hardware, and

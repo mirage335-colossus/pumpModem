@@ -1,5 +1,9 @@
 # Bounded clock-step source and receiver comparison
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../README.md)
+governs execution.
+
 This evidence supports the limited [clock-step profile](../../../triad-clock-follow.md),
 not universal clock synchronization. No machine clock was changed. No audio
 device or cloud resource was used. Propagation, oscillator impairment and
@@ -134,8 +138,8 @@ rate `.000006`, Added 1000, seed 74004, source duration 100000000, start
 (denominator 1), source duration 200000, window 800, start 105000, seed 74003,
 correction date 100000, names `hf-base-74003`/`hf-plus-74003`, noise seed 84003.
 
-Copy the retained [incremental validation script](incremental-validation.py)
-and [affine diagnostic](affine-diagnostic.py) into
+Copy the retained [historical incremental validation script](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-06-clock-follow/incremental-validation.py)
+and [historical affine diagnostic](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-06-clock-follow/affine-diagnostic.py) into
 `local-evidence/triad-clock-follow/` to reproduce their original relative paths,
 then run them with the numerical environment and `OPENBLAS_NUM_THREADS=1
 OMP_NUM_THREADS=1`. Their JSON outputs are diagnostic receipts in that ignored

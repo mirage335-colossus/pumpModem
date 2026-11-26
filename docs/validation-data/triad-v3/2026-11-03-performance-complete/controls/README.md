@@ -1,5 +1,9 @@
 # Performance-decision controls
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../../README.md)
+governs execution.
+
 These records test decision logic under declared timing distributions and verify
 one real adapter's enclosing timer. They **do not establish the future false-failure
 rate of CI**, receiver sensitivity, hardware slowdown, or complete suite coverage.
@@ -78,7 +82,7 @@ Important limits:
 ## Real sampled adapter timer check
 
 [Actual result](actual-delay-001/result.json), [frozen plan](actual-delay-001/plan.json),
-[reproducer](actual-delay-001/reproduce.py) and
+[historical reproducer](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-complete/controls/actual-delay-001/reproduce.py) and
 [reproduction receipt](actual-delay-001/reproduction-receipt.json) are preserved,
 as are all eight native-exported input files under `actual-delay-001/sampled-stats/`.
 The inputs came from the shared native HF channel with an actual noisy

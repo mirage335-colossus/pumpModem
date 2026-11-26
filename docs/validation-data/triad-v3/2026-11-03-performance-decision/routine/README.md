@@ -1,5 +1,9 @@
 # Prospective CPU decision routine
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../../README.md)
+governs execution.
+
 The [complete summary](cpu-decision-001/summary.json.gz) records one completed
 CPU campaign: **741.035036 seconds**, all **23 runtime gates passed**, all
 16 matrix-selected functional commands passed, and `errors: []`. The process
@@ -64,7 +68,7 @@ and enabled [reporting projection receipt](identical-anchor-inputs/reporting-pro
 are exact input copies; the original proof and all unchanged runtime/input
 identities remain required by that projection.
 Its historical source-archive hash points to the unchanged
-[identical-FFT source snapshot](../../2026-11-03-performance-complete/identical-fft/matching-source.tar.gz),
+[historical identical-FFT source snapshot](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-complete/identical-fft/matching-source.tar.gz),
 which remains in the earlier archive rather than being relabeled as current.
 
 The summary's historical native and Python coverage receipt hashes were checked

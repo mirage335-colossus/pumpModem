@@ -1,5 +1,9 @@
 # CPU/GPU FFT acquisition comparison on one retained capture
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../../README.md)
+governs execution.
+
 **CUDA did not accelerate this cold-start CLI workload.** On one RTX PRO
 6000 Blackwell Workstation Edition, two CUDA FP32 runs took 5.356 and
 5.058 seconds, compared with 4.605 and 4.471 seconds for CPU FP32 on the
@@ -9,7 +13,7 @@ precision qualification or a resident GPU throughput measurement.
 
 The [independently reviewed summary](summary.json) retains commands, source
 and input hashes, resource reports, all six job statuses and the full-table
-comparison results. [compare.py](compare.py) is the byte-identical supplied
+comparison results. [historical compare.py](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-fft-timing/gpu/compare.py) is the byte-identical supplied
 campaign driver. The six large raw score tables remain in ignored
 `local-evidence/triad-fft-timing/gpu/remote/`; they are not duplicated here.
 

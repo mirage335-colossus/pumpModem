@@ -1,5 +1,9 @@
 # Selective amplitude modulation in the isolated three-carrier modem
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../README.md)
+governs execution.
+
 > **Model and capture correction.** Every receiver result in this record used
 > the historical `legacy-allpass-v1` selective operator. That operator remains
 > a valid reproducibility target for these runs, but the measured 0.00075-Hz /
@@ -140,7 +144,7 @@ use zero residual CFO beyond the exported candidates. This is a comparison of
 declared receivers, not an equal-hardware throughput comparison or a claim of
 universal optimality.
 
-[`retention.py`](reproduction/retention.py) separately computes noiseless
+[historical `retention.py`](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/retention.py) separately computes noiseless
 projection energy from exported means, Grams and signal energy, using an FP64
 PSD pseudoinverse with a declared rank cutoff. A candidate remains fixed over
 the observation while its fitted coefficients may vary per block. The report
@@ -162,7 +166,7 @@ For Added Symbols ×1, the existing mapping gives fine-symbol rate per carrier
 
 [Export plan](reproduction/screen-export-plan.json),
 [score plan](reproduction/screen-score-plan.json),
-[generator](reproduction/make_screen.py).
+[historical generator](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/make_screen.py).
 
 The 48 cases contain four balanced sampled physical paths each, giving 192
 exports. They reuse 20 distinct root vectors across the configurations; these
@@ -196,7 +200,7 @@ listed C/N₀ grid. Its replicas remain conditional on the sampled physical path
 
 [Export plan](reproduction/highspread-export-plan.json),
 [score plan](reproduction/highspread-score-plan.json),
-[generator](reproduction/make_highspread.py).
+[historical generator](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/make_highspread.py).
 
 Ten cases use two balanced paths each, totaling 20 exports: B=D=10 Hz with
 6 ms delay, and B=D=30 Hz with 7 ms delay, each at Off, Each25, Each65, Slow65
@@ -214,7 +218,7 @@ both change between profiles; their effects are not independently identified.
 
 [Export plan](reproduction/holdout-export-plan.json),
 [score plan](reproduction/holdout-score-plan.json),
-[generator](reproduction/make_holdout.py).
+[historical generator](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/make_holdout.py).
 
 Nine fixed signal cells contain 300 balanced observations each: **2700 signal
 exports**, plus **192 controls** in six 32-path null/wrong-key cells. These use
@@ -248,7 +252,7 @@ the denominator.
 
 [Export plan](reproduction/long-export-plan.json),
 [score/retention plan](reproduction/long-score-plan.json),
-[generator](reproduction/make_long.py).
+[historical generator](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/make_long.py).
 
 Off and Each65 each have 16 balanced paths, 32 exports total, with paired
 roots across modes. They request 850 days of active time at GUI rate .0036 Hz,
@@ -268,7 +272,7 @@ performance.
 ### Receiver alternatives and computation
 
 [Alternative plan](reproduction/alternatives-score-plan.json),
-[generator](reproduction/make_alternatives.py),
+[historical generator](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/make_alternatives.py),
 [threading benchmark plan](reproduction/threading-benchmark-plan.json).
 
 Twenty-five new jobs compare seven receiver configurations over five existing
@@ -380,9 +384,9 @@ The final inventory and archive receipt are recorded below. Its
 `scientific_qualification` remains false.
 
 The accepted [holdout summary](reproduction/holdout-summary.json) and
-[reproducer](reproduction/summarize_holdouts.py) collect all 24 cells from the
+[historical reproducer](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/summarize_holdouts.py) collect all 24 cells from the
 two final audits. The [six-panel development figure](screen-curves.png) and
-[plot script](reproduction/plot_results.py) show conditional development
+[historical plot script](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/plot_results.py) show conditional development
 curves after verifying 18 score NPZs and 60 manifests. Shading shows the
 minimum and maximum conditional reception fractions across sampled physical
 paths; it is **not a confidence interval** or a new holdout result.
@@ -556,7 +560,7 @@ and method already described for the primary audit.
 | g1 slower rate | .36 | −14 | 297 | 299 | 3 / 1 | .959187 / .969562 |
 
 The accepted independent [confidence recount](reproduction/followup-confidence.json)
-and [reproducer](reproduction/followup_confidence.py) bind all 1628 manifests
+and [historical reproducer](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/followup_confidence.py) bind all 1628 manifests
 and score rows, including admitted-control identities. At the three original-rate
 edge points, the strict-gate balanced-mean one-sided 95% **upper** bounds are
 .921889, .929941 and .974302, respectively. All are below .99: those fixed
@@ -587,7 +591,7 @@ particular, the 300/300 slower g01 signal result does not establish usable
 encrypted-message discrimination by itself.
 
 The independently accepted [wrong-key diagnostic](reproduction/wrong-key-diagnostic.json)
-and [reproducer](reproduction/wrong_key_diagnostic.py) bind six selected raw
+and [historical reproducer](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/wrong_key_diagnostic.py) bind six selected raw
 workspaces and 14 saved score-report/NPZ pairs. Its three focused self-checks
 passed, with an additional dense Gaussian log-LR variance check agreeing
 to 8.88×10⁻¹⁶. For the selected slower-rate path 90001, the best fixed
@@ -637,7 +641,7 @@ this conditional signal/null comparison does not test. Selection after viewing
 these rows cannot be treated as fresh independent validation.
 
 The accepted [comparison summary](reproduction/comparisons-summary.json) and
-[reproducer](reproduction/summarize_comparisons.py) retain all matched outcomes,
+[historical reproducer](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/summarize_comparisons.py) retain all matched outcomes,
 stage timings, workspace receipts and the long-refinement comparison. In the
 CPU FP32 / CUDA FP32 / CPU FP64 check, 768 paired conditional trials had
 identical winning bits and strict-gate decisions for every device/precision
@@ -649,7 +653,7 @@ tested arrays, not all possible near-threshold cases or peak-memory behavior.
 
 Five selected existing actual-noisy captures were also replayed on CPU FP64
 from the retained raw statistics. The [replay result](reproduction/replay-summary.json)
-and [script](reproduction/replay_selected.py) report maximum absolute score
+and [historical script](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/replay_selected.py) report maximum absolute score
 difference 4.5729×10⁻⁶ relative to the original GPU FP32 scores, with all
 winners and strict/relaxed decisions unchanged. This reproduces the selected
 wrong-key admissions as well as signal decisions; it is not a new performance
@@ -666,7 +670,7 @@ The retained archive is `local-evidence/triad-selective/selective-final.tar.gz`,
 185,675,334 bytes, SHA-256
 `6bcdc7ee6d210d4b57c5aad7abdbb15fd987e12680d3bd7055053e5aff56b3b4`.
 The [verification receipt](reproduction/archive-verification.json) and
-[verifier](reproduction/verify_archive.py) record the source bundle, before/after
+[historical verifier](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/verify_archive.py) record the source bundle, before/after
 source inventory, binary, manifests, job receipts and scorer input binding.
 The repaired verifier passed independent review, and the maintained receipt
 records the accepted result.
@@ -720,7 +724,7 @@ the native-scalar/full-report regression repair. This failure was not a change
 to the physical law or reception threshold. Successful software checks do not
 resolve the pending reception and operational calibration qualifications.
 
-The plan-bound [screen analyzer](reproduction/analyze_screen.py) checks report
+The plan-bound [historical screen analyzer](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/analyze_screen.py) checks report
 options, planned inputs, score NPZ hashes, manifest receipts, saved-count
 recounts and missing/failed observations. Its default receipt validation does
 not imply every large input array was locally rehashed; the final archive audit
@@ -731,7 +735,7 @@ retained here after completion.
 ## Local Added Symbols ×10 diagnostic
 
 The [Added Symbols probe](reproduction/added-probe-summary.json) and
-[reproducer](reproduction/added_probe.py) completed 32 local sampled exports
+[historical reproducer](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective/reproduction/added_probe.py) completed 32 local sampled exports
 and 32 actual-noisy CPU FP64 comparisons. All exports exited successfully.
 This post-hoc diagnostic uses the first eight roots from each slower-rate
 profile/control cell, comparing the existing ×1 results with ×10 and

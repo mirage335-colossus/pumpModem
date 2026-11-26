@@ -224,7 +224,7 @@ engineering stress. Do not invent a probability distribution from one maximum.
 | Absorption/outage | Flare [HF11], energetic-particle/polar-cap absorption [HF12], auroral absorption or layer cutoff. | Event, sunlight/latitude/frequency, path loss or measured power/SNR trajectory, affected/unaffected modes, outage interval. | Decode-through-fade results and Gaussian noise-only tests. |
 | Extreme/scientific edge | F.1487 comparative sweep limits or a published measured extreme used as a bounded stress. | Label explicitly as standards sweep, observed finite maximum, or synthetic extrapolation; state duration, estimator, and falsifier. | “Natural worst case,” tail probability, or service claim. |
 
-The [skywave appraisal protocol](../../../_appraisal/highFidelity-triple_Robust_Modem/experiment-protocol.md#skywave-validation) specifies the matched signal and negative controls. Low SNR or severe impairment can alter admission without identifying the physical cause; repeated processing of one capture does not establish independent environmental evidence.
+The [frozen appraisal coverage matrix](../../../_appraisal/highFidelity-triple_Robust_Modem/coverage.md#five-link-adequacy-and-receiver-generality) records the executed skywave suite, its controls and remaining adequacy limits; the [adverse-skywave experiment map](../../../_appraisal/highFidelity-triple_Robust_Modem/hf-experiments.md#frozen-bounded-campaigns) identifies bounded campaigns. Low SNR or severe impairment can alter admission without identifying the physical cause; repeated processing of one capture does not establish independent environmental evidence.
 
 ## Native modeling and validation options
 
@@ -240,7 +240,7 @@ Doppler, oscillator error, absorption, or AWGN. Preserve continuous phase and
 channel state across chunks and the emitted DATA plus Helper waveform; do not
 reset a realization at public slot boundaries.
 
-Concrete analytic controls, matched comparisons and mode-removal procedures are specified in the [appraisal protocol](../../../_appraisal/highFidelity-triple_Robust_Modem/experiment-protocol.md#skywave-validation). Their relevance depends on preserving the observation method and the physical regime represented by the source data.
+The [appraisal evidence map](../../../_appraisal/highFidelity-triple_Robust_Modem/hf-experiments.md#mechanisms-and-independent-checks) describes the independent controls and matched comparisons; the [coverage matrix](../../../_appraisal/highFidelity-triple_Robust_Modem/coverage.md#five-link-adequacy-and-receiver-generality) states how far they qualify the skywave receiver. Their relevance depends on preserving the observation method and the physical regime represented by the source data.
 
 The intended falsifiers are concrete. A Watterson-only claim is falsified for
 a declared regime if measured residuals, stationarity checks, path-delay

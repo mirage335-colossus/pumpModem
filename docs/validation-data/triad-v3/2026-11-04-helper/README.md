@@ -1,5 +1,9 @@
 # Production Helper / isolated three-carrier sampled study
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../README.md)
+governs execution.
+
 This record accompanies [the maintained integration guide](../../../triad-helper.md).
 It tests the requested HF and microwave configurations with the production
 Helper waveform and the corrected shared sampled channel. It does **not**
@@ -184,7 +188,7 @@ and cross-run gates needed a Helper on/off calibration-condition identity in
 addition to the receiver procedure identity. All actual campaigns already held
 that condition fixed. The correction changes neither DSP, scores, gates nor
 saved decisions. The original script/raw summaries and
-[reporting-only patch](reporting-correction.patch) are retained;
+[historical reporting-only patch](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-04-helper/reporting-correction.patch) are retained;
 `campaign-results.json` supersedes their pooled signal intervals.
 
 The [raw campaign archive](raw-campaigns.tar.gz) contains public manifests,

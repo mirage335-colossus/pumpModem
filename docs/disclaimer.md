@@ -8,9 +8,11 @@ a particular class of user could never use the software.
 
 The maintained services use standard cryptographic primitives through OpenSSL;
 their current constructions and limits are documented in [crypto.md](crypto.md)
-and [security.md](security.md). Robust transmission and reception are
-unavailable in the GUI pending backend connection; this notice does not define
-a Robust wire format.
+and [security.md](security.md). Robust transmission and reception are available
+through the shared GUI's native modem stack, subject to the supported configured
+calendar and receiver scope in [current architecture](robust-current.md) and
+[requirements](requirements.md). This notice does not define a Robust wire
+format.
 No assertion is made that these choices alone establish an export-control
 classification, public-information exclusion, RF authorization, or exemption.
 

@@ -12,6 +12,19 @@ data only for a concrete current purpose that a concise finding cannot serve,
 and retire redundant material when that purpose ends. Provenance completeness
 is stated by each record.
 
+Standalone [theoretical calculations](../development.md#theoretical-calculations)
+and their outputs are retained research. Retiring an operating receiver does
+not retire the mathematics or the small programs that reproduce its stated
+bounds. The recovered [spread calculations](triad-v3/2026-11-02-spread/theory/README.md)
+and [presence frontier](triad-v3/2026-11-02-minus60/README.md#admission-budgets-and-theoretical-references)
+record their historical models, minimal dependencies and current reproduction
+checks separately from receiver qualification.
+
+Links marked **historical** in these records resolve to a verified, pinned Git
+revision of retired source, archives or guide sections. They preserve the
+original evidence context without restoring an obsolete implementation or
+turning a historical campaign recipe into a current execution instruction.
+
 The [triad archive-retirement manifest](triad-v3/archive-content-retirement.json)
 records removed archived source/build/test drivers and checksum updates.
 Retained data leaves were verified byte-identical; outer archive and checksum

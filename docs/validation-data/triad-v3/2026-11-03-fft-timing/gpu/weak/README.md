@@ -1,5 +1,9 @@
 # Postselected weak-signal precision check
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../../../README.md)
+governs execution.
+
 CPU FP64 and CUDA FP32 preserved the original CPU FP32 winning bits and both
 admission decisions on three selected observations near the strict threshold.
 The maximum change in either bit's mixture log-likelihood was **6.94927e−6**.
@@ -47,7 +51,7 @@ reductions retain complex128/float64, and FP32 applies to observation FFTs and
 the bounded mode multiplication. TF32 was disabled. See the
 [parent precision description](../README.md) for these implementation limits.
 
-The byte-identical [driver](weak_precision.py) is bound by SHA256
+The byte-identical [historical driver](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-fft-timing/gpu/weak/weak_precision.py) is bound by SHA256
 `95b2510d998dfc50278c2bb5e98500f0d763b5f46e90327c593e65d3f31c60a5`.
 It requires the exact frozen plan/source closure, original followup results and
 retained workspaces, a CUDA environment, and a fresh output directory. Its

@@ -1,5 +1,9 @@
 # Per-test decision-stopping controls
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../../README.md)
+governs execution.
+
 This is new evidence for the corrected decision policy, separate from the
 [earlier precision-stopping controls](../../2026-11-03-performance-complete/controls/README.md).
 The experiment tests the maintained decision helper using simulated runtimes.
@@ -90,7 +94,7 @@ after each completed slowdown factor and preserves failure/incomplete state.
 Runtime can vary; seeded numerical outcomes should reproduce with the matching
 sources and compatible numerical libraries.
 
-[matching-source-and-test.tar.gz](matching-source-and-test.tar.gz) preserves
+[historical matching-source-and-test.tar.gz](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-decision/controls/matching-source-and-test.tar.gz) preserves
 all five source files declared by the plan, plus the eight-test source snapshot.
 It is a compact source receipt, not a full repository or dependency lock.
 All five declared source hashes matched both during the run and preservation.

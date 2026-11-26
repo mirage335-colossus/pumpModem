@@ -1,5 +1,9 @@
 # Initial sampled FFT physical contrasts and long observations
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../../README.md)
+governs execution.
+
 The initial campaign completed **152 actual sampled captures**: 136 across
 17 short/moderate-duration contrasts and 16 across two long-duration cells.
 All exports and scores completed. Independent recount finds **63/68 correct
@@ -17,7 +21,7 @@ channel and synchronization assumptions described below.
 
 The [reviewed summary](summary.json) preserves every capture's outcomes,
 geometry, energy accounting, durations, costs and provenance. The read-only
-[analysis script](analysis.py) reproduces the recount without running any
+[historical analysis script](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-fft-timing/physical/analysis.py) reproduces the recount without running any
 receiver or simulator. This is the initial 152-capture snapshot; the completed
 [half-duration, independent 32-signal and higher-Doppler followups](followup/README.md)
 are separate evidence, not silently included here.

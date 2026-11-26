@@ -1,5 +1,9 @@
 # Three-carrier reception at −60 dB-Hz
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../README.md)
+governs execution.
+
 This study extends the isolated three-carrier modem to reciprocal sample rates
 and genuinely long sampled observations at total-triplet **C/N₀ = −60 dB-Hz**.
 It compares rates, observation durations, fixed and evolving rays, common and
@@ -305,6 +309,31 @@ retaining the original stricter UCB calibration.
 
 The [theory implementation](theory/frontier.py) and [numerical results](theory/frontier.json)
 separate a known-waveform Gaussian reference from unknown Gaussian-ray models.
+**25 November 2026 reproduction recovery.** The analytical program and its
+[focused mathematical checks](theory/test_frontier.py) are restored from
+pre-deletion revision `357a50970a0c6214eeaade7c5704bbc39abd4b79`. Only the two
+FP64 OU reference formulas and the family-adjusted Gaussian energy calculation
+needed from retired files are isolated in [presence_reference.py](theory/presence_reference.py).
+No receiver or campaign implementation is restored. The original JSON is unchanged;
+all three source hashes it records match that revision. New reports identify the
+recovered source separately and carry the original revision as recovery provenance.
+The eighth check compares every scientific result and assumption with the retained
+record; source hashes and installed library versions are expected to differ.
+
+With Python 3, mpmath, SciPy and NumPy available in a scientific environment:
+
+```sh
+python3 docs/validation-data/triad-v3/2026-11-02-minus60/theory/frontier.py \
+  --output /tmp/minus60-frontier.json
+python3 -m unittest discover \
+  -s docs/validation-data/triad-v3/2026-11-02-minus60/theory -p test_frontier.py
+```
+
+This bounded 42-row analytical calculation does not run a receiver or simulate
+years of observations. Its seven original checks and retained-result comparison
+passed with mpmath 1.3.0, SciPy 1.18.1 and NumPy 2.5.4 during recovery. This restores
+theoretical reproducibility, not qualification of the historical or current modem.
+
 With the present minute schedule, the optimistic known-waveform reference needs
 **432.072 useful days for 99% presence** under the strict per-component false
 tail, or **261.203 days for 90% presence** under the relaxed allocation. Presence
@@ -367,12 +396,12 @@ throws when unvisited durations remain; it does not assume monotonic evidence
 across rank changes. Session checkpoint/restart and field recovery remain
 unimplemented.
 
-The [job runner](reproduction/run_jobs.py) and retained generation/scoring plans
+The [historical job runner](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-minus60/reproduction/run_jobs.py) and retained generation/scoring plans
 specify commands, seeds, family choices and bounded execution. Replay requires
 mapping their original workspace paths to the local checkout. The
 [receiver/source binding receipt](reproduction/receiver_bindings.json) is
 explicitly a post-run receipt of unchanged reviewed sources, not a prior
-timestamped hash commitment. The [analyzer](analyze.py) owns the final identity,
+timestamped hash commitment. The [historical analyzer](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-minus60/analyze.py) owns the final identity,
 duplicate, control, score and confidence checks. The full audit verified all
 12,672 available report-bound input-file checks before evidence pruning, with
 no failed receiver capture records. Its primary-method population checks are

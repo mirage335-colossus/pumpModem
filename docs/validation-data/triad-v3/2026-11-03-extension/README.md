@@ -1,5 +1,9 @@
 # Configuration and acquisition extension
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../README.md)
+governs execution.
+
 This continues the [broad study](../2026-11-03-broad/README.md) on source
 `23181c2d` plus the changes recorded here. It remains an isolated three-carrier
 experiment. The ordinary receiver and its regression campaign are outside scope.
@@ -12,7 +16,7 @@ remain independent. Zero shift removes the shift profile, and both topologies
 count base phase diffusion once. Stochastic sampling jitter is not implemented.
 The explicit additional modulation-rate control permits a modulation-only stress
 channel with spread None while preserving the historical default bypass.
-See the [channel contract](../../../channel-models.md#versioned-three-carrier-selective-modulation)
+See the [historical channel contract](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/channel-models.md#versioned-three-carrier-selective-modulation)
 and [v3 model description](../../../triad-v3.md).
 
 The isolated 14-test group passed locally, including measured positive/negative

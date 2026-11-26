@@ -1,5 +1,9 @@
 # Normal and CI decision-policy controls
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../../README.md)
+governs execution.
+
 These controls exercise the maintained decision helper using simulated timings.
 They do not measure receiver throughput, qualify an abbreviation model, or
 establish a future hardware error rate. The earlier
@@ -123,7 +127,7 @@ python tools/triad_perf_decision_policy_controls.py \
 python -m unittest discover -s tests -p test_triad_perf_decision_policy_controls.py
 ```
 
-[matching-source-and-test.tar.gz](matching-source-and-test.tar.gz) contains all
+[historical matching-source-and-test.tar.gz](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-broader/controls/matching-source-and-test.tar.gz) contains all
 five sources declared by both plans and the test snapshot. All declared hashes
 matched during both runs and at preservation. This compact archive is not a
 complete repository or dependency lock. The raw logs are empty because the

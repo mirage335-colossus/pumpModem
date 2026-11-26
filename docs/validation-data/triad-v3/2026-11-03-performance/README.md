@@ -1,5 +1,9 @@
 # Bounded three-carrier receiver performance study
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../README.md)
+governs execution.
+
 The suite completed its required isolated receiver coverage on a Ryzen laptop,
 an EPYC CPU and an RTX PRO 6000 Blackwell Server Edition GPU within the
 600-second backend budget. Numerical comparisons completed without a hard
@@ -120,7 +124,7 @@ occupancy or proof of peak throughput.
 Both requested FP8 probes were rejected: the generated product used FP16 tensor
 instructions rather than the requested FP8 instructions. The original
 [failed hardware profile](gpu-fp8-rejection.json.gz) and
-[rejected product PTX](rejected-fp8-product.ptx.gz) are retained. The subsequent
+[historical rejected product PTX](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance/rejected-fp8-product.ptx.gz) are retained. The subsequent
 suite records those paths as unsupported on this compiler/runtime combination,
 with no substituted-format throughput and no accepted fallback. This is not a
 claim that the GPU hardware lacks FP8 support. Wider tensor scale restoration

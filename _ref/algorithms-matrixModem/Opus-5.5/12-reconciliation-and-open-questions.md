@@ -9,7 +9,7 @@ the literature's internal disagreements, and lists what remains unknown.
 
 | Topic | Sol-6.2 | This pass | Status |
 | --- | --- | --- | --- |
-| Receive noise density | Illustrative −174/−164/−154 dBm/Hz; headline uses −164 | ITU-R P.372 medians give about −144 (quiet rural, 10 MHz) to −130 dBm/Hz (rural, 7 MHz) | **Corrected**: Sol-6.2's C/N0 and airtime estimates are 25–35 dB optimistic for HF (e.g. 2 mW/150 dB is about −7 dB-Hz, not +17) |
+| Receive noise density | Illustrative −174/−164/−154 dBm/Hz; headline uses −164 | ITU-R P.372 medians give about −144 (quiet rural, 10 MHz) to −130 dBm/Hz (rural, 7 MHz) | **Corrected**: across these noise-density endpoints, the earlier −164 dBm/Hz headline overstates C/N0 by about 20–34 dB. For quiet rural, 2 mW/150 dB gives about −7 dB-Hz at 7.1 MHz (N0 ≈ −139.9 dBm/Hz) and −3 dB-Hz at 10.1 MHz (N0 ≈ −143.7 dBm/Hz), not +17; at 180 dB the corresponding values are −37 and −33 dB-Hz. |
 | Blackwell INT4 | "INT4 listed for 8.9, 10.0, 10.3 and 12.x"; Blackwell supports INT4 Tensor input | INT4 listed only up to 8.9; RTX Blackwell whitepapers omit INT4; the 4-bit route is block-scaled FP4 | **Corrected** (see [precision chapter](07-matrix-hardware-and-precision.md)) |
 | FP4 as integer arithmetic | "not integer arithmetic" | Integer-valued E2M1 operands with FP32 accumulation are exact within ~2^24 (model and exact-emulation evidence; verify per device) | **Refined** |
 | Vega 5650U | No matrix unit; cites Vega 7nm ISA | gfx90c lacks even INT8/INT4 dot instructions; the cited ISA is gfx906 | **Corrected** |

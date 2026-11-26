@@ -4,9 +4,11 @@ This page records the historical product scope associated with version `001_00`.
 It predates retirement of the single-carrier Robust implementation and does not
 define current Robust behavior or qualification.
 
-The maintained components are the independent Fast and Legacy modems and the
-canonical native Robust transmitter/channel/Helper Generator stack. Robust GUI
-transmission and reception remain unavailable pending receiver integration.
+**25 November status clarification.** An earlier status paragraph on this page
+described the native Robust transmitter/channel/Helper Generator while GUI
+receiver integration was pending. That interim status is superseded: the current
+native Robust stack includes the receiver and shared GUI session. Neither the
+original scope nor that interim status qualifies current receiver behavior.
 See [current requirements](requirements.md),
 [Robust architecture and limits](robust-current.md), [Fast](indexes/fast.md),
 and [Legacy](legacy-modem.md).

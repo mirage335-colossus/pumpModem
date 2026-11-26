@@ -38,6 +38,13 @@ has a concrete bearing on the current triad, with source, configuration, input
 and computational-regime limits. Such a finding does not qualify the canonical
 native transmitter/channel/Helper generator or complete receiver.
 
+This retirement rule concerns operating implementations and campaign artifacts.
+The [research-material](../development.md#research-material) and
+[theoretical-calculation](../development.md#theoretical-calculations) exceptions
+still protect scientific findings, citations and the small programs and outputs
+that reproduce significant bounds. See the [retained calculation guidance](../validation-data/README.md)
+for their distinction from archived execution recipes.
+
 ## Fast measurements and reproduction
 
 Fast's former studies and receiver-cost captures are historical Git records, not

@@ -1,5 +1,9 @@
 # Three-pair first-look shadow
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../../README.md)
+governs execution.
+
 The [plan](plan.json) was frozen before examining the three-pair prefixes.
 It tests `(3, 5, 9, 17, 33)` with equal per-direction spending of α=0.05,
 only for the same 20 already-routed direct paired cases. Workloads, ordering,
@@ -24,7 +28,7 @@ second workload campaign or new qualification was run for this alternative.
 
 The original [inline analysis](replay.json) is preserved, including raw-input
 hashes. Its standalone implementation was not retained. Therefore
-[replay.py](replay.py) independently rechecks every stopping decision and upper
+[historical replay.py](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-03-performance-decision/n3-shadow/replay.py) independently rechecks every stopping decision and upper
 bound using the actual maintained `summarize` function and archived observations.
 That check found one cost-accounting discrepancy: the new Gaussian helper used
 23 inner calls, whereas the original shadow applied the old capture's 21 calls.

@@ -1,5 +1,9 @@
 # Local CPU cost: HF crystal / IC-7100, Helper, Each65
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../README.md)
+governs execution.
+
 Later implementation: the [hierarchical CPU receiver study](../2026-11-06-realtime/README.md)
 demonstrates practical complete-capture acquisition for this bounded physical-link
 case. The measurements below remain the historical Cartesian-reference diagnosis;
@@ -261,7 +265,7 @@ codec/calendar estimate, **not a supported full-message waveform test**. The
 isolated v3 source is one-bit and the Helper export's limited alternating-slot
 evaluator does not implement the 22-bit `fox` message adapter.
 
-The small [encoder probe](evidence/fox_probe.cpp) is reproducible against the
+The small [historical encoder probe](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-05-local-cpu/evidence/fox_probe.cpp) is reproducible against the
 compatible existing native object:
 
 ```sh

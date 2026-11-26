@@ -188,4 +188,5 @@ not been benchmarked here.
 
 Former single-carrier reception and recovery performance measurements are
 historical and do not define current Robust compute estimates. Robust estimates
-are unavailable pending receiver integration; see [current status](robust-current.md).
+must use source- and configuration-matched measurements of the integrated native
+receiver; see [current status](robust-current.md) and its linked validation limits.

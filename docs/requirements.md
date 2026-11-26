@@ -1,15 +1,16 @@
 # Requirements and implementation coverage
 
-The project includes independent Fast and Legacy modems and retains a Robust GUI
-entry. Robust is not currently available through the GUI. Its canonical native
-waveform/channel/Helper Generator path is `IndependentApskV2`; Python
-`WeakReceiver` acquisition and `PracticalTrackingReceiver` tracking are
-sequential stages, not an integrated receive service. See
+The project includes independent Fast and Legacy modems and a Robust modem
+connected to the shared GUI. Its canonical native transmitter, channel, Helper
+and complete receiver use the compiled `IndependentApskV2` stack; Python tools
+orchestrate native checks and analyze results, but do not provide receiver DSP
+or state. GUI availability does not qualify every configuration, unknown-start
+acquisition, complete-receiver capacity or physical performance. See the
 [current Robust architecture and limits](robust-current.md).
 
 | Component | Current scope | Guidance |
 | --- | --- | --- |
-| Robust native transmitter/channel | Canonical three-adjacent-carrier APSK waveform, shaping, streaming sampled channel and Helper Generator. No connected end-to-end receiver or GUI session. | [Robust architecture](robust-current.md); concise [pattern](triad-patterns.md), [stochastic channel](triad-stochastic.md), and [shaping](triad-shaping.md) research, with their source-bound limits |
+| Robust native modem | Compiled `IndependentApskV2` transmitter, sampled channel, Helper, complete receiver and shared GUI session. Configured-calendar operation is implemented; unknown waveform epoch/ordinal/start-time acquisition remains unqualified. Physical, sensitivity and capacity coverage is configuration-specific. | [Robust architecture](robust-current.md); concise [pattern](triad-patterns.md), [stochastic channel](triad-stochastic.md), and [shaping](triad-shaping.md) research, with their source-bound limits |
 | Fast Modem | Independent text/file-transfer modem with maintained waveform, coding, audio and interface behavior. | [Fast index](indexes/fast.md), [format](fast-mode.md) and linked measured limits |
 | Legacy Modem | Independent simplex BPSK31, BPSK125 and Olivia-4/2k text modem. | [Legacy reference](legacy-modem.md) and retained interoperability fixtures |
 | Shared interfaces | Toolkit-neutral application mapping, FLTK/Rev adapters, optional terminal/framebuffer/browser frontends and common audio/device services. | [GUI contract](gui-contract.md), [architecture](gui-architecture.md), and [frontend interfaces](frontend-interfaces.md) |

@@ -1,5 +1,9 @@
 # Three-carrier receiver diversity and hour/two-day validation
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../README.md)
+governs execution.
+
 Status: **completed bounded campaign; operational planner and broader
 qualification remain incomplete**. This is an isolated three-carrier study.
 Nothing here integrates the ordinary Robust receiver or validates a physical
@@ -8,7 +12,7 @@ radio link.
 The maintained model, assumptions, likelihood definitions, test design and
 limitations are in [the triad noise-calibration guide](../../../triad-noise-calibration.md).
 The machine-readable summary and reproduction utility are in
-[`analysis.json`](analysis.json) and [`analyze_results.py`](analyze_results.py).
+[`analysis.json`](analysis.json) and [historical `analyze_results.py`](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-01-diversity/analyze_results.py).
 The technical archive, its index and source provenance are included beside
 this report. They contain technical experiment records only.
 
@@ -152,7 +156,7 @@ The table uses the combined K=9 strict gate on the same 12 sampled paths for
 all five methods in each case. These reports originally used K=7 and two
 calibration policies, so raising the score threshold preserves the stated
 calibration allowance. The [paired recount](screen-comparison.json), reproduced
-with [compare_screens.py](compare_screens.py), binds report/score hashes and
+with [historical compare_screens.py](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-01-diversity/compare_screens.py), binds report/score hashes and
 checks input identity. No wrong accepted bits occurred in this table. The
 legacy K=5, one-calibration-policy diagnostics remain in the archive; their
 K=9 score-only counterfactuals do not establish combined-family false-admission

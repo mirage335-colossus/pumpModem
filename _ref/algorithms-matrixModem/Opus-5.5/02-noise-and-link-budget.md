@@ -18,13 +18,16 @@ in depth.
    about 39 dB (−134 dBm/Hz) in a rural one; at 7 MHz the corresponding values
    are about −140 and −130 dBm/Hz. Atmospheric noise, not included in these
    curves, can dominate below ~10 MHz at night and in summer.
-2. **The Sol-6.2 link arithmetic is 25–35 dB optimistic for HF.** Its
-   illustrative −174/−164/−154 dBm/Hz noise densities correspond to
+2. **The earlier −164 dBm/Hz headline overstates C/N0 by about 20–34 dB
+   against these P.372 noise references.** The initial Sol-6.2 examples use
+   illustrative −174/−164/−154 dBm/Hz noise densities, corresponding to
    Fa = 0/10/20 dB. The repository's [noise review](../../highFidelity-triple_Robust_Modem/Fable-5.2/50-noise-and-interference-mf-hf.md)
    already notes that the modem simulator default of −164 dBm/Hz is below the
-   P.372 reference outputs. For 2 mW and 150 dB loss, realistic C/N0 is about
-   −7 dB-Hz at a quiet-rural 7–10 MHz site, not +17 dB-Hz. At 180 dB it is
-   about −37 dB-Hz.
+   P.372 reference outputs. For 2 mW and 150 dB loss, these medians give about
+   −7 dB-Hz at the quiet-rural 7.1 MHz reference (N0 ≈ −139.9 dBm/Hz), and
+   −3 dB-Hz at 10.1 MHz (N0 ≈ −143.7 dBm/Hz), not +17 dB-Hz. At 180 dB the
+   corresponding values are about −37 and −33 dB-Hz. These P.372 median
+   examples omit the additional atmospheric noise noted above.
 3. **Receive antenna efficiency rarely matters; transmit antenna efficiency
    always does.** When external noise dominates the receiver's own noise, an
    inefficient receive antenna attenuates signal and noise equally. A compact or

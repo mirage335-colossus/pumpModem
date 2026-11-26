@@ -1,5 +1,9 @@
 # Random-channel reception and Helper phase limits
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../README.md)
+governs execution.
+
 This study implements and tests time-varying stochastic propagation for the
 isolated three-carrier modem. It materially improves reception over the static
 two-ray comparator in the tested conditions. It does **not** qualify the entire
@@ -224,7 +228,7 @@ No release, publication or ordinary-receiver qualification is claimed.
 per-capture decisions/energy reports, hashes, gates, numerical measurements,
 failed attempts, audits, command logs and one-off reproduction scripts.
 [source-overlay.tar.gz](source-overlay.tar.gz) binds the changed source to the
-base revision; [frozen-v1-overlay.tar.gz](frozen-v1-overlay.tar.gz) preserves the
+base revision; [historical frozen-v1-overlay.tar.gz](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-05-stochastic/frozen-v1-overlay.tar.gz) preserves the
 original campaign implementation. The original exporter was rebuilt byte for
 byte before component diagnostics changed it. [artifact-manifest.json](artifact-manifest.json)
 and [SHA256SUMS](SHA256SUMS) identify these packages.

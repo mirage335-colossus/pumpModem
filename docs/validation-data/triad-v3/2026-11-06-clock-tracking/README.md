@@ -1,5 +1,9 @@
 # Default 200-ppm audio discipline and bounded remote timing tracking
 
+Links marked **historical** point to the source tree before retirement. They
+preserve provenance; the [current retention and reproduction policy](../../README.md)
+governs execution.
+
 This study changes the isolated triad live defaults, preserves the prior
 [50-ppm/fixed-bank evidence](../2026-11-06-continuous-clock/README.md), and adds
 bounded timing-state reception. Ordinary Robust receiver integration is excluded.
@@ -223,7 +227,7 @@ The interrupted pre-cache preflight is retained; it never opened the audio devic
 
 ## Reproduction and scope
 
-Start with [the maintained inexpensive commands](../../../triad-clock-follow.md#use-and-inexpensive-qualification).
+Start with [historical the maintained inexpensive commands](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/triad-clock-follow.md#use-and-inexpensive-qualification).
 Use the NumPy/SciPy/Torch study environment. Native tests use build/dev-cli after
 `./build.sh configure --cli`; old build-* directories are not current evidence.
 Do not repeat this sampled/cable campaign for unchanged branches. The cache
