@@ -146,6 +146,47 @@ operand peaks, so reaching them requires:
   grid, but each hypothesis is still a phase-matrix GEMM.
 - **Overlap.** CPU FFT of the next dwell or offset proceeds while the GPU scores the previous one.
 
+## 5a. Very short messages: time per message, not bits
+
+At minutes to hours per bit, the figure of merit is airtime per received message. (Chat discussion,
+26 November 2026; design inference, not measured.)
+
+- **A convolutional code cannot speed up a one-bit message.** One bit is a choice between two
+  transmissions; the best design is two maximally distinguishable signals spread over enough
+  independent fades. A convolutional code applied to one bit is repetition, and a terminated tail
+  adds overhead (tail-biting removes the tail but gains nothing).
+- **Airtime grows much more slowly than message length.** Illustration with the union bound for
+  noncoherent M-ary orthogonal signaling, AWGN, no fading, message error 10⁻³:
+  E/N₀ ≈ 2·(k·ln2 + ln(1/ε)) [derived, loose for large k]:
+
+  | Bits per message k | E/N₀ | Relative airtime |
+  | --- | --- | --- |
+  | 1 | ≈ 15.2 | 1× |
+  | 10 | ≈ 27.7 | ≈ 1.8× |
+  | 100 | ≈ 152 | ≈ 10× |
+
+  Short messages spend most energy on reliability (the ln(1/ε) term), not information: one bit
+  costs about 20× (13 dB) more energy per bit than the asymptotic ln 2 limit. Carry as many bits
+  per message as the application can use; ten bits cost little more airtime than one. The
+  finite-message calculation in
+  [`coherence-limits/finite_message.cpp`](../../../_appraisal/algorithms-matrixModem/coherence-limits/README.md)
+  gives the corresponding fading-channel durations.
+- **Up to about 20–30 bits:** send the whole message as one choice from a keyed codebook of 2ᵏ
+  waveforms and decode by exhaustive maximum likelihood over the bank. This is optimal and beats any
+  trellis code, and it is the Tensor Core-shaped workload (the Blackwell experiment decoded 15-bit
+  messages against 67,108,864 hypotheses; [results](tensor-reception-results.md)).
+- **Fading:** spread message energy over many independent fades (time/frequency diversity built
+  into the codewords, or interleaving). Kennedy's optimum per-branch SNR of about 3 suggests about
+  E/(3N₀) branches. Without diversity a Rayleigh-faded short message needs far more energy.
+- **Longer messages,** where an exhaustive bank is infeasible: tail-biting convolutional codes with
+  large memory and list/ML decoding are among the best published codes below about 100 bits
+  [Coşkun et al., *Efficient error-correcting codes in the short blocklength regime*, Physical
+  Communication 34, 2019](https://doi.org/10.1016/j.phycom.2019.03.004).
+- **Bound message length with fixed geometry:** one configured short-message format and one long
+  format, each with fixed batch shapes; received lengths never select DSP geometry.
+- Open: compute the table exactly (not by union bound) with Rayleigh and diversity cases, and
+  measure bank decoding against tail-biting codes at matched airtime.
+
 ## 6. Open measurements
 
 1. Segment-GEMM drift search on a full RTX PRO 6000 Blackwell: Tensor activity, useful hypotheses/s

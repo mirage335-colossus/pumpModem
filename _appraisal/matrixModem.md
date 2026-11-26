@@ -138,7 +138,7 @@ Both transmitter and receiver must be designed to maximize computational ceiling
 
 - Total bandwidth should be configurable. A 2.2kHz (450Hz-2650Hz) bandwidth may be preferable, but such a limit is not subject to the 26dB attenuation of the 2.8kHz limit, rather this configurable total bandwidth has more to do with avoiding failure due to typical SSB transceiver built-in frequency filters. 
 
-- Total bandwidth used should not exceed the FCC Part 97 limit of 2.8kHz and 26dB attenuation outside the band relative to the mean power within it .
+- Total bandwidth used should not exceed the FCC Part 97 limit of 2.8kHz and 26dB attenuation outside the 2.8kHz band relative to the mean power within it .
 
 
 
@@ -181,21 +181,27 @@ Both transmitter and receiver must be designed to maximize computational ceiling
   - Transmit Power
   - Path loss
 
+  - Simulation Deleterious Conditions Difficulty x(eg. 0.1, 0.2, 0.5, 1, 2, 5, 10)
+
   - Clock sync, Region, Offset, Audio error
-  - Oscillator and Spread Margin (eg. 3x)
-  
+  - Oscillator and Spread Search Margin x(eg. 1x, 3x)
+
   - SNR Path Loss Margin (eg. 3dB, 6dB, 10dB, 13dB, 16dB, 20dB)
 
   - Shift
   - Doppler
 
-  - Tone bandwidth (eg. 6.25Hz)
-  - Tone symbol rate (eg. 6.25Hz)
+  - Tone bandwidth (ie. auto, no other options yet)
+  - Tone symbol rate (ie. auto, no othre options yet)
 
-  - Total bandwidth (2.2kHz)
+  - Total bandwidth (eg. 2.2kHz)
 
   - Audio device
   - Live/Duplex
+
+
+Tone bandwidth and symbol rate (if relevant - ie. if modem is actually FSK) should follow the doppler/delay spread requirements.
+
 
 
 
