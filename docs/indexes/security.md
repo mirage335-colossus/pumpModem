@@ -16,8 +16,8 @@ selected mitigations do not establish universal security or link performance.
 | [Current Robust status](../robust-current.md) | Native GUI stack and configured-calendar scope; historical measurements do not qualify current CPU capacity. |
 | [LPI estimates](../lpi-estimates.md) | Uncalibrated observation models and assumptions; not capability assurance. |
 | [Earlier security review](../security-review.md) | Historical packet/APSK findings, superseded by current security/protocol references; retains prior reasoning and limitations. |
-| [Requirements matrix](../requirements.md) | Version 001_00 feature coverage and implementation/qualification boundaries. |
-| [Version scope](../original-specification.md) | Current scope and remaining automatic RF-tuning capability, despite the historical-sounding filename. |
+| [Requirements and implementation matrix](../requirements.md) | Current component scope and implementation/qualification coverage. |
+| [Original scope record](../original-specification.md) | Historical version 001_00 scope; it does not define current Robust behavior or qualification. |
 | [Public-release disclaimer](../disclaimer.md) | Release scope, performance/legal qualifications and license context. |
 | [License](../../LICENSE) and [dependency provenance](../../third_party/README.md) | Repository license and retained third-party source/notice information. |
 

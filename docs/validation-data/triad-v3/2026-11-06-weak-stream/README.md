@@ -239,6 +239,41 @@ patterns, acquisition mismatch, selective modulation and hardware. Doubling
 duration improves those ideal calculations but is not demonstrated modem
 performance. Full formulas and explicit assumptions are archived in `theory/`.
 
+## Standalone theoretical reproduction
+
+The [ideal benchmark calculator](theory/benchmarks.py) restores the program
+originally archived as
+`weak-stream-evidence/local-evidence/triad-weak-stream/theory/benchmarks.py`
+in `compact-evidence.tar.gz` at Git revision
+`357a50970a0c6214eeaade7c5704bbc39abd4b79`. Original script SHA-256:
+`dd8c5b4768d6cd51716b281d362cb4ce38a3cbf2df849fe4dbe19a9040449a64`.
+The current archive retains `benchmarks.json` under the same member directory,
+SHA-256 `c395ab2273e9efd56dd3d944078711b47509d2546937bfe6c5d21cac19e6d679`.
+
+Its ten covariance/eigenvalue cases, Chernoff calculation and illustrative
+11-clock/two-channel atom count are unchanged; the different runtime-count
+scalar check above remains separate. A main guard and explicit fresh output
+path replace import-time execution and writing beside the program. No receiver
+or captured input is required. The separate retired `helper-metrology.py`
+depended on the former receiver; its formulas, measurements and provenance
+remain in the archive, without restoring that operating implementation.
+
+With `PYTHON` selecting a NumPy/SciPy environment, run from the repository root:
+
+```sh
+output_dir=$(mktemp -d)
+PYTHONDONTWRITEBYTECODE=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  "${PYTHON:-python3}" docs/validation-data/triad-v3/2026-11-06-weak-stream/theory/benchmarks.py \
+  --output "$output_dir/benchmarks.json"
+```
+
+The 2026-11-25 recovery check reproduced all 99 numeric result fields exactly
+with Python 3.13.5 / NumPy 2.5.4 / SciPy 1.18.1 in 0.55 s wall time, including
+startup. `cpu_seconds` is execution metadata and is excluded from equality.
+These ideal calculations retain their explicit omissions and do not establish
+receiver sensitivity. Archived results and container identities are unchanged.
+Remove the temporary report after comparison.
+
 ## Reproduction, provenance and exclusions
 
 The compact archive retains frozen sources, input identities, native argv,

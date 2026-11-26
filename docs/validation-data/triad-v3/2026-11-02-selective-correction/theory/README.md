@@ -227,17 +227,18 @@ premise and remains an appropriate separate experiment.
 
 ## Reproduce the cheap checks
 
-From the repository root, using a Python environment with NumPy and SciPy:
+From the repository root, using Python 3 with NumPy and SciPy and a C++20
+`c++` compiler (or select another compiler with `--compiler`):
 
 ```sh
-OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 python \
+PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 python3 \
   docs/validation-data/triad-v3/2026-11-02-selective-correction/theory/dispersive_information.py \
   --output /tmp/dispersive-information.json
-OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 python \
+PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 python3 \
   docs/validation-data/triad-v3/2026-11-02-selective-correction/theory/test_dispersive_information.py
 ```
 
-Four focused tests passed in 2.85 seconds. They check the cubic contraction
+In the original run, four focused tests passed in 2.85 seconds. They check the cubic contraction
 identity, complete-output agreement with the actual C++ helper (maximum error
 `6.28e-16` over 24 input/29 output rows), two-sided branch stack bounds,
 second/fourth phase moments and reported exclusions. Five nodes per each of six
@@ -245,3 +246,47 @@ phases integrate the degree-four polynomial moments exactly in exact
 arithmetic; the floating calculations are diagnostics, not exact KL quadrature
 or certified interval arithmetic. No long waveform, receiver trial or GPU
 acceleration is represented by these tests.
+
+## Standalone recovery and model identity
+
+The 25 November 2026 recovery restores the [calculator](dispersive_information.py),
+[finite probe](dispersive_probe.cpp) and [four-test suite](test_dispersive_information.py).
+The recorded report remains unchanged. All its original source hashes match
+[`ea05d3a8346be7b06a2a53c0e4050e44a963b34b`](https://github.com/mirage335-colossus/pumpModem/tree/ea05d3a8346be7b06a2a53c0e4050e44a963b34b),
+including the corrected
+[`channel_perturbation.hpp`](https://github.com/mirage335-colossus/pumpModem/blob/ea05d3a8346be7b06a2a53c0e4050e44a963b34b/src/channel_perturbation.hpp)
+SHA-256 `fae3b1b345e3dc19c8b85a5010e4434530bd0a34d595dd4de8cd55349d8d879a`.
+This is distinct from the legacy all-pass model; the later `357a5097` calculator
+and probe bytes are identical, but its channel sources are not the report's
+complete source identity.
+
+The probe extracts the historical cubic Lagrange coefficients, actual-tap center
+rotation, DFT branch sum and seeded AM phases in their original arithmetic order.
+Its 24-input/29-output diagnostic uses a finite zero-extended input vector in
+place of a streaming history ring and retains the entire five-sample tail.
+The original 4096-sample phase renormalization is never reached. Gaussian
+coefficients and phase initialization use the small
+[shared mathematical extract](../../2026-11-02-selective/theory/historical_math.hpp);
+no receiver, channel runtime or historical source tree is restored.
+
+The calculator retains the unchanged legacy `input_bounds` mathematics and all
+corrected operator constants, inversion formulas and margins. It verifies the
+same exact historical transmitter-bound report and synthesis identities as the
+[legacy recovery](../../2026-11-02-selective/theory/README.md#standalone-recovery-and-model-identity).
+Regenerated reports retain that history in `historical_model_commit` and
+`historical_source_sha256`, separately from hashes of the current standalone
+files in `source_sha256`. The original hash assertion now checks the retained
+report against this pinned historical mapping and the actual transmitter-bound
+file, instead of requiring deleted modem sources. The helper description labels
+the standalone extraction. The original seven-test legacy suite, including its
+full-report serialization regression and recorded initial failure, remains
+available alongside these four corrected tests.
+
+With Python 3.13, NumPy 2.5.4, SciPy 1.18.1 and one numerical thread, the four
+tests passed in 0.739 s. A complete regenerated report matched all 751 numeric
+fields exactly on this host, including all 36 exclusions and necessary-span
+inversions. The original probe built against its pinned historical headers and
+the standalone probe emitted byte-identical JSON (15,068 bytes), including all
+three Gaussian kernels. Floating-point roundoff may vary elsewhere; the
+independent matrix/probe check retains its `2e-12` absolute tolerance. The
+temporary report is for comparison; the original JSON is not overwritten.

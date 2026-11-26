@@ -443,7 +443,13 @@ Use [the reproduction guide](reproduction/README.md) for frozen campaign plans,
 bounded stages, provenance requirements and explicit optional long-span work.
 For isolated implementation changes, start with the
 [hierarchical abbreviated Robust test method](../../../triad-performance.md).
-The new lightweight tool checks are:
+The analytical bounds remain independently runnable; see the restored
+[theory programs and current commands](evidence/theory.md#reproduction) and
+[oscillator mathematics](evidence/oscillator-coherence.md). The first two tests
+below and the subsequent census commands record the **historical campaign** and
+require its retired source/binary environment; they are not current application
+reproduction instructions. The third test, `test_triad_coverage_bounds.py`, is
+the restored standalone mathematical check and runs in the current checkout:
 
 ```sh
 python3 -m unittest discover -s tests -p test_triad_coverage.py
@@ -451,8 +457,8 @@ python3 -m unittest discover -s tests -p test_triad_factor_census.py
 python3 -m unittest discover -s tests -p test_triad_coverage_bounds.py
 ```
 
-To regenerate the complete factorized validity census cheaply with the current
-native executable, use a fresh scratch directory:
+The original complete factorized validity census used its source-matched native
+executable and a fresh scratch directory:
 
 ```sh
 triad_census="$(mktemp -d "${TMPDIR:-/tmp}/triad-census.XXXXXX")"
@@ -474,12 +480,20 @@ source-matched receipts; old evidence must not be silently rebound to a new
 build. Preserve the compact reports here and keep large raw workspaces and
 exploratory receipts in their declared evidence archive.
 
-The original theory and harmonic files in `evidence/` are retained copies. The original
-theory note calls its accepted report `coverage-bounds-source-bound.json` and
-uses underscores in the harmonic filenames; this directory stores those as
-`coverage-bounds.json` and `harmonic-probe.{json,py}`. The harmonic script retains
-its original local input paths and cannot be replayed without that shaped-basis
-input. It is retained as a reproducibility record, not a self-contained fixture.
+**25 November 2026 theoretical recovery.** The accepted source-bound result is
+`evidence/coverage-bounds.json`; its digest below and embedded source hash resolve
+the earlier note's `coverage-bounds-source-bound.json` naming. The restored
+coverage tool reproduces it byte-for-byte. The harmonic files consistently use
+hyphens, and the recovered program now uses a minimal, hash-verified public-basis
+fixture instead of absolute workspace paths. Its replay reproduces all recorded
+numerical results. The oscillator program separately reproduces its mathematics;
+native configuration receipts remain historical. See the linked theory notes for
+commands, dependencies, adaptations and scope.
+
+The following hashes identify the **original archived artifacts**. Retained JSON
+files still match them; updated explanatory notes and adapted programs have new
+source identities recorded by their fresh reports. Original hashes are preserved
+as provenance, not presented as hashes of the edited files.
 
 | Artifact | SHA-256 |
 | --- | --- |

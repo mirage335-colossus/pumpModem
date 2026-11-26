@@ -137,8 +137,13 @@ route:
    support it). Samples, templates, intermediate energies and soft metrics are
    all requantized into this codebook with explicit per-block scale factors held
    outside the matrix operation.
-2. **Products and accumulation:** exact. Integer routes accumulate in s32
-   (no overflow while K·36 < 2^31, i.e. K < 6×10⁷). The FP4 route accumulates in
+2. **Products and accumulation:** exact. Integer routes accumulate in s32.
+   For the listed ±6 codebook, the maximum product magnitude is 36, so the
+   positive worst-case sum fits only through K = ⌊(2³¹−1)/36⌋ = 59,652,323.
+   If a build supports the optional full symmetric INT4 range −7…7, the
+   maximum product magnitude is 49 and the corresponding limit is
+   K = ⌊(2³¹−1)/49⌋ = 43,826,196. These limits correct the earlier rounded
+   K < 6×10⁷ shorthand, which admitted overflowing sums. The FP4 route accumulates in
    FP32 and is exact while every partial sum, including chained C across
    K-tiles, stays below 2^24: worst case about 466,000 products of magnitude 36.
    A 60 s window at 2,400 complex samples/s is 288,000 real products per

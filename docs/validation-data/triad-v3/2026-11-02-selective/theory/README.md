@@ -1,8 +1,8 @@
 # Selective amplitude modulation: information bounds and checked diagnostics
 
 This study derives necessary reception conditions for the isolated three-carrier
-waveform under the sampled Gaussian-ray model plus the shared additional
-frequency-selective modulation stage. It does not demonstrate reception at
+waveform under the sampled Gaussian-ray model plus the historical
+`legacy-allpass-v1` frequency-selective modulation stage. It does not demonstrate reception at
 −60 dB-Hz, simulate ten years of samples, or establish a physical propagation
 limit. The [machine-readable result](selective_information.json) contains 228
 explicit cases, source hashes, assumptions and the checked helper comparison.
@@ -17,9 +17,11 @@ inconclusive.
 
 ## The implemented modulation law
 
-The source contracts are [channel-models.md](../../../../channel-models.md),
-`src/channel_perturbation.hpp`, `src/triad_gaussian_fading.hpp` and
-`src/triad_simulation_stream.cpp`. Source fingerprints are in the result.
+The maintained guide is [channel-models.md](../../../../channel-models.md).
+This calculation binds the historical `src/channel_perturbation.hpp`,
+`src/triad_gaussian_fading.hpp` and `src/triad_simulation_stream.cpp` at the
+[model revision recorded below](#standalone-recovery-and-model-identity),
+with source fingerprints in the result.
 The selective stage follows ray propagation and precedes additive noise. It
 has continuous filter state and must be allowed its output tail.
 
@@ -304,15 +306,20 @@ performed by this script.
 
 ## Reproduction and validation
 
-From the repository root with NumPy/SciPy installed:
+From the repository root with Python 3, NumPy, SciPy and a C++20 `c++` compiler
+available (or select another compiler with `--compiler`):
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 /tmp/triad-weak-env/bin/python docs/validation-data/triad-v3/2026-11-02-selective/theory/selective_information.py --output docs/validation-data/triad-v3/2026-11-02-selective/theory/selective_information.json
-PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 /tmp/triad-weak-env/bin/python -m unittest discover -s docs/validation-data/triad-v3/2026-11-02-selective/theory -p test_selective_information.py -v
+PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 python3 \
+  docs/validation-data/triad-v3/2026-11-02-selective/theory/selective_information.py \
+  --output /tmp/selective-information.json
+PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 python3 \
+  -m unittest discover -s docs/validation-data/triad-v3/2026-11-02-selective/theory \
+  -p test_selective_information.py -v
 ```
 
-Both commands completed successfully; seven focused tests passed in 2.266 s
-on this host. They check the actual helper/FIR, filter contractions and exact
+In the original run, both commands completed successfully; seven focused tests
+passed in 2.266 s. They check the helper/FIR, filter contractions and exact
 bypasses, phase moments, mixture inequality direction, binary inversion,
 low-signal scaling, depth limits and complete strict-JSON serialization.
 The report compiles a tiny read-only C++ helper in a temporary directory. It
@@ -324,6 +331,49 @@ serializing the complete report. Native scalar casts and the full-report
 serialization regression repaired it without changing the physics or
 thresholds. The original failure summary is retained in ignored
 `local-evidence/triad-selective-theory/serialization-failure.txt`.
+
+## Standalone recovery and model identity
+
+The 25 November 2026 recovery restores the [calculator](selective_information.py),
+[finite probe](selective_probe.cpp) and [seven-test suite](test_selective_information.py)
+under the [theoretical-calculation rule](../../../../development.md#theoretical-calculations).
+The retained report is unchanged. Its source hashes all match
+[`8c98439406a124639ccce58edcff8588f6f9a35b`](https://github.com/mirage335-colossus/pumpModem/tree/8c98439406a124639ccce58edcff8588f6f9a35b).
+The original calculator/probe/test bytes also survive at `357a5097`, but that
+later checkout's channel sources do not all identify this report's model.
+
+The standalone C++ probe extracts only the all-pass recurrences, branch sum,
+seed-to-phase mapping and phase stepping from the historical
+[`channel_perturbation.hpp`](https://github.com/mirage335-colossus/pumpModem/blob/8c98439406a124639ccce58edcff8588f6f9a35b/src/channel_perturbation.hpp)
+(SHA-256 `710da481e4613abed3e771eccf63659157e6bf2bc478bfea06c5032324cf044c`).
+Its fixed 256-sample diagnostic never reaches the original 4096-sample phase
+renormalization. The shared [mathematical helper](historical_math.hpp) retains
+only phase initialization and finite Gaussian coefficient construction from
+[`triad_gaussian_fading.hpp`](https://github.com/mirage335-colossus/pumpModem/blob/8c98439406a124639ccce58edcff8588f6f9a35b/src/triad_gaussian_fading.hpp)
+(SHA-256 `97f26b082d7d68123952bde7ccb9f97148c5977cf741cf6c15c76e77fcc20944`).
+There is no random ray generator, receiver, channel runtime or modem build.
+
+The calculator's mathematical functions, scalar casts and numerical margins
+are unchanged. Its source binding now verifies the exact retained
+[`transmitter_bound.json`](../../2026-11-02-spread/theory/transmitter_bound.json)
+SHA-256 `5f3c25e8ec5c46be83f551f9244f5758989b44dbb1f78bf2c4bb266e98b194df`
+and that report's historical pulse/synthesis identities, instead of requiring
+deleted modem sources. Regenerated output separates `historical_model_commit`
+and `historical_source_sha256` from `source_sha256`, which hashes the standalone
+files actually used. Its helper-check description identifies the extraction.
+These provenance differences are intentional; the bound remains for the legacy
+model. The [corrected calculation](../../2026-11-02-selective-correction/theory/README.md)
+is a distinct model and result.
+
+Recovery validation used Python 3.13, NumPy 2.5.4, SciPy 1.18.1 and one numerical
+thread. All seven original tests passed in 1.453 s, including full strict-JSON
+serialization. All 4,138 numeric report fields matched the retained report
+exactly on this host. Compiling the original probe against the pinned historical
+headers in a temporary directory produced byte-identical JSON to the extracted
+probe (57,864 bytes), including all six Gaussian kernels. Numerical agreement
+elsewhere may have floating-point roundoff; the probe/matrix check permits
+absolute error up to `2e-12`. Temporary regenerated reports are comparison
+outputs, not replacements for the historical record.
 
 Useful next experiments are actual sampled-waveform joint receivers with
 constrained sinusoidal selective nuisance fitting, evolving correlated ray

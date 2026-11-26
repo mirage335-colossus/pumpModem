@@ -154,8 +154,8 @@ configuration dependence.
 
 ## Corrected sampled tone response probe, settled v2
 
-The reproducible C++ probe and its complete result table are retained in
-[response-v2](response-v2/README.md). This is a corrected-operator response
+The complete result table and a pinned link to the historical C++ probe are
+retained in [response-v2](response-v2/README.md). This is a corrected-operator response
 test, not a receiver campaign. It measures actual complex, magnitude and phase
 response of isolated tones and compares summed-tone processing against the
 sum of individually processed tones. This directly checks physical waveform
@@ -511,7 +511,7 @@ input analysis report has SHA-256
 `9dd23226dbbdd834e39cbd9d2bb690be742d3f756c4607503d6ab0c10ab496a9` and binds
 to analyzer SHA-256
 `45f4960da40c216c07be8a632182756679a315c5d6ad645506fe102b17b7477e`. The
-accepted scope and reproducible analyzer are linked from the
+accepted scope and pinned historical analyzer are linked from the
 [reproduction guide](reproduction/README.md).
 
 ![Measured legacy and corrected responses across common offsets](response-v2/response-comparison.png)

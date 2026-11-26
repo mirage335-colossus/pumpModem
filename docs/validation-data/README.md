@@ -15,10 +15,20 @@ is stated by each record.
 Standalone [theoretical calculations](../development.md#theoretical-calculations)
 and their outputs are retained research. Retiring an operating receiver does
 not retire the mathematics or the small programs that reproduce its stated
-bounds. The recovered [spread calculations](triad-v3/2026-11-02-spread/theory/README.md)
-and [presence frontier](triad-v3/2026-11-02-minus60/README.md#admission-budgets-and-theoretical-references)
-record their historical models, minimal dependencies and current reproduction
-checks separately from receiver qualification.
+bounds. The following records distinguish their historical models, minimal
+dependencies and current reproduction checks from receiver qualification:
+
+| Calculation | Reproduction guidance |
+| --- | --- |
+| Low-rate energy, day-scale oracle and OU bounds | [Sub-9-kHz theory](triad-v3/2026-11-01-sub9/README.md#retained-theoretical-calculations) |
+| Spread information and finite-window bounds | [Spread theory](triad-v3/2026-11-02-spread/theory/README.md) |
+| Ideal presence and duration references | [Presence frontier](triad-v3/2026-11-02-minus60/README.md#admission-budgets-and-theoretical-references) |
+| Original selective and corrected dispersive models | [Original model](triad-v3/2026-11-02-selective/theory/README.md#reproduction-and-validation), [corrected model](triad-v3/2026-11-02-selective-correction/theory/README.md#reproduce-the-cheap-checks) |
+| Coverage, harmonic subspace and oscillator coherence | [Broad-study theory](triad-v3/2026-11-03-broad/evidence/theory.md), [oscillator reference](triad-v3/2026-11-03-broad/evidence/oscillator-coherence.md) |
+| Rank-two presence | [Helper reference](triad-v3/2026-11-05-helper-broad/README.md#standalone-theoretical-reproduction) |
+| Finite-kernel covariance | [Stochastic reference](triad-v3/2026-11-05-stochastic/README.md#standalone-theoretical-reproduction) |
+| Ideal AWGN and renewed-channel comparison | [Multiday reference](triad-v3/2026-11-06-multiday-tracking/README.md#standalone-theoretical-reproduction) |
+| Gaussian-renewal and known-waveform benchmarks | [Weak-stream reference](triad-v3/2026-11-06-weak-stream/README.md#standalone-theoretical-reproduction) |
 
 Links marked **historical** in these records resolve to a verified, pinned Git
 revision of retired source, archives or guide sections. They preserve the

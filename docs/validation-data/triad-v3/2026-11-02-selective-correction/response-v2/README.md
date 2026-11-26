@@ -11,11 +11,16 @@ rate was caused by residual prehistory, not evidence of interpolation error.
 The following rerun uses a warm-up of `ceil(tail_samples/Fs) + 1000 seconds`
 for every profile and replaces the invalid result.
 
-This accepted probe is in `dispersive_probe.cpp`; its complete JSONL output is
-`response-results.jsonl`. SHA-256 values in this checked copy are
+The accepted [historical probe source](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective-correction/response-v2/dispersive_probe.cpp)
+is pinned in Git history; its complete JSONL output remains in
+[`response-results.jsonl`](response-results.jsonl). The recorded SHA-256 values are
 `c9fed6aab032dc44425858b33f07f3f7bf0652c2fbdd29549937c0583ee5c29a` for the
 source and `bf1edb64821c6c8d37e72e6e1cbfaf1f8d0611cb986672aa1cf255cfab6175d4`
-for results. Build and run from the repository root:
+for results. The original build/run recipe below is retained as provenance;
+it requires the historical channel implementation and its `src/` and `include/`
+headers, not the current checkout. Revision
+`357a50970a0c6214eeaade7c5704bbc39abd4b79` preserves the probe source; its presence
+alone does not verify that all headers match the original measurement's model.
 
 ```sh
 g++ -std=c++20 -O2 -Wall -Wextra -Isrc -Iinclude \
@@ -68,21 +73,24 @@ Lines only connect those points. The legacy probe did not save adjacent
 amplitude-difference RMS; that panel explicitly omits legacy curves rather
 than deriving them from per-tone magnitude RMS.
 
-The plot's four inputs are maintained in this directory:
+The plot's two result inputs remain in this directory; its two source inputs
+are pinned in Git history:
 
 - [Corrected results](response-results.jsonl), 58 profiles, and their
   [historical probe source](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective-correction/response-v2/dispersive_probe.cpp), with the hashes given above.
 - [Frozen legacy results](legacy-response-results.jsonl), **30 profiles**,
   SHA-256 `89b4463a9e0003faa593d29c8727843eadbcbe6f56f3826fb3ae68435fe40a48`.
-- [historical Frozen legacy probe source](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective-correction/response-v2/legacy_probe.cpp), SHA-256
+- [Historical frozen legacy probe source](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective-correction/response-v2/legacy_probe.cpp), SHA-256
   `26fecc0ae5f8e9e2e3be0dc72a3d097095b45496d4214430f79a19895c362dd0`.
   This source establishes Fs=1 Hz and seed A, which its historical JSONL
   did not record.
 
-[historical The plotting script](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective-correction/response-v2/plot_response.py) verifies all four exact input hashes
+[The historical plotting script](https://github.com/mirage335-colossus/pumpModem/blob/357a50970a0c6214eeaade7c5704bbc39abd4b79/docs/validation-data/triad-v3/2026-11-02-selective-correction/response-v2/plot_response.py) verifies all four exact input hashes
 and embeds their paths/hashes and its own source hash in PNG metadata. No
-ignored local-evidence files or new probe executions are needed. From the
-repository root, using a Python environment with Matplotlib installed:
+ignored local-evidence files or new probe executions are needed once those
+four inputs are available. The original plotting recipe below uses the pinned
+historical plotting source, those hash-verified inputs and its Python/Matplotlib
+environment:
 
 ```sh
 MPLCONFIGDIR=/tmp/triad-selective-mpl python3 \

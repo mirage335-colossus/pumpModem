@@ -13,17 +13,25 @@ python3 -m unittest discover -s tests -p test_triad_coverage_bounds.py
 python3 tools/triad_coverage_bounds.py --gaussian-widths 0.001,0.005,0.05,0.1,10,55 --output /tmp/triad-coverage-bounds-fresh.json
 ```
 
-The accepted source-bound result is `coverage-bounds-source-bound.json`, SHA-256
+The accepted source-bound result is retained here as
+[coverage-bounds.json](coverage-bounds.json), SHA-256
 `236221bf37cbbdf79922a3da327ca07cb3a331ed55091b37e1425fd99324f2dd`.
-The earlier `coverage-bounds.json` has the same numerical computation before the
-source-digest field was added; do not substitute it for the source-bound receipt.
-The tool source is `tools/triad_coverage_bounds.py`, SHA-256
+It includes the accepted source-digest field. The earlier draft called the
+accepted file `coverage-bounds-source-bound.json` and used `coverage-bounds.json`
+for a pre-digest result; that naming does not describe the retained file's identity.
+The restored [tool source](../../../../../tools/triad_coverage_bounds.py) has SHA-256
 `bb4e1cbf161c5f4b5d9af151e995c357ef0444907d31c312a215c19b2b3a0c5b`.
 The 16 focused tests passed in 0.004 seconds. The report covers all 19 requested
 C/N0 values, all 17 rate geometry references, and 114 separately requested
 continuous-Gaussian necessary-information screens. The latter widths are
 explicit stress laws; their coinciding numeric values with preset ray-center
 separations do not map one law onto the other.
+
+**25 November 2026 recovery.** The tool and its 16 mathematical tests were
+restored unchanged from revision `357a50970a0c6214eeaade7c5704bbc39abd4b79`.
+The commands above pass and regenerate the retained source-bound JSON
+byte-for-byte. They use only the Python standard library and do not join an
+automatic receiver test group.
 
 ## Known-channel energy and presence references
 
@@ -82,12 +90,49 @@ operator bounds need their separately verified source/clock/envelope assumptions
 
 ## Harmonic expansion diagnostic and decision
 
-`harmonic_probe.py` and `harmonic_probe.json` preserve a 1.564-second CPU
+[harmonic-probe.py](harmonic-probe.py) and [harmonic-probe.json](harmonic-probe.json)
+preserve a 1.564-second historical CPU
 calculation using the retained public shaped basis with SHA-256
 `376f2fe4cfc30b7da313a88bf80ab7cc291b4f774c42cc713c54441a1401f09a`.
 This script uses NumPy/SciPy (the recorded interpreter was
-`/tmp/triad-weak-env/bin/python`) and one BLAS/OpenMP thread. It contains the
-recorded local repository/input paths. The actual noisy observation was unused.
+`/tmp/triad-weak-env/bin/python`) and one BLAS/OpenMP thread. The original script,
+SHA-256 `19e05f8025708877d431f890e5550271b5d0db5205345e31c8f8980bfb88fc1f`,
+used local absolute paths. The restored version takes explicit input/output paths
+and verifies the exact input identities; its mathematical operations are unchanged.
+The actual noisy observation was unused and is not needed for replay.
+
+The indispensable 2,457,472-byte [public basis](harmonic-input/basis.c128) and
+27,089-byte [original manifest](harmonic-input/manifest.json) are retained for
+this calculation. The manifest hash is
+`96d3878332ee6868809c611b62589aac86e51afeda956628406f6082f602909c`;
+both files were recovered byte-for-byte from the original public-basis workspace.
+The [original export plan](../../2026-11-02-acquisition/reproduction/inputs/reference-basis-plan.json)
+preserves source parameters and binary identity. Other files named by that full
+workspace manifest are not retained here or required by this diagnostic. Keep this
+minimal fixture while the source-bound harmonic result is retained; replace it
+only with a documented faithful reproduction that carries these values forward.
+It is theoretical research input, not a receiver capture or a campaign archive.
+
+From the repository root, with NumPy/SciPy available and a fresh output path:
+
+```sh
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 \
+  docs/validation-data/triad-v3/2026-11-03-broad/evidence/harmonic-probe.py \
+  --output /tmp/harmonic-probe-fresh.json
+```
+
+The default input is the sibling `harmonic-input/` directory; `--basis-directory`
+accepts another copy with the same hashes. The recovery replay reproduced all
+125 numerical fields exactly with NumPy 2.5.4 and SciPy 1.18.1. The historical
+JSON is unchanged; fresh elapsed time and recovery provenance are separate.
+The three [recovery checks](test_theory_recovery.py) compare the coverage report,
+harmonic results and oscillator mathematics against their preserved records:
+
+```sh
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 -m unittest discover \
+  -s docs/validation-data/triad-v3/2026-11-03-broad/evidence \
+  -p test_theory_recovery.py
+```
 
 Two stable delayed/Doppler-shifted ray templates are passed through an
 independent exact finite cubic-FIR/DFT expansion. The identity plus three
@@ -120,7 +165,7 @@ as a default merely to collect all sidebands. The consequential comparison is
 global/physically constrained coherent fitting versus unnecessarily independent
 short-window gains on stable channels. Real oscillator phase evolution, timing
 and tap mismatch must be tested before claiming the global fit works. The
-current source template and propagated fractional-delay composition also differ;
+historical source template and propagated fractional-delay composition also differ;
 adding delay/Doppler taps alone is not the exact finite-FIR selective expansion.
 
 ## Numerical and physical pitfalls

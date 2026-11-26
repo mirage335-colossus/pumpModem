@@ -155,6 +155,38 @@ not an exactly calibrated optimal detector. For independently renewed rank-one
 Gaussian channels, total KL≈C² tau T/2 at low block energy; this quantitatively
 explains the severe reset penalty. These assumptions are explicit in the guide.
 
+## Standalone theoretical reproduction
+
+The [ideal AWGN calculation](theory/diagnose.py) restores `theory/diagnose.py`
+from the original `evidence.zip` at Git revision
+`357a50970a0c6214eeaade7c5704bbc39abd4b79`. Original script SHA-256:
+`1d158464aef71efdf5a3196449f991161c562c1de3d7876114a23a9522a804b9`.
+The current archive retains `theory/diagnosis.json`, SHA-256
+`60d6fb340a5048b3aa5b518b8a5c2b5d9a1777d7f1ad3d21c7f7bca713855b33`.
+
+The analytical expressions, fixed seed 771031 and 200,000 low-dimensional
+sufficient-statistic draws are unchanged. A main guard and explicit fresh
+output path replace import-time execution and writing beside the program.
+This is a small ideal block-orthogonal AWGN thought experiment, with no native
+waveform, capture generation or receiver dependency. Its 200,000 draws do not
+constitute independent physical-channel or modem success trials.
+
+With `PYTHON` selecting a NumPy/SciPy environment, run from the repository root:
+
+```sh
+output_dir=$(mktemp -d)
+PYTHONDONTWRITEBYTECODE=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  "${PYTHON:-python3}" docs/validation-data/triad-v3/2026-11-06-multiday-tracking/theory/diagnose.py \
+  --output "$output_dir/diagnosis.json"
+```
+
+The 2026-11-25 bounded replay reproduced all 28 numeric result fields exactly
+with Python 3.13.5 / NumPy 2.5.4 / SciPy 1.18.1 in 1.44 s wall time, including
+startup. `cpu_seconds` is execution metadata and is excluded from equality.
+Archived results and original campaign costs below remain unchanged. Remove
+the temporary report after comparison; do not rerun the receiver campaign to
+check these formulas.
+
 ## Reproduction and cost discipline
 
 Use [campaign-protocol.json](campaign-protocol.json),

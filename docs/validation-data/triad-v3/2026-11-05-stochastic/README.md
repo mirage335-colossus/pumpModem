@@ -222,6 +222,39 @@ entire gap is achievable without channel knowledge or provide a population bound
 No release, publication or ordinary-receiver qualification is claimed.
 
 
+## Standalone theoretical reproduction
+
+The [finite-kernel covariance calculator](theory/finite_kernel.py) restores the
+mathematics from `theory/finite_kernel.py` in the original
+`compact-evidence.tar.gz` at Git revision
+`357a50970a0c6214eeaade7c5704bbc39abd4b79`. Original script SHA-256:
+`7d80040ee47f37a351a54bd5224522fb3e674fb2e9260582561ee7eb34dc7865`.
+The current archive retains `theory/finite-kernel.json`, SHA-256
+`1c0d09fba3be2acc0c5a3e48f2196d3bf41062d8f405ef92dd4ad8e5464be836`.
+
+The recovered program keeps the fixed 53-tap kernel, cubic interpolation,
+512 midpoint grid phases and 2,049 lag points. It no longer reads a current
+native header or current Git HEAD as if those identified this historical
+model. The original source/script/base fields remain explicitly historical;
+`reproducer_sha256` identifies the recovered program. Only portable output
+handling and provenance have changed. No archived result or container changed.
+
+With `PYTHON` selecting a NumPy environment, run from the repository root:
+
+```sh
+output_dir=$(mktemp -d)
+PYTHONDONTWRITEBYTECODE=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  "${PYTHON:-python3}" docs/validation-data/triad-v3/2026-11-05-stochastic/theory/finite_kernel.py \
+  --output "$output_dir/finite-kernel.json"
+```
+
+The 2026-11-25 recovery check reproduced all eight numeric fields exactly with
+Python 3.13.5 / NumPy 2.5.4 in 0.45 s wall time, including startup. This remains
+a deterministic covariance diagnostic, not interval-certified integration,
+an exact unconditional Gaussian likelihood, or current receiver qualification.
+The report retains its original mixture-of-Gaussians and motion-guard caveats.
+Remove the temporary report after comparison.
+
 ## Reproduction and acceptance evidence
 
 [compact-evidence.tar.gz](compact-evidence.tar.gz) retains protocols, schedules,

@@ -286,7 +286,7 @@ retention is about 72%. An energy gain from modulation is not evidence of a
 better channel fit, and a known-signal binary oracle is not a blind admission
 benchmark.
 
-The retained `theory/rank2_presence_reference.py` computes a complementary
+The retained [rank-two presence calculation](theory/rank2_presence_reference.py) computes a complementary
 ideal unknown-coefficient reference. For a known rank-two complex subspace in
 white noise, the null projection statistic is Gamma(2,1); an alternative has
 the corresponding noncentral chi-square law. At alpha=.05, 90/99% detection
@@ -324,6 +324,32 @@ spectrum, not categorically unsupported. Symbol Burst's whole-bit UTC calendar
 is not represented by within-bit wait tiles. Fake FHSS contains no RF retune
 transient. Static two-ray/periodic-AM simulations do not establish arbitrary
 diffuse-channel resilience or long-term oscillator coherence.
+
+## Standalone theoretical reproduction
+
+The [rank-two reference calculator](theory/rank2_presence_reference.py) is
+restored byte for byte from `evidence/theory/rank2_presence_reference.py` in
+the original `compact-evidence.tar.gz` at Git revision
+`357a50970a0c6214eeaade7c5704bbc39abd4b79`. Its SHA-256 is
+`2c355ba2166e54d76d3fd03dd4bd42b5153c014dc22b69ef777300eb0eac9d7b`.
+The current archive retains `evidence/theory/rank2-presence-reference.json`,
+SHA-256 `4e93e951cffd809c8f3f87d529461a1aee4dfcee7210a945bf05c4760d5b0c30`.
+Archive identities and historical results are unchanged by this recovery.
+
+This small calculation needs SciPy and no receiver or captured input. From the
+repository root, with `PYTHON` selecting that environment:
+
+```sh
+output_dir=$(mktemp -d)
+PYTHONDONTWRITEBYTECODE=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  "${PYTHON:-python3}" docs/validation-data/triad-v3/2026-11-05-helper-broad/theory/rank2_presence_reference.py \
+  > "$output_dir/rank2-presence-reference.json"
+```
+
+The 2026-11-25 recovery check reproduced all 105 numeric fields exactly using
+Python 3.13.5 / SciPy 1.18.1 in 1.46 s wall time, including process startup.
+The assumptions and limits above remain: these are ideal reference detectors,
+not receiver qualification. Remove the temporary report after comparison.
 
 ## Computation and reproducibility
 
